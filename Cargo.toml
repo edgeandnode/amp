@@ -1,0 +1,28 @@
+[workspace]
+members = ["firehose-datasets", "types"]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+
+[workspace.dependencies]
+tokio = { version = "1.36.0", features = [
+    "macros",
+    "test-util",
+    "rt-multi-thread",
+    "parking_lot",
+] }
+tonic = { version = "0.11.0", features = ["gzip", "prost"] }
+tonic-build = "0.11"
+prost = "0.12"
+prost-types = "0.12"
+thiserror = "1.0"
+futures = "0.3"
+num-bigint = "0.4.4"
+hex = "0.4.3"
+serde = "1.0.197"
+serde_derive = "1.0.197"
+serde_arrow = "0.10.0"
+clap = { version = "4.5.2", features = ["derive"] }
+toml = "0.8.10"
