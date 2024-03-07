@@ -1,13 +1,11 @@
 use clap::Parser;
 use firehose_datasets::client::Client;
+use fs_err::{self as fs, OpenOptions};
 use futures::StreamExt as _;
-use prost::Message as _;
-use std::{
-    fs::{self, OpenOptions},
-    io::{BufWriter, Write as _},
-};
+use std::io::{BufWriter, Write as _};
 
-/// A tool for dumping a range of firehose blocks to protobufs files and for converting them to parquet tables
+/// A tool for dumping a range of firehose blocks to protobufs text files and for converting them to
+/// parquet tables.
 #[derive(Parser, Debug)]
 #[command(name = "firehose-dump")]
 struct Args {
@@ -17,9 +15,7 @@ struct Args {
     /// url = "http://localhost:8080"
     /// token = "secret"
     /// ```
-    ///
-    /// Defaults value is "local/provider.toml", with `.local` being conveniently `.gitignore`d.
-    #[arg(long, short, default_value = "local/provider.toml")]
+    #[arg(long, short, env = "DUMP_FIREHOSE_PROVIDER")]
     config: String,
 
     /// The block number to start from, inclusive.
@@ -34,7 +30,7 @@ struct Args {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<(), anyhow::Error> {
     let args = Args::parse();
     let Args {
         config,
@@ -44,7 +40,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     } = args;
 
     let mut client = {
-        let provider = toml::from_str(&std::fs::read_to_string(config)?)?;
+        let config = fs::read_to_string(&config)?;
+        let provider = toml::from_str(&config)?;
         Client::new(provider).await?
     };
 
@@ -53,7 +50,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         fs::create_dir(out_dir)?;
     }
     let mut pb_file = {
-        let pb_file_path = out_dir.join(format!("blocks_{start}_to_{end}.pb"));
+        let pb_file_path = out_dir.join(format!("pb_blocks_{start}_to_{end}.json"));
         let pb_file = OpenOptions::new()
             .write(true)
             .create(true)
@@ -66,10 +63,48 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut stream = Box::pin(client.blocks(args.start, args.end).await?);
     while let Some(block) = stream.next().await {
         let block = block?;
-        let bytes = block.encode_length_delimited_to_vec();
-        pb_file.write_all(&bytes)?;
+
+        // This is to get a hex representation for bytes arrays in the JSON.
+        let mut json_block = serde_json::to_value(&block)?;
+        replace_u8_arrays_with_hex_string(&mut json_block);
+
+        serde_json::to_writer_pretty(&mut pb_file, &json_block)?;
     }
     pb_file.flush()?;
 
     Ok(())
+}
+
+fn replace_u8_arrays_with_hex_string(value: &mut serde_json::Value) {
+    use serde_json::Value;
+
+    fn is_u8(v: &Value) -> bool {
+        use Value::Number;
+        match v {
+            Number(num) => num.as_u64().map_or(false, |u| u <= u8::MAX as u64),
+            _ => false, // Not a number
+        }
+    }
+
+    match value {
+        Value::Object(map) => {
+            for (_, v) in map {
+                replace_u8_arrays_with_hex_string(v);
+            }
+        }
+        Value::Array(vec) => {
+            // 32 is hashes, 20 is addresses, 256 is logs bloom.
+            if (vec.len() == 32 || vec.len() == 20 || vec.len() == 256) && vec.iter().all(is_u8) {
+                // Convert the 32-byte array to a hex string.
+                let bytes: Vec<u8> = vec.iter().map(|v| v.as_u64().unwrap() as u8).collect();
+                let hex_str = format!("0x{}", hex::encode(bytes));
+                *value = Value::String(hex_str);
+            } else {
+                for v in vec {
+                    replace_u8_arrays_with_hex_string(v);
+                }
+            }
+        }
+        _ => {}
+    }
 }

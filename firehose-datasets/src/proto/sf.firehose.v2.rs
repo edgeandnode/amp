@@ -1,14 +1,16 @@
+#[derive(serde::Serialize, serde::Deserialize)]
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct SingleBlockRequest {
     #[prost(message, repeated, tag = "6")]
-    pub transforms: ::prost::alloc::vec::Vec<::prost_types::Any>,
+    pub transforms: ::prost::alloc::vec::Vec<super::super::super::google::protobuf::Any>,
     #[prost(oneof = "single_block_request::Reference", tags = "3, 4, 5")]
     pub reference: ::core::option::Option<single_block_request::Reference>,
 }
 /// Nested message and enum types in `SingleBlockRequest`.
 pub mod single_block_request {
     /// Get the current known canonical version of a block at with this number
+    #[derive(serde::Serialize, serde::Deserialize)]
     #[allow(clippy::derive_partial_eq_without_eq)]
     #[derive(Clone, PartialEq, ::prost::Message)]
     pub struct BlockNumber {
@@ -16,6 +18,7 @@ pub mod single_block_request {
         pub num: u64,
     }
     /// Get the current block with specific hash and number
+    #[derive(serde::Serialize, serde::Deserialize)]
     #[allow(clippy::derive_partial_eq_without_eq)]
     #[derive(Clone, PartialEq, ::prost::Message)]
     pub struct BlockHashAndNumber {
@@ -25,12 +28,14 @@ pub mod single_block_request {
         pub hash: ::prost::alloc::string::String,
     }
     /// Get the block that generated a specific cursor
+    #[derive(serde::Serialize, serde::Deserialize)]
     #[allow(clippy::derive_partial_eq_without_eq)]
     #[derive(Clone, PartialEq, ::prost::Message)]
     pub struct Cursor {
         #[prost(string, tag = "1")]
         pub cursor: ::prost::alloc::string::String,
     }
+    #[derive(serde::Serialize, serde::Deserialize)]
     #[allow(clippy::derive_partial_eq_without_eq)]
     #[derive(Clone, PartialEq, ::prost::Oneof)]
     pub enum Reference {
@@ -42,12 +47,14 @@ pub mod single_block_request {
         Cursor(Cursor),
     }
 }
+#[derive(serde::Serialize, serde::Deserialize)]
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct SingleBlockResponse {
     #[prost(message, optional, tag = "1")]
-    pub block: ::core::option::Option<::prost_types::Any>,
+    pub block: ::core::option::Option<super::super::super::google::protobuf::Any>,
 }
+#[derive(serde::Serialize, serde::Deserialize)]
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Request {
@@ -87,8 +94,9 @@ pub struct Request {
     #[prost(bool, tag = "4")]
     pub final_blocks_only: bool,
     #[prost(message, repeated, tag = "10")]
-    pub transforms: ::prost::alloc::vec::Vec<::prost_types::Any>,
+    pub transforms: ::prost::alloc::vec::Vec<super::super::super::google::protobuf::Any>,
 }
+#[derive(serde::Serialize, serde::Deserialize)]
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Response {
@@ -97,12 +105,13 @@ pub struct Response {
     ///    - sf.ethereum.type.v1.Block
     ///    - sf.near.type.v1.Block
     #[prost(message, optional, tag = "1")]
-    pub block: ::core::option::Option<::prost_types::Any>,
+    pub block: ::core::option::Option<super::super::super::google::protobuf::Any>,
     #[prost(enumeration = "ForkStep", tag = "6")]
     pub step: i32,
     #[prost(string, tag = "10")]
     pub cursor: ::prost::alloc::string::String,
 }
+#[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
 pub enum ForkStep {

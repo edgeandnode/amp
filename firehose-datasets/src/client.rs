@@ -1,9 +1,9 @@
-#[path = "proto/sf.firehose.v2.rs"]
-mod pbfirehose;
+use crate::evm::pbethereum;
+use crate::proto::sf::firehose::v2 as pbfirehose;
 
 use std::str::FromStr;
 
-use super::evm::pbethereum;
+use anyhow::anyhow;
 use futures::{Stream, TryStreamExt as _};
 use pbfirehose::stream_client::StreamClient;
 use pbfirehose::ForkStep;
@@ -30,7 +30,7 @@ pub enum Error {
     #[error("ProtocolBuffers decoding error: {0}")]
     PbDecodeError(#[from] prost::DecodeError),
     #[error("Assertion failure: {0}")]
-    AssertFail(Box<dyn std::error::Error>),
+    AssertFail(anyhow::Error),
     #[error("URL parse error: {0}")]
     UriParse(#[from] InvalidUri),
     #[error("Invalid auth token: {0}")]
@@ -94,11 +94,11 @@ impl Client {
                 // Assert we have a final block.
                 // See also: only-final-blocks
                 if step != ForkStep::StepFinal {
-                    let err = format!("Only STEP_FINAL is expected, found {}", step.as_str_name());
-                    return Err(Error::AssertFail(err.into()));
+                    let err = anyhow!("Only STEP_FINAL is expected, found {}", step.as_str_name());
+                    return Err(Error::AssertFail(err));
                 }
                 let Some(block) = block else {
-                    return Err(Error::AssertFail("Expected block, found none".into()));
+                    return Err(Error::AssertFail(anyhow!("Expected block, found none")));
                 };
 
                 let ethereum_block = pbethereum::Block::decode(block.value.as_ref())?;

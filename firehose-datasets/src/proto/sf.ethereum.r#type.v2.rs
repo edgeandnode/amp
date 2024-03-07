@@ -1,3 +1,4 @@
+#[derive(serde::Serialize, serde::Deserialize)]
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Block {
@@ -31,6 +32,7 @@ pub struct Block {
 ///
 /// WARN: this is a client-side optimization pattern and should be moved in the
 /// consuming code.
+#[derive(serde::Serialize, serde::Deserialize)]
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct HeaderOnlyBlock {
@@ -40,6 +42,7 @@ pub struct HeaderOnlyBlock {
 /// BlockWithRefs is a lightweight block, with traces and transactions
 /// purged from the `block` within, and only.  It is used in transports
 /// to pass block data around.
+#[derive(serde::Serialize, serde::Deserialize)]
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct BlockWithRefs {
@@ -52,18 +55,21 @@ pub struct BlockWithRefs {
     #[prost(bool, tag = "4")]
     pub irreversible: bool,
 }
+#[derive(serde::Serialize, serde::Deserialize)]
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct TransactionRefs {
     #[prost(bytes = "vec", repeated, tag = "1")]
     pub hashes: ::prost::alloc::vec::Vec<::prost::alloc::vec::Vec<u8>>,
 }
+#[derive(serde::Serialize, serde::Deserialize)]
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct UnclesHeaders {
     #[prost(message, repeated, tag = "1")]
     pub uncles: ::prost::alloc::vec::Vec<BlockHeader>,
 }
+#[derive(serde::Serialize, serde::Deserialize)]
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct BlockRef {
@@ -72,6 +78,7 @@ pub struct BlockRef {
     #[prost(uint64, tag = "2")]
     pub number: u64,
 }
+#[derive(serde::Serialize, serde::Deserialize)]
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct BlockHeader {
@@ -115,7 +122,9 @@ pub struct BlockHeader {
     #[prost(uint64, tag = "11")]
     pub gas_used: u64,
     #[prost(message, optional, tag = "12")]
-    pub timestamp: ::core::option::Option<::prost_types::Timestamp>,
+    pub timestamp: ::core::option::Option<
+        super::super::super::super::google::protobuf::Timestamp,
+    >,
     /// ExtraData is free-form bytes included in the block by the "miner". While on Yellow paper of
     /// Ethereum this value is maxed to 32 bytes, other consensus algorithm like Clique and some other
     /// forks are using bigger values to carry special consensus data.
@@ -162,12 +171,14 @@ pub struct BlockHeader {
     #[prost(message, optional, tag = "18")]
     pub base_fee_per_gas: ::core::option::Option<BigInt>,
 }
+#[derive(serde::Serialize, serde::Deserialize)]
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct BigInt {
     #[prost(bytes = "vec", tag = "1")]
     pub bytes: ::prost::alloc::vec::Vec<u8>,
 }
+#[derive(serde::Serialize, serde::Deserialize)]
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct TransactionTrace {
@@ -257,6 +268,7 @@ pub struct TransactionTrace {
 }
 /// Nested message and enum types in `TransactionTrace`.
 pub mod transaction_trace {
+    #[derive(serde::Serialize, serde::Deserialize)]
     #[derive(
         Clone,
         Copy,
@@ -307,6 +319,7 @@ pub mod transaction_trace {
 }
 /// AccessTuple represents a list of storage keys for a given contract's address and is used
 /// for AccessList construction.
+#[derive(serde::Serialize, serde::Deserialize)]
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AccessTuple {
@@ -316,6 +329,7 @@ pub struct AccessTuple {
     pub storage_keys: ::prost::alloc::vec::Vec<::prost::alloc::vec::Vec<u8>>,
 }
 /// TransactionTraceWithBlockRef
+#[derive(serde::Serialize, serde::Deserialize)]
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct TransactionTraceWithBlockRef {
@@ -324,6 +338,7 @@ pub struct TransactionTraceWithBlockRef {
     #[prost(message, optional, tag = "2")]
     pub block_ref: ::core::option::Option<BlockRef>,
 }
+#[derive(serde::Serialize, serde::Deserialize)]
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct TransactionReceipt {
@@ -349,6 +364,7 @@ pub struct TransactionReceipt {
     #[prost(message, repeated, tag = "4")]
     pub logs: ::prost::alloc::vec::Vec<Log>,
 }
+#[derive(serde::Serialize, serde::Deserialize)]
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Log {
@@ -383,6 +399,7 @@ pub struct Log {
     #[prost(uint64, tag = "7")]
     pub ordinal: u64,
 }
+#[derive(serde::Serialize, serde::Deserialize)]
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Call {
@@ -476,6 +493,7 @@ pub struct Call {
     #[prost(message, repeated, tag = "33")]
     pub account_creations: ::prost::alloc::vec::Vec<AccountCreation>,
 }
+#[derive(serde::Serialize, serde::Deserialize)]
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct StorageChange {
@@ -490,6 +508,7 @@ pub struct StorageChange {
     #[prost(uint64, tag = "5")]
     pub ordinal: u64,
 }
+#[derive(serde::Serialize, serde::Deserialize)]
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct BalanceChange {
@@ -511,6 +530,7 @@ pub mod balance_change {
     /// ```shell
     /// ack -ho 'BalanceChangeReason\(".*"\)' | grep -Eo '".*"' | sort | uniq
     /// ```
+    #[derive(serde::Serialize, serde::Deserialize)]
     #[derive(
         Clone,
         Copy,
@@ -591,6 +611,7 @@ pub mod balance_change {
         }
     }
 }
+#[derive(serde::Serialize, serde::Deserialize)]
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct NonceChange {
@@ -603,6 +624,7 @@ pub struct NonceChange {
     #[prost(uint64, tag = "4")]
     pub ordinal: u64,
 }
+#[derive(serde::Serialize, serde::Deserialize)]
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AccountCreation {
@@ -611,6 +633,7 @@ pub struct AccountCreation {
     #[prost(uint64, tag = "2")]
     pub ordinal: u64,
 }
+#[derive(serde::Serialize, serde::Deserialize)]
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CodeChange {
@@ -633,6 +656,7 @@ pub struct CodeChange {
 ///
 /// Hence, we only index some of them, those that are costy like all the calls
 /// one, log events, return data, etc.
+#[derive(serde::Serialize, serde::Deserialize)]
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GasChange {
@@ -652,6 +676,7 @@ pub mod gas_change {
     /// ```shell
     /// ack -ho 'GasChangeReason\(".*"\)' | grep -Eo '".*"' | sort | uniq
     /// ```
+    #[derive(serde::Serialize, serde::Deserialize)]
     #[derive(
         Clone,
         Copy,
@@ -747,6 +772,7 @@ pub mod gas_change {
         }
     }
 }
+#[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
 pub enum TransactionTraceStatus {
@@ -779,6 +805,7 @@ impl TransactionTraceStatus {
         }
     }
 }
+#[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
 pub enum CallType {

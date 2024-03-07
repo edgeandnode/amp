@@ -12,7 +12,7 @@ pub enum ProtobufToRowError {
 }
 
 pub fn protobufs_to_rows(
-    block: super::pbethereum::Block,
+    block: pbethereum::Block,
 ) -> Result<(BlockHeader, Vec<TransactionTrace>, Vec<Call>, Vec<Log>), ProtobufToRowError> {
     use ProtobufToRowError::*;
 

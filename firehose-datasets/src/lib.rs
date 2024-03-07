@@ -5,3 +5,5 @@
 
 pub mod client;
 pub mod evm;
+
+mod proto;
