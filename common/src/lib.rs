@@ -7,6 +7,7 @@ use datafusion::{
     arrow::datatypes::DECIMAL128_MAX_PRECISION,
     common::{parsers::CompressionTypeVariant, Constraints},
     logical_expr::{CreateExternalTable, DdlStatement, LogicalPlan},
+    sql::TableReference,
 };
 
 pub type BlockNum = u64;
@@ -31,7 +32,20 @@ pub fn create_table_at<T: Table>(location: String) -> LogicalPlan {
         // This tables are not really external, as we will ingest and store them in our preferred format.
         // And we like Parquet.
         file_type: "PARQUET".to_string(),
-        name: T::TABLE_NAME.into(),
+
+        // DataFusion gives us two namespace levels: catalog and schema. We can set our own
+        // convention for the catalog and schema organization. Note that this 'schema' namespace is
+        // a different thing from the Arrow table schema.
+        //
+        // Setting a generic "evm" schema name alludes to the idea that schema names will serve as an
+        // alias for a more complex and unambiguous description of datasets (that we will need to
+        // come up with). Datasets would be a collection of tables. Many datasets be compatible by
+        // sharing a same Arrow table schema. Users would then be able to conveniently point the same
+        // schema name to different compatible datasets according to configuration, so that they can
+        // for example reuse the same code across networks and across dataset versions. So the "evm"
+        // schema could be configured to point to any EVM network, as their tables are largely
+        // compatible.
+        name: TableReference::partial("evm", T::TABLE_NAME),
 
         // Unwrap: The schema is static, any panics would be caught in basic testing.
         schema: Arc::new(schema.try_into().unwrap()),
