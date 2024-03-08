@@ -41,7 +41,7 @@ pub struct TransactionTrace {
 }
 
 impl Table for TransactionTrace {
-    const TABLE_NAME: &'static str = "transaction_trace";
+    const TABLE_NAME: &'static str = "transactions";
 
     fn schema() -> Schema {
         let block_num = Field::new("block_num", DataType::UInt64, false);

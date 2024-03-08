@@ -30,7 +30,7 @@ pub struct Log {
 }
 
 impl Table for Log {
-    const TABLE_NAME: &'static str = "log";
+    const TABLE_NAME: &'static str = "logs";
 
     fn schema() -> Schema {
         let block_num = Field::new("block_num", DataType::UInt64, false);

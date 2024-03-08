@@ -31,7 +31,7 @@ pub struct Call {
 }
 
 impl Table for Call {
-    const TABLE_NAME: &'static str = "call";
+    const TABLE_NAME: &'static str = "calls";
 
     fn schema() -> Schema {
         let block_num = Field::new("block_num", DataType::UInt64, false);

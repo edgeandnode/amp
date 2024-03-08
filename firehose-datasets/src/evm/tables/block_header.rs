@@ -27,7 +27,7 @@ pub struct BlockHeader {
 }
 
 impl Table for BlockHeader {
-    const TABLE_NAME: &'static str = "block_header";
+    const TABLE_NAME: &'static str = "blocks";
 
     fn schema() -> Schema {
         let number = Field::new("number", DataType::UInt64, false);
