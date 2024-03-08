@@ -1,11 +1,13 @@
 use clap::Parser;
+use datafusion::datasource::file_format::parquet;
 use firehose_datasets::client::Client;
+use firehose_datasets::evm::pbethereum;
 use fs_err::{self as fs, OpenOptions};
 use futures::StreamExt as _;
 use std::io::{BufWriter, Write as _};
 
-/// A tool for dumping a range of firehose blocks to protobufs text files and for converting them to
-/// parquet tables.
+/// A tool for dumping a range of firehose blocks to a protobufs json file and/or for converting them
+/// to parquet tables.
 #[derive(Parser, Debug)]
 #[command(name = "firehose-dump")]
 struct Args {
@@ -27,6 +29,15 @@ struct Args {
     /// The directory to write the output files to.
     #[arg(long, short)]
     out: String,
+
+    /// Whether to dump to protobufs json file. The whole range will be dumped into a single file,
+    /// containing one JSON object per block.
+    #[arg(long)]
+    pb_json: bool,
+
+    /// Whether to convert to parquet tables.
+    #[arg(long)]
+    parquet: bool,
 }
 
 #[tokio::main]
@@ -37,6 +48,8 @@ async fn main() -> Result<(), anyhow::Error> {
         start,
         end,
         out,
+        pb_json,
+        parquet,
     } = args;
 
     let mut client = {
@@ -49,7 +62,7 @@ async fn main() -> Result<(), anyhow::Error> {
     if !out_dir.exists() {
         fs::create_dir(out_dir)?;
     }
-    let mut pb_file = {
+    let mut pb_writer = if pb_json {
         let pb_file_path = out_dir.join(format!("pb_blocks_{start}_to_{end}.json"));
         let pb_file = OpenOptions::new()
             .write(true)
@@ -57,21 +70,38 @@ async fn main() -> Result<(), anyhow::Error> {
             .append(true)
             .open(pb_file_path)?;
         pb_file.set_len(0)?;
-        BufWriter::new(pb_file)
+        Some(BufWriter::new(pb_file))
+    } else {
+        None
     };
 
+    // let arrow_builder = if parquet { serde_arrow::ArrowBuilder::new(} else { None };
     let mut stream = Box::pin(client.blocks(args.start, args.end).await?);
     while let Some(block) = stream.next().await {
         let block = block?;
 
-        // This is to get a hex representation for bytes arrays in the JSON.
-        let mut json_block = serde_json::to_value(&block)?;
-        replace_u8_arrays_with_hex_string(&mut json_block);
-
-        serde_json::to_writer_pretty(&mut pb_file, &json_block)?;
+        if let Some(pb_writer) = &mut pb_writer {
+            // This is writing each block as a separate JSON file.
+            write_block_to_pb_json(pb_writer, &block)?;
+        }
     }
-    pb_file.flush()?;
 
+    if let Some(mut pb_writer) = pb_writer {
+        pb_writer.flush()?;
+    }
+
+    Ok(())
+}
+
+fn write_block_to_pb_json(
+    writer: &mut impl std::io::Write,
+    block: &pbethereum::Block,
+) -> Result<(), anyhow::Error> {
+    // This is to get a hex representation for bytes arrays in the JSON.
+    let mut json_block = serde_json::to_value(&block)?;
+    replace_u8_arrays_with_hex_string(&mut json_block);
+
+    serde_json::to_writer_pretty(writer, &json_block)?;
     Ok(())
 }
 
