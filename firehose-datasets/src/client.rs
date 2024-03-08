@@ -4,6 +4,7 @@ use crate::proto::sf::firehose::v2 as pbfirehose;
 use std::str::FromStr;
 
 use anyhow::anyhow;
+use common::BlockNum;
 use futures::{Stream, TryStreamExt as _};
 use pbfirehose::stream_client::StreamClient;
 use pbfirehose::ForkStep;
@@ -19,7 +20,6 @@ use tonic::service::interceptor::InterceptedService;
 use tonic::service::Interceptor;
 use tonic::transport::Endpoint;
 use tonic::transport::Uri;
-use types::*;
 
 #[derive(Error, Debug)]
 pub enum Error {

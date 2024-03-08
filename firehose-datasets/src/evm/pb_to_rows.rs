@@ -1,7 +1,8 @@
 use super::pbethereum;
 use super::tables::*;
+use anyhow::anyhow;
+use common::{Bytes32, EvmCurrency};
 use thiserror::Error;
-use types::{Bytes32, EvmCurrency};
 
 #[derive(Error, Debug)]
 pub enum ProtobufToRowError {
@@ -9,6 +10,8 @@ pub enum ProtobufToRowError {
     Malformed(Vec<u8>),
     #[error("Missing field: {0}")]
     Missing(&'static str),
+    #[error("Assertion failure: {0}")]
+    AssertFail(anyhow::Error),
 }
 
 pub fn protobufs_to_rows(
@@ -94,17 +97,34 @@ pub fn protobufs_to_rows(
 
             // And the logs associated with each call.
             for log in call.logs {
+                let mut topic0 = None;
+                let mut topic1 = None;
+                let mut topic2 = None;
+                let mut topic3 = None;
+
+                for t in log.topics {
+                    let topic = Bytes32::try_from(t).map_err(Malformed)?;
+                    match (topic0, topic1, topic2, topic3) {
+                        (None, _, _, _) => topic0 = Some(topic),
+                        (Some(_), None, _, _) => topic1 = Some(topic),
+                        (Some(_), Some(_), None, _) => topic2 = Some(topic),
+                        (Some(_), Some(_), Some(_), None) => topic3 = Some(topic),
+                        (Some(_), Some(_), Some(_), Some(_)) => {
+                            return Err(AssertFail(anyhow!("log has more than four topics")))
+                        }
+                    }
+                }
+
                 let log = Log {
                     block_num: header.number,
                     tx_index,
                     call_index,
                     tx_hash: tx_hash.clone(),
                     address: log.address.try_into().map_err(Malformed)?,
-                    topics: log
-                        .topics
-                        .into_iter()
-                        .map(|t| Bytes32::try_from(t).map_err(Malformed))
-                        .collect::<Result<_, ProtobufToRowError>>()?,
+                    topic0,
+                    topic1,
+                    topic2,
+                    topic3,
                     data: log.data.into(),
                     index: log.index,
                     block_index: log.block_index,
