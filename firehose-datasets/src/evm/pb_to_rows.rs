@@ -16,10 +16,10 @@ pub enum ProtobufToRowError {
 
 pub fn protobufs_to_rows(
     block: pbethereum::Block,
-) -> Result<(BlockHeader, Vec<TransactionTrace>, Vec<Call>, Vec<Log>), ProtobufToRowError> {
+) -> Result<(BlockHeader, Vec<Transaction>, Vec<Call>, Vec<Log>), ProtobufToRowError> {
     use ProtobufToRowError::*;
 
-    let mut transactions: Vec<TransactionTrace> = vec![];
+    let mut transactions: Vec<Transaction> = vec![];
     let mut calls: Vec<Call> = vec![];
     let mut logs: Vec<Log> = vec![];
 
@@ -28,7 +28,7 @@ pub fn protobufs_to_rows(
     for tx in block.transaction_traces {
         let tx_index = tx.index;
         let tx_hash: Bytes32 = tx.hash.try_into().map_err(Malformed)?;
-        let tx_trace_row = TransactionTrace {
+        let tx_trace_row = Transaction {
             block_num: header.number,
             tx_index,
             tx_hash: tx_hash.clone(),

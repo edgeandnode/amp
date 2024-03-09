@@ -1,20 +1,27 @@
 mod block_header;
 mod call;
 mod log;
-mod transaction_trace;
+mod transaction;
 
 pub use block_header::BlockHeader;
 pub use call::Call;
-use common::create_table_at;
+use common::{create_table_at, Table};
 use datafusion::logical_expr::LogicalPlan;
 pub use log::Log;
-pub use transaction_trace::TransactionTrace;
+pub use transaction::Transaction;
 
-pub fn create_evm_tables_at(location: String) -> Vec<LogicalPlan> {
+fn all_tables() -> Vec<Table> {
     vec![
-        create_table_at::<BlockHeader>(location.clone()),
-        create_table_at::<TransactionTrace>(location.clone()),
-        create_table_at::<Call>(location.clone()),
-        create_table_at::<Log>(location),
+        block_header::table(),
+        transaction::table(),
+        call::table(),
+        log::table(),
     ]
+}
+
+pub fn create_evm_tables_at(namespace: String, location: String) -> Vec<LogicalPlan> {
+    all_tables()
+        .into_iter()
+        .map(|table| create_table_at(table, namespace.clone(), location.clone()))
+        .collect()
 }

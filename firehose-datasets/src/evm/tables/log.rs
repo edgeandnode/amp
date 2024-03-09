@@ -4,6 +4,15 @@ use common::{
 };
 use serde::Serialize;
 
+pub fn table() -> Table {
+    Table {
+        name: TABLE_NAME.to_string(),
+        schema: schema(),
+    }
+}
+
+const TABLE_NAME: &'static str = "logs";
+
 #[derive(Debug, Serialize)]
 pub struct Log {
     pub block_num: u64,
@@ -29,40 +38,36 @@ pub struct Log {
     pub ordinal: u64,
 }
 
-impl Table for Log {
-    const TABLE_NAME: &'static str = "logs";
+fn schema() -> Schema {
+    let block_num = Field::new("block_num", DataType::UInt64, false);
+    let tx_index = Field::new("tx_index", DataType::UInt32, false);
+    let call_index = Field::new("call_index", DataType::UInt32, false);
+    let tx_hash = Field::new("tx_hash", BYTES32_TYPE, false);
+    let address = Field::new("address", ADDRESS_TYPE, false);
+    let topic0 = Field::new("topic0", BYTES32_TYPE, true);
+    let topic1 = Field::new("topic1", BYTES32_TYPE, true);
+    let topic2 = Field::new("topic2", BYTES32_TYPE, true);
+    let topic3 = Field::new("topic3", BYTES32_TYPE, true);
+    let data = Field::new("data", DataType::Binary, false);
+    let index = Field::new("index", DataType::UInt32, false);
+    let block_index = Field::new("block_index", DataType::UInt32, false);
+    let ordinal = Field::new("ordinal", DataType::UInt64, false);
 
-    fn schema() -> Schema {
-        let block_num = Field::new("block_num", DataType::UInt64, false);
-        let tx_index = Field::new("tx_index", DataType::UInt32, false);
-        let call_index = Field::new("call_index", DataType::UInt32, false);
-        let tx_hash = Field::new("tx_hash", BYTES32_TYPE, false);
-        let address = Field::new("address", ADDRESS_TYPE, false);
-        let topic0 = Field::new("topic0", BYTES32_TYPE, true);
-        let topic1 = Field::new("topic1", BYTES32_TYPE, true);
-        let topic2 = Field::new("topic2", BYTES32_TYPE, true);
-        let topic3 = Field::new("topic3", BYTES32_TYPE, true);
-        let data = Field::new("data", DataType::Binary, false);
-        let index = Field::new("index", DataType::UInt32, false);
-        let block_index = Field::new("block_index", DataType::UInt32, false);
-        let ordinal = Field::new("ordinal", DataType::UInt64, false);
+    let fields = vec![
+        block_num,
+        tx_index,
+        call_index,
+        tx_hash,
+        address,
+        topic0,
+        topic1,
+        topic2,
+        topic3,
+        data,
+        index,
+        block_index,
+        ordinal,
+    ];
 
-        let fields = vec![
-            block_num,
-            tx_index,
-            call_index,
-            tx_hash,
-            address,
-            topic0,
-            topic1,
-            topic2,
-            topic3,
-            data,
-            index,
-            block_index,
-            ordinal,
-        ];
-
-        Schema::new(fields)
-    }
+    Schema::new(fields)
 }

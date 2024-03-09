@@ -20,35 +20,45 @@ pub const BYTES32_TYPE: DataType = DataType::FixedSizeBinary(32);
 pub const EVM_ADDRESS_TYPE: DataType = DataType::FixedSizeBinary(20);
 pub const EVM_CURRENCY_TYPE: DataType = DataType::Decimal128(DECIMAL128_MAX_PRECISION, 0);
 
-pub trait Table {
-    const TABLE_NAME: &'static str;
-
-    fn schema() -> Schema;
+pub enum DataSourceKind {
+    Chain,
 }
 
-pub fn create_table_at<T: Table>(location: String) -> LogicalPlan {
-    let schema = T::schema();
+/// Identifies a data source and its data schema.
+pub struct DataSource {
+    pub kind: DataSourceKind,
+    pub name: String,
+    pub network: String,
+    pub data_schema: DataSchema,
+}
+
+pub struct DataSchema {
+    pub format_spec: String,
+    pub tables: Vec<Table>,
+}
+
+pub struct Table {
+    pub name: String,
+    pub schema: Schema,
+}
+
+pub fn create_table_at(table: Table, namespace: String, location: String) -> LogicalPlan {
     let command = CreateExternalTable {
         // This tables are not really external, as we will ingest and store them in our preferred format.
         // And we like Parquet.
         file_type: "PARQUET".to_string(),
 
-        // DataFusion gives us two namespace levels: catalog and schema. We can set our own
-        // convention for the catalog and schema organization. Note that this 'schema' namespace is
-        // a different thing from the Arrow table schema.
+        // DataFusion gives us two namespace levels: catalog and schema. The term 'schema' here is a
+        // different thing from an Arrow data schema. We choose to only utilize the schema level, and
+        // we call it a 'namespace' to avoid confusion.
         //
-        // Setting a generic "evm" schema name alludes to the idea that schema names will serve as an
-        // alias for a more complex and unambiguous description of datasets (that we will need to
-        // come up with). Datasets would be a collection of tables. Many datasets be compatible by
-        // sharing a same Arrow table schema. Users would then be able to conveniently point the same
-        // schema name to different compatible datasets according to configuration, so that they can
-        // for example reuse the same code across networks and across dataset versions. So the "evm"
-        // schema could be configured to point to any EVM network, as their tables are largely
-        // compatible.
-        name: TableReference::partial("evm", T::TABLE_NAME),
+        // Many DataSources may share a same DataSchema. Users are then able to conveniently point
+        // the same namespace name to different compatible data schemas according to configuration.
+        // This is useful for sharing code across networks and data schema versions.
+        name: TableReference::partial(namespace, table.name),
 
         // Unwrap: The schema is static, any panics would be caught in basic testing.
-        schema: Arc::new(schema.try_into().unwrap()),
+        schema: Arc::new(table.schema.try_into().unwrap()),
 
         location,
 
