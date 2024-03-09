@@ -10,7 +10,7 @@ use datafusion::logical_expr::LogicalPlan;
 pub use log::Log;
 pub use transaction::Transaction;
 
-fn all_tables() -> Vec<Table> {
+pub fn all_tables() -> Vec<Table> {
     vec![
         block_header::table(),
         transaction::table(),

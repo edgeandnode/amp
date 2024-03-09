@@ -1,10 +1,15 @@
 use clap::Parser;
-use datafusion::datasource::file_format::parquet;
+use datafusion::parquet;
 use firehose_datasets::client::Client;
 use firehose_datasets::evm::pbethereum;
 use fs_err::{self as fs, OpenOptions};
 use futures::StreamExt as _;
-use std::io::{BufWriter, Write as _};
+use parquet::arrow::ArrowWriter as ParquetWriter;
+use parquet::file::properties::WriterProperties as ParquetWriterProperties;
+use std::{
+    collections::HashMap,
+    io::{BufWriter, Write as _},
+};
 
 /// A tool for dumping a range of firehose blocks to a protobufs json file and/or for converting them
 /// to parquet tables.
@@ -63,26 +68,57 @@ async fn main() -> Result<(), anyhow::Error> {
         fs::create_dir(out_dir)?;
     }
     let mut pb_writer = if pb_json {
-        let pb_file_path = out_dir.join(format!("pb_blocks_{start}_to_{end}.json"));
-        let pb_file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .append(true)
-            .open(pb_file_path)?;
-        pb_file.set_len(0)?;
-        Some(BufWriter::new(pb_file))
+        let file_path = out_dir.join(format!("pb_blocks_{start}_to_{end}.json"));
+        Some(file_writer(&file_path)?)
     } else {
         None
     };
 
-    // let arrow_builder = if parquet { serde_arrow::ArrowBuilder::new(} else { None };
+    // Watch https://github.com/apache/arrow-datafusion/issues/9493 for speed-ups to parquet writing.
+    // Maps table names to parquet writers.
+    let mut parquet_writers: Option<HashMap<String, ParquetWriter<_>>> = if parquet {
+        let writer = firehose_datasets::evm::tables::all_tables()
+            .into_iter()
+            .map(|table| -> Result<_, anyhow::Error> {
+                let name = &table.name;
+                let file_path = out_dir.join(format!("{name}_{start}_to_{end}.parquet"));
+                let file_writer = file_writer(&file_path)?;
+                let schema = table.schema.into();
+                Ok((
+                    table.name,
+                    ParquetWriter::try_new(file_writer, schema, Some(parquet_options()))?,
+                ))
+            })
+            .collect::<Result<_, _>>()?;
+        Some(writer)
+    } else {
+        None
+    };
+
+    // part-00000
     let mut stream = Box::pin(client.blocks(args.start, args.end).await?);
-    while let Some(block) = stream.next().await {
+
+    // Polls the stream concurrently to the main task
+    let (tx, mut block_stream) = tokio::sync::mpsc::channel(100);
+    tokio::spawn(async move {
+        while let Some(block) = stream.next().await {
+            let _ = tx.send(block).await;
+        }
+    });
+    while let Some(block) = block_stream.recv().await {
         let block = block?;
 
         if let Some(pb_writer) = &mut pb_writer {
             // This is writing each block as a separate JSON file.
             write_block_to_pb_json(pb_writer, &block)?;
+        }
+
+        if let Some(parquet_writers) = &mut parquet_writers {
+            // let arrays = serde_arrow::to_arrow(&fields, &records)?;
+
+            // // Create RecordBatch
+            // let schema = Schema::new(fields);
+            // let batch = RecordBatch::try_new(schema, arrays)?;
         }
     }
 
@@ -91,6 +127,28 @@ async fn main() -> Result<(), anyhow::Error> {
     }
 
     Ok(())
+}
+
+fn parquet_options() -> ParquetWriterProperties {
+    use parquet::basic::{Compression, ZstdLevel};
+
+    // For DataFusion defaults, see `ParquetOptions` here:
+    // https://github.com/apache/arrow-datafusion/blob/main/datafusion/common/src/config.rs
+    let compression = Compression::ZSTD(ZstdLevel::try_new(1).unwrap());
+
+    ParquetWriterProperties::builder()
+        .set_compression(compression)
+        .build()
+}
+
+fn file_writer(path: &std::path::Path) -> Result<BufWriter<fs::File>, anyhow::Error> {
+    let file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .append(true)
+        .open(path)?;
+    file.set_len(0)?;
+    Ok(BufWriter::new(file))
 }
 
 fn write_block_to_pb_json(
