@@ -11,28 +11,28 @@ pub fn table() -> Table {
     }
 }
 
-const TABLE_NAME: &'static str = "blocks";
+pub const TABLE_NAME: &'static str = "blocks";
 
 #[derive(Debug, Serialize)]
-pub struct BlockHeader {
-    pub number: u64,
-    pub hash: Bytes32,
+pub struct Block {
+    pub(crate) number: u64,
+    pub(crate) hash: Bytes32,
 
-    pub parent_hash: Bytes32,
-    pub uncle_hash: Bytes32,
-    pub coinbase: Address,
-    pub state_root: Bytes32,
-    pub transactions_root: Bytes32,
-    pub receipt_root: Bytes32,
-    pub logs_bloom: Bytes,
-    pub difficulty: Bytes,
-    pub gas_limit: u64,
-    pub gas_used: u64,
-    pub timestamp: u64,
-    pub extra_data: Bytes,
-    pub mix_hash: Bytes32,
-    pub nonce: u64,
-    pub base_fee_per_gas: Option<u64>,
+    pub(crate) parent_hash: Bytes32,
+    pub(crate) uncle_hash: Bytes32,
+    pub(crate) coinbase: Address,
+    pub(crate) state_root: Bytes32,
+    pub(crate) transactions_root: Bytes32,
+    pub(crate) receipt_root: Bytes32,
+    pub(crate) logs_bloom: Bytes,
+    pub(crate) difficulty: Bytes,
+    pub(crate) gas_limit: u64,
+    pub(crate) gas_used: u64,
+    pub(crate) timestamp: u64,
+    pub(crate) extra_data: Bytes,
+    pub(crate) mix_hash: Bytes32,
+    pub(crate) nonce: u64,
+    pub(crate) base_fee_per_gas: Option<u64>,
 }
 
 fn schema() -> Schema {

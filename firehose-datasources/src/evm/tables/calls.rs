@@ -12,31 +12,31 @@ pub fn table() -> Table {
     }
 }
 
-const TABLE_NAME: &'static str = "calls";
+pub const TABLE_NAME: &'static str = "calls";
 
 /// Represents successful calls.
 ///
 /// The Firehose call model is much richer, and there is more we can easily add here.
 #[derive(Debug, Serialize)]
 pub struct Call {
-    pub block_num: u64,
-    pub tx_index: u32,
-    pub tx_hash: Bytes32,
-    pub index: u32,
+    pub(crate) block_num: u64,
+    pub(crate) tx_index: u32,
+    pub(crate) tx_hash: Bytes32,
+    pub(crate) index: u32,
 
-    pub parent_index: u32,
-    pub depth: u32,
-    pub caller: Address,
-    pub address: Address,
-    pub value: Option<EvmCurrency>,
-    pub gas_limit: u64,
-    pub gas_consumed: u64,
-    pub return_data: Bytes,
-    pub input: Bytes,
-    pub executed_code: bool,
-    pub selfdestruct: bool,
-    pub begin_ordinal: u64,
-    pub end_ordinal: u64,
+    pub(crate) parent_index: u32,
+    pub(crate) depth: u32,
+    pub(crate) caller: Address,
+    pub(crate) address: Address,
+    pub(crate) value: Option<EvmCurrency>,
+    pub(crate) gas_limit: u64,
+    pub(crate) gas_consumed: u64,
+    pub(crate) return_data: Bytes,
+    pub(crate) input: Bytes,
+    pub(crate) executed_code: bool,
+    pub(crate) selfdestruct: bool,
+    pub(crate) begin_ordinal: u64,
+    pub(crate) end_ordinal: u64,
 }
 
 fn schema() -> Schema {

@@ -1,5 +1,8 @@
 use super::pbethereum;
-use super::tables::*;
+use super::tables::blocks::Block;
+use super::tables::calls::Call;
+use super::tables::logs::Log;
+use super::tables::transaction::Transaction;
 use anyhow::anyhow;
 use common::{Bytes32, EvmCurrency};
 use thiserror::Error;
@@ -16,7 +19,7 @@ pub enum ProtobufToRowError {
 
 pub fn protobufs_to_rows(
     block: pbethereum::Block,
-) -> Result<(BlockHeader, Vec<Transaction>, Vec<Call>, Vec<Log>), ProtobufToRowError> {
+) -> Result<(Block, Vec<Transaction>, Vec<Call>, Vec<Log>), ProtobufToRowError> {
     use ProtobufToRowError::*;
 
     let mut transactions: Vec<Transaction> = vec![];
@@ -138,7 +141,7 @@ pub fn protobufs_to_rows(
     Ok((header, transactions, calls, logs))
 }
 
-fn header_from_pb(header: pbethereum::BlockHeader) -> Result<BlockHeader, ProtobufToRowError> {
+fn header_from_pb(header: pbethereum::BlockHeader) -> Result<Block, ProtobufToRowError> {
     use ProtobufToRowError::*;
 
     let timestamp = header.timestamp.ok_or(Missing("timestamp"))?.seconds as u64;
@@ -147,7 +150,7 @@ fn header_from_pb(header: pbethereum::BlockHeader) -> Result<BlockHeader, Protob
     // protobuf, and it can actually just fit in a u64.
     let base_fee_per_gas = header.base_fee_per_gas.map(pb_bigint_to_u64).transpose()?;
 
-    let header = BlockHeader {
+    let header = Block {
         hash: header.hash.try_into().map_err(Malformed)?,
         parent_hash: header.parent_hash.try_into().map_err(Malformed)?,
         uncle_hash: header.uncle_hash.try_into().map_err(Malformed)?,

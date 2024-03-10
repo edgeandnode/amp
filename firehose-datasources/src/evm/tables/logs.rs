@@ -11,31 +11,31 @@ pub fn table() -> Table {
     }
 }
 
-const TABLE_NAME: &'static str = "logs";
+pub const TABLE_NAME: &'static str = "logs";
 
 #[derive(Debug, Serialize)]
 pub struct Log {
-    pub block_num: u64,
-    pub tx_index: u32,
-    pub call_index: u32,
-    pub tx_hash: Bytes32,
+    pub(crate) block_num: u64,
+    pub(crate) tx_index: u32,
+    pub(crate) call_index: u32,
+    pub(crate) tx_hash: Bytes32,
 
-    pub address: Address,
-    pub topic0: Option<Bytes32>,
-    pub topic1: Option<Bytes32>,
-    pub topic2: Option<Bytes32>,
-    pub topic3: Option<Bytes32>,
+    pub(crate) address: Address,
+    pub(crate) topic0: Option<Bytes32>,
+    pub(crate) topic1: Option<Bytes32>,
+    pub(crate) topic2: Option<Bytes32>,
+    pub(crate) topic3: Option<Bytes32>,
 
-    pub data: Bytes,
+    pub(crate) data: Bytes,
 
     // Index of the log relative to the transaction.
-    pub index: u32,
+    pub(crate) index: u32,
 
     // Index of the log relative to the block, 0 if the state was reverted.
-    pub block_index: u32,
+    pub(crate) block_index: u32,
 
     // Unique identifier for the log's position in the blockchain.
-    pub ordinal: u64,
+    pub(crate) ordinal: u64,
 }
 
 fn schema() -> Schema {

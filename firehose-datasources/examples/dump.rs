@@ -1,11 +1,18 @@
+use arrow::array::RecordBatch;
 use clap::Parser;
+use common::Table;
+use datafusion::arrow;
 use datafusion::parquet;
-use firehose_datasets::client::Client;
-use firehose_datasets::evm::pbethereum;
+use firehose_datasources::client::Client;
+use firehose_datasources::evm::pbethereum;
+use firehose_datasources::evm::protobufs_to_rows;
+use firehose_datasources::evm::tables;
 use fs_err::{self as fs, OpenOptions};
 use futures::StreamExt as _;
 use parquet::arrow::ArrowWriter as ParquetWriter;
 use parquet::file::properties::WriterProperties as ParquetWriterProperties;
+use serde::Serialize;
+use std::sync::Arc;
 use std::{
     collections::HashMap,
     io::{BufWriter, Write as _},
@@ -77,11 +84,15 @@ async fn main() -> Result<(), anyhow::Error> {
     // Watch https://github.com/apache/arrow-datafusion/issues/9493 for speed-ups to parquet writing.
     // Maps table names to parquet writers.
     let mut parquet_writers: Option<HashMap<String, ParquetWriter<_>>> = if parquet {
-        let writer = firehose_datasets::evm::tables::all_tables()
+        let writer = firehose_datasources::evm::tables::all_tables()
             .into_iter()
             .map(|table| -> Result<_, anyhow::Error> {
                 let name = &table.name;
-                let file_path = out_dir.join(format!("{name}_{start}_to_{end}.parquet"));
+                let table_dir = out_dir.join(name);
+                if !table_dir.exists() {
+                    fs::create_dir(&table_dir)?;
+                }
+                let file_path = table_dir.join(format!("{start}_to_{end}.parquet"));
                 let file_writer = file_writer(&file_path)?;
                 let schema = table.schema.into();
                 Ok((
@@ -114,11 +125,25 @@ async fn main() -> Result<(), anyhow::Error> {
         }
 
         if let Some(parquet_writers) = &mut parquet_writers {
-            // let arrays = serde_arrow::to_arrow(&fields, &records)?;
+            use tables::{blocks, calls, logs, transaction};
 
-            // // Create RecordBatch
-            // let schema = Schema::new(fields);
-            // let batch = RecordBatch::try_new(schema, arrays)?;
+            let (block, transactions, calls, logs) = protobufs_to_rows(block)?;
+            let block = to_record_batch(blocks::table(), &[block])?;
+            let transactions_batch = to_record_batch(transaction::table(), &transactions)?;
+            let calls_batch = to_record_batch(calls::table(), &calls)?;
+            let logs_batch = to_record_batch(logs::table(), &logs)?;
+
+            let blocks_writer = parquet_writers.get_mut(blocks::TABLE_NAME).unwrap();
+            blocks_writer.write(&block)?;
+
+            let transactions_writer = parquet_writers.get_mut(transaction::TABLE_NAME).unwrap();
+            transactions_writer.write(&transactions_batch)?;
+
+            let calls_writer = parquet_writers.get_mut(calls::TABLE_NAME).unwrap();
+            calls_writer.write(&calls_batch)?;
+
+            let logs_writer = parquet_writers.get_mut(logs::TABLE_NAME).unwrap();
+            logs_writer.write(&logs_batch)?;
         }
     }
 
@@ -127,6 +152,13 @@ async fn main() -> Result<(), anyhow::Error> {
     }
 
     Ok(())
+}
+
+fn to_record_batch(table: Table, rows: &[impl Serialize]) -> Result<RecordBatch, anyhow::Error> {
+    let fields = table.schema.fields.iter();
+    let fields: Vec<_> = fields.map(|f| f.as_ref()).cloned().collect();
+    let arrays = serde_arrow::to_arrow(&fields, rows)?;
+    Ok(RecordBatch::try_new(Arc::new(table.schema), arrays)?)
 }
 
 fn parquet_options() -> ParquetWriterProperties {

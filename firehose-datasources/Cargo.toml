@@ -1,5 +1,5 @@
 [package]
-name = "firehose-datasets"
+name = "firehose-datasources"
 edition.workspace = true
 
 [[example]]

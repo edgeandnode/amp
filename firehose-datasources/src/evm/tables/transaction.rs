@@ -12,41 +12,41 @@ pub fn table() -> Table {
     }
 }
 
-const TABLE_NAME: &'static str = "transactions";
+pub const TABLE_NAME: &'static str = "transactions";
 
 #[derive(Debug, Serialize)]
 pub struct Transaction {
-    pub block_num: u64,
-    pub tx_index: u32,
-    pub tx_hash: Bytes32,
+    pub(crate) block_num: u64,
+    pub(crate) tx_index: u32,
+    pub(crate) tx_hash: Bytes32,
 
-    pub to: Bytes,
-    pub nonce: u64,
-    pub gas_price: EvmCurrency,
-    pub gas_limit: u64,
+    pub(crate) to: Bytes,
+    pub(crate) nonce: u64,
+    pub(crate) gas_price: EvmCurrency,
+    pub(crate) gas_limit: u64,
 
     // Value is the amount of Ether transferred as part of this transaction.
-    pub value: EvmCurrency,
+    pub(crate) value: EvmCurrency,
 
     // Input data the transaction will receive for EVM execution.
-    pub input: Bytes,
+    pub(crate) input: Bytes,
 
     // Elliptic curve parameters.
-    pub v: Bytes,
-    pub r: Bytes,
-    pub s: Bytes,
+    pub(crate) v: Bytes,
+    pub(crate) r: Bytes,
+    pub(crate) s: Bytes,
 
     // GasUsed is the total amount of gas unit used for the whole execution of the transaction.
-    pub gas_used: u64,
+    pub(crate) gas_used: u64,
 
-    pub r#type: i32,
-    pub max_fee_per_gas: EvmCurrency,
-    pub max_priority_fee_per_gas: Option<EvmCurrency>,
-    pub from: Address,
-    pub return_data: Bytes,
-    pub public_key: Bytes,
-    pub begin_ordinal: u64,
-    pub end_ordinal: u64,
+    pub(crate) r#type: i32,
+    pub(crate) max_fee_per_gas: EvmCurrency,
+    pub(crate) max_priority_fee_per_gas: Option<EvmCurrency>,
+    pub(crate) from: Address,
+    pub(crate) return_data: Bytes,
+    pub(crate) public_key: Bytes,
+    pub(crate) begin_ordinal: u64,
+    pub(crate) end_ordinal: u64,
 }
 
 fn schema() -> Schema {
