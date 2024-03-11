@@ -1,8 +1,12 @@
+use std::sync::Arc;
+
+use common::arrow::array::RecordBatch;
 use common::arrow::datatypes::{DataType, Field, Schema};
+use common::arrow::error::ArrowError;
+use common::arrow_helpers::ScalarToArray as _;
 use common::{
     Bytes, Bytes32, EvmAddress as Address, Table, BYTES32_TYPE, EVM_ADDRESS_TYPE as ADDRESS_TYPE,
 };
-use serde::Serialize;
 
 pub fn table() -> Table {
     Table {
@@ -13,7 +17,7 @@ pub fn table() -> Table {
 
 pub const TABLE_NAME: &'static str = "logs";
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Default)]
 pub struct Log {
     pub(crate) block_num: u64,
     pub(crate) tx_index: u32,
@@ -38,7 +42,45 @@ pub struct Log {
     pub(crate) ordinal: u64,
 }
 
-fn schema() -> Schema {
+impl Log {
+    pub fn to_arrow(&self) -> Result<RecordBatch, ArrowError> {
+        let Log {
+            block_num,
+            tx_index,
+            call_index,
+            tx_hash,
+            address,
+            topic0,
+            topic1,
+            topic2,
+            topic3,
+            data,
+            index,
+            block_index,
+            ordinal,
+        } = self;
+
+        let columns = vec![
+            block_num.to_arrow()?,
+            tx_index.to_arrow()?,
+            call_index.to_arrow()?,
+            tx_hash.to_arrow()?,
+            address.to_arrow()?,
+            topic0.to_arrow()?,
+            topic1.to_arrow()?,
+            topic2.to_arrow()?,
+            topic3.to_arrow()?,
+            data.to_arrow()?,
+            index.to_arrow()?,
+            block_index.to_arrow()?,
+            ordinal.to_arrow()?,
+        ];
+
+        RecordBatch::try_new(Arc::new(schema()), columns)
+    }
+}
+
+pub fn schema() -> Schema {
     let block_num = Field::new("block_num", DataType::UInt64, false);
     let tx_index = Field::new("tx_index", DataType::UInt32, false);
     let call_index = Field::new("call_index", DataType::UInt32, false);
@@ -70,4 +112,12 @@ fn schema() -> Schema {
     ];
 
     Schema::new(fields)
+}
+
+#[test]
+fn default_to_arrow() {
+    let log = Log::default();
+    let batch = log.to_arrow().unwrap();
+    assert_eq!(batch.num_columns(), 13);
+    assert_eq!(batch.num_rows(), 1);
 }

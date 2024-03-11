@@ -1,6 +1,5 @@
-use arrow::array::RecordBatch;
+use arrow::compute::concat_batches;
 use clap::Parser;
-use common::Table;
 use datafusion::arrow;
 use datafusion::parquet;
 use firehose_datasources::client::Client;
@@ -11,7 +10,6 @@ use fs_err::{self as fs, OpenOptions};
 use futures::StreamExt as _;
 use parquet::arrow::ArrowWriter as ParquetWriter;
 use parquet::file::properties::WriterProperties as ParquetWriterProperties;
-use serde::Serialize;
 use std::sync::Arc;
 use std::{
     collections::HashMap,
@@ -63,6 +61,12 @@ async fn main() -> Result<(), anyhow::Error> {
         pb_json,
         parquet,
     } = args;
+
+    if end == 0 {
+        return Err(anyhow::anyhow!(
+            "The end block number must be greater than 0"
+        ));
+    }
 
     let mut client = {
         let config = fs::read_to_string(&config)?;
@@ -125,18 +129,43 @@ async fn main() -> Result<(), anyhow::Error> {
         }
 
         if let Some(parquet_writers) = &mut parquet_writers {
-            use tables::{blocks, calls, logs, transaction};
+            use tables::{blocks, calls, logs, transactions};
 
             let (block, transactions, calls, logs) = protobufs_to_rows(block)?;
-            let block = to_record_batch(blocks::table(), &[block])?;
-            let transactions_batch = to_record_batch(transaction::table(), &transactions)?;
-            let calls_batch = to_record_batch(calls::table(), &calls)?;
-            let logs_batch = to_record_batch(logs::table(), &logs)?;
+
+            let block = block.to_arrow()?;
+
+            let transactions_batch = {
+                let mut batches = vec![];
+                for tx in transactions {
+                    batches.push(tx.to_arrow()?);
+                }
+                let schema = &Arc::new(transactions::schema());
+                concat_batches(schema, batches.iter())?
+            };
+
+            let calls_batch = {
+                let mut batches = vec![];
+                for call in calls {
+                    batches.push(call.to_arrow()?);
+                }
+                let schema = &Arc::new(calls::schema());
+                concat_batches(schema, batches.iter())?
+            };
+
+            let logs_batch = {
+                let mut batches = vec![];
+                for log in logs {
+                    batches.push(log.to_arrow()?);
+                }
+                let schema = &Arc::new(logs::schema());
+                concat_batches(schema, batches.iter())?
+            };
 
             let blocks_writer = parquet_writers.get_mut(blocks::TABLE_NAME).unwrap();
             blocks_writer.write(&block)?;
 
-            let transactions_writer = parquet_writers.get_mut(transaction::TABLE_NAME).unwrap();
+            let transactions_writer = parquet_writers.get_mut(transactions::TABLE_NAME).unwrap();
             transactions_writer.write(&transactions_batch)?;
 
             let calls_writer = parquet_writers.get_mut(calls::TABLE_NAME).unwrap();
@@ -154,13 +183,6 @@ async fn main() -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-fn to_record_batch(table: Table, rows: &[impl Serialize]) -> Result<RecordBatch, anyhow::Error> {
-    let fields = table.schema.fields.iter();
-    let fields: Vec<_> = fields.map(|f| f.as_ref()).cloned().collect();
-    let arrays = serde_arrow::to_arrow(&fields, rows)?;
-    Ok(RecordBatch::try_new(Arc::new(table.schema), arrays)?)
-}
-
 fn parquet_options() -> ParquetWriterProperties {
     use parquet::basic::{Compression, ZstdLevel};
 
@@ -168,6 +190,9 @@ fn parquet_options() -> ParquetWriterProperties {
     // https://github.com/apache/arrow-datafusion/blob/main/datafusion/common/src/config.rs
     let compression = Compression::ZSTD(ZstdLevel::try_new(1).unwrap());
 
+    // Note: We could set `sorting_columns` for columns like `block_number` and `ordinal`. However,
+    // Datafusion doesn't actually read that metadata info anywhere and just reiles on the
+    // `file_sort_order` set on the reader configuration.
     ParquetWriterProperties::builder()
         .set_compression(compression)
         .build()

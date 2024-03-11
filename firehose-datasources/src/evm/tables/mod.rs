@@ -1,7 +1,7 @@
 pub mod blocks;
 pub mod calls;
 pub mod logs;
-pub mod transaction;
+pub mod transactions;
 
 use common::{create_table_at, Table};
 use datafusion::logical_expr::LogicalPlan;
@@ -9,7 +9,7 @@ use datafusion::logical_expr::LogicalPlan;
 pub fn all_tables() -> Vec<Table> {
     vec![
         blocks::table(),
-        transaction::table(),
+        transactions::table(),
         calls::table(),
         logs::table(),
     ]

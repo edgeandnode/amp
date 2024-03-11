@@ -1,4 +1,9 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut prost_config = prost_build::Config::new();
+
+    // These comments break doc tests, so we disable them.
+    prost_config.disable_comments(&["google.protobuf.Timestamp", "google.protobuf.Any"]);
+
     let config = tonic_build::configure()
         .build_server(false)
         .out_dir("src/proto");
@@ -10,7 +15,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .include_file("mod.rs")
         .type_attribute(".", "#[derive(serde::Serialize, serde::Deserialize)]");
 
-    config.compile(&["proto/firehose.proto", "proto/ethereum.proto"], &[""])?;
+    config.compile_with_config(
+        prost_config,
+        &["proto/firehose.proto", "proto/ethereum.proto"],
+        &[""],
+    )?;
 
     Ok(())
 }

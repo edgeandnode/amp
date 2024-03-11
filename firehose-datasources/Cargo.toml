@@ -15,7 +15,6 @@ futures.workspace = true
 hex.workspace = true
 serde.workspace = true
 serde_derive.workspace = true
-serde_arrow.workspace = true
 clap.workspace = true
 toml.workspace = true
 anyhow.workspace = true
@@ -23,6 +22,7 @@ datafusion.workspace = true
 
 [build-dependencies]
 tonic-build.workspace = true
+prost-build.workspace = true
 
 [dev-dependencies]
 prost-reflect = "0.13.0"

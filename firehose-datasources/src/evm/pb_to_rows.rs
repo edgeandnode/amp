@@ -1,8 +1,7 @@
-use super::pbethereum;
 use super::tables::blocks::Block;
 use super::tables::calls::Call;
 use super::tables::logs::Log;
-use super::tables::transaction::Transaction;
+use super::{pbethereum, tables::transactions::Transaction};
 use anyhow::anyhow;
 use common::{Bytes32, EvmCurrency};
 use thiserror::Error;
@@ -38,11 +37,15 @@ pub fn protobufs_to_rows(
 
             to: tx.to.into(),
             nonce: tx.nonce,
-            gas_price: non_negative_pb_bigint_to_evm_currency(
-                tx.gas_price.ok_or(Missing("gas_price"))?,
-            )?,
+            gas_price: tx
+                .gas_price
+                .map(non_negative_pb_bigint_to_evm_currency)
+                .transpose()?,
             gas_limit: tx.gas_limit,
-            value: non_negative_pb_bigint_to_evm_currency(tx.value.ok_or(Missing("value"))?)?,
+            value: tx
+                .value
+                .map(non_negative_pb_bigint_to_evm_currency)
+                .transpose()?,
             input: tx.input.into(),
 
             v: tx.v.into(),
@@ -51,9 +54,10 @@ pub fn protobufs_to_rows(
             gas_used: tx.gas_used,
 
             r#type: tx.r#type,
-            max_fee_per_gas: non_negative_pb_bigint_to_evm_currency(
-                tx.max_fee_per_gas.ok_or(Missing("max_fee_per_gas"))?,
-            )?,
+            max_fee_per_gas: tx
+                .max_fee_per_gas
+                .map(non_negative_pb_bigint_to_evm_currency)
+                .transpose()?,
             max_priority_fee_per_gas: tx
                 .max_priority_fee_per_gas
                 .map(non_negative_pb_bigint_to_evm_currency)

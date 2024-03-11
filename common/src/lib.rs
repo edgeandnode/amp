@@ -1,6 +1,8 @@
-use std::sync::Arc;
+pub mod arrow_helpers;
 
 pub use datafusion::arrow;
+
+use std::sync::Arc;
 
 use arrow::datatypes::{DataType, Schema};
 use datafusion::{
@@ -17,8 +19,13 @@ pub type EvmAddress = [u8; 20];
 pub type EvmCurrency = i128; // Payment amount in the EVM. Used for gas or value transfers.
 
 pub const BYTES32_TYPE: DataType = DataType::FixedSizeBinary(32);
+pub type Bytes32ArrayType = arrow::array::FixedSizeBinaryArray;
+
 pub const EVM_ADDRESS_TYPE: DataType = DataType::FixedSizeBinary(20);
+pub type EvmAddressArrayType = arrow::array::FixedSizeBinaryArray;
+
 pub const EVM_CURRENCY_TYPE: DataType = DataType::Decimal128(DECIMAL128_MAX_PRECISION, 0);
+pub type EvmCurrencyArrayType = arrow::array::Decimal128Array;
 
 pub enum DataSourceKind {
     Chain,
