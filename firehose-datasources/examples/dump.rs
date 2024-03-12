@@ -118,6 +118,9 @@ async fn main() -> Result<(), anyhow::Error> {
     });
     while let Some(block) = block_stream.recv().await {
         let block = block?;
+        if block.number % 100000 == 0 {
+            println!("Reached block {}", block.number);
+        }
 
         if let Some(pb_writer) = &mut pb_writer {
             // This is writing each block as a separate JSON file.
