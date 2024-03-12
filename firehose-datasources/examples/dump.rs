@@ -11,10 +11,7 @@ use futures::StreamExt as _;
 use parquet::arrow::ArrowWriter as ParquetWriter;
 use parquet::file::properties::WriterProperties as ParquetWriterProperties;
 use std::sync::Arc;
-use std::{
-    collections::HashMap,
-    io::{BufWriter, Write as _},
-};
+use std::{collections::HashMap, io::Write as _};
 
 /// A tool for dumping a range of firehose blocks to a protobufs json file and/or for converting them
 /// to parquet tables.
@@ -110,7 +107,6 @@ async fn main() -> Result<(), anyhow::Error> {
         None
     };
 
-    // part-00000
     let mut stream = Box::pin(client.blocks(args.start, args.end).await?);
 
     // Polls the stream concurrently to the main task
@@ -180,6 +176,12 @@ async fn main() -> Result<(), anyhow::Error> {
         pb_writer.flush()?;
     }
 
+    if let Some(parquet_writers) = parquet_writers {
+        for (_, writer) in parquet_writers {
+            writer.close()?;
+        }
+    }
+
     Ok(())
 }
 
@@ -198,14 +200,14 @@ fn parquet_options() -> ParquetWriterProperties {
         .build()
 }
 
-fn file_writer(path: &std::path::Path) -> Result<BufWriter<fs::File>, anyhow::Error> {
+fn file_writer(path: &std::path::Path) -> Result<fs::File, anyhow::Error> {
     let file = OpenOptions::new()
         .write(true)
         .create(true)
         .append(true)
         .open(path)?;
     file.set_len(0)?;
-    Ok(BufWriter::new(file))
+    Ok(file)
 }
 
 fn write_block_to_pb_json(
