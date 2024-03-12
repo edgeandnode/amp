@@ -8,8 +8,8 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum ProtobufToRowError {
-    #[error("Malformed bytes: {}", hex::encode(.0))]
-    Malformed(Vec<u8>),
+    #[error("Malformed field {0}, bytes: {}", hex::encode(.1))]
+    Malformed(&'static str, Vec<u8>),
     #[error("Missing field: {0}")]
     Missing(&'static str),
     #[error("Assertion failure: {0}")]
@@ -29,7 +29,7 @@ pub fn protobufs_to_rows(
 
     for tx in block.transaction_traces {
         let tx_index = tx.index;
-        let tx_hash: Bytes32 = tx.hash.try_into().map_err(Malformed)?;
+        let tx_hash: Bytes32 = tx.hash.try_into().map_err(|b| Malformed("tx.hash", b))?;
         let tx_trace_row = Transaction {
             block_num: header.number,
             tx_index,
@@ -39,12 +39,12 @@ pub fn protobufs_to_rows(
             nonce: tx.nonce,
             gas_price: tx
                 .gas_price
-                .map(non_negative_pb_bigint_to_evm_currency)
+                .map(|b| non_negative_pb_bigint_to_evm_currency("tx.gas_price", b))
                 .transpose()?,
             gas_limit: tx.gas_limit,
             value: tx
                 .value
-                .map(non_negative_pb_bigint_to_evm_currency)
+                .map(|b| non_negative_pb_bigint_to_evm_currency("tx.value", b))
                 .transpose()?,
             input: tx.input.into(),
 
@@ -56,13 +56,13 @@ pub fn protobufs_to_rows(
             r#type: tx.r#type,
             max_fee_per_gas: tx
                 .max_fee_per_gas
-                .map(non_negative_pb_bigint_to_evm_currency)
+                .map(|b| non_negative_pb_bigint_to_evm_currency("tx.max_fee_per_gas", b))
                 .transpose()?,
             max_priority_fee_per_gas: tx
                 .max_priority_fee_per_gas
-                .map(non_negative_pb_bigint_to_evm_currency)
+                .map(|b| non_negative_pb_bigint_to_evm_currency("tx.max_priority_fee_per_gas", b))
                 .transpose()?,
-            from: tx.from.try_into().map_err(Malformed)?,
+            from: tx.from.try_into().map_err(|b| Malformed("tx.from", b))?,
             return_data: tx.return_data.into(),
             public_key: tx.public_key.into(),
             begin_ordinal: tx.begin_ordinal,
@@ -85,11 +85,17 @@ pub fn protobufs_to_rows(
                 index: call_index,
                 parent_index: call.parent_index,
                 depth: call.depth,
-                caller: call.caller.try_into().map_err(Malformed)?,
-                address: call.address.try_into().map_err(Malformed)?,
+                caller: call
+                    .caller
+                    .try_into()
+                    .map_err(|b| Malformed("call.caller", b))?,
+                address: call
+                    .address
+                    .try_into()
+                    .map_err(|b| Malformed("call.address", b))?,
                 value: call
                     .value
-                    .map(non_negative_pb_bigint_to_evm_currency)
+                    .map(|b| non_negative_pb_bigint_to_evm_currency("call.value", b))
                     .transpose()?,
                 gas_limit: call.gas_limit,
                 gas_consumed: call.gas_consumed,
@@ -110,7 +116,7 @@ pub fn protobufs_to_rows(
                 let mut topic3 = None;
 
                 for t in log.topics {
-                    let topic = Bytes32::try_from(t).map_err(Malformed)?;
+                    let topic = Bytes32::try_from(t).map_err(|b| Malformed("log.topicN", b))?;
                     match (topic0, topic1, topic2, topic3) {
                         (None, _, _, _) => topic0 = Some(topic),
                         (Some(_), None, _, _) => topic1 = Some(topic),
@@ -127,7 +133,10 @@ pub fn protobufs_to_rows(
                     tx_index,
                     call_index,
                     tx_hash: tx_hash.clone(),
-                    address: log.address.try_into().map_err(Malformed)?,
+                    address: log
+                        .address
+                        .try_into()
+                        .map_err(|b| Malformed("log.address", b))?,
                     topic0,
                     topic1,
                     topic2,
@@ -152,16 +161,37 @@ fn header_from_pb(header: pbethereum::BlockHeader) -> Result<Block, ProtobufToRo
 
     // `base_fee_per_gas` is annoying. It is optional, it is represented as a byte array in the
     // protobuf, and it can actually just fit in a u64.
-    let base_fee_per_gas = header.base_fee_per_gas.map(pb_bigint_to_u64).transpose()?;
+    let base_fee_per_gas = header
+        .base_fee_per_gas
+        .map(|b| pb_bigint_to_u64("base_fee_per_gas", b))
+        .transpose()?;
 
     let header = Block {
-        hash: header.hash.try_into().map_err(Malformed)?,
-        parent_hash: header.parent_hash.try_into().map_err(Malformed)?,
-        uncle_hash: header.uncle_hash.try_into().map_err(Malformed)?,
-        coinbase: header.coinbase.try_into().map_err(Malformed)?,
-        state_root: header.state_root.try_into().map_err(Malformed)?,
-        transactions_root: header.transactions_root.try_into().map_err(Malformed)?,
-        receipt_root: header.receipt_root.try_into().map_err(Malformed)?,
+        hash: header.hash.try_into().map_err(|b| Malformed("hash", b))?,
+        parent_hash: header
+            .parent_hash
+            .try_into()
+            .map_err(|b| Malformed("parent_hash", b))?,
+        uncle_hash: header
+            .uncle_hash
+            .try_into()
+            .map_err(|b| Malformed("uncle_hash", b))?,
+        coinbase: header
+            .coinbase
+            .try_into()
+            .map_err(|b| Malformed("coinbase", b))?,
+        state_root: header
+            .state_root
+            .try_into()
+            .map_err(|b| Malformed("state_root", b))?,
+        transactions_root: header
+            .transactions_root
+            .try_into()
+            .map_err(|b| Malformed("transactions_root", b))?,
+        receipt_root: header
+            .receipt_root
+            .try_into()
+            .map_err(|b| Malformed("receipt_root", b))?,
         logs_bloom: header.logs_bloom.into(),
         difficulty: header.difficulty.ok_or(Missing("difficulty"))?.bytes.into(),
         number: header.number,
@@ -169,7 +199,10 @@ fn header_from_pb(header: pbethereum::BlockHeader) -> Result<Block, ProtobufToRo
         gas_used: header.gas_used,
         timestamp: timestamp,
         extra_data: header.extra_data.into(),
-        mix_hash: header.mix_hash.try_into().map_err(Malformed)?,
+        mix_hash: header
+            .mix_hash
+            .try_into()
+            .map_err(|b| Malformed("mix_hash", b))?,
         nonce: header.nonce,
         base_fee_per_gas,
     };
@@ -178,32 +211,39 @@ fn header_from_pb(header: pbethereum::BlockHeader) -> Result<Block, ProtobufToRo
 }
 
 // Assume `bytes` is big-endian number that will fit into a u64.
-fn pb_bigint_to_u64(bytes: pbethereum::BigInt) -> Result<u64, ProtobufToRowError> {
+fn pb_bigint_to_u64(
+    field: &'static str,
+    bytes: pbethereum::BigInt,
+) -> Result<u64, ProtobufToRowError> {
     use ProtobufToRowError::*;
     let len = bytes.bytes.len();
     let slice = bytes
         .bytes
         .get((len - 8)..)
-        .ok_or_else(|| Malformed(bytes.bytes.clone()))?;
+        .ok_or_else(|| Malformed(field, bytes.bytes.clone()))?;
     let bytes8: [u8; 8] = slice
         .try_into()
-        .map_err(|_| Malformed(bytes.bytes.clone()))?;
+        .map_err(|_| Malformed(field, bytes.bytes.clone()))?;
     Ok(u64::from_be_bytes(bytes8))
 }
 
 // Assume that `bytes` is a non-negative big-endian number that will fit into an i128.
 fn non_negative_pb_bigint_to_evm_currency(
+    field: &'static str,
     bytes: pbethereum::BigInt,
 ) -> Result<EvmCurrency, ProtobufToRowError> {
     use ProtobufToRowError::*;
     let len = bytes.bytes.len();
-    let slice = bytes
-        .bytes
-        .get((len - 16)..)
-        .ok_or_else(|| Malformed(bytes.bytes.clone()))?;
-    let bytes16: [u8; 16] = slice
-        .try_into()
-        .map_err(|_| Malformed(bytes.bytes.clone()))?;
+
+    if len > 16 {
+        return Err(Malformed(field, bytes.bytes.clone()));
+    }
+
+    // If bytes has len < 16, pad with zeroes.
+    let mut bytes16 = [0u8; 16];
+    let start = 16 - len;
+    bytes16[start..].copy_from_slice(&bytes.bytes);
+
     let unsigned = u128::from_be_bytes(bytes16);
     Ok(unsigned as i128)
 }
