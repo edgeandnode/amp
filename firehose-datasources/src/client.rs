@@ -57,6 +57,7 @@ impl Client {
             let auth = AuthInterceptor::new(token)?;
             StreamClient::with_interceptor(channel, auth)
                 .accept_compressed(CompressionEncoding::Gzip)
+                .max_decoding_message_size(100 * 1024 * 1024) // 100MiB
         };
 
         Ok(Client { stream_client })

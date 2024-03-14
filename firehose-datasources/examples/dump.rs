@@ -11,6 +11,7 @@ use futures::StreamExt as _;
 use parquet::arrow::ArrowWriter as ParquetWriter;
 use parquet::file::properties::WriterProperties as ParquetWriterProperties;
 use std::sync::Arc;
+use std::time::Instant;
 use std::{collections::HashMap, io::Write as _};
 
 /// A tool for dumping a range of firehose blocks to a protobufs json file and/or for converting them
@@ -110,6 +111,7 @@ async fn main() -> Result<(), anyhow::Error> {
     let mut stream = Box::pin(client.blocks(args.start, args.end).await?);
 
     // Polls the stream concurrently to the main task
+    let start = Instant::now();
     let (tx, mut block_stream) = tokio::sync::mpsc::channel(100);
     tokio::spawn(async move {
         while let Some(block) = stream.next().await {
@@ -119,7 +121,11 @@ async fn main() -> Result<(), anyhow::Error> {
     while let Some(block) = block_stream.recv().await {
         let block = block?;
         if block.number % 100000 == 0 {
-            println!("Reached block {}", block.number);
+            println!(
+                "Reached block {}, at minute {}",
+                block.number,
+                start.elapsed().as_secs() / 60
+            );
         }
 
         if let Some(pb_writer) = &mut pb_writer {

@@ -19,7 +19,7 @@ pub const TABLE_NAME: &'static str = "blocks";
 
 #[derive(Debug, Default)]
 pub struct Block {
-    pub(crate) number: u64,
+    pub(crate) block_num: u64,
     pub(crate) hash: Bytes32,
 
     pub(crate) parent_hash: Bytes32,
@@ -42,7 +42,7 @@ pub struct Block {
 impl Block {
     pub fn to_arrow(&self) -> Result<RecordBatch, ArrowError> {
         let Block {
-            number,
+            block_num,
             hash,
             parent_hash,
             uncle_hash,
@@ -62,7 +62,7 @@ impl Block {
         } = self;
 
         let columns = vec![
-            number.to_arrow()?,
+            block_num.to_arrow()?,
             hash.to_arrow()?,
             parent_hash.to_arrow()?,
             uncle_hash.to_arrow()?,
@@ -86,7 +86,7 @@ impl Block {
 }
 
 fn schema() -> Schema {
-    let number = Field::new("number", DataType::UInt64, false);
+    let number = Field::new("block_num", DataType::UInt64, false);
     let hash = Field::new("hash", BYTES32_TYPE, false);
     let parent_hash = Field::new("parent_hash", BYTES32_TYPE, false);
     let uncle_hash = Field::new("uncle_hash", BYTES32_TYPE, false);

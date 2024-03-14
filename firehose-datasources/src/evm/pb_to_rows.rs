@@ -31,7 +31,7 @@ pub fn protobufs_to_rows(
         let tx_index = tx.index;
         let tx_hash: Bytes32 = tx.hash.try_into().map_err(|b| Malformed("tx.hash", b))?;
         let tx_trace_row = Transaction {
-            block_num: header.number,
+            block_num: header.block_num,
             tx_index,
             tx_hash: tx_hash.clone(),
 
@@ -79,7 +79,7 @@ pub fn protobufs_to_rows(
 
             let call_index = call.index;
             let call_row = Call {
-                block_num: header.number,
+                block_num: header.block_num,
                 tx_index,
                 tx_hash: tx_hash.clone(),
                 index: call_index,
@@ -129,7 +129,7 @@ pub fn protobufs_to_rows(
                 }
 
                 let log = Log {
-                    block_num: header.number,
+                    block_num: header.block_num,
                     tx_index,
                     call_index,
                     tx_hash: tx_hash.clone(),
@@ -194,7 +194,7 @@ fn header_from_pb(header: pbethereum::BlockHeader) -> Result<Block, ProtobufToRo
             .map_err(|b| Malformed("receipt_root", b))?,
         logs_bloom: header.logs_bloom.into(),
         difficulty: header.difficulty.ok_or(Missing("difficulty"))?.bytes.into(),
-        number: header.number,
+        block_num: header.number,
         gas_limit: header.gas_limit,
         gas_used: header.gas_used,
         timestamp: timestamp,
@@ -217,13 +217,16 @@ fn pb_bigint_to_u64(
 ) -> Result<u64, ProtobufToRowError> {
     use ProtobufToRowError::*;
     let len = bytes.bytes.len();
-    let slice = bytes
-        .bytes
-        .get((len - 8)..)
-        .ok_or_else(|| Malformed(field, bytes.bytes.clone()))?;
-    let bytes8: [u8; 8] = slice
-        .try_into()
-        .map_err(|_| Malformed(field, bytes.bytes.clone()))?;
+
+    if len > 8 {
+        return Err(Malformed(field, bytes.bytes.clone()));
+    }
+
+    // If bytes has len < 8, pad with zeroes.
+    let mut bytes8 = [0u8; 8];
+    let start = 8 - len;
+    bytes8[start..].copy_from_slice(&bytes.bytes);
+
     Ok(u64::from_be_bytes(bytes8))
 }
 
