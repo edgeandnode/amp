@@ -10,7 +10,7 @@ use datafusion::arrow::{
 
 use crate::{
     Bytes, Bytes32, Bytes32ArrayType, EvmAddress, EvmCurrency, EvmCurrencyArrayType,
-    EVM_CURRENCY_TYPE,
+    TimestampSecond, EVM_CURRENCY_TYPE,
 };
 
 use super::arrow::array::Array;
@@ -93,5 +93,14 @@ impl ScalarToArray for u32 {
 impl ScalarToArray for i32 {
     fn to_arrow(&self) -> Result<Arc<dyn Array>, ArrowError> {
         Ok(Arc::new(Int32Array::from_iter_values(once(*self))))
+    }
+}
+
+impl ScalarToArray for TimestampSecond {
+    fn to_arrow(&self) -> Result<Arc<dyn Array>, ArrowError> {
+        use datafusion::arrow::array::TimestampSecondArray;
+
+        let array = TimestampSecondArray::from_iter_values(once(self.0 as i64)).with_timezone_utc();
+        Ok(Arc::new(array))
     }
 }

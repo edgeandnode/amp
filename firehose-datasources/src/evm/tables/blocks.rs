@@ -5,7 +5,8 @@ use common::arrow::datatypes::{DataType, Field, Schema};
 use common::arrow::error::ArrowError;
 use common::arrow_helpers::ScalarToArray as _;
 use common::{
-    Bytes, Bytes32, EvmAddress as Address, Table, BYTES32_TYPE, EVM_ADDRESS_TYPE as ADDRESS_TYPE,
+    timestamp_type, Bytes, Bytes32, EvmAddress as Address, Table, TimestampSecond, BYTES32_TYPE,
+    EVM_ADDRESS_TYPE as ADDRESS_TYPE,
 };
 
 pub fn table() -> Table {
@@ -20,9 +21,11 @@ pub const TABLE_NAME: &'static str = "blocks";
 #[derive(Debug, Default)]
 pub struct Block {
     pub(crate) block_num: u64,
-    pub(crate) hash: Bytes32,
+    pub(crate) timestamp: TimestampSecond,
 
+    pub(crate) hash: Bytes32,
     pub(crate) parent_hash: Bytes32,
+
     pub(crate) uncle_hash: Bytes32,
     pub(crate) coinbase: Address,
     pub(crate) state_root: Bytes32,
@@ -32,7 +35,6 @@ pub struct Block {
     pub(crate) difficulty: Bytes,
     pub(crate) gas_limit: u64,
     pub(crate) gas_used: u64,
-    pub(crate) timestamp: u64,
     pub(crate) extra_data: Bytes,
     pub(crate) mix_hash: Bytes32,
     pub(crate) nonce: u64,
@@ -43,6 +45,7 @@ impl Block {
     pub fn to_arrow(&self) -> Result<RecordBatch, ArrowError> {
         let Block {
             block_num,
+            timestamp,
             hash,
             parent_hash,
             uncle_hash,
@@ -54,7 +57,6 @@ impl Block {
             difficulty,
             gas_limit,
             gas_used,
-            timestamp,
             extra_data,
             mix_hash,
             nonce,
@@ -63,6 +65,7 @@ impl Block {
 
         let columns = vec![
             block_num.to_arrow()?,
+            timestamp.to_arrow()?,
             hash.to_arrow()?,
             parent_hash.to_arrow()?,
             uncle_hash.to_arrow()?,
@@ -74,7 +77,6 @@ impl Block {
             difficulty.to_arrow()?,
             gas_limit.to_arrow()?,
             gas_used.to_arrow()?,
-            timestamp.to_arrow()?,
             extra_data.to_arrow()?,
             mix_hash.to_arrow()?,
             nonce.to_arrow()?,
@@ -87,6 +89,7 @@ impl Block {
 
 fn schema() -> Schema {
     let number = Field::new("block_num", DataType::UInt64, false);
+    let timestamp = Field::new("timestamp", timestamp_type(), false);
     let hash = Field::new("hash", BYTES32_TYPE, false);
     let parent_hash = Field::new("parent_hash", BYTES32_TYPE, false);
     let uncle_hash = Field::new("uncle_hash", BYTES32_TYPE, false);
@@ -98,7 +101,6 @@ fn schema() -> Schema {
     let difficulty = Field::new("difficulty", DataType::Binary, false);
     let gas_limit = Field::new("gas_limit", DataType::UInt64, false);
     let gas_used = Field::new("gas_used", DataType::UInt64, false);
-    let timestamp = Field::new("timestamp", DataType::UInt64, false);
     let extra_data = Field::new("extra_data", DataType::Binary, false);
     let mix_hash = Field::new("mix_hash", BYTES32_TYPE, false);
     let nonce = Field::new("nonce", DataType::UInt64, false);
@@ -106,6 +108,7 @@ fn schema() -> Schema {
 
     let fields = vec![
         number,
+        timestamp,
         hash,
         parent_hash,
         uncle_hash,
@@ -117,7 +120,6 @@ fn schema() -> Schema {
         difficulty,
         gas_limit,
         gas_used,
-        timestamp,
         extra_data,
         mix_hash,
         nonce,

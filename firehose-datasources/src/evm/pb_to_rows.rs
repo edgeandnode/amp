@@ -3,7 +3,7 @@ use super::tables::calls::Call;
 use super::tables::logs::Log;
 use super::{pbethereum, tables::transactions::Transaction};
 use anyhow::anyhow;
-use common::{Bytes32, EvmCurrency};
+use common::{Bytes32, EvmCurrency, TimestampSecond};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -32,6 +32,7 @@ pub fn protobufs_to_rows(
         let tx_hash: Bytes32 = tx.hash.try_into().map_err(|b| Malformed("tx.hash", b))?;
         let tx_trace_row = Transaction {
             block_num: header.block_num,
+            timestamp: header.timestamp,
             tx_index,
             tx_hash: tx_hash.clone(),
 
@@ -80,6 +81,7 @@ pub fn protobufs_to_rows(
             let call_index = call.index;
             let call_row = Call {
                 block_num: header.block_num,
+                timestamp: header.timestamp,
                 tx_index,
                 tx_hash: tx_hash.clone(),
                 index: call_index,
@@ -130,6 +132,7 @@ pub fn protobufs_to_rows(
 
                 let log = Log {
                     block_num: header.block_num,
+                    timestamp: header.timestamp,
                     tx_index,
                     call_index,
                     tx_hash: tx_hash.clone(),
@@ -167,6 +170,8 @@ fn header_from_pb(header: pbethereum::BlockHeader) -> Result<Block, ProtobufToRo
         .transpose()?;
 
     let header = Block {
+        block_num: header.number,
+        timestamp: TimestampSecond(timestamp),
         hash: header.hash.try_into().map_err(|b| Malformed("hash", b))?,
         parent_hash: header
             .parent_hash
@@ -194,10 +199,8 @@ fn header_from_pb(header: pbethereum::BlockHeader) -> Result<Block, ProtobufToRo
             .map_err(|b| Malformed("receipt_root", b))?,
         logs_bloom: header.logs_bloom.into(),
         difficulty: header.difficulty.ok_or(Missing("difficulty"))?.bytes.into(),
-        block_num: header.number,
         gas_limit: header.gas_limit,
         gas_used: header.gas_used,
-        timestamp: timestamp,
         extra_data: header.extra_data.into(),
         mix_hash: header
             .mix_hash

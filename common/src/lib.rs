@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use arrow::datatypes::{DataType, Schema};
 use datafusion::{
-    arrow::datatypes::DECIMAL128_MAX_PRECISION,
+    arrow::datatypes::{TimeUnit, DECIMAL128_MAX_PRECISION},
     common::{parsers::CompressionTypeVariant, Constraints},
     logical_expr::{CreateExternalTable, DdlStatement, LogicalPlan},
     sql::TableReference,
@@ -26,6 +26,17 @@ pub type EvmAddressArrayType = arrow::array::FixedSizeBinaryArray;
 
 pub const EVM_CURRENCY_TYPE: DataType = DataType::Decimal128(DECIMAL128_MAX_PRECISION, 0);
 pub type EvmCurrencyArrayType = arrow::array::Decimal128Array;
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct TimestampSecond(pub u64);
+
+pub fn timestamp_type() -> DataType {
+    let timezone = Some("+00:00".into());
+    DataType::Timestamp(TimeUnit::Second, timezone)
+}
+
+/// Remember to call `.with_timezone_utc()` after creating a Timestamp array.
+pub type TimestampArrayType = arrow::array::TimestampSecondArray;
 
 pub enum DataSourceKind {
     Chain,
