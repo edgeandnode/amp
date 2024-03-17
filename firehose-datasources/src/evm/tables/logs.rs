@@ -5,7 +5,7 @@ use common::arrow::datatypes::{DataType, Field, Schema};
 use common::arrow::error::ArrowError;
 use common::arrow_helpers::ScalarToArray as _;
 use common::{
-    Bytes, Bytes32, EvmAddress as Address, Table, TimestampSecond, BYTES32_TYPE,
+    Bytes, Bytes32, EvmAddress as Address, Table, Timestamp, BYTES32_TYPE,
     EVM_ADDRESS_TYPE as ADDRESS_TYPE,
 };
 
@@ -21,7 +21,7 @@ pub const TABLE_NAME: &'static str = "logs";
 #[derive(Debug, Default)]
 pub struct Log {
     pub(crate) block_num: u64,
-    pub(crate) timestamp: TimestampSecond,
+    pub(crate) timestamp: Timestamp,
     pub(crate) tx_index: u32,
     pub(crate) call_index: u32,
     pub(crate) tx_hash: Bytes32,

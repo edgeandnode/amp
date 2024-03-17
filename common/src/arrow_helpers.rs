@@ -9,8 +9,8 @@ use datafusion::arrow::{
 };
 
 use crate::{
-    Bytes, Bytes32, Bytes32ArrayType, EvmAddress, EvmCurrency, EvmCurrencyArrayType,
-    TimestampSecond, EVM_CURRENCY_TYPE,
+    Bytes, Bytes32, Bytes32ArrayType, EvmAddress, EvmCurrency, EvmCurrencyArrayType, Timestamp,
+    TimestampArrayType, EVM_CURRENCY_TYPE,
 };
 
 use super::arrow::array::Array;
@@ -96,11 +96,16 @@ impl ScalarToArray for i32 {
     }
 }
 
-impl ScalarToArray for TimestampSecond {
+impl ScalarToArray for Timestamp {
     fn to_arrow(&self) -> Result<Arc<dyn Array>, ArrowError> {
-        use datafusion::arrow::array::TimestampSecondArray;
+        // i64::MAX in nanoseconds is almost 300 years, so we're safe to cast.
+        let nanos: i64 = self.0.as_nanos().try_into().map_err(|_| {
+            ArrowError::ExternalError(
+                format!("Timestamp out of range for Arrow's nanosecond precision",).into(),
+            )
+        })?;
 
-        let array = TimestampSecondArray::from_iter_values(once(self.0 as i64)).with_timezone_utc();
+        let array = TimestampArrayType::from_iter_values(once(nanos)).with_timezone_utc();
         Ok(Arc::new(array))
     }
 }

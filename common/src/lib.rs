@@ -3,6 +3,7 @@ pub mod arrow_helpers;
 pub use datafusion::arrow;
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use arrow::datatypes::{DataType, Schema};
 use datafusion::{
@@ -28,15 +29,22 @@ pub const EVM_CURRENCY_TYPE: DataType = DataType::Decimal128(DECIMAL128_MAX_PREC
 pub type EvmCurrencyArrayType = arrow::array::Decimal128Array;
 
 #[derive(Clone, Copy, Debug, Default)]
-pub struct TimestampSecond(pub u64);
+pub struct Timestamp(pub Duration);
 
+// Note: We choose a 'nanosecond' precision for the timestamp, even though many blockchains expose
+// only 'second' precision for block timestamps. A couple justifications for 'nanosecond':
+// 1. We found that the `date_bin` scalar function in DataFusion expects a nanosecond precision
+//    origin parameter. If we patch DataFusion to fix this, we can revisit this decision.
+// 2. There is no performance hit for choosing higher precision, it's all i64 at the Arrow level.
+// 3. It's the most precise timestamp, so it's maximally future-compatible with data sources that use
+//    more precise timestamps.
 pub fn timestamp_type() -> DataType {
     let timezone = Some("+00:00".into());
-    DataType::Timestamp(TimeUnit::Second, timezone)
+    DataType::Timestamp(TimeUnit::Nanosecond, timezone)
 }
 
 /// Remember to call `.with_timezone_utc()` after creating a Timestamp array.
-pub type TimestampArrayType = arrow::array::TimestampSecondArray;
+pub type TimestampArrayType = arrow::array::TimestampNanosecondArray;
 
 pub enum DataSourceKind {
     Chain,

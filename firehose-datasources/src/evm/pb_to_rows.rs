@@ -1,9 +1,11 @@
+use std::time::Duration;
+
 use super::tables::blocks::Block;
 use super::tables::calls::Call;
 use super::tables::logs::Log;
 use super::{pbethereum, tables::transactions::Transaction};
 use anyhow::anyhow;
-use common::{Bytes32, EvmCurrency, TimestampSecond};
+use common::{Bytes32, EvmCurrency, Timestamp};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -171,7 +173,7 @@ fn header_from_pb(header: pbethereum::BlockHeader) -> Result<Block, ProtobufToRo
 
     let header = Block {
         block_num: header.number,
-        timestamp: TimestampSecond(timestamp),
+        timestamp: Timestamp(Duration::from_secs(timestamp)),
         hash: header.hash.try_into().map_err(|b| Malformed("hash", b))?,
         parent_hash: header
             .parent_hash
