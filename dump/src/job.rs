@@ -4,16 +4,15 @@ use datafusion::parquet;
 use firehose_datasources::evm;
 use firehose_datasources::{client::Client, evm::protobufs_to_rows};
 use futures::StreamExt as _;
+use object_store::buffered::BufWriter;
 use object_store::path::Path;
 use object_store::ObjectStore;
 use parquet::arrow::AsyncArrowWriter;
 use parquet::file::properties::WriterProperties as ParquetWriterProperties;
 use std::collections::BTreeMap;
 use std::{sync::Arc, time::Instant};
-use tokio::io::AsyncWrite;
 
-type AsyncWriter = Box<dyn AsyncWrite + Unpin + Send>;
-type ParquetWriter = AsyncArrowWriter<AsyncWriter>;
+type ParquetWriter = AsyncArrowWriter<BufWriter>;
 
 pub struct Job {
     pub client: Client,
@@ -34,21 +33,14 @@ impl Job {
 
     async fn writer_for_table(&self, table: &Table) -> Result<ParquetWriter, anyhow::Error> {
         let path = Path::parse(&self.path_for_table(table.name.as_str()))?;
-        let (_, object_writer) = self.store.put_multipart(&path).await?;
+        let object_writer = BufWriter::new(self.store.clone(), path);
 
         let schema = table.schema.clone();
-
-        // 10MiB. We didn't bench this. I suspect this setting isn't very relevant given this:
-        // https://arrow.apache.org/rust/parquet/arrow/async_writer/struct.AsyncArrowWriter.html#memory-usage
-        // > However, the columnar nature of parquet forces data for an entire row group to be
-        // > buffered in memory, before it can be flushed. Depending on the data and the configured
-        // > row group size, this buffering may be substantial.
-        let buffer_size = 10 * 1024 * 1024;
         let opts = Some(parquet_options());
 
         // Watch https://github.com/apache/arrow-datafusion/issues/9493 for a higher level, parallel
         // API for parquet writing.
-        let writer = ParquetWriter::try_new(object_writer, schema, buffer_size, opts)?;
+        let writer = ParquetWriter::try_new(object_writer, schema, opts)?;
         Ok(writer)
     }
 }
