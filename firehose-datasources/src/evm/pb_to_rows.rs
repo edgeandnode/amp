@@ -1,11 +1,14 @@
 use std::time::Duration;
 
+use crate::evm::tables::{blocks, calls, logs, transactions};
+
 use super::tables::blocks::Block;
 use super::tables::calls::Call;
 use super::tables::logs::Log;
 use super::{pbethereum, tables::transactions::Transaction};
 use anyhow::anyhow;
-use common::{Bytes32, EvmCurrency, Timestamp};
+use common::arrow_helpers::TableRow;
+use common::{Bytes32, EvmCurrency, TableRows, Timestamp};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -18,9 +21,7 @@ pub enum ProtobufToRowError {
     AssertFail(anyhow::Error),
 }
 
-pub fn protobufs_to_rows(
-    block: pbethereum::Block,
-) -> Result<(Block, Vec<Transaction>, Vec<Call>, Vec<Log>), ProtobufToRowError> {
+pub fn protobufs_to_rows(block: pbethereum::Block) -> Result<Vec<TableRows>, ProtobufToRowError> {
     use ProtobufToRowError::*;
 
     let mut transactions: Vec<Transaction> = vec![];
@@ -156,7 +157,33 @@ pub fn protobufs_to_rows(
         }
     }
 
-    Ok((header, transactions, calls, logs))
+    let header_row = TableRows {
+        table: blocks::table(),
+        rows: vec![Box::new(header)],
+    };
+    let transactions_rows = TableRows {
+        table: transactions::table(),
+        rows: transactions
+            .into_iter()
+            .map(|t| Box::new(t) as Box<dyn TableRow>)
+            .collect(),
+    };
+    let calls_rows = TableRows {
+        table: calls::table(),
+        rows: calls
+            .into_iter()
+            .map(|c| Box::new(c) as Box<dyn TableRow>)
+            .collect(),
+    };
+    let logs_rows = TableRows {
+        table: logs::table(),
+        rows: logs
+            .into_iter()
+            .map(|l| Box::new(l) as Box<dyn TableRow>)
+            .collect(),
+    };
+
+    Ok(vec![header_row, transactions_rows, calls_rows, logs_rows])
 }
 
 fn header_from_pb(header: pbethereum::BlockHeader) -> Result<Block, ProtobufToRowError> {

@@ -1081,6 +1081,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "extractor"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "common",
+ "datafusion",
+ "firehose-datasources",
+ "fs-err",
+ "futures",
+ "object_store",
+ "serde_json",
+ "tokio",
+ "toml",
+]
+
+[[package]]
 name = "fastrand"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1088,7 +1105,7 @@ checksum = "25cbce373ec4653f1a01a31e8a5e5ec0c622dc27ff9c4e6606eefef5cbbed4a5"
 
 [[package]]
 name = "firehose-datasources"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -1099,7 +1116,6 @@ dependencies = [
  "hex",
  "prost",
  "prost-build",
- "prost-reflect",
  "prost-types",
  "serde",
  "serde_derive",
@@ -2072,17 +2088,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.52",
-]
-
-[[package]]
-name = "prost-reflect"
-version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9ae9372e3227f3685376a0836e5c248611eafc95a0be900d44bc6cdf225b700f"
-dependencies = [
- "once_cell",
- "prost",
- "prost-types",
 ]
 
 [[package]]

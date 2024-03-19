@@ -1,0 +1,17 @@
+[package]
+name = "extractor"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+common = { path = "../common" }
+firehose-datasources = { path = "../firehose-datasources" }
+tokio.workspace = true
+serde_json.workspace = true
+datafusion.workspace = true
+futures.workspace = true
+clap.workspace = true
+object_store.workspace = true
+anyhow.workspace = true
+fs-err.workspace = true
+toml.workspace = true

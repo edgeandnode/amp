@@ -1,9 +1,7 @@
 [package]
 name = "firehose-datasources"
 edition.workspace = true
-
-[[example]]
-name = "dump"
+version.workspace = true
 
 [dependencies]
 common = { path = "../common" }
@@ -25,7 +23,6 @@ tonic-build.workspace = true
 prost-build.workspace = true
 
 [dev-dependencies]
-prost-reflect = "0.13.0"
 tokio.workspace = true
 fs-err.workspace = true
 serde_json.workspace = true

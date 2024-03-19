@@ -2,18 +2,32 @@ use std::{iter::once, sync::Arc};
 
 use datafusion::arrow::{
     array::{
-        BinaryArray, BooleanArray, FixedSizeBinaryBuilder, Int32Array, UInt32Array, UInt64Array,
-        UInt64Builder,
+        BinaryArray, BooleanArray, FixedSizeBinaryBuilder, Int32Array, RecordBatch, UInt32Array,
+        UInt64Array, UInt64Builder,
     },
+    compute::concat_batches,
     error::ArrowError,
 };
 
 use crate::{
-    Bytes, Bytes32, Bytes32ArrayType, EvmAddress, EvmCurrency, EvmCurrencyArrayType, Timestamp,
-    TimestampArrayType, EVM_CURRENCY_TYPE,
+    Bytes, Bytes32, Bytes32ArrayType, EvmAddress, EvmCurrency, EvmCurrencyArrayType, TableRows,
+    Timestamp, TimestampArrayType, EVM_CURRENCY_TYPE,
 };
 
 use super::arrow::array::Array;
+
+pub fn rows_to_record_batch(rows: &TableRows) -> Result<RecordBatch, ArrowError> {
+    let mut batches = vec![];
+    for row in &rows.rows {
+        batches.push(row.to_record_batch()?);
+    }
+    concat_batches(&rows.table.schema, batches.iter())
+}
+
+pub trait TableRow {
+    /// Returns a record batch containing a single row.
+    fn to_record_batch(&self) -> Result<RecordBatch, ArrowError>;
+}
 
 pub trait ScalarToArray {
     fn to_arrow(&self) -> Result<Arc<dyn Array>, ArrowError>;

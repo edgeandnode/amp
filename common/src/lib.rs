@@ -1,13 +1,14 @@
 pub mod arrow_helpers;
 
+use arrow_helpers::TableRow;
 pub use datafusion::arrow;
 
 use std::sync::Arc;
 use std::time::Duration;
 
-use arrow::datatypes::{DataType, Schema};
+use arrow::datatypes::DataType;
 use datafusion::{
-    arrow::datatypes::{TimeUnit, DECIMAL128_MAX_PRECISION},
+    arrow::datatypes::{SchemaRef, TimeUnit, DECIMAL128_MAX_PRECISION},
     common::{parsers::CompressionTypeVariant, Constraints},
     logical_expr::{CreateExternalTable, DdlStatement, LogicalPlan},
     sql::TableReference,
@@ -65,9 +66,15 @@ pub struct DataSchema {
 
 pub struct Table {
     pub name: String,
-    pub schema: Schema,
+    pub schema: SchemaRef,
 }
 
+pub struct TableRows {
+    pub table: Table,
+    pub rows: Vec<Box<dyn TableRow>>,
+}
+
+// Dead code, might be useful on the read side. Playing around with datafusion external tables.
 pub fn create_table_at(table: Table, namespace: String, location: String) -> LogicalPlan {
     let command = CreateExternalTable {
         // This tables are not really external, as we will ingest and store them in our preferred format.
@@ -84,7 +91,7 @@ pub fn create_table_at(table: Table, namespace: String, location: String) -> Log
         name: TableReference::partial(namespace, table.name),
 
         // Unwrap: The schema is static, any panics would be caught in basic testing.
-        schema: Arc::new(table.schema.try_into().unwrap()),
+        schema: Arc::new(table.schema.as_ref().clone().try_into().unwrap()),
 
         location,
 

@@ -43,6 +43,8 @@ pub struct FirehoseProvider {
     pub token: Option<String>,
 }
 
+// Cloning is cheap and shares the underlying connection.
+#[derive(Clone)]
 pub struct Client {
     stream_client: StreamClient<InterceptedService<tonic::transport::Channel, AuthInterceptor>>,
 }
@@ -110,6 +112,7 @@ impl Client {
     }
 }
 
+#[derive(Clone)]
 struct AuthInterceptor {
     pub token: Option<MetadataValue<Ascii>>,
 }

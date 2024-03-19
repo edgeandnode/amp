@@ -6,7 +6,7 @@ pub mod transactions;
 use common::{create_table_at, Table};
 use datafusion::logical_expr::LogicalPlan;
 
-pub fn all_tables() -> Vec<Table> {
+pub fn all() -> Vec<Table> {
     vec![
         blocks::table(),
         transactions::table(),
@@ -15,8 +15,8 @@ pub fn all_tables() -> Vec<Table> {
     ]
 }
 
-pub fn create_evm_tables_at(namespace: String, location: String) -> Vec<LogicalPlan> {
-    all_tables()
+pub fn create_at(namespace: String, location: String) -> Vec<LogicalPlan> {
+    all()
         .into_iter()
         .map(|table| create_table_at(table, namespace.clone(), location.clone()))
         .collect()
