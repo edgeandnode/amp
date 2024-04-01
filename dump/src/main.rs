@@ -1,10 +1,14 @@
 mod job;
+mod parquet_writer;
 
 use clap::Parser;
+use datafusion::parquet;
 use firehose_datasources::client::Client;
 use fs_err as fs;
 use futures::future::join_all;
 use job::Job;
+use parquet::basic::{Compression, ZstdLevel};
+use parquet::file::properties::WriterProperties as ParquetWriterProperties;
 use std::sync::Arc;
 
 /// A tool for dumping a range of firehose blocks to a protobufs json file and/or for converting them
@@ -36,6 +40,16 @@ struct Args {
     /// The path to write the output files to.
     #[arg(long, short)]
     out: String,
+
+    /// The size of each partition in MB. Once the size is reached, a new part file is created. This
+    /// is based on the estimated in-memory size of the data. The actual on-disk file size will vary,
+    /// but will correlate with this value. Defaults to 1 GB.
+    #[arg(long, default_value = "1024")]
+    partition_size_mb: u64,
+
+    /// Whether to disable compression when writing parquet files. Defaults to false.
+    #[arg(long)]
+    disable_compression: bool,
 }
 
 #[tokio::main]
@@ -47,7 +61,15 @@ async fn main() -> Result<(), anyhow::Error> {
         end,
         out,
         n_jobs,
+        partition_size_mb,
+        disable_compression,
     } = args;
+    let partition_size = partition_size_mb * 1024 * 1024;
+    let compression = if disable_compression {
+        parquet::basic::Compression::UNCOMPRESSED
+    } else {
+        Compression::ZSTD(ZstdLevel::try_new(1).unwrap())
+    };
 
     if end == 0 {
         return Err(anyhow::anyhow!(
@@ -76,6 +98,8 @@ async fn main() -> Result<(), anyhow::Error> {
                 end: to,
                 job_id: jobs.len() as u8,
                 store: store.clone(),
+                partition_size,
+                parquet_opts: parquet_opts(compression),
             });
             from = to + 1;
         }
@@ -87,4 +111,16 @@ async fn main() -> Result<(), anyhow::Error> {
     }
 
     Ok(())
+}
+
+fn parquet_opts(compression: Compression) -> ParquetWriterProperties {
+    // For DataFusion defaults, see `ParquetOptions` here:
+    // https://github.com/apache/arrow-datafusion/blob/main/datafusion/common/src/config.rs
+    //
+    // Note: We could set `sorting_columns` for columns like `block_num` and `ordinal`. However,
+    // Datafusion doesn't actually read that metadata info anywhere and just reiles on the
+    // `file_sort_order` set on the reader configuration.
+    ParquetWriterProperties::builder()
+        .set_compression(compression)
+        .build()
 }

@@ -1,18 +1,14 @@
 use common::arrow_helpers::rows_to_record_batch;
-use common::Table;
-use datafusion::parquet;
+use datafusion::parquet::file::properties::WriterProperties as ParquetWriterProperties;
 use firehose_datasources::evm;
 use firehose_datasources::{client::Client, evm::protobufs_to_rows};
 use futures::StreamExt as _;
-use object_store::buffered::BufWriter;
 use object_store::path::Path;
 use object_store::ObjectStore;
-use parquet::arrow::AsyncArrowWriter;
-use parquet::file::properties::WriterProperties as ParquetWriterProperties;
 use std::collections::BTreeMap;
 use std::{sync::Arc, time::Instant};
 
-type ParquetWriter = AsyncArrowWriter<BufWriter>;
+use crate::parquet_writer::ParquetWriter;
 
 pub struct Job {
     pub client: Client,
@@ -20,29 +16,20 @@ pub struct Job {
     pub end: u64,
     pub job_id: u8,
     pub store: Arc<dyn ObjectStore>,
+    pub parquet_opts: ParquetWriterProperties,
+
+    // The target size of each table partition file in bytes. This is measured as the estimated
+    // uncompressed size of the partition. Once the size is reached, a new part file is created. Note
+    // that different tables may have a different number of partitions for a same block range.
+    // Lighter tables will have less parts than heavier tables.
+    pub partition_size: u64,
 }
 
-impl Job {
-    fn path_for_table(&self, table_name: &str) -> String {
-        // Pad `start` and `end` to 9 digits.
-        let padded_start = format!("{:09}", self.start);
-        let padded_end = format!("{:09}", self.end);
+fn path_for_part(table_name: &str, start_block: u64) -> String {
+    // Pad `start` to 9 digits.
+    let padded_start = format!("{:09}", start_block);
 
-        format!("{}/{}-{}.parquet", table_name, padded_start, padded_end)
-    }
-
-    async fn writer_for_table(&self, table: &Table) -> Result<ParquetWriter, anyhow::Error> {
-        let path = Path::parse(&self.path_for_table(table.name.as_str()))?;
-        let object_writer = BufWriter::new(self.store.clone(), path);
-
-        let schema = table.schema.clone();
-        let opts = Some(parquet_options());
-
-        // Watch https://github.com/apache/arrow-datafusion/issues/9493 for a higher level, parallel
-        // API for parquet writing.
-        let writer = ParquetWriter::try_new(object_writer, schema, opts)?;
-        Ok(writer)
-    }
+    format!("{}/{}.parquet", table_name, padded_start)
 }
 
 // Spawning a job:
@@ -64,7 +51,10 @@ pub async fn run_job(mut job: Job) -> Result<(), anyhow::Error> {
         let mut writers = BTreeMap::new();
         let tables = evm::tables::all();
         for table in tables {
-            let writer = job.writer_for_table(&table).await?;
+            let path = Path::parse(&path_for_part(&table.name, job.start))?;
+            let writer =
+                ParquetWriter::new(&job.store, path, &table.schema, job.parquet_opts.clone())
+                    .await?;
             writers.insert(table.name.clone(), writer);
         }
         writers
@@ -80,33 +70,34 @@ pub async fn run_job(mut job: Job) -> Result<(), anyhow::Error> {
             );
         }
 
+        let block_number = block.number;
         let all_table_rows = protobufs_to_rows(block)?;
 
         for table_rows in all_table_rows {
             let record_batch = rows_to_record_batch(&table_rows)?;
-            let writer = writers.get_mut(table_rows.table.name.as_str()).unwrap();
+            let table = table_rows.table;
+
+            let bytes_written = writers.get(table.name.as_str()).unwrap().bytes_written();
+
+            // Check if we need to create a new part file for the table.
+            if bytes_written >= job.partition_size {
+                let path = Path::parse(&path_for_part(&table.name, block_number))?;
+                let new_writer =
+                    ParquetWriter::new(&job.store, path, &table.schema, job.parquet_opts.clone())
+                        .await?;
+                let old_writer = writers.insert(table.name.clone(), new_writer).unwrap();
+                old_writer.close().await?;
+            }
+
+            let writer = writers.get_mut(table.name.as_str()).unwrap();
             writer.write(&record_batch).await?;
         }
     }
 
+    // Close the last part file for each table.
     for (_, writer) in writers {
         writer.close().await?;
     }
 
     Ok(())
-}
-
-fn parquet_options() -> ParquetWriterProperties {
-    use parquet::basic::{Compression, ZstdLevel};
-
-    // For DataFusion defaults, see `ParquetOptions` here:
-    // https://github.com/apache/arrow-datafusion/blob/main/datafusion/common/src/config.rs
-    let compression = Compression::ZSTD(ZstdLevel::try_new(1).unwrap());
-
-    // Note: We could set `sorting_columns` for columns like `block_num` and `ordinal`. However,
-    // Datafusion doesn't actually read that metadata info anywhere and just reiles on the
-    // `file_sort_order` set on the reader configuration.
-    ParquetWriterProperties::builder()
-        .set_compression(compression)
-        .build()
 }

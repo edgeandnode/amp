@@ -6,10 +6,10 @@ Example usage to dump first one million blocks:
 cargo run --release -p dump -- -o local/firehose_files 0 1000000
 ```
 
-This will create one directory per table, with one file for the whole range. If you want to split the
-range into separate files, this is not supported yet. But you can invoke repeatedly with
-non-overlapping ranges. There is an `--n-jobs` option, if you set `--n-jobs 5` that will both use 5
-concurrent Firehose connections and split the range into five chunks.
+This will create one directory per table. Each directory may contain multiple files, named by their
+start block, corresponding to table partitions.
+
+Check the `--help` text for more configuration options.
 
 ## Config
 
