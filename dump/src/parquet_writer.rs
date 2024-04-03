@@ -13,8 +13,8 @@ use parquet::file::properties::WriterProperties as ParquetWriterProperties;
 pub struct ParquetWriter {
     writer: AsyncArrowWriter<BufWriter>,
 
-    // Sum of `batch.get_array_memory_size()` for all batches written. Does not correspond to the
-    // actual size of the written file, particularly because this is uncompressed.
+    // Sum of `get_slice_memory_size` for all data written. Does not correspond to the actual size of
+    // the written file, particularly because this is uncompressed.
     bytes_written: u64,
 }
 
