@@ -1,12 +1,14 @@
 use common::arrow_helpers::rows_to_record_batch;
 use datafusion::parquet::file::properties::WriterProperties as ParquetWriterProperties;
-use firehose_datasources::evm;
+use firehose_datasources::client::Error as FirehoseError;
+use firehose_datasources::evm::{self, pbethereum};
 use firehose_datasources::{client::Client, evm::protobufs_to_rows};
-use futures::StreamExt as _;
+use futures::{FutureExt, StreamExt as _};
 use object_store::path::Path;
 use object_store::ObjectStore;
 use std::collections::BTreeMap;
 use std::{sync::Arc, time::Instant};
+use tokio::sync::mpsc;
 
 use crate::parquet_writer::ParquetWriter;
 
@@ -35,17 +37,17 @@ fn path_for_part(table_name: &str, start_block: u64) -> String {
 // Spawning a job:
 // - Spawns a task to fetch blocks from the `client`.
 // - Returns a future that will read that block stream and write a parquet file to the object store.
-pub async fn run_job(mut job: Job) -> Result<(), anyhow::Error> {
-    let mut stream = Box::pin(job.client.blocks(job.start, job.end).await?);
+pub async fn run_job(job: Job) -> Result<(), anyhow::Error> {
+    let start_time = Instant::now();
 
-    // Polls the stream concurrently to the write task
-    let start = Instant::now();
-    let (tx, mut block_stream) = tokio::sync::mpsc::channel(100);
-    tokio::spawn(async move {
-        while let Some(block) = stream.next().await {
-            let _ = tx.send(block).await;
-        }
-    });
+    let (mut firehose, firehose_join_handle) = {
+        let start_block = job.start;
+        let end_block = job.end;
+        let client = job.client.clone();
+        let (tx, rx) = tokio::sync::mpsc::channel(100);
+        let firehose_task = stream_blocks_to_channel(client, start_block, end_block, tx);
+        (rx, tokio::spawn(firehose_task))
+    };
 
     let mut writers: BTreeMap<String, ParquetWriter> = {
         let mut writers = BTreeMap::new();
@@ -60,13 +62,12 @@ pub async fn run_job(mut job: Job) -> Result<(), anyhow::Error> {
         writers
     };
 
-    while let Some(block) = block_stream.recv().await {
-        let block = block?;
+    while let Some(block) = firehose.recv().await {
         if block.number % 100000 == 0 {
             println!(
                 "Reached block {}, at minute {}",
                 block.number,
-                start.elapsed().as_secs() / 60
+                start_time.elapsed().as_secs() / 60
             );
         }
 
@@ -94,10 +95,66 @@ pub async fn run_job(mut job: Job) -> Result<(), anyhow::Error> {
         }
     }
 
-    // Close the last part file for each table.
+    // The Firehose task stopped sending blocks, so it must have terminated. Here we check if it
+    // terminated with any errors or panics.
+    firehose_join_handle.now_or_never().unwrap()??;
+
+    // Close the last part file for each table, checking for any errors.
     for (_, writer) in writers {
         writer.close().await?;
     }
 
     Ok(())
+}
+
+/// Fetches blocks from the Firehose and sends them through the channel.
+///
+/// Terminates with `Ok` when the Firehose stream reaches `end_block`, or the channel receiver goes
+/// away.
+///
+/// Terminates with `Err` when there is an error estabilishing the stream.
+///
+/// Errors from the Firehose stream are logged and retried.
+async fn stream_blocks_to_channel(
+    mut client: Client,
+    start_block: u64,
+    end_block: u64,
+    tx: mpsc::Sender<pbethereum::Block>,
+) -> Result<(), FirehoseError> {
+    // Explicitly track the next block in case we need to restart the Firehose stream.
+    let mut next_block = start_block;
+
+    // A retry loop for consuming the Firehose.
+    'retry: loop {
+        let mut stream = match client.blocks(next_block, end_block).await {
+            Ok(stream) => Box::pin(stream),
+
+            // If there is an error at the initial connection, we don't retry here as that's
+            // unexpected.
+            Err(err) => break Err(err),
+        };
+        while let Some(block) = stream.next().await {
+            match block {
+                Ok(block) => {
+                    let block_num = block.number;
+
+                    // Send the block and check if the receiver has gone away.
+                    if tx.send(block).await.is_err() {
+                        break;
+                    }
+
+                    next_block = block_num + 1;
+                }
+                Err(err) => {
+                    // Log and retry.
+                    println!("Error reading firehose stream: {}", err);
+                    continue 'retry;
+                }
+            }
+        }
+
+        // The stream has ended, or the receiver has gone away, either way we hit a natural
+        // termination condition.
+        break Ok(());
+    }
 }
