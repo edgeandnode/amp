@@ -1,12 +1,15 @@
 mod job;
 mod parquet_writer;
 
+use anyhow::Context as _;
 use clap::Parser;
 use datafusion::parquet;
 use firehose_datasources::client::Client;
 use fs_err as fs;
 use futures::future::join_all;
 use job::Job;
+use object_store::gcp::GoogleCloudStorageBuilder;
+use object_store::ObjectStore;
 use parquet::basic::{Compression, ZstdLevel};
 use parquet::file::properties::WriterProperties as ParquetWriterProperties;
 use std::sync::Arc;
@@ -37,7 +40,15 @@ struct Args {
     #[arg(long, short = 'j', default_value = "1")]
     n_jobs: u8,
 
-    /// The path to write the output files to.
+    /// The output location and path. Both local and object storage are supported.
+    /// - For local storage, this is the path to a directory.
+    /// - For GCS, this expected to be gs://<bucket>.
+    ///   GCS Authorization can be configured through one of the following environment variables:
+    ///     * GOOGLE_SERVICE_ACCOUNT_PATH: location of service account file
+    ///     * GOOGLE_SERVICE_ACCOUNT_KEY: JSON serialized service account key It will otherwise
+    ///   fallback to using Appication Default Credentials.
+    ///     * https://cloud.google.com/docs/authentication/application-default-credentials
+    /// - S3 support TODO.
     #[arg(long, short)]
     out: String,
 
@@ -83,7 +94,19 @@ async fn main() -> Result<(), anyhow::Error> {
         Client::new(provider).await?
     };
 
-    let store = Arc::new(object_store::local::LocalFileSystem::new_with_prefix(out)?);
+    let store: Arc<dyn ObjectStore> = if out.starts_with("gs://") {
+        let bucket = {
+            let segment = out.trim_start_matches("gs://").split('/').next();
+            segment.context("invalid GCS url")?
+        };
+        Arc::new(
+            GoogleCloudStorageBuilder::from_env()
+                .with_bucket_name(bucket)
+                .build()?,
+        )
+    } else {
+        Arc::new(object_store::local::LocalFileSystem::new_with_prefix(out)?)
+    };
 
     let jobs = {
         let mut jobs = vec![];
