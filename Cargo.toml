@@ -29,7 +29,5 @@ toml = "0.8.10"
 anyhow = "1.0.80"
 fs-err = "2.11.0"
 serde_json = "1.0.114"
-
-# Switch to datafusion v37 when it's released, in about a week.
-datafusion = { git = "https://github.com/apache/arrow-datafusion.git" }
+datafusion = "37"
 object_store = { version = "0.9.1", features = ["aws", "gcp"] }
