@@ -1,18 +1,20 @@
 pub mod arrow_helpers;
 
-use arrow_helpers::TableRow;
-pub use datafusion::arrow;
-
-use std::sync::Arc;
 use std::time::Duration;
 
 use arrow::datatypes::DataType;
+use arrow_helpers::TableRow;
+pub use datafusion::arrow;
+use datafusion::common::{DFSchemaRef, OwnedTableReference};
+use datafusion::logical_expr::{col, DdlStatement, LogicalPlan};
 use datafusion::{
     arrow::datatypes::{SchemaRef, TimeUnit, DECIMAL128_MAX_PRECISION},
-    common::{parsers::CompressionTypeVariant, Constraints},
-    logical_expr::{CreateExternalTable, DdlStatement, LogicalPlan},
+    common::{parsers::CompressionTypeVariant, Constraints, ToDFSchema},
+    execution::context::SessionContext,
+    logical_expr::CreateExternalTable,
     sql::TableReference,
 };
+use url::Url;
 
 pub type BlockNum = u64;
 pub type Bytes32 = [u8; 32];
@@ -47,21 +49,35 @@ pub fn timestamp_type() -> DataType {
 /// Remember to call `.with_timezone_utc()` after creating a Timestamp array.
 pub type TimestampArrayType = arrow::array::TimestampNanosecondArray;
 
-pub enum DataSourceKind {
-    Chain,
-}
-
-/// Identifies a data source and its data schema.
-pub struct DataSource {
-    pub kind: DataSourceKind,
+/// Identifies a dataset and its data schema.
+pub struct DataSet {
     pub name: String,
     pub network: String,
     pub data_schema: DataSchema,
 }
 
 pub struct DataSchema {
-    pub format_spec: String,
     pub tables: Vec<Table>,
+}
+
+impl DataSchema {
+    /// `base_url` is expected to be a directory and theferore must end with a `/`.
+    pub async fn register_tables(
+        &self,
+        ctx: SessionContext,
+        base_url: Url,
+    ) -> Result<(), anyhow::Error> {
+        for table in &self.tables {
+            // We will eventually want to leverage namespacing.
+            let table_reference = TableReference::bare(table.name.clone());
+
+            let schema = table.schema.as_ref().clone().to_dfschema_ref()?;
+            let url = base_url.join(&table.name)?;
+            let command = create_external_table(table_reference, schema, &url);
+            ctx.execute_logical_plan(command).await?;
+        }
+        Ok(())
+    }
 }
 
 pub struct Table {
@@ -74,39 +90,38 @@ pub struct TableRows {
     pub rows: Vec<Box<dyn TableRow>>,
 }
 
-// Dead code, might be useful on the read side. Playing around with datafusion external tables.
-pub fn create_table_at(table: Table, namespace: String, location: String) -> LogicalPlan {
+pub fn create_external_table(
+    name: OwnedTableReference,
+    schema: DFSchemaRef,
+    url: &Url,
+) -> LogicalPlan {
     let command = CreateExternalTable {
-        // This tables are not really external, as we will ingest and store them in our preferred format.
-        // And we like Parquet.
+        // Assume parquet, which has native compression.
         file_type: "PARQUET".to_string(),
+        file_compression_type: CompressionTypeVariant::UNCOMPRESSED,
 
-        // DataFusion gives us two namespace levels: catalog and schema. The term 'schema' here is a
-        // different thing from an Arrow data schema. We choose to only utilize the schema level, and
-        // we call it a 'namespace' to avoid confusion.
-        //
-        // Many DataSources may share a same DataSchema. Users are then able to conveniently point
-        // the same namespace name to different compatible data schemas according to configuration.
-        // This is useful for sharing code across networks and data schema versions.
-        name: TableReference::partial(namespace, table.name),
+        name,
+        schema,
+        location: url.to_string(),
 
-        // Unwrap: The schema is static, any panics would be caught in basic testing.
-        schema: Arc::new(table.schema.as_ref().clone().try_into().unwrap()),
-
-        location,
+        // TODO:
+        // - Make this less hardcoded to accomodate non-blockchain data.
+        // - Have a consistency check that the data really is sorted.
+        // - Add other sorted columns that may be relevant such as `ordinal`.
+        // - Do we want to address and leverage https://github.com/apache/arrow-datafusion/issues/4177?
+        order_exprs: vec![
+            vec![col("block_num").sort(true, false)],
+            vec![col("timestamp").sort(true, false)],
+        ],
 
         // Up to our preference, but maybe it's more robust for the caller to check existence.
         if_not_exists: false,
-
-        // Assume parquet, which has native compression, so we don't need to compress the file.
-        file_compression_type: CompressionTypeVariant::UNCOMPRESSED,
 
         // Wen streaming?
         unbounded: false,
 
         // Things we don't currently use.
         table_partition_cols: vec![],
-        order_exprs: vec![],
         options: Default::default(),
         constraints: Constraints::empty(),
         column_defaults: Default::default(),

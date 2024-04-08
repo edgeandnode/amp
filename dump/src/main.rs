@@ -3,6 +3,7 @@ mod parquet_writer;
 
 use anyhow::Context as _;
 use clap::Parser;
+use datafusion::execution::context::SessionContext;
 use datafusion::parquet;
 use firehose_datasources::client::Client;
 use fs_err as fs;
@@ -13,7 +14,7 @@ use object_store::ObjectStore;
 use parquet::basic::{Compression, ZstdLevel};
 use parquet::file::properties::WriterProperties as ParquetWriterProperties;
 use std::sync::Arc;
-
+use url::Url;
 /// A tool for dumping a range of firehose blocks to a protobufs json file and/or for converting them
 /// to parquet tables.
 #[derive(Parser, Debug)]
@@ -70,7 +71,7 @@ async fn main() -> Result<(), anyhow::Error> {
         config,
         start,
         end,
-        out,
+        mut out,
         n_jobs,
         partition_size_mb,
         disable_compression,
@@ -94,19 +95,35 @@ async fn main() -> Result<(), anyhow::Error> {
         Client::new(provider).await?
     };
 
-    let store: Arc<dyn ObjectStore> = if out.starts_with("gs://") {
+    // Make sure `out` has a trailing slash.
+    if !out.ends_with('/') {
+        out.push('/');
+    }
+
+    let (base_url, store): (_, Arc<dyn ObjectStore>) = if out.starts_with("gs://") {
         let bucket = {
             let segment = out.trim_start_matches("gs://").split('/').next();
             segment.context("invalid GCS url")?
         };
-        Arc::new(
+
+        let store = Arc::new(
             GoogleCloudStorageBuilder::from_env()
                 .with_bucket_name(bucket)
                 .build()?,
-        )
+        );
+        (Url::parse(&out)?, store)
     } else {
-        Arc::new(object_store::local::LocalFileSystem::new_with_prefix(out)?)
+        let store = Arc::new(object_store::local::LocalFileSystem::new_with_prefix(&out)?);
+        let path = fs::canonicalize(&out)?;
+        let url = Url::from_directory_path(path).unwrap();
+        (url, store)
     };
+
+    let dataset = firehose_datasources::evm::dataset("mainnet".to_string());
+
+    let ctx = SessionContext::new();
+    ctx.runtime_env()
+        .register_object_store(&base_url, store.clone());
 
     let jobs = {
         let mut jobs = vec![];
@@ -146,4 +163,17 @@ fn parquet_opts(compression: Compression) -> ParquetWriterProperties {
     ParquetWriterProperties::builder()
         .set_compression(compression)
         .build()
+}
+
+struct MultiRange {
+    // The ranges are inclusive on both ends.
+    ranges: Vec<(u64, u64)>,
+}
+
+impl MultiRange {
+    fn contains(&self, value: u64) -> bool {
+        self.ranges
+            .iter()
+            .any(|(start, end)| *start <= value && value <= *end)
+    }
 }
