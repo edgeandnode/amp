@@ -124,6 +124,7 @@ async fn main() -> Result<(), anyhow::Error> {
     let ctx = SessionContext::new();
     ctx.runtime_env()
         .register_object_store(&base_url, store.clone());
+    dataset.register_tables(&ctx, &base_url).await?;
 
     let jobs = {
         let mut jobs = vec![];

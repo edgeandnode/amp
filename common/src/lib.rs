@@ -56,6 +56,17 @@ pub struct DataSet {
     pub data_schema: DataSchema,
 }
 
+impl DataSet {
+    /// `base_url` is expected to be a directory and theferore must end with a `/`.
+    pub async fn register_tables(
+        &self,
+        ctx: &SessionContext,
+        base_url: &Url,
+    ) -> Result<(), anyhow::Error> {
+        self.data_schema.register_tables(ctx, base_url).await
+    }
+}
+
 pub struct DataSchema {
     pub tables: Vec<Table>,
 }
@@ -64,8 +75,8 @@ impl DataSchema {
     /// `base_url` is expected to be a directory and theferore must end with a `/`.
     pub async fn register_tables(
         &self,
-        ctx: SessionContext,
-        base_url: Url,
+        ctx: &SessionContext,
+        base_url: &Url,
     ) -> Result<(), anyhow::Error> {
         for table in &self.tables {
             // We will eventually want to leverage namespacing.
@@ -105,7 +116,7 @@ pub fn create_external_table(
         location: url.to_string(),
 
         // TODO:
-        // - Make this less hardcoded to accomodate non-blockchain data.
+        // - Make this less hardcoded to handle non-blockchain data.
         // - Have a consistency check that the data really is sorted.
         // - Add other sorted columns that may be relevant such as `ordinal`.
         // - Do we want to address and leverage https://github.com/apache/arrow-datafusion/issues/4177?
