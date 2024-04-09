@@ -5,7 +5,7 @@ use anyhow::Context as _;
 use clap::Parser;
 use datafusion::execution::context::SessionContext;
 use datafusion::parquet;
-use firehose_datasources::client::Client;
+use firehose_datasets::client::Client;
 use fs_err as fs;
 use futures::future::join_all;
 use job::Job;
@@ -119,7 +119,7 @@ async fn main() -> Result<(), anyhow::Error> {
         (url, store)
     };
 
-    let dataset = firehose_datasources::evm::dataset("mainnet".to_string());
+    let dataset = firehose_datasets::evm::dataset("mainnet".to_string());
 
     let ctx = SessionContext::new();
     ctx.runtime_env()

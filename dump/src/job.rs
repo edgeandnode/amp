@@ -1,8 +1,8 @@
 use common::arrow_helpers::rows_to_record_batch;
 use datafusion::parquet::file::properties::WriterProperties as ParquetWriterProperties;
-use firehose_datasources::client::Error as FirehoseError;
-use firehose_datasources::evm::{self, pbethereum};
-use firehose_datasources::{client::Client, evm::protobufs_to_rows};
+use firehose_datasets::client::Error as FirehoseError;
+use firehose_datasets::evm::{self, pbethereum};
+use firehose_datasets::{client::Client, evm::protobufs_to_rows};
 use futures::{FutureExt, StreamExt as _};
 use object_store::path::Path;
 use object_store::ObjectStore;

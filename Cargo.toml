@@ -1,5 +1,5 @@
 [workspace]
-members = ["firehose-datasources", "common", "dump"]
+members = ["firehose-datasets", "common", "dump"]
 
 resolver = "2"
 
