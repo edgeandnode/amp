@@ -35,6 +35,7 @@ struct Args {
     config: String,
 
     /// The block number to start from, inclusive.
+    #[arg(long, short, default_value = "0")]
     start: u64,
 
     /// The block number to end at, inclusive.
@@ -55,8 +56,8 @@ struct Args {
     ///   fallback to using Appication Default Credentials.
     ///     * https://cloud.google.com/docs/authentication/application-default-credentials
     /// - S3 support TODO.
-    #[arg(long, short)]
-    out: String,
+    #[arg(long)]
+    to: String,
 
     /// The size of each partition in MB. Once the size is reached, a new part file is created. This
     /// is based on the estimated in-memory size of the data. The actual on-disk file size will vary,
@@ -76,7 +77,7 @@ async fn main() -> Result<(), anyhow::Error> {
         config,
         start,
         end,
-        mut out,
+        to: mut out,
         n_jobs,
         partition_size_mb,
         disable_compression,
