@@ -39,7 +39,7 @@ struct Args {
     start: u64,
 
     /// The block number to end at, inclusive.
-    end: u64,
+    end_block: u64,
 
     /// How many parallel extractor jobs to run. Defaults to 1. Each job will be responsible for an
     /// equal number of blocks. Example: If start = 0, end = 10_000_000 and n_jobs = 10, then each
@@ -76,7 +76,7 @@ async fn main() -> Result<(), anyhow::Error> {
     let Args {
         config,
         start,
-        end,
+        end_block,
         to: mut out,
         n_jobs,
         partition_size_mb,
@@ -89,7 +89,7 @@ async fn main() -> Result<(), anyhow::Error> {
         Compression::ZSTD(ZstdLevel::try_new(1).unwrap())
     };
 
-    if end == 0 {
+    if end_block == 0 {
         return Err(anyhow::anyhow!(
             "The end block number must be greater than 0"
         ));
@@ -176,8 +176,8 @@ async fn main() -> Result<(), anyhow::Error> {
         let total_block = end - start + 1;
         let blocks_per_job = total_block.div_ceil(n_jobs as u64);
         let mut from = start;
-        while from <= end {
-            let to = (from + blocks_per_job).min(end);
+        while from <= end_block {
+            let to = (from + blocks_per_job).min(end_block);
             jobs.push(Job {
                 client: client.clone(),
                 start: from,
