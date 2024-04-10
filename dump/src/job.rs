@@ -1,4 +1,5 @@
 use common::arrow_helpers::rows_to_record_batch;
+use common::multirange::MultiRange;
 use datafusion::parquet::file::properties::WriterProperties as ParquetWriterProperties;
 use firehose_datasets::client::Error as FirehoseError;
 use firehose_datasets::evm::{self, pbethereum};
@@ -25,6 +26,10 @@ pub struct Job {
     // that different tables may have a different number of partitions for a same block range.
     // Lighter tables will have less parts than heavier tables.
     pub partition_size: u64,
+
+    // Block ranges that are already written to the object store, per table. This is used to resume a
+    // job that was interrupted. These blocks should simply be skipped.
+    pub existing_blocks: BTreeMap<String, MultiRange>,
 }
 
 fn path_for_part(table_name: &str, start_block: u64) -> String {
@@ -75,6 +80,19 @@ pub async fn run_job(job: Job) -> Result<(), anyhow::Error> {
         let all_table_rows = protobufs_to_rows(block)?;
 
         for table_rows in all_table_rows {
+            if table_rows.rows.is_empty() {
+                continue;
+            }
+
+            // Skip blocks that are already present.
+            if job
+                .existing_blocks
+                .get(table_rows.table.name.as_str())
+                .map_or(false, |range| range.contains(block_number))
+            {
+                continue;
+            }
+
             let record_batch = rows_to_record_batch(&table_rows)?;
             let table = table_rows.table;
 

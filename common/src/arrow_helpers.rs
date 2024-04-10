@@ -17,7 +17,7 @@ use crate::{
 use super::arrow::array::Array;
 
 pub fn rows_to_record_batch(rows: &TableRows) -> Result<RecordBatch, ArrowError> {
-    let mut batches = vec![];
+    let mut batches = Vec::with_capacity(rows.rows.len());
     for row in &rows.rows {
         batches.push(row.to_record_batch()?);
     }

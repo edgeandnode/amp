@@ -1,4 +1,5 @@
 pub mod arrow_helpers;
+pub mod multirange;
 
 use std::time::Duration;
 
@@ -57,13 +58,17 @@ pub struct DataSet {
 }
 
 impl DataSet {
+    pub fn tables(&self) -> &[Table] {
+        &self.data_schema.tables
+    }
+
     /// `base_url` is expected to be a directory and theferore must end with a `/`.
-    pub async fn register_tables(
+    pub async fn create_external_tables(
         &self,
         ctx: &SessionContext,
         base_url: &Url,
     ) -> Result<(), anyhow::Error> {
-        self.data_schema.register_tables(ctx, base_url).await
+        self.data_schema.create_external_tables(ctx, base_url).await
     }
 }
 
@@ -73,7 +78,7 @@ pub struct DataSchema {
 
 impl DataSchema {
     /// `base_url` is expected to be a directory and theferore must end with a `/`.
-    pub async fn register_tables(
+    pub async fn create_external_tables(
         &self,
         ctx: &SessionContext,
         base_url: &Url,
@@ -83,7 +88,11 @@ impl DataSchema {
             let table_reference = TableReference::bare(table.name.clone());
 
             let schema = table.schema.as_ref().clone().to_dfschema_ref()?;
-            let url = base_url.join(&table.name)?;
+            let url = if base_url.scheme() == "file" {
+                Url::from_directory_path(&format!("/{}/", &table.name)).unwrap()
+            } else {
+                base_url.join(&format!("{}/", &table.name))?
+            };
             let command = create_external_table(table_reference, schema, &url);
             ctx.execute_logical_plan(command).await?;
         }
