@@ -173,8 +173,8 @@ async fn main() -> Result<(), anyhow::Error> {
 
     let jobs = {
         let mut jobs = vec![];
-        let total_block = end - start + 1;
-        let blocks_per_job = total_block.div_ceil(n_jobs as u64);
+        let total_blocks = end_block - start + 1;
+        let blocks_per_job = total_blocks.div_ceil(n_jobs as u64);
         let mut from = start;
         while from <= end_block {
             let to = (from + blocks_per_job).min(end_block);
