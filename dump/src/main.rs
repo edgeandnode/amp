@@ -35,38 +35,41 @@ struct Args {
     config: String,
 
     /// The block number to start from, inclusive.
-    #[arg(long, short, default_value = "0")]
+    #[arg(long, short, default_value = "0", env = "DUMP_START_BLOCK")]
     start: u64,
 
     /// The block number to end at, inclusive.
+    #[arg(long, short, env = "DUMP_END_BLOCK")]
     end_block: u64,
 
     /// How many parallel extractor jobs to run. Defaults to 1. Each job will be responsible for an
     /// equal number of blocks. Example: If start = 0, end = 10_000_000 and n_jobs = 10, then each
     /// job will be responsible for a contiguous section of 1 million blocks.
-    #[arg(long, short = 'j', default_value = "1")]
+    #[arg(long, short = 'j', default_value = "1", env = "DUMP_N_JOBS")]
     n_jobs: u8,
 
     /// The output location and path. Both local and object storage are supported.
+    ///
     /// - For local storage, this is the path to a directory.
+    ///
     /// - For GCS, this expected to be gs://<bucket>.
     ///   GCS Authorization can be configured through one of the following environment variables:
-    ///     * GOOGLE_SERVICE_ACCOUNT_PATH: location of service account file
-    ///     * GOOGLE_SERVICE_ACCOUNT_KEY: JSON serialized service account key It will otherwise
-    ///   fallback to using Appication Default Credentials.
-    ///     * https://cloud.google.com/docs/authentication/application-default-credentials
+    ///     * GOOGLE_SERVICE_ACCOUNT_PATH: location of service account file, or
+    ///     * GOOGLE_SERVICE_ACCOUNT_KEY: JSON serialized service account key.
+    ///   It will otherwise fallback to using Appication Default Credentials.
+    ///
     /// - S3 support TODO.
-    #[arg(long)]
+    #[arg(long, env = "DUMP_TO")]
     to: String,
 
     /// The size of each partition in MB. Once the size is reached, a new part file is created. This
     /// is based on the estimated in-memory size of the data. The actual on-disk file size will vary,
     /// but will correlate with this value. Defaults to 1 GB.
-    #[arg(long, default_value = "1024")]
+    #[arg(long, default_value = "1024", env = "DUMP_PARTITION_SIZE_MB")]
     partition_size_mb: u64,
 
     /// Whether to disable compression when writing parquet files. Defaults to false.
-    #[arg(long)]
+    #[arg(long, env = "DUMP_DISABLE_COMPRESSION")]
     disable_compression: bool,
 }
 
