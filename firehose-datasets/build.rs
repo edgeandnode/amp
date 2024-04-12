@@ -1,4 +1,6 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    println!("cargo:rerun-if-changed=proto");
+
     let mut prost_config = prost_build::Config::new();
 
     // These comments break doc tests, so we disable them.
@@ -13,7 +15,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = config
         .compile_well_known_types(true)
         .include_file("mod.rs")
-        .type_attribute(".", "#[derive(serde::Serialize, serde::Deserialize)]");
+        .type_attribute(".", "#[derive(serde::Serialize, serde::Deserialize)]")
+        .emit_rerun_if_changed(false); // See https://github.com/hyperium/tonic/issues/1070
 
     config.compile_with_config(
         prost_config,
