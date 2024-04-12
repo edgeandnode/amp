@@ -1,13 +1,46 @@
 use futures::Stream;
 use std::pin::Pin;
+use thiserror::Error;
 
 use arrow_flight::{
-    flight_service_server::FlightService, ActionType, FlightData, FlightInfo, HandshakeRequest,
-    HandshakeResponse, PutResult,
+    flight_descriptor::DescriptorType,
+    flight_service_server::FlightService,
+    sql::{Any, CommandStatementQuery, CommandStatementSubstraitPlan, SubstraitPlan},
+    ActionType, FlightData, FlightInfo, HandshakeRequest, HandshakeResponse, PutResult,
 };
+use bytes::Bytes;
+use prost::Message as _;
 use tonic::{Request, Response, Status};
 
 type TonicStream<T> = Pin<Box<dyn Stream<Item = Result<T, Status>> + Send + 'static>>;
+
+#[derive(Error, Debug)]
+enum Error {
+    #[error("ProtocolBuffers decoding error: {0}")]
+    PbDecodeError(String),
+
+    #[error("Unsupported flight descriptor type: {0}")]
+    UnsupportedFlightDescriptorType(String),
+
+    #[error("Unexpected null field: {0}")]
+    UnexpectedNull(&'static str),
+}
+
+impl From<prost::DecodeError> for Error {
+    fn from(e: prost::DecodeError) -> Self {
+        Error::PbDecodeError(e.to_string())
+    }
+}
+
+impl From<Error> for Status {
+    fn from(e: Error) -> Self {
+        match e {
+            Error::PbDecodeError(_) => Status::invalid_argument(e.to_string()),
+            Error::UnsupportedFlightDescriptorType(_) => Status::invalid_argument(e.to_string()),
+            Error::UnexpectedNull(_) => Status::invalid_argument(e.to_string()),
+        }
+    }
+}
 
 struct Service;
 
@@ -25,14 +58,14 @@ impl FlightService for Service {
         &self,
         _request: Request<arrow_flight::FlightDescriptor>,
     ) -> Result<Response<arrow_flight::PollInfo>, Status> {
-        unimplemented!()
+        return Err(Status::unimplemented("poll_flight_info"));
     }
 
     async fn do_exchange(
         &self,
         _request: Request<tonic::Streaming<FlightData>>,
     ) -> Result<Response<Self::DoExchangeStream>, Status> {
-        unimplemented!()
+        return Err(Status::unimplemented("do_exchange"));
     }
 
     async fn handshake(
@@ -46,21 +79,23 @@ impl FlightService for Service {
         &self,
         _request: Request<arrow_flight::Criteria>,
     ) -> Result<Response<Self::ListFlightsStream>, Status> {
-        unimplemented!()
+        return Err(Status::unimplemented("list_flights"));
     }
 
     async fn get_flight_info(
         &self,
-        _request: Request<arrow_flight::FlightDescriptor>,
+        request: Request<arrow_flight::FlightDescriptor>,
     ) -> Result<Response<arrow_flight::FlightInfo>, Status> {
-        unimplemented!()
+        let descriptor = request.into_inner();
+        let info = self.get_flight_info(descriptor)?;
+        Ok(Response::new(info))
     }
 
     async fn get_schema(
         &self,
         _request: Request<arrow_flight::FlightDescriptor>,
     ) -> Result<Response<arrow_flight::SchemaResult>, Status> {
-        unimplemented!()
+        return Err(Status::unimplemented("get_schema"));
     }
 
     async fn do_get(
@@ -74,20 +109,71 @@ impl FlightService for Service {
         &self,
         _request: Request<tonic::Streaming<FlightData>>,
     ) -> Result<Response<Self::DoPutStream>, Status> {
-        unimplemented!()
+        return Err(Status::unimplemented("do_put"));
     }
 
     async fn list_actions(
         &self,
         _request: Request<arrow_flight::Empty>,
     ) -> Result<Response<Self::ListActionsStream>, Status> {
-        unimplemented!()
+        return Err(Status::unimplemented("list_actions"));
     }
 
     async fn do_action(
         &self,
         _request: Request<arrow_flight::Action>,
     ) -> Result<Response<Self::DoActionStream>, Status> {
-        unimplemented!()
+        return Err(Status::unimplemented("do_action"));
+    }
+}
+
+impl Service {
+    fn get_flight_info(
+        &self,
+        descriptor: arrow_flight::FlightDescriptor,
+    ) -> Result<arrow_flight::FlightInfo, Error> {
+        match DescriptorType::try_from(descriptor.r#type)? {
+            DescriptorType::Cmd => {
+                let msg = Any::decode(descriptor.cmd.as_ref())?;
+                if let Some(sql_query) = msg
+                    .unpack::<CommandStatementQuery>()
+                    .map_err(|e| Error::PbDecodeError(e.to_string()))?
+                {
+                    sql_query.query;
+                    todo!("Execute SQL query")
+                } else if let Some(substrait_query) = msg
+                    .unpack::<CommandStatementSubstraitPlan>()
+                    .map_err(|e| Error::PbDecodeError(e.to_string()))?
+                {
+                    let Some(plan) = substrait_query.plan else {
+                        return Err(Error::UnexpectedNull("substrait plan"));
+                    };
+                    let SubstraitPlan {
+                        plan: _,
+                        version: _,
+                    } = plan;
+                    todo!("Execute Substrait query")
+                }
+            }
+            DescriptorType::Path | DescriptorType::Unknown => {
+                return Err(Error::UnsupportedFlightDescriptorType(
+                    descriptor.r#type.to_string(),
+                ));
+            }
+        }
+
+        let info = FlightInfo {
+            flight_descriptor: Some(descriptor),
+            schema: Bytes::new(), // TODO
+            endpoint: Vec::new(), // TODO, endpoint is mandatory
+
+            // Not important.
+            ordered: false,
+            total_records: -1,
+            total_bytes: -1,
+            app_metadata: Bytes::new(),
+        };
+
+        Ok(info)
     }
 }
