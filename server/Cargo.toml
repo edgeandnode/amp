@@ -1,0 +1,10 @@
+[package]
+name = "server"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+arrow-flight = { version = "51.0.0", features = ["flight-sql-experimental"] }
+tonic.workspace = true
+async-trait.workspace = true
+futures.workspace = true

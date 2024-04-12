@@ -1,5 +1,5 @@
 [workspace]
-members = ["firehose-datasets", "common", "dump"]
+members = ["firehose-datasets", "common", "dump", "server"]
 
 resolver = "2"
 
@@ -32,3 +32,4 @@ serde_json = "1.0.114"
 datafusion = "37"
 object_store = { version = "0.9.1", features = ["aws", "gcp"] }
 url = "2.5.0"
+async-trait = "0.1.80"
