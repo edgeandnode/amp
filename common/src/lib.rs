@@ -1,21 +1,15 @@
 pub mod arrow_helpers;
+pub mod dataset_context;
 pub mod multirange;
+
+pub use datafusion::arrow;
+pub use datafusion::parquet;
 
 use std::time::Duration;
 
 use arrow::datatypes::DataType;
 use arrow_helpers::TableRow;
-pub use datafusion::arrow;
-use datafusion::common::{DFSchemaRef, OwnedTableReference};
-use datafusion::logical_expr::{col, DdlStatement, LogicalPlan};
-use datafusion::{
-    arrow::datatypes::{SchemaRef, TimeUnit, DECIMAL128_MAX_PRECISION},
-    common::{parsers::CompressionTypeVariant, Constraints, ToDFSchema},
-    execution::context::SessionContext,
-    logical_expr::CreateExternalTable,
-    sql::TableReference,
-};
-use url::Url;
+use datafusion::arrow::datatypes::{SchemaRef, TimeUnit, DECIMAL128_MAX_PRECISION};
 
 pub type BlockNum = u64;
 pub type Bytes32 = [u8; 32];
@@ -61,45 +55,13 @@ impl DataSet {
     pub fn tables(&self) -> &[Table] {
         &self.data_schema.tables
     }
-
-    /// `base_url` is expected to be a directory and theferore must end with a `/`.
-    pub async fn create_external_tables(
-        &self,
-        ctx: &SessionContext,
-        base_url: &Url,
-    ) -> Result<(), anyhow::Error> {
-        self.data_schema.create_external_tables(ctx, base_url).await
-    }
 }
 
 pub struct DataSchema {
     pub tables: Vec<Table>,
 }
 
-impl DataSchema {
-    /// `base_url` is expected to be a directory and theferore must end with a `/`.
-    pub async fn create_external_tables(
-        &self,
-        ctx: &SessionContext,
-        base_url: &Url,
-    ) -> Result<(), anyhow::Error> {
-        for table in &self.tables {
-            // We will eventually want to leverage namespacing.
-            let table_reference = TableReference::bare(table.name.clone());
-
-            let schema = table.schema.as_ref().clone().to_dfschema_ref()?;
-            let url = if base_url.scheme() == "file" {
-                Url::from_directory_path(&format!("/{}/", &table.name)).unwrap()
-            } else {
-                base_url.join(&format!("{}/", &table.name))?
-            };
-            let command = create_external_table(table_reference, schema, &url);
-            ctx.execute_logical_plan(command).await?;
-        }
-        Ok(())
-    }
-}
-
+#[derive(Clone, Hash, PartialEq, Eq, Debug)]
 pub struct Table {
     pub name: String,
     pub schema: SchemaRef,
@@ -108,49 +70,4 @@ pub struct Table {
 pub struct TableRows {
     pub table: Table,
     pub rows: Vec<Box<dyn TableRow>>,
-}
-
-pub fn create_external_table(
-    name: OwnedTableReference,
-    schema: DFSchemaRef,
-    url: &Url,
-) -> LogicalPlan {
-    let command = CreateExternalTable {
-        // Assume parquet, which has native compression.
-        file_type: "PARQUET".to_string(),
-        file_compression_type: CompressionTypeVariant::UNCOMPRESSED,
-
-        name,
-        schema,
-        location: url.to_string(),
-
-        // TODO:
-        // - Make this less hardcoded to handle non-blockchain data.
-        // - Have a consistency check that the data really is sorted.
-        // - Add other sorted columns that may be relevant such as `ordinal`.
-        // - Do we want to address and leverage https://github.com/apache/arrow-datafusion/issues/4177?
-        order_exprs: vec![
-            vec![col("block_num").sort(true, false)],
-            vec![col("timestamp").sort(true, false)],
-        ],
-
-        // Up to our preference, but maybe it's more robust for the caller to check existence.
-        if_not_exists: false,
-
-        // Wen streaming?
-        unbounded: false,
-
-        // Things we don't currently use.
-        table_partition_cols: vec![],
-        options: Default::default(),
-        constraints: Constraints::empty(),
-        column_defaults: Default::default(),
-        definition: None,
-
-        // CSV specific
-        has_header: false,
-        delimiter: ',',
-    };
-
-    LogicalPlan::Ddl(DdlStatement::CreateExternalTable(command))
 }

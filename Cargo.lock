@@ -742,6 +742,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "datafusion",
+ "object_store",
  "url",
 ]
 
@@ -1143,7 +1144,6 @@ dependencies = [
  "anyhow",
  "clap",
  "common",
- "datafusion",
  "firehose-datasets",
  "fs-err",
  "futures",
@@ -2639,6 +2639,8 @@ dependencies = [
  "arrow-flight",
  "async-trait",
  "bytes",
+ "common",
+ "firehose-datasets",
  "futures",
  "prost",
  "thiserror",

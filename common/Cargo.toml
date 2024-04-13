@@ -7,3 +7,4 @@ version.workspace = true
 datafusion.workspace = true
 url.workspace = true
 anyhow.workspace = true
+object_store.workspace = true

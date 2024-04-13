@@ -1,3 +1,4 @@
+use common::dataset_context::DatasetContext;
 use futures::Stream;
 use std::pin::Pin;
 use thiserror::Error;
@@ -5,7 +6,7 @@ use thiserror::Error;
 use arrow_flight::{
     flight_descriptor::DescriptorType,
     flight_service_server::FlightService,
-    sql::{Any, CommandStatementQuery, CommandStatementSubstraitPlan, SubstraitPlan},
+    sql::{Any, CommandStatementQuery},
     ActionType, FlightData, FlightInfo, HandshakeRequest, HandshakeResponse, PutResult,
 };
 use bytes::Bytes;
@@ -23,7 +24,7 @@ enum Error {
     UnsupportedFlightDescriptorType(String),
 
     #[error("Unexpected null field: {0}")]
-    UnexpectedNull(&'static str),
+    _UnexpectedNull(&'static str),
 }
 
 impl From<prost::DecodeError> for Error {
@@ -37,12 +38,15 @@ impl From<Error> for Status {
         match e {
             Error::PbDecodeError(_) => Status::invalid_argument(e.to_string()),
             Error::UnsupportedFlightDescriptorType(_) => Status::invalid_argument(e.to_string()),
-            Error::UnexpectedNull(_) => Status::invalid_argument(e.to_string()),
+            Error::_UnexpectedNull(_) => Status::invalid_argument(e.to_string()),
         }
     }
 }
 
-struct Service;
+struct Service {
+    // One service currently supports only one dataset.
+    _dataset: DatasetContext,
+}
 
 #[async_trait::async_trait]
 impl FlightService for Service {
@@ -140,19 +144,8 @@ impl Service {
                     .map_err(|e| Error::PbDecodeError(e.to_string()))?
                 {
                     sql_query.query;
-                    todo!("Execute SQL query")
-                } else if let Some(substrait_query) = msg
-                    .unpack::<CommandStatementSubstraitPlan>()
-                    .map_err(|e| Error::PbDecodeError(e.to_string()))?
-                {
-                    let Some(plan) = substrait_query.plan else {
-                        return Err(Error::UnexpectedNull("substrait plan"));
-                    };
-                    let SubstraitPlan {
-                        plan: _,
-                        version: _,
-                    } = plan;
-                    todo!("Execute Substrait query")
+                    // TODO: Use datafusion-proto?
+                    todo!("Encode plan into Ticket")
                 }
             }
             DescriptorType::Path | DescriptorType::Unknown => {

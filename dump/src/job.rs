@@ -1,6 +1,6 @@
 use common::arrow_helpers::rows_to_record_batch;
 use common::multirange::MultiRange;
-use datafusion::parquet::file::properties::WriterProperties as ParquetWriterProperties;
+use common::parquet::file::properties::WriterProperties as ParquetWriterProperties;
 use firehose_datasets::client::Error as FirehoseError;
 use firehose_datasets::evm::{self, pbethereum};
 use firehose_datasets::{client::Client, evm::protobufs_to_rows};

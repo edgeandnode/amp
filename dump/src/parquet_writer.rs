@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use common::arrow::array::RecordBatch;
 use common::arrow::datatypes::SchemaRef;
-use datafusion::parquet;
-use datafusion::parquet::errors::ParquetError;
+use common::parquet;
+use common::parquet::errors::ParquetError;
 use object_store::buffered::BufWriter;
 use object_store::path::Path;
 use object_store::ObjectStore;

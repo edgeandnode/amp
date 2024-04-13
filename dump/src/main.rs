@@ -4,21 +4,17 @@ mod parquet_writer;
 use anyhow::Context as _;
 use clap::Parser;
 use common::arrow::array::UInt64Array;
+use common::dataset_context::DatasetContext;
 use common::multirange::MultiRange;
-use datafusion::execution::context::SessionContext;
-use datafusion::parquet;
+use common::parquet;
 use firehose_datasets::client::Client;
 use fs_err as fs;
 use futures::future::join_all;
 use futures::StreamExt as _;
 use job::Job;
-use object_store::gcp::GoogleCloudStorageBuilder;
-use object_store::ObjectStore;
 use parquet::basic::{Compression, ZstdLevel};
 use parquet::file::properties::WriterProperties as ParquetWriterProperties;
 use std::collections::BTreeMap;
-use std::sync::Arc;
-use url::Url;
 
 /// A tool for dumping a range of firehose blocks to a protobufs json file and/or for converting them
 /// to parquet tables.
@@ -80,7 +76,7 @@ async fn main() -> Result<(), anyhow::Error> {
         config,
         start,
         end_block,
-        to: mut out,
+        to,
         n_jobs,
         partition_size_mb,
         disable_compression,
@@ -104,54 +100,20 @@ async fn main() -> Result<(), anyhow::Error> {
         Client::new(provider).await?
     };
 
-    // Make sure `out` has a trailing slash so it's recognized as a directory.
-    if !out.ends_with('/') {
-        out.push('/');
-    }
-
-    let (base_url, store): (_, Arc<dyn ObjectStore>) = if out.starts_with("gs://") {
-        let bucket = {
-            let segment = out.trim_start_matches("gs://").split('/').next();
-            segment.context("invalid GCS url")?
-        };
-
-        let store = Arc::new(
-            GoogleCloudStorageBuilder::from_env()
-                .with_bucket_name(bucket)
-                .build()?,
-        );
-        (Url::parse(&out)?, store)
-    } else {
-        let store = Arc::new(object_store::local::LocalFileSystem::new_with_prefix(&out)?);
-        let path = format!("/{}", out);
-        let url = Url::from_directory_path(path).unwrap();
-        (url, store)
-    };
-
     let dataset = firehose_datasets::evm::dataset("mainnet".to_string());
-
-    let ctx = SessionContext::new();
-    ctx.runtime_env()
-        .register_object_store(&base_url, store.clone());
-    dataset
-        .create_external_tables(&ctx, &base_url)
-        .await
-        .context("failed to register tables")?;
+    let ctx = DatasetContext::new(dataset, to)?;
 
     // The ranges of blocks that are already present, by table name.
     let existing_blocks: BTreeMap<String, MultiRange> = {
         let mut existing_blocks = BTreeMap::new();
-        for table in dataset.tables() {
+        for table in ctx.tables() {
             let table_name = table.name.clone();
             let mut multirange = MultiRange::default();
             let mut record_stream = ctx
-                .sql(&format!(
+                .sql_execute(&format!(
                     "select distinct(block_num) from {} order by block_num",
                     table_name
                 ))
-                .await
-                .context("failed to prepare existing blocks query")?
-                .execute_stream()
                 .await
                 .context("failed to run existing blocks query")?;
             while let Some(batch) = record_stream.next().await {
@@ -174,6 +136,7 @@ async fn main() -> Result<(), anyhow::Error> {
         existing_blocks
     };
 
+    let store = ctx.object_store()?;
     let jobs = {
         let mut jobs = vec![];
         let total_blocks = end_block - start + 1;

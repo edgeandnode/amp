@@ -4,6 +4,8 @@ edition.workspace = true
 version.workspace = true
 
 [dependencies]
+common = { path = "../common" }
+firehose-datasets = { path = "../firehose-datasets" }
 arrow-flight = { version = "51.0.0", features = ["flight-sql-experimental"] }
 tonic.workspace = true
 async-trait.workspace = true
