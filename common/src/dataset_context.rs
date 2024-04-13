@@ -71,7 +71,7 @@ impl DatasetContext {
         })
     }
 
-    /// Security: This function  can receive arbitrary SQL, it will check and restrict the `query`.
+    /// Security: This function can receive arbitrary SQL, it will check and restrict the `query`.
     pub async fn sql_execute(
         &self,
         query: &str,
