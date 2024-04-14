@@ -1,15 +1,21 @@
-use common::dataset_context::DatasetContext;
-use futures::Stream;
+use common::{
+    arrow::{self, error::ArrowError, ipc::writer::IpcDataGenerator},
+    dataset_context::{DatasetContext, Error as CoreError},
+};
+use datafusion::{common::DFSchema, error::DataFusionError, logical_expr::LogicalPlan};
+use futures::{Stream, TryStreamExt};
 use std::pin::Pin;
 use thiserror::Error;
 
 use arrow_flight::{
+    encode::{FlightDataEncoder, FlightDataEncoderBuilder},
     flight_descriptor::DescriptorType,
     flight_service_server::FlightService,
     sql::{Any, CommandStatementQuery},
-    ActionType, FlightData, FlightInfo, HandshakeRequest, HandshakeResponse, PutResult,
+    ActionType, FlightData, FlightDescriptor, FlightEndpoint, FlightInfo, HandshakeRequest,
+    HandshakeResponse, PutResult,
 };
-use bytes::Bytes;
+use bytes::{BufMut, Bytes, BytesMut};
 use prost::Message as _;
 use tonic::{Request, Response, Status};
 
@@ -23,8 +29,11 @@ enum Error {
     #[error("Unsupported flight descriptor type: {0}")]
     UnsupportedFlightDescriptorType(String),
 
-    #[error("Unexpected null field: {0}")]
-    _UnexpectedNull(&'static str),
+    #[error("Unsupported flight descriptor command: {0}")]
+    UnsupportedFlightDescriptorCommand(String),
+
+    #[error("{0}")]
+    CoreError(#[from] CoreError),
 }
 
 impl From<prost::DecodeError> for Error {
@@ -38,14 +47,51 @@ impl From<Error> for Status {
         match e {
             Error::PbDecodeError(_) => Status::invalid_argument(e.to_string()),
             Error::UnsupportedFlightDescriptorType(_) => Status::invalid_argument(e.to_string()),
-            Error::_UnexpectedNull(_) => Status::invalid_argument(e.to_string()),
+            Error::UnsupportedFlightDescriptorCommand(_) => Status::invalid_argument(e.to_string()),
+
+            Error::CoreError(CoreError::InvalidPlan(_)) => Status::invalid_argument(e.to_string()),
+            Error::CoreError(CoreError::UnsupportedSql(_)) => {
+                Status::invalid_argument(e.to_string())
+            }
+            Error::CoreError(CoreError::PlanEncodingError(_)) => {
+                Status::invalid_argument(e.to_string())
+            }
+            Error::CoreError(CoreError::PlanningError(DataFusionError::ResourcesExhausted(_))) => {
+                Status::resource_exhausted(e.to_string())
+            }
+            Error::CoreError(CoreError::PlanningError(_)) => Status::internal(e.to_string()),
+            Error::CoreError(CoreError::DatasetError(_)) => Status::internal(e.to_string()),
         }
+    }
+}
+
+struct Ticket {
+    plan: LogicalPlan,
+}
+
+impl Ticket {
+    fn new(plan: LogicalPlan) -> Self {
+        Self { plan }
+    }
+
+    async fn from_flight(
+        ticket: arrow_flight::Ticket,
+        ctx: &DatasetContext,
+    ) -> Result<Self, Error> {
+        let plan = ctx.plan_from_bytes(&ticket.ticket).await?;
+        Ok(Self { plan })
+    }
+
+    fn to_flight(self) -> Result<arrow_flight::Ticket, Error> {
+        let serialized_plan = datafusion_proto::bytes::logical_plan_to_bytes(&self.plan)
+            .map_err(|e| Error::CoreError(CoreError::PlanEncodingError(e)))?;
+        Ok(arrow_flight::Ticket::new(serialized_plan))
     }
 }
 
 struct Service {
     // One service currently supports only one dataset.
-    _dataset: DatasetContext,
+    dataset_ctx: DatasetContext,
 }
 
 #[async_trait::async_trait]
@@ -88,10 +134,10 @@ impl FlightService for Service {
 
     async fn get_flight_info(
         &self,
-        request: Request<arrow_flight::FlightDescriptor>,
-    ) -> Result<Response<arrow_flight::FlightInfo>, Status> {
+        request: Request<FlightDescriptor>,
+    ) -> Result<Response<FlightInfo>, Status> {
         let descriptor = request.into_inner();
-        let info = self.get_flight_info(descriptor)?;
+        let info = self.get_flight_info(descriptor).await?;
         Ok(Response::new(info))
     }
 
@@ -104,9 +150,12 @@ impl FlightService for Service {
 
     async fn do_get(
         &self,
-        _request: Request<arrow_flight::Ticket>,
+        request: Request<arrow_flight::Ticket>,
     ) -> Result<Response<Self::DoGetStream>, Status> {
-        unimplemented!()
+        let ticket = request.into_inner();
+        let _data_stream = self.do_get(ticket).await?;
+        // TODO: Error conversion into `Status`
+        todo!()
     }
 
     async fn do_put(
@@ -132,20 +181,20 @@ impl FlightService for Service {
 }
 
 impl Service {
-    fn get_flight_info(
-        &self,
-        descriptor: arrow_flight::FlightDescriptor,
-    ) -> Result<arrow_flight::FlightInfo, Error> {
-        match DescriptorType::try_from(descriptor.r#type)? {
+    async fn get_flight_info(&self, descriptor: FlightDescriptor) -> Result<FlightInfo, Error> {
+        let (schema, ticket) = match DescriptorType::try_from(descriptor.r#type)? {
             DescriptorType::Cmd => {
                 let msg = Any::decode(descriptor.cmd.as_ref())?;
                 if let Some(sql_query) = msg
                     .unpack::<CommandStatementQuery>()
                     .map_err(|e| Error::PbDecodeError(e.to_string()))?
                 {
-                    sql_query.query;
-                    // TODO: Use datafusion-proto?
-                    todo!("Encode plan into Ticket")
+                    let plan = self.dataset_ctx.sql_to_plan(&sql_query.query).await?;
+                    let schema = plan.schema().as_ref().clone();
+                    let ticket = Ticket::new(plan);
+                    (schema, ticket)
+                } else {
+                    return Err(Error::UnsupportedFlightDescriptorCommand(msg.type_url));
                 }
             }
             DescriptorType::Path | DescriptorType::Unknown => {
@@ -153,12 +202,29 @@ impl Service {
                     descriptor.r#type.to_string(),
                 ));
             }
-        }
+        };
+
+        let endpoint = FlightEndpoint {
+            ticket: Some(ticket.to_flight()?),
+
+            // We may eventually want to leverage the load-balancing capabilities of Arrow Flight.
+            // But for now leaving `location` this empty is fine, per the docs
+            // https://arrow.apache.org/docs/format/Flight.html:
+            //
+            // > If the list is empty, the expectation is that the ticket can only be redeemed on the
+            // > current service where the ticket was generated.
+            location: vec![],
+
+            // We don't currently have anything to expire.
+            expiration_time: None,
+
+            app_metadata: Bytes::new(),
+        };
 
         let info = FlightInfo {
             flight_descriptor: Some(descriptor),
-            schema: Bytes::new(), // TODO
-            endpoint: Vec::new(), // TODO, endpoint is mandatory
+            schema: ipc_schema(&schema),
+            endpoint: vec![endpoint],
 
             // Not important.
             ordered: false,
@@ -169,4 +235,23 @@ impl Service {
 
         Ok(info)
     }
+
+    async fn do_get(&self, ticket: arrow_flight::Ticket) -> Result<FlightDataEncoder, Error> {
+        let Ticket { plan } = Ticket::from_flight(ticket, &self.dataset_ctx).await?;
+        let stream = self.dataset_ctx.execute_plan(plan).await?;
+
+        Ok(FlightDataEncoderBuilder::new()
+            .with_schema(stream.schema())
+            .build(stream.map_err(ArrowError::from).err_into()))
+    }
+}
+
+fn ipc_schema(schema: &DFSchema) -> Bytes {
+    let ipc_opts = &Default::default();
+    let encoded = IpcDataGenerator::default().schema_to_bytes(&schema.into(), ipc_opts);
+
+    // Unwrap: writing to `BytesMut` never fails.
+    let mut bytes = BytesMut::new().writer();
+    arrow::ipc::writer::write_message(&mut bytes, encoded, ipc_opts).unwrap();
+    bytes.into_inner().into()
 }
