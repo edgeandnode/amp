@@ -34,3 +34,4 @@ object_store = { version = "0.9.1", features = ["aws", "gcp"] }
 url = "2.5.0"
 async-trait = "0.1.80"
 bytes = "1"
+datafusion-proto = "37"

@@ -18,9 +18,29 @@ use datafusion::{
     sql::TableReference,
 };
 use object_store::{gcp::GoogleCloudStorageBuilder, local::LocalFileSystem, ObjectStore};
+use thiserror::Error;
 use url::Url;
 
 use crate::{DataSet, Table};
+
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error("invalid plan: {0}")]
+    InvalidPlan(DataFusionError),
+
+    #[error("plan encoding error: {0}")]
+    PlanEncodingError(DataFusionError),
+
+    #[error("planning error: {0}")]
+    PlanningError(DataFusionError),
+
+    #[error("unsupported SQL: {0}")]
+    UnsupportedSql(DataFusionError),
+
+    /// Signals a problem with the dataset configuration.
+    #[error("dataset error: {0}")]
+    DatasetError(DataFusionError),
+}
 
 pub struct DatasetContext {
     env: Arc<RuntimeEnv>,
@@ -40,7 +60,7 @@ impl DatasetContext {
     /// Examples of valid formats for `data_location`:
     /// - Filesystem path: `relative/path/to/data/`
     /// - GCS: `gs://bucket-name/`
-    pub fn new(dataset: DataSet, data_location: String) -> Result<Self, anyhow::Error> {
+    pub async fn new(dataset: DataSet, data_location: String) -> Result<Self, anyhow::Error> {
         let (data_url, object_store) = parse_data_location(data_location)?;
         let env = RuntimeEnv::new(runtime_config())?;
         env.register_object_store(&data_url, object_store);
@@ -62,25 +82,69 @@ impl DatasetContext {
             table_urls
         };
 
-        Ok(Self {
+        let this = Self {
             env: Arc::new(env),
             dataset,
             session_config,
             data_url,
             table_urls,
-        })
+        };
+
+        // Do a 'dry run' to ensure the dataset is correctly configured.
+        this.datafusion_ctx().await?;
+
+        Ok(this)
     }
 
     /// Security: This function can receive arbitrary SQL, it will check and restrict the `query`.
-    pub async fn sql_execute(
+    pub async fn execute_sql(&self, query: &str) -> Result<SendableRecordBatchStream, Error> {
+        self.execute_plan(self.sql_to_plan(query).await?).await
+    }
+
+    pub async fn execute_plan(
         &self,
-        query: &str,
-    ) -> Result<SendableRecordBatchStream, DataFusionError> {
+        plan: LogicalPlan,
+    ) -> Result<SendableRecordBatchStream, Error> {
+        use datafusion::physical_plan::execute_stream;
+        verify_plan(&plan)?;
+        let ctx = self.datafusion_ctx().await?;
+        let physical_plan = ctx
+            .state()
+            .create_physical_plan(&plan)
+            .await
+            .map_err(Error::PlanningError)?;
+
+        execute_stream(physical_plan, ctx.task_ctx()).map_err(Error::PlanningError)
+    }
+
+    pub async fn sql_to_plan(&self, query: &str) -> Result<LogicalPlan, Error> {
+        let ctx = self.datafusion_ctx().await?;
+        let plan = ctx
+            .state()
+            .create_logical_plan(query)
+            .await
+            .map_err(Error::UnsupportedSql)?;
+        verify_plan(&plan)?;
+        Ok(plan)
+    }
+
+    pub async fn plan_from_bytes(&self, bytes: &[u8]) -> Result<LogicalPlan, Error> {
+        let ctx = self.datafusion_ctx().await?;
+        let plan = datafusion_proto::bytes::logical_plan_from_bytes(bytes, &ctx)
+            .map_err(Error::PlanEncodingError)?;
+        verify_plan(&plan)?;
+        Ok(plan)
+    }
+
+    // Because `DatasetContext` is read-only, planning and execution can be done on ephemeral
+    // sessions created by this function, and they will behave the same as if they had been run
+    // against a persistent `SessionContext`
+    async fn datafusion_ctx(&self) -> Result<SessionContext, Error> {
         let ctx = SessionContext::new_with_config_rt(self.session_config.clone(), self.env.clone());
-        self.create_external_tables(&ctx).await?;
-        let opts = sql_opts_read_only();
-        let df = ctx.sql_with_options(query, opts).await?;
-        df.execute_stream().await
+        self.create_external_tables(&ctx)
+            .await
+            .map_err(Error::DatasetError)?;
+        Ok(ctx)
     }
 
     async fn create_external_tables(&self, ctx: &SessionContext) -> Result<(), DataFusionError> {
@@ -119,11 +183,13 @@ fn runtime_config() -> RuntimeConfig {
     }
 }
 
-fn sql_opts_read_only() -> SQLOptions {
+fn verify_plan(plan: &LogicalPlan) -> Result<(), Error> {
     SQLOptions::new()
         .with_allow_ddl(false)
         .with_allow_dml(false)
         .with_allow_statements(false)
+        .verify_plan(plan)
+        .map_err(Error::InvalidPlan)
 }
 
 fn parse_data_location(

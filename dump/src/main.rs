@@ -101,7 +101,7 @@ async fn main() -> Result<(), anyhow::Error> {
     };
 
     let dataset = firehose_datasets::evm::dataset("mainnet".to_string());
-    let ctx = DatasetContext::new(dataset, to)?;
+    let ctx = DatasetContext::new(dataset, to).await?;
 
     // The ranges of blocks that are already present, by table name.
     let existing_blocks: BTreeMap<String, MultiRange> = {
@@ -110,7 +110,7 @@ async fn main() -> Result<(), anyhow::Error> {
             let table_name = table.name.clone();
             let mut multirange = MultiRange::default();
             let mut record_stream = ctx
-                .sql_execute(&format!(
+                .execute_sql(&format!(
                     "select distinct(block_num) from {} order by block_num",
                     table_name
                 ))

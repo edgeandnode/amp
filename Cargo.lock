@@ -742,7 +742,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "datafusion",
+ "datafusion-proto",
  "object_store",
+ "thiserror",
  "url",
 ]
 
@@ -1102,6 +1104,21 @@ dependencies = [
  "pin-project-lite",
  "rand",
  "tokio",
+]
+
+[[package]]
+name = "datafusion-proto"
+version = "37.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "36f381c59c265e3aa615c8f67bf4412f02b694f13499e46dad75dc35e6c32324"
+dependencies = [
+ "arrow",
+ "chrono",
+ "datafusion",
+ "datafusion-common",
+ "datafusion-expr",
+ "object_store",
+ "prost",
 ]
 
 [[package]]
@@ -2640,6 +2657,8 @@ dependencies = [
  "async-trait",
  "bytes",
  "common",
+ "datafusion",
+ "datafusion-proto",
  "firehose-datasets",
  "futures",
  "prost",
