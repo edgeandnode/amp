@@ -1,8 +1,9 @@
 use common::arrow_helpers::rows_to_record_batch;
 use common::multirange::MultiRange;
 use common::parquet::file::properties::WriterProperties as ParquetWriterProperties;
+use common::DataSet;
 use firehose_datasets::client::Error as FirehoseError;
-use firehose_datasets::evm::{self, pbethereum};
+use firehose_datasets::evm::pbethereum;
 use firehose_datasets::{client::Client, evm::protobufs_to_rows};
 use futures::{FutureExt, StreamExt as _};
 use object_store::path::Path;
@@ -14,6 +15,7 @@ use tokio::sync::mpsc;
 use crate::parquet_writer::ParquetWriter;
 
 pub struct Job {
+    pub dataset: DataSet,
     pub client: Client,
     pub start: u64,
     pub end: u64,
@@ -56,7 +58,7 @@ pub async fn run_job(job: Job) -> Result<(), anyhow::Error> {
 
     let mut writers: BTreeMap<String, ParquetWriter> = {
         let mut writers = BTreeMap::new();
-        let tables = evm::tables::all();
+        let tables = job.dataset.tables();
         for table in tables {
             let path = Path::parse(&path_for_part(&table.name, job.start))?;
             let writer =

@@ -101,7 +101,7 @@ async fn main() -> Result<(), anyhow::Error> {
     };
 
     let dataset = firehose_datasets::evm::dataset("mainnet".to_string());
-    let ctx = DatasetContext::new(dataset, to).await?;
+    let ctx = DatasetContext::new(dataset.clone(), to).await?;
 
     // The ranges of blocks that are already present, by table name.
     let existing_blocks: BTreeMap<String, MultiRange> = {
@@ -145,6 +145,7 @@ async fn main() -> Result<(), anyhow::Error> {
         while from <= end_block {
             let to = (from + blocks_per_job).min(end_block);
             jobs.push(Job {
+                dataset: dataset.clone(),
                 client: client.clone(),
                 start: from,
                 end: to,

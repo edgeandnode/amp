@@ -45,6 +45,7 @@ pub fn timestamp_type() -> DataType {
 pub type TimestampArrayType = arrow::array::TimestampNanosecondArray;
 
 /// Identifies a dataset and its data schema.
+#[derive(Clone, Debug)]
 pub struct DataSet {
     pub name: String,
     pub network: String,
@@ -57,6 +58,7 @@ impl DataSet {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct DataSchema {
     pub tables: Vec<Table>,
 }
