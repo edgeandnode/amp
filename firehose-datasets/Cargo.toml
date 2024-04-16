@@ -17,6 +17,7 @@ clap.workspace = true
 toml.workspace = true
 anyhow.workspace = true
 datafusion.workspace = true
+tokio.workspace = true
 
 [build-dependencies]
 tonic-build.workspace = true

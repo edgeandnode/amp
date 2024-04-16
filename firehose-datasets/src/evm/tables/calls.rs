@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
-use common::arrow::array::{Array, RecordBatch};
+use common::arrow::array::{Array, ArrayRef};
 use common::arrow::datatypes::{DataType, Field, Schema};
 use common::arrow::error::ArrowError;
 use common::arrow_helpers::{ScalarToArray as _, TableRow};
 use common::{
-    Bytes, Bytes32, EvmAddress as Address, EvmCurrency, Table, Timestamp, BYTES32_TYPE,
+    Bytes, Bytes32, EvmAddress as Address, EvmCurrency, Table, Timestamp, BLOCK_NUM, BYTES32_TYPE,
     EVM_ADDRESS_TYPE as ADDRESS_TYPE, EVM_CURRENCY_TYPE,
 };
 
@@ -93,7 +93,7 @@ impl Call {
 }
 
 pub fn schema() -> Schema {
-    let block_num = Field::new("block_num", DataType::UInt64, false);
+    let block_num = Field::new(BLOCK_NUM, DataType::UInt64, false);
     let timestamp = Field::new("timestamp", common::timestamp_type(), false);
     let tx_index = Field::new("tx_index", DataType::UInt32, false);
     let tx_hash = Field::new("tx_hash", BYTES32_TYPE, false);
@@ -137,16 +137,17 @@ pub fn schema() -> Schema {
 }
 
 impl TableRow for Call {
-    fn to_record_batch(&self) -> Result<RecordBatch, ArrowError> {
-        let columns = self.to_columns()?;
-        RecordBatch::try_new(Arc::new(schema()), columns)
+    fn to_columns(&self) -> Result<Vec<ArrayRef>, ArrowError> {
+        self.to_columns()
     }
 }
 
 #[test]
 fn default_to_arrow() {
+    use common::arrow::record_batch::RecordBatch;
+
     let call = Call::default();
-    let batch = call.to_record_batch().unwrap();
+    let batch = RecordBatch::try_new(Arc::new(schema()), call.to_columns().unwrap()).unwrap();
     assert_eq!(batch.num_columns(), 18);
     assert_eq!(batch.num_rows(), 1);
 }

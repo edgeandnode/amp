@@ -2,31 +2,35 @@ use std::{iter::once, sync::Arc};
 
 use datafusion::arrow::{
     array::{
-        BinaryArray, BooleanArray, FixedSizeBinaryBuilder, Int32Array, RecordBatch, UInt32Array,
-        UInt64Array, UInt64Builder,
+        ArrayRef, BinaryArray, BooleanArray, FixedSizeBinaryBuilder, Int32Array, RecordBatch,
+        UInt32Array, UInt64Array, UInt64Builder,
     },
     compute::concat_batches,
+    datatypes::SchemaRef,
     error::ArrowError,
 };
 
 use crate::{
-    Bytes, Bytes32, Bytes32ArrayType, EvmAddress, EvmCurrency, EvmCurrencyArrayType, TableRows,
-    Timestamp, TimestampArrayType, EVM_CURRENCY_TYPE,
+    Bytes, Bytes32, Bytes32ArrayType, EvmAddress, EvmCurrency, EvmCurrencyArrayType, Timestamp,
+    TimestampArrayType, EVM_CURRENCY_TYPE,
 };
 
 use super::arrow::array::Array;
 
-pub fn rows_to_record_batch(rows: &TableRows) -> Result<RecordBatch, ArrowError> {
-    let mut batches = Vec::with_capacity(rows.rows.len());
-    for row in &rows.rows {
-        batches.push(row.to_record_batch()?);
+pub fn rows_to_record_batch(
+    schema: &SchemaRef,
+    rows: impl Iterator<Item = impl TableRow>,
+) -> Result<RecordBatch, ArrowError> {
+    let mut batches = Vec::new();
+    for row in rows {
+        batches.push(RecordBatch::try_new(schema.clone(), row.to_columns()?)?);
     }
-    concat_batches(&rows.table.schema, batches.iter())
+    concat_batches(schema, batches.iter())
 }
 
-pub trait TableRow {
+pub trait TableRow: Send + Sync + 'static {
     /// Returns a record batch containing a single row.
-    fn to_record_batch(&self) -> Result<RecordBatch, ArrowError>;
+    fn to_columns(&self) -> Result<Vec<ArrayRef>, ArrowError>;
 }
 
 pub trait ScalarToArray {

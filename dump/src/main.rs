@@ -3,10 +3,12 @@ mod parquet_writer;
 
 use anyhow::Context as _;
 use clap::Parser;
-use common::arrow::array::UInt64Array;
+use common::arrow::array::AsArray;
+use common::arrow::datatypes::UInt64Type;
 use common::dataset_context::DatasetContext;
 use common::multirange::MultiRange;
 use common::parquet;
+use common::BLOCK_NUM;
 use firehose_datasets::client::Client;
 use fs_err as fs;
 use futures::future::join_all;
@@ -111,19 +113,14 @@ async fn main() -> Result<(), anyhow::Error> {
             let mut multirange = MultiRange::default();
             let mut record_stream = ctx
                 .execute_sql(&format!(
-                    "select distinct(block_num) from {} order by block_num",
+                    "select distinct({BLOCK_NUM}) from {} order by block_num",
                     table_name
                 ))
                 .await
                 .context("failed to run existing blocks query")?;
             while let Some(batch) = record_stream.next().await {
                 let batch = batch?;
-                let block_nums = batch
-                    .column(0)
-                    .as_any()
-                    .downcast_ref::<UInt64Array>()
-                    .unwrap()
-                    .values();
+                let block_nums = batch.column(0).as_primitive::<UInt64Type>().values();
                 multirange.append(MultiRange::new(block_nums.as_ref())?)?;
             }
             println!(
@@ -146,7 +143,7 @@ async fn main() -> Result<(), anyhow::Error> {
             let to = (from + blocks_per_job).min(end_block);
             jobs.push(Job {
                 dataset: dataset.clone(),
-                client: client.clone(),
+                block_streamer: client.clone(),
                 start: from,
                 end: to,
                 job_id: jobs.len() as u8,

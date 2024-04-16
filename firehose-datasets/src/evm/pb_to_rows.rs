@@ -7,23 +7,30 @@ use super::tables::calls::Call;
 use super::tables::logs::Log;
 use super::{pbethereum, tables::transactions::Transaction};
 use anyhow::anyhow;
-use common::arrow_helpers::TableRow;
-use common::{Bytes32, EvmCurrency, TableRows, Timestamp};
+use common::arrow::error::ArrowError;
+use common::arrow_helpers::{rows_to_record_batch, TableRow};
+use common::{Bytes32, DatasetRows, EvmCurrency, TableRows, Timestamp};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum ProtobufToRowError {
-    #[error("Malformed field {0}, bytes: {}", hex::encode(.1))]
+    #[error("malformed field {0}, bytes: {}", hex::encode(.1))]
     Malformed(&'static str, Vec<u8>),
-    #[error("Missing field: {0}")]
+    #[error("missing field: {0}")]
     Missing(&'static str),
-    #[error("Assertion failure: {0}")]
+    #[error("assertion failure: {0}")]
     AssertFail(anyhow::Error),
+    #[error("error serializing to arrow: {0}")]
+    ArrowError(#[from] ArrowError),
 }
 
-pub fn protobufs_to_rows(block: pbethereum::Block) -> Result<Vec<TableRows>, ProtobufToRowError> {
+pub fn protobufs_to_rows(block: pbethereum::Block) -> Result<DatasetRows, ProtobufToRowError> {
     use ProtobufToRowError::*;
 
+    // Performance note: To save on allocations, instead of these Vecs we could have for example a
+    // `TransactionBatchBuilder` struct, having for each field in `Transaction` a corresponding field
+    // with a type from `arrow::array::builder`. `TransactionBatchBuilder` would have a `push` method
+    // and a `to_record_batch` method. This would avoid the use of `concat_batches`.
     let mut transactions: Vec<Transaction> = vec![];
     let mut calls: Vec<Call> = vec![];
     let mut logs: Vec<Log> = vec![];
@@ -157,33 +164,26 @@ pub fn protobufs_to_rows(block: pbethereum::Block) -> Result<Vec<TableRows>, Pro
         }
     }
 
-    let header_row = TableRows {
-        table: blocks::table(),
-        rows: vec![Box::new(header)],
-    };
+    let header_row = TableRows::try_new(blocks::table(), header.to_columns()?)?;
     let transactions_rows = TableRows {
         table: transactions::table(),
-        rows: transactions
-            .into_iter()
-            .map(|t| Box::new(t) as Box<dyn TableRow>)
-            .collect(),
+        rows: rows_to_record_batch(&transactions::schema().into(), transactions.into_iter())?,
     };
     let calls_rows = TableRows {
         table: calls::table(),
-        rows: calls
-            .into_iter()
-            .map(|c| Box::new(c) as Box<dyn TableRow>)
-            .collect(),
+        rows: rows_to_record_batch(&calls::schema().into(), calls.into_iter())?,
     };
     let logs_rows = TableRows {
         table: logs::table(),
-        rows: logs
-            .into_iter()
-            .map(|l| Box::new(l) as Box<dyn TableRow>)
-            .collect(),
+        rows: rows_to_record_batch(&logs::schema().into(), logs.into_iter())?,
     };
 
-    Ok(vec![header_row, transactions_rows, calls_rows, logs_rows])
+    Ok(DatasetRows(vec![
+        header_row,
+        transactions_rows,
+        calls_rows,
+        logs_rows,
+    ]))
 }
 
 fn header_from_pb(header: pbethereum::BlockHeader) -> Result<Block, ProtobufToRowError> {

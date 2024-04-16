@@ -21,7 +21,7 @@ use object_store::{gcp::GoogleCloudStorageBuilder, local::LocalFileSystem, Objec
 use thiserror::Error;
 use url::Url;
 
-use crate::{DataSet, Table};
+use crate::{DataSet, Table, BLOCK_NUM};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -236,7 +236,7 @@ fn create_external_table(name: OwnedTableReference, schema: DFSchemaRef, url: &U
         // - Add other sorted columns that may be relevant such as `ordinal`.
         // - Do we want to address and leverage https://github.com/apache/arrow-datafusion/issues/4177?
         order_exprs: vec![
-            vec![col("block_num").sort(true, false)],
+            vec![col(BLOCK_NUM).sort(true, false)],
             vec![col("timestamp").sort(true, false)],
         ],
 

@@ -4,7 +4,11 @@ use crate::proto::sf::firehose::v2 as pbfirehose;
 use std::str::FromStr;
 
 use anyhow::anyhow;
+use anyhow::Context as _;
 use common::BlockNum;
+use common::BlockStreamer;
+use common::DatasetRows;
+use futures::StreamExt as _;
 use futures::{Stream, TryStreamExt as _};
 use pbfirehose::stream_client::StreamClient;
 use pbfirehose::ForkStep;
@@ -12,6 +16,7 @@ use pbfirehose::Response as StreamResponse;
 use prost::Message as _;
 use serde::Deserialize;
 use thiserror::Error;
+use tokio::sync::mpsc;
 use tonic::codec::CompressionEncoding;
 use tonic::codegen::http::uri::InvalidUri;
 use tonic::metadata::errors::InvalidMetadataValue;
@@ -144,5 +149,64 @@ impl Interceptor for AuthInterceptor {
         }
 
         Ok(req)
+    }
+}
+
+impl BlockStreamer for Client {
+    /// Once spawned, will continuously fetch blocks from the Firehose and send them through the channel.
+    ///
+    /// Terminates with `Ok` when the Firehose stream reaches `end_block`, or the channel receiver goes
+    /// away.
+    ///
+    /// Terminates with `Err` when there is an error estabilishing the stream.
+    ///
+    /// Errors from the Firehose stream are logged and retried.
+    async fn block_stream(
+        mut self,
+        start_block: u64,
+        end_block: u64,
+        tx: mpsc::Sender<DatasetRows>,
+    ) -> Result<(), anyhow::Error> {
+        use crate::evm::pb_to_rows::protobufs_to_rows;
+
+        // Explicitly track the next block in case we need to restart the Firehose stream.
+        let mut next_block = start_block;
+
+        // A retry loop for consuming the Firehose.
+        'retry: loop {
+            let mut stream = match self.blocks(next_block, end_block).await {
+                Ok(stream) => Box::pin(stream),
+
+                // If there is an error at the initial connection, we don't retry here as that's
+                // unexpected.
+                Err(err) => break Err(err.into()),
+            };
+            while let Some(block) = stream.next().await {
+                match block {
+                    Ok(block) => {
+                        let block_num = block.number;
+
+                        let table_rows = protobufs_to_rows(block)
+                            .context("error converting Protobufs to rows")?;
+
+                        // Send the block and check if the receiver has gone away.
+                        if tx.send(table_rows).await.is_err() {
+                            break;
+                        }
+
+                        next_block = block_num + 1;
+                    }
+                    Err(err) => {
+                        // Log and retry.
+                        println!("Error reading firehose stream: {}", err);
+                        continue 'retry;
+                    }
+                }
+            }
+
+            // The stream has ended, or the receiver has gone away, either way we hit a natural
+            // termination condition.
+            break Ok(());
+        }
     }
 }

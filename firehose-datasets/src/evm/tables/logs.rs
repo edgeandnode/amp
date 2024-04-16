@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
-use common::arrow::array::{Array, RecordBatch};
+use common::arrow::array::{Array, ArrayRef};
 use common::arrow::datatypes::{DataType, Field, Schema};
 use common::arrow::error::ArrowError;
 use common::arrow_helpers::{ScalarToArray as _, TableRow};
 use common::{
-    Bytes, Bytes32, EvmAddress as Address, Table, Timestamp, BYTES32_TYPE,
+    Bytes, Bytes32, EvmAddress as Address, Table, Timestamp, BLOCK_NUM, BYTES32_TYPE,
     EVM_ADDRESS_TYPE as ADDRESS_TYPE,
 };
 
@@ -85,7 +85,7 @@ impl Log {
 }
 
 pub fn schema() -> Schema {
-    let block_num = Field::new("block_num", DataType::UInt64, false);
+    let block_num = Field::new(BLOCK_NUM, DataType::UInt64, false);
     let timestamp = Field::new("timestamp", common::timestamp_type(), false);
     let tx_index = Field::new("tx_index", DataType::UInt32, false);
     let call_index = Field::new("call_index", DataType::UInt32, false);
@@ -121,16 +121,17 @@ pub fn schema() -> Schema {
 }
 
 impl TableRow for Log {
-    fn to_record_batch(&self) -> Result<RecordBatch, ArrowError> {
-        let columns = self.to_columns()?;
-        RecordBatch::try_new(Arc::new(schema()), columns)
+    fn to_columns(&self) -> Result<Vec<ArrayRef>, ArrowError> {
+        self.to_columns()
     }
 }
 
 #[test]
 fn default_to_arrow() {
+    use common::arrow::record_batch::RecordBatch;
+
     let log = Log::default();
-    let batch = log.to_record_batch().unwrap();
+    let batch = RecordBatch::try_new(Arc::new(schema()), log.to_columns().unwrap()).unwrap();
     assert_eq!(batch.num_columns(), 14);
     assert_eq!(batch.num_rows(), 1);
 }

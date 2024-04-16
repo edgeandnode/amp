@@ -10,3 +10,4 @@ anyhow.workspace = true
 object_store.workspace = true
 datafusion-proto.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
