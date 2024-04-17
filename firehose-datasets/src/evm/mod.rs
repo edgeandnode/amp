@@ -4,9 +4,6 @@ use common::{DataSchema, DataSet};
 pub mod pb_to_rows;
 pub mod tables;
 
-#[cfg(test)]
-pub mod test_support;
-
 pub fn dataset(network: String) -> DataSet {
     DataSet {
         name: "evm-firehose".to_string(),
