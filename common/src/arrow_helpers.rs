@@ -1,129 +1,97 @@
-use std::{iter::once, sync::Arc};
-
-use datafusion::arrow::{
-    array::{
-        ArrayRef, BinaryArray, BooleanArray, FixedSizeBinaryBuilder, Int32Array, RecordBatch,
-        UInt32Array, UInt64Array, UInt64Builder,
-    },
-    compute::concat_batches,
-    datatypes::SchemaRef,
-    error::ArrowError,
+use datafusion::arrow::array::{
+    Decimal128Array, Decimal128Builder, FixedSizeBinaryBuilder, TimestampNanosecondBuilder,
 };
 
 use crate::{
-    Bytes, Bytes32, Bytes32ArrayType, EvmAddress, EvmCurrency, EvmCurrencyArrayType, Timestamp,
-    TimestampArrayType, EVM_CURRENCY_TYPE,
+    timestamp_type, Bytes32ArrayType, EvmAddressArrayType, Timestamp, TimestampArrayType,
+    EVM_CURRENCY_TYPE,
 };
 
-use super::arrow::array::Array;
+#[derive(Debug)]
+pub struct Bytes32ArrayBuilder(FixedSizeBinaryBuilder);
 
-pub fn rows_to_record_batch(
-    schema: &SchemaRef,
-    rows: impl Iterator<Item = impl TableRow>,
-) -> Result<RecordBatch, ArrowError> {
-    let mut batches = Vec::new();
-    for row in rows {
-        batches.push(RecordBatch::try_new(schema.clone(), row.to_columns()?)?);
+impl Bytes32ArrayBuilder {
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self(FixedSizeBinaryBuilder::with_capacity(capacity, 32))
     }
-    concat_batches(schema, batches.iter())
-}
 
-pub trait TableRow: Send + Sync + 'static {
-    /// Returns a record batch containing a single row.
-    fn to_columns(&self) -> Result<Vec<ArrayRef>, ArrowError>;
-}
-
-pub trait ScalarToArray {
-    fn to_arrow(&self) -> Result<Arc<dyn Array>, ArrowError>;
-}
-
-impl ScalarToArray for u64 {
-    fn to_arrow(&self) -> Result<Arc<dyn Array>, ArrowError> {
-        Ok(Arc::new(UInt64Array::from_iter_values(once(*self))))
+    pub fn append_value(&mut self, value: [u8; 32]) {
+        // Unwrap: The lenght is fixed.
+        self.0.append_value(value).unwrap()
     }
-}
 
-impl ScalarToArray for Bytes32 {
-    fn to_arrow(&self) -> Result<Arc<dyn Array>, ArrowError> {
-        Ok(Arc::new(Bytes32ArrayType::try_from_iter(once(self))?))
-    }
-}
-
-impl ScalarToArray for Bytes {
-    fn to_arrow(&self) -> Result<Arc<dyn Array>, ArrowError> {
-        Ok(Arc::new(BinaryArray::from_iter_values(once(self))))
-    }
-}
-
-impl ScalarToArray for Option<u64> {
-    fn to_arrow(&self) -> Result<Arc<dyn Array>, ArrowError> {
-        let mut builder = UInt64Builder::new();
-        builder.append_option(*self);
-        Ok(Arc::new(builder.finish()))
-    }
-}
-
-impl ScalarToArray for EvmAddress {
-    fn to_arrow(&self) -> Result<Arc<dyn Array>, ArrowError> {
-        Ok(Arc::new(Bytes32ArrayType::try_from_iter(once(self))?))
-    }
-}
-
-impl ScalarToArray for Option<Bytes32> {
-    fn to_arrow(&self) -> Result<Arc<dyn Array>, ArrowError> {
-        let mut builder = FixedSizeBinaryBuilder::new(32);
-        match self {
-            Some(bytes) => builder.append_value(bytes)?,
-            None => builder.append_null(),
+    pub fn append_option(&mut self, value: Option<[u8; 32]>) {
+        match value {
+            // Unwrap: The lenght is fixed.
+            Some(value) => self.0.append_value(value).unwrap(),
+            None => self.0.append_null(),
         }
-        Ok(Arc::new(builder.finish()))
+    }
+
+    pub fn finish(mut self) -> Bytes32ArrayType {
+        self.0.finish()
     }
 }
 
-impl ScalarToArray for EvmCurrency {
-    fn to_arrow(&self) -> Result<Arc<dyn Array>, ArrowError> {
-        let array =
-            EvmCurrencyArrayType::from_iter_values(once(*self)).with_data_type(EVM_CURRENCY_TYPE);
-        Ok(Arc::new(array))
+#[derive(Debug)]
+pub struct EvmAddressArrayBuilder(FixedSizeBinaryBuilder);
+
+impl EvmAddressArrayBuilder {
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self(FixedSizeBinaryBuilder::with_capacity(capacity, 20))
+    }
+
+    pub fn append_value(&mut self, value: [u8; 20]) {
+        // Unwrap: The lenght is fixed.
+        self.0.append_value(value).unwrap()
+    }
+
+    pub fn append_option(&mut self, value: Option<[u8; 20]>) {
+        match value {
+            // Unwrap: The lenght is fixed.
+            Some(value) => self.append_value(value),
+            None => self.0.append_null(),
+        }
+    }
+
+    pub fn finish(mut self) -> EvmAddressArrayType {
+        self.0.finish()
     }
 }
 
-impl ScalarToArray for Option<EvmCurrency> {
-    fn to_arrow(&self) -> Result<Arc<dyn Array>, ArrowError> {
-        let mut builder = EvmCurrencyArrayType::builder(1).with_data_type(EVM_CURRENCY_TYPE);
-        builder.append_option(*self);
-        Ok(Arc::new(builder.finish()))
+pub struct EvmCurrencyArrayBuilder(Decimal128Builder);
+
+impl EvmCurrencyArrayBuilder {
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self(Decimal128Builder::with_capacity(capacity).with_data_type(EVM_CURRENCY_TYPE))
+    }
+
+    pub fn append_option(&mut self, value: Option<i128>) {
+        match value {
+            Some(value) => self.0.append_value(value),
+            None => self.0.append_null(),
+        }
+    }
+
+    pub fn finish(mut self) -> Decimal128Array {
+        self.0.finish()
     }
 }
 
-impl ScalarToArray for bool {
-    fn to_arrow(&self) -> Result<Arc<dyn Array>, ArrowError> {
-        Ok(Arc::new(BooleanArray::from_iter(once(Some(*self)))))
-    }
-}
+#[derive(Debug, Default)]
+pub struct TimestampArrayBuilder(TimestampNanosecondBuilder);
 
-impl ScalarToArray for u32 {
-    fn to_arrow(&self) -> Result<Arc<dyn Array>, ArrowError> {
-        Ok(Arc::new(UInt32Array::from_iter_values(once(*self))))
+impl TimestampArrayBuilder {
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self(TimestampNanosecondBuilder::with_capacity(capacity).with_data_type(timestamp_type()))
     }
-}
 
-impl ScalarToArray for i32 {
-    fn to_arrow(&self) -> Result<Arc<dyn Array>, ArrowError> {
-        Ok(Arc::new(Int32Array::from_iter_values(once(*self))))
-    }
-}
-
-impl ScalarToArray for Timestamp {
-    fn to_arrow(&self) -> Result<Arc<dyn Array>, ArrowError> {
+    pub fn append_value(&mut self, value: Timestamp) {
         // i64::MAX in nanoseconds is almost 300 years, so we're safe to cast.
-        let nanos: i64 = self.0.as_nanos().try_into().map_err(|_| {
-            ArrowError::ExternalError(
-                format!("Timestamp out of range for Arrow's nanosecond precision",).into(),
-            )
-        })?;
+        self.0.append_value(value.0.as_nanos() as i64)
+    }
 
-        let array = TimestampArrayType::from_iter_values(once(nanos)).with_timezone_utc();
-        Ok(Arc::new(array))
+    pub fn finish(mut self) -> TimestampArrayType {
+        self.0.finish()
     }
 }

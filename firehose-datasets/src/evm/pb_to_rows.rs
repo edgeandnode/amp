@@ -1,6 +1,9 @@
 use std::time::Duration;
 
-use crate::evm::tables::{blocks, calls, logs, transactions};
+use crate::evm::tables::blocks::BlockRowsBuilder;
+use crate::evm::tables::calls::CallRowsBuilder;
+use crate::evm::tables::logs::LogRowsBuilder;
+use crate::evm::tables::transactions::TransactionRowsBuilder;
 
 use super::tables::blocks::Block;
 use super::tables::calls::Call;
@@ -8,8 +11,7 @@ use super::tables::logs::Log;
 use super::{pbethereum, tables::transactions::Transaction};
 use anyhow::anyhow;
 use common::arrow::error::ArrowError;
-use common::arrow_helpers::{rows_to_record_batch, TableRow};
-use common::{Bytes32, DatasetRows, EvmCurrency, TableRows, Timestamp};
+use common::{Bytes32, DatasetRows, EvmCurrency, Timestamp};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -27,13 +29,23 @@ pub enum ProtobufToRowError {
 pub fn protobufs_to_rows(block: pbethereum::Block) -> Result<DatasetRows, ProtobufToRowError> {
     use ProtobufToRowError::*;
 
-    // Performance note: To save on allocations, instead of these Vecs we could have for example a
-    // `TransactionBatchBuilder` struct, having for each field in `Transaction` a corresponding field
-    // with a type from `arrow::array::builder`. `TransactionBatchBuilder` would have a `push` method
-    // and a `to_record_batch` method. This would avoid the use of `concat_batches`.
-    let mut transactions: Vec<Transaction> = vec![];
-    let mut calls: Vec<Call> = vec![];
-    let mut logs: Vec<Log> = vec![];
+    let transaction_count = block.transaction_traces.len();
+    let mut transactions: TransactionRowsBuilder =
+        TransactionRowsBuilder::with_capacity(transaction_count);
+
+    let call_count = block
+        .transaction_traces
+        .iter()
+        .map(|tx| tx.calls.len())
+        .sum();
+    let mut calls: CallRowsBuilder = CallRowsBuilder::with_capacity(call_count);
+
+    let log_count = block
+        .transaction_traces
+        .iter()
+        .map(|tx| tx.calls.iter().map(|call| call.logs.len()).sum::<usize>())
+        .sum();
+    let mut logs: LogRowsBuilder = LogRowsBuilder::with_capacity(log_count);
 
     let header = header_from_pb(block.header.ok_or(Missing("header"))?)?;
 
@@ -79,7 +91,7 @@ pub fn protobufs_to_rows(block: pbethereum::Block) -> Result<DatasetRows, Protob
             begin_ordinal: tx.begin_ordinal,
             end_ordinal: tx.end_ordinal,
         };
-        transactions.push(tx_trace_row);
+        transactions.append(&tx_trace_row);
 
         // Also push the calls associated with each trace.
         for call in tx.calls {
@@ -118,7 +130,7 @@ pub fn protobufs_to_rows(block: pbethereum::Block) -> Result<DatasetRows, Protob
                 begin_ordinal: call.begin_ordinal,
                 end_ordinal: call.end_ordinal,
             };
-            calls.push(call_row);
+            calls.append(&call_row);
 
             // And the logs associated with each call.
             for log in call.logs {
@@ -159,24 +171,19 @@ pub fn protobufs_to_rows(block: pbethereum::Block) -> Result<DatasetRows, Protob
                     block_index: log.block_index,
                     ordinal: log.ordinal,
                 };
-                logs.push(log)
+                logs.append(&log);
             }
         }
     }
 
-    let header_row = TableRows::try_new(blocks::table(), header.to_columns()?)?;
-    let transactions_rows = TableRows {
-        table: transactions::table(),
-        rows: rows_to_record_batch(&transactions::schema().into(), transactions.into_iter())?,
+    let header_row = {
+        let mut builder = BlockRowsBuilder::with_capacity(1);
+        builder.append(&header);
+        builder.build()?
     };
-    let calls_rows = TableRows {
-        table: calls::table(),
-        rows: rows_to_record_batch(&calls::schema().into(), calls.into_iter())?,
-    };
-    let logs_rows = TableRows {
-        table: logs::table(),
-        rows: rows_to_record_batch(&logs::schema().into(), logs.into_iter())?,
-    };
+    let transactions_rows = transactions.build()?;
+    let calls_rows = calls.build()?;
+    let logs_rows = logs.build()?;
 
     Ok(DatasetRows(vec![
         header_row,
@@ -236,7 +243,7 @@ fn header_from_pb(header: pbethereum::BlockHeader) -> Result<Block, ProtobufToRo
             .try_into()
             .map_err(|b| Malformed("mix_hash", b))?,
         nonce: header.nonce,
-        base_fee_per_gas,
+        base_fee_per_gas: base_fee_per_gas.map(|b| b as i128),
     };
 
     Ok(header)

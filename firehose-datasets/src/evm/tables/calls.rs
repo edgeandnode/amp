@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
-use common::arrow::array::{Array, ArrayRef};
+use common::arrow::array::{ArrayRef, BinaryBuilder, BooleanBuilder, UInt32Builder, UInt64Builder};
 use common::arrow::datatypes::{DataType, Field, Schema};
 use common::arrow::error::ArrowError;
-use common::arrow_helpers::{ScalarToArray as _, TableRow};
 use common::{
-    Bytes, Bytes32, EvmAddress as Address, EvmCurrency, Table, Timestamp, BLOCK_NUM, BYTES32_TYPE,
-    EVM_ADDRESS_TYPE as ADDRESS_TYPE, EVM_CURRENCY_TYPE,
+    Bytes, Bytes32, Bytes32ArrayBuilder, EvmAddress as Address, EvmAddressArrayBuilder,
+    EvmCurrency, EvmCurrencyArrayBuilder, Table, TableRows, Timestamp, TimestampArrayBuilder,
+    BLOCK_NUM, BYTES32_TYPE, EVM_ADDRESS_TYPE as ADDRESS_TYPE, EVM_CURRENCY_TYPE,
 };
 
 pub fn table() -> Table {
@@ -44,8 +44,52 @@ pub struct Call {
     pub(crate) end_ordinal: u64,
 }
 
-impl Call {
-    fn to_columns(&self) -> Result<Vec<Arc<dyn Array>>, ArrowError> {
+pub(crate) struct CallRowsBuilder {
+    block_num: UInt64Builder,
+    timestamp: TimestampArrayBuilder,
+    tx_index: UInt32Builder,
+    tx_hash: Bytes32ArrayBuilder,
+    index: UInt32Builder,
+    parent_index: UInt32Builder,
+    depth: UInt32Builder,
+    caller: EvmAddressArrayBuilder,
+    address: EvmAddressArrayBuilder,
+    value: EvmCurrencyArrayBuilder,
+    gas_limit: UInt64Builder,
+    gas_consumed: UInt64Builder,
+    return_data: BinaryBuilder,
+    input: BinaryBuilder,
+    executed_code: BooleanBuilder,
+    selfdestruct: BooleanBuilder,
+    begin_ordinal: UInt64Builder,
+    end_ordinal: UInt64Builder,
+}
+
+impl CallRowsBuilder {
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            block_num: UInt64Builder::with_capacity(capacity),
+            timestamp: TimestampArrayBuilder::with_capacity(capacity),
+            tx_index: UInt32Builder::with_capacity(capacity),
+            tx_hash: Bytes32ArrayBuilder::with_capacity(capacity),
+            index: UInt32Builder::with_capacity(capacity),
+            parent_index: UInt32Builder::with_capacity(capacity),
+            depth: UInt32Builder::with_capacity(capacity),
+            caller: EvmAddressArrayBuilder::with_capacity(capacity),
+            address: EvmAddressArrayBuilder::with_capacity(capacity),
+            value: EvmCurrencyArrayBuilder::with_capacity(capacity),
+            gas_limit: UInt64Builder::with_capacity(capacity),
+            gas_consumed: UInt64Builder::with_capacity(capacity),
+            return_data: BinaryBuilder::with_capacity(capacity, 0),
+            input: BinaryBuilder::with_capacity(capacity, 0),
+            executed_code: BooleanBuilder::with_capacity(capacity),
+            selfdestruct: BooleanBuilder::with_capacity(capacity),
+            begin_ordinal: UInt64Builder::with_capacity(capacity),
+            end_ordinal: UInt64Builder::with_capacity(capacity),
+        }
+    }
+
+    pub fn append(&mut self, call: &Call) {
         let Call {
             block_num,
             timestamp,
@@ -65,30 +109,72 @@ impl Call {
             selfdestruct,
             begin_ordinal,
             end_ordinal,
+        } = call;
+
+        self.block_num.append_value(*block_num);
+        self.timestamp.append_value(*timestamp);
+        self.tx_index.append_value(*tx_index);
+        self.tx_hash.append_value(*tx_hash);
+        self.index.append_value(*index);
+        self.parent_index.append_value(*parent_index);
+        self.depth.append_value(*depth);
+        self.caller.append_value(*caller);
+        self.address.append_value(*address);
+        self.value.append_option(*value);
+        self.gas_limit.append_value(*gas_limit);
+        self.gas_consumed.append_value(*gas_consumed);
+        self.return_data.append_value(return_data);
+        self.input.append_value(input);
+        self.executed_code.append_value(*executed_code);
+        self.selfdestruct.append_value(*selfdestruct);
+        self.begin_ordinal.append_value(*begin_ordinal);
+        self.end_ordinal.append_value(*end_ordinal);
+    }
+
+    pub(crate) fn build(self) -> Result<TableRows, ArrowError> {
+        let Self {
+            mut block_num,
+            timestamp,
+            mut tx_index,
+            tx_hash,
+            mut index,
+            mut parent_index,
+            mut depth,
+            caller,
+            address,
+            value,
+            mut gas_limit,
+            mut gas_consumed,
+            mut return_data,
+            mut input,
+            mut executed_code,
+            mut selfdestruct,
+            mut begin_ordinal,
+            mut end_ordinal,
         } = self;
 
         let columns = vec![
-            block_num.to_arrow()?,
-            timestamp.to_arrow()?,
-            tx_index.to_arrow()?,
-            tx_hash.to_arrow()?,
-            index.to_arrow()?,
-            parent_index.to_arrow()?,
-            depth.to_arrow()?,
-            caller.to_arrow()?,
-            address.to_arrow()?,
-            value.to_arrow()?,
-            gas_limit.to_arrow()?,
-            gas_consumed.to_arrow()?,
-            return_data.to_arrow()?,
-            input.to_arrow()?,
-            executed_code.to_arrow()?,
-            selfdestruct.to_arrow()?,
-            begin_ordinal.to_arrow()?,
-            end_ordinal.to_arrow()?,
+            Arc::new(block_num.finish()) as ArrayRef,
+            Arc::new(timestamp.finish()),
+            Arc::new(tx_index.finish()),
+            Arc::new(tx_hash.finish()),
+            Arc::new(index.finish()),
+            Arc::new(parent_index.finish()),
+            Arc::new(depth.finish()),
+            Arc::new(caller.finish()),
+            Arc::new(address.finish()),
+            Arc::new(value.finish()),
+            Arc::new(gas_limit.finish()),
+            Arc::new(gas_consumed.finish()),
+            Arc::new(return_data.finish()),
+            Arc::new(input.finish()),
+            Arc::new(executed_code.finish()),
+            Arc::new(selfdestruct.finish()),
+            Arc::new(begin_ordinal.finish()),
+            Arc::new(end_ordinal.finish()),
         ];
 
-        Ok(columns)
+        TableRows::new(table(), columns)
     }
 }
 
@@ -136,18 +222,14 @@ pub fn schema() -> Schema {
     Schema::new(fields)
 }
 
-impl TableRow for Call {
-    fn to_columns(&self) -> Result<Vec<ArrayRef>, ArrowError> {
-        self.to_columns()
-    }
-}
-
 #[test]
 fn default_to_arrow() {
-    use common::arrow::record_batch::RecordBatch;
-
     let call = Call::default();
-    let batch = RecordBatch::try_new(Arc::new(schema()), call.to_columns().unwrap()).unwrap();
-    assert_eq!(batch.num_columns(), 18);
-    assert_eq!(batch.num_rows(), 1);
+    let rows = {
+        let mut builder = CallRowsBuilder::with_capacity(1);
+        builder.append(&call);
+        builder.build().unwrap()
+    };
+    assert_eq!(rows.rows.num_columns(), 18);
+    assert_eq!(rows.rows.num_rows(), 1);
 }

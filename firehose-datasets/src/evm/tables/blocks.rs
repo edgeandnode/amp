@@ -1,12 +1,13 @@
 use std::sync::Arc;
 
-use common::arrow::array::{Array, ArrayRef};
+use common::arrow::array::{ArrayRef, BinaryBuilder, UInt64Builder};
 use common::arrow::datatypes::{DataType, Field, Schema};
 use common::arrow::error::ArrowError;
-use common::arrow_helpers::{ScalarToArray as _, TableRow};
 use common::{
-    timestamp_type, Bytes, Bytes32, EvmAddress as Address, Table, Timestamp, BLOCK_NUM,
-    BYTES32_TYPE, EVM_ADDRESS_TYPE as ADDRESS_TYPE,
+    timestamp_type, Bytes, Bytes32, Bytes32ArrayBuilder, EvmAddress as Address,
+    EvmAddressArrayBuilder, EvmCurrency, EvmCurrencyArrayBuilder, Table, TableRows, Timestamp,
+    TimestampArrayBuilder, BLOCK_NUM, BYTES32_TYPE, EVM_ADDRESS_TYPE as ADDRESS_TYPE,
+    EVM_CURRENCY_TYPE,
 };
 
 pub fn table() -> Table {
@@ -38,11 +39,53 @@ pub struct Block {
     pub(crate) extra_data: Bytes,
     pub(crate) mix_hash: Bytes32,
     pub(crate) nonce: u64,
-    pub(crate) base_fee_per_gas: Option<u64>,
+    pub(crate) base_fee_per_gas: Option<EvmCurrency>,
 }
 
-impl Block {
-    fn to_columns(&self) -> Result<Vec<Arc<dyn Array>>, ArrowError> {
+pub(crate) struct BlockRowsBuilder {
+    block_num: UInt64Builder,
+    timestamp: TimestampArrayBuilder,
+    hash: Bytes32ArrayBuilder,
+    parent_hash: Bytes32ArrayBuilder,
+    uncle_hash: Bytes32ArrayBuilder,
+    coinbase: EvmAddressArrayBuilder,
+    state_root: Bytes32ArrayBuilder,
+    transactions_root: Bytes32ArrayBuilder,
+    receipt_root: Bytes32ArrayBuilder,
+    logs_bloom: BinaryBuilder,
+    difficulty: BinaryBuilder,
+    gas_limit: UInt64Builder,
+    gas_used: UInt64Builder,
+    extra_data: BinaryBuilder,
+    mix_hash: Bytes32ArrayBuilder,
+    nonce: UInt64Builder,
+    base_fee_per_gas: EvmCurrencyArrayBuilder,
+}
+
+impl BlockRowsBuilder {
+    pub(crate) fn with_capacity(capacity: usize) -> Self {
+        Self {
+            block_num: UInt64Builder::with_capacity(capacity),
+            timestamp: TimestampArrayBuilder::with_capacity(capacity),
+            hash: Bytes32ArrayBuilder::with_capacity(capacity),
+            parent_hash: Bytes32ArrayBuilder::with_capacity(capacity),
+            uncle_hash: Bytes32ArrayBuilder::with_capacity(capacity),
+            coinbase: EvmAddressArrayBuilder::with_capacity(capacity),
+            state_root: Bytes32ArrayBuilder::with_capacity(capacity),
+            transactions_root: Bytes32ArrayBuilder::with_capacity(capacity),
+            receipt_root: Bytes32ArrayBuilder::with_capacity(capacity),
+            logs_bloom: BinaryBuilder::with_capacity(capacity, 0),
+            difficulty: BinaryBuilder::with_capacity(capacity, 0),
+            gas_limit: UInt64Builder::with_capacity(capacity),
+            gas_used: UInt64Builder::with_capacity(capacity),
+            extra_data: BinaryBuilder::with_capacity(capacity, 0),
+            mix_hash: Bytes32ArrayBuilder::with_capacity(capacity),
+            nonce: UInt64Builder::with_capacity(capacity),
+            base_fee_per_gas: EvmCurrencyArrayBuilder::with_capacity(capacity),
+        }
+    }
+
+    pub fn append(&mut self, row: &Block) {
         let Block {
             block_num,
             timestamp,
@@ -61,29 +104,69 @@ impl Block {
             mix_hash,
             nonce,
             base_fee_per_gas,
+        } = row;
+
+        self.block_num.append_value(*block_num);
+        self.timestamp.append_value(*timestamp);
+        self.hash.append_value(*hash);
+        self.parent_hash.append_value(*parent_hash);
+        self.uncle_hash.append_value(*uncle_hash);
+        self.coinbase.append_value(*coinbase);
+        self.state_root.append_value(*state_root);
+        self.transactions_root.append_value(*transactions_root);
+        self.receipt_root.append_value(*receipt_root);
+        self.logs_bloom.append_value(logs_bloom);
+        self.difficulty.append_value(difficulty);
+        self.gas_limit.append_value(*gas_limit);
+        self.gas_used.append_value(*gas_used);
+        self.extra_data.append_value(extra_data);
+        self.mix_hash.append_value(*mix_hash);
+        self.nonce.append_value(*nonce);
+        self.base_fee_per_gas.append_option(*base_fee_per_gas);
+    }
+
+    pub(crate) fn build(self) -> Result<TableRows, ArrowError> {
+        let Self {
+            mut block_num,
+            timestamp,
+            hash,
+            parent_hash,
+            uncle_hash,
+            coinbase,
+            state_root,
+            transactions_root,
+            receipt_root,
+            mut logs_bloom,
+            mut difficulty,
+            mut gas_limit,
+            mut gas_used,
+            mut extra_data,
+            mix_hash,
+            mut nonce,
+            base_fee_per_gas,
         } = self;
 
         let columns = vec![
-            block_num.to_arrow()?,
-            timestamp.to_arrow()?,
-            hash.to_arrow()?,
-            parent_hash.to_arrow()?,
-            uncle_hash.to_arrow()?,
-            coinbase.to_arrow()?,
-            state_root.to_arrow()?,
-            transactions_root.to_arrow()?,
-            receipt_root.to_arrow()?,
-            logs_bloom.to_arrow()?,
-            difficulty.to_arrow()?,
-            gas_limit.to_arrow()?,
-            gas_used.to_arrow()?,
-            extra_data.to_arrow()?,
-            mix_hash.to_arrow()?,
-            nonce.to_arrow()?,
-            base_fee_per_gas.to_arrow()?,
+            Arc::new(block_num.finish()) as ArrayRef,
+            Arc::new(timestamp.finish()),
+            Arc::new(hash.finish()),
+            Arc::new(parent_hash.finish()),
+            Arc::new(uncle_hash.finish()),
+            Arc::new(coinbase.finish()),
+            Arc::new(state_root.finish()),
+            Arc::new(transactions_root.finish()),
+            Arc::new(receipt_root.finish()),
+            Arc::new(logs_bloom.finish()),
+            Arc::new(difficulty.finish()),
+            Arc::new(gas_limit.finish()),
+            Arc::new(gas_used.finish()),
+            Arc::new(extra_data.finish()),
+            Arc::new(mix_hash.finish()),
+            Arc::new(nonce.finish()),
+            Arc::new(base_fee_per_gas.finish()),
         ];
 
-        Ok(columns)
+        TableRows::new(table(), columns)
     }
 }
 
@@ -104,7 +187,7 @@ fn schema() -> Schema {
     let extra_data = Field::new("extra_data", DataType::Binary, false);
     let mix_hash = Field::new("mix_hash", BYTES32_TYPE, false);
     let nonce = Field::new("nonce", DataType::UInt64, false);
-    let base_fee_per_gas = Field::new("base_fee_per_gas", DataType::UInt64, true);
+    let base_fee_per_gas = Field::new("base_fee_per_gas", EVM_CURRENCY_TYPE, true);
 
     let fields = vec![
         number,
@@ -129,18 +212,14 @@ fn schema() -> Schema {
     Schema::new(fields)
 }
 
-impl TableRow for Block {
-    fn to_columns(&self) -> Result<Vec<ArrayRef>, ArrowError> {
-        self.to_columns()
-    }
-}
-
 #[test]
 fn default_to_arrow() {
-    use common::arrow::record_batch::RecordBatch;
-
     let block = Block::default();
-    let batch = RecordBatch::try_new(Arc::new(schema()), block.to_columns().unwrap()).unwrap();
-    assert_eq!(batch.num_columns(), 17);
-    assert_eq!(batch.num_rows(), 1);
+    let rows = {
+        let mut builder = BlockRowsBuilder::with_capacity(1);
+        builder.append(&block);
+        builder.build().unwrap()
+    };
+    assert_eq!(rows.rows.num_columns(), 17);
+    assert_eq!(rows.rows.num_rows(), 1);
 }

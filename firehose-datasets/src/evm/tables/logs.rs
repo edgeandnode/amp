@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
-use common::arrow::array::{Array, ArrayRef};
+use common::arrow::array::{ArrayRef, BinaryBuilder, UInt32Builder, UInt64Builder};
 use common::arrow::datatypes::{DataType, Field, Schema};
 use common::arrow::error::ArrowError;
-use common::arrow_helpers::{ScalarToArray as _, TableRow};
 use common::{
-    Bytes, Bytes32, EvmAddress as Address, Table, Timestamp, BLOCK_NUM, BYTES32_TYPE,
+    Bytes, Bytes32, Bytes32ArrayBuilder, EvmAddress as Address, EvmAddressArrayBuilder, Table,
+    TableRows, Timestamp, TimestampArrayBuilder, BLOCK_NUM, BYTES32_TYPE,
     EVM_ADDRESS_TYPE as ADDRESS_TYPE,
 };
 
@@ -44,8 +44,45 @@ pub struct Log {
     pub(crate) ordinal: u64,
 }
 
-impl Log {
-    fn to_columns(&self) -> Result<Vec<Arc<dyn Array>>, ArrowError> {
+#[derive(Debug)]
+pub(crate) struct LogRowsBuilder {
+    block_num: UInt64Builder,
+    timestamp: TimestampArrayBuilder,
+    tx_index: UInt32Builder,
+    call_index: UInt32Builder,
+    tx_hash: Bytes32ArrayBuilder,
+    address: EvmAddressArrayBuilder,
+    topic0: Bytes32ArrayBuilder,
+    topic1: Bytes32ArrayBuilder,
+    topic2: Bytes32ArrayBuilder,
+    topic3: Bytes32ArrayBuilder,
+    data: BinaryBuilder,
+    index: UInt32Builder,
+    block_index: UInt32Builder,
+    ordinal: UInt64Builder,
+}
+
+impl LogRowsBuilder {
+    pub(crate) fn with_capacity(capacity: usize) -> Self {
+        Self {
+            block_num: UInt64Builder::with_capacity(capacity),
+            timestamp: TimestampArrayBuilder::with_capacity(capacity),
+            tx_index: UInt32Builder::with_capacity(capacity),
+            call_index: UInt32Builder::with_capacity(capacity),
+            tx_hash: Bytes32ArrayBuilder::with_capacity(capacity),
+            address: EvmAddressArrayBuilder::with_capacity(capacity),
+            topic0: Bytes32ArrayBuilder::with_capacity(capacity),
+            topic1: Bytes32ArrayBuilder::with_capacity(capacity),
+            topic2: Bytes32ArrayBuilder::with_capacity(capacity),
+            topic3: Bytes32ArrayBuilder::with_capacity(capacity),
+            data: BinaryBuilder::with_capacity(capacity, 0),
+            index: UInt32Builder::with_capacity(capacity),
+            block_index: UInt32Builder::with_capacity(capacity),
+            ordinal: UInt64Builder::with_capacity(capacity),
+        }
+    }
+
+    pub(crate) fn append(&mut self, log: &Log) {
         let Log {
             block_num,
             timestamp,
@@ -61,26 +98,60 @@ impl Log {
             index,
             block_index,
             ordinal,
+        } = log;
+
+        self.block_num.append_value(*block_num);
+        self.timestamp.append_value(*timestamp);
+        self.tx_index.append_value(*tx_index);
+        self.call_index.append_value(*call_index);
+        self.tx_hash.append_value(*tx_hash);
+        self.address.append_value(*address);
+        self.topic0.append_option(*topic0);
+        self.topic1.append_option(*topic1);
+        self.topic2.append_option(*topic2);
+        self.topic3.append_option(*topic3);
+        self.data.append_value(data);
+        self.index.append_value(*index);
+        self.block_index.append_value(*block_index);
+        self.ordinal.append_value(*ordinal);
+    }
+
+    pub(crate) fn build(self) -> Result<TableRows, ArrowError> {
+        let Self {
+            mut block_num,
+            timestamp,
+            mut tx_index,
+            mut call_index,
+            tx_hash,
+            address,
+            topic0,
+            topic1,
+            topic2,
+            topic3,
+            mut data,
+            mut index,
+            mut block_index,
+            mut ordinal,
         } = self;
 
         let columns = vec![
-            block_num.to_arrow()?,
-            timestamp.to_arrow()?,
-            tx_index.to_arrow()?,
-            call_index.to_arrow()?,
-            tx_hash.to_arrow()?,
-            address.to_arrow()?,
-            topic0.to_arrow()?,
-            topic1.to_arrow()?,
-            topic2.to_arrow()?,
-            topic3.to_arrow()?,
-            data.to_arrow()?,
-            index.to_arrow()?,
-            block_index.to_arrow()?,
-            ordinal.to_arrow()?,
+            Arc::new(block_num.finish()) as ArrayRef,
+            Arc::new(timestamp.finish()),
+            Arc::new(tx_index.finish()),
+            Arc::new(call_index.finish()),
+            Arc::new(tx_hash.finish()),
+            Arc::new(address.finish()),
+            Arc::new(topic0.finish()),
+            Arc::new(topic1.finish()),
+            Arc::new(topic2.finish()),
+            Arc::new(topic3.finish()),
+            Arc::new(data.finish()),
+            Arc::new(index.finish()),
+            Arc::new(block_index.finish()),
+            Arc::new(ordinal.finish()),
         ];
 
-        Ok(columns)
+        TableRows::new(table(), columns)
     }
 }
 
@@ -120,18 +191,14 @@ pub fn schema() -> Schema {
     Schema::new(fields)
 }
 
-impl TableRow for Log {
-    fn to_columns(&self) -> Result<Vec<ArrayRef>, ArrowError> {
-        self.to_columns()
-    }
-}
-
 #[test]
 fn default_to_arrow() {
-    use common::arrow::record_batch::RecordBatch;
-
     let log = Log::default();
-    let batch = RecordBatch::try_new(Arc::new(schema()), log.to_columns().unwrap()).unwrap();
-    assert_eq!(batch.num_columns(), 14);
-    assert_eq!(batch.num_rows(), 1);
+    let rows = {
+        let mut builder = LogRowsBuilder::with_capacity(1);
+        builder.append(&log);
+        builder.build().unwrap()
+    };
+    assert_eq!(rows.rows.num_columns(), 14);
+    assert_eq!(rows.rows.num_rows(), 1);
 }

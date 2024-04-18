@@ -2,15 +2,18 @@ pub mod arrow_helpers;
 pub mod dataset_context;
 pub mod multirange;
 
+pub use arrow_helpers::*;
 pub use datafusion::arrow;
+pub use datafusion::parquet;
+
 use datafusion::arrow::array::ArrayRef;
 use datafusion::arrow::error::ArrowError;
-pub use datafusion::parquet;
 
 use std::future::Future;
 use std::time::Duration;
 
 use anyhow::Context as _;
+use arrow::array::FixedSizeBinaryArray;
 use arrow::datatypes::DataType;
 use datafusion::arrow::datatypes::{SchemaRef, TimeUnit, DECIMAL128_MAX_PRECISION};
 use datafusion::arrow::{
@@ -29,13 +32,13 @@ pub type EvmAddress = [u8; 20];
 pub type EvmCurrency = i128; // Payment amount in the EVM. Used for gas or value transfers.
 
 pub const BYTES32_TYPE: DataType = DataType::FixedSizeBinary(32);
-pub type Bytes32ArrayType = arrow::array::FixedSizeBinaryArray;
+pub type Bytes32ArrayType = FixedSizeBinaryArray;
 
 pub const EVM_ADDRESS_TYPE: DataType = DataType::FixedSizeBinary(20);
-pub type EvmAddressArrayType = arrow::array::FixedSizeBinaryArray;
+pub type EvmAddressArrayType = FixedSizeBinaryArray;
 
+/// Payment amount in the EVM. Used for gas or value transfers.
 pub const EVM_CURRENCY_TYPE: DataType = DataType::Decimal128(DECIMAL128_MAX_PRECISION, 0);
-pub type EvmCurrencyArrayType = arrow::array::Decimal128Array;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Timestamp(pub Duration);
@@ -53,7 +56,7 @@ pub fn timestamp_type() -> DataType {
 }
 
 /// Remember to call `.with_timezone_utc()` after creating a Timestamp array.
-pub type TimestampArrayType = arrow::array::TimestampNanosecondArray;
+pub(crate) type TimestampArrayType = arrow::array::TimestampNanosecondArray;
 
 /// Identifies a dataset and its data schema.
 #[derive(Clone, Debug)]
@@ -86,8 +89,7 @@ pub struct TableRows {
 }
 
 impl TableRows {
-    // Useful for tests.
-    pub fn try_new(table: Table, columns: Vec<ArrayRef>) -> Result<Self, ArrowError> {
+    pub fn new(table: Table, columns: Vec<ArrayRef>) -> Result<Self, ArrowError> {
         let schema = table.schema.clone();
         Ok(TableRows {
             table,
