@@ -1259,6 +1259,7 @@ dependencies = [
  "fs-err",
  "futures",
  "hex",
+ "lazy_static",
  "prost",
  "prost-build",
  "prost-types",

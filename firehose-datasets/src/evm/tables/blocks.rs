@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use common::arrow::array::{ArrayRef, BinaryBuilder, UInt64Builder};
-use common::arrow::datatypes::{DataType, Field, Schema};
+use common::arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use common::arrow::error::ArrowError;
 use common::{
     timestamp_type, Bytes, Bytes32, Bytes32ArrayBuilder, EvmAddress as Address,
@@ -10,10 +10,14 @@ use common::{
     EVM_CURRENCY_TYPE,
 };
 
+lazy_static::lazy_static! {
+    static ref SCHEMA: SchemaRef = Arc::new(schema());
+}
+
 pub fn table() -> Table {
     Table {
         name: TABLE_NAME.to_string(),
-        schema: Arc::new(schema()),
+        schema: SCHEMA.clone(),
     }
 }
 
@@ -170,6 +174,7 @@ impl BlockRowsBuilder {
     }
 }
 
+/// Prefer using the pre-computed SCHEMA
 fn schema() -> Schema {
     let number = Field::new(BLOCK_NUM, DataType::UInt64, false);
     let timestamp = Field::new("timestamp", timestamp_type(), false);
