@@ -81,7 +81,6 @@ async fn main() -> Result<(), anyhow::Error> {
     let dataset = firehose_datasets::evm::dataset("mainnet".to_string());
 
     let ctx = Arc::new(DatasetContext::new(dataset.clone(), to).await?);
-    let store = ctx.object_store()?;
     let total_blocks = end_block - start + 1;
     let jobs = {
         let mut jobs = vec![];
@@ -96,7 +95,6 @@ async fn main() -> Result<(), anyhow::Error> {
                 end: to,
                 job_id: jobs.len() as u8,
                 batch_size,
-                store: store.clone(),
                 ctx: ctx.clone(),
             });
             from = to + 1;

@@ -2,9 +2,8 @@ use anyhow::{anyhow, Context as _};
 use common::arrow::array::{AsArray, RecordBatch};
 use common::arrow::datatypes::UInt64Type;
 use common::dataset_context::DatasetContext;
-use common::{BlockStreamer, DataSet};
+use common::{BlockStreamer, DataSet, BLOCK_NUM};
 use futures::{FutureExt, StreamExt as _};
-use object_store::ObjectStore;
 use std::collections::HashMap;
 use std::ops::RangeInclusive;
 use std::{sync::Arc, time::Instant};
@@ -16,12 +15,11 @@ pub struct Job<T: BlockStreamer> {
     pub end: u64,
     pub job_id: u8,
     pub batch_size: u64,
-    pub store: Arc<dyn ObjectStore>,
     pub ctx: Arc<DatasetContext>,
 }
 
-
-async fn validate_batches(ctx: Arc<DatasetContext>, table_name: String, block_range: RangeInclusive<u64>, fbatches: Vec<RecordBatch>) -> Result<(), anyhow::Error> {
+// Validate buffered vector of dataset batches against existing data in the object store.
+async fn validate_batches(ctx: Arc<DatasetContext>, table_name: &str, block_range: RangeInclusive<u64>, fbatches: &Vec<RecordBatch>) -> Result<(), anyhow::Error> {
 
     let mut record_stream = ctx
         .execute_sql(&format!(
@@ -33,42 +31,38 @@ async fn validate_batches(ctx: Arc<DatasetContext>, table_name: String, block_ra
         .await
         .context("failed to run existing blocks query")?;
 
-    let mut rows_left = fbatches.iter().fold(0, |acc, batch| acc + batch.num_rows());
-    let mut looping = 0;
-    let mut fi = 0;
-    let mut fj = 0;
+    let mut total_processed = 0;
+    let mut i = 0;
+    let mut j = 0;
+    let total_rows = fbatches.iter().fold(0, |acc, batch| acc + batch.num_rows());
+
     while let Some(qbatch) = record_stream.next().await {
         let qbatch: RecordBatch = qbatch?;
         if fbatches[0].num_columns() != qbatch.num_columns() {
             return Err(anyhow!("column count in range {}..{} in table `{}` does not match", block_range.start(), block_range.end(), table_name));
         }
-        let mut qr = 0;
-    'l: for i in fi..fbatches.len() {
-            for j in fj..fbatches[i].num_rows() {
-                for k in 0..fbatches[i].num_columns() {
-                    if fbatches[i].column(k).slice(j, 1) != qbatch.column(k).slice(qr, 1) {
-                        let block_num = qbatch.column(0).as_primitive::<UInt64Type>().value(qr);
-                        return Err(anyhow!("column {} in block {} in table `{}` does not match", k, block_num, table_name));
-                    }
-                }
-                qr += 1;
-                if qr >= qbatch.num_rows() {
-                    // remember where we stopped
-                    fi = i;
-                    fj = j+1;
-                    break 'l;
-                }
+        let mut row = 0;
+        while row < qbatch.num_rows() && i < fbatches.len() {
+            let to_slice = (fbatches[i].num_rows() - j).min(qbatch.num_rows() - row);
+            if fbatches[i].slice(j, to_slice) != qbatch.slice(row, to_slice) {
+                let block_num = fbatches[i]
+                    .column_by_name(BLOCK_NUM)
+                    .with_context(|| "missing block_num column")?
+                    .as_primitive::<UInt64Type>()
+                    .value(j);
+                return Err(anyhow!("mismatch in block {} in table `{}`", block_num, table_name));
+            }
+            total_processed += to_slice;
+            j += to_slice;
+            row += to_slice;
+            if j == fbatches[i].num_rows() {
+                j = 0;
+                i += 1;
             }
         }
-        rows_left -= qr;
-        looping += 1;
-        if looping >= 2 {
-            println!("looping {looping} times");
-        }
-
     }
-    if rows_left != 0 {
-        return Err(anyhow!("missing {} block(s) in range {}..{} in table `{}`", rows_left, block_range.start(), block_range.end(), table_name));
+    if total_processed != total_rows {
+        return Err(anyhow!("missing {} block(s) in range {}..{} in table `{}`", total_rows - total_processed, block_range.start(), block_range.end(), table_name));
     }
     Ok(())
 }
@@ -76,7 +70,7 @@ async fn validate_batches(ctx: Arc<DatasetContext>, table_name: String, block_ra
 
 // Spawning a job:
 // - Spawns a task to fetch blocks from the `client`.
-// - Returns a future that will read that block stream and write a parquet file to the object store.
+// - Returns a future that will validate firehose blocks against existing data.
 pub async fn run_job(job: Job<impl BlockStreamer>) -> Result<(), anyhow::Error> {
     let start_time = Instant::now();
 
@@ -99,7 +93,7 @@ pub async fn run_job(job: Job<impl BlockStreamer>) -> Result<(), anyhow::Error> 
 
         let block_num = dataset_rows.block_num()?;
 
-        if block_num % 10000 == 0 {
+        if block_num % 1000 == 0 {
             println!(
                 "Reached block {} @ worker #{}, at {}:{:02}",
                 block_num,
@@ -126,11 +120,8 @@ pub async fn run_job(job: Job<impl BlockStreamer>) -> Result<(), anyhow::Error> 
 
         if block_num % job.batch_size == 0 || block_num == job.end {
             for (table_name, batches) in table_map.iter_mut() {
-                validate_batches(job.ctx.clone(), table_name.clone(), RangeInclusive::new(batch_start, block_num), batches.clone()).await?;
+                validate_batches(job.ctx.clone(), &table_name, RangeInclusive::new(batch_start, block_num), &batches).await?;
                 batches.clear();
-                // tokio::spawn(async move {
-                //     validate_batch(ctx, table_name, start_block, block_number, fbatch).await.unwrap();
-                // });
             }
             batch_start = block_num + 1;
         }
