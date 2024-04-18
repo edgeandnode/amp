@@ -1173,6 +1173,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "dump-check"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "common",
+ "firehose-datasets",
+ "fs-err",
+ "futures",
+ "object_store",
+ "serde_json",
+ "tokio",
+ "toml",
+ "url",
+]
+
+[[package]]
 name = "either"
 version = "1.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
