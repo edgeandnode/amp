@@ -1,12 +1,17 @@
 mod job;
+mod stats;
 
 use clap::Parser;
 use common::dataset_context::DatasetContext;
 use firehose_datasets::client::Client;
 use futures::future::join_all;
 use job::Job;
-use std::{fs, sync::Arc};
-use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use stats::{StatsGetter, StatsUpdater};
+use std::{fs, sync::{Arc, Mutex}};
+use indicatif::{ProgressBar, ProgressStyle};
+use human_bytes::human_bytes;
+
+use crate::stats::Stats;
 
 /// A tool for dumping a range of firehose blocks to a protobufs json file and/or for converting them
 /// to parquet tables.
@@ -79,27 +84,19 @@ async fn main() -> Result<(), anyhow::Error> {
         Client::new(provider).await?
     };
 
-    let progress = MultiProgress::new();
-    let style = ProgressStyle::with_template(
-        "[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}",
-    )
-    .unwrap()
-    .progress_chars("##-");
-
-
     let dataset = firehose_datasets::evm::dataset("mainnet".to_string());
 
     let ctx = Arc::new(DatasetContext::new(dataset.clone(), to).await?);
     let total_blocks = end_block - start + 1;
+    let stats = Arc::new(Mutex::new(Stats::default()));
+    let ui_handle = tokio::spawn(ui(total_blocks, stats.clone()));
+
     let jobs = {
         let mut jobs = vec![];
         let blocks_per_job = total_blocks.div_ceil(n_jobs as u64);
         let mut from = start;
         while from <= end_block {
             let to = (from + blocks_per_job).min(end_block);
-            let pb = progress.add(ProgressBar::new(to - from + 1));
-            pb.set_style(style.clone());
-            pb.set_message(format!("Worker {}", jobs.len() + 1));
             jobs.push(Job {
                 dataset: dataset.clone(),
                 block_streamer: client.clone(),
@@ -108,7 +105,7 @@ async fn main() -> Result<(), anyhow::Error> {
                 job_id: jobs.len() as u8,
                 batch_size,
                 ctx: ctx.clone(),
-                progress: pb,
+                stats: stats.clone(),
             });
             from = to + 1;
         }
@@ -119,7 +116,25 @@ async fn main() -> Result<(), anyhow::Error> {
         res?;
     }
 
+    ui_handle.await?;
+
     println!("Validated successfully {total_blocks} blocks");
 
     Ok(())
+}
+
+
+async fn ui(blocks: u64, stats: impl StatsUpdater + StatsGetter) {
+    let pb = ProgressBar::new(blocks);
+    pb.set_style(ProgressStyle::default_bar()
+        .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}")
+        .unwrap()
+        .progress_chars("##-"));
+
+    while stats.get_blocks() < blocks {
+        pb.set_position(stats.get_blocks());
+        pb.set_message(format!("{}", human_bytes(stats.get_bytes() as f64)));
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    pb.finish_with_message(format!("{}", human_bytes(stats.get_bytes() as f64)));
 }

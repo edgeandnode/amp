@@ -8,8 +8,9 @@ use futures::{FutureExt, StreamExt as _};
 use std::collections::HashMap;
 use std::ops::RangeInclusive;
 use std::sync::Arc;
+use crate::stats::StatsUpdater;
 
-pub struct Job<T: BlockStreamer> {
+pub struct Job<T: BlockStreamer, S: StatsUpdater> {
     pub dataset: DataSet,
     pub block_streamer: T,
     pub start: u64,
@@ -17,7 +18,7 @@ pub struct Job<T: BlockStreamer> {
     pub job_id: u8,
     pub batch_size: u64,
     pub ctx: Arc<DatasetContext>,
-    pub progress: indicatif::ProgressBar,
+    pub stats: S,
 }
 
 // Validate buffered vector of dataset batches against existing data in the object store.
@@ -73,7 +74,7 @@ async fn validate_batches(ctx: Arc<DatasetContext>, table_name: &str, block_rang
 // Spawning a job:
 // - Spawns a task to fetch blocks from the `client`.
 // - Returns a future that will validate firehose blocks against existing data.
-pub async fn run_job(job: Job<impl BlockStreamer>) -> Result<(), anyhow::Error> {
+pub async fn run_job(job: Job<impl BlockStreamer, impl StatsUpdater>) -> Result<(), anyhow::Error> {
 
     let (mut firehose, firehose_join_handle) = {
         let start_block = job.start;
@@ -88,7 +89,7 @@ pub async fn run_job(job: Job<impl BlockStreamer>) -> Result<(), anyhow::Error> 
     let mut batch_start = job.start;
 
     while let Some(dataset_rows) = firehose.recv().await {
-        job.progress.inc(1);
+        job.stats.inc_blocks(1);
         if dataset_rows.is_empty() {
             continue;
         }
@@ -99,6 +100,13 @@ pub async fn run_job(job: Job<impl BlockStreamer>) -> Result<(), anyhow::Error> 
             if table_rows.is_empty() {
                 continue;
             }
+
+            let bytes = table_rows.rows
+                .columns()
+                .iter()
+                .map(|c| c.to_data().get_slice_memory_size().unwrap())
+                .sum::<usize>() as u64;
+            job.stats.inc_bytes(bytes);
 
             table_map
                 .entry(table_rows.table.name.clone())
