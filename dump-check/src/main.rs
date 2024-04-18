@@ -6,6 +6,7 @@ use firehose_datasets::client::Client;
 use futures::future::join_all;
 use job::Job;
 use std::{fs, sync::Arc};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 
 /// A tool for dumping a range of firehose blocks to a protobufs json file and/or for converting them
 /// to parquet tables.
@@ -78,6 +79,14 @@ async fn main() -> Result<(), anyhow::Error> {
         Client::new(provider).await?
     };
 
+    let progress = MultiProgress::new();
+    let style = ProgressStyle::with_template(
+        "[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}",
+    )
+    .unwrap()
+    .progress_chars("##-");
+
+
     let dataset = firehose_datasets::evm::dataset("mainnet".to_string());
 
     let ctx = Arc::new(DatasetContext::new(dataset.clone(), to).await?);
@@ -88,6 +97,9 @@ async fn main() -> Result<(), anyhow::Error> {
         let mut from = start;
         while from <= end_block {
             let to = (from + blocks_per_job).min(end_block);
+            let pb = progress.add(ProgressBar::new(to - from + 1));
+            pb.set_style(style.clone());
+            pb.set_message(format!("Worker {}", jobs.len() + 1));
             jobs.push(Job {
                 dataset: dataset.clone(),
                 block_streamer: client.clone(),
@@ -96,6 +108,7 @@ async fn main() -> Result<(), anyhow::Error> {
                 job_id: jobs.len() as u8,
                 batch_size,
                 ctx: ctx.clone(),
+                progress: pb,
             });
             from = to + 1;
         }

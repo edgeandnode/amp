@@ -7,7 +7,7 @@ use futures::future::join_all;
 use futures::{FutureExt, StreamExt as _};
 use std::collections::HashMap;
 use std::ops::RangeInclusive;
-use std::{sync::Arc, time::Instant};
+use std::sync::Arc;
 
 pub struct Job<T: BlockStreamer> {
     pub dataset: DataSet,
@@ -17,6 +17,7 @@ pub struct Job<T: BlockStreamer> {
     pub job_id: u8,
     pub batch_size: u64,
     pub ctx: Arc<DatasetContext>,
+    pub progress: indicatif::ProgressBar,
 }
 
 // Validate buffered vector of dataset batches against existing data in the object store.
@@ -73,7 +74,6 @@ async fn validate_batches(ctx: Arc<DatasetContext>, table_name: &str, block_rang
 // - Spawns a task to fetch blocks from the `client`.
 // - Returns a future that will validate firehose blocks against existing data.
 pub async fn run_job(job: Job<impl BlockStreamer>) -> Result<(), anyhow::Error> {
-    let start_time = Instant::now();
 
     let (mut firehose, firehose_join_handle) = {
         let start_block = job.start;
@@ -88,22 +88,12 @@ pub async fn run_job(job: Job<impl BlockStreamer>) -> Result<(), anyhow::Error> 
     let mut batch_start = job.start;
 
     while let Some(dataset_rows) = firehose.recv().await {
+        job.progress.inc(1);
         if dataset_rows.is_empty() {
             continue;
         }
 
         let block_num = dataset_rows.block_num()?;
-
-        if block_num % 1000 == 0 {
-            println!(
-                "Reached block {} @ worker #{}, at {}:{:02}",
-                block_num,
-                job.job_id,
-                start_time.elapsed().as_secs() / 60,
-                start_time.elapsed().as_secs() % 60
-            );
-        }
-
 
         for table_rows in dataset_rows {
             if table_rows.is_empty() {
