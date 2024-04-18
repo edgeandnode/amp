@@ -3,6 +3,7 @@ use common::arrow::array::{AsArray, RecordBatch};
 use common::arrow::datatypes::UInt64Type;
 use common::dataset_context::DatasetContext;
 use common::{BlockStreamer, DataSet, BLOCK_NUM};
+use futures::future::join_all;
 use futures::{FutureExt, StreamExt as _};
 use std::collections::HashMap;
 use std::ops::RangeInclusive;
@@ -109,20 +110,20 @@ pub async fn run_job(job: Job<impl BlockStreamer>) -> Result<(), anyhow::Error> 
                 continue;
             }
 
-            let record_batch = table_rows.rows;
-            let table = table_rows.table;
-
             table_map
-                .entry(table.name.clone())
+                .entry(table_rows.table.name.clone())
                 .or_insert_with(Vec::new)
-                .push(record_batch);
+                .push(table_rows.rows);
         }
 
         if block_num % job.batch_size == 0 || block_num == job.end {
-            for (table_name, batches) in table_map.iter_mut() {
-                validate_batches(job.ctx.clone(), &table_name, RangeInclusive::new(batch_start, block_num), &batches).await?;
-                batches.clear();
+            let futures = table_map.iter().map(|(table_name, batches)| {
+                validate_batches(job.ctx.clone(), &table_name, RangeInclusive::new(batch_start, block_num), batches)
+            });
+            for res in join_all(futures).await {
+                res?;
             }
+            table_map.clear();
             batch_start = block_num + 1;
         }
     }
