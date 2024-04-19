@@ -1196,6 +1196,7 @@ dependencies = [
  "fs-err",
  "futures",
  "human_bytes",
+ "humantime",
  "indicatif",
  "object_store",
  "serde_json",

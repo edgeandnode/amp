@@ -10,6 +10,7 @@ use stats::StatsGetter;
 use std::{fs, sync::{Arc, Mutex}};
 use indicatif::{ProgressBar, ProgressStyle};
 use human_bytes::human_bytes;
+use humantime::format_duration;
 
 use crate::stats::Stats;
 
@@ -127,14 +128,14 @@ async fn main() -> Result<(), anyhow::Error> {
 async fn ui(blocks: u64, stats: impl StatsGetter) {
     let pb = ProgressBar::new(blocks);
     pb.set_style(ProgressStyle::default_bar()
-        .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}")
+        .template("[{elapsed_precise}] {bar:60.cyan/blue} {pos:>7}/{len:7}\n{msg}")
         .unwrap()
         .progress_chars("##-"));
 
     while stats.get_blocks() < blocks {
         pb.set_position(stats.get_blocks());
-        pb.set_message(format!("{}", human_bytes(stats.get_bytes() as f64)));
+        pb.set_message(format!("Arrow: {:>10} | Duration1: {:>20} | Duration2: {:>20}", human_bytes(stats.get_bytes() as f64), format_duration(stats.get_duration1()), format_duration(stats.get_duration2())));
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
-    pb.finish_with_message(format!("{}", human_bytes(stats.get_bytes() as f64)));
+    pb.finish_with_message(format!("Arrow: {} | Duration1: {} | Duration2: {}", human_bytes(stats.get_bytes() as f64), format_duration(stats.get_duration1()),  format_duration(stats.get_duration2())));
 }

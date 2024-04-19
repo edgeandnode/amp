@@ -8,9 +8,10 @@ use futures::{FutureExt, StreamExt as _};
 use std::collections::HashMap;
 use std::ops::RangeInclusive;
 use std::sync::Arc;
+use std::time::Instant;
 use crate::stats::StatsUpdater;
 
-pub struct Job<T: BlockStreamer, S: StatsUpdater> {
+pub struct Job<T: BlockStreamer, S: StatsUpdater + Clone> {
     pub dataset: DataSet,
     pub block_streamer: T,
     pub start: u64,
@@ -22,8 +23,9 @@ pub struct Job<T: BlockStreamer, S: StatsUpdater> {
 }
 
 // Validate buffered vector of dataset batches against existing data in the object store.
-async fn validate_batches(ctx: Arc<DatasetContext>, table_name: &str, block_range: RangeInclusive<u64>, fbatches: &Vec<RecordBatch>) -> Result<(), anyhow::Error> {
+async fn validate_batches(ctx: Arc<DatasetContext>, table_name: &str, block_range: RangeInclusive<u64>, fbatches: &Vec<RecordBatch>, stats: impl StatsUpdater) -> Result<(), anyhow::Error> {
 
+    let time1 = Instant::now();
     let mut record_stream = ctx
         .execute_sql(&format!(
             "select * from {} where block_num >= {} and block_num <= {} order by block_num asc",
@@ -40,6 +42,7 @@ async fn validate_batches(ctx: Arc<DatasetContext>, table_name: &str, block_rang
     let total_rows = fbatches.iter().fold(0, |acc, batch| acc + batch.num_rows());
 
     while let Some(qbatch) = record_stream.next().await {
+        let time2 = Instant::now();
         let qbatch: RecordBatch = qbatch?;
         if fbatches[0].num_columns() != qbatch.num_columns() {
             return Err(anyhow!("column count in range {}..{} in table `{}` does not match", block_range.start(), block_range.end(), table_name));
@@ -63,10 +66,12 @@ async fn validate_batches(ctx: Arc<DatasetContext>, table_name: &str, block_rang
                 i += 1;
             }
         }
+        stats.inc_duration2(time2.elapsed());
     }
     if total_processed != total_rows {
         return Err(anyhow!("missing {} block(s) in range {}..{} in table `{}`", total_rows - total_processed, block_range.start(), block_range.end(), table_name));
     }
+    stats.inc_duration1(time1.elapsed());
     Ok(())
 }
 
@@ -74,7 +79,7 @@ async fn validate_batches(ctx: Arc<DatasetContext>, table_name: &str, block_rang
 // Spawning a job:
 // - Spawns a task to fetch blocks from the `client`.
 // - Returns a future that will validate firehose blocks against existing data.
-pub async fn run_job(job: Job<impl BlockStreamer, impl StatsUpdater>) -> Result<(), anyhow::Error> {
+pub async fn run_job(job: Job<impl BlockStreamer, impl StatsUpdater + Clone>) -> Result<(), anyhow::Error> {
 
     let (mut firehose, firehose_join_handle) = {
         let start_block = job.start;
@@ -116,7 +121,7 @@ pub async fn run_job(job: Job<impl BlockStreamer, impl StatsUpdater>) -> Result<
 
         if block_num % job.batch_size == 0 || block_num == job.end {
             let futures = table_map.iter().map(|(table_name, batches)| {
-                validate_batches(job.ctx.clone(), &table_name, RangeInclusive::new(batch_start, block_num), batches)
+                validate_batches(job.ctx.clone(), &table_name, RangeInclusive::new(batch_start, block_num), batches, job.stats.clone())
             });
             for res in join_all(futures).await {
                 res?;
