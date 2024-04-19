@@ -6,7 +6,7 @@ use common::dataset_context::DatasetContext;
 use firehose_datasets::client::Client;
 use futures::future::join_all;
 use job::Job;
-use stats::{StatsGetter, StatsUpdater};
+use stats::StatsGetter;
 use std::{fs, sync::{Arc, Mutex}};
 use indicatif::{ProgressBar, ProgressStyle};
 use human_bytes::human_bytes;
@@ -124,7 +124,7 @@ async fn main() -> Result<(), anyhow::Error> {
 }
 
 
-async fn ui(blocks: u64, stats: impl StatsUpdater + StatsGetter) {
+async fn ui(blocks: u64, stats: impl StatsGetter) {
     let pb = ProgressBar::new(blocks);
     pb.set_style(ProgressStyle::default_bar()
         .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}")
