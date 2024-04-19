@@ -1,18 +1,16 @@
 mod job;
-mod stats;
+mod metrics;
 
 use clap::Parser;
 use common::dataset_context::DatasetContext;
 use firehose_datasets::client::Client;
 use futures::future::join_all;
 use job::Job;
-use stats::StatsGetter;
-use std::{fs, sync::{Arc, Mutex}};
+use std::{fs, sync::Arc};
 use indicatif::{ProgressBar, ProgressStyle};
 use human_bytes::human_bytes;
-use humantime::format_duration;
 
-use crate::stats::Stats;
+use crate::metrics::MetricsRegistry;
 
 /// A tool for dumping a range of firehose blocks to a protobufs json file and/or for converting them
 /// to parquet tables.
@@ -79,6 +77,15 @@ async fn main() -> Result<(), anyhow::Error> {
         ));
     }
 
+    let metrics = Arc::new(MetricsRegistry::new());
+
+    prometheus_exporter::start(
+        "0.0.0.0:9102"
+        .parse()
+        .expect("failed to parse binding")
+    )
+    .expect("failed to start prometheus exporter");
+
     let client = {
         let config = fs::read_to_string(&config)?;
         let provider = toml::from_str(&config)?;
@@ -89,8 +96,7 @@ async fn main() -> Result<(), anyhow::Error> {
 
     let ctx = Arc::new(DatasetContext::new(dataset.clone(), to).await?);
     let total_blocks = end_block - start + 1;
-    let stats = Arc::new(Mutex::new(Stats::default()));
-    let ui_handle = tokio::spawn(ui(total_blocks, stats.clone()));
+    let ui_handle = tokio::spawn(ui(total_blocks, metrics.clone()));
 
     let jobs = {
         let mut jobs = vec![];
@@ -106,7 +112,7 @@ async fn main() -> Result<(), anyhow::Error> {
                 job_id: jobs.len() as u8,
                 batch_size,
                 ctx: ctx.clone(),
-                stats: stats.clone(),
+                metrics: metrics.clone(),
             });
             from = to + 1;
         }
@@ -125,17 +131,17 @@ async fn main() -> Result<(), anyhow::Error> {
 }
 
 
-async fn ui(blocks: u64, stats: impl StatsGetter) {
+async fn ui(blocks: u64, metrics: Arc<MetricsRegistry>) {
     let pb = ProgressBar::new(blocks);
     pb.set_style(ProgressStyle::default_bar()
-        .template("[{elapsed_precise}] {bar:60.cyan/blue} {pos:>7}/{len:7}\n{msg}")
+        .template("[{elapsed_precise}] {bar:60.cyan/blue} {pos:>7}/{len:7} {msg}")
         .unwrap()
         .progress_chars("##-"));
 
-    while stats.get_blocks() < blocks {
-        pb.set_position(stats.get_blocks());
-        pb.set_message(format!("Arrow: {:>10} | Duration1: {:>20} | Duration2: {:>20}", human_bytes(stats.get_bytes() as f64), format_duration(stats.get_duration1()), format_duration(stats.get_duration2())));
+    while metrics.blocks_read.get() < blocks as f64 {
+        pb.set_position(metrics.blocks_read.get() as u64);
+        pb.set_message(format!("{:>10}", human_bytes(metrics.bytes_read.get())));
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
-    pb.finish_with_message(format!("Arrow: {} | Duration1: {} | Duration2: {}", human_bytes(stats.get_bytes() as f64), format_duration(stats.get_duration1()),  format_duration(stats.get_duration2())));
+    pb.finish_with_message(format!("{:>10}", human_bytes(metrics.bytes_read.get())));
 }

@@ -8,10 +8,9 @@ use futures::{FutureExt, StreamExt as _};
 use std::collections::HashMap;
 use std::ops::RangeInclusive;
 use std::sync::Arc;
-use std::time::Instant;
-use crate::stats::StatsUpdater;
+use crate::metrics::MetricsRegistry;
 
-pub struct Job<T: BlockStreamer, S: StatsUpdater + Clone> {
+pub struct Job<T: BlockStreamer> {
     pub dataset: DataSet,
     pub block_streamer: T,
     pub start: u64,
@@ -19,13 +18,12 @@ pub struct Job<T: BlockStreamer, S: StatsUpdater + Clone> {
     pub job_id: u8,
     pub batch_size: u64,
     pub ctx: Arc<DatasetContext>,
-    pub stats: S,
+    pub metrics: Arc<MetricsRegistry>,
 }
 
 // Validate buffered vector of dataset batches against existing data in the object store.
-async fn validate_batches(ctx: Arc<DatasetContext>, table_name: &str, block_range: RangeInclusive<u64>, fbatches: &Vec<RecordBatch>, stats: impl StatsUpdater) -> Result<(), anyhow::Error> {
+async fn validate_batches(ctx: Arc<DatasetContext>, table_name: &str, block_range: RangeInclusive<u64>, fbatches: &Vec<RecordBatch>, _metrics: Arc<MetricsRegistry>) -> Result<(), anyhow::Error> {
 
-    let time1 = Instant::now();
     let mut record_stream = ctx
         .execute_sql(&format!(
             "select * from {} where block_num >= {} and block_num <= {} order by block_num asc",
@@ -42,7 +40,6 @@ async fn validate_batches(ctx: Arc<DatasetContext>, table_name: &str, block_rang
     let total_rows = fbatches.iter().fold(0, |acc, batch| acc + batch.num_rows());
 
     while let Some(qbatch) = record_stream.next().await {
-        let time2 = Instant::now();
         let qbatch: RecordBatch = qbatch?;
         if fbatches[0].num_columns() != qbatch.num_columns() {
             return Err(anyhow!("column count in range {}..{} in table `{}` does not match", block_range.start(), block_range.end(), table_name));
@@ -66,12 +63,10 @@ async fn validate_batches(ctx: Arc<DatasetContext>, table_name: &str, block_rang
                 i += 1;
             }
         }
-        stats.inc_duration2(time2.elapsed());
     }
     if total_processed != total_rows {
         return Err(anyhow!("missing {} block(s) in range {}..{} in table `{}`", total_rows - total_processed, block_range.start(), block_range.end(), table_name));
     }
-    stats.inc_duration1(time1.elapsed());
     Ok(())
 }
 
@@ -79,7 +74,7 @@ async fn validate_batches(ctx: Arc<DatasetContext>, table_name: &str, block_rang
 // Spawning a job:
 // - Spawns a task to fetch blocks from the `client`.
 // - Returns a future that will validate firehose blocks against existing data.
-pub async fn run_job(job: Job<impl BlockStreamer, impl StatsUpdater + Clone>) -> Result<(), anyhow::Error> {
+pub async fn run_job(job: Job<impl BlockStreamer>) -> Result<(), anyhow::Error> {
 
     let (mut firehose, firehose_join_handle) = {
         let start_block = job.start;
@@ -94,7 +89,7 @@ pub async fn run_job(job: Job<impl BlockStreamer, impl StatsUpdater + Clone>) ->
     let mut batch_start = job.start;
 
     while let Some(dataset_rows) = firehose.recv().await {
-        job.stats.inc_blocks(1);
+        job.metrics.blocks_read.inc();
         if dataset_rows.is_empty() {
             continue;
         }
@@ -110,8 +105,8 @@ pub async fn run_job(job: Job<impl BlockStreamer, impl StatsUpdater + Clone>) ->
                 .columns()
                 .iter()
                 .map(|c| c.to_data().get_slice_memory_size().unwrap())
-                .sum::<usize>() as u64;
-            job.stats.inc_bytes(bytes);
+                .sum::<usize>();
+            job.metrics.bytes_read.inc_by(bytes as f64);
 
             table_map
                 .entry(table_rows.table.name.clone())
@@ -121,7 +116,7 @@ pub async fn run_job(job: Job<impl BlockStreamer, impl StatsUpdater + Clone>) ->
 
         if block_num % job.batch_size == 0 || block_num == job.end {
             let futures = table_map.iter().map(|(table_name, batches)| {
-                validate_batches(job.ctx.clone(), &table_name, RangeInclusive::new(batch_start, block_num), batches, job.stats.clone())
+                validate_batches(job.ctx.clone(), &table_name, RangeInclusive::new(batch_start, block_num), batches, job.metrics.clone())
             });
             for res in join_all(futures).await {
                 res?;
