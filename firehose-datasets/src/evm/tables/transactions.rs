@@ -47,8 +47,8 @@ pub(crate) struct Transaction {
     pub(crate) r: Bytes,
     pub(crate) s: Bytes,
 
-    // GasUsed is the total amount of gas unit used for the whole execution of the transaction.
-    pub(crate) gas_used: u64,
+    // The total amount of gas unit used for the whole execution of the transaction.
+    pub(crate) receipt_cumulative_gas_used: u64,
 
     pub(crate) r#type: i32,
     pub(crate) max_fee_per_gas: Option<EvmCurrency>,
@@ -56,6 +56,8 @@ pub(crate) struct Transaction {
     pub(crate) from: Address,
     pub(crate) return_data: Bytes,
     pub(crate) public_key: Bytes,
+
+    // Firehose specific.
     pub(crate) begin_ordinal: u64,
     pub(crate) end_ordinal: u64,
 }
@@ -128,7 +130,7 @@ impl TransactionRowsBuilder {
             v,
             r,
             s,
-            gas_used,
+            receipt_cumulative_gas_used,
             r#type,
             max_fee_per_gas,
             max_priority_fee_per_gas,
@@ -152,7 +154,7 @@ impl TransactionRowsBuilder {
         self.v.append_value(v);
         self.r.append_value(r);
         self.s.append_value(s);
-        self.gas_used.append_value(*gas_used);
+        self.gas_used.append_value(*receipt_cumulative_gas_used);
         self.r#type.append_value(*r#type);
         self.max_fee_per_gas.append_option(*max_fee_per_gas);
         self.max_priority_fee_per_gas

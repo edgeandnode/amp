@@ -74,7 +74,7 @@ pub fn protobufs_to_rows(block: pbethereum::Block) -> Result<DatasetRows, Protob
             v: tx.v.into(),
             r: tx.r.into(),
             s: tx.s.into(),
-            gas_used: tx.gas_used,
+            receipt_cumulative_gas_used: tx.gas_used,
 
             r#type: tx.r#type,
             max_fee_per_gas: tx
@@ -235,6 +235,11 @@ fn header_from_pb(header: pbethereum::BlockHeader) -> Result<Block, ProtobufToRo
             .map_err(|b| Malformed("receipt_root", b))?,
         logs_bloom: header.logs_bloom.into(),
         difficulty: header.difficulty.ok_or(Missing("difficulty"))?.bytes.into(),
+        total_difficulty: header
+            .total_difficulty
+            .ok_or(Missing("total_difficulty"))?
+            .bytes
+            .into(),
         gas_limit: header.gas_limit,
         gas_used: header.gas_used,
         extra_data: header.extra_data.into(),
