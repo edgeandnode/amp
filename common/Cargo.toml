@@ -11,3 +11,4 @@ object_store.workspace = true
 datafusion-proto.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+futures.workspace = true

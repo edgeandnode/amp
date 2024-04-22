@@ -28,3 +28,5 @@ prost-build.workspace = true
 tokio.workspace = true
 fs-err.workspace = true
 serde_json.workspace = true
+url.workspace = true
+object_store.workspace = true

@@ -755,6 +755,7 @@ dependencies = [
  "anyhow",
  "datafusion",
  "datafusion-proto",
+ "futures",
  "object_store",
  "thiserror",
  "tokio",
@@ -1282,6 +1283,7 @@ dependencies = [
  "futures",
  "hex",
  "lazy_static",
+ "object_store",
  "prost",
  "prost-build",
  "prost-types",
@@ -1293,6 +1295,7 @@ dependencies = [
  "toml",
  "tonic",
  "tonic-build",
+ "url",
 ]
 
 [[package]]
