@@ -53,6 +53,7 @@ pub fn protobufs_to_rows(block: pbethereum::Block) -> Result<DatasetRows, Protob
         let tx_index = tx.index;
         let tx_hash: Bytes32 = tx.hash.try_into().map_err(|b| Malformed("tx.hash", b))?;
         let tx_trace_row = Transaction {
+            block_hash: header.hash,
             block_num: header.block_num,
             timestamp: header.timestamp,
             tx_index,
@@ -102,6 +103,7 @@ pub fn protobufs_to_rows(block: pbethereum::Block) -> Result<DatasetRows, Protob
 
             let call_index = call.index;
             let call_row = Call {
+                block_hash: header.hash,
                 block_num: header.block_num,
                 timestamp: header.timestamp,
                 tx_index,
@@ -153,6 +155,7 @@ pub fn protobufs_to_rows(block: pbethereum::Block) -> Result<DatasetRows, Protob
                 }
 
                 let log = Log {
+                    block_hash: header.hash,
                     block_num: header.block_num,
                     timestamp: header.timestamp,
                     tx_index,

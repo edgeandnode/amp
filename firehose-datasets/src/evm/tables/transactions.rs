@@ -22,8 +22,64 @@ pub fn table() -> Table {
 
 pub const TABLE_NAME: &'static str = "transactions";
 
+/// Prefer using the pre-computed SCHEMA
+fn schema() -> Schema {
+    let block_hash = Field::new("block_hash", BYTES32_TYPE, false);
+    let block_num = Field::new(BLOCK_NUM, DataType::UInt64, false);
+    let timestamp = Field::new("timestamp", common::timestamp_type(), false);
+    let tx_index = Field::new("tx_index", DataType::UInt32, false);
+    let tx_hash = Field::new("tx_hash", BYTES32_TYPE, false);
+    let to = Field::new("to", DataType::Binary, false);
+    let nonce = Field::new("nonce", DataType::UInt64, false);
+    let gas_price = Field::new("gas_price", EVM_CURRENCY_TYPE, true);
+    let gas_limit = Field::new("gas_limit", DataType::UInt64, false);
+    let value = Field::new("value", EVM_CURRENCY_TYPE, true);
+    let input = Field::new("input", DataType::Binary, false);
+    let v = Field::new("v", DataType::Binary, false);
+    let r = Field::new("r", DataType::Binary, false);
+    let s = Field::new("s", DataType::Binary, false);
+    let gas_used = Field::new("gas_used", DataType::UInt64, false);
+    let r#type = Field::new("type", DataType::Int32, false);
+    let max_fee_per_gas = Field::new("max_fee_per_gas", EVM_CURRENCY_TYPE, true);
+    let max_priority_fee_per_gas = Field::new("max_priority_fee_per_gas", EVM_CURRENCY_TYPE, true);
+    let from = Field::new("from", ADDRESS_TYPE, false);
+    let return_data = Field::new("return_data", DataType::Binary, false);
+    let public_key = Field::new("public_key", DataType::Binary, false);
+    let begin_ordinal = Field::new("begin_ordinal", DataType::UInt64, false);
+    let end_ordinal = Field::new("end_ordinal", DataType::UInt64, false);
+
+    let fields = vec![
+        block_hash,
+        block_num,
+        timestamp,
+        tx_index,
+        tx_hash,
+        to,
+        nonce,
+        gas_price,
+        gas_limit,
+        value,
+        input,
+        v,
+        r,
+        s,
+        gas_used,
+        r#type,
+        max_fee_per_gas,
+        max_priority_fee_per_gas,
+        from,
+        return_data,
+        public_key,
+        begin_ordinal,
+        end_ordinal,
+    ];
+
+    Schema::new(fields)
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct Transaction {
+    pub(crate) block_hash: Bytes32,
     pub(crate) block_num: u64,
     pub(crate) timestamp: Timestamp,
     pub(crate) tx_index: u32,
@@ -63,6 +119,7 @@ pub(crate) struct Transaction {
 }
 
 pub(crate) struct TransactionRowsBuilder {
+    block_hash: Bytes32ArrayBuilder,
     block_num: UInt64Builder,
     timestamp: TimestampArrayBuilder,
     tx_index: UInt32Builder,
@@ -90,6 +147,7 @@ pub(crate) struct TransactionRowsBuilder {
 impl TransactionRowsBuilder {
     pub(crate) fn with_capacity(capacity: usize) -> Self {
         Self {
+            block_hash: Bytes32ArrayBuilder::with_capacity(capacity),
             block_num: UInt64Builder::with_capacity(capacity),
             timestamp: TimestampArrayBuilder::with_capacity(capacity),
             tx_index: UInt32Builder::with_capacity(capacity),
@@ -117,6 +175,7 @@ impl TransactionRowsBuilder {
 
     pub(crate) fn append(&mut self, tx: &Transaction) {
         let Transaction {
+            block_hash,
             block_num,
             timestamp,
             tx_index,
@@ -141,6 +200,7 @@ impl TransactionRowsBuilder {
             end_ordinal,
         } = tx;
 
+        self.block_hash.append_value(*block_hash);
         self.block_num.append_value(*block_num);
         self.timestamp.append_value(*timestamp);
         self.tx_index.append_value(*tx_index);
@@ -168,6 +228,7 @@ impl TransactionRowsBuilder {
 
     pub(crate) fn build(self) -> Result<TableRows, ArrowError> {
         let Self {
+            block_hash,
             mut block_num,
             timestamp,
             mut tx_index,
@@ -193,7 +254,8 @@ impl TransactionRowsBuilder {
         } = self;
 
         let columns = vec![
-            Arc::new(block_num.finish()) as ArrayRef,
+            Arc::new(block_hash.finish()) as ArrayRef,
+            Arc::new(block_num.finish()),
             Arc::new(timestamp.finish()),
             Arc::new(tx_index.finish()),
             Arc::new(tx_hash.finish()),
@@ -221,59 +283,6 @@ impl TransactionRowsBuilder {
     }
 }
 
-/// Prefer using the pre-computed SCHEMA
-fn schema() -> Schema {
-    let block_num = Field::new(BLOCK_NUM, DataType::UInt64, false);
-    let timestamp = Field::new("timestamp", common::timestamp_type(), false);
-    let tx_index = Field::new("tx_index", DataType::UInt32, false);
-    let tx_hash = Field::new("tx_hash", BYTES32_TYPE, false);
-    let to = Field::new("to", DataType::Binary, false);
-    let nonce = Field::new("nonce", DataType::UInt64, false);
-    let gas_price = Field::new("gas_price", EVM_CURRENCY_TYPE, true);
-    let gas_limit = Field::new("gas_limit", DataType::UInt64, false);
-    let value = Field::new("value", EVM_CURRENCY_TYPE, true);
-    let input = Field::new("input", DataType::Binary, false);
-    let v = Field::new("v", DataType::Binary, false);
-    let r = Field::new("r", DataType::Binary, false);
-    let s = Field::new("s", DataType::Binary, false);
-    let gas_used = Field::new("gas_used", DataType::UInt64, false);
-    let r#type = Field::new("type", DataType::Int32, false);
-    let max_fee_per_gas = Field::new("max_fee_per_gas", EVM_CURRENCY_TYPE, true);
-    let max_priority_fee_per_gas = Field::new("max_priority_fee_per_gas", EVM_CURRENCY_TYPE, true);
-    let from = Field::new("from", ADDRESS_TYPE, false);
-    let return_data = Field::new("return_data", DataType::Binary, false);
-    let public_key = Field::new("public_key", DataType::Binary, false);
-    let begin_ordinal = Field::new("begin_ordinal", DataType::UInt64, false);
-    let end_ordinal = Field::new("end_ordinal", DataType::UInt64, false);
-
-    let fields = vec![
-        block_num,
-        timestamp,
-        tx_index,
-        tx_hash,
-        to,
-        nonce,
-        gas_price,
-        gas_limit,
-        value,
-        input,
-        v,
-        r,
-        s,
-        gas_used,
-        r#type,
-        max_fee_per_gas,
-        max_priority_fee_per_gas,
-        from,
-        return_data,
-        public_key,
-        begin_ordinal,
-        end_ordinal,
-    ];
-
-    Schema::new(fields)
-}
-
 #[test]
 fn default_to_arrow() {
     let tx = Transaction::default();
@@ -282,6 +291,6 @@ fn default_to_arrow() {
         builder.append(&tx);
         builder.build().unwrap()
     };
-    assert_eq!(rows.rows.num_columns(), 22);
+    assert_eq!(rows.rows.num_columns(), 23);
     assert_eq!(rows.rows.num_rows(), 1);
 }

@@ -24,6 +24,7 @@ pub const TABLE_NAME: &'static str = "calls";
 
 /// Prefer using the pre-computed SCHEMA
 fn schema() -> Schema {
+    let block_hash = Field::new("block_hash", BYTES32_TYPE, false);
     let block_num = Field::new(BLOCK_NUM, DataType::UInt64, false);
     let timestamp = Field::new("timestamp", common::timestamp_type(), false);
     let tx_index = Field::new("tx_index", DataType::UInt32, false);
@@ -44,6 +45,7 @@ fn schema() -> Schema {
     let end_ordinal = Field::new("end_ordinal", DataType::UInt64, false);
 
     let fields = vec![
+        block_hash,
         block_num,
         timestamp,
         tx_index,
@@ -72,6 +74,7 @@ fn schema() -> Schema {
 /// The Firehose call model is much richer, and there is more we can easily add here.
 #[derive(Debug, Default)]
 pub struct Call {
+    pub(crate) block_hash: Bytes32,
     pub(crate) block_num: u64,
     pub(crate) timestamp: Timestamp,
     pub(crate) tx_index: u32,
@@ -96,6 +99,7 @@ pub struct Call {
 }
 
 pub(crate) struct CallRowsBuilder {
+    block_hash: Bytes32ArrayBuilder,
     block_num: UInt64Builder,
     timestamp: TimestampArrayBuilder,
     tx_index: UInt32Builder,
@@ -119,6 +123,7 @@ pub(crate) struct CallRowsBuilder {
 impl CallRowsBuilder {
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
+            block_hash: Bytes32ArrayBuilder::with_capacity(capacity),
             block_num: UInt64Builder::with_capacity(capacity),
             timestamp: TimestampArrayBuilder::with_capacity(capacity),
             tx_index: UInt32Builder::with_capacity(capacity),
@@ -142,6 +147,7 @@ impl CallRowsBuilder {
 
     pub fn append(&mut self, call: &Call) {
         let Call {
+            block_hash,
             block_num,
             timestamp,
             tx_index,
@@ -162,6 +168,7 @@ impl CallRowsBuilder {
             end_ordinal,
         } = call;
 
+        self.block_hash.append_value(*block_hash);
         self.block_num.append_value(*block_num);
         self.timestamp.append_value(*timestamp);
         self.tx_index.append_value(*tx_index);
@@ -184,6 +191,7 @@ impl CallRowsBuilder {
 
     pub(crate) fn build(self) -> Result<TableRows, ArrowError> {
         let Self {
+            block_hash,
             mut block_num,
             timestamp,
             mut tx_index,
@@ -205,7 +213,8 @@ impl CallRowsBuilder {
         } = self;
 
         let columns = vec![
-            Arc::new(block_num.finish()) as ArrayRef,
+            Arc::new(block_hash.finish()) as ArrayRef,
+            Arc::new(block_num.finish()),
             Arc::new(timestamp.finish()),
             Arc::new(tx_index.finish()),
             Arc::new(tx_hash.finish()),
@@ -237,6 +246,6 @@ fn default_to_arrow() {
         builder.append(&call);
         builder.build().unwrap()
     };
-    assert_eq!(rows.rows.num_columns(), 18);
+    assert_eq!(rows.rows.num_columns(), 19);
     assert_eq!(rows.rows.num_rows(), 1);
 }
