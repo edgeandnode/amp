@@ -1,14 +1,14 @@
 use common::{
-    arrow::{self, error::ArrowError, ipc::writer::IpcDataGenerator},
+    arrow::{self, ipc::writer::IpcDataGenerator},
     dataset_context::{DatasetContext, Error as CoreError},
 };
 use datafusion::{common::DFSchema, error::DataFusionError, logical_expr::LogicalPlan};
-use futures::{Stream, TryStreamExt};
+use futures::{Stream, StreamExt as _, TryStreamExt};
 use std::pin::Pin;
 use thiserror::Error;
 
 use arrow_flight::{
-    encode::{FlightDataEncoder, FlightDataEncoderBuilder},
+    encode::FlightDataEncoderBuilder,
     flight_descriptor::DescriptorType,
     flight_service_server::FlightService,
     sql::{Any, CommandStatementQuery},
@@ -31,6 +31,9 @@ enum Error {
 
     #[error("Unsupported flight descriptor command: {0}")]
     UnsupportedFlightDescriptorCommand(String),
+
+    #[error("Query execution error: {0}")]
+    ExecutionError(DataFusionError),
 
     #[error("{0}")]
     CoreError(#[from] CoreError),
@@ -61,6 +64,10 @@ impl From<Error> for Status {
             }
             Error::CoreError(CoreError::PlanningError(_)) => Status::internal(e.to_string()),
             Error::CoreError(CoreError::DatasetError(_)) => Status::internal(e.to_string()),
+            Error::ExecutionError(DataFusionError::ResourcesExhausted(_)) => {
+                Status::resource_exhausted(e.to_string())
+            }
+            Error::ExecutionError(_) => Status::internal(e.to_string()),
         }
     }
 }
@@ -153,9 +160,8 @@ impl FlightService for Service {
         request: Request<arrow_flight::Ticket>,
     ) -> Result<Response<Self::DoGetStream>, Status> {
         let ticket = request.into_inner();
-        let _data_stream = self.do_get(ticket).await?;
-        // TODO: Error conversion into `Status`
-        todo!()
+        let data_stream = self.do_get(ticket).await?;
+        Ok(Response::new(data_stream))
     }
 
     async fn do_put(
@@ -236,13 +242,20 @@ impl Service {
         Ok(info)
     }
 
-    async fn do_get(&self, ticket: arrow_flight::Ticket) -> Result<FlightDataEncoder, Error> {
+    async fn do_get(&self, ticket: arrow_flight::Ticket) -> Result<TonicStream<FlightData>, Error> {
         let Ticket { plan } = Ticket::from_flight(ticket, &self.dataset_ctx).await?;
         let stream = self.dataset_ctx.execute_plan(plan).await?;
 
         Ok(FlightDataEncoderBuilder::new()
             .with_schema(stream.schema())
-            .build(stream.map_err(ArrowError::from).err_into()))
+            .build(
+                stream
+                    .map_err(Error::ExecutionError)
+                    .map_err(Status::from)
+                    .err_into(),
+            )
+            .map_err(Status::from)
+            .boxed())
     }
 }
 
