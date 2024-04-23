@@ -96,9 +96,15 @@ impl Ticket {
     }
 }
 
-struct Service {
+pub(super) struct Service {
     // One service currently supports only one dataset.
     dataset_ctx: DatasetContext,
+}
+
+impl Service {
+    pub fn new(dataset_ctx: DatasetContext) -> Self {
+        Self { dataset_ctx }
+    }
 }
 
 #[async_trait::async_trait]

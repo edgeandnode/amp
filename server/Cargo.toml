@@ -15,3 +15,5 @@ bytes.workspace = true
 prost.workspace = true
 thiserror.workspace = true
 datafusion.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
