@@ -73,6 +73,8 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
+    tracing_subscriber::fmt::init();
+
     let args = Args::parse();
     let Args {
         config,
