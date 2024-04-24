@@ -1,3 +1,4 @@
+use crate::metrics::MetricsRegistry;
 use anyhow::{anyhow, Context as _};
 use common::arrow::array::{AsArray, RecordBatch};
 use common::arrow::datatypes::UInt64Type;
@@ -8,7 +9,6 @@ use futures::{FutureExt, StreamExt as _};
 use std::collections::HashMap;
 use std::ops::RangeInclusive;
 use std::sync::Arc;
-use crate::metrics::MetricsRegistry;
 
 pub struct Job<T: BlockStreamer> {
     pub dataset: DataSet,
@@ -22,8 +22,13 @@ pub struct Job<T: BlockStreamer> {
 }
 
 // Validate buffered vector of dataset batches against existing data in the object store.
-async fn validate_batches(ctx: Arc<DatasetContext>, table_name: &str, block_range: RangeInclusive<u64>, fbatches: &Vec<RecordBatch>, _metrics: Arc<MetricsRegistry>) -> Result<(), anyhow::Error> {
-
+async fn validate_batches(
+    ctx: Arc<DatasetContext>,
+    table_name: &str,
+    block_range: RangeInclusive<u64>,
+    fbatches: &Vec<RecordBatch>,
+    _metrics: Arc<MetricsRegistry>,
+) -> Result<(), anyhow::Error> {
     let mut record_stream = ctx
         .execute_sql(&format!(
             "select * from {} where block_num >= {} and block_num <= {} order by block_num asc",
@@ -42,7 +47,12 @@ async fn validate_batches(ctx: Arc<DatasetContext>, table_name: &str, block_rang
     while let Some(qbatch) = record_stream.next().await {
         let qbatch: RecordBatch = qbatch?;
         if fbatches[0].num_columns() != qbatch.num_columns() {
-            return Err(anyhow!("column count in range {}..{} in table `{}` does not match", block_range.start(), block_range.end(), table_name));
+            return Err(anyhow!(
+                "column count in range {}..{} in table `{}` does not match",
+                block_range.start(),
+                block_range.end(),
+                table_name
+            ));
         }
         let mut row = 0;
         while row < qbatch.num_rows() && i < fbatches.len() {
@@ -53,7 +63,11 @@ async fn validate_batches(ctx: Arc<DatasetContext>, table_name: &str, block_rang
                     .with_context(|| "missing block_num column")?
                     .as_primitive::<UInt64Type>()
                     .value(j);
-                return Err(anyhow!("mismatch in block {} in table `{}`", block_num, table_name));
+                return Err(anyhow!(
+                    "mismatch in block {} in table `{}`",
+                    block_num,
+                    table_name
+                ));
             }
             total_processed += to_slice;
             j += to_slice;
@@ -65,17 +79,21 @@ async fn validate_batches(ctx: Arc<DatasetContext>, table_name: &str, block_rang
         }
     }
     if total_processed != total_rows {
-        return Err(anyhow!("missing {} block(s) in range {}..{} in table `{}`", total_rows - total_processed, block_range.start(), block_range.end(), table_name));
+        return Err(anyhow!(
+            "missing {} block(s) in range {}..{} in table `{}`",
+            total_rows - total_processed,
+            block_range.start(),
+            block_range.end(),
+            table_name
+        ));
     }
     Ok(())
 }
-
 
 // Spawning a job:
 // - Spawns a task to fetch blocks from the `client`.
 // - Returns a future that will validate firehose blocks against existing data.
 pub async fn run_job(job: Job<impl BlockStreamer>) -> Result<(), anyhow::Error> {
-
     let (mut firehose, firehose_join_handle) = {
         let start_block = job.start;
         let end_block = job.end;
@@ -85,7 +103,7 @@ pub async fn run_job(job: Job<impl BlockStreamer>) -> Result<(), anyhow::Error> 
         (rx, tokio::spawn(firehose_task))
     };
 
-    let mut table_map: HashMap<String, Vec<RecordBatch>>  = HashMap::new();
+    let mut table_map: HashMap<String, Vec<RecordBatch>> = HashMap::new();
     let mut batch_start = job.start;
 
     while let Some(dataset_rows) = firehose.recv().await {
@@ -101,7 +119,8 @@ pub async fn run_job(job: Job<impl BlockStreamer>) -> Result<(), anyhow::Error> 
                 continue;
             }
 
-            let bytes = table_rows.rows
+            let bytes = table_rows
+                .rows
                 .columns()
                 .iter()
                 .map(|c| c.to_data().get_slice_memory_size().unwrap())
@@ -116,7 +135,13 @@ pub async fn run_job(job: Job<impl BlockStreamer>) -> Result<(), anyhow::Error> 
 
         if block_num % job.batch_size == 0 || block_num == job.end {
             let futures = table_map.iter().map(|(table_name, batches)| {
-                validate_batches(job.ctx.clone(), &table_name, RangeInclusive::new(batch_start, block_num), batches, job.metrics.clone())
+                validate_batches(
+                    job.ctx.clone(),
+                    &table_name,
+                    RangeInclusive::new(batch_start, block_num),
+                    batches,
+                    job.metrics.clone(),
+                )
             });
             for res in join_all(futures).await {
                 res?;

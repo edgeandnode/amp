@@ -5,10 +5,10 @@ use clap::Parser;
 use common::dataset_context::DatasetContext;
 use firehose_datasets::client::Client;
 use futures::future::join_all;
+use human_bytes::human_bytes;
+use indicatif::{ProgressBar, ProgressStyle};
 use job::Job;
 use std::{fs, sync::Arc};
-use indicatif::{ProgressBar, ProgressStyle};
-use human_bytes::human_bytes;
 
 use crate::metrics::MetricsRegistry;
 
@@ -79,12 +79,8 @@ async fn main() -> Result<(), anyhow::Error> {
 
     let metrics = Arc::new(MetricsRegistry::new());
 
-    prometheus_exporter::start(
-        "0.0.0.0:9102"
-        .parse()
-        .expect("failed to parse binding")
-    )
-    .expect("failed to start prometheus exporter");
+    prometheus_exporter::start("0.0.0.0:9102".parse().expect("failed to parse binding"))
+        .expect("failed to start prometheus exporter");
 
     let client = {
         let config = fs::read_to_string(&config)?;
@@ -130,13 +126,14 @@ async fn main() -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-
 async fn ui(blocks: u64, metrics: Arc<MetricsRegistry>) {
     let pb = ProgressBar::new(blocks);
-    pb.set_style(ProgressStyle::default_bar()
-        .template("[{elapsed_precise}] {bar:60.cyan/blue} {pos:>7}/{len:7} {msg}")
-        .unwrap()
-        .progress_chars("##-"));
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("[{elapsed_precise}] {bar:60.cyan/blue} {pos:>7}/{len:7} {msg}")
+            .unwrap()
+            .progress_chars("##-"),
+    );
 
     while metrics.blocks_read.get() < blocks as f64 {
         pb.set_position(metrics.blocks_read.get() as u64);
