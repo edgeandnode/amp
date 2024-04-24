@@ -9,6 +9,8 @@ mod service;
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
+    tracing_subscriber::fmt::init();
+
     let dataset = firehose_datasets::evm::dataset("mainnet".to_string());
     let data_location = std::env::var("DATA_LOCATION").context("no DATA_LOCATION env var set")?;
     let ctx = DatasetContext::new(dataset.clone(), data_location)

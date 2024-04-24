@@ -2851,6 +2851,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tonic",
+ "tracing-subscriber",
 ]
 
 [[package]]

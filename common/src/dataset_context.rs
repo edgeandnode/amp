@@ -210,14 +210,25 @@ impl DatasetContext {
 }
 
 fn runtime_config() -> RuntimeConfig {
+    use datafusion::execution::cache::{
+        cache_manager::CacheManagerConfig, cache_unit::DefaultFileStatisticsCache,
+    };
+
     // TODO: Experiment with spill to disk and memory limits.
     // For now, spill to disk is disabled and memory is unbounded.
     let disk_manager = DiskManagerConfig::Disabled;
     let memory_pool = None;
+    let cache_manager = CacheManagerConfig {
+        // Caches parquet file statistics. Seems like a good thing.
+        table_files_statistics_cache: Some(Arc::new(DefaultFileStatisticsCache::default())),
+        // Seems it might lead to staleness in the ListingTable, better not.
+        list_files_cache: None,
+    };
 
     RuntimeConfig {
         disk_manager,
         memory_pool,
+        cache_manager,
         ..Default::default()
     }
 }
