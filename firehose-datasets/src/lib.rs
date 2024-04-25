@@ -5,5 +5,6 @@
 
 pub mod client;
 pub mod evm;
+pub mod substreams;
 
 mod proto;

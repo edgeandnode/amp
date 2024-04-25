@@ -20,8 +20,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     config.compile_with_config(
         prost_config,
-        &["proto/firehose.proto", "proto/ethereum.proto"],
-        &[""],
+        &[
+            "firehose.proto",
+            "ethereum.proto",
+            "sf/substreams/v1/modules.proto",
+            "sf/substreams/v1/package.proto",
+            "sf/substreams/rpc/v2/substreams.proto"
+        ],
+        &["proto", "proto/sf/substreams/v1"],
     )?;
 
     Ok(())

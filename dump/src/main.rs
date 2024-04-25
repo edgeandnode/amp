@@ -10,6 +10,7 @@ use common::multirange::MultiRange;
 use common::parquet;
 use common::BLOCK_NUM;
 use firehose_datasets::client::Client;
+use firehose_datasets::substreams::client::SubstreamsClient;
 use fs_err as fs;
 use futures::future::join_all;
 use futures::StreamExt as _;
@@ -69,6 +70,12 @@ struct Args {
     /// Whether to disable compression when writing parquet files. Defaults to false.
     #[arg(long, env = "DUMP_DISABLE_COMPRESSION")]
     disable_compression: bool,
+
+    #[arg(long, env = "DUMP_SUBSTREAMS_MANIFEST")]
+    manifest: Option<String>,
+
+    #[arg(long, env = "DUMP_SUBSTREAMS_MODULE")]
+    module: Option<String>,
 }
 
 #[tokio::main]
@@ -82,6 +89,8 @@ async fn main() -> Result<(), anyhow::Error> {
         n_jobs,
         partition_size_mb,
         disable_compression,
+        manifest,
+        module
     } = args;
     let partition_size = partition_size_mb * 1024 * 1024;
     let compression = if disable_compression {
@@ -99,10 +108,14 @@ async fn main() -> Result<(), anyhow::Error> {
     let client = {
         let config = fs::read_to_string(&config)?;
         let provider = toml::from_str(&config)?;
-        Client::new(provider).await?
+        //     Client::new(provider).await?
+        let manifest = manifest.context("missing manifest")?;
+        let module = module.context("missing output module")?;
+        SubstreamsClient::new(provider, manifest, module).await?
     };
 
-    let dataset = firehose_datasets::evm::dataset("mainnet".to_string());
+    // let dataset = firehose_datasets::evm::dataset("mainnet".to_string());
+    let dataset = firehose_datasets::substreams::dataset("mainnet".to_string(), client.tables.tables.clone());
     let ctx = DatasetContext::new(dataset.clone(), to).await?;
 
     // The ranges of blocks that are already present, by table name.
