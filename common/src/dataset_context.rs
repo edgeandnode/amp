@@ -150,36 +150,6 @@ impl DatasetContext {
         Ok(plan)
     }
 
-    pub async fn print_schema(&self) -> Result<Vec<(Table, String)>, Error> {
-        use datafusion::arrow::util::pretty::pretty_format_batches;
-
-        let mut output = vec![];
-        for table in self.tables() {
-            let mut record_stream = self
-                .execute_sql(format!("describe {}", table.name).as_str())
-                .await?;
-            let Some(Ok(batch)) = record_stream.next().await else {
-                return Err(Error::DatasetError(DataFusionError::Execution(format!(
-                    "no schema for table `{}`",
-                    table.name,
-                ))));
-            };
-            let pretty_schema = pretty_format_batches(&[batch])
-                .map_err(|e| Error::DatasetError(e.into()))?
-                .to_string();
-
-            // For readability, simplify somme common type names, using whitespace to keep the character width.
-            let pretty_schema = pretty_schema.replace(
-                r#"Timestamp(Nanosecond, Some("+00:00"))"#,
-                r#"Timestamp                            "#,
-            );
-            let pretty_schema = pretty_schema.replace("Decimal128(38, 0)", "UInt128          ");
-
-            output.push((table.clone(), pretty_schema));
-        }
-        Ok(output)
-    }
-
     // Because `DatasetContext` is read-only, planning and execution can be done on ephemeral
     // sessions created by this function, and they will behave the same as if they had been run
     // against a persistent `SessionContext`
@@ -211,6 +181,36 @@ impl DatasetContext {
     // Should never error unless there was a bug in the constructor.
     pub fn object_store(&self) -> Result<Arc<dyn ObjectStore>, DataFusionError> {
         self.env.object_store_registry.get_store(&self.data_url)
+    }
+
+    pub async fn print_schema(&self) -> Result<Vec<(Table, String)>, Error> {
+        use datafusion::arrow::util::pretty::pretty_format_batches;
+
+        let mut output = vec![];
+        for table in self.tables() {
+            let mut record_stream = self
+                .execute_sql(format!("describe {}", table.name).as_str())
+                .await?;
+            let Some(Ok(batch)) = record_stream.next().await else {
+                return Err(Error::DatasetError(DataFusionError::Execution(format!(
+                    "no schema for table `{}`",
+                    table.name,
+                ))));
+            };
+            let pretty_schema = pretty_format_batches(&[batch])
+                .map_err(|e| Error::DatasetError(e.into()))?
+                .to_string();
+
+            // For readability, simplify somme common type names, using whitespace to keep the character width.
+            let pretty_schema = pretty_schema.replace(
+                r#"Timestamp(Nanosecond, Some("+00:00"))"#,
+                r#"Timestamp                            "#,
+            );
+            let pretty_schema = pretty_schema.replace("Decimal128(38, 0)", "UInt128          ");
+
+            output.push((table.clone(), pretty_schema));
+        }
+        Ok(output)
     }
 }
 
