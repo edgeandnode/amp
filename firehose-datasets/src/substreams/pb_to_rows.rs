@@ -126,13 +126,12 @@ fn message_to_rows(list: &Vec<Value>, schema: Arc<Schema>, block_num: u64) -> Re
                 builder.extend(cols);
                 columns.push(Arc::new(builder.finish()));
             },
-            Value::List(_) => {
+            Value::List(_) | Value::Map(_) => {
                 let mut builder = StringBuilder::with_capacity(row_count, 0);
-                let cols = col_iter.map(|field| field.and_then(|_field| Some("list".to_string())));
+                let cols = col_iter.map(|field| field.and_then(|field| Some(field.to_string())));
                 builder.extend(cols);
                 columns.push(Arc::new(builder.finish()));
             },
-            _ => return Err(anyhow::anyhow!("unsupported data type: {:?}", *field)),
         }
     }
     Ok(RecordBatch::try_new(schema, columns)?)

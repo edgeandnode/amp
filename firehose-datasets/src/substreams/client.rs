@@ -38,6 +38,7 @@ use crate::proto::sf::substreams::v1::Package;
 pub struct SubstreamsClient {
     pub stream_client: StreamClient<InterceptedService<Channel, AuthInterceptor>>,
     pub tables: Tables,
+    pub output_module: String,
 }
 
 impl Package {
@@ -71,9 +72,9 @@ impl SubstreamsClient {
         };
         let package = Package::from_url(manifest.as_str()).await?;
 
-        let tables = Tables::from_package(package, output_module).map_err(|_| Error::AssertFail(anyhow!("failed to build tables from spkg")))?;
+        let tables = Tables::from_package(package, output_module.clone()).map_err(|_| Error::AssertFail(anyhow!("failed to build tables from spkg")))?;
 
-        Ok(SubstreamsClient { stream_client, tables })
+        Ok(SubstreamsClient { stream_client, tables, output_module })
     }
 
     /// Both `start` and `stop` are inclusive. Could be abstracted to handle multiple chains, but for
@@ -91,7 +92,7 @@ impl SubstreamsClient {
             final_blocks_only: true,
             modules: self.tables.package.modules.clone(),
             production_mode: true,
-            output_module: self.tables.output_module.clone(),
+            output_module: self.output_module.clone(),
             debug_initial_store_snapshot_for_modules: vec![],
         });
 

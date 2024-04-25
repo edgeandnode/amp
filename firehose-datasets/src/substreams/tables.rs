@@ -17,7 +17,6 @@ use crate::proto::{
 pub struct Tables {
     pub tables: Vec<Table>,
     pub package: Package,
-    pub output_module: String,
     pub message_descriptor: MessageDescriptor,
 }
 
@@ -69,7 +68,7 @@ impl Tables {
         }).collect();
 
 
-        Ok(Self { tables, package, message_descriptor, output_module })
+        Ok(Self { tables, package, message_descriptor })
     }
 
 

@@ -1,23 +1,37 @@
 mod job;
 mod parquet_writer;
 
+use std::collections::BTreeMap;
 use anyhow::Context as _;
 use clap::Parser;
-use common::arrow::array::AsArray;
-use common::arrow::datatypes::UInt64Type;
-use common::dataset_context::DatasetContext;
-use common::multirange::MultiRange;
-use common::parquet;
-use common::BLOCK_NUM;
-use firehose_datasets::client::Client;
-use firehose_datasets::substreams::client::SubstreamsClient;
+use tokio::sync::mpsc;
+use parquet::{
+    basic::{Compression, ZstdLevel},
+    file::properties::WriterProperties as ParquetWriterProperties,
+};
 use fs_err as fs;
-use futures::future::join_all;
-use futures::StreamExt as _;
+use futures::{
+    future::join_all,
+    StreamExt as _,
+};
+
+use common::{
+    arrow::{
+        array::AsArray,
+        datatypes::UInt64Type,
+    },
+    dataset_context::DatasetContext,
+    multirange::MultiRange,
+    parquet,
+    BLOCK_NUM,
+    BlockStreamer,
+};
+use firehose_datasets::{
+    client::Client,
+    substreams::client::SubstreamsClient,
+};
 use job::Job;
-use parquet::basic::{Compression, ZstdLevel};
-use parquet::file::properties::WriterProperties as ParquetWriterProperties;
-use std::collections::BTreeMap;
+
 
 /// A tool for dumping a range of firehose blocks to a protobufs json file and/or for converting them
 /// to parquet tables.
@@ -78,6 +92,28 @@ struct Args {
     module: Option<String>,
 }
 
+
+#[derive(Clone)]
+pub enum BlockStreamerClient {
+    FirehoseClient(Client),
+    SubstreamsClient(SubstreamsClient),
+}
+
+impl BlockStreamer for BlockStreamerClient {
+    async fn block_stream(
+        self,
+        start_block: u64,
+        end_block: u64,
+        tx: mpsc::Sender<common::DatasetRows>,
+    ) -> Result<(), anyhow::Error> {
+        match self {
+            BlockStreamerClient::FirehoseClient(client) => client.block_stream(start_block, end_block, tx).await,
+            BlockStreamerClient::SubstreamsClient(substreams_client) => substreams_client.block_stream(start_block, end_block, tx).await,
+        }
+    }
+}
+
+
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
     let args = Args::parse();
@@ -105,17 +141,25 @@ async fn main() -> Result<(), anyhow::Error> {
         ));
     }
 
-    let client = {
+    let (dataset, client) = {
         let config = fs::read_to_string(&config)?;
         let provider = toml::from_str(&config)?;
-        //     Client::new(provider).await?
-        let manifest = manifest.context("missing manifest")?;
-        let module = module.context("missing output module")?;
-        SubstreamsClient::new(provider, manifest, module).await?
+        if manifest.is_none() {
+            (
+                firehose_datasets::evm::dataset("mainnet".to_string()),
+                BlockStreamerClient::FirehoseClient(Client::new(provider).await?)
+            )
+        } else {
+            let manifest = manifest.context("missing manifest")?;
+            let module = module.context("missing output module")?;
+            let client = SubstreamsClient::new(provider, manifest, module).await?;
+            (
+                firehose_datasets::substreams::dataset("mainnet".to_string(), client.tables.tables.clone()),
+                BlockStreamerClient::SubstreamsClient(client)
+            )
+        }
     };
 
-    // let dataset = firehose_datasets::evm::dataset("mainnet".to_string());
-    let dataset = firehose_datasets::substreams::dataset("mainnet".to_string(), client.tables.tables.clone());
     let ctx = DatasetContext::new(dataset.clone(), to).await?;
 
     // The ranges of blocks that are already present, by table name.
