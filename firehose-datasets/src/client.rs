@@ -2,6 +2,7 @@ use crate::evm::pbethereum;
 use crate::proto::sf::firehose::v2 as pbfirehose;
 
 use std::str::FromStr;
+use std::time::Duration;
 
 use anyhow::anyhow;
 use anyhow::Context as _;
@@ -28,7 +29,7 @@ use tonic::transport::Uri;
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("HTTP connection error: {0}")]
+    #[error("HTTP/2 connection error: {0}")]
     Connection(#[from] tonic::transport::Error),
     #[error("gRPC call error: {0}")]
     Call(#[from] tonic::Status),
@@ -51,23 +52,35 @@ pub struct FirehoseProvider {
 // Cloning is cheap and shares the underlying connection.
 #[derive(Clone)]
 pub struct Client {
-    stream_client: StreamClient<InterceptedService<tonic::transport::Channel, AuthInterceptor>>,
+    endpoint: Endpoint,
+    auth: AuthInterceptor,
 }
 
 impl Client {
     /// Configure the client from an EVM Firehose endpoint.
     pub async fn new(cfg: FirehoseProvider) -> Result<Self, Error> {
         let FirehoseProvider { url, token } = cfg;
-        let stream_client = {
+        let client = {
             let uri = Uri::from_str(&url)?;
-            let channel = Endpoint::from(uri).connect().await?;
+            let endpoint = Endpoint::from(uri);
             let auth = AuthInterceptor::new(token)?;
-            StreamClient::with_interceptor(channel, auth)
-                .accept_compressed(CompressionEncoding::Gzip)
-                .max_decoding_message_size(100 * 1024 * 1024) // 100MiB
+            Client { endpoint, auth }
         };
 
-        Ok(Client { stream_client })
+        // Test connection
+        client.connect().await?;
+
+        Ok(client)
+    }
+
+    async fn connect(
+        &self,
+    ) -> Result<StreamClient<InterceptedService<tonic::transport::Channel, AuthInterceptor>>, Error>
+    {
+        let channel = self.endpoint.connect().await?;
+        Ok(StreamClient::with_interceptor(channel, self.auth.clone())
+            .accept_compressed(CompressionEncoding::Gzip)
+            .max_decoding_message_size(100 * 1024 * 1024)) // 100MiB
     }
 
     /// Both `start` and `stop` are inclusive. Could be abstracted to handle multiple chains, but for
@@ -88,7 +101,10 @@ impl Client {
             transforms: vec![],
         });
 
-        let raw_stream = self.stream_client.blocks(request).await?.into_inner();
+        // We intentionally do not store and reuse the connection, but recreate it every time.
+        // This is more robust to connection failures.
+        let mut client = self.connect().await?;
+        let raw_stream = client.blocks(request).await?.into_inner();
         let block_stream = raw_stream
             .err_into::<Error>()
             .and_then(|response| async move {
@@ -169,6 +185,8 @@ impl BlockStreamer for Client {
     ) -> Result<(), anyhow::Error> {
         use crate::evm::pb_to_rows::protobufs_to_rows;
 
+        const RETRY_BACKOFF: Duration = Duration::from_secs(5);
+
         // Explicitly track the next block in case we need to restart the Firehose stream.
         let mut next_block = start_block;
 
@@ -198,7 +216,8 @@ impl BlockStreamer for Client {
                     }
                     Err(err) => {
                         // Log and retry.
-                        println!("Error reading firehose stream: {}", err);
+                        println!("error reading firehose stream, retrying in {} seconds, error message: {}", RETRY_BACKOFF.as_secs(), err);
+                        tokio::time::sleep(RETRY_BACKOFF).await;
                         continue 'retry;
                     }
                 }
