@@ -1,7 +1,6 @@
 use crate::substreams::client::SubstreamsClient;
 use crate::evm::client::EvmClient;
 
-
 use common::BlockStreamer;
 use serde::Deserialize;
 use thiserror::Error;
@@ -13,7 +12,7 @@ use tonic::service::Interceptor;
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("HTTP connection error: {0}")]
+    #[error("HTTP/2 connection error: {0}")]
     Connection(#[from] tonic::transport::Error),
     #[error("gRPC call error: {0}")]
     Call(#[from] tonic::Status),

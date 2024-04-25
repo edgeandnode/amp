@@ -3,3 +3,4 @@
 /.vscode
 /local
 .history
+**/.ipynb_checkpoints

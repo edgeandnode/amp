@@ -1,6 +1,4 @@
-use prometheus::{
-    register_counter, Counter
-};
+use prometheus::{register_counter, Counter};
 
 pub struct MetricsRegistry {
     pub blocks_read: Counter,

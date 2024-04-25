@@ -14,7 +14,12 @@ tokio = { version = "1.36.0", features = [
     "rt-multi-thread",
     "parking_lot",
 ] }
-tonic = { version = "0.11.0", features = ["gzip", "prost", "tls-roots"] }
+tonic = { version = "0.11.0", features = [
+    "transport",
+    "gzip",
+    "prost",
+    "tls-roots",
+] }
 tonic-build = "0.11"
 prost = "0.12"
 prost-types = "0.12"
@@ -36,3 +41,5 @@ async-trait = "0.1.80"
 bytes = "1"
 datafusion-proto = "37"
 lazy_static = "1.4.0"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+log = "0.4"

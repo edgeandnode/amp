@@ -4,6 +4,7 @@ use crate::proto::sf::firehose::v2 as pbfirehose;
 use crate::client::Error;
 
 use std::str::FromStr;
+use std::time::Duration;
 
 use anyhow::anyhow;
 use anyhow::Context as _;
@@ -12,6 +13,7 @@ use common::BlockStreamer;
 use common::DatasetRows;
 use futures::StreamExt as _;
 use futures::{Stream, TryStreamExt as _};
+use log::debug;
 use pbfirehose::stream_client::StreamClient;
 use pbfirehose::ForkStep;
 use pbfirehose::Response as StreamResponse;
@@ -146,6 +148,8 @@ impl BlockStreamer for EvmClient {
     ) -> Result<(), anyhow::Error> {
         use crate::evm::pb_to_rows::protobufs_to_rows;
 
+        const RETRY_BACKOFF: Duration = Duration::from_secs(5);
+
         // Explicitly track the next block in case we need to restart the Firehose stream.
         let mut next_block = start_block;
 
@@ -175,7 +179,8 @@ impl BlockStreamer for EvmClient {
                     }
                     Err(err) => {
                         // Log and retry.
-                        println!("Error reading firehose stream: {}", err);
+                        debug!("error reading firehose stream, retrying in {} seconds, error message: {}", RETRY_BACKOFF.as_secs(), err);
+                        tokio::time::sleep(RETRY_BACKOFF).await;
                         continue 'retry;
                     }
                 }
