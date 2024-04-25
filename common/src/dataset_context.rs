@@ -75,8 +75,13 @@ impl DatasetContext {
         env.register_object_store(&data_url, object_store);
 
         // This contains various tuning options for the query engine.
-        // Using `from_env` allows to tinker at runtime.
-        let session_config = SessionConfig::from_env()?;
+        // Using `from_env` allows tinkering without re-compiling.
+        let mut session_config = SessionConfig::from_env()?;
+
+        if std::env::var_os("DATAFUSION_OPTIMIZER_PREFER_EXISTING_SORT").is_none() {
+            // Set `prefer_existing_sort` by default.
+            session_config.options_mut().optimizer.prefer_existing_sort = true;
+        }
 
         let table_urls = {
             let mut table_urls = HashMap::new();
