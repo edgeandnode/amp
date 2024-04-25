@@ -10,4 +10,8 @@ An experiment in ETL architecture for data services in The Graph. 'Project Nozzl
 
 ## Components
 
-The only working existing and working component is the [dump](dump/README.md) tool, for dumping EVM Firehose to Parquet.
+### Dump
+[Dump tool](dump/README.md), currently able to dump EVM Firehose to Parquet. Substreams support is WIP see [#8](https://github.com/graphprotocol/project-nozzle/issues/8).
+
+### Server
+Arrow Flight server. To run, just `cargo run -p server`. See the Python [Client](python/client.py) and its [example](python/client_example.py) for how to send a SQL query over the wire.
