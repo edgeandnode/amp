@@ -4,7 +4,6 @@ mod parquet_writer;
 use std::collections::BTreeMap;
 use anyhow::Context as _;
 use clap::Parser;
-use tokio::sync::mpsc;
 use parquet::{
     basic::{Compression, ZstdLevel},
     file::properties::WriterProperties as ParquetWriterProperties,
@@ -24,11 +23,11 @@ use common::{
     multirange::MultiRange,
     parquet,
     BLOCK_NUM,
-    BlockStreamer,
 };
 use firehose_datasets::{
-    client::Client,
+    client::BlockStreamerClient,
     substreams::client::SubstreamsClient,
+    evm::client::EvmClient,
 };
 use job::Job;
 
@@ -93,27 +92,6 @@ struct Args {
 }
 
 
-#[derive(Clone)]
-pub enum BlockStreamerEnum {
-    FirehoseClient(Client),
-    SubstreamsClient(SubstreamsClient),
-}
-
-impl BlockStreamer for BlockStreamerClient {
-    async fn block_stream(
-        self,
-        start_block: u64,
-        end_block: u64,
-        tx: mpsc::Sender<common::DatasetRows>,
-    ) -> Result<(), anyhow::Error> {
-        match self {
-            BlockStreamerClient::FirehoseClient(client) => client.block_stream(start_block, end_block, tx).await,
-            BlockStreamerClient::SubstreamsClient(substreams_client) => substreams_client.block_stream(start_block, end_block, tx).await,
-        }
-    }
-}
-
-
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
     let args = Args::parse();
@@ -147,7 +125,7 @@ async fn main() -> Result<(), anyhow::Error> {
         if manifest.is_none() {
             (
                 firehose_datasets::evm::dataset("mainnet".to_string()),
-                BlockStreamerClient::FirehoseClient(Client::new(provider).await?)
+                BlockStreamerClient::EvmClient(EvmClient::new(provider).await?)
             )
         } else {
             let manifest = manifest.context("missing manifest")?;

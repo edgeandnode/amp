@@ -3,6 +3,7 @@ use common::{DataSchema, DataSet};
 
 pub mod pb_to_rows;
 pub mod tables;
+pub mod client;
 
 pub fn dataset(network: String) -> DataSet {
     DataSet {

@@ -3,7 +3,7 @@ mod metrics;
 
 use clap::Parser;
 use common::dataset_context::DatasetContext;
-use firehose_datasets::client::Client;
+use firehose_datasets::evm::client::EvmClient;
 use futures::future::join_all;
 use job::Job;
 use std::{fs, sync::Arc};
@@ -89,7 +89,7 @@ async fn main() -> Result<(), anyhow::Error> {
     let client = {
         let config = fs::read_to_string(&config)?;
         let provider = toml::from_str(&config)?;
-        Client::new(provider).await?
+        EvmClient::new(provider).await?
     };
 
     let dataset = firehose_datasets::evm::dataset("mainnet".to_string());
