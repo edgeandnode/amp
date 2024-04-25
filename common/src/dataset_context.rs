@@ -17,6 +17,7 @@ use datafusion::{
     logical_expr::{col, CreateExternalTable, DdlStatement, LogicalPlan},
     sql::TableReference,
 };
+use futures::StreamExt as _;
 use object_store::{gcp::GoogleCloudStorageBuilder, local::LocalFileSystem, ObjectStore};
 use thiserror::Error;
 use url::Url;
@@ -61,7 +62,15 @@ impl DatasetContext {
     /// - Filesystem path: `relative/path/to/data/`
     /// - GCS: `gs://bucket-name/`
     pub async fn new(dataset: DataSet, data_location: String) -> Result<Self, anyhow::Error> {
-        let (data_url, object_store) = parse_data_location(data_location)?;
+        let (data_url, object_store) = infer_object_store(data_location)?;
+        Self::with_object_store(dataset, data_url, object_store).await
+    }
+
+    pub async fn with_object_store(
+        dataset: DataSet,
+        data_url: Url,
+        object_store: Arc<dyn ObjectStore>,
+    ) -> Result<Self, anyhow::Error> {
         let env = RuntimeEnv::new(runtime_config())?;
         env.register_object_store(&data_url, object_store);
 
@@ -136,6 +145,36 @@ impl DatasetContext {
         Ok(plan)
     }
 
+    pub async fn print_schema(&self) -> Result<Vec<(Table, String)>, Error> {
+        use datafusion::arrow::util::pretty::pretty_format_batches;
+
+        let mut output = vec![];
+        for table in self.tables() {
+            let mut record_stream = self
+                .execute_sql(format!("describe {}", table.name).as_str())
+                .await?;
+            let Some(Ok(batch)) = record_stream.next().await else {
+                return Err(Error::DatasetError(DataFusionError::Execution(format!(
+                    "no schema for table `{}`",
+                    table.name,
+                ))));
+            };
+            let pretty_schema = pretty_format_batches(&[batch])
+                .map_err(|e| Error::DatasetError(e.into()))?
+                .to_string();
+
+            // For readability, simplify somme common type names, using whitespace to keep the character width.
+            let pretty_schema = pretty_schema.replace(
+                r#"Timestamp(Nanosecond, Some("+00:00"))"#,
+                r#"Timestamp                            "#,
+            );
+            let pretty_schema = pretty_schema.replace("Decimal128(38, 0)", "UInt128          ");
+
+            output.push((table.clone(), pretty_schema));
+        }
+        Ok(output)
+    }
+
     // Because `DatasetContext` is read-only, planning and execution can be done on ephemeral
     // sessions created by this function, and they will behave the same as if they had been run
     // against a persistent `SessionContext`
@@ -192,7 +231,7 @@ fn verify_plan(plan: &LogicalPlan) -> Result<(), Error> {
         .map_err(Error::InvalidPlan)
 }
 
-fn parse_data_location(
+pub fn infer_object_store(
     mut data_location: String,
 ) -> Result<(Url, Arc<dyn ObjectStore>), anyhow::Error> {
     // Make sure there is a trailing slash so it's recognized as a directory.

@@ -94,7 +94,7 @@ struct Args {
 
 
 #[derive(Clone)]
-pub enum BlockStreamerClient {
+pub enum BlockStreamerEnum {
     FirehoseClient(Client),
     SubstreamsClient(SubstreamsClient),
 }

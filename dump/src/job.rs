@@ -1,6 +1,7 @@
 use common::multirange::MultiRange;
 use common::parquet::file::properties::WriterProperties as ParquetWriterProperties;
 use common::{BlockStreamer, DataSet};
+use futures::FutureExt as _;
 use object_store::path::Path;
 use object_store::ObjectStore;
 use std::collections::BTreeMap;
@@ -114,8 +115,7 @@ pub async fn run_job(job: Job<impl BlockStreamer>) -> Result<(), anyhow::Error> 
 
     // The Firehose task stopped sending blocks, so it must have terminated. Here we check if it
     // terminated with any errors or panics.
-    // firehose_join_handle.now_or_never().unwrap()??;
-    firehose_join_handle.await??;
+    firehose_join_handle.now_or_never().unwrap()??;
 
     // Close the last part file for each table, checking for any errors.
     for (_, writer) in writers {

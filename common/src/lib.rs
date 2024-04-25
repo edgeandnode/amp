@@ -5,6 +5,7 @@ pub mod multirange;
 pub use arrow_helpers::*;
 pub use datafusion::arrow;
 pub use datafusion::parquet;
+pub use dataset_context::DatasetContext;
 
 use datafusion::arrow::array::ArrayRef;
 use datafusion::arrow::error::ArrowError;

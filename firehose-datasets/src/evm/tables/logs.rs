@@ -22,12 +22,51 @@ pub fn table() -> Table {
 
 pub const TABLE_NAME: &'static str = "logs";
 
+/// Prefer using the pre-computed SCHEMA
+fn schema() -> Schema {
+    let block_hash = Field::new("block_hash", BYTES32_TYPE, false);
+    let block_num = Field::new(BLOCK_NUM, DataType::UInt64, false);
+    let timestamp = Field::new("timestamp", common::timestamp_type(), false);
+    let tx_index = Field::new("tx_index", DataType::UInt32, false);
+    let tx_hash = Field::new("tx_hash", BYTES32_TYPE, false);
+    let address = Field::new("address", ADDRESS_TYPE, false);
+    let topic0 = Field::new("topic0", BYTES32_TYPE, true);
+    let topic1 = Field::new("topic1", BYTES32_TYPE, true);
+    let topic2 = Field::new("topic2", BYTES32_TYPE, true);
+    let topic3 = Field::new("topic3", BYTES32_TYPE, true);
+    let data = Field::new("data", DataType::Binary, false);
+    let block_index = Field::new("block_index", DataType::UInt32, false);
+    let index = Field::new("index", DataType::UInt32, false);
+    let call_index = Field::new("call_index", DataType::UInt32, false);
+    let ordinal = Field::new("ordinal", DataType::UInt64, false);
+
+    let fields = vec![
+        block_hash,
+        block_num,
+        timestamp,
+        tx_index,
+        tx_hash,
+        address,
+        topic0,
+        topic1,
+        topic2,
+        topic3,
+        data,
+        block_index,
+        index,
+        call_index,
+        ordinal,
+    ];
+
+    Schema::new(fields)
+}
+
 #[derive(Debug, Default)]
 pub struct Log {
+    pub(crate) block_hash: Bytes32,
     pub(crate) block_num: u64,
     pub(crate) timestamp: Timestamp,
     pub(crate) tx_index: u32,
-    pub(crate) call_index: u32,
     pub(crate) tx_hash: Bytes32,
 
     pub(crate) address: Address,
@@ -38,18 +77,20 @@ pub struct Log {
 
     pub(crate) data: Bytes,
 
-    // Index of the log relative to the transaction.
-    pub(crate) index: u32,
-
     // Index of the log relative to the block, 0 if the state was reverted.
     pub(crate) block_index: u32,
 
-    // Unique identifier for the log's position in the blockchain.
+    // Firehose specific.
+    //
+    // Index of the log relative to the transaction.
+    pub(crate) index: u32,
+    pub(crate) call_index: u32,
     pub(crate) ordinal: u64,
 }
 
 #[derive(Debug)]
 pub(crate) struct LogRowsBuilder {
+    block_hash: Bytes32ArrayBuilder,
     block_num: UInt64Builder,
     timestamp: TimestampArrayBuilder,
     tx_index: UInt32Builder,
@@ -69,6 +110,7 @@ pub(crate) struct LogRowsBuilder {
 impl LogRowsBuilder {
     pub(crate) fn with_capacity(capacity: usize) -> Self {
         Self {
+            block_hash: Bytes32ArrayBuilder::with_capacity(capacity),
             block_num: UInt64Builder::with_capacity(capacity),
             timestamp: TimestampArrayBuilder::with_capacity(capacity),
             tx_index: UInt32Builder::with_capacity(capacity),
@@ -88,10 +130,10 @@ impl LogRowsBuilder {
 
     pub(crate) fn append(&mut self, log: &Log) {
         let Log {
+            block_hash,
             block_num,
             timestamp,
             tx_index,
-            call_index,
             tx_hash,
             address,
             topic0,
@@ -99,15 +141,16 @@ impl LogRowsBuilder {
             topic2,
             topic3,
             data,
-            index,
             block_index,
+            index,
+            call_index,
             ordinal,
         } = log;
 
+        self.block_hash.append_value(*block_hash);
         self.block_num.append_value(*block_num);
         self.timestamp.append_value(*timestamp);
         self.tx_index.append_value(*tx_index);
-        self.call_index.append_value(*call_index);
         self.tx_hash.append_value(*tx_hash);
         self.address.append_value(*address);
         self.topic0.append_option(*topic0);
@@ -115,17 +158,18 @@ impl LogRowsBuilder {
         self.topic2.append_option(*topic2);
         self.topic3.append_option(*topic3);
         self.data.append_value(data);
-        self.index.append_value(*index);
         self.block_index.append_value(*block_index);
+        self.index.append_value(*index);
+        self.call_index.append_value(*call_index);
         self.ordinal.append_value(*ordinal);
     }
 
     pub(crate) fn build(self) -> Result<TableRows, ArrowError> {
         let Self {
+            block_hash,
             mut block_num,
             timestamp,
             mut tx_index,
-            mut call_index,
             tx_hash,
             address,
             topic0,
@@ -133,16 +177,17 @@ impl LogRowsBuilder {
             topic2,
             topic3,
             mut data,
-            mut index,
             mut block_index,
+            mut index,
+            mut call_index,
             mut ordinal,
         } = self;
 
         let columns = vec![
-            Arc::new(block_num.finish()) as ArrayRef,
+            Arc::new(block_hash.finish()) as ArrayRef,
+            Arc::new(block_num.finish()),
             Arc::new(timestamp.finish()),
             Arc::new(tx_index.finish()),
-            Arc::new(call_index.finish()),
             Arc::new(tx_hash.finish()),
             Arc::new(address.finish()),
             Arc::new(topic0.finish()),
@@ -150,50 +195,14 @@ impl LogRowsBuilder {
             Arc::new(topic2.finish()),
             Arc::new(topic3.finish()),
             Arc::new(data.finish()),
-            Arc::new(index.finish()),
             Arc::new(block_index.finish()),
+            Arc::new(index.finish()),
+            Arc::new(call_index.finish()),
             Arc::new(ordinal.finish()),
         ];
 
         TableRows::new(table(), columns)
     }
-}
-
-/// Prefer using the pre-computed SCHEMA
-fn schema() -> Schema {
-    let block_num = Field::new(BLOCK_NUM, DataType::UInt64, false);
-    let timestamp = Field::new("timestamp", common::timestamp_type(), false);
-    let tx_index = Field::new("tx_index", DataType::UInt32, false);
-    let call_index = Field::new("call_index", DataType::UInt32, false);
-    let tx_hash = Field::new("tx_hash", BYTES32_TYPE, false);
-    let address = Field::new("address", ADDRESS_TYPE, false);
-    let topic0 = Field::new("topic0", BYTES32_TYPE, true);
-    let topic1 = Field::new("topic1", BYTES32_TYPE, true);
-    let topic2 = Field::new("topic2", BYTES32_TYPE, true);
-    let topic3 = Field::new("topic3", BYTES32_TYPE, true);
-    let data = Field::new("data", DataType::Binary, false);
-    let index = Field::new("index", DataType::UInt32, false);
-    let block_index = Field::new("block_index", DataType::UInt32, false);
-    let ordinal = Field::new("ordinal", DataType::UInt64, false);
-
-    let fields = vec![
-        block_num,
-        timestamp,
-        tx_index,
-        call_index,
-        tx_hash,
-        address,
-        topic0,
-        topic1,
-        topic2,
-        topic3,
-        data,
-        index,
-        block_index,
-        ordinal,
-    ];
-
-    Schema::new(fields)
 }
 
 #[test]
@@ -204,6 +213,6 @@ fn default_to_arrow() {
         builder.append(&log);
         builder.build().unwrap()
     };
-    assert_eq!(rows.rows.num_columns(), 14);
+    assert_eq!(rows.rows.num_columns(), 15);
     assert_eq!(rows.rows.num_rows(), 1);
 }

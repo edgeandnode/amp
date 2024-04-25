@@ -103,7 +103,6 @@ impl SubstreamsClient {
 
                 match response.message {
                     Some(Message::BlockScopedData(data)) => {
-                        println!("{}", data.clock.as_ref().unwrap().number);
                         Ok(data)
                     }
                     Some(Message::FatalError(_)) => {

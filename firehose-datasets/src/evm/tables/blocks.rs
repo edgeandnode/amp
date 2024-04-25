@@ -23,6 +23,51 @@ pub fn table() -> Table {
 
 pub const TABLE_NAME: &'static str = "blocks";
 
+/// Prefer using the pre-computed SCHEMA
+fn schema() -> Schema {
+    let number = Field::new(BLOCK_NUM, DataType::UInt64, false);
+    let timestamp = Field::new("timestamp", timestamp_type(), false);
+    let hash = Field::new("hash", BYTES32_TYPE, false);
+    let parent_hash = Field::new("parent_hash", BYTES32_TYPE, false);
+    let uncle_hash = Field::new("uncle_hash", BYTES32_TYPE, false);
+    let coinbase = Field::new("coinbase", ADDRESS_TYPE, false);
+    let state_root = Field::new("state_root", BYTES32_TYPE, false);
+    let transactions_root = Field::new("transactions_root", BYTES32_TYPE, false);
+    let receipt_root = Field::new("receipt_root", BYTES32_TYPE, false);
+    let logs_bloom = Field::new("logs_bloom", DataType::Binary, false);
+    let difficulty = Field::new("difficulty", DataType::Binary, false);
+    let total_difficulty = Field::new("total_difficulty", DataType::Binary, false);
+    let gas_limit = Field::new("gas_limit", DataType::UInt64, false);
+    let gas_used = Field::new("gas_used", DataType::UInt64, false);
+    let extra_data = Field::new("extra_data", DataType::Binary, false);
+    let mix_hash = Field::new("mix_hash", BYTES32_TYPE, false);
+    let nonce = Field::new("nonce", DataType::UInt64, false);
+    let base_fee_per_gas = Field::new("base_fee_per_gas", EVM_CURRENCY_TYPE, true);
+
+    let fields = vec![
+        number,
+        timestamp,
+        hash,
+        parent_hash,
+        uncle_hash,
+        coinbase,
+        state_root,
+        transactions_root,
+        receipt_root,
+        logs_bloom,
+        difficulty,
+        total_difficulty,
+        gas_limit,
+        gas_used,
+        extra_data,
+        mix_hash,
+        nonce,
+        base_fee_per_gas,
+    ];
+
+    Schema::new(fields)
+}
+
 #[derive(Debug, Default)]
 pub struct Block {
     pub(crate) block_num: u64,
@@ -38,6 +83,7 @@ pub struct Block {
     pub(crate) receipt_root: Bytes32,
     pub(crate) logs_bloom: Bytes,
     pub(crate) difficulty: Bytes,
+    pub(crate) total_difficulty: Bytes,
     pub(crate) gas_limit: u64,
     pub(crate) gas_used: u64,
     pub(crate) extra_data: Bytes,
@@ -58,6 +104,7 @@ pub(crate) struct BlockRowsBuilder {
     receipt_root: Bytes32ArrayBuilder,
     logs_bloom: BinaryBuilder,
     difficulty: BinaryBuilder,
+    total_difficulty: BinaryBuilder,
     gas_limit: UInt64Builder,
     gas_used: UInt64Builder,
     extra_data: BinaryBuilder,
@@ -80,6 +127,7 @@ impl BlockRowsBuilder {
             receipt_root: Bytes32ArrayBuilder::with_capacity(capacity),
             logs_bloom: BinaryBuilder::with_capacity(capacity, 0),
             difficulty: BinaryBuilder::with_capacity(capacity, 0),
+            total_difficulty: BinaryBuilder::with_capacity(capacity, 0),
             gas_limit: UInt64Builder::with_capacity(capacity),
             gas_used: UInt64Builder::with_capacity(capacity),
             extra_data: BinaryBuilder::with_capacity(capacity, 0),
@@ -102,6 +150,7 @@ impl BlockRowsBuilder {
             receipt_root,
             logs_bloom,
             difficulty,
+            total_difficulty,
             gas_limit,
             gas_used,
             extra_data,
@@ -121,6 +170,7 @@ impl BlockRowsBuilder {
         self.receipt_root.append_value(*receipt_root);
         self.logs_bloom.append_value(logs_bloom);
         self.difficulty.append_value(difficulty);
+        self.total_difficulty.append_value(total_difficulty);
         self.gas_limit.append_value(*gas_limit);
         self.gas_used.append_value(*gas_used);
         self.extra_data.append_value(extra_data);
@@ -142,6 +192,7 @@ impl BlockRowsBuilder {
             receipt_root,
             mut logs_bloom,
             mut difficulty,
+            mut total_difficulty,
             mut gas_limit,
             mut gas_used,
             mut extra_data,
@@ -162,6 +213,7 @@ impl BlockRowsBuilder {
             Arc::new(receipt_root.finish()),
             Arc::new(logs_bloom.finish()),
             Arc::new(difficulty.finish()),
+            Arc::new(total_difficulty.finish()),
             Arc::new(gas_limit.finish()),
             Arc::new(gas_used.finish()),
             Arc::new(extra_data.finish()),
@@ -174,49 +226,6 @@ impl BlockRowsBuilder {
     }
 }
 
-/// Prefer using the pre-computed SCHEMA
-fn schema() -> Schema {
-    let number = Field::new(BLOCK_NUM, DataType::UInt64, false);
-    let timestamp = Field::new("timestamp", timestamp_type(), false);
-    let hash = Field::new("hash", BYTES32_TYPE, false);
-    let parent_hash = Field::new("parent_hash", BYTES32_TYPE, false);
-    let uncle_hash = Field::new("uncle_hash", BYTES32_TYPE, false);
-    let coinbase = Field::new("coinbase", ADDRESS_TYPE, false);
-    let state_root = Field::new("state_root", BYTES32_TYPE, false);
-    let transactions_root = Field::new("transactions_root", BYTES32_TYPE, false);
-    let receipt_root = Field::new("receipt_root", BYTES32_TYPE, false);
-    let logs_bloom = Field::new("logs_bloom", DataType::Binary, false);
-    let difficulty = Field::new("difficulty", DataType::Binary, false);
-    let gas_limit = Field::new("gas_limit", DataType::UInt64, false);
-    let gas_used = Field::new("gas_used", DataType::UInt64, false);
-    let extra_data = Field::new("extra_data", DataType::Binary, false);
-    let mix_hash = Field::new("mix_hash", BYTES32_TYPE, false);
-    let nonce = Field::new("nonce", DataType::UInt64, false);
-    let base_fee_per_gas = Field::new("base_fee_per_gas", EVM_CURRENCY_TYPE, true);
-
-    let fields = vec![
-        number,
-        timestamp,
-        hash,
-        parent_hash,
-        uncle_hash,
-        coinbase,
-        state_root,
-        transactions_root,
-        receipt_root,
-        logs_bloom,
-        difficulty,
-        gas_limit,
-        gas_used,
-        extra_data,
-        mix_hash,
-        nonce,
-        base_fee_per_gas,
-    ];
-
-    Schema::new(fields)
-}
-
 #[test]
 fn default_to_arrow() {
     let block = Block::default();
@@ -225,6 +234,6 @@ fn default_to_arrow() {
         builder.append(&block);
         builder.build().unwrap()
     };
-    assert_eq!(rows.rows.num_columns(), 17);
+    assert_eq!(rows.rows.num_columns(), 18);
     assert_eq!(rows.rows.num_rows(), 1);
 }

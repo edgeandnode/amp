@@ -66,6 +66,10 @@ impl EvmCurrencyArrayBuilder {
         Self(Decimal128Builder::with_capacity(capacity).with_data_type(EVM_CURRENCY_TYPE))
     }
 
+    pub fn append_value(&mut self, value: i128) {
+        self.0.append_value(value)
+    }
+
     pub fn append_option(&mut self, value: Option<i128>) {
         match value {
             Some(value) => self.0.append_value(value),
