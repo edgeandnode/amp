@@ -1,22 +1,16 @@
 mod job;
 mod parquet_writer;
 
-use anyhow::Context as _;
 use clap::Parser;
-use common::arrow::array::AsArray;
-use common::arrow::datatypes::UInt64Type;
 use common::dataset_context::DatasetContext;
-use common::multirange::MultiRange;
 use common::parquet;
-use common::BLOCK_NUM;
 use firehose_datasets::client::Client;
 use fs_err as fs;
 use futures::future::join_all;
-use futures::StreamExt as _;
 use job::Job;
+use log::info;
 use parquet::basic::{Compression, ZstdLevel};
 use parquet::file::properties::WriterProperties as ParquetWriterProperties;
-use std::collections::BTreeMap;
 
 /// A tool for dumping a range of firehose blocks to a protobufs json file and/or for converting them
 /// to parquet tables.
@@ -32,9 +26,11 @@ struct Args {
     #[arg(long, short, env = "FIREHOSE_PROVIDER")]
     config: String,
 
-    /// The block number to start from, inclusive.
-    #[arg(long, short, default_value = "0", env = "DUMP_START_BLOCK")]
-    start: u64,
+    /// The block number to start from, inclusive. If ommited, the default behaviour is to:
+    /// - Start from genesis if no blocks are present in the target tables.
+    /// - Start from the last block in the target tables, picking up where it left off.
+    #[arg(long, short, env = "DUMP_START_BLOCK")]
+    start: Option<u64>,
 
     /// The block number to end at, inclusive.
     #[arg(long, short, env = "DUMP_END_BLOCK")]
@@ -106,34 +102,16 @@ async fn main() -> Result<(), anyhow::Error> {
 
     let dataset = firehose_datasets::evm::dataset("mainnet".to_string());
     let ctx = DatasetContext::new(dataset.clone(), to).await?;
-
-    // The ranges of blocks that are already present, by table name.
-    let existing_blocks: BTreeMap<String, MultiRange> = {
-        let mut existing_blocks = BTreeMap::new();
-        for table in ctx.tables() {
-            let table_name = table.name.clone();
-            let mut multirange = MultiRange::default();
-            let mut record_stream = ctx
-                .execute_sql(&format!(
-                    "select distinct({BLOCK_NUM}) from {} order by block_num",
-                    table_name
-                ))
-                .await
-                .context("failed to run existing blocks query")?;
-            while let Some(batch) = record_stream.next().await {
-                let batch = batch?;
-                let block_nums = batch.column(0).as_primitive::<UInt64Type>().values();
-                multirange.append(MultiRange::new(block_nums.as_ref())?)?;
-            }
-            println!(
-                "Existing blocks for table `{}`: {}",
-                table_name,
-                multirange.total_len()
-            );
-            existing_blocks.insert(table_name, multirange);
-        }
-        existing_blocks
-    };
+    let block_stats = ctx.block_stats().await?;
+    for (table_name, multirange) in &block_stats.existing_blocks {
+        info!(
+            "Existing blocks for table `{}`: {}",
+            table_name,
+            multirange.total_len()
+        );
+    }
+    let start = start.unwrap_or(block_stats.min_latest_block);
+    info!("Starting from block {}", start);
 
     let store = ctx.object_store()?;
     let jobs = {
@@ -152,7 +130,7 @@ async fn main() -> Result<(), anyhow::Error> {
                 store: store.clone(),
                 partition_size,
                 parquet_opts: parquet_opts(compression),
-                existing_blocks: existing_blocks.clone(),
+                existing_blocks: block_stats.existing_blocks.clone(),
             });
             from = to + 1;
         }

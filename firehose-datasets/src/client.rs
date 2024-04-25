@@ -11,6 +11,7 @@ use common::BlockStreamer;
 use common::DatasetRows;
 use futures::StreamExt as _;
 use futures::{Stream, TryStreamExt as _};
+use log::debug;
 use pbfirehose::stream_client::StreamClient;
 use pbfirehose::ForkStep;
 use pbfirehose::Response as StreamResponse;
@@ -216,7 +217,7 @@ impl BlockStreamer for Client {
                     }
                     Err(err) => {
                         // Log and retry.
-                        println!("error reading firehose stream, retrying in {} seconds, error message: {}", RETRY_BACKOFF.as_secs(), err);
+                        debug!("error reading firehose stream, retrying in {} seconds, error message: {}", RETRY_BACKOFF.as_secs(), err);
                         tokio::time::sleep(RETRY_BACKOFF).await;
                         continue 'retry;
                     }

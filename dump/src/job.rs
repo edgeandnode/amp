@@ -2,6 +2,7 @@ use common::multirange::MultiRange;
 use common::parquet::file::properties::WriterProperties as ParquetWriterProperties;
 use common::{BlockStreamer, DataSet};
 use futures::FutureExt;
+use log::info;
 use object_store::path::Path;
 use object_store::ObjectStore;
 use std::collections::BTreeMap;
@@ -72,8 +73,9 @@ pub async fn run_job(job: Job<impl BlockStreamer>) -> Result<(), anyhow::Error> 
         let block_num = dataset_rows.block_num()?;
 
         if block_num % 100000 == 0 {
-            println!(
-                "Reached block {}, at minute {}",
+            info!(
+                "job #{} reached block {}, at minute {}",
+                job.job_id,
                 block_num,
                 start_time.elapsed().as_secs() / 60
             );

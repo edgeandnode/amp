@@ -1,5 +1,16 @@
 use std::fmt;
 
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum Error {
+    #[error("values are not sorted or contain duplicates: {0:?}")]
+    UnsortedOrDuplicates(Vec<u64>),
+
+    #[error("tried to append ranges that are not consecutive: left ends with {0} and right starts with {1}")]
+    NonConsecutive(u64, u64),
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct MultiRange {
     // The ranges are inclusive on both ends.
@@ -7,13 +18,10 @@ pub struct MultiRange {
 }
 
 impl MultiRange {
-    pub fn new(values: &[u64]) -> Result<Self, anyhow::Error> {
+    pub fn new(values: &[u64]) -> Result<Self, Error> {
         let is_sorted = values.windows(2).all(|w| w[0] < w[1]);
         if !is_sorted {
-            return Err(anyhow::anyhow!(
-                "values are not sorted or contain duplicates: {:?}",
-                values
-            ));
+            return Err(Error::UnsortedOrDuplicates(values.to_vec()));
         }
 
         let mut ranges = Vec::new();
@@ -35,7 +43,7 @@ impl MultiRange {
         Ok(MultiRange { ranges })
     }
 
-    pub fn append(&mut self, mut other: MultiRange) -> Result<(), anyhow::Error> {
+    pub fn append(&mut self, mut other: MultiRange) -> Result<(), Error> {
         let Some(our_last) = self.ranges.last().map(|(_, end)| *end) else {
             *self = other;
             return Ok(());
@@ -47,11 +55,7 @@ impl MultiRange {
 
         // Check that the first range of `other` is consecutive to the last range of `self`.
         if our_last >= their_first {
-            return Err(anyhow::anyhow!(
-                "tried to append ranges that are not consecutive: {} and {}",
-                our_last,
-                their_first
-            ));
+            return Err(Error::NonConsecutive(our_last, their_first));
         }
 
         if our_last + 1 == their_first {
@@ -86,6 +90,10 @@ impl MultiRange {
             .iter()
             .map(|(start, end)| end - start + 1)
             .sum::<u64>() as usize
+    }
+
+    pub fn max(&self) -> Option<u64> {
+        self.ranges.last().map(|(_, end)| *end)
     }
 }
 

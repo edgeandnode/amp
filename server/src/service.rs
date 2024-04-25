@@ -32,10 +32,10 @@ enum Error {
     #[error("Unsupported flight descriptor command: {0}")]
     UnsupportedFlightDescriptorCommand(String),
 
-    #[error("Query execution error: {0}")]
+    #[error("query execution error: {0}")]
     ExecutionError(DataFusionError),
 
-    #[error("{0}")]
+    #[error(transparent)]
     CoreError(#[from] CoreError),
 }
 
@@ -45,9 +45,16 @@ impl From<prost::DecodeError> for Error {
     }
 }
 
+fn datafusion_error_to_status(outer: &Error, e: &DataFusionError) -> Status {
+    match e {
+        DataFusionError::ResourcesExhausted(_) => Status::resource_exhausted(outer.to_string()),
+        _ => Status::internal(outer.to_string()),
+    }
+}
+
 impl From<Error> for Status {
     fn from(e: Error) -> Self {
-        match e {
+        match &e {
             Error::PbDecodeError(_) => Status::invalid_argument(e.to_string()),
             Error::UnsupportedFlightDescriptorType(_) => Status::invalid_argument(e.to_string()),
             Error::UnsupportedFlightDescriptorCommand(_) => Status::invalid_argument(e.to_string()),
@@ -59,15 +66,11 @@ impl From<Error> for Status {
             Error::CoreError(CoreError::PlanEncodingError(_)) => {
                 Status::invalid_argument(e.to_string())
             }
-            Error::CoreError(CoreError::PlanningError(DataFusionError::ResourcesExhausted(_))) => {
-                Status::resource_exhausted(e.to_string())
-            }
-            Error::CoreError(CoreError::PlanningError(_)) => Status::internal(e.to_string()),
             Error::CoreError(CoreError::DatasetError(_)) => Status::internal(e.to_string()),
-            Error::ExecutionError(DataFusionError::ResourcesExhausted(_)) => {
-                Status::resource_exhausted(e.to_string())
-            }
-            Error::ExecutionError(_) => Status::internal(e.to_string()),
+
+            Error::CoreError(CoreError::PlanningError(df)) => datafusion_error_to_status(&e, df),
+            Error::CoreError(CoreError::ExecutionError(df)) => datafusion_error_to_status(&e, df),
+            Error::ExecutionError(df) => datafusion_error_to_status(&e, df),
         }
     }
 }

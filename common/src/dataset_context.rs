@@ -1,7 +1,12 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashMap},
+    sync::Arc,
+};
 
+use anyhow::anyhow;
 use anyhow::Context as _;
 use datafusion::{
+    arrow::{array::AsArray as _, datatypes::UInt64Type},
     common::{
         parsers::CompressionTypeVariant, Constraints, DFSchemaRef, OwnedTableReference,
         ToDFSchema as _,
@@ -22,7 +27,7 @@ use object_store::{gcp::GoogleCloudStorageBuilder, local::LocalFileSystem, Objec
 use thiserror::Error;
 use url::Url;
 
-use crate::{DataSet, Table, BLOCK_NUM};
+use crate::{multirange::MultiRange, BlockNum, DataSet, Table, BLOCK_NUM};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -38,9 +43,20 @@ pub enum Error {
     #[error("unsupported SQL: {0}")]
     UnsupportedSql(DataFusionError),
 
+    #[error("query execution error: {0}")]
+    ExecutionError(DataFusionError),
+
     /// Signals a problem with the dataset configuration.
-    #[error("dataset error: {0}")]
-    DatasetError(DataFusionError),
+    #[error("dataset error: {0:#}")]
+    DatasetError(anyhow::Error),
+}
+
+pub struct BlockStats {
+    pub existing_blocks: BTreeMap<String, MultiRange>,
+
+    // Minimum latest block across all tables. If a table is empty, this is 0.
+    // Useful for knowing the earliest block to start from.
+    pub min_latest_block: BlockNum,
 }
 
 pub struct DatasetContext {
@@ -157,7 +173,7 @@ impl DatasetContext {
         let ctx = SessionContext::new_with_config_rt(self.session_config.clone(), self.env.clone());
         self.create_external_tables(&ctx)
             .await
-            .map_err(Error::DatasetError)?;
+            .map_err(|e| Error::DatasetError(e.into()))?;
         Ok(ctx)
     }
 
@@ -183,6 +199,36 @@ impl DatasetContext {
         self.env.object_store_registry.get_store(&self.data_url)
     }
 
+    /// Useful stats for datasets that have a `block_num` column on all tables.
+    pub async fn block_stats(&self) -> Result<BlockStats, Error> {
+        let mut min_latest_block: u64 = u64::MAX;
+        let mut existing_blocks: BTreeMap<String, MultiRange> = BTreeMap::new();
+        for table in self.tables() {
+            let table_name = table.name.clone();
+            let mut multirange = MultiRange::default();
+            let mut record_stream = self
+                .execute_sql(&format!(
+                    "select distinct({BLOCK_NUM}) from {} order by block_num",
+                    table_name
+                ))
+                .await?;
+            while let Some(batch) = record_stream.next().await {
+                let batch = batch.map_err(Error::ExecutionError)?;
+                let block_nums = batch.column(0).as_primitive::<UInt64Type>().values();
+                MultiRange::new(block_nums.as_ref())
+                    .and_then(|r| multirange.append(r))
+                    .map_err(|e| Error::DatasetError(e.into()))?;
+            }
+            min_latest_block = min_latest_block.min(multirange.max().unwrap_or(0));
+            existing_blocks.insert(table_name, multirange);
+        }
+
+        Ok(BlockStats {
+            existing_blocks,
+            min_latest_block,
+        })
+    }
+
     pub async fn print_schema(&self) -> Result<Vec<(Table, String)>, Error> {
         use datafusion::arrow::util::pretty::pretty_format_batches;
 
@@ -192,10 +238,10 @@ impl DatasetContext {
                 .execute_sql(format!("describe {}", table.name).as_str())
                 .await?;
             let Some(Ok(batch)) = record_stream.next().await else {
-                return Err(Error::DatasetError(DataFusionError::Execution(format!(
+                return Err(Error::DatasetError(anyhow!(
                     "no schema for table `{}`",
                     table.name,
-                ))));
+                )));
             };
             let pretty_schema = pretty_format_batches(&[batch])
                 .map_err(|e| Error::DatasetError(e.into()))?
