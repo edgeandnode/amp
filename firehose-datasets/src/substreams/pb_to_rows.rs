@@ -136,3 +136,55 @@ fn message_to_rows(list: &Vec<Value>, schema: Arc<Schema>, block_num: u64) -> Re
     }
     Ok(RecordBatch::try_new(schema, columns)?)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use common::arrow::datatypes::*;
+    use prost_reflect::DescriptorPool;
+    use std::sync::Arc;
+    use anyhow::Result;
+
+    #[test]
+    fn test_message_to_rows() -> Result<()> {
+        let fields = vec![
+            ("i32", Value::I32(1), DataType::Int32),
+            ("i64", Value::I64(2), DataType::Int64),
+            ("str", Value::String("test".to_string()), DataType::Utf8),
+            ("boolean", Value::Bool(true), DataType::Boolean),
+            (BLOCK_NUM, Value::U64(42), DataType::UInt64),
+        ];
+        let pool = DescriptorPool::decode(include_bytes!("test/descriptors.bin").as_ref()).unwrap();
+        let message_descriptor = pool.get_message_by_name("package.MyMessage").unwrap();
+
+        let mut dynamic_message = DynamicMessage::new(message_descriptor.clone());
+        fields.iter().for_each(|field| {
+            if field.0 == BLOCK_NUM { return; }
+            let field_descriptor = message_descriptor.get_field_by_name(field.0).unwrap();
+            dynamic_message.set_field(&field_descriptor, field.1.clone());
+        });
+        // let mut buff = Vec::new();
+        // dynamic_message.encode(&mut buff)?;
+        // let dynamic_message = DynamicMessage::decode(message_descriptor, [8, 1, 16, 2, 26, 8, 84, 101, 115, 116, 68, 97, 116, 97, 32, 1].as_ref()).unwrap();
+        let message = vec![
+            Value::Message(dynamic_message)
+        ];
+
+        let schema = Arc::new(Schema::new(fields.iter().map(|field| {
+            Field::new(field.0, field.2.clone(), false)
+        }).collect::<Vec<_>>()));
+
+        let result = message_to_rows(&message, schema, 42)?;
+
+        assert_eq!(result.num_columns(), 5);
+        assert_eq!(result.num_rows(), 1);
+
+        assert_eq!(result.column(0).as_any().downcast_ref::<Int32Array>().unwrap(), &Int32Array::from(vec![1]));
+        assert_eq!(result.column(1).as_any().downcast_ref::<Int64Array>().unwrap(), &Int64Array::from(vec![2]));
+        assert_eq!(result.column(2).as_any().downcast_ref::<StringArray>().unwrap(), &StringArray::from(vec!["test"]));
+        assert_eq!(result.column(3).as_any().downcast_ref::<BooleanArray>().unwrap(), &BooleanArray::from(vec![true]));
+        assert_eq!(result.column(4).as_any().downcast_ref::<UInt64Array>().unwrap(), &UInt64Array::from(vec![42]));
+
+        Ok(())
+    }
+}
