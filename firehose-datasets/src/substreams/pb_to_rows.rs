@@ -176,15 +176,35 @@ mod tests {
 
         let result = message_to_rows(&message, schema, 42)?;
 
-        assert_eq!(result.num_columns(), 5);
+        assert_eq!(result.num_columns(), fields.len());
         assert_eq!(result.num_rows(), 1);
 
-        assert_eq!(result.column(0).as_any().downcast_ref::<Int32Array>().unwrap(), &Int32Array::from(vec![1]));
-        assert_eq!(result.column(1).as_any().downcast_ref::<Int64Array>().unwrap(), &Int64Array::from(vec![2]));
-        assert_eq!(result.column(2).as_any().downcast_ref::<StringArray>().unwrap(), &StringArray::from(vec!["test"]));
-        assert_eq!(result.column(3).as_any().downcast_ref::<BooleanArray>().unwrap(), &BooleanArray::from(vec![true]));
-        assert_eq!(result.column(4).as_any().downcast_ref::<UInt64Array>().unwrap(), &UInt64Array::from(vec![42]));
-
+        for (i, (_, value, data_type)) in fields.iter().enumerate() {
+            match data_type {
+                DataType::Int32 => {
+                    let expected = Int32Array::from(vec![if let Value::I32(v) = value { *v } else { -1 }]);
+                    assert_eq!(result.column(i).as_any().downcast_ref::<Int32Array>().unwrap(), &expected);
+                },
+                DataType::Int64 => {
+                    let expected = Int64Array::from(vec![if let Value::I64(v) = value { *v } else { -1 }]);
+                    assert_eq!(result.column(i).as_any().downcast_ref::<Int64Array>().unwrap(), &expected);
+                },
+                DataType::Utf8 => {
+                    let expected = StringArray::from(vec![if let Value::String(v) = value { v.clone() } else { "".to_string() }]);
+                    assert_eq!(result.column(i).as_any().downcast_ref::<StringArray>().unwrap(), &expected);
+                },
+                DataType::Boolean => {
+                    let expected = BooleanArray::from(vec![if let Value::Bool(v) = value { *v } else { false }]);
+                    assert_eq!(result.column(i).as_any().downcast_ref::<BooleanArray>().unwrap(), &expected);
+                },
+                DataType::UInt64 => {
+                    let expected = UInt64Array::from(vec![if let Value::U64(v) = value { *v } else { 0 }]);
+                    assert_eq!(result.column(i).as_any().downcast_ref::<UInt64Array>().unwrap(), &expected);
+                },
+                _ => panic!("unsupported DataType"),
+            }
+        }
         Ok(())
     }
 }
+
