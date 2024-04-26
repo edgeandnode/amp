@@ -148,62 +148,73 @@ mod tests {
     #[test]
     fn test_message_to_rows() -> Result<()> {
         let fields = vec![
-            ("i32", Value::I32(1), DataType::Int32),
-            ("i64", Value::I64(2), DataType::Int64),
-            ("str", Value::String("test".to_string()), DataType::Utf8),
-            ("boolean", Value::Bool(true), DataType::Boolean),
-            (BLOCK_NUM, Value::U64(42), DataType::UInt64),
+            ("i32", vec![Value::I32(123412), Value::I32(345345), Value::I32(1234123)], DataType::Int32),
+            ("i64", vec![Value::I64(5435234), Value::I64(312312342), Value::I64(1234123413)], DataType::Int64),
+            ("str", vec![Value::String("test".to_string()), Value::String("test test".to_string()), Value::String("test test test".to_string())], DataType::Utf8),
+            ("boolean", vec![Value::Bool(true), Value::Bool(false), Value::Bool(true)], DataType::Boolean),
+            (BLOCK_NUM, vec![Value::U64(42), Value::U64(42), Value::U64(42)], DataType::UInt64),
         ];
         let pool = DescriptorPool::decode(include_bytes!("test/descriptors.bin").as_ref()).unwrap();
         let message_descriptor = pool.get_message_by_name("package.MyMessage").unwrap();
-
-        let mut dynamic_message = DynamicMessage::new(message_descriptor.clone());
-        fields.iter().for_each(|field| {
-            if field.0 == BLOCK_NUM { return; }
-            let field_descriptor = message_descriptor.get_field_by_name(field.0).unwrap();
-            dynamic_message.set_field(&field_descriptor, field.1.clone());
-        });
         // let mut buff = Vec::new();
         // dynamic_message.encode(&mut buff)?;
         // let dynamic_message = DynamicMessage::decode(message_descriptor, [8, 1, 16, 2, 26, 8, 84, 101, 115, 116, 68, 97, 116, 97, 32, 1].as_ref()).unwrap();
-        let message = vec![
+
+        let messages = fields.get(0).unwrap().1.iter().enumerate().map(|(i, _)| {
+            let mut dynamic_message = DynamicMessage::new(message_descriptor.clone());
+            fields.iter().for_each(|field| {
+                if field.0 == BLOCK_NUM { return; }
+                let field_descriptor = message_descriptor.get_field_by_name(field.0).unwrap();
+                dynamic_message.set_field(&field_descriptor, field.1[i].clone());
+            });
             Value::Message(dynamic_message)
-        ];
+        }).collect::<Vec<_>>();
 
         let schema = Arc::new(Schema::new(fields.iter().map(|field| {
             Field::new(field.0, field.2.clone(), false)
         }).collect::<Vec<_>>()));
 
-        let result = message_to_rows(&message, schema, 42)?;
+        let result = message_to_rows(&messages, schema, 42)?;
 
         assert_eq!(result.num_columns(), fields.len());
-        assert_eq!(result.num_rows(), 1);
+        assert_eq!(result.num_rows(), messages.len());
 
-        for (i, (_, value, data_type)) in fields.iter().enumerate() {
+        for (i, (_, values, data_type)) in fields.iter().enumerate() {
             match data_type {
                 DataType::Int32 => {
-                    let expected = Int32Array::from(vec![if let Value::I32(v) = value { *v } else { -1 }]);
+                    let expected = Int32Array::from(values.iter().filter_map(|v| {
+                        if let Value::I32(val) = v { Some(*val) } else { None }
+                    }).collect::<Vec<_>>());
                     assert_eq!(result.column(i).as_any().downcast_ref::<Int32Array>().unwrap(), &expected);
                 },
                 DataType::Int64 => {
-                    let expected = Int64Array::from(vec![if let Value::I64(v) = value { *v } else { -1 }]);
+                    let expected = Int64Array::from(values.iter().filter_map(|v| {
+                        if let Value::I64(val) = v { Some(*val) } else { None }
+                    }).collect::<Vec<_>>());
                     assert_eq!(result.column(i).as_any().downcast_ref::<Int64Array>().unwrap(), &expected);
                 },
                 DataType::Utf8 => {
-                    let expected = StringArray::from(vec![if let Value::String(v) = value { v.clone() } else { "".to_string() }]);
+                    let expected = StringArray::from(values.iter().filter_map(|v| {
+                        if let Value::String(val) = v { Some(val.clone()) } else { None }
+                    }).collect::<Vec<_>>());
                     assert_eq!(result.column(i).as_any().downcast_ref::<StringArray>().unwrap(), &expected);
                 },
                 DataType::Boolean => {
-                    let expected = BooleanArray::from(vec![if let Value::Bool(v) = value { *v } else { false }]);
+                    let expected = BooleanArray::from(values.iter().filter_map(|v| {
+                        if let Value::Bool(val) = v { Some(*val) } else { None }
+                    }).collect::<Vec<_>>());
                     assert_eq!(result.column(i).as_any().downcast_ref::<BooleanArray>().unwrap(), &expected);
                 },
                 DataType::UInt64 => {
-                    let expected = UInt64Array::from(vec![if let Value::U64(v) = value { *v } else { 0 }]);
+                    let expected = UInt64Array::from(values.iter().filter_map(|v| {
+                        if let Value::U64(val) = v { Some(*val) } else { None }
+                    }).collect::<Vec<_>>());
                     assert_eq!(result.column(i).as_any().downcast_ref::<UInt64Array>().unwrap(), &expected);
                 },
                 _ => panic!("unsupported DataType"),
             }
         }
+
         Ok(())
     }
 }
