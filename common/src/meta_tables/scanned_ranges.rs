@@ -9,7 +9,7 @@
 //! scanned. As the `existing_blocks` in `BlockStats` is what ensures no data is written twice. This
 //! is important as it lets us get away with this optimization even without an atomic transaction
 //! system. For example in:
-//! ```
+//! ```ignore
 //! write_real_data();
 //! write_scanned_ranges();
 //! ```

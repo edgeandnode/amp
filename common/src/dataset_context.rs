@@ -1,7 +1,4 @@
-use std::{
-    collections::{BTreeMap, HashMap},
-    sync::Arc,
-};
+use std::{collections::BTreeMap, sync::Arc};
 
 use anyhow::anyhow;
 use anyhow::Context as _;
@@ -59,16 +56,28 @@ pub struct BlockStats {
     pub min_latest_block: BlockNum,
 }
 
-pub struct DatasetContext {
-    env: Arc<RuntimeEnv>,
+struct TableUrl {
+    table: Table,
+    url: Url,
+}
+
+struct DatasetLocation {
     dataset: DataSet,
-    session_config: SessionConfig,
 
     // Physical location of the data.
     data_url: Url,
 
     // URLs for each table in the dataset, in a format understood by the object store.
-    table_urls: HashMap<Table, Url>,
+    table_urls: Vec<TableUrl>,
+
+    // Metadata tables. These are not part of a dataset and not queryable.
+    _meta_table_urls: Vec<TableUrl>,
+}
+
+pub struct DatasetContext {
+    env: Arc<RuntimeEnv>,
+    session_config: SessionConfig,
+    dataset_location: DatasetLocation,
 }
 
 impl DatasetContext {
@@ -100,24 +109,29 @@ impl DatasetContext {
         }
 
         let table_urls = {
-            let mut table_urls = HashMap::new();
-            for table in dataset.tables() {
+            let mut table_urls = Vec::new();
+            for table in dataset.tables().iter().cloned() {
                 let url = if data_url.scheme() == "file" {
                     Url::from_directory_path(&format!("/{}/", &table.name)).unwrap()
                 } else {
                     data_url.join(&format!("{}/", &table.name))?
                 };
-                table_urls.insert(table.clone(), url);
+                table_urls.push(TableUrl { table, url });
             }
             table_urls
         };
 
-        let this = Self {
-            env: Arc::new(env),
+        let dataset_location = DatasetLocation {
             dataset,
-            session_config,
             data_url,
             table_urls,
+            _meta_table_urls: Vec::new(),
+        };
+
+        let this = Self {
+            env: Arc::new(env),
+            dataset_location,
+            session_config,
         };
 
         // Do a 'dry run' to ensure the dataset is correctly configured.
@@ -178,25 +192,31 @@ impl DatasetContext {
     }
 
     async fn create_external_tables(&self, ctx: &SessionContext) -> Result<(), DataFusionError> {
-        for (table, url) in &self.table_urls {
+        for table_url in &self.dataset_location.table_urls {
             // We will eventually wante namespacing, for referencing many datasets in a single query.
-            let table_reference = TableReference::bare(table.name.clone());
+            let table_reference = TableReference::bare(table_url.table.name.clone());
 
-            let schema = table.schema.as_ref().clone().to_dfschema_ref()?;
+            let schema = table_url.table.schema.as_ref().clone().to_dfschema_ref()?;
 
-            let command = create_external_table(table_reference, schema, &url);
+            let command = create_external_table(table_reference, schema, &table_url.url);
             ctx.execute_logical_plan(command).await?;
         }
         Ok(())
     }
 
     pub fn tables(&self) -> &[Table] {
-        self.dataset.tables()
+        self.dataset().tables()
     }
 
     // Should never error unless there was a bug in the constructor.
     pub fn object_store(&self) -> Result<Arc<dyn ObjectStore>, DataFusionError> {
-        self.env.object_store_registry.get_store(&self.data_url)
+        self.env
+            .object_store_registry
+            .get_store(&self.dataset_location.data_url)
+    }
+
+    fn dataset(&self) -> &DataSet {
+        &self.dataset_location.dataset
     }
 
     /// Useful stats for datasets that have a `block_num` column on all tables.
