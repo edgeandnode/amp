@@ -2,6 +2,7 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use anyhow::anyhow;
 use anyhow::Context as _;
+use datafusion::arrow::array::RecordBatch;
 use datafusion::{
     arrow::{array::AsArray as _, datatypes::UInt64Type},
     common::{
@@ -24,6 +25,7 @@ use object_store::{gcp::GoogleCloudStorageBuilder, local::LocalFileSystem, Objec
 use thiserror::Error;
 use url::Url;
 
+use crate::meta_tables;
 use crate::{multirange::MultiRange, BlockNum, Dataset, Table, BLOCK_NUM};
 
 #[derive(Error, Debug)]
@@ -46,6 +48,9 @@ pub enum Error {
     /// Signals a problem with the dataset configuration.
     #[error("dataset error: {0:#}")]
     DatasetError(anyhow::Error),
+
+    #[error("meta table error: {0}")]
+    MetaTableError(DataFusionError),
 }
 
 pub struct BlockStats {
@@ -61,6 +66,20 @@ struct TableUrl {
     url: Url,
 }
 
+impl TableUrl {
+    fn resolve(base: &Url, table: &Table) -> Result<TableUrl, anyhow::Error> {
+        let url = if base.scheme() == "file" {
+            Url::from_directory_path(&format!("/{}/", &table.name)).unwrap()
+        } else {
+            base.join(&format!("{}/", &table.name))?
+        };
+        Ok(TableUrl {
+            table: table.clone(),
+            url,
+        })
+    }
+}
+
 struct DatasetLocation {
     dataset: Dataset,
 
@@ -71,7 +90,7 @@ struct DatasetLocation {
     table_urls: Vec<TableUrl>,
 
     // Metadata tables. These are not part of a dataset and not queryable.
-    _meta_table_urls: Vec<TableUrl>,
+    meta_table_urls: Vec<TableUrl>,
 }
 
 pub struct DatasetContext {
@@ -88,11 +107,13 @@ impl DatasetContext {
     /// - GCS: `gs://bucket-name/`
     pub async fn new(dataset: Dataset, data_location: String) -> Result<Self, anyhow::Error> {
         let (data_url, object_store) = infer_object_store(data_location)?;
-        Self::with_object_store(dataset, data_url, object_store).await
+        let meta = meta_tables::tables();
+        Self::with_object_store(dataset, meta, data_url, object_store).await
     }
 
     pub async fn with_object_store(
         dataset: Dataset,
+        meta: Vec<Table>,
         data_url: Url,
         object_store: Arc<dyn ObjectStore>,
     ) -> Result<Self, anyhow::Error> {
@@ -108,24 +129,22 @@ impl DatasetContext {
             session_config.options_mut().optimizer.prefer_existing_sort = true;
         }
 
-        let table_urls = {
-            let mut table_urls = Vec::new();
-            for table in dataset.tables().iter().cloned() {
-                let url = if data_url.scheme() == "file" {
-                    Url::from_directory_path(&format!("/{}/", &table.name)).unwrap()
-                } else {
-                    data_url.join(&format!("{}/", &table.name))?
-                };
-                table_urls.push(TableUrl { table, url });
-            }
-            table_urls
-        };
+        let table_urls = dataset
+            .tables()
+            .iter()
+            .map(|table| TableUrl::resolve(&data_url, table))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let meta_table_urls = meta
+            .iter()
+            .map(|table| TableUrl::resolve(&data_url, table))
+            .collect::<Result<Vec<_>, _>>()?;
 
         let dataset_location = DatasetLocation {
             dataset,
             data_url,
             table_urls,
-            _meta_table_urls: Vec::new(),
+            meta_table_urls,
         };
 
         let this = Self {
@@ -185,23 +204,10 @@ impl DatasetContext {
     // against a persistent `SessionContext`
     async fn datafusion_ctx(&self) -> Result<SessionContext, Error> {
         let ctx = SessionContext::new_with_config_rt(self.session_config.clone(), self.env.clone());
-        self.create_external_tables(&ctx)
+        create_external_tables(&ctx, &self.dataset_location.table_urls)
             .await
             .map_err(|e| Error::DatasetError(e.into()))?;
         Ok(ctx)
-    }
-
-    async fn create_external_tables(&self, ctx: &SessionContext) -> Result<(), DataFusionError> {
-        for table_url in &self.dataset_location.table_urls {
-            // We will eventually wante namespacing, for referencing many datasets in a single query.
-            let table_reference = TableReference::bare(table_url.table.name.clone());
-
-            let schema = table_url.table.schema.as_ref().clone().to_dfschema_ref()?;
-
-            let command = create_external_table(table_reference, schema, &table_url.url);
-            ctx.execute_logical_plan(command).await?;
-        }
-        Ok(())
     }
 
     pub fn tables(&self) -> &[Table] {
@@ -278,6 +284,21 @@ impl DatasetContext {
         }
         Ok(output)
     }
+
+    async fn datafusion_ctx_meta(&self) -> Result<SessionContext, Error> {
+        let ctx = SessionContext::new_with_config_rt(self.session_config.clone(), self.env.clone());
+        create_external_tables(&ctx, &self.dataset_location.meta_table_urls)
+            .await
+            .map_err(|e| Error::DatasetError(e.into()))?;
+        Ok(ctx)
+    }
+
+    /// Meta table queries are trusted and are expected to have small result sizes.
+    pub async fn execute_sql_meta(&self, query: &str) -> Result<Vec<RecordBatch>, Error> {
+        let ctx = self.datafusion_ctx_meta().await?;
+        let df = ctx.sql(query).await.map_err(Error::MetaTableError)?;
+        df.collect().await.map_err(Error::MetaTableError)
+    }
 }
 
 fn runtime_config() -> RuntimeConfig {
@@ -339,6 +360,20 @@ pub fn infer_object_store(
         let url = Url::from_directory_path(path).unwrap();
         Ok((url, store))
     }
+}
+
+async fn create_external_tables(
+    ctx: &SessionContext,
+    table_urls: &[TableUrl],
+) -> Result<(), DataFusionError> {
+    for table_url in table_urls {
+        // We will eventually wante namespacing, for referencing many datasets in a single query.
+        let table_reference = TableReference::bare(table_url.table.name.clone());
+        let schema = table_url.table.schema.as_ref().clone().to_dfschema_ref()?;
+        let command = create_external_table(table_reference, schema, &table_url.url);
+        ctx.execute_logical_plan(command).await?;
+    }
+    Ok(())
 }
 
 fn create_external_table(name: OwnedTableReference, schema: DFSchemaRef, url: &Url) -> LogicalPlan {

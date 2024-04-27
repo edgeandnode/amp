@@ -25,7 +25,7 @@ async fn print_schema_to_readme() {
     let dataset = dataset("whatever".to_string());
     let url = Url::parse("memory://test_url/").unwrap();
     let object_store = Arc::new(object_store::memory::InMemory::new());
-    let context = DatasetContext::with_object_store(dataset, url, object_store)
+    let context = DatasetContext::with_object_store(dataset, vec![], url, object_store)
         .await
         .unwrap();
 

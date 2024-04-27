@@ -68,8 +68,12 @@ impl From<Error> for Status {
             }
             Error::CoreError(CoreError::DatasetError(_)) => Status::internal(e.to_string()),
 
-            Error::CoreError(CoreError::PlanningError(df)) => datafusion_error_to_status(&e, df),
-            Error::CoreError(CoreError::ExecutionError(df)) => datafusion_error_to_status(&e, df),
+            Error::CoreError(
+                CoreError::PlanningError(df)
+                | CoreError::ExecutionError(df)
+                | CoreError::MetaTableError(df),
+            ) => datafusion_error_to_status(&e, df),
+
             Error::ExecutionError(df) => datafusion_error_to_status(&e, df),
         }
     }
