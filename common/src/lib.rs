@@ -62,13 +62,13 @@ pub(crate) type TimestampArrayType = arrow::array::TimestampNanosecondArray;
 
 /// Identifies a dataset and its data schema.
 #[derive(Clone, Debug)]
-pub struct DataSet {
+pub struct Dataset {
     pub name: String,
     pub network: String,
     pub data_schema: DataSchema,
 }
 
-impl DataSet {
+impl Dataset {
     pub fn tables(&self) -> &[Table] {
         &self.data_schema.tables
     }

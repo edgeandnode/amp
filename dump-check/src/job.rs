@@ -3,7 +3,7 @@ use anyhow::{anyhow, Context as _};
 use common::arrow::array::{AsArray, RecordBatch};
 use common::arrow::datatypes::UInt64Type;
 use common::dataset_context::DatasetContext;
-use common::{BlockStreamer, DataSet, BLOCK_NUM};
+use common::{BlockStreamer, Dataset, BLOCK_NUM};
 use futures::future::join_all;
 use futures::{FutureExt, StreamExt as _};
 use std::collections::HashMap;
@@ -11,7 +11,7 @@ use std::ops::RangeInclusive;
 use std::sync::Arc;
 
 pub struct Job<T: BlockStreamer> {
-    pub dataset: DataSet,
+    pub dataset: Dataset,
     pub block_streamer: T,
     pub start: u64,
     pub end: u64,

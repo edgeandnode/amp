@@ -24,7 +24,7 @@ use object_store::{gcp::GoogleCloudStorageBuilder, local::LocalFileSystem, Objec
 use thiserror::Error;
 use url::Url;
 
-use crate::{multirange::MultiRange, BlockNum, DataSet, Table, BLOCK_NUM};
+use crate::{multirange::MultiRange, BlockNum, Dataset, Table, BLOCK_NUM};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -62,7 +62,7 @@ struct TableUrl {
 }
 
 struct DatasetLocation {
-    dataset: DataSet,
+    dataset: Dataset,
 
     // Physical location of the data.
     data_url: Url,
@@ -86,13 +86,13 @@ impl DatasetContext {
     /// Examples of valid formats for `data_location`:
     /// - Filesystem path: `relative/path/to/data/`
     /// - GCS: `gs://bucket-name/`
-    pub async fn new(dataset: DataSet, data_location: String) -> Result<Self, anyhow::Error> {
+    pub async fn new(dataset: Dataset, data_location: String) -> Result<Self, anyhow::Error> {
         let (data_url, object_store) = infer_object_store(data_location)?;
         Self::with_object_store(dataset, data_url, object_store).await
     }
 
     pub async fn with_object_store(
-        dataset: DataSet,
+        dataset: Dataset,
         data_url: Url,
         object_store: Arc<dyn ObjectStore>,
     ) -> Result<Self, anyhow::Error> {
@@ -215,7 +215,7 @@ impl DatasetContext {
             .get_store(&self.dataset_location.data_url)
     }
 
-    fn dataset(&self) -> &DataSet {
+    fn dataset(&self) -> &Dataset {
         &self.dataset_location.dataset
     }
 

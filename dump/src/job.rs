@@ -1,6 +1,6 @@
 use common::multirange::MultiRange;
 use common::parquet::file::properties::WriterProperties as ParquetWriterProperties;
-use common::{BlockStreamer, DataSet};
+use common::{BlockStreamer, Dataset};
 use futures::FutureExt;
 use log::info;
 use object_store::ObjectStore;
@@ -10,7 +10,7 @@ use std::{sync::Arc, time::Instant};
 use crate::parquet_writer::DatasetWriter;
 
 pub struct Job<T: BlockStreamer> {
-    pub dataset: DataSet,
+    pub dataset: Dataset,
     pub block_streamer: T,
     pub start: u64,
     pub end: u64,

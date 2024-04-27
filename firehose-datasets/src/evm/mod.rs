@@ -1,11 +1,11 @@
 pub use crate::proto::sf::ethereum::r#type::v2 as pbethereum;
-use common::{DataSchema, DataSet};
+use common::{DataSchema, Dataset};
 
 pub mod pb_to_rows;
 pub mod tables;
 
-pub fn dataset(network: String) -> DataSet {
-    DataSet {
+pub fn dataset(network: String) -> Dataset {
+    Dataset {
         name: "evm-firehose".to_string(),
         network,
         data_schema: DataSchema {

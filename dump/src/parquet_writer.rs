@@ -4,7 +4,7 @@ use std::sync::Arc;
 use common::arrow::array::RecordBatch;
 use common::meta_tables::scanned_ranges::ScannedRange;
 use common::parquet::errors::ParquetError;
-use common::{parquet, BlockNum, DataSet, Table, TableRows};
+use common::{parquet, BlockNum, Dataset, Table, TableRows};
 use object_store::buffered::BufWriter;
 use object_store::path::Path;
 use object_store::ObjectStore;
@@ -28,7 +28,7 @@ pub struct DatasetWriter {
 
 impl DatasetWriter {
     pub async fn new(
-        dataset: &DataSet,
+        dataset: &Dataset,
         store: Arc<dyn ObjectStore>,
         opts: ParquetWriterProperties,
         start: BlockNum,
