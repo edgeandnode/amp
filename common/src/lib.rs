@@ -1,5 +1,6 @@
 pub mod arrow_helpers;
 pub mod dataset_context;
+pub mod meta_tables;
 pub mod multirange;
 
 pub use arrow_helpers::*;
@@ -108,7 +109,7 @@ impl TableRows {
     /// - If the table is empty.
     /// - If any table is missing the block_num column.
     /// - If the block_num column values are not all the same.
-    fn unify_block_num(&self) -> Result<u64, anyhow::Error> {
+    pub fn block_num(&self) -> Result<u64, anyhow::Error> {
         use arrow::compute::kernels::aggregate::max;
         use arrow::compute::kernels::aggregate::min;
 
@@ -170,7 +171,7 @@ impl DatasetRows {
             if table_rows.is_empty() {
                 continue;
             }
-            let block_num = table_rows.unify_block_num()?;
+            let block_num = table_rows.block_num()?;
             block_nums.push(block_num);
         }
 

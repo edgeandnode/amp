@@ -756,6 +756,7 @@ dependencies = [
  "datafusion",
  "datafusion-proto",
  "futures",
+ "lazy_static",
  "object_store",
  "thiserror",
  "tokio",

@@ -12,3 +12,4 @@ datafusion-proto.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 futures.workspace = true
+lazy_static.workspace = true
