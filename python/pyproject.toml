@@ -1,0 +1,18 @@
+[tool.poetry]
+name = "python-nozzle"
+version = "0.1.0"
+description = ""
+authors = ["David Lutterkort"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+protobuf = "^5.26.1"
+pyarrow = "^16.0.0"
+pandas = "^2.2.2"
+jupyter = "^1.0.0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
