@@ -2,9 +2,9 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use common::arrow::array::RecordBatch;
-use common::meta_tables::scanned_ranges::ScannedRange;
+use common::meta_tables::scanned_ranges::{self, ScannedRange, ScannedRangeRowsBuilder};
 use common::parquet::errors::ParquetError;
-use common::{parquet, BlockNum, Dataset, Table, TableRows};
+use common::{parquet, BlockNum, DatasetContext, Table, TableRows};
 use object_store::buffered::BufWriter;
 use object_store::path::Path;
 use object_store::ObjectStore;
@@ -24,27 +24,35 @@ pub struct DatasetWriter {
     opts: ParquetWriterProperties,
     store: Arc<dyn ObjectStore>,
     partition_size: u64,
+
+    // The scanned ranges waiting to be written to the `__scanned_ranges` table.
+    scanned_range_batch: ScannedRangeRowsBuilder,
+
+    // For inserting into `__scanned_ranges`
+    dataset_ctx: Arc<DatasetContext>,
 }
 
 impl DatasetWriter {
     pub async fn new(
-        dataset: &Dataset,
-        store: Arc<dyn ObjectStore>,
+        dataset_ctx: Arc<DatasetContext>,
         opts: ParquetWriterProperties,
         start: BlockNum,
         partition_size: u64,
     ) -> Result<Self, anyhow::Error> {
         let mut writers = BTreeMap::new();
-        for table in dataset.tables() {
+        let store = dataset_ctx.object_store()?;
+        for table in dataset_ctx.tables() {
             let path = Path::parse(&path_for_part(&table.name, start))?;
             let writer = ParquetWriter::new(&store, path, &table, opts.clone(), start).await?;
             writers.insert(table.name.clone(), writer);
         }
         Ok(DatasetWriter {
+            dataset_ctx,
             writers,
             opts,
             store,
             partition_size,
+            scanned_range_batch: ScannedRangeRowsBuilder::default(),
         })
     }
 
@@ -68,23 +76,58 @@ impl DatasetWriter {
             // The `__scanned_ranges` optimization works best if ranges are adjacent, even if the
             // tables themselves are sparse and don't have data for all block numbers. So we start
             // the new range at `block_num` and close the previous one at `block_num - 1`.
-            old_writer.close(block_num - 1).await?;
+            let scanned_range = old_writer.close(block_num - 1).await?;
+            self.scanned_range_batch.append(&scanned_range);
         }
 
         let writer = self.writers.get_mut(table.name.as_str()).unwrap();
-        let _scanned_range = writer.write(&table_rows.rows).await?;
+        writer.write(&table_rows.rows).await?;
 
         Ok(())
     }
 
     /// Flush and close all pending writes.
-    pub async fn close(self) -> Result<(), ParquetError> {
+    pub async fn close(mut self, end: BlockNum) -> Result<(), anyhow::Error> {
         for (_, writer) in self.writers {
-            let end = writer.bytes_written();
-            let _scanned_range = writer.close(end).await?;
+            let scanned_range = writer.close(end).await?;
+            self.scanned_range_batch.append(&scanned_range);
         }
+        flush_scanned_ranges(&self.dataset_ctx, self.scanned_range_batch).await?;
+
         Ok(())
     }
+}
+
+async fn flush_scanned_ranges(
+    ctx: &DatasetContext,
+    mut ranges: ScannedRangeRowsBuilder,
+) -> Result<(), anyhow::Error> {
+    use datafusion::common::ToDFSchema;
+    use datafusion::datasource::{DefaultTableSource, MemTable};
+    use datafusion::logical_expr::{DmlStatement, LogicalPlan, TableScan, WriteOp};
+
+    let batch = ranges.flush()?;
+
+    // Build a datafusion logical plan to insert the `batch` into the `__scanned_ranges` table.
+    let table = scanned_ranges::table();
+    let inserted_values = {
+        let mem_table = MemTable::try_new(table.schema.clone(), vec![vec![batch]])?;
+        let table_source = Arc::new(DefaultTableSource::new(Arc::new(mem_table)));
+        let table_scan =
+            TableScan::try_new("temp_scanned_range_input", table_source, None, vec![], None)?;
+        Arc::new(LogicalPlan::TableScan(table_scan))
+    };
+    let insert_plan = LogicalPlan::Dml(DmlStatement {
+        table_name: table.name.into(),
+        table_schema: table.schema.to_dfschema_ref()?,
+        op: WriteOp::InsertInto,
+        input: inserted_values,
+    });
+
+    // Execute plan against meta ctx
+    ctx.meta_execute_plan(insert_plan).await?;
+
+    Ok(())
 }
 
 pub struct ParquetWriter {

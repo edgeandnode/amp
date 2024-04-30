@@ -17,12 +17,9 @@
 
 use std::sync::Arc;
 
-use crate::{
-    arrow::array::{ArrayRef, StringBuilder},
-    TableRows,
-};
+use crate::arrow::array::{ArrayRef, StringBuilder};
 use datafusion::arrow::{
-    array::UInt64Builder,
+    array::{RecordBatch, UInt64Builder},
     datatypes::{DataType, Field, Schema, SchemaRef},
     error::ArrowError,
 };
@@ -65,25 +62,19 @@ pub struct ScannedRangeRowsBuilder {
 }
 
 impl ScannedRangeRowsBuilder {
-    pub fn singleton(scanned_range: ScannedRange) -> Result<TableRows, ArrowError> {
-        let mut builder = ScannedRangeRowsBuilder::default();
-        builder.append(&scanned_range);
-        builder.build()
-    }
-
-    fn append(&mut self, range: &ScannedRange) {
+    pub fn append(&mut self, range: &ScannedRange) {
         self.table.append_value(&range.table);
         self.range_start.append_value(range.range_start);
         self.range_end.append_value(range.range_end);
     }
 
-    fn build(&mut self) -> Result<TableRows, ArrowError> {
+    pub fn flush(&mut self) -> Result<RecordBatch, ArrowError> {
         let columns = vec![
             Arc::new(self.table.finish()) as ArrayRef,
             Arc::new(self.range_start.finish()) as ArrayRef,
             Arc::new(self.range_end.finish()) as ArrayRef,
         ];
 
-        TableRows::new(table(), columns)
+        RecordBatch::try_new(SCHEMA.clone(), columns)
     }
 }

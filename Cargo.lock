@@ -1198,6 +1198,7 @@ dependencies = [
  "anyhow",
  "clap",
  "common",
+ "datafusion",
  "firehose-datasets",
  "fs-err",
  "futures",

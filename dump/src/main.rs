@@ -1,6 +1,8 @@
 mod job;
 mod parquet_writer;
 
+use std::sync::Arc;
+
 use clap::Parser;
 use common::dataset_context::DatasetContext;
 use common::parquet;
@@ -101,7 +103,7 @@ async fn main() -> Result<(), anyhow::Error> {
     };
 
     let dataset = firehose_datasets::evm::dataset("mainnet".to_string());
-    let ctx = DatasetContext::new(dataset.clone(), to).await?;
+    let ctx = Arc::new(DatasetContext::new(dataset.clone(), to).await?);
     let block_stats = ctx.block_stats().await?;
     for (table_name, multirange) in &block_stats.existing_blocks {
         info!(
@@ -113,7 +115,6 @@ async fn main() -> Result<(), anyhow::Error> {
     let start = start.unwrap_or(block_stats.min_latest_block);
     info!("Starting from block {}", start);
 
-    let store = ctx.object_store()?;
     let jobs = {
         let mut jobs = vec![];
         let total_blocks = end_block - start + 1;
@@ -122,12 +123,11 @@ async fn main() -> Result<(), anyhow::Error> {
         while from <= end_block {
             let to = (from + blocks_per_job).min(end_block);
             jobs.push(Job {
-                dataset: dataset.clone(),
+                dataset_ctx: ctx.clone(),
                 block_streamer: client.clone(),
                 start: from,
                 end: to,
                 job_id: jobs.len() as u8,
-                store: store.clone(),
                 partition_size,
                 parquet_opts: parquet_opts(compression),
                 existing_blocks: block_stats.existing_blocks.clone(),

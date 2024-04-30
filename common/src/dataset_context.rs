@@ -3,6 +3,7 @@ use std::{collections::BTreeMap, sync::Arc};
 use anyhow::anyhow;
 use anyhow::Context as _;
 use datafusion::arrow::array::RecordBatch;
+use datafusion::logical_expr::Expr;
 use datafusion::{
     arrow::{array::AsArray as _, datatypes::UInt64Type},
     common::{
@@ -64,10 +65,17 @@ pub struct BlockStats {
 struct TableUrl {
     table: Table,
     url: Url,
+
+    // Physical ordering of the table at this location.
+    order_exprs: Vec<Vec<Expr>>,
 }
 
 impl TableUrl {
-    fn resolve(base: &Url, table: &Table) -> Result<TableUrl, anyhow::Error> {
+    fn resolve(
+        base: &Url,
+        table: &Table,
+        order_exprs: Vec<Vec<Expr>>,
+    ) -> Result<TableUrl, anyhow::Error> {
         let url = if base.scheme() == "file" {
             Url::from_directory_path(&format!("/{}/", &table.name)).unwrap()
         } else {
@@ -76,6 +84,7 @@ impl TableUrl {
         Ok(TableUrl {
             table: table.clone(),
             url,
+            order_exprs,
         })
     }
 }
@@ -129,15 +138,24 @@ impl DatasetContext {
             session_config.options_mut().optimizer.prefer_existing_sort = true;
         }
 
+        // Leveraging `order_exprs` can optimize away sorting for many query plans.
+        // TODO:
+        // - Make this less hardcoded to handle non-blockchain data.
+        // - Have a consistency check that the data really is sorted.
+        // - Do we want to address and leverage https://github.com/apache/arrow-datafusion/issues/4177?
+        let order_exprs = vec![
+            vec![col(BLOCK_NUM).sort(true, false)],
+            vec![col("timestamp").sort(true, false)],
+        ];
         let table_urls = dataset
             .tables()
             .iter()
-            .map(|table| TableUrl::resolve(&data_url, table))
+            .map(|table| TableUrl::resolve(&data_url, table, order_exprs.clone()))
             .collect::<Result<Vec<_>, _>>()?;
 
         let meta_table_urls = meta
             .iter()
-            .map(|table| TableUrl::resolve(&data_url, table))
+            .map(|table| TableUrl::resolve(&data_url, table, vec![]))
             .collect::<Result<Vec<_>, _>>()?;
 
         let dataset_location = DatasetLocation {
@@ -221,7 +239,7 @@ impl DatasetContext {
             .get_store(&self.dataset_location.data_url)
     }
 
-    fn dataset(&self) -> &Dataset {
+    pub fn dataset(&self) -> &Dataset {
         &self.dataset_location.dataset
     }
 
@@ -285,7 +303,7 @@ impl DatasetContext {
         Ok(output)
     }
 
-    async fn datafusion_ctx_meta(&self) -> Result<SessionContext, Error> {
+    async fn meta_datafusion_ctx(&self) -> Result<SessionContext, Error> {
         let ctx = SessionContext::new_with_config_rt(self.session_config.clone(), self.env.clone());
         create_external_tables(&ctx, &self.dataset_location.meta_table_urls)
             .await
@@ -294,9 +312,18 @@ impl DatasetContext {
     }
 
     /// Meta table queries are trusted and are expected to have small result sizes.
-    pub async fn execute_sql_meta(&self, query: &str) -> Result<Vec<RecordBatch>, Error> {
-        let ctx = self.datafusion_ctx_meta().await?;
+    pub async fn meta_execute_sql(&self, query: &str) -> Result<Vec<RecordBatch>, Error> {
+        let ctx = self.meta_datafusion_ctx().await?;
         let df = ctx.sql(query).await.map_err(Error::MetaTableError)?;
+        df.collect().await.map_err(Error::MetaTableError)
+    }
+
+    pub async fn meta_execute_plan(&self, plan: LogicalPlan) -> Result<Vec<RecordBatch>, Error> {
+        let ctx = self.meta_datafusion_ctx().await?;
+        let df = ctx
+            .execute_logical_plan(plan)
+            .await
+            .map_err(Error::MetaTableError)?;
         df.collect().await.map_err(Error::MetaTableError)
     }
 }
@@ -369,14 +396,24 @@ async fn create_external_tables(
     for table_url in table_urls {
         // We will eventually wante namespacing, for referencing many datasets in a single query.
         let table_reference = TableReference::bare(table_url.table.name.clone());
-        let schema = table_url.table.schema.as_ref().clone().to_dfschema_ref()?;
-        let command = create_external_table(table_reference, schema, &table_url.url);
+        let schema = table_url.table.schema.clone().to_dfschema_ref()?;
+        let command = create_external_table(
+            table_reference,
+            schema,
+            &table_url.url,
+            table_url.order_exprs.clone(),
+        );
         ctx.execute_logical_plan(command).await?;
     }
     Ok(())
 }
 
-fn create_external_table(name: OwnedTableReference, schema: DFSchemaRef, url: &Url) -> LogicalPlan {
+fn create_external_table(
+    name: OwnedTableReference,
+    schema: DFSchemaRef,
+    url: &Url,
+    order_exprs: Vec<Vec<Expr>>,
+) -> LogicalPlan {
     let command = CreateExternalTable {
         // Assume parquet, which has native compression.
         file_type: "PARQUET".to_string(),
@@ -385,16 +422,7 @@ fn create_external_table(name: OwnedTableReference, schema: DFSchemaRef, url: &U
         name,
         schema,
         location: url.to_string(),
-
-        // TODO:
-        // - Make this less hardcoded to handle non-blockchain data.
-        // - Have a consistency check that the data really is sorted.
-        // - Add other sorted columns that may be relevant such as `ordinal`.
-        // - Do we want to address and leverage https://github.com/apache/arrow-datafusion/issues/4177?
-        order_exprs: vec![
-            vec![col(BLOCK_NUM).sort(true, false)],
-            vec![col("timestamp").sort(true, false)],
-        ],
+        order_exprs,
 
         // Up to our preference, but maybe it's more robust for the caller to check existence.
         if_not_exists: false,

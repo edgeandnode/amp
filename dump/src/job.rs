@@ -1,21 +1,19 @@
 use common::multirange::MultiRange;
 use common::parquet::file::properties::WriterProperties as ParquetWriterProperties;
-use common::{BlockStreamer, Dataset};
+use common::{BlockStreamer, DatasetContext};
 use futures::FutureExt;
 use log::info;
-use object_store::ObjectStore;
 use std::collections::BTreeMap;
 use std::{sync::Arc, time::Instant};
 
 use crate::parquet_writer::DatasetWriter;
 
 pub struct Job<T: BlockStreamer> {
-    pub dataset: Dataset,
+    pub dataset_ctx: Arc<DatasetContext>,
     pub block_streamer: T,
     pub start: u64,
     pub end: u64,
     pub job_id: u8,
-    pub store: Arc<dyn ObjectStore>,
     pub parquet_opts: ParquetWriterProperties,
 
     // The target size of each table partition file in bytes. This is measured as the estimated
@@ -43,8 +41,7 @@ pub async fn run_job(job: Job<impl BlockStreamer>) -> Result<(), anyhow::Error> 
     };
 
     let mut writer = DatasetWriter::new(
-        &job.dataset,
-        job.store,
+        job.dataset_ctx.clone(),
         job.parquet_opts,
         job.start,
         job.partition_size,
@@ -90,7 +87,7 @@ pub async fn run_job(job: Job<impl BlockStreamer>) -> Result<(), anyhow::Error> 
     firehose_join_handle.now_or_never().unwrap()??;
 
     // Close the last part file for each table, checking for any errors.
-    writer.close().await?;
+    writer.close(job.end).await?;
 
     Ok(())
 }

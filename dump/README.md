@@ -12,6 +12,8 @@ by running the command again.
 
 Check the `--help` text for more configuration options.
 
+To get logs, set `RUST_LOG=info`.
+
 ## Config
 
 A config file toml is required. The path to the file can be configured in the CLI with `--config` or
