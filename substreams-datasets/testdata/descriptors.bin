@@ -1,0 +1,9 @@
+
+z
+
+test.protopackage"[
+	MyMessage
+i32 (Ri32
+i64 (Ri64
+str (	Rstr
+boolean (Rbooleanbproto3

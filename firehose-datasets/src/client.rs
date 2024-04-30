@@ -135,7 +135,7 @@ impl Client {
 }
 
 #[derive(Clone)]
-struct AuthInterceptor {
+pub struct AuthInterceptor {
     pub token: Option<MetadataValue<Ascii>>,
 }
 
