@@ -4,7 +4,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut prost_config = prost_build::Config::new();
 
     // These comments break doc tests, so we disable them.
-    prost_config.disable_comments(&["google.protobuf.Timestamp", "google.protobuf.Any"]);
+    prost_config.disable_comments(["google.protobuf.Timestamp", "google.protobuf.Any"]);
 
     let config = tonic_build::configure()
         .build_server(false)
