@@ -1,12 +1,12 @@
 use common::BlockStreamer;
-use firehose_datasets::client::Client as EvmClient;
+use firehose_datasets::client::Client as FirehoseClient;
 use substreams_datasets::client::Client as SubstreamsClient;
 use tokio::sync::mpsc;
 
 
 #[derive(Clone)]
 pub enum BlockStreamerClient {
-    EvmClient(EvmClient),
+    FirehoseClient(FirehoseClient),
     SubstreamsClient(SubstreamsClient),
 }
 
@@ -18,8 +18,8 @@ impl BlockStreamer for BlockStreamerClient {
         tx: mpsc::Sender<common::DatasetRows>,
     ) -> Result<(), anyhow::Error> {
         match self {
-            BlockStreamerClient::EvmClient(client) => client.block_stream(start_block, end_block, tx).await,
-            BlockStreamerClient::SubstreamsClient(substreams_client) => substreams_client.block_stream(start_block, end_block, tx).await,
+            BlockStreamerClient::FirehoseClient(client) => client.block_stream(start_block, end_block, tx).await,
+            BlockStreamerClient::SubstreamsClient(client) => client.block_stream(start_block, end_block, tx).await,
         }
     }
 }

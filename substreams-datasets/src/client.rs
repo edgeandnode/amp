@@ -2,7 +2,6 @@ use std::str::FromStr as _;
 use tokio::sync::mpsc;
 use anyhow::anyhow;
 use prost::Message as _;
-use reqwest::Url;
 
 use firehose_datasets::client::{AuthInterceptor, Error, FirehoseProvider};
 
@@ -21,6 +20,7 @@ use common::{
     BlockNum,
     BlockStreamer,
     DatasetRows,
+    Table,
 };
 use super::{
     pb_to_rows::pb_to_rows,
@@ -45,7 +45,7 @@ pub struct Client {
 
 impl Package {
     pub async fn from_url(url: &str) -> Result<Self, Error> {
-        let url = Url::parse(url).map_err(|_| Error::AssertFail(anyhow!("failed to parse spkg url")))?;
+        let url = reqwest::Url::parse(url).map_err(|_| Error::AssertFail(anyhow!("failed to parse spkg url")))?;
 
         let response = reqwest::get(url).await.map_err(|_| Error::AssertFail(anyhow!("failed to get spkg")))?;
         if !response.status().is_success() {
@@ -75,6 +75,10 @@ impl Client {
         let tables = Tables::from_package(&package, output_module.clone()).map_err(|_| Error::AssertFail(anyhow!("failed to build tables from spkg")))?;
 
         Ok(Self { stream_client, package, tables, output_module })
+    }
+
+    pub fn tables(&self) -> &Vec<Table> {
+        &self.tables.tables
     }
 
     /// Both `start` and `stop` are inclusive. Could be abstracted to handle multiple chains, but for

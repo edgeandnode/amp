@@ -15,6 +15,8 @@ by running the command again.
 
 Check the `--help` text for more configuration options.
 
+To get logs, set `RUST_LOG=info`.
+
 ## Substreams
 
 To dump substreams module output you will need a substreams module that contains repeated messages in the output, which is a common substreams pattern.
