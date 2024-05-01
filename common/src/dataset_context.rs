@@ -22,7 +22,12 @@ use datafusion::{
     sql::TableReference,
 };
 use futures::StreamExt as _;
-use object_store::{gcp::GoogleCloudStorageBuilder, local::LocalFileSystem, ObjectStore};
+use object_store::{
+    gcp::GoogleCloudStorageBuilder,
+    aws::AmazonS3Builder,
+    local::LocalFileSystem,
+    ObjectStore
+};
 use thiserror::Error;
 use url::Url;
 
@@ -114,6 +119,7 @@ impl DatasetContext {
     /// Examples of valid formats for `data_location`:
     /// - Filesystem path: `relative/path/to/data/`
     /// - GCS: `gs://bucket-name/`
+    /// - S3: `s3://bucket-name/`
     pub async fn new(dataset: Dataset, data_location: String) -> Result<Self, anyhow::Error> {
         let (data_url, object_store) = infer_object_store(data_location)?;
         let meta = meta_tables::tables();
@@ -377,6 +383,18 @@ pub fn infer_object_store(
 
         let store = Arc::new(
             GoogleCloudStorageBuilder::from_env()
+                .with_bucket_name(bucket)
+                .build()?,
+        );
+        Ok((Url::parse(&data_location)?, store))
+    } else if data_location.starts_with("s3://") {
+        let bucket = {
+            let segment = data_location.trim_start_matches("s3://").split('/').next();
+            segment.context("invalid S3 url")?
+        };
+
+        let store = Arc::new(
+            AmazonS3Builder::from_env()
                 .with_bucket_name(bucket)
                 .build()?,
         );
