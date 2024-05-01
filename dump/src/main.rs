@@ -108,26 +108,25 @@ async fn main() -> Result<(), anyhow::Error> {
         ));
     }
 
-    let (dataset, client) = {
+    let client = {
         let config = fs::read_to_string(&config)?;
         let provider = toml::from_str(&config)?;
         if manifest.is_none() {
-            (
-                firehose_datasets::evm::dataset("mainnet".to_string()),
-                BlockStreamerClient::EvmClient(firehose_datasets::client::Client::new(provider).await?)
-            )
+            BlockStreamerClient::EvmClient(firehose_datasets::client::Client::new(provider).await?)
         } else {
             let manifest = manifest.context("missing manifest")?;
             let module = module.context("missing output module")?;
             let client = substreams_datasets::client::Client::new(provider, manifest, module).await?;
-            (
-                substreams_datasets::dataset("mainnet".to_string(), client.tables.tables.clone()),
-                BlockStreamerClient::SubstreamsClient(client)
-            )
+            BlockStreamerClient::SubstreamsClient(client)
         }
     };
 
-    let ctx = Arc::new(DatasetContext::new(dataset.clone(), to).await?);
+    let dataset = match client {
+        BlockStreamerClient::EvmClient(_) => firehose_datasets::evm::dataset("mainnet".to_string()),
+        BlockStreamerClient::SubstreamsClient(ref client) => substreams_datasets::dataset("mainnet".to_string(), client.tables.tables.clone()),
+    };
+
+    let ctx = Arc::new(DatasetContext::new(dataset, to).await?);
     let block_stats = ctx.block_stats().await?;
     for (table_name, multirange) in &block_stats.existing_blocks {
         info!(
