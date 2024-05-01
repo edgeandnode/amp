@@ -39,6 +39,7 @@ use pbsubstreams::{
 pub struct Client {
     pub stream_client: StreamClient<InterceptedService<Channel, AuthInterceptor>>,
     pub tables: Tables,
+    pub package: Package,
     pub output_module: String,
 }
 
@@ -71,9 +72,9 @@ impl Client {
         };
         let package = Package::from_url(manifest.as_str()).await?;
 
-        let tables = Tables::from_package(package, output_module.clone()).map_err(|_| Error::AssertFail(anyhow!("failed to build tables from spkg")))?;
+        let tables = Tables::from_package(&package, output_module.clone()).map_err(|_| Error::AssertFail(anyhow!("failed to build tables from spkg")))?;
 
-        Ok(Client { stream_client, tables, output_module })
+        Ok(Self { stream_client, package, tables, output_module })
     }
 
     /// Both `start` and `stop` are inclusive. Could be abstracted to handle multiple chains, but for
@@ -89,7 +90,7 @@ impl Client {
 
             start_cursor: String::new(),
             final_blocks_only: true,
-            modules: self.tables.package.modules.clone(),
+            modules: self.package.modules.clone(),
             production_mode: true,
             output_module: self.output_module.clone(),
             debug_initial_store_snapshot_for_modules: vec![],

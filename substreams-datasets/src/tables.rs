@@ -16,13 +16,12 @@ use crate::proto::{
 #[derive(Debug, Clone)]
 pub struct Tables {
     pub tables: Vec<Table>,
-    pub package: Package,
     pub message_descriptor: MessageDescriptor,
 }
 
 impl Tables {
     // create table schemas from spkg package
-    pub fn from_package(package: Package, output_module: String) -> Result<Self, anyhow::Error> {
+    pub fn from_package(package: &Package, output_module: String) -> Result<Self, anyhow::Error> {
 
         let descr_set = FileDescriptorSet {
             file: package.proto_files.clone()
@@ -68,7 +67,7 @@ impl Tables {
         }).collect();
 
 
-        Ok(Self { tables, package, message_descriptor })
+        Ok(Self { tables, message_descriptor })
     }
 
 
