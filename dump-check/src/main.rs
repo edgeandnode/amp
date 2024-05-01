@@ -1,12 +1,11 @@
 mod job;
 mod metrics;
+mod ui;
 
 use clap::Parser;
 use common::dataset_context::DatasetContext;
 use firehose_datasets::client::Client;
-use futures::future::join_all;
-use human_bytes::human_bytes;
-use indicatif::{ProgressBar, ProgressStyle};
+use futures::future::try_join_all;
 use job::Job;
 use std::{fs, sync::Arc};
 
@@ -61,6 +60,8 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
+    tracing_subscriber::fmt::init();
+
     let args = Args::parse();
     let Args {
         config,
@@ -74,6 +75,12 @@ async fn main() -> Result<(), anyhow::Error> {
     if end_block == 0 {
         return Err(anyhow::anyhow!(
             "The end block number must be greater than 0"
+        ));
+    }
+
+    if start > end_block {
+        return Err(anyhow::anyhow!(
+            "The start block number must be less than the end block number"
         ));
     }
 
@@ -92,7 +99,7 @@ async fn main() -> Result<(), anyhow::Error> {
 
     let ctx = Arc::new(DatasetContext::new(dataset.clone(), to).await?);
     let total_blocks = end_block - start + 1;
-    let ui_handle = tokio::spawn(ui(total_blocks, metrics.clone()));
+    let ui_handle = tokio::spawn(ui::ui(total_blocks, metrics.clone()));
 
     let jobs = {
         let mut jobs = vec![];
@@ -115,30 +122,12 @@ async fn main() -> Result<(), anyhow::Error> {
         jobs
     };
 
-    for res in join_all(jobs.into_iter().map(job::run_job)).await {
-        res?;
-    }
+    // early return if any job errors out
+    try_join_all(jobs.into_iter().map(job::run_job)).await?;
 
     ui_handle.await?;
 
     println!("Validated successfully {total_blocks} blocks");
 
     Ok(())
-}
-
-async fn ui(blocks: u64, metrics: Arc<MetricsRegistry>) {
-    let pb = ProgressBar::new(blocks);
-    pb.set_style(
-        ProgressStyle::default_bar()
-            .template("[{elapsed_precise}] {bar:60.cyan/blue} {pos:>7}/{len:7} {msg}")
-            .unwrap()
-            .progress_chars("##-"),
-    );
-
-    while metrics.blocks_read.get() < blocks as f64 {
-        pb.set_position(metrics.blocks_read.get() as u64);
-        pb.set_message(format!("{:>10}", human_bytes(metrics.bytes_read.get())));
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    }
-    pb.finish_with_message(format!("{:>10}", human_bytes(metrics.bytes_read.get())));
 }
