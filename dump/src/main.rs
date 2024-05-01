@@ -1,18 +1,20 @@
 mod job;
 mod parquet_writer;
+mod client;
 
 use std::sync::Arc;
 
+use anyhow::Context as _;
 use clap::Parser;
 use common::dataset_context::DatasetContext;
 use common::parquet;
-use firehose_datasets::client::Client;
 use fs_err as fs;
 use futures::future::join_all;
 use job::Job;
 use log::info;
 use parquet::basic::{Compression, ZstdLevel};
 use parquet::file::properties::WriterProperties as ParquetWriterProperties;
+use crate::client::BlockStreamerClient;
 
 /// A tool for dumping a range of firehose blocks to a protobufs json file and/or for converting them
 /// to parquet tables.
@@ -67,6 +69,14 @@ struct Args {
     /// Whether to disable compression when writing parquet files. Defaults to false.
     #[arg(long, env = "DUMP_DISABLE_COMPRESSION")]
     disable_compression: bool,
+
+    // Substreams package manifest URL if streaming substreams data
+    #[arg(long, env = "DUMP_SUBSTREAMS_MANIFEST")]
+    manifest: Option<String>,
+
+    // Substreams output module name
+    #[arg(long, env = "DUMP_SUBSTREAMS_MODULE")]
+    module: Option<String>,
 }
 
 #[tokio::main]
@@ -82,6 +92,8 @@ async fn main() -> Result<(), anyhow::Error> {
         n_jobs,
         partition_size_mb,
         disable_compression,
+        manifest,
+        module,
     } = args;
     let partition_size = partition_size_mb * 1024 * 1024;
     let compression = if disable_compression {
@@ -99,11 +111,22 @@ async fn main() -> Result<(), anyhow::Error> {
     let client = {
         let config = fs::read_to_string(&config)?;
         let provider = toml::from_str(&config)?;
-        Client::new(provider).await?
+        if manifest.is_none() {
+            BlockStreamerClient::FirehoseClient(firehose_datasets::client::Client::new(provider).await?)
+        } else {
+            let manifest = manifest.context("missing manifest")?;
+            let module = module.context("missing output module")?;
+            let client = substreams_datasets::client::Client::new(provider, manifest, module).await?;
+            BlockStreamerClient::SubstreamsClient(client)
+        }
     };
 
-    let dataset = firehose_datasets::evm::dataset("mainnet".to_string());
-    let ctx = Arc::new(DatasetContext::new(dataset.clone(), to).await?);
+    let dataset = match client {
+        BlockStreamerClient::FirehoseClient(_) => firehose_datasets::evm::dataset("mainnet".to_string()),
+        BlockStreamerClient::SubstreamsClient(ref client) => substreams_datasets::dataset("mainnet".to_string(), client.tables().clone()),
+    };
+
+    let ctx = Arc::new(DatasetContext::new(dataset, to).await?);
     let block_stats = ctx.block_stats().await?;
     for (table_name, multirange) in &block_stats.existing_blocks {
         info!(

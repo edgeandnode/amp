@@ -6,6 +6,7 @@ version.workspace = true
 [dependencies]
 common = { path = "../common" }
 firehose-datasets = { path = "../firehose-datasets" }
+substreams-datasets = { path = "../substreams-datasets" }
 tokio.workspace = true
 serde_json.workspace = true
 futures.workspace = true
