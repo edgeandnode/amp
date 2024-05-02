@@ -1,8 +1,12 @@
 pub use crate::proto::sf::ethereum::r#type::v2 as pbethereum;
 use common::{DataSchema, Dataset};
 
+use self::event::{EvmDecode, EvmTopic};
+
 pub mod pb_to_rows;
 pub mod tables;
+
+mod event;
 
 pub fn dataset(network: String) -> Dataset {
     Dataset {
@@ -10,6 +14,7 @@ pub fn dataset(network: String) -> Dataset {
         network,
         data_schema: DataSchema {
             tables: tables::all(),
+            scalar_udfs: vec![EvmDecode::new().into(), EvmTopic::new().into()],
         },
     }
 }

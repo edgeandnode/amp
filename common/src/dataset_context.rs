@@ -223,10 +223,12 @@ impl DatasetContext {
     // sessions created by this function, and they will behave the same as if they had been run
     // against a persistent `SessionContext`
     async fn datafusion_ctx(&self) -> Result<SessionContext, Error> {
-        let ctx = SessionContext::new_with_config_rt(self.session_config.clone(), self.env.clone());
+        let mut ctx =
+            SessionContext::new_with_config_rt(self.session_config.clone(), self.env.clone());
         create_external_tables(&ctx, &self.dataset_location.table_urls)
             .await
             .map_err(|e| Error::DatasetError(e.into()))?;
+        self.dataset_location.dataset.register(&mut ctx);
         Ok(ctx)
     }
 
