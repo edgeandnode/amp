@@ -78,6 +78,11 @@ impl DatasetWriter {
             // the new range at `block_num` and close the previous one at `block_num - 1`.
             let scanned_range = old_writer.close(block_num - 1).await?;
             self.scanned_range_batch.append(&scanned_range);
+
+            // Periodically flush the scanned ranges so the dump process can resume efficiently
+            if self.scanned_range_batch.len() >= 10 {
+                flush_scanned_ranges(&self.dataset_ctx, &mut self.scanned_range_batch).await?;
+            }
         }
 
         let writer = self.writers.get_mut(table.name.as_str()).unwrap();
@@ -92,7 +97,7 @@ impl DatasetWriter {
             let scanned_range = writer.close(end).await?;
             self.scanned_range_batch.append(&scanned_range);
         }
-        flush_scanned_ranges(&self.dataset_ctx, self.scanned_range_batch).await?;
+        flush_scanned_ranges(&self.dataset_ctx, &mut self.scanned_range_batch).await?;
 
         Ok(())
     }
@@ -100,7 +105,7 @@ impl DatasetWriter {
 
 async fn flush_scanned_ranges(
     ctx: &DatasetContext,
-    mut ranges: ScannedRangeRowsBuilder,
+    ranges: &mut ScannedRangeRowsBuilder,
 ) -> Result<(), anyhow::Error> {
     use datafusion::common::ToDFSchema;
     use datafusion::datasource::{DefaultTableSource, MemTable};

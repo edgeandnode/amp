@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use crate::arrow::array::{ArrayRef, StringBuilder};
 use datafusion::arrow::{
-    array::{RecordBatch, UInt64Builder},
+    array::{ArrayBuilder as _, RecordBatch, UInt64Builder},
     datatypes::{DataType, Field, Schema, SchemaRef},
     error::ArrowError,
 };
@@ -76,5 +76,9 @@ impl ScannedRangeRowsBuilder {
         ];
 
         RecordBatch::try_new(SCHEMA.clone(), columns)
+    }
+
+    pub fn len(&self) -> usize {
+        self.table.len()
     }
 }
