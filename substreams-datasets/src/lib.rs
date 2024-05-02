@@ -1,6 +1,6 @@
 pub mod client;
-pub mod tables;
 pub(crate) mod pb_to_rows;
+pub mod tables;
 
 mod proto;
 
@@ -10,8 +10,6 @@ pub fn dataset(network: String, tables: Vec<Table>) -> Dataset {
     Dataset {
         name: "substreams".to_string(),
         network,
-        data_schema: DataSchema {
-            tables,
-        },
+        data_schema: DataSchema { tables },
     }
 }

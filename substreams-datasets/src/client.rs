@@ -1,38 +1,22 @@
-use std::str::FromStr as _;
-use tokio::sync::mpsc;
 use anyhow::anyhow;
 use prost::Message as _;
+use std::str::FromStr as _;
+use tokio::sync::mpsc;
 
 use firehose_datasets::client::{AuthInterceptor, Error, FirehoseProvider};
 
+use futures::{Stream, StreamExt as _, TryStreamExt as _};
 use tonic::{
-    service::interceptor::InterceptedService,
     codec::CompressionEncoding,
-    transport::{Uri, Endpoint, Channel},
-};
-use futures::{
-    Stream,
-    TryStreamExt as _,
-    StreamExt as _,
+    service::interceptor::InterceptedService,
+    transport::{Channel, Endpoint, Uri},
 };
 
-use common::{
-    BlockNum,
-    BlockStreamer,
-    DatasetRows,
-    Table,
-};
-use super::{
-    pb_to_rows::pb_to_rows,
-    tables::Tables,
-};
+use super::{pb_to_rows::pb_to_rows, tables::Tables};
 use crate::proto::sf::substreams::rpc::v2::{self as pbsubstreams, BlockScopedData};
 use crate::proto::sf::substreams::v1::Package;
-use pbsubstreams::{
-    stream_client::StreamClient,
-    Request as StreamRequest,
-    response::Message,
-};
+use common::{BlockNum, BlockStreamer, DatasetRows, Table};
+use pbsubstreams::{response::Message, stream_client::StreamClient, Request as StreamRequest};
 
 // Cloning is cheap and shares the underlying connection.
 #[derive(Clone)]
@@ -45,14 +29,22 @@ pub struct Client {
 
 impl Package {
     pub async fn from_url(url: &str) -> Result<Self, Error> {
-        let url = reqwest::Url::parse(url).map_err(|_| Error::AssertFail(anyhow!("failed to parse spkg url")))?;
+        let url = reqwest::Url::parse(url)
+            .map_err(|_| Error::AssertFail(anyhow!("failed to parse spkg url")))?;
 
-        let response = reqwest::get(url).await.map_err(|_| Error::AssertFail(anyhow!("failed to get spkg")))?;
+        let response = reqwest::get(url)
+            .await
+            .map_err(|_| Error::AssertFail(anyhow!("failed to get spkg")))?;
         if !response.status().is_success() {
-            return Err(Error::AssertFail(anyhow!("Failed to fetch package from URL")));
+            return Err(Error::AssertFail(anyhow!(
+                "Failed to fetch package from URL"
+            )));
         }
 
-        let bytes = response.bytes().await.map_err(|_| Error::AssertFail(anyhow!("failed to read response bytes")))?;
+        let bytes = response
+            .bytes()
+            .await
+            .map_err(|_| Error::AssertFail(anyhow!("failed to read response bytes")))?;
         let decoded = Self::decode(bytes.as_ref())?;
 
         Ok(decoded)
@@ -60,7 +52,11 @@ impl Package {
 }
 
 impl Client {
-    pub async fn new(cfg: FirehoseProvider, manifest: String, output_module: String) -> Result<Self, Error> {
+    pub async fn new(
+        cfg: FirehoseProvider,
+        manifest: String,
+        output_module: String,
+    ) -> Result<Self, Error> {
         let FirehoseProvider { url, token } = cfg;
         let stream_client = {
             let uri = Uri::from_str(&url)?;
@@ -72,9 +68,15 @@ impl Client {
         };
         let package = Package::from_url(manifest.as_str()).await?;
 
-        let tables = Tables::from_package(&package, output_module.clone()).map_err(|_| Error::AssertFail(anyhow!("failed to build tables from spkg")))?;
+        let tables = Tables::from_package(&package, output_module.clone())
+            .map_err(|_| Error::AssertFail(anyhow!("failed to build tables from spkg")))?;
 
-        Ok(Self { stream_client, package, tables, output_module })
+        Ok(Self {
+            stream_client,
+            package,
+            tables,
+            output_module,
+        })
     }
 
     pub fn tables(&self) -> &Vec<Table> {
@@ -104,11 +106,8 @@ impl Client {
         let block_stream = raw_stream
             .err_into::<Error>()
             .and_then(|response| async move {
-
                 match response.message {
-                    Some(Message::BlockScopedData(data)) => {
-                        Ok(data)
-                    }
+                    Some(Message::BlockScopedData(data)) => Ok(data),
                     Some(Message::FatalError(_)) => {
                         return Err(Error::AssertFail(anyhow!("Error streaming")));
                     }
@@ -121,7 +120,6 @@ impl Client {
         Ok(block_stream)
     }
 }
-
 
 impl BlockStreamer for Client {
     /// Once spawned, will continuously fetch blocks from the Firehose and send them through the channel.
@@ -138,7 +136,6 @@ impl BlockStreamer for Client {
         end_block: u64,
         tx: mpsc::Sender<DatasetRows>,
     ) -> Result<(), anyhow::Error> {
-
         // Explicitly track the next block in case we need to restart the Firehose stream.
         let mut next_block = start_block;
 
@@ -154,7 +151,10 @@ impl BlockStreamer for Client {
             while let Some(block) = stream.next().await {
                 match block {
                     Ok(block) => {
-                        if block.clock.is_none() || block.output.is_none() || block.output.as_ref().unwrap().map_output.is_none(){
+                        if block.clock.is_none()
+                            || block.output.is_none()
+                            || block.output.as_ref().unwrap().map_output.is_none()
+                        {
                             continue;
                         }
                         let block_num = block.clock.as_ref().unwrap().number;

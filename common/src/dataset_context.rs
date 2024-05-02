@@ -23,10 +23,7 @@ use datafusion::{
 };
 use futures::StreamExt as _;
 use object_store::{
-    gcp::GoogleCloudStorageBuilder,
-    aws::AmazonS3Builder,
-    local::LocalFileSystem,
-    ObjectStore
+    aws::AmazonS3Builder, gcp::GoogleCloudStorageBuilder, local::LocalFileSystem, ObjectStore,
 };
 use thiserror::Error;
 use url::Url;

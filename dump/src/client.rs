@@ -3,7 +3,6 @@ use firehose_datasets::client::Client as FirehoseClient;
 use substreams_datasets::client::Client as SubstreamsClient;
 use tokio::sync::mpsc;
 
-
 #[derive(Clone)]
 pub enum BlockStreamerClient {
     FirehoseClient(FirehoseClient),
@@ -18,8 +17,12 @@ impl BlockStreamer for BlockStreamerClient {
         tx: mpsc::Sender<common::DatasetRows>,
     ) -> Result<(), anyhow::Error> {
         match self {
-            BlockStreamerClient::FirehoseClient(client) => client.block_stream(start_block, end_block, tx).await,
-            BlockStreamerClient::SubstreamsClient(client) => client.block_stream(start_block, end_block, tx).await,
+            BlockStreamerClient::FirehoseClient(client) => {
+                client.block_stream(start_block, end_block, tx).await
+            }
+            BlockStreamerClient::SubstreamsClient(client) => {
+                client.block_stream(start_block, end_block, tx).await
+            }
         }
     }
 }

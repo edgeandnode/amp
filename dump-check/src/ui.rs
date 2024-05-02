@@ -1,10 +1,9 @@
 use std::sync::Arc;
 
-use indicatif::{ProgressBar, ProgressStyle};
 use human_bytes::human_bytes;
+use indicatif::{ProgressBar, ProgressStyle};
 
 use crate::metrics::MetricsRegistry;
-
 
 pub(crate) async fn ui(blocks: u64, metrics: Arc<MetricsRegistry>) {
     if atty::is(atty::Stream::Stdout) {

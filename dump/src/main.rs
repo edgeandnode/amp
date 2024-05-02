@@ -1,9 +1,10 @@
+mod client;
 mod job;
 mod parquet_writer;
-mod client;
 
 use std::sync::Arc;
 
+use crate::client::BlockStreamerClient;
 use anyhow::Context as _;
 use clap::Parser;
 use common::dataset_context::DatasetContext;
@@ -14,7 +15,6 @@ use job::Job;
 use log::info;
 use parquet::basic::{Compression, ZstdLevel};
 use parquet::file::properties::WriterProperties as ParquetWriterProperties;
-use crate::client::BlockStreamerClient;
 
 /// A tool for dumping a range of firehose blocks to a protobufs json file and/or for converting them
 /// to parquet tables.
@@ -119,18 +119,25 @@ async fn main() -> Result<(), anyhow::Error> {
         let config = fs::read_to_string(&config)?;
         let provider = toml::from_str(&config)?;
         if manifest.is_none() {
-            BlockStreamerClient::FirehoseClient(firehose_datasets::client::Client::new(provider).await?)
+            BlockStreamerClient::FirehoseClient(
+                firehose_datasets::client::Client::new(provider).await?,
+            )
         } else {
             let manifest = manifest.context("missing manifest")?;
             let module = module.context("missing output module")?;
-            let client = substreams_datasets::client::Client::new(provider, manifest, module).await?;
+            let client =
+                substreams_datasets::client::Client::new(provider, manifest, module).await?;
             BlockStreamerClient::SubstreamsClient(client)
         }
     };
 
     let dataset = match client {
-        BlockStreamerClient::FirehoseClient(_) => firehose_datasets::evm::dataset("mainnet".to_string()),
-        BlockStreamerClient::SubstreamsClient(ref client) => substreams_datasets::dataset("mainnet".to_string(), client.tables().clone()),
+        BlockStreamerClient::FirehoseClient(_) => {
+            firehose_datasets::evm::dataset("mainnet".to_string())
+        }
+        BlockStreamerClient::SubstreamsClient(ref client) => {
+            substreams_datasets::dataset("mainnet".to_string(), client.tables().clone())
+        }
     };
 
     let ctx = Arc::new(DatasetContext::new(dataset, to).await?);
