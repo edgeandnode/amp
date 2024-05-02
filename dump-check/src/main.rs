@@ -49,7 +49,14 @@ struct Args {
     ///     * GOOGLE_SERVICE_ACCOUNT_KEY: JSON serialized service account key.
     ///   It will otherwise fallback to using Appication Default Credentials.
     ///
-    /// - S3 support TODO.
+    /// - For S3, this expected to be s3://<bucket>.
+    ///   S3 session can be configured through the following environment variables:
+    ///     * AWS_ACCESS_KEY_ID: access key ID
+    ///     * AWS_SECRET_ACCESS_KEY: secret access key
+    ///     * AWS_DEFAULT_REGION: AWS region
+    ///     * AWS_ENDPOINT: endpoint
+    ///     * AWS_SESSION_TOKEN: session token
+    ///     * AWS_ALLOW_HTTP: allow HTTP
     #[arg(long, env = "DUMP_TO")]
     to: String,
 

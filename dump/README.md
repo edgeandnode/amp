@@ -64,6 +64,7 @@ All configuration can be set through env vars instead of the CLI.
   - Examples:
     - Local storage: `DUMP_TO=/data/output`
     - Google Cloud Storage: `DUMP_TO=gs://my-bucket`
+    - Amazon S3 Storage: `DUMP_TO=s3://my-bucket`
 
 #### Google Cloud Storage
 - **GOOGLE_SERVICE_ACCOUNT_PATH**
@@ -73,6 +74,27 @@ All configuration can be set through env vars instead of the CLI.
 - **GOOGLE_SERVICE_ACCOUNT_KEY**
   - Description: JSON serialized Google service account key.
   - Example: `GOOGLE_SERVICE_ACCOUNT_KEY='{"type": "service_account", ...}'`
+
+#### Amazon S3 Cloud Storage
+- **AWS_ACCESS_KEY_ID**
+  - Description: S3 access key ID.
+  - Example: `AWS_ACCESS_KEY_ID=MY_KEY_ID`
+
+- **AWS_SECRET_ACCESS_KEY**
+  - Description: S3 secret access key.
+  - Example: `AWS_SECRET_ACCESS_KEY=MY_SECRET_KEY`
+
+- **AWS_ENDPOINT**
+  - Description: S3 compatible endpoint. If unset, uses Amazon S3 service. If set, uses specified S3 compatible object service.
+  - Example: `AWS_ENDPOINT=http://s3.mycompany.com:8333`
+
+- **AWS_DEFAULT_REGION**
+  - Description: Amazon S3 region.
+  - Default: `AWS_DEFAULT_REGION=us-east-1`
+
+- **AWS_ALLOW_HTTP**
+  - Description: Allow non-TLS connections.
+  - Default: `AWS_ALLOW_HTTP=false`
 
 ### Optional
 
@@ -95,6 +117,8 @@ All configuration can be set through env vars instead of the CLI.
 
 - **DUMP_SUBSTREAMS_MANIFEST**
   - Description: URL of the substreams SPKG manifest.
+  - Example: `DUMP_SUBSTREAMS_MANIFEST=https://spkg.io/streamingfast/uniswap-v3-v0.2.8.spkg`
 
 - **DUMP_SUBSTREAMS_MODULE**
   - Description: substreams output module to use.
+  - Example: `DUMP_SUBSTREAMS_MODULE=map_extract_data_types`
