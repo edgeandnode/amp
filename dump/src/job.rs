@@ -11,9 +11,8 @@ use crate::parquet_writer::DatasetWriter;
 pub struct Job<T: BlockStreamer> {
     pub dataset_ctx: Arc<DatasetContext>,
     pub block_streamer: T,
-    pub start: u64,
-    pub end: u64,
-    pub job_id: u8,
+    pub multirange: MultiRange,
+    pub job_id: u32,
     pub parquet_opts: ParquetWriterProperties,
 
     // The target size of each table partition file in bytes. This is measured as the estimated
@@ -30,20 +29,37 @@ pub struct Job<T: BlockStreamer> {
 // Spawning a job:
 // - Spawns a task to fetch blocks from the `client`.
 // - Returns a future that will read that block stream and write a parquet file to the object store.
-pub async fn run_job(job: Job<impl BlockStreamer>) -> Result<(), anyhow::Error> {
+pub async fn run_job(job: Arc<Job<impl BlockStreamer>>) -> Result<(), anyhow::Error> {
+    info!(
+        "Starting job #{}, scanning ranges {}",
+        job.job_id, job.multirange
+    );
+
+    // The ranges are run sequentially by design, as parallelism is controlled by the number of jobs.
+    for range in &job.multirange.ranges {
+        run_job_range(job.clone(), range.0, range.1).await?;
+    }
+    Ok(())
+}
+
+async fn run_job_range(
+    job: Arc<Job<impl BlockStreamer>>,
+    start: u64,
+    end: u64,
+) -> Result<(), anyhow::Error> {
     let start_time = Instant::now();
 
     let (mut firehose, firehose_join_handle) = {
         let block_streamer = job.block_streamer.clone();
         let (tx, rx) = tokio::sync::mpsc::channel(100);
-        let firehose_task = block_streamer.block_stream(job.start, job.end, tx);
+        let firehose_task = block_streamer.block_stream(start, end, tx);
         (rx, tokio::spawn(firehose_task))
     };
 
     let mut writer = DatasetWriter::new(
         job.dataset_ctx.clone(),
-        job.parquet_opts,
-        job.start,
+        job.parquet_opts.clone(),
+        start,
         job.partition_size,
     )
     .await?;
@@ -87,7 +103,9 @@ pub async fn run_job(job: Job<impl BlockStreamer>) -> Result<(), anyhow::Error> 
     firehose_join_handle.now_or_never().unwrap()??;
 
     // Close the last part file for each table, checking for any errors.
-    writer.close(job.end).await?;
+    writer.close(end).await?;
+
+    info!("job #{} finished", job.job_id,);
 
     Ok(())
 }

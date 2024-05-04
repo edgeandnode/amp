@@ -17,7 +17,10 @@
 
 use std::sync::Arc;
 
-use crate::arrow::array::{ArrayRef, StringBuilder};
+use crate::{
+    arrow::array::{ArrayRef, StringBuilder},
+    timestamp_type, Timestamp, TimestampArrayBuilder,
+};
 use datafusion::arrow::{
     array::{ArrayBuilder as _, RecordBatch, UInt64Builder},
     datatypes::{DataType, Field, Schema, SchemaRef},
@@ -43,8 +46,9 @@ fn schema() -> Schema {
     let table = Field::new("table", DataType::Utf8, false);
     let start = Field::new("range_start", DataType::UInt64, false);
     let end = Field::new("range_end", DataType::UInt64, false);
+    let created_at = Field::new("created_at", timestamp_type(), false);
 
-    let fields = vec![table, start, end];
+    let fields = vec![table, start, end, created_at];
     Schema::new(fields)
 }
 
@@ -52,6 +56,7 @@ pub struct ScannedRange {
     pub table: String,
     pub range_start: u64,
     pub range_end: u64,
+    pub created_at: Timestamp,
 }
 
 #[derive(Debug, Default)]
@@ -59,6 +64,7 @@ pub struct ScannedRangeRowsBuilder {
     table: StringBuilder,
     range_start: UInt64Builder,
     range_end: UInt64Builder,
+    timestamp: TimestampArrayBuilder,
 }
 
 impl ScannedRangeRowsBuilder {
@@ -66,13 +72,15 @@ impl ScannedRangeRowsBuilder {
         self.table.append_value(&range.table);
         self.range_start.append_value(range.range_start);
         self.range_end.append_value(range.range_end);
+        self.timestamp.append_value(range.created_at);
     }
 
     pub fn flush(&mut self) -> Result<RecordBatch, ArrowError> {
         let columns = vec![
             Arc::new(self.table.finish()) as ArrayRef,
-            Arc::new(self.range_start.finish()) as ArrayRef,
-            Arc::new(self.range_end.finish()) as ArrayRef,
+            Arc::new(self.range_start.finish()),
+            Arc::new(self.range_end.finish()),
+            Arc::new(self.timestamp.finish()),
         ];
 
         RecordBatch::try_new(SCHEMA.clone(), columns)

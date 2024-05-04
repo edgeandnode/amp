@@ -95,7 +95,7 @@ impl TimestampArrayBuilder {
         self.0.append_value(value.0.as_nanos() as i64)
     }
 
-    pub fn finish(mut self) -> TimestampArrayType {
+    pub fn finish(&mut self) -> TimestampArrayType {
         self.0.finish()
     }
 }

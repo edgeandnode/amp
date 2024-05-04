@@ -182,7 +182,7 @@ impl BlockRowsBuilder {
     pub(crate) fn build(self) -> Result<TableRows, ArrowError> {
         let Self {
             mut block_num,
-            timestamp,
+            mut timestamp,
             hash,
             parent_hash,
             uncle_hash,

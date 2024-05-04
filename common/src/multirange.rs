@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod tests;
+
 use std::fmt;
 
 use thiserror::Error;
@@ -11,14 +14,18 @@ pub enum Error {
     NonConsecutive(u64, u64),
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct MultiRange {
-    // The ranges are inclusive on both ends.
+    // The ranges are inclusive on both ends, non-overlapping, non-adjacent and sorted in ascending order.
     pub ranges: Vec<(u64, u64)>,
 }
 
 impl MultiRange {
-    pub fn new(values: &[u64]) -> Result<Self, Error> {
+    pub fn empty() -> Self {
+        MultiRange { ranges: Vec::new() }
+    }
+
+    pub fn from_values(values: &[u64]) -> Result<Self, Error> {
         let is_sorted = values.windows(2).all(|w| w[0] < w[1]);
         if !is_sorted {
             return Err(Error::UnsortedOrDuplicates(values.to_vec()));
@@ -41,6 +48,17 @@ impl MultiRange {
         }
 
         Ok(MultiRange { ranges })
+    }
+
+    /// Ranges must be in ascending order and non-overlapping.
+    pub fn from_ranges(ranges: impl IntoIterator<Item = (u64, u64)>) -> Result<Self, Error> {
+        let mut multi_range = MultiRange::empty();
+        for (start, end) in ranges {
+            multi_range.append(MultiRange {
+                ranges: vec![(start, end)],
+            })?;
+        }
+        Ok(multi_range)
     }
 
     pub fn append(&mut self, mut other: MultiRange) -> Result<(), Error> {
@@ -85,15 +103,136 @@ impl MultiRange {
             .is_ok()
     }
 
-    pub fn total_len(&self) -> usize {
+    pub fn total_len(&self) -> u64 {
         self.ranges
             .iter()
             .map(|(start, end)| end - start + 1)
-            .sum::<u64>() as usize
+            .sum::<u64>()
     }
 
     pub fn max(&self) -> Option<u64> {
         self.ranges.last().map(|(_, end)| *end)
+    }
+
+    pub fn intersection(&self, other: &MultiRange) -> MultiRange {
+        let mut intersection = MultiRange::empty();
+        let mut i = 0;
+        let mut j = 0;
+
+        while i < self.ranges.len() && j < other.ranges.len() {
+            let (self_start, self_end) = self.ranges[i];
+            let (other_start, other_end) = other.ranges[j];
+
+            // Check for overlap
+            if self_end >= other_start && other_end >= self_start {
+                // Calculate the intersection
+                let start = std::cmp::max(self_start, other_start);
+                let end = std::cmp::min(self_end, other_end);
+                intersection.ranges.push((start, end));
+            }
+
+            // Move to the next range in the list with the smaller endpoint
+            if self_end < other_end {
+                i += 1;
+            } else {
+                j += 1;
+            }
+        }
+
+        intersection
+    }
+
+    /// Calculate the complement of the ranges within a specified bounded space.
+    pub fn complement(&self, start: u64, end: u64) -> MultiRange {
+        let mut complement_ranges = Vec::new();
+
+        let mut next_complement_start = start;
+        for &(cur_start, cur_end) in &self.ranges {
+            if cur_end < start {
+                // Skip ranges that are entirely before the start
+                continue;
+            }
+            if cur_start > end {
+                break;
+            }
+
+            if cur_start > next_complement_start {
+                complement_ranges.push((next_complement_start, cur_start - 1));
+            }
+
+            next_complement_start = cur_end + 1;
+        }
+
+        // Handle any remaining range after the last specified range
+        if next_complement_start <= end {
+            complement_ranges.push((next_complement_start, end));
+        }
+
+        MultiRange {
+            ranges: complement_ranges,
+        }
+    }
+
+    /// Splits the multirange into at most `n` partitions where each partition is as equal in total
+    /// length as possible. If a range exceeds the target partition size, it is split across
+    /// partitions. `min_part_len` should be used to prevent partitions from being too small, though
+    /// the last partition may still be smaller than that.
+    pub fn split_and_partition(&self, n: u64, min_part_len: u64) -> Vec<MultiRange> {
+        let total_length = self.total_len();
+
+        if total_length == 0 || n == 0 {
+            return vec![];
+        }
+
+        let target_part_size = total_length.div_ceil(n).max(min_part_len);
+        let mut partitions = Vec::new();
+        let mut current_part = MultiRange::empty();
+
+        for &(start, end) in &self.ranges {
+            let mut current_start = start;
+
+            while current_start <= end {
+                let space_left = target_part_size - current_part.total_len();
+
+                if space_left == 0 {
+                    // Finalize the current partition and continue with the next one.
+                    partitions.push(current_part);
+                    current_part = MultiRange::empty();
+                    continue;
+                }
+
+                let remaining_len = end - current_start + 1;
+
+                if remaining_len <= space_left {
+                    // Add the entire remaining range to the current partition and we're done with
+                    // this range.
+                    current_part.ranges.push((current_start, end));
+                    break;
+                } else {
+                    // Split the range and effectively finalize the current partition by consuming
+                    // all space left.
+                    let split_end = current_start + space_left - 1;
+                    current_part.ranges.push((current_start, split_end));
+
+                    // Continue with the rest of the range.
+                    current_start = split_end + 1;
+                }
+            }
+        }
+
+        // All partitions except the last should respect the minimum partition length.
+        assert!(partitions.iter().all(|p| p.total_len() >= min_part_len));
+
+        // Add the last partition if it has any ranges.
+        if !current_part.ranges.is_empty() {
+            partitions.push(current_part);
+        }
+
+        // Correctness checks.
+        assert!(partitions.len() as u64 <= n);
+        assert!(self.total_len() == partitions.iter().map(|p| p.total_len()).sum::<u64>());
+
+        partitions
     }
 }
 
@@ -108,62 +247,4 @@ impl fmt::Display for MultiRange {
 
         write!(f, "{}", ranges)
     }
-}
-
-#[test]
-fn test_multi_range() {
-    // Test input that is not sorted
-    let unsorted_values = vec![3, 1, 2];
-    MultiRange::new(&unsorted_values).unwrap_err();
-
-    // Test input with duplicates
-    let duplicate_values = vec![1, 2, 2, 3];
-    MultiRange::new(&duplicate_values).unwrap_err();
-
-    // Test empty input
-    let empty_values = vec![];
-    let empty_result = MultiRange::new(&empty_values).unwrap();
-    assert!(
-        empty_result.ranges.is_empty(),
-        "Ranges should be empty for empty input"
-    );
-
-    // Test input with consecutive and non-consecutive values, but without any duplicates
-    let mixed_values = vec![1, 2, 3, 5, 6, 8];
-    let mixed_result = MultiRange::new(&mixed_values).unwrap();
-    assert_eq!(
-        mixed_result.ranges,
-        vec![(1, 3), (5, 6), (8, 8)],
-        "Ranges should correctly merge consecutive values and separate non-consecutive values"
-    );
-    assert!(mixed_result.contains(1));
-    assert!(mixed_result.contains(2));
-    assert!(mixed_result.contains(3));
-    assert!(!mixed_result.contains(4));
-    assert!(mixed_result.contains(5));
-    assert!(mixed_result.contains(6));
-    assert!(!mixed_result.contains(7));
-    assert!(mixed_result.contains(8));
-}
-
-#[test]
-fn test_multi_range_append() {
-    let mut range1 = MultiRange::new(&[1, 2, 3, 5, 6, 8]).unwrap();
-    let range2 = MultiRange::new(&[10, 11, 12]).unwrap();
-    range1.append(range2).unwrap();
-    assert_eq!(
-        range1.ranges,
-        vec![(1, 3), (5, 6), (8, 8), (10, 12)],
-        "Ranges should be appended correctly"
-    );
-
-    // test merge logic of `append`
-    let mut range1 = MultiRange::new(&[1, 2, 3, 5, 6, 8]).unwrap();
-    let range2 = MultiRange::new(&[9, 10, 11]).unwrap();
-    range1.append(range2).unwrap();
-    assert_eq!(
-        range1.ranges,
-        vec![(1, 3), (5, 6), (8, 11)],
-        "Ranges should be merged correctly"
-    );
 }

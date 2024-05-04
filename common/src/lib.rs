@@ -13,6 +13,7 @@ use datafusion::arrow::error::ArrowError;
 
 use std::future::Future;
 use std::time::Duration;
+use std::time::SystemTime;
 
 use anyhow::Context as _;
 use arrow::array::FixedSizeBinaryArray;
@@ -44,6 +45,16 @@ pub const EVM_CURRENCY_TYPE: DataType = DataType::Decimal128(DECIMAL128_MAX_PREC
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Timestamp(pub Duration);
+
+impl Timestamp {
+    pub fn now() -> Self {
+        Timestamp(
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap(),
+        )
+    }
+}
 
 // Note: We choose a 'nanosecond' precision for the timestamp, even though many blockchains expose
 // only 'second' precision for block timestamps. A couple justifications for 'nanosecond':

@@ -2,15 +2,21 @@ mod client;
 mod job;
 mod parquet_writer;
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use crate::client::BlockStreamerClient;
 use anyhow::Context as _;
 use clap::Parser;
+use common::arrow::array::AsArray as _;
+use common::arrow::datatypes::UInt64Type;
 use common::dataset_context::DatasetContext;
+use common::multirange::MultiRange;
 use common::parquet;
+use common::BLOCK_NUM;
 use fs_err as fs;
 use futures::future::join_all;
+use futures::StreamExt as _;
 use job::Job;
 use log::info;
 use parquet::basic::{Compression, ZstdLevel};
@@ -30,11 +36,11 @@ struct Args {
     #[arg(long, short, env = "FIREHOSE_PROVIDER")]
     config: String,
 
-    /// The block number to start from, inclusive. If ommited, the default behaviour is to:
-    /// - Start from genesis if no blocks are present in the target tables.
-    /// - Start from the last block in the target tables, picking up where it left off.
-    #[arg(long, short, env = "DUMP_START_BLOCK")]
-    start: Option<u64>,
+    /// The block number to start from, inclusive. If ommited, defaults to `0`. Note that `dump` is
+    /// smart about keeping track of what blocks have already been dumped, so you only need to set
+    /// this if you really don't want the data before this block.
+    #[arg(long, short, default_value = "0", env = "DUMP_START_BLOCK")]
+    start: u64,
 
     /// The block number to end at, inclusive.
     #[arg(long, short, env = "DUMP_END_BLOCK")]
@@ -141,38 +147,37 @@ async fn main() -> Result<(), anyhow::Error> {
     };
 
     let ctx = Arc::new(DatasetContext::new(dataset, to).await?);
-    let block_stats = ctx.block_stats().await?;
-    for (table_name, multirange) in &block_stats.existing_blocks {
+    let existing_blocks = existing_blocks(&ctx).await?;
+    for (table_name, multirange) in &existing_blocks {
         info!(
             "Existing blocks for table `{}`: {}",
             table_name,
             multirange.total_len()
         );
     }
-    let start = start.unwrap_or(block_stats.min_latest_block);
-    info!("Starting from block {}", start);
 
-    let jobs = {
-        let mut jobs = vec![];
-        let total_blocks = end_block - start + 1;
-        let blocks_per_job = total_blocks.div_ceil(n_jobs as u64);
-        let mut from = start;
-        while from <= end_block {
-            let to = (from + blocks_per_job).min(end_block);
-            jobs.push(Job {
+    // Find the ranges of blocks that have not been scanned yet, in case we are resuming the dump
+    // process, and split them across jobs as to balance the number of blocks per job.
+    let ranges_to_scan = {
+        let scanned_ranges = scanned_ranges(&ctx).await?;
+        let missing_ranges = scanned_ranges.complement(start, end_block);
+        missing_ranges.split_and_partition(n_jobs as u64, 100)
+    };
+
+    let jobs = ranges_to_scan
+        .into_iter()
+        .enumerate()
+        .map(|(i, multirange)| {
+            Arc::new(Job {
                 dataset_ctx: ctx.clone(),
                 block_streamer: client.clone(),
-                start: from,
-                end: to,
-                job_id: jobs.len() as u8,
+                multirange,
+                job_id: i as u32,
                 partition_size,
                 parquet_opts: parquet_opts(compression),
-                existing_blocks: block_stats.existing_blocks.clone(),
-            });
-            from = to + 1;
-        }
-        jobs
-    };
+                existing_blocks: existing_blocks.clone(),
+            })
+        });
 
     for res in join_all(jobs.into_iter().map(job::run_job)).await {
         res?;
@@ -191,4 +196,64 @@ fn parquet_opts(compression: Compression) -> ParquetWriterProperties {
     ParquetWriterProperties::builder()
         .set_compression(compression)
         .build()
+}
+
+/// Blocks that already exist in the dataset. This is used to ensure no duplicate data is written.
+async fn existing_blocks(
+    ctx: &DatasetContext,
+) -> Result<BTreeMap<String, MultiRange>, anyhow::Error> {
+    let mut existing_blocks: BTreeMap<String, MultiRange> = BTreeMap::new();
+    for table in ctx.tables() {
+        let table_name = table.name.clone();
+        let mut multirange = MultiRange::default();
+        let mut record_stream = ctx
+            .execute_sql(&format!(
+                "select distinct({BLOCK_NUM}) from {} order by block_num",
+                table_name
+            ))
+            .await?;
+        while let Some(batch) = record_stream.next().await {
+            let batch = batch?;
+            let block_nums = batch.column(0).as_primitive::<UInt64Type>().values();
+            MultiRange::from_values(block_nums.as_ref()).and_then(|r| multirange.append(r))?;
+        }
+        existing_blocks.insert(table_name, multirange);
+    }
+
+    Ok(existing_blocks)
+}
+
+// This is the intersection of the `__scanned_ranges` for all tables. That is, a range is only
+// considered scanned if it is scanned for all tables.
+async fn scanned_ranges(ctx: &DatasetContext) -> Result<MultiRange, anyhow::Error> {
+    use common::meta_tables::scanned_ranges::TABLE_NAME as __SCANNED_RANGES;
+
+    let mut multirange_by_table: BTreeMap<String, MultiRange> = BTreeMap::default();
+
+    for table in ctx.tables() {
+        let table_name = table.name.clone();
+        let batch = ctx
+            .meta_execute_sql(&format!(
+                "select range_start, range_end from {__SCANNED_RANGES} where table = '{table_name}' order by range_start",
+            ))
+            .await?;
+        let start_blocks: &[u64] = batch
+            .column(0)
+            .as_primitive::<UInt64Type>()
+            .values()
+            .as_ref();
+        let end_blocks: &[u64] = batch
+            .column(1)
+            .as_primitive::<UInt64Type>()
+            .values()
+            .as_ref();
+        let ranges = start_blocks.iter().zip(end_blocks).map(|(s, e)| (*s, *e));
+        let multi_range = MultiRange::from_ranges(ranges)?;
+        multirange_by_table.insert(table_name, multi_range);
+    }
+
+    let mut scanned_ranges = multirange_by_table.into_iter().map(|(_, r)| r);
+    let first = scanned_ranges.next().context("no tables")?;
+    let intersection = scanned_ranges.fold(first, |acc, r| acc.intersection(&r));
+    Ok(intersection)
 }

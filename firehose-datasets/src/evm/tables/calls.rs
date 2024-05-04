@@ -193,7 +193,7 @@ impl CallRowsBuilder {
         let Self {
             block_hash,
             mut block_num,
-            timestamp,
+            mut timestamp,
             mut tx_index,
             tx_hash,
             mut index,

@@ -1,11 +1,13 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
 
+use crate::arrow;
 use anyhow::anyhow;
 use anyhow::Context as _;
-use datafusion::arrow::array::RecordBatch;
+use arrow::array::RecordBatch;
+use arrow::compute::concat_batches;
+use arrow::datatypes::SchemaRef;
 use datafusion::logical_expr::Expr;
 use datafusion::{
-    arrow::{array::AsArray as _, datatypes::UInt64Type},
     common::{
         parsers::CompressionTypeVariant, Constraints, DFSchemaRef, OwnedTableReference,
         ToDFSchema as _,
@@ -29,7 +31,7 @@ use thiserror::Error;
 use url::Url;
 
 use crate::meta_tables;
-use crate::{multirange::MultiRange, BlockNum, Dataset, Table, BLOCK_NUM};
+use crate::{Dataset, Table, BLOCK_NUM};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -54,14 +56,6 @@ pub enum Error {
 
     #[error("meta table error: {0}")]
     MetaTableError(DataFusionError),
-}
-
-pub struct BlockStats {
-    pub existing_blocks: BTreeMap<String, MultiRange>,
-
-    // Minimum latest block across all tables. If a table is empty, this is 0.
-    // Useful for knowing the earliest block to start from.
-    pub min_latest_block: BlockNum,
 }
 
 struct TableUrl {
@@ -246,36 +240,6 @@ impl DatasetContext {
         &self.dataset_location.dataset
     }
 
-    /// Useful stats for datasets that have a `block_num` column on all tables.
-    pub async fn block_stats(&self) -> Result<BlockStats, Error> {
-        let mut min_latest_block: u64 = u64::MAX;
-        let mut existing_blocks: BTreeMap<String, MultiRange> = BTreeMap::new();
-        for table in self.tables() {
-            let table_name = table.name.clone();
-            let mut multirange = MultiRange::default();
-            let mut record_stream = self
-                .execute_sql(&format!(
-                    "select distinct({BLOCK_NUM}) from {} order by block_num",
-                    table_name
-                ))
-                .await?;
-            while let Some(batch) = record_stream.next().await {
-                let batch = batch.map_err(Error::ExecutionError)?;
-                let block_nums = batch.column(0).as_primitive::<UInt64Type>().values();
-                MultiRange::new(block_nums.as_ref())
-                    .and_then(|r| multirange.append(r))
-                    .map_err(|e| Error::DatasetError(e.into()))?;
-            }
-            min_latest_block = min_latest_block.min(multirange.max().unwrap_or(0));
-            existing_blocks.insert(table_name, multirange);
-        }
-
-        Ok(BlockStats {
-            existing_blocks,
-            min_latest_block,
-        })
-    }
-
     pub async fn print_schema(&self) -> Result<Vec<(Table, String)>, Error> {
         use datafusion::arrow::util::pretty::pretty_format_batches;
 
@@ -315,19 +279,25 @@ impl DatasetContext {
     }
 
     /// Meta table queries are trusted and are expected to have small result sizes.
-    pub async fn meta_execute_sql(&self, query: &str) -> Result<Vec<RecordBatch>, Error> {
+    pub async fn meta_execute_sql(&self, query: &str) -> Result<RecordBatch, Error> {
         let ctx = self.meta_datafusion_ctx().await?;
         let df = ctx.sql(query).await.map_err(Error::MetaTableError)?;
-        df.collect().await.map_err(Error::MetaTableError)
+        let schema = SchemaRef::new(df.schema().into());
+        let batches = df.collect().await.map_err(Error::MetaTableError);
+        let batch = concat_batches(&schema, batches.iter().flatten()).unwrap();
+        Ok(batch)
     }
 
-    pub async fn meta_execute_plan(&self, plan: LogicalPlan) -> Result<Vec<RecordBatch>, Error> {
+    pub async fn meta_execute_plan(&self, plan: LogicalPlan) -> Result<RecordBatch, Error> {
         let ctx = self.meta_datafusion_ctx().await?;
         let df = ctx
             .execute_logical_plan(plan)
             .await
             .map_err(Error::MetaTableError)?;
-        df.collect().await.map_err(Error::MetaTableError)
+        let schema = SchemaRef::new(df.schema().into());
+        let batches = df.collect().await.map_err(Error::MetaTableError);
+        let batch = concat_batches(&schema, batches.iter().flatten()).unwrap();
+        Ok(batch)
     }
 }
 

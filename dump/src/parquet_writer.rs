@@ -4,7 +4,7 @@ use std::sync::Arc;
 use common::arrow::array::RecordBatch;
 use common::meta_tables::scanned_ranges::{self, ScannedRange, ScannedRangeRowsBuilder};
 use common::parquet::errors::ParquetError;
-use common::{parquet, BlockNum, DatasetContext, Table, TableRows};
+use common::{parquet, BlockNum, DatasetContext, Table, TableRows, Timestamp};
 use object_store::buffered::BufWriter;
 use object_store::path::Path;
 use object_store::ObjectStore;
@@ -182,10 +182,12 @@ impl ParquetWriter {
 
     pub async fn close(self, end: BlockNum) -> Result<ScannedRange, ParquetError> {
         self.writer.close().await?;
+
         let scanned_range = ScannedRange {
             table: self.table.name.clone(),
             range_start: self.start,
             range_end: end,
+            created_at: Timestamp::now(),
         };
         Ok(scanned_range)
     }
