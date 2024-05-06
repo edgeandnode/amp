@@ -29,7 +29,7 @@ pub struct Job<T: BlockStreamer> {
 // Spawning a job:
 // - Spawns a task to fetch blocks from the `client`.
 // - Returns a future that will read that block stream and write a parquet file to the object store.
-pub async fn run_job(job: Arc<Job<impl BlockStreamer>>) -> Result<(), anyhow::Error> {
+pub async fn run(job: Arc<Job<impl BlockStreamer>>) -> Result<(), anyhow::Error> {
     info!("job #{} ranges to scan: {}", job.job_id, job.multirange);
 
     // The ranges are run sequentially by design, as parallelism is controlled by the number of jobs.
@@ -104,8 +104,6 @@ async fn run_job_range(
 
     // Close the last part file for each table, checking for any errors.
     writer.close(end).await?;
-
-    info!("job #{} finished", job.job_id,);
 
     Ok(())
 }
