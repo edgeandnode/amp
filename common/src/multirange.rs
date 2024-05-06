@@ -50,15 +50,35 @@ impl MultiRange {
         Ok(MultiRange { ranges })
     }
 
-    /// Ranges must be in ascending order and non-overlapping.
-    pub fn from_ranges(ranges: impl IntoIterator<Item = (u64, u64)>) -> Result<Self, Error> {
-        let mut multi_range = MultiRange::empty();
-        for (start, end) in ranges {
-            multi_range.append(MultiRange {
-                ranges: vec![(start, end)],
-            })?;
+    /// Overlapping ranges will be merged.
+    pub fn from_ranges(mut ranges: Vec<(u64, u64)>) -> Self {
+        ranges.sort();
+        ranges
+            .into_iter()
+            .fold(MultiRange::empty(), |mut multi_range, range| {
+                multi_range.push_merge(range);
+                multi_range
+            })
+    }
+
+    /// If the range is overlapping or adjacent to the last range, it will be merged with it.
+    /// Otherwise, it will be added as a new range.
+    ///
+    /// Panics if the range starts before the last range.
+    fn push_merge(&mut self, range: (u64, u64)) {
+        let Some(last) = self.ranges.last_mut() else {
+            self.ranges.push(range);
+            return;
+        };
+
+        assert!(last.0 <= range.0, "ranges must be sorted");
+
+        if last.1 >= range.0 + 1 {
+            // Merge the ranges.
+            last.1 = std::cmp::max(last.1, range.1);
+        } else {
+            self.ranges.push(range);
         }
-        Ok(multi_range)
     }
 
     pub fn append(&mut self, mut other: MultiRange) -> Result<(), Error> {

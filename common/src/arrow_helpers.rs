@@ -82,7 +82,7 @@ impl EvmCurrencyArrayBuilder {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct TimestampArrayBuilder(TimestampNanosecondBuilder);
 
 impl TimestampArrayBuilder {

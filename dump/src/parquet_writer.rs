@@ -52,7 +52,7 @@ impl DatasetWriter {
             opts,
             store,
             partition_size,
-            scanned_range_batch: ScannedRangeRowsBuilder::default(),
+            scanned_range_batch: ScannedRangeRowsBuilder::new(),
         })
     }
 
@@ -180,9 +180,15 @@ impl ParquetWriter {
         self.writer.write(batch).await
     }
 
-    pub async fn close(self, end: BlockNum) -> Result<ScannedRange, ParquetError> {
+    pub async fn close(self, end: BlockNum) -> Result<ScannedRange, anyhow::Error> {
         self.writer.close().await?;
 
+        anyhow::ensure!(
+            end >= self.start,
+            "end block {} must be before start block {}",
+            end,
+            self.start
+        );
         let scanned_range = ScannedRange {
             table: self.table.name.clone(),
             range_start: self.start,

@@ -234,7 +234,7 @@ async fn scanned_ranges(ctx: &DatasetContext) -> Result<MultiRange, anyhow::Erro
         let table_name = table.name.clone();
         let batch = ctx
             .meta_execute_sql(&format!(
-                "select range_start, range_end from {__SCANNED_RANGES} where table = '{table_name}' order by range_start",
+                "select range_start, range_end from {__SCANNED_RANGES} where table = '{table_name}' order by range_start, range_end",
             ))
             .await?;
         let start_blocks: &[u64] = batch
@@ -248,7 +248,7 @@ async fn scanned_ranges(ctx: &DatasetContext) -> Result<MultiRange, anyhow::Erro
             .values()
             .as_ref();
         let ranges = start_blocks.iter().zip(end_blocks).map(|(s, e)| (*s, *e));
-        let multi_range = MultiRange::from_ranges(ranges)?;
+        let multi_range = MultiRange::from_ranges(ranges.collect());
         multirange_by_table.insert(table_name, multi_range);
     }
 
