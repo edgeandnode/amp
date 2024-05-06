@@ -24,6 +24,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "sf/substreams/v1/modules.proto",
             "sf/substreams/v1/package.proto",
             "sf/substreams/rpc/v2/substreams.proto",
+            "sf/substreams/sink/sql/v1/services.proto",
         ],
         &["proto", "proto/sf/substreams/v1"],
     )?;

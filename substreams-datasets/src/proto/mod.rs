@@ -10,8 +10,16 @@ pub mod sf {
                 include!("sf.substreams.rpc.v2.rs");
             }
         }
+        pub mod sink {
+            pub mod sql {
+                pub mod v1 {
+                    include!("sf.substreams.sink.sql.v1.rs");
+                }
+            }
+        }
         pub mod v1 {
             include!("sf.substreams.v1.rs");
         }
+        include!("sf.substreams.rs");
     }
 }
