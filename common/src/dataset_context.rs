@@ -6,6 +6,7 @@ use anyhow::Context as _;
 use arrow::array::RecordBatch;
 use arrow::compute::concat_batches;
 use arrow::datatypes::SchemaRef;
+use arrow::util::pretty::pretty_format_batches;
 use datafusion::logical_expr::Expr;
 use datafusion::{
     common::{
@@ -241,8 +242,6 @@ impl DatasetContext {
     }
 
     pub async fn print_schema(&self) -> Result<Vec<(Table, String)>, Error> {
-        use datafusion::arrow::util::pretty::pretty_format_batches;
-
         let mut output = vec![];
         for table in self.tables() {
             let mut record_stream = self
@@ -283,8 +282,8 @@ impl DatasetContext {
         let ctx = self.meta_datafusion_ctx().await?;
         let df = ctx.sql(query).await.map_err(Error::MetaTableError)?;
         let schema = SchemaRef::new(df.schema().into());
-        let batches = df.collect().await.map_err(Error::MetaTableError);
-        let batch = concat_batches(&schema, batches.iter().flatten()).unwrap();
+        let batches = df.collect().await.map_err(Error::MetaTableError)?;
+        let batch = concat_batches(&schema, &batches).unwrap();
         Ok(batch)
     }
 
@@ -295,8 +294,16 @@ impl DatasetContext {
             .await
             .map_err(Error::MetaTableError)?;
         let schema = SchemaRef::new(df.schema().into());
-        let batches = df.collect().await.map_err(Error::MetaTableError);
-        let batch = concat_batches(&schema, batches.iter().flatten()).unwrap();
+        let batches = df.collect().await.map_err(Error::MetaTableError)?;
+
+        // Note: This is a workaround. Replace with:
+        // `let batch = concat_batches(&schema, &batches).unwrap();`
+        // After https://github.com/apache/datafusion/pull/10394 is merged and released.
+        let batch = if batches.is_empty() {
+            RecordBatch::new_empty(schema)
+        } else {
+            concat_batches(&batches[0].schema(), &batches).unwrap()
+        };
         Ok(batch)
     }
 }

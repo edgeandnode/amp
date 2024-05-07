@@ -29,15 +29,26 @@ pub struct Job<T: BlockStreamer> {
 // Spawning a job:
 // - Spawns a task to fetch blocks from the `client`.
 // - Returns a future that will read that block stream and write a parquet file to the object store.
-pub async fn run_job(job: Arc<Job<impl BlockStreamer>>) -> Result<(), anyhow::Error> {
-    info!(
-        "Starting job #{}, scanning ranges {}",
-        job.job_id, job.multirange
-    );
+pub async fn run(job: Arc<Job<impl BlockStreamer>>) -> Result<(), anyhow::Error> {
+    info!("job #{} ranges to scan: {}", job.job_id, job.multirange);
 
     // The ranges are run sequentially by design, as parallelism is controlled by the number of jobs.
     for range in &job.multirange.ranges {
+        info!(
+            "job #{} starting scan for range [{}, {}]",
+            job.job_id, range.0, range.1
+        );
+        let start_time = Instant::now();
+
         run_job_range(job.clone(), range.0, range.1).await?;
+
+        info!(
+            "job #{} finished scan for range [{}, {}] in {} minutes",
+            job.job_id,
+            range.0,
+            range.1,
+            start_time.elapsed().as_secs() / 60
+        );
     }
     Ok(())
 }
@@ -47,8 +58,6 @@ async fn run_job_range(
     start: u64,
     end: u64,
 ) -> Result<(), anyhow::Error> {
-    let start_time = Instant::now();
-
     let (mut firehose, firehose_join_handle) = {
         let block_streamer = job.block_streamer.clone();
         let (tx, rx) = tokio::sync::mpsc::channel(100);
@@ -70,15 +79,6 @@ async fn run_job_range(
         }
 
         let block_num = dataset_rows.block_num()?;
-
-        if block_num % 100000 == 0 {
-            info!(
-                "job #{} reached block {}, at minute {}",
-                job.job_id,
-                block_num,
-                start_time.elapsed().as_secs() / 60
-            );
-        }
 
         for table_rows in dataset_rows {
             if table_rows.is_empty() {
@@ -105,8 +105,6 @@ async fn run_job_range(
 
     // Close the last part file for each table, checking for any errors.
     writer.close(end).await?;
-
-    info!("job #{} finished", job.job_id,);
 
     Ok(())
 }

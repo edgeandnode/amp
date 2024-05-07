@@ -15,8 +15,9 @@ use common::multirange::MultiRange;
 use common::parquet;
 use common::BLOCK_NUM;
 use fs_err as fs;
-use futures::future::join_all;
+use futures::future::try_join_all;
 use futures::StreamExt as _;
+use futures::TryFutureExt as _;
 use job::Job;
 use log::info;
 use parquet::basic::{Compression, ZstdLevel};
@@ -179,9 +180,12 @@ async fn main() -> Result<(), anyhow::Error> {
             })
         });
 
-    for res in join_all(jobs.into_iter().map(job::run_job)).await {
-        res?;
-    }
+    // Spawn the jobs so they run in parallel, terminating early if any job fails.
+    try_join_all(
+        jobs.into_iter()
+            .map(|job| async { tokio::spawn(job::run(job)).err_into().await.and_then(|x| x) }),
+    )
+    .await?;
 
     Ok(())
 }
@@ -234,7 +238,7 @@ async fn scanned_ranges(ctx: &DatasetContext) -> Result<MultiRange, anyhow::Erro
         let table_name = table.name.clone();
         let batch = ctx
             .meta_execute_sql(&format!(
-                "select range_start, range_end from {__SCANNED_RANGES} where table = '{table_name}' order by range_start",
+                "select range_start, range_end from {__SCANNED_RANGES} where table = '{table_name}' order by range_start, range_end",
             ))
             .await?;
         let start_blocks: &[u64] = batch
@@ -248,7 +252,7 @@ async fn scanned_ranges(ctx: &DatasetContext) -> Result<MultiRange, anyhow::Erro
             .values()
             .as_ref();
         let ranges = start_blocks.iter().zip(end_blocks).map(|(s, e)| (*s, *e));
-        let multi_range = MultiRange::from_ranges(ranges)?;
+        let multi_range = MultiRange::from_ranges(ranges.collect());
         multirange_by_table.insert(table_name, multi_range);
     }
 

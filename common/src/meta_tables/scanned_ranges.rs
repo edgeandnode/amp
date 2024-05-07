@@ -59,7 +59,7 @@ pub struct ScannedRange {
     pub created_at: Timestamp,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct ScannedRangeRowsBuilder {
     table: StringBuilder,
     range_start: UInt64Builder,
@@ -68,6 +68,15 @@ pub struct ScannedRangeRowsBuilder {
 }
 
 impl ScannedRangeRowsBuilder {
+    pub fn new() -> Self {
+        Self {
+            table: StringBuilder::new(),
+            range_start: UInt64Builder::new(),
+            range_end: UInt64Builder::new(),
+            timestamp: TimestampArrayBuilder::with_capacity(0),
+        }
+    }
+
     pub fn append(&mut self, range: &ScannedRange) {
         self.table.append_value(&range.table);
         self.range_start.append_value(range.range_start);
