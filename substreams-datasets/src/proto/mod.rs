@@ -11,6 +11,11 @@ pub mod sf {
             }
         }
         pub mod sink {
+            pub mod database {
+                pub mod v1 {
+                    include!("sf.substreams.sink.database.v1.rs");
+                }
+            }
             pub mod sql {
                 pub mod v1 {
                     include!("sf.substreams.sink.sql.v1.rs");

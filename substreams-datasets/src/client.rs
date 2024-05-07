@@ -159,6 +159,9 @@ impl BlockStreamer for Client {
                         }
                         let block_num = block.clock.as_ref().unwrap().number;
                         let table_rows = pb_to_rows(block, &self.tables)?;
+                        if table_rows.0.len() == 0 {
+                            continue;
+                        }
 
                         // Send the block and check if the receiver has gone away.
                         if tx.send(table_rows).await.is_err() {

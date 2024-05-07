@@ -3,12 +3,10 @@ use std::sync::Arc;
 use anyhow::{anyhow, Context as _};
 use prost::Message as _;
 use prost_reflect::{Cardinality, DescriptorPool, FieldDescriptor, Kind, MessageDescriptor};
-use substreams_entity_change::tables;
 
 use crate::proto::{google::protobuf::FileDescriptorSet, sf::substreams::{sink::sql::v1::{Service as SqlService, service::Engine as SqlEngine}, v1::Package}};
 use common::{
-    arrow::datatypes::{DataType as ArrowDataType, TimeUnit, Field, Schema},
-    Table, BLOCK_NUM,
+    arrow::datatypes::{DataType as ArrowDataType, Field, Schema, TimeUnit}, timestamp_type, Table, BLOCK_NUM
 };
 
 use sqlparser::dialect;
@@ -65,7 +63,7 @@ impl Tables {
                     return Err(anyhow!("sink schema is empty"));
                 }
 
-                if SqlEngine::try_from(sink_config.engine)?.as_str_name() != "postgres" {
+                if SqlEngine::try_from(sink_config.engine)? != SqlEngine::Postgres {
                     return Err(anyhow!("only postgres sink engine supported"));
                 }
 
@@ -117,7 +115,7 @@ fn parse_sql(sql: &str) -> Result<Vec<Table>, anyhow::Error> {
         match statement {
             Statement::CreateTable { name, columns, .. } => {
                 let fields = columns.iter().map(|column| {
-                    let datatype = match &column.data_type {
+                    let mut datatype = match &column.data_type {
                         SqlDataType::Int(_) => ArrowDataType::Int32,
                         SqlDataType::BigInt(_) => ArrowDataType::Int64,
                         SqlDataType::SmallInt(_) => ArrowDataType::Int16,
@@ -127,7 +125,8 @@ fn parse_sql(sql: &str) -> Result<Vec<Table>, anyhow::Error> {
                         SqlDataType::Text => ArrowDataType::Utf8,
                         SqlDataType::Date => ArrowDataType::Date32,
                         SqlDataType::Time(_,_) => ArrowDataType::Time64(TimeUnit::Nanosecond),
-                        SqlDataType::Timestamp(_,_) => ArrowDataType::Timestamp(TimeUnit::Nanosecond, None),
+                        // SqlDataType::Timestamp(_,_) => ArrowDataType::Timestamp(TimeUnit::Nanosecond, None),
+                        SqlDataType::Timestamp(_,_) => timestamp_type(),
                         SqlDataType::Decimal(_) => ArrowDataType::Float64,   // replace with Decimal?
                         SqlDataType::Real => ArrowDataType::Float32,
                         SqlDataType::Double => ArrowDataType::Float64,
@@ -135,6 +134,10 @@ fn parse_sql(sql: &str) -> Result<Vec<Table>, anyhow::Error> {
                         SqlDataType::Binary(_) => ArrowDataType::Binary,
                         _ => ArrowDataType::Utf8,
                     };
+                    // block_num always UInt64
+                    if column.name.value.as_str() == BLOCK_NUM {
+                        datatype = ArrowDataType::UInt64;
+                    }
                     Field::new(column.name.value.as_str(), datatype, false)
                 }).collect::<Vec<_>>();
 
@@ -190,6 +193,10 @@ fn table_from_field(field: &FieldDescriptor, pool: &DescriptorPool) -> Option<Ta
                 if f.cardinality() == Cardinality::Repeated {
                     // datatype = ArrowDataType::List(Arc::new(Field::new(f.name(), datatype, false)));
                     datatype = ArrowDataType::Utf8;
+                }
+                // block_num always UInt64
+                if f.name() == BLOCK_NUM {
+                    datatype = ArrowDataType::UInt64;
                 }
                 Field::new(f.name(), datatype, false)
             })
