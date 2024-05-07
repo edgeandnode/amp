@@ -5,7 +5,7 @@ use prost_reflect::{DynamicMessage, Value};
 use prost::Message as _;
 
 use super::tables::{Tables, OutputType};
-use crate::proto::sf::substreams::{rpc::v2::BlockScopedData, sink::database::v1::{table_change, DatabaseChanges, Field as TableChangeField, TableChange}};
+use crate::proto::sf::substreams::{rpc::v2::BlockScopedData, sink::database::v1::{table_change, DatabaseChanges, TableChange}};
 use common::{
     arrow::{array::*, datatypes::{Schema, DataType as ArrowDataType}},
     parquet::data_type::AsBytes as _,

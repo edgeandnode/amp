@@ -6,6 +6,7 @@ use log::info;
 use std::collections::BTreeMap;
 use std::{sync::Arc, time::Instant};
 
+use crate::metrics::MetricsRegistry;
 use crate::parquet_writer::DatasetWriter;
 
 pub struct Job<T: BlockStreamer> {
@@ -24,6 +25,8 @@ pub struct Job<T: BlockStreamer> {
     // Block ranges that are already written to the object store, per table. This is used to resume a
     // job that was interrupted. These blocks should simply be skipped.
     pub existing_blocks: BTreeMap<String, MultiRange>,
+
+    pub metrics: Arc<MetricsRegistry>,
 }
 
 // Spawning a job:
@@ -73,12 +76,15 @@ async fn run_job_range(
     )
     .await?;
 
+    let mut last_block = start;
     while let Some(dataset_rows) = firehose.recv().await {
         if dataset_rows.is_empty() {
             continue;
         }
 
         let block_num = dataset_rows.block_num()?;
+        job.metrics.blocks_read.inc_by((block_num - last_block) as f64);
+        last_block = block_num;
 
         for table_rows in dataset_rows {
             if table_rows.is_empty() {
@@ -94,9 +100,19 @@ async fn run_job_range(
                 continue;
             }
 
+            let bytes = table_rows
+                .rows
+                .columns()
+                .iter()
+                .map(|c| c.to_data().get_slice_memory_size().unwrap())
+                .sum::<usize>();
+            job.metrics.bytes_read.inc_by(bytes as f64);
+
             writer.write(table_rows).await?;
         }
     }
+
+    job.metrics.blocks_read.inc_by((end - last_block + 1) as f64);
 
     // The Firehose task stopped sending blocks, so it must have terminated. Here we check if it
     // terminated with any errors or panics.

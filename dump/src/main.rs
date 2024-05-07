@@ -1,6 +1,8 @@
 mod client;
 mod job;
 mod parquet_writer;
+mod ui;
+mod metrics;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -20,6 +22,7 @@ use futures::StreamExt as _;
 use futures::TryFutureExt as _;
 use job::Job;
 use log::info;
+use metrics::MetricsRegistry;
 use parquet::basic::{Compression, ZstdLevel};
 use parquet::file::properties::WriterProperties as ParquetWriterProperties;
 
@@ -84,11 +87,14 @@ struct Args {
     #[arg(long, env = "DUMP_DISABLE_COMPRESSION")]
     disable_compression: bool,
 
-    // Substreams package manifest URL if streaming substreams data
+    /// Substreams package manifest URL if streaming substreams data.
     #[arg(long, env = "DUMP_SUBSTREAMS_MANIFEST")]
     manifest: Option<String>,
 
-    // Substreams output module name
+    /// Substreams output module name. The following module outputs can be used for dumping substreams:
+    /// * `sf.substreams.sink.database.v1.DatabaseChanges`, using SQL schema defined in `sink_config` of the substreams package.
+    /// * `sf.substreams.sink.entities.v1.Entities`, using GraphQL schema defined in `sink_config` of the substreams package. TODO.
+    /// * any substreams module that contains repeated messages in the output, using schema inferred from the protobuf reflection API.
     #[arg(long, env = "DUMP_SUBSTREAMS_MODULE")]
     module: Option<String>,
 }
@@ -122,6 +128,8 @@ async fn main() -> Result<(), anyhow::Error> {
         ));
     }
 
+    let metrics = Arc::new(MetricsRegistry::new());
+
     let client = {
         let config = fs::read_to_string(&config)?;
         let provider = toml::from_str(&config)?;
@@ -148,6 +156,8 @@ async fn main() -> Result<(), anyhow::Error> {
     };
 
     let ctx = Arc::new(DatasetContext::new(dataset, to).await?);
+    let total_blocks = end_block - start + 1;
+    let ui_handle = tokio::spawn(ui::ui(total_blocks, metrics.clone()));
     let existing_blocks = existing_blocks(&ctx).await?;
     for (table_name, multirange) in &existing_blocks {
         info!(
@@ -177,6 +187,7 @@ async fn main() -> Result<(), anyhow::Error> {
                 partition_size,
                 parquet_opts: parquet_opts(compression),
                 existing_blocks: existing_blocks.clone(),
+                metrics: metrics.clone(),
             })
         });
 
@@ -186,6 +197,8 @@ async fn main() -> Result<(), anyhow::Error> {
             .map(|job| async { tokio::spawn(job::run(job)).err_into().await.and_then(|x| x) }),
     )
     .await?;
+
+    ui_handle.await?;
 
     Ok(())
 }
