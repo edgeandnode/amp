@@ -11,6 +11,7 @@ use anyhow::Context as _;
 use clap::Parser;
 use common::arrow::array::AsArray as _;
 use common::arrow::datatypes::UInt64Type;
+use common::config::Config;
 use common::dataset_context::DatasetContext;
 use common::multirange::MultiRange;
 use common::parquet;
@@ -148,7 +149,8 @@ async fn main() -> Result<(), anyhow::Error> {
         }
     };
 
-    let ctx = Arc::new(DatasetContext::new(dataset, to).await?);
+    let config = Config::location_only(to);
+    let ctx = Arc::new(DatasetContext::new(dataset, &config).await?);
     let existing_blocks = existing_blocks(&ctx).await?;
     for (table_name, multirange) in &existing_blocks {
         info!(

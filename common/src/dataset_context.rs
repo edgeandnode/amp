@@ -1,12 +1,15 @@
 use std::sync::Arc;
 
 use crate::arrow;
+use crate::config::Config;
 use anyhow::anyhow;
 use anyhow::Context as _;
 use arrow::array::RecordBatch;
 use arrow::compute::concat_batches;
 use arrow::datatypes::SchemaRef;
 use arrow::util::pretty::pretty_format_batches;
+use datafusion::execution::memory_pool::FairSpillPool;
+use datafusion::execution::memory_pool::MemoryPool;
 use datafusion::logical_expr::Expr;
 use datafusion::{
     common::{
@@ -112,19 +115,20 @@ impl DatasetContext {
     /// - Filesystem path: `relative/path/to/data/`
     /// - GCS: `gs://bucket-name/`
     /// - S3: `s3://bucket-name/`
-    pub async fn new(dataset: Dataset, data_location: String) -> Result<Self, anyhow::Error> {
-        let (data_url, object_store) = infer_object_store(data_location)?;
+    pub async fn new(dataset: Dataset, config: &Config) -> Result<Self, anyhow::Error> {
+        let (data_url, object_store) = infer_object_store(config.data_location.clone())?;
         let meta = meta_tables::tables();
-        Self::with_object_store(dataset, meta, data_url, object_store).await
+        Self::with_object_store(config, dataset, meta, data_url, object_store).await
     }
 
     pub async fn with_object_store(
+        config: &Config,
         dataset: Dataset,
         meta: Vec<Table>,
         data_url: Url,
         object_store: Arc<dyn ObjectStore>,
     ) -> Result<Self, anyhow::Error> {
-        let env = RuntimeEnv::new(runtime_config())?;
+        let env = RuntimeEnv::new(runtime_config(config))?;
         env.register_object_store(&data_url, object_store);
 
         // This contains various tuning options for the query engine.
@@ -308,15 +312,21 @@ impl DatasetContext {
     }
 }
 
-fn runtime_config() -> RuntimeConfig {
+fn runtime_config(config: &Config) -> RuntimeConfig {
     use datafusion::execution::cache::{
         cache_manager::CacheManagerConfig, cache_unit::DefaultFileStatisticsCache,
     };
 
-    // TODO: Experiment with spill to disk and memory limits.
-    // For now, spill to disk is disabled and memory is unbounded.
-    let disk_manager = DiskManagerConfig::Disabled;
-    let memory_pool = None;
+    let disk_manager = if config.spill_location.is_empty() {
+        DiskManagerConfig::Disabled
+    } else {
+        DiskManagerConfig::NewSpecified(config.spill_location.clone())
+    };
+    let memory_pool: Option<Arc<dyn MemoryPool>> = if config.max_mem > 0 {
+        Some(Arc::new(FairSpillPool::new(config.max_mem)))
+    } else {
+        None
+    };
     let cache_manager = CacheManagerConfig {
         // Caches parquet file statistics. Seems like a good thing.
         table_files_statistics_cache: Some(Arc::new(DefaultFileStatisticsCache::default())),

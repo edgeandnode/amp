@@ -769,8 +769,10 @@ dependencies = [
  "futures",
  "lazy_static",
  "object_store",
+ "serde",
  "thiserror",
  "tokio",
+ "toml",
  "url",
 ]
 

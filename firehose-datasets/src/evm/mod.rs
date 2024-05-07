@@ -16,6 +16,7 @@ pub fn dataset(network: String) -> Dataset {
 
 #[tokio::test]
 async fn print_schema_to_readme() {
+    use common::config::Config;
     use common::DatasetContext;
     use fs_err as fs;
     use std::fmt::Write;
@@ -25,7 +26,8 @@ async fn print_schema_to_readme() {
     let dataset = dataset("whatever".to_string());
     let url = Url::parse("memory://test_url/").unwrap();
     let object_store = Arc::new(object_store::memory::InMemory::new());
-    let context = DatasetContext::with_object_store(dataset, vec![], url, object_store)
+    let config = Config::location_only("/var/tmp".to_string());
+    let context = DatasetContext::with_object_store(&config, dataset, vec![], url, object_store)
         .await
         .unwrap();
 

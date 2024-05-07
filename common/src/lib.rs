@@ -1,4 +1,5 @@
 pub mod arrow_helpers;
+pub mod config;
 pub mod dataset_context;
 pub mod meta_tables;
 pub mod multirange;
