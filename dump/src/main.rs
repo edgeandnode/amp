@@ -4,6 +4,7 @@ mod parquet_writer;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::client::BlockStreamerClient;
 use anyhow::Context as _;
@@ -181,10 +182,14 @@ async fn main() -> Result<(), anyhow::Error> {
         });
 
     // Spawn the jobs so they run in parallel, terminating early if any job fails.
-    try_join_all(
-        jobs.into_iter()
-            .map(|job| async { tokio::spawn(job::run(job)).err_into().await.and_then(|x| x) }),
-    )
+    try_join_all(jobs.into_iter().map(|job| {
+        let handle = tokio::spawn(job::run(job));
+
+        // Stagger the start of each job by 1 second in an attempt to avoid client rate limits.
+        std::thread::sleep(Duration::from_secs(1));
+
+        async { handle.err_into().await.and_then(|x| x) }
+    }))
     .await?;
 
     Ok(())
