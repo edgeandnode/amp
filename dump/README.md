@@ -4,14 +4,14 @@ A CLI to dump extractor interfaces to parquet files. Currently supports dumping 
 
 ## Firehose
 
-Example usage to dump first one million blocks:
+Example usage to dump first four million blocks to local disk, running two parallel jobs:
 ```
-cargo run --release -p dump -- --to local/firehose_files -e 1000000
+cargo run --release -p dump -- --to local/firehose_files -e 4000000 -j 2
 ```
 
 This will create one directory per table. Each directory may contain multiple files, named by their
 start block, corresponding to table partitions. If the process is interrupted, it is safe to resume
-by running the command again.
+by running the same command again.
 
 Check the `--help` text for more configuration options.
 
