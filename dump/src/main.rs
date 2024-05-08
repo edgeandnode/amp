@@ -182,15 +182,17 @@ async fn main() -> Result<(), anyhow::Error> {
         });
 
     // Spawn the jobs so they run in parallel, terminating early if any job fails.
-    try_join_all(jobs.into_iter().map(|job| {
+    let mut join_handles = vec![];
+    for job in jobs {
         let handle = tokio::spawn(job::run(job));
 
         // Stagger the start of each job by 1 second in an attempt to avoid client rate limits.
-        std::thread::sleep(Duration::from_secs(1));
+        tokio::time::sleep(Duration::from_secs(1)).await;
 
-        async { handle.err_into().await.and_then(|x| x) }
-    }))
-    .await?;
+        join_handles.push(async { handle.err_into().await.and_then(|x| x) });
+    }
+
+    try_join_all(join_handles).await?;
 
     Ok(())
 }
