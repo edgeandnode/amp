@@ -17,6 +17,10 @@ Check the `--help` text for more configuration options.
 
 To get logs, set `RUST_LOG=info`.
 
+### System requirements
+
+Dump is memory intensive, because the contents of each parquet row group, which usually corresponds to a file, needs to be entirely buffered in memory before being written. This memory requirement varies linearely with the number of jobs, the partition size (`DUMP_N_JOBS` and `DUMP_PARTITION_SIZE_MB`) and the number of tables being written to. As a reference point, at 100 workers and a 128MB partition size, memory usage was measured to peak at about 44GB for the EVM dataset with 4 tables.
+
 ## Substreams
 
 To dump substreams module output you will need a substreams module that contains repeated messages in the output, which is a common substreams pattern.
