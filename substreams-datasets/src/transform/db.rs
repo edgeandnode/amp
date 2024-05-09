@@ -4,20 +4,32 @@ use std::sync::Arc;
 
 use prost::Message as _;
 
-use crate::proto::sf::substreams::sink::database::v1::{table_change, DatabaseChanges, TableChange};
 use crate::tables::Tables;
+use crate::proto::sf::substreams::sink::database::v1::{
+    table_change,
+    DatabaseChanges,
+    TableChange
+};
+
 use common::{
-    arrow::{array::*, datatypes::{Schema, DataType as ArrowDataType}},
+    arrow::{
+        array::*,
+        datatypes::{
+            Schema,
+            DataType as ArrowDataType
+        }
+    },
     parquet::data_type::AsBytes as _,
-    DatasetRows, TableRows, BLOCK_NUM,
+    DatasetRows,
+    TableRows,
+    BLOCK_NUM,
 };
 
 
 pub(crate) fn pb_to_rows(value: Vec<u8>, tables: &Tables, block_num: u64) -> Result<DatasetRows, anyhow::Error> {
-    let mut table_rows = DatasetRows(Vec::new());
 
     let changes = DatabaseChanges::decode(value.as_bytes())?;
-    for table in &tables.tables {
+    let tables: Result<Vec<_>, anyhow::Error> = tables.tables.iter().filter_map(|table| {
         let table_changes = changes
             .table_changes
             .iter()
@@ -27,15 +39,20 @@ pub(crate) fn pb_to_rows(value: Vec<u8>, tables: &Tables, block_num: u64) -> Res
             )
             .collect::<Vec<_>>();
         if table_changes.is_empty() {
-            continue;
+            return None;
         }
-        let rows = table_change_to_rows(&table_changes, table.schema.clone(), block_num)?;
-        table_rows.0.push(TableRows {
-            rows,
+        let rows = table_change_to_rows(&table_changes, table.schema.clone(), block_num);
+        if let Err(err) = rows {
+            return Some(Err(err.into()));
+        }
+        Some(Ok(TableRows {
+            rows: rows.unwrap(),
             table: table.clone(),
-        });
-    }
-    Ok(table_rows)
+        }))
+    })
+    .collect();
+
+    Ok(DatasetRows(tables?))
 }
 
 

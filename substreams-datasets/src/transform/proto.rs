@@ -3,11 +3,15 @@ use std::sync::Arc;
 use anyhow::Context as _;
 use prost_reflect::{DynamicMessage, Value};
 
-use crate::tables::Tables;
 use common::{
-    arrow::{array::*, datatypes::{Schema, DataType as ArrowDataType}},
+    arrow::{
+        array::*,
+        datatypes::Schema
+    },
     parquet::data_type::AsBytes as _,
-    DatasetRows, TableRows, BLOCK_NUM,
+    DatasetRows,
+    TableRows,
+    BLOCK_NUM,
 };
 
 
