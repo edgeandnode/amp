@@ -19,7 +19,7 @@ To get logs, set `RUST_LOG=info`.
 
 ### System requirements
 
-Dump is memory intensive, because the contents of each parquet row group, which usually corresponds to a file, needs to be entirely buffered in memory before being written. This memory requirement varies linearely with the number of jobs, the partition size (`DUMP_N_JOBS` and `DUMP_PARTITION_SIZE_MB`) and the number of tables being written to. As a reference point, at 100 workers and a 128MB partition size, memory usage was measured to peak at about 44GB for the EVM dataset with 4 tables.
+Dump is memory intensive, because the contents of each parquet row group, which usually corresponds to a file, needs to be entirely buffered in memory before being written. This memory requirement varies linearely with the number of jobs (`DUMP_N_JOBS`), the partition size (`DUMP_PARTITION_SIZE_MB`) and the number of tables being written to. As a reference point, at 100 workers and a 128MB partition size, memory usage was measured to peak at about 44GB for the EVM dataset with 4 tables.
 
 ## Substreams
 
