@@ -1,6 +1,6 @@
 pub mod client;
-pub(crate) mod pb_to_rows;
 pub mod tables;
+pub mod transform;
 
 mod proto;
 

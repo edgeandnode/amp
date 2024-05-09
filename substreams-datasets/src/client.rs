@@ -12,8 +12,8 @@ use tonic::{
     transport::{Channel, Endpoint, Uri},
 };
 
-use super::{pb_to_rows::pb_to_rows, tables::Tables};
-use crate::proto::sf::substreams::rpc::v2::{self as pbsubstreams, BlockScopedData};
+use super::tables::Tables;
+use crate::{proto::sf::substreams::rpc::v2::{self as pbsubstreams, BlockScopedData}, transform::transform};
 use crate::proto::sf::substreams::v1::Package;
 use common::{BlockNum, BlockStreamer, DatasetRows, Table};
 use pbsubstreams::{response::Message, stream_client::StreamClient, Request as StreamRequest};
@@ -158,7 +158,7 @@ impl BlockStreamer for Client {
                             continue;
                         }
                         let block_num = block.clock.as_ref().unwrap().number;
-                        let table_rows = pb_to_rows(block, &self.tables)?;
+                        let table_rows = transform(block, &self.tables)?;
                         if table_rows.is_empty() {
                             continue;
                         }
