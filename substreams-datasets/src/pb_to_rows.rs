@@ -5,7 +5,7 @@ use prost_reflect::{DynamicMessage, Value};
 use prost::Message as _;
 
 use super::tables::{Tables, OutputType};
-use crate::proto::sf::substreams::{rpc::v2::BlockScopedData, sink::database::v1::{table_change, DatabaseChanges, Field as TableChangeField, TableChange}};
+use crate::proto::sf::substreams::{rpc::v2::BlockScopedData, sink::database::v1::{table_change, DatabaseChanges, TableChange}};
 use common::{
     arrow::{array::*, datatypes::{Schema, DataType as ArrowDataType}},
     parquet::data_type::AsBytes as _,
@@ -23,10 +23,10 @@ pub fn pb_to_rows(block: BlockScopedData, tables: &Tables) -> Result<DatasetRows
         .context("module output is empty")?
         .value;
 
-    match tables.output_type {
-        OutputType::Proto => {
+    match &tables.output_type {
+        OutputType::Proto(message_descriptor) => {
             let dynamic_message =
-                DynamicMessage::decode(tables.message_descriptor.clone(), value.as_bytes())?;
+                DynamicMessage::decode(message_descriptor.clone(), value.as_bytes())?;
             for (field, value) in dynamic_message.fields() {
                 let list = match value {
                     Value::List(list) => list,
@@ -76,7 +76,7 @@ fn table_change_to_rows(changes: &[&TableChange], schema: Arc<Schema>, block_num
     let mut columns: Vec<Arc<dyn Array>> = Vec::with_capacity(schema.fields().len());
     let row_count = changes.len();
 
-    for column in schema.fields().iter() {
+    for column in schema.fields() {
         let col_name = column.name();
         if col_name == BLOCK_NUM {
             let mut builder = UInt64Builder::with_capacity(row_count);
@@ -191,22 +191,22 @@ fn message_to_rows(
     let row_count = list.len();
     let mut columns: Vec<Arc<dyn Array>> = Vec::with_capacity(schema.fields().len());
 
-    for field in schema.fields().iter() {
-        let col_name = field.name();
+    for column in schema.fields() {
+        let col_name = column.name();
         if col_name == BLOCK_NUM {
             let mut builder = UInt64Builder::with_capacity(row_count);
             builder.append_slice(&vec![block_num; row_count]);
             columns.push(Arc::new(builder.finish()));
             continue;
         }
-        let field = message
+        let field_value = message
             .get_field_by_name(col_name)
             .context(format!("field not found: {col_name}"))?;
         let col_iter = list.iter().map(|row| {
             row.as_message()
                 .and_then(|msg| msg.get_field_by_name(col_name))
         });
-        match *field {
+        match *field_value {
             Value::String(_) => {
                 let mut builder = StringBuilder::with_capacity(row_count, 0);
                 let cols = col_iter

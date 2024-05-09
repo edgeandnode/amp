@@ -15,7 +15,7 @@ use sqlparser::ast::{Statement, DataType as SqlDataType};
 
 #[derive(Debug, Clone)]
 pub enum OutputType {
-    Proto,
+    Proto(MessageDescriptor),
     DbOut,
     Entities,
 }
@@ -24,7 +24,6 @@ pub enum OutputType {
 pub struct Tables {
     pub tables: Vec<Table>,
     pub output_type: OutputType,
-    pub message_descriptor: MessageDescriptor,
 }
 
 impl Tables {
@@ -80,11 +79,10 @@ impl Tables {
                 Ok(Self {
                     output_type: OutputType::DbOut,
                     tables,
-                    message_descriptor,
                 })
             },
             "sf.substreams.sink.entities.v1.Entities" => {
-                return Err(anyhow!("Entities output type not supported yet"));
+                todo!("Entities output type not supported yet");
                 // Ok(Self {
                 //     output_type: OutputType::Entities,
                 //     tables: vec![],
@@ -97,9 +95,8 @@ impl Tables {
                     .filter_map(|field| table_from_field(&field, &pool))
                     .collect::<Vec<_>>();
                 Ok(Self {
-                    output_type: OutputType::Proto,
+                    output_type: OutputType::Proto(message_descriptor),
                     tables,
-                    message_descriptor,
                 })
             }
         }

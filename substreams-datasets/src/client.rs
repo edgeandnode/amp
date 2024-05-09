@@ -159,7 +159,7 @@ impl BlockStreamer for Client {
                         }
                         let block_num = block.clock.as_ref().unwrap().number;
                         let table_rows = pb_to_rows(block, &self.tables)?;
-                        if table_rows.0.len() == 0 {
+                        if table_rows.is_empty() {
                             continue;
                         }
 
