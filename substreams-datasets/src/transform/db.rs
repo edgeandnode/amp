@@ -41,7 +41,7 @@ pub(crate) fn pb_to_rows(value: Vec<u8>, tables: &Tables, block_num: u64) -> Res
         if table_changes.is_empty() {
             return None;
         }
-        let rows = table_change_to_rows(&table_changes, table.schema.clone(), block_num);
+        let rows = table_changes_to_rows(&table_changes, table.schema.clone(), block_num);
         if let Err(err) = rows {
             return Some(Err(err.into()));
         }
@@ -56,7 +56,7 @@ pub(crate) fn pb_to_rows(value: Vec<u8>, tables: &Tables, block_num: u64) -> Res
 }
 
 
-fn table_change_to_rows(changes: &[&TableChange], schema: Arc<Schema>, block_num: u64) -> Result<RecordBatch, anyhow::Error> {
+fn table_changes_to_rows(changes: &[&TableChange], schema: Arc<Schema>, block_num: u64) -> Result<RecordBatch, anyhow::Error> {
     let mut columns: Vec<Arc<dyn Array>> = Vec::with_capacity(schema.fields().len());
     let row_count = changes.len();
 

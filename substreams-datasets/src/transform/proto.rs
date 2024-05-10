@@ -16,27 +16,38 @@ use common::{
 
 
 pub(crate) fn pb_to_rows(message_descriptor: &prost_reflect::MessageDescriptor, value: Vec<u8>, tables: &crate::tables::Tables, block_num: u64) -> Result<DatasetRows, anyhow::Error> {
-    let mut table_rows = DatasetRows(Vec::new());
 
     let dynamic_message =
         DynamicMessage::decode(message_descriptor.clone(), value.as_bytes())?;
-    for (field, value) in dynamic_message.fields() {
+
+    let tables: Result<Vec<_>, anyhow::Error> = dynamic_message.fields().filter_map(|(field, value)| {
         let list = match value {
             Value::List(list) => list,
-            _ => continue,
+            _ => return None,
         };
+
         let table = tables
             .tables
             .iter()
-            .find(|t| t.name == field.name())
-            .context(format!("table not found: {}", field.name()))?;
-        let rows = message_to_rows(list, table.schema.clone(), block_num)?;
-        table_rows.0.push(TableRows {
-            rows,
+            .find(|t| t.name == field.name());
+        if table.is_none() {
+            return Some(Err(anyhow::anyhow!("table not found")));
+        }
+
+        let table = table.unwrap();
+        let rows = message_to_rows(list, table.schema.clone(), block_num);
+        if let Err(err) = rows {
+            return Some(Err(err.into()));
+        }
+
+        Some(Ok(TableRows {
+            rows: rows.unwrap(),
             table: table.clone(),
-        });
-    }
-    Ok(table_rows)
+        }))
+    })
+    .collect();
+
+    Ok(DatasetRows(tables?))
 }
 
 
