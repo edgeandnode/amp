@@ -13,8 +13,11 @@ use tonic::{
 };
 
 use super::tables::Tables;
-use crate::{proto::sf::substreams::rpc::v2::{self as pbsubstreams, BlockScopedData}, transform::transform};
 use crate::proto::sf::substreams::v1::Package;
+use crate::{
+    proto::sf::substreams::rpc::v2::{self as pbsubstreams, BlockScopedData},
+    transform::transform,
+};
 use common::{BlockNum, BlockStreamer, DatasetRows, Table};
 use pbsubstreams::{response::Message, stream_client::StreamClient, Request as StreamRequest};
 

@@ -4,52 +4,47 @@ use anyhow::Context as _;
 use prost_reflect::{DynamicMessage, Value};
 
 use common::{
-    arrow::{
-        array::*,
-        datatypes::Schema
-    },
-    DatasetRows,
-    TableRows,
-    Table,
-    BLOCK_NUM,
+    arrow::{array::*, datatypes::Schema},
+    DatasetRows, Table, TableRows, BLOCK_NUM,
 };
 
-
 /// transform Protobuf message to RecordBatch based on the message descriptor
-pub(crate) fn pb_to_rows(message_descriptor: &prost_reflect::MessageDescriptor, value: &[u8], schemas: &[Table], block_num: u64) -> Result<DatasetRows, anyhow::Error> {
-
+pub(crate) fn pb_to_rows(
+    message_descriptor: &prost_reflect::MessageDescriptor,
+    value: &[u8],
+    schemas: &[Table],
+    block_num: u64,
+) -> Result<DatasetRows, anyhow::Error> {
     let dynamic_message = DynamicMessage::decode(message_descriptor.clone(), value)?;
 
-    let tables: Result<Vec<_>, anyhow::Error> = dynamic_message.fields().filter_map(|(field, value)| {
-        let list = match value {
-            Value::List(list) => list,
-            _ => return None,
-        };
+    let tables: Result<Vec<_>, anyhow::Error> = dynamic_message
+        .fields()
+        .filter_map(|(field, value)| {
+            let list = match value {
+                Value::List(list) => list,
+                _ => return None,
+            };
 
-        let table = schemas
-            .iter()
-            .find(|t| t.name == field.name());
-        if table.is_none() {
-            return Some(Err(anyhow::anyhow!("table not found")));
-        }
+            let table = schemas.iter().find(|t| t.name == field.name());
+            if table.is_none() {
+                return Some(Err(anyhow::anyhow!("table not found")));
+            }
 
-        let table = table.unwrap();
-        let rows = message_to_rows(list, table.schema.clone(), block_num);
-        if let Err(err) = rows {
-            return Some(Err(err.into()));
-        }
+            let table = table.unwrap();
+            let rows = message_to_rows(list, table.schema.clone(), block_num);
+            if let Err(err) = rows {
+                return Some(Err(err.into()));
+            }
 
-        Some(Ok(TableRows {
-            rows: rows.unwrap(),
-            table: table.clone(),
-        }))
-    })
-    .collect();
+            Some(Ok(TableRows {
+                rows: rows.unwrap(),
+                table: table.clone(),
+            }))
+        })
+        .collect();
 
     Ok(DatasetRows(tables?))
 }
-
-
 
 fn message_to_rows(
     list: &[Value],
@@ -215,7 +210,8 @@ mod tests {
             ),
         ];
         let pool =
-            DescriptorPool::decode(include_bytes!("../../testdata/descriptors.bin").as_ref()).unwrap();
+            DescriptorPool::decode(include_bytes!("../../testdata/descriptors.bin").as_ref())
+                .unwrap();
         let message_descriptor = pool.get_message_by_name("package.MyMessage").unwrap();
         // let mut buff = Vec::new();
         // dynamic_message.encode(&mut buff)?;

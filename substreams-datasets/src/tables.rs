@@ -4,14 +4,21 @@ use anyhow::{anyhow, Context as _};
 use prost::Message as _;
 use prost_reflect::{Cardinality, DescriptorPool, FieldDescriptor, Kind, MessageDescriptor};
 
-use crate::proto::{google::protobuf::FileDescriptorSet, sf::substreams::{sink::sql::v1::{Service as SqlService, service::Engine as SqlEngine}, v1::Package}};
+use crate::proto::{
+    google::protobuf::FileDescriptorSet,
+    sf::substreams::{
+        sink::sql::v1::{service::Engine as SqlEngine, Service as SqlService},
+        v1::Package,
+    },
+};
 use common::{
-    arrow::datatypes::{DataType as ArrowDataType, Field, Schema, TimeUnit}, timestamp_type, Table, BLOCK_NUM
+    arrow::datatypes::{DataType as ArrowDataType, Field, Schema, TimeUnit},
+    timestamp_type, Table, BLOCK_NUM,
 };
 
+use sqlparser::ast::{DataType as SqlDataType, Statement};
 use sqlparser::dialect;
 use sqlparser::parser::Parser;
-use sqlparser::ast::{Statement, DataType as SqlDataType};
 
 #[derive(Debug, Clone)]
 pub enum OutputType {
@@ -43,8 +50,12 @@ impl Tables {
         let output_type = parse_message_type(module.output.as_ref().unwrap().r#type.as_str());
         let pool = DescriptorPool::decode(descr_set.encode_to_vec().as_slice())
             .context("failed to construct descriptor pool from package")?;
-        let message_descriptor = pool.get_message_by_name(output_type.as_str())
-            .context(format!("failed to get message descriptor for type {}", output_type))?;
+        let message_descriptor =
+            pool.get_message_by_name(output_type.as_str())
+                .context(format!(
+                    "failed to get message descriptor for type {}",
+                    output_type
+                ))?;
 
         match output_type.as_str() {
             "sf.substreams.sink.database.v1.DatabaseChanges" => {
@@ -55,8 +66,9 @@ impl Tables {
                         .ok_or_else(|| anyhow!("sink config not defined"))?
                         .value
                         .clone()
-                        .as_slice()
-                ).context("failed to decode sink config")?;
+                        .as_slice(),
+                )
+                .context("failed to decode sink config")?;
 
                 if sink_config.schema.is_empty() {
                     return Err(anyhow!("sink schema is empty"));
@@ -80,7 +92,7 @@ impl Tables {
                     output_type: OutputType::DbOut,
                     tables,
                 })
-            },
+            }
             "sf.substreams.sink.entities.v1.Entities" => {
                 todo!("Entities output type not supported yet");
                 // Ok(Self {
@@ -88,7 +100,7 @@ impl Tables {
                 //     tables: vec![],
                 //     message_descriptor,
                 // })
-            },
+            }
             _ => {
                 let tables = message_descriptor
                     .fields()
@@ -108,44 +120,52 @@ fn parse_sql(sql: &str) -> Result<Vec<Table>, anyhow::Error> {
 
     let statements = Parser::parse_sql(&dialect, sql).context("failed to parse SQL")?;
 
-    let tables = statements.iter().filter_map(|statement| {
-        match statement {
-            Statement::CreateTable { name, columns, .. } => {
-                let fields = columns.iter().map(|column| {
-                    let mut datatype = match &column.data_type {
-                        SqlDataType::Int(_) => ArrowDataType::Int32,
-                        SqlDataType::BigInt(_) => ArrowDataType::Int64,
-                        SqlDataType::SmallInt(_) => ArrowDataType::Int16,
-                        SqlDataType::TinyInt(_) => ArrowDataType::Int8,
-                        SqlDataType::Char(_) => ArrowDataType::Utf8,
-                        SqlDataType::Varchar(_) => ArrowDataType::Utf8,
-                        SqlDataType::Text => ArrowDataType::Utf8,
-                        SqlDataType::Date => ArrowDataType::Date32,
-                        SqlDataType::Time(_,_) => ArrowDataType::Time64(TimeUnit::Nanosecond),
-                        // SqlDataType::Timestamp(_,_) => ArrowDataType::Timestamp(TimeUnit::Nanosecond, None),
-                        SqlDataType::Timestamp(_,_) => timestamp_type(),
-                        SqlDataType::Decimal(_) => ArrowDataType::Float64,   // replace with Decimal?
-                        SqlDataType::Real => ArrowDataType::Float32,
-                        SqlDataType::Double => ArrowDataType::Float64,
-                        SqlDataType::Boolean => ArrowDataType::Boolean,
-                        SqlDataType::Binary(_) => ArrowDataType::Binary,
-                        _ => ArrowDataType::Utf8,
-                    };
-                    // block_num always UInt64
-                    if column.name.value.as_str() == BLOCK_NUM {
-                        datatype = ArrowDataType::UInt64;
-                    }
-                    Field::new(column.name.value.as_str(), datatype, false)
-                }).collect::<Vec<_>>();
+    let tables = statements
+        .iter()
+        .filter_map(|statement| {
+            match statement {
+                Statement::CreateTable { name, columns, .. } => {
+                    let fields = columns
+                        .iter()
+                        .map(|column| {
+                            let mut datatype = match &column.data_type {
+                                SqlDataType::Int(_) => ArrowDataType::Int32,
+                                SqlDataType::BigInt(_) => ArrowDataType::Int64,
+                                SqlDataType::SmallInt(_) => ArrowDataType::Int16,
+                                SqlDataType::TinyInt(_) => ArrowDataType::Int8,
+                                SqlDataType::Char(_) => ArrowDataType::Utf8,
+                                SqlDataType::Varchar(_) => ArrowDataType::Utf8,
+                                SqlDataType::Text => ArrowDataType::Utf8,
+                                SqlDataType::Date => ArrowDataType::Date32,
+                                SqlDataType::Time(_, _) => {
+                                    ArrowDataType::Time64(TimeUnit::Nanosecond)
+                                }
+                                // SqlDataType::Timestamp(_,_) => ArrowDataType::Timestamp(TimeUnit::Nanosecond, None),
+                                SqlDataType::Timestamp(_, _) => timestamp_type(),
+                                SqlDataType::Decimal(_) => ArrowDataType::Float64, // replace with Decimal?
+                                SqlDataType::Real => ArrowDataType::Float32,
+                                SqlDataType::Double => ArrowDataType::Float64,
+                                SqlDataType::Boolean => ArrowDataType::Boolean,
+                                SqlDataType::Binary(_) => ArrowDataType::Binary,
+                                _ => ArrowDataType::Utf8,
+                            };
+                            // block_num always UInt64
+                            if column.name.value.as_str() == BLOCK_NUM {
+                                datatype = ArrowDataType::UInt64;
+                            }
+                            Field::new(column.name.value.as_str(), datatype, false)
+                        })
+                        .collect::<Vec<_>>();
 
-                Some(Table {
-                    name: name.to_string(),
-                    schema: Arc::new(Schema::new(fields)),
-                })
+                    Some(Table {
+                        name: name.to_string(),
+                        schema: Arc::new(Schema::new(fields)),
+                    })
+                }
+                _ => None,
             }
-            _ => { None }
-        }
-    }).collect();
+        })
+        .collect();
 
     Ok(tables)
 }
@@ -205,7 +225,6 @@ fn table_from_field(field: &FieldDescriptor, pool: &DescriptorPool) -> Option<Ta
         schema: Arc::new(Schema::new(fields)),
     })
 }
-
 
 #[cfg(test)]
 mod tests {
