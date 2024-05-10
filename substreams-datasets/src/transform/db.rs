@@ -10,9 +10,15 @@ use crate::proto::sf::substreams::sink::database::v1::{
 use common::{
     arrow::{
         array::*,
-        datatypes::{DataType as ArrowDataType, Schema},
+        datatypes::{DataType as ArrowDataType, Field, Schema, TimeUnit},
     },
-    DatasetRows, Table, TableRows, BLOCK_NUM,
+    timestamp_type, DatasetRows, Table, TableRows, BLOCK_NUM,
+};
+
+use sqlparser::{
+    ast::{DataType as SqlDataType, Statement},
+    dialect,
+    parser::Parser,
 };
 
 /// transform DatabaseChanges proto message to RecordBatch based on the schemas
@@ -21,8 +27,7 @@ pub(crate) fn pb_to_rows(
     schemas: &[Table],
     block_num: u64,
 ) -> Result<DatasetRows, anyhow::Error> {
-    let changes = DatabaseChanges::decode(value)
-        .context("failed to decode dbChanges output")?;
+    let changes = DatabaseChanges::decode(value).context("failed to decode dbChanges output")?;
     let tables: Result<Vec<_>, anyhow::Error> = schemas
         .iter()
         .filter_map(|table| {
@@ -58,16 +63,16 @@ fn table_changes_to_rows(
     block_num: u64,
 ) -> Result<RecordBatch, anyhow::Error> {
     let row_count = changes.len();
-    let col_count = schema.fields().len();
-    let columns = schema.fields().iter().fold(
-        Vec::<Arc<dyn Array>>::with_capacity(col_count),
-        |mut acc, column| {
+
+    let columns: Vec<Arc<dyn Array>> = schema
+        .fields()
+        .iter()
+        .filter_map(|column| {
             let col_name = column.name();
             if col_name == BLOCK_NUM {
                 let mut builder = UInt64Builder::with_capacity(row_count);
                 builder.append_slice(&vec![block_num; row_count]);
-                acc.push(Arc::new(builder.finish()));
-                return acc;
+                return Some(Ok(Arc::new(builder.finish()) as Arc<dyn Array>));
             }
 
             let col_iter = changes.iter().map(|change| {
@@ -78,7 +83,7 @@ fn table_changes_to_rows(
                     .map(|field| field.new_value.clone())
             });
 
-            let elem: Arc<dyn Array> = match column.data_type() {
+            let col: Arc<dyn Array> = match column.data_type() {
                 ArrowDataType::Int64 => {
                     let mut builder = Int64Builder::with_capacity(row_count);
                     let cols = col_iter.map(|field| {
@@ -185,10 +190,113 @@ fn table_changes_to_rows(
                 }
                 _ => todo!("field type {} not implemented", column.data_type()),
             };
-            acc.push(elem);
-            acc
-        },
-    );
+            Some(Ok(col))
+        })
+        .collect::<Result<_, anyhow::Error>>()?;
 
     Ok(RecordBatch::try_new(schema, columns)?)
+}
+
+pub(crate) fn sql_to_schemas(sql: String) -> Result<Vec<Table>, anyhow::Error> {
+    let dialect = dialect::GenericDialect {};
+
+    let statements = Parser::parse_sql(&dialect, &sql).context("failed to parse SQL")?;
+
+    let tables = statements
+        .iter()
+        .filter_map(|statement| {
+            match statement {
+                Statement::CreateTable { name, columns, .. } => {
+                    let fields = columns
+                        .iter()
+                        .map(|column| {
+                            let mut datatype = match &column.data_type {
+                                SqlDataType::Int(_) => ArrowDataType::Int32,
+                                SqlDataType::BigInt(_) => ArrowDataType::Int64,
+                                SqlDataType::SmallInt(_) => ArrowDataType::Int16,
+                                SqlDataType::TinyInt(_) => ArrowDataType::Int8,
+                                SqlDataType::Char(_) => ArrowDataType::Utf8,
+                                SqlDataType::Varchar(_) => ArrowDataType::Utf8,
+                                SqlDataType::Text => ArrowDataType::Utf8,
+                                SqlDataType::Date => ArrowDataType::Date32,
+                                SqlDataType::Time(_, _) => {
+                                    ArrowDataType::Time64(TimeUnit::Nanosecond)
+                                }
+                                // SqlDataType::Timestamp(_,_) => ArrowDataType::Timestamp(TimeUnit::Nanosecond, None),
+                                SqlDataType::Timestamp(_, _) => timestamp_type(),
+                                SqlDataType::Decimal(_) => ArrowDataType::Float64, // replace with Decimal?
+                                SqlDataType::Real => ArrowDataType::Float32,
+                                SqlDataType::Double => ArrowDataType::Float64,
+                                SqlDataType::Boolean => ArrowDataType::Boolean,
+                                SqlDataType::Binary(_) => ArrowDataType::Binary,
+                                _ => ArrowDataType::Utf8,
+                            };
+                            // block_num always UInt64
+                            if column.name.value.as_str() == BLOCK_NUM {
+                                datatype = ArrowDataType::UInt64;
+                            }
+                            Field::new(column.name.value.as_str(), datatype, false)
+                        })
+                        .collect::<Vec<_>>();
+
+                    Some(Table {
+                        name: name.to_string(),
+                        schema: Arc::new(Schema::new(fields)),
+                    })
+                }
+                _ => None,
+            }
+        })
+        .collect();
+
+    Ok(tables)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_sql() {
+        let sql = "---------- comment ---------
+CREATE TABLE example_table (
+    -- Integer types
+    int_column INT,
+    tinyint_column TINYINT,
+    smallint_column SMALLINT,
+    mediumint_column MEDIUMINT,
+    bigint_column BIGINT,
+
+    -- Numeric types
+    float_column FLOAT,
+    double_column DOUBLE,
+    decimal_column DECIMAL(10,2),
+
+    -- Date and time types
+    date_column DATE,
+    datetime_column DATETIME,
+    timestamp_column TIMESTAMP,
+    time_column TIME,
+    year_column YEAR,
+
+    -- Character types
+    char_column CHAR(10),
+    varchar_column VARCHAR(255),
+    text_column TEXT,
+
+    -- Binary types
+    binary_column BINARY(10),
+    varbinary_column VARBINARY(255),
+    blob_column BLOB,
+
+    -- Other types
+    enum_column ENUM('value1', 'value2', 'value3'),
+    set_column SET('option1', 'option2', 'option3')
+);"
+        .to_string();
+
+        let res = sql_to_schemas(sql);
+        assert!(res.is_ok());
+        println!("{:?}", res.unwrap());
+    }
 }

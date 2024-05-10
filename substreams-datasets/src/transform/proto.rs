@@ -1,10 +1,15 @@
 use std::sync::Arc;
 
 use anyhow::Context as _;
-use prost_reflect::{DynamicMessage, Value};
+use prost_reflect::{
+    Cardinality, DescriptorPool, DynamicMessage, FieldDescriptor, Kind, MessageDescriptor, Value,
+};
 
 use common::{
-    arrow::{array::*, datatypes::Schema},
+    arrow::{
+        array::*,
+        datatypes::{DataType as ArrowDataType, Field, Schema},
+    },
     DatasetRows, Table, TableRows, BLOCK_NUM,
 };
 
@@ -58,26 +63,26 @@ fn message_to_rows(
         .as_message()
         .context("field type should be a message")?;
     let row_count = list.len();
-    let col_count = schema.fields().len();
 
-    let columns = schema.fields().iter().fold(
-        Vec::<Arc<dyn Array>>::with_capacity(col_count),
-        |mut acc, column| {
+    let columns: Vec<Arc<dyn Array>> = schema
+        .fields()
+        .iter()
+        .filter_map(|column| {
             let col_name = column.name();
             if col_name == BLOCK_NUM {
                 let mut builder = UInt64Builder::with_capacity(row_count);
                 builder.append_slice(&vec![block_num; row_count]);
-                acc.push(Arc::new(builder.finish()));
-                return acc;
+                return Some(Ok(Arc::new(builder.finish()) as Arc<dyn Array>));
             }
-            let field_value = message
-                .get_field_by_name(col_name)
-                .expect(&format!("field not found: {col_name}"));
+            let field_value = message.get_field_by_name(col_name);
+            if field_value.is_none() {
+                return Some(Err(anyhow::anyhow!("field not found: {col_name}")));
+            }
             let col_iter = list.iter().map(|row| {
                 row.as_message()
                     .and_then(|msg| msg.get_field_by_name(col_name))
             });
-            let col: Arc<dyn Array> = match *field_value {
+            let col: Arc<dyn Array> = match *field_value.unwrap() {
                 Value::String(_) => {
                     let mut builder = StringBuilder::with_capacity(row_count, 0);
                     let cols = col_iter
@@ -166,10 +171,9 @@ fn message_to_rows(
                     Arc::new(builder.finish())
                 }
             };
-            acc.push(col);
-            acc
-        },
-    );
+            Some(Ok(col))
+        })
+        .collect::<Result<_, _>>()?;
 
     Ok(RecordBatch::try_new(schema, columns)?)
 }
@@ -376,4 +380,67 @@ mod tests {
 
         Ok(())
     }
+}
+
+pub(crate) fn descriptor_to_schemas(
+    message_descriptor: MessageDescriptor,
+    pool: DescriptorPool,
+) -> Result<Vec<Table>, anyhow::Error> {
+    let tables = message_descriptor
+        .fields()
+        .filter_map(|field| field_to_table(&field, &pool))
+        .collect::<Vec<_>>();
+
+    if tables.is_empty() {
+        return Err(anyhow::anyhow!("no suitable tables in the module"));
+    }
+
+    return Ok(tables);
+}
+
+fn field_to_table(field: &FieldDescriptor, pool: &DescriptorPool) -> Option<Table> {
+    if !field.is_list() {
+        return None;
+    }
+    let typename = field.field_descriptor_proto().type_name();
+    let message = pool.get_message_by_name(typename).unwrap();
+    let mut fields = Vec::with_capacity(message.fields().len() + 1);
+    if message.get_field_by_name(BLOCK_NUM).is_none() {
+        fields.push(Field::new(BLOCK_NUM, ArrowDataType::UInt64, false));
+    }
+    fields.extend(
+        message
+            .fields()
+            .map(|f| {
+                let mut datatype = match f.kind() {
+                    Kind::String => ArrowDataType::Utf8,
+                    Kind::Uint32 => ArrowDataType::UInt32,
+                    Kind::Uint64 => ArrowDataType::UInt64,
+                    Kind::Int32 => ArrowDataType::Int32,
+                    Kind::Int64 => ArrowDataType::Int64,
+                    Kind::Float => ArrowDataType::Float32,
+                    Kind::Double => ArrowDataType::Float64,
+                    Kind::Bytes => ArrowDataType::Binary,
+                    Kind::Bool => ArrowDataType::Boolean,
+                    Kind::Message(_) => ArrowDataType::Utf8,
+                    Kind::Enum(_) => ArrowDataType::Int32,
+                    _ => ArrowDataType::Utf8,
+                };
+                if f.cardinality() == Cardinality::Repeated {
+                    // datatype = ArrowDataType::List(Arc::new(Field::new(f.name(), datatype, false)));
+                    datatype = ArrowDataType::Utf8;
+                }
+                // block_num always UInt64
+                if f.name() == BLOCK_NUM {
+                    datatype = ArrowDataType::UInt64;
+                }
+                Field::new(f.name(), datatype, false)
+            })
+            .collect::<Vec<_>>(),
+    );
+
+    Some(Table {
+        name: field.name().to_string(),
+        schema: Arc::new(Schema::new(fields)),
+    })
 }
