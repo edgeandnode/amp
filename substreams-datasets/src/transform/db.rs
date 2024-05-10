@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use prost::Message as _;
 
-use crate::tables::Tables;
 use crate::proto::sf::substreams::sink::database::v1::{
     table_change,
     DatabaseChanges,
@@ -19,17 +18,17 @@ use common::{
             DataType as ArrowDataType
         }
     },
-    parquet::data_type::AsBytes as _,
     DatasetRows,
     TableRows,
+    Table,
     BLOCK_NUM,
 };
 
+/// transform DatabaseChanges proto message to RecordBatch based on the schemas
+pub(crate) fn pb_to_rows(value: &[u8], schemas: &[Table], block_num: u64) -> Result<DatasetRows, anyhow::Error> {
 
-pub(crate) fn pb_to_rows(value: Vec<u8>, tables: &Tables, block_num: u64) -> Result<DatasetRows, anyhow::Error> {
-
-    let changes = DatabaseChanges::decode(value.as_bytes())?;
-    let tables: Result<Vec<_>, anyhow::Error> = tables.tables.iter().filter_map(|table| {
+    let changes = DatabaseChanges::decode(value)?;
+    let tables: Result<Vec<_>, anyhow::Error> = schemas.iter().filter_map(|table| {
         let table_changes = changes
             .table_changes
             .iter()
@@ -57,17 +56,17 @@ pub(crate) fn pb_to_rows(value: Vec<u8>, tables: &Tables, block_num: u64) -> Res
 
 
 fn table_changes_to_rows(changes: &[&TableChange], schema: Arc<Schema>, block_num: u64) -> Result<RecordBatch, anyhow::Error> {
-    let mut columns: Vec<Arc<dyn Array>> = Vec::with_capacity(schema.fields().len());
     let row_count = changes.len();
-
-    for column in schema.fields() {
+    let col_count = schema.fields().len();
+    let columns = schema.fields().iter().fold(Vec::<Arc<dyn Array>>::with_capacity(col_count), |mut acc, column| {
         let col_name = column.name();
         if col_name == BLOCK_NUM {
             let mut builder = UInt64Builder::with_capacity(row_count);
             builder.append_slice(&vec![block_num; row_count]);
-            columns.push(Arc::new(builder.finish()));
-            continue;
+            acc.push(Arc::new(builder.finish()));
+            return acc;
         }
+
         let col_iter = changes.iter().map(|change| {
             change
                 .fields
@@ -76,41 +75,41 @@ fn table_changes_to_rows(changes: &[&TableChange], schema: Arc<Schema>, block_nu
                 .map(|field| field.new_value.clone())
         });
 
-        match column.data_type() {
+        let elem: Arc<dyn Array> = match column.data_type() {
             ArrowDataType::Int64 => {
                 let mut builder = Int64Builder::with_capacity(row_count);
                 let cols = col_iter
                     .map(|field| field.and_then(|field| Some(field.parse().expect("field type should be an i64"))));
                 builder.extend(cols);
-                columns.push(Arc::new(builder.finish()));
+                Arc::new(builder.finish())
             }
             ArrowDataType::Int32 => {
                 let mut builder = Int32Builder::with_capacity(row_count);
                 let cols = col_iter
                     .map(|field| field.and_then(|field| Some(field.parse().expect("field type should be an i32"))));
                 builder.extend(cols);
-                columns.push(Arc::new(builder.finish()));
+                Arc::new(builder.finish())
             }
             ArrowDataType::Utf8 => {
                 let mut builder = StringBuilder::with_capacity(row_count, 0);
                 let cols = col_iter
                     .map(|field| field.and_then(|field| Some(field.to_string())));
                 builder.extend(cols);
-                columns.push(Arc::new(builder.finish()));
+                Arc::new(builder.finish())
             }
             ArrowDataType::Boolean => {
                 let mut builder = BooleanBuilder::with_capacity(row_count);
                 let cols = col_iter
                     .map(|field| field.and_then(|field| Some(field.parse::<bool>().expect("field type should be a boolean"))));
                 builder.extend(cols);
-                columns.push(Arc::new(builder.finish()));
+                Arc::new(builder.finish())
             }
             ArrowDataType::UInt64 => {
                 let mut builder = UInt64Builder::with_capacity(row_count);
                 let cols = col_iter
                     .map(|field| field.and_then(|field| Some(field.parse().expect("field type should be a u64"))));
                 builder.extend(cols);
-                columns.push(Arc::new(builder.finish()));
+                Arc::new(builder.finish())
             }
             ArrowDataType::Timestamp(_, _) => {
                 let mut builder = TimestampNanosecondBuilder::with_capacity(row_count).with_data_type(common::timestamp_type());
@@ -125,39 +124,41 @@ fn table_changes_to_rows(changes: &[&TableChange], schema: Arc<Schema>, block_nu
                         )
                     );
                 builder.extend(cols);
-                columns.push(Arc::new(builder.finish()));
+                Arc::new(builder.finish())
             }
             ArrowDataType::Float64 => {
                 let mut builder = Float64Builder::with_capacity(row_count);
                 let cols = col_iter
                     .map(|field| field.and_then(|field| Some(field.parse().expect("field type should be a float"))));
                 builder.extend(cols);
-                columns.push(Arc::new(builder.finish()));
+                Arc::new(builder.finish())
             }
             ArrowDataType::Float32 => {
                 let mut builder = Float32Builder::with_capacity(row_count);
                 let cols = col_iter
                     .map(|field| field.and_then(|field| Some(field.parse().expect("field type should be a float"))));
                 builder.extend(cols);
-                columns.push(Arc::new(builder.finish()));
+                Arc::new(builder.finish())
             }
             ArrowDataType::Date32 => {
                 let mut builder = Date32Builder::with_capacity(row_count);
                 let cols = col_iter
                     .map(|field| field.and_then(|field| Some(field.parse().expect("field type should be a date"))));
                 builder.extend(cols);
-                columns.push(Arc::new(builder.finish()));
+                Arc::new(builder.finish())
             }
             ArrowDataType::Binary => {
                 let mut builder = BinaryBuilder::with_capacity(row_count, 0);
                 let cols = col_iter
                     .map(|field| field.and_then(|field| Some(field.as_bytes().to_owned())));
                 builder.extend(cols);
-                columns.push(Arc::new(builder.finish()));
+                Arc::new(builder.finish())
             }
             _ => todo!("field type {} not implemented", column.data_type()),
-        }
-    }
+        };
+        acc.push(elem);
+        acc
+    });
 
     Ok(RecordBatch::try_new(schema, columns)?)
 }

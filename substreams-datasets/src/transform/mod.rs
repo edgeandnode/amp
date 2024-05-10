@@ -2,12 +2,11 @@ pub mod proto;
 pub mod db;
 pub mod entities;
 
-
 use anyhow::Context as _;
 
-use super::tables::{Tables, OutputType};
+use crate::tables::{Tables, OutputType};
 use crate::proto::sf::substreams::rpc::v2::BlockScopedData;
-use common::DatasetRows;
+use common::{parquet::data_type::AsBytes, DatasetRows};
 
 pub fn transform(block: BlockScopedData, tables: &Tables) -> Result<DatasetRows, anyhow::Error> {
 
@@ -21,10 +20,10 @@ pub fn transform(block: BlockScopedData, tables: &Tables) -> Result<DatasetRows,
 
     let table_rows = match &tables.output_type {
         OutputType::Proto(message_descriptor) => {
-            proto::pb_to_rows(message_descriptor, value, tables, block_num)
+            proto::pb_to_rows(message_descriptor, value.as_bytes(), &tables.tables, block_num)
         }
         OutputType::DbOut => {
-            db::pb_to_rows(value, tables, block_num)
+            db::pb_to_rows(value.as_bytes(), &tables.tables, block_num)
         }
         OutputType::Entities => {
             entities::pb_to_rows(value, tables, block_num)

@@ -8,17 +8,17 @@ use common::{
         array::*,
         datatypes::Schema
     },
-    parquet::data_type::AsBytes as _,
     DatasetRows,
     TableRows,
+    Table,
     BLOCK_NUM,
 };
 
 
-pub(crate) fn pb_to_rows(message_descriptor: &prost_reflect::MessageDescriptor, value: Vec<u8>, tables: &crate::tables::Tables, block_num: u64) -> Result<DatasetRows, anyhow::Error> {
+/// transform Protobuf message to RecordBatch based on the message descriptor
+pub(crate) fn pb_to_rows(message_descriptor: &prost_reflect::MessageDescriptor, value: &[u8], schemas: &[Table], block_num: u64) -> Result<DatasetRows, anyhow::Error> {
 
-    let dynamic_message =
-        DynamicMessage::decode(message_descriptor.clone(), value.as_bytes())?;
+    let dynamic_message = DynamicMessage::decode(message_descriptor.clone(), value)?;
 
     let tables: Result<Vec<_>, anyhow::Error> = dynamic_message.fields().filter_map(|(field, value)| {
         let list = match value {
@@ -26,8 +26,7 @@ pub(crate) fn pb_to_rows(message_descriptor: &prost_reflect::MessageDescriptor, 
             _ => return None,
         };
 
-        let table = tables
-            .tables
+        let table = schemas
             .iter()
             .find(|t| t.name == field.name());
         if table.is_none() {
