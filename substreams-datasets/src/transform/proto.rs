@@ -57,110 +57,119 @@ fn message_to_rows(
         .as_message()
         .context("field type should be a message")?;
     let row_count = list.len();
-    let mut columns: Vec<Arc<dyn Array>> = Vec::with_capacity(schema.fields().len());
+    let col_count = schema.fields().len();
 
-    for column in schema.fields() {
-        let col_name = column.name();
-        if col_name == BLOCK_NUM {
-            let mut builder = UInt64Builder::with_capacity(row_count);
-            builder.append_slice(&vec![block_num; row_count]);
-            columns.push(Arc::new(builder.finish()));
-            continue;
-        }
-        let field_value = message
-            .get_field_by_name(col_name)
-            .context(format!("field not found: {col_name}"))?;
-        let col_iter = list.iter().map(|row| {
-            row.as_message()
-                .and_then(|msg| msg.get_field_by_name(col_name))
-        });
-        match *field_value {
-            Value::String(_) => {
-                let mut builder = StringBuilder::with_capacity(row_count, 0);
-                let cols = col_iter
-                    .map(|field| field.and_then(|field| field.as_str().map(|s| s.to_owned())));
-                builder.extend(cols);
-                columns.push(Arc::new(builder.finish()));
-            }
-            Value::U32(_) => {
-                let mut builder = UInt32Builder::with_capacity(row_count);
-                let cols = col_iter
-                    .map(|field| field.and_then(|field| field.as_u32().map(|s| s.to_owned())));
-                builder.extend(cols);
-                columns.push(Arc::new(builder.finish()));
-            }
-            Value::U64(_) => {
+    let columns = schema.fields().iter().fold(
+        Vec::<Arc<dyn Array>>::with_capacity(col_count),
+        |mut acc, column| {
+            let col_name = column.name();
+            if col_name == BLOCK_NUM {
                 let mut builder = UInt64Builder::with_capacity(row_count);
-                let cols = col_iter
-                    .map(|field| field.and_then(|field| field.as_u64().map(|s| s.to_owned())));
-                builder.extend(cols);
-                columns.push(Arc::new(builder.finish()));
+                builder.append_slice(&vec![block_num; row_count]);
+                acc.push(Arc::new(builder.finish()));
+                return acc;
             }
-            Value::I32(_) => {
-                let mut builder = Int32Builder::with_capacity(row_count);
-                let cols = col_iter
-                    .map(|field| field.and_then(|field| field.as_i32().map(|s| s.to_owned())));
-                builder.extend(cols);
-                columns.push(Arc::new(builder.finish()));
-            }
-            Value::I64(_) => {
-                let mut builder = Int64Builder::with_capacity(row_count);
-                let cols = col_iter
-                    .map(|field| field.and_then(|field| field.as_i64().map(|s| s.to_owned())));
-                builder.extend(cols);
-                columns.push(Arc::new(builder.finish()));
-            }
-            Value::F32(_) => {
-                let mut builder = Float32Builder::with_capacity(row_count);
-                let cols = col_iter
-                    .map(|field| field.and_then(|field| field.as_f32().map(|s| s.to_owned())));
-                builder.extend(cols);
-                columns.push(Arc::new(builder.finish()));
-            }
-            Value::F64(_) => {
-                let mut builder = Float64Builder::with_capacity(row_count);
-                let cols = col_iter
-                    .map(|field| field.and_then(|field| field.as_f64().map(|s| s.to_owned())));
-                builder.extend(cols);
-                columns.push(Arc::new(builder.finish()));
-            }
-            Value::Bytes(_) => {
-                let mut builder = BinaryBuilder::with_capacity(row_count, 0);
-                let cols = col_iter
-                    .map(|field| field.and_then(|field| field.as_bytes().map(|s| s.to_owned())));
-                builder.extend(cols);
-                columns.push(Arc::new(builder.finish()));
-            }
-            Value::Bool(_) => {
-                let mut builder = BooleanBuilder::with_capacity(row_count);
-                let cols = col_iter
-                    .map(|field| field.and_then(|field| field.as_bool().map(|s| s.to_owned())));
-                builder.extend(cols);
-                columns.push(Arc::new(builder.finish()));
-            }
-            Value::EnumNumber(_) => {
-                let mut builder = Int32Builder::with_capacity(row_count);
-                let cols = col_iter.map(|field| {
-                    field.and_then(|field| field.as_enum_number().map(|s| s.to_owned()))
-                });
-                builder.extend(cols);
-                columns.push(Arc::new(builder.finish()));
-            }
-            Value::Message(_) => {
-                let mut builder = StringBuilder::with_capacity(row_count, 0);
-                let cols = col_iter
-                    .map(|field| field.and_then(|field| field.as_message().map(|s| s.to_string())));
-                builder.extend(cols);
-                columns.push(Arc::new(builder.finish()));
-            }
-            Value::List(_) | Value::Map(_) => {
-                let mut builder = StringBuilder::with_capacity(row_count, 0);
-                let cols = col_iter.map(|field| field.and_then(|field| Some(field.to_string())));
-                builder.extend(cols);
-                columns.push(Arc::new(builder.finish()));
-            }
-        }
-    }
+            let field_value = message
+                .get_field_by_name(col_name)
+                .expect(&format!("field not found: {col_name}"));
+            let col_iter = list.iter().map(|row| {
+                row.as_message()
+                    .and_then(|msg| msg.get_field_by_name(col_name))
+            });
+            let col: Arc<dyn Array> = match *field_value {
+                Value::String(_) => {
+                    let mut builder = StringBuilder::with_capacity(row_count, 0);
+                    let cols = col_iter
+                        .map(|field| field.and_then(|field| field.as_str().map(|s| s.to_owned())));
+                    builder.extend(cols);
+                    Arc::new(builder.finish())
+                }
+                Value::U32(_) => {
+                    let mut builder = UInt32Builder::with_capacity(row_count);
+                    let cols = col_iter
+                        .map(|field| field.and_then(|field| field.as_u32().map(|s| s.to_owned())));
+                    builder.extend(cols);
+                    Arc::new(builder.finish())
+                }
+                Value::U64(_) => {
+                    let mut builder = UInt64Builder::with_capacity(row_count);
+                    let cols = col_iter
+                        .map(|field| field.and_then(|field| field.as_u64().map(|s| s.to_owned())));
+                    builder.extend(cols);
+                    Arc::new(builder.finish())
+                }
+                Value::I32(_) => {
+                    let mut builder = Int32Builder::with_capacity(row_count);
+                    let cols = col_iter
+                        .map(|field| field.and_then(|field| field.as_i32().map(|s| s.to_owned())));
+                    builder.extend(cols);
+                    Arc::new(builder.finish())
+                }
+                Value::I64(_) => {
+                    let mut builder = Int64Builder::with_capacity(row_count);
+                    let cols = col_iter
+                        .map(|field| field.and_then(|field| field.as_i64().map(|s| s.to_owned())));
+                    builder.extend(cols);
+                    Arc::new(builder.finish())
+                }
+                Value::F32(_) => {
+                    let mut builder = Float32Builder::with_capacity(row_count);
+                    let cols = col_iter
+                        .map(|field| field.and_then(|field| field.as_f32().map(|s| s.to_owned())));
+                    builder.extend(cols);
+                    Arc::new(builder.finish())
+                }
+                Value::F64(_) => {
+                    let mut builder = Float64Builder::with_capacity(row_count);
+                    let cols = col_iter
+                        .map(|field| field.and_then(|field| field.as_f64().map(|s| s.to_owned())));
+                    builder.extend(cols);
+                    Arc::new(builder.finish())
+                }
+                Value::Bytes(_) => {
+                    let mut builder = BinaryBuilder::with_capacity(row_count, 0);
+                    let cols = col_iter.map(|field| {
+                        field.and_then(|field| field.as_bytes().map(|s| s.to_owned()))
+                    });
+                    builder.extend(cols);
+                    Arc::new(builder.finish())
+                }
+                Value::Bool(_) => {
+                    let mut builder = BooleanBuilder::with_capacity(row_count);
+                    let cols = col_iter
+                        .map(|field| field.and_then(|field| field.as_bool().map(|s| s.to_owned())));
+                    builder.extend(cols);
+                    Arc::new(builder.finish())
+                }
+                Value::EnumNumber(_) => {
+                    let mut builder = Int32Builder::with_capacity(row_count);
+                    let cols = col_iter.map(|field| {
+                        field.and_then(|field| field.as_enum_number().map(|s| s.to_owned()))
+                    });
+                    builder.extend(cols);
+                    Arc::new(builder.finish())
+                }
+                Value::Message(_) => {
+                    let mut builder = StringBuilder::with_capacity(row_count, 0);
+                    let cols = col_iter.map(|field| {
+                        field.and_then(|field| field.as_message().map(|s| s.to_string()))
+                    });
+                    builder.extend(cols);
+                    Arc::new(builder.finish())
+                }
+                Value::List(_) | Value::Map(_) => {
+                    let mut builder = StringBuilder::with_capacity(row_count, 0);
+                    let cols =
+                        col_iter.map(|field| field.and_then(|field| Some(field.to_string())));
+                    builder.extend(cols);
+                    Arc::new(builder.finish())
+                }
+            };
+            acc.push(col);
+            acc
+        },
+    );
+
     Ok(RecordBatch::try_new(schema, columns)?)
 }
 
