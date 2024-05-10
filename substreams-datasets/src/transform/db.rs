@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use anyhow::Context as _;
 use prost::Message as _;
 
 use crate::proto::sf::substreams::sink::database::v1::{
@@ -20,7 +21,8 @@ pub(crate) fn pb_to_rows(
     schemas: &[Table],
     block_num: u64,
 ) -> Result<DatasetRows, anyhow::Error> {
-    let changes = DatabaseChanges::decode(value)?;
+    let changes = DatabaseChanges::decode(value)
+        .context("failed to decode dbChanges output")?;
     let tables: Result<Vec<_>, anyhow::Error> = schemas
         .iter()
         .filter_map(|table| {

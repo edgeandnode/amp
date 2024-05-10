@@ -15,7 +15,8 @@ pub(crate) fn pb_to_rows(
     schemas: &[Table],
     block_num: u64,
 ) -> Result<DatasetRows, anyhow::Error> {
-    let dynamic_message = DynamicMessage::decode(message_descriptor.clone(), value)?;
+    let dynamic_message = DynamicMessage::decode(message_descriptor.clone(), value)
+        .context("failed to decode module output message")?;
 
     let tables: Result<Vec<_>, anyhow::Error> = dynamic_message
         .fields()
