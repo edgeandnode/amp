@@ -12,10 +12,7 @@ use datafusion::execution::memory_pool::FairSpillPool;
 use datafusion::execution::memory_pool::MemoryPool;
 use datafusion::logical_expr::Expr;
 use datafusion::{
-    common::{
-        parsers::CompressionTypeVariant, Constraints, DFSchemaRef, OwnedTableReference,
-        ToDFSchema as _,
-    },
+    common::{parsers::CompressionTypeVariant, Constraints, DFSchemaRef, ToDFSchema as _},
     error::DataFusionError,
     execution::{
         config::SessionConfig,
@@ -138,6 +135,17 @@ impl DatasetContext {
         if std::env::var_os("DATAFUSION_OPTIMIZER_PREFER_EXISTING_SORT").is_none() {
             // Set `prefer_existing_sort` by default.
             session_config.options_mut().optimizer.prefer_existing_sort = true;
+        }
+
+        if std::env::var_os("DATAFUSION_EXECUTION_SPLIT_FILE_GROUPS_BY_STATISTICS").is_none() {
+            // Set `split_file_groups_by_statistics` by default.
+            //
+            // Without this `prefer_existing_sort` will not be used with multiple files.
+            // See https://github.com/apache/datafusion/issues/10336.
+            session_config
+                .options_mut()
+                .execution
+                .split_file_groups_by_statistics = true;
         }
 
         // Leveraging `order_exprs` can optimize away sorting for many query plans.
@@ -413,7 +421,7 @@ async fn create_external_tables(
 }
 
 fn create_external_table(
-    name: OwnedTableReference,
+    name: TableReference,
     schema: DFSchemaRef,
     url: &Url,
     order_exprs: Vec<Vec<Expr>>,

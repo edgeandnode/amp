@@ -41,15 +41,17 @@ toml = "0.8.10"
 anyhow = "1.0.80"
 fs-err = "2.11.0"
 serde_json = "1.0.114"
-datafusion = "37"
-object_store = { version = "0.9.1", features = ["aws", "gcp"] }
 url = "2.5.0"
 async-trait = "0.1.80"
 bytes = "1"
-datafusion-proto = "37"
 lazy_static = "1.4.0"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 log = "0.4"
 alloy-core = { version = "0.7.2", features = ["std", "json-abi", "dyn-abi"] }
 itertools = "0.12.1"
 atty = "0.2.14"
+
+# Datafusion and Arrow crates
+datafusion = "38"
+datafusion-proto = "38"
+object_store = { version = "0.9.1", features = ["aws", "gcp"] }
