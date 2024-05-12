@@ -15,6 +15,7 @@ use common::config::Config;
 use common::dataset_context::DatasetContext;
 use common::multirange::MultiRange;
 use common::parquet;
+use common::tracing;
 use common::BLOCK_NUM;
 use fs_err as fs;
 use futures::future::try_join_all;
@@ -97,7 +98,7 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
-    tracing_subscriber::fmt::init();
+    tracing::register_logger();
 
     let args = Args::parse();
     let Args {

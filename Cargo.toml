@@ -1,5 +1,12 @@
 [workspace]
-members = ["firehose-datasets", "common", "dump", "server", "dump-check", "substreams-datasets"]
+members = [
+    "firehose-datasets",
+    "common",
+    "dump",
+    "server",
+    "dump-check",
+    "substreams-datasets",
+]
 
 resolver = "2"
 
@@ -45,3 +52,4 @@ tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 log = "0.4"
 alloy-core = { version = "0.7.2", features = ["std", "json-abi", "dyn-abi"] }
 itertools = "0.12.1"
+atty = "0.2.14"

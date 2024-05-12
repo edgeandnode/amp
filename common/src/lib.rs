@@ -3,6 +3,7 @@ pub mod config;
 pub mod dataset_context;
 pub mod meta_tables;
 pub mod multirange;
+pub mod tracing;
 
 pub use arrow_helpers::*;
 pub use datafusion::arrow;

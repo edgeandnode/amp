@@ -2,14 +2,14 @@ use std::net::SocketAddr;
 
 use anyhow::Context;
 use arrow_flight::flight_service_server::FlightServiceServer;
-use common::{config::Config, DatasetContext};
+use common::{config::Config, tracing, DatasetContext};
 use tonic::transport::Server;
 
 mod service;
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
-    tracing_subscriber::fmt::init();
+    tracing::register_logger();
 
     let dataset = firehose_datasets::evm::dataset("mainnet".to_string());
     let config = std::env::var("NOZZLE_CONFIG").context("no NOZZLE_CONFIG env var set")?;

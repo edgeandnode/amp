@@ -1078,6 +1078,7 @@ name = "common"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "atty",
  "datafusion",
  "datafusion-proto",
  "futures",
@@ -1087,6 +1088,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "toml",
+ "tracing-subscriber",
  "url",
 ]
 
@@ -1616,7 +1618,6 @@ dependencies = [
  "substreams-datasets",
  "tokio",
  "toml",
- "tracing-subscriber",
  "url",
 ]
 
@@ -3918,7 +3919,6 @@ dependencies = [
  "thiserror",
  "tokio",
  "tonic",
- "tracing-subscriber",
 ]
 
 [[package]]

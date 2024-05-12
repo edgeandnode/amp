@@ -17,4 +17,3 @@ thiserror.workspace = true
 datafusion.workspace = true
 tokio.workspace = true
 anyhow.workspace = true
-tracing-subscriber.workspace = true
