@@ -132,9 +132,10 @@ impl DatasetContext {
         // Using `from_env` allows tinkering without re-compiling.
         let mut session_config = SessionConfig::from_env()?;
 
+        let opts = session_config.options_mut();
         if std::env::var_os("DATAFUSION_OPTIMIZER_PREFER_EXISTING_SORT").is_none() {
             // Set `prefer_existing_sort` by default.
-            session_config.options_mut().optimizer.prefer_existing_sort = true;
+            opts.optimizer.prefer_existing_sort = true;
         }
 
         if std::env::var_os("DATAFUSION_EXECUTION_SPLIT_FILE_GROUPS_BY_STATISTICS").is_none() {
@@ -142,10 +143,13 @@ impl DatasetContext {
             //
             // Without this `prefer_existing_sort` will not be used with multiple files.
             // See https://github.com/apache/datafusion/issues/10336.
-            session_config
-                .options_mut()
-                .execution
-                .split_file_groups_by_statistics = true;
+            opts.execution.split_file_groups_by_statistics = true;
+        }
+
+        if std::env::var_os("DATAFUSION_EXECUTION_COLLECT_STATISTICS").is_none() {
+            // Set `collect_statistics` by default, so DataFusion eagerly reads and caches the
+            // Parquet metadata statistics used for various optimizations.
+            opts.execution.collect_statistics = true;
         }
 
         // Leveraging `order_exprs` can optimize away sorting for many query plans.
