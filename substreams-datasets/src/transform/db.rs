@@ -88,12 +88,12 @@ fn table_changes_to_rows(
             let col_iter = changes.iter().map(|change| {
                 if let Some(table_change::PrimaryKey::CompositePk(key)) = &change.primary_key {
                     if let Some(val) = key.keys.get(col_name) {
-                        return Some(val.clone());
+                        return Some(val);
                     }
                 }
                 change.fields.iter().find_map(|field| {
                     if field.name == *col_name {
-                        return Some(field.new_value.clone());
+                        return Some(&field.new_value);
                     }
                     None // shouldn't be reachable, will trigger an Arrow batch error
                 })
