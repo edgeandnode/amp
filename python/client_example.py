@@ -5,6 +5,7 @@ def to_hex(val):
     return '0x' + val.hex() if isinstance(val, bytes) else val
 
 client = Client("grpc://127.0.0.1:1602")
-df = client.get_sql("select * from logs limit 1")
+df = client.get_sql("select * from logs limit 1", read_all=True)
+df = df.to_pandas()
 df = df.map(to_hex)
-df
+print(df)
