@@ -71,7 +71,7 @@ impl Client {
         };
         let package = Package::from_url(manifest.as_str()).await?;
 
-        let tables = Tables::from_package(&package, output_module.clone())
+        let tables = Tables::from_package(&package, &output_module)
             .map_err(|_| Error::AssertFail(anyhow!("failed to build tables from spkg")))?;
 
         Ok(Self {
@@ -166,8 +166,9 @@ impl BlockStreamer for Client {
                             continue;
                         }
                         let block_num = block.clock.as_ref().unwrap().number;
-                        let table_rows = transform(block, &self.tables)
-                            .context("error converting Blockscope to rows")?;
+                        let table_rows = transform(block, &self.tables).context(format!(
+                            "error converting Blockscope to rows for block {block_num}"
+                        ))?;
                         if table_rows.is_empty() {
                             continue;
                         }

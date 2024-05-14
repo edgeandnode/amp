@@ -1,10 +1,14 @@
 use std::sync::Arc;
 
-use anyhow::Context as _;
+use anyhow::{anyhow, Context as _};
 use prost::Message as _;
 
 use crate::proto::sf::substreams::sink::database::v1::{
     table_change, DatabaseChanges, TableChange,
+};
+use crate::proto::sf::substreams::{
+    sink::sql::v1::{service::Engine as SqlEngine, Service as SqlService},
+    v1::Package,
 };
 
 use common::{
@@ -45,7 +49,12 @@ pub(crate) fn pb_to_rows(
             }
             let rows = table_changes_to_rows(&table_changes, table.schema.clone(), block_num);
             if let Err(err) = rows {
-                return Some(Err(err.into()));
+                return Some(Err(err
+                    .context(format!(
+                        "Processing table changes for '{}' at block {}",
+                        table.name, block_num
+                    ))
+                    .into()));
             }
             Some(Ok(TableRows {
                 rows: rows.unwrap(),
@@ -75,12 +84,19 @@ fn table_changes_to_rows(
                 return Some(Ok(Arc::new(builder.finish()) as Arc<dyn Array>));
             }
 
+            // iterator over all table changes for this column
             let col_iter = changes.iter().map(|change| {
-                change
-                    .fields
-                    .iter()
-                    .find(|&field| field.name == *col_name)
-                    .map(|field| field.new_value.clone())
+                if let Some(table_change::PrimaryKey::CompositePk(key)) = &change.primary_key {
+                    if let Some(val) = key.keys.get(col_name) {
+                        return Some(val.clone());
+                    }
+                }
+                change.fields.iter().find_map(|field| {
+                    if field.name == *col_name {
+                        return Some(field.new_value.clone());
+                    }
+                    None // shouldn't be reachable, will trigger an Arrow batch error
+                })
             });
 
             let col: Arc<dyn Array> = match column.data_type() {
@@ -197,20 +213,65 @@ fn table_changes_to_rows(
     Ok(RecordBatch::try_new(schema, columns)?)
 }
 
-pub(crate) fn sql_to_schemas(sql: String) -> Result<Vec<Table>, anyhow::Error> {
+pub(crate) fn package_to_schemas(
+    package: &Package,
+    output_module: &str,
+) -> Result<Vec<Table>, anyhow::Error> {
+    let sink_config = SqlService::decode(
+        package
+            .sink_config
+            .as_ref()
+            .ok_or_else(|| anyhow!("sink config not defined"))?
+            .value
+            .clone()
+            .as_slice(),
+    )
+    .context("failed to decode sink config")?;
+
+    if sink_config.schema.is_empty() {
+        return Err(anyhow!("sink schema is empty"));
+    }
+
+    if SqlEngine::try_from(sink_config.engine)? != SqlEngine::Postgres {
+        return Err(anyhow!("only postgres sink engine supported"));
+    }
+
+    if package.sink_module != output_module {
+        return Err(anyhow!(
+            "sink module {} does not match output module {}",
+            package.sink_module,
+            output_module
+        ));
+    }
+
+    let tables = sql_to_schemas(sink_config.schema)?;
+
+    Ok(tables)
+}
+
+fn sql_to_schemas(sql: String) -> Result<Vec<Table>, anyhow::Error> {
     let dialect = dialect::GenericDialect {};
 
     let statements = Parser::parse_sql(&dialect, &sql).context("failed to parse SQL")?;
 
     let tables = statements
         .iter()
-        .filter_map(|statement| {
-            match statement {
-                Statement::CreateTable { name, columns, .. } => {
-                    let fields = columns
+        .filter_map(|statement| statement_to_table(statement))
+        .collect();
+
+    Ok(tables)
+}
+
+fn statement_to_table(statement: &Statement) -> Option<Table> {
+    match statement {
+        Statement::CreateTable { name, columns, .. } => {
+            let fields = std::iter::once(Field::new(BLOCK_NUM, ArrowDataType::UInt64, false))
+                .chain(
+                    columns
                         .iter()
+                        .filter(|column| column.name.value != BLOCK_NUM)
                         .map(|column| {
-                            let mut datatype = match &column.data_type {
+                            let datatype = match column.data_type {
                                 SqlDataType::Int(_) => ArrowDataType::Int32,
                                 SqlDataType::BigInt(_) => ArrowDataType::Int64,
                                 SqlDataType::SmallInt(_) => ArrowDataType::Int16,
@@ -224,32 +285,25 @@ pub(crate) fn sql_to_schemas(sql: String) -> Result<Vec<Table>, anyhow::Error> {
                                 }
                                 // SqlDataType::Timestamp(_,_) => ArrowDataType::Timestamp(TimeUnit::Nanosecond, None),
                                 SqlDataType::Timestamp(_, _) => timestamp_type(),
-                                SqlDataType::Decimal(_) => ArrowDataType::Float64, // replace with Decimal?
+                                SqlDataType::Decimal(_) => ArrowDataType::Float64,
                                 SqlDataType::Real => ArrowDataType::Float32,
                                 SqlDataType::Double => ArrowDataType::Float64,
                                 SqlDataType::Boolean => ArrowDataType::Boolean,
                                 SqlDataType::Binary(_) => ArrowDataType::Binary,
                                 _ => ArrowDataType::Utf8,
                             };
-                            // block_num always UInt64
-                            if column.name.value.as_str() == BLOCK_NUM {
-                                datatype = ArrowDataType::UInt64;
-                            }
                             Field::new(column.name.value.as_str(), datatype, false)
-                        })
-                        .collect::<Vec<_>>();
+                        }),
+                )
+                .collect::<Vec<_>>();
 
-                    Some(Table {
-                        name: name.to_string(),
-                        schema: Arc::new(Schema::new(fields)),
-                    })
-                }
-                _ => None,
-            }
-        })
-        .collect();
-
-    Ok(tables)
+            Some(Table {
+                name: name.to_string(),
+                schema: Arc::new(Schema::new(fields)),
+            })
+        }
+        _ => None,
+    }
 }
 
 #[cfg(test)]

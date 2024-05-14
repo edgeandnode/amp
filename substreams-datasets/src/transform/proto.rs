@@ -1,9 +1,8 @@
 use std::sync::Arc;
 
 use anyhow::Context as _;
-use prost_reflect::{
-    Cardinality, DescriptorPool, DynamicMessage, FieldDescriptor, Kind, MessageDescriptor, Value,
-};
+use prost::Message as _;
+use prost_reflect::{Cardinality, DescriptorPool, DynamicMessage, FieldDescriptor, Kind, Value};
 
 use common::{
     arrow::{
@@ -13,9 +12,13 @@ use common::{
     DatasetRows, Table, TableRows, BLOCK_NUM,
 };
 
+use crate::proto::{google::protobuf::FileDescriptorSet, sf::substreams::v1::Package};
+
+pub use prost_reflect::MessageDescriptor;
+
 /// transform Protobuf message to RecordBatch based on the message descriptor
 pub(crate) fn pb_to_rows(
-    message_descriptor: &prost_reflect::MessageDescriptor,
+    message_descriptor: &MessageDescriptor,
     value: &[u8],
     schemas: &[Table],
     block_num: u64,
@@ -176,6 +179,88 @@ fn message_to_rows(
         .collect::<Result<_, _>>()?;
 
     Ok(RecordBatch::try_new(schema, columns)?)
+}
+
+fn field_to_table(field: &FieldDescriptor, pool: &DescriptorPool) -> Option<Table> {
+    if !field.is_list() {
+        return None;
+    }
+    let typename = field.field_descriptor_proto().type_name();
+    let message = pool.get_message_by_name(typename).unwrap();
+    let mut fields = Vec::with_capacity(message.fields().len() + 1);
+    if message.get_field_by_name(BLOCK_NUM).is_none() {
+        fields.push(Field::new(BLOCK_NUM, ArrowDataType::UInt64, false));
+    }
+    fields.extend(
+        message
+            .fields()
+            .map(|f| {
+                let mut datatype = match f.kind() {
+                    Kind::String => ArrowDataType::Utf8,
+                    Kind::Uint32 => ArrowDataType::UInt32,
+                    Kind::Uint64 => ArrowDataType::UInt64,
+                    Kind::Int32 => ArrowDataType::Int32,
+                    Kind::Int64 => ArrowDataType::Int64,
+                    Kind::Float => ArrowDataType::Float32,
+                    Kind::Double => ArrowDataType::Float64,
+                    Kind::Bytes => ArrowDataType::Binary,
+                    Kind::Bool => ArrowDataType::Boolean,
+                    Kind::Message(_) => ArrowDataType::Utf8,
+                    Kind::Enum(_) => ArrowDataType::Int32,
+                    _ => ArrowDataType::Utf8,
+                };
+                if f.cardinality() == Cardinality::Repeated {
+                    // datatype = ArrowDataType::List(Arc::new(Field::new(f.name(), datatype, false)));
+                    datatype = ArrowDataType::Utf8;
+                }
+                // block_num always UInt64
+                if f.name() == BLOCK_NUM {
+                    datatype = ArrowDataType::UInt64;
+                }
+                Field::new(f.name(), datatype, false)
+            })
+            .collect::<Vec<_>>(),
+    );
+
+    Some(Table {
+        name: field.name().to_string(),
+        schema: Arc::new(Schema::new(fields)),
+    })
+}
+
+pub(crate) fn package_to_schemas(
+    package: &Package,
+    output_type: &str,
+) -> Result<(Vec<Table>, MessageDescriptor), anyhow::Error> {
+    let descr_set = FileDescriptorSet {
+        file: package.proto_files.clone(),
+    };
+    let output_type = parse_message_type(output_type);
+    let pool = DescriptorPool::decode(descr_set.encode_to_vec().as_slice())
+        .context("failed to construct descriptor pool from package")?;
+    let message_descriptor = pool
+        .get_message_by_name(output_type.as_str())
+        .context(format!("failed to get descriptor for type {output_type}"))?;
+
+    let tables = message_descriptor
+        .fields()
+        .filter_map(|field| field_to_table(&field, &pool))
+        .collect::<Vec<_>>();
+
+    if tables.is_empty() {
+        return Err(anyhow::anyhow!("no suitable tables in the module"));
+    }
+
+    Ok((tables, message_descriptor))
+}
+
+// proto:sf.ethereum.token.v1.Transfers -> sf.ethereum.token.v1.Transfers
+fn parse_message_type(s: &str) -> String {
+    if let Some(index) = s.find(':') {
+        s[index + 1..].to_string()
+    } else {
+        s.to_string()
+    }
 }
 
 #[cfg(test)]
@@ -380,67 +465,4 @@ mod tests {
 
         Ok(())
     }
-}
-
-pub(crate) fn descriptor_to_schemas(
-    message_descriptor: MessageDescriptor,
-    pool: DescriptorPool,
-) -> Result<Vec<Table>, anyhow::Error> {
-    let tables = message_descriptor
-        .fields()
-        .filter_map(|field| field_to_table(&field, &pool))
-        .collect::<Vec<_>>();
-
-    if tables.is_empty() {
-        return Err(anyhow::anyhow!("no suitable tables in the module"));
-    }
-
-    return Ok(tables);
-}
-
-fn field_to_table(field: &FieldDescriptor, pool: &DescriptorPool) -> Option<Table> {
-    if !field.is_list() {
-        return None;
-    }
-    let typename = field.field_descriptor_proto().type_name();
-    let message = pool.get_message_by_name(typename).unwrap();
-    let mut fields = Vec::with_capacity(message.fields().len() + 1);
-    if message.get_field_by_name(BLOCK_NUM).is_none() {
-        fields.push(Field::new(BLOCK_NUM, ArrowDataType::UInt64, false));
-    }
-    fields.extend(
-        message
-            .fields()
-            .map(|f| {
-                let mut datatype = match f.kind() {
-                    Kind::String => ArrowDataType::Utf8,
-                    Kind::Uint32 => ArrowDataType::UInt32,
-                    Kind::Uint64 => ArrowDataType::UInt64,
-                    Kind::Int32 => ArrowDataType::Int32,
-                    Kind::Int64 => ArrowDataType::Int64,
-                    Kind::Float => ArrowDataType::Float32,
-                    Kind::Double => ArrowDataType::Float64,
-                    Kind::Bytes => ArrowDataType::Binary,
-                    Kind::Bool => ArrowDataType::Boolean,
-                    Kind::Message(_) => ArrowDataType::Utf8,
-                    Kind::Enum(_) => ArrowDataType::Int32,
-                    _ => ArrowDataType::Utf8,
-                };
-                if f.cardinality() == Cardinality::Repeated {
-                    // datatype = ArrowDataType::List(Arc::new(Field::new(f.name(), datatype, false)));
-                    datatype = ArrowDataType::Utf8;
-                }
-                // block_num always UInt64
-                if f.name() == BLOCK_NUM {
-                    datatype = ArrowDataType::UInt64;
-                }
-                Field::new(f.name(), datatype, false)
-            })
-            .collect::<Vec<_>>(),
-    );
-
-    Some(Table {
-        name: field.name().to_string(),
-        schema: Arc::new(Schema::new(fields)),
-    })
 }
