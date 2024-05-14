@@ -1,0 +1,19 @@
+# Sample of a server configuration
+# Copy this file and edit it. Set the environment variable `NOZZLE_CONFIG`
+# to its location
+
+# Where the data files that `dump` created are stored.
+#
+# Examples of valid formats for `data_location`:
+#   - Filesystem path: `relative/path/to/data/`
+#   - GCS: `gs://bucket-name/`
+#   - S3: `s3://bucket-name/`
+data-location = "/some/where"
+
+# How much memory the server can use in bytes. Setting this to 0 means
+# unlimited
+max-mem = 21474836480
+
+# Paths where DataFusion can create temporary files. Setting this to an
+# empty array disables spill-to-disk
+spill-location = ["/some/where/else"]

@@ -4,15 +4,18 @@ mod parquet_writer;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::client::BlockStreamerClient;
 use anyhow::Context as _;
 use clap::Parser;
 use common::arrow::array::AsArray as _;
 use common::arrow::datatypes::UInt64Type;
+use common::config::Config;
 use common::dataset_context::DatasetContext;
 use common::multirange::MultiRange;
 use common::parquet;
+use common::tracing;
 use common::BLOCK_NUM;
 use fs_err as fs;
 use futures::future::try_join_all;
@@ -95,7 +98,7 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
-    tracing_subscriber::fmt::init();
+    tracing::register_logger();
 
     let args = Args::parse();
     let Args {
@@ -147,7 +150,8 @@ async fn main() -> Result<(), anyhow::Error> {
         }
     };
 
-    let ctx = Arc::new(DatasetContext::new(dataset, to).await?);
+    let config = Config::location_only(to);
+    let ctx = Arc::new(DatasetContext::new(dataset, &config).await?);
     let existing_blocks = existing_blocks(&ctx).await?;
     for (table_name, multirange) in &existing_blocks {
         info!(
@@ -181,11 +185,19 @@ async fn main() -> Result<(), anyhow::Error> {
         });
 
     // Spawn the jobs so they run in parallel, terminating early if any job fails.
-    try_join_all(
-        jobs.into_iter()
-            .map(|job| async { tokio::spawn(job::run(job)).err_into().await.and_then(|x| x) }),
-    )
-    .await?;
+    let mut join_handles = vec![];
+    for job in jobs {
+        let handle = tokio::spawn(job::run(job));
+
+        // Stagger the start of each job by 1 second in an attempt to avoid client rate limits.
+        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        join_handles.push(async { handle.err_into().await.and_then(|x| x) });
+    }
+
+    try_join_all(join_handles).await?;
+
+    info!("All {} jobs completed successfully", n_jobs);
 
     Ok(())
 }

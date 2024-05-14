@@ -1,18 +1,18 @@
 use std::sync::Arc;
 
 use crate::arrow;
+use crate::config::Config;
 use anyhow::anyhow;
 use anyhow::Context as _;
 use arrow::array::RecordBatch;
 use arrow::compute::concat_batches;
 use arrow::datatypes::SchemaRef;
 use arrow::util::pretty::pretty_format_batches;
+use datafusion::execution::memory_pool::FairSpillPool;
+use datafusion::execution::memory_pool::MemoryPool;
 use datafusion::logical_expr::Expr;
 use datafusion::{
-    common::{
-        parsers::CompressionTypeVariant, Constraints, DFSchemaRef, OwnedTableReference,
-        ToDFSchema as _,
-    },
+    common::{parsers::CompressionTypeVariant, Constraints, DFSchemaRef, ToDFSchema as _},
     error::DataFusionError,
     execution::{
         config::SessionConfig,
@@ -112,28 +112,44 @@ impl DatasetContext {
     /// - Filesystem path: `relative/path/to/data/`
     /// - GCS: `gs://bucket-name/`
     /// - S3: `s3://bucket-name/`
-    pub async fn new(dataset: Dataset, data_location: String) -> Result<Self, anyhow::Error> {
-        let (data_url, object_store) = infer_object_store(data_location)?;
+    pub async fn new(dataset: Dataset, config: &Config) -> Result<Self, anyhow::Error> {
+        let (data_url, object_store) = infer_object_store(config.data_location.clone())?;
         let meta = meta_tables::tables();
-        Self::with_object_store(dataset, meta, data_url, object_store).await
+        Self::with_object_store(config, dataset, meta, data_url, object_store).await
     }
 
     pub async fn with_object_store(
+        config: &Config,
         dataset: Dataset,
         meta: Vec<Table>,
         data_url: Url,
         object_store: Arc<dyn ObjectStore>,
     ) -> Result<Self, anyhow::Error> {
-        let env = RuntimeEnv::new(runtime_config())?;
+        let env = RuntimeEnv::new(runtime_config(config))?;
         env.register_object_store(&data_url, object_store);
 
         // This contains various tuning options for the query engine.
         // Using `from_env` allows tinkering without re-compiling.
         let mut session_config = SessionConfig::from_env()?;
 
+        let opts = session_config.options_mut();
         if std::env::var_os("DATAFUSION_OPTIMIZER_PREFER_EXISTING_SORT").is_none() {
             // Set `prefer_existing_sort` by default.
-            session_config.options_mut().optimizer.prefer_existing_sort = true;
+            opts.optimizer.prefer_existing_sort = true;
+        }
+
+        if std::env::var_os("DATAFUSION_EXECUTION_SPLIT_FILE_GROUPS_BY_STATISTICS").is_none() {
+            // Set `split_file_groups_by_statistics` by default.
+            //
+            // Without this `prefer_existing_sort` will not be used with multiple files.
+            // See https://github.com/apache/datafusion/issues/10336.
+            opts.execution.split_file_groups_by_statistics = true;
+        }
+
+        if std::env::var_os("DATAFUSION_EXECUTION_COLLECT_STATISTICS").is_none() {
+            // Set `collect_statistics` by default, so DataFusion eagerly reads and caches the
+            // Parquet metadata statistics used for various optimizations.
+            opts.execution.collect_statistics = true;
         }
 
         // Leveraging `order_exprs` can optimize away sorting for many query plans.
@@ -219,10 +235,12 @@ impl DatasetContext {
     // sessions created by this function, and they will behave the same as if they had been run
     // against a persistent `SessionContext`
     async fn datafusion_ctx(&self) -> Result<SessionContext, Error> {
-        let ctx = SessionContext::new_with_config_rt(self.session_config.clone(), self.env.clone());
+        let mut ctx =
+            SessionContext::new_with_config_rt(self.session_config.clone(), self.env.clone());
         create_external_tables(&ctx, &self.dataset_location.table_urls)
             .await
             .map_err(|e| Error::DatasetError(e.into()))?;
+        self.dataset_location.dataset.register(&mut ctx);
         Ok(ctx)
     }
 
@@ -308,15 +326,21 @@ impl DatasetContext {
     }
 }
 
-fn runtime_config() -> RuntimeConfig {
+fn runtime_config(config: &Config) -> RuntimeConfig {
     use datafusion::execution::cache::{
         cache_manager::CacheManagerConfig, cache_unit::DefaultFileStatisticsCache,
     };
 
-    // TODO: Experiment with spill to disk and memory limits.
-    // For now, spill to disk is disabled and memory is unbounded.
-    let disk_manager = DiskManagerConfig::Disabled;
-    let memory_pool = None;
+    let disk_manager = if config.spill_location.is_empty() {
+        DiskManagerConfig::Disabled
+    } else {
+        DiskManagerConfig::NewSpecified(config.spill_location.clone())
+    };
+    let memory_pool: Option<Arc<dyn MemoryPool>> = if config.max_mem > 0 {
+        Some(Arc::new(FairSpillPool::new(config.max_mem)))
+    } else {
+        None
+    };
     let cache_manager = CacheManagerConfig {
         // Caches parquet file statistics. Seems like a good thing.
         table_files_statistics_cache: Some(Arc::new(DefaultFileStatisticsCache::default())),
@@ -401,7 +425,7 @@ async fn create_external_tables(
 }
 
 fn create_external_table(
-    name: OwnedTableReference,
+    name: TableReference,
     schema: DFSchemaRef,
     url: &Url,
     order_exprs: Vec<Vec<Expr>>,
