@@ -18,7 +18,7 @@ async fn main() -> Result<(), anyhow::Error> {
     let ctx = DatasetContext::new(dataset.clone(), &config).await.unwrap();
     let svc = FlightServiceServer::new(service::Service::new(ctx));
 
-    let addr: SocketAddr = ([127, 0, 0, 1], 1602).into();
+    let addr: SocketAddr = ([0, 0, 0, 0], 1602).into();
 
     info!("Serving at {}:{}", addr, 1602);
 
