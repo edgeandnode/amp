@@ -197,6 +197,8 @@ async fn main() -> Result<(), anyhow::Error> {
 
     try_join_all(join_handles).await?;
 
+    info!("All {} jobs completed successfully", n_jobs);
+
     Ok(())
 }
 

@@ -3946,6 +3946,7 @@ dependencies = [
  "datafusion-proto",
  "firehose-datasets",
  "futures",
+ "log",
  "prost",
  "thiserror",
  "tokio",

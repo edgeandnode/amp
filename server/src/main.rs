@@ -3,6 +3,7 @@ use std::net::SocketAddr;
 use anyhow::Context;
 use arrow_flight::flight_service_server::FlightServiceServer;
 use common::{config::Config, tracing, DatasetContext};
+use log::info;
 use tonic::transport::Server;
 
 mod service;
@@ -18,6 +19,8 @@ async fn main() -> Result<(), anyhow::Error> {
     let svc = FlightServiceServer::new(service::Service::new(ctx));
 
     let addr: SocketAddr = ([127, 0, 0, 1], 1602).into();
+
+    info!("Serving at {}:{}", addr, 1602);
 
     Server::builder().add_service(svc).serve(addr).await?;
     Ok(())
