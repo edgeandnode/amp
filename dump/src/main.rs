@@ -44,11 +44,11 @@ struct Args {
     /// smart about keeping track of what blocks have already been dumped, so you only need to set
     /// this if you really don't want the data before this block.
     #[arg(long, short, default_value = "0", env = "DUMP_START_BLOCK")]
-    start: u64,
+    start: String,
 
-    /// The block number to end at, inclusive.
+    /// The block number to end at, inclusive. If starts with "+" then relative to `start`.
     #[arg(long, short, env = "DUMP_END_BLOCK")]
-    end_block: u64,
+    end_block: String,
 
     /// How many parallel extractor jobs to run. Defaults to 1. Each job will be responsible for an
     /// equal number of blocks. Example: If start = 0, end = 10_000_000 and n_jobs = 10, then each
@@ -119,11 +119,7 @@ async fn main() -> Result<(), anyhow::Error> {
         Compression::ZSTD(ZstdLevel::try_new(1).unwrap())
     };
 
-    if end_block == 0 {
-        return Err(anyhow::anyhow!(
-            "The end block number must be greater than 0"
-        ));
-    }
+    let (start, end_block) = resolve_block_range(start, end_block)?;
 
     let client = {
         let config = fs::read_to_string(&config)?;
@@ -202,6 +198,32 @@ async fn main() -> Result<(), anyhow::Error> {
     Ok(())
 }
 
+// start block is always a number
+// if end_block starts with "+" then it is a relative block number
+// otherwise, it's an absolute block number and should be after start_block
+fn resolve_block_range(start_block: String, end_block: String) -> anyhow::Result<(u64, u64)> {
+    if start_block.starts_with('+') {
+        anyhow::bail!("start_block must be an absolute block number")
+    }
+    let start_block = start_block.parse::<u64>().context("invalid start block")?;
+    let end_block = if end_block.starts_with('+') {
+        let relative_block = end_block
+            .trim_start_matches('+')
+            .parse::<u64>()
+            .context("invalid relative end block")?;
+        start_block + relative_block
+    } else {
+        end_block.parse::<u64>().context("invalid end block")?
+    };
+    if end_block < start_block {
+        anyhow::bail!("end_block must be greater than or equal to start_block")
+    }
+    if end_block == 0 {
+        anyhow::bail!("end_block must be greater than 0")
+    }
+    Ok((start_block, end_block))
+}
+
 fn parquet_opts(compression: Compression) -> ParquetWriterProperties {
     // For DataFusion defaults, see `ParquetOptions` here:
     // https://github.com/apache/arrow-datafusion/blob/main/datafusion/common/src/config.rs
@@ -272,4 +294,41 @@ async fn scanned_ranges(ctx: &DatasetContext) -> Result<MultiRange, anyhow::Erro
     let first = scanned_ranges.next().context("no tables")?;
     let intersection = scanned_ranges.fold(first, |acc, r| acc.intersection(&r));
     Ok(intersection)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_resolve_block_range() {
+        let test_cases = vec![
+            ("10", "20", Ok((10, 20))),
+            ("0", "1", Ok((0, 1))),
+            (
+                "18446744073709551614",
+                "18446744073709551615",
+                Ok((18_446_744_073_709_551_614u64, 18_446_744_073_709_551_615u64)),
+            ),
+            ("10", "+5", Ok((10, 15))),
+            ("100", "90", Err(anyhow::Error::msg(""))),
+            ("0", "0", Err(anyhow::Error::msg(""))),
+            ("0", "0x", Err(anyhow::Error::msg(""))),
+            ("0", "xxx", Err(anyhow::Error::msg(""))),
+            ("xxx", "123", Err(anyhow::Error::msg(""))),
+            ("100", "+1000x", Err(anyhow::Error::msg(""))),
+            ("100", "+1x", Err(anyhow::Error::msg(""))),
+            ("123x", "+5", Err(anyhow::Error::msg(""))),
+            ("+10", "1000", Err(anyhow::Error::msg(""))),
+            ("-10", "100", Err(anyhow::Error::msg(""))),
+            ("-10", "+50", Err(anyhow::Error::msg(""))),
+        ];
+
+        for (start_block, end_block, expected) in test_cases {
+            match resolve_block_range(start_block.into(), end_block.into()) {
+                Ok(result) => assert_eq!(expected.unwrap(), result),
+                Err(_) => assert_eq!(expected.is_err(), true),
+            }
+        }
+    }
 }
