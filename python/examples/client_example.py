@@ -1,4 +1,4 @@
-from client import Client
+from nozzle.client import Client
 
 # Convert bytes columns to hex
 def to_hex(val):

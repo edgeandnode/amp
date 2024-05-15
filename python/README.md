@@ -10,7 +10,7 @@ will install all required dependencies, including
 You will need to have the files that [`dump`](../dump) produces available
 locally, and run the [server](../server) You can then start Jupyter with
 ```shell
-poetry run jupyter notebook
+poetry run jupyter notebook examples/
 ```
 
 That will open a new browser tab. In that, double click on

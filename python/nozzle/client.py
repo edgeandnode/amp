@@ -1,7 +1,7 @@
 from pyarrow import flight
 from google.protobuf.any_pb2 import Any
 
-import FlightSql_pb2
+from . import FlightSql_pb2
 
 class Client:
     def __init__(self, url):
