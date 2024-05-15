@@ -36,7 +36,7 @@ class Client:
     def _batch_generator(self, reader):
         while True:
             try:
-                batch = reader.read_next_batch()
-                yield batch
+                chunk = reader.read_chunk()
+                yield chunk.data
             except StopIteration:
                 break
