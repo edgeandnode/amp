@@ -98,10 +98,10 @@ async fn run_job_range(
         }
     }
 
-    // The Firehose task stopped sending blocks, so it must have terminated. Here we check if it
-    // terminated with any errors or panics.
-    firehose_join_handle.now_or_never().unwrap()??;
-
+    // The Firehose task stopped sending blocks, so it must have terminated. Here we wait for it to
+    // finish and check for any errors and panics.
+    log::debug!("Waiting for firehose job #{} to finish", job.job_id);
+    firehose_join_handle.await??;
     // Close the last part file for each table, checking for any errors.
     writer.close(end).await?;
 

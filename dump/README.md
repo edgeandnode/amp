@@ -21,23 +21,31 @@ Dump is memory intensive, because the contents of each parquet row group, which 
 
 ## Substreams
 
-To dump substreams module output you will need a substreams module that contains repeated messages in the output, which is a common substreams pattern.
-For example, a module with the following output:
-```proto
-message Events {
-  repeated Transfer transfers = 1;
-  repeated Mint mints = 2;
-  repeated Burn burns = 3;
-}
-```
-will produce `transfers`, `mints`, and `burns` parquet files, where each column matches the field of the corresponding event message type. All non-repeated fields in the module output are dropped from the schema.
+To dump substreams output you need to provide substreams .SPKG package and output module using `--manifest` and `--module` arguments or environment variables.
 
-To provide substreams manifest and output module use `--manifest` and `--module` cli arguments or environment variables (see below).
+The following types of substreams modules can be used:
 
-An example that dumps all UniswapV3 smart contract events from a specified block range:
-```bash
-cargo run --release -p dump -- -s=18000000 -e=18001000 --to=local/uniswap --manifest=https://spkg.io/streamingfast/uniswap-v3-v0.2.8.spkg --module=map_extract_data_types
-```
+- `db_out`-like modules emitting `DatabaseChanges` output. For this type of module to work, the substreams .SPKG manifest must contain `sink` section with embedded `schema.sql` schema. Corresponding Arrow schema is inferred from `schema.sql`. See this manifest as an example: [WETH token contract](https://github.com/pinax-network/weth-substreams/blob/main/substreams.sql.yaml#L50-L57).
+  An example using WETH ERC20 token smart contract:
+  ```bash
+  > cargo run --release -p dump -- --config=config.toml --to=local/weth -s=18000000 -e=18100000 --manifest=https://spkg.io/pinax-network/weth-v0.1.0.spkg --module=db_out
+  ```
+
+- Arbitrary map modules with repeated messages in the output. Schema in this case is inferred from the Protobuf message descriptors included in the substreams .SPKG package.
+  For example, a module with the following output:
+  ```proto
+  message Events {
+    repeated Transfer transfers = 1;
+    repeated Mint mints = 2;
+    repeated Burn burns = 3;
+  }
+  ```
+  will produce `transfers`, `mints`, and `burns` parquet files, where each column matches the field of the corresponding event message type. All non-repeated fields in the module output are dropped from the schema.
+
+  An example using WETH ERC20 token smart contract:
+  ```bash
+  > cargo run --release -p dump -- --config=config.toml --to=local/weth -s=18000000 -e=18100000 --manifest=https://spkg.io/pinax-network/weth-v0.1.0.spkg --module=map_events
+  ```
 
 
 ## Config

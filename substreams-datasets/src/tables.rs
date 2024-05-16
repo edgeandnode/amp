@@ -1,97 +1,60 @@
-use std::sync::Arc;
+use anyhow::{anyhow, Context as _};
 
-use anyhow::Context as _;
-use prost::Message as _;
-use prost_reflect::{Cardinality, DescriptorPool, Kind, MessageDescriptor};
-
-use crate::proto::{google::protobuf::FileDescriptorSet, sf::substreams::v1::Package};
-use common::{
-    arrow::datatypes::{DataType, Field, Schema},
-    Table, BLOCK_NUM,
+use crate::{
+    proto::sf::substreams::v1::Package,
+    transform::{self, proto::MessageDescriptor},
 };
+use common::Table;
+
+#[derive(Debug, Clone)]
+pub enum OutputType {
+    Proto(MessageDescriptor),
+    DbOut,
+    Entities,
+}
 
 #[derive(Debug, Clone)]
 pub struct Tables {
     pub tables: Vec<Table>,
-    pub message_descriptor: MessageDescriptor,
+    pub output_type: OutputType,
 }
 
 impl Tables {
-    // create table schemas from spkg package
-    pub fn from_package(package: &Package, output_module: String) -> Result<Self, anyhow::Error> {
-        let descr_set = FileDescriptorSet {
-            file: package.proto_files.clone(),
-        };
+    /// create table schemas from spkg package
+    pub fn from_package(package: &Package, output_module: &str) -> Result<Self, anyhow::Error> {
         let module = package
             .modules
             .as_ref()
-            .unwrap()
+            .ok_or_else(|| anyhow!("modules not defined"))?
             .modules
             .iter()
             .find(|&m| m.name == output_module)
             .context(format!("module {} not found", output_module))?;
-        let output_type = Self::parse_message_type(module.output.as_ref().unwrap().r#type.as_str());
-        let pool = DescriptorPool::decode(descr_set.encode_to_vec().as_slice())
-            .context("failed to decode descriptor pool from package")?;
-        let message_descriptor = pool.get_message_by_name(output_type.as_str()).unwrap();
-        let tables = message_descriptor
-            .fields()
-            .filter_map(|field| {
-                if !field.is_list() {
-                    return None;
-                }
-                let typename = field.field_descriptor_proto().type_name();
-                let message = pool.get_message_by_name(typename).unwrap();
-                let mut fields = Vec::with_capacity(message.fields().len() + 1);
-                if message.get_field_by_name(BLOCK_NUM).is_none() {
-                    fields.push(Field::new(BLOCK_NUM, DataType::UInt64, false));
-                }
-                fields.extend(
-                    message
-                        .fields()
-                        .map(|f| {
-                            let mut datatype = match f.kind() {
-                                Kind::String => DataType::Utf8,
-                                Kind::Uint32 => DataType::UInt32,
-                                Kind::Uint64 => DataType::UInt64,
-                                Kind::Int32 => DataType::Int32,
-                                Kind::Int64 => DataType::Int64,
-                                Kind::Float => DataType::Float32,
-                                Kind::Double => DataType::Float64,
-                                Kind::Bytes => DataType::Binary,
-                                Kind::Bool => DataType::Boolean,
-                                Kind::Message(_) => DataType::Utf8,
-                                Kind::Enum(_) => DataType::Int32,
-                                _ => DataType::Utf8,
-                            };
-                            if f.cardinality() == Cardinality::Repeated {
-                                // datatype = DataType::List(Arc::new(Field::new(f.name(), datatype, false)));
-                                datatype = DataType::Utf8;
-                            }
-                            Field::new(f.name(), datatype, false)
-                        })
-                        .collect::<Vec<_>>(),
-                );
+        let output_type = module.output.as_ref().unwrap().r#type.as_str();
 
-                Some(Table {
-                    name: field.name().to_string(),
-                    schema: Arc::new(Schema::new(fields)),
+        match output_type {
+            "proto:sf.substreams.sink.database.v1.DatabaseChanges" => {
+                let tables = transform::db::package_to_schemas(package, output_module)?;
+                Ok(Self {
+                    output_type: OutputType::DbOut,
+                    tables,
                 })
-            })
-            .collect();
-
-        Ok(Self {
-            tables,
-            message_descriptor,
-        })
-    }
-
-    // proto:sf.ethereum.token.v1.Transfers -> sf.ethereum.token.v1.Transfers
-    fn parse_message_type(s: &str) -> String {
-        if let Some(index) = s.find(':') {
-            s[index + 1..].to_string()
-        } else {
-            s.to_string()
+            }
+            "proto:sf.substreams.sink.entity.v1.EntityChanges" => {
+                let tables = transform::entities::package_to_schemas(package, output_module)?;
+                Ok(Self {
+                    output_type: OutputType::Entities,
+                    tables,
+                })
+            }
+            _ => {
+                let (tables, message_descriptor) =
+                    transform::proto::package_to_schemas(package, output_type)?;
+                Ok(Self {
+                    output_type: OutputType::Proto(message_descriptor),
+                    tables,
+                })
+            }
         }
     }
 }

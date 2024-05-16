@@ -1,6 +1,6 @@
-use anyhow::anyhow;
+use anyhow::{anyhow, Context as _};
 use prost::Message as _;
-use std::str::FromStr as _;
+use std::{str::FromStr as _, time::Duration};
 use tokio::sync::mpsc;
 
 use firehose_datasets::client::{AuthInterceptor, Error, FirehoseProvider};
@@ -12,9 +12,12 @@ use tonic::{
     transport::{Channel, Endpoint, Uri},
 };
 
-use super::{pb_to_rows::pb_to_rows, tables::Tables};
-use crate::proto::sf::substreams::rpc::v2::{self as pbsubstreams, BlockScopedData};
+use super::tables::Tables;
 use crate::proto::sf::substreams::v1::Package;
+use crate::{
+    proto::sf::substreams::rpc::v2::{self as pbsubstreams, BlockScopedData},
+    transform::transform,
+};
 use common::{BlockNum, BlockStreamer, DatasetRows, Table};
 use pbsubstreams::{response::Message, stream_client::StreamClient, Request as StreamRequest};
 
@@ -68,7 +71,7 @@ impl Client {
         };
         let package = Package::from_url(manifest.as_str()).await?;
 
-        let tables = Tables::from_package(&package, output_module.clone())
+        let tables = Tables::from_package(&package, &output_module)
             .map_err(|_| Error::AssertFail(anyhow!("failed to build tables from spkg")))?;
 
         Ok(Self {
@@ -109,8 +112,12 @@ impl Client {
                 match response.message {
                     Some(Message::BlockScopedData(data)) => Ok(data),
                     Some(Message::FatalError(_)) => {
-                        return Err(Error::AssertFail(anyhow!("Error streaming")));
+                        return Err(Error::AssertFail(anyhow!("Substreams server error")));
                     }
+                    Some(Message::BlockUndoSignal(_)) => {
+                        return Err(Error::AssertFail(anyhow!("Block undo signal received")));
+                    }
+                    // ignore progress, session, snapshot messages
                     _ => {
                         return Ok(BlockScopedData::default());
                     }
@@ -138,6 +145,7 @@ impl BlockStreamer for Client {
     ) -> Result<(), anyhow::Error> {
         // Explicitly track the next block in case we need to restart the Firehose stream.
         let mut next_block = start_block;
+        const RETRY_BACKOFF: Duration = Duration::from_secs(5);
 
         // A retry loop for consuming the Firehose.
         'retry: loop {
@@ -158,7 +166,12 @@ impl BlockStreamer for Client {
                             continue;
                         }
                         let block_num = block.clock.as_ref().unwrap().number;
-                        let table_rows = pb_to_rows(block, &self.tables)?;
+                        let table_rows = transform(block, &self.tables).context(format!(
+                            "error converting Blockscope to rows for block {block_num}"
+                        ))?;
+                        if table_rows.is_empty() {
+                            continue;
+                        }
 
                         // Send the block and check if the receiver has gone away.
                         if tx.send(table_rows).await.is_err() {
@@ -169,7 +182,8 @@ impl BlockStreamer for Client {
                     }
                     Err(err) => {
                         // Log and retry.
-                        println!("Error reading substreams stream: {}", err);
+                        log::debug!("error reading substreams stream, retrying in {} seconds, error message: {}", RETRY_BACKOFF.as_secs(), err);
+                        tokio::time::sleep(RETRY_BACKOFF).await;
                         continue 'retry;
                     }
                 }
