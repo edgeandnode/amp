@@ -6,7 +6,7 @@ use serde::Deserialize;
 #[serde(rename_all = "kebab-case")]
 pub struct Config {
     pub data_location: String,
-    pub max_mem: usize,
+    pub max_mem_mb: usize,
     pub spill_location: Vec<PathBuf>,
 }
 
@@ -19,7 +19,7 @@ impl Config {
     pub fn location_only(data_location: String) -> Self {
         Self {
             data_location,
-            max_mem: 0,
+            max_mem_mb: 0,
             spill_location: vec![],
         }
     }

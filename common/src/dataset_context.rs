@@ -336,8 +336,9 @@ fn runtime_config(config: &Config) -> RuntimeConfig {
     } else {
         DiskManagerConfig::NewSpecified(config.spill_location.clone())
     };
-    let memory_pool: Option<Arc<dyn MemoryPool>> = if config.max_mem > 0 {
-        Some(Arc::new(FairSpillPool::new(config.max_mem)))
+    let memory_pool: Option<Arc<dyn MemoryPool>> = if config.max_mem_mb > 0 {
+        let max_mem_bytes = config.max_mem_mb * 1024 * 1024;
+        Some(Arc::new(FairSpillPool::new(max_mem_bytes)))
     } else {
         None
     };
