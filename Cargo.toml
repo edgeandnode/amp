@@ -50,6 +50,7 @@ log = "0.4"
 alloy-core = { version = "0.7.2", features = ["std", "json-abi", "dyn-abi"] }
 itertools = "0.12.1"
 atty = "0.2.14"
+snmalloc-rs = "0.3.4"
 
 # Datafusion and Arrow crates
 datafusion = "38"

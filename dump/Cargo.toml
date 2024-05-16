@@ -18,3 +18,4 @@ toml.workspace = true
 url.workspace = true
 log.workspace = true
 datafusion.workspace = true
+snmalloc-rs.workspace = true

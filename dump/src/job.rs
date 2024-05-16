@@ -1,7 +1,6 @@
 use common::multirange::MultiRange;
 use common::parquet::file::properties::WriterProperties as ParquetWriterProperties;
 use common::{BlockStreamer, DatasetContext};
-use futures::FutureExt;
 use log::info;
 use std::collections::BTreeMap;
 use std::{sync::Arc, time::Instant};

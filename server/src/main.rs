@@ -8,13 +8,23 @@ use tonic::transport::Server;
 
 mod service;
 
+#[global_allocator]
+static ALLOC: snmalloc_rs::SnMalloc = snmalloc_rs::SnMalloc;
+
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
     tracing::register_logger();
 
     let dataset = firehose_datasets::evm::dataset("mainnet".to_string());
     let config = std::env::var("NOZZLE_CONFIG").context("no NOZZLE_CONFIG env var set")?;
+
     let config = Config::load(config.into()).context("failed to load config")?;
+    info!("memory limit is {} MB", config.max_mem_mb);
+    info!(
+        "spill to disk allowed: {}",
+        !config.spill_location.is_empty()
+    );
+
     let ctx = DatasetContext::new(dataset.clone(), &config).await.unwrap();
     let svc = FlightServiceServer::new(service::Service::new(ctx));
 

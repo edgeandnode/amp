@@ -9,6 +9,7 @@ use arrow::compute::concat_batches;
 use arrow::datatypes::SchemaRef;
 use arrow::util::pretty::pretty_format_batches;
 use datafusion::execution::memory_pool::FairSpillPool;
+use datafusion::execution::memory_pool::GreedyMemoryPool;
 use datafusion::execution::memory_pool::MemoryPool;
 use datafusion::logical_expr::Expr;
 use datafusion::{
@@ -331,14 +332,20 @@ fn runtime_config(config: &Config) -> RuntimeConfig {
         cache_manager::CacheManagerConfig, cache_unit::DefaultFileStatisticsCache,
     };
 
-    let disk_manager = if config.spill_location.is_empty() {
+    let spill_allowed = !config.spill_location.is_empty();
+    let disk_manager = if spill_allowed {
         DiskManagerConfig::Disabled
     } else {
         DiskManagerConfig::NewSpecified(config.spill_location.clone())
     };
     let memory_pool: Option<Arc<dyn MemoryPool>> = if config.max_mem_mb > 0 {
         let max_mem_bytes = config.max_mem_mb * 1024 * 1024;
-        Some(Arc::new(FairSpillPool::new(max_mem_bytes)))
+
+        if spill_allowed {
+            Some(Arc::new(FairSpillPool::new(max_mem_bytes)))
+        } else {
+            Some(Arc::new(GreedyMemoryPool::new(max_mem_bytes)))
+        }
     } else {
         None
     };

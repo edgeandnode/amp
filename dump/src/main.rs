@@ -26,6 +26,9 @@ use log::info;
 use parquet::basic::{Compression, ZstdLevel};
 use parquet::file::properties::WriterProperties as ParquetWriterProperties;
 
+#[global_allocator]
+static ALLOC: snmalloc_rs::SnMalloc = snmalloc_rs::SnMalloc;
+
 /// A tool for dumping a range of firehose blocks to a protobufs json file and/or for converting them
 /// to parquet tables.
 #[derive(Parser, Debug)]

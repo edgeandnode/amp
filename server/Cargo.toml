@@ -18,3 +18,4 @@ datafusion.workspace = true
 tokio.workspace = true
 anyhow.workspace = true
 log.workspace = true
+snmalloc-rs.workspace = true
