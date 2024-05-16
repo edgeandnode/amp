@@ -20,7 +20,7 @@ async fn main() -> Result<(), anyhow::Error> {
 
     let addr: SocketAddr = ([0, 0, 0, 0], 1602).into();
 
-    info!("Serving at {}:{}", addr, 1602);
+    info!("Serving at {}", addr);
 
     Server::builder().add_service(svc).serve(addr).await?;
     Ok(())
