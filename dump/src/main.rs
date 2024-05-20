@@ -236,6 +236,7 @@ fn parquet_opts(compression: Compression) -> ParquetWriterProperties {
     // `file_sort_order` set on the reader configuration.
     ParquetWriterProperties::builder()
         .set_compression(compression)
+        .set_bloom_filter_enabled(true)
         .build()
 }
 
