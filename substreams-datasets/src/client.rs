@@ -67,6 +67,7 @@ impl Client {
             let auth = AuthInterceptor::new(token)?;
             StreamClient::with_interceptor(channel, auth)
                 .accept_compressed(CompressionEncoding::Gzip)
+                .send_compressed(CompressionEncoding::Gzip)
                 .max_decoding_message_size(100 * 1024 * 1024) // 100MiB
         };
         let package = Package::from_url(manifest.as_str()).await?;

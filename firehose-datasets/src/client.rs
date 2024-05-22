@@ -81,6 +81,7 @@ impl Client {
         let channel = self.endpoint.connect().await?;
         Ok(StreamClient::with_interceptor(channel, self.auth.clone())
             .accept_compressed(CompressionEncoding::Gzip)
+            .send_compressed(CompressionEncoding::Gzip)
             .max_decoding_message_size(100 * 1024 * 1024)) // 100MiB
     }
 
