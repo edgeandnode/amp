@@ -32,7 +32,8 @@ async fn print_schema_to_readme() {
     let url = Url::parse("memory://test_url/").unwrap();
     let object_store = Arc::new(object_store::memory::InMemory::new());
     let config = Config::location_only("/var/tmp".to_string());
-    let context = DatasetContext::with_object_store(&config, dataset, vec![], url, object_store)
+    let env = Arc::new((config.to_runtime_env()).unwrap());
+    let context = DatasetContext::with_object_store(env, dataset, vec![], url, object_store)
         .await
         .unwrap();
 

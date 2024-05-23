@@ -162,7 +162,8 @@ async fn main() -> Result<(), anyhow::Error> {
     };
 
     let config = Config::location_only(to);
-    let ctx = Arc::new(DatasetContext::new(dataset, &config).await?);
+    let env = Arc::new((config.to_runtime_env())?);
+    let ctx = Arc::new(DatasetContext::new(dataset, config.data_location, env).await?);
     let existing_blocks = existing_blocks(&ctx).await?;
     for (table_name, multirange) in &existing_blocks {
         info!(

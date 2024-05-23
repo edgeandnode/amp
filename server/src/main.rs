@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::{net::SocketAddr, sync::Arc};
 
 use anyhow::Context;
 use arrow_flight::flight_service_server::FlightServiceServer;
@@ -25,7 +25,8 @@ async fn main() -> Result<(), anyhow::Error> {
         !config.spill_location.is_empty()
     );
 
-    let ctx = DatasetContext::new(dataset.clone(), &config).await.unwrap();
+    let env = Arc::new((config.to_runtime_env())?);
+    let ctx = DatasetContext::new(dataset.clone(), config.data_location, env).await?;
     let svc = FlightServiceServer::new(service::Service::new(ctx));
 
     let addr: SocketAddr = ([0, 0, 0, 0], 1602).into();

@@ -105,7 +105,8 @@ async fn main() -> Result<(), anyhow::Error> {
     let dataset = firehose_datasets::evm::dataset("mainnet".to_string());
 
     let config = Config::location_only(to);
-    let ctx = Arc::new(DatasetContext::new(dataset.clone(), &config).await?);
+    let env = Arc::new((config.to_runtime_env())?);
+    let ctx = Arc::new(DatasetContext::new(dataset.clone(), config.data_location, env).await?);
     let total_blocks = end_block - start + 1;
     let ui_handle = tokio::spawn(ui::ui(total_blocks, metrics.clone()));
 
