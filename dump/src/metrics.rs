@@ -20,13 +20,9 @@ impl ParquetWriterMetrics {
             but does not exactly correspond to the size of the parquet files written.",
         );
 
-        let files_written =
-            IntCounterVec::new(files_written_opts, &["dataset", "location", "table"]).unwrap();
-        let bytes_written = IntCounterVec::new(
-            bytes_written_opts,
-            &["dataset", "location", "table", "filename"],
-        )
-        .unwrap();
+        let labels = &["dataset", "network", "location", "table"];
+        let files_written = IntCounterVec::new(files_written_opts, labels).unwrap();
+        let bytes_written = IntCounterVec::new(bytes_written_opts, labels).unwrap();
 
         register(Box::new(files_written.clone())).unwrap();
         register(Box::new(bytes_written.clone())).unwrap();
@@ -37,22 +33,15 @@ impl ParquetWriterMetrics {
         })
     }
 
-    pub fn add_files_written(&self, dataset: &str, location: &str, table: &str) {
+    pub fn inc_files_written(&self, dataset: &str, location: &str, table: &str) {
         self.files_written
             .with_label_values(&[dataset, location, table])
             .inc();
     }
 
-    pub fn add_bytes_written(
-        &self,
-        dataset: &str,
-        location: &str,
-        table: &str,
-        filename: &str,
-        bytes: u64,
-    ) {
+    pub fn add_bytes_written(&self, dataset: &str, location: &str, table: &str, bytes: u64) {
         self.bytes_written
-            .with_label_values(&[dataset, location, table, filename])
+            .with_label_values(&[dataset, location, table])
             .inc_by(bytes);
     }
 }
