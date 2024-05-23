@@ -10,6 +10,7 @@ use super::tables::calls::Call;
 use super::tables::logs::Log;
 use super::{pbethereum, tables::transactions::Transaction};
 use anyhow::anyhow;
+use common::arrow::datatypes::i256;
 use common::arrow::error::ArrowError;
 use common::{Bytes32, DatasetRows, EvmCurrency, Timestamp};
 use thiserror::Error;
@@ -251,7 +252,7 @@ fn header_from_pb(header: pbethereum::BlockHeader) -> Result<Block, ProtobufToRo
             .try_into()
             .map_err(|b| Malformed("mix_hash", b))?,
         nonce: header.nonce,
-        base_fee_per_gas: base_fee_per_gas.map(|b| b as i128),
+        base_fee_per_gas: base_fee_per_gas.map(|b| i256::from_i128(b as i128)),
     };
 
     Ok(header)
@@ -285,15 +286,18 @@ fn non_negative_pb_bigint_to_evm_currency(
     use ProtobufToRowError::*;
     let len = bytes.bytes.len();
 
-    if len > 16 {
+    // A Decimal256 can actually fit only 252 bits, not 256, so we limit the binary representation to
+    // 31 bytes (248 bits).
+    //
+    // See also: evm-currency-note
+    if len > 31 {
         return Err(Malformed(field, bytes.bytes.clone()));
     }
 
-    // If bytes has len < 16, pad with zeroes.
-    let mut bytes16 = [0u8; 16];
-    let start = 16 - len;
-    bytes16[start..].copy_from_slice(&bytes.bytes);
+    // Pad with zeroes.
+    let mut bytes32 = [0u8; 32];
+    let start = 32 - len;
+    bytes32[start..].copy_from_slice(&bytes.bytes);
 
-    let unsigned = u128::from_be_bytes(bytes16);
-    Ok(unsigned as i128)
+    Ok(i256::from_be_bytes(bytes32))
 }
