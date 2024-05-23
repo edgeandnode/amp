@@ -377,7 +377,10 @@ pub fn infer_object_store(
         );
         Ok((Url::parse(&data_location)?, store))
     } else {
-        fs::create_dir(&data_location)?; // Ensure the directory exists.
+        if fs::metadata(&data_location).is_err() {
+            // Create the directory if it doesn't exist.
+            fs::create_dir(&data_location)?;
+        }
         let store = Arc::new(LocalFileSystem::new_with_prefix(&data_location)?);
         let path = format!("/{}", data_location);
         let url = Url::from_directory_path(path).unwrap();
