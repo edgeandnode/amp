@@ -25,6 +25,7 @@ use datafusion::{
     logical_expr::{col, CreateExternalTable, DdlStatement, LogicalPlan},
     sql::TableReference,
 };
+use fs_err as fs;
 use futures::StreamExt as _;
 use object_store::{
     aws::AmazonS3Builder, gcp::GoogleCloudStorageBuilder, local::LocalFileSystem, ObjectStore,
@@ -60,15 +61,20 @@ pub enum Error {
     MetaTableError(DataFusionError),
 }
 
-struct TableUrl {
-    table: Table,
-    url: Url,
+#[derive(Debug, Clone)]
+pub struct TableUrl {
+    pub table: Table,
+    pub url: Url,
 
     // Physical ordering of the table at this location.
     order_exprs: Vec<Vec<Expr>>,
 }
 
 impl TableUrl {
+    pub fn name(&self) -> &str {
+        &self.table.name
+    }
+
     fn resolve(
         base: &Url,
         table: &Table,
@@ -249,6 +255,10 @@ impl DatasetContext {
         self.dataset().tables()
     }
 
+    pub fn table_urls(&self) -> &[TableUrl] {
+        &self.dataset_location.table_urls
+    }
+
     // Should never error unless there was a bug in the constructor.
     pub fn object_store(&self) -> Result<Arc<dyn ObjectStore>, DataFusionError> {
         self.env
@@ -406,6 +416,7 @@ pub fn infer_object_store(
         );
         Ok((Url::parse(&data_location)?, store))
     } else {
+        fs::create_dir(&data_location)?; // Ensure the directory exists.
         let store = Arc::new(LocalFileSystem::new_with_prefix(&data_location)?);
         let path = format!("/{}", data_location);
         let url = Url::from_directory_path(path).unwrap();

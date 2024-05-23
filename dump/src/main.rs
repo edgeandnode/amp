@@ -1,5 +1,6 @@
 mod client;
 mod job;
+mod metrics; // unused for now
 mod parquet_writer;
 
 use std::collections::BTreeMap;
@@ -97,6 +98,10 @@ struct Args {
     // Substreams output module name
     #[arg(long, env = "DUMP_SUBSTREAMS_MODULE")]
     module: Option<String>,
+
+    // If set, will also be used as a subdirectory in the output path, `to/network`.
+    #[arg(long, env = "DUMP_NETWORK", default_value = "")]
+    network: String,
 }
 
 #[tokio::main]
@@ -108,12 +113,13 @@ async fn main() -> Result<(), anyhow::Error> {
         config,
         start,
         end_block,
-        to,
+        mut to,
         n_jobs,
         partition_size_mb,
         disable_compression,
         manifest,
         module,
+        network,
     } = args;
     let partition_size = partition_size_mb * 1024 * 1024;
     let compression = if disable_compression {
@@ -121,6 +127,14 @@ async fn main() -> Result<(), anyhow::Error> {
     } else {
         Compression::ZSTD(ZstdLevel::try_new(1).unwrap())
     };
+
+    // For non-substreams, use the network as a subdirectory in the output path.
+    if manifest.is_none() && network != "" {
+        if to.ends_with('/') {
+            to.pop();
+        }
+        to = format!("{}/{}/", to, network);
+    }
 
     let (start, end_block) = resolve_block_range(start, end_block)?;
 
@@ -141,11 +155,9 @@ async fn main() -> Result<(), anyhow::Error> {
     };
 
     let dataset = match client {
-        BlockStreamerClient::FirehoseClient(_) => {
-            firehose_datasets::evm::dataset("mainnet".to_string())
-        }
+        BlockStreamerClient::FirehoseClient(_) => firehose_datasets::evm::dataset(network),
         BlockStreamerClient::SubstreamsClient(ref client) => {
-            substreams_datasets::dataset("mainnet".to_string(), client.tables().clone())
+            substreams_datasets::dataset(network, client.tables().clone())
         }
     };
 

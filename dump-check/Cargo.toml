@@ -17,7 +17,7 @@ toml.workspace = true
 url.workspace = true
 indicatif = "0.17"
 human_bytes = { version = "0.4", default-features = false }
-prometheus = "0.13"
+prometheus.workspace = true
 prometheus_exporter = "0.8"
 atty = "0.2.14"
 log.workspace = true
