@@ -206,8 +206,9 @@ impl BlockStreamer for Client {
                     Ok(block) => {
                         let block_num = block.number;
 
-                        let table_rows = protobufs_to_rows(block)
-                            .context("error converting Protobufs to rows")?;
+                        let table_rows = protobufs_to_rows(block).with_context(|| {
+                            format!("error converting Protobufs to rows on block {}", block_num)
+                        })?;
 
                         // Send the block and check if the receiver has gone away.
                         if tx.send(table_rows).await.is_err() {
