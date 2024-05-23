@@ -83,8 +83,8 @@ struct Args {
 
     /// The size of each partition in MB. Once the size is reached, a new part file is created. This
     /// is based on the estimated in-memory size of the data. The actual on-disk file size will vary,
-    /// but will correlate with this value. Defaults to 2 GB.
-    #[arg(long, default_value = "2048", env = "DUMP_PARTITION_SIZE_MB")]
+    /// but will correlate with this value. Defaults to 4 GB.
+    #[arg(long, default_value = "4096", env = "DUMP_PARTITION_SIZE_MB")]
     partition_size_mb: u64,
 
     /// Whether to disable compression when writing parquet files. Defaults to false.
