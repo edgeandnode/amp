@@ -7,8 +7,6 @@ pub mod tracing;
 
 pub use arrow_helpers::*;
 pub use datafusion::arrow;
-use datafusion::arrow::datatypes::i256;
-use datafusion::arrow::datatypes::DECIMAL256_MAX_PRECISION;
 use datafusion::execution::context::SessionContext;
 use datafusion::logical_expr::ScalarUDF;
 pub use datafusion::parquet;
@@ -22,8 +20,13 @@ use std::time::Duration;
 use std::time::SystemTime;
 
 use anyhow::Context as _;
-use arrow::array::{AsArray as _, FixedSizeBinaryArray, RecordBatch};
-use arrow::datatypes::{DataType, SchemaRef, TimeUnit, UInt64Type};
+use arrow::array::FixedSizeBinaryArray;
+use arrow::datatypes::DataType;
+use datafusion::arrow::datatypes::{SchemaRef, TimeUnit, DECIMAL128_MAX_PRECISION};
+use datafusion::arrow::{
+    array::{AsArray as _, RecordBatch},
+    datatypes::UInt64Type,
+};
 use tokio::sync::mpsc;
 
 /// The block number column name.
@@ -33,6 +36,7 @@ pub type BlockNum = u64;
 pub type Bytes32 = [u8; 32];
 pub type Bytes = Box<[u8]>;
 pub type EvmAddress = [u8; 20];
+pub type EvmCurrency = i128; // Payment amount in the EVM. Used for gas or value transfers.
 
 pub const BYTES32_TYPE: DataType = DataType::FixedSizeBinary(32);
 pub type Bytes32ArrayType = FixedSizeBinaryArray;
@@ -41,15 +45,7 @@ pub const EVM_ADDRESS_TYPE: DataType = DataType::FixedSizeBinary(20);
 pub type EvmAddressArrayType = FixedSizeBinaryArray;
 
 /// Payment amount in the EVM. Used for gas or value transfers.
-///
-/// Why Decimal256: In the EVM, values are a word so theoretically up to 256 bits. These are monetary
-/// values and therefore expected to not be so huge, so we can set a lower practical limit. In the
-/// wild we've seen values that don't fit in 128 bits, a specific example is gas price in Arbitrum.
-/// So we a Decimal256 and 31 bytes (248 bits) as our practical limit when decoding from Firehose.
-///
-/// See also: evm-currency-note
-pub type EvmCurrency = i256;
-pub const EVM_CURRENCY_TYPE: DataType = DataType::Decimal256(DECIMAL256_MAX_PRECISION, 0);
+pub const EVM_CURRENCY_TYPE: DataType = DataType::Decimal128(DECIMAL128_MAX_PRECISION, 0);
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Timestamp(pub Duration);

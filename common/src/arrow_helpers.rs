@@ -1,8 +1,5 @@
-use datafusion::arrow::{
-    array::{
-        Decimal256Array, Decimal256Builder, FixedSizeBinaryBuilder, TimestampNanosecondBuilder,
-    },
-    datatypes::i256,
+use datafusion::arrow::array::{
+    Decimal128Array, Decimal128Builder, FixedSizeBinaryBuilder, TimestampNanosecondBuilder,
 };
 
 use crate::{
@@ -62,25 +59,25 @@ impl EvmAddressArrayBuilder {
     }
 }
 
-pub struct EvmCurrencyArrayBuilder(Decimal256Builder);
+pub struct EvmCurrencyArrayBuilder(Decimal128Builder);
 
 impl EvmCurrencyArrayBuilder {
     pub fn with_capacity(capacity: usize) -> Self {
-        Self(Decimal256Builder::with_capacity(capacity).with_data_type(EVM_CURRENCY_TYPE))
+        Self(Decimal128Builder::with_capacity(capacity).with_data_type(EVM_CURRENCY_TYPE))
     }
 
-    pub fn append_value(&mut self, value: i256) {
+    pub fn append_value(&mut self, value: i128) {
         self.0.append_value(value)
     }
 
-    pub fn append_option(&mut self, value: Option<i256>) {
+    pub fn append_option(&mut self, value: Option<i128>) {
         match value {
             Some(value) => self.0.append_value(value),
             None => self.0.append_null(),
         }
     }
 
-    pub fn finish(mut self) -> Decimal256Array {
+    pub fn finish(mut self) -> Decimal128Array {
         self.0.finish()
     }
 }
