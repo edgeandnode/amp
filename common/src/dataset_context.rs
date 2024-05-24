@@ -289,7 +289,9 @@ impl DatasetContext {
                 r#"Timestamp(Nanosecond, Some("+00:00"))"#,
                 r#"Timestamp                            "#,
             );
-            let pretty_schema = pretty_schema.replace("Decimal128(38, 0)", "UInt128          ");
+            let pretty_schema = pretty_schema.replace("Decimal128(38, 0)", "UInt126          ");
+            let pretty_schema = pretty_schema.replace("FixedSizeBinary(32)", "Binary32           ");
+            let pretty_schema = pretty_schema.replace("FixedSizeBinary(20)", "Binary20           ");
 
             output.push((table.clone(), pretty_schema));
         }
