@@ -159,7 +159,6 @@ pub fn protobufs_to_rows(block: pbethereum::Block) -> Result<DatasetRows, Protob
                     block_num: header.block_num,
                     timestamp: header.timestamp,
                     tx_index,
-                    call_index,
                     tx_hash: tx_hash.clone(),
                     address: log
                         .address
@@ -170,9 +169,7 @@ pub fn protobufs_to_rows(block: pbethereum::Block) -> Result<DatasetRows, Protob
                     topic2,
                     topic3,
                     data: log.data.into(),
-                    index: log.index,
-                    block_index: log.block_index,
-                    ordinal: log.ordinal,
+                    log_index: log.block_index,
                 };
                 logs.append(&log);
             }
