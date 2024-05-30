@@ -1,13 +1,14 @@
 use std::sync::Arc;
 
-use common::arrow::array::{ArrayRef, BinaryBuilder, UInt32Builder, UInt64Builder};
-use common::arrow::datatypes::{DataType, Field, Schema, SchemaRef};
-use common::arrow::error::ArrowError;
-use common::{
-    Bytes, Bytes32, Bytes32ArrayBuilder, EvmAddress as Address, EvmAddressArrayBuilder, Table,
-    TableRows, Timestamp, TimestampArrayBuilder, BLOCK_NUM, BYTES32_TYPE,
-    EVM_ADDRESS_TYPE as ADDRESS_TYPE,
+use crate::arrow;
+use crate::{
+    timestamp_type, Bytes, Bytes32, Bytes32ArrayBuilder, EvmAddress as Address,
+    EvmAddressArrayBuilder, Table, TableRows, Timestamp, TimestampArrayBuilder, BLOCK_NUM,
+    BYTES32_TYPE, EVM_ADDRESS_TYPE as ADDRESS_TYPE,
 };
+use arrow::array::{ArrayRef, BinaryBuilder, UInt32Builder, UInt64Builder};
+use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
+use arrow::error::ArrowError;
 
 lazy_static::lazy_static! {
     static ref SCHEMA: SchemaRef = Arc::new(schema());
@@ -26,7 +27,7 @@ pub const TABLE_NAME: &'static str = "logs";
 fn schema() -> Schema {
     let block_hash = Field::new("block_hash", BYTES32_TYPE, false);
     let block_num = Field::new(BLOCK_NUM, DataType::UInt64, false);
-    let timestamp = Field::new("timestamp", common::timestamp_type(), false);
+    let timestamp = Field::new("timestamp", timestamp_type(), false);
     let tx_hash = Field::new("tx_hash", BYTES32_TYPE, false);
     let tx_index = Field::new("tx_index", DataType::UInt32, false);
     let log_index = Field::new("log_index", DataType::UInt32, false);
@@ -47,25 +48,25 @@ fn schema() -> Schema {
 
 #[derive(Debug, Default)]
 pub struct Log {
-    pub(crate) block_hash: Bytes32,
-    pub(crate) block_num: u64,
-    pub(crate) timestamp: Timestamp,
-    pub(crate) tx_index: u32,
-    pub(crate) tx_hash: Bytes32,
+    pub block_hash: Bytes32,
+    pub block_num: u64,
+    pub timestamp: Timestamp,
+    pub tx_index: u32,
+    pub tx_hash: Bytes32,
 
     // Index of the log relative to the block, 0 if the state was reverted.
-    pub(crate) log_index: u32,
+    pub log_index: u32,
 
-    pub(crate) address: Address,
-    pub(crate) topic0: Option<Bytes32>,
-    pub(crate) topic1: Option<Bytes32>,
-    pub(crate) topic2: Option<Bytes32>,
-    pub(crate) topic3: Option<Bytes32>,
-    pub(crate) data: Bytes,
+    pub address: Address,
+    pub topic0: Option<Bytes32>,
+    pub topic1: Option<Bytes32>,
+    pub topic2: Option<Bytes32>,
+    pub topic3: Option<Bytes32>,
+    pub data: Bytes,
 }
 
 #[derive(Debug)]
-pub(crate) struct LogRowsBuilder {
+pub struct LogRowsBuilder {
     block_hash: Bytes32ArrayBuilder,
     block_num: UInt64Builder,
     timestamp: TimestampArrayBuilder,
@@ -81,7 +82,7 @@ pub(crate) struct LogRowsBuilder {
 }
 
 impl LogRowsBuilder {
-    pub(crate) fn with_capacity(capacity: usize) -> Self {
+    pub fn with_capacity(capacity: usize) -> Self {
         Self {
             block_hash: Bytes32ArrayBuilder::with_capacity(capacity),
             block_num: UInt64Builder::with_capacity(capacity),
@@ -98,7 +99,7 @@ impl LogRowsBuilder {
         }
     }
 
-    pub(crate) fn append(&mut self, log: &Log) {
+    pub fn append(&mut self, log: &Log) {
         let Log {
             block_hash,
             block_num,
@@ -128,7 +129,7 @@ impl LogRowsBuilder {
         self.log_index.append_value(*log_index);
     }
 
-    pub(crate) fn build(self) -> Result<TableRows, ArrowError> {
+    pub fn build(self) -> Result<TableRows, ArrowError> {
         let Self {
             block_hash,
             mut block_num,

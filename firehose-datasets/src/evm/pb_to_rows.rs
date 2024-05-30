@@ -1,16 +1,15 @@
 use std::time::Duration;
 
-use crate::evm::tables::blocks::BlockRowsBuilder;
-use crate::evm::tables::calls::CallRowsBuilder;
-use crate::evm::tables::logs::LogRowsBuilder;
-use crate::evm::tables::transactions::TransactionRowsBuilder;
-
-use super::tables::blocks::Block;
 use super::tables::calls::Call;
-use super::tables::logs::Log;
 use super::{pbethereum, tables::transactions::Transaction};
+use crate::evm::tables::calls::CallRowsBuilder;
+use crate::evm::tables::transactions::TransactionRowsBuilder;
 use anyhow::anyhow;
 use common::arrow::error::ArrowError;
+use common::evm::tables::blocks::Block;
+use common::evm::tables::blocks::BlockRowsBuilder;
+use common::evm::tables::logs::Log;
+use common::evm::tables::logs::LogRowsBuilder;
 use common::{Bytes32, DatasetRows, EvmCurrency, Timestamp};
 use thiserror::Error;
 
@@ -225,11 +224,11 @@ fn header_from_pb(header: pbethereum::BlockHeader) -> Result<Block, ProtobufToRo
             .parent_hash
             .try_into()
             .map_err(|b| Malformed("parent_hash", b))?,
-        uncle_hash: header
+        ommers_hash: header
             .uncle_hash
             .try_into()
             .map_err(|b| Malformed("uncle_hash", b))?,
-        coinbase: header
+        miner: header
             .coinbase
             .try_into()
             .map_err(|b| Malformed("coinbase", b))?,
@@ -246,7 +245,10 @@ fn header_from_pb(header: pbethereum::BlockHeader) -> Result<Block, ProtobufToRo
             .try_into()
             .map_err(|b| Malformed("receipt_root", b))?,
         logs_bloom: header.logs_bloom.into(),
-        difficulty: header.difficulty.ok_or(Missing("difficulty"))?.bytes.into(),
+        difficulty: header
+            .difficulty
+            .ok_or(Missing("difficulty"))
+            .and_then(|b| non_negative_pb_bigint_to_evm_currency("difficulty", b))?,
         gas_limit: header.gas_limit,
         gas_used: header.gas_used,
         extra_data: header.extra_data.into(),

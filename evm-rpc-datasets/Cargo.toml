@@ -1,0 +1,14 @@
+[package]
+name = "evm-rpc-datasets"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+common = { path = "../common" }
+alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", version = "0.1.0" }
+jsonrpsee = { version = "0.22.5", features = ["client"] }
+anyhow.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+thiserror.workspace = true
+hex.workspace = true
