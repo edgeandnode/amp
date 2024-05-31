@@ -18,6 +18,8 @@ use thiserror::Error;
 pub enum ProtobufToRowError {
     #[error("malformed field {0}, bytes: {}", hex::encode(.1))]
     Malformed(&'static str, Vec<u8>),
+    #[error("overflow in field {0}, bytes: {}", hex::encode(.1))]
+    Overflow(&'static str, Vec<u8>),
     #[error("missing field: {0}")]
     Missing(&'static str),
     #[error("assertion failure: {0}")]
@@ -61,10 +63,20 @@ pub fn protobufs_to_rows(block: pbethereum::Block) -> Result<DatasetRows, Protob
 
             to: tx.to.into(),
             nonce: tx.nonce,
-            gas_price: tx
-                .gas_price
-                .map(|b| non_negative_pb_bigint_to_evm_currency("tx.gas_price", b))
-                .transpose()?,
+            gas_price: tx.gas_price.and_then(|b| {
+                // Null `gas_price` on overflow
+                //
+                // Unfourtnately, we have seen overflows values in the wild. Case in point:
+                // Arbitrum block 16464264 has one tx, with a nonsensically high gas price in
+                // both Firehose and JSON-RPC. Since the value is nonsense but the tx seems
+                // otherwise valid, 'NULL' seems like the best option. If more cases appear, we
+                // may revisit this behaviour.
+                match non_negative_pb_bigint_to_evm_currency("tx.gas_price", b) {
+                    Ok(v) => Some(v),
+                    Err(Overflow(_, _)) => None,
+                    Err(e) => unreachable!("expected ok or overflow, got: {}", e),
+                }
+            }),
             gas_limit: tx.gas_limit,
             value: tx
                 .value
@@ -270,6 +282,9 @@ fn pb_bigint_to_u64(
 }
 
 // Assume that `bytes` is a non-negative big-endian number that will fit into an i128.
+//
+// Errors:
+// - `ProtobufToRowError::Overflow` if `bytes` is too long to fit into an i128.
 fn non_negative_pb_bigint_to_evm_currency(
     field: &'static str,
     bytes: pbethereum::BigInt,
@@ -278,7 +293,7 @@ fn non_negative_pb_bigint_to_evm_currency(
     let len = bytes.bytes.len();
 
     if len > 16 {
-        return Err(Malformed(field, bytes.bytes.clone()));
+        return Err(Overflow(field, bytes.bytes.clone()));
     }
 
     // If bytes has len < 16, pad with zeroes.
