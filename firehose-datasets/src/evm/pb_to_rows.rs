@@ -51,6 +51,11 @@ pub fn protobufs_to_rows(block: pbethereum::Block) -> Result<DatasetRows, Protob
     let header = header_from_pb(block.header.ok_or(Missing("header"))?)?;
 
     for tx in block.transaction_traces {
+        // Skip failed or reverted transactions.
+        if tx.status != 1 {
+            continue;
+        }
+
         let tx_index = tx.index;
         let tx_hash: Bytes32 = tx.hash.try_into().map_err(|b| Malformed("tx.hash", b))?;
         let tx_trace_row = Transaction {
