@@ -22,7 +22,7 @@ struct Args {
     /// url = "http://localhost:8080"
     /// token = "secret"
     /// ```
-    #[arg(long, short, env = "FIREHOSE_PROVIDER")]
+    #[arg(long, short, env = "DUMP_CONFIG")]
     config: String,
 
     /// The block number to start from, inclusive.

@@ -51,7 +51,7 @@ The following types of substreams modules can be used:
 ## Config
 
 A config file toml is required. The path to the file can be configured in the CLI with `--config` or
-in the environment with `FIREHOSE_PROVIDER`. The current config format is:
+in the environment with `DUMP_CONFIG`. The current config format is:
 ```
 url = "<FIREHOSE URL>"
 token = "<AUTH_TOKEN>"
@@ -61,9 +61,9 @@ token = "<AUTH_TOKEN>"
 
 All configuration can be set through env vars instead of the CLI.
 
-- **FIREHOSE_PROVIDER**
+- **DUMP_CONFIG**
   - Description: Sets the path to a provider config file.
-  - Example: `FIREHOSE_PROVIDER=/path/to/config.toml`
+  - Example: `DUMP_CONFIG=/path/to/config.toml`
 
 - **DUMP_END_BLOCK**
   - Description: Specifies the block number to end at, inclusive.
