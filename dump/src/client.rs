@@ -1,4 +1,4 @@
-use common::BlockStreamer;
+use common::{BlockStreamer, BoxError};
 use firehose_datasets::client::Client as FirehoseClient;
 use substreams_datasets::client::Client as SubstreamsClient;
 use tokio::sync::mpsc;
@@ -15,7 +15,7 @@ impl BlockStreamer for BlockStreamerClient {
         start_block: u64,
         end_block: u64,
         tx: mpsc::Sender<common::DatasetRows>,
-    ) -> Result<(), anyhow::Error> {
+    ) -> Result<(), BoxError> {
         match self {
             BlockStreamerClient::FirehoseClient(client) => {
                 client.block_stream(start_block, end_block, tx).await

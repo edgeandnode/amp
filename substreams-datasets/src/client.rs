@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context as _};
+use anyhow::Context as _;
 use prost::Message as _;
 use std::{str::FromStr as _, time::Duration};
 use tokio::sync::mpsc;
@@ -18,7 +18,7 @@ use crate::{
     proto::sf::substreams::rpc::v2::{self as pbsubstreams, BlockScopedData},
     transform::transform,
 };
-use common::{BlockNum, BlockStreamer, DatasetRows, Table};
+use common::{BlockNum, BlockStreamer, BoxError, DatasetRows, Table};
 use pbsubstreams::{response::Message, stream_client::StreamClient, Request as StreamRequest};
 
 // Cloning is cheap and shares the underlying connection.
@@ -33,21 +33,19 @@ pub struct Client {
 impl Package {
     pub async fn from_url(url: &str) -> Result<Self, Error> {
         let url = reqwest::Url::parse(url)
-            .map_err(|_| Error::AssertFail(anyhow!("failed to parse spkg url")))?;
+            .map_err(|_| Error::AssertFail("failed to parse spkg url".into()))?;
 
         let response = reqwest::get(url)
             .await
-            .map_err(|_| Error::AssertFail(anyhow!("failed to get spkg")))?;
+            .map_err(|_| Error::AssertFail("failed to get spkg".into()))?;
         if !response.status().is_success() {
-            return Err(Error::AssertFail(anyhow!(
-                "Failed to fetch package from URL"
-            )));
+            return Err(Error::AssertFail("Failed to fetch package from URL".into()));
         }
 
         let bytes = response
             .bytes()
             .await
-            .map_err(|_| Error::AssertFail(anyhow!("failed to read response bytes")))?;
+            .map_err(|_| Error::AssertFail("failed to read response bytes".into()))?;
         let decoded = Self::decode(bytes.as_ref())?;
 
         Ok(decoded)
@@ -73,7 +71,7 @@ impl Client {
         let package = Package::from_url(manifest.as_str()).await?;
 
         let tables = Tables::from_package(&package, &output_module)
-            .map_err(|_| Error::AssertFail(anyhow!("failed to build tables from spkg")))?;
+            .map_err(|_| Error::AssertFail("failed to build tables from spkg".into()))?;
 
         Ok(Self {
             stream_client,
@@ -113,10 +111,10 @@ impl Client {
                 match response.message {
                     Some(Message::BlockScopedData(data)) => Ok(data),
                     Some(Message::FatalError(_)) => {
-                        return Err(Error::AssertFail(anyhow!("Substreams server error")));
+                        return Err(Error::AssertFail("Substreams server error".into()));
                     }
                     Some(Message::BlockUndoSignal(_)) => {
-                        return Err(Error::AssertFail(anyhow!("Block undo signal received")));
+                        return Err(Error::AssertFail("Block undo signal received".into()));
                     }
                     // ignore progress, session, snapshot messages
                     _ => {
@@ -143,7 +141,7 @@ impl BlockStreamer for Client {
         start_block: u64,
         end_block: u64,
         tx: mpsc::Sender<DatasetRows>,
-    ) -> Result<(), anyhow::Error> {
+    ) -> Result<(), BoxError> {
         // Explicitly track the next block in case we need to restart the Firehose stream.
         let mut next_block = start_block;
         const RETRY_BACKOFF: Duration = Duration::from_secs(5);

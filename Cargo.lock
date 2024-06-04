@@ -1216,7 +1216,6 @@ dependencies = [
 name = "common"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "atty",
  "datafusion",
  "datafusion-proto",
@@ -1776,7 +1775,6 @@ checksum = "fea41bba32d969b513997752735605054bc0dfa92b4c56bf1189f2e174be7a10"
 name = "dump"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "clap",
  "common",
  "datafusion",
@@ -1798,7 +1796,6 @@ dependencies = [
 name = "dump-check"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "atty",
  "clap",
  "common",
@@ -1899,7 +1896,6 @@ name = "evm-rpc-datasets"
 version = "0.1.0"
 dependencies = [
  "alloy-rpc-types",
- "anyhow",
  "common",
  "hex",
  "jsonrpsee",
@@ -1940,7 +1936,6 @@ name = "firehose-datasets"
 version = "0.1.0"
 dependencies = [
  "alloy-core",
- "anyhow",
  "clap",
  "common",
  "datafusion",
@@ -4288,7 +4283,6 @@ dependencies = [
 name = "server"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "arrow-flight",
  "async-trait",
  "bytes",

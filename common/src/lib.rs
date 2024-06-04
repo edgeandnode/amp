@@ -20,7 +20,6 @@ use std::future::Future;
 use std::time::Duration;
 use std::time::SystemTime;
 
-use anyhow::Context as _;
 use arrow::array::FixedSizeBinaryArray;
 use arrow::datatypes::DataType;
 use datafusion::arrow::datatypes::{SchemaRef, TimeUnit, DECIMAL128_MAX_PRECISION};
@@ -29,6 +28,8 @@ use datafusion::arrow::{
     datatypes::UInt64Type,
 };
 use tokio::sync::mpsc;
+
+pub type BoxError = Box<dyn std::error::Error + Sync + Send + 'static>;
 
 /// The block number column name.
 pub const BLOCK_NUM: &str = "block_num";
@@ -132,33 +133,33 @@ impl TableRows {
     /// - If the table is empty.
     /// - If any table is missing the block_num column.
     /// - If the block_num column values are not all the same.
-    pub fn block_num(&self) -> Result<u64, anyhow::Error> {
+    pub fn block_num(&self) -> Result<u64, BoxError> {
         use arrow::compute::kernels::aggregate::max;
         use arrow::compute::kernels::aggregate::min;
 
         if self.is_empty() {
-            return Err(anyhow::anyhow!("empty table: {}", self.table.name));
+            return Err(format!("empty table: {}", self.table.name).into());
         }
 
         let block_nums = self
             .rows
             .column_by_name(BLOCK_NUM)
-            .with_context(|| format!("missing block_num column in table: {}", self.table.name))?;
+            .ok_or_else(|| format!("missing block_num column in table: {}", self.table.name))?;
         let block_nums = block_nums
             .as_primitive_opt::<UInt64Type>()
-            .context("block_num column is not uint64")?;
+            .ok_or("block_num column is not uint64")?;
 
         // Unwrap: We are not empty.
         let min = min(block_nums).unwrap();
         let max = max(block_nums).unwrap();
 
-        anyhow::ensure!(
-            min == max,
-            "table {} contains mismatching block_num: {} != {}",
-            self.table.name,
-            min,
-            max
-        );
+        if min != max {
+            return Err(format!(
+                "table {} contains mismatching block_num: {} != {}",
+                self.table.name, min, max
+            )
+            .into());
+        };
 
         Ok(min)
     }
@@ -184,9 +185,9 @@ impl DatasetRows {
     /// - If the dataset is empty.
     /// - If any table is missing the block_num column.
     /// - If the block_num column values are not all the same.
-    pub fn block_num(&self) -> Result<u64, anyhow::Error> {
+    pub fn block_num(&self) -> Result<u64, BoxError> {
         if self.is_empty() {
-            return Err(anyhow::anyhow!("empty dataset"));
+            return Err("empty dataset".into());
         }
 
         let mut block_nums = vec![];
@@ -202,12 +203,11 @@ impl DatasetRows {
         let min = block_nums.iter().min().unwrap();
         let max = block_nums.iter().max().unwrap();
 
-        anyhow::ensure!(
-            min == max,
-            "dataset contains mismatching block_num: {} != {}",
-            min,
-            max
-        );
+        if min != max {
+            return Err(
+                format!("dataset contains mismatching block_num: {} != {}", min, max).into(),
+            );
+        }
 
         Ok(*min)
     }
@@ -228,5 +228,5 @@ pub trait BlockStreamer: Clone + 'static {
         start_block: u64,
         end_block: u64,
         tx: mpsc::Sender<DatasetRows>,
-    ) -> impl Future<Output = Result<(), anyhow::Error>> + Send;
+    ) -> impl Future<Output = Result<(), BoxError>> + Send;
 }

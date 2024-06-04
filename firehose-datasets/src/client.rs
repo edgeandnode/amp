@@ -4,10 +4,9 @@ use crate::proto::sf::firehose::v2 as pbfirehose;
 use std::str::FromStr;
 use std::time::Duration;
 
-use anyhow::anyhow;
-use anyhow::Context as _;
 use common::BlockNum;
 use common::BlockStreamer;
+use common::BoxError;
 use common::DatasetRows;
 use futures::StreamExt as _;
 use futures::{Stream, TryStreamExt as _};
@@ -37,7 +36,7 @@ pub enum Error {
     #[error("ProtocolBuffers decoding error: {0}")]
     PbDecodeError(#[from] prost::DecodeError),
     #[error("Assertion failure: {0}")]
-    AssertFail(anyhow::Error),
+    AssertFail(BoxError),
     #[error("URL parse error: {0}")]
     UriParse(#[from] InvalidUri),
     #[error("Invalid auth token: {0}")]
@@ -120,11 +119,11 @@ impl Client {
                 // Assert we have a final block.
                 // See also: only-final-blocks
                 if step != ForkStep::StepFinal {
-                    let err = anyhow!("Only STEP_FINAL is expected, found {}", step.as_str_name());
-                    return Err(Error::AssertFail(err));
+                    let err = format!("Only STEP_FINAL is expected, found {}", step.as_str_name());
+                    return Err(Error::AssertFail(err.into()));
                 }
                 let Some(block) = block else {
-                    return Err(Error::AssertFail(anyhow!("Expected block, found none")));
+                    return Err(Error::AssertFail("Expected block, found none".into()));
                 };
 
                 let ethereum_block = pbethereum::Block::decode(block.value.as_ref())?;
@@ -184,7 +183,7 @@ impl BlockStreamer for Client {
         start_block: u64,
         end_block: u64,
         tx: mpsc::Sender<DatasetRows>,
-    ) -> Result<(), anyhow::Error> {
+    ) -> Result<(), BoxError> {
         use crate::evm::pb_to_rows::protobufs_to_rows;
 
         const RETRY_BACKOFF: Duration = Duration::from_secs(5);
@@ -206,8 +205,11 @@ impl BlockStreamer for Client {
                     Ok(block) => {
                         let block_num = block.number;
 
-                        let table_rows = protobufs_to_rows(block).with_context(|| {
-                            format!("error converting Protobufs to rows on block {}", block_num)
+                        let table_rows = protobufs_to_rows(block).map_err(|e| {
+                            format!(
+                                "error converting Protobufs to rows on block {}: {}",
+                                block_num, e
+                            )
                         })?;
 
                         // Send the block and check if the receiver has gone away.

@@ -3,7 +3,7 @@ mod metrics;
 mod ui;
 
 use clap::Parser;
-use common::{config::Config, dataset_context::DatasetContext};
+use common::{config::Config, dataset_context::DatasetContext, BoxError};
 use firehose_datasets::client::Client;
 use futures::future::try_join_all;
 use job::Job;
@@ -66,7 +66,7 @@ struct Args {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), anyhow::Error> {
+async fn main() -> Result<(), BoxError> {
     tracing_subscriber::fmt::init();
 
     let args = Args::parse();
@@ -80,15 +80,11 @@ async fn main() -> Result<(), anyhow::Error> {
     } = args;
 
     if end_block == 0 {
-        return Err(anyhow::anyhow!(
-            "The end block number must be greater than 0"
-        ));
+        return Err("The end block number must be greater than 0".into());
     }
 
     if start > end_block {
-        return Err(anyhow::anyhow!(
-            "The start block number must be less than the end block number"
-        ));
+        return Err("The start block number must be less than the end block number".into());
     }
 
     let metrics = Arc::new(MetricsRegistry::new());

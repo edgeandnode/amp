@@ -5,7 +5,7 @@ use common::arrow::array::RecordBatch;
 use common::dataset_context::TableUrl;
 use common::meta_tables::scanned_ranges::{self, ScannedRange, ScannedRangeRowsBuilder};
 use common::parquet::errors::ParquetError;
-use common::{parquet, BlockNum, DatasetContext, Table, TableRows, Timestamp};
+use common::{parquet, BlockNum, BoxError, DatasetContext, Table, TableRows, Timestamp};
 use object_store::buffered::BufWriter;
 use object_store::path::Path;
 use object_store::ObjectStore;
@@ -45,7 +45,7 @@ impl DatasetWriter {
         opts: ParquetWriterProperties,
         start: BlockNum,
         partition_size: u64,
-    ) -> Result<Self, anyhow::Error> {
+    ) -> Result<Self, BoxError> {
         let mut writers = BTreeMap::new();
         let mut urls = BTreeMap::new();
         let store = dataset_ctx.object_store()?;
@@ -65,7 +65,7 @@ impl DatasetWriter {
         })
     }
 
-    pub async fn write(&mut self, table_rows: TableRows) -> Result<(), anyhow::Error> {
+    pub async fn write(&mut self, table_rows: TableRows) -> Result<(), BoxError> {
         let table = &table_rows.table;
         let block_num = table_rows.block_num()?;
 
@@ -101,21 +101,19 @@ impl DatasetWriter {
     }
 
     /// Flush and close all pending writes.
-    pub async fn close(mut self, end: BlockNum) -> Result<(), anyhow::Error> {
+    pub async fn close(mut self, end: BlockNum) -> Result<(), BoxError> {
         for (_, writer) in self.writers {
             let scanned_range = writer.close(end).await?;
             self.scanned_range_batch.append(&scanned_range);
         }
-        flush_scanned_ranges(&self.dataset_ctx, &mut self.scanned_range_batch).await?;
-
-        Ok(())
+        flush_scanned_ranges(&self.dataset_ctx, &mut self.scanned_range_batch).await
     }
 }
 
 async fn flush_scanned_ranges(
     ctx: &DatasetContext,
     ranges: &mut ScannedRangeRowsBuilder,
-) -> Result<(), anyhow::Error> {
+) -> Result<(), BoxError> {
     use datafusion::common::ToDFSchema;
     use datafusion::datasource::{DefaultTableSource, MemTable};
     use datafusion::logical_expr::{DmlStatement, LogicalPlan, TableScan, WriteOp};
@@ -163,7 +161,7 @@ impl ParquetWriter {
         table: &TableUrl,
         opts: ParquetWriterProperties,
         start: BlockNum,
-    ) -> Result<ParquetWriter, anyhow::Error> {
+    ) -> Result<ParquetWriter, BoxError> {
         let path = Path::parse(&path_for_part(&table.url, start))?;
         let object_writer = BufWriter::new(store.clone(), path);
 
@@ -190,15 +188,14 @@ impl ParquetWriter {
         self.writer.write(batch).await
     }
 
-    pub async fn close(self, end: BlockNum) -> Result<ScannedRange, anyhow::Error> {
+    pub async fn close(self, end: BlockNum) -> Result<ScannedRange, BoxError> {
         self.writer.close().await?;
 
-        anyhow::ensure!(
-            end >= self.start,
-            "end block {} must be before start block {}",
-            end,
-            self.start
-        );
+        if end < self.start {
+            return Err(
+                format!("end block {} must be after start block {}", end, self.start).into(),
+            );
+        }
         let scanned_range = ScannedRange {
             table: self.table.name.clone(),
             range_start: self.start,

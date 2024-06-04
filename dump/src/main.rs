@@ -8,7 +8,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::client::BlockStreamerClient;
-use anyhow::Context as _;
 use clap::Parser;
 use common::arrow::array::AsArray as _;
 use common::arrow::datatypes::UInt64Type;
@@ -17,6 +16,7 @@ use common::dataset_context::DatasetContext;
 use common::multirange::MultiRange;
 use common::parquet;
 use common::tracing;
+use common::BoxError;
 use common::BLOCK_NUM;
 use fs_err as fs;
 use futures::future::try_join_all;
@@ -105,7 +105,7 @@ struct Args {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), anyhow::Error> {
+async fn main() -> Result<(), BoxError> {
     tracing::register_logger();
 
     let args = Args::parse();
@@ -146,8 +146,8 @@ async fn main() -> Result<(), anyhow::Error> {
                 firehose_datasets::client::Client::new(provider).await?,
             )
         } else {
-            let manifest = manifest.context("missing manifest")?;
-            let module = module.context("missing output module")?;
+            let manifest = manifest.ok_or("missing manifest")?;
+            let module = module.ok_or("missing output module")?;
             let client =
                 substreams_datasets::client::Client::new(provider, manifest, module).await?;
             BlockStreamerClient::SubstreamsClient(client)
@@ -217,25 +217,29 @@ async fn main() -> Result<(), anyhow::Error> {
 // start block is always a number
 // if end_block starts with "+" then it is a relative block number
 // otherwise, it's an absolute block number and should be after start_block
-fn resolve_block_range(start_block: String, end_block: String) -> anyhow::Result<(u64, u64)> {
+fn resolve_block_range(start_block: String, end_block: String) -> Result<(u64, u64), BoxError> {
     if start_block.starts_with('+') {
-        anyhow::bail!("start_block must be an absolute block number")
+        return Err("start_block must be an absolute block number".into());
     }
-    let start_block = start_block.parse::<u64>().context("invalid start block")?;
+    let start_block = start_block
+        .parse::<u64>()
+        .map_err(|e| format!("invalid start block: {e}"))?;
     let end_block = if end_block.starts_with('+') {
         let relative_block = end_block
             .trim_start_matches('+')
             .parse::<u64>()
-            .context("invalid relative end block")?;
+            .map_err(|e| format!("invalid relative end block: {e}"))?;
         start_block + relative_block
     } else {
-        end_block.parse::<u64>().context("invalid end block")?
+        end_block
+            .parse::<u64>()
+            .map_err(|e| format!("invalid end block: {e}"))?
     };
     if end_block < start_block {
-        anyhow::bail!("end_block must be greater than or equal to start_block")
+        return Err("end_block must be greater than or equal to start_block".into());
     }
     if end_block == 0 {
-        anyhow::bail!("end_block must be greater than 0")
+        return Err("end_block must be greater than 0".into());
     }
     Ok((start_block, end_block))
 }
@@ -254,9 +258,7 @@ fn parquet_opts(compression: Compression) -> ParquetWriterProperties {
 }
 
 /// Blocks that already exist in the dataset. This is used to ensure no duplicate data is written.
-async fn existing_blocks(
-    ctx: &DatasetContext,
-) -> Result<BTreeMap<String, MultiRange>, anyhow::Error> {
+async fn existing_blocks(ctx: &DatasetContext) -> Result<BTreeMap<String, MultiRange>, BoxError> {
     let mut existing_blocks: BTreeMap<String, MultiRange> = BTreeMap::new();
     for table in ctx.tables() {
         let table_name = table.name.clone();
@@ -280,7 +282,7 @@ async fn existing_blocks(
 
 // This is the intersection of the `__scanned_ranges` for all tables. That is, a range is only
 // considered scanned if it is scanned for all tables.
-async fn scanned_ranges(ctx: &DatasetContext) -> Result<MultiRange, anyhow::Error> {
+async fn scanned_ranges(ctx: &DatasetContext) -> Result<MultiRange, BoxError> {
     use common::meta_tables::scanned_ranges::TABLE_NAME as __SCANNED_RANGES;
 
     let mut multirange_by_table: BTreeMap<String, MultiRange> = BTreeMap::default();
@@ -308,7 +310,7 @@ async fn scanned_ranges(ctx: &DatasetContext) -> Result<MultiRange, anyhow::Erro
     }
 
     let mut scanned_ranges = multirange_by_table.into_iter().map(|(_, r)| r);
-    let first = scanned_ranges.next().context("no tables")?;
+    let first = scanned_ranges.next().ok_or("no tables")?;
     let intersection = scanned_ranges.fold(first, |acc, r| acc.intersection(&r));
     Ok(intersection)
 }
@@ -328,17 +330,17 @@ mod tests {
                 Ok((18_446_744_073_709_551_614u64, 18_446_744_073_709_551_615u64)),
             ),
             ("10", "+5", Ok((10, 15))),
-            ("100", "90", Err(anyhow::Error::msg(""))),
-            ("0", "0", Err(anyhow::Error::msg(""))),
-            ("0", "0x", Err(anyhow::Error::msg(""))),
-            ("0", "xxx", Err(anyhow::Error::msg(""))),
-            ("xxx", "123", Err(anyhow::Error::msg(""))),
-            ("100", "+1000x", Err(anyhow::Error::msg(""))),
-            ("100", "+1x", Err(anyhow::Error::msg(""))),
-            ("123x", "+5", Err(anyhow::Error::msg(""))),
-            ("+10", "1000", Err(anyhow::Error::msg(""))),
-            ("-10", "100", Err(anyhow::Error::msg(""))),
-            ("-10", "+50", Err(anyhow::Error::msg(""))),
+            ("100", "90", Err(BoxError::from(""))),
+            ("0", "0", Err(BoxError::from(""))),
+            ("0", "0x", Err(BoxError::from(""))),
+            ("0", "xxx", Err(BoxError::from(""))),
+            ("xxx", "123", Err(BoxError::from(""))),
+            ("100", "+1000x", Err(BoxError::from(""))),
+            ("100", "+1x", Err(BoxError::from(""))),
+            ("123x", "+5", Err(BoxError::from(""))),
+            ("+10", "1000", Err(BoxError::from(""))),
+            ("-10", "100", Err(BoxError::from(""))),
+            ("-10", "+50", Err(BoxError::from(""))),
         ];
 
         for (start_block, end_block, expected) in test_cases {

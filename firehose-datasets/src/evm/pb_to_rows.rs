@@ -4,13 +4,12 @@ use super::tables::calls::Call;
 use super::{pbethereum, tables::transactions::Transaction};
 use crate::evm::tables::calls::CallRowsBuilder;
 use crate::evm::tables::transactions::TransactionRowsBuilder;
-use anyhow::anyhow;
 use common::arrow::error::ArrowError;
 use common::evm::tables::blocks::Block;
 use common::evm::tables::blocks::BlockRowsBuilder;
 use common::evm::tables::logs::Log;
 use common::evm::tables::logs::LogRowsBuilder;
-use common::{Bytes32, DatasetRows, EvmCurrency, Timestamp};
+use common::{BoxError, Bytes32, DatasetRows, EvmCurrency, Timestamp};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -22,7 +21,7 @@ pub enum ProtobufToRowError {
     #[error("missing field: {0}")]
     Missing(&'static str),
     #[error("assertion failure: {0}")]
-    AssertFail(anyhow::Error),
+    AssertFail(BoxError),
     #[error("error serializing to arrow: {0}")]
     ArrowError(#[from] ArrowError),
 }
@@ -165,7 +164,7 @@ pub fn protobufs_to_rows(block: pbethereum::Block) -> Result<DatasetRows, Protob
                         (Some(_), Some(_), None, _) => topic2 = Some(topic),
                         (Some(_), Some(_), Some(_), None) => topic3 = Some(topic),
                         (Some(_), Some(_), Some(_), Some(_)) => {
-                            return Err(AssertFail(anyhow!("log has more than four topics")))
+                            return Err(AssertFail("log has more than four topics".into()))
                         }
                     }
                 }

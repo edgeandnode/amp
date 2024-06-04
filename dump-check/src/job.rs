@@ -1,9 +1,8 @@
 use crate::metrics::MetricsRegistry;
-use anyhow::{anyhow, Context as _};
 use common::arrow::array::{AsArray, RecordBatch};
 use common::arrow::datatypes::UInt64Type;
 use common::dataset_context::DatasetContext;
-use common::{BlockStreamer, Dataset, BLOCK_NUM};
+use common::{BlockStreamer, BoxError, Dataset, BLOCK_NUM};
 use futures::future::join_all;
 use futures::{FutureExt, StreamExt as _};
 use std::collections::HashMap;
@@ -28,7 +27,7 @@ async fn validate_batches(
     block_range: RangeInclusive<u64>,
     fbatches: &Vec<RecordBatch>,
     _metrics: Arc<MetricsRegistry>,
-) -> Result<(), anyhow::Error> {
+) -> Result<(), BoxError> {
     let mut record_stream = ctx
         .execute_sql(&format!(
             "select * from {} where block_num >= {} and block_num <= {} order by block_num asc",
@@ -37,7 +36,7 @@ async fn validate_batches(
             block_range.end()
         ))
         .await
-        .context("failed to run existing blocks query")?;
+        .map_err(|e| format!("failed to run existing blocks query: {e}"))?;
 
     let mut total_processed = 0;
     let mut i = 0;
@@ -47,12 +46,13 @@ async fn validate_batches(
     while let Some(qbatch) = record_stream.next().await {
         let qbatch: RecordBatch = qbatch?;
         if fbatches[0].num_columns() != qbatch.num_columns() {
-            return Err(anyhow!(
+            return Err(format!(
                 "column count in range {}..{} in table `{}` does not match",
                 block_range.start(),
                 block_range.end(),
                 table_name
-            ));
+            )
+            .into());
         }
         let mut row = 0;
         while row < qbatch.num_rows() && i < fbatches.len() {
@@ -60,14 +60,12 @@ async fn validate_batches(
             if fbatches[i].slice(j, to_slice) != qbatch.slice(row, to_slice) {
                 let block_num = fbatches[i]
                     .column_by_name(BLOCK_NUM)
-                    .with_context(|| "missing block_num column")?
+                    .ok_or("missing block_num column")?
                     .as_primitive::<UInt64Type>()
                     .value(j);
-                return Err(anyhow!(
-                    "mismatch in block {} in table `{}`",
-                    block_num,
-                    table_name
-                ));
+                return Err(
+                    format!("mismatch in block {} in table `{}`", block_num, table_name).into(),
+                );
             }
             total_processed += to_slice;
             j += to_slice;
@@ -79,13 +77,14 @@ async fn validate_batches(
         }
     }
     if total_processed != total_rows {
-        return Err(anyhow!(
+        return Err(format!(
             "missing {} block(s) in range {}..{} in table `{}`",
             total_rows - total_processed,
             block_range.start(),
             block_range.end(),
             table_name
-        ));
+        )
+        .into());
     }
     Ok(())
 }
@@ -93,7 +92,7 @@ async fn validate_batches(
 // Spawning a job:
 // - Spawns a task to fetch blocks from the `client`.
 // - Returns a future that will validate firehose blocks against existing data.
-pub async fn run_job(job: Job<impl BlockStreamer>) -> Result<(), anyhow::Error> {
+pub async fn run_job(job: Job<impl BlockStreamer>) -> Result<(), BoxError> {
     let (mut firehose, firehose_join_handle) = {
         let start_block = job.start;
         let end_block = job.end;

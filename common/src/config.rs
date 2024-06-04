@@ -10,6 +10,8 @@ use datafusion::{
 };
 use serde::Deserialize;
 
+use crate::BoxError;
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Config {
@@ -19,7 +21,7 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn load(file: PathBuf) -> anyhow::Result<Self> {
+    pub fn load(file: PathBuf) -> Result<Self, BoxError> {
         let contents = std::fs::read_to_string(file)?;
         toml::from_str(&contents).map_err(Into::into)
     }

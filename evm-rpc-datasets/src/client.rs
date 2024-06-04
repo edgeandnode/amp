@@ -1,14 +1,15 @@
+use std::future::Future;
 use std::time::Duration;
 
 use alloy_rpc_types::Header;
 use alloy_rpc_types::Log as RpcLog;
-use anyhow::Error;
 use common::evm::tables::blocks::Block;
 use common::evm::tables::blocks::BlockRowsBuilder;
 use common::evm::tables::logs::Log;
 use common::evm::tables::logs::LogRowsBuilder;
 use common::BlockNum;
 use common::BlockStreamer;
+use common::BoxError;
 use common::DatasetRows;
 use common::EvmCurrency;
 use common::Timestamp;
@@ -30,7 +31,7 @@ pub enum ToRowError {
     #[error("missing field: {0}")]
     Missing(&'static str),
     #[error("overflow in field {0}: {1}")]
-    Overflow(&'static str, anyhow::Error),
+    Overflow(&'static str, BoxError),
 }
 
 #[derive(Clone)]
@@ -39,7 +40,7 @@ pub struct JsonRpcClient {
 }
 
 impl JsonRpcClient {
-    pub fn new(url: &str) -> Result<Self, Error> {
+    pub fn new(url: &str) -> Result<Self, BoxError> {
         let mut content_type = HeaderMap::new();
         content_type.insert("Content-Type", "application/json".parse().unwrap());
         let client = HttpClientBuilder::default()
@@ -83,7 +84,7 @@ impl JsonRpcClient {
         start_block: u64,
         end_block: u64,
         tx: mpsc::Sender<DatasetRows>,
-    ) -> Result<(), anyhow::Error> {
+    ) -> Result<(), BoxError> {
         for block_num in start_block..=end_block {
             let (header, logs) = try_join!(
                 self.get_block_by_number(block_num),
@@ -107,12 +108,12 @@ impl BlockStreamer for JsonRpcClient {
         start_block: u64,
         end_block: u64,
         tx: mpsc::Sender<common::DatasetRows>,
-    ) -> impl std::future::Future<Output = Result<(), anyhow::Error>> + Send {
+    ) -> impl Future<Output = Result<(), BoxError>> + Send {
         self.block_stream(start_block, end_block, tx)
     }
 }
 
-fn rpc_to_rows(block: Header, logs: Vec<RpcLog>) -> Result<DatasetRows, Error> {
+fn rpc_to_rows(block: Header, logs: Vec<RpcLog>) -> Result<DatasetRows, BoxError> {
     let header = rpc_header_to_row(block)?;
     let logs = logs
         .into_iter()

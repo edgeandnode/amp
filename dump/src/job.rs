@@ -1,6 +1,6 @@
 use common::multirange::MultiRange;
 use common::parquet::file::properties::WriterProperties as ParquetWriterProperties;
-use common::{BlockStreamer, DatasetContext};
+use common::{BlockStreamer, BoxError, DatasetContext};
 use log::info;
 use std::collections::BTreeMap;
 use std::{sync::Arc, time::Instant};
@@ -28,7 +28,7 @@ pub struct Job<T: BlockStreamer> {
 // Spawning a job:
 // - Spawns a task to fetch blocks from the `client`.
 // - Returns a future that will read that block stream and write a parquet file to the object store.
-pub async fn run(job: Arc<Job<impl BlockStreamer>>) -> Result<(), anyhow::Error> {
+pub async fn run(job: Arc<Job<impl BlockStreamer>>) -> Result<(), BoxError> {
     info!("job #{} ranges to scan: {}", job.job_id, job.multirange);
 
     // The ranges are run sequentially by design, as parallelism is controlled by the number of jobs.
@@ -56,7 +56,7 @@ async fn run_job_range(
     job: Arc<Job<impl BlockStreamer>>,
     start: u64,
     end: u64,
-) -> Result<(), anyhow::Error> {
+) -> Result<(), BoxError> {
     let (mut firehose, firehose_join_handle) = {
         let block_streamer = job.block_streamer.clone();
         let (tx, rx) = tokio::sync::mpsc::channel(100);

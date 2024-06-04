@@ -1,8 +1,6 @@
 use std::sync::Arc;
 
-use crate::arrow;
-use anyhow::anyhow;
-use anyhow::Context as _;
+use crate::{arrow, BoxError};
 use arrow::array::RecordBatch;
 use arrow::compute::concat_batches;
 use arrow::datatypes::SchemaRef;
@@ -49,8 +47,8 @@ pub enum Error {
     ExecutionError(DataFusionError),
 
     /// Signals a problem with the dataset configuration.
-    #[error("dataset error: {0:#}")]
-    DatasetError(anyhow::Error),
+    #[error("dataset error: {0}")]
+    DatasetError(BoxError),
 
     #[error("meta table error: {0}")]
     MetaTableError(DataFusionError),
@@ -74,7 +72,7 @@ impl TableUrl {
         base: &Url,
         table: &Table,
         order_exprs: Vec<Vec<Expr>>,
-    ) -> Result<TableUrl, anyhow::Error> {
+    ) -> Result<TableUrl, BoxError> {
         let url = if base.scheme() == "file" {
             Url::from_directory_path(&format!("/{}/", &table.name)).unwrap()
         } else {
@@ -118,7 +116,7 @@ impl DatasetContext {
         dataset: Dataset,
         data_location: String,
         env: Arc<RuntimeEnv>,
-    ) -> Result<Self, anyhow::Error> {
+    ) -> Result<Self, BoxError> {
         let (data_url, object_store) = infer_object_store(data_location.clone())?;
         let meta = meta_tables::tables();
         Self::with_object_store(env, dataset, meta, data_url, object_store).await
@@ -130,7 +128,7 @@ impl DatasetContext {
         meta: Vec<Table>,
         data_url: Url,
         object_store: Arc<dyn ObjectStore>,
-    ) -> Result<Self, anyhow::Error> {
+    ) -> Result<Self, BoxError> {
         env.register_object_store(&data_url, object_store);
 
         // This contains various tuning options for the query engine.
@@ -275,10 +273,9 @@ impl DatasetContext {
                 .execute_sql(format!("describe {}", table.name).as_str())
                 .await?;
             let Some(Ok(batch)) = record_stream.next().await else {
-                return Err(Error::DatasetError(anyhow!(
-                    "no schema for table `{}`",
-                    table.name,
-                )));
+                return Err(Error::DatasetError(
+                    format!("no schema for table `{}`", table.name,).into(),
+                ));
             };
             let pretty_schema = pretty_format_batches(&[batch])
                 .map_err(|e| Error::DatasetError(e.into()))?
@@ -348,7 +345,7 @@ fn verify_plan(plan: &LogicalPlan) -> Result<(), Error> {
 
 pub fn infer_object_store(
     mut data_location: String,
-) -> Result<(Url, Arc<dyn ObjectStore>), anyhow::Error> {
+) -> Result<(Url, Arc<dyn ObjectStore>), BoxError> {
     // Make sure there is a trailing slash so it's recognized as a directory.
     if !data_location.ends_with('/') {
         data_location.push('/');
@@ -357,7 +354,7 @@ pub fn infer_object_store(
     if data_location.starts_with("gs://") {
         let bucket = {
             let segment = data_location.trim_start_matches("gs://").split('/').next();
-            segment.context("invalid GCS url")?
+            segment.ok_or("invalid GCS url")?
         };
 
         let store = Arc::new(
@@ -369,7 +366,7 @@ pub fn infer_object_store(
     } else if data_location.starts_with("s3://") {
         let bucket = {
             let segment = data_location.trim_start_matches("s3://").split('/').next();
-            segment.context("invalid S3 url")?
+            segment.ok_or("invalid S3 url")?
         };
 
         let store = Arc::new(
