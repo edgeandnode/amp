@@ -1,7 +1,7 @@
 use std::{net::SocketAddr, sync::Arc};
 
 use arrow_flight::flight_service_server::FlightServiceServer;
-use common::{config::Config, tracing, BoxError, DatasetContext};
+use common::{config::Config, tracing, BoxError, QueryContext};
 use log::info;
 use tonic::transport::Server;
 
@@ -26,7 +26,7 @@ async fn main() -> Result<(), BoxError> {
     );
 
     let env = Arc::new((config.to_runtime_env())?);
-    let ctx = DatasetContext::new(dataset.clone(), config.data_location, env).await?;
+    let ctx = QueryContext::for_dataset(dataset.clone(), config.data_location, env).await?;
     let svc = FlightServiceServer::new(service::Service::new(ctx));
 
     let addr: SocketAddr = ([0, 0, 0, 0], 1602).into();

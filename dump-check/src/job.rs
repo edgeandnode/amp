@@ -1,7 +1,7 @@
 use crate::metrics::MetricsRegistry;
 use common::arrow::array::{AsArray, RecordBatch};
 use common::arrow::datatypes::UInt64Type;
-use common::dataset_context::DatasetContext;
+use common::dataset_context::QueryContext;
 use common::{BlockStreamer, BoxError, Dataset, BLOCK_NUM};
 use futures::future::join_all;
 use futures::{FutureExt, StreamExt as _};
@@ -16,13 +16,13 @@ pub struct Job<T: BlockStreamer> {
     pub end: u64,
     pub job_id: u8,
     pub batch_size: u64,
-    pub ctx: Arc<DatasetContext>,
+    pub ctx: Arc<QueryContext>,
     pub metrics: Arc<MetricsRegistry>,
 }
 
 // Validate buffered vector of dataset batches against existing data in the object store.
 async fn validate_batches(
-    ctx: Arc<DatasetContext>,
+    ctx: Arc<QueryContext>,
     table_name: &str,
     block_range: RangeInclusive<u64>,
     fbatches: &Vec<RecordBatch>,

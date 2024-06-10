@@ -1,6 +1,6 @@
 use common::{
     arrow::{self, ipc::writer::IpcDataGenerator},
-    dataset_context::{DatasetContext, Error as CoreError},
+    dataset_context::{Error as CoreError, QueryContext},
 };
 use datafusion::{common::DFSchema, error::DataFusionError, logical_expr::LogicalPlan};
 use futures::{Stream, StreamExt as _, TryStreamExt};
@@ -88,10 +88,7 @@ impl Ticket {
         Self { plan }
     }
 
-    async fn from_flight(
-        ticket: arrow_flight::Ticket,
-        ctx: &DatasetContext,
-    ) -> Result<Self, Error> {
+    async fn from_flight(ticket: arrow_flight::Ticket, ctx: &QueryContext) -> Result<Self, Error> {
         let plan = ctx.plan_from_bytes(&ticket.ticket).await?;
         Ok(Self { plan })
     }
@@ -104,13 +101,12 @@ impl Ticket {
 }
 
 pub(super) struct Service {
-    // One service currently supports only one dataset.
-    dataset_ctx: DatasetContext,
+    query_ctx: QueryContext,
 }
 
 impl Service {
-    pub fn new(dataset_ctx: DatasetContext) -> Self {
-        Self { dataset_ctx }
+    pub fn new(query_ctx: QueryContext) -> Self {
+        Self { query_ctx }
     }
 }
 
@@ -208,7 +204,7 @@ impl Service {
                     .unpack::<CommandStatementQuery>()
                     .map_err(|e| Error::PbDecodeError(e.to_string()))?
                 {
-                    let plan = self.dataset_ctx.sql_to_plan(&sql_query.query).await?;
+                    let plan = self.query_ctx.sql_to_plan(&sql_query.query).await?;
                     let schema = plan.schema().as_ref().clone();
                     let ticket = Ticket::new(plan);
                     (schema, ticket)
@@ -256,8 +252,8 @@ impl Service {
     }
 
     async fn do_get(&self, ticket: arrow_flight::Ticket) -> Result<TonicStream<FlightData>, Error> {
-        let Ticket { plan } = Ticket::from_flight(ticket, &self.dataset_ctx).await?;
-        let stream = self.dataset_ctx.execute_plan(plan).await?;
+        let Ticket { plan } = Ticket::from_flight(ticket, &self.query_ctx).await?;
+        let stream = self.query_ctx.execute_plan(plan).await?;
 
         Ok(FlightDataEncoderBuilder::new()
             .with_schema(stream.schema())

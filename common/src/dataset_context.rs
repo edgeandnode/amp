@@ -104,32 +104,42 @@ impl TableLocations {
     }
 }
 
-pub struct DatasetContext {
+pub struct QueryContext {
     env: Arc<RuntimeEnv>,
     session_config: SessionConfig,
     table_locations: TableLocations,
 }
 
-impl DatasetContext {
+impl QueryContext {
     /// Connects a dataset definition to exisiting data.
     ///
     /// Examples of valid formats for `data_location`:
     /// - Filesystem path: `relative/path/to/data/`
     /// - GCS: `gs://bucket-name/`
     /// - S3: `s3://bucket-name/`
-    pub async fn new(
+    pub async fn for_dataset(
         dataset: Dataset,
         data_location: String,
         env: Arc<RuntimeEnv>,
     ) -> Result<Self, BoxError> {
-        let (data_url, object_store) = infer_object_store(data_location.clone())?;
+        let tables = dataset.tables();
         let meta = meta_tables::tables();
-        Self::with_object_store(env, dataset, meta, data_url, object_store).await
+        Self::for_tables(tables, meta, data_location, env).await
+    }
+
+    pub async fn for_tables(
+        tables: &[Table],
+        meta: Vec<Table>,
+        data_location: String,
+        env: Arc<RuntimeEnv>,
+    ) -> Result<Self, BoxError> {
+        let (data_url, object_store) = infer_object_store(data_location.clone())?;
+        Self::with_object_store(env, tables, meta, data_url, object_store).await
     }
 
     pub async fn with_object_store(
         env: Arc<RuntimeEnv>,
-        dataset: Dataset,
+        tables: &[Table],
         meta: Vec<Table>,
         data_url: Url,
         object_store: Arc<dyn ObjectStore>,
@@ -169,8 +179,7 @@ impl DatasetContext {
             vec![col(BLOCK_NUM).sort(true, false)],
             vec![col("timestamp").sort(true, false)],
         ];
-        let table_urls = dataset
-            .tables()
+        let table_urls = tables
             .iter()
             .map(|table| TableUrl::resolve(&data_url, table, order_exprs.clone()))
             .collect::<Result<Vec<_>, _>>()?;

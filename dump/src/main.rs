@@ -12,7 +12,7 @@ use clap::Parser;
 use common::arrow::array::AsArray as _;
 use common::arrow::datatypes::UInt64Type;
 use common::config::Config;
-use common::dataset_context::DatasetContext;
+use common::dataset_context::QueryContext;
 use common::multirange::MultiRange;
 use common::parquet;
 use common::tracing;
@@ -163,7 +163,7 @@ async fn main() -> Result<(), BoxError> {
 
     let config = Config::location_only(to);
     let env = Arc::new((config.to_runtime_env())?);
-    let ctx = Arc::new(DatasetContext::new(dataset, config.data_location, env).await?);
+    let ctx = Arc::new(QueryContext::for_dataset(dataset, config.data_location, env).await?);
     let existing_blocks = existing_blocks(&ctx).await?;
     for (table_name, multirange) in &existing_blocks {
         info!(
@@ -258,7 +258,7 @@ fn parquet_opts(compression: Compression) -> ParquetWriterProperties {
 }
 
 /// Blocks that already exist in the dataset. This is used to ensure no duplicate data is written.
-async fn existing_blocks(ctx: &DatasetContext) -> Result<BTreeMap<String, MultiRange>, BoxError> {
+async fn existing_blocks(ctx: &QueryContext) -> Result<BTreeMap<String, MultiRange>, BoxError> {
     let mut existing_blocks: BTreeMap<String, MultiRange> = BTreeMap::new();
     for table in ctx.tables() {
         let table_name = table.name.clone();
@@ -282,7 +282,7 @@ async fn existing_blocks(ctx: &DatasetContext) -> Result<BTreeMap<String, MultiR
 
 // This is the intersection of the `__scanned_ranges` for all tables. That is, a range is only
 // considered scanned if it is scanned for all tables.
-async fn scanned_ranges(ctx: &DatasetContext) -> Result<MultiRange, BoxError> {
+async fn scanned_ranges(ctx: &QueryContext) -> Result<MultiRange, BoxError> {
     use common::meta_tables::scanned_ranges::TABLE_NAME as __SCANNED_RANGES;
 
     let mut multirange_by_table: BTreeMap<String, MultiRange> = BTreeMap::default();

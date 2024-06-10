@@ -5,7 +5,7 @@ use common::arrow::array::RecordBatch;
 use common::dataset_context::TableUrl;
 use common::meta_tables::scanned_ranges::{self, ScannedRange, ScannedRangeRowsBuilder};
 use common::parquet::errors::ParquetError;
-use common::{parquet, BlockNum, BoxError, DatasetContext, Table, TableRows, Timestamp};
+use common::{parquet, BlockNum, BoxError, QueryContext, Table, TableRows, Timestamp};
 use object_store::buffered::BufWriter;
 use object_store::path::Path;
 use object_store::ObjectStore;
@@ -36,12 +36,12 @@ pub struct DatasetWriter {
     scanned_range_batch: ScannedRangeRowsBuilder,
 
     // For inserting into `__scanned_ranges`
-    dataset_ctx: Arc<DatasetContext>,
+    dataset_ctx: Arc<QueryContext>,
 }
 
 impl DatasetWriter {
     pub async fn new(
-        dataset_ctx: Arc<DatasetContext>,
+        dataset_ctx: Arc<QueryContext>,
         opts: ParquetWriterProperties,
         start: BlockNum,
         partition_size: u64,
@@ -111,7 +111,7 @@ impl DatasetWriter {
 }
 
 async fn flush_scanned_ranges(
-    ctx: &DatasetContext,
+    ctx: &QueryContext,
     ranges: &mut ScannedRangeRowsBuilder,
 ) -> Result<(), BoxError> {
     use datafusion::common::ToDFSchema;

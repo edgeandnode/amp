@@ -9,7 +9,7 @@ pub mod tracing;
 pub use arrow_helpers::*;
 pub use datafusion::arrow;
 pub use datafusion::parquet;
-pub use dataset_context::DatasetContext;
+pub use dataset_context::QueryContext;
 
 use datafusion::arrow::array::ArrayRef;
 use datafusion::arrow::error::ArrowError;

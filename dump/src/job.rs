@@ -1,6 +1,6 @@
 use common::multirange::MultiRange;
 use common::parquet::file::properties::WriterProperties as ParquetWriterProperties;
-use common::{BlockStreamer, BoxError, DatasetContext};
+use common::{BlockStreamer, BoxError, QueryContext};
 use log::info;
 use std::collections::BTreeMap;
 use std::{sync::Arc, time::Instant};
@@ -8,7 +8,7 @@ use std::{sync::Arc, time::Instant};
 use crate::parquet_writer::DatasetWriter;
 
 pub struct Job<T: BlockStreamer> {
-    pub dataset_ctx: Arc<DatasetContext>,
+    pub dataset_ctx: Arc<QueryContext>,
     pub block_streamer: T,
     pub multirange: MultiRange,
     pub job_id: u32,
