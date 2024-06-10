@@ -2,9 +2,9 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use common::arrow::array::RecordBatch;
-use common::dataset_context::TableUrl;
 use common::meta_tables::scanned_ranges::{self, ScannedRange, ScannedRangeRowsBuilder};
 use common::parquet::errors::ParquetError;
+use common::query_context::TableUrl;
 use common::{parquet, BlockNum, BoxError, QueryContext, Table, TableRows, Timestamp};
 use object_store::buffered::BufWriter;
 use object_store::path::Path;

@@ -1,15 +1,15 @@
 pub mod arrow_helpers;
 pub mod config;
-pub mod dataset_context;
 pub mod evm;
 pub mod meta_tables;
 pub mod multirange;
+pub mod query_context;
 pub mod tracing;
 
 pub use arrow_helpers::*;
 pub use datafusion::arrow;
 pub use datafusion::parquet;
-pub use dataset_context::QueryContext;
+pub use query_context::QueryContext;
 
 use datafusion::arrow::array::ArrayRef;
 use datafusion::arrow::error::ArrowError;

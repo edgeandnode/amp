@@ -1,7 +1,7 @@
 use crate::metrics::MetricsRegistry;
 use common::arrow::array::{AsArray, RecordBatch};
 use common::arrow::datatypes::UInt64Type;
-use common::dataset_context::QueryContext;
+use common::query_context::QueryContext;
 use common::{BlockStreamer, BoxError, Dataset, BLOCK_NUM};
 use futures::future::join_all;
 use futures::{FutureExt, StreamExt as _};

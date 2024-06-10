@@ -3,7 +3,7 @@ mod metrics;
 mod ui;
 
 use clap::Parser;
-use common::{config::Config, dataset_context::QueryContext, BoxError};
+use common::{config::Config, query_context::QueryContext, BoxError};
 use firehose_datasets::client::Client;
 use futures::future::try_join_all;
 use job::Job;

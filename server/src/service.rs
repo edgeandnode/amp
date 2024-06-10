@@ -1,6 +1,6 @@
 use common::{
     arrow::{self, ipc::writer::IpcDataGenerator},
-    dataset_context::{Error as CoreError, QueryContext},
+    query_context::{Error as CoreError, QueryContext},
 };
 use datafusion::{common::DFSchema, error::DataFusionError, logical_expr::LogicalPlan};
 use futures::{Stream, StreamExt as _, TryStreamExt};
