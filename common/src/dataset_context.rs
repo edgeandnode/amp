@@ -87,9 +87,7 @@ impl TableUrl {
     }
 }
 
-struct DatasetLocation {
-    dataset: Dataset,
-
+struct TableLocations {
     // Physical location of the data.
     data_url: Url,
 
@@ -100,10 +98,16 @@ struct DatasetLocation {
     meta_table_urls: Vec<TableUrl>,
 }
 
+impl TableLocations {
+    fn tables(&self) -> impl Iterator<Item = &Table> {
+        self.table_urls.iter().map(|t| &t.table)
+    }
+}
+
 pub struct DatasetContext {
     env: Arc<RuntimeEnv>,
     session_config: SessionConfig,
-    dataset_location: DatasetLocation,
+    table_locations: TableLocations,
 }
 
 impl DatasetContext {
@@ -176,8 +180,7 @@ impl DatasetContext {
             .map(|table| TableUrl::resolve(&data_url, table, vec![]))
             .collect::<Result<Vec<_>, _>>()?;
 
-        let dataset_location = DatasetLocation {
-            dataset,
+        let table_locations = TableLocations {
             data_url,
             table_urls,
             meta_table_urls,
@@ -185,7 +188,7 @@ impl DatasetContext {
 
         let this = Self {
             env,
-            dataset_location,
+            table_locations,
             session_config,
         };
 
@@ -240,7 +243,7 @@ impl DatasetContext {
     // against a persistent `SessionContext`
     async fn datafusion_ctx(&self) -> Result<SessionContext, Error> {
         let ctx = SessionContext::new_with_config_rt(self.session_config.clone(), self.env.clone());
-        create_external_tables(&ctx, &self.dataset_location.table_urls)
+        create_external_tables(&ctx, &self.table_locations.table_urls)
             .await
             .map_err(|e| Error::DatasetError(e.into()))?;
         for udf in udfs() {
@@ -249,23 +252,19 @@ impl DatasetContext {
         Ok(ctx)
     }
 
-    pub fn tables(&self) -> &[Table] {
-        self.dataset().tables()
+    pub fn tables(&self) -> impl Iterator<Item = &Table> {
+        self.table_locations.tables()
     }
 
     pub fn table_urls(&self) -> &[TableUrl] {
-        &self.dataset_location.table_urls
+        &self.table_locations.table_urls
     }
 
     // Should never error unless there was a bug in the constructor.
     pub fn object_store(&self) -> Result<Arc<dyn ObjectStore>, DataFusionError> {
         self.env
             .object_store_registry
-            .get_store(&self.dataset_location.data_url)
-    }
-
-    pub fn dataset(&self) -> &Dataset {
-        &self.dataset_location.dataset
+            .get_store(&self.table_locations.data_url)
     }
 
     pub async fn print_schema(&self) -> Result<Vec<(Table, String)>, Error> {
@@ -299,7 +298,7 @@ impl DatasetContext {
 
     async fn meta_datafusion_ctx(&self) -> Result<SessionContext, Error> {
         let ctx = SessionContext::new_with_config_rt(self.session_config.clone(), self.env.clone());
-        create_external_tables(&ctx, &self.dataset_location.meta_table_urls)
+        create_external_tables(&ctx, &self.table_locations.meta_table_urls)
             .await
             .map_err(|e| Error::DatasetError(e.into()))?;
         Ok(ctx)
