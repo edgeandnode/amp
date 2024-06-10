@@ -17,3 +17,5 @@ toml.workspace = true
 tracing-subscriber.workspace = true
 atty.workspace = true
 fs-err.workspace = true
+alloy-core.workspace = true
+itertools.workspace = true

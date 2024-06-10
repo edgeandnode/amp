@@ -1,11 +1,12 @@
 use std::sync::Arc;
 
+use crate::evm::udfs::{EvmDecode, EvmTopic};
 use crate::{arrow, BoxError};
 use arrow::array::RecordBatch;
 use arrow::compute::concat_batches;
 use arrow::datatypes::SchemaRef;
 use arrow::util::pretty::pretty_format_batches;
-use datafusion::logical_expr::Expr;
+use datafusion::logical_expr::{Expr, ScalarUDF};
 use datafusion::{
     common::{parsers::CompressionTypeVariant, Constraints, DFSchemaRef, ToDFSchema as _},
     error::DataFusionError,
@@ -238,12 +239,13 @@ impl DatasetContext {
     // sessions created by this function, and they will behave the same as if they had been run
     // against a persistent `SessionContext`
     async fn datafusion_ctx(&self) -> Result<SessionContext, Error> {
-        let mut ctx =
-            SessionContext::new_with_config_rt(self.session_config.clone(), self.env.clone());
+        let ctx = SessionContext::new_with_config_rt(self.session_config.clone(), self.env.clone());
         create_external_tables(&ctx, &self.dataset_location.table_urls)
             .await
             .map_err(|e| Error::DatasetError(e.into()))?;
-        self.dataset_location.dataset.register(&mut ctx);
+        for udf in udfs() {
+            ctx.register_udf(udf);
+        }
         Ok(ctx)
     }
 
@@ -441,4 +443,8 @@ fn create_external_table(
     };
 
     LogicalPlan::Ddl(DdlStatement::CreateExternalTable(command))
+}
+
+fn udfs() -> Vec<ScalarUDF> {
+    vec![EvmDecode::new().into(), EvmTopic::new().into()]
 }

@@ -8,8 +8,6 @@ pub mod tracing;
 
 pub use arrow_helpers::*;
 pub use datafusion::arrow;
-use datafusion::execution::context::SessionContext;
-use datafusion::logical_expr::ScalarUDF;
 pub use datafusion::parquet;
 pub use dataset_context::DatasetContext;
 
@@ -89,18 +87,11 @@ impl Dataset {
     pub fn tables(&self) -> &[Table] {
         &self.data_schema.tables
     }
-
-    pub fn register(&self, ctx: &mut SessionContext) {
-        for udf in &self.data_schema.scalar_udfs {
-            ctx.register_udf(udf.clone());
-        }
-    }
 }
 
 #[derive(Clone, Debug)]
 pub struct DataSchema {
     pub tables: Vec<Table>,
-    pub scalar_udfs: Vec<ScalarUDF>,
 }
 
 #[derive(Clone, Hash, PartialEq, Eq, Debug)]

@@ -1,14 +1,6 @@
 use std::{any::Any, str::FromStr, sync::Arc};
 
-use alloy_core::{
-    dyn_abi::{DynSolType, DynSolValue, DynToken, Specifier as _},
-    json_abi::Event as AlloyEvent,
-    primitives::{
-        ruint::{mask, FromUintError},
-        BigIntConversionError, Signed, B256,
-    },
-};
-use common::{
+use crate::{
     arrow::{
         array::{
             Array, BinaryArray, BinaryBuilder, BooleanBuilder, Decimal128Builder,
@@ -22,6 +14,14 @@ use common::{
         },
     },
     Bytes32ArrayType, BYTES32_TYPE,
+};
+use alloy_core::{
+    dyn_abi::{DynSolType, DynSolValue, DynToken, Specifier as _},
+    json_abi::Event as AlloyEvent,
+    primitives::{
+        ruint::{mask, FromUintError},
+        BigIntConversionError, Signed, B256,
+    },
 };
 use datafusion::{
     arrow::array::ArrayBuilder,
@@ -643,16 +643,16 @@ impl ScalarUDFImpl for EvmTopic {
 
 #[cfg(test)]
 mod tests {
-    use alloy_core::{
-        hex::FromHex as _,
-        primitives::{Bytes, B256},
-    };
-    use common::arrow::{
+    use crate::arrow::{
         array::{
             BinaryBuilder, Decimal256Array, FixedSizeBinaryArray, FixedSizeBinaryBuilder,
             Int32Array, StructArray,
         },
         datatypes::i256,
+    };
+    use alloy_core::{
+        hex::FromHex as _,
+        primitives::{Bytes, B256},
     };
     use lazy_static::lazy_static;
 

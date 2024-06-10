@@ -10,9 +10,6 @@ pub fn dataset(network: String, tables: Vec<Table>) -> Dataset {
     Dataset {
         name: "substreams".to_string(),
         network,
-        data_schema: DataSchema {
-            tables,
-            scalar_udfs: vec![],
-        },
+        data_schema: DataSchema { tables },
     }
 }
