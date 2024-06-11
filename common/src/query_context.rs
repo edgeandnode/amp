@@ -7,6 +7,7 @@ use arrow::compute::concat_batches;
 use arrow::datatypes::SchemaRef;
 use arrow::util::pretty::pretty_format_batches;
 use datafusion::logical_expr::{Expr, ScalarUDF};
+use datafusion::sql::parser;
 use datafusion::{
     common::{parsers::CompressionTypeVariant, Constraints, DFSchemaRef, ToDFSchema as _},
     error::DataFusionError,
@@ -41,9 +42,6 @@ pub enum Error {
     #[error("planning error: {0}")]
     PlanningError(DataFusionError),
 
-    #[error("unsupported SQL: {0}")]
-    UnsupportedSql(DataFusionError),
-
     #[error("query execution error: {0}")]
     ExecutionError(DataFusionError),
 
@@ -53,6 +51,9 @@ pub enum Error {
 
     #[error("meta table error: {0}")]
     MetaTableError(DataFusionError),
+
+    #[error("SQL parse error: {0}")]
+    SqlParseError(BoxError),
 }
 
 #[derive(Debug, Clone)]
@@ -209,7 +210,8 @@ impl QueryContext {
 
     /// Security: This function can receive arbitrary SQL, it will check and restrict the `query`.
     pub async fn execute_sql(&self, query: &str) -> Result<SendableRecordBatchStream, Error> {
-        self.execute_plan(self.sql_to_plan(query).await?).await
+        let statement = parse_sql(query).map_err(Error::SqlParseError)?;
+        self.execute_plan(self.sql_to_plan(statement).await?).await
     }
 
     pub async fn execute_plan(
@@ -228,13 +230,13 @@ impl QueryContext {
         execute_stream(physical_plan, ctx.task_ctx()).map_err(Error::PlanningError)
     }
 
-    pub async fn sql_to_plan(&self, query: &str) -> Result<LogicalPlan, Error> {
+    pub async fn sql_to_plan(&self, query: parser::Statement) -> Result<LogicalPlan, Error> {
         let ctx = self.datafusion_ctx().await?;
         let plan = ctx
             .state()
-            .create_logical_plan(query)
+            .statement_to_plan(query)
             .await
-            .map_err(Error::UnsupportedSql)?;
+            .map_err(Error::PlanningError)?;
         verify_plan(&plan)?;
         Ok(plan)
     }
@@ -455,4 +457,17 @@ fn create_external_table(
 
 fn udfs() -> Vec<ScalarUDF> {
     vec![EvmDecode::new().into(), EvmTopic::new().into()]
+}
+
+pub fn parse_sql(sql: &str) -> Result<parser::Statement, BoxError> {
+    let mut statements = parser::DFParser::parse_sql(sql)?;
+    if statements.len() != 1 {
+        return Err(format!(
+            "a single SQL statement is expected, found {}",
+            statements.len()
+        )
+        .into());
+    }
+    let statement = statements.pop_back().unwrap();
+    Ok(statement)
 }

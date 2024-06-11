@@ -1,6 +1,7 @@
 use common::{
     arrow::{self, ipc::writer::IpcDataGenerator},
-    query_context::{Error as CoreError, QueryContext},
+    query_context::{parse_sql, Error as CoreError, QueryContext},
+    BoxError,
 };
 use datafusion::{common::DFSchema, error::DataFusionError, logical_expr::LogicalPlan};
 use futures::{Stream, StreamExt as _, TryStreamExt};
@@ -26,14 +27,17 @@ enum Error {
     #[error("ProtocolBuffers decoding error: {0}")]
     PbDecodeError(String),
 
-    #[error("Unsupported flight descriptor type: {0}")]
+    #[error("unsupported flight descriptor type: {0}")]
     UnsupportedFlightDescriptorType(String),
 
-    #[error("Unsupported flight descriptor command: {0}")]
+    #[error("unsupported flight descriptor command: {0}")]
     UnsupportedFlightDescriptorCommand(String),
 
     #[error("query execution error: {0}")]
     ExecutionError(DataFusionError),
+
+    #[error("SQL parse error: {0}")]
+    SqlParseError(BoxError),
 
     #[error(transparent)]
     CoreError(#[from] CoreError),
@@ -60,7 +64,7 @@ impl From<Error> for Status {
             Error::UnsupportedFlightDescriptorCommand(_) => Status::invalid_argument(e.to_string()),
 
             Error::CoreError(CoreError::InvalidPlan(_)) => Status::invalid_argument(e.to_string()),
-            Error::CoreError(CoreError::UnsupportedSql(_)) => {
+            Error::CoreError(CoreError::SqlParseError(_)) | Error::SqlParseError(_) => {
                 Status::invalid_argument(e.to_string())
             }
             Error::CoreError(CoreError::PlanEncodingError(_)) => {
@@ -204,7 +208,8 @@ impl Service {
                     .unpack::<CommandStatementQuery>()
                     .map_err(|e| Error::PbDecodeError(e.to_string()))?
                 {
-                    let plan = self.query_ctx.sql_to_plan(&sql_query.query).await?;
+                    let statement = parse_sql(&sql_query.query).map_err(Error::SqlParseError)?;
+                    let plan = self.query_ctx.sql_to_plan(statement).await?;
                     let schema = plan.schema().as_ref().clone();
                     let ticket = Ticket::new(plan);
                     (schema, ticket)
