@@ -11,6 +11,7 @@ use crate::client::BlockStreamerClient;
 use clap::Parser;
 use common::arrow::array::AsArray as _;
 use common::arrow::datatypes::UInt64Type;
+use common::catalog::physical::Catalog;
 use common::config::Config;
 use common::multirange::MultiRange;
 use common::parquet;
@@ -163,7 +164,8 @@ async fn main() -> Result<(), BoxError> {
 
     let config = Config::location_only(to);
     let env = Arc::new((config.to_runtime_env())?);
-    let ctx = Arc::new(QueryContext::for_dataset(dataset, config.data_location, env).await?);
+    let catalog = Catalog::for_dataset(&dataset, config.data_location)?;
+    let ctx = Arc::new(QueryContext::for_catalog(catalog, env).await?);
     let existing_blocks = existing_blocks(&ctx).await?;
     for (table_name, multirange) in &existing_blocks {
         info!(

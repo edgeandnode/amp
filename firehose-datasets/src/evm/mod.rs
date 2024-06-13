@@ -1,5 +1,5 @@
 pub use crate::proto::sf::ethereum::r#type::v2 as pbethereum;
-use common::{DataSchema, Dataset};
+use common::Dataset;
 
 pub mod pb_to_rows;
 pub mod tables;
@@ -8,14 +8,13 @@ pub fn dataset(network: String) -> Dataset {
     Dataset {
         name: "evm-firehose".to_string(),
         network,
-        data_schema: DataSchema {
-            tables: tables::all(),
-        },
+        tables: tables::all(),
     }
 }
 
 #[tokio::test]
 async fn print_schema_to_readme() {
+    use common::catalog::physical::Catalog;
     use common::config::Config;
     use common::QueryContext;
     use fs_err as fs;
@@ -28,9 +27,8 @@ async fn print_schema_to_readme() {
     let object_store = Arc::new(object_store::memory::InMemory::new());
     let config = Config::location_only("/var/tmp".to_string());
     let env = Arc::new((config.to_runtime_env()).unwrap());
-    let context = QueryContext::with_object_store(env, dataset.tables(), vec![], url, object_store)
-        .await
-        .unwrap();
+    let catalog = Catalog::new(dataset.tables(), url, object_store).unwrap();
+    let context = QueryContext::for_catalog(catalog, env).await.unwrap();
 
     let mut out = String::new();
     writeln!(out, "# Schema").unwrap();

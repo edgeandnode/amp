@@ -1,4 +1,5 @@
 pub mod arrow_helpers;
+pub mod catalog;
 pub mod config;
 pub mod evm;
 pub mod meta_tables;
@@ -7,12 +8,10 @@ pub mod query_context;
 pub mod tracing;
 
 pub use arrow_helpers::*;
+pub use catalog::logical::*;
 pub use datafusion::arrow;
 pub use datafusion::parquet;
 pub use query_context::QueryContext;
-
-use datafusion::arrow::array::ArrayRef;
-use datafusion::arrow::error::ArrowError;
 
 use std::future::Future;
 use std::time::Duration;
@@ -20,7 +19,9 @@ use std::time::SystemTime;
 
 use arrow::array::FixedSizeBinaryArray;
 use arrow::datatypes::DataType;
-use datafusion::arrow::datatypes::{SchemaRef, TimeUnit, DECIMAL128_MAX_PRECISION};
+use datafusion::arrow::array::ArrayRef;
+use datafusion::arrow::datatypes::{TimeUnit, DECIMAL128_MAX_PRECISION};
+use datafusion::arrow::error::ArrowError;
 use datafusion::arrow::{
     array::{AsArray as _, RecordBatch},
     datatypes::UInt64Type,
@@ -74,31 +75,6 @@ pub fn timestamp_type() -> DataType {
 
 /// Remember to call `.with_timezone_utc()` after creating a Timestamp array.
 pub(crate) type TimestampArrayType = arrow::array::TimestampNanosecondArray;
-
-/// Identifies a dataset and its data schema.
-#[derive(Clone, Debug)]
-pub struct Dataset {
-    pub name: String,
-    pub network: String,
-    pub data_schema: DataSchema,
-}
-
-impl Dataset {
-    pub fn tables(&self) -> &[Table] {
-        &self.data_schema.tables
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct DataSchema {
-    pub tables: Vec<Table>,
-}
-
-#[derive(Clone, Hash, PartialEq, Eq, Debug)]
-pub struct Table {
-    pub name: String,
-    pub schema: SchemaRef,
-}
 
 pub struct TableRows {
     pub table: Table,

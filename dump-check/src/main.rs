@@ -3,7 +3,7 @@ mod metrics;
 mod ui;
 
 use clap::Parser;
-use common::{config::Config, query_context::QueryContext, BoxError};
+use common::{catalog::physical::Catalog, config::Config, query_context::QueryContext, BoxError};
 use firehose_datasets::client::Client;
 use futures::future::try_join_all;
 use job::Job;
@@ -102,8 +102,8 @@ async fn main() -> Result<(), BoxError> {
 
     let config = Config::location_only(to);
     let env = Arc::new((config.to_runtime_env())?);
-    let ctx =
-        Arc::new(QueryContext::for_dataset(dataset.clone(), config.data_location, env).await?);
+    let catalog = Catalog::for_dataset(&dataset, config.data_location)?;
+    let ctx = Arc::new(QueryContext::for_catalog(catalog, env).await?);
     let total_blocks = end_block - start + 1;
     let ui_handle = tokio::spawn(ui::ui(total_blocks, metrics.clone()));
 

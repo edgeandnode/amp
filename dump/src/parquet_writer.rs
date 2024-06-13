@@ -2,9 +2,9 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use common::arrow::array::RecordBatch;
+use common::catalog::physical::PhysicalTable;
 use common::meta_tables::scanned_ranges::{self, ScannedRange, ScannedRangeRowsBuilder};
 use common::parquet::errors::ParquetError;
-use common::query_context::TableUrl;
 use common::{parquet, BlockNum, BoxError, QueryContext, Table, TableRows, Timestamp};
 use object_store::buffered::BufWriter;
 use object_store::path::Path;
@@ -26,7 +26,7 @@ fn path_for_part(table_location: &Url, start_block: u64) -> String {
 
 pub struct DatasetWriter {
     writers: BTreeMap<String, ParquetWriter>,
-    urls: BTreeMap<String, TableUrl>,
+    tables: BTreeMap<String, PhysicalTable>,
 
     opts: ParquetWriterProperties,
     store: Arc<dyn ObjectStore>,
@@ -47,17 +47,17 @@ impl DatasetWriter {
         partition_size: u64,
     ) -> Result<Self, BoxError> {
         let mut writers = BTreeMap::new();
-        let mut urls = BTreeMap::new();
-        let store = dataset_ctx.object_store()?;
-        for table in dataset_ctx.table_urls() {
-            urls.insert(table.name().to_string(), table.clone());
+        let mut tables = BTreeMap::new();
+        let store = dataset_ctx.object_store();
+        for table in dataset_ctx.catalog().tables() {
+            tables.insert(table.name().to_string(), table.clone());
             let writer = ParquetWriter::new(&store, &table, opts.clone(), start).await?;
             writers.insert(table.name().to_string(), writer);
         }
         Ok(DatasetWriter {
             dataset_ctx,
             writers,
-            urls,
+            tables,
             opts,
             store,
             partition_size,
@@ -77,7 +77,7 @@ impl DatasetWriter {
 
         // Check if we need to create a new part file for the table.
         if bytes_written >= self.partition_size {
-            let table_url = self.urls.get(table.name.as_str()).unwrap();
+            let table_url = self.tables.get(table.name.as_str()).unwrap();
             let new_writer =
                 ParquetWriter::new(&self.store, table_url, self.opts.clone(), block_num).await?;
             let old_writer = self.writers.insert(table.name.clone(), new_writer).unwrap();
@@ -158,7 +158,7 @@ pub struct ParquetWriter {
 impl ParquetWriter {
     pub async fn new(
         store: &Arc<dyn ObjectStore>,
-        table: &TableUrl,
+        table: &PhysicalTable,
         opts: ParquetWriterProperties,
         start: BlockNum,
     ) -> Result<ParquetWriter, BoxError> {
