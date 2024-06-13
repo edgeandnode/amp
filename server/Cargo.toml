@@ -6,7 +6,7 @@ version.workspace = true
 [dependencies]
 common = { path = "../common" }
 firehose-datasets = { path = "../firehose-datasets" }
-arrow-flight = { version = "51.0.0", features = ["flight-sql-experimental"] }
+arrow-flight.workspace = true
 datafusion-proto.workspace = true
 tonic.workspace = true
 async-trait.workspace = true

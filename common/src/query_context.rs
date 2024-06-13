@@ -7,7 +7,7 @@ use arrow::util::pretty::pretty_format_batches;
 use datafusion::logical_expr::{Expr, ScalarUDF};
 use datafusion::sql::parser;
 use datafusion::{
-    common::{parsers::CompressionTypeVariant, Constraints, DFSchemaRef, ToDFSchema as _},
+    common::{Constraints, DFSchemaRef, ToDFSchema as _},
     error::DataFusionError,
     execution::{
         config::SessionConfig,
@@ -273,9 +273,7 @@ fn create_external_table_cmd(
     order_exprs: Vec<Vec<Expr>>,
 ) -> LogicalPlan {
     let command = CreateExternalTable {
-        // Assume parquet, which has native compression.
         file_type: "PARQUET".to_string(),
-        file_compression_type: CompressionTypeVariant::UNCOMPRESSED,
 
         name,
         schema,
@@ -294,10 +292,6 @@ fn create_external_table_cmd(
         constraints: Constraints::empty(),
         column_defaults: Default::default(),
         definition: None,
-
-        // CSV specific
-        has_header: false,
-        delimiter: ',',
     };
 
     LogicalPlan::Ddl(DdlStatement::CreateExternalTable(command))

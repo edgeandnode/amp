@@ -129,12 +129,12 @@ async fn flush_scanned_ranges(
             TableScan::try_new("temp_scanned_range_input", table_source, None, vec![], None)?;
         Arc::new(LogicalPlan::TableScan(table_scan))
     };
-    let insert_plan = LogicalPlan::Dml(DmlStatement {
-        table_name: table.name.into(),
-        table_schema: table.schema.to_dfschema_ref()?,
-        op: WriteOp::InsertInto,
-        input: inserted_values,
-    });
+    let insert_plan = LogicalPlan::Dml(DmlStatement::new(
+        table.name.into(),
+        table.schema.to_dfschema_ref()?,
+        WriteOp::InsertInto,
+        inserted_values,
+    ));
 
     // Execute plan against meta ctx
     ctx.meta_execute_plan(insert_plan).await?;

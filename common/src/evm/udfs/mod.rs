@@ -29,7 +29,7 @@ use datafusion::{
     error::DataFusionError,
     logical_expr::{
         simplify::{ExprSimplifyResult, SimplifyInfo},
-        ColumnarValue, FuncMonotonicity, ScalarUDFImpl, Signature, Volatility,
+        ColumnarValue, ScalarUDFImpl, Signature, Volatility,
     },
     prelude::Expr,
     scalar::ScalarValue,
@@ -570,10 +570,6 @@ impl ScalarUDFImpl for EvmDecode {
 
     fn aliases(&self) -> &[String] {
         &[]
-    }
-
-    fn monotonicity(&self) -> datafusion::error::Result<Option<FuncMonotonicity>> {
-        Ok(None)
     }
 
     fn simplify(
