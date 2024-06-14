@@ -227,15 +227,7 @@ impl QueryContext {
             .map_err(Error::MetaTableError)?;
         let schema = SchemaRef::new(df.schema().into());
         let batches = df.collect().await.map_err(Error::MetaTableError)?;
-
-        // Note: This is a workaround. Replace with:
-        // `let batch = concat_batches(&schema, &batches).unwrap();`
-        // After https://github.com/apache/datafusion/pull/10394 is merged and released.
-        let batch = if batches.is_empty() {
-            RecordBatch::new_empty(schema)
-        } else {
-            concat_batches(&batches[0].schema(), &batches).unwrap()
-        };
+        let batch = concat_batches(&schema, &batches).unwrap();
         Ok(batch)
     }
 }
