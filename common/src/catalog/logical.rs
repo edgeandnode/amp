@@ -19,7 +19,7 @@ impl Dataset {
     }
 
     pub fn meta_tables(&self) -> Vec<Table> {
-        crate::meta_tables::tables()
+        vec![crate::meta_tables::scanned_ranges::table()]
     }
 }
 
