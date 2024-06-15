@@ -6,7 +6,7 @@
 //! scanned and is empty.
 //!
 //! It is ok for this to contain false negatives, that is, to not contain a range that was in fact
-//! scanned. As the `existing_blocks` in `BlockStats` is what ensures no data is written twice. This
+//! scanned. As the `existing_blocks` check is what ensures no data is written twice. This
 //! is important as it lets us get away with this optimization even without an atomic transaction
 //! system. For example in:
 //! ```ignore
