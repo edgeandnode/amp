@@ -3,7 +3,10 @@ use prost::Message as _;
 use std::{str::FromStr as _, time::Duration};
 use tokio::sync::mpsc;
 
-use firehose_datasets::client::{AuthInterceptor, Error, FirehoseProvider};
+use firehose_datasets::{
+    client::{AuthInterceptor, Error},
+    provider::FirehoseProvider,
+};
 
 use futures::{Stream, StreamExt as _, TryStreamExt as _};
 use tonic::{
@@ -58,7 +61,11 @@ impl Client {
         manifest: String,
         output_module: String,
     ) -> Result<Self, Error> {
-        let FirehoseProvider { url, token } = cfg;
+        let FirehoseProvider {
+            url,
+            token,
+            network: _network,
+        } = cfg;
         let stream_client = {
             let uri = Uri::from_str(&url)?;
             let channel = Endpoint::from(uri).connect().await?;

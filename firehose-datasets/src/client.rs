@@ -1,5 +1,6 @@
 use crate::evm::pbethereum;
 use crate::proto::sf::firehose::v2 as pbfirehose;
+use crate::provider::FirehoseProvider;
 
 use std::str::FromStr;
 use std::time::Duration;
@@ -15,7 +16,6 @@ use pbfirehose::stream_client::StreamClient;
 use pbfirehose::ForkStep;
 use pbfirehose::Response as StreamResponse;
 use prost::Message as _;
-use serde::Deserialize;
 use thiserror::Error;
 use tokio::sync::mpsc;
 use tonic::codec::CompressionEncoding;
@@ -43,12 +43,6 @@ pub enum Error {
     Utf8(#[from] InvalidMetadataValue),
 }
 
-#[derive(Debug, Deserialize)]
-pub struct FirehoseProvider {
-    pub url: String,
-    pub token: Option<String>,
-}
-
 // Cloning is cheap and shares the underlying connection.
 #[derive(Clone)]
 pub struct Client {
@@ -59,7 +53,12 @@ pub struct Client {
 impl Client {
     /// Configure the client from an EVM Firehose endpoint.
     pub async fn new(cfg: FirehoseProvider) -> Result<Self, Error> {
-        let FirehoseProvider { url, token } = cfg;
+        let FirehoseProvider {
+            url,
+            token,
+            network: _network,
+        } = cfg;
+
         let client = {
             let uri = Uri::from_str(&url)?;
             let endpoint = Endpoint::from(uri);

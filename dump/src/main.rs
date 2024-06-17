@@ -19,6 +19,7 @@ use common::query_context::QueryContext;
 use common::tracing;
 use common::BoxError;
 use common::BLOCK_NUM;
+use firehose_datasets::provider::FirehoseProvider;
 use fs_err as fs;
 use futures::future::try_join_all;
 use futures::StreamExt as _;
@@ -92,17 +93,17 @@ struct Args {
     #[arg(long, env = "DUMP_DISABLE_COMPRESSION")]
     disable_compression: bool,
 
-    // Substreams package manifest URL if streaming substreams data
+    /// Substreams package manifest URL if streaming substreams data
     #[arg(long, env = "DUMP_SUBSTREAMS_MANIFEST")]
     manifest: Option<String>,
 
-    // Substreams output module name
+    /// Substreams output module name
     #[arg(long, env = "DUMP_SUBSTREAMS_MODULE")]
     module: Option<String>,
 
-    // If set, will also be used as a subdirectory in the output path, `to/network`.
-    #[arg(long, env = "DUMP_NETWORK", default_value = "")]
-    network: String,
+    /// If set, will also be used as a subdirectory in the output path, `to/dataset`.
+    #[arg(long, env = "DUMP_DATASET", default_value = "")]
+    dataset: String,
 }
 
 #[tokio::main]
@@ -114,13 +115,13 @@ async fn main() -> Result<(), BoxError> {
         config,
         start,
         end_block,
-        mut to,
+        to,
         n_jobs,
         partition_size_mb,
         disable_compression,
         manifest,
         module,
-        network,
+        dataset,
     } = args;
     let partition_size = partition_size_mb * 1024 * 1024;
     let compression = if disable_compression {
@@ -129,19 +130,24 @@ async fn main() -> Result<(), BoxError> {
         Compression::ZSTD(ZstdLevel::try_new(1).unwrap())
     };
 
-    // For non-substreams, use the network as a subdirectory in the output path.
-    if manifest.is_none() && network != "" {
+    // The output location is `<to>/<dataset>`.
+    let data_location = if dataset.is_empty() {
+        to
+    } else {
+        let mut to = to;
         if to.ends_with('/') {
             to.pop();
         }
-        to = format!("{}/{}/", to, network);
-    }
+        format!("{}/{}/", to, dataset)
+    };
 
     let (start, end_block) = resolve_block_range(start, end_block)?;
 
+    let config = fs::read_to_string(&config)?;
+    let provider = toml::from_str::<FirehoseProvider>(&config)?;
+    let network = provider.network.clone();
+
     let client = {
-        let config = fs::read_to_string(&config)?;
-        let provider = toml::from_str(&config)?;
         if manifest.is_none() {
             BlockStreamerClient::FirehoseClient(
                 firehose_datasets::client::Client::new(provider).await?,
@@ -162,7 +168,7 @@ async fn main() -> Result<(), BoxError> {
         }
     };
 
-    let config = Config::location_only(to);
+    let config = Config::location_only(data_location);
     let env = Arc::new((config.to_runtime_env())?);
     let catalog = Catalog::for_dataset(&dataset, config.data_location)?;
     let ctx = Arc::new(QueryContext::for_catalog(catalog, env).await?);
