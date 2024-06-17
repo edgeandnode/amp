@@ -27,6 +27,7 @@ pub fn table() -> Table {
 
 fn schema() -> Schema {
     let name = Field::new("name", DataType::Utf8, false);
+    let network = Field::new("network", DataType::Utf8, false);
     let url = Field::new("url", DataType::Utf8, false);
     let sql_query = Field::new("sql_query", DataType::Utf8, false);
     let query_plan = Field::new("query_plan", DataType::Binary, false);
@@ -43,6 +44,7 @@ fn schema() -> Schema {
     );
     let fields = vec![
         name,
+        network,
         url,
         sql_query,
         query_plan,
@@ -92,6 +94,7 @@ fn table_struct_inner_fields() -> Vec<Field> {
 
 pub struct Dataset {
     pub name: String,
+    pub network: String,
     pub url: String,
     pub sql_query: String,
     pub query_plan: Vec<u8>,
@@ -116,6 +119,7 @@ pub struct ColumnStruct {
 #[derive(Debug)]
 pub struct DatasetRowsBuilder {
     name: StringBuilder,
+    network: StringBuilder,
     url: StringBuilder,
     sql_query: StringBuilder,
     query_plan: BinaryBuilder,
@@ -130,6 +134,7 @@ impl DatasetRowsBuilder {
 
         Self {
             name: StringBuilder::new(),
+            network: StringBuilder::new(),
             url: StringBuilder::new(),
             sql_query: StringBuilder::new(),
             query_plan: BinaryBuilder::new(),
@@ -147,6 +152,7 @@ impl DatasetRowsBuilder {
     pub fn append(&mut self, dataset: &Dataset) {
         let Dataset {
             name,
+            network,
             url,
             sql_query,
             query_plan,
@@ -156,6 +162,7 @@ impl DatasetRowsBuilder {
         } = dataset;
 
         self.name.append_value(name);
+        self.network.append_value(network);
         self.url.append_value(url);
         self.sql_query.append_value(sql_query);
         self.query_plan.append_value(query_plan);
@@ -237,6 +244,7 @@ impl DatasetRowsBuilder {
     pub fn flush(&mut self) -> Result<RecordBatch, ArrowError> {
         let DatasetRowsBuilder {
             name,
+            network,
             url,
             sql_query,
             query_plan,
@@ -247,6 +255,7 @@ impl DatasetRowsBuilder {
 
         let columns = vec![
             Arc::new(name.finish()) as ArrayRef,
+            Arc::new(network.finish()),
             Arc::new(url.finish()),
             Arc::new(sql_query.finish()),
             Arc::new(query_plan.finish()),
@@ -269,6 +278,7 @@ fn dataset_rows_builder() {
     // Define the test dataset
     let dataset = Dataset {
         name: "TestDataset".to_string(),
+        network: "mainnet".to_string(),
         url: "http://example.com".to_string(),
         sql_query: "SELECT * FROM BaseDataset".to_string(),
         query_plan: vec![],
@@ -314,12 +324,12 @@ fn dataset_rows_builder() {
         .to_string();
 
     let expected_output = "
-+-------------+--------------------+---------------------------+------------+----------------------+---------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-| name        | url                | sql_query                 | query_plan | created_at           | dependencies  | tables                                                                                                                                                                                                                                                                                                                                                                |
-+-------------+--------------------+---------------------------+------------+----------------------+---------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-| TestDataset | http://example.com | SELECT * FROM BaseDataset |            | 1970-01-01T00:00:00Z | [BaseDataset] | [{name: Table1, url: http://example.com/table1, sorted_by: [column1, column2], schema: [{column_name: column1, data_type: Int64, is_nullable: false}, {column_name: column2, data_type: String, is_nullable: true}]}, {name: Table2, url: http://example.com/table2, sorted_by: [columnA], schema: [{column_name: columnA, data_type: Boolean, is_nullable: false}]}] |
-+-------------+--------------------+---------------------------+------------+----------------------+---------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
- ";
++-------------+---------+--------------------+---------------------------+------------+----------------------+---------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| name        | network | url                | sql_query                 | query_plan | created_at           | dependencies  | tables                                                                                                                                                                                                                                                                                                                                                                |
++-------------+---------+--------------------+---------------------------+------------+----------------------+---------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| TestDataset | mainnet | http://example.com | SELECT * FROM BaseDataset |            | 1970-01-01T00:00:00Z | [BaseDataset] | [{name: Table1, url: http://example.com/table1, sorted_by: [column1, column2], schema: [{column_name: column1, data_type: Int64, is_nullable: false}, {column_name: column2, data_type: String, is_nullable: true}]}, {name: Table2, url: http://example.com/table2, sorted_by: [columnA], schema: [{column_name: columnA, data_type: Boolean, is_nullable: false}]}] |
++-------------+---------+--------------------+---------------------------+------------+----------------------+---------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+";
 
     assert_eq!(formatted.trim(), expected_output.trim());
 }
