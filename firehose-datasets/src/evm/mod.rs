@@ -40,10 +40,6 @@ async fn print_schema_to_readme() {
         writeln!(out, "````").unwrap();
     }
 
-    let existing = fs::read_to_string("evm/README.md").unwrap_or_default();
-
-    // Only write if the content has changed.
-    if existing != out {
-        fs::write("src/evm/README.md", out).unwrap();
-    }
+    let path = "src/evm/README.md";
+    fs::write(path, out).unwrap();
 }
