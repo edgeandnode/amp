@@ -1,14 +1,12 @@
-use super::logical::Table;
-
 use std::sync::Arc;
 
-use datafusion::arrow::array::RecordBatch;
 use fs_err as fs;
 use object_store::{
     aws::AmazonS3Builder, gcp::GoogleCloudStorageBuilder, local::LocalFileSystem, ObjectStore,
 };
 use url::Url;
 
+use super::logical::Table;
 use crate::{BoxError, Dataset};
 
 pub struct Catalog {
@@ -55,12 +53,8 @@ impl PhysicalDataset {
         self.tables.iter().filter(|table| table.table.is_meta())
     }
 
-    /// Turns this dataset into a single row, in the schema of `meta_tables::datasets`.
-    pub fn to_record_batch(self) -> RecordBatch {
-        use crate::meta_tables::datasets::DatasetRow;
-
-        let row = DatasetRow::from(self);
-        row.to_record_batch()
+    pub fn name(&self) -> &str {
+        &self.dataset.name
     }
 }
 
@@ -124,6 +118,10 @@ impl Catalog {
 
     pub fn object_store(&self) -> Arc<dyn ObjectStore> {
         self.object_store.clone()
+    }
+
+    pub fn datasets(&self) -> &[PhysicalDataset] {
+        &self.datasets
     }
 
     pub fn all_tables(&self) -> impl Iterator<Item = &PhysicalTable> {

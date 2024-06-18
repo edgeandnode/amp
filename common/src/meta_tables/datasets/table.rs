@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use crate::{
     arrow::array::{ArrayRef, BooleanBuilder, ListBuilder, StringBuilder, StructBuilder},
-    catalog::physical::{PhysicalDataset, PhysicalTable},
-    timestamp_type, Dataset, Timestamp, TimestampArrayBuilder,
+    catalog::physical::PhysicalTable,
+    timestamp_type, Timestamp, TimestampArrayBuilder,
 };
 use datafusion::arrow::{
     array::{ArrayBuilder, BinaryBuilder, RecordBatch},
@@ -102,36 +102,6 @@ pub struct DatasetRow {
     pub created_at: Timestamp,
     pub dependencies: Vec<String>,
     pub tables: Vec<TableStruct>,
-}
-
-impl From<PhysicalDataset> for DatasetRow {
-    fn from(table: PhysicalDataset) -> Self {
-        let PhysicalDataset {
-            dataset:
-                Dataset {
-                    name,
-                    network,
-                    tables: _,
-                },
-            url,
-            tables,
-        } = table;
-
-        let tables = tables.into_iter().map(Into::into).collect();
-
-        DatasetRow {
-            name,
-            network,
-            url: url.to_string(),
-            created_at: Timestamp::now(),
-            tables,
-
-            // Fields for derived datasets, not yet implemented
-            sql_query: String::new(),
-            query_plan: vec![],
-            dependencies: vec![],
-        }
-    }
 }
 
 impl DatasetRow {
