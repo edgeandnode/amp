@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use crate::{
     arrow::array::{ArrayRef, BooleanBuilder, ListBuilder, StringBuilder, StructBuilder},
-    timestamp_type, Timestamp, TimestampArrayBuilder,
+    catalog::physical::{PhysicalDataset, PhysicalTable},
+    timestamp_type, Dataset, Timestamp, TimestampArrayBuilder,
 };
 use datafusion::arrow::{
     array::{ArrayBuilder, BinaryBuilder, RecordBatch},
@@ -92,7 +93,7 @@ fn table_struct_inner_fields() -> Vec<Field> {
     ]
 }
 
-pub struct Dataset {
+pub struct DatasetRow {
     pub name: String,
     pub network: String,
     pub url: String,
@@ -103,11 +104,74 @@ pub struct Dataset {
     pub tables: Vec<TableStruct>,
 }
 
+impl From<PhysicalDataset> for DatasetRow {
+    fn from(table: PhysicalDataset) -> Self {
+        let PhysicalDataset {
+            dataset:
+                Dataset {
+                    name,
+                    network,
+                    tables: _,
+                },
+            url,
+            tables,
+        } = table;
+
+        let tables = tables.into_iter().map(Into::into).collect();
+
+        DatasetRow {
+            name,
+            network,
+            url: url.to_string(),
+            created_at: Timestamp::now(),
+            tables,
+
+            // Fields for derived datasets, not yet implemented
+            sql_query: String::new(),
+            query_plan: vec![],
+            dependencies: vec![],
+        }
+    }
+}
+
+impl DatasetRow {
+    pub fn to_record_batch(&self) -> RecordBatch {
+        let mut builder = DatasetRowsBuilder::new();
+        builder.append(self);
+        builder.flush().unwrap()
+    }
+}
+
 pub struct TableStruct {
     pub name: String,
     pub url: String,
     pub sorted_by: Vec<String>,
     pub schema: Vec<ColumnStruct>,
+}
+
+impl From<PhysicalTable> for TableStruct {
+    fn from(table: PhysicalTable) -> Self {
+        let sorted_by = table.table.sorted_by();
+        let PhysicalTable {
+            url,
+            table: Table { name, schema },
+        } = table;
+        let fields = schema.fields().iter();
+        let schema: Vec<ColumnStruct> = fields
+            .map(|field| ColumnStruct {
+                column_name: field.name().clone(),
+                data_type: serde_json::to_string(field.data_type()).unwrap(),
+                is_nullable: field.is_nullable(),
+            })
+            .collect();
+
+        TableStruct {
+            name,
+            url: url.to_string(),
+            sorted_by,
+            schema,
+        }
+    }
 }
 
 pub struct ColumnStruct {
@@ -149,8 +213,8 @@ impl DatasetRowsBuilder {
         }
     }
 
-    pub fn append(&mut self, dataset: &Dataset) {
-        let Dataset {
+    pub fn append(&mut self, dataset: &DatasetRow) {
+        let DatasetRow {
             name,
             network,
             url,
@@ -275,8 +339,9 @@ impl DatasetRowsBuilder {
 #[test]
 fn dataset_rows_builder() {
     use datafusion::arrow::util::pretty::pretty_format_batches;
+
     // Define the test dataset
-    let dataset = Dataset {
+    let dataset = DatasetRow {
         name: "TestDataset".to_string(),
         network: "mainnet".to_string(),
         url: "http://example.com".to_string(),

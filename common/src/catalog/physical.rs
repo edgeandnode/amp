@@ -2,6 +2,7 @@ use super::logical::Table;
 
 use std::sync::Arc;
 
+use datafusion::arrow::array::RecordBatch;
 use fs_err as fs;
 use object_store::{
     aws::AmazonS3Builder, gcp::GoogleCloudStorageBuilder, local::LocalFileSystem, ObjectStore,
@@ -13,7 +14,54 @@ use crate::{BoxError, Dataset};
 pub struct Catalog {
     url: Url,
     object_store: Arc<dyn ObjectStore>,
-    tables: Vec<PhysicalTable>,
+    datasets: Vec<PhysicalDataset>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PhysicalDataset {
+    pub(crate) dataset: Dataset,
+    pub(crate) url: Url,
+    pub(crate) tables: Vec<PhysicalTable>,
+}
+
+impl PhysicalDataset {
+    /// The tables are assumed to live in the subpath:
+    /// `<url>/<dataset_name>/<table_name>`
+    pub fn from_dataset_at(dataset: Dataset, url: Url) -> Result<Self, BoxError> {
+        let tables = {
+            let mut tables = dataset.tables().to_vec();
+            tables.append(&mut dataset.meta_tables());
+            tables
+        };
+
+        let physical_tables = tables
+            .iter()
+            .map(|table| PhysicalTable::resolve(&url, table))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(PhysicalDataset {
+            dataset,
+            url,
+            tables: physical_tables,
+        })
+    }
+
+    /// All tables in the catalog, except meta tables.
+    pub fn tables(&self) -> impl Iterator<Item = &PhysicalTable> {
+        self.tables.iter().filter(|table| !table.table.is_meta())
+    }
+
+    pub fn meta_tables(&self) -> impl Iterator<Item = &PhysicalTable> {
+        self.tables.iter().filter(|table| table.table.is_meta())
+    }
+
+    /// Turns this dataset into a single row, in the schema of `meta_tables::datasets`.
+    pub fn to_record_batch(self) -> RecordBatch {
+        use crate::meta_tables::datasets::DatasetRow;
+
+        let row = DatasetRow::from(self);
+        row.to_record_batch()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -31,7 +79,8 @@ impl PhysicalTable {
 
     fn resolve(base: &Url, table: &Table) -> Result<Self, BoxError> {
         let url = if base.scheme() == "file" {
-            Url::from_directory_path(&format!("/{}/", &table.name)).unwrap()
+            Url::from_directory_path(&format!("/{}/", &table.name))
+                .map_err(|()| "error parsing table name as URL")?
         } else {
             base.join(&format!("{}/", &table.name))?
         };
@@ -44,34 +93,29 @@ impl PhysicalTable {
 
 impl Catalog {
     /// To obtain `url` and `object_store`, call `infer_object_store` on a path.
-    ///
-    /// The table names will be resolved as subdirectories of `url`.
-    pub fn new(
-        tables: &[Table],
-        url: Url,
-        object_store: Arc<dyn ObjectStore>,
-    ) -> Result<Self, BoxError> {
-        let table_urls = tables
-            .iter()
-            .map(|table| PhysicalTable::resolve(&url, table))
-            .collect::<Result<Vec<_>, _>>()?;
-
+    pub fn empty(url: Url, object_store: Arc<dyn ObjectStore>) -> Result<Self, BoxError> {
         Ok(Catalog {
             url,
             object_store,
-            tables: table_urls,
+            datasets: vec![],
         })
+    }
+
+    /// The tables are assumed to live in the path:
+    /// `<url>/<dataset_name>/<table_name>`
+    /// Where `url` is the base URL of this catalog.
+    pub fn register(&mut self, dataset: &Dataset) -> Result<(), BoxError> {
+        let physical_dataset = PhysicalDataset::from_dataset_at(dataset.clone(), self.url.clone())?;
+        self.datasets.push(physical_dataset);
+        Ok(())
     }
 
     /// Will include meta tables.
     pub fn for_dataset(dataset: &Dataset, data_location: String) -> Result<Self, BoxError> {
-        let tables = {
-            let mut tables = dataset.tables().to_vec();
-            tables.append(&mut dataset.meta_tables());
-            tables
-        };
         let (url, object_store) = infer_object_store(data_location.clone())?;
-        Self::new(&tables, url, object_store)
+        let mut this = Self::empty(url, object_store)?;
+        this.register(dataset)?;
+        Ok(this)
     }
 
     pub fn url(&self) -> &Url {
@@ -82,13 +126,14 @@ impl Catalog {
         self.object_store.clone()
     }
 
-    /// All tables in the catalog, except meta tables.
-    pub fn tables(&self) -> impl Iterator<Item = &PhysicalTable> {
-        self.tables.iter().filter(|table| !table.table.is_meta())
+    pub fn all_tables(&self) -> impl Iterator<Item = &PhysicalTable> {
+        self.datasets.iter().flat_map(|dataset| dataset.tables())
     }
 
-    pub fn meta_tables(&self) -> impl Iterator<Item = &PhysicalTable> {
-        self.tables.iter().filter(|table| table.table.is_meta())
+    pub fn all_meta_tables(&self) -> impl Iterator<Item = &PhysicalTable> {
+        self.datasets
+            .iter()
+            .flat_map(|dataset| dataset.meta_tables())
     }
 }
 
