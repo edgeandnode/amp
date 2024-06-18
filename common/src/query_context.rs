@@ -4,7 +4,8 @@ use arrow::array::RecordBatch;
 use arrow::compute::concat_batches;
 use arrow::datatypes::SchemaRef;
 use arrow::util::pretty::pretty_format_batches;
-use datafusion::logical_expr::{Expr, ScalarUDF};
+use datafusion::common::DFSchema;
+use datafusion::logical_expr::{CreateCatalogSchema, Expr, ScalarUDF};
 use datafusion::sql::parser;
 use datafusion::{
     common::{Constraints, DFSchemaRef, ToDFSchema as _},
@@ -25,7 +26,6 @@ use url::Url;
 
 use crate::catalog::physical::{Catalog, PhysicalTable};
 use crate::evm::udfs::{EvmDecode, EvmTopic};
-use crate::Table;
 use crate::{arrow, BoxError};
 
 #[derive(Error, Debug)]
@@ -149,19 +149,16 @@ impl QueryContext {
     // against a persistent `SessionContext`
     async fn datafusion_ctx(&self) -> Result<SessionContext, Error> {
         let ctx = SessionContext::new_with_config_rt(self.session_config.clone(), self.env.clone());
-        for table in self.catalog.all_tables() {
-            create_external_table(&ctx, table)
-                .await
-                .map_err(|e| Error::DatasetError(e.into()))?;
+
+        for ds in self.catalog.datasets() {
+            create_dataset_tables(ctx.clone(), ds.name().to_string(), ds.tables()).await?;
         }
+
         for udf in udfs() {
             ctx.register_udf(udf);
         }
-        Ok(ctx)
-    }
 
-    pub fn tables(&self) -> impl Iterator<Item = &Table> {
-        self.catalog.all_tables().map(|t| &t.table)
+        Ok(ctx)
     }
 
     pub fn object_store(&self) -> Arc<dyn ObjectStore> {
@@ -170,15 +167,15 @@ impl QueryContext {
         self.env.object_store_registry.get_store(url).unwrap()
     }
 
-    pub async fn print_schema(&self) -> Result<Vec<(Table, String)>, Error> {
+    pub async fn print_schema(&self) -> Result<Vec<(PhysicalTable, String)>, Error> {
         let mut output = vec![];
-        for table in self.tables() {
+        for table in self.catalog.all_tables() {
             let mut record_stream = self
-                .execute_sql(format!("describe {}", table.name).as_str())
+                .execute_sql(format!("describe {}", table.table_ref()).as_str())
                 .await?;
             let Some(Ok(batch)) = record_stream.next().await else {
                 return Err(Error::DatasetError(
-                    format!("no schema for table `{}`", table.name,).into(),
+                    format!("no schema for table `{}`", table.table_ref(),).into(),
                 ));
             };
             let pretty_schema = pretty_format_batches(&[batch])
@@ -201,10 +198,8 @@ impl QueryContext {
 
     async fn meta_datafusion_ctx(&self) -> Result<SessionContext, Error> {
         let ctx = SessionContext::new_with_config_rt(self.session_config.clone(), self.env.clone());
-        for table in self.catalog.all_meta_tables() {
-            create_external_table(&ctx, table)
-                .await
-                .map_err(|e| Error::DatasetError(e.into()))?;
+        for ds in self.catalog.datasets() {
+            create_dataset_tables(ctx.clone(), ds.name().to_string(), ds.meta_tables()).await?;
         }
         Ok(ctx)
     }
@@ -241,19 +236,32 @@ fn verify_plan(plan: &LogicalPlan) -> Result<(), Error> {
         .map_err(Error::InvalidPlan)
 }
 
+async fn create_dataset_tables(
+    ctx: SessionContext,
+    dataset_name: String,
+    tables: impl Iterator<Item = &PhysicalTable>,
+) -> Result<(), Error> {
+    // The catalog schema needs to be explicitly created or table creation will fail.
+    let create_schema_cmd = create_catalog_schema_cmd(dataset_name);
+    ctx.execute_logical_plan(create_schema_cmd)
+        .await
+        .map_err(|e| Error::DatasetError(e.into()))?;
+    for table in tables {
+        create_external_table(&ctx, table)
+            .await
+            .map_err(|e| Error::DatasetError(e.into()))?;
+    }
+    Ok(())
+}
+
 async fn create_external_table(
     ctx: &SessionContext,
     table: &PhysicalTable,
 ) -> Result<(), DataFusionError> {
-    // We will eventually want namespacing, for referencing many datasets in a single query.
-    let table_reference = TableReference::bare(table.name().to_string());
+    let table_reference = table.table_ref().clone();
     let schema = table.table.schema.clone().to_dfschema_ref()?;
-    let command = create_external_table_cmd(
-        table_reference,
-        schema,
-        &table.url,
-        table.table.order_exprs(),
-    );
+    let command =
+        create_external_table_cmd(table_reference, schema, &table.url, table.order_exprs());
     ctx.execute_logical_plan(command).await?;
     Ok(())
 }
@@ -272,11 +280,8 @@ fn create_external_table_cmd(
         location: url.to_string(),
         order_exprs,
 
-        // Up to our preference, but maybe it's more robust for the caller to check existence.
+        // Up to our preference, but maybe it's more robust for the caller to check duplicates.
         if_not_exists: false,
-
-        // Wen streaming?
-        unbounded: false,
 
         // Things we don't currently use.
         table_partition_cols: vec![],
@@ -284,9 +289,24 @@ fn create_external_table_cmd(
         constraints: Constraints::empty(),
         column_defaults: Default::default(),
         definition: None,
+        unbounded: false,
     };
 
     LogicalPlan::Ddl(DdlStatement::CreateExternalTable(command))
+}
+
+fn create_catalog_schema_cmd(schema_name: String) -> LogicalPlan {
+    let command = DdlStatement::CreateCatalogSchema(CreateCatalogSchema {
+        schema_name,
+
+        // Better to explicitly check duplicates.
+        if_not_exists: false,
+
+        // This 'schema' has no meaning.
+        schema: Arc::new(DFSchema::empty()),
+    });
+
+    LogicalPlan::Ddl(command)
 }
 
 fn udfs() -> Vec<ScalarUDF> {

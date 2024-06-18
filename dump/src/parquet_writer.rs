@@ -6,6 +6,7 @@ use common::catalog::physical::PhysicalTable;
 use common::meta_tables::scanned_ranges::{self, ScannedRange, ScannedRangeRowsBuilder};
 use common::parquet::errors::ParquetError;
 use common::{parquet, BlockNum, BoxError, QueryContext, Table, TableRows, Timestamp};
+use datafusion::sql::TableReference;
 use object_store::buffered::BufWriter;
 use object_store::path::Path;
 use object_store::ObjectStore;
@@ -50,9 +51,9 @@ impl DatasetWriter {
         let mut tables = BTreeMap::new();
         let store = dataset_ctx.object_store();
         for table in dataset_ctx.catalog().all_tables() {
-            tables.insert(table.name().to_string(), table.clone());
+            tables.insert(table.table_name().to_string(), table.clone());
             let writer = ParquetWriter::new(&store, &table, opts.clone(), start).await?;
-            writers.insert(table.name().to_string(), writer);
+            writers.insert(table.table_name().to_string(), writer);
         }
         Ok(DatasetWriter {
             dataset_ctx,
@@ -119,6 +120,11 @@ async fn flush_scanned_ranges(
     use datafusion::logical_expr::{DmlStatement, LogicalPlan, TableScan, WriteOp};
 
     let batch = ranges.flush()?;
+    let dataset_name = {
+        let datasets = ctx.catalog().datasets();
+        assert!(datasets.len() == 1, "expected one dataset");
+        datasets[0].name().to_string()
+    };
 
     // Build a datafusion logical plan to insert the `batch` into the `__scanned_ranges` table.
     let table = scanned_ranges::table();
@@ -130,7 +136,7 @@ async fn flush_scanned_ranges(
         Arc::new(LogicalPlan::TableScan(table_scan))
     };
     let insert_plan = LogicalPlan::Dml(DmlStatement::new(
-        table.name.into(),
+        TableReference::partial(dataset_name, table.name.as_str()),
         table.schema.to_dfschema_ref()?,
         WriteOp::InsertInto,
         inserted_values,

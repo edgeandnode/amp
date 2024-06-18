@@ -20,6 +20,7 @@ use common::query_context::QueryContext;
 use common::tracing;
 use common::BoxError;
 use common::BLOCK_NUM;
+use datafusion::sql::TableReference;
 use fs_err as fs;
 use futures::future::try_join_all;
 use futures::StreamExt as _;
@@ -273,13 +274,12 @@ fn parquet_opts(compression: Compression) -> ParquetWriterProperties {
 /// Blocks that already exist in the dataset. This is used to ensure no duplicate data is written.
 async fn existing_blocks(ctx: &QueryContext) -> Result<BTreeMap<String, MultiRange>, BoxError> {
     let mut existing_blocks: BTreeMap<String, MultiRange> = BTreeMap::new();
-    for table in ctx.tables() {
-        let table_name = table.name.clone();
+    for table in ctx.catalog().all_tables() {
         let mut multirange = MultiRange::default();
         let mut record_stream = ctx
             .execute_sql(&format!(
                 "select distinct({BLOCK_NUM}) from {} order by block_num",
-                table_name
+                table.table_ref()
             ))
             .await?;
         while let Some(batch) = record_stream.next().await {
@@ -287,7 +287,7 @@ async fn existing_blocks(ctx: &QueryContext) -> Result<BTreeMap<String, MultiRan
             let block_nums = batch.column(0).as_primitive::<UInt64Type>().values();
             MultiRange::from_values(block_nums.as_ref()).and_then(|r| multirange.append(r))?;
         }
-        existing_blocks.insert(table_name, multirange);
+        existing_blocks.insert(table.table_name().to_string(), multirange);
     }
 
     Ok(existing_blocks)
@@ -300,11 +300,12 @@ async fn scanned_ranges(ctx: &QueryContext) -> Result<MultiRange, BoxError> {
 
     let mut multirange_by_table: BTreeMap<String, MultiRange> = BTreeMap::default();
 
-    for table in ctx.tables() {
-        let table_name = table.name.clone();
+    for table in ctx.catalog().all_tables() {
+        let table_name = table.table_name().to_string();
+        let scanned_ranges_ref = TableReference::partial(table.catalog_schema(), __SCANNED_RANGES);
         let batch = ctx
             .meta_execute_sql(&format!(
-                "select range_start, range_end from {__SCANNED_RANGES} where table = '{table_name}' order by range_start, range_end",
+                "select range_start, range_end from {scanned_ranges_ref} where table = '{table_name}' order by range_start, range_end",
             ))
             .await?;
         let start_blocks: &[u64] = batch

@@ -124,7 +124,8 @@ impl From<PhysicalTable> for TableStruct {
         let sorted_by = table.table.sorted_by();
         let PhysicalTable {
             url,
-            table: Table { name, schema },
+            table_ref,
+            table: Table { name: _, schema },
         } = table;
         let fields = schema.fields().iter();
         let schema: Vec<ColumnStruct> = fields
@@ -136,7 +137,7 @@ impl From<PhysicalTable> for TableStruct {
             .collect();
 
         TableStruct {
-            name,
+            name: table_ref.to_string(),
             url: url.to_string(),
             sorted_by,
             schema,

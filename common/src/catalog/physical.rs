@@ -1,5 +1,9 @@
 use std::sync::Arc;
 
+use datafusion::{
+    logical_expr::{col, Expr},
+    sql::TableReference,
+};
 use fs_err as fs;
 use object_store::{
     aws::AmazonS3Builder, gcp::GoogleCloudStorageBuilder, local::LocalFileSystem, ObjectStore,
@@ -26,15 +30,18 @@ impl PhysicalDataset {
     /// The tables are assumed to live in the subpath:
     /// `<url>/<dataset_name>/<table_name>`
     pub fn from_dataset_at(dataset: Dataset, url: Url) -> Result<Self, BoxError> {
+        let dataset_name = dataset.name.clone();
+        validate_name(&dataset_name)?;
+
         let tables = {
-            let mut tables = dataset.tables().to_vec();
+            let mut tables = dataset.tables.clone();
             tables.append(&mut dataset.meta_tables());
             tables
         };
 
         let physical_tables = tables
             .iter()
-            .map(|table| PhysicalTable::resolve(&url, table))
+            .map(|table| PhysicalTable::resolve(&url, &dataset_name, table))
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(PhysicalDataset {
@@ -46,11 +53,11 @@ impl PhysicalDataset {
 
     /// All tables in the catalog, except meta tables.
     pub fn tables(&self) -> impl Iterator<Item = &PhysicalTable> {
-        self.tables.iter().filter(|table| !table.table.is_meta())
+        self.tables.iter().filter(|table| !table.is_meta())
     }
 
     pub fn meta_tables(&self) -> impl Iterator<Item = &PhysicalTable> {
-        self.tables.iter().filter(|table| table.table.is_meta())
+        self.tables.iter().filter(|table| table.is_meta())
     }
 
     pub fn name(&self) -> &str {
@@ -61,28 +68,72 @@ impl PhysicalDataset {
 #[derive(Debug, Clone)]
 pub struct PhysicalTable {
     pub table: Table,
+    pub table_ref: TableReference,
 
     // URL in a format understood by the object store.
     pub url: Url,
 }
 
 impl PhysicalTable {
-    pub fn name(&self) -> &str {
+    pub fn table_name(&self) -> &str {
         &self.table.name
     }
 
-    fn resolve(base: &Url, table: &Table) -> Result<Self, BoxError> {
+    pub fn catalog_schema(&self) -> &str {
+        // Unwrap: This is always constructed with a schema.
+        &self.table_ref.schema().unwrap()
+    }
+
+    fn resolve(base: &Url, dataset_name: &str, table: &Table) -> Result<Self, BoxError> {
+        validate_name(&table.name)?;
+
         let url = if base.scheme() == "file" {
             Url::from_directory_path(&format!("/{}/", &table.name))
                 .map_err(|()| "error parsing table name as URL")?
         } else {
             base.join(&format!("{}/", &table.name))?
         };
+
+        let table_ref = TableReference::partial(dataset_name, table.name.as_str());
+
         Ok(PhysicalTable {
             table: table.clone(),
+            table_ref,
             url,
         })
     }
+
+    pub fn is_meta(&self) -> bool {
+        self.table.is_meta()
+    }
+
+    /// Qualified table reference in the format `dataset_name.table_name`.
+    pub fn table_ref(&self) -> &TableReference {
+        &self.table_ref
+    }
+
+    pub fn order_exprs(&self) -> Vec<Vec<Expr>> {
+        self.table
+            .sorted_by()
+            .iter()
+            .map(|col_name| vec![col(col_name).sort(true, false)])
+            .collect()
+    }
+}
+
+fn validate_name(name: &str) -> Result<(), BoxError> {
+    if let Some(c) = name
+        .chars()
+        .find(|&c| !(c.is_ascii_lowercase() || c == '_'))
+    {
+        return Err(format!(
+            "names must be lowercase and contain only letters and underscores, \
+             the name: '{name}' is not allowed because it contains the character '{c}'"
+        )
+        .into());
+    }
+
+    Ok(())
 }
 
 impl Catalog {
