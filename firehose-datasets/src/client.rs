@@ -39,8 +39,10 @@ pub enum Error {
     AssertFail(BoxError),
     #[error("URL parse error: {0}")]
     UriParse(#[from] InvalidUri),
-    #[error("Invalid auth token: {0}")]
+    #[error("invalid auth token: {0}")]
     Utf8(#[from] InvalidMetadataValue),
+    #[error("TOML parse error: {0}")]
+    Toml(#[from] toml::de::Error),
 }
 
 // Cloning is cheap and shares the underlying connection.
@@ -48,28 +50,39 @@ pub enum Error {
 pub struct Client {
     endpoint: Endpoint,
     auth: AuthInterceptor,
+    network: String,
 }
 
 impl Client {
     /// Configure the client from an EVM Firehose endpoint.
-    pub async fn new(cfg: FirehoseProvider) -> Result<Self, Error> {
+    pub async fn new(raw_config: String) -> Result<Self, Error> {
+        let cfg: FirehoseProvider = toml::from_str(&raw_config)?;
+
         let FirehoseProvider {
             url,
             token,
-            network: _network,
+            network,
         } = cfg;
 
         let client = {
             let uri = Uri::from_str(&url)?;
             let endpoint = Endpoint::from(uri);
             let auth = AuthInterceptor::new(token)?;
-            Client { endpoint, auth }
+            Client {
+                endpoint,
+                auth,
+                network,
+            }
         };
 
         // Test connection
         client.connect().await?;
 
         Ok(client)
+    }
+
+    pub fn network(&self) -> String {
+        self.network.to_string()
     }
 
     async fn connect(

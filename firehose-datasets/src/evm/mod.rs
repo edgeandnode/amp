@@ -27,7 +27,8 @@ async fn print_schema_to_readme() {
     let object_store = Arc::new(object_store::memory::InMemory::new());
     let config = Config::location_only("/var/tmp".to_string());
     let env = Arc::new((config.to_runtime_env()).unwrap());
-    let catalog = Catalog::new(dataset.tables(), url, object_store).unwrap();
+    let mut catalog = Catalog::empty(url, object_store).unwrap();
+    catalog.register(&dataset).unwrap();
     let context = QueryContext::for_catalog(catalog, env).await.unwrap();
 
     let mut out = String::new();

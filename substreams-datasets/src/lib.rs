@@ -3,6 +3,7 @@ pub mod tables;
 pub mod transform;
 
 mod proto;
+mod provider;
 
 use common::{Dataset, Table};
 

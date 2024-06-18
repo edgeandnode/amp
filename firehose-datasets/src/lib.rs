@@ -5,6 +5,6 @@
 
 pub mod client;
 pub mod evm;
-pub mod provider;
 
 mod proto;
+mod provider;
