@@ -149,7 +149,7 @@ impl QueryContext {
     // against a persistent `SessionContext`
     async fn datafusion_ctx(&self) -> Result<SessionContext, Error> {
         let ctx = SessionContext::new_with_config_rt(self.session_config.clone(), self.env.clone());
-        for table in self.catalog.tables() {
+        for table in self.catalog.all_tables() {
             create_external_table(&ctx, table)
                 .await
                 .map_err(|e| Error::DatasetError(e.into()))?;
@@ -161,7 +161,7 @@ impl QueryContext {
     }
 
     pub fn tables(&self) -> impl Iterator<Item = &Table> {
-        self.catalog.tables().map(|t| &t.table)
+        self.catalog.all_tables().map(|t| &t.table)
     }
 
     pub fn object_store(&self) -> Arc<dyn ObjectStore> {
@@ -201,7 +201,7 @@ impl QueryContext {
 
     async fn meta_datafusion_ctx(&self) -> Result<SessionContext, Error> {
         let ctx = SessionContext::new_with_config_rt(self.session_config.clone(), self.env.clone());
-        for table in self.catalog.meta_tables() {
+        for table in self.catalog.all_meta_tables() {
             create_external_table(&ctx, table)
                 .await
                 .map_err(|e| Error::DatasetError(e.into()))?;
