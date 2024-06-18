@@ -19,7 +19,6 @@ use common::query_context::QueryContext;
 use common::tracing;
 use common::BoxError;
 use common::BLOCK_NUM;
-use firehose_datasets::provider::FirehoseProvider;
 use fs_err as fs;
 use futures::future::try_join_all;
 use futures::StreamExt as _;
@@ -143,28 +142,28 @@ async fn main() -> Result<(), BoxError> {
 
     let (start, end_block) = resolve_block_range(start, end_block)?;
 
-    let config = fs::read_to_string(&config)?;
-    let provider = toml::from_str::<FirehoseProvider>(&config)?;
-    let network = provider.network.clone();
+    let raw_config = fs::read_to_string(&config)?;
 
     let client = {
         if manifest.is_none() {
             BlockStreamerClient::FirehoseClient(
-                firehose_datasets::client::Client::new(provider).await?,
+                firehose_datasets::client::Client::new(raw_config).await?,
             )
         } else {
             let manifest = manifest.ok_or("missing manifest")?;
             let module = module.ok_or("missing output module")?;
             let client =
-                substreams_datasets::client::Client::new(provider, manifest, module).await?;
+                substreams_datasets::client::Client::new(raw_config, manifest, module).await?;
             BlockStreamerClient::SubstreamsClient(client)
         }
     };
 
-    let dataset = match client {
-        BlockStreamerClient::FirehoseClient(_) => firehose_datasets::evm::dataset(network),
-        BlockStreamerClient::SubstreamsClient(ref client) => {
-            substreams_datasets::dataset(network, client.tables().clone())
+    let dataset = match &client {
+        BlockStreamerClient::FirehoseClient(client) => {
+            firehose_datasets::evm::dataset(client.network())
+        }
+        BlockStreamerClient::SubstreamsClient(client) => {
+            substreams_datasets::dataset(client.network.clone(), client.tables().clone())
         }
     };
 

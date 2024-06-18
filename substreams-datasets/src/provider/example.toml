@@ -1,0 +1,7 @@
+# The substreams endpoint
+url = "https://<ENDPOINT>"
+
+# Auth token. If provided, this will be included in every request, simoulaneously as:
+# - an HTTP header: `Authorization: bearer <API_TOKEN>`
+# - a grpc metadata entry under the `authorization` key.
+token = "<AUTH_TOKEN>"
