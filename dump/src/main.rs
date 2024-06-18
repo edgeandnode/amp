@@ -13,6 +13,7 @@ use common::arrow::array::AsArray as _;
 use common::arrow::datatypes::UInt64Type;
 use common::catalog::physical::Catalog;
 use common::config::Config;
+use common::meta_tables;
 use common::multirange::MultiRange;
 use common::parquet;
 use common::query_context::QueryContext;
@@ -170,6 +171,7 @@ async fn main() -> Result<(), BoxError> {
     let config = Config::location_only(data_location);
     let env = Arc::new((config.to_runtime_env())?);
     let catalog = Catalog::for_dataset(&dataset, config.data_location)?;
+    let physical_dataset = catalog.datasets()[0].clone();
     let ctx = Arc::new(QueryContext::for_catalog(catalog, env).await?);
     let existing_blocks = existing_blocks(&ctx).await?;
     for (table_name, multirange) in &existing_blocks {
@@ -185,7 +187,7 @@ async fn main() -> Result<(), BoxError> {
     let ranges_to_scan = {
         let scanned_ranges = scanned_ranges(&ctx).await?;
         let missing_ranges = scanned_ranges.complement(start, end_block);
-        missing_ranges.split_and_partition(n_jobs as u64, 100)
+        missing_ranges.split_and_partition(n_jobs as u64, 1000)
     };
 
     let jobs = ranges_to_scan
@@ -217,6 +219,10 @@ async fn main() -> Result<(), BoxError> {
     try_join_all(join_handles).await?;
 
     info!("All {} jobs completed successfully", n_jobs);
+
+    // Write (or overwrite) the entry in `__datasets/<dataset_name>.parquet`.
+    let store = ctx.object_store();
+    meta_tables::datasets::write(physical_dataset, store).await?;
 
     Ok(())
 }
