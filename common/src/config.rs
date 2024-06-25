@@ -10,25 +10,52 @@ use datafusion::{
 };
 use serde::Deserialize;
 
-use crate::BoxError;
+use crate::{BoxError, Store};
+
+pub struct Config {
+    pub data_store: Store,
+    pub providers_store: Store,
+    pub dataset_defs_store: Store,
+    pub max_mem_mb: usize,
+    pub spill_location: Vec<PathBuf>,
+}
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub struct Config {
-    pub data_location: String,
+struct ConfigFile {
+    pub data_dir: String,
+    pub providers_dir: String,
+    pub dataset_defs_dir: String,
     pub max_mem_mb: usize,
     pub spill_location: Vec<PathBuf>,
 }
 
 impl Config {
-    pub fn load(file: PathBuf) -> Result<Self, BoxError> {
-        let contents = std::fs::read_to_string(file)?;
-        toml::from_str(&contents).map_err(Into::into)
+    pub fn load(file: impl Into<PathBuf>) -> Result<Self, BoxError> {
+        let contents = std::fs::read_to_string(file.into())?;
+        let config_file: ConfigFile = toml::from_str(&contents)?;
+        let data_store = Store::new(config_file.data_dir)?;
+        let providers_store = Store::new(config_file.providers_dir)?;
+        let dataset_defs_store = Store::new(config_file.dataset_defs_dir)?;
+
+        Ok(Self {
+            data_store,
+            providers_store,
+            dataset_defs_store,
+            max_mem_mb: config_file.max_mem_mb,
+            spill_location: config_file.spill_location,
+        })
     }
 
-    pub fn location_only(data_location: String) -> Self {
+    /// For testing purposes only.
+    pub fn in_memory() -> Self {
+        let data_store = Store::in_memory();
+        let providers_store = Store::in_memory();
+        let dataset_defs_store = Store::in_memory();
+
         Self {
-            data_location,
+            data_store,
+            providers_store,
+            dataset_defs_store,
             max_mem_mb: 0,
             spill_location: vec![],
         }

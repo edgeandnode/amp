@@ -1234,7 +1234,9 @@ name = "common"
 version = "0.1.0"
 dependencies = [
  "alloy-core",
+ "async-trait",
  "atty",
+ "bytes",
  "datafusion",
  "datafusion-proto",
  "fs-err",
@@ -1744,6 +1746,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "dataset-store"
+version = "0.1.0"
+dependencies = [
+ "common",
+ "firehose-datasets",
+ "substreams-datasets",
+ "tokio",
+ "toml",
+]
+
+[[package]]
 name = "der"
 version = "0.7.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1820,17 +1833,14 @@ dependencies = [
  "clap",
  "common",
  "datafusion",
- "firehose-datasets",
- "fs-err",
+ "dataset-store",
  "futures",
  "log",
  "object_store 0.10.1",
  "prometheus",
  "serde_json",
  "snmalloc-rs",
- "substreams-datasets",
  "tokio",
- "toml",
  "url",
 ]
 
@@ -1841,8 +1851,7 @@ dependencies = [
  "atty",
  "clap",
  "common",
- "firehose-datasets",
- "fs-err",
+ "dataset-store",
  "futures",
  "human_bytes",
  "indicatif",
@@ -1852,7 +1861,6 @@ dependencies = [
  "prometheus_exporter",
  "serde_json",
  "tokio",
- "toml",
  "tracing-subscriber",
  "url",
 ]
@@ -1939,6 +1947,7 @@ version = "0.1.0"
 dependencies = [
  "alloy-rpc-types",
  "common",
+ "futures",
  "hex",
  "jsonrpsee",
  "serde_json",

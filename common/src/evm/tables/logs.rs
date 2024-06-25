@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use crate::arrow;
 use crate::{
-    timestamp_type, Bytes, Bytes32, Bytes32ArrayBuilder, EvmAddress as Address,
-    EvmAddressArrayBuilder, Table, TableRows, Timestamp, TimestampArrayBuilder, BLOCK_NUM,
-    BYTES32_TYPE, EVM_ADDRESS_TYPE as ADDRESS_TYPE,
+    timestamp_type, Bytes32, Bytes32ArrayBuilder, EvmAddress as Address, EvmAddressArrayBuilder,
+    Table, TableRows, Timestamp, TimestampArrayBuilder, BLOCK_NUM, BYTES32_TYPE,
+    EVM_ADDRESS_TYPE as ADDRESS_TYPE,
 };
 use arrow::array::{ArrayRef, BinaryBuilder, UInt32Builder, UInt64Builder};
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
@@ -62,7 +62,7 @@ pub struct Log {
     pub topic1: Option<Bytes32>,
     pub topic2: Option<Bytes32>,
     pub topic3: Option<Bytes32>,
-    pub data: Bytes,
+    pub data: Vec<u8>,
 }
 
 #[derive(Debug)]

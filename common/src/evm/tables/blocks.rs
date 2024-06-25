@@ -2,10 +2,9 @@ use std::sync::Arc;
 
 use crate::arrow;
 use crate::{
-    timestamp_type, Bytes, Bytes32, Bytes32ArrayBuilder, EvmAddress as Address,
-    EvmAddressArrayBuilder, EvmCurrency, EvmCurrencyArrayBuilder, Table, TableRows, Timestamp,
-    TimestampArrayBuilder, BLOCK_NUM, BYTES32_TYPE, EVM_ADDRESS_TYPE as ADDRESS_TYPE,
-    EVM_CURRENCY_TYPE,
+    timestamp_type, Bytes32, Bytes32ArrayBuilder, EvmAddress as Address, EvmAddressArrayBuilder,
+    EvmCurrency, EvmCurrencyArrayBuilder, Table, TableRows, Timestamp, TimestampArrayBuilder,
+    BLOCK_NUM, BYTES32_TYPE, EVM_ADDRESS_TYPE as ADDRESS_TYPE, EVM_CURRENCY_TYPE,
 };
 use arrow::array::{ArrayRef, BinaryBuilder, UInt64Builder};
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
@@ -80,13 +79,13 @@ pub struct Block {
     pub state_root: Bytes32,
     pub transactions_root: Bytes32,
     pub receipt_root: Bytes32,
-    pub logs_bloom: Bytes,
+    pub logs_bloom: Vec<u8>,
 
     // Difficulty is not really currency, but fits in a i128 so EvmCurrency is convenient.
     pub difficulty: EvmCurrency,
     pub gas_limit: u64,
     pub gas_used: u64,
-    pub extra_data: Bytes,
+    pub extra_data: Vec<u8>,
     pub mix_hash: Bytes32,
     pub nonce: u64,
     pub base_fee_per_gas: Option<EvmCurrency>,

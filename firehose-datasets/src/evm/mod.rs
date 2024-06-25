@@ -1,33 +1,38 @@
 pub use crate::proto::sf::ethereum::r#type::v2 as pbethereum;
-use common::Dataset;
-
+use crate::{dataset::DatasetDef, Error};
 pub mod pb_to_rows;
 pub mod tables;
 
-pub fn dataset(network: String) -> Dataset {
-    Dataset {
-        name: "evm_firehose".to_string(),
-        network,
+use common::Dataset;
+
+pub fn dataset(dataset_cfg: toml::Value) -> Result<Dataset, Error> {
+    let dataset_def: DatasetDef = dataset_cfg.try_into()?;
+    Ok(Dataset {
+        name: dataset_def.name,
+        network: dataset_def.network,
         tables: tables::all(),
-    }
+    })
 }
 
 #[tokio::test]
 async fn print_schema_to_readme() {
     use common::catalog::physical::Catalog;
     use common::config::Config;
+    use common::Dataset;
     use common::QueryContext;
     use fs_err as fs;
     use std::fmt::Write;
     use std::sync::Arc;
-    use url::Url;
 
-    let dataset = dataset("whatever".to_string());
-    let url = Url::parse("memory://test_url/").unwrap();
-    let object_store = Arc::new(object_store::memory::InMemory::new());
-    let config = Config::location_only("/var/tmp".to_string());
+    let dataset = Dataset {
+        name: "test_dataset".to_string(),
+        network: "whatever".to_string(),
+        tables: tables::all(),
+    };
+    let config = Config::in_memory();
+
     let env = Arc::new((config.to_runtime_env()).unwrap());
-    let mut catalog = Catalog::empty(url, object_store).unwrap();
+    let mut catalog = Catalog::empty(config.data_store).unwrap();
     catalog.register(&dataset).unwrap();
     let context = QueryContext::for_catalog(catalog, env).await.unwrap();
 

@@ -4,26 +4,25 @@ mod ui;
 
 use clap::Parser;
 use common::{catalog::physical::Catalog, config::Config, query_context::QueryContext, BoxError};
-use firehose_datasets::client::Client;
+use dataset_store::{load_client, load_dataset};
 use futures::future::try_join_all;
 use job::Job;
-use std::{fs, sync::Arc};
+use std::sync::Arc;
 
 use crate::metrics::MetricsRegistry;
 
-/// A tool for dumping a range of firehose blocks to a protobufs json file and/or for converting them
-/// to parquet tables.
+/// Checks the output of `dump` against a provider.
 #[derive(Parser, Debug)]
-#[command(name = "firehose-dump")]
+#[command(name = "firehose-dump-check")]
 struct Args {
-    /// Path to a provider config file. Example config:
-    ///
-    /// ```toml
-    /// url = "http://localhost:8080"
-    /// token = "secret"
-    /// ```
-    #[arg(long, short, env = "DUMP_CONFIG")]
+    /// Path to a config file. See README for details on the format.
+    #[arg(long, env = "NOZZLE_CONFIG")]
     config: String,
+
+    /// The name of the dataset to dump. This will be looked up in the dataset directory.
+    /// Will also be used as a subdirectory in the output path, `<data_dir>/<dataset>`.
+    #[arg(long, env = "DUMP_DATASET")]
+    dataset: String,
 
     /// The block number to start from, inclusive.
     #[arg(long, short, default_value = "0", env = "DUMP_START_BLOCK")]
@@ -39,27 +38,6 @@ struct Args {
     #[arg(long, short = 'j', default_value = "1", env = "DUMP_N_JOBS")]
     n_jobs: u8,
 
-    /// The output location and path. Both local and object storage are supported.
-    ///
-    /// - For local storage, this is the path to a directory.
-    ///
-    /// - For GCS, this expected to be gs://<bucket>.
-    ///   GCS Authorization can be configured through one of the following environment variables:
-    ///     * GOOGLE_SERVICE_ACCOUNT_PATH: location of service account file, or
-    ///     * GOOGLE_SERVICE_ACCOUNT_KEY: JSON serialized service account key.
-    ///   It will otherwise fallback to using Appication Default Credentials.
-    ///
-    /// - For S3, this expected to be s3://<bucket>.
-    ///   S3 session can be configured through the following environment variables:
-    ///     * AWS_ACCESS_KEY_ID: access key ID
-    ///     * AWS_SECRET_ACCESS_KEY: secret access key
-    ///     * AWS_DEFAULT_REGION: AWS region
-    ///     * AWS_ENDPOINT: endpoint
-    ///     * AWS_SESSION_TOKEN: session token
-    ///     * AWS_ALLOW_HTTP: allow HTTP
-    #[arg(long, env = "DUMP_TO")]
-    to: String,
-
     /// Number of blocks to validate per query
     #[arg(long, short, default_value = "1000", env = "DUMP_BATCH_SIZE")]
     batch_size: u64,
@@ -71,13 +49,15 @@ async fn main() -> Result<(), BoxError> {
 
     let args = Args::parse();
     let Args {
-        config,
+        config: config_path,
+        dataset: dataset_name,
         start,
         end_block,
-        to,
         batch_size,
         n_jobs,
     } = args;
+
+    let cfg = Config::load(config_path)?;
 
     if end_block == 0 {
         return Err("The end block number must be greater than 0".into());
@@ -92,17 +72,11 @@ async fn main() -> Result<(), BoxError> {
     prometheus_exporter::start("0.0.0.0:9102".parse().expect("failed to parse binding"))
         .expect("failed to start prometheus exporter");
 
-    let client = {
-        let config = fs::read_to_string(&config)?;
-        let provider = toml::from_str(&config)?;
-        Client::new(provider).await?
-    };
+    let dataset = load_dataset(&dataset_name, &cfg.dataset_defs_store).await?;
+    let client = load_client(&dataset_name, &cfg.dataset_defs_store, &cfg.providers_store).await?;
 
-    let dataset = firehose_datasets::evm::dataset("mainnet".to_string());
-
-    let config = Config::location_only(to);
-    let env = Arc::new((config.to_runtime_env())?);
-    let catalog = Catalog::for_dataset(&dataset, config.data_location)?;
+    let env = Arc::new((cfg.to_runtime_env())?);
+    let catalog = Catalog::for_dataset(&dataset, cfg.data_store)?;
     let ctx = Arc::new(QueryContext::for_catalog(catalog, env).await?);
     let total_blocks = end_block - start + 1;
     let ui_handle = tokio::spawn(ui::ui(total_blocks, metrics.clone()));

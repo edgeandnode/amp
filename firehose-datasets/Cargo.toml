@@ -19,6 +19,7 @@ datafusion.workspace = true
 tokio.workspace = true
 lazy_static.workspace = true
 log.workspace = true
+object_store.workspace = true
 
 [build-dependencies]
 tonic-build.workspace = true
@@ -28,4 +29,3 @@ prost-build.workspace = true
 fs-err.workspace = true
 serde_json.workspace = true
 url.workspace = true
-object_store.workspace = true

@@ -6,5 +6,35 @@
 pub mod client;
 pub mod evm;
 
+pub use client::Client;
+pub use dataset::DATASET_KIND;
+
+use common::{store::StoreError, BoxError};
+use thiserror::Error;
+use tonic::codegen::http::uri::InvalidUri;
+use tonic::metadata::errors::InvalidMetadataValue;
+
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error("HTTP/2 connection error: {0}")]
+    Connection(#[from] tonic::transport::Error),
+    #[error("gRPC call error: {0}")]
+    Call(#[from] tonic::Status),
+    #[error("ProtocolBuffers decoding error: {0}")]
+    PbDecodeError(#[from] prost::DecodeError),
+    #[error("Assertion failure: {0}")]
+    AssertFail(BoxError),
+    #[error("URL parse error: {0}")]
+    UriParse(#[from] InvalidUri),
+    #[error("invalid auth token: {0}")]
+    Utf8(#[from] InvalidMetadataValue),
+    #[error("TOML parse error: {0}")]
+    Toml(#[from] toml::de::Error),
+    #[error("store error: {0}")]
+    StoreError(#[from] StoreError),
+    #[error("Dataset definition error: {0}")]
+    DatasetDefinitionError(BoxError),
+}
+
+mod dataset;
 mod proto;
-mod provider;

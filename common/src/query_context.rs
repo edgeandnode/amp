@@ -61,7 +61,7 @@ pub struct QueryContext {
 
 impl QueryContext {
     pub async fn for_catalog(catalog: Catalog, env: Arc<RuntimeEnv>) -> Result<Self, BoxError> {
-        env.register_object_store(catalog.url(), catalog.object_store());
+        env.register_object_store(catalog.store().url(), catalog.store().object_store());
 
         // This contains various tuning options for the query engine.
         // Using `from_env` allows tinkering without re-compiling.
@@ -163,7 +163,7 @@ impl QueryContext {
 
     pub fn object_store(&self) -> Arc<dyn ObjectStore> {
         // Unwrap: This was registered in the constructor.
-        let url = self.catalog.url();
+        let url = self.catalog.store().url();
         self.env.object_store_registry.get_store(url).unwrap()
     }
 

@@ -1,10 +1,13 @@
+use crate::dataset::extract_provider;
+use crate::dataset::FirehoseProvider;
 use crate::evm::pbethereum;
 use crate::proto::sf::firehose::v2 as pbfirehose;
-use crate::provider::FirehoseProvider;
+use crate::Error;
 
 use std::str::FromStr;
 use std::time::Duration;
 
+use common::store::Store;
 use common::BlockNum;
 use common::BlockStreamer;
 use common::BoxError;
@@ -16,34 +19,13 @@ use pbfirehose::stream_client::StreamClient;
 use pbfirehose::ForkStep;
 use pbfirehose::Response as StreamResponse;
 use prost::Message as _;
-use thiserror::Error;
 use tokio::sync::mpsc;
 use tonic::codec::CompressionEncoding;
-use tonic::codegen::http::uri::InvalidUri;
-use tonic::metadata::errors::InvalidMetadataValue;
 use tonic::metadata::{Ascii, MetadataValue};
 use tonic::service::interceptor::InterceptedService;
 use tonic::service::Interceptor;
 use tonic::transport::Endpoint;
 use tonic::transport::Uri;
-
-#[derive(Error, Debug)]
-pub enum Error {
-    #[error("HTTP/2 connection error: {0}")]
-    Connection(#[from] tonic::transport::Error),
-    #[error("gRPC call error: {0}")]
-    Call(#[from] tonic::Status),
-    #[error("ProtocolBuffers decoding error: {0}")]
-    PbDecodeError(#[from] prost::DecodeError),
-    #[error("Assertion failure: {0}")]
-    AssertFail(BoxError),
-    #[error("URL parse error: {0}")]
-    UriParse(#[from] InvalidUri),
-    #[error("invalid auth token: {0}")]
-    Utf8(#[from] InvalidMetadataValue),
-    #[error("TOML parse error: {0}")]
-    Toml(#[from] toml::de::Error),
-}
 
 // Cloning is cheap and shares the underlying connection.
 #[derive(Clone)]
@@ -54,15 +36,15 @@ pub struct Client {
 }
 
 impl Client {
-    /// Configure the client from an EVM Firehose endpoint.
-    pub async fn new(raw_config: String) -> Result<Self, Error> {
-        let cfg: FirehoseProvider = toml::from_str(&raw_config)?;
+    /// Configure the client from a Firehose dataset definition.
+    pub async fn new(dataset_def: toml::Value, provider_store: &Store) -> Result<Self, Error> {
+        let provider = extract_provider(dataset_def, provider_store).await?;
 
         let FirehoseProvider {
             url,
             token,
             network,
-        } = cfg;
+        } = provider;
 
         let client = {
             let uri = Uri::from_str(&url)?;
@@ -98,7 +80,7 @@ impl Client {
 
     /// Both `start` and `stop` are inclusive. Could be abstracted to handle multiple chains, but for
     /// now assumes an EVM Firehose endpoint.
-    pub async fn blocks(
+    async fn blocks(
         &mut self,
         start: BlockNum,
         stop: BlockNum,
