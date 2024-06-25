@@ -11,7 +11,6 @@ use common::arrow::array::AsArray as _;
 use common::arrow::datatypes::UInt64Type;
 use common::catalog::physical::Catalog;
 use common::config::Config;
-use common::meta_tables;
 use common::multirange::MultiRange;
 use common::parquet;
 use common::query_context::QueryContext;
@@ -102,7 +101,6 @@ async fn main() -> Result<(), BoxError> {
 
     let env = Arc::new(cfg.to_runtime_env()?);
     let catalog = Catalog::for_dataset(&dataset, cfg.data_store)?;
-    let physical_dataset = catalog.datasets()[0].clone();
     let ctx = Arc::new(QueryContext::for_catalog(catalog, env).await?);
 
     let existing_blocks = existing_blocks(&ctx).await?;
@@ -151,10 +149,6 @@ async fn main() -> Result<(), BoxError> {
     try_join_all(join_handles).await?;
 
     info!("All {} jobs completed successfully", n_jobs);
-
-    // Write (or overwrite) the entry in `__datasets/<dataset_name>.parquet`.
-    let store = ctx.object_store();
-    meta_tables::datasets::write(physical_dataset, store).await?;
 
     Ok(())
 }

@@ -60,6 +60,7 @@ impl Catalog {
 #[derive(Debug, Clone)]
 pub struct PhysicalDataset {
     pub(crate) dataset: Dataset,
+    #[allow(unused)]
     pub(crate) url: Url,
     pub(crate) tables: Vec<PhysicalTable>,
 }
