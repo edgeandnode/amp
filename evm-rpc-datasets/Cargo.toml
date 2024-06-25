@@ -11,3 +11,4 @@ serde_json.workspace = true
 tokio.workspace = true
 thiserror.workspace = true
 hex.workspace = true
+futures.workspace = true

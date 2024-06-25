@@ -20,3 +20,5 @@ fs-err.workspace = true
 alloy-core.workspace = true
 itertools.workspace = true
 serde_json.workspace = true
+async-trait.workspace = true
+bytes.workspace = true

@@ -4,9 +4,9 @@ use common::arrow::array::{ArrayRef, BinaryBuilder, Int32Builder, UInt32Builder,
 use common::arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use common::arrow::error::ArrowError;
 use common::{
-    Bytes, Bytes32, Bytes32ArrayBuilder, EvmAddress as Address, EvmAddressArrayBuilder,
-    EvmCurrency, EvmCurrencyArrayBuilder, Table, TableRows, Timestamp, TimestampArrayBuilder,
-    BLOCK_NUM, BYTES32_TYPE, EVM_ADDRESS_TYPE as ADDRESS_TYPE, EVM_CURRENCY_TYPE,
+    Bytes32, Bytes32ArrayBuilder, EvmAddress as Address, EvmAddressArrayBuilder, EvmCurrency,
+    EvmCurrencyArrayBuilder, Table, TableRows, Timestamp, TimestampArrayBuilder, BLOCK_NUM,
+    BYTES32_TYPE, EVM_ADDRESS_TYPE as ADDRESS_TYPE, EVM_CURRENCY_TYPE,
 };
 
 lazy_static::lazy_static! {
@@ -85,7 +85,7 @@ pub(crate) struct Transaction {
     pub(crate) tx_index: u32,
     pub(crate) tx_hash: Bytes32,
 
-    pub(crate) to: Bytes,
+    pub(crate) to: Vec<u8>,
     pub(crate) nonce: u64,
 
     // Unsure why this is optional, firehose doesn't document that.
@@ -96,12 +96,12 @@ pub(crate) struct Transaction {
     pub(crate) value: Option<EvmCurrency>,
 
     // Input data the transaction will receive for EVM execution.
-    pub(crate) input: Bytes,
+    pub(crate) input: Vec<u8>,
 
     // Elliptic curve parameters.
-    pub(crate) v: Bytes,
-    pub(crate) r: Bytes,
-    pub(crate) s: Bytes,
+    pub(crate) v: Vec<u8>,
+    pub(crate) r: Vec<u8>,
+    pub(crate) s: Vec<u8>,
 
     // The total amount of gas unit used for the whole execution of the transaction.
     pub(crate) receipt_cumulative_gas_used: u64,
@@ -110,8 +110,8 @@ pub(crate) struct Transaction {
     pub(crate) max_fee_per_gas: Option<EvmCurrency>,
     pub(crate) max_priority_fee_per_gas: Option<EvmCurrency>,
     pub(crate) from: Address,
-    pub(crate) return_data: Bytes,
-    pub(crate) public_key: Bytes,
+    pub(crate) return_data: Vec<u8>,
+    pub(crate) public_key: Vec<u8>,
 
     // Firehose specific.
     pub(crate) begin_ordinal: u64,

@@ -5,14 +5,12 @@ version.workspace = true
 
 [dependencies]
 common = { path = "../common" }
-firehose-datasets = { path = "../firehose-datasets" }
+dataset-store = { path = "../dataset-store" }
 tokio.workspace = true
 serde_json.workspace = true
 futures.workspace = true
 clap.workspace = true
 object_store.workspace = true
-fs-err.workspace = true
-toml.workspace = true
 url.workspace = true
 indicatif = "0.17"
 human_bytes = { version = "0.4", default-features = false }

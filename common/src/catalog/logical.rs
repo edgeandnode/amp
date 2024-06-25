@@ -1,7 +1,4 @@
-use datafusion::{
-    arrow::datatypes::SchemaRef,
-    logical_expr::{col, Expr},
-};
+use datafusion::arrow::datatypes::SchemaRef;
 
 use crate::BLOCK_NUM;
 
@@ -33,13 +30,6 @@ pub struct Table {
 impl Table {
     pub fn is_meta(&self) -> bool {
         self.name.starts_with("__")
-    }
-
-    pub fn order_exprs(&self) -> Vec<Vec<Expr>> {
-        self.sorted_by()
-            .into_iter()
-            .map(|col_name| vec![col(col_name).sort(true, false)])
-            .collect()
     }
 
     /// Column names by which this table is naturally sorted.

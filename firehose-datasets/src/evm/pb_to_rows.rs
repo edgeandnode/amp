@@ -85,11 +85,11 @@ pub fn protobufs_to_rows(block: pbethereum::Block) -> Result<DatasetRows, Protob
                 .value
                 .map(|b| non_negative_pb_bigint_to_evm_currency("tx.value", b))
                 .transpose()?,
-            input: tx.input.into(),
+            input: tx.input,
 
-            v: tx.v.into(),
-            r: tx.r.into(),
-            s: tx.s.into(),
+            v: tx.v,
+            r: tx.r,
+            s: tx.s,
             receipt_cumulative_gas_used: tx.gas_used,
 
             r#type: tx.r#type,
@@ -102,8 +102,8 @@ pub fn protobufs_to_rows(block: pbethereum::Block) -> Result<DatasetRows, Protob
                 .map(|b| non_negative_pb_bigint_to_evm_currency("tx.max_priority_fee_per_gas", b))
                 .transpose()?,
             from: tx.from.try_into().map_err(|b| Malformed("tx.from", b))?,
-            return_data: tx.return_data.into(),
-            public_key: tx.public_key.into(),
+            return_data: tx.return_data,
+            public_key: tx.public_key,
             begin_ordinal: tx.begin_ordinal,
             end_ordinal: tx.end_ordinal,
         };

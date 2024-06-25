@@ -3,7 +3,7 @@ use prost::Message as _;
 use std::{str::FromStr as _, time::Duration};
 use tokio::sync::mpsc;
 
-use firehose_datasets::client::{AuthInterceptor, Error};
+use firehose_datasets::{client::AuthInterceptor, Error};
 
 use futures::{Stream, StreamExt as _, TryStreamExt as _};
 use tonic::{
@@ -13,12 +13,12 @@ use tonic::{
 };
 
 use super::tables::Tables;
+use crate::{dataset::extract_def_and_provider, proto::sf::substreams::v1::Package};
 use crate::{
     proto::sf::substreams::rpc::v2::{self as pbsubstreams, BlockScopedData},
     transform::transform,
 };
-use crate::{proto::sf::substreams::v1::Package, provider::SubstreamsProvider};
-use common::{BlockNum, BlockStreamer, BoxError, DatasetRows, Table};
+use common::{BlockNum, BlockStreamer, BoxError, DatasetRows, Store, Table};
 use pbsubstreams::{response::Message, stream_client::StreamClient, Request as StreamRequest};
 
 // Cloning is cheap and shares the underlying connection.
@@ -54,34 +54,29 @@ impl Package {
 }
 
 impl Client {
-    pub async fn new(
-        raw_config: String,
-        manifest: String,
-        output_module: String,
-    ) -> Result<Self, Error> {
-        let cfg: SubstreamsProvider = toml::from_str(&raw_config)?;
+    pub async fn new(raw_config: toml::Value, provider_store: &Store) -> Result<Self, Error> {
+        let (def, provider) = extract_def_and_provider(raw_config, provider_store).await?;
 
-        let SubstreamsProvider { url, token } = cfg;
         let stream_client = {
-            let uri = Uri::from_str(&url)?;
+            let uri = Uri::from_str(&provider.url)?;
             let channel = Endpoint::from(uri).connect().await?;
-            let auth = AuthInterceptor::new(token)?;
+            let auth = AuthInterceptor::new(provider.token)?;
             StreamClient::with_interceptor(channel, auth)
                 .accept_compressed(CompressionEncoding::Gzip)
                 .send_compressed(CompressionEncoding::Gzip)
                 .max_decoding_message_size(100 * 1024 * 1024) // 100MiB
         };
-        let package = Package::from_url(manifest.as_str()).await?;
+        let package = Package::from_url(def.manifest.as_str()).await?;
         let network = package.network.clone();
 
-        let tables = Tables::from_package(&package, &output_module)
+        let tables = Tables::from_package(&package, &def.module)
             .map_err(|_| Error::AssertFail("failed to build tables from spkg".into()))?;
 
         Ok(Self {
             stream_client,
             package,
             tables,
-            output_module,
+            output_module: def.module,
             network,
         })
     }

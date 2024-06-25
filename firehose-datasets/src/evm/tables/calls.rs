@@ -4,9 +4,9 @@ use common::arrow::array::{ArrayRef, BinaryBuilder, BooleanBuilder, UInt32Builde
 use common::arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use common::arrow::error::ArrowError;
 use common::{
-    Bytes, Bytes32, Bytes32ArrayBuilder, EvmAddress as Address, EvmAddressArrayBuilder,
-    EvmCurrency, EvmCurrencyArrayBuilder, Table, TableRows, Timestamp, TimestampArrayBuilder,
-    BLOCK_NUM, BYTES32_TYPE, EVM_ADDRESS_TYPE as ADDRESS_TYPE, EVM_CURRENCY_TYPE,
+    Bytes32, Bytes32ArrayBuilder, EvmAddress as Address, EvmAddressArrayBuilder, EvmCurrency,
+    EvmCurrencyArrayBuilder, Table, TableRows, Timestamp, TimestampArrayBuilder, BLOCK_NUM,
+    BYTES32_TYPE, EVM_ADDRESS_TYPE as ADDRESS_TYPE, EVM_CURRENCY_TYPE,
 };
 
 lazy_static::lazy_static! {
@@ -88,8 +88,8 @@ pub struct Call {
     pub(crate) value: Option<EvmCurrency>,
     pub(crate) gas_limit: u64,
     pub(crate) gas_consumed: u64,
-    pub(crate) return_data: Bytes,
-    pub(crate) input: Bytes,
+    pub(crate) return_data: Vec<u8>,
+    pub(crate) input: Vec<u8>,
     pub(crate) selfdestruct: bool,
 
     // Firehose specific.

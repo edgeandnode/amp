@@ -1,4 +1,3 @@
-mod client;
 mod job;
 mod metrics; // unused for now
 mod parquet_writer;
@@ -7,7 +6,6 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::client::BlockStreamerClient;
 use clap::Parser;
 use common::arrow::array::AsArray as _;
 use common::arrow::datatypes::UInt64Type;
@@ -21,7 +19,8 @@ use common::tracing;
 use common::BoxError;
 use common::BLOCK_NUM;
 use datafusion::sql::TableReference;
-use fs_err as fs;
+use dataset_store::load_client;
+use dataset_store::load_dataset;
 use futures::future::try_join_all;
 use futures::StreamExt as _;
 use futures::TryFutureExt as _;
@@ -33,19 +32,18 @@ use parquet::file::properties::WriterProperties as ParquetWriterProperties;
 #[global_allocator]
 static ALLOC: snmalloc_rs::SnMalloc = snmalloc_rs::SnMalloc;
 
-/// A tool for dumping a range of firehose blocks to a protobufs json file and/or for converting them
-/// to parquet tables.
+/// A tool for dumping firehose or substreams data to parquet files.
 #[derive(Parser, Debug)]
 #[command(name = "firehose-dump")]
 struct Args {
-    /// Path to a provider config file. Example config:
-    ///
-    /// ```toml
-    /// url = "http://localhost:8080"
-    /// token = "secret"
-    /// ```
-    #[arg(long, short, env = "DUMP_CONFIG")]
+    /// Path to a config file. See README for details on the format.
+    #[arg(long, env = "NOZZLE_CONFIG")]
     config: String,
+
+    /// The name of the dataset to dump. This will be looked up in the dataset definiton directory.
+    /// Will also be used as a subdirectory in the output path, `<data_dir>/<dataset>`.
+    #[arg(long, env = "DUMP_DATASET")]
+    dataset: String,
 
     /// The block number to start from, inclusive. If ommited, defaults to `0`. Note that `dump` is
     /// smart about keeping track of what blocks have already been dumped, so you only need to set
@@ -63,27 +61,6 @@ struct Args {
     #[arg(long, short = 'j', default_value = "1", env = "DUMP_N_JOBS")]
     n_jobs: u8,
 
-    /// The output location and path. Both local and object storage are supported.
-    ///
-    /// - For local storage, this is the path to a directory.
-    ///
-    /// - For GCS, this expected to be gs://<bucket>.
-    ///   GCS Authorization can be configured through one of the following environment variables:
-    ///     * GOOGLE_SERVICE_ACCOUNT_PATH: location of service account file, or
-    ///     * GOOGLE_SERVICE_ACCOUNT_KEY: JSON serialized service account key.
-    ///   It will otherwise fallback to using Appication Default Credentials.
-    ///
-    /// - For S3, this expected to be s3://<bucket>.
-    ///   S3 session can be configured through the following environment variables:
-    ///     * AWS_ACCESS_KEY_ID: access key ID
-    ///     * AWS_SECRET_ACCESS_KEY: secret access key
-    ///     * AWS_DEFAULT_REGION: AWS region
-    ///     * AWS_ENDPOINT: endpoint
-    ///     * AWS_SESSION_TOKEN: session token
-    ///     * AWS_ALLOW_HTTP: allow HTTP
-    #[arg(long, env = "DUMP_TO")]
-    to: String,
-
     /// The size of each partition in MB. Once the size is reached, a new part file is created. This
     /// is based on the estimated in-memory size of the data. The actual on-disk file size will vary,
     /// but will correlate with this value. Defaults to 4 GB.
@@ -93,18 +70,6 @@ struct Args {
     /// Whether to disable compression when writing parquet files. Defaults to false.
     #[arg(long, env = "DUMP_DISABLE_COMPRESSION")]
     disable_compression: bool,
-
-    /// Substreams package manifest URL if streaming substreams data
-    #[arg(long, env = "DUMP_SUBSTREAMS_MANIFEST")]
-    manifest: Option<String>,
-
-    /// Substreams output module name
-    #[arg(long, env = "DUMP_SUBSTREAMS_MODULE")]
-    module: Option<String>,
-
-    /// If set, will also be used as a subdirectory in the output path, `to/dataset`.
-    #[arg(long, env = "DUMP_DATASET", default_value = "")]
-    dataset: String,
 }
 
 #[tokio::main]
@@ -113,17 +78,16 @@ async fn main() -> Result<(), BoxError> {
 
     let args = Args::parse();
     let Args {
-        config,
+        config: config_path,
         start,
         end_block,
-        to,
         n_jobs,
         partition_size_mb,
         disable_compression,
-        manifest,
-        module,
-        dataset,
+        dataset: dataset_name,
     } = args;
+
+    let cfg = Config::load(config_path)?;
     let partition_size = partition_size_mb * 1024 * 1024;
     let compression = if disable_compression {
         parquet::basic::Compression::UNCOMPRESSED
@@ -131,49 +95,16 @@ async fn main() -> Result<(), BoxError> {
         Compression::ZSTD(ZstdLevel::try_new(1).unwrap())
     };
 
-    // The output location is `<to>/<dataset>`.
-    let data_location = if dataset.is_empty() {
-        to
-    } else {
-        let mut to = to;
-        if to.ends_with('/') {
-            to.pop();
-        }
-        format!("{}/{}/", to, dataset)
-    };
-
     let (start, end_block) = resolve_block_range(start, end_block)?;
 
-    let raw_config = fs::read_to_string(&config)?;
+    let dataset = load_dataset(&dataset_name, &cfg.dataset_defs_store).await?;
+    let client = load_client(&dataset_name, &cfg.dataset_defs_store, &cfg.providers_store).await?;
 
-    let client = {
-        if manifest.is_none() {
-            BlockStreamerClient::FirehoseClient(
-                firehose_datasets::client::Client::new(raw_config).await?,
-            )
-        } else {
-            let manifest = manifest.ok_or("missing manifest")?;
-            let module = module.ok_or("missing output module")?;
-            let client =
-                substreams_datasets::client::Client::new(raw_config, manifest, module).await?;
-            BlockStreamerClient::SubstreamsClient(client)
-        }
-    };
-
-    let dataset = match &client {
-        BlockStreamerClient::FirehoseClient(client) => {
-            firehose_datasets::evm::dataset(client.network())
-        }
-        BlockStreamerClient::SubstreamsClient(client) => {
-            substreams_datasets::dataset(client.network.clone(), client.tables().clone())
-        }
-    };
-
-    let config = Config::location_only(data_location);
-    let env = Arc::new((config.to_runtime_env())?);
-    let catalog = Catalog::for_dataset(&dataset, config.data_location)?;
+    let env = Arc::new(cfg.to_runtime_env()?);
+    let catalog = Catalog::for_dataset(&dataset, cfg.data_store)?;
     let physical_dataset = catalog.datasets()[0].clone();
     let ctx = Arc::new(QueryContext::for_catalog(catalog, env).await?);
+
     let existing_blocks = existing_blocks(&ctx).await?;
     for (table_name, multirange) in &existing_blocks {
         info!(

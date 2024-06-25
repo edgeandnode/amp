@@ -5,6 +5,7 @@ pub mod evm;
 pub mod meta_tables;
 pub mod multirange;
 pub mod query_context;
+pub mod store;
 pub mod tracing;
 
 pub use arrow_helpers::*;
@@ -12,6 +13,7 @@ pub use catalog::logical::*;
 pub use datafusion::arrow;
 pub use datafusion::parquet;
 pub use query_context::QueryContext;
+pub use store::Store;
 
 use std::future::Future;
 use std::time::Duration;
@@ -35,7 +37,6 @@ pub const BLOCK_NUM: &str = "block_num";
 
 pub type BlockNum = u64;
 pub type Bytes32 = [u8; 32];
-pub type Bytes = Box<[u8]>;
 pub type EvmAddress = [u8; 20];
 pub type EvmCurrency = i128; // Payment amount in the EVM. Used for gas or value transfers.
 
