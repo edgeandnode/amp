@@ -13,7 +13,6 @@ pub struct Catalog {
 }
 
 impl Catalog {
-    /// To obtain `url` and `object_store`, call `infer_object_store` on a path.
     pub fn empty(store: Store) -> Result<Self, BoxError> {
         Ok(Catalog {
             store,
@@ -114,15 +113,6 @@ pub struct PhysicalTable {
 }
 
 impl PhysicalTable {
-    pub fn table_name(&self) -> &str {
-        &self.table.name
-    }
-
-    pub fn catalog_schema(&self) -> &str {
-        // Unwrap: This is always constructed with a schema.
-        &self.table_ref.schema().unwrap()
-    }
-
     fn resolve(base: &Url, dataset_name: &str, table: &Table) -> Result<Self, BoxError> {
         validate_name(&table.name)?;
 
@@ -140,6 +130,15 @@ impl PhysicalTable {
             table_ref,
             url,
         })
+    }
+
+    pub fn table_name(&self) -> &str {
+        &self.table.name
+    }
+
+    pub fn catalog_schema(&self) -> &str {
+        // Unwrap: This is always constructed with a schema.
+        &self.table_ref.schema().unwrap()
     }
 
     pub fn is_meta(&self) -> bool {
