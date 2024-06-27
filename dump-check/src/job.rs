@@ -10,10 +10,13 @@ use std::ops::RangeInclusive;
 use std::sync::Arc;
 
 pub struct Job<T: BlockStreamer> {
+    #[allow(unused)]
     pub dataset: Dataset,
     pub block_streamer: T,
     pub start: u64,
     pub end: u64,
+
+    #[allow(unused)]
     pub job_id: u8,
     pub batch_size: u64,
     pub ctx: Arc<QueryContext>,

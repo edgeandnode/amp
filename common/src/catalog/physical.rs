@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use datafusion::{
     logical_expr::{col, Expr},
     sql::TableReference,
@@ -8,37 +10,28 @@ use super::logical::Table;
 use crate::{store::Store, BoxError, Dataset};
 
 pub struct Catalog {
-    store: Store,
     datasets: Vec<PhysicalDataset>,
 }
 
 impl Catalog {
-    pub fn empty(store: Store) -> Result<Self, BoxError> {
-        Ok(Catalog {
-            store,
-            datasets: vec![],
-        })
+    pub fn empty() -> Self {
+        Catalog { datasets: vec![] }
     }
 
     /// The tables are assumed to live in the path:
     /// `<url>/<dataset_name>/<table_name>`
     /// Where `url` is the base URL of this catalog.
-    pub fn register(&mut self, dataset: &Dataset) -> Result<(), BoxError> {
-        let physical_dataset =
-            PhysicalDataset::from_dataset_at(dataset.clone(), self.store.url().clone())?;
+    pub fn register(&mut self, dataset: &Dataset, data_store: Arc<Store>) -> Result<(), BoxError> {
+        let physical_dataset = PhysicalDataset::from_dataset_at(dataset.clone(), data_store)?;
         self.datasets.push(physical_dataset);
         Ok(())
     }
 
     /// Will include meta tables.
-    pub fn for_dataset(dataset: &Dataset, data_store: Store) -> Result<Self, BoxError> {
-        let mut this = Self::empty(data_store)?;
-        this.register(dataset)?;
+    pub fn for_dataset(dataset: &Dataset, data_store: Arc<Store>) -> Result<Self, BoxError> {
+        let mut this = Self::empty();
+        this.register(dataset, data_store)?;
         Ok(this)
-    }
-
-    pub fn store(&self) -> &Store {
-        &self.store
     }
 
     pub fn datasets(&self) -> &[PhysicalDataset] {
@@ -59,15 +52,14 @@ impl Catalog {
 #[derive(Debug, Clone)]
 pub struct PhysicalDataset {
     pub(crate) dataset: Dataset,
-    #[allow(unused)]
-    pub(crate) url: Url,
+    pub(crate) data_store: Arc<Store>,
     pub(crate) tables: Vec<PhysicalTable>,
 }
 
 impl PhysicalDataset {
     /// The tables are assumed to live in the subpath:
     /// `<url>/<dataset_name>/<table_name>`
-    pub fn from_dataset_at(dataset: Dataset, url: Url) -> Result<Self, BoxError> {
+    pub fn from_dataset_at(dataset: Dataset, data_store: Arc<Store>) -> Result<Self, BoxError> {
         let dataset_name = dataset.name.clone();
         validate_name(&dataset_name)?;
 
@@ -79,12 +71,12 @@ impl PhysicalDataset {
 
         let physical_tables = tables
             .iter()
-            .map(|table| PhysicalTable::resolve(&url, &dataset_name, table))
+            .map(|table| PhysicalTable::resolve(data_store.url(), &dataset_name, table))
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(PhysicalDataset {
             dataset,
-            url,
+            data_store,
             tables: physical_tables,
         })
     }
@@ -100,6 +92,10 @@ impl PhysicalDataset {
 
     pub fn name(&self) -> &str {
         &self.dataset.name
+    }
+
+    pub fn data_store(&self) -> Arc<Store> {
+        self.data_store.clone()
     }
 }
 

@@ -13,9 +13,9 @@ use serde::Deserialize;
 use crate::{BoxError, Store};
 
 pub struct Config {
-    pub data_store: Store,
-    pub providers_store: Store,
-    pub dataset_defs_store: Store,
+    pub data_store: Arc<Store>,
+    pub providers_store: Arc<Store>,
+    pub dataset_defs_store: Arc<Store>,
     pub max_mem_mb: usize,
     pub spill_location: Vec<PathBuf>,
 }
@@ -38,9 +38,9 @@ impl Config {
         let dataset_defs_store = Store::new(config_file.dataset_defs_dir)?;
 
         Ok(Self {
-            data_store,
-            providers_store,
-            dataset_defs_store,
+            data_store: Arc::new(data_store),
+            providers_store: Arc::new(providers_store),
+            dataset_defs_store: Arc::new(dataset_defs_store),
             max_mem_mb: config_file.max_mem_mb,
             spill_location: config_file.spill_location,
         })
@@ -48,9 +48,9 @@ impl Config {
 
     /// For testing purposes only.
     pub fn in_memory() -> Self {
-        let data_store = Store::in_memory();
-        let providers_store = Store::in_memory();
-        let dataset_defs_store = Store::in_memory();
+        let data_store = Arc::new(Store::in_memory());
+        let providers_store = Arc::new(Store::in_memory());
+        let dataset_defs_store = Arc::new(Store::in_memory());
 
         Self {
             data_store,
@@ -61,7 +61,7 @@ impl Config {
         }
     }
 
-    pub fn to_runtime_env(&self) -> Result<RuntimeEnv, DataFusionError> {
+    pub fn make_runtime_env(&self) -> Result<RuntimeEnv, DataFusionError> {
         use datafusion::execution::cache::{
             cache_manager::CacheManagerConfig, cache_unit::DefaultFileStatisticsCache,
         };

@@ -6,6 +6,7 @@ version.workspace = true
 [dependencies]
 common = { path = "../common" }
 firehose-datasets = { path = "../firehose-datasets" }
+dataset-store = { path = "../dataset-store" }
 arrow-flight.workspace = true
 datafusion-proto.workspace = true
 tonic.workspace = true

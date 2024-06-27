@@ -1751,7 +1751,9 @@ version = "0.1.0"
 dependencies = [
  "common",
  "firehose-datasets",
+ "object_store 0.10.1",
  "substreams-datasets",
+ "thiserror",
  "tokio",
  "toml",
 ]
@@ -4341,6 +4343,7 @@ dependencies = [
  "common",
  "datafusion",
  "datafusion-proto",
+ "dataset-store",
  "firehose-datasets",
  "futures",
  "log",

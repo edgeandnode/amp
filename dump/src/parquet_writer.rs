@@ -49,7 +49,10 @@ impl DatasetWriter {
     ) -> Result<Self, BoxError> {
         let mut writers = BTreeMap::new();
         let mut tables = BTreeMap::new();
-        let store = dataset_ctx.object_store();
+
+        // This only handles a single dataset.
+        let store = dataset_ctx.catalog().datasets()[0].data_store() as Arc<dyn ObjectStore>;
+
         for table in dataset_ctx.catalog().all_tables() {
             tables.insert(table.table_name().to_string(), table.clone());
             let writer = ParquetWriter::new(&store, &table, opts.clone(), start).await?;

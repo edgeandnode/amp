@@ -18,8 +18,7 @@ use common::tracing;
 use common::BoxError;
 use common::BLOCK_NUM;
 use datafusion::sql::TableReference;
-use dataset_store::load_client;
-use dataset_store::load_dataset;
+use dataset_store::DatasetStore;
 use futures::future::try_join_all;
 use futures::StreamExt as _;
 use futures::TryFutureExt as _;
@@ -86,7 +85,8 @@ async fn main() -> Result<(), BoxError> {
         dataset: dataset_name,
     } = args;
 
-    let cfg = Config::load(config_path)?;
+    let config = Config::load(config_path)?;
+    let dataset_store = DatasetStore::new(&config);
     let partition_size = partition_size_mb * 1024 * 1024;
     let compression = if disable_compression {
         parquet::basic::Compression::UNCOMPRESSED
@@ -96,11 +96,11 @@ async fn main() -> Result<(), BoxError> {
 
     let (start, end_block) = resolve_block_range(start, end_block)?;
 
-    let dataset = load_dataset(&dataset_name, &cfg.dataset_defs_store).await?;
-    let client = load_client(&dataset_name, &cfg.dataset_defs_store, &cfg.providers_store).await?;
+    let dataset = dataset_store.load_dataset(&dataset_name).await?;
+    let client = dataset_store.load_client(&dataset_name).await?;
 
-    let env = Arc::new(cfg.to_runtime_env()?);
-    let catalog = Catalog::for_dataset(&dataset, cfg.data_store)?;
+    let env = Arc::new(config.make_runtime_env()?);
+    let catalog = Catalog::for_dataset(&dataset, config.data_store)?;
     let ctx = Arc::new(QueryContext::for_catalog(catalog, env).await?);
 
     let existing_blocks = existing_blocks(&ctx).await?;
