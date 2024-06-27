@@ -1,11 +1,17 @@
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use arrow::array::RecordBatch;
 use arrow::compute::concat_batches;
 use arrow::datatypes::SchemaRef;
 use arrow::util::pretty::pretty_format_batches;
-use datafusion::common::DFSchema;
-use datafusion::logical_expr::{CreateCatalogSchema, Expr, ScalarUDF};
+use bytes::Bytes;
+use datafusion::common::tree_node::{Transformed, TreeNode as _, TreeNodeRewriter};
+use datafusion::common::{not_impl_err, DFSchema};
+use datafusion::datasource::{DefaultTableSource, MemTable, TableProvider, TableType};
+use datafusion::logical_expr::{
+    CreateCatalogSchema, Expr, Extension, LogicalPlanBuilder, ScalarUDF, TableScan,
+};
 use datafusion::sql::parser;
 use datafusion::{
     common::{Constraints, DFSchemaRef, ToDFSchema as _},
@@ -19,14 +25,17 @@ use datafusion::{
     logical_expr::{CreateExternalTable, DdlStatement, LogicalPlan},
     sql::TableReference,
 };
+use datafusion_proto::bytes::{
+    logical_plan_from_bytes_with_extension_codec, logical_plan_to_bytes_with_extension_codec,
+};
+use datafusion_proto::logical_plan::LogicalExtensionCodec;
 use futures::StreamExt as _;
-use object_store::ObjectStore;
 use thiserror::Error;
 use url::Url;
 
 use crate::catalog::physical::{Catalog, PhysicalTable};
 use crate::evm::udfs::{EvmDecode, EvmTopic};
-use crate::{arrow, BoxError};
+use crate::{arrow, BoxError, Store};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -51,6 +60,9 @@ pub enum Error {
 
     #[error("SQL parse error: {0}")]
     SqlParseError(BoxError),
+
+    #[error("DataFusion configuration error: {0}")]
+    ConfigError(DataFusionError),
 }
 
 pub struct QueryContext {
@@ -60,12 +72,14 @@ pub struct QueryContext {
 }
 
 impl QueryContext {
-    pub async fn for_catalog(catalog: Catalog, env: Arc<RuntimeEnv>) -> Result<Self, BoxError> {
-        env.register_object_store(catalog.store().url(), catalog.store().object_store());
+    pub async fn empty(env: Arc<RuntimeEnv>) -> Result<Self, Error> {
+        Self::for_catalog(Catalog::empty(), env).await
+    }
 
+    pub async fn for_catalog(catalog: Catalog, env: Arc<RuntimeEnv>) -> Result<Self, Error> {
         // This contains various tuning options for the query engine.
         // Using `from_env` allows tinkering without re-compiling.
-        let mut session_config = SessionConfig::from_env()?;
+        let mut session_config = SessionConfig::from_env().map_err(Error::ConfigError)?;
 
         let opts = session_config.options_mut();
         if std::env::var_os("DATAFUSION_OPTIMIZER_PREFER_EXISTING_SORT").is_none() {
@@ -106,52 +120,75 @@ impl QueryContext {
     /// Security: This function can receive arbitrary SQL, it will check and restrict the `query`.
     pub async fn execute_sql(&self, query: &str) -> Result<SendableRecordBatchStream, Error> {
         let statement = parse_sql(query).map_err(Error::SqlParseError)?;
-        self.execute_plan(self.sql_to_plan(statement).await?).await
+        let ctx = self.datafusion_ctx().await?;
+        let plan = sql_to_plan(&ctx, statement).await?;
+        execute_plan(&ctx, plan).await
     }
 
-    pub async fn execute_plan(
+    /// This will plan the query against empty tables, and then serialize that plan using
+    /// datafusion-proto. This is useful for sending the plan to a remote server for execution.
+    ///
+    /// Returns the serialized plan and its output schema.
+    pub async fn sql_to_remote_plan(
         &self,
-        plan: LogicalPlan,
-    ) -> Result<SendableRecordBatchStream, Error> {
-        use datafusion::physical_plan::execute_stream;
-        verify_plan(&plan)?;
-        let ctx = self.datafusion_ctx().await?;
-        let physical_plan = ctx
-            .state()
-            .create_physical_plan(&plan)
-            .await
-            .map_err(Error::PlanningError)?;
-
-        execute_stream(physical_plan, ctx.task_ctx()).map_err(Error::PlanningError)
+        query: parser::Statement,
+    ) -> Result<(Bytes, DFSchemaRef), Error> {
+        let ctx = self.datafusion_ctx_for_remote_plan().await?;
+        let plan = sql_to_plan(&ctx, query).await?;
+        let schema = plan.schema().clone();
+        let serialized_plan = logical_plan_to_bytes_with_extension_codec(&plan, &EmptyTableCodec)
+            .map_err(Error::PlanEncodingError)?;
+        Ok((serialized_plan, schema))
     }
 
-    pub async fn sql_to_plan(&self, query: parser::Statement) -> Result<LogicalPlan, Error> {
-        let ctx = self.datafusion_ctx().await?;
-        let plan = ctx
-            .state()
-            .statement_to_plan(query)
-            .await
-            .map_err(Error::PlanningError)?;
-        verify_plan(&plan)?;
-        Ok(plan)
-    }
-
+    /// This will deserialize the plan with empty tables in the `TableScan` nodes.
     pub async fn plan_from_bytes(&self, bytes: &[u8]) -> Result<LogicalPlan, Error> {
         let ctx = self.datafusion_ctx().await?;
-        let plan = datafusion_proto::bytes::logical_plan_from_bytes(bytes, &ctx)
+        let plan = logical_plan_from_bytes_with_extension_codec(bytes, &ctx, &EmptyTableCodec)
             .map_err(Error::PlanEncodingError)?;
         verify_plan(&plan)?;
         Ok(plan)
     }
 
-    // Because `DatasetContext` is read-only, planning and execution can be done on ephemeral
-    // sessions created by this function, and they will behave the same as if they had been run
-    // against a persistent `SessionContext`
+    /// A remote plan has empty tables, so this will attach the actual table providers from our
+    /// catalog to the plan before executing it.
+    pub async fn execute_remote_plan(
+        &self,
+        plan: LogicalPlan,
+    ) -> Result<SendableRecordBatchStream, Error> {
+        let ctx = self.datafusion_ctx().await?;
+        let all_tables = all_tables(&ctx).await;
+        let mut rewriter = AttachTablesToPlan {
+            providers: all_tables,
+        };
+        let plan = plan
+            .rewrite(&mut rewriter)
+            .map_err(Error::PlanningError)?
+            .data;
+
+        execute_plan(&ctx, plan).await
+    }
+
+    /// Because `DatasetContext` is read-only, planning and execution can be done on ephemeral
+    /// sessions created by this function, and they will behave the same as if they had been run
+    /// against a persistent `SessionContext`
     async fn datafusion_ctx(&self) -> Result<SessionContext, Error> {
+        self.datafusion_ctx_inner(true).await
+    }
+
+    /// This will create empty in-memory tables, as it assumes the plan will be serialized to be
+    /// executed remotely and therefore does not need to access the local data.
+    async fn datafusion_ctx_for_remote_plan(&self) -> Result<SessionContext, Error> {
+        self.datafusion_ctx_inner(false).await
+    }
+
+    async fn datafusion_ctx_inner(&self, external_tables: bool) -> Result<SessionContext, Error> {
         let ctx = SessionContext::new_with_config_rt(self.session_config.clone(), self.env.clone());
 
         for ds in self.catalog.datasets() {
-            create_dataset_tables(ctx.clone(), ds.name().to_string(), ds.tables()).await?;
+            let ds_name = ds.name().to_string();
+            create_dataset_tables(&ctx, ds_name, ds.data_store(), ds.tables(), external_tables)
+                .await?;
         }
 
         for udf in udfs() {
@@ -159,12 +196,6 @@ impl QueryContext {
         }
 
         Ok(ctx)
-    }
-
-    pub fn object_store(&self) -> Arc<dyn ObjectStore> {
-        // Unwrap: This was registered in the constructor.
-        let url = self.catalog.store().url();
-        self.env.object_store_registry.get_store(url).unwrap()
     }
 
     pub async fn print_schema(&self) -> Result<Vec<(PhysicalTable, String)>, Error> {
@@ -199,7 +230,8 @@ impl QueryContext {
     async fn meta_datafusion_ctx(&self) -> Result<SessionContext, Error> {
         let ctx = SessionContext::new_with_config_rt(self.session_config.clone(), self.env.clone());
         for ds in self.catalog.datasets() {
-            create_dataset_tables(ctx.clone(), ds.name().to_string(), ds.meta_tables()).await?;
+            let ds_name = ds.name().to_string();
+            create_dataset_tables(&ctx, ds_name, ds.data_store(), ds.meta_tables(), true).await?;
         }
         Ok(ctx)
     }
@@ -227,6 +259,19 @@ impl QueryContext {
     }
 }
 
+pub async fn sql_to_plan(
+    ctx: &SessionContext,
+    query: parser::Statement,
+) -> Result<LogicalPlan, Error> {
+    let plan = ctx
+        .state()
+        .statement_to_plan(query)
+        .await
+        .map_err(Error::PlanningError)?;
+    verify_plan(&plan)?;
+    Ok(plan)
+}
+
 fn verify_plan(plan: &LogicalPlan) -> Result<(), Error> {
     SQLOptions::new()
         .with_allow_ddl(false)
@@ -237,32 +282,43 @@ fn verify_plan(plan: &LogicalPlan) -> Result<(), Error> {
 }
 
 async fn create_dataset_tables(
-    ctx: SessionContext,
+    ctx: &SessionContext,
     dataset_name: String,
+    dataset_store: Arc<Store>,
     tables: impl Iterator<Item = &PhysicalTable>,
+    external_tables: bool,
 ) -> Result<(), Error> {
+    // This may overwrite a previously registered store, but that should not make a difference.
+    ctx.register_object_store(dataset_store.url(), dataset_store.clone());
+
     // The catalog schema needs to be explicitly created or table creation will fail.
     let create_schema_cmd = create_catalog_schema_cmd(dataset_name);
     ctx.execute_logical_plan(create_schema_cmd)
         .await
         .map_err(|e| Error::DatasetError(e.into()))?;
     for table in tables {
-        create_external_table(&ctx, table)
+        create_table(ctx, table, external_tables)
             .await
             .map_err(|e| Error::DatasetError(e.into()))?;
     }
     Ok(())
 }
 
-async fn create_external_table(
+async fn create_table(
     ctx: &SessionContext,
     table: &PhysicalTable,
+    external: bool,
 ) -> Result<(), DataFusionError> {
-    let table_reference = table.table_ref().clone();
+    let table_ref = table.table_ref().clone();
     let schema = table.table.schema.clone().to_dfschema_ref()?;
-    let command =
-        create_external_table_cmd(table_reference, schema, &table.url, table.order_exprs());
-    ctx.execute_logical_plan(command).await?;
+    if external {
+        let cmd = create_external_table_cmd(table_ref, schema, &table.url, table.order_exprs());
+        ctx.execute_logical_plan(cmd).await?;
+    } else {
+        // Unwrap: Table is empty.
+        let mem_table = MemTable::try_new(schema.as_ref().clone().into(), vec![vec![]]).unwrap();
+        ctx.register_table(table_ref, Arc::new(mem_table))?;
+    };
     Ok(())
 }
 
@@ -324,4 +380,106 @@ pub fn parse_sql(sql: &str) -> Result<parser::Statement, BoxError> {
     }
     let statement = statements.pop_back().unwrap();
     Ok(statement)
+}
+
+async fn execute_plan(
+    ctx: &SessionContext,
+    plan: LogicalPlan,
+) -> Result<SendableRecordBatchStream, Error> {
+    use datafusion::physical_plan::execute_stream;
+
+    verify_plan(&plan)?;
+    let physical_plan = ctx
+        .state()
+        .create_physical_plan(&plan)
+        .await
+        .map_err(Error::PlanningError)?;
+
+    execute_stream(physical_plan, ctx.task_ctx()).map_err(Error::PlanningError)
+}
+
+/// Replaces placeholder table providers coming from a deserialized plan with the actual providers
+/// registered in a local session context.
+struct AttachTablesToPlan {
+    providers: BTreeMap<TableReference, Arc<dyn TableProvider + 'static>>,
+}
+
+impl TreeNodeRewriter for AttachTablesToPlan {
+    type Node = LogicalPlan;
+    fn f_up(&mut self, node: Self::Node) -> Result<Transformed<LogicalPlan>, DataFusionError> {
+        match node {
+            // Look for table scans that are not view references, and replace their provider with the
+            // one registered in the local context.
+            LogicalPlan::TableScan(TableScan {
+                table_name, source, ..
+            }) if source.table_type() == TableType::Base && source.get_logical_plan().is_none() => {
+                let provider = self.providers.get(&table_name).ok_or_else(|| {
+                    DataFusionError::External(
+                        format!("table {table_name} is not registered in the context").into(),
+                    )
+                })?;
+                let new_source = Arc::new(DefaultTableSource::new(provider.clone()));
+                Ok(Transformed::yes(
+                    LogicalPlanBuilder::scan(table_name, new_source, None)?.build()?,
+                ))
+            }
+            _ => Ok(Transformed::no(node)),
+        }
+    }
+}
+
+async fn all_tables(ctx: &SessionContext) -> BTreeMap<TableReference, Arc<dyn TableProvider>> {
+    let mut tables = BTreeMap::new();
+
+    // Unwrap: We always have a single catalog, the default one.
+    let catalog = ctx.catalog(&ctx.catalog_names()[0]).unwrap();
+    for catalog_schema in catalog.schema_names() {
+        // Unwrap: This was taken from `schema_names`.
+        let schema_provider = catalog.schema(&catalog_schema).unwrap();
+        for table_name in schema_provider.table_names() {
+            // Unwrap: This was taken from `table_names`.
+            let table_provider = schema_provider.table(&table_name).await.unwrap().unwrap();
+            let table_ref = TableReference::partial(catalog_schema.clone(), table_name);
+            tables.insert(table_ref, table_provider);
+        }
+    }
+
+    tables
+}
+
+#[derive(Debug)]
+pub struct EmptyTableCodec;
+
+impl LogicalExtensionCodec for EmptyTableCodec {
+    fn try_decode(
+        &self,
+        _buf: &[u8],
+        _inputs: &[LogicalPlan],
+        _ctx: &SessionContext,
+    ) -> Result<Extension, DataFusionError> {
+        not_impl_err!("No extension codec provided")
+    }
+
+    fn try_encode(&self, _node: &Extension, _buf: &mut Vec<u8>) -> Result<(), DataFusionError> {
+        not_impl_err!("No extension codec provided")
+    }
+
+    fn try_decode_table_provider(
+        &self,
+        _buf: &[u8],
+        schema: SchemaRef,
+        _ctx: &SessionContext,
+    ) -> Result<Arc<dyn TableProvider>, DataFusionError> {
+        let table = MemTable::try_new(schema, vec![vec![]])?;
+        Ok(Arc::new(table))
+    }
+
+    fn try_encode_table_provider(
+        &self,
+        _node: Arc<dyn TableProvider>,
+        _buf: &mut Vec<u8>,
+    ) -> Result<(), DataFusionError> {
+        // No-op, the only thing we need for table scans is the table name.
+        Ok(())
+    }
 }

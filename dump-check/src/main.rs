@@ -4,7 +4,7 @@ mod ui;
 
 use clap::Parser;
 use common::{catalog::physical::Catalog, config::Config, query_context::QueryContext, BoxError};
-use dataset_store::{load_client, load_dataset};
+use dataset_store::DatasetStore;
 use futures::future::try_join_all;
 use job::Job;
 use std::sync::Arc;
@@ -57,7 +57,8 @@ async fn main() -> Result<(), BoxError> {
         n_jobs,
     } = args;
 
-    let cfg = Config::load(config_path)?;
+    let config = Config::load(config_path)?;
+    let dataset_store = DatasetStore::new(&config);
 
     if end_block == 0 {
         return Err("The end block number must be greater than 0".into());
@@ -72,11 +73,11 @@ async fn main() -> Result<(), BoxError> {
     prometheus_exporter::start("0.0.0.0:9102".parse().expect("failed to parse binding"))
         .expect("failed to start prometheus exporter");
 
-    let dataset = load_dataset(&dataset_name, &cfg.dataset_defs_store).await?;
-    let client = load_client(&dataset_name, &cfg.dataset_defs_store, &cfg.providers_store).await?;
+    let dataset = dataset_store.load_dataset(&dataset_name).await?;
+    let client = dataset_store.load_client(&dataset_name).await?;
 
-    let env = Arc::new((cfg.to_runtime_env())?);
-    let catalog = Catalog::for_dataset(&dataset, cfg.data_store)?;
+    let env = Arc::new((config.make_runtime_env())?);
+    let catalog = Catalog::for_dataset(&dataset, config.data_store)?;
     let ctx = Arc::new(QueryContext::for_catalog(catalog, env).await?);
     let total_blocks = end_block - start + 1;
     let ui_handle = tokio::spawn(ui::ui(total_blocks, metrics.clone()));

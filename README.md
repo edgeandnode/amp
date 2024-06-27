@@ -9,6 +9,7 @@ __This repository is currently private. But it may eventually be open sourced, r
 An experiment in ETL architecture for data services in The Graph. 'Project Nozzle' is a codename.
 
 ## Components
+See [config.md](config.md) for how to configure both the dump tool and the server.
 
 ### Dump
 [Dump tool](dump/README.md), currently able to dump EVM Firehose & Substreams to Parquet. Supports parallel and resumeable extraction.

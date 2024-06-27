@@ -31,9 +31,9 @@ async fn print_schema_to_readme() {
     };
     let config = Config::in_memory();
 
-    let env = Arc::new((config.to_runtime_env()).unwrap());
-    let mut catalog = Catalog::empty(config.data_store).unwrap();
-    catalog.register(&dataset).unwrap();
+    let env = Arc::new((config.make_runtime_env()).unwrap());
+    let mut catalog = Catalog::empty();
+    catalog.register(&dataset, config.data_store).unwrap();
     let context = QueryContext::for_catalog(catalog, env).await.unwrap();
 
     let mut out = String::new();

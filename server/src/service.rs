@@ -1,11 +1,18 @@
 use common::{
     arrow::{self, ipc::writer::IpcDataGenerator},
+    catalog::{collect_scanned_tables, physical::Catalog, resolve_table_references},
+    config::Config,
     query_context::{parse_sql, Error as CoreError, QueryContext},
     BoxError,
 };
-use datafusion::{common::DFSchema, error::DataFusionError, logical_expr::LogicalPlan};
+use datafusion::{
+    common::DFSchema, error::DataFusionError, execution::runtime_env::RuntimeEnv,
+    sql::TableReference,
+};
+use dataset_store::DatasetStore;
 use futures::{Stream, StreamExt as _, TryStreamExt};
-use std::pin::Pin;
+use log::debug;
+use std::{collections::BTreeSet, pin::Pin, sync::Arc};
 use thiserror::Error;
 
 use arrow_flight::{
@@ -14,7 +21,7 @@ use arrow_flight::{
     flight_service_server::FlightService,
     sql::{Any, CommandStatementQuery},
     ActionType, FlightData, FlightDescriptor, FlightEndpoint, FlightInfo, HandshakeRequest,
-    HandshakeResponse, PutResult,
+    HandshakeResponse, PutResult, Ticket,
 };
 use bytes::{BufMut, Bytes, BytesMut};
 use prost::Message as _;
@@ -39,6 +46,15 @@ enum Error {
     #[error("SQL parse error: {0}")]
     SqlParseError(BoxError),
 
+    #[error("dataset '{0}' not found")]
+    DatasetNotFound(String),
+
+    #[error("error accessing definition of dataset '{0}': {1}")]
+    DatasetStoreError(String, dataset_store::Error),
+
+    #[error("error configuring dataset {0}: {1}")]
+    DatasetError(String, BoxError),
+
     #[error(transparent)]
     CoreError(#[from] CoreError),
 }
@@ -62,6 +78,9 @@ impl From<Error> for Status {
             Error::PbDecodeError(_) => Status::invalid_argument(e.to_string()),
             Error::UnsupportedFlightDescriptorType(_) => Status::invalid_argument(e.to_string()),
             Error::UnsupportedFlightDescriptorCommand(_) => Status::invalid_argument(e.to_string()),
+            Error::DatasetNotFound(_) => Status::not_found(e.to_string()),
+            Error::DatasetStoreError(_, _) => Status::internal(e.to_string()),
+            Error::DatasetError(_, _) => Status::internal(e.to_string()),
 
             Error::CoreError(CoreError::InvalidPlan(_)) => Status::invalid_argument(e.to_string()),
             Error::CoreError(CoreError::SqlParseError(_)) | Error::SqlParseError(_) => {
@@ -71,6 +90,7 @@ impl From<Error> for Status {
                 Status::invalid_argument(e.to_string())
             }
             Error::CoreError(CoreError::DatasetError(_)) => Status::internal(e.to_string()),
+            Error::CoreError(CoreError::ConfigError(_)) => Status::internal(e.to_string()),
 
             Error::CoreError(
                 CoreError::PlanningError(df)
@@ -83,34 +103,15 @@ impl From<Error> for Status {
     }
 }
 
-struct Ticket {
-    plan: LogicalPlan,
-}
-
-impl Ticket {
-    fn new(plan: LogicalPlan) -> Self {
-        Self { plan }
-    }
-
-    async fn from_flight(ticket: arrow_flight::Ticket, ctx: &QueryContext) -> Result<Self, Error> {
-        let plan = ctx.plan_from_bytes(&ticket.ticket).await?;
-        Ok(Self { plan })
-    }
-
-    fn to_flight(self) -> Result<arrow_flight::Ticket, Error> {
-        let serialized_plan = datafusion_proto::bytes::logical_plan_to_bytes(&self.plan)
-            .map_err(|e| Error::CoreError(CoreError::PlanEncodingError(e)))?;
-        Ok(arrow_flight::Ticket::new(serialized_plan))
-    }
-}
-
 pub(super) struct Service {
-    query_ctx: QueryContext,
+    config: Config,
+    env: Arc<RuntimeEnv>,
 }
 
 impl Service {
-    pub fn new(query_ctx: QueryContext) -> Self {
-        Self { query_ctx }
+    pub fn new(config: Config) -> Result<Self, DataFusionError> {
+        let env = Arc::new(config.make_runtime_env()?);
+        Ok(Self { config, env })
     }
 }
 
@@ -201,18 +202,29 @@ impl FlightService for Service {
 
 impl Service {
     async fn get_flight_info(&self, descriptor: FlightDescriptor) -> Result<FlightInfo, Error> {
-        let (schema, ticket) = match DescriptorType::try_from(descriptor.r#type)? {
+        let (serialized_plan, schema) = match DescriptorType::try_from(descriptor.r#type)? {
             DescriptorType::Cmd => {
                 let msg = Any::decode(descriptor.cmd.as_ref())?;
                 if let Some(sql_query) = msg
                     .unpack::<CommandStatementQuery>()
                     .map_err(|e| Error::PbDecodeError(e.to_string()))?
                 {
+                    // The magic that turns a SQL string into a DataFusion logical plan that can be
+                    // sent back over the wire:
+                    // - Parse the SQL query.
+                    // - Collect table references in the query.
+                    // - Assume that in `foo.bar`, `foo` is a dataset name.
+                    // - Look up those dataset names in the configured dataset store.
+                    // - Collect those datasets into a catalog.
+                    // - Build a DataFusion query context with empty tables from that catalog.
+                    // - Use that context to plan the SQL query.
+                    // - Serialize the plan to bytes using datafusion-protobufs.
                     let statement = parse_sql(&sql_query.query).map_err(Error::SqlParseError)?;
-                    let plan = self.query_ctx.sql_to_plan(statement).await?;
-                    let schema = plan.schema().as_ref().clone();
-                    let ticket = Ticket::new(plan);
-                    (schema, ticket)
+                    let (tables, _) = resolve_table_references(&statement, true)
+                        .map_err(|e| CoreError::SqlParseError(e.into()))?;
+                    let catalog = load_catalog_for_table_refs(tables, &self.config).await?;
+                    let query_ctx = QueryContext::for_catalog(catalog, self.env.clone()).await?;
+                    query_ctx.sql_to_remote_plan(statement).await?
                 } else {
                     return Err(Error::UnsupportedFlightDescriptorCommand(msg.type_url));
                 }
@@ -225,7 +237,7 @@ impl Service {
         };
 
         let endpoint = FlightEndpoint {
-            ticket: Some(ticket.to_flight()?),
+            ticket: Some(Ticket::new(serialized_plan)),
 
             // We may eventually want to leverage the load-balancing capabilities of Arrow Flight.
             // But for now leaving `location` this empty is fine, per the docs
@@ -257,8 +269,16 @@ impl Service {
     }
 
     async fn do_get(&self, ticket: arrow_flight::Ticket) -> Result<TonicStream<FlightData>, Error> {
-        let Ticket { plan } = Ticket::from_flight(ticket, &self.query_ctx).await?;
-        let stream = self.query_ctx.execute_plan(plan).await?;
+        //  DataFusion requires a context for initially deserializing a logical plan. That context is used a
+        // `FunctionRegistry` for UDFs. So using a `QueryContext::empty` works as that includes UDFs.
+        let ctx = QueryContext::empty(self.env.clone()).await?;
+        let plan = ctx.plan_from_bytes(&ticket.ticket).await?;
+
+        // The deserialized plan references empty tables, so we need to load the actual tables from the catalog.
+        let table_refs = collect_scanned_tables(&plan);
+        let catalog = load_catalog_for_table_refs(table_refs, &self.config).await?;
+        let query_ctx = QueryContext::for_catalog(catalog, self.env.clone()).await?;
+        let stream = query_ctx.execute_remote_plan(plan).await?;
 
         Ok(FlightDataEncoderBuilder::new()
             .with_schema(stream.schema())
@@ -281,4 +301,56 @@ fn ipc_schema(schema: &DFSchema) -> Bytes {
     let mut bytes = BytesMut::new().writer();
     arrow::ipc::writer::write_message(&mut bytes, encoded, ipc_opts).unwrap();
     bytes.into_inner().into()
+}
+
+async fn load_catalog_for_table_refs(
+    table_refs: impl IntoIterator<Item = TableReference>,
+    config: &Config,
+) -> Result<Catalog, Error> {
+    use Error::*;
+
+    let dataset_names = datasets_from_table_refs(table_refs)?;
+    let mut catalog = Catalog::empty();
+    let dataset_store = DatasetStore::new(&config);
+    for dataset_name in dataset_names {
+        let dataset = match dataset_store.load_dataset(&dataset_name).await {
+            Ok(dataset) => dataset,
+            Err(e) if e.is_not_found() => {
+                debug!("dataset {} not found, full error: {}", dataset_name, e);
+                return Err(DatasetNotFound(dataset_name));
+            }
+            Err(e) => return Err(DatasetStoreError(dataset_name, e)),
+        };
+
+        // We currently assume all datasets live in the same `data_store`.
+        catalog
+            .register(&dataset, config.data_store.clone())
+            .map_err(|e| DatasetError(dataset_name, e))?;
+    }
+    Ok(catalog)
+}
+
+fn datasets_from_table_refs(
+    table_refs: impl IntoIterator<Item = TableReference>,
+) -> Result<BTreeSet<String>, Error> {
+    let mut dataset_names = BTreeSet::new();
+    for t in table_refs {
+        if t.catalog().is_some() {
+            return Err(Error::SqlParseError(
+                format!(
+                    "found table qualified with catalog '{}', tables must only be qualified with a dataset name",
+                    t.table()
+                )
+                .into(),
+            ));
+        }
+
+        let Some(catalog_schema) = t.schema() else {
+            return Err(Error::SqlParseError(
+                format!("found unqualified table '{}', all tables must be qualified with a dataset name", t.table()).into()
+            ));
+        };
+        dataset_names.insert(catalog_schema.to_string());
+    }
+    Ok(dataset_names)
 }

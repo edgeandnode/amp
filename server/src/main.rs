@@ -1,7 +1,7 @@
-use std::{net::SocketAddr, sync::Arc};
+use std::net::SocketAddr;
 
 use arrow_flight::flight_service_server::FlightServiceServer;
-use common::{catalog::physical::Catalog, config::Config, tracing, BoxError, QueryContext};
+use common::{config::Config, tracing, BoxError};
 use log::info;
 use tonic::transport::Server;
 
@@ -25,15 +25,16 @@ async fn main() -> Result<(), BoxError> {
         !config.spill_location.is_empty()
     );
 
-    let env = Arc::new((config.to_runtime_env())?);
-    let catalog = Catalog::empty(config.data_store)?; //Catalog::for_dataset(&dataset, config.data_location)?;
-    let ctx = QueryContext::for_catalog(catalog, env).await?;
-    let svc = FlightServiceServer::new(service::Service::new(ctx));
+    let service = service::Service::new(config)?;
 
     let addr: SocketAddr = ([0, 0, 0, 0], 1602).into();
 
     info!("Serving at {}", addr);
 
-    Server::builder().add_service(svc).serve(addr).await?;
-    Ok(())
+    Server::builder()
+        .add_service(FlightServiceServer::new(service))
+        .serve(addr)
+        .await?;
+
+    Err("server shutdown unexpectedly, it should run forever".into())
 }

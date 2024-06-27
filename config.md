@@ -24,5 +24,5 @@ Substreams, and then there are datasets defined as a transformation, or pipeline
 on top of one or more base dataset.
 
 Currently, two kinds of base datasets are implemented, Firehose and Substreams. For details on those,
-see the Firehose [dataset docs](firehose-datasets/configuration.md) and the Substreams [dataset
-docs](substreams-datasets/configuring.md).
+see the Firehose [dataset docs](firehose-datasets/config.md) and the Substreams [dataset
+docs](substreams-datasets/config.md).

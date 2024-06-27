@@ -27,7 +27,7 @@ pub enum StoreError {
 /// - When constructed with: `gs://bucket/subidr/` will preserve the `subdir` when doing any
 ///   requests.
 /// - Can be extended with helper functions.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Store {
     url: Url,
     prefix: String,
@@ -62,10 +62,6 @@ impl Store {
 
     pub fn url(&self) -> &Url {
         &self.url
-    }
-
-    pub fn object_store(&self) -> Arc<dyn ObjectStore> {
-        self.store.clone()
     }
 
     pub async fn get_bytes(&self, location: impl Into<Path>) -> Result<Bytes, StoreError> {
