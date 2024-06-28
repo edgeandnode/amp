@@ -1,13 +1,14 @@
-# Sample of a configuration Copy this file and edit it. Set the environment variable `NOZZLE_CONFIG`
-# to its location. See `configuration.md` for more information.
+# Sample of a configuration. Copy this file and edit it. Set the environment variable `NOZZLE_CONFIG`
+# to its location. See `configuration.md` for more context.
 
-# All directory configurations (the `*_dir` keys) support both filesystem land object store
-# locations. So they can either be a filesystem path, for local storage, or a URL for object an
-# store, in one of the following formats:
+# All directory configurations (the `*_dir` keys) support both filesystem and object store locations.
+# So they can either be a filesystem path, for local storage, or a URL for object an store. When
+# using filesystem paths, any relative paths will be resolved relative to the directory of this file.
+# Object store URLs can be in one of the following formats:
 #
-# # S3 and S3-compatible stores
+# # S3-compatible stores
 # 
-#   URL format: `s3://<bucket>`. S3 session can be configured through the following environment
+#   URL format: `s3://<bucket>` Sessions can be configured through the following environment
 #   variables:
 #
 #     * AWS_ACCESS_KEY_ID: access key ID

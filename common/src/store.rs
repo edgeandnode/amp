@@ -1,4 +1,4 @@
-use std::{ops::Range, sync::Arc};
+use std::{ops::Range, path::PathBuf, sync::Arc};
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -35,8 +35,15 @@ pub struct Store {
 }
 
 impl Store {
-    pub fn new(data_location: String) -> Result<Self, BoxError> {
-        let (url, object_store) = infer_object_store(data_location)?;
+    /// Creates a store for an object store path or filesystem directory. Examples of valid formats
+    /// for `data_location`:
+    /// - Filesystem path: `relative/path/to/data/`
+    /// - GCS: `gs://bucket-name/`
+    /// - S3: `s3://bucket-name/`
+    ///
+    /// If `data_location` is not a URL, but a relative path, then `base` will be used as the prefix.
+    pub fn new(data_location: String, base: Option<&std::path::Path>) -> Result<Self, BoxError> {
+        let (url, object_store) = infer_object_store(data_location, base)?;
 
         let prefix = match url.scheme() {
             // Don't set a prefix for file URLs, as DataFusion will preserve the full path.
@@ -188,7 +195,12 @@ impl ObjectStore for Store {
 /// - Filesystem path: `relative/path/to/data/`
 /// - GCS: `gs://bucket-name/`
 /// - S3: `s3://bucket-name/`
-fn infer_object_store(mut data_location: String) -> Result<(Url, Box<dyn ObjectStore>), BoxError> {
+///
+/// `base` is used as the base directory for relative filesystem paths.
+fn infer_object_store(
+    mut data_location: String,
+    base: Option<&std::path::Path>,
+) -> Result<(Url, Box<dyn ObjectStore>), BoxError> {
     // Make sure there is a trailing slash so it's recognized as a directory.
     if !data_location.ends_with('/') {
         data_location.push('/');
@@ -221,11 +233,17 @@ fn infer_object_store(mut data_location: String) -> Result<(Url, Box<dyn ObjectS
         );
         Ok((Url::parse(&data_location)?, store))
     } else {
-        // Error if the directory does not exist or cannot be read for any reason.
-        fs::metadata(&data_location)?;
+        let mut path = PathBuf::from(&data_location);
+        if !path.is_absolute() {
+            if let Some(base) = base {
+                path = PathBuf::from(base).join(path);
+            }
+        }
 
-        let store = Box::new(LocalFileSystem::new_with_prefix(&data_location)?);
-        let path = format!("/{}", data_location);
+        // Error if the directory does not exist.
+        let path = fs::canonicalize(path)?;
+
+        let store = Box::new(LocalFileSystem::new_with_prefix(&path)?);
         let url = Url::from_directory_path(path).unwrap();
         Ok((url, store))
     }

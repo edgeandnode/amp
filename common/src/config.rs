@@ -1,3 +1,4 @@
+use fs_err as fs;
 use std::{path::PathBuf, sync::Arc};
 
 use datafusion::{
@@ -31,11 +32,15 @@ struct ConfigFile {
 
 impl Config {
     pub fn load(file: impl Into<PathBuf>) -> Result<Self, BoxError> {
-        let contents = std::fs::read_to_string(file.into())?;
+        let config_path: PathBuf = fs::canonicalize(file.into())?;
+        let contents = fs_err::read_to_string(&config_path)?;
+
+        // Resolve any filesystem paths relative to the directory of the config file.
+        let base = config_path.parent();
         let config_file: ConfigFile = toml::from_str(&contents)?;
-        let data_store = Store::new(config_file.data_dir)?;
-        let providers_store = Store::new(config_file.providers_dir)?;
-        let dataset_defs_store = Store::new(config_file.dataset_defs_dir)?;
+        let data_store = Store::new(config_file.data_dir, base)?;
+        let providers_store = Store::new(config_file.providers_dir, base)?;
+        let dataset_defs_store = Store::new(config_file.dataset_defs_dir, base)?;
 
         Ok(Self {
             data_store: Arc::new(data_store),
