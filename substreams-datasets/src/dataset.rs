@@ -46,7 +46,7 @@ pub(crate) async fn extract_def_and_provider(
 
 #[tokio::test]
 async fn test_deserialize() {
-    let dataset_store = Store::new("example_config/dataset_defs/".to_string()).unwrap();
+    let dataset_store = Store::new("example_config/dataset_defs/".to_string(), None).unwrap();
 
     let dataset_def: toml::Value = toml::from_str(
         &String::from_utf8(
@@ -60,7 +60,7 @@ async fn test_deserialize() {
     )
     .unwrap();
 
-    let provider_store = Store::new("example_config/providers/".to_string()).unwrap();
+    let provider_store = Store::new("example_config/providers/".to_string(), None).unwrap();
 
     let (def, provider) = extract_def_and_provider(dataset_def, &provider_store)
         .await
