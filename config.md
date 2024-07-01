@@ -20,8 +20,7 @@ will by default be placed under `<data_dir>/foobar/` and tables will be refered 
 `foobar.table`.
 
 Conceptually there are base datasets, which are extracted from external systems such Firehose and
-Substreams, and then there are datasets defined as a transformation, or pipeline of transformations,
-on top of one or more base dataset.
+Substreams, and then there are datasets defined as queries on other datasets.
 
 Currently, two kinds of base datasets are implemented, Firehose and Substreams. For details on those,
 see the Firehose [dataset docs](firehose-datasets/config.md) and the Substreams [dataset

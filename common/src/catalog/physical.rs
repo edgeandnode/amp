@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use datafusion::{
+    arrow::datatypes::SchemaRef,
     logical_expr::{col, Expr},
     sql::TableReference,
 };
@@ -101,24 +102,18 @@ impl PhysicalDataset {
 
 #[derive(Debug, Clone)]
 pub struct PhysicalTable {
-    pub table: Table,
-    pub table_ref: TableReference,
+    table: Table,
+    table_ref: TableReference,
 
     // URL in a format understood by the object store.
-    pub url: Url,
+    url: Url,
 }
 
 impl PhysicalTable {
     fn resolve(base: &Url, dataset_name: &str, table: &Table) -> Result<Self, BoxError> {
         validate_name(&table.name)?;
 
-        let url = if base.scheme() == "file" {
-            Url::from_directory_path(&format!("/{}/", &table.name))
-                .map_err(|()| "error parsing table name as URL")?
-        } else {
-            base.join(&format!("{}/", &table.name))?
-        };
-
+        let url = base.join(&format!("{}/{}/", dataset_name, &table.name))?;
         let table_ref = TableReference::partial(dataset_name, table.name.as_str());
 
         Ok(PhysicalTable {
@@ -132,6 +127,10 @@ impl PhysicalTable {
         &self.table.name
     }
 
+    pub fn url(&self) -> &Url {
+        &self.url
+    }
+
     pub fn catalog_schema(&self) -> &str {
         // Unwrap: This is always constructed with a schema.
         &self.table_ref.schema().unwrap()
@@ -139,6 +138,10 @@ impl PhysicalTable {
 
     pub fn is_meta(&self) -> bool {
         self.table.is_meta()
+    }
+
+    pub fn schema(&self) -> SchemaRef {
+        self.table.schema.clone()
     }
 
     /// Qualified table reference in the format `dataset_name.table_name`.
