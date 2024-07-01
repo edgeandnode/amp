@@ -310,9 +310,9 @@ async fn create_table(
     external: bool,
 ) -> Result<(), DataFusionError> {
     let table_ref = table.table_ref().clone();
-    let schema = table.table.schema.clone().to_dfschema_ref()?;
+    let schema = table.schema().to_dfschema_ref()?;
     if external {
-        let cmd = create_external_table_cmd(table_ref, schema, &table.url, table.order_exprs());
+        let cmd = create_external_table_cmd(table_ref, schema, &table.url(), table.order_exprs());
         ctx.execute_logical_plan(cmd).await?;
     } else {
         // Unwrap: Table is empty.

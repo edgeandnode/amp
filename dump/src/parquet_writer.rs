@@ -5,11 +5,11 @@ use common::arrow::array::RecordBatch;
 use common::catalog::physical::PhysicalTable;
 use common::meta_tables::scanned_ranges::{self, ScannedRange, ScannedRangeRowsBuilder};
 use common::parquet::errors::ParquetError;
-use common::{parquet, BlockNum, BoxError, QueryContext, Table, TableRows, Timestamp};
+use common::{parquet, BlockNum, BoxError, QueryContext, Store, TableRows, Timestamp};
 use datafusion::sql::TableReference;
+use log::debug;
 use object_store::buffered::BufWriter;
 use object_store::path::Path;
-use object_store::ObjectStore;
 use parquet::arrow::AsyncArrowWriter;
 use parquet::file::properties::WriterProperties as ParquetWriterProperties;
 use url::Url;
@@ -30,7 +30,7 @@ pub struct DatasetWriter {
     tables: BTreeMap<String, PhysicalTable>,
 
     opts: ParquetWriterProperties,
-    store: Arc<dyn ObjectStore>,
+    store: Arc<Store>,
     partition_size: u64,
 
     // The scanned ranges waiting to be written to the `__scanned_ranges` table.
@@ -51,11 +51,11 @@ impl DatasetWriter {
         let mut tables = BTreeMap::new();
 
         // This only handles a single dataset.
-        let store = dataset_ctx.catalog().datasets()[0].data_store() as Arc<dyn ObjectStore>;
+        let store = dataset_ctx.catalog().datasets()[0].data_store();
 
         for table in dataset_ctx.catalog().all_tables() {
             tables.insert(table.table_name().to_string(), table.clone());
-            let writer = ParquetWriter::new(&store, &table, opts.clone(), start).await?;
+            let writer = ParquetWriter::new(&store, table.clone(), opts.clone(), start).await?;
             writers.insert(table.table_name().to_string(), writer);
         }
         Ok(DatasetWriter {
@@ -80,10 +80,14 @@ impl DatasetWriter {
             .bytes_written();
 
         // Check if we need to create a new part file for the table.
+        //
+        // TODO: Try switching to `ArrowWriter::memory_size()` once
+        // https://github.com/apache/arrow-rs/pull/5967 is merged and released.
         if bytes_written >= self.partition_size {
-            let table_url = self.tables.get(table.name.as_str()).unwrap();
+            let physical_table = self.tables.get(table.name.as_str()).unwrap().clone();
             let new_writer =
-                ParquetWriter::new(&self.store, table_url, self.opts.clone(), block_num).await?;
+                ParquetWriter::new(&self.store, physical_table, self.opts.clone(), block_num)
+                    .await?;
             let old_writer = self.writers.insert(table.name.clone(), new_writer).unwrap();
 
             // The `__scanned_ranges` optimization works best if ranges are adjacent, even if the
@@ -153,8 +157,9 @@ async fn flush_scanned_ranges(
 
 pub struct ParquetWriter {
     writer: AsyncArrowWriter<BufWriter>,
+    path: Path,
 
-    table: Table,
+    table: PhysicalTable,
 
     // The first block number in the range that this writer is responsible for.
     start: BlockNum,
@@ -166,22 +171,23 @@ pub struct ParquetWriter {
 
 impl ParquetWriter {
     pub async fn new(
-        store: &Arc<dyn ObjectStore>,
-        table: &PhysicalTable,
+        store: &Store,
+        table: PhysicalTable,
         opts: ParquetWriterProperties,
         start: BlockNum,
     ) -> Result<ParquetWriter, BoxError> {
-        let path = Path::parse(&path_for_part(&table.url, start))?;
-        let object_writer = BufWriter::new(store.clone(), path);
+        let path = Path::parse(path_for_part(table.url(), start))?;
+
+        let object_writer = BufWriter::new(Arc::new(store.clone()), path.clone());
 
         // Watch https://github.com/apache/arrow-datafusion/issues/9493 for a higher level, parallel
         // API for parquet writing.
-        let table = &table.table;
-        let writer = AsyncArrowWriter::try_new(object_writer, table.schema.clone(), Some(opts))?;
+        let writer = AsyncArrowWriter::try_new(object_writer, table.schema(), Some(opts))?;
         Ok(ParquetWriter {
             writer,
             start,
-            table: table.clone(),
+            table,
+            path,
             bytes_written: 0,
         })
     }
@@ -200,13 +206,15 @@ impl ParquetWriter {
     pub async fn close(self, end: BlockNum) -> Result<ScannedRange, BoxError> {
         self.writer.close().await?;
 
+        debug!("wrote {} for range {} to {}", self.path, self.start, end);
+
         if end < self.start {
             return Err(
                 format!("end block {} must be after start block {}", end, self.start).into(),
             );
         }
         let scanned_range = ScannedRange {
-            table: self.table.name.clone(),
+            table: self.table.table_name().to_string(),
             range_start: self.start,
             range_end: end,
             created_at: Timestamp::now(),
