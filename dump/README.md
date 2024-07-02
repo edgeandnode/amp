@@ -2,109 +2,35 @@
 
 A CLI to dump extractor interfaces to parquet files. Currently supports dumping EVM Firehose to a simplified schema and Substreams with schema inferred from the manifest.
 
-## Firehose
+First, you will need to setup your config file and point `NOZZLE_CONFIG` to it. Please refer to [config.md](../config.md) and [the sample config](../config.sample.toml) for that initial setup. Then also see the definition format for the desired dataset, such as the currently supported [firehose](../firehose-datasets/config.md) or [substreams](../substreams-datasets/config.md) datasets.
 
-Example usage to dump first four million blocks to local disk, running two parallel jobs:
+Once you have a config with a dataset definition directory setup, dump becomes very easy to use, as you can simply refer to the dataset by name. An example usage to dump first four million blocks of a dataset named `eth_firehose`, running two parallel jobs:
+
 ```
-cargo run --release -p dump -- --to local/firehose_files -e 4000000 -j 2
+cargo run --release dump -- --dataset eth_firehose -e 4000000 -j 2
 ```
 
-This will create one directory per table. Each directory may contain multiple files, named by their
-start block, corresponding to table partitions. If the process is interrupted, it is safe to resume
-by running the same command again.
+You will now be able to find your tables under `<dataset>/<table>/` in your data directory. Each
+table may contain multiple files, named by their start block, corresponding to table partitions. If
+the process is interrupted, it is safe to resume by running the same command again.
 
 Check the `--help` text for more configuration options.
 
 ### System requirements
 
-Dump is memory intensive, because the contents of each parquet row group, which usually corresponds to a file, needs to be entirely buffered in memory before being written. This memory requirement varies linearely with the number of jobs (`DUMP_N_JOBS`), the partition size (`DUMP_PARTITION_SIZE_MB`) and the number of tables being written to. As a reference point, at 100 workers and a 128MB partition size, memory usage was measured to peak at about 44GB for the EVM dataset with 4 tables.
-
-## Substreams
-
-To dump substreams output you need to provide substreams .SPKG package and output module using `--manifest` and `--module` arguments or environment variables.
-
-The following types of substreams modules can be used:
-
-- `db_out`-like modules emitting `DatabaseChanges` output. For this type of module to work, the substreams .SPKG manifest must contain `sink` section with embedded `schema.sql` schema. Corresponding Arrow schema is inferred from `schema.sql`. See this manifest as an example: [WETH token contract](https://github.com/pinax-network/weth-substreams/blob/main/substreams.sql.yaml#L50-L57).
-  An example using WETH ERC20 token smart contract:
-  ```bash
-  > cargo run --release -p dump -- --config=config.toml --to=local/weth -s=18000000 -e=18100000 --manifest=https://spkg.io/pinax-network/weth-v0.1.0.spkg --module=db_out
-  ```
-
-- Arbitrary map modules with repeated messages in the output. Schema in this case is inferred from the Protobuf message descriptors included in the substreams .SPKG package.
-  For example, a module with the following output:
-  ```proto
-  message Events {
-    repeated Transfer transfers = 1;
-    repeated Mint mints = 2;
-    repeated Burn burns = 3;
-  }
-  ```
-  will produce `transfers`, `mints`, and `burns` parquet files, where each column matches the field of the corresponding event message type. All non-repeated fields in the module output are dropped from the schema.
-
-  An example using WETH ERC20 token smart contract:
-  ```bash
-  > cargo run --release -p dump -- --config=config.toml --to=local/weth -s=18000000 -e=18100000 --manifest=https://spkg.io/pinax-network/weth-v0.1.0.spkg --module=map_events
-  ```
-
-
-## Config
-
-A config file toml is required. The path to the file can be configured in the CLI with `--config` or
-in the environment with `DUMP_CONFIG`. The current config format is:
-```
-url = "<FIREHOSE URL>"
-token = "<AUTH_TOKEN>"
-```
+Dump needs some RAM, because the contents of each parquet row group, which usually corresponds to a file, needs to be entirely buffered in memory before being written. This memory requirement varies linearely with the number of jobs (`DUMP_N_JOBS`), the partition size (`DUMP_PARTITION_SIZE_MB`) and the number of tables being written to. As a reference point, at 50 workers and a 4 GB partition size, memory usage was measured to peak at about 10 GB for the EVM dataset with 4 tables.
 
 ## Environment variables
 
 All configuration can be set through env vars instead of the CLI.
 
-- **DUMP_CONFIG**
-  - Description: Sets the path to a provider config file.
-  - Example: `DUMP_CONFIG=/path/to/config.toml`
+- **NOZZLE_CONFIG**
+  - Description: Sets the path to a config file.
+  - Example: `NOZZLE_CONFIG=/path/to/config.toml`
 
 - **DUMP_END_BLOCK**
   - Description: Specifies the block number to end at, inclusive.
   - Example: `DUMP_END_BLOCK=10000000`
-
-- **DUMP_TO**
-  - Description: Defines the output location and path.
-  - Examples:
-    - Local storage: `DUMP_TO=/data/output`
-    - Google Cloud Storage: `DUMP_TO=gs://my-bucket`
-    - Amazon S3 Storage: `DUMP_TO=s3://my-bucket`
-
-#### Google Cloud Storage
-- **GOOGLE_SERVICE_ACCOUNT_PATH**
-  - Description: Path to the Google Cloud service account file.
-  - Example: `GOOGLE_SERVICE_ACCOUNT_PATH=/path/to/service-account.json`
-
-- **GOOGLE_SERVICE_ACCOUNT_KEY**
-  - Description: JSON serialized Google service account key.
-  - Example: `GOOGLE_SERVICE_ACCOUNT_KEY='{"type": "service_account", ...}'`
-
-#### Amazon S3 Cloud Storage
-- **AWS_ACCESS_KEY_ID**
-  - Description: S3 access key ID.
-  - Example: `AWS_ACCESS_KEY_ID=MY_KEY_ID`
-
-- **AWS_SECRET_ACCESS_KEY**
-  - Description: S3 secret access key.
-  - Example: `AWS_SECRET_ACCESS_KEY=MY_SECRET_KEY`
-
-- **AWS_ENDPOINT**
-  - Description: S3 compatible endpoint. If unset, uses Amazon S3 service. If set, uses specified S3 compatible object service.
-  - Example: `AWS_ENDPOINT=http://s3.mycompany.com:8333`
-
-- **AWS_DEFAULT_REGION**
-  - Description: Amazon S3 region.
-  - Default: `AWS_DEFAULT_REGION=us-east-1`
-
-- **AWS_ALLOW_HTTP**
-  - Description: Allow non-TLS connections.
-  - Default: `AWS_ALLOW_HTTP=false`
 
 ### Optional
 
@@ -124,11 +50,3 @@ All configuration can be set through env vars instead of the CLI.
 - **DUMP_DISABLE_COMPRESSION**
   - Description: Controls whether compression is disabled when writing Parquet files.
   - Default: `DUMP_DISABLE_COMPRESSION=false`
-
-- **DUMP_SUBSTREAMS_MANIFEST**
-  - Description: URL of the substreams SPKG manifest.
-  - Example: `DUMP_SUBSTREAMS_MANIFEST=https://spkg.io/streamingfast/uniswap-v3-v0.2.8.spkg`
-
-- **DUMP_SUBSTREAMS_MODULE**
-  - Description: substreams output module to use.
-  - Example: `DUMP_SUBSTREAMS_MODULE=map_extract_data_types`
