@@ -1,13 +1,11 @@
-use std::{ops::Range, path::PathBuf, sync::Arc};
+use std::{path::PathBuf, sync::Arc};
 
-use async_trait::async_trait;
 use bytes::Bytes;
+use datafusion::prelude::SessionContext;
 use fs_err as fs;
-use futures::stream::BoxStream;
 use object_store::{
     aws::AmazonS3Builder, gcp::GoogleCloudStorageBuilder, local::LocalFileSystem, path::Path,
-    prefix::PrefixStore, GetOptions, GetResult, ListResult, MultipartUpload, ObjectMeta,
-    ObjectStore, PutMultipartOpts, PutOptions, PutPayload, PutResult,
+    prefix::PrefixStore, ObjectStore,
 };
 use url::Url;
 
@@ -24,14 +22,14 @@ pub enum StoreError {
 /// A wrapper around an `ObjectStore`. There are a few things it helps us with over a plain
 /// `ObjectStore`:
 /// - Keeps track of the URL of the store, in case we need it.
-/// - When constructed with: `gs://bucket/subidr/` will preserve the `subdir` when doing any
-///   requests.
+/// - Tries to better handle various cases of relative paths and path prefixes.
 /// - Can be extended with helper functions.
 #[derive(Debug, Clone)]
 pub struct Store {
     url: Url,
     prefix: String,
-    store: Arc<PrefixStore<Box<dyn ObjectStore>>>,
+    store: Arc<PrefixStore<Arc<dyn ObjectStore>>>,
+    unprefixed: Arc<dyn ObjectStore>,
 }
 
 impl Store {
@@ -43,32 +41,44 @@ impl Store {
     ///
     /// If `data_location` is not a URL, but a relative path, then `base` will be used as the prefix.
     pub fn new(data_location: String, base: Option<&std::path::Path>) -> Result<Self, BoxError> {
-        let (url, object_store) = infer_object_store(data_location, base)?;
-
-        let prefix = match url.scheme() {
-            // Don't set a prefix for file URLs, as DataFusion will preserve the full path.
-            "file" => String::new(),
-
-            // For object store URLs, set the prefix to the path part of the URL.
-            _ => url.path().to_string(),
-        };
-
-        let store = Arc::new(PrefixStore::new(object_store, prefix.as_str()));
-        Ok(Self { url, prefix, store })
+        let (url, unprefixed) = infer_object_store(data_location, base)?;
+        let prefix = url.path().to_string();
+        let store = Arc::new(PrefixStore::new(unprefixed.clone(), prefix.as_str()));
+        Ok(Self {
+            url,
+            prefix,
+            store,
+            unprefixed,
+        })
     }
 
     pub fn in_memory() -> Self {
         let url = Url::parse("memory://in_memory_store/").unwrap();
-        let store = Box::new(object_store::memory::InMemory::new());
+        let store = Arc::new(object_store::memory::InMemory::new());
         Self {
             url,
             prefix: "".to_string(),
-            store: Arc::new(PrefixStore::new(store, "")),
+            store: Arc::new(PrefixStore::new(store.clone(), "")),
+            unprefixed: store,
         }
     }
 
     pub fn url(&self) -> &Url {
         &self.url
+    }
+
+    /// A store that will search for paths relative to the location provided in the constructor, as
+    /// would be expected.
+    pub fn prefixed_store(&self) -> Arc<dyn ObjectStore> {
+        self.store.clone()
+    }
+
+    /// Registers the store in a datafusion context so that it can be used in queries.
+    pub fn register_in(&self, ctx: &SessionContext) {
+        // It's important to register the unprefixed store, as we give absolute URLs to the
+        // `CreateExternalTable` command, which will do its own prefixing. Using the prefixed store
+        // here would result in double prefixing.
+        ctx.register_object_store(self.url(), self.unprefixed.clone());
     }
 
     pub async fn get_bytes(&self, location: impl Into<Path>) -> Result<Bytes, StoreError> {
@@ -88,109 +98,6 @@ impl std::fmt::Display for Store {
     }
 }
 
-/// Delegated impl to the internal store.
-#[async_trait]
-impl ObjectStore for Store {
-    async fn put(&self, location: &Path, payload: PutPayload) -> object_store::Result<PutResult> {
-        self.store.put(location, payload).await
-    }
-
-    async fn put_opts(
-        &self,
-        location: &Path,
-        payload: PutPayload,
-        opts: PutOptions,
-    ) -> object_store::Result<PutResult> {
-        self.store.put_opts(location, payload, opts).await
-    }
-
-    async fn put_multipart(
-        &self,
-        location: &Path,
-    ) -> object_store::Result<Box<dyn MultipartUpload>> {
-        self.store.put_multipart(location).await
-    }
-
-    async fn put_multipart_opts(
-        &self,
-        location: &Path,
-        opts: PutMultipartOpts,
-    ) -> object_store::Result<Box<dyn MultipartUpload>> {
-        self.store.put_multipart_opts(location, opts).await
-    }
-
-    async fn get(&self, location: &Path) -> object_store::Result<GetResult> {
-        self.store.get(location).await
-    }
-
-    async fn get_opts(
-        &self,
-        location: &Path,
-        options: GetOptions,
-    ) -> object_store::Result<GetResult> {
-        self.store.get_opts(location, options).await
-    }
-
-    async fn get_range(&self, location: &Path, range: Range<usize>) -> object_store::Result<Bytes> {
-        self.store.get_range(location, range).await
-    }
-
-    async fn get_ranges(
-        &self,
-        location: &Path,
-        ranges: &[Range<usize>],
-    ) -> object_store::Result<Vec<Bytes>> {
-        self.store.get_ranges(location, ranges).await
-    }
-
-    async fn head(&self, location: &Path) -> object_store::Result<ObjectMeta> {
-        self.store.head(location).await
-    }
-
-    async fn delete(&self, location: &Path) -> object_store::Result<()> {
-        self.store.delete(location).await
-    }
-
-    fn delete_stream<'a>(
-        &'a self,
-        locations: BoxStream<'a, object_store::Result<Path>>,
-    ) -> BoxStream<'a, object_store::Result<Path>> {
-        self.store.delete_stream(locations)
-    }
-
-    fn list(&self, prefix: Option<&Path>) -> BoxStream<'_, object_store::Result<ObjectMeta>> {
-        self.store.list(prefix)
-    }
-
-    fn list_with_offset(
-        &self,
-        prefix: Option<&Path>,
-        offset: &Path,
-    ) -> BoxStream<'_, object_store::Result<ObjectMeta>> {
-        self.store.list_with_offset(prefix, offset)
-    }
-
-    async fn list_with_delimiter(&self, prefix: Option<&Path>) -> object_store::Result<ListResult> {
-        self.store.list_with_delimiter(prefix).await
-    }
-
-    async fn copy(&self, from: &Path, to: &Path) -> object_store::Result<()> {
-        self.store.copy(from, to).await
-    }
-
-    async fn rename(&self, from: &Path, to: &Path) -> object_store::Result<()> {
-        self.store.rename(from, to).await
-    }
-
-    async fn copy_if_not_exists(&self, from: &Path, to: &Path) -> object_store::Result<()> {
-        self.store.copy_if_not_exists(from, to).await
-    }
-
-    async fn rename_if_not_exists(&self, from: &Path, to: &Path) -> object_store::Result<()> {
-        self.store.rename_if_not_exists(from, to).await
-    }
-}
-
 /// The location must be a directory. Examples of valid formats for `data_location`:
 /// - Filesystem path: `relative/path/to/data/`
 /// - GCS: `gs://bucket-name/`
@@ -200,7 +107,7 @@ impl ObjectStore for Store {
 fn infer_object_store(
     mut data_location: String,
     base: Option<&std::path::Path>,
-) -> Result<(Url, Box<dyn ObjectStore>), BoxError> {
+) -> Result<(Url, Arc<dyn ObjectStore>), BoxError> {
     // Make sure there is a trailing slash so it's recognized as a directory.
     if !data_location.ends_with('/') {
         data_location.push('/');
@@ -214,7 +121,7 @@ fn infer_object_store(
             segment.ok_or("invalid GCS url")?
         };
 
-        let store = Box::new(
+        let store = Arc::new(
             GoogleCloudStorageBuilder::from_env()
                 .with_bucket_name(bucket)
                 .build()?,
@@ -226,7 +133,7 @@ fn infer_object_store(
             segment.ok_or("invalid S3 url")?
         };
 
-        let store = Box::new(
+        let store = Arc::new(
             AmazonS3Builder::from_env()
                 .with_bucket_name(bucket)
                 .build()?,
@@ -243,8 +150,8 @@ fn infer_object_store(
         // Error if the directory does not exist.
         let path = fs::canonicalize(path)?;
 
-        let store = Box::new(LocalFileSystem::new_with_prefix(&path)?);
         let url = Url::from_directory_path(path).unwrap();
+        let store = Arc::new(LocalFileSystem::new());
         Ok((url, store))
     }
 }

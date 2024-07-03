@@ -12,17 +12,12 @@ use object_store::buffered::BufWriter;
 use object_store::path::Path;
 use parquet::arrow::AsyncArrowWriter;
 use parquet::file::properties::WriterProperties as ParquetWriterProperties;
-use url::Url;
 
-fn path_for_part(table_location: &Url, start_block: u64) -> String {
+fn path_for_part(table_path: &str, start_block: u64) -> String {
     // Pad `start` to 9 digits.
     let padded_start = format!("{:09}", start_block);
 
-    if table_location.path().ends_with('/') {
-        format!("{}{}.parquet", table_location.path(), padded_start)
-    } else {
-        format!("{}/{}.parquet", table_location.path(), padded_start)
-    }
+    format!("{}{}.parquet", table_path, padded_start)
 }
 
 pub struct DatasetWriter {
@@ -176,9 +171,9 @@ impl ParquetWriter {
         opts: ParquetWriterProperties,
         start: BlockNum,
     ) -> Result<ParquetWriter, BoxError> {
-        let path = Path::parse(path_for_part(table.url(), start))?;
+        let path = Path::parse(path_for_part(table.path(), start))?;
 
-        let object_writer = BufWriter::new(Arc::new(store.clone()), path.clone());
+        let object_writer = BufWriter::new(store.prefixed_store(), path.clone());
 
         // Watch https://github.com/apache/arrow-datafusion/issues/9493 for a higher level, parallel
         // API for parquet writing.
@@ -204,15 +199,16 @@ impl ParquetWriter {
     }
 
     pub async fn close(self, end: BlockNum) -> Result<ScannedRange, BoxError> {
-        self.writer.close().await?;
-
-        debug!("wrote {} for range {} to {}", self.path, self.start, end);
-
         if end < self.start {
             return Err(
                 format!("end block {} must be after start block {}", end, self.start).into(),
             );
         }
+
+        self.writer.close().await?;
+
+        debug!("wrote {} for range {} to {}", self.path, self.start, end);
+
         let scanned_range = ScannedRange {
             table: self.table.table_name().to_string(),
             range_start: self.start,

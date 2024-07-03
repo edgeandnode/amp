@@ -289,7 +289,7 @@ async fn create_dataset_tables(
     external_tables: bool,
 ) -> Result<(), Error> {
     // This may overwrite a previously registered store, but that should not make a difference.
-    ctx.register_object_store(dataset_store.url(), dataset_store.clone());
+    dataset_store.register_in(ctx);
 
     // The catalog schema needs to be explicitly created or table creation will fail.
     let create_schema_cmd = create_catalog_schema_cmd(dataset_name);

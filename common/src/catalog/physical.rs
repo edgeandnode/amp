@@ -105,21 +105,26 @@ pub struct PhysicalTable {
     table: Table,
     table_ref: TableReference,
 
-    // URL in a format understood by the object store.
+    // Absolute URL.
     url: Url,
+
+    // Path relative the store URL.
+    path: String,
 }
 
 impl PhysicalTable {
     fn resolve(base: &Url, dataset_name: &str, table: &Table) -> Result<Self, BoxError> {
         validate_name(&table.name)?;
 
-        let url = base.join(&format!("{}/{}/", dataset_name, &table.name))?;
+        let path = format!("{}/{}/", dataset_name, table.name);
+        let url = base.join(&path)?;
         let table_ref = TableReference::partial(dataset_name, table.name.as_str());
 
         Ok(PhysicalTable {
             table: table.clone(),
             table_ref,
             url,
+            path,
         })
     }
 
@@ -129,6 +134,10 @@ impl PhysicalTable {
 
     pub fn url(&self) -> &Url {
         &self.url
+    }
+
+    pub fn path(&self) -> &str {
+        &self.path
     }
 
     pub fn catalog_schema(&self) -> &str {
