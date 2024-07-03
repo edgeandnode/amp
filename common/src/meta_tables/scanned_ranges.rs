@@ -1,30 +1,37 @@
-//! Keeps track of block ranges that have already been scanned. This is an optimization to skip
-//! scanned ranges when resuming a write process.
+//! Keeps track of block ranges that have already been scanned. One use of this is an optimization to
+//! skip scanned ranges when resuming a write process.
 //!
-//! This cannot be inferred from tables themselves, because tables can be sparse and not have data
-//! for all block numbers. In which case we don't know if a block was never scanned, or if it was
-//! scanned and is empty.
+//! These ranges could not be perfectly inferred from tables themselves, because tables can be sparse
+//! and not have data for all block numbers. In which case we don't know if a block was never
+//! scanned, or if it was scanned and is empty.
 //!
-//! It is ok for this to contain false negatives, that is, to not contain a range that was in fact
-//! scanned. As the `existing_blocks` check is what ensures no data is written twice. This
-//! is important as it lets us get away with this optimization even without an atomic transaction
-//! system. For example in:
+//! # Consistency
+//! Because there isn't an atomic way of writing multiple files to object storage, we need to be
+//! mindful of consistency. The non-atomic write process is:
 //! ```ignore
 //! write_real_data();
 //! write_scanned_ranges();
 //! ```
-//! If the process is interrupted between the two writes, that will create a false negative.
+//! Creating the possibility of orphaned data files if the process is interrupted between the two
+//! writes or if the first operation succeeds and the second one errors. An orphaned file means a
+//! data file for which `__scanned_ranges` does not contain a corresponding range. One way we ensure
+//! consistency is by detecting and deleting orphaned files when starting up a write process.
+//!
+//! See also: scanned-ranges-consistency
 
 use std::sync::Arc;
 
 use crate::{
     arrow::array::{ArrayRef, StringBuilder},
-    timestamp_type, Timestamp, TimestampArrayBuilder,
+    timestamp_type, BoxError, QueryContext, Timestamp, TimestampArrayBuilder,
 };
-use datafusion::arrow::{
-    array::{ArrayBuilder as _, RecordBatch, UInt64Builder},
-    datatypes::{DataType, Field, Schema, SchemaRef},
-    error::ArrowError,
+use datafusion::{
+    arrow::{
+        array::{ArrayBuilder as _, AsArray as _, RecordBatch, UInt64Builder},
+        datatypes::{DataType, Field, Schema, SchemaRef, UInt64Type},
+        error::ArrowError,
+    },
+    sql::TableReference,
 };
 
 use crate::Table;
@@ -51,6 +58,39 @@ fn schema() -> Schema {
 
     let fields = vec![table, start, end, filename, created_at];
     Schema::new(fields)
+}
+
+pub async fn ranges_for_table(
+    ctx: &QueryContext,
+    catalog_schema: &str,
+    table_name: &str,
+) -> Result<Vec<(u64, u64)>, BoxError> {
+    let scanned_ranges_ref = TableReference::partial(catalog_schema, TABLE_NAME);
+    let rb = ctx
+            .meta_execute_sql(&format!(
+                "select range_start, range_end from {scanned_ranges_ref} where table = '{table_name}' order by range_start, range_end",
+            ))
+            .await?;
+    let start_blocks: &[u64] = rb.column(0).as_primitive::<UInt64Type>().values().as_ref();
+    let end_blocks: &[u64] = rb.column(1).as_primitive::<UInt64Type>().values().as_ref();
+
+    let ranges = start_blocks.iter().zip(end_blocks).map(|(s, e)| (*s, *e));
+    Ok(ranges.collect())
+}
+
+pub async fn filenames_for_table(
+    ctx: &QueryContext,
+    catalog_schema: &str,
+    table_name: &str,
+) -> Result<Vec<String>, BoxError> {
+    let scanned_ranges_ref = TableReference::partial(catalog_schema, TABLE_NAME);
+    let rb = ctx
+            .meta_execute_sql(&format!(
+                "select filename from {scanned_ranges_ref} where table = '{table_name}' order by range_start, range_end",
+            ))
+            .await?;
+    let filenames = rb.column(0).as_string::<i32>().iter().map(|s| s.unwrap());
+    Ok(filenames.map(|s| s.to_string()).collect())
 }
 
 pub struct ScannedRange {

@@ -3,6 +3,7 @@ mod metrics; // unused for now
 mod parquet_writer;
 
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -11,19 +12,22 @@ use common::arrow::array::AsArray as _;
 use common::arrow::datatypes::UInt64Type;
 use common::catalog::physical::Catalog;
 use common::config::Config;
+use common::meta_tables::scanned_ranges::filenames_for_table;
 use common::multirange::MultiRange;
 use common::parquet;
 use common::query_context::QueryContext;
 use common::tracing;
 use common::BoxError;
 use common::BLOCK_NUM;
-use datafusion::sql::TableReference;
 use dataset_store::DatasetStore;
 use futures::future::try_join_all;
 use futures::StreamExt as _;
 use futures::TryFutureExt as _;
+use futures::TryStreamExt;
 use job::Job;
 use log::info;
+use log::warn;
+use object_store::path::Path;
 use parquet::basic::{Compression, ZstdLevel};
 use parquet::file::properties::WriterProperties as ParquetWriterProperties;
 
@@ -93,14 +97,14 @@ async fn main() -> Result<(), BoxError> {
     } else {
         Compression::ZSTD(ZstdLevel::try_new(1).unwrap())
     };
-
     let (start, end_block) = resolve_block_range(start, end_block)?;
 
     let dataset = dataset_store.load_dataset(&dataset_name).await?;
     let client = dataset_store.load_client(&dataset_name).await?;
 
     let env = Arc::new(config.make_runtime_env()?);
-    let catalog = Catalog::for_dataset(&dataset, config.data_store)?;
+    let catalog = Catalog::for_dataset(&dataset, config.data_store.clone())?;
+    let physical_dataset = catalog.datasets()[0].clone();
     let ctx = Arc::new(QueryContext::for_catalog(catalog, env).await?);
 
     let existing_blocks = existing_blocks(&ctx).await?;
@@ -110,6 +114,39 @@ async fn main() -> Result<(), BoxError> {
             table_name,
             multirange.total_len()
         );
+    }
+
+    // As a consistency check, ensure that all previously written are accounted for in
+    // `__scanned_ranges`. If they are not, delete them as that is an inconsistent state.
+    //
+    // See also: scanned-ranges-consistency
+    for table in physical_dataset.tables() {
+        let registered_files = {
+            let f = filenames_for_table(&ctx, table.catalog_schema(), table.table_name()).await?;
+            BTreeSet::from_iter(f.into_iter())
+        };
+
+        let store = config.data_store.prefixed_store();
+        // Unwrap: The table path is syntatically valid.
+        let path = Path::parse(table.path()).unwrap();
+        let stored_files: Vec<_> = store.list(Some(&path)).try_collect().await?;
+        for stored_file in stored_files {
+            // Unwrap: A full object path always has a filename.
+            let filename = stored_file.location.filename().unwrap();
+            if !registered_files.contains(filename) {
+                // Check that this is a file written by a dump job, with name in the format:
+                // "<block_num>.parquet".
+                let is_dump_file = filename.ends_with(".parquet")
+                    && filename.trim_end_matches(".parquet").parse::<u64>().is_ok();
+
+                if is_dump_file {
+                    // This file was written by a dump job but it is not present in `__scanned_ranges`,
+                    // so it is an orphaned file. Delete it.
+                    warn!("Deleting orphaned file: {}", stored_file.location);
+                    store.delete(&stored_file.location).await?;
+                }
+            }
+        }
     }
 
     // Find the ranges of blocks that have not been scanned yet, in case we are resuming the dump
@@ -221,30 +258,14 @@ async fn existing_blocks(ctx: &QueryContext) -> Result<BTreeMap<String, MultiRan
 // This is the intersection of the `__scanned_ranges` for all tables. That is, a range is only
 // considered scanned if it is scanned for all tables.
 async fn scanned_ranges(ctx: &QueryContext) -> Result<MultiRange, BoxError> {
-    use common::meta_tables::scanned_ranges::TABLE_NAME as __SCANNED_RANGES;
+    use common::meta_tables::scanned_ranges::ranges_for_table;
 
     let mut multirange_by_table: BTreeMap<String, MultiRange> = BTreeMap::default();
 
     for table in ctx.catalog().all_tables() {
         let table_name = table.table_name().to_string();
-        let scanned_ranges_ref = TableReference::partial(table.catalog_schema(), __SCANNED_RANGES);
-        let batch = ctx
-            .meta_execute_sql(&format!(
-                "select range_start, range_end from {scanned_ranges_ref} where table = '{table_name}' order by range_start, range_end",
-            ))
-            .await?;
-        let start_blocks: &[u64] = batch
-            .column(0)
-            .as_primitive::<UInt64Type>()
-            .values()
-            .as_ref();
-        let end_blocks: &[u64] = batch
-            .column(1)
-            .as_primitive::<UInt64Type>()
-            .values()
-            .as_ref();
-        let ranges = start_blocks.iter().zip(end_blocks).map(|(s, e)| (*s, *e));
-        let multi_range = MultiRange::from_ranges(ranges.collect());
+        let ranges = ranges_for_table(ctx, table.catalog_schema(), &table_name).await?;
+        let multi_range = MultiRange::from_ranges(ranges);
         multirange_by_table.insert(table_name, multi_range);
     }
 
