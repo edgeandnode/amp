@@ -46,10 +46,10 @@ fn schema() -> Schema {
     let table = Field::new("table", DataType::Utf8, false);
     let start = Field::new("range_start", DataType::UInt64, false);
     let end = Field::new("range_end", DataType::UInt64, false);
-    let file_path = Field::new("file_path", DataType::Utf8, false);
+    let filename = Field::new("filename", DataType::Utf8, false);
     let created_at = Field::new("created_at", timestamp_type(), false);
 
-    let fields = vec![table, start, end, file_path, created_at];
+    let fields = vec![table, start, end, filename, created_at];
     Schema::new(fields)
 }
 
@@ -57,7 +57,7 @@ pub struct ScannedRange {
     pub table: String,
     pub range_start: u64,
     pub range_end: u64,
-    pub file_path: String,
+    pub filename: String,
     pub created_at: Timestamp,
 }
 
@@ -66,7 +66,7 @@ pub struct ScannedRangeRowsBuilder {
     table: StringBuilder,
     range_start: UInt64Builder,
     range_end: UInt64Builder,
-    file_path: StringBuilder,
+    filename: StringBuilder,
     timestamp: TimestampArrayBuilder,
 }
 
@@ -76,7 +76,7 @@ impl ScannedRangeRowsBuilder {
             table: StringBuilder::new(),
             range_start: UInt64Builder::new(),
             range_end: UInt64Builder::new(),
-            file_path: StringBuilder::new(),
+            filename: StringBuilder::new(),
             timestamp: TimestampArrayBuilder::with_capacity(0),
         }
     }
@@ -85,7 +85,7 @@ impl ScannedRangeRowsBuilder {
         self.table.append_value(&range.table);
         self.range_start.append_value(range.range_start);
         self.range_end.append_value(range.range_end);
-        self.file_path.append_value(&range.file_path);
+        self.filename.append_value(&range.filename);
         self.timestamp.append_value(range.created_at);
     }
 
@@ -94,7 +94,7 @@ impl ScannedRangeRowsBuilder {
             Arc::new(self.table.finish()) as ArrayRef,
             Arc::new(self.range_start.finish()),
             Arc::new(self.range_end.finish()),
-            Arc::new(self.file_path.finish()),
+            Arc::new(self.filename.finish()),
             Arc::new(self.timestamp.finish()),
         ];
 

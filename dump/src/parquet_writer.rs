@@ -209,11 +209,13 @@ impl ParquetWriter {
 
         debug!("wrote {} for range {} to {}", self.path, self.start, end);
 
+        // Unwrap: The path is a file.
+        let filename = self.path.filename().unwrap().to_string();
         let scanned_range = ScannedRange {
             table: self.table.table_name().to_string(),
             range_start: self.start,
             range_end: end,
-            file_path: self.path.to_string(),
+            filename,
             created_at: Timestamp::now(),
         };
         Ok(scanned_range)
