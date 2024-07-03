@@ -213,6 +213,7 @@ impl ParquetWriter {
             table: self.table.table_name().to_string(),
             range_start: self.start,
             range_end: end,
+            file_path: self.path.to_string(),
             created_at: Timestamp::now(),
         };
         Ok(scanned_range)
