@@ -1,17 +1,12 @@
 use common::{
     arrow::{self, ipc::writer::IpcDataGenerator},
-    catalog::{collect_scanned_tables, physical::Catalog, resolve_table_references},
+    catalog::{collect_scanned_tables, resolve_table_references},
     config::Config,
     query_context::{parse_sql, Error as CoreError, QueryContext},
-    BoxError,
 };
-use datafusion::{
-    common::DFSchema, error::DataFusionError, execution::runtime_env::RuntimeEnv,
-    sql::TableReference,
-};
+use datafusion::{common::DFSchema, error::DataFusionError, execution::runtime_env::RuntimeEnv};
 use dataset_store::{DatasetError, DatasetStore};
 use futures::{Stream, StreamExt as _, TryStreamExt};
-use log::debug;
 use std::{pin::Pin, sync::Arc};
 use thiserror::Error;
 
@@ -43,14 +38,8 @@ enum Error {
     #[error("query execution error: {0}")]
     ExecutionError(DataFusionError),
 
-    #[error("SQL parse error: {0}")]
-    SqlParseError(BoxError),
-
-    #[error("dataset '{0}' not found")]
-    DatasetNotFound(String),
-
     #[error("error looking up datasets: {0}")]
-    DatasetStoreError(DatasetError),
+    DatasetStoreError(#[from] DatasetError),
 
     #[error(transparent)]
     CoreError(#[from] CoreError),
@@ -75,11 +64,11 @@ impl From<Error> for Status {
             Error::PbDecodeError(_) => Status::invalid_argument(e.to_string()),
             Error::UnsupportedFlightDescriptorType(_) => Status::invalid_argument(e.to_string()),
             Error::UnsupportedFlightDescriptorCommand(_) => Status::invalid_argument(e.to_string()),
-            Error::DatasetNotFound(_) => Status::not_found(e.to_string()),
+            Error::DatasetStoreError(e) if e.is_not_found() => Status::not_found(e.to_string()),
             Error::DatasetStoreError(_) => Status::internal(e.to_string()),
 
             Error::CoreError(CoreError::InvalidPlan(_)) => Status::invalid_argument(e.to_string()),
-            Error::CoreError(CoreError::SqlParseError(_)) | Error::SqlParseError(_) => {
+            Error::CoreError(CoreError::SqlParseError(_)) => {
                 Status::invalid_argument(e.to_string())
             }
             Error::CoreError(CoreError::PlanEncodingError(_)) => {
@@ -215,10 +204,13 @@ impl Service {
                     // - Build a DataFusion query context with empty tables from that catalog.
                     // - Use that context to plan the SQL query.
                     // - Serialize the plan to bytes using datafusion-protobufs.
-                    let statement = parse_sql(&sql_query.query).map_err(Error::SqlParseError)?;
+                    let statement = parse_sql(&sql_query.query)?;
                     let (tables, _) = resolve_table_references(&statement, true)
                         .map_err(|e| CoreError::SqlParseError(e.into()))?;
-                    let catalog = load_catalog_for_table_refs(tables, &self.config).await?;
+                    let dataset_store = DatasetStore::new(&self.config);
+                    let catalog = dataset_store
+                        .load_catalog_for_table_refs(tables.iter())
+                        .await?;
                     let query_ctx = QueryContext::for_catalog(catalog, self.env.clone()).await?;
                     query_ctx.sql_to_remote_plan(statement).await?
                 } else {
@@ -272,7 +264,10 @@ impl Service {
 
         // The deserialized plan references empty tables, so we need to load the actual tables from the catalog.
         let table_refs = collect_scanned_tables(&plan);
-        let catalog = load_catalog_for_table_refs(table_refs, &self.config).await?;
+        let dataset_store = DatasetStore::new(&self.config);
+        let catalog = dataset_store
+            .load_catalog_for_table_refs(table_refs.iter())
+            .await?;
         let query_ctx = QueryContext::for_catalog(catalog, self.env.clone()).await?;
         let stream = query_ctx.execute_remote_plan(plan).await?;
 
@@ -297,23 +292,4 @@ fn ipc_schema(schema: &DFSchema) -> Bytes {
     let mut bytes = BytesMut::new().writer();
     arrow::ipc::writer::write_message(&mut bytes, encoded, ipc_opts).unwrap();
     bytes.into_inner().into()
-}
-
-async fn load_catalog_for_table_refs(
-    table_refs: impl IntoIterator<Item = TableReference>,
-    config: &Config,
-) -> Result<Catalog, Error> {
-    use Error::*;
-
-    let dataset_store = DatasetStore::new(&config);
-    let catalog = match dataset_store.load_catalog_for_table_refs(table_refs).await {
-        Ok(dataset) => dataset,
-        Err(e) if e.is_not_found() => {
-            debug!("dataset not found, full error: {}", e);
-            return Err(DatasetNotFound(e.dataset.unwrap()));
-        }
-        Err(e) => return Err(Error::DatasetStoreError(e)),
-    };
-
-    Ok(catalog)
 }

@@ -1,3 +1,5 @@
+pub mod sql_datasets;
+
 use core::fmt;
 use std::{collections::BTreeSet, sync::Arc};
 
@@ -76,9 +78,13 @@ impl From<(String, Error)> for DatasetError {
 
 impl fmt::Display for DatasetError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let e = &self.error;
         match &self.dataset {
-            Some(dataset) => write!(f, "error with dataset '{}': {}", dataset, self.error),
-            None => write!(f, "{}", self.error),
+            Some(dataset) if self.is_not_found() => {
+                write!(f, "dataset '{}' not found, full error: {}", dataset, e)
+            }
+            Some(dataset) => write!(f, "error with dataset '{}': {}", dataset, e),
+            None => write!(f, "{}", e),
         }
     }
 }
@@ -181,9 +187,9 @@ impl DatasetStore {
     /// Looks up the datasets for the given table references and loads them into a catalog.
     ///
     /// The
-    pub async fn load_catalog_for_table_refs(
+    pub async fn load_catalog_for_table_refs<'a>(
         &self,
-        table_refs: impl IntoIterator<Item = TableReference>,
+        table_refs: impl Iterator<Item = &'a TableReference>,
     ) -> Result<Catalog, DatasetError> {
         let dataset_names = datasets_from_table_refs(table_refs)?;
         let mut catalog = Catalog::empty();
@@ -199,8 +205,8 @@ impl DatasetStore {
     }
 }
 
-fn datasets_from_table_refs(
-    table_refs: impl IntoIterator<Item = TableReference>,
+fn datasets_from_table_refs<'a>(
+    table_refs: impl Iterator<Item = &'a TableReference>,
 ) -> Result<BTreeSet<String>, DatasetError> {
     let mut dataset_names = BTreeSet::new();
     for t in table_refs {
