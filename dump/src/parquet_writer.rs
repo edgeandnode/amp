@@ -36,7 +36,7 @@ pub struct DatasetWriter {
 }
 
 impl DatasetWriter {
-    pub async fn new(
+    pub fn new(
         dataset_ctx: Arc<QueryContext>,
         opts: ParquetWriterProperties,
         start: BlockNum,
@@ -50,7 +50,7 @@ impl DatasetWriter {
 
         for table in dataset_ctx.catalog().all_tables() {
             tables.insert(table.table_name().to_string(), table.clone());
-            let writer = ParquetWriter::new(&store, table.clone(), opts.clone(), start).await?;
+            let writer = ParquetWriter::new(&store, table.clone(), opts.clone(), start)?;
             writers.insert(table.table_name().to_string(), writer);
         }
         Ok(DatasetWriter {
@@ -81,8 +81,7 @@ impl DatasetWriter {
         if bytes_written >= self.partition_size {
             let physical_table = self.tables.get(table.name.as_str()).unwrap().clone();
             let new_writer =
-                ParquetWriter::new(&self.store, physical_table, self.opts.clone(), block_num)
-                    .await?;
+                ParquetWriter::new(&self.store, physical_table, self.opts.clone(), block_num)?;
             let old_writer = self.writers.insert(table.name.clone(), new_writer).unwrap();
 
             // The `__scanned_ranges` optimization works best if ranges are adjacent, even if the
@@ -165,7 +164,7 @@ pub struct ParquetWriter {
 }
 
 impl ParquetWriter {
-    pub async fn new(
+    pub fn new(
         store: &Store,
         table: PhysicalTable,
         opts: ParquetWriterProperties,

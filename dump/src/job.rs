@@ -69,8 +69,7 @@ async fn run_job_range(
         job.parquet_opts.clone(),
         start,
         job.partition_size,
-    )
-    .await?;
+    )?;
 
     while let Some(dataset_rows) = firehose.recv().await {
         if dataset_rows.is_empty() {
