@@ -117,9 +117,15 @@ impl QueryContext {
         &self.catalog
     }
 
+    pub async fn plan_sql(&self, query: parser::Statement) -> Result<LogicalPlan, Error> {
+        let ctx = self.datafusion_ctx().await?;
+        let plan = sql_to_plan(&ctx, query).await?;
+        Ok(plan)
+    }
+
     /// Security: This function can receive arbitrary SQL, it will check and restrict the `query`.
     pub async fn execute_sql(&self, query: &str) -> Result<SendableRecordBatchStream, Error> {
-        let statement = parse_sql(query).map_err(Error::SqlParseError)?;
+        let statement = parse_sql(query)?;
         let ctx = self.datafusion_ctx().await?;
         let plan = sql_to_plan(&ctx, statement).await?;
         execute_plan(&ctx, plan).await
@@ -257,12 +263,17 @@ impl QueryContext {
         let batch = concat_batches(&schema, &batches).unwrap();
         Ok(batch)
     }
+
+    pub async fn execute_plan(
+        &self,
+        plan: LogicalPlan,
+    ) -> Result<SendableRecordBatchStream, Error> {
+        let ctx = self.datafusion_ctx().await?;
+        execute_plan(&ctx, plan).await
+    }
 }
 
-pub async fn sql_to_plan(
-    ctx: &SessionContext,
-    query: parser::Statement,
-) -> Result<LogicalPlan, Error> {
+async fn sql_to_plan(ctx: &SessionContext, query: parser::Statement) -> Result<LogicalPlan, Error> {
     let plan = ctx
         .state()
         .statement_to_plan(query)
@@ -369,14 +380,17 @@ fn udfs() -> Vec<ScalarUDF> {
     vec![EvmDecode::new().into(), EvmTopic::new().into()]
 }
 
-pub fn parse_sql(sql: &str) -> Result<parser::Statement, BoxError> {
-    let mut statements = parser::DFParser::parse_sql(sql)?;
+pub fn parse_sql(sql: &str) -> Result<parser::Statement, Error> {
+    let mut statements =
+        parser::DFParser::parse_sql(sql).map_err(|e| Error::SqlParseError(e.into()))?;
     if statements.len() != 1 {
-        return Err(format!(
-            "a single SQL statement is expected, found {}",
-            statements.len()
-        )
-        .into());
+        return Err(Error::SqlParseError(
+            format!(
+                "a single SQL statement is expected, found {}",
+                statements.len()
+            )
+            .into(),
+        ));
     }
     let statement = statements.pop_back().unwrap();
     Ok(statement)
