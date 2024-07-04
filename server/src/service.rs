@@ -9,10 +9,10 @@ use datafusion::{
     common::DFSchema, error::DataFusionError, execution::runtime_env::RuntimeEnv,
     sql::TableReference,
 };
-use dataset_store::DatasetStore;
+use dataset_store::{DatasetError, DatasetStore};
 use futures::{Stream, StreamExt as _, TryStreamExt};
 use log::debug;
-use std::{collections::BTreeSet, pin::Pin, sync::Arc};
+use std::{pin::Pin, sync::Arc};
 use thiserror::Error;
 
 use arrow_flight::{
@@ -49,11 +49,8 @@ enum Error {
     #[error("dataset '{0}' not found")]
     DatasetNotFound(String),
 
-    #[error("error accessing definition of dataset '{0}': {1}")]
-    DatasetStoreError(String, dataset_store::Error),
-
-    #[error("error configuring dataset {0}: {1}")]
-    DatasetError(String, BoxError),
+    #[error("error looking up datasets: {0}")]
+    DatasetStoreError(DatasetError),
 
     #[error(transparent)]
     CoreError(#[from] CoreError),
@@ -79,8 +76,7 @@ impl From<Error> for Status {
             Error::UnsupportedFlightDescriptorType(_) => Status::invalid_argument(e.to_string()),
             Error::UnsupportedFlightDescriptorCommand(_) => Status::invalid_argument(e.to_string()),
             Error::DatasetNotFound(_) => Status::not_found(e.to_string()),
-            Error::DatasetStoreError(_, _) => Status::internal(e.to_string()),
-            Error::DatasetError(_, _) => Status::internal(e.to_string()),
+            Error::DatasetStoreError(_) => Status::internal(e.to_string()),
 
             Error::CoreError(CoreError::InvalidPlan(_)) => Status::invalid_argument(e.to_string()),
             Error::CoreError(CoreError::SqlParseError(_)) | Error::SqlParseError(_) => {
@@ -309,48 +305,15 @@ async fn load_catalog_for_table_refs(
 ) -> Result<Catalog, Error> {
     use Error::*;
 
-    let dataset_names = datasets_from_table_refs(table_refs)?;
-    let mut catalog = Catalog::empty();
     let dataset_store = DatasetStore::new(&config);
-    for dataset_name in dataset_names {
-        let dataset = match dataset_store.load_dataset(&dataset_name).await {
-            Ok(dataset) => dataset,
-            Err(e) if e.is_not_found() => {
-                debug!("dataset {} not found, full error: {}", dataset_name, e);
-                return Err(DatasetNotFound(dataset_name));
-            }
-            Err(e) => return Err(DatasetStoreError(dataset_name, e)),
-        };
-
-        // We currently assume all datasets live in the same `data_store`.
-        catalog
-            .register(&dataset, config.data_store.clone())
-            .map_err(|e| DatasetError(dataset_name, e))?;
-    }
-    Ok(catalog)
-}
-
-fn datasets_from_table_refs(
-    table_refs: impl IntoIterator<Item = TableReference>,
-) -> Result<BTreeSet<String>, Error> {
-    let mut dataset_names = BTreeSet::new();
-    for t in table_refs {
-        if t.catalog().is_some() {
-            return Err(Error::SqlParseError(
-                format!(
-                    "found table qualified with catalog '{}', tables must only be qualified with a dataset name",
-                    t.table()
-                )
-                .into(),
-            ));
+    let catalog = match dataset_store.load_catalog_for_table_refs(table_refs).await {
+        Ok(dataset) => dataset,
+        Err(e) if e.is_not_found() => {
+            debug!("dataset not found, full error: {}", e);
+            return Err(DatasetNotFound(e.dataset.unwrap()));
         }
+        Err(e) => return Err(Error::DatasetStoreError(e)),
+    };
 
-        let Some(catalog_schema) = t.schema() else {
-            return Err(Error::SqlParseError(
-                format!("found unqualified table '{}', all tables must be qualified with a dataset name", t.table()).into()
-            ));
-        };
-        dataset_names.insert(catalog_schema.to_string());
-    }
-    Ok(dataset_names)
+    Ok(catalog)
 }

@@ -1750,6 +1750,7 @@ name = "dataset-store"
 version = "0.1.0"
 dependencies = [
  "common",
+ "datafusion",
  "firehose-datasets",
  "object_store 0.10.1",
  "substreams-datasets",
