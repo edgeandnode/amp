@@ -11,6 +11,7 @@ use clap::Parser;
 use common::arrow::array::AsArray as _;
 use common::arrow::datatypes::UInt64Type;
 use common::catalog::physical::Catalog;
+use common::catalog::physical::PhysicalDataset;
 use common::config::Config;
 use common::meta_tables::scanned_ranges::filenames_for_table;
 use common::multirange::MultiRange;
@@ -28,6 +29,7 @@ use job::Job;
 use log::info;
 use log::warn;
 use object_store::path::Path;
+use object_store::ObjectMeta;
 use parquet::basic::{Compression, ZstdLevel};
 use parquet::file::properties::WriterProperties as ParquetWriterProperties;
 
@@ -61,7 +63,7 @@ struct Args {
     /// equal number of blocks. Example: If start = 0, end = 10_000_000 and n_jobs = 10, then each
     /// job will be responsible for a contiguous section of 1 million blocks.
     #[arg(long, short = 'j', default_value = "1", env = "DUMP_N_JOBS")]
-    n_jobs: u8,
+    n_jobs: u16,
 
     /// The size of each partition in MB. Once the size is reached, a new part file is created. This
     /// is based on the estimated in-memory size of the data. The actual on-disk file size will vary,
@@ -97,80 +99,84 @@ async fn main() -> Result<(), BoxError> {
     } else {
         Compression::ZSTD(ZstdLevel::try_new(1).unwrap())
     };
+    let parquet_opts = parquet_opts(compression);
     let (start, end_block) = resolve_block_range(start, end_block)?;
 
     let dataset = dataset_store.load_dataset(&dataset_name).await?;
-    let client = dataset_store.load_client(&dataset_name).await?;
 
     let env = Arc::new(config.make_runtime_env()?);
     let catalog = Catalog::for_dataset(&dataset, config.data_store.clone())?;
     let physical_dataset = catalog.datasets()[0].clone();
     let ctx = Arc::new(QueryContext::for_catalog(catalog, env).await?);
 
-    let existing_blocks = existing_blocks(&ctx).await?;
-    for (table_name, multirange) in &existing_blocks {
+    // Ensure consistency before starting the dump procedure.
+    delete_orphaned_files(&physical_dataset, &ctx).await?;
+
+    // Query the scanned ranges, we might already have some ranges if this is not the first dump run
+    // for this dataset.
+    let scanned_ranges_by_table = scanned_ranges_by_table(&ctx).await?;
+    for (table_name, multirange) in &scanned_ranges_by_table {
         info!(
-            "Existing blocks for table `{}`: {}",
+            "table `{}` has scanned {} blocks in the ranges: {}",
             table_name,
-            multirange.total_len()
+            multirange.total_len(),
+            multirange,
         );
     }
 
-    // As a consistency check, ensure that all previously written are accounted for in
-    // `__scanned_ranges`. If they are not, delete them as that is an inconsistent state.
-    //
-    // See also: scanned-ranges-consistency
-    for table in physical_dataset.tables() {
-        let registered_files = {
-            let f = filenames_for_table(&ctx, table.catalog_schema(), table.table_name()).await?;
-            BTreeSet::from_iter(f.into_iter())
-        };
-
-        let store = config.data_store.prefixed_store();
-        // Unwrap: The table path is syntatically valid.
-        let path = Path::parse(table.path()).unwrap();
-        let stored_files: Vec<_> = store.list(Some(&path)).try_collect().await?;
-        for stored_file in stored_files {
-            // Unwrap: A full object path always has a filename.
-            let filename = stored_file.location.filename().unwrap();
-            if !registered_files.contains(filename) {
-                // Check that this is a file written by a dump job, with name in the format:
-                // "<block_num>.parquet".
-                let is_dump_file = filename.ends_with(".parquet")
-                    && filename.trim_end_matches(".parquet").parse::<u64>().is_ok();
-
-                if is_dump_file {
-                    // This file was written by a dump job but it is not present in `__scanned_ranges`,
-                    // so it is an orphaned file. Delete it.
-                    warn!("Deleting orphaned file: {}", stored_file.location);
-                    store.delete(&stored_file.location).await?;
-                }
-            }
-        }
-    }
-
-    // Find the ranges of blocks that have not been scanned yet, in case we are resuming the dump
-    // process, and split them across jobs as to balance the number of blocks per job.
-    let ranges_to_scan = {
-        let scanned_ranges = scanned_ranges(&ctx).await?;
-        let missing_ranges = scanned_ranges.complement(start, end_block);
-        missing_ranges.split_and_partition(n_jobs as u64, 1000)
+    // This is the intersection of the `__scanned_ranges` for all tables. That is, a range is only
+    // considered scanned if it is scanned for all tables.
+    let scanned_ranges = {
+        let mut scanned_ranges = scanned_ranges_by_table.into_iter().map(|(_, r)| r);
+        let first = scanned_ranges.next().ok_or("no tables")?;
+        let intersection = scanned_ranges.fold(first, |acc, r| acc.intersection(&r));
+        intersection
     };
 
-    let jobs = ranges_to_scan
-        .into_iter()
-        .enumerate()
-        .map(|(i, multirange)| {
-            Arc::new(Job {
-                dataset_ctx: ctx.clone(),
-                block_streamer: client.clone(),
-                multirange,
-                job_id: i as u32,
-                partition_size,
-                parquet_opts: parquet_opts(compression),
-                existing_blocks: existing_blocks.clone(),
-            })
-        });
+    // Find the ranges of blocks that have not been scanned yet for at least one table.
+    let missing_ranges = scanned_ranges.complement(start, end_block);
+
+    run_block_stream_jobs(
+        n_jobs,
+        ctx,
+        &dataset_name,
+        &dataset_store,
+        missing_ranges,
+        partition_size,
+        parquet_opts,
+    )
+    .await?;
+
+    info!("dump completed successfully");
+
+    Ok(())
+}
+
+async fn run_block_stream_jobs(
+    n_jobs: u16,
+    ctx: Arc<QueryContext>,
+    dataset_name: &str,
+    dataset_store: &DatasetStore,
+    ranges: MultiRange,
+    partition_size: u64,
+    parquet_opts: ParquetWriterProperties,
+) -> Result<(), BoxError> {
+    // Split them across the target number of jobs as to balance the number of blocks per job.
+    let multiranges = ranges.split_and_partition(n_jobs as u64, 1000);
+    let client = dataset_store.load_client(dataset_name).await?;
+    let existing_blocks = existing_blocks(&ctx).await?;
+
+    let jobs = multiranges.into_iter().enumerate().map(|(i, multirange)| {
+        Arc::new(Job {
+            dataset_ctx: ctx.clone(),
+            block_streamer: client.clone(),
+            multirange,
+            job_id: i as u32,
+            partition_size,
+            parquet_opts: parquet_opts.clone(),
+            existing_blocks: existing_blocks.clone(),
+        })
+    });
 
     // Spawn the jobs so they run in parallel, terminating early if any job fails.
     let mut join_handles = vec![];
@@ -184,8 +190,6 @@ async fn main() -> Result<(), BoxError> {
     }
 
     try_join_all(join_handles).await?;
-
-    info!("All {} jobs completed successfully", n_jobs);
 
     Ok(())
 }
@@ -257,10 +261,12 @@ async fn existing_blocks(ctx: &QueryContext) -> Result<BTreeMap<String, MultiRan
 
 // This is the intersection of the `__scanned_ranges` for all tables. That is, a range is only
 // considered scanned if it is scanned for all tables.
-async fn scanned_ranges(ctx: &QueryContext) -> Result<MultiRange, BoxError> {
+async fn scanned_ranges_by_table(
+    ctx: &QueryContext,
+) -> Result<BTreeMap<String, MultiRange>, BoxError> {
     use common::meta_tables::scanned_ranges::ranges_for_table;
 
-    let mut multirange_by_table: BTreeMap<String, MultiRange> = BTreeMap::default();
+    let mut multirange_by_table = BTreeMap::default();
 
     for table in ctx.catalog().all_tables() {
         let table_name = table.table_name().to_string();
@@ -269,10 +275,59 @@ async fn scanned_ranges(ctx: &QueryContext) -> Result<MultiRange, BoxError> {
         multirange_by_table.insert(table_name, multi_range);
     }
 
-    let mut scanned_ranges = multirange_by_table.into_iter().map(|(_, r)| r);
-    let first = scanned_ranges.next().ok_or("no tables")?;
-    let intersection = scanned_ranges.fold(first, |acc, r| acc.intersection(&r));
-    Ok(intersection)
+    Ok(multirange_by_table)
+}
+
+// As a consistency check, ensure that all previously written are accounted for in
+// `__scanned_ranges`. If they are not, delete them as that is an inconsistent state.
+//
+// See also: scanned-ranges-consistency
+async fn delete_orphaned_files(
+    physical_dataset: &PhysicalDataset,
+    ctx: &QueryContext,
+) -> Result<(), BoxError> {
+    for table in physical_dataset.tables() {
+        let registered_files = {
+            let f = filenames_for_table(&ctx, table.catalog_schema(), table.table_name()).await?;
+            BTreeSet::from_iter(f.into_iter())
+        };
+
+        let store = physical_dataset.data_store().prefixed_store();
+
+        // Unwrap: The table path is syntatically valid.
+        let path = Path::parse(table.path()).unwrap();
+
+        // Check that this is a file written by a dump job, with name in the format:
+        // "<block_num>.parquet".
+        let is_dump_file = |filename: &str| {
+            filename.ends_with(".parquet")
+                && filename.trim_end_matches(".parquet").parse::<u64>().is_ok()
+        };
+
+        // Collect all stored filse whose filename matches `is_dump_file`.
+        let stored_files: Vec<ObjectMeta> = store
+            .list(Some(&path))
+            .try_collect::<Vec<ObjectMeta>>()
+            .await?
+            .into_iter()
+            .filter(|f| f.location.filename().is_some_and(is_dump_file))
+            .collect();
+
+        for stored_file in stored_files {
+            // Unwrap: A full object path always has a filename.
+            let filename = stored_file.location.filename().unwrap();
+
+            if !registered_files.contains(filename) {
+                // This file was written by a dump job but it is not present in `__scanned_ranges`,
+                // so it is an orphaned file. Delete it.
+                warn!("Deleting orphaned file: {}", stored_file.location);
+                store.delete(&stored_file.location).await?;
+            }
+        }
+
+        // TODO: Check for files in `__scanned_ranges` that do not exist in the store.
+    }
+    Ok(())
 }
 
 #[cfg(test)]
