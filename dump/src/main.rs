@@ -304,28 +304,35 @@ async fn delete_orphaned_files(
                 && filename.trim_end_matches(".parquet").parse::<u64>().is_ok()
         };
 
-        // Collect all stored filse whose filename matches `is_dump_file`.
-        let stored_files: Vec<ObjectMeta> = store
+        // Collect all stored files whose filename matches `is_dump_file`.
+        let stored_files: BTreeMap<String, ObjectMeta> = store
             .list(Some(&path))
             .try_collect::<Vec<ObjectMeta>>()
             .await?
             .into_iter()
-            .filter(|f| f.location.filename().is_some_and(is_dump_file))
+            // Unwrap: A full object path always has a filename.
+            .map(|f| (f.location.filename().unwrap().to_string(), f))
+            .filter(|(filename, _)| is_dump_file(filename))
             .collect();
 
-        for stored_file in stored_files {
-            // Unwrap: A full object path always has a filename.
-            let filename = stored_file.location.filename().unwrap();
-
+        for (filename, object_meta) in &stored_files {
             if !registered_files.contains(filename) {
                 // This file was written by a dump job but it is not present in `__scanned_ranges`,
                 // so it is an orphaned file. Delete it.
-                warn!("Deleting orphaned file: {}", stored_file.location);
-                store.delete(&stored_file.location).await?;
+                warn!("Deleting orphaned file: {}", object_meta.location);
+                store.delete(&object_meta.location).await?;
             }
         }
 
-        // TODO: Check for files in `__scanned_ranges` that do not exist in the store.
+        // Check for files in `__scanned_ranges` that do not exist in the store.
+        for filename in registered_files {
+            if !stored_files.contains_key(&filename) {
+                return Err(format!(
+                    "The dataset is corrupted, file in __scanned_ranges does not exist in store: {}",
+                    filename
+                ).into());
+            }
+        }
     }
     Ok(())
 }
