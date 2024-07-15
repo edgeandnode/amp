@@ -13,10 +13,62 @@ use common::{
     meta_tables::scanned_ranges,
     multirange::MultiRange,
     query_context::{parse_sql, Error as CoreError},
-    BlockNum, BoxError, QueryContext, BLOCK_NUM,
+    BlockNum, BoxError, Dataset, Table, BLOCK_NUM,
 };
+use futures::StreamExt as _;
+use object_store::ObjectMeta;
+use serde::Deserialize;
 
 use crate::DatasetStore;
+
+pub const DATASET_KIND: &str = "sql";
+
+#[derive(Debug, Deserialize)]
+pub(super) struct DatasetDef {
+    pub kind: String,
+    pub name: String,
+}
+
+pub(super) async fn dataset(
+    store: Arc<DatasetStore>,
+    dataset_def: toml::Value,
+) -> Result<Dataset, BoxError> {
+    let def: DatasetDef = dataset_def.try_into()?;
+    if def.kind != DATASET_KIND {
+        return Err(format!("expected dataset kind '{DATASET_KIND}', got '{}'", def.kind).into());
+    }
+
+    let defs_store = store.dataset_defs_store();
+    let mut files = defs_store.list(def.name.clone());
+
+    // List all `.sql` files in the dataset dir and infer the output schema to get `Table`s.
+    let mut tables: Vec<Table> = vec![];
+    while let Some(file) = files.next().await {
+        let file: ObjectMeta = file?;
+
+        // Unwrap: Listed paths are always files.
+        let filename = file.location.filename().unwrap();
+        let Some(table_name) = filename.strip_suffix(".sql") else {
+            continue;
+        };
+
+        let raw_query = defs_store.get_string(file.location.clone()).await?;
+        let query = parse_sql(&raw_query)?;
+        let env = Arc::new(store.config.make_runtime_env()?);
+        let ctx = store.clone().ctx_for_sql(&query, env).await?;
+        let schema = ctx.sql_output_schema(query).await?;
+        let table = Table {
+            name: table_name.to_string(),
+            schema: schema.as_ref().clone().into(),
+        };
+        tables.push(table);
+    }
+
+    Ok(Dataset {
+        name: def.name,
+        tables,
+    })
+}
 
 /// This will:
 /// - Plan the query against the configured datasets.
@@ -27,7 +79,7 @@ use crate::DatasetStore;
 /// - Execute the plan.
 async fn execute_query_for_range(
     query: &str,
-    dataset_store: DatasetStore,
+    dataset_store: Arc<DatasetStore>,
     env: Arc<RuntimeEnv>,
     start: BlockNum,
     end: BlockNum,
@@ -35,10 +87,7 @@ async fn execute_query_for_range(
     let statement = parse_sql(query)?;
     let (tables, _) = resolve_table_references(&statement, true)
         .map_err(|e| CoreError::SqlParseError(e.into()))?;
-    let catalog = dataset_store
-        .load_catalog_for_table_refs(tables.iter())
-        .await?;
-    let ctx = QueryContext::for_catalog(catalog, env.clone()).await?;
+    let ctx = dataset_store.ctx_for_sql(&statement, env).await?;
 
     // Validate dependency scanned ranges
     for table in tables {

@@ -4,10 +4,17 @@ use core::fmt;
 use std::{collections::BTreeSet, sync::Arc};
 
 use common::{
-    catalog::physical::Catalog, config::Config, store::StoreError, BlockStreamer, BoxError,
-    Dataset, Store,
+    catalog::{physical::Catalog, resolve_table_references},
+    config::Config,
+    store::StoreError,
+    BlockStreamer, BoxError, Dataset, QueryContext, Store,
 };
-use datafusion::sql::TableReference;
+use datafusion::{
+    execution::runtime_env::RuntimeEnv,
+    sql::{parser, TableReference},
+};
+use futures::{future::BoxFuture, FutureExt as _, TryFutureExt as _};
+use serde::Deserialize;
 use thiserror::Error;
 use tokio::sync::mpsc;
 
@@ -19,17 +26,23 @@ enum Error {
     #[error("TOML parse error: {0}")]
     Toml(#[from] toml::de::Error),
 
-    #[error("kind parse error: {0}")]
-    KindParseError(&'static str),
-
     #[error("unsupported dataset kind '{0}'")]
     UnsupportedKind(String),
+
+    #[error("dataset field 'name = \"{0}\"' does not match filename '{1}'")]
+    NameMismatch(String, String),
 
     #[error("unsupported table name: {0}")]
     UnsupportedName(BoxError),
 
     #[error("firehose error: {0}")]
     FirehoseError(#[from] firehose_datasets::Error),
+
+    #[error("error loading sql dataset: {0}")]
+    SqlDatasetError(BoxError),
+
+    #[error("{0}")]
+    Unknown(BoxError),
 }
 
 #[derive(Debug, Error)]
@@ -45,6 +58,13 @@ impl DatasetError {
         Self {
             dataset: None,
             error,
+        }
+    }
+
+    fn unknown(error: impl Into<BoxError>) -> Self {
+        Self {
+            dataset: None,
+            error: Error::Unknown(error.into()),
         }
     }
 
@@ -90,36 +110,28 @@ impl fmt::Display for DatasetError {
 }
 
 pub struct DatasetStore {
-    dataset_defs_store: Arc<Store>,
-    providers_store: Arc<Store>,
-    data_store: Arc<Store>,
+    config: Arc<Config>,
 }
 
 impl DatasetStore {
-    pub fn new(config: &Config) -> Self {
-        let dataset_defs_store = config.dataset_defs_store.clone();
-        let providers_store = config.providers_store.clone();
-        let data_store = config.data_store.clone();
-
-        Self {
-            dataset_defs_store,
-            providers_store,
-            data_store,
-        }
+    pub fn new(config: Arc<Config>) -> Arc<Self> {
+        Arc::new(Self { config })
     }
 
-    pub async fn load_dataset(&self, dataset: &str) -> Result<Dataset, DatasetError> {
-        self.load_dataset_inner(dataset)
+    pub async fn load_dataset(self: &Arc<Self>, dataset: &str) -> Result<Dataset, DatasetError> {
+        self.clone()
+            .load_dataset_inner(dataset)
             .await
             .map_err(|e| (dataset, e).into())
     }
 
-    async fn load_dataset_inner(&self, dataset_name: &str) -> Result<Dataset, Error> {
+    async fn load_dataset_inner(self: Arc<Self>, dataset_name: &str) -> Result<Dataset, Error> {
         let (kind, dataset_toml) = self.kind_and_dataset(&dataset_name).await?;
 
         let dataset = match kind.as_str() {
             firehose_datasets::DATASET_KIND => firehose_datasets::evm::dataset(dataset_toml)?,
             substreams_datasets::DATASET_KIND => substreams_datasets::dataset(dataset_toml).await?,
+            sql_datasets::DATASET_KIND => self.sql_dataset(dataset_toml).await?,
             _ => return Err(Error::UnsupportedKind(kind)),
         };
 
@@ -159,11 +171,11 @@ impl DatasetStore {
 
         match kind.as_str() {
             firehose_datasets::DATASET_KIND => {
-                let client = firehose_datasets::Client::new(toml, &self.providers_store).await?;
+                let client = firehose_datasets::Client::new(toml, self.providers_store()).await?;
                 Ok(BlockStreamClient::Firehose(client))
             }
             substreams_datasets::DATASET_KIND => {
-                let client = substreams_datasets::Client::new(toml, &self.providers_store).await?;
+                let client = substreams_datasets::Client::new(toml, self.providers_store()).await?;
                 Ok(BlockStreamClient::Substreams(client))
             }
             _ => Err(Error::UnsupportedKind(kind)),
@@ -173,22 +185,46 @@ impl DatasetStore {
     async fn kind_and_dataset(&self, dataset_name: &str) -> Result<(String, toml::Value), Error> {
         use Error::*;
 
+        /// All dataset definitions must have a kind and name. The name must match the filename.
+        #[derive(Deserialize)]
+        struct CommonFields {
+            kind: String,
+            name: String,
+        }
+
         let filename = format!("{}.toml", dataset_name);
-        let raw_dataset = self.dataset_defs_store.get_string(filename).await?;
+        let raw_dataset = self.dataset_defs_store().get_string(filename).await?;
         let dataset_def: toml::Value = toml::from_str(&raw_dataset)?;
-        let kind = dataset_def
-            .get("kind")
-            .ok_or(KindParseError("missing 'kind' field in dataset definiton"))?
-            .as_str()
-            .ok_or(KindParseError("expected 'kind' field to be a string"))?;
-        Ok((kind.to_string(), dataset_def))
+        let common_fields = CommonFields::deserialize(dataset_def.clone())?;
+        if common_fields.name != dataset_name {
+            return Err(NameMismatch(common_fields.name, dataset_name.to_string()));
+        }
+
+        Ok((common_fields.kind.to_string(), dataset_def))
+    }
+
+    /// Creates a `QueryContext` for a SQL query, this will infer and load any dependencies. The
+    /// procedure is:
+    ///
+    /// 1. Collect table references in the query.
+    /// 2. Assume that in `foo.bar`, `foo` is a dataset name.
+    /// 3. Look up the dataset names in the configured dataset store.
+    /// 4. Collect the datasets into a catalog.
+    pub async fn ctx_for_sql(
+        self: Arc<Self>,
+        query: &parser::Statement,
+        env: Arc<RuntimeEnv>,
+    ) -> Result<QueryContext, DatasetError> {
+        let (tables, _) = resolve_table_references(&query, true).map_err(DatasetError::unknown)?;
+        let catalog = self.load_catalog_for_table_refs(tables.iter()).await?;
+        QueryContext::for_catalog(catalog, env.clone()).map_err(DatasetError::unknown)
     }
 
     /// Looks up the datasets for the given table references and loads them into a catalog.
     ///
     /// The
     pub async fn load_catalog_for_table_refs<'a>(
-        &self,
+        self: Arc<Self>,
         table_refs: impl Iterator<Item = &'a TableReference>,
     ) -> Result<Catalog, DatasetError> {
         let dataset_names = datasets_from_table_refs(table_refs)?;
@@ -198,10 +234,28 @@ impl DatasetStore {
 
             // We currently assume all datasets live in the same `data_store`.
             catalog
-                .register(&dataset, self.data_store.clone())
+                .register(&dataset, self.config.data_store.clone())
                 .map_err(|e| (dataset_name, Error::UnsupportedName(e)))?;
         }
         Ok(catalog)
+    }
+
+    /// Each `.sql` file in the directory with the same name as the dataset will be loaded as a table.
+    fn sql_dataset(
+        self: Arc<Self>,
+        dataset_def: toml::Value,
+    ) -> BoxFuture<'static, Result<Dataset, Error>> {
+        sql_datasets::dataset(self, dataset_def)
+            .map_err(Error::SqlDatasetError)
+            .boxed()
+    }
+
+    fn providers_store(&self) -> &Arc<Store> {
+        &self.config.providers_store
+    }
+
+    fn dataset_defs_store(&self) -> &Arc<Store> {
+        &self.config.dataset_defs_store
     }
 }
 

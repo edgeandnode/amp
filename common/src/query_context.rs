@@ -34,6 +34,7 @@ use thiserror::Error;
 use url::Url;
 
 use crate::catalog::physical::{Catalog, PhysicalTable};
+use crate::catalog::resolve_table_references;
 use crate::evm::udfs::{EvmDecode, EvmTopic};
 use crate::{arrow, BoxError, Store};
 
@@ -72,11 +73,11 @@ pub struct QueryContext {
 }
 
 impl QueryContext {
-    pub async fn empty(env: Arc<RuntimeEnv>) -> Result<Self, Error> {
-        Self::for_catalog(Catalog::empty(), env).await
+    pub fn empty(env: Arc<RuntimeEnv>) -> Result<Self, Error> {
+        Self::for_catalog(Catalog::empty(), env)
     }
 
-    pub async fn for_catalog(catalog: Catalog, env: Arc<RuntimeEnv>) -> Result<Self, Error> {
+    pub fn for_catalog(catalog: Catalog, env: Arc<RuntimeEnv>) -> Result<Self, Error> {
         // This contains various tuning options for the query engine.
         // Using `from_env` allows tinkering without re-compiling.
         let mut session_config = SessionConfig::from_env().map_err(Error::ConfigError)?;
@@ -107,14 +108,18 @@ impl QueryContext {
             catalog,
         };
 
-        // Do a 'dry run' to ensure the dataset is correctly configured.
-        this.datafusion_ctx().await?;
-
         Ok(this)
     }
 
     pub fn catalog(&self) -> &Catalog {
         &self.catalog
+    }
+
+    /// Infers the output schema of the query by planning it against empty tables
+    pub async fn sql_output_schema(&self, query: parser::Statement) -> Result<DFSchemaRef, Error> {
+        let ctx = self.datafusion_ctx_inner(false).await?;
+        let plan = sql_to_plan(&ctx, query).await?;
+        Ok(plan.schema().clone())
     }
 
     pub async fn plan_sql(&self, query: parser::Statement) -> Result<LogicalPlan, Error> {
@@ -139,7 +144,7 @@ impl QueryContext {
         &self,
         query: parser::Statement,
     ) -> Result<(Bytes, DFSchemaRef), Error> {
-        let ctx = self.datafusion_ctx_for_remote_plan().await?;
+        let ctx = self.datafusion_ctx_inner(false).await?;
         let plan = sql_to_plan(&ctx, query).await?;
         let schema = plan.schema().clone();
         let serialized_plan = logical_plan_to_bytes_with_extension_codec(&plan, &EmptyTableCodec)
@@ -182,12 +187,8 @@ impl QueryContext {
         self.datafusion_ctx_inner(true).await
     }
 
-    /// This will create empty in-memory tables, as it assumes the plan will be serialized to be
-    /// executed remotely and therefore does not need to access the local data.
-    async fn datafusion_ctx_for_remote_plan(&self) -> Result<SessionContext, Error> {
-        self.datafusion_ctx_inner(false).await
-    }
-
+    /// If `external_tables` is `false`, This will create empty in-memory tables, so the context will
+    /// be able to plan queries but will be useless for executing them.
     async fn datafusion_ctx_inner(&self, external_tables: bool) -> Result<SessionContext, Error> {
         let ctx = SessionContext::new_with_config_rt(self.session_config.clone(), self.env.clone());
 

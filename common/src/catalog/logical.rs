@@ -6,7 +6,6 @@ use crate::BLOCK_NUM;
 #[derive(Clone, Debug)]
 pub struct Dataset {
     pub name: String,
-    pub network: String,
     pub tables: Vec<Table>,
 }
 

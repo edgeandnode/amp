@@ -91,8 +91,8 @@ async fn main() -> Result<(), BoxError> {
         dataset: dataset_name,
     } = args;
 
-    let config = Config::load(config_path)?;
-    let dataset_store = DatasetStore::new(&config);
+    let config = Arc::new(Config::load(config_path)?);
+    let dataset_store = DatasetStore::new(config.clone());
     let partition_size = partition_size_mb * 1024 * 1024;
     let compression = if disable_compression {
         parquet::basic::Compression::UNCOMPRESSED
@@ -107,7 +107,7 @@ async fn main() -> Result<(), BoxError> {
     let env = Arc::new(config.make_runtime_env()?);
     let catalog = Catalog::for_dataset(&dataset, config.data_store.clone())?;
     let physical_dataset = catalog.datasets()[0].clone();
-    let ctx = Arc::new(QueryContext::for_catalog(catalog, env).await?);
+    let ctx = Arc::new(QueryContext::for_catalog(catalog, env)?);
 
     // Ensure consistency before starting the dump procedure.
     delete_orphaned_files(&physical_dataset, &ctx).await?;

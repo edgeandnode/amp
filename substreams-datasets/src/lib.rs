@@ -24,7 +24,6 @@ pub async fn dataset(dataset_cfg: toml::Value) -> Result<Dataset, Error> {
 
     Ok(Dataset {
         name: dataset_def.name,
-        network: package.network,
         tables: tables.tables,
     })
 }
