@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::{net::SocketAddr, sync::Arc};
 
 use arrow_flight::flight_service_server::FlightServiceServer;
 use common::{config::Config, tracing, BoxError};
@@ -25,7 +25,7 @@ async fn main() -> Result<(), BoxError> {
         !config.spill_location.is_empty()
     );
 
-    let service = service::Service::new(config)?;
+    let service = service::Service::new(Arc::new(config))?;
 
     let addr: SocketAddr = ([0, 0, 0, 0], 1602).into();
 

@@ -3,9 +3,10 @@ use std::{path::PathBuf, sync::Arc};
 use bytes::Bytes;
 use datafusion::prelude::SessionContext;
 use fs_err as fs;
+use futures::{stream::BoxStream, StreamExt, TryStreamExt};
 use object_store::{
     aws::AmazonS3Builder, gcp::GoogleCloudStorageBuilder, local::LocalFileSystem, path::Path,
-    prefix::PrefixStore, ObjectStore,
+    prefix::PrefixStore, ObjectMeta, ObjectStore,
 };
 use url::Url;
 
@@ -89,6 +90,13 @@ impl Store {
         let path = location.into();
         let bytes = self.get_bytes(path.clone()).await?;
         String::from_utf8(bytes.to_vec()).map_err(|_| StoreError::NotUtf8(path.to_string()))
+    }
+
+    pub fn list(&self, prefix: impl Into<Path>) -> BoxStream<'_, Result<ObjectMeta, StoreError>> {
+        self.store
+            .list(Some(&prefix.into()))
+            .map_err(|e| e.into())
+            .boxed()
     }
 }
 

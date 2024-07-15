@@ -55,7 +55,7 @@ async fn test_deserialize() {
     let dataset_def: toml::Value = toml::from_str(
         &String::from_utf8(
             dataset_store
-                .get_bytes("dataset_example.toml")
+                .get_bytes("example_firehose.toml")
                 .await
                 .unwrap()
                 .to_vec(),

@@ -12,3 +12,5 @@ toml.workspace = true
 thiserror.workspace = true
 object_store.workspace = true
 datafusion.workspace = true
+serde.workspace = true
+futures.workspace = true

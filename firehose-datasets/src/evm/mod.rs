@@ -9,7 +9,6 @@ pub fn dataset(dataset_cfg: toml::Value) -> Result<Dataset, Error> {
     let dataset_def: DatasetDef = dataset_cfg.try_into()?;
     Ok(Dataset {
         name: dataset_def.name,
-        network: dataset_def.network,
         tables: tables::all(),
     })
 }
@@ -26,7 +25,6 @@ async fn print_schema_to_readme() {
 
     let dataset = Dataset {
         name: "test_dataset".to_string(),
-        network: "whatever".to_string(),
         tables: tables::all(),
     };
     let config = Config::in_memory();
@@ -34,7 +32,7 @@ async fn print_schema_to_readme() {
     let env = Arc::new((config.make_runtime_env()).unwrap());
     let mut catalog = Catalog::empty();
     catalog.register(&dataset, config.data_store).unwrap();
-    let context = QueryContext::for_catalog(catalog, env).await.unwrap();
+    let context = QueryContext::for_catalog(catalog, env).unwrap();
 
     let mut out = String::new();
     writeln!(out, "# Schema").unwrap();

@@ -57,8 +57,8 @@ async fn main() -> Result<(), BoxError> {
         n_jobs,
     } = args;
 
-    let config = Config::load(config_path)?;
-    let dataset_store = DatasetStore::new(&config);
+    let config = Arc::new(Config::load(config_path)?);
+    let dataset_store = DatasetStore::new(config.clone());
 
     if end_block == 0 {
         return Err("The end block number must be greater than 0".into());
@@ -77,8 +77,8 @@ async fn main() -> Result<(), BoxError> {
     let client = dataset_store.load_client(&dataset_name).await?;
 
     let env = Arc::new((config.make_runtime_env())?);
-    let catalog = Catalog::for_dataset(&dataset, config.data_store)?;
-    let ctx = Arc::new(QueryContext::for_catalog(catalog, env).await?);
+    let catalog = Catalog::for_dataset(&dataset, config.data_store.clone())?;
+    let ctx = Arc::new(QueryContext::for_catalog(catalog, env)?);
     let total_blocks = end_block - start + 1;
     let ui_handle = tokio::spawn(ui::ui(total_blocks, metrics.clone()));
 

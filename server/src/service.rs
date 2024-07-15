@@ -1,6 +1,6 @@
 use common::{
     arrow::{self, ipc::writer::IpcDataGenerator},
-    catalog::{collect_scanned_tables, resolve_table_references},
+    catalog::collect_scanned_tables,
     config::Config,
     query_context::{parse_sql, Error as CoreError, QueryContext},
 };
@@ -89,12 +89,12 @@ impl From<Error> for Status {
 }
 
 pub(super) struct Service {
-    config: Config,
+    config: Arc<Config>,
     env: Arc<RuntimeEnv>,
 }
 
 impl Service {
-    pub fn new(config: Config) -> Result<Self, DataFusionError> {
+    pub fn new(config: Arc<Config>) -> Result<Self, DataFusionError> {
         let env = Arc::new(config.make_runtime_env()?);
         Ok(Self { config, env })
     }
@@ -197,22 +197,14 @@ impl Service {
                     // The magic that turns a SQL string into a DataFusion logical plan that can be
                     // sent back over the wire:
                     // - Parse the SQL query.
-                    // - Collect table references in the query.
-                    // - Assume that in `foo.bar`, `foo` is a dataset name.
-                    // - Look up those dataset names in the configured dataset store.
-                    // - Collect those datasets into a catalog.
+                    // - Infer depedencies and collect them into a catalog.
                     // - Build a DataFusion query context with empty tables from that catalog.
                     // - Use that context to plan the SQL query.
                     // - Serialize the plan to bytes using datafusion-protobufs.
-                    let statement = parse_sql(&sql_query.query)?;
-                    let (tables, _) = resolve_table_references(&statement, true)
-                        .map_err(|e| CoreError::SqlParseError(e.into()))?;
-                    let dataset_store = DatasetStore::new(&self.config);
-                    let catalog = dataset_store
-                        .load_catalog_for_table_refs(tables.iter())
-                        .await?;
-                    let query_ctx = QueryContext::for_catalog(catalog, self.env.clone()).await?;
-                    query_ctx.sql_to_remote_plan(statement).await?
+                    let query = parse_sql(&sql_query.query)?;
+                    let dataset_store = DatasetStore::new(self.config.clone());
+                    let query_ctx = dataset_store.ctx_for_sql(&query, self.env.clone()).await?;
+                    query_ctx.sql_to_remote_plan(query).await?
                 } else {
                     return Err(Error::UnsupportedFlightDescriptorCommand(msg.type_url));
                 }
@@ -259,16 +251,16 @@ impl Service {
     async fn do_get(&self, ticket: arrow_flight::Ticket) -> Result<TonicStream<FlightData>, Error> {
         //  DataFusion requires a context for initially deserializing a logical plan. That context is used a
         // `FunctionRegistry` for UDFs. So using a `QueryContext::empty` works as that includes UDFs.
-        let ctx = QueryContext::empty(self.env.clone()).await?;
+        let ctx = QueryContext::empty(self.env.clone())?;
         let plan = ctx.plan_from_bytes(&ticket.ticket).await?;
 
         // The deserialized plan references empty tables, so we need to load the actual tables from the catalog.
         let table_refs = collect_scanned_tables(&plan);
-        let dataset_store = DatasetStore::new(&self.config);
+        let dataset_store = DatasetStore::new(self.config.clone());
         let catalog = dataset_store
             .load_catalog_for_table_refs(table_refs.iter())
             .await?;
-        let query_ctx = QueryContext::for_catalog(catalog, self.env.clone()).await?;
+        let query_ctx = QueryContext::for_catalog(catalog, self.env.clone())?;
         let stream = query_ctx.execute_remote_plan(plan).await?;
 
         Ok(FlightDataEncoderBuilder::new()
