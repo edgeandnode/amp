@@ -23,6 +23,7 @@ pub async fn dataset(dataset_cfg: toml::Value) -> Result<Dataset, Error> {
         .map_err(|_| Error::AssertFail("failed to build tables from spkg".into()))?;
 
     Ok(Dataset {
+        kind: dataset_def.kind,
         name: dataset_def.name,
         tables: tables.tables,
     })

@@ -1,4 +1,7 @@
-use std::sync::Arc;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
 use datafusion::{
     common::tree_node::{Transformed, TreeNode},
@@ -6,6 +9,7 @@ use datafusion::{
     error::DataFusionError,
     execution::{runtime_env::RuntimeEnv, SendableRecordBatchStream},
     logical_expr::{col, lit, Filter, LogicalPlan, Sort, TableScan},
+    sql::parser,
 };
 
 use common::{
@@ -21,6 +25,13 @@ use serde::Deserialize;
 
 use crate::DatasetStore;
 
+pub struct SqlDataset {
+    pub dataset: Dataset,
+
+    /// Maps a table name to the query that defines that table.
+    pub queries: BTreeMap<String, parser::Statement>,
+}
+
 pub const DATASET_KIND: &str = "sql";
 
 #[derive(Debug, Deserialize)]
@@ -32,7 +43,7 @@ pub(super) struct DatasetDef {
 pub(super) async fn dataset(
     store: Arc<DatasetStore>,
     dataset_def: toml::Value,
-) -> Result<Dataset, BoxError> {
+) -> Result<SqlDataset, BoxError> {
     let def: DatasetDef = dataset_def.try_into()?;
     if def.kind != DATASET_KIND {
         return Err(format!("expected dataset kind '{DATASET_KIND}', got '{}'", def.kind).into());
@@ -43,6 +54,7 @@ pub(super) async fn dataset(
 
     // List all `.sql` files in the dataset dir and infer the output schema to get `Table`s.
     let mut tables: Vec<Table> = vec![];
+    let mut queries: BTreeMap<String, parser::Statement> = BTreeMap::new();
     while let Some(file) = files.next().await {
         let file: ObjectMeta = file?;
 
@@ -56,17 +68,35 @@ pub(super) async fn dataset(
         let query = parse_sql(&raw_query)?;
         let env = Arc::new(store.config.make_runtime_env()?);
         let ctx = store.clone().ctx_for_sql(&query, env).await?;
-        let schema = ctx.sql_output_schema(query).await?;
+        let schema = ctx.sql_output_schema(query.clone()).await?;
+        let network = {
+            let tables = ctx.catalog().all_tables().into_iter();
+            let mut networks: BTreeSet<_> = tables.map(|t| t.network()).collect();
+            if networks.len() > 1 {
+                return Err(format!(
+                    "table {} has dependencies in multiple networks: {:?}",
+                    table_name, networks
+                )
+                .into());
+            }
+            networks.pop_first().unwrap().to_string()
+        };
         let table = Table {
             name: table_name.to_string(),
             schema: schema.as_ref().clone().into(),
+            network,
         };
         tables.push(table);
+        queries.insert(table_name.to_string(), query);
     }
 
-    Ok(Dataset {
-        name: def.name,
-        tables,
+    Ok(SqlDataset {
+        dataset: Dataset {
+            kind: def.kind,
+            name: def.name,
+            tables,
+        },
+        queries,
     })
 }
 

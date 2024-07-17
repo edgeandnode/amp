@@ -171,11 +171,7 @@ impl ParquetWriter {
         start: BlockNum,
     ) -> Result<ParquetWriter, BoxError> {
         let path = Path::parse(path_for_part(table.path(), start))?;
-
         let object_writer = BufWriter::new(store.prefixed_store(), path.clone());
-
-        // Watch https://github.com/apache/arrow-datafusion/issues/9493 for a higher level, parallel
-        // API for parquet writing.
         let writer = AsyncArrowWriter::try_new(object_writer, table.schema(), Some(opts))?;
         Ok(ParquetWriter {
             writer,

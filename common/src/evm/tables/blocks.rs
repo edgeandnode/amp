@@ -14,10 +14,11 @@ lazy_static::lazy_static! {
     static ref SCHEMA: SchemaRef = Arc::new(schema());
 }
 
-pub fn table() -> Table {
+pub fn table(network: String) -> Table {
     Table {
         name: TABLE_NAME.to_string(),
         schema: SCHEMA.clone(),
+        network,
     }
 }
 
@@ -174,7 +175,7 @@ impl BlockRowsBuilder {
         self.base_fee_per_gas.append_option(*base_fee_per_gas);
     }
 
-    pub fn build(self) -> Result<TableRows, ArrowError> {
+    pub fn build(self, network: String) -> Result<TableRows, ArrowError> {
         let Self {
             mut block_num,
             mut timestamp,
@@ -215,7 +216,7 @@ impl BlockRowsBuilder {
             Arc::new(base_fee_per_gas.finish()),
         ];
 
-        TableRows::new(table(), columns)
+        TableRows::new(table(network), columns)
     }
 }
 
@@ -225,7 +226,7 @@ fn default_to_arrow() {
     let rows = {
         let mut builder = BlockRowsBuilder::with_capacity(1);
         builder.append(&block);
-        builder.build().unwrap()
+        builder.build("test_network".to_string()).unwrap()
     };
     assert_eq!(rows.rows.num_columns(), 17);
     assert_eq!(rows.rows.num_rows(), 1);

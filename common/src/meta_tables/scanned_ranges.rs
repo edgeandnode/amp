@@ -46,6 +46,7 @@ pub fn table() -> Table {
     Table {
         name: TABLE_NAME.to_string(),
         schema: SCHEMA.clone(),
+        network: String::new(),
     }
 }
 

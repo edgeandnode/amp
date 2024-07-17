@@ -165,6 +165,10 @@ impl PhysicalTable {
             .map(|col_name| vec![col(col_name).sort(true, false)])
             .collect()
     }
+
+    pub fn network(&self) -> &str {
+        &self.table.network
+    }
 }
 
 fn validate_name(name: &str) -> Result<(), BoxError> {

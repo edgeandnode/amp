@@ -13,10 +13,11 @@ lazy_static::lazy_static! {
     static ref SCHEMA: SchemaRef = Arc::new(schema());
 }
 
-pub fn table() -> Table {
+pub fn table(network: String) -> Table {
     Table {
         name: TABLE_NAME.to_string(),
         schema: SCHEMA.clone(),
+        network,
     }
 }
 
@@ -226,7 +227,7 @@ impl TransactionRowsBuilder {
         self.end_ordinal.append_value(*end_ordinal);
     }
 
-    pub(crate) fn build(self) -> Result<TableRows, ArrowError> {
+    pub(crate) fn build(self, network: String) -> Result<TableRows, ArrowError> {
         let Self {
             block_hash,
             mut block_num,
@@ -279,7 +280,7 @@ impl TransactionRowsBuilder {
             Arc::new(end_ordinal.finish()),
         ];
 
-        TableRows::new(table(), columns)
+        TableRows::new(table(network), columns)
     }
 }
 
@@ -289,7 +290,7 @@ fn default_to_arrow() {
     let rows = {
         let mut builder = TransactionRowsBuilder::with_capacity(1);
         builder.append(&tx);
-        builder.build().unwrap()
+        builder.build("test_network".to_string()).unwrap()
     };
     assert_eq!(rows.rows.num_columns(), 23);
     assert_eq!(rows.rows.num_rows(), 1);

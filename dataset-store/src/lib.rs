@@ -1,7 +1,7 @@
 pub mod sql_datasets;
 
 use core::fmt;
-use std::{collections::BTreeSet, sync::Arc};
+use std::{collections::BTreeSet, str::FromStr, sync::Arc};
 
 use common::{
     catalog::{physical::Catalog, resolve_table_references},
@@ -15,11 +15,12 @@ use datafusion::{
 };
 use futures::{future::BoxFuture, FutureExt as _, TryFutureExt as _};
 use serde::Deserialize;
+use sql_datasets::SqlDataset;
 use thiserror::Error;
 use tokio::sync::mpsc;
 
 #[derive(Debug, Error)]
-enum Error {
+pub enum Error {
     #[error("failed to fetch: {0}")]
     FetchError(#[from] StoreError),
 
@@ -43,6 +44,46 @@ enum Error {
 
     #[error("{0}")]
     Unknown(BoxError),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DatasetKind {
+    Firehose,
+    Substreams,
+    Sql,
+}
+
+impl DatasetKind {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Firehose => firehose_datasets::DATASET_KIND,
+            Self::Substreams => substreams_datasets::DATASET_KIND,
+            Self::Sql => sql_datasets::DATASET_KIND,
+        }
+    }
+}
+
+impl fmt::Display for DatasetKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Firehose => f.write_str(firehose_datasets::DATASET_KIND),
+            Self::Substreams => f.write_str(substreams_datasets::DATASET_KIND),
+            Self::Sql => f.write_str(sql_datasets::DATASET_KIND),
+        }
+    }
+}
+
+impl FromStr for DatasetKind {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            firehose_datasets::DATASET_KIND => Ok(Self::Firehose),
+            substreams_datasets::DATASET_KIND => Ok(Self::Substreams),
+            sql_datasets::DATASET_KIND => Ok(Self::Sql),
+            k => Err(Error::UnsupportedKind(k.to_string())),
+        }
+    }
 }
 
 #[derive(Debug, Error)]
@@ -131,8 +172,8 @@ impl DatasetStore {
         let dataset = match kind.as_str() {
             firehose_datasets::DATASET_KIND => firehose_datasets::evm::dataset(dataset_toml)?,
             substreams_datasets::DATASET_KIND => substreams_datasets::dataset(dataset_toml).await?,
-            sql_datasets::DATASET_KIND => self.sql_dataset(dataset_toml).await?,
-            _ => return Err(Error::UnsupportedKind(kind)),
+            sql_datasets::DATASET_KIND => self.sql_dataset(dataset_toml).await?.dataset,
+            _ => return Err(Error::UnsupportedKind(kind.to_string())),
         };
 
         Ok(dataset)
@@ -169,20 +210,23 @@ impl DatasetStore {
 
         let (kind, toml) = self.kind_and_dataset(dataset_name).await?;
 
-        match kind.as_str() {
-            firehose_datasets::DATASET_KIND => {
+        match kind {
+            DatasetKind::Firehose => {
                 let client = firehose_datasets::Client::new(toml, self.providers_store()).await?;
                 Ok(BlockStreamClient::Firehose(client))
             }
-            substreams_datasets::DATASET_KIND => {
+            DatasetKind::Substreams => {
                 let client = substreams_datasets::Client::new(toml, self.providers_store()).await?;
                 Ok(BlockStreamClient::Substreams(client))
             }
-            _ => Err(Error::UnsupportedKind(kind)),
+            DatasetKind::Sql => Err(Error::UnsupportedKind(kind.to_string())),
         }
     }
 
-    async fn kind_and_dataset(&self, dataset_name: &str) -> Result<(String, toml::Value), Error> {
+    async fn kind_and_dataset(
+        &self,
+        dataset_name: &str,
+    ) -> Result<(DatasetKind, toml::Value), Error> {
         use Error::*;
 
         /// All dataset definitions must have a kind and name. The name must match the filename.
@@ -199,8 +243,9 @@ impl DatasetStore {
         if common_fields.name != dataset_name {
             return Err(NameMismatch(common_fields.name, dataset_name.to_string()));
         }
+        let kind = DatasetKind::from_str(&common_fields.kind)?;
 
-        Ok((common_fields.kind.to_string(), dataset_def))
+        Ok((kind, dataset_def))
     }
 
     /// Creates a `QueryContext` for a SQL query, this will infer and load any dependencies. The
@@ -244,7 +289,7 @@ impl DatasetStore {
     fn sql_dataset(
         self: Arc<Self>,
         dataset_def: toml::Value,
-    ) -> BoxFuture<'static, Result<Dataset, Error>> {
+    ) -> BoxFuture<'static, Result<SqlDataset, Error>> {
         sql_datasets::dataset(self, dataset_def)
             .map_err(Error::SqlDatasetError)
             .boxed()

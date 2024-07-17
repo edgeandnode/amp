@@ -26,7 +26,10 @@ pub enum ProtobufToRowError {
     ArrowError(#[from] ArrowError),
 }
 
-pub fn protobufs_to_rows(block: pbethereum::Block) -> Result<DatasetRows, ProtobufToRowError> {
+pub fn protobufs_to_rows(
+    block: pbethereum::Block,
+    network: &str,
+) -> Result<DatasetRows, ProtobufToRowError> {
     use ProtobufToRowError::*;
 
     let transaction_count = block.transaction_traces.len();
@@ -194,11 +197,11 @@ pub fn protobufs_to_rows(block: pbethereum::Block) -> Result<DatasetRows, Protob
     let header_row = {
         let mut builder = BlockRowsBuilder::with_capacity(1);
         builder.append(&header);
-        builder.build()?
+        builder.build(network.to_string())?
     };
-    let transactions_rows = transactions.build()?;
-    let calls_rows = calls.build()?;
-    let logs_rows = logs.build()?;
+    let transactions_rows = transactions.build(network.to_string())?;
+    let calls_rows = calls.build(network.to_string())?;
+    let logs_rows = logs.build(network.to_string())?;
 
     Ok(DatasetRows(vec![
         header_row,

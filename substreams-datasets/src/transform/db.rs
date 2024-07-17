@@ -244,25 +244,25 @@ pub(crate) fn package_to_schemas(
         ));
     }
 
-    let tables = sql_to_schemas(sink_config.schema)?;
+    let tables = sql_to_schemas(sink_config.schema, &package.network)?;
 
     Ok(tables)
 }
 
-fn sql_to_schemas(sql: String) -> Result<Vec<Table>, anyhow::Error> {
+fn sql_to_schemas(sql: String, network: &str) -> Result<Vec<Table>, anyhow::Error> {
     let dialect = dialect::GenericDialect {};
 
     let statements = Parser::parse_sql(&dialect, &sql).context("failed to parse SQL")?;
 
     let tables = statements
         .iter()
-        .filter_map(|statement| statement_to_table(statement))
+        .filter_map(|statement| statement_to_table(statement, network))
         .collect();
 
     Ok(tables)
 }
 
-fn statement_to_table(statement: &Statement) -> Option<Table> {
+fn statement_to_table(statement: &Statement, network: &str) -> Option<Table> {
     match statement {
         Statement::CreateTable { name, columns, .. } => {
             let fields = std::iter::once(Field::new(BLOCK_NUM, ArrowDataType::UInt64, false))
@@ -300,6 +300,7 @@ fn statement_to_table(statement: &Statement) -> Option<Table> {
             Some(Table {
                 name: name.to_string(),
                 schema: Arc::new(Schema::new(fields)),
+                network: network.to_string(),
             })
         }
         _ => None,
@@ -349,7 +350,7 @@ CREATE TABLE example_table (
 );"
         .to_string();
 
-        let res = sql_to_schemas(sql);
+        let res = sql_to_schemas(sql, "test_network");
         assert!(res.is_ok());
         println!("{:?}", res.unwrap());
     }

@@ -181,7 +181,7 @@ fn message_to_rows(
     Ok(RecordBatch::try_new(schema, columns)?)
 }
 
-fn field_to_table(field: &FieldDescriptor, pool: &DescriptorPool) -> Option<Table> {
+fn field_to_table(field: &FieldDescriptor, pool: &DescriptorPool, network: &str) -> Option<Table> {
     if !field.is_list() {
         return None;
     }
@@ -225,6 +225,7 @@ fn field_to_table(field: &FieldDescriptor, pool: &DescriptorPool) -> Option<Tabl
     Some(Table {
         name: field.name().to_string(),
         schema: Arc::new(Schema::new(fields)),
+        network: network.to_string(),
     })
 }
 
@@ -244,7 +245,7 @@ pub(crate) fn package_to_schemas(
 
     let tables = message_descriptor
         .fields()
-        .filter_map(|field| field_to_table(&field, &pool))
+        .filter_map(|field| field_to_table(&field, &pool, &package.network))
         .collect::<Vec<_>>();
 
     if tables.is_empty() {
