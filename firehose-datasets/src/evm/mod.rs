@@ -8,8 +8,9 @@ use common::Dataset;
 pub fn dataset(dataset_cfg: toml::Value) -> Result<Dataset, Error> {
     let dataset_def: DatasetDef = dataset_cfg.try_into()?;
     Ok(Dataset {
+        kind: dataset_def.kind,
         name: dataset_def.name,
-        tables: tables::all(),
+        tables: tables::all(&dataset_def.network),
     })
 }
 
@@ -24,8 +25,9 @@ async fn print_schema_to_readme() {
     use std::sync::Arc;
 
     let dataset = Dataset {
+        kind: crate::DATASET_KIND.to_string(),
         name: "test_dataset".to_string(),
-        tables: tables::all(),
+        tables: tables::all("test_network"),
     };
     let config = Config::in_memory();
 

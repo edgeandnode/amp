@@ -34,7 +34,6 @@ use thiserror::Error;
 use url::Url;
 
 use crate::catalog::physical::{Catalog, PhysicalTable};
-use crate::catalog::resolve_table_references;
 use crate::evm::udfs::{EvmDecode, EvmTopic};
 use crate::{arrow, BoxError, Store};
 

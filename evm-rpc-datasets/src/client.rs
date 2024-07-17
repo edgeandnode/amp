@@ -37,16 +37,17 @@ pub enum ToRowError {
 #[derive(Clone)]
 pub struct JsonRpcClient {
     client: HttpClient,
+    network: String,
 }
 
 impl JsonRpcClient {
-    pub fn new(url: &str) -> Result<Self, BoxError> {
+    pub fn new(url: &str, network: String) -> Result<Self, BoxError> {
         let mut content_type = HeaderMap::new();
         content_type.insert("Content-Type", "application/json".parse().unwrap());
         let client = HttpClientBuilder::default()
             .set_headers(content_type)
             .build(url)?;
-        Ok(Self { client })
+        Ok(Self { client, network })
     }
 
     async fn get_block_by_number(&self, block_number: BlockNum) -> Result<Header, RpcError> {
@@ -91,7 +92,7 @@ impl JsonRpcClient {
                 self.get_logs(block_num),
             )?;
 
-            let rows = rpc_to_rows(header, logs)?;
+            let rows = rpc_to_rows(header, logs, &self.network)?;
 
             // Send the block and check if the receiver has gone away.
             if tx.send(rows).await.is_err() {
@@ -113,7 +114,7 @@ impl BlockStreamer for JsonRpcClient {
     }
 }
 
-fn rpc_to_rows(block: Header, logs: Vec<RpcLog>) -> Result<DatasetRows, BoxError> {
+fn rpc_to_rows(block: Header, logs: Vec<RpcLog>, network: &str) -> Result<DatasetRows, BoxError> {
     let header = rpc_header_to_row(block)?;
     let logs = logs
         .into_iter()
@@ -123,7 +124,7 @@ fn rpc_to_rows(block: Header, logs: Vec<RpcLog>) -> Result<DatasetRows, BoxError
     let header_row = {
         let mut builder = BlockRowsBuilder::with_capacity(1);
         builder.append(&header);
-        builder.build()?
+        builder.build(network.to_string())?
     };
 
     let logs_row = {
@@ -131,7 +132,7 @@ fn rpc_to_rows(block: Header, logs: Vec<RpcLog>) -> Result<DatasetRows, BoxError
         for log in logs {
             builder.append(&log);
         }
-        builder.build()?
+        builder.build(network.to_string())?
     };
 
     Ok(DatasetRows(vec![header_row, logs_row]))

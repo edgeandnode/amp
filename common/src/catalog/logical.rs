@@ -5,6 +5,7 @@ use crate::BLOCK_NUM;
 /// Identifies a dataset and its data schema.
 #[derive(Clone, Debug)]
 pub struct Dataset {
+    pub kind: String,
     pub name: String,
     pub tables: Vec<Table>,
 }
@@ -24,6 +25,7 @@ pub struct Table {
     /// Bare table name.
     pub name: String,
     pub schema: SchemaRef,
+    pub network: String,
 }
 
 impl Table {

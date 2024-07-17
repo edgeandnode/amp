@@ -4,6 +4,7 @@ mod parquet_writer;
 
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -18,8 +19,10 @@ use common::multirange::MultiRange;
 use common::parquet;
 use common::query_context::QueryContext;
 use common::tracing;
+use common::BlockNum;
 use common::BoxError;
 use common::BLOCK_NUM;
+use dataset_store::DatasetKind;
 use dataset_store::DatasetStore;
 use futures::future::try_join_all;
 use futures::StreamExt as _;
@@ -124,28 +127,23 @@ async fn main() -> Result<(), BoxError> {
         );
     }
 
-    // This is the intersection of the `__scanned_ranges` for all tables. That is, a range is only
-    // considered scanned if it is scanned for all tables.
-    let scanned_ranges = {
-        let mut scanned_ranges = scanned_ranges_by_table.into_iter().map(|(_, r)| r);
-        let first = scanned_ranges.next().ok_or("no tables")?;
-        let intersection = scanned_ranges.fold(first, |acc, r| acc.intersection(&r));
-        intersection
-    };
-
-    // Find the ranges of blocks that have not been scanned yet for at least one table.
-    let missing_ranges = scanned_ranges.complement(start, end_block);
-
-    run_block_stream_jobs(
-        n_jobs,
-        ctx,
-        &dataset_name,
-        &dataset_store,
-        missing_ranges,
-        partition_size,
-        parquet_opts,
-    )
-    .await?;
+    match DatasetKind::from_str(&dataset.kind)? {
+        DatasetKind::Firehose | DatasetKind::Substreams => {
+            run_block_stream_jobs(
+                n_jobs,
+                ctx,
+                &dataset_name,
+                &dataset_store,
+                scanned_ranges_by_table,
+                partition_size,
+                parquet_opts,
+                start,
+                end_block,
+            )
+            .await?;
+        }
+        DatasetKind::Sql => todo!(),
+    }
 
     info!("dump completed successfully");
 
@@ -157,10 +155,24 @@ async fn run_block_stream_jobs(
     ctx: Arc<QueryContext>,
     dataset_name: &str,
     dataset_store: &DatasetStore,
-    ranges: MultiRange,
+    scanned_ranges_by_table: BTreeMap<String, MultiRange>,
     partition_size: u64,
     parquet_opts: ParquetWriterProperties,
+    start: BlockNum,
+    end: BlockNum,
 ) -> Result<(), BoxError> {
+    // This is the intersection of the `__scanned_ranges` for all tables. That is, a range is only
+    // considered scanned if it is scanned for all tables.
+    let scanned_ranges = {
+        let mut scanned_ranges = scanned_ranges_by_table.into_iter().map(|(_, r)| r);
+        let first = scanned_ranges.next().ok_or("no tables")?;
+        let intersection = scanned_ranges.fold(first, |acc, r| acc.intersection(&r));
+        intersection
+    };
+
+    // Find the ranges of blocks that have not been scanned yet for at least one table.
+    let ranges = scanned_ranges.complement(start, end);
+
     // Split them across the target number of jobs as to balance the number of blocks per job.
     let multiranges = ranges.split_and_partition(n_jobs as u64, 1000);
     let client = dataset_store.load_client(dataset_name).await?;

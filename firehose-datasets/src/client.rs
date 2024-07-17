@@ -199,7 +199,7 @@ impl BlockStreamer for Client {
                     Ok(block) => {
                         let block_num = block.number;
 
-                        let table_rows = protobufs_to_rows(block).map_err(|e| {
+                        let table_rows = protobufs_to_rows(block, &self.network).map_err(|e| {
                             format!(
                                 "error converting Protobufs to rows on block {}: {}",
                                 block_num, e
