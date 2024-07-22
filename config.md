@@ -25,3 +25,31 @@ Substreams, and then there are datasets defined as queries on other datasets.
 Currently, two kinds of base datasets are implemented, Firehose and Substreams. For details on those,
 see the Firehose [dataset docs](firehose-datasets/config.md) and the Substreams [dataset
 docs](substreams-datasets/config.md).
+
+### SQL datasets
+
+A dataset can be defined as a set of SQL queries on other datasets, with each query defining a table.
+SQL datasets serve as materialized views, and can be used to share a result
+among multiple queries or to do ahead of time work that is too slow or expensive to do at query time.
+As an example, we will show how to define an `erc20_transfer` dataset, containing all erc20 transfer
+events. The `erc20_transfer.toml` is straightforward:
+```
+kind = "sql"
+name = "erc20_transfer"
+```
+The actual SQL queries should be placed beside the dataset definition, in a directory of the same
+name. In this case we will only have one query for the transfers table, so the file `erc_20_transfer/transfers.sql` would contain the query:
+```sql
+select t.block_num,
+    t.timestamp,
+    t.event['from'] as from,
+    t.event['to'] as to,
+    t.event['value'] as value
+    from (select l.block_num,
+                l.timestamp,
+                evm_decode(l.topic1, l.topic2, l.topic3, l.data, 'Transfer(address indexed from, address indexed to, uint256 value)') as event
+            from eth_firehose.logs l
+            where l.topic0 = evm_topic('Transfer(address indexed from, address indexed to, uint256 value)')) t
+```
+The dataset is now ready to be dumped with `dump --dataset erc_20_transfer`. assuming the dependency
+`eth_firehose` is already present.

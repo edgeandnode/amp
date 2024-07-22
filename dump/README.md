@@ -39,12 +39,13 @@ All configuration can be set through env vars instead of the CLI.
   - Default: `DUMP_START_BLOCK=0`
 
 - **DUMP_N_JOBS**
-  - Description: Determines the number of parallel firehoses and extractor jobs to run.
+  - Description: Determines the number of parallel firehoses and extractor jobs to run. Not supported
+    for SQL datasets.
   - Default: `DUMP_N_JOBS=1`
 
 - **DUMP_PARTITION_SIZE_MB**
-  - Description: Specifies the size of each partition in megabytes.
-  - Usage: Set the partition size, which dictates when new files are created.
+  - Description: Specifies the size of each partition in megabytes, which dictates when new files are
+    created. Has no effect for SQL datasets.
   - Default: `DUMP_PARTITION_SIZE_MB=1024`
 
 - **DUMP_DISABLE_COMPRESSION**
