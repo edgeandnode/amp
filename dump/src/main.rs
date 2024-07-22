@@ -14,6 +14,7 @@ use common::arrow::datatypes::UInt64Type;
 use common::catalog::physical::Catalog;
 use common::catalog::physical::PhysicalDataset;
 use common::config::Config;
+use common::meta_tables::scanned_ranges;
 use common::meta_tables::scanned_ranges::filenames_for_table;
 use common::multirange::MultiRange;
 use common::parquet;
@@ -22,6 +23,8 @@ use common::tracing;
 use common::BlockNum;
 use common::BoxError;
 use common::BLOCK_NUM;
+use datafusion::execution::runtime_env::RuntimeEnv;
+use datafusion::sql::TableReference;
 use dataset_store::DatasetKind;
 use dataset_store::DatasetStore;
 use futures::future::try_join_all;
@@ -29,12 +32,14 @@ use futures::StreamExt as _;
 use futures::TryFutureExt as _;
 use futures::TryStreamExt;
 use job::Job;
+use log::debug;
 use log::info;
 use log::warn;
 use object_store::path::Path;
 use object_store::ObjectMeta;
 use parquet::basic::{Compression, ZstdLevel};
 use parquet::file::properties::WriterProperties as ParquetWriterProperties;
+use parquet_writer::ParquetWriter;
 
 #[global_allocator]
 static ALLOC: snmalloc_rs::SnMalloc = snmalloc_rs::SnMalloc;
@@ -110,7 +115,7 @@ async fn main() -> Result<(), BoxError> {
     let env = Arc::new(config.make_runtime_env()?);
     let catalog = Catalog::for_dataset(&dataset, config.data_store.clone())?;
     let physical_dataset = catalog.datasets()[0].clone();
-    let ctx = Arc::new(QueryContext::for_catalog(catalog, env)?);
+    let ctx = Arc::new(QueryContext::for_catalog(catalog, env.clone())?);
 
     // Ensure consistency before starting the dump procedure.
     delete_orphaned_files(&physical_dataset, &ctx).await?;
@@ -119,6 +124,10 @@ async fn main() -> Result<(), BoxError> {
     // for this dataset.
     let scanned_ranges_by_table = scanned_ranges_by_table(&ctx).await?;
     for (table_name, multirange) in &scanned_ranges_by_table {
+        if multirange.total_len() == 0 {
+            continue;
+        }
+
         info!(
             "table `{}` has scanned {} blocks in the ranges: {}",
             table_name,
@@ -142,10 +151,26 @@ async fn main() -> Result<(), BoxError> {
             )
             .await?;
         }
-        DatasetKind::Sql => todo!(),
+        DatasetKind::Sql => {
+            if n_jobs > 1 {
+                return Err("n_jobs > 1 is not supported for SQL datasets".into());
+            }
+
+            dump_sql_dataset(
+                ctx,
+                &dataset_name,
+                dataset_store,
+                env,
+                scanned_ranges_by_table,
+                parquet_opts,
+                start,
+                end_block,
+            )
+            .await?;
+        }
     }
 
-    info!("dump completed successfully");
+    info!("dump of dataset {dataset_name} completed successfully");
 
     Ok(())
 }
@@ -202,6 +227,54 @@ async fn run_block_stream_jobs(
     }
 
     try_join_all(join_handles).await?;
+
+    Ok(())
+}
+
+async fn dump_sql_dataset(
+    ctx: Arc<QueryContext>,
+    dataset_name: &str,
+    dataset_store: Arc<DatasetStore>,
+    env: Arc<RuntimeEnv>,
+    scanned_ranges_by_table: BTreeMap<String, MultiRange>,
+    parquet_opts: ParquetWriterProperties,
+    start: BlockNum,
+    end: BlockNum,
+) -> Result<(), BoxError> {
+    use dataset_store::sql_datasets::execute_query_for_range;
+
+    let dataset = dataset_store.load_sql_dataset(dataset_name).await?;
+    let physical_dataset = &ctx.catalog().datasets()[0].clone();
+    let data_store = physical_dataset.data_store();
+
+    for (table, query) in dataset.queries {
+        let physical_table = {
+            let mut tables = physical_dataset.tables();
+            tables.find(|t| t.table_name() == table).unwrap()
+        };
+        let ranges_to_scan = scanned_ranges_by_table[&table].complement(start, end);
+
+        debug!("dumping {}", physical_table.table_ref());
+
+        for (start, end) in ranges_to_scan.ranges {
+            let store = dataset_store.clone();
+            let mut stream =
+                execute_query_for_range(query.clone(), store, env.clone(), Some(start), end)
+                    .await?;
+            let mut writer = ParquetWriter::new(
+                &data_store,
+                physical_table.clone(),
+                parquet_opts.clone(),
+                start,
+            )?;
+            while let Some(batch) = stream.try_next().await? {
+                writer.write(&batch).await?;
+            }
+            let scanned_range = writer.close(end).await?.as_record_batch();
+            let table_ref = TableReference::partial(dataset_name, scanned_ranges::TABLE_NAME);
+            ctx.meta_insert_into(table_ref, scanned_range).await?;
+        }
+    }
 
     Ok(())
 }

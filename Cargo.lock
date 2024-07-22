@@ -1243,6 +1243,7 @@ dependencies = [
  "futures",
  "itertools 0.12.1",
  "lazy_static",
+ "log",
  "object_store 0.10.1",
  "serde",
  "serde_json",
@@ -5675,3 +5676,8 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
+
+[[patch.unused]]
+name = "datafusion"
+version = "40.0.0"
+source = "git+https://github.com/leoyvens/datafusion?branch=datafusion-proto-decimal-256#77246555567547256c3be86a855f2a03d9519831"

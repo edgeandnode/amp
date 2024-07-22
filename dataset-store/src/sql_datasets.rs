@@ -107,32 +107,32 @@ pub(super) async fn dataset(
 /// - Inject block range constraints into the plan.
 /// - Inject 'order by block_num' into the plan.
 /// - Execute the plan.
-async fn execute_query_for_range(
-    query: &str,
+pub async fn execute_query_for_range(
+    query: parser::Statement,
     dataset_store: Arc<DatasetStore>,
     env: Arc<RuntimeEnv>,
-    start: BlockNum,
+    start: Option<BlockNum>,
     end: BlockNum,
 ) -> Result<SendableRecordBatchStream, BoxError> {
-    let statement = parse_sql(query)?;
-    let (tables, _) = resolve_table_references(&statement, true)
-        .map_err(|e| CoreError::SqlParseError(e.into()))?;
-    let ctx = dataset_store.ctx_for_sql(&statement, env).await?;
+    let (tables, _) =
+        resolve_table_references(&query, true).map_err(|e| CoreError::SqlParseError(e.into()))?;
+    let ctx = dataset_store.ctx_for_sql(&query, env).await?;
 
     // Validate dependency scanned ranges
     for table in tables {
         // Unwrap: A valid catalog was built with this table name.
-        let catalog_schema = table.catalog().unwrap();
+        let catalog_schema = table.schema().unwrap();
         let ranges = scanned_ranges::ranges_for_table(&ctx, catalog_schema, table.table()).await?;
         let ranges = MultiRange::from_ranges(ranges);
+        let start = start.unwrap_or(0);
         let needed_range = MultiRange::from_ranges(vec![(start, end)]);
-        let synced = ranges.intersection(&needed_range) == needed_range;
+        let synced = ranges.intersection(&needed_range).total_len() == needed_range.total_len();
         if !synced {
-            return Err(format!("tried to query range {needed_range} of dataset {catalog_schema} but it has only synced {ranges}").into());
+            return Err(format!("tried to query range {needed_range} of dataset {catalog_schema} but it has not been synced").into());
         }
     }
 
-    let plan = ctx.plan_sql(statement).await?;
+    let plan = ctx.plan_sql(query).await?;
     check_support(&plan)?;
     let plan = inject_block_range_constraints(plan, start, end)?;
     let plan = order_by_block_num(plan);
@@ -207,7 +207,7 @@ fn check_support(plan: &LogicalPlan) -> Result<bool, BoxError> {
 
 fn inject_block_range_constraints(
     plan: LogicalPlan,
-    start: u64,
+    start: Option<u64>,
     end: u64,
 ) -> Result<LogicalPlan, DataFusionError> {
     plan.transform(|node| match &node {
@@ -217,9 +217,12 @@ fn inject_block_range_constraints(
         {
             // `where start <= block_num and block_num <= end`
             // Is it ok for this to be unqualified? Or should it be `TABLE_NAME.block_num`?
-            let predicate = lit(start)
-                .lt_eq(col(BLOCK_NUM))
-                .and(col(BLOCK_NUM).lt_eq(lit(end)));
+            let mut predicate = col(BLOCK_NUM).lt_eq(lit(end));
+
+            if let Some(start) = start {
+                predicate = predicate.and(lit(start).lt_eq(col(BLOCK_NUM)));
+            }
+
             let with_filter = Filter::try_new(predicate, Arc::new(node))?;
             Ok(Transformed::yes(LogicalPlan::Filter(with_filter)))
         }
@@ -230,7 +233,7 @@ fn inject_block_range_constraints(
 
 fn order_by_block_num(plan: LogicalPlan) -> LogicalPlan {
     let sort = Sort {
-        expr: vec![col(BLOCK_NUM)],
+        expr: vec![col(BLOCK_NUM).sort(true, false)],
         input: Arc::new(plan),
         fetch: None,
     };

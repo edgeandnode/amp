@@ -116,11 +116,7 @@ async fn flush_scanned_ranges(
     ctx: &QueryContext,
     ranges: &mut ScannedRangeRowsBuilder,
 ) -> Result<(), BoxError> {
-    use datafusion::common::ToDFSchema;
-    use datafusion::datasource::{DefaultTableSource, MemTable};
-    use datafusion::logical_expr::{DmlStatement, LogicalPlan, TableScan, WriteOp};
-
-    let batch = ranges.flush()?;
+    let batch = ranges.build();
     let dataset_name = {
         let datasets = ctx.catalog().datasets();
         assert!(datasets.len() == 1, "expected one dataset");
@@ -128,23 +124,8 @@ async fn flush_scanned_ranges(
     };
 
     // Build a datafusion logical plan to insert the `batch` into the `__scanned_ranges` table.
-    let table = scanned_ranges::table();
-    let inserted_values = {
-        let mem_table = MemTable::try_new(table.schema.clone(), vec![vec![batch]])?;
-        let table_source = Arc::new(DefaultTableSource::new(Arc::new(mem_table)));
-        let table_scan =
-            TableScan::try_new("temp_scanned_range_input", table_source, None, vec![], None)?;
-        Arc::new(LogicalPlan::TableScan(table_scan))
-    };
-    let insert_plan = LogicalPlan::Dml(DmlStatement::new(
-        TableReference::partial(dataset_name, table.name.as_str()),
-        table.schema.to_dfschema_ref()?,
-        WriteOp::InsertInto,
-        inserted_values,
-    ));
-
-    // Execute plan against meta ctx
-    ctx.meta_execute_plan(insert_plan).await?;
+    let table_ref = TableReference::partial(dataset_name, scanned_ranges::TABLE_NAME);
+    ctx.meta_insert_into(table_ref, batch).await?;
 
     Ok(())
 }
@@ -193,6 +174,7 @@ impl ParquetWriter {
         self.writer.write(batch).await
     }
 
+    #[must_use]
     pub async fn close(self, end: BlockNum) -> Result<ScannedRange, BoxError> {
         if end < self.start {
             return Err(

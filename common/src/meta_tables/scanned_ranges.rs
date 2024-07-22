@@ -29,7 +29,6 @@ use datafusion::{
     arrow::{
         array::{ArrayBuilder as _, AsArray as _, RecordBatch, UInt64Builder},
         datatypes::{DataType, Field, Schema, SchemaRef, UInt64Type},
-        error::ArrowError,
     },
     sql::TableReference,
 };
@@ -102,6 +101,14 @@ pub struct ScannedRange {
     pub created_at: Timestamp,
 }
 
+impl ScannedRange {
+    pub fn as_record_batch(&self) -> RecordBatch {
+        let mut builder = ScannedRangeRowsBuilder::new();
+        builder.append(self);
+        builder.build()
+    }
+}
+
 #[derive(Debug)]
 pub struct ScannedRangeRowsBuilder {
     table: StringBuilder,
@@ -130,7 +137,7 @@ impl ScannedRangeRowsBuilder {
         self.timestamp.append_value(range.created_at);
     }
 
-    pub fn flush(&mut self) -> Result<RecordBatch, ArrowError> {
+    pub fn build(&mut self) -> RecordBatch {
         let columns = vec![
             Arc::new(self.table.finish()) as ArrayRef,
             Arc::new(self.range_start.finish()),
@@ -139,7 +146,8 @@ impl ScannedRangeRowsBuilder {
             Arc::new(self.timestamp.finish()),
         ];
 
-        RecordBatch::try_new(SCHEMA.clone(), columns)
+        // Unwrap: The columns follow the schema and have an equal length.
+        RecordBatch::try_new(SCHEMA.clone(), columns).unwrap()
     }
 
     pub fn len(&self) -> usize {
