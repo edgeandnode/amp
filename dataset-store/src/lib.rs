@@ -166,6 +166,16 @@ impl DatasetStore {
             .map_err(|e| (dataset, e).into())
     }
 
+    pub async fn load_sql_dataset(
+        self: &Arc<Self>,
+        dataset: &str,
+    ) -> Result<SqlDataset, DatasetError> {
+        self.clone()
+            .load_sql_dataset_inner(dataset)
+            .await
+            .map_err(|e| (dataset, e).into())
+    }
+
     async fn load_dataset_inner(self: Arc<Self>, dataset_name: &str) -> Result<Dataset, Error> {
         let (kind, dataset_toml) = self.kind_and_dataset(&dataset_name).await?;
 
@@ -177,6 +187,18 @@ impl DatasetStore {
         };
 
         Ok(dataset)
+    }
+
+    async fn load_sql_dataset_inner(
+        self: Arc<Self>,
+        dataset_name: &str,
+    ) -> Result<SqlDataset, Error> {
+        let (kind, dataset_toml) = self.kind_and_dataset(dataset_name).await?;
+        if kind != DatasetKind::Sql {
+            return Err(Error::UnsupportedKind(kind.to_string()));
+        }
+
+        self.sql_dataset(dataset_toml).await
     }
 
     pub async fn load_client(&self, dataset: &str) -> Result<impl BlockStreamer, DatasetError> {

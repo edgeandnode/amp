@@ -10,7 +10,8 @@ use datafusion::common::tree_node::{Transformed, TreeNode as _, TreeNodeRewriter
 use datafusion::common::{not_impl_err, DFSchema};
 use datafusion::datasource::{DefaultTableSource, MemTable, TableProvider, TableType};
 use datafusion::logical_expr::{
-    CreateCatalogSchema, Expr, Extension, LogicalPlanBuilder, ScalarUDF, TableScan,
+    CreateCatalogSchema, DmlStatement, Expr, Extension, LogicalPlanBuilder, ScalarUDF, TableScan,
+    WriteOp,
 };
 use datafusion::sql::parser;
 use datafusion::{
@@ -270,6 +271,34 @@ impl QueryContext {
     ) -> Result<SendableRecordBatchStream, Error> {
         let ctx = self.datafusion_ctx().await?;
         execute_plan(&ctx, plan).await
+    }
+
+    /// Insert rows into a metadata table.
+    pub async fn meta_insert_into(
+        &self,
+        table_ref: TableReference,
+        batch: RecordBatch,
+    ) -> Result<(), Error> {
+        let schema = batch.schema();
+        let values = {
+            // Unwrap: The schema is the batch schema.
+            let mem_table = MemTable::try_new(schema.clone(), vec![vec![batch]]).unwrap();
+            let table_source = Arc::new(DefaultTableSource::new(Arc::new(mem_table)));
+
+            // Unwrap: The scan is trivial.
+            let table_scan =
+                TableScan::try_new("temp_insert_input", table_source, None, vec![], None).unwrap();
+            Arc::new(LogicalPlan::TableScan(table_scan))
+        };
+
+        // Unwrap: Not really fallible.
+        let df_schema = schema.to_dfschema_ref().unwrap();
+        let insert = DmlStatement::new(table_ref, df_schema, WriteOp::InsertInto, values);
+
+        // Execute plan against meta ctx
+        self.meta_execute_plan(LogicalPlan::Dml(insert)).await?;
+
+        Ok(())
     }
 }
 
