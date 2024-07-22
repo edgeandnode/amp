@@ -510,6 +510,7 @@ impl LogicalExtensionCodec for EmptyTableCodec {
     fn try_decode_table_provider(
         &self,
         _buf: &[u8],
+        _table_ref: &TableReference,
         schema: SchemaRef,
         _ctx: &SessionContext,
     ) -> Result<Arc<dyn TableProvider>, DataFusionError> {
@@ -519,6 +520,7 @@ impl LogicalExtensionCodec for EmptyTableCodec {
 
     fn try_encode_table_provider(
         &self,
+        _table_ref: &TableReference,
         _node: Arc<dyn TableProvider>,
         _buf: &mut Vec<u8>,
     ) -> Result<(), DataFusionError> {

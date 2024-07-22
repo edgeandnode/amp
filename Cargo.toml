@@ -55,7 +55,7 @@ snmalloc-rs = "0.3.4"
 prometheus = "0.13"
 
 # Datafusion and Arrow crates
-datafusion = { version = "39", features = ["serde"] }
-datafusion-proto = "39"
+datafusion = { version = "40", features = ["serde"] }
+datafusion-proto = "40"
 object_store = { version = "0.10.1", features = ["aws", "gcp"] }
-arrow-flight = { version = "52.0.0", features = ["flight-sql-experimental"] }
+arrow-flight = { version = "52.1.0", features = ["flight-sql-experimental"] }
