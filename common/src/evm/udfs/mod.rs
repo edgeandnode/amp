@@ -35,6 +35,7 @@ use datafusion::{
     scalar::ScalarValue,
 };
 use itertools::izip;
+use log::trace;
 
 type Unsigned = alloy_core::primitives::Uint<256, 4>;
 
@@ -151,6 +152,7 @@ impl<'a> FieldBuilder<'a> {
                 self.field::<Decimal256Builder>()?.append_null()
             }
             DataType::Binary => self.field::<BinaryBuilder>()?.append_null(),
+            DataType::FixedSizeBinary(_) => self.field::<FixedSizeBinaryBuilder>()?.append_null(),
             DataType::Utf8 => self.field::<StringBuilder>()?.append_null(),
             _ => return internal_err!("unexpected data type: {}", ty),
         };
@@ -395,34 +397,56 @@ impl Event {
         builder: &mut StructBuilder,
         data: Option<&[u8]>,
     ) -> Result<(), DataFusionError> {
+        use DataFusionError::Execution;
+
         let DynSolType::Tuple(tys) = &self.body_tuple else {
             return internal_err!("expected a tuple type for body_tuple");
         };
 
-        if let Some(data) = data {
-            let DynSolValue::Tuple(values) =
-                self.body_tuple.abi_decode_sequence(data).or_else(|e| {
-                    plan_err!(
+        if tys.is_empty() {
+            return Ok(());
+        }
+
+        let values = data
+            .ok_or_else(|| Execution("expected non-null log data for event decoding".to_string()))
+            .and_then(|data| {
+                let decoded = self.body_tuple.abi_decode_sequence(data).map_err(|e| {
+                    Execution(format!(
                         "failed to decode data field with {} bytes: {}",
                         data.len(),
-                        e
-                    )
-                })?
-            else {
-                return internal_err!("expected a tuple of DynSolValue from decoding data");
-            };
-            for (number, (value, ty)) in values.into_iter().zip(tys).enumerate() {
-                let mut field_builder =
-                    FieldBuilder::new(builder, ty, number + self.topic_types.len());
-                field_builder.append_value(value)?;
+                        e,
+                    ))
+                })?;
+                match decoded {
+                    DynSolValue::Tuple(values) => Ok(values),
+                    // Unreachable: `body_tuple` is a `DynSolType::Tuple`
+                    _ => unreachable!(),
+                }
+            });
+
+        match values {
+            Ok(values) => {
+                for (number, (value, ty)) in values.into_iter().zip(tys).enumerate() {
+                    let mut field_builder =
+                        FieldBuilder::new(builder, ty, number + self.topic_types.len());
+                    field_builder.append_value(value)?;
+                }
             }
-        } else {
-            for (number, ty) in tys.iter().enumerate() {
-                let mut field_builder =
-                    FieldBuilder::new(builder, ty, number + self.topic_types.len());
-                field_builder.append_null_value()?;
+            Err(e) => {
+                trace!(
+                    "failed to decode event '{}{}', filling with nulls. Error: {}",
+                    self.name,
+                    self.body_tuple,
+                    e
+                );
+                for (number, ty) in tys.iter().enumerate() {
+                    let mut field_builder =
+                        FieldBuilder::new(builder, ty, number + self.topic_types.len());
+                    field_builder.append_null_value()?;
+                }
             }
         }
+
         Ok(())
     }
 }
