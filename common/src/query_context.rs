@@ -84,16 +84,15 @@ impl QueryContext {
 
         let opts = session_config.options_mut();
         if std::env::var_os("DATAFUSION_OPTIMIZER_PREFER_EXISTING_SORT").is_none() {
-            // Set `prefer_existing_sort` by default.
+            // Set `prefer_existing_sort` by default. This has a caveat that it only works for
+            // datasets with less files than the number of threads the query is executed with.
+            // The ideal optimization would probably be https://github.com/apache/datafusion/issues/10316.
             opts.optimizer.prefer_existing_sort = true;
         }
 
-        if std::env::var_os("DATAFUSION_EXECUTION_SPLIT_FILE_GROUPS_BY_STATISTICS").is_none() {
-            // Set `split_file_groups_by_statistics` by default.
-            //
-            // Without this `prefer_existing_sort` will not be used with multiple files.
-            // See https://github.com/apache/datafusion/issues/10336.
-            opts.execution.split_file_groups_by_statistics = true;
+        if std::env::var_os("DATAFUSION_EXECUTION_PARQUET_PUSHDOWN_FILTERS").is_none() {
+            // Set `parquet.pushdown_filters` by default.
+            opts.execution.parquet.pushdown_filters = true;
         }
 
         if std::env::var_os("DATAFUSION_EXECUTION_COLLECT_STATISTICS").is_none() {
