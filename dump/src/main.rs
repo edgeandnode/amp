@@ -61,7 +61,7 @@ struct Args {
     /// smart about keeping track of what blocks have already been dumped, so you only need to set
     /// this if you really don't want the data before this block.
     #[arg(long, short, default_value = "0", env = "DUMP_START_BLOCK")]
-    start: String,
+    start: u64,
 
     /// The block number to end at, inclusive. If starts with "+" then relative to `start`.
     #[arg(long, short, env = "DUMP_END_BLOCK")]
@@ -108,7 +108,7 @@ async fn main() -> Result<(), BoxError> {
         Compression::ZSTD(ZstdLevel::try_new(1).unwrap())
     };
     let parquet_opts = parquet_opts(compression);
-    let (start, end_block) = resolve_block_range(start, end_block)?;
+    let end_block = resolve_end_block(start, end_block)?;
 
     let dataset = dataset_store.load_dataset(&dataset_name).await?;
 
@@ -279,16 +279,9 @@ async fn dump_sql_dataset(
     Ok(())
 }
 
-// start block is always a number
 // if end_block starts with "+" then it is a relative block number
 // otherwise, it's an absolute block number and should be after start_block
-fn resolve_block_range(start_block: String, end_block: String) -> Result<(u64, u64), BoxError> {
-    if start_block.starts_with('+') {
-        return Err("start_block must be an absolute block number".into());
-    }
-    let start_block = start_block
-        .parse::<u64>()
-        .map_err(|e| format!("invalid start block: {e}"))?;
+fn resolve_end_block(start_block: u64, end_block: String) -> Result<u64, BoxError> {
     let end_block = if end_block.starts_with('+') {
         let relative_block = end_block
             .trim_start_matches('+')
@@ -306,7 +299,7 @@ fn resolve_block_range(start_block: String, end_block: String) -> Result<(u64, u
     if end_block == 0 {
         return Err("end_block must be greater than 0".into());
     }
-    Ok((start_block, end_block))
+    Ok(end_block)
 }
 
 fn parquet_opts(compression: Compression) -> ParquetWriterProperties {
@@ -429,29 +422,24 @@ mod tests {
     #[test]
     fn test_resolve_block_range() {
         let test_cases = vec![
-            ("10", "20", Ok((10, 20))),
-            ("0", "1", Ok((0, 1))),
+            (10, "20", Ok(20)),
+            (0, "1", Ok(1)),
             (
-                "18446744073709551614",
+                18446744073709551614,
                 "18446744073709551615",
-                Ok((18_446_744_073_709_551_614u64, 18_446_744_073_709_551_615u64)),
+                Ok(18_446_744_073_709_551_615u64),
             ),
-            ("10", "+5", Ok((10, 15))),
-            ("100", "90", Err(BoxError::from(""))),
-            ("0", "0", Err(BoxError::from(""))),
-            ("0", "0x", Err(BoxError::from(""))),
-            ("0", "xxx", Err(BoxError::from(""))),
-            ("xxx", "123", Err(BoxError::from(""))),
-            ("100", "+1000x", Err(BoxError::from(""))),
-            ("100", "+1x", Err(BoxError::from(""))),
-            ("123x", "+5", Err(BoxError::from(""))),
-            ("+10", "1000", Err(BoxError::from(""))),
-            ("-10", "100", Err(BoxError::from(""))),
-            ("-10", "+50", Err(BoxError::from(""))),
+            (10, "+5", Ok(15)),
+            (100, "90", Err(BoxError::from(""))),
+            (0, "0", Err(BoxError::from(""))),
+            (0, "0x", Err(BoxError::from(""))),
+            (0, "xxx", Err(BoxError::from(""))),
+            (100, "+1000x", Err(BoxError::from(""))),
+            (100, "+1x", Err(BoxError::from(""))),
         ];
 
         for (start_block, end_block, expected) in test_cases {
-            match resolve_block_range(start_block.into(), end_block.into()) {
+            match resolve_end_block(start_block, end_block.into()) {
                 Ok(result) => assert_eq!(expected.unwrap(), result),
                 Err(_) => assert_eq!(expected.is_err(), true),
             }
