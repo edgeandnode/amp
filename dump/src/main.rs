@@ -25,6 +25,7 @@ use common::BoxError;
 use common::BLOCK_NUM;
 use datafusion::execution::runtime_env::RuntimeEnv;
 use datafusion::sql::TableReference;
+use dataset_store::sql_datasets::max_end_block;
 use dataset_store::DatasetKind;
 use dataset_store::DatasetStore;
 use futures::future::try_join_all;
@@ -32,7 +33,6 @@ use futures::StreamExt as _;
 use futures::TryFutureExt as _;
 use futures::TryStreamExt;
 use job::Job;
-use log::debug;
 use log::info;
 use log::warn;
 use object_store::path::Path;
@@ -65,7 +65,7 @@ struct Args {
 
     /// The block number to end at, inclusive. If starts with "+" then relative to `start`.
     #[arg(long, short, env = "DUMP_END_BLOCK")]
-    end_block: String,
+    end_block: Option<String>,
 
     /// How many parallel extractor jobs to run. Defaults to 1. Each job will be responsible for an
     /// equal number of blocks. Example: If start = 0, end = 10_000_000 and n_jobs = 10, then each
@@ -108,7 +108,8 @@ async fn main() -> Result<(), BoxError> {
         Compression::ZSTD(ZstdLevel::try_new(1).unwrap())
     };
     let parquet_opts = parquet_opts(compression);
-    let end_block = resolve_end_block(start, end_block)?;
+
+    let end_block = end_block.map(|e| resolve_end_block(start, e)).transpose()?;
 
     let dataset = dataset_store.load_dataset(&dataset_name).await?;
 
@@ -184,8 +185,10 @@ async fn run_block_stream_jobs(
     partition_size: u64,
     parquet_opts: ParquetWriterProperties,
     start: BlockNum,
-    end: BlockNum,
+    end: Option<BlockNum>,
 ) -> Result<(), BoxError> {
+    let end = end.ok_or("end block is required")?;
+
     // This is the intersection of the `__scanned_ranges` for all tables. That is, a range is only
     // considered scanned if it is scanned for all tables.
     let scanned_ranges = {
@@ -239,7 +242,7 @@ async fn dump_sql_dataset(
     scanned_ranges_by_table: BTreeMap<String, MultiRange>,
     parquet_opts: ParquetWriterProperties,
     start: BlockNum,
-    end: BlockNum,
+    end: Option<BlockNum>,
 ) -> Result<(), BoxError> {
     use dataset_store::sql_datasets::execute_query_for_range;
 
@@ -248,15 +251,31 @@ async fn dump_sql_dataset(
     let data_store = physical_dataset.data_store();
 
     for (table, query) in dataset.queries {
+        let end = match end {
+            Some(end) => end,
+            None => {
+                match max_end_block(&query, dataset_store.clone(), env.clone()).await? {
+                    Some(end) => end,
+                    None => {
+                        // If the dependencies have synced nothing, we have nothing to do.
+                        continue;
+                    }
+                }
+            }
+        };
+
         let physical_table = {
             let mut tables = physical_dataset.tables();
             tables.find(|t| t.table_name() == table).unwrap()
         };
         let ranges_to_scan = scanned_ranges_by_table[&table].complement(start, end);
 
-        debug!("dumping {}", physical_table.table_ref());
-
         for (start, end) in ranges_to_scan.ranges {
+            info!(
+                "dumping {} between blocks {start} and {end}",
+                physical_table.table_ref()
+            );
+
             let store = dataset_store.clone();
             let mut stream =
                 execute_query_for_range(query.clone(), store, env.clone(), Some(start), end)
@@ -349,7 +368,7 @@ async fn scanned_ranges_by_table(
     for table in ctx.catalog().all_tables() {
         let table_name = table.table_name().to_string();
         let ranges = ranges_for_table(ctx, table.catalog_schema(), &table_name).await?;
-        let multi_range = MultiRange::from_ranges(ranges);
+        let multi_range = MultiRange::from_ranges(ranges)?;
         multirange_by_table.insert(table_name, multi_range);
     }
 

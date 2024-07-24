@@ -29,7 +29,7 @@ All configuration can be set through env vars instead of the CLI.
   - Example: `NOZZLE_CONFIG=/path/to/config.toml`
 
 - **DUMP_END_BLOCK**
-  - Description: Specifies the block number to end at, inclusive.
+  - Description: Specifies the block number to end at, inclusive. Optional for SQL datasets.
   - Example: `DUMP_END_BLOCK=10000000`
 
 ### Optional

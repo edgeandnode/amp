@@ -65,8 +65,8 @@ fn test_multi_range_intersect() {
         range1: impl IntoIterator<Item = (u64, u64)>,
         range2: impl IntoIterator<Item = (u64, u64)>,
     ) -> MultiRange {
-        let range1 = MultiRange::from_ranges(range1.into_iter().collect());
-        let range2 = MultiRange::from_ranges(range2.into_iter().collect());
+        let range1 = MultiRange::from_ranges(range1.into_iter().collect()).unwrap();
+        let range2 = MultiRange::from_ranges(range2.into_iter().collect()).unwrap();
         let intersect = range1.intersection(&range2);
         let intersect2 = range2.intersection(&range1);
         assert_eq!(intersect.ranges, intersect2.ranges);
@@ -111,7 +111,7 @@ fn test_multi_range_complement() {
         start: u64,
         end: u64,
     ) -> MultiRange {
-        let multi_range = MultiRange::from_ranges(ranges.into_iter().collect());
+        let multi_range = MultiRange::from_ranges(ranges.into_iter().collect()).unwrap();
         multi_range.complement(start, end)
     }
 
@@ -229,7 +229,7 @@ fn test_multi_range_split_single_range() {
 
 #[test]
 fn test_multi_range_split_and_partition_multiple_ranges() {
-    let mr = MultiRange::from_ranges(vec![(1, 1), (3, 10), (15, 45), (50, 100)]);
+    let mr = MultiRange::from_ranges(vec![(1, 1), (3, 10), (15, 45), (50, 100)]).unwrap();
 
     // Requesting zero partitions
     assert!(mr.split_and_partition(0, 5).is_empty());
@@ -285,4 +285,11 @@ fn test_multi_range_split_and_partition_multiple_ranges() {
         vec![(90, 100)],
     ];
     assert_parts(split_check, expected_partitions_ten);
+}
+
+#[test]
+fn test_from_ranges_merge() {
+    // Merge adjacent ranges
+    let mr = MultiRange::from_ranges(vec![(1, 2), (3, 10), (15, 45), (50, 100)]).unwrap();
+    assert_eq!(mr.ranges, vec![(1, 10), (15, 45), (50, 100)]);
 }

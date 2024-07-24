@@ -12,6 +12,9 @@ pub enum Error {
 
     #[error("tried to append ranges that are not consecutive: left ends with {0} and right starts with {1}")]
     NonConsecutive(u64, u64),
+
+    #[error("tried to append ranges that are overlapping: {0:?} and {1:?}")]
+    OverlappingRanges((u64, u64), (u64, u64)),
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -50,35 +53,44 @@ impl MultiRange {
         Ok(MultiRange { ranges })
     }
 
-    /// Overlapping ranges will be merged.
-    pub fn from_ranges(mut ranges: Vec<(u64, u64)>) -> Self {
+    /// Adjacent ranges will be merged. Errors if the ranges overlap.
+    pub fn from_ranges(mut ranges: Vec<(u64, u64)>) -> Result<Self, Error> {
         ranges.sort();
         ranges
             .into_iter()
-            .fold(MultiRange::empty(), |mut multi_range, range| {
-                multi_range.push_merge(range);
-                multi_range
+            .try_fold(MultiRange::empty(), |mut multi_range, range| {
+                multi_range.push_merge(range)?;
+                Ok(multi_range)
             })
     }
 
-    /// If the range is overlapping or adjacent to the last range, it will be merged with it.
+    /// If the range is adjacent to the last range, it will be merged with it.
     /// Otherwise, it will be added as a new range.
     ///
     /// Panics if the range starts before the last range.
-    fn push_merge(&mut self, range: (u64, u64)) {
+    ///
+    /// Errors if the ranges overlap.
+    fn push_merge(&mut self, range: (u64, u64)) -> Result<(), Error> {
         let Some(last) = self.ranges.last_mut() else {
             self.ranges.push(range);
-            return;
+            return Ok(());
         };
 
         assert!(last.0 <= range.0, "ranges must be sorted");
 
-        if last.1 >= range.0 + 1 {
+        // Check overlap
+        if last.1 >= range.0 {
+            return Err(Error::OverlappingRanges(*last, range));
+        }
+
+        if last.1 == range.0 - 1 {
             // Merge the ranges.
             last.1 = std::cmp::max(last.1, range.1);
         } else {
             self.ranges.push(range);
         }
+
+        Ok(())
     }
 
     pub fn append(&mut self, mut other: MultiRange) -> Result<(), Error> {

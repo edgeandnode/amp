@@ -119,16 +119,19 @@ pub async fn execute_query_for_range(
     let ctx = dataset_store.ctx_for_sql(&query, env).await?;
 
     // Validate dependency scanned ranges
-    for table in tables {
-        // Unwrap: A valid catalog was built with this table name.
-        let catalog_schema = table.schema().unwrap();
-        let ranges = scanned_ranges::ranges_for_table(&ctx, catalog_schema, table.table()).await?;
-        let ranges = MultiRange::from_ranges(ranges);
-        let start = start.unwrap_or(0);
-        let needed_range = MultiRange::from_ranges(vec![(start, end)]);
-        let synced = ranges.intersection(&needed_range).total_len() == needed_range.total_len();
-        if !synced {
-            return Err(format!("tried to query range {needed_range} of dataset {catalog_schema} but it has not been synced").into());
+    {
+        let needed_start = start.unwrap_or(0);
+        let needed_range = MultiRange::from_ranges(vec![(needed_start, end)]).unwrap();
+        for table in tables {
+            // Unwrap: A valid catalog was built with this table name.
+            let catalog_schema = table.schema().unwrap();
+            let ranges =
+                scanned_ranges::ranges_for_table(&ctx, catalog_schema, table.table()).await?;
+            let ranges = MultiRange::from_ranges(ranges)?;
+            let synced = ranges.intersection(&needed_range) == needed_range;
+            if !synced {
+                return Err(format!("tried to query range {needed_range} of table {table} but it has not been synced").into());
+            }
         }
     }
 
@@ -137,6 +140,29 @@ pub async fn execute_query_for_range(
     let plan = inject_block_range_constraints(plan, start, end)?;
     let plan = order_by_block_num(plan);
     Ok(ctx.execute_plan(plan).await?)
+}
+
+/// The most recent block that has been synced for all tables in the query.
+pub async fn max_end_block(
+    query: &parser::Statement,
+    dataset_store: Arc<DatasetStore>,
+    env: Arc<RuntimeEnv>,
+) -> Result<Option<BlockNum>, BoxError> {
+    let (tables, _) =
+        resolve_table_references(&query, true).map_err(|e| CoreError::SqlParseError(e.into()))?;
+    let ctx = dataset_store.ctx_for_sql(&query, env).await?;
+
+    // Infer the end block
+    let mut end = None;
+    for table in tables {
+        // Unwrap: A valid catalog was built with this table name.
+        let catalog_schema = table.schema().unwrap();
+        let ranges = scanned_ranges::ranges_for_table(&ctx, catalog_schema, table.table()).await?;
+        let ranges = MultiRange::from_ranges(ranges)?;
+        end = ranges.max();
+    }
+
+    Ok(end)
 }
 
 /// This function validates that a query can be used in a dataset definiton.
