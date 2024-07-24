@@ -4,6 +4,7 @@ use std::{
 };
 
 use datafusion::{
+    catalog::resolve_table_references,
     common::tree_node::{Transformed, TreeNode},
     datasource::TableType,
     error::DataFusionError,
@@ -13,7 +14,6 @@ use datafusion::{
 };
 
 use common::{
-    catalog::resolve_table_references,
     meta_tables::scanned_ranges,
     multirange::MultiRange,
     query_context::{parse_sql, Error as CoreError},

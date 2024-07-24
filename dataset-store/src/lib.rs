@@ -4,12 +4,11 @@ use core::fmt;
 use std::{collections::BTreeSet, str::FromStr, sync::Arc};
 
 use common::{
-    catalog::{physical::Catalog, resolve_table_references},
-    config::Config,
-    store::StoreError,
-    BlockStreamer, BoxError, Dataset, QueryContext, Store,
+    catalog::physical::Catalog, config::Config, store::StoreError, BlockStreamer, BoxError,
+    Dataset, QueryContext, Store,
 };
 use datafusion::{
+    catalog::resolve_table_references,
     execution::runtime_env::RuntimeEnv,
     sql::{parser, TableReference},
 };
