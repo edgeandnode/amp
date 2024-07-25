@@ -16,3 +16,4 @@ log.workspace = true
 datafusion.workspace = true
 snmalloc-rs.workspace = true
 prometheus.workspace = true
+thiserror.workspace = true

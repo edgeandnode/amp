@@ -4,8 +4,8 @@ use core::fmt;
 use std::{collections::BTreeSet, str::FromStr, sync::Arc};
 
 use common::{
-    catalog::physical::Catalog, config::Config, store::StoreError, BlockStreamer, BoxError,
-    Dataset, QueryContext, Store,
+    catalog::physical::Catalog, config::Config, store::StoreError, BlockNum, BlockStreamer,
+    BoxError, Dataset, QueryContext, Store,
 };
 use datafusion::{
     catalog::resolve_table_references,
@@ -216,8 +216,8 @@ impl DatasetStore {
         impl BlockStreamer for BlockStreamClient {
             async fn block_stream(
                 self,
-                start_block: u64,
-                end_block: u64,
+                start_block: BlockNum,
+                end_block: BlockNum,
                 tx: mpsc::Sender<common::DatasetRows>,
             ) -> Result<(), BoxError> {
                 match self {
@@ -225,6 +225,13 @@ impl DatasetStore {
                     Self::Substreams(client) => {
                         client.block_stream(start_block, end_block, tx).await
                     }
+                }
+            }
+
+            async fn recent_final_block_num(&mut self) -> Result<BlockNum, BoxError> {
+                match self {
+                    Self::Firehose(client) => client.recent_final_block_num().await,
+                    Self::Substreams(client) => client.recent_final_block_num().await,
                 }
             }
         }

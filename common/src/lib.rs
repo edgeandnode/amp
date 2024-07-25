@@ -197,4 +197,7 @@ pub trait BlockStreamer: Clone + 'static {
         end_block: u64,
         tx: mpsc::Sender<DatasetRows>,
     ) -> impl Future<Output = Result<(), BoxError>> + Send;
+
+    fn recent_final_block_num(&mut self)
+        -> impl Future<Output = Result<BlockNum, BoxError>> + Send;
 }

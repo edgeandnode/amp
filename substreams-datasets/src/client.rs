@@ -89,7 +89,7 @@ impl Client {
     /// now assumes an EVM Firehose endpoint.
     pub async fn blocks(
         &mut self,
-        start: BlockNum,
+        start: i64,
         stop: BlockNum,
     ) -> Result<impl Stream<Item = Result<BlockScopedData, Error>>, Error> {
         let request = tonic::Request::new(StreamRequest {
@@ -148,7 +148,7 @@ impl BlockStreamer for Client {
 
         // A retry loop for consuming the Firehose.
         'retry: loop {
-            let mut stream = match self.blocks(next_block, end_block).await {
+            let mut stream = match self.blocks(next_block as i64, end_block).await {
                 Ok(stream) => Box::pin(stream),
 
                 // If there is an error at the initial connection, we don't retry here as that's
@@ -192,5 +192,17 @@ impl BlockStreamer for Client {
             // termination condition.
             break Ok(());
         }
+    }
+
+    async fn recent_final_block_num(&mut self) -> Result<BlockNum, BoxError> {
+        Ok(self
+            .blocks(-1, 0)
+            .await?
+            .boxed()
+            .next()
+            .await
+            .transpose()?
+            .map(|b| b.final_block_height)
+            .unwrap_or(0))
     }
 }

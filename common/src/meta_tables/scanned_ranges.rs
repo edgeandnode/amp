@@ -23,7 +23,8 @@ use std::sync::Arc;
 
 use crate::{
     arrow::array::{ArrayRef, StringBuilder},
-    timestamp_type, BoxError, QueryContext, Timestamp, TimestampArrayBuilder,
+    query_context::Error as CoreError,
+    timestamp_type, QueryContext, Timestamp, TimestampArrayBuilder,
 };
 use datafusion::{
     arrow::{
@@ -64,7 +65,7 @@ pub async fn ranges_for_table(
     ctx: &QueryContext,
     catalog_schema: &str,
     table_name: &str,
-) -> Result<Vec<(u64, u64)>, BoxError> {
+) -> Result<Vec<(u64, u64)>, CoreError> {
     let scanned_ranges_ref = TableReference::partial(catalog_schema, TABLE_NAME);
     let rb = ctx
             .meta_execute_sql(&format!(
@@ -82,7 +83,7 @@ pub async fn filenames_for_table(
     ctx: &QueryContext,
     catalog_schema: &str,
     table_name: &str,
-) -> Result<Vec<String>, BoxError> {
+) -> Result<Vec<String>, CoreError> {
     let scanned_ranges_ref = TableReference::partial(catalog_schema, TABLE_NAME);
     let rb = ctx
             .meta_execute_sql(&format!(

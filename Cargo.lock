@@ -1848,6 +1848,7 @@ dependencies = [
  "prometheus",
  "serde_json",
  "snmalloc-rs",
+ "thiserror",
  "tokio",
  "url",
 ]

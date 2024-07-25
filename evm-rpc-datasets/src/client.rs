@@ -112,6 +112,10 @@ impl BlockStreamer for JsonRpcClient {
     ) -> impl Future<Output = Result<(), BoxError>> + Send {
         self.block_stream(start_block, end_block, tx)
     }
+
+    async fn recent_final_block_num(&mut self) -> Result<BlockNum, BoxError> {
+        todo!("latest block not yet implemented for json-rpc")
+    }
 }
 
 fn rpc_to_rows(block: Header, logs: Vec<RpcLog>, network: &str) -> Result<DatasetRows, BoxError> {

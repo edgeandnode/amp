@@ -18,9 +18,11 @@ use common::meta_tables::scanned_ranges;
 use common::meta_tables::scanned_ranges::filenames_for_table;
 use common::multirange::MultiRange;
 use common::parquet;
+use common::query_context::Error as CoreError;
 use common::query_context::QueryContext;
 use common::tracing;
 use common::BlockNum;
+use common::BlockStreamer as _;
 use common::BoxError;
 use common::BLOCK_NUM;
 use datafusion::execution::runtime_env::RuntimeEnv;
@@ -40,6 +42,7 @@ use object_store::ObjectMeta;
 use parquet::basic::{Compression, ZstdLevel};
 use parquet::file::properties::WriterProperties as ParquetWriterProperties;
 use parquet_writer::ParquetWriter;
+use thiserror::Error;
 
 #[global_allocator]
 static ALLOC: snmalloc_rs::SnMalloc = snmalloc_rs::SnMalloc;
@@ -85,7 +88,18 @@ struct Args {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), BoxError> {
+async fn main() {
+    match main_inner().await {
+        Ok(()) => {}
+        Err(e) => {
+            // Manually print the error so we can control the format.
+            eprintln!("Exiting with error: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+async fn main_inner() -> Result<(), BoxError> {
     tracing::register_logger();
 
     let args = Args::parse();
@@ -187,7 +201,14 @@ async fn run_block_stream_jobs(
     start: BlockNum,
     end: Option<BlockNum>,
 ) -> Result<(), BoxError> {
-    let end = end.ok_or("end block is required")?;
+    let mut client = dataset_store.load_client(dataset_name).await?;
+
+    let end = match end {
+        Some(end) => end,
+        None => client.recent_final_block_num().await?,
+    };
+
+    info!("dumping dataset {dataset_name} from {start} to {end}");
 
     // This is the intersection of the `__scanned_ranges` for all tables. That is, a range is only
     // considered scanned if it is scanned for all tables.
@@ -203,7 +224,6 @@ async fn run_block_stream_jobs(
 
     // Split them across the target number of jobs as to balance the number of blocks per job.
     let multiranges = ranges.split_and_partition(n_jobs as u64, 1000);
-    let client = dataset_store.load_client(dataset_name).await?;
     let existing_blocks = existing_blocks(&ctx).await?;
 
     let jobs = multiranges.into_iter().enumerate().map(|(i, multirange)| {
@@ -375,6 +395,19 @@ async fn scanned_ranges_by_table(
     Ok(multirange_by_table)
 }
 
+#[derive(Error, Debug)]
+#[error("consistency check error: {0}")]
+enum ConsistencyCheckError {
+    #[error("internal query error: {0}")]
+    QueryError(#[from] CoreError),
+
+    #[error("object store error: {0}")]
+    ObjectStoreError(#[from] object_store::Error),
+
+    #[error("dataset {0} is corrupted: {1}")]
+    CorruptedDataset(String, BoxError),
+}
+
 // As a consistency check, ensure that all previously written are accounted for in
 // `__scanned_ranges`. If they are not, delete them as that is an inconsistent state.
 //
@@ -382,7 +415,7 @@ async fn scanned_ranges_by_table(
 async fn delete_orphaned_files(
     physical_dataset: &PhysicalDataset,
     ctx: &QueryContext,
-) -> Result<(), BoxError> {
+) -> Result<(), ConsistencyCheckError> {
     for table in physical_dataset.tables() {
         let registered_files = {
             let f = filenames_for_table(&ctx, table.catalog_schema(), table.table_name()).await?;
@@ -424,10 +457,13 @@ async fn delete_orphaned_files(
         // Check for files in `__scanned_ranges` that do not exist in the store.
         for filename in registered_files {
             if !stored_files.contains_key(&filename) {
-                return Err(format!(
-                    "The dataset is corrupted, file in __scanned_ranges does not exist in store: {}",
+                let dataset_name = table.catalog_schema().to_string();
+                let err = format!(
+                    "file in __scanned_ranges does not exist in store: {}",
                     filename
-                ).into());
+                )
+                .into();
+                return Err(ConsistencyCheckError::CorruptedDataset(dataset_name, err));
             }
         }
     }

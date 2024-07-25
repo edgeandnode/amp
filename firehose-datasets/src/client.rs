@@ -82,7 +82,7 @@ impl Client {
     /// now assumes an EVM Firehose endpoint.
     async fn blocks(
         &mut self,
-        start: BlockNum,
+        start: i64,
         stop: BlockNum,
     ) -> Result<impl Stream<Item = Result<pbethereum::Block, Error>>, Error> {
         let request = tonic::Request::new(pbfirehose::Request {
@@ -187,7 +187,7 @@ impl BlockStreamer for Client {
 
         // A retry loop for consuming the Firehose.
         'retry: loop {
-            let mut stream = match self.blocks(next_block, end_block).await {
+            let mut stream = match self.blocks(next_block as i64, end_block).await {
                 Ok(stream) => Box::pin(stream),
 
                 // If there is an error at the initial connection, we don't retry here as that's
@@ -226,5 +226,12 @@ impl BlockStreamer for Client {
             // termination condition.
             break Ok(());
         }
+    }
+
+    async fn recent_final_block_num(&mut self) -> Result<BlockNum, BoxError> {
+        // We don't know for sure that `chain_head - 100` is final, but it's a good guess as in
+        // Ethereum mainnnet blocks are finalized every two epochs, which are 64 blocks.
+        let block = self.blocks(-100, 0).await?.boxed().next().await;
+        Ok(block.transpose()?.map(|b| b.number).unwrap_or(0))
     }
 }

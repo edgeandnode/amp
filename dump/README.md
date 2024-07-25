@@ -28,15 +28,21 @@ All configuration can be set through env vars instead of the CLI.
   - Description: Sets the path to a config file.
   - Example: `NOZZLE_CONFIG=/path/to/config.toml`
 
-- **DUMP_END_BLOCK**
-  - Description: Specifies the block number to end at, inclusive. Optional for SQL datasets.
-  - Example: `DUMP_END_BLOCK=10000000`
+- **DUMP_DATASET**
+  - Description: The name of the dataset to dump. This is the name of the dataset definition `.toml`,
+    without the extension. So if you have an `eth_firehose.toml`, you can set `DUMP_DATASET=eth_firehose`.
 
 ### Optional
 
 - **DUMP_START_BLOCK**
   - Description: The block number to start from, inclusive.
   - Default: `DUMP_START_BLOCK=0`
+
+  - **DUMP_END_BLOCK**
+  - Description: Specifies the block number to end at, inclusive.
+  - Default: For Firehose datasets, 100 blocks behind chain head. For Substreams, the latest final
+    block. For SQL datasets, the latest block that has been scanned by all dependencies.
+  - Example: `DUMP_END_BLOCK=10000000`
 
 - **DUMP_N_JOBS**
   - Description: Determines the number of parallel firehoses and extractor jobs to run. Not supported
