@@ -66,7 +66,8 @@ struct Args {
     #[arg(long, short, default_value = "0", env = "DUMP_START_BLOCK")]
     start: u64,
 
-    /// The block number to end at, inclusive. If starts with "+" then relative to `start`.
+    /// The block number to end at, inclusive. If starts with "+" then relative to `start`. If
+    /// ommited, defaults to a recent block.
     #[arg(long, short, env = "DUMP_END_BLOCK")]
     end_block: Option<String>,
 
@@ -75,6 +76,10 @@ struct Args {
     /// job will be responsible for a contiguous section of 1 million blocks.
     #[arg(long, short = 'j', default_value = "1", env = "DUMP_N_JOBS")]
     n_jobs: u16,
+
+    /// Overrides the `data_dir` in the config file.
+    #[arg(long, env = "DUMP_DATA_DIR")]
+    data_dir: Option<String>,
 
     /// The size of each partition in MB. Once the size is reached, a new part file is created. This
     /// is based on the estimated in-memory size of the data. The actual on-disk file size will vary,
@@ -108,12 +113,13 @@ async fn main_inner() -> Result<(), BoxError> {
         start,
         end_block,
         n_jobs,
+        data_dir,
         partition_size_mb,
         disable_compression,
         dataset: dataset_name,
     } = args;
 
-    let config = Arc::new(Config::load(config_path)?);
+    let config = Arc::new(Config::load(config_path, data_dir)?);
     let dataset_store = DatasetStore::new(config.clone());
     let partition_size = partition_size_mb * 1024 * 1024;
     let compression = if disable_compression {
