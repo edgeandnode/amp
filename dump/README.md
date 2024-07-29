@@ -30,7 +30,9 @@ All configuration can be set through env vars instead of the CLI.
 
 - **DUMP_DATASET**
   - Description: The name of the dataset to dump. This is the name of the dataset definition `.toml`,
-    without the extension. So if you have an `eth_firehose.toml`, you can set `DUMP_DATASET=eth_firehose`.
+    without the extension. So if you have an `eth_firehose.toml`, you can set
+    `DUMP_DATASET=eth_firehose`. Also accepts a comma-separated list of datasets, which will be
+    dumped in the provided order.
 
 ### Optional
 

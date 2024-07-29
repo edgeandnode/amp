@@ -57,8 +57,10 @@ struct Args {
 
     /// The name of the dataset to dump. This will be looked up in the dataset definiton directory.
     /// Will also be used as a subdirectory in the output path, `<data_dir>/<dataset>`.
-    #[arg(long, env = "DUMP_DATASET")]
-    dataset: String,
+    ///
+    /// Also accepts a comma-separated list of datasets, which will be dumped in the provided order.
+    #[arg(long, required = true, env = "DUMP_DATASET", value_delimiter = ',')]
+    dataset: Vec<String>,
 
     /// The block number to start from, inclusive. If ommited, defaults to `0`. Note that `dump` is
     /// smart about keeping track of what blocks have already been dumped, so you only need to set
@@ -116,7 +118,7 @@ async fn main_inner() -> Result<(), BoxError> {
         data_dir,
         partition_size_mb,
         disable_compression,
-        dataset: dataset_name,
+        dataset: datasets,
     } = args;
 
     let config = Arc::new(Config::load(config_path, data_dir)?);
@@ -128,70 +130,70 @@ async fn main_inner() -> Result<(), BoxError> {
         Compression::ZSTD(ZstdLevel::try_new(1).unwrap())
     };
     let parquet_opts = parquet_opts(compression);
-
     let end_block = end_block.map(|e| resolve_end_block(start, e)).transpose()?;
-
-    let dataset = dataset_store.load_dataset(&dataset_name).await?;
-
     let env = Arc::new(config.make_runtime_env()?);
-    let catalog = Catalog::for_dataset(&dataset, config.data_store.clone())?;
-    let physical_dataset = catalog.datasets()[0].clone();
-    let ctx = Arc::new(QueryContext::for_catalog(catalog, env.clone())?);
 
-    // Ensure consistency before starting the dump procedure.
-    delete_orphaned_files(&physical_dataset, &ctx).await?;
+    for dataset_name in datasets {
+        let dataset = dataset_store.load_dataset(&dataset_name).await?;
+        let catalog = Catalog::for_dataset(&dataset, config.data_store.clone())?;
+        let physical_dataset = catalog.datasets()[0].clone();
+        let ctx = Arc::new(QueryContext::for_catalog(catalog, env.clone())?);
 
-    // Query the scanned ranges, we might already have some ranges if this is not the first dump run
-    // for this dataset.
-    let scanned_ranges_by_table = scanned_ranges_by_table(&ctx).await?;
-    for (table_name, multirange) in &scanned_ranges_by_table {
-        if multirange.total_len() == 0 {
-            continue;
-        }
+        // Ensure consistency before starting the dump procedure.
+        delete_orphaned_files(&physical_dataset, &ctx).await?;
 
-        info!(
-            "table `{}` has scanned {} blocks in the ranges: {}",
-            table_name,
-            multirange.total_len(),
-            multirange,
-        );
-    }
-
-    match DatasetKind::from_str(&dataset.kind)? {
-        DatasetKind::Firehose | DatasetKind::Substreams => {
-            run_block_stream_jobs(
-                n_jobs,
-                ctx,
-                &dataset_name,
-                &dataset_store,
-                scanned_ranges_by_table,
-                partition_size,
-                parquet_opts,
-                start,
-                end_block,
-            )
-            .await?;
-        }
-        DatasetKind::Sql => {
-            if n_jobs > 1 {
-                return Err("n_jobs > 1 is not supported for SQL datasets".into());
+        // Query the scanned ranges, we might already have some ranges if this is not the first dump run
+        // for this dataset.
+        let scanned_ranges_by_table = scanned_ranges_by_table(&ctx).await?;
+        for (table_name, multirange) in &scanned_ranges_by_table {
+            if multirange.total_len() == 0 {
+                continue;
             }
 
-            dump_sql_dataset(
-                ctx,
-                &dataset_name,
-                dataset_store,
-                env,
-                scanned_ranges_by_table,
-                parquet_opts,
-                start,
-                end_block,
-            )
-            .await?;
+            info!(
+                "table `{}` has scanned {} blocks in the ranges: {}",
+                table_name,
+                multirange.total_len(),
+                multirange,
+            );
         }
-    }
 
-    info!("dump of dataset {dataset_name} completed successfully");
+        match DatasetKind::from_str(&dataset.kind)? {
+            DatasetKind::Firehose | DatasetKind::Substreams => {
+                run_block_stream_jobs(
+                    n_jobs,
+                    ctx,
+                    &dataset_name,
+                    &dataset_store,
+                    scanned_ranges_by_table,
+                    partition_size,
+                    &parquet_opts,
+                    start,
+                    end_block,
+                )
+                .await?;
+            }
+            DatasetKind::Sql => {
+                if n_jobs > 1 {
+                    return Err("n_jobs > 1 is not supported for SQL datasets".into());
+                }
+
+                dump_sql_dataset(
+                    ctx,
+                    &dataset_name,
+                    &dataset_store,
+                    &env,
+                    scanned_ranges_by_table,
+                    &parquet_opts,
+                    start,
+                    end_block,
+                )
+                .await?;
+            }
+        }
+
+        info!("dump of dataset {dataset_name} completed successfully");
+    }
 
     Ok(())
 }
@@ -203,7 +205,7 @@ async fn run_block_stream_jobs(
     dataset_store: &DatasetStore,
     scanned_ranges_by_table: BTreeMap<String, MultiRange>,
     partition_size: u64,
-    parquet_opts: ParquetWriterProperties,
+    parquet_opts: &ParquetWriterProperties,
     start: BlockNum,
     end: Option<BlockNum>,
 ) -> Result<(), BoxError> {
@@ -263,10 +265,10 @@ async fn run_block_stream_jobs(
 async fn dump_sql_dataset(
     ctx: Arc<QueryContext>,
     dataset_name: &str,
-    dataset_store: Arc<DatasetStore>,
-    env: Arc<RuntimeEnv>,
+    dataset_store: &Arc<DatasetStore>,
+    env: &Arc<RuntimeEnv>,
     scanned_ranges_by_table: BTreeMap<String, MultiRange>,
-    parquet_opts: ParquetWriterProperties,
+    parquet_opts: &ParquetWriterProperties,
     start: BlockNum,
     end: Option<BlockNum>,
 ) -> Result<(), BoxError> {
