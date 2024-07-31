@@ -31,6 +31,7 @@ use datafusion_proto::bytes::{
 };
 use datafusion_proto::logical_plan::LogicalExtensionCodec;
 use futures::StreamExt as _;
+use log::trace;
 use thiserror::Error;
 use url::Url;
 
@@ -129,6 +130,8 @@ impl QueryContext {
 
     /// Security: This function can receive arbitrary SQL, it will check and restrict the `query`.
     pub async fn execute_sql(&self, query: &str) -> Result<SendableRecordBatchStream, Error> {
+        trace!("executing SQL query: {}", query);
+
         let statement = parse_sql(query)?;
         let ctx = self.datafusion_ctx().await?;
         let plan = sql_to_plan(&ctx, statement).await?;

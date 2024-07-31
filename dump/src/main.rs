@@ -35,6 +35,7 @@ use futures::StreamExt as _;
 use futures::TryFutureExt as _;
 use futures::TryStreamExt;
 use job::Job;
+use log::debug;
 use log::info;
 use log::warn;
 use object_store::path::Path;
@@ -216,8 +217,6 @@ async fn run_block_stream_jobs(
         None => client.recent_final_block_num().await?,
     };
 
-    info!("dumping dataset {dataset_name} from {start} to {end}");
-
     // This is the intersection of the `__scanned_ranges` for all tables. That is, a range is only
     // considered scanned if it is scanned for all tables.
     let scanned_ranges = {
@@ -229,6 +228,7 @@ async fn run_block_stream_jobs(
 
     // Find the ranges of blocks that have not been scanned yet for at least one table.
     let ranges = scanned_ranges.complement(start, end);
+    info!("dumping dataset {dataset_name} for ranges {ranges}");
 
     // Split them across the target number of jobs as to balance the number of blocks per job.
     let multiranges = ranges.split_and_partition(n_jobs as u64, 1000);
@@ -366,6 +366,8 @@ fn parquet_opts(compression: Compression) -> ParquetWriterProperties {
 async fn existing_blocks(ctx: &QueryContext) -> Result<BTreeMap<String, MultiRange>, BoxError> {
     let mut existing_blocks: BTreeMap<String, MultiRange> = BTreeMap::new();
     for table in ctx.catalog().all_tables() {
+        debug!("fetching existing blocks for table: {}", table.table_ref());
+
         let mut multirange = MultiRange::default();
         let mut record_stream = ctx
             .execute_sql(&format!(
