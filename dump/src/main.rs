@@ -366,13 +366,13 @@ fn parquet_opts(compression: Compression) -> ParquetWriterProperties {
 async fn existing_blocks(ctx: &QueryContext) -> Result<BTreeMap<String, MultiRange>, BoxError> {
     let mut existing_blocks: BTreeMap<String, MultiRange> = BTreeMap::new();
     for table in ctx.catalog().all_tables() {
-        debug!("fetching existing blocks for table: {}", table.table_ref());
+        let t = table.table_ref();
+        debug!("querying unique block numbers on table {t}");
 
         let mut multirange = MultiRange::default();
         let mut record_stream = ctx
             .execute_sql(&format!(
-                "select distinct({BLOCK_NUM}) from {} order by block_num",
-                table.table_ref()
+                "select distinct({BLOCK_NUM}) from {t} order by block_num",
             ))
             .await?;
         while let Some(batch) = record_stream.next().await {
