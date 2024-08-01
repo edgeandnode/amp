@@ -123,6 +123,11 @@ async fn flush_scanned_ranges(
         datasets[0].name().to_string()
     };
 
+    debug!(
+        "flushing {} scanned ranges for dataset {dataset_name}",
+        batch.num_rows()
+    );
+
     // Build a datafusion logical plan to insert the `batch` into the `__scanned_ranges` table.
     let table_ref = TableReference::partial(dataset_name, scanned_ranges::TABLE_NAME);
     ctx.meta_insert_into(table_ref, batch).await?;

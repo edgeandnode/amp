@@ -146,6 +146,10 @@ impl MultiRange {
         self.ranges.last().map(|(_, end)| *end)
     }
 
+    pub fn min(&self) -> Option<u64> {
+        self.ranges.first().map(|(start, _)| *start)
+    }
+
     pub fn intersection(&self, other: &MultiRange) -> MultiRange {
         let mut intersection = MultiRange::empty();
         let mut i = 0;

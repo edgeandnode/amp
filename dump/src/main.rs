@@ -230,9 +230,16 @@ async fn run_block_stream_jobs(
     let ranges = scanned_ranges.complement(start, end);
     info!("dumping dataset {dataset_name} for ranges {ranges}");
 
+    if ranges.total_len() == 0 {
+        info!("no blocks to dump for {dataset_name}");
+        return Ok(());
+    }
+
     // Split them across the target number of jobs as to balance the number of blocks per job.
     let multiranges = ranges.split_and_partition(n_jobs as u64, 1000);
-    let existing_blocks = existing_blocks(&ctx).await?;
+
+    // Unwrap: `ranges` is not empty.
+    let existing_blocks = existing_blocks(&ctx, ranges.min().unwrap()).await?;
 
     let jobs = multiranges.into_iter().enumerate().map(|(i, multirange)| {
         Arc::new(Job {
@@ -363,16 +370,19 @@ fn parquet_opts(compression: Compression) -> ParquetWriterProperties {
 }
 
 /// Blocks that already exist in the dataset. This is used to ensure no duplicate data is written.
-async fn existing_blocks(ctx: &QueryContext) -> Result<BTreeMap<String, MultiRange>, BoxError> {
+async fn existing_blocks(
+    ctx: &QueryContext,
+    from: BlockNum,
+) -> Result<BTreeMap<String, MultiRange>, BoxError> {
     let mut existing_blocks: BTreeMap<String, MultiRange> = BTreeMap::new();
     for table in ctx.catalog().all_tables() {
         let t = table.table_ref();
-        debug!("querying unique block numbers on table {t}");
+        debug!("querying unique block numbers on table {t} from {from}");
 
         let mut multirange = MultiRange::default();
         let mut record_stream = ctx
             .execute_sql(&format!(
-                "select distinct({BLOCK_NUM}) from {t} order by block_num",
+                "select distinct({BLOCK_NUM}) from {t} where block_num >= {from} order by block_num",
             ))
             .await?;
         while let Some(batch) = record_stream.next().await {
@@ -380,6 +390,9 @@ async fn existing_blocks(ctx: &QueryContext) -> Result<BTreeMap<String, MultiRan
             let block_nums = batch.column(0).as_primitive::<UInt64Type>().values();
             MultiRange::from_values(block_nums.as_ref()).and_then(|r| multirange.append(r))?;
         }
+
+        debug!("{} blocks on table {t} from {from}", multirange.total_len());
+
         existing_blocks.insert(table.table_name().to_string(), multirange);
     }
 
