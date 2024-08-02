@@ -4,7 +4,7 @@ use std::{
 };
 
 use datafusion::{
-    catalog::resolve_table_references,
+    catalog_common::resolve_table_references,
     common::tree_node::{Transformed, TreeNode},
     datasource::TableType,
     error::DataFusionError,

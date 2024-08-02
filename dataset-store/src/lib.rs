@@ -8,7 +8,7 @@ use common::{
     BoxError, Dataset, QueryContext, Store,
 };
 use datafusion::{
-    catalog::resolve_table_references,
+    catalog_common::resolve_table_references,
     execution::runtime_env::RuntimeEnv,
     sql::{parser, TableReference},
 };
