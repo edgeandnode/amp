@@ -95,7 +95,7 @@ struct Args {
     disable_compression: bool,
 
     /// How often to run the dump job in seconds. By default will run once and exit.
-    #[arg(long, env = "DUMP_RUN_EVERY_MINS")]
+    #[arg(long, env = "DUMP_RUN_EVERY_SECS")]
     run_every_secs: Option<u64>,
 }
 
