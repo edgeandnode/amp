@@ -93,6 +93,10 @@ struct Args {
     /// Whether to disable compression when writing parquet files. Defaults to false.
     #[arg(long, env = "DUMP_DISABLE_COMPRESSION")]
     disable_compression: bool,
+
+    /// How often to run the dump job in seconds. By default will run once and exit.
+    #[arg(long, env = "DUMP_RUN_EVERY_MINS")]
+    run_every_secs: Option<u64>,
 }
 
 #[tokio::main]
@@ -120,6 +124,7 @@ async fn main_inner() -> Result<(), BoxError> {
         partition_size_mb,
         disable_compression,
         dataset: datasets,
+        run_every_secs,
     } = args;
 
     let config = Arc::new(Config::load(config_path, data_dir)?);
@@ -133,7 +138,55 @@ async fn main_inner() -> Result<(), BoxError> {
     let parquet_opts = parquet_opts(compression);
     let end_block = end_block.map(|e| resolve_end_block(start, e)).transpose()?;
     let env = Arc::new(config.make_runtime_env()?);
+    let run_every = run_every_secs.map(|s| tokio::time::interval(Duration::from_secs(s)));
 
+    match run_every {
+        None => {
+            dump_datasets(
+                &datasets,
+                &dataset_store,
+                &config,
+                &env,
+                n_jobs,
+                partition_size,
+                &parquet_opts,
+                start,
+                end_block,
+            )
+            .await?
+        }
+        Some(mut run_every) => loop {
+            run_every.tick().await;
+
+            dump_datasets(
+                &datasets,
+                &dataset_store,
+                &config,
+                &env,
+                n_jobs,
+                partition_size,
+                &parquet_opts,
+                start,
+                end_block,
+            )
+            .await?;
+        },
+    }
+
+    Ok(())
+}
+
+async fn dump_datasets(
+    datasets: &[String],
+    dataset_store: &Arc<DatasetStore>,
+    config: &Config,
+    env: &Arc<RuntimeEnv>,
+    n_jobs: u16,
+    partition_size: u64,
+    parquet_opts: &ParquetWriterProperties,
+    start: u64,
+    end_block: Option<u64>,
+) -> Result<(), BoxError> {
     for dataset_name in datasets {
         let dataset = dataset_store.load_dataset(&dataset_name).await?;
         let catalog = Catalog::for_dataset(&dataset, config.data_store.clone())?;
@@ -168,7 +221,7 @@ async fn main_inner() -> Result<(), BoxError> {
                     &dataset_store,
                     scanned_ranges_by_table,
                     partition_size,
-                    &parquet_opts,
+                    parquet_opts,
                     start,
                     end_block,
                 )
@@ -182,10 +235,10 @@ async fn main_inner() -> Result<(), BoxError> {
                 dump_sql_dataset(
                     ctx,
                     &dataset_name,
-                    &dataset_store,
-                    &env,
+                    dataset_store,
+                    env,
                     scanned_ranges_by_table,
-                    &parquet_opts,
+                    parquet_opts,
                     start,
                     end_block,
                 )
