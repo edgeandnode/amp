@@ -64,6 +64,6 @@ All configuration can be set through env vars instead of the CLI.
   - Description: Controls whether compression is disabled when writing Parquet files.
   - Default: `DUMP_DISABLE_COMPRESSION=false`
 
-- **DUMP_RUN_EVERY_SECS**
-  - Description: If set, the dump command will be re-run periodically. Value in seconds.
+- **DUMP_RUN_EVERY_MINS**
+  - Description: If set, the dump command will be re-run periodically. Value in minutes.
     Default: Runs once and exits.

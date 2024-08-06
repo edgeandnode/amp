@@ -94,9 +94,9 @@ struct Args {
     #[arg(long, env = "DUMP_DISABLE_COMPRESSION")]
     disable_compression: bool,
 
-    /// How often to run the dump job in seconds. By default will run once and exit.
-    #[arg(long, env = "DUMP_RUN_EVERY_SECS")]
-    run_every_secs: Option<u64>,
+    /// How often to run the dump job in minutes. By default will run once and exit.
+    #[arg(long, env = "DUMP_RUN_EVERY_MINS")]
+    run_every_mins: Option<u64>,
 }
 
 #[tokio::main]
@@ -124,7 +124,7 @@ async fn main_inner() -> Result<(), BoxError> {
         partition_size_mb,
         disable_compression,
         dataset: datasets,
-        run_every_secs,
+        run_every_mins,
     } = args;
 
     let config = Arc::new(Config::load(config_path, data_dir)?);
@@ -138,7 +138,7 @@ async fn main_inner() -> Result<(), BoxError> {
     let parquet_opts = parquet_opts(compression);
     let end_block = end_block.map(|e| resolve_end_block(start, e)).transpose()?;
     let env = Arc::new(config.make_runtime_env()?);
-    let run_every = run_every_secs.map(|s| tokio::time::interval(Duration::from_secs(s)));
+    let run_every = run_every_mins.map(|s| tokio::time::interval(Duration::from_secs(s * 60)));
 
     match run_every {
         None => {
@@ -289,7 +289,7 @@ async fn run_block_stream_jobs(
     }
 
     // Split them across the target number of jobs as to balance the number of blocks per job.
-    let multiranges = ranges.split_and_partition(n_jobs as u64, 1000);
+    let multiranges = ranges.split_and_partition(n_jobs as u64, 2000);
 
     // Unwrap: `ranges` is not empty.
     let existing_blocks = existing_blocks(&ctx, ranges.min().unwrap()).await?;
