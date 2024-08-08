@@ -9,8 +9,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use clap::Parser;
-use common::arrow::array::AsArray as _;
-use common::arrow::datatypes::UInt64Type;
 use common::catalog::physical::Catalog;
 use common::catalog::physical::PhysicalDataset;
 use common::config::Config;
@@ -24,25 +22,22 @@ use common::tracing;
 use common::BlockNum;
 use common::BlockStreamer as _;
 use common::BoxError;
-use common::BLOCK_NUM;
 use datafusion::execution::runtime_env::RuntimeEnv;
 use datafusion::sql::TableReference;
 use dataset_store::sql_datasets::max_end_block;
 use dataset_store::DatasetKind;
 use dataset_store::DatasetStore;
 use futures::future::try_join_all;
-use futures::StreamExt as _;
 use futures::TryFutureExt as _;
 use futures::TryStreamExt;
 use job::Job;
-use log::debug;
 use log::info;
 use log::warn;
 use object_store::path::Path;
 use object_store::ObjectMeta;
 use parquet::basic::{Compression, ZstdLevel};
 use parquet::file::properties::WriterProperties as ParquetWriterProperties;
-use parquet_writer::ParquetWriter;
+use parquet_writer::ParquetFileWriter;
 use thiserror::Error;
 
 #[global_allocator]
@@ -273,7 +268,7 @@ async fn run_block_stream_jobs(
     // This is the intersection of the `__scanned_ranges` for all tables. That is, a range is only
     // considered scanned if it is scanned for all tables.
     let scanned_ranges = {
-        let mut scanned_ranges = scanned_ranges_by_table.into_iter().map(|(_, r)| r);
+        let mut scanned_ranges = scanned_ranges_by_table.clone().into_iter().map(|(_, r)| r);
         let first = scanned_ranges.next().ok_or("no tables")?;
         let intersection = scanned_ranges.fold(first, |acc, r| acc.intersection(&r));
         intersection
@@ -290,10 +285,6 @@ async fn run_block_stream_jobs(
 
     // Split them across the target number of jobs as to balance the number of blocks per job.
     let multiranges = ranges.split_and_partition(n_jobs as u64, 2000);
-
-    // Unwrap: `ranges` is not empty.
-    let existing_blocks = existing_blocks(&ctx, ranges.min().unwrap()).await?;
-
     let jobs = multiranges.into_iter().enumerate().map(|(i, multirange)| {
         Arc::new(Job {
             dataset_ctx: ctx.clone(),
@@ -302,7 +293,7 @@ async fn run_block_stream_jobs(
             job_id: i as u32,
             partition_size,
             parquet_opts: parquet_opts.clone(),
-            existing_blocks: existing_blocks.clone(),
+            scanned_ranges_by_table: scanned_ranges_by_table.clone(),
         })
     });
 
@@ -368,7 +359,7 @@ async fn dump_sql_dataset(
             let mut stream =
                 execute_query_for_range(query.clone(), store, env.clone(), Some(start), end)
                     .await?;
-            let mut writer = ParquetWriter::new(
+            let mut writer = ParquetFileWriter::new(
                 &data_store,
                 physical_table.clone(),
                 parquet_opts.clone(),
@@ -420,36 +411,6 @@ fn parquet_opts(compression: Compression) -> ParquetWriterProperties {
         .set_compression(compression)
         .set_bloom_filter_enabled(true)
         .build()
-}
-
-/// Blocks that already exist in the dataset. This is used to ensure no duplicate data is written.
-async fn existing_blocks(
-    ctx: &QueryContext,
-    from: BlockNum,
-) -> Result<BTreeMap<String, MultiRange>, BoxError> {
-    let mut existing_blocks: BTreeMap<String, MultiRange> = BTreeMap::new();
-    for table in ctx.catalog().all_tables() {
-        let t = table.table_ref();
-        debug!("querying unique block numbers on table {t} from {from}");
-
-        let mut multirange = MultiRange::default();
-        let mut record_stream = ctx
-            .execute_sql(&format!(
-                "select distinct({BLOCK_NUM}) from {t} where block_num >= {from} order by block_num",
-            ))
-            .await?;
-        while let Some(batch) = record_stream.next().await {
-            let batch = batch?;
-            let block_nums = batch.column(0).as_primitive::<UInt64Type>().values();
-            MultiRange::from_values(block_nums.as_ref()).and_then(|r| multirange.append(r))?;
-        }
-
-        debug!("{} blocks on table {t} from {from}", multirange.total_len());
-
-        existing_blocks.insert(table.table_name().to_string(), multirange);
-    }
-
-    Ok(existing_blocks)
 }
 
 // This is the intersection of the `__scanned_ranges` for all tables. That is, a range is only
