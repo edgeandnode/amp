@@ -194,6 +194,10 @@ impl QueryContext {
     async fn datafusion_ctx_inner(&self, external_tables: bool) -> Result<SessionContext, Error> {
         let ctx = SessionContext::new_with_config_rt(self.session_config.clone(), self.env.clone());
 
+        // Remove after updating to datafusion 42, when
+        // https://github.com/apache/datafusion/pull/11959 will have been merged and released.
+        ctx.register_udf(datafusion::functions::core::get_field().as_ref().clone());
+
         for ds in self.catalog.datasets() {
             let ds_name = ds.name().to_string();
             create_dataset_tables(&ctx, ds_name, ds.data_store(), ds.tables(), external_tables)
