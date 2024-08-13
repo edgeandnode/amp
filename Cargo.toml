@@ -55,11 +55,7 @@ snmalloc-rs = "0.3.4"
 prometheus = "0.13"
 
 # Datafusion and Arrow crates
-# Go back to a crates.io dependency once version 41 is released
-datafusion = { git = "https://github.com/apache/arrow-datafusion", branch = "main", features = [
-    "serde",
-] }
-datafusion-proto = { git = "https://github.com/apache/arrow-datafusion", branch = "main" }
-
-object_store = { version = "0.10.1", features = ["aws", "gcp"] }
+datafusion = { version = "41", features = ["serde"] }
+datafusion-proto = "41"
+object_store = { version = "0.10.2", features = ["aws", "gcp"] }
 arrow-flight = { version = "52.2.0", features = ["flight-sql-experimental"] }
