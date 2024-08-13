@@ -51,5 +51,5 @@ select t.block_num,
             from eth_firehose.logs l
             where l.topic0 = evm_topic('Transfer(address indexed from, address indexed to, uint256 value)')) t
 ```
-The dataset is now ready to be dumped with `dump --dataset erc_20_transfer`. assuming the dependency
-`eth_firehose` is already present.
+The dataset is now ready to be dumped with `dump --dataset erc_20_transfer`, assuming the dependency
+`eth_firehose` is already present, and then queried as in `select * from erc_20_transfer.transfers`.
