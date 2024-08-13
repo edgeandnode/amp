@@ -224,7 +224,7 @@ async fn dump_datasets(
             }
             DatasetKind::Sql => {
                 if n_jobs > 1 {
-                    return Err("n_jobs > 1 is not supported for SQL datasets".into());
+                    warn!("n_jobs > 1 has no effect for SQL datasets");
                 }
 
                 dump_sql_dataset(
