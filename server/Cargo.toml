@@ -3,6 +3,12 @@ name = "server"
 edition.workspace = true
 version.workspace = true
 
+[lib]
+name = "server"
+
+[[bin]]
+name = "server"
+
 [dependencies]
 common = { path = "../common" }
 firehose-datasets = { path = "../firehose-datasets" }

@@ -88,7 +88,7 @@ impl From<Error> for Status {
     }
 }
 
-pub(super) struct Service {
+pub struct Service {
     config: Arc<Config>,
     env: Arc<RuntimeEnv>,
 }
