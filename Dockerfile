@@ -3,7 +3,7 @@ FROM rust:latest AS build
 # cmake is for snmalloc
 RUN apt-get update && apt-get install -y protobuf-compiler cmake
 COPY . .
-RUN cargo build --release --workspace && \
+RUN cargo build --release --workspace -v && \
     cp ./target/release/dump /bin/dump && \
     cp ./target/release/server /bin/server
 
