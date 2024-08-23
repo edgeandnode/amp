@@ -30,12 +30,7 @@ tonic = { version = "0.11.0", features = [
     "tls-roots",
 ] }
 tonic-build = "0.11"
-
-# SECURITY: `no-recursion-limit` is necessary for executing very deeply nested queries, but it
-# exposes the server to potential stack overflow attacks. For production readiness we would want
-# something like https://github.com/tokio-rs/prost/pull/785.
-prost = { version = "0.12", features = ["no-recursion-limit"] }
-
+prost = "0.12"
 prost-types = "0.12"
 prost-build = "0.12"
 thiserror = "1.0"
