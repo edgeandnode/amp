@@ -3730,8 +3730,7 @@ dependencies = [
 [[package]]
 name = "prost"
 version = "0.12.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "146c289cda302b98a28d40c8b3b90498d6e526dd24ac2ecea73e4e491685b94a"
+source = "git+https://github.com/edgeandnode/prost?branch=nozzle-fork#f16c84b9aa47e904a7039034bf664ac804bf7707"
 dependencies = [
  "bytes",
  "prost-derive",
@@ -3762,11 +3761,10 @@ dependencies = [
 [[package]]
 name = "prost-derive"
 version = "0.12.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "efb6c9a1dd1def8e2124d17e83a20af56f1570d6c2d2bd9e266ccb768df3840e"
+source = "git+https://github.com/edgeandnode/prost?branch=nozzle-fork#f16c84b9aa47e904a7039034bf664ac804bf7707"
 dependencies = [
  "anyhow",
- "itertools 0.11.0",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn 2.0.52",

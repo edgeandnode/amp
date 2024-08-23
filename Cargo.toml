@@ -54,3 +54,15 @@ datafusion = { version = "41", features = ["serde"] }
 datafusion-proto = "41"
 object_store = { version = "0.10.2", features = ["aws", "gcp"] }
 arrow-flight = { version = "52.2.0", features = ["flight-sql-experimental"] }
+
+# Prost fork
+#   
+# The only change in our fork is to bump the recursion limit from 100 to 1000, to allow deserializing
+# larger queries serialized with datafusion-proto. This is preferable to using the
+# `no-recursion-limit` feature, for two reasons:
+# 1. It's more secure, as it still prevents stack overflow attacks, just with a larger limit.
+# 2. `no-recursion-limit` did not work, in our testing it work on macos but not on linux.
+#
+# Something like https://github.com/tokio-rs/prost/pull/785 would enable us to remove this fork.
+[patch.crates-io]
+prost = { git = "https://github.com/edgeandnode/prost", branch = "nozzle-fork" }
