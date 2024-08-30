@@ -11,3 +11,4 @@ dump-check = { path = "../dump-check" }
 object_store.workspace = true
 futures.workspace = true
 tokio.workspace = true
+log.workspace = true

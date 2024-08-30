@@ -4755,6 +4755,7 @@ dependencies = [
  "dump",
  "dump-check",
  "futures",
+ "log",
  "object_store",
  "tokio",
 ]
