@@ -7,7 +7,7 @@ use common::tracing;
 use common::BoxError;
 use datafusion::parquet;
 use dataset_store::DatasetStore;
-use dump::dump_datasets;
+use dump::dump_dataset;
 use dump::parquet_opts;
 use parquet::basic::Compression;
 use parquet::basic::ZstdLevel;
@@ -109,34 +109,38 @@ async fn main_inner() -> Result<(), BoxError> {
 
     match run_every {
         None => {
-            dump_datasets(
-                &datasets,
-                &dataset_store,
-                &config,
-                &env,
-                n_jobs,
-                partition_size,
-                &parquet_opts,
-                start,
-                end_block,
-            )
-            .await?
+            for dataset_name in datasets {
+                dump_dataset(
+                    &dataset_name,
+                    &dataset_store,
+                    &config,
+                    &env,
+                    n_jobs,
+                    partition_size,
+                    &parquet_opts,
+                    start,
+                    end_block,
+                )
+                .await?
+            }
         }
         Some(mut run_every) => loop {
             run_every.tick().await;
 
-            dump_datasets(
-                &datasets,
-                &dataset_store,
-                &config,
-                &env,
-                n_jobs,
-                partition_size,
-                &parquet_opts,
-                start,
-                end_block,
-            )
-            .await?;
+            for dataset_name in &datasets {
+                dump_dataset(
+                    dataset_name,
+                    &dataset_store,
+                    &config,
+                    &env,
+                    n_jobs,
+                    partition_size,
+                    &parquet_opts,
+                    start,
+                    end_block,
+                )
+                .await?;
+            }
         },
     }
 

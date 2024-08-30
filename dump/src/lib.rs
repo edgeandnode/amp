@@ -38,8 +38,8 @@ use parquet::file::properties::WriterProperties as ParquetWriterProperties;
 use parquet_writer::ParquetFileWriter;
 use thiserror::Error;
 
-pub async fn dump_datasets(
-    datasets: &[String],
+pub async fn dump_dataset(
+    dataset_name: &str,
     dataset_store: &Arc<DatasetStore>,
     config: &Config,
     env: &Arc<RuntimeEnv>,
@@ -49,67 +49,65 @@ pub async fn dump_datasets(
     start: u64,
     end_block: Option<u64>,
 ) -> Result<(), BoxError> {
-    for dataset_name in datasets {
-        let dataset = dataset_store.load_dataset(&dataset_name).await?;
-        let catalog = Catalog::for_dataset(&dataset, config.data_store.clone())?;
-        let physical_dataset = catalog.datasets()[0].clone();
-        let ctx = Arc::new(QueryContext::for_catalog(catalog, env.clone())?);
+    let dataset = dataset_store.load_dataset(&dataset_name).await?;
+    let catalog = Catalog::for_dataset(&dataset, config.data_store.clone())?;
+    let physical_dataset = catalog.datasets()[0].clone();
+    let ctx = Arc::new(QueryContext::for_catalog(catalog, env.clone())?);
 
-        // Ensure consistency before starting the dump procedure.
-        delete_orphaned_files(&physical_dataset, &ctx).await?;
+    // Ensure consistency before starting the dump procedure.
+    delete_orphaned_files(&physical_dataset, &ctx).await?;
 
-        // Query the scanned ranges, we might already have some ranges if this is not the first dump run
-        // for this dataset.
-        let scanned_ranges_by_table = scanned_ranges_by_table(&ctx).await?;
-        for (table_name, multirange) in &scanned_ranges_by_table {
-            if multirange.total_len() == 0 {
-                continue;
-            }
-
-            info!(
-                "table `{}` has scanned {} blocks in the ranges: {}",
-                table_name,
-                multirange.total_len(),
-                multirange,
-            );
+    // Query the scanned ranges, we might already have some ranges if this is not the first dump run
+    // for this dataset.
+    let scanned_ranges_by_table = scanned_ranges_by_table(&ctx).await?;
+    for (table_name, multirange) in &scanned_ranges_by_table {
+        if multirange.total_len() == 0 {
+            continue;
         }
 
-        match DatasetKind::from_str(&dataset.kind)? {
-            DatasetKind::Firehose | DatasetKind::Substreams => {
-                run_block_stream_jobs(
-                    n_jobs,
-                    ctx,
-                    &dataset_name,
-                    &dataset_store,
-                    scanned_ranges_by_table,
-                    partition_size,
-                    parquet_opts,
-                    start,
-                    end_block,
-                )
-                .await?;
-            }
-            DatasetKind::Sql => {
-                if n_jobs > 1 {
-                    warn!("n_jobs > 1 has no effect for SQL datasets");
-                }
-
-                dump_sql_dataset(
-                    ctx,
-                    &dataset_name,
-                    dataset_store,
-                    env,
-                    scanned_ranges_by_table,
-                    parquet_opts,
-                    start,
-                    end_block,
-                )
-                .await?;
-            }
-        }
-
-        info!("dump of dataset {dataset_name} completed successfully");
+        info!(
+            "table `{}` has scanned {} blocks in the ranges: {}",
+            table_name,
+            multirange.total_len(),
+            multirange,
+        );
     }
+
+    match DatasetKind::from_str(&dataset.kind)? {
+        DatasetKind::Firehose | DatasetKind::Substreams => {
+            run_block_stream_jobs(
+                n_jobs,
+                ctx,
+                &dataset_name,
+                &dataset_store,
+                scanned_ranges_by_table,
+                partition_size,
+                parquet_opts,
+                start,
+                end_block,
+            )
+            .await?;
+        }
+        DatasetKind::Sql => {
+            if n_jobs > 1 {
+                warn!("n_jobs > 1 has no effect for SQL datasets");
+            }
+
+            dump_sql_dataset(
+                ctx,
+                &dataset_name,
+                dataset_store,
+                env,
+                scanned_ranges_by_table,
+                parquet_opts,
+                start,
+                end_block,
+            )
+            .await?;
+        }
+    }
+
+    info!("dump of dataset {dataset_name} completed successfully");
 
     Ok(())
 }
