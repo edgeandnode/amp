@@ -3,6 +3,12 @@ name = "dump-check"
 edition.workspace = true
 version.workspace = true
 
+[lib]
+name = "dump_check"
+
+[[bin]]
+name = "dump-check"
+
 [dependencies]
 common = { path = "../common" }
 dataset-store = { path = "../dataset-store" }
@@ -19,3 +25,4 @@ prometheus_exporter = "0.8"
 atty = "0.2.14"
 log.workspace = true
 tracing-subscriber.workspace = true
+datafusion.workspace = true
