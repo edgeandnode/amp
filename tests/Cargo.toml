@@ -1,0 +1,13 @@
+[package]
+name = "tests"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+common = { path = "../common" }
+dataset-store = { path = "../dataset-store" }
+dump = { path = "../dump" }
+dump-check = { path = "../dump-check" }
+object_store.workspace = true
+futures.workspace = true
+tokio.workspace = true

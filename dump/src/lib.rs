@@ -242,7 +242,7 @@ async fn dump_sql_dataset(
     Ok(())
 }
 
-pub fn parquet_opts(compression: Compression) -> ParquetWriterProperties {
+pub fn parquet_opts(compression: Compression, bloom_filters: bool) -> ParquetWriterProperties {
     // For DataFusion defaults, see `ParquetOptions` here:
     // https://github.com/apache/arrow-datafusion/blob/main/datafusion/common/src/config.rs
     //
@@ -251,7 +251,7 @@ pub fn parquet_opts(compression: Compression) -> ParquetWriterProperties {
     // `file_sort_order` set on the reader configuration.
     ParquetWriterProperties::builder()
         .set_compression(compression)
-        .set_bloom_filter_enabled(true)
+        .set_bloom_filter_enabled(bloom_filters)
         .build()
 }
 

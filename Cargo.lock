@@ -1896,6 +1896,7 @@ dependencies = [
  "atty",
  "clap",
  "common",
+ "datafusion",
  "dataset-store",
  "futures",
  "human_bytes",
@@ -4743,6 +4744,19 @@ dependencies = [
  "fastrand",
  "rustix",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "tests"
+version = "0.1.0"
+dependencies = [
+ "common",
+ "dataset-store",
+ "dump",
+ "dump-check",
+ "futures",
+ "object_store",
+ "tokio",
 ]
 
 [[package]]

@@ -8,6 +8,7 @@ members = [
     "substreams-datasets",
     "evm-rpc-datasets",
     "dataset-store",
+    "tests",
 ]
 
 resolver = "2"

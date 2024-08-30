@@ -1,0 +1,5 @@
+# Copy this file into firehose_eth_mainnet.toml, filling in the url and token
+kind = "firehose"
+url = "<URL>"
+token = "<TOKEN>"
+network = "mainnet"
