@@ -1,8 +1,8 @@
 use std::future::Future;
 use std::time::Duration;
 
-use alloy_rpc_types::Header;
-use alloy_rpc_types::Log as RpcLog;
+use alloy::rpc::types::Header;
+use alloy::rpc::types::Log as RpcLog;
 use common::evm::tables::blocks::Block;
 use common::evm::tables::blocks::BlockRowsBuilder;
 use common::evm::tables::logs::Log;
@@ -144,9 +144,9 @@ fn rpc_to_rows(block: Header, logs: Vec<RpcLog>, network: &str) -> Result<Datase
 
 fn rpc_header_to_row(header: Header) -> Result<Block, ToRowError> {
     Ok(Block {
-        block_num: header.number.ok_or(ToRowError::Missing("number"))?,
+        block_num: header.number,
         timestamp: Timestamp(Duration::from_secs(header.timestamp)),
-        hash: header.hash.ok_or(ToRowError::Missing("hash"))?.into(),
+        hash: header.hash.into(),
         parent_hash: header.parent_hash.into(),
         ommers_hash: header.uncles_hash.into(),
         miner: header.miner.into(),

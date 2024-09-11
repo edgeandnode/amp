@@ -44,7 +44,7 @@ bytes = "1"
 lazy_static = "1.4.0"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 log = "0.4"
-alloy-core = { version = "0.7.2", features = ["std", "json-abi", "dyn-abi"] }
+alloy = { version = "0.3.3", features = ["json-abi", "dyn-abi", "rpc-types"] }
 itertools = "0.12.1"
 atty = "0.2.14"
 snmalloc-rs = "0.3.4"
@@ -57,7 +57,7 @@ object_store = { version = "0.10.2", features = ["aws", "gcp"] }
 arrow-flight = { version = "52.2.0", features = ["flight-sql-experimental"] }
 
 # Prost fork
-#   
+#
 # The only change in our fork is to bump the recursion limit from 100 to 1000, to allow deserializing
 # larger queries serialized with datafusion-proto. This is preferable to using the
 # `no-recursion-limit` feature, for two reasons:

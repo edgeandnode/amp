@@ -15,7 +15,7 @@ use crate::{
     },
     Bytes32ArrayType, BYTES32_TYPE,
 };
-use alloy_core::{
+use alloy::{
     dyn_abi::{DynSolType, DynSolValue, DynToken, Specifier as _},
     json_abi::Event as AlloyEvent,
     primitives::{
@@ -37,7 +37,7 @@ use datafusion::{
 use itertools::izip;
 use log::trace;
 
-type Unsigned = alloy_core::primitives::Uint<256, 4>;
+type Unsigned = alloy::primitives::Uint<256, 4>;
 
 const DEC128_PREC: u8 = DECIMAL128_MAX_PRECISION;
 const DEC256_PREC: u8 = DECIMAL256_MAX_PRECISION;
@@ -670,7 +670,7 @@ mod tests {
         },
         datatypes::i256,
     };
-    use alloy_core::{
+    use alloy::{
         hex::FromHex as _,
         primitives::{Bytes, B256},
     };
