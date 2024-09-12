@@ -12,3 +12,5 @@ tokio.workspace = true
 thiserror.workspace = true
 hex.workspace = true
 futures.workspace = true
+serde.workspace = true
+toml.workspace = true

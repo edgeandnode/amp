@@ -5,6 +5,7 @@ version.workspace = true
 
 [dependencies]
 common = { path = "../common" }
+evm-rpc-datasets = { path = "../evm-rpc-datasets" }
 firehose-datasets = { path = "../firehose-datasets" }
 substreams-datasets = { path = "../substreams-datasets" }
 tokio.workspace = true
