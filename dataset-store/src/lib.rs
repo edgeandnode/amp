@@ -35,6 +35,9 @@ pub enum Error {
     #[error("unsupported table name: {0}")]
     UnsupportedName(BoxError),
 
+    #[error("EVM RPC error: {0}")]
+    EvmRpcError(#[from] evm_rpc_datasets::Error),
+
     #[error("firehose error: {0}")]
     FirehoseError(#[from] firehose_datasets::Error),
 
@@ -47,6 +50,7 @@ pub enum Error {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DatasetKind {
+    EvmRpc,
     Firehose,
     Substreams,
     Sql,
@@ -55,6 +59,7 @@ pub enum DatasetKind {
 impl DatasetKind {
     pub fn as_str(&self) -> &str {
         match self {
+            Self::EvmRpc => evm_rpc_datasets::DATASET_KIND,
             Self::Firehose => firehose_datasets::DATASET_KIND,
             Self::Substreams => substreams_datasets::DATASET_KIND,
             Self::Sql => sql_datasets::DATASET_KIND,
@@ -65,6 +70,7 @@ impl DatasetKind {
 impl fmt::Display for DatasetKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::EvmRpc => f.write_str(evm_rpc_datasets::DATASET_KIND),
             Self::Firehose => f.write_str(firehose_datasets::DATASET_KIND),
             Self::Substreams => f.write_str(substreams_datasets::DATASET_KIND),
             Self::Sql => f.write_str(sql_datasets::DATASET_KIND),
@@ -77,6 +83,7 @@ impl FromStr for DatasetKind {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
+            evm_rpc_datasets::DATASET_KIND => Ok(Self::EvmRpc),
             firehose_datasets::DATASET_KIND => Ok(Self::Firehose),
             substreams_datasets::DATASET_KIND => Ok(Self::Substreams),
             sql_datasets::DATASET_KIND => Ok(Self::Sql),
@@ -176,9 +183,10 @@ impl DatasetStore {
     }
 
     async fn load_dataset_inner(self: Arc<Self>, dataset_name: &str) -> Result<Dataset, Error> {
-        let (kind, dataset_toml) = self.kind_and_dataset(&dataset_name).await?;
+        let (kind, dataset_toml) = self.kind_and_dataset(dataset_name).await?;
 
         let dataset = match kind.as_str() {
+            evm_rpc_datasets::DATASET_KIND => evm_rpc_datasets::dataset(dataset_toml)?,
             firehose_datasets::DATASET_KIND => firehose_datasets::evm::dataset(dataset_toml)?,
             substreams_datasets::DATASET_KIND => substreams_datasets::dataset(dataset_toml).await?,
             sql_datasets::DATASET_KIND => self.sql_dataset(dataset_toml).await?.dataset,
@@ -209,6 +217,7 @@ impl DatasetStore {
     async fn load_client_inner(&self, dataset_name: &str) -> Result<impl BlockStreamer, Error> {
         #[derive(Clone)]
         pub enum BlockStreamClient {
+            EvmRpc(evm_rpc_datasets::JsonRpcClient),
             Firehose(firehose_datasets::Client),
             Substreams(substreams_datasets::Client),
         }
@@ -221,6 +230,7 @@ impl DatasetStore {
                 tx: mpsc::Sender<common::DatasetRows>,
             ) -> Result<(), BoxError> {
                 match self {
+                    Self::EvmRpc(client) => client.block_stream(start_block, end_block, tx).await,
                     Self::Firehose(client) => client.block_stream(start_block, end_block, tx).await,
                     Self::Substreams(client) => {
                         client.block_stream(start_block, end_block, tx).await
@@ -230,6 +240,7 @@ impl DatasetStore {
 
             async fn recent_final_block_num(&mut self) -> Result<BlockNum, BoxError> {
                 match self {
+                    Self::EvmRpc(client) => client.recent_final_block_num().await,
                     Self::Firehose(client) => client.recent_final_block_num().await,
                     Self::Substreams(client) => client.recent_final_block_num().await,
                 }
@@ -239,6 +250,10 @@ impl DatasetStore {
         let (kind, toml) = self.kind_and_dataset(dataset_name).await?;
 
         match kind {
+            DatasetKind::EvmRpc => {
+                let client = evm_rpc_datasets::client(toml)?;
+                Ok(BlockStreamClient::EvmRpc(client))
+            }
             DatasetKind::Firehose => {
                 let client = firehose_datasets::Client::new(toml, self.providers_store()).await?;
                 Ok(BlockStreamClient::Firehose(client))
@@ -288,7 +303,7 @@ impl DatasetStore {
         query: &parser::Statement,
         env: Arc<RuntimeEnv>,
     ) -> Result<QueryContext, DatasetError> {
-        let (tables, _) = resolve_table_references(&query, true).map_err(DatasetError::unknown)?;
+        let (tables, _) = resolve_table_references(query, true).map_err(DatasetError::unknown)?;
         let catalog = self.load_catalog_for_table_refs(tables.iter()).await?;
         QueryContext::for_catalog(catalog, env.clone()).map_err(DatasetError::unknown)
     }

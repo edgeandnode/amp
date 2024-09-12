@@ -74,12 +74,12 @@ pub async fn dump_dataset(
     }
 
     match DatasetKind::from_str(&dataset.kind)? {
-        DatasetKind::Firehose | DatasetKind::Substreams => {
+        DatasetKind::EvmRpc | DatasetKind::Firehose | DatasetKind::Substreams => {
             run_block_stream_jobs(
                 n_jobs,
                 ctx,
-                &dataset_name,
-                &dataset_store,
+                dataset_name,
+                dataset_store,
                 scanned_ranges_by_table,
                 partition_size,
                 parquet_opts,

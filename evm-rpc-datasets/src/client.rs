@@ -34,6 +34,7 @@ pub enum ToRowError {
     Overflow(&'static str, BoxError),
 }
 
+// TODO: use alloy client
 #[derive(Clone)]
 pub struct JsonRpcClient {
     client: HttpClient,
@@ -52,6 +53,11 @@ impl JsonRpcClient {
 
     async fn get_block_by_number(&self, block_number: BlockNum) -> Result<Header, RpcError> {
         let params = json!([format!("0x{:x}", block_number), false]);
+        self.call("eth_getBlockByNumber", params).await
+    }
+
+    async fn get_latest_finalized_block(&self) -> Result<Header, RpcError> {
+        let params = json!(["finalized", false]);
         self.call("eth_getBlockByNumber", params).await
     }
 
@@ -114,7 +120,8 @@ impl BlockStreamer for JsonRpcClient {
     }
 
     async fn recent_final_block_num(&mut self) -> Result<BlockNum, BoxError> {
-        todo!("latest block not yet implemented for json-rpc")
+        let header = self.get_latest_finalized_block().await?;
+        Ok(header.number)
     }
 }
 
