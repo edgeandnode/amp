@@ -5,12 +5,10 @@ version.workspace = true
 
 [dependencies]
 common = { path = "../common" }
-jsonrpsee = { version = "0.22.5", features = ["client"] }
 alloy.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 thiserror.workspace = true
-hex.workspace = true
-futures.workspace = true
 serde.workspace = true
 toml.workspace = true
+serde_with = "3.9.0"

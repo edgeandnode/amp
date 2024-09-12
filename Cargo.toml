@@ -44,7 +44,12 @@ bytes = "1"
 lazy_static = "1.4.0"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 log = "0.4"
-alloy = { version = "0.3.3", features = ["json-abi", "dyn-abi", "rpc-types"] }
+alloy = { version = "0.3.3", features = [
+    "json-abi",
+    "dyn-abi",
+    "provider-http",
+    "rpc-types",
+] }
 itertools = "0.12.1"
 atty = "0.2.14"
 snmalloc-rs = "0.3.4"
