@@ -1,8 +1,12 @@
 use std::future::Future;
 use std::time::Duration;
 
+use alloy::eips::BlockNumberOrTag;
+use alloy::providers::Provider as _;
+use alloy::rpc::types::Filter as LogsFilter;
 use alloy::rpc::types::Header;
 use alloy::rpc::types::Log as RpcLog;
+use alloy::transports::http::reqwest::Url;
 use common::evm::tables::blocks::Block;
 use common::evm::tables::blocks::BlockRowsBuilder;
 use common::evm::tables::logs::Log;
@@ -13,15 +17,6 @@ use common::BoxError;
 use common::DatasetRows;
 use common::EvmCurrency;
 use common::Timestamp;
-use jsonrpsee::core::client::ClientT;
-use jsonrpsee::core::client::Error as RpcError;
-use jsonrpsee::core::traits::ToRpcParams;
-use jsonrpsee::core::DeserializeOwned;
-use jsonrpsee::http_client::HeaderMap;
-use jsonrpsee::http_client::HttpClient;
-use jsonrpsee::http_client::HttpClientBuilder;
-use serde_json::json;
-use serde_json::value::RawValue;
 use thiserror::Error;
 use tokio::sync::mpsc;
 use tokio::try_join;
@@ -34,56 +29,16 @@ pub enum ToRowError {
     Overflow(&'static str, BoxError),
 }
 
-// TODO: use alloy client
 #[derive(Clone)]
 pub struct JsonRpcClient {
-    client: HttpClient,
+    client: alloy::providers::ReqwestProvider,
     network: String,
 }
 
 impl JsonRpcClient {
-    pub fn new(url: &str, network: String) -> Result<Self, BoxError> {
-        let mut content_type = HeaderMap::new();
-        content_type.insert("Content-Type", "application/json".parse().unwrap());
-        let client = HttpClientBuilder::default()
-            .set_headers(content_type)
-            .build(url)?;
+    pub fn new(url: Url, network: String) -> Result<Self, BoxError> {
+        let client = alloy::providers::ProviderBuilder::new().on_http(url);
         Ok(Self { client, network })
-    }
-
-    async fn get_block_by_number(&self, block_number: BlockNum) -> Result<Header, RpcError> {
-        let params = json!([format!("0x{:x}", block_number), false]);
-        self.call("eth_getBlockByNumber", params).await
-    }
-
-    async fn get_latest_finalized_block(&self) -> Result<Header, RpcError> {
-        let params = json!(["finalized", false]);
-        self.call("eth_getBlockByNumber", params).await
-    }
-
-    async fn get_logs(&self, block_number: BlockNum) -> Result<Vec<RpcLog>, RpcError> {
-        let params = json!([{
-            "fromBlock": format!("0x{:x}", block_number),
-            "toBlock": format!("0x{:x}", block_number),
-        }]);
-        self.call("eth_getLogs", params).await
-    }
-
-    async fn call<T: DeserializeOwned>(
-        &self,
-        method: &str,
-        params: serde_json::Value,
-    ) -> Result<T, RpcError> {
-        // newtype so we can implement ToRpcParams for it
-        struct JsonRpcParams(serde_json::Value);
-
-        impl ToRpcParams for JsonRpcParams {
-            fn to_rpc_params(self) -> Result<Option<Box<RawValue>>, serde_json::Error> {
-                serde_json::value::to_raw_value(&self.0).map(Some)
-            }
-        }
-
-        self.client.request(method, JsonRpcParams(params)).await
     }
 
     async fn block_stream(
@@ -93,12 +48,18 @@ impl JsonRpcClient {
         tx: mpsc::Sender<DatasetRows>,
     ) -> Result<(), BoxError> {
         for block_num in start_block..=end_block {
-            let (header, logs) = try_join!(
-                self.get_block_by_number(block_num),
-                self.get_logs(block_num),
+            let filter = LogsFilter::new().select(block_num);
+            let (block, logs) = try_join!(
+                self.client
+                    .get_block_by_number(BlockNumberOrTag::Number(block_num), false),
+                self.client.get_logs(&filter),
             )?;
+            let block = match block {
+                Some(block) => block,
+                None => return Err(format!("block not found: {block_num}").into()),
+            };
 
-            let rows = rpc_to_rows(header, logs, &self.network)?;
+            let rows = rpc_to_rows(block.header, logs, &self.network)?;
 
             // Send the block and check if the receiver has gone away.
             if tx.send(rows).await.is_err() {
@@ -106,6 +67,12 @@ impl JsonRpcClient {
             }
         }
         Ok(())
+    }
+}
+
+impl AsRef<alloy::providers::ReqwestProvider> for JsonRpcClient {
+    fn as_ref(&self) -> &alloy::providers::ReqwestProvider {
+        &self.client
     }
 }
 
@@ -120,8 +87,11 @@ impl BlockStreamer for JsonRpcClient {
     }
 
     async fn recent_final_block_num(&mut self) -> Result<BlockNum, BoxError> {
-        let header = self.get_latest_finalized_block().await?;
-        Ok(header.number)
+        let block = self
+            .client
+            .get_block_by_number(BlockNumberOrTag::Finalized, false)
+            .await?;
+        Ok(block.map(|b| b.header.number).unwrap_or(0))
     }
 }
 
@@ -167,7 +137,7 @@ fn rpc_header_to_row(header: Header) -> Result<Block, ToRowError> {
             .map_err(|e| ToRowError::Overflow("gas_limit", e.into()))?,
         gas_used: u64::try_from(header.gas_used)
             .map_err(|e| ToRowError::Overflow("gas_used", e.into()))?,
-        extra_data: header.extra_data.0.to_vec().into(),
+        extra_data: header.extra_data.0.to_vec(),
         mix_hash: header
             .mix_hash
             .ok_or(ToRowError::Missing("mix_hash"))?
@@ -209,6 +179,6 @@ fn rpc_log_to_row(log: RpcLog, timestamp: Timestamp) -> Result<Log, ToRowError> 
         topic1: log.topics().get(1).cloned().map(Into::into),
         topic2: log.topics().get(2).cloned().map(Into::into),
         topic3: log.topics().get(3).cloned().map(Into::into),
-        data: log.data().data.to_vec().into(),
+        data: log.data().data.to_vec(),
     })
 }
