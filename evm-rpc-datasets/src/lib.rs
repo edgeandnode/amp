@@ -2,7 +2,7 @@ mod client;
 
 use alloy::transports::http::reqwest::Url;
 pub use client::JsonRpcClient;
-use common::{BoxError, Dataset};
+use common::{store::StoreError, BoxError, Dataset, Store};
 use serde::Deserialize;
 use serde_with::serde_as;
 
@@ -12,18 +12,25 @@ pub const DATASET_KIND: &str = "evm-rpc";
 pub enum Error {
     #[error("RPC client error: {0}")]
     Client(BoxError),
+    #[error("store error: {0}")]
+    StoreError(#[from] StoreError),
     #[error("TOML parse error: {0}")]
     Toml(#[from] toml::de::Error),
 }
 
-#[serde_as]
 #[derive(Debug, Deserialize)]
 pub(crate) struct DatasetDef {
     pub kind: String,
     pub name: String,
-    #[serde_as(as = "serde_with::DisplayFromStr")]
-    pub provider: Url,
+    pub provider: String,
     pub network: String,
+}
+
+#[serde_as]
+#[derive(Debug, Deserialize)]
+pub(crate) struct EvmRpcProvider {
+    #[serde_as(as = "serde_with::DisplayFromStr")]
+    pub url: Url,
 }
 
 pub fn dataset(dataset_cfg: toml::Value) -> Result<Dataset, Error> {
@@ -38,8 +45,13 @@ pub fn dataset(dataset_cfg: toml::Value) -> Result<Dataset, Error> {
     })
 }
 
-pub fn client(dataset_cfg: toml::Value) -> Result<JsonRpcClient, Error> {
+pub async fn client(
+    dataset_cfg: toml::Value,
+    provider_store: &Store,
+) -> Result<JsonRpcClient, Error> {
     let def: DatasetDef = dataset_cfg.try_into()?;
-    let client = JsonRpcClient::new(def.provider, def.network).map_err(Error::Client)?;
+    let provider_string = provider_store.get_string(def.provider.as_str()).await?;
+    let provider: EvmRpcProvider = toml::from_str(&provider_string)?;
+    let client = JsonRpcClient::new(provider.url, def.network).map_err(Error::Client)?;
     Ok(client)
 }
