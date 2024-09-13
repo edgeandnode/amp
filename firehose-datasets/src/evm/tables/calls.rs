@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use common::arrow::array::{ArrayRef, BinaryBuilder, BooleanBuilder, UInt32Builder, UInt64Builder};
 use common::arrow::datatypes::{DataType, Field, Schema, SchemaRef};
@@ -9,9 +9,7 @@ use common::{
     BYTES32_TYPE, EVM_ADDRESS_TYPE as ADDRESS_TYPE, EVM_CURRENCY_TYPE,
 };
 
-lazy_static::lazy_static! {
-    static ref SCHEMA: SchemaRef = Arc::new(schema());
-}
+static SCHEMA: LazyLock<SchemaRef> = LazyLock::new(|| Arc::new(schema()));
 
 pub fn table(network: String) -> Table {
     Table {

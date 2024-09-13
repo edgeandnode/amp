@@ -663,6 +663,8 @@ impl ScalarUDFImpl for EvmTopic {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::LazyLock;
+
     use crate::arrow::{
         array::{
             BinaryBuilder, Decimal256Array, FixedSizeBinaryArray, FixedSizeBinaryBuilder,
@@ -671,10 +673,10 @@ mod tests {
         datatypes::i256,
     };
     use alloy::{
+        hex,
         hex::FromHex as _,
         primitives::{Bytes, B256},
     };
-    use lazy_static::lazy_static;
 
     use super::*;
 
@@ -695,12 +697,10 @@ mod tests {
     const SIG: &str =
             "Swap(address indexed sender,address indexed recipient,int256 amount0,int256 amount1,uint160 sqrtPriceX96,uint128 liquidity,int24 tick)";
 
-    lazy_static! {
-        // topic0: Swap event
-        static ref TOPIC_0: B256 =
-            B256::from_hex("c42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67")
-                .unwrap();
-    }
+    // topic0: Swap event
+    static TOPIC_0: LazyLock<B256> = LazyLock::new(|| {
+        hex!("c42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67").into()
+    });
 
     // Transaction hashes for swaps from blocks 19644517 to 19644520. All
     // the data below is from logs of these transactions, in the same order.
@@ -751,55 +751,63 @@ mod tests {
              000000000000000000000000000000000000000000000000000002fb6d")];
 
     // Decoded data for TXNS from etherscan
-    lazy_static! {
-        static ref SENDERS: FixedSizeBinaryArray = {
-            FixedSizeBinaryArray::try_from_iter(
-                CSV.into_iter()
-                    .map(|(t1, _, _)| B256::from_hex(t1).unwrap()[12..32].to_vec()),
-            )
-            .expect("sender can be turned into FixedSizeBinaryArray")
-        };
-        static ref RECIPIENTS: FixedSizeBinaryArray = {
-            FixedSizeBinaryArray::try_from_iter(
-                CSV.into_iter()
-                    .map(|(_, t2, _)| B256::from_hex(t2).unwrap()[12..32].to_vec()),
-            )
-            .expect("recipient can be turned into FixedSizeBinaryArray")
-        };
-        static ref AMOUNT0: Decimal256Array = parse_dec256([
+    static SENDERS: LazyLock<FixedSizeBinaryArray> = LazyLock::new(|| {
+        FixedSizeBinaryArray::try_from_iter(
+            CSV.into_iter()
+                .map(|(t1, _, _)| B256::from_hex(t1).unwrap()[12..32].to_vec()),
+        )
+        .expect("sender can be turned into FixedSizeBinaryArray")
+    });
+    static RECIPIENTS: LazyLock<FixedSizeBinaryArray> = LazyLock::new(|| {
+        FixedSizeBinaryArray::try_from_iter(
+            CSV.into_iter()
+                .map(|(_, t2, _)| B256::from_hex(t2).unwrap()[12..32].to_vec()),
+        )
+        .expect("recipient can be turned into FixedSizeBinaryArray")
+    });
+    static AMOUNT0: LazyLock<Decimal256Array> = LazyLock::new(|| {
+        parse_dec256([
             "1000000000",
             "2515363509",
             "-3079847368",
             "4613983989",
             "-149245246228",
-        ]);
-        static ref AMOUNT1: Decimal256Array = parse_dec256([
+        ])
+    });
+    static AMOUNT1: LazyLock<Decimal256Array> = LazyLock::new(|| {
+        parse_dec256([
             "-306731836130196125",
             "-771534952448026751",
             "945625318260095903",
             "-1415239140885295657",
             "45840926746167214080",
-        ]);
-        static ref SQRT_PRICE_X96: Decimal256Array = parse_dec256([
+        ])
+    });
+    static SQRT_PRICE_X96: LazyLock<Decimal256Array> = LazyLock::new(|| {
+        parse_dec256([
             "1387928334765558613523830189754692",
             "1387919176344430097549424633421269",
             "1387930395673702867992718976366466",
             "1387913596232525690981973365205177",
             "1388456901914535021316446911389794",
-        ]);
-        static ref LIQUIDITY: Decimal256Array = parse_dec256([
+        ])
+    });
+    static LIQUIDITY: LazyLock<Decimal256Array> = LazyLock::new(|| {
+        parse_dec256([
             "6674436099870907042",
             "6674436099870907042",
             "6674436099870907042",
             "6674436099870907042",
             "6682069004008125561",
-        ]);
-        static ref TICK: Int32Array = Int32Array::from_iter(
+        ])
+    });
+    static TICK: LazyLock<Int32Array> = LazyLock::new(|| {
+        Int32Array::from_iter(
             ["195429", "195429", "195429", "195429", "195437"]
                 .into_iter()
                 .map(|s| s.parse::<i32>().unwrap()),
-        );
-    }
+        )
+    });
 
     #[test]
     fn topic0_for_signature() {

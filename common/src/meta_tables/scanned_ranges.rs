@@ -19,7 +19,7 @@
 //!
 //! See also: scanned-ranges-consistency
 
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use crate::{
     arrow::array::{ArrayRef, StringBuilder},
@@ -38,9 +38,7 @@ use crate::Table;
 
 pub const TABLE_NAME: &'static str = "__scanned_ranges";
 
-lazy_static::lazy_static! {
-    static ref SCHEMA: SchemaRef = Arc::new(schema());
-}
+static SCHEMA: LazyLock<SchemaRef> = LazyLock::new(|| Arc::new(schema()));
 
 pub fn table() -> Table {
     Table {
