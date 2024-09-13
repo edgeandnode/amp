@@ -251,7 +251,7 @@ impl DatasetStore {
 
         match kind {
             DatasetKind::EvmRpc => {
-                let client = evm_rpc_datasets::client(toml)?;
+                let client = evm_rpc_datasets::client(toml, &self.providers_store()).await?;
                 Ok(BlockStreamClient::EvmRpc(client))
             }
             DatasetKind::Firehose => {
