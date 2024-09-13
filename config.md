@@ -22,9 +22,10 @@ will by default be placed under `<data_dir>/foobar/` and tables will be refered 
 Conceptually there are base datasets, which are extracted from external systems such Firehose and
 Substreams, and then there are datasets defined as queries on other datasets.
 
-Currently, two kinds of base datasets are implemented, Firehose and Substreams. For details on those,
-see the Firehose [dataset docs](firehose-datasets/README.md) and the Substreams [dataset
-docs](substreams-datasets/README.md).
+Details for the base datasets currently implemented:
+- EVM RPC [dataset docs](evm-rpc-datasets/README.md)
+- Firehose [dataset docs](firehose-datasets/README.md)
+- Substreams [dataset docs](substreams-datasets/README.md)
 
 ### SQL datasets
 

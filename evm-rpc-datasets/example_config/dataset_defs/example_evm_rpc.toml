@@ -1,0 +1,13 @@
+kind = "evm-rpc"
+
+# The name of the dataset. This will be used as the dataset directory name under the data directory,
+# and also as the catalog schema name in the SQL interface.
+name = "example_evm_rpc"
+
+# Path to the provider relative to the provider directory.
+provider = "provider_example.toml"
+
+# The network for this dataset. Must match the provider.
+# Follow the 'CLI name' in this table:
+# https://thegraph.com/docs/en/developing/supported-networks/
+network = "mainnet"
