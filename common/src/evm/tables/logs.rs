@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use crate::arrow;
 use crate::{
@@ -10,9 +10,7 @@ use arrow::array::{ArrayRef, BinaryBuilder, UInt32Builder, UInt64Builder};
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use arrow::error::ArrowError;
 
-lazy_static::lazy_static! {
-    static ref SCHEMA: SchemaRef = Arc::new(schema());
-}
+static SCHEMA: LazyLock<SchemaRef> = LazyLock::new(|| Arc::new(schema()));
 
 pub fn table(network: String) -> Table {
     Table {
