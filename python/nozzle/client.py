@@ -54,7 +54,7 @@ import hashlib
 from eth_utils import to_hex
 from eth_utils.crypto import keccak
 from eth_utils import keccak
-from google.cloud import storage, bigquery
+#from google.cloud import storage, bigquery
 
 import binascii
 import decimal
@@ -151,6 +151,9 @@ def generate_signature(json_string):
 def elapsed(start):
     return round(time.time() - start, 4) 
 
+def to_hex(val):
+    return '0x' + val.hex() if isinstance(val, bytes) else val
+
 def process_query(client, query):
     # df = pd.DataFrame()
 
@@ -165,7 +168,7 @@ def process_query(client, query):
         batch = next(result_stream)
         print('time for first batch ', elapsed(start), 's')
         total_events += batch.num_rows
-        df = batch.to_pandas().map(to_hex)
+        df = batch.to_pandas()
 
         print('The type of df is ', type(df))
         
@@ -178,13 +181,17 @@ def process_query(client, query):
             new_df = batch.to_pandas().map(to_hex)
             # Concatenate the df dataframe to the previous dataframe
             df = pd.concat([df, new_df])
-
-
-        print('total rows: ', total_events)
-        print('total time to consume the stream: ', elapsed(start), 's')
-        print('rows/s: ', total_events / elapsed(start))
+        df = df.map(to_hex)
+        pd.set_option('display.max_columns', None)
+        pd.set_option('display.width', None)
         print('Here are some data ', df.head())
-        return df 
+        print('Columns: ', df.columns)
+        return df
+
+    except StopIteration:
+        print("No more batches available in the result stream.")
+        return None
+
 
     except StopIteration:
         print("No more batches available in the result stream.")
@@ -351,6 +358,7 @@ def load_parquet_to_bigquery(dataset_id, table_id, gcs_uri):
 # Convert bytes columns to hex
 def to_hex(val):
     return '0x' + val.hex() if isinstance(val, bytes) else val
+
 class Abi:
     def __init__(self, path):
         f = open(path)

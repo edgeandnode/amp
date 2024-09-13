@@ -9,8 +9,14 @@ readme = "README.md"
 python = "^3.11"
 protobuf = "^5.26.1"
 pyarrow = "^16.0.0"
-pandas = "^2.2.2"
 jupyter = "^1.0.0"
+polars = "^1.7.0"
+requests = "^2.31.0"
+base58 = "^2.1.1"
+eth-utils = "^5.0.0"
+click = "^8.1.7"
+datafusion = "^40.1.0"
+
 
 
 [build-system]
