@@ -23,8 +23,8 @@ Conceptually there are base datasets, which are extracted from external systems 
 Substreams, and then there are datasets defined as queries on other datasets.
 
 Currently, two kinds of base datasets are implemented, Firehose and Substreams. For details on those,
-see the Firehose [dataset docs](firehose-datasets/config.md) and the Substreams [dataset
-docs](substreams-datasets/config.md).
+see the Firehose [dataset docs](firehose-datasets/README.md) and the Substreams [dataset
+docs](substreams-datasets/README.md).
 
 ### SQL datasets
 
