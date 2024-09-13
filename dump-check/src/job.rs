@@ -1,4 +1,4 @@
-use crate::metrics::MetricsRegistry;
+use crate::metrics::METRICS;
 use common::arrow::array::{AsArray, RecordBatch};
 use common::arrow::datatypes::UInt64Type;
 use common::query_context::QueryContext;
@@ -20,7 +20,6 @@ pub struct Job<T: BlockStreamer> {
     pub job_id: u8,
     pub batch_size: u64,
     pub ctx: Arc<QueryContext>,
-    pub metrics: Arc<MetricsRegistry>,
 }
 
 // Validate buffered vector of dataset batches against existing data in the object store.
@@ -29,7 +28,6 @@ async fn validate_batches(
     table_name: &str,
     block_range: RangeInclusive<u64>,
     fbatches: &Vec<RecordBatch>,
-    _metrics: Arc<MetricsRegistry>,
 ) -> Result<(), BoxError> {
     let mut record_stream = ctx
         .execute_sql(&format!(
@@ -109,7 +107,7 @@ pub async fn run_job(job: Job<impl BlockStreamer>) -> Result<(), BoxError> {
     let mut batch_start = job.start;
 
     while let Some(dataset_rows) = firehose.recv().await {
-        job.metrics.blocks_read.inc();
+        METRICS.blocks_read.inc();
         if dataset_rows.is_empty() {
             continue;
         }
@@ -127,7 +125,7 @@ pub async fn run_job(job: Job<impl BlockStreamer>) -> Result<(), BoxError> {
                 .iter()
                 .map(|c| c.to_data().get_slice_memory_size().unwrap())
                 .sum::<usize>();
-            job.metrics.bytes_read.inc_by(bytes as f64);
+            METRICS.bytes_read.inc_by(bytes as f64);
 
             table_map
                 .entry(format!(
@@ -146,7 +144,6 @@ pub async fn run_job(job: Job<impl BlockStreamer>) -> Result<(), BoxError> {
                     &table_name,
                     RangeInclusive::new(batch_start, block_num),
                     batches,
-                    job.metrics.clone(),
                 )
             });
             for res in join_all(futures).await {

@@ -1,31 +1,29 @@
-use std::sync::Arc;
-
 use human_bytes::human_bytes;
 use indicatif::{ProgressBar, ProgressStyle};
 
-use dump_check::metrics::MetricsRegistry;
+use dump_check::metrics::METRICS;
 
-pub(crate) async fn ui(blocks: u64, metrics: Arc<MetricsRegistry>) {
+pub(crate) async fn ui(blocks: u64) {
     if atty::is(atty::Stream::Stdout) {
-        nice_ui(blocks, metrics).await;
+        nice_ui(blocks).await;
     } else {
-        log_ui(blocks, metrics).await;
+        log_ui(blocks).await;
     }
 }
 
-async fn log_ui(blocks: u64, metrics: Arc<MetricsRegistry>) {
-    while metrics.blocks_read.get() < blocks as f64 {
+async fn log_ui(blocks: u64) {
+    while METRICS.blocks_read.get() < blocks as f64 {
         tokio::time::sleep(std::time::Duration::from_secs(10)).await;
         log::info!(
             "Progress: {:.2}%, Read {} blocks, {} arrow data",
-            metrics.blocks_read.get() / blocks as f64 * 100.0,
-            metrics.blocks_read.get(),
-            human_bytes(metrics.bytes_read.get())
+            METRICS.blocks_read.get() / blocks as f64 * 100.0,
+            METRICS.blocks_read.get(),
+            human_bytes(METRICS.bytes_read.get())
         );
     }
 }
 
-async fn nice_ui(blocks: u64, metrics: Arc<MetricsRegistry>) {
+async fn nice_ui(blocks: u64) {
     let pb = ProgressBar::new(blocks);
     pb.set_style(
         ProgressStyle::default_bar()
@@ -34,10 +32,10 @@ async fn nice_ui(blocks: u64, metrics: Arc<MetricsRegistry>) {
             .progress_chars("##-"),
     );
 
-    while metrics.blocks_read.get() < blocks as f64 {
-        pb.set_position(metrics.blocks_read.get() as u64);
-        pb.set_message(format!("{:>10}", human_bytes(metrics.bytes_read.get())));
+    while METRICS.blocks_read.get() < blocks as f64 {
+        pb.set_position(METRICS.blocks_read.get() as u64);
+        pb.set_message(format!("{:>10}", human_bytes(METRICS.bytes_read.get())));
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
-    pb.finish_with_message(format!("{:>10}", human_bytes(metrics.bytes_read.get())));
+    pb.finish_with_message(format!("{:>10}", human_bytes(METRICS.bytes_read.get())));
 }

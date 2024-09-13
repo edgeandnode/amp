@@ -2146,6 +2146,7 @@ dependencies = [
  "futures",
  "human_bytes",
  "indicatif",
+ "lazy_static",
  "log",
  "object_store",
  "prometheus",

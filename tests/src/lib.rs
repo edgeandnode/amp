@@ -49,8 +49,6 @@ pub(crate) mod test_support {
 
     #[cfg(test)]
     pub async fn check_blocks(dataset_name: &str, start: u64, end: u64) -> Result<(), BoxError> {
-        use dump_check::metrics::MetricsRegistry;
-
         let config = Arc::new(Config::load("test_config/config.toml", None)?);
         let dataset_store = DatasetStore::new(config.clone());
         let env = Arc::new(config.make_runtime_env()?);
@@ -64,7 +62,6 @@ pub(crate) mod test_support {
             1,
             start,
             end,
-            Arc::new(MetricsRegistry::new()),
         )
         .await
     }
