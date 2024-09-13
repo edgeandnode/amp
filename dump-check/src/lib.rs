@@ -18,7 +18,6 @@ pub async fn dump_check(
     n_jobs: u8,
     start: u64,
     end_block: u64,
-    metrics: Arc<metrics::MetricsRegistry>,
 ) -> Result<(), BoxError> {
     let dataset = dataset_store.load_dataset(&dataset_name).await?;
     let client = dataset_store.load_client(&dataset_name).await?;
@@ -40,7 +39,6 @@ pub async fn dump_check(
                 job_id: jobs.len() as u8,
                 batch_size,
                 ctx: ctx.clone(),
-                metrics: metrics.clone(),
             });
             from = to + 1;
         }

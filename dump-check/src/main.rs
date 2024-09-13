@@ -5,8 +5,6 @@ use common::{config::Config, BoxError};
 use dataset_store::DatasetStore;
 use std::sync::Arc;
 
-use dump_check::metrics::MetricsRegistry;
-
 /// Checks the output of `dump` against a provider.
 #[derive(Parser, Debug)]
 #[command(name = "firehose-dump-check")]
@@ -64,13 +62,11 @@ async fn main() -> Result<(), BoxError> {
         return Err("The start block number must be less than the end block number".into());
     }
 
-    let metrics = Arc::new(MetricsRegistry::new());
-
     prometheus_exporter::start("0.0.0.0:9102".parse().expect("failed to parse binding"))
         .expect("failed to start prometheus exporter");
 
     let total_blocks = end_block - start + 1;
-    let ui_handle = tokio::spawn(ui::ui(total_blocks, metrics.clone()));
+    let ui_handle = tokio::spawn(ui::ui(total_blocks));
 
     let env = Arc::new((config.make_runtime_env())?);
 
@@ -83,7 +79,6 @@ async fn main() -> Result<(), BoxError> {
         n_jobs,
         start,
         end_block,
-        metrics,
     )
     .await?;
 
