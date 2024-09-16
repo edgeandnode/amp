@@ -300,7 +300,7 @@ fn statement_to_table(statement: &Statement, network: &str) -> Option<Table> {
             Some(Table {
                 name: name.to_string(),
                 schema: Arc::new(Schema::new(fields)),
-                network: network.to_string(),
+                network: Some(network.to_string()),
             })
         }
         _ => None,

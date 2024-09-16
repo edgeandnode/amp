@@ -166,8 +166,8 @@ impl PhysicalTable {
             .collect()
     }
 
-    pub fn network(&self) -> &str {
-        &self.table.network
+    pub fn network(&self) -> Option<&str> {
+        self.table.network.as_ref().map(|n| n.as_str())
     }
 }
 

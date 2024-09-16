@@ -25,7 +25,7 @@ pub struct Table {
     /// Bare table name.
     pub name: String,
     pub schema: SchemaRef,
-    pub network: String,
+    pub network: Option<String>,
 }
 
 impl Table {

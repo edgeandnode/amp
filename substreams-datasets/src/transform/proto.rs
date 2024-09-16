@@ -225,7 +225,7 @@ fn field_to_table(field: &FieldDescriptor, pool: &DescriptorPool, network: &str)
     Some(Table {
         name: field.name().to_string(),
         schema: Arc::new(Schema::new(fields)),
-        network: network.to_string(),
+        network: Some(network.to_string()),
     })
 }
 
