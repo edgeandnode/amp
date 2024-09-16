@@ -51,10 +51,6 @@ All configuration can be set through env vars instead of the CLI.
     for SQL datasets.
   - Default: `DUMP_N_JOBS=1`
 
-- **DUMP_DATA_DIR**
-  - Description: Overrides the `data_dir` in the `NOZZLE_CONFIG` file.
-  - Default: The `data_dir` value in the config file.
-
 - **DUMP_PARTITION_SIZE_MB**
   - Description: Specifies the size of each partition in megabytes, which dictates when new files are
     created. Has no effect for SQL datasets.

@@ -1,3 +1,7 @@
+use figment::{
+    providers::{Env, Format as _, Toml},
+    Figment,
+};
 use fs_err as fs;
 use std::{path::PathBuf, sync::Arc};
 
@@ -32,15 +36,23 @@ struct ConfigFile {
 
 impl Config {
     /// `data_dir` is an optional override for the data directory.
-    pub fn load(file: impl Into<PathBuf>, data_dir: Option<String>) -> Result<Self, BoxError> {
+    ///
+    /// `env_override` allows env vars prefixed with `NOZZLE_CONFIG_` to override config values.
+    pub fn load(file: impl Into<PathBuf>, env_override: bool) -> Result<Self, BoxError> {
         let config_path: PathBuf = fs::canonicalize(file.into())?;
         let contents = fs_err::read_to_string(&config_path)?;
 
+        let config_file: ConfigFile = {
+            let mut config_builder = Figment::new().merge(Toml::string(&contents));
+            if env_override {
+                config_builder = config_builder.merge(Env::prefixed("NOZZLE_CONFIG_"));
+            }
+            config_builder.extract()?
+        };
+
         // Resolve any filesystem paths relative to the directory of the config file.
         let base = config_path.parent();
-        let config_file: ConfigFile = toml::from_str(&contents)?;
-        let data_dir = data_dir.unwrap_or(config_file.data_dir);
-        let data_store = Store::new(data_dir, base)?;
+        let data_store = Store::new(config_file.data_dir, base)?;
         let providers_store = Store::new(config_file.providers_dir, base)?;
         let dataset_defs_store = Store::new(config_file.dataset_defs_dir, base)?;
 

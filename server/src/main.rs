@@ -16,7 +16,7 @@ async fn main() -> Result<(), BoxError> {
     let config = std::env::var("NOZZLE_CONFIG")
         .map_err(|_| BoxError::from("no NOZZLE_CONFIG env var set"))?;
 
-    let config = Config::load(config, None).map_err(|e| format!("failed to load config: {e}"))?;
+    let config = Config::load(config, true).map_err(|e| format!("failed to load config: {e}"))?;
     info!("memory limit is {} MB", config.max_mem_mb);
     info!(
         "spill to disk allowed: {}",

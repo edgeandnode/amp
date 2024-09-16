@@ -19,7 +19,7 @@ pub(crate) mod test_support {
 
     pub async fn bless(dataset_name: &str, start: u64, end: u64) -> Result<(), BoxError> {
         check_provider_files().await;
-        let config = Arc::new(Config::load("test_config/config.toml", None)?);
+        let config = Arc::new(Config::load("test_config/config.toml", false)?);
         let dataset_store = DatasetStore::new(config.clone());
         let partition_size = 1024 * 1024; // 100 kB
         let compression = Compression::ZSTD(ZstdLevel::try_new(1).unwrap());
@@ -49,7 +49,7 @@ pub(crate) mod test_support {
 
     #[cfg(test)]
     pub async fn check_blocks(dataset_name: &str, start: u64, end: u64) -> Result<(), BoxError> {
-        let config = Arc::new(Config::load("test_config/config.toml", None)?);
+        let config = Arc::new(Config::load("test_config/config.toml", false)?);
         let dataset_store = DatasetStore::new(config.clone());
         let env = Arc::new(config.make_runtime_env()?);
 

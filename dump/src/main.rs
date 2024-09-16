@@ -47,10 +47,6 @@ struct Args {
     #[arg(long, short = 'j', default_value = "1", env = "DUMP_N_JOBS")]
     n_jobs: u16,
 
-    /// Overrides the `data_dir` in the config file.
-    #[arg(long, env = "DUMP_DATA_DIR")]
-    data_dir: Option<String>,
-
     /// The size of each partition in MB. Once the size is reached, a new part file is created. This
     /// is based on the estimated in-memory size of the data. The actual on-disk file size will vary,
     /// but will correlate with this value. Defaults to 4 GB.
@@ -87,14 +83,13 @@ async fn main_inner() -> Result<(), BoxError> {
         start,
         end_block,
         n_jobs,
-        data_dir,
         partition_size_mb,
         disable_compression,
         dataset: datasets,
         run_every_mins,
     } = args;
 
-    let config = Arc::new(Config::load(config_path, data_dir)?);
+    let config = Arc::new(Config::load(config_path, true)?);
     let dataset_store = DatasetStore::new(config.clone());
     let partition_size = partition_size_mb * 1024 * 1024;
     let compression = if disable_compression {

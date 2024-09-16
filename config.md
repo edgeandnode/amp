@@ -13,6 +13,10 @@ Configuring datasets to be extracted and served requires three different directo
 Although the initial setup with three directories may seem cumbersome, it allows for a highly
 flexible configuration.
 
+Note that the values in the `NOZZLE_CONFIG` file can be overridden from the environment, by prefixing
+the env var name with `NOZZLE_CONFIG_`. For example, to override the `data_dir` value, you can set a
+`NOZZLE_CONFIG_DATA_DIR` env var to the desired path.
+
 ## Datasets
 All datasets have a name. This will be used as the dataset directory name under the data directory,
 and also as the catalog schema name in the SQL interface. So if you have a dataset name `foobar`, it

@@ -51,7 +51,7 @@ async fn main() -> Result<(), BoxError> {
         n_jobs,
     } = args;
 
-    let config = Arc::new(Config::load(config_path, None)?);
+    let config = Arc::new(Config::load(config_path, true)?);
     let dataset_store = DatasetStore::new(config.clone());
 
     if end_block == 0 {
