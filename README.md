@@ -8,6 +8,10 @@ __This repository is currently private. But it may eventually be open sourced, r
 
 An experiment in ETL architecture for data services in The Graph. 'Project Nozzle' is a codename.
 
+### Python Quickstart
+
+To quickly dive into the power of Nozzle with Python, best is to run the [`getting-started.ipynb](python/examples/getting-started.ipynb). Follow the instructions in thy [Python README](python/README.md).
+
 ## Components
 See [config.md](config.md) for how to configure both the dump tool and the server.
 
