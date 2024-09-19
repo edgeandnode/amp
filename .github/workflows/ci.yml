@@ -28,21 +28,31 @@ jobs:
           command: test
           args: --verbose --workspace --exclude tests -- --nocapture
 
-# TODO: Configure Firehose provider for this
-#   integration-tests:
-#     name: Run unit tests
-#     runs-on: ubuntu-latest
-#     timeout-minutes: 10
-#     env:
-#       RUSTFLAGS: "-D warnings"
-#     steps:
-#       - uses: actions/checkout@v2
-#       - uses: Swatinem/rust-cache@v2
-#       - name: Unit tests
-#         uses: actions-rs/cargo@v1
-#         with:
-#           command: test
-#           args: --verbose -p tests -- --nocapture
+  integration-tests:
+    name: Run unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      RUSTFLAGS: "-D warnings"
+      FIREHOSE_ETH_MAINNET_URL: ${{ secrets.FIREHOSE_ETH_MAINNET_URL }}
+      FIREHOSE_ETH_MAINNET_TOKEN: ${{ secrets.FIREHOSE_ETH_MAINNET_TOKEN }}
+      RPC_ETH_MAINNET_URL: ${{ secrets.RPC_ETH_MAINNET_URL }}
+    steps:
+      - uses: actions/checkout@v2
+      - uses: Swatinem/rust-cache@v2
+      - name: Copy firehose provider file
+        run: |
+          envsubst < tests/config/providers/COPY_ME_firehose_eth_mainnet.toml
+                   > tests/config/providers/firehose_eth_mainnet.toml
+      - name: Copy rpc provider file
+        run: |
+          envsubst < tests/config/providers/COPY_ME_rpc_eth_mainnet.toml
+                   > tests/config/providers/rpc_eth_mainnet.toml
+      - name: Integration tests
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --verbose -p tests -- --nocapture
 
   rustfmt:
     name: Check rustfmt style
