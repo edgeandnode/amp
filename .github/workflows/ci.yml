@@ -12,7 +12,7 @@ env:
 
 jobs:
   unit-tests:
-    name: Run unit tests
+    name: Unit tests
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -29,7 +29,7 @@ jobs:
           args: --verbose --workspace --exclude tests -- --nocapture
 
   integration-tests:
-    name: Run unit tests
+    name: Integration tests
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -40,13 +40,15 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - uses: Swatinem/rust-cache@v2
+      - name: Install deps
+        run: sudo apt-get install -y protobuf-compiler
       - name: Copy firehose provider file
         run: |
-          envsubst < tests/config/providers/COPY_ME_firehose_eth_mainnet.toml
+          envsubst < tests/config/providers/COPY_ME_firehose_eth_mainnet.toml \
                    > tests/config/providers/firehose_eth_mainnet.toml
       - name: Copy rpc provider file
         run: |
-          envsubst < tests/config/providers/COPY_ME_rpc_eth_mainnet.toml
+          envsubst < tests/config/providers/COPY_ME_rpc_eth_mainnet.toml \
                    > tests/config/providers/rpc_eth_mainnet.toml
       - name: Integration tests
         uses: actions-rs/cargo@v1
