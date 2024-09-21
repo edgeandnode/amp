@@ -16,6 +16,9 @@ base58 = "^2.1.1"
 eth-utils = "^5.0.0"
 click = "^8.1.7"
 datafusion = "^40.1.0"
+pycryptodome = "^3.20.0"
+pandas = "^2.2.2"
+pydantic = "^2.9.2"
 
 
 

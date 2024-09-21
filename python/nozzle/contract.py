@@ -6,13 +6,14 @@ from .base_contract import BaseContract
 from .event import Event
 from .chains import Chain
 
-class ContractEvents:
+class ContractEvents():
     pass
 
 @dataclass
 class Contract(BaseContract):
     events: Optional[ContractEvents] = None
     _abi: Dict = field(default_factory=dict)
+    force_refresh: Optional[bool] = False
 
     def add_event(self, event: Event):
         if self.events is None:
@@ -30,7 +31,9 @@ class Contract(BaseContract):
     @abi.setter
     def abi(self, value: Dict):
         self._abi = value
-        self._write_abi()
+        # if abi file doesn't exist, write it
+        if not (Path('abi') / self.chain.name / self.name / f"{str(self.address)}.json").exists() or self.force_refresh:
+            self._write_abi()
 
     def _write_abi(self):
         abi_dir = Path('abi') / self.chain.name / self.name

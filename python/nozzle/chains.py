@@ -1,16 +1,18 @@
 from enum import Enum
 from dataclasses import dataclass, field
 from typing import Dict, List
+import requests
 
 @dataclass
 class ChainInfo:
     name: str
     chain_id: int
     contract_api_url: str
+    current_block_api_url: str
 
 class Chain(Enum):
-    ETHEREUM = ChainInfo("ethereum", 1, "https://eth.blockscout.com/api/v2/smart-contracts/")
-    ARBITRUM = ChainInfo("arbitrum", 42161, "https://arbitrum.blockscout.com/api/v2/smart-contracts/")
+    ETHEREUM = ChainInfo("ethereum", 1, "https://eth.blockscout.com/api/v2/smart-contracts/", "https://eth.blockscout.com/api/v2/main-page/blocks/")
+    ARBITRUM = ChainInfo("arbitrum", 42161, "https://arbitrum.blockscout.com/api/v2/smart-contracts/", "https://arbitrum.blockscout.com/api/v2/main-page/blocks/")
 
     @property
     def contract_api_url(self):

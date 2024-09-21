@@ -16,3 +16,6 @@ class Event:
     parameters: List[EventParameter]
     signature: str
     contract: BaseContract
+
+def __post_init__(self):
+        self.parameters = [EventParameter(**p) if isinstance(p, dict) else p for p in self.parameters]

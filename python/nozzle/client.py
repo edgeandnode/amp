@@ -48,7 +48,9 @@ import os
 from decimal import Decimal
 import pyarrow as pa
 import pyarrow.parquet as pq
+import pyarrow.compute as pc
 import pandas as pd
+import polars as pl
 import time
 import hashlib
 from eth_utils import to_hex
@@ -64,7 +66,7 @@ import requests
 from collections import defaultdict
 
 
-def process_and_save_dataframe(final_df: pd.DataFrame, output_directory: str, file_name: str = 'final_df.parquet'):
+def process_and_save_dataframe(final_df: pl.DataFrame, output_directory: str, file_name: str = 'final_df.parquet'):
     # Ensure the output directory exists and is writable
     if not os.access(output_directory, os.W_OK):
         raise OSError(f"Cannot write to the specified directory: {output_directory}")
@@ -72,13 +74,11 @@ def process_and_save_dataframe(final_df: pd.DataFrame, output_directory: str, fi
     # Convert the defaultdict to a regular dictionary if needed
     if isinstance(final_df, defaultdict):
         indexer_dict = {key: dict(value) for key, value in final_df.items()}
-        final_df = pd.DataFrame.from_dict(indexer_dict, orient='index')
-        final_df.reset_index(inplace=True)
+        final_df = pl.DataFrame(indexer_dict)
 
     # Ensure the date column is in datetime format
     if 'date' in final_df.columns:
-        final_df['date'] = pd.to_datetime(final_df['date'], errors='coerce')
-        final_df['date'] = final_df['date'].dt.date  # Convert to date format
+        final_df = final_df.with_column(pl.col('date').str.strptime(pl.Date, fmt='%Y-%m-%d'))
 
     # Define schema using pyarrow to ensure compatibility
     schema = pa.schema([
@@ -88,7 +88,7 @@ def process_and_save_dataframe(final_df: pd.DataFrame, output_directory: str, fi
     ])
 
     # Convert pandas DataFrame to pyarrow Table
-    table = pa.Table.from_pandas(final_df, schema=schema)
+    table = pa.Table.from_pandas(final_df.to_pandas(), schema=schema)
 
     # Construct the full file path
     file_path = os.path.join(output_directory, file_name)
@@ -97,6 +97,7 @@ def process_and_save_dataframe(final_df: pd.DataFrame, output_directory: str, fi
     pq.write_table(table, file_path)
 
     print(f"File saved successfully at {file_path}")
+    return table
 
 def generate_signatures_from_abi(file_path, specific_event_name=None):
     # Read the ABI file
@@ -155,8 +156,6 @@ def to_hex(val):
     return '0x' + val.hex() if isinstance(val, bytes) else val
 
 def process_query(client, query):
-    # df = pd.DataFrame()
-
     print(query)
     start = time.time()
 
@@ -164,13 +163,14 @@ def process_query(client, query):
     print('time to establish stream: ', elapsed(start), 's')
 
     total_events = 0
+    batches = []
     try:
         batch = next(result_stream)
         print('time for first batch ', elapsed(start), 's')
         total_events += batch.num_rows
-        df = batch.to_pandas()
+        batches.append(batch)
 
-        print('The type of df is ', type(df))
+        print('The type of batch is ', type(batch))
         
         batch_start = time.time()
 
@@ -178,23 +178,21 @@ def process_query(client, query):
             total_events += batch.num_rows
             print('received batch of ', batch.num_rows, ' rows in ', elapsed(batch_start), 's')
             batch_start = time.time()
-            new_df = batch.to_pandas().map(to_hex)
-            # Concatenate the df dataframe to the previous dataframe
-            df = pd.concat([df, new_df])
-        df = df.map(to_hex)
-        pd.set_option('display.max_columns', None)
-        pd.set_option('display.width', None)
-        print('Here are some data ', df.head())
-        print('Columns: ', df.columns)
-        return df
+            batches.append(batch)
+
+        table = pa.Table.from_batches(batches)
+
+        # Convert fixedsizebinary to string
+        table = pa.Table.from_pandas(table.to_pandas().map(to_hex))
+
+        # Pretty print ten rows from the pyarrow table
+        print('Columns: ', table.column_names)
+        print('Table: ', table.to_string(preview_cols=5))
+        return table
 
     except StopIteration:
         print("No more batches available in the result stream.")
-        return None
-
-
-    except StopIteration:
-        print("No more batches available in the result stream.")
+        return pa.Table.from_batches(batches)
 
 def convert_bigint_subgraph_id_to_base58(bigint_representation: int) -> str:
     # Convert the bigint to a hex string
@@ -354,10 +352,6 @@ def load_parquet_to_bigquery(dataset_id, table_id, gcs_uri):
     load_job.result()  # Waits for the job to complete.
 
     print(f"Job finished. Loaded {load_job.output_rows} rows into {dataset_id}:{table_id}")
-
-# Convert bytes columns to hex
-def to_hex(val):
-    return '0x' + val.hex() if isinstance(val, bytes) else val
 
 class Abi:
     def __init__(self, path):

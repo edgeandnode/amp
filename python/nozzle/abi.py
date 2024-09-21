@@ -9,7 +9,7 @@ from .base_contract import BaseContract
 
 class ABI:
     @staticmethod
-    def fetch(contract_address: str, chain: Chain, contract_name: str) -> dict:
+    def fetch(contract_address: str, chain: Chain, contract_name: str, force_refresh: bool = False) -> dict:
         """
         Fetch the ABI for a given contract address and save it to a JSON file.
         
@@ -26,13 +26,14 @@ class ABI:
         """
         abi_file = Path('abi') / chain.name / contract_name / f"{contract_address}.json"
         
-        if abi_file.exists():
+        if abi_file.exists() and not force_refresh:
             print(f"Loading ABI from local file: {abi_file}")
             with open(abi_file, 'r') as f:
                 return json.load(f)
 
         # If not found locally, attempt to fetch from BlockScout
         try:
+            print(f"Fetching ABI from BlockScout: {chain.contract_api_url}{contract_address}")
             url = f"{chain.contract_api_url}{contract_address}"
             response = requests.get(url)
             response.raise_for_status()

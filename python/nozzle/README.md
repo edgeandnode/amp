@@ -35,12 +35,6 @@ Nozzle is a powerful framework for analyzing Ethereum blockchain data. It allows
    poetry shell
    ```
 
-4. Set up your environment variables:
-   ```bash
-   cp .env.example .env
-   ```
-   Edit the `.env` file with your specific configuration.
-
 ## Data Directory Structure and Table Registration
 
 Nozzle organizes data in a structured directory hierarchy and automatically registers tables based on this structure. Understanding this system is crucial for efficient data management and querying.
