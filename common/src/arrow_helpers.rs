@@ -16,13 +16,13 @@ impl Bytes32ArrayBuilder {
     }
 
     pub fn append_value(&mut self, value: [u8; 32]) {
-        // Unwrap: The lenght is fixed.
+        // Unwrap: The length is fixed.
         self.0.append_value(value).unwrap()
     }
 
     pub fn append_option(&mut self, value: Option<[u8; 32]>) {
         match value {
-            // Unwrap: The lenght is fixed.
+            // Unwrap: The length is fixed.
             Some(value) => self.0.append_value(value).unwrap(),
             None => self.0.append_null(),
         }
@@ -42,13 +42,13 @@ impl EvmAddressArrayBuilder {
     }
 
     pub fn append_value(&mut self, value: [u8; 20]) {
-        // Unwrap: The lenght is fixed.
+        // Unwrap: The length is fixed.
         self.0.append_value(value).unwrap()
     }
 
     pub fn append_option(&mut self, value: Option<[u8; 20]>) {
         match value {
-            // Unwrap: The lenght is fixed.
+            // Unwrap: The length is fixed.
             Some(value) => self.append_value(value),
             None => self.0.append_null(),
         }
