@@ -3,6 +3,7 @@
 /.vscode
 /local
 .history
+.direnv
 **/.ipynb_checkpoints
 /python/__pycache__
 **/.python-version
