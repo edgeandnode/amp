@@ -1,0 +1,259 @@
+{
+  "Dai.Approval": {
+    "src": {
+      "name": "src",
+      "type": "address",
+      "pyarrow_type": "string",
+      "indexed": true,
+      "description": ""
+    },
+    "guy": {
+      "name": "guy",
+      "type": "address",
+      "pyarrow_type": "string",
+      "indexed": true,
+      "description": ""
+    },
+    "wad": {
+      "name": "wad",
+      "type": "uint256",
+      "pyarrow_type": "decimal256(76, 0)",
+      "indexed": false,
+      "description": ""
+    }
+  },
+  "Dai.LogNote": {
+    "sig": {
+      "name": "sig",
+      "type": "bytes4",
+      "pyarrow_type": "fixed_size_binary[4]",
+      "indexed": true,
+      "description": ""
+    },
+    "usr": {
+      "name": "usr",
+      "type": "address",
+      "pyarrow_type": "string",
+      "indexed": true,
+      "description": ""
+    },
+    "arg1": {
+      "name": "arg1",
+      "type": "bytes32",
+      "pyarrow_type": "fixed_size_binary[32]",
+      "indexed": true,
+      "description": ""
+    },
+    "arg2": {
+      "name": "arg2",
+      "type": "bytes32",
+      "pyarrow_type": "fixed_size_binary[32]",
+      "indexed": true,
+      "description": ""
+    },
+    "data": {
+      "name": "data",
+      "type": "bytes",
+      "pyarrow_type": "binary",
+      "indexed": false,
+      "description": ""
+    }
+  },
+  "Dai.Transfer": {
+    "src": {
+      "name": "src",
+      "type": "address",
+      "pyarrow_type": "string",
+      "indexed": true,
+      "description": ""
+    },
+    "dst": {
+      "name": "dst",
+      "type": "address",
+      "pyarrow_type": "string",
+      "indexed": true,
+      "description": ""
+    },
+    "wad": {
+      "name": "wad",
+      "type": "uint256",
+      "pyarrow_type": "decimal256(76, 0)",
+      "indexed": false,
+      "description": ""
+    }
+  },
+  "LUSDToken.Approval": {
+    "owner": {
+      "name": "owner",
+      "type": "address",
+      "pyarrow_type": "string",
+      "indexed": true,
+      "description": "The LUSD owner approving spending"
+    },
+    "spender": {
+      "name": "spender",
+      "type": "address",
+      "pyarrow_type": "string",
+      "indexed": true,
+      "description": "The address being approved to spend LUSD"
+    },
+    "value": {
+      "name": "value",
+      "type": "uint256",
+      "pyarrow_type": "decimal256(76, 0)",
+      "indexed": false,
+      "description": "The amount of LUSD approved"
+    }
+  },
+  "LUSDToken.BorrowerOperationsAddressChanged": {
+    "_newBorrowerOperationsAddress": {
+      "name": "_newBorrowerOperationsAddress",
+      "type": "address",
+      "pyarrow_type": "string",
+      "indexed": false,
+      "description": "Admin function"
+    }
+  },
+  "LUSDToken.LUSDTokenBalanceUpdated": {
+    "_user": {
+      "name": "_user",
+      "type": "address",
+      "pyarrow_type": "string",
+      "indexed": false,
+      "description": "The LUSD user"
+    },
+    "_amount": {
+      "name": "_amount",
+      "type": "uint256",
+      "pyarrow_type": "decimal256(76, 0)",
+      "indexed": false,
+      "description": "The amount of the LUSD owner's balance"
+    }
+  },
+  "LUSDToken.StabilityPoolAddressChanged": {
+    "_newStabilityPoolAddress": {
+      "name": "_newStabilityPoolAddress",
+      "type": "address",
+      "pyarrow_type": "string",
+      "indexed": false,
+      "description": "Admin function"
+    }
+  },
+  "LUSDToken.Transfer": {
+    "from_": {
+      "name": "from",
+      "type": "address",
+      "pyarrow_type": "string",
+      "indexed": true,
+      "description": "The address sending the LUSD"
+    },
+    "to": {
+      "name": "to",
+      "type": "address",
+      "pyarrow_type": "string",
+      "indexed": true,
+      "description": "The recipient address of the LUSD"
+    },
+    "value": {
+      "name": "value",
+      "type": "uint256",
+      "pyarrow_type": "decimal256(76, 0)",
+      "indexed": false,
+      "description": "The amount of LUSD transferred"
+    },
+    "from": {
+      "name": "from",
+      "type": "address",
+      "pyarrow_type": "string",
+      "indexed": true,
+      "description": "The address sending the LUSD"
+    }
+  },
+  "LUSDToken.TroveManagerAddressChanged": {
+    "_troveManagerAddress": {
+      "name": "_troveManagerAddress",
+      "type": "address",
+      "pyarrow_type": "string",
+      "indexed": false,
+      "description": "Admin function"
+    }
+  },
+  "WETH9.Approval": {
+    "src": {
+      "name": "src",
+      "type": "address",
+      "pyarrow_type": "string",
+      "indexed": true,
+      "description": ""
+    },
+    "guy": {
+      "name": "guy",
+      "type": "address",
+      "pyarrow_type": "string",
+      "indexed": true,
+      "description": ""
+    },
+    "wad": {
+      "name": "wad",
+      "type": "uint256",
+      "pyarrow_type": "decimal256(76, 0)",
+      "indexed": false,
+      "description": ""
+    }
+  },
+  "WETH9.Transfer": {
+    "src": {
+      "name": "src",
+      "type": "address",
+      "pyarrow_type": "string",
+      "indexed": true,
+      "description": ""
+    },
+    "dst": {
+      "name": "dst",
+      "type": "address",
+      "pyarrow_type": "string",
+      "indexed": true,
+      "description": ""
+    },
+    "wad": {
+      "name": "wad",
+      "type": "uint256",
+      "pyarrow_type": "decimal256(76, 0)",
+      "indexed": false,
+      "description": ""
+    }
+  },
+  "WETH9.Deposit": {
+    "dst": {
+      "name": "dst",
+      "type": "address",
+      "pyarrow_type": "string",
+      "indexed": true,
+      "description": ""
+    },
+    "wad": {
+      "name": "wad",
+      "type": "uint256",
+      "pyarrow_type": "decimal256(76, 0)",
+      "indexed": false,
+      "description": ""
+    }
+  },
+  "WETH9.Withdrawal": {
+    "src": {
+      "name": "src",
+      "type": "address",
+      "pyarrow_type": "string",
+      "indexed": true,
+      "description": ""
+    },
+    "wad": {
+      "name": "wad",
+      "type": "uint256",
+      "pyarrow_type": "decimal256(76, 0)",
+      "indexed": false,
+      "description": ""
+    }
+  }
+}

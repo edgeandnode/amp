@@ -84,8 +84,6 @@ class View(ABC):
         
         # Check whether input tables are registered
         for table in self.input_tables:
-            print('table ', table.name)
-            print('tables ', self._ctx.tables())
             if table.name not in self._ctx.tables():
                 raise ValueError(f"Input table {table.name} is not registered")
 
@@ -224,7 +222,6 @@ class View(ABC):
         Returns a dictionary of field names and their descriptions.
         Override this method in subclasses to provide field descriptions.
         """
-        print('schema ', self.schema())
         return {field.name: field.metadata.get(b'description', b'').decode() 
                 for field in self.schema()}
     

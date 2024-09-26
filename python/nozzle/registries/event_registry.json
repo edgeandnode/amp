@@ -1,0 +1,138 @@
+{
+  "Dai": {
+    "Approval": {
+      "name": "Approval",
+      "contract": {
+        "name": "Dai",
+        "address": "0x6B175474E89094C44Da98b954EedeAC495271d0F",
+        "chain": "ethereum"
+      },
+      "signature": "Approval(address indexed src, address indexed guy, uint256 wad)",
+      "description": "Event emitted when an address approves another address to spend their DAI"
+    },
+    "LogNote": {
+      "name": "LogNote",
+      "contract": {
+        "name": "Dai",
+        "address": "0x6B175474E89094C44Da98b954EedeAC495271d0F",
+        "chain": "ethereum"
+      },
+      "signature": "LogNote(bytes4 indexed sig, address indexed usr, bytes32 indexed arg1, bytes32 indexed arg2, bytes data)",
+      "description": "idk"
+    },
+    "Transfer": {
+      "name": "Transfer",
+      "contract": {
+        "name": "Dai",
+        "address": "0x6B175474E89094C44Da98b954EedeAC495271d0F",
+        "chain": "ethereum"
+      },
+      "signature": "Transfer(address indexed src, address indexed dst, uint256 wad)",
+      "description": "Emitted when DAI is transferred across addresses"
+    }
+  },
+  "LUSDToken": {
+    "Approval": {
+      "name": "Approval",
+      "contract": {
+        "name": "LUSDToken",
+        "address": "0x5f98805A4E8be255a32880FDeC7F6728C6568bA0",
+        "chain": "ethereum"
+      },
+      "signature": "Approval(address indexed owner, address indexed spender, uint256 value)",
+      "description": "Emitted when user approves another address to spend LUSD"
+    },
+    "BorrowerOperationsAddressChanged": {
+      "name": "BorrowerOperationsAddressChanged",
+      "contract": {
+        "name": "LUSDToken",
+        "address": "0x5f98805A4E8be255a32880FDeC7F6728C6568bA0",
+        "chain": "ethereum"
+      },
+      "signature": "BorrowerOperationsAddressChanged(address _newBorrowerOperationsAddress)",
+      "description": "Admin function"
+    },
+    "LUSDTokenBalanceUpdated": {
+      "name": "LUSDTokenBalanceUpdated",
+      "contract": {
+        "name": "LUSDToken",
+        "address": "0x5f98805A4E8be255a32880FDeC7F6728C6568bA0",
+        "chain": "ethereum"
+      },
+      "signature": "LUSDTokenBalanceUpdated(address _user, uint256 _amount)",
+      "description": "Emitted when an LUSD user's balance changes"
+    },
+    "StabilityPoolAddressChanged": {
+      "name": "StabilityPoolAddressChanged",
+      "contract": {
+        "name": "LUSDToken",
+        "address": "0x5f98805A4E8be255a32880FDeC7F6728C6568bA0",
+        "chain": "ethereum"
+      },
+      "signature": "StabilityPoolAddressChanged(address _newStabilityPoolAddress)",
+      "description": "Admin function"
+    },
+    "Transfer": {
+      "name": "Transfer",
+      "contract": {
+        "name": "LUSDToken",
+        "address": "0x5f98805A4E8be255a32880FDeC7F6728C6568bA0",
+        "chain": "ethereum"
+      },
+      "signature": "Transfer(address indexed from, address indexed to, uint256 value)",
+      "description": "Transfers of LUSD from one address to another"
+    },
+    "TroveManagerAddressChanged": {
+      "name": "TroveManagerAddressChanged",
+      "contract": {
+        "name": "LUSDToken",
+        "address": "0x5f98805A4E8be255a32880FDeC7F6728C6568bA0",
+        "chain": "ethereum"
+      },
+      "signature": "TroveManagerAddressChanged(address _troveManagerAddress)",
+      "description": "Admin function"
+    }
+  },
+  "WETH9": {
+    "Approval": {
+      "name": "Approval",
+      "contract": {
+        "name": "WETH9",
+        "address": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+        "chain": "ethereum"
+      },
+      "signature": "Approval(address indexed src, address indexed guy, uint256 wad)",
+      "description": "Approval for WETH transfers"
+    },
+    "Transfer": {
+      "name": "Transfer",
+      "contract": {
+        "name": "WETH9",
+        "address": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+        "chain": "ethereum"
+      },
+      "signature": "Transfer(address indexed src, address indexed dst, uint256 wad)",
+      "description": "Transfer of WETH"
+    },
+    "Deposit": {
+      "name": "Deposit",
+      "contract": {
+        "name": "WETH9",
+        "address": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+        "chain": "ethereum"
+      },
+      "signature": "Deposit(address indexed dst, uint256 wad)",
+      "description": "Deposit of WETH"
+    },
+    "Withdrawal": {
+      "name": "Withdrawal",
+      "contract": {
+        "name": "WETH9",
+        "address": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+        "chain": "ethereum"
+      },
+      "signature": "Withdrawal(address indexed src, uint256 wad)",
+      "description": "Withdrawal of WETH"
+    }
+  }
+}

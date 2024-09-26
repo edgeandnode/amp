@@ -1,266 +1,184 @@
-# The Graph Nozzles: Blockchain Data Transformation Framework
+# Nozzle: Local Blockchain Data Analysis Framework
 
 ## Table of Contents
 1. [Introduction](#introduction)
-2. [Getting Started](#getting-started)
-3. [Data Directory Structure and Table Registration](#data-directory-structure-and-table-registration)
-4. [Onboarding a New Contract](#onboarding-a-new-contract)
-5. [Creating Views](#creating-views)
-6. [Testing Views](#testing-views)
-7. [Iterating on Views](#iterating-on-views)
-8. [Composing Views](#composing-views)
-9. [Best Practices](#best-practices)
-10. [Performance Testing](#performance-testing)
+2. [Value Proposition](#value-proposition)
+3. [Getting Started](#getting-started)
+   - [Installation](#installation)
+   - [Adding Contracts](#adding-contracts)
+   - [Preprocessing Data](#preprocessing-data)
+   - [Creating and Running Views](#creating-and-running-views)
+   - [Exploring Data in Notebooks](#exploring-data-in-notebooks)
+   - [Using the Data Catalog Visualization](#using-the-data-catalog-visualization)
+4. [Advanced Usage](#advanced-usage)
+5. [Best Practices](#best-practices)
 
 ## Introduction
 
-Nozzle is a powerful framework for analyzing Ethereum blockchain data. It allows you to easily onboard contracts, create views for specific data analysis tasks, and compose these views for complex analyses.
+Nozzle is a powerful, user-friendly framework for blockchain data transformation. The local python client enables developers, researchers, and analysts to easily onboard smart contracts, preprocess on-chain data, create custom views, make arbitrary joins and transformations, and perform complex analyses—all on their local machine.
+
+## Value Proposition
+
+Nozzle's engineering design offers several key advantages:
+
+1. **Local-First Development**: Run and test queries on your local machine using the same query engine that serves production queries, ensuring compatibility while allowing for fast iteration.
+2. **Modular Architecture**: Easily extend the library of existing nozzle views with new data sources, views, and analysis techniques.
+3. **Efficient Data Management**: Automatic preprocessing of event data and local caching to minimize redundant computations.
+4. **Intuitive CLI Tools**: Simple commands for adding contracts, preprocessing data, and creating views.
+5. **Integrated Visualization**: Built-in data catalog for easy exploration of available datasets and their relationships.
+6. **Seamless Integration**: Works well with popular data science tools like Jupyter notebooks, dataframe and machine learning libraries in a local environment.
 
 ## Getting Started
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/your-repo/nozzle.git
-   cd nozzle
-   ```
+### Installation
 
-2. Install Poetry (if not already installed):
-   ```bash
-   curl -sSL https://install.python-poetry.org | python3 -
-   ```
-
-3. Install dependencies and activate the virtual environment:
+1. Install python dependencies and create a virtual environment:
    ```bash
    poetry install
    poetry shell
+   cd examples
    ```
 
-## Data Directory Structure and Table Registration
+### Adding Contracts
 
-Nozzle organizes data in a structured directory hierarchy and automatically registers tables based on this structure. Understanding this system is crucial for efficient data management and querying.
+To add a new contract for analysis:
 
-### Directory Structure
-
-The data is organized as follows:
-
-```
-nozzle_data/
-├── ViewName1/
-│   ├── EventName1/
-│   │   ├── blocks_1000000_1999999.parquet
-│   │   ├── blocks_2000000_2999999.parquet
-│   │   └── ...
-│   └── EventName2/
-│       ├── blocks_1000000_1999999.parquet
-│       └── ...
-└── ViewName2/
-    └── ...
+```bash
+# DAI
+python3 -m nozzle.commands add_contract --address 0x6b175474e89094c44da98b954eedeac495271d0f --chain ethereum
+# LUSD
+python3 -m nozzle.commands add_contract --address 0x5f98805a4e8be255a32880fdec7f6728c6568ba0 --chain ethereum
+#WETH
+python3 -m nozzle.commands add_contract --address 0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2 --chain ethereum
 ```
 
-- Each view has its own directory.
-- Within each view directory, there are subdirectories for each event.
-- Each event directory contains Parquet files, each covering a specific block range.
+This command does a few things behind the scenes: 
+1. fetches the contract's ABI and stores it locally for future use
+2. Prompts users to enter description of the contract's events and event parameters, which are used to populate a local data catalog
+3. It adds metadata about the contract and its events to the registries (for contract, event, and event parameters), which allows for easy autocompletion and introspection of the data model.
 
-### Table Registration
+### Preprocessing Data
 
-When a view is initialized or refreshed:
+Preprocess event data for a specific contract and block range:
 
-1. The system scans the appropriate directories based on the view name and specified events.
-2. For each Parquet file found:
-   - A table is registered in the DataFusion context.
-   - The table name follows the format: `preprocessed_{event_name}_{start_block}_{end_block}`.
-   - These tables are stored in the view's `_event_tables` dictionary.
+```bash
+# Run event preprocessing for these contracts to pull data into local tables to work with
+python3 -m nozzle.commands run_event_preprocessing --contract-name Dai --events Approval,Transfer --start-block 17000000 --end-block 18000000
 
-### Accessing Tables in Queries
+python3 -m nozzle.commands run_event_preprocessing --contract-name LUSDToken --events Approval,Transfer --start-block 17000000 --end-block 18000000
 
-When writing queries in your view's `get_query` method:
+python3 -m nozzle.commands run_event_preprocessing --contract-name WETH9 --events Approval,Transfer --start-block 17000000 --end-block 17010000
+```
 
-1. Use `self._event_tables[event_name]` to get a list of all registered tables for a specific event.
-2. Each item in this list is a tuple: `(table_name, start_block, end_block)`.
-3. You can construct queries that span multiple block ranges by UNIONing these tables.
+This command fetches the specified events from a remote Nozzle server and stores them locally in Parquet files for efficient querying. It registers the table and associated parquet files in a registry so that it can be easily reloaded into a datafusion SessionContext for querying across sessions.
 
-Example:
+### Creating and Running Your Own Views
 
+1. Create a new view:
+   ```bash
+   # Codegen to create a new nozzle view file
+   python -m nozzle.commands create_new_view --name daily_lusd_transfers --description "LUSD transfers at the wallet level by day"
+   ```
+
+2. Edit the created view file (`daily_lusd_transfers.py`) to implement your analysis logic.
 ```python
-def get_query(self) -> str:
-    transfer_tables = " UNION ALL ".join([
-        f"SELECT * FROM {table_name}"
-        for table_name, _, _ in self._event_tables['Transfer']
-    ])
-    
-    return f"""
-    SELECT COUNT(*) as transfer_count
-    FROM ({transfer_tables})
-    WHERE block_num BETWEEN {self.start_block} AND {self.end_block}
-    """
+from nozzle.view import View
+from datafusion import SessionContext, DataFrame, functions as f, lit, col
+import pyarrow as pa
+import argparse
+from nozzle.table_registry import TableRegistry
+
+class daily_lusd_transfers_view(View):
+    def __init__(self, start_block, end_block):
+        super().__init__(
+            description='Daily LUSD transfers by wallet',
+            input_tables=[TableRegistry.preprocessed_event_lusdtoken_transfer],  # Add your input tables here from TableRegistry
+            start_block=start_block,
+            end_block=end_block
+        )
+
+    def query(self) -> str:
+        # Implement your query here. You can use SQL or DataFrame operations.
+        # Example SQL query:
+        def df_operations(ctx: SessionContext) -> DataFrame:
+            return ctx.table(TableRegistry.preprocessed_event_lusdtoken_transfer.name)\
+                .aggregate([
+                    col(TableRegistry.preprocessed_event_lusdtoken_transfer.columns.from_).alias('sender'),
+                    f.date_trunc(lit('day'), col(TableRegistry.preprocessed_event_lusdtoken_transfer.columns.timestamp)).alias('day')
+                ], [
+                    f.count().alias('transfer_count'),
+                    f.sum(col(TableRegistry.preprocessed_event_lusdtoken_transfer.columns.value_) / pow(10, 17)).alias('total_daily_lusd_transfer_value')
+                ]).sort(f.order_by(col('total_daily_lusd_transfer_value'), ascending=False))
+        return df_operations
+
+    def schema(self) -> pa.lib.Schema:
+        # Define the output schema of your view
+        return pa.schema([
+            pa.field('sender', pa.string(), metadata={'description': 'Sender of the transfer'}),
+            pa.field('day', pa.timestamp('ns', tz='UTC'), metadata={'description': 'Day of the transfer'}),
+            pa.field('transfer_count', pa.int64(), metadata={'description': 'Number of transfers'}),
+            pa.field('total_daily_lusd_transfer_value', pa.float64(), metadata={'description': 'Total value of the transfers'}),
+            # Add more fields as needed
+        ])
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Daily LUSD transfers by wallet')
+    parser.add_argument('--start-block', type=int, required=True, help='Start block number')
+    parser.add_argument('--end-block', type=int, required=True, help='End block number')
+    args = parser.parse_args()
+
+    view = daily_lusd_transfers_view(start_block=args.start_block, end_block=args.end_block)
+    result = view.execute()
+    print(result.to_pandas().head(10))
+
+# Available registered tables:
+# preprocessed_event_dai_approval, preprocessed_event_dai_transfer, preprocessed_event_lusdtoken_approval, preprocessed_event_lusdtoken_transfer
+# To run the view, use: python3 daily_lusd_transfers.py --start_block <start_block> --end_block <end_block>
 ```
 
-This structure allows for efficient querying across large block ranges while maintaining manageable file sizes and enabling parallel processing.
-
-## Onboarding a New Contract
-
-1. Identify the contract you want to onboard (address, chain, name).
-2. Add the contract to the `Contracts` class:
-
-   ```python
-   from nozzle.contracts import Contracts
-   from nozzle.chains import Chain
-
-   Contracts.add_contract(
-       name="MyContract",
-       address="0x1234567890123456789012345678901234567890",
-       chain=Chain.ETHEREUM
-   )
-   ```
-
-3. The ABI will be automatically fetched and cached. You can now access the contract and its events:
-
-   ```python
-   my_contract = Contracts.get_contract("MyContract")
-   transfer_event = my_contract.events.Transfer
-   ```
-
-## Creating Views
-
-1. Create a new file in the `nozzle/views` directory, e.g., `my_view.py`.
-2. Define your view class, inheriting from `View`:
-
-   ```python
-   from nozzle.view import View
-   from nozzle.contracts import Contracts
-
-   class MyView(View):
-       def __init__(self, start_block=None, end_block=None, force_refresh=False):
-           my_contract = Contracts.get_contract("MyContract")
-           super().__init__(
-               events=[my_contract.events.Transfer],
-               start_block=start_block,
-               end_block=end_block,
-               force_refresh=force_refresh
-           )
-
-       def get_query(self) -> str:
-           return f"""
-           SELECT COUNT(*) as transfer_count
-           FROM {self._event_tables['Transfer'][0]}
-           """
-   ```
-
-3. Implement the `get_query` method to define your analysis logic.
-
-## Testing Views
-
-1. Create a test file in the `tests` directory, e.g., `test_my_view.py`.
-2. Write unit tests for your view:
-
-   ```python
-   import unittest
-   from nozzle.views.my_view import MyView
-
-   class TestMyView(unittest.TestCase):
-       def test_my_view(self):
-           view = MyView(start_block=1000000, end_block=1001000)
-           result = view.execute()
-           self.assertIsNotNone(result)
-           self.assertTrue(len(result) > 0)
-   ```
-
-3. Run the tests:
+3. Run the view:
    ```bash
-   python -m unittest discover tests
+   # Run the view
+   python3 daily_lusd_transfers.py --start-block 17000000 --end-block 18000000
    ```
 
-## Iterating on Views
+### Exploring Data in Notebooks
 
-1. Start with a basic query in your view's `get_query` method.
-2. Run the view and analyze the results.
-3. Refine the query based on your findings.
-4. Add new parameters to the view's `__init__` method if needed.
-5. Update tests to cover new functionality.
-6. Repeat steps 2-5 until you're satisfied with the results.
-
-## Composing Views
-
-1. Create a new view that combines data from multiple existing views:
-
-   ```python
-   from nozzle.view import View
-   from nozzle.views.my_view import MyView
-   from nozzle.views.other_view import OtherView
-
-   class CompositeView(View):
-       def __init__(self, start_block=None, end_block=None, force_refresh=False):
-           self.my_view = MyView(start_block, end_block, force_refresh)
-           self.other_view = OtherView(start_block, end_block, force_refresh)
-           super().__init__(
-               events=self.my_view.events + self.other_view.events,
-               start_block=start_block,
-               end_block=end_block,
-               force_refresh=force_refresh
-           )
-
-       def get_query(self) -> str:
-           my_view_query = self.my_view.get_query()
-           other_view_query = self.other_view.get_query()
-           return f"""
-           WITH my_view_results AS ({my_view_query}),
-                other_view_results AS ({other_view_query})
-           SELECT *
-           FROM my_view_results
-           JOIN other_view_results ON my_view_results.block_num = other_view_results.block_num
-           """
-   ```
-
-2. Ensure that the composite view handles all necessary events and data preprocessing.
-
-## Best Practices
-
-1. Naming Conventions:
-   - Use descriptive names for views, e.g., `TokenTransferView`, `LiquidityPoolView`.
-   - Name query columns clearly, e.g., `daily_volume`, `unique_users`.
-
-2. Code Organization:
-   - Keep each view in a separate file.
-   - Use a consistent structure for view classes.
-
-3. Documentation:
-   - Add docstrings to your views explaining their purpose and parameters.
-   - Comment complex SQL queries for clarity.
-
-4. Error Handling:
-   - Implement proper error handling in views, especially for edge cases.
-
-5. Version Control:
-   - Commit frequently with clear, descriptive commit messages.
-   - Use feature branches for significant changes.
-
-## Performance Testing
-
-1. Use the `--force-refresh` flag to test query performance with fresh data:
+1. Start a Jupyter notebook:
    ```bash
-   python -m nozzle.views.my_view --force-refresh
+   jupyter notebook
    ```
 
-2. Monitor query execution time and resource usage.
-
-3. For large queries, use EXPLAIN ANALYZE to understand query plans:
-   ```sql
-   EXPLAIN ANALYZE
-   Your complex query here
-   ```
-
-4. Optimize queries by:
-   - Adding appropriate indexes
-   - Simplifying complex joins
-   - Using CTEs for better readability and potential performance gains
-   - Considering materialized views for frequently accessed data
-
-5. Use the `process_query` function's built-in timing to measure performance improvements:
+2. In your notebook, you can import and use Nozzle views:
    ```python
+   from nozzle.views.daily_lusd_transfers import daily_lusd_transfers_view
+   from nozzle.table_registry import TableRegistry
+   
+   view = daily_lusd_transfers_view(start_block=17000000, end_block=18000000)
    result = view.execute()
-   print(f"Query execution time: {result.execution_time} seconds")
+
+   # You can also use the TableRegistry autocomplete to view all available tables and columns
+   TableRegistry.daily_lusd_transfers_view.columns
+   
+   # Analyze the results
+   import polars as pl
+   df_pl = result.to_polars()
+   df_pl.head()
+
+   import pandas as pd
+   df_pd = result.to_pandas()
+   df_pd.head()
    ```
 
-6. For very large datasets, consider using sampling techniques to test query logic before running on the full dataset.
+### Using the Data Catalog Visualization
 
-Remember to always test performance improvements with realistic data volumes to ensure they provide actual benefits in production scenarios.
+Launch the data catalog visualization:
+
+```bash
+python3 -m nozzle.graph_view
+```
+![Local Nozzle Data Catalog Graph View](local_nozzle_data_catalog.png)
+This opens a web interface where you can explore:
+- Available contracts and their events
+- Existing views and their dependencies
+- Data schemas and types

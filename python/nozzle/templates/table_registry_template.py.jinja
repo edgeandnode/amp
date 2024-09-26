@@ -13,16 +13,17 @@ class RegisteredTable:
 
 {% for table_name, table in registry.items() %}
 class {{ table_name }}(RegisteredTable):
-    name = '{{ table.name }}'
+    name = "{{ table.name }}"
     schema = pa.schema([{% for field in table.schema %}
-        pa.field('{{ field.name }}', {{ field.type }}, metadata={{ field.metadata }}),{% endfor %}
+        pa.field("{{ field.name }}", {{ field.type }}, metadata={{ field.metadata }}),{% endfor %}
     ])
-    description = '{{ table.description }}'
-    parquet_files = [{% for file in table.parquet_files %}Path('{{ file }}'){% if not loop.last %}, {% endif %}{% endfor %}]
+    description = "{{ table.description }}"
+    parquet_files = [{% for file in table.parquet_files %}Path("{{ file }}"){% if not loop.last %}, {% endif %}{% endfor %}]
     min_block = {{ table.min_block }}
     max_block = {{ table.max_block }}
+    {% set reserved_words = {"event": True, "type": True, "from": True, "to": True, "value": True, "key": True, "index": True} %}
     class columns:{% for field in table.schema %}
-        {{ field.name }} = '{{ field.name }}'{% endfor %}
+        {% if field.name in reserved_words %}{% set field_name = field.name + "_" %}{{ field_name }}{% else %}{{ field.name }}{% endif %} = "{{ field.name }}"{% endfor %}
 {% endfor %}
 
 class TableRegistry:

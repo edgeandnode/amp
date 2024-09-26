@@ -1,0 +1,784 @@
+{
+  "preprocessed_event_dai_approval": {
+    "name": "preprocessed_event_dai_approval",
+    "schema": [
+      {
+        "name": "block_num",
+        "type": "pa.int64()",
+        "metadata": null
+      },
+      {
+        "name": "timestamp",
+        "type": "pa.timestamp('ns', tz='UTC')",
+        "metadata": null
+      },
+      {
+        "name": "tx_hash",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      {
+        "name": "log_index",
+        "type": "pa.int64()",
+        "metadata": null
+      },
+      {
+        "name": "address",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      {
+        "name": "event_signature",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      {
+        "name": "src",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      {
+        "name": "guy",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      {
+        "name": "wad",
+        "type": "pa.decimal256(76, 0)",
+        "metadata": null
+      }
+    ],
+    "description": "Preprocessed Dai Approval event data",
+    "parquet_files": [
+      "data/Dai/Approval/17000000_18000000.parquet"
+    ],
+    "min_block": 17000000,
+    "max_block": 18000000,
+    "columns": {
+      "block_num": {
+        "name": "block_num",
+        "type": "pa.int64()",
+        "metadata": null
+      },
+      "timestamp": {
+        "name": "timestamp",
+        "type": "pa.timestamp('ns', tz='UTC')",
+        "metadata": null
+      },
+      "tx_hash": {
+        "name": "tx_hash",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      "log_index": {
+        "name": "log_index",
+        "type": "pa.int64()",
+        "metadata": null
+      },
+      "address": {
+        "name": "address",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      "event_signature": {
+        "name": "event_signature",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      "src": {
+        "name": "src",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      "guy": {
+        "name": "guy",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      "wad": {
+        "name": "wad",
+        "type": "pa.decimal256(76, 0)",
+        "metadata": null
+      }
+    }
+  },
+  "preprocessed_event_dai_transfer": {
+    "name": "preprocessed_event_dai_transfer",
+    "schema": [
+      {
+        "name": "block_num",
+        "type": "pa.int64()",
+        "metadata": null
+      },
+      {
+        "name": "timestamp",
+        "type": "pa.timestamp('ns', tz='UTC')",
+        "metadata": null
+      },
+      {
+        "name": "tx_hash",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      {
+        "name": "log_index",
+        "type": "pa.int64()",
+        "metadata": null
+      },
+      {
+        "name": "address",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      {
+        "name": "event_signature",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      {
+        "name": "src",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      {
+        "name": "dst",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      {
+        "name": "wad",
+        "type": "pa.decimal128(27, 0)",
+        "metadata": null
+      }
+    ],
+    "description": "Preprocessed Dai Transfer event data",
+    "parquet_files": [
+      "data/Dai/Transfer/17000000_18000000.parquet"
+    ],
+    "min_block": 17000000,
+    "max_block": 18000000,
+    "columns": {
+      "block_num": {
+        "name": "block_num",
+        "type": "pa.int64()",
+        "metadata": null
+      },
+      "timestamp": {
+        "name": "timestamp",
+        "type": "pa.timestamp('ns', tz='UTC')",
+        "metadata": null
+      },
+      "tx_hash": {
+        "name": "tx_hash",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      "log_index": {
+        "name": "log_index",
+        "type": "pa.int64()",
+        "metadata": null
+      },
+      "address": {
+        "name": "address",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      "event_signature": {
+        "name": "event_signature",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      "src": {
+        "name": "src",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      "dst": {
+        "name": "dst",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      "wad": {
+        "name": "wad",
+        "type": "pa.decimal128(27, 0)",
+        "metadata": null
+      }
+    }
+  },
+  "preprocessed_event_lusdtoken_approval": {
+    "name": "preprocessed_event_lusdtoken_approval",
+    "schema": [
+      {
+        "name": "block_num",
+        "type": "pa.int64()",
+        "metadata": null
+      },
+      {
+        "name": "timestamp",
+        "type": "pa.timestamp('ns', tz='UTC')",
+        "metadata": null
+      },
+      {
+        "name": "tx_hash",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      {
+        "name": "log_index",
+        "type": "pa.int64()",
+        "metadata": null
+      },
+      {
+        "name": "address",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      {
+        "name": "event_signature",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      {
+        "name": "owner",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      {
+        "name": "spender",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      {
+        "name": "value",
+        "type": "pa.decimal256(68, 0)",
+        "metadata": null
+      }
+    ],
+    "description": "Preprocessed LUSDToken Approval event data",
+    "parquet_files": [
+      "data/LUSDToken/Approval/17000000_18000000.parquet"
+    ],
+    "min_block": 17000000,
+    "max_block": 18000000,
+    "columns": {
+      "block_num": {
+        "name": "block_num",
+        "type": "pa.int64()",
+        "metadata": null
+      },
+      "timestamp": {
+        "name": "timestamp",
+        "type": "pa.timestamp('ns', tz='UTC')",
+        "metadata": null
+      },
+      "tx_hash": {
+        "name": "tx_hash",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      "log_index": {
+        "name": "log_index",
+        "type": "pa.int64()",
+        "metadata": null
+      },
+      "address": {
+        "name": "address",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      "event_signature": {
+        "name": "event_signature",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      "owner": {
+        "name": "owner",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      "spender": {
+        "name": "spender",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      "value": {
+        "name": "value",
+        "type": "pa.decimal256(68, 0)",
+        "metadata": null
+      }
+    }
+  },
+  "preprocessed_event_lusdtoken_transfer": {
+    "name": "preprocessed_event_lusdtoken_transfer",
+    "schema": [
+      {
+        "name": "block_num",
+        "type": "pa.int64()",
+        "metadata": null
+      },
+      {
+        "name": "timestamp",
+        "type": "pa.timestamp('ns', tz='UTC')",
+        "metadata": null
+      },
+      {
+        "name": "tx_hash",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      {
+        "name": "log_index",
+        "type": "pa.int64()",
+        "metadata": null
+      },
+      {
+        "name": "address",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      {
+        "name": "event_signature",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      {
+        "name": "from",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      {
+        "name": "to",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      {
+        "name": "value",
+        "type": "pa.decimal128(25, 0)",
+        "metadata": null
+      }
+    ],
+    "description": "Preprocessed LUSDToken Transfer event data",
+    "parquet_files": [
+      "data/LUSDToken/Transfer/17000000_18000000.parquet"
+    ],
+    "min_block": 17000000,
+    "max_block": 18000000,
+    "columns": {
+      "block_num": {
+        "name": "block_num",
+        "type": "pa.int64()",
+        "metadata": null
+      },
+      "timestamp": {
+        "name": "timestamp",
+        "type": "pa.timestamp('ns', tz='UTC')",
+        "metadata": null
+      },
+      "tx_hash": {
+        "name": "tx_hash",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      "log_index": {
+        "name": "log_index",
+        "type": "pa.int64()",
+        "metadata": null
+      },
+      "address": {
+        "name": "address",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      "event_signature": {
+        "name": "event_signature",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      "from": {
+        "name": "from",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      "to": {
+        "name": "to",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      "value": {
+        "name": "value",
+        "type": "pa.decimal128(25, 0)",
+        "metadata": null
+      }
+    }
+  },
+  "daily_dai_transfer_counts_view": {
+    "name": "daily_dai_transfer_counts_view",
+    "schema": [
+      {
+        "name": "sender",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      {
+        "name": "day",
+        "type": "pa.timestamp('ns', tz='UTC')",
+        "metadata": null
+      },
+      {
+        "name": "transfer_count",
+        "type": "pa.int64()",
+        "metadata": null
+      },
+      {
+        "name": "avg_value_dai",
+        "type": "pa.decimal128(38, 4)",
+        "metadata": null
+      }
+    ],
+    "description": "This is a table of DAI transfer counts by day. daily_dai_transfer_counts_view view output from blocks 17000000 to 18000000",
+    "parquet_files": [
+      "data/daily_dai_transfer_counts_view/17000000_18000000.parquet"
+    ],
+    "min_block": 17000000,
+    "max_block": 18000000,
+    "columns": {
+      "sender": {
+        "name": "sender",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      "day": {
+        "name": "day",
+        "type": "pa.timestamp('ns', tz='UTC')",
+        "metadata": null
+      },
+      "transfer_count": {
+        "name": "transfer_count",
+        "type": "pa.int64()",
+        "metadata": null
+      },
+      "avg_value": {
+        "name": "avg_value",
+        "type": "pa.decimal128(35, 8)",
+        "metadata": null
+      },
+      "avg_value_dai": {
+        "name": "avg_value_dai",
+        "type": "pa.decimal128(38, 4)",
+        "metadata": null
+      }
+    }
+  },
+  "daily_lusd_transfers_view": {
+    "name": "daily_lusd_transfers_view",
+    "schema": [
+      {
+        "name": "sender",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      {
+        "name": "day",
+        "type": "pa.timestamp('ns', tz='UTC')",
+        "metadata": null
+      },
+      {
+        "name": "transfer_count",
+        "type": "pa.int64()",
+        "metadata": null
+      },
+      {
+        "name": "avg_value_lusd",
+        "type": "pa.decimal128(38, 4)",
+        "metadata": null
+      }
+    ],
+    "description": "Daily LUSD transfers by wallet. daily_lusd_transfers_view view output from blocks 15000000 to 15100000",
+    "parquet_files": [
+      "data/daily_lusd_transfers_view/15000000_15100000.parquet"
+    ],
+    "min_block": 15000000,
+    "max_block": 15100000,
+    "columns": {
+      "sender": {
+        "name": "sender",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      "day": {
+        "name": "day",
+        "type": "pa.timestamp('ns', tz='UTC')",
+        "metadata": null
+      },
+      "transfer_count": {
+        "name": "transfer_count",
+        "type": "pa.int64()",
+        "metadata": null
+      },
+      "avg_value_lusd": {
+        "name": "avg_value_lusd",
+        "type": "pa.decimal128(38, 4)",
+        "metadata": null
+      }
+    }
+  },
+  "preprocessed_event_weth9_approval": {
+    "name": "preprocessed_event_weth9_approval",
+    "schema": [
+      {
+        "name": "block_num",
+        "type": "pa.int64()",
+        "metadata": null
+      },
+      {
+        "name": "timestamp",
+        "type": "pa.timestamp('ns', tz='UTC')",
+        "metadata": null
+      },
+      {
+        "name": "tx_hash",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      {
+        "name": "log_index",
+        "type": "pa.int64()",
+        "metadata": null
+      },
+      {
+        "name": "address",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      {
+        "name": "event_signature",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      {
+        "name": "src",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      {
+        "name": "guy",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      {
+        "name": "wad",
+        "type": "pa.decimal256(53, 0)",
+        "metadata": null
+      }
+    ],
+    "description": "Preprocessed WETH9 Approval event data",
+    "parquet_files": [
+      "data/WETH9/Approval/17000000_17010000.parquet"
+    ],
+    "min_block": 17000000,
+    "max_block": 17010000,
+    "columns": {
+      "block_num": {
+        "name": "block_num",
+        "type": "pa.int64()",
+        "metadata": null
+      },
+      "timestamp": {
+        "name": "timestamp",
+        "type": "pa.timestamp('ns', tz='UTC')",
+        "metadata": null
+      },
+      "tx_hash": {
+        "name": "tx_hash",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      "log_index": {
+        "name": "log_index",
+        "type": "pa.int64()",
+        "metadata": null
+      },
+      "address": {
+        "name": "address",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      "event_signature": {
+        "name": "event_signature",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      "src": {
+        "name": "src",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      "guy": {
+        "name": "guy",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      "wad": {
+        "name": "wad",
+        "type": "pa.decimal256(53, 0)",
+        "metadata": null
+      }
+    }
+  },
+  "preprocessed_event_weth9_transfer": {
+    "name": "preprocessed_event_weth9_transfer",
+    "schema": [
+      {
+        "name": "block_num",
+        "type": "pa.int64()",
+        "metadata": null
+      },
+      {
+        "name": "timestamp",
+        "type": "pa.timestamp('ns', tz='UTC')",
+        "metadata": null
+      },
+      {
+        "name": "tx_hash",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      {
+        "name": "log_index",
+        "type": "pa.int64()",
+        "metadata": null
+      },
+      {
+        "name": "address",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      {
+        "name": "event_signature",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      {
+        "name": "src",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      {
+        "name": "dst",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      {
+        "name": "wad",
+        "type": "pa.decimal128(23, 0)",
+        "metadata": null
+      }
+    ],
+    "description": "Preprocessed WETH9 Transfer event data",
+    "parquet_files": [
+      "data/WETH9/Transfer/17000000_17010000.parquet"
+    ],
+    "min_block": 17000000,
+    "max_block": 17010000,
+    "columns": {
+      "block_num": {
+        "name": "block_num",
+        "type": "pa.int64()",
+        "metadata": null
+      },
+      "timestamp": {
+        "name": "timestamp",
+        "type": "pa.timestamp('ns', tz='UTC')",
+        "metadata": null
+      },
+      "tx_hash": {
+        "name": "tx_hash",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      "log_index": {
+        "name": "log_index",
+        "type": "pa.int64()",
+        "metadata": null
+      },
+      "address": {
+        "name": "address",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      "event_signature": {
+        "name": "event_signature",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      "src": {
+        "name": "src",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      "dst": {
+        "name": "dst",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      "wad": {
+        "name": "wad",
+        "type": "pa.decimal128(23, 0)",
+        "metadata": null
+      }
+    }
+  },
+  "daily_weth_transfers_view": {
+    "name": "daily_weth_transfers_view",
+    "schema": [
+      {
+        "name": "sender",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      {
+        "name": "day",
+        "type": "pa.timestamp('ns', tz='UTC')",
+        "metadata": null
+      },
+      {
+        "name": "transfer_count",
+        "type": "pa.int64()",
+        "metadata": null
+      },
+      {
+        "name": "avg_value_dai",
+        "type": "pa.decimal128(37, 4)",
+        "metadata": null
+      }
+    ],
+    "description": "WETH transfers at the wallet level by day. daily_weth_transfers_view view output from blocks 17000000 to 17100000",
+    "parquet_files": [
+      "data/daily_weth_transfers_view/17000000_17100000.parquet"
+    ],
+    "min_block": 17000000,
+    "max_block": 17100000,
+    "columns": {
+      "sender": {
+        "name": "sender",
+        "type": "pa.string()",
+        "metadata": null
+      },
+      "day": {
+        "name": "day",
+        "type": "pa.timestamp('ns', tz='UTC')",
+        "metadata": null
+      },
+      "transfer_count": {
+        "name": "transfer_count",
+        "type": "pa.int64()",
+        "metadata": null
+      },
+      "avg_value_dai": {
+        "name": "avg_value_dai",
+        "type": "pa.decimal128(37, 4)",
+        "metadata": null
+      }
+    }
+  }
+}

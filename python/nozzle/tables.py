@@ -37,12 +37,12 @@ class Tables:
         
         try:
             existing_table = DynamicTableRegistry.get_table_by_name(table_name)
-        except ValueError:
+            if existing_table:
+                min_block = min(existing_table.min_block, min_block) if min_block is not None else existing_table.min_block
+                max_block = max(existing_table.max_block, max_block) if max_block is not None else existing_table.max_block
+        except Exception as e:
             existing_table = None
-        if existing_table:
-            min_block = min(existing_table.min_block, min_block) if min_block is not None else existing_table.min_block
-            max_block = max(existing_table.max_block, max_block) if max_block is not None else existing_table.max_block
-        
+                
         # Use DynamicTableRegistry to register or update the table
         DynamicTableRegistry.register_table(
             table_name=table_name,

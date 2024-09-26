@@ -227,8 +227,8 @@ def create_new_view(name, description):
         f.write(f"\n")
         f.write(f"if __name__ == '__main__':\n")
         f.write(f"    parser = argparse.ArgumentParser(description='{description}')\n")
-        f.write(f"    parser.add_argument('--start_block', type=int, required=True, help='Start block number')\n")
-        f.write(f"    parser.add_argument('--end_block', type=int, required=True, help='End block number')\n")
+        f.write(f"    parser.add_argument('--start-block', type=int, required=True, help='Start block number')\n")
+        f.write(f"    parser.add_argument('--end-block', type=int, required=True, help='End block number')\n")
         f.write(f"    args = parser.parse_args()\n")
         f.write(f"\n")
         f.write(f"    view = {name}_view(start_block=args.start_block, end_block=args.end_block)\n")
@@ -256,10 +256,6 @@ def preprocess_event_data(start_block: int, end_block: int, events_to_preprocess
         
         try:
             existing_table = DynamicTableRegistry.get_table_by_name(table_name)
-            print('EXISTING TABLE', existing_table)
-            print('EXISTING TABLE DIR ', dir(existing_table))
-            print('EXISTING TABLE DICT ', existing_table.__dict__)
-            print(' CLASS DICT EXISTING TABLE', existing_table.__class__.__dict__)
             parquet_files = existing_table.parquet_files
             min_block = existing_table.min_block
             max_block = existing_table.max_block
@@ -271,7 +267,6 @@ def preprocess_event_data(start_block: int, end_block: int, events_to_preprocess
             schema = None
 
         if force_refresh or run or not existing_table:
-            print('PREPROCESSING 2')
             client = Client(NOZZLE_URL)
             print(f"Preprocessing data for {event.name} events from remote server")
             query = build_event_query(event, start_block, end_block, run)
@@ -300,8 +295,6 @@ def preprocess_event_data(start_block: int, end_block: int, events_to_preprocess
         reload_table_registry()
 
 def build_event_query(event: Event, start_block: int, end_block: int, run: bool = False) -> str:
-    print('EVENT TYPE 3', type(event))
-    print('EVENT PARAM TYPE 2 ', type(event.parameters))
     print("EventParameterRegistry structure:")
     for attr in dir(EventParameterRegistry):
         if not attr.startswith("__"):
@@ -325,7 +318,7 @@ def build_event_query(event: Event, start_block: int, end_block: int, run: bool 
         for param in event_specific_parameters:
             for param_name, param_value in param.__class__.__dict__.items():
                 if not param_name.startswith("__"):
-                    decoded_columns.append(f"decoded.{param_name} as {param_name}")
+                    decoded_columns.append(f"decoded.{param_value.name} as {param_value.name}")
     
     except AttributeError as e:
         logging.error(f"Error accessing event parameters: {str(e)}")
@@ -334,6 +327,9 @@ def build_event_query(event: Event, start_block: int, end_block: int, run: bool 
         raise
     
     decoded_columns_str = ", ".join(decoded_columns)
+    # if parameter name is reserved word in sql, we need to quote it so query runs, and add alias
+    RESERVED_SQL_WORDS = set(["from", "to", "value"])
+    decoded_columns_str = ", ".join([f"`{col}` as {col}" if col in RESERVED_SQL_WORDS else col for col in decoded_columns_str.split(", ")])
     columns_str = ", ".join(columns + [decoded_columns_str])
     
     return f"""
