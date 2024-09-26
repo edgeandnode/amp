@@ -1,0 +1,341 @@
+
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Local Nozzle Data Catalog</title>
+        <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+        <style>
+            body {
+                margin: 0;
+                padding: 0;
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                overflow: hidden;
+            }
+            #mynetwork {
+                width: 100%;
+                height: 100vh;
+                border: 1px solid #00ff00;
+                box-shadow: 0 0 20px rgba(0, 255, 0, 0.3);
+            }
+            #node-info {
+                position: fixed;
+                bottom: 0;
+                left: 50%;
+                transform: translateX(-50%);
+                width: 80%;
+                max-width: 800px;
+                height: 35vh;
+                overflow-y: auto;
+                background-color: rgba(255, 255, 255, 0.9);
+                color: #000000;
+                padding: 20px;
+                display: none;
+                box-shadow: 0 -5px 10px rgba(0, 0, 0, 0.3);
+                border-radius: 10px 10px 0 0;
+            }
+            .group-label {
+                font-size: 1.2em;
+                color: #00aa00;
+                text-transform: uppercase;
+                margin-bottom: 10px;
+            }
+            #sidebar {
+                position: fixed;
+                top: 0;
+                left: -300px;
+                width: 300px;
+                height: 100vh;
+                background-color: rgba(255, 255, 255, 0.9);
+                transition: left 0.3s ease-in-out;
+                overflow-y: auto;
+                z-index: 1000;
+                box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);
+                padding: 20px;
+            }
+            #sidebar.open {
+                left: 0;
+            }
+            #sidebar-toggle {
+                position: fixed;
+                top: 10px;
+                left: 10px;
+                z-index: 1001;
+                background-color: #591b9b;
+                color: white;
+                border: none;
+                padding: 10px 15px;
+                cursor: pointer;
+                font-size: 16px;
+                border-radius: 5px;
+            }
+            #sidebar.open + #sidebar-toggle {
+                left: 310px;
+            }
+            .tree-list {
+                list-style-type: none;
+                padding-left: 20px;
+            }
+            .tree-item {
+                cursor: pointer;
+                color: #000000;
+                padding: 5px 0;
+            }
+            .tree-item:hover {
+                background-color: #f0f0f0;
+            }
+            .tree-toggle {
+                cursor: pointer;
+                user-select: none;
+            }
+            .tree-toggle::before {
+                content: '▶';
+                display: inline-block;
+                margin-right: 6px;
+                transition: transform 0.3s;
+            }
+            .tree-toggle.open::before {
+                transform: rotate(90deg);
+            }
+            table {
+                border-collapse: collapse;
+                width: 100%;
+            }
+            th, td {
+                border: 1px solid #ddd;
+                padding: 8px;
+                text-align: left;
+            }
+            th {
+                background-color: #f2f2f2;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="mynetwork"></div>
+        <div id="node-info"></div>
+        <button id="sidebar-toggle">☰</button>
+        <div id="sidebar">
+            <br><br>
+            <h3>Local Nozzle Data Catalog</h3>
+            <div id="tree-view"></div>
+        </div>
+
+        <script type="text/javascript">
+            var nodes = new vis.DataSet([{"id": "table_daily_dai_transfer_counts_view", "label": "daily_dai_transfer_counts_view", "group": "table", "description": "This is a table of DAI transfer counts by day. daily_dai_transfer_counts_view view output from blocks 17500000 to 17600000", "attributes": {"schema": [{"name": "sender", "type": "string"}, {"name": "day", "type": "timestamp[ns, tz=UTC]"}, {"name": "transfer_count", "type": "int64"}, {"name": "avg_value", "type": "decimal128(35, 8)"}], "parquet_files": ["data/daily_dai_transfer_counts_view/17500000_17600000.parquet"], "min_block": 17500000, "max_block": 17600000}}, {"id": "table_preprocessed_event_dai_approval", "label": "preprocessed_event_dai_approval", "group": "table", "description": "Preprocessed Dai Approval event data", "attributes": {"schema": [{"name": "block_num", "type": "int64"}, {"name": "timestamp", "type": "timestamp[ns, tz=UTC]"}, {"name": "tx_hash", "type": "string"}, {"name": "log_index", "type": "int64"}, {"name": "address", "type": "string"}, {"name": "event_signature", "type": "string"}, {"name": "src", "type": "string"}, {"name": "guy", "type": "string"}, {"name": "wad", "type": "decimal256(76, 0)"}], "parquet_files": ["data/Dai/Approval/17500000_17600000.parquet"], "min_block": 17500000, "max_block": 17600000}}, {"id": "table_preprocessed_event_dai_transfer", "label": "preprocessed_event_dai_transfer", "group": "table", "description": "Preprocessed Dai Transfer event data", "attributes": {"schema": [{"name": "block_num", "type": "int64"}, {"name": "timestamp", "type": "timestamp[ns, tz=UTC]"}, {"name": "tx_hash", "type": "string"}, {"name": "log_index", "type": "int64"}, {"name": "address", "type": "string"}, {"name": "event_signature", "type": "string"}, {"name": "src", "type": "string"}, {"name": "dst", "type": "string"}, {"name": "wad", "type": "decimal128(27, 0)"}], "parquet_files": ["data/Dai/Transfer/17500000_17600000.parquet"], "min_block": 17500000, "max_block": 17600000}}, {"id": "table_preprocessed_event_uniswapv2factory_paircreated", "label": "preprocessed_event_uniswapv2factory_paircreated", "group": "table", "description": "Preprocessed UniswapV2Factory PairCreated event data", "attributes": {"schema": [{"name": "block_num", "type": "int64"}, {"name": "timestamp", "type": "timestamp[ns, tz=UTC]"}, {"name": "tx_hash", "type": "string"}, {"name": "log_index", "type": "int64"}, {"name": "address", "type": "string"}, {"name": "event_signature", "type": "string"}, {"name": "token0", "type": "string"}, {"name": "token1", "type": "string"}, {"name": "pair", "type": "string"}], "parquet_files": ["data/UniswapV2Factory/PairCreated/17500000_17600000.parquet"], "min_block": 17500000, "max_block": 17600000}}, {"id": "contract_Dai", "label": "Dai", "group": "contract", "description": "Contract: Dai", "attributes": {"address": "0x6B175474E89094C44Da98b954EedeAC495271d0F", "chain": "Chain.ETHEREUM"}}, {"id": "contract_UniswapV2Factory", "label": "UniswapV2Factory", "group": "contract", "description": "Contract: UniswapV2Factory", "attributes": {"address": "0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f", "chain": "Chain.ETHEREUM"}}, {"id": "contract_UniswapV2Pair", "label": "UniswapV2Pair", "group": "contract", "description": "Contract: UniswapV2Pair", "attributes": {"address": "0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc", "chain": "Chain.ETHEREUM"}}, {"id": "contract_WETH9", "label": "WETH9", "group": "contract", "description": "Contract: WETH9", "attributes": {"address": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", "chain": "Chain.ETHEREUM"}}, {"id": "event_Dai_Approval", "label": "Approval", "group": "event", "description": "4wt4wD", "attributes": {"signature": "Approval(address indexed src, address indexed guy, uint256 wad)", "contract": "Dai"}}, {"id": "param_Dai_Approval_guy", "label": "guy", "group": "parameter", "description": "", "attributes": {"abi_type": "address", "indexed": true}}, {"id": "param_Dai_Approval_src", "label": "src", "group": "parameter", "description": "", "attributes": {"abi_type": "address", "indexed": true}}, {"id": "param_Dai_Approval_wad", "label": "wad", "group": "parameter", "description": "", "attributes": {"abi_type": "uint256", "indexed": false}}, {"id": "event_Dai_LogNote", "label": "LogNote", "group": "event", "description": "hdt", "attributes": {"signature": "LogNote(bytes4 indexed sig, address indexed usr, bytes32 indexed arg1, bytes32 indexed arg2, bytes data)", "contract": "Dai"}}, {"id": "param_Dai_LogNote_arg1", "label": "arg1", "group": "parameter", "description": "", "attributes": {"abi_type": "bytes32", "indexed": true}}, {"id": "param_Dai_LogNote_arg2", "label": "arg2", "group": "parameter", "description": "", "attributes": {"abi_type": "bytes32", "indexed": true}}, {"id": "param_Dai_LogNote_data", "label": "data", "group": "parameter", "description": "", "attributes": {"abi_type": "bytes", "indexed": false}}, {"id": "param_Dai_LogNote_sig", "label": "sig", "group": "parameter", "description": "", "attributes": {"abi_type": "bytes4", "indexed": true}}, {"id": "param_Dai_LogNote_usr", "label": "usr", "group": "parameter", "description": "", "attributes": {"abi_type": "address", "indexed": true}}, {"id": "event_Dai_Transfer", "label": "Transfer", "group": "event", "description": "tyhede", "attributes": {"signature": "Transfer(address indexed src, address indexed dst, uint256 wad)", "contract": "Dai"}}, {"id": "param_Dai_Transfer_dst", "label": "dst", "group": "parameter", "description": "", "attributes": {"abi_type": "address", "indexed": true}}, {"id": "param_Dai_Transfer_src", "label": "src", "group": "parameter", "description": "", "attributes": {"abi_type": "address", "indexed": true}}, {"id": "param_Dai_Transfer_wad", "label": "wad", "group": "parameter", "description": "", "attributes": {"abi_type": "uint256", "indexed": false}}, {"id": "event_UniswapV2Factory_PairCreated", "label": "PairCreated", "group": "event", "description": "Uniswap pair was created", "attributes": {"signature": "PairCreated(address indexed token0, address indexed token1, address pair, uint256 )", "contract": "UniswapV2Factory"}}, {"id": "param_UniswapV2Factory_PairCreated_pair", "label": "pair", "group": "parameter", "description": "", "attributes": {"abi_type": "address", "indexed": false}}, {"id": "param_UniswapV2Factory_PairCreated_token0", "label": "token0", "group": "parameter", "description": "", "attributes": {"abi_type": "address", "indexed": true}}, {"id": "param_UniswapV2Factory_PairCreated_token1", "label": "token1", "group": "parameter", "description": "", "attributes": {"abi_type": "address", "indexed": true}}, {"id": "event_UniswapV2Pair_Approval", "label": "Approval", "group": "event", "description": "Approval of LP", "attributes": {"signature": "Approval(address indexed owner, address indexed spender, uint256 value)", "contract": "UniswapV2Pair"}}, {"id": "param_UniswapV2Pair_Approval_owner", "label": "owner", "group": "parameter", "description": "owner", "attributes": {"abi_type": "address", "indexed": true}}, {"id": "param_UniswapV2Pair_Approval_spender", "label": "spender", "group": "parameter", "description": "spender", "attributes": {"abi_type": "address", "indexed": true}}, {"id": "param_UniswapV2Pair_Approval_value", "label": "value", "group": "parameter", "description": "amount approved", "attributes": {"abi_type": "uint256", "indexed": false}}, {"id": "event_UniswapV2Pair_Burn", "label": "Burn", "group": "event", "description": "burnt", "attributes": {"signature": "Burn(address indexed sender, uint256 amount0, uint256 amount1, address indexed to)", "contract": "UniswapV2Pair"}}, {"id": "param_UniswapV2Pair_Burn_amount0", "label": "amount0", "group": "parameter", "description": "amount of token 0", "attributes": {"abi_type": "uint256", "indexed": false}}, {"id": "param_UniswapV2Pair_Burn_amount1", "label": "amount1", "group": "parameter", "description": "amount of token 1 ", "attributes": {"abi_type": "uint256", "indexed": false}}, {"id": "param_UniswapV2Pair_Burn_sender", "label": "sender", "group": "parameter", "description": "sender", "attributes": {"abi_type": "address", "indexed": true}}, {"id": "param_UniswapV2Pair_Burn_to", "label": "to", "group": "parameter", "description": "to address", "attributes": {"abi_type": "address", "indexed": true}}, {"id": "event_UniswapV2Pair_Mint", "label": "Mint", "group": "event", "description": "mint", "attributes": {"signature": "Mint(address indexed sender, uint256 amount0, uint256 amount1)", "contract": "UniswapV2Pair"}}, {"id": "param_UniswapV2Pair_Mint_amount0", "label": "amount0", "group": "parameter", "description": "", "attributes": {"abi_type": "uint256", "indexed": false}}, {"id": "param_UniswapV2Pair_Mint_amount1", "label": "amount1", "group": "parameter", "description": "", "attributes": {"abi_type": "uint256", "indexed": false}}, {"id": "param_UniswapV2Pair_Mint_sender", "label": "sender", "group": "parameter", "description": "sender", "attributes": {"abi_type": "address", "indexed": true}}, {"id": "event_UniswapV2Pair_Swap", "label": "Swap", "group": "event", "description": "", "attributes": {"signature": "Swap(address indexed sender, uint256 amount0In, uint256 amount1In, uint256 amount0Out, uint256 amount1Out, address indexed to)", "contract": "UniswapV2Pair"}}, {"id": "param_UniswapV2Pair_Swap_amount0In", "label": "amount0In", "group": "parameter", "description": "", "attributes": {"abi_type": "uint256", "indexed": false}}, {"id": "param_UniswapV2Pair_Swap_amount0Out", "label": "amount0Out", "group": "parameter", "description": "", "attributes": {"abi_type": "uint256", "indexed": false}}, {"id": "param_UniswapV2Pair_Swap_amount1In", "label": "amount1In", "group": "parameter", "description": "", "attributes": {"abi_type": "uint256", "indexed": false}}, {"id": "param_UniswapV2Pair_Swap_amount1Out", "label": "amount1Out", "group": "parameter", "description": "", "attributes": {"abi_type": "uint256", "indexed": false}}, {"id": "param_UniswapV2Pair_Swap_sender", "label": "sender", "group": "parameter", "description": "", "attributes": {"abi_type": "address", "indexed": true}}, {"id": "param_UniswapV2Pair_Swap_to", "label": "to", "group": "parameter", "description": "", "attributes": {"abi_type": "address", "indexed": true}}, {"id": "event_UniswapV2Pair_Sync", "label": "Sync", "group": "event", "description": "", "attributes": {"signature": "Sync(uint112 reserve0, uint112 reserve1)", "contract": "UniswapV2Pair"}}, {"id": "param_UniswapV2Pair_Sync_reserve0", "label": "reserve0", "group": "parameter", "description": "", "attributes": {"abi_type": "uint112", "indexed": false}}, {"id": "param_UniswapV2Pair_Sync_reserve1", "label": "reserve1", "group": "parameter", "description": "", "attributes": {"abi_type": "uint112", "indexed": false}}, {"id": "event_UniswapV2Pair_Transfer", "label": "Transfer", "group": "event", "description": "", "attributes": {"signature": "Transfer(address indexed from, address indexed to, uint256 value)", "contract": "UniswapV2Pair"}}, {"id": "param_UniswapV2Pair_Transfer_from_", "label": "from_", "group": "parameter", "description": "", "attributes": {"abi_type": "address", "indexed": true}}, {"id": "param_UniswapV2Pair_Transfer_to", "label": "to", "group": "parameter", "description": "", "attributes": {"abi_type": "address", "indexed": true}}, {"id": "param_UniswapV2Pair_Transfer_value", "label": "value", "group": "parameter", "description": "", "attributes": {"abi_type": "uint256", "indexed": false}}, {"id": "event_WETH9_Approval", "label": "Approval", "group": "event", "description": "shrtxfg", "attributes": {"signature": "Approval(address indexed src, address indexed guy, uint256 wad)", "contract": "WETH9"}}, {"id": "param_WETH9_Approval_guy", "label": "guy", "group": "parameter", "description": "rhtrht", "attributes": {"abi_type": "address", "indexed": true}}, {"id": "param_WETH9_Approval_src", "label": "src", "group": "parameter", "description": "fgxhrxhf", "attributes": {"abi_type": "address", "indexed": true}}, {"id": "param_WETH9_Approval_wad", "label": "wad", "group": "parameter", "description": "xhrtrxh", "attributes": {"abi_type": "uint256", "indexed": false}}, {"id": "event_WETH9_Deposit", "label": "Deposit", "group": "event", "description": "hxtrrxht", "attributes": {"signature": "Deposit(address indexed dst, uint256 wad)", "contract": "WETH9"}}, {"id": "param_WETH9_Deposit_dst", "label": "dst", "group": "parameter", "description": "hxrtxhrt", "attributes": {"abi_type": "address", "indexed": true}}, {"id": "param_WETH9_Deposit_wad", "label": "wad", "group": "parameter", "description": "xhrhrxt", "attributes": {"abi_type": "uint256", "indexed": false}}, {"id": "event_WETH9_Transfer", "label": "Transfer", "group": "event", "description": "xhrthxrt", "attributes": {"signature": "Transfer(address indexed src, address indexed dst, uint256 wad)", "contract": "WETH9"}}, {"id": "param_WETH9_Transfer_dst", "label": "dst", "group": "parameter", "description": "xhtrxrht", "attributes": {"abi_type": "address", "indexed": true}}, {"id": "param_WETH9_Transfer_src", "label": "src", "group": "parameter", "description": "hxtrxhr", "attributes": {"abi_type": "address", "indexed": true}}, {"id": "param_WETH9_Transfer_wad", "label": "wad", "group": "parameter", "description": "xhrtxhr", "attributes": {"abi_type": "uint256", "indexed": false}}, {"id": "event_WETH9_Withdrawal", "label": "Withdrawal", "group": "event", "description": "hrxtxrht", "attributes": {"signature": "Withdrawal(address indexed src, uint256 wad)", "contract": "WETH9"}}, {"id": "param_WETH9_Withdrawal_src", "label": "src", "group": "parameter", "description": "hxrthrxtr", "attributes": {"abi_type": "address", "indexed": true}}, {"id": "param_WETH9_Withdrawal_wad", "label": "wad", "group": "parameter", "description": "xhrxhrmjc", "attributes": {"abi_type": "uint256", "indexed": false}}]);
+            var edges = new vis.DataSet([{"from": "contract_Dai", "to": "event_Dai_Approval"}, {"from": "event_Dai_Approval", "to": "param_Dai_Approval_guy"}, {"from": "event_Dai_Approval", "to": "param_Dai_Approval_src"}, {"from": "event_Dai_Approval", "to": "param_Dai_Approval_wad"}, {"from": "contract_Dai", "to": "event_Dai_LogNote"}, {"from": "event_Dai_LogNote", "to": "param_Dai_LogNote_arg1"}, {"from": "event_Dai_LogNote", "to": "param_Dai_LogNote_arg2"}, {"from": "event_Dai_LogNote", "to": "param_Dai_LogNote_data"}, {"from": "event_Dai_LogNote", "to": "param_Dai_LogNote_sig"}, {"from": "event_Dai_LogNote", "to": "param_Dai_LogNote_usr"}, {"from": "contract_Dai", "to": "event_Dai_Transfer"}, {"from": "event_Dai_Transfer", "to": "param_Dai_Transfer_dst"}, {"from": "event_Dai_Transfer", "to": "param_Dai_Transfer_src"}, {"from": "event_Dai_Transfer", "to": "param_Dai_Transfer_wad"}, {"from": "contract_UniswapV2Factory", "to": "event_UniswapV2Factory_PairCreated"}, {"from": "event_UniswapV2Factory_PairCreated", "to": "param_UniswapV2Factory_PairCreated_pair"}, {"from": "event_UniswapV2Factory_PairCreated", "to": "param_UniswapV2Factory_PairCreated_token0"}, {"from": "event_UniswapV2Factory_PairCreated", "to": "param_UniswapV2Factory_PairCreated_token1"}, {"from": "contract_UniswapV2Pair", "to": "event_UniswapV2Pair_Approval"}, {"from": "event_UniswapV2Pair_Approval", "to": "param_UniswapV2Pair_Approval_owner"}, {"from": "event_UniswapV2Pair_Approval", "to": "param_UniswapV2Pair_Approval_spender"}, {"from": "event_UniswapV2Pair_Approval", "to": "param_UniswapV2Pair_Approval_value"}, {"from": "contract_UniswapV2Pair", "to": "event_UniswapV2Pair_Burn"}, {"from": "event_UniswapV2Pair_Burn", "to": "param_UniswapV2Pair_Burn_amount0"}, {"from": "event_UniswapV2Pair_Burn", "to": "param_UniswapV2Pair_Burn_amount1"}, {"from": "event_UniswapV2Pair_Burn", "to": "param_UniswapV2Pair_Burn_sender"}, {"from": "event_UniswapV2Pair_Burn", "to": "param_UniswapV2Pair_Burn_to"}, {"from": "contract_UniswapV2Pair", "to": "event_UniswapV2Pair_Mint"}, {"from": "event_UniswapV2Pair_Mint", "to": "param_UniswapV2Pair_Mint_amount0"}, {"from": "event_UniswapV2Pair_Mint", "to": "param_UniswapV2Pair_Mint_amount1"}, {"from": "event_UniswapV2Pair_Mint", "to": "param_UniswapV2Pair_Mint_sender"}, {"from": "contract_UniswapV2Pair", "to": "event_UniswapV2Pair_Swap"}, {"from": "event_UniswapV2Pair_Swap", "to": "param_UniswapV2Pair_Swap_amount0In"}, {"from": "event_UniswapV2Pair_Swap", "to": "param_UniswapV2Pair_Swap_amount0Out"}, {"from": "event_UniswapV2Pair_Swap", "to": "param_UniswapV2Pair_Swap_amount1In"}, {"from": "event_UniswapV2Pair_Swap", "to": "param_UniswapV2Pair_Swap_amount1Out"}, {"from": "event_UniswapV2Pair_Swap", "to": "param_UniswapV2Pair_Swap_sender"}, {"from": "event_UniswapV2Pair_Swap", "to": "param_UniswapV2Pair_Swap_to"}, {"from": "contract_UniswapV2Pair", "to": "event_UniswapV2Pair_Sync"}, {"from": "event_UniswapV2Pair_Sync", "to": "param_UniswapV2Pair_Sync_reserve0"}, {"from": "event_UniswapV2Pair_Sync", "to": "param_UniswapV2Pair_Sync_reserve1"}, {"from": "contract_UniswapV2Pair", "to": "event_UniswapV2Pair_Transfer"}, {"from": "event_UniswapV2Pair_Transfer", "to": "param_UniswapV2Pair_Transfer_from_"}, {"from": "event_UniswapV2Pair_Transfer", "to": "param_UniswapV2Pair_Transfer_to"}, {"from": "event_UniswapV2Pair_Transfer", "to": "param_UniswapV2Pair_Transfer_value"}, {"from": "contract_WETH9", "to": "event_WETH9_Approval"}, {"from": "event_WETH9_Approval", "to": "param_WETH9_Approval_guy"}, {"from": "event_WETH9_Approval", "to": "param_WETH9_Approval_src"}, {"from": "event_WETH9_Approval", "to": "param_WETH9_Approval_wad"}, {"from": "contract_WETH9", "to": "event_WETH9_Deposit"}, {"from": "event_WETH9_Deposit", "to": "param_WETH9_Deposit_dst"}, {"from": "event_WETH9_Deposit", "to": "param_WETH9_Deposit_wad"}, {"from": "contract_WETH9", "to": "event_WETH9_Transfer"}, {"from": "event_WETH9_Transfer", "to": "param_WETH9_Transfer_dst"}, {"from": "event_WETH9_Transfer", "to": "param_WETH9_Transfer_src"}, {"from": "event_WETH9_Transfer", "to": "param_WETH9_Transfer_wad"}, {"from": "contract_WETH9", "to": "event_WETH9_Withdrawal"}, {"from": "event_WETH9_Withdrawal", "to": "param_WETH9_Withdrawal_src"}, {"from": "event_WETH9_Withdrawal", "to": "param_WETH9_Withdrawal_wad"}, {"from": "table_daily_dai_transfer_counts_view", "to": "table_preprocessed_event_dai_transfer", "label": "input"}, {"from": "table_preprocessed_event_dai_approval", "to": "event_Dai_Approval", "label": "preprocessed"}, {"from": "table_preprocessed_event_dai_transfer", "to": "event_Dai_Transfer", "label": "preprocessed"}, {"from": "table_preprocessed_event_uniswapv2factory_paircreated", "to": "event_UniswapV2Factory_PairCreated", "label": "preprocessed"}]);
+
+            var container = document.getElementById('mynetwork');
+            var data = {
+                nodes: nodes,
+                edges: edges
+            };
+            var options = {
+                nodes: {
+                    shape: 'dot',
+                    size: 20,
+                    font: {
+                        face: 'Segoe UI',
+                        size: 18,
+                        color: '#000000',
+                    },
+                    borderWidth: 2,
+                    shadow: true,
+                    chosen: {
+                        node: (values, id, selected, hovering) => {
+                            values.size = selected ? 30 : 20;
+                            values.borderWidth = selected ? 3 : 2;
+                            if (selected) {
+                                values.color = brightenColor(values.color, 40);
+                            }
+                        }
+                    }
+                },
+                edges: {
+                    width: 2,
+                    color: {color: '#2c3e50', highlight: '#64ffda'},
+                    arrows: {to: {enabled: true, scaleFactor: 1, type: 'arrow'}},
+                    font: {
+                        face: 'Segoe UI',
+                        size: 14,
+                        color: '#000000'
+                    }
+                },
+                groups: {
+                    table: {color: '#4a69bd', borderWidth: 2, borderWidthSelected: 4},
+                    contract: {color: '#60a3bc', borderWidth: 2, borderWidthSelected: 4},
+                    event: {color: '#82ccdd', borderWidth: 2, borderWidthSelected: 4},
+                    parameter: {color: '#b8e994', borderWidth: 2, borderWidthSelected: 4}
+                },
+                layout: {
+                    hierarchical: {
+                        direction: 'UD',
+                        sortMethod: 'directed',
+                        levelSeparation: 200,
+                        nodeSpacing: 250
+                    }
+                },
+                physics: false
+            };
+
+            function brightenColor(hex, percent) {
+                // ... (brightenColor function remains the same) ...
+            }
+
+            var network = new vis.Network(container, data, options);
+
+            network.on("hoverNode", function (params) {
+                var node = nodes.get(params.node);
+                if (node.description) {
+                    network.canvas.body.container.title = node.description;
+                }
+            });
+
+            function showNodeInfo(nodeId) {
+                var node = nodes.get(nodeId);
+                var nodeInfo = document.getElementById('node-info');
+                var content = `<div class="group-label">${node.group}</div>
+                               <h2>${node.label}</h2>
+                               <p>${node.description}</p>`;
+                
+                if (node.group === 'table') {
+                    content += `<h3>Schema:</h3>
+                                <table>
+                                    <tr><th>Name</th><th>Type</th></tr>
+                                    ${node.attributes.schema.map(field => `<tr><td>${field.name}</td><td>${field.type}</td></tr>`).join('')}
+                                </table>
+                                <h3>Parquet Files:</h3>
+                                <ul>
+                                    ${node.attributes.parquet_files.map(file => `<li>${file}</li>`).join('')}
+                                </ul>
+                                <p>Min Block: ${node.attributes.min_block}</p>
+                                <p>Max Block: ${node.attributes.max_block}</p>`;
+                } else {
+                    content += `<pre>${JSON.stringify(node.attributes, null, 2)}</pre>`;
+                }
+                
+                nodeInfo.innerHTML = content;
+                nodeInfo.style.display = 'block';
+            }
+
+            network.on("click", function (params) {
+                if (params.nodes.length > 0) {
+                    showNodeInfo(params.nodes[0]);
+                } else {
+                    document.getElementById('node-info').style.display = 'none';
+                }
+            });
+
+            function generateTreeView() {
+                const treeView = document.getElementById('tree-view');
+                const nodeMap = new Map();
+
+                // Create a map of all nodes
+                nodes.forEach(node => {
+                    nodeMap.set(node.id, { ...node, children: [] });
+                });
+
+                // Build the tree structure
+                edges.forEach(edge => {
+                    const parent = nodeMap.get(edge.from);
+                    const child = nodeMap.get(edge.to);
+                    if (parent && child) {
+                        parent.children.push(child);
+                    }
+                });
+
+                function generateTreeHTML(node) {
+                    let html = `<li>`;
+                    if (node.children.length > 0) {
+                        html += `<span class="tree-toggle">${node.label}</span>`;
+                        html += `<ul class="tree-list" style="display: none;">`;
+                        node.children.forEach(child => {
+                            html += generateTreeHTML(child);
+                        });
+                        html += `</ul>`;
+                    } else {
+                        html += `<span class="tree-item" data-node-id="${node.id}">${node.label}</span>`;
+                    }
+                    html += `</li>`;
+                    return html;
+                }
+
+                const groupedNodes = {
+                    tables: [],
+                    contracts: [],
+                    others: []
+                };
+
+                nodeMap.forEach(node => {
+                    if (node.group === 'table') {
+                        groupedNodes.tables.push(node);
+                    } else if (node.group === 'contract') {
+                        groupedNodes.contracts.push(node);
+                    } else if (!edges.get({to: node.id})) {
+                        groupedNodes.others.push(node);
+                    }
+                });
+
+                let treeHtml = '<ul class="tree-list">';
+                
+                treeHtml += '<li><span class="tree-toggle">Tables</span><ul class="tree-list" style="display: none;">';
+                groupedNodes.tables.forEach(node => {
+                    treeHtml += generateTreeHTML(node);
+                 });
+                treeHtml += '</ul></li>';
+
+                treeHtml += '<li><span class="tree-toggle">Contracts</span><ul class="tree-list" style="display: none;">';
+                groupedNodes.contracts.forEach(node => {
+                    treeHtml += generateTreeHTML(node);
+                });
+                treeHtml += '</ul></li>';
+
+                if (groupedNodes.others.length > 0) {
+                    treeHtml += '<li><span class="tree-toggle">Others</span><ul class="tree-list" style="display: none;">';
+                    groupedNodes.others.forEach(node => {
+                        treeHtml += generateTreeHTML(node);
+                    });
+                    treeHtml += '</ul></li>';
+                }
+
+                treeHtml += '</ul>';
+
+                treeView.innerHTML = treeHtml;
+
+                document.querySelectorAll('.tree-item').forEach(item => {
+                    item.addEventListener('click', function(event) {
+                        event.stopPropagation();
+                        const nodeId = this.getAttribute('data-node-id');
+                        network.selectNodes([nodeId]);
+                        network.focus(nodeId, {
+                            scale: 1.5,
+                            animation: true
+                        });
+                        showNodeInfo(nodeId);
+                    });
+                });
+
+                document.querySelectorAll('.tree-toggle').forEach(toggle => {
+                    toggle.addEventListener('click', function(event) {
+                        event.stopPropagation();
+                        this.classList.toggle('open');
+                        const subList = this.nextElementSibling;
+                        if (subList) {
+                            subList.style.display = subList.style.display === 'none' ? 'block' : 'none';
+                        }
+                    });
+                });
+            }
+            
+
+            document.getElementById('sidebar-toggle').addEventListener('click', function() {
+                document.getElementById('sidebar').classList.toggle('open');
+                this.classList.toggle('open');
+            });
+
+            generateTreeView();
+        </script>
+    </body>
+    </html>
+    

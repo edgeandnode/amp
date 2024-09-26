@@ -5,6 +5,8 @@ from typing import List, Dict, Optional
 from .chains import Chain
 from .event import Event, EventParameter
 from .base_contract import BaseContract
+from .event import EventParameters
+from .util import get_pyarrow_type
 
 
 class ABI:
@@ -48,10 +50,10 @@ class ABI:
             raise ValueError(f"Error fetching ABI: {str(e)}")
 
     @staticmethod
-    def _save_abi_to_file(abi: dict, chain: Chain, contract_address: str):
+    def _save_abi_to_file(abi: dict, chain: Chain, contract_name: str, contract_address: str):
         abi_dir = Path('abi')
         abi_dir.mkdir(exist_ok=True)
-        file_path = abi_dir / f"{chain.name}_{contract_address}.json"
+        file_path = abi_dir / chain.name / contract_name / f"{contract_address}.json"
         with open(file_path, 'w') as f:
             json.dump(abi, f, indent=2)
         print(f"ABI saved to {file_path}")
@@ -64,12 +66,14 @@ class ABI:
         return abi
 
     @staticmethod
+    @staticmethod
     def extract_events(abi: List[Dict], contract: BaseContract) -> Dict[str, Event]:
         """
         Extract events from the ABI.
 
         Args:
         abi (List[Dict]): The contract ABI.
+        contract (BaseContract): The contract object.
 
         Returns:
         Dict[str, Event]: A dictionary of event names to Event objects.
@@ -79,8 +83,29 @@ class ABI:
             if item['type'] == 'event':
                 event_name = item['name']
                 event_signature = ABI.create_event_signature(item)
-                event_params = [EventParameter(name=p['name'], type=p['type'], indexed=p['indexed']) for p in item['inputs']]
-                events[event_name] = Event(name=event_name, parameters=event_params, signature=event_signature, contract=contract)
+                
+                # Create the Event object
+                event = Event(
+                    name=event_name,
+                    signature=event_signature,
+                    contract=contract,
+                    abi_event=item,
+                    parameters=EventParameters()
+                )
+
+                # Create EventParameter objects for each input
+                for input_param in item['inputs']:
+                    pyarrow_type = get_pyarrow_type(input_param['type'])
+                    param = EventParameter(
+                        name=input_param['name'],
+                        abi_type=input_param['type'],
+                        pyarrow_type=pyarrow_type,
+                        indexed=input_param['indexed'],
+                        description='',  # Description will be added later when prompted
+                    )
+                    setattr(event.parameters, input_param['name'], param)
+
+                events[event_name] = event
         return events
 
     @staticmethod
@@ -117,3 +142,7 @@ class ABI:
         # Construct the full signature
         signature = f"{event_name}({inputs_signature})"
         return signature
+    
+    @staticmethod
+    def _get_storage_path(chain: Chain, contract_name: str, contract_address: str) -> Path:
+        return Path('abi') / chain.name / contract_name / f"{contract_address}.json"

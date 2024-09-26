@@ -1,0 +1,26 @@
+from dataclasses import dataclass
+from .base_contract import BaseContract
+from .chains import Chain
+from .address import EVMAddress
+from .event_parameter_registry import EventParameterRegistry
+
+@dataclass
+class RegisteredEvent:
+    name: str
+    contract: BaseContract
+    signature: str
+    parameters: object
+    description: str
+
+{% for contract_name, events in registry.items() %}
+class {{ contract_name }}Events:{% for event_name, event in events.items() %}
+    {{ event_name }} = RegisteredEvent(
+        name='{{ event.name }}',
+        contract=BaseContract(name='{{ event.contract.name }}', address=EVMAddress('{{ event.contract.address }}'), chain=Chain.{{ event.contract.chain.upper() }}),
+        signature='{{ event.signature }}',
+        parameters=EventParameterRegistry.{{ contract_name }}.{{ event_name }}EventParameters,
+        description='{{ event.description }}'
+    ){% endfor %}{% endfor %}
+
+class EventRegistry:{% for contract_name in registry.keys() %}
+    {{ contract_name }} = {{ contract_name }}Events(){% endfor %}

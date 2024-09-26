@@ -1,0 +1,16 @@
+from .base_contract import BaseContract
+from .contract import ContractEvents
+from .chains import Chain
+from .address import EVMAddress
+from .registered_contract import RegisteredContract
+from .event_registry import EventRegistry
+
+{% for contract_name, contract in registry.items() %}
+class {{ contract_name }}Contract(RegisteredContract):
+    name = '{{ contract.name }}'
+    address = EVMAddress('{{ contract.address }}')
+    chain = Chain.{{ contract.chain.upper() }}
+    events = EventRegistry.{{ contract_name }}{% endfor %}
+
+class ContractRegistry:{% for contract_name in registry.keys() %}
+    {{ contract_name }} = {{ contract_name }}Contract{% endfor %}

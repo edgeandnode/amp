@@ -1,0 +1,39 @@
+import pyarrow as pa
+from typing import List
+from pathlib import Path
+from .registered_table import RegisteredTable
+
+class RegisteredTable:
+    name: str
+    schema: pa.Schema
+    description: str
+    parquet_files: List[Path]
+    min_block: int
+    max_block: int
+
+{% for table_name, table in registry.items() %}
+class {{ table_name }}(RegisteredTable):
+    name = '{{ table.name }}'
+    schema = pa.schema([{% for field in table.schema %}
+        pa.field('{{ field.name }}', {{ field.type }}, metadata={{ field.metadata }}),{% endfor %}
+    ])
+    description = '{{ table.description }}'
+    parquet_files = [{% for file in table.parquet_files %}Path('{{ file }}'){% if not loop.last %}, {% endif %}{% endfor %}]
+    min_block = {{ table.min_block }}
+    max_block = {{ table.max_block }}
+    class columns:{% for field in table.schema %}
+        {{ field.name }} = '{{ field.name }}'{% endfor %}
+{% endfor %}
+
+class TableRegistry:
+{% for table_name in registry.keys() %}
+    {{ table_name }} = {{ table_name }}()
+{% endfor %}
+
+    @classmethod
+    def get_table(cls, name: str) -> RegisteredTable:
+        return getattr(cls, name)
+
+    @classmethod
+    def list_tables(cls) -> List[str]:
+        return [attr for attr in dir(cls) if isinstance(getattr(cls, attr), RegisteredTable)]

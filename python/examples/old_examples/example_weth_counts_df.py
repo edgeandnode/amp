@@ -13,9 +13,9 @@ class example_weth_counts_df(View):
         super().__init__(
             description = "Example view that counts WETH events",
             events = [EventRegistry.WETH9.Transfer, EventRegistry.WETH9.Approval],
-            #input_tables = [table_registry.example_weth_counts_df_20700000_20800000],
-            start_block=20700000,
-            end_block=None
+            input_tables = [table_registry.example_weth_counts_df_20700000_20800000],
+            start_block=20760000,
+            end_block=20780000
         )
         # Require documentation for each event parameter if events are the input
         # self.event_descriptions = {

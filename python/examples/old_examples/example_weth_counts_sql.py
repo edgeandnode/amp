@@ -10,9 +10,8 @@ class example_weth_counts_sql(View):
                 EventRegistry.WETH9.Approval,
                 EventRegistry.WETH9.Transfer
             ],
-            start_block=20700000,
-            end_block=None,
-            name = "example_weth_counts_view_sql",
+            start_block=20760000,
+            end_block=20780000,
             description = "This view counts the number of WETH approval and transfer events per day."
         )
 
@@ -55,10 +54,10 @@ class example_weth_counts_sql(View):
 # result = example_weth_counts_view.execute(full_run=False)
 
 # To do a full run, use:
-# python -m nozzle.examples.example_weth_counts  --run
+# python -m nozzle.examples.example_weth_counts_sql  --run
 
 # To do a test run, use:
-# python -m nozzle.examples.example_weth_counts
+# python -m nozzle.examples.example_weth_counts_sql
 
 # Take a flag to do a full run or a test run from the command line
 if __name__ == "__main__":

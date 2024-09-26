@@ -1,0 +1,23 @@
+from dataclasses import dataclass
+import pyarrow as pa
+from .util import get_pyarrow_type
+
+@dataclass
+class EventParameter:
+    name: str
+    abi_type: str
+    pyarrow_type: pa.DataType
+    indexed: bool
+    description: str
+
+{% set contracts = {} %}{% for event_name in registry.keys() %}{% set contract_name, _ = event_name.split('.') %}{% if contract_name not in contracts %}{% set _ = contracts.update({contract_name: True}) %}
+class {{ contract_name }}:
+    pass{% endif %}{% endfor %}
+
+{% for event_name, parameters in registry.items() %}
+class {{ event_name.replace('.', '') }}EventParameters():{% for param_name, param in parameters.items() %}
+    {{ param_name }} = EventParameter(name='{{ param.name }}', abi_type='{{ param.type }}', pyarrow_type=get_pyarrow_type('{{ param.type }}'), indexed={{ param.indexed }}, description='{{ param.description }}'){% endfor %}{% endfor %}
+
+class EventParameterRegistry:{% for contract_name in contracts %}
+    {{ contract_name }} = {{ contract_name }}(){% endfor %}{% for event_name in registry.keys() %}
+    {% set contract_name, event_short_name = event_name.split('.') %}{{ contract_name }}.{{ event_short_name }}EventParameters = {{ event_name.replace('.', '') }}EventParameters(){% endfor %}

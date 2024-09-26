@@ -21,7 +21,8 @@ import numpy as np
 import pandas as pd
 from functools import wraps
 from .tables import Tables
-from .table_registry import table_registry, RegisteredTable
+from .table_registry import RegisteredTable
+from .event_parameter_registry import EventParameter
 
 DEFAULT_BLOCK_RANGE = 100_000
 NOZZLE_URL = "grpc://34.122.177.97:80"
@@ -31,29 +32,33 @@ DATA_DIR = Path("data")
 @dataclass
 class View(ABC):
     description: str
-    events: Optional[List[RegisteredEvent]] = None
-    input_tables: Optional[List[RegisteredTable]] = None
-    event_descriptions: Optional[Dict[RegisteredEvent, str]] = None
+    input_tables: List[RegisteredTable]  # List of registered table names
     start_block: Optional[int] = None
     end_block: Optional[int] = None
     num_blocks: Optional[int] = None
     force_refresh: bool = False
-    # materialized: bool = True TODO: implement non-materialized views (data not persisted, but query plans can be composed with other views)
     tables = Tables()
     _ctx: datafusion.SessionContext = tables._ctx
-    _preprocessed: bool = field(init=False, default=False)
-    _event_tables: Dict[str, str] = field(init=False, default_factory=dict)
-    
 
     def __post_init__(self):
-        # Must include either events or input_tables
-        if not self.events and not self.input_tables:
-            raise ValueError("Either events or input_tables must be specified in the view to have any data to query")
-        self.name: self.__class__.__name__
+        if not self.input_tables:
+            raise ValueError("At least one input table must be specified")
+        self.name = self.__class__.__name__
         self.set_block_range()
         self.validate_inputs()
         DATA_DIR.mkdir(exist_ok=True)
-        # self.schedule = self.schedule TODO: implement scheduling functionality
+
+    def validate_inputs(self):
+        if not isinstance(self.start_block, int) or not isinstance(self.end_block, int):
+            raise ValueError("start_block and end_block must be integers")
+        
+        if self.start_block >= self.end_block:
+            raise ValueError("start_block must be less than end_block")
+
+        for table in self.input_tables:
+            # Check if the table is in the table registry
+            if not isinstance(table, RegisteredTable):
+                raise ValueError(f"Invalid input table: {table}. This table is not registered.")
 
     def set_block_range(self):
         if self.start_block is None and self.end_block is None:
@@ -76,96 +81,15 @@ class View(ABC):
         
         if self.start_block >= self.end_block:
             raise ValueError("start_block must be less than end_block")
-
-        if not self.events:
-            raise ValueError("At least one event must be specified")
-
-        for event in self.events:
-            if not isinstance(event, RegisteredEvent):
-                raise ValueError(f"Invalid event: {event}. Must be an RegisteredEvent object.")
-
-    def preprocess_data(self, run: bool = False):
-        if self._preprocessed:
-            return
-
-        # New code
-        if self.events:
-            for event in self.events:
-                event_dir = DATA_DIR / event.contract.name / event.name
-                if not event_dir.exists():
-                    event_dir.mkdir(parents=True)                
-                output_path = event_dir / f"{self.start_block}_{self.end_block}.parquet"
-                print('output_path', output_path)
-                print(self.force_refresh)
-                print(run)
-                print(os.path.exists(output_path))
-                
-                table_name = f"preprocessed_event_{event.contract.name.lower()}_{event.name.lower()}_{self.start_block}_{self.end_block}"
-                datafusion_tables = self._ctx.tables()
-                print(datafusion_tables)
-                if table_name in datafusion_tables and os.path.exists(output_path) and not self.force_refresh and not run:
-                    print(f"Using existing preprocessed data for {event.name} from {output_path}")
-                    table = pq.read_table(output_path)
-                else:
-                    client = self.nozzle_client()
-                    print(f"Preprocessing data for {event.name} events from remote server")
-                    query = self.build_event_query(event, run)
-                    table = process_query(client, query)
-                    # Generate schema from pyarrow table
-                    schema = table.schema
-                    pq.write_table(table, output_path)
-                    print(f"Table {table_name} registered with {table.num_rows} rows")
-                    print(f"Preprocessed data for {event.contract.name} {event.name} events saved to {output_path}")
-                    table_description = f"Preprocessed {event.contract.name} {event.name} event data from blocks {self.start_block} to {self.end_block}"
-                    field_descriptions = {
-                        'block_num': 'The block number',
-                        'timestamp': 'The timestamp of the block',
-                        'tx_hash': 'The transaction hash',
-                        'log_index': 'The event log index, which is unique within a block',
-                        'address': 'The address of the contract that emitted the event',
-                        'event_signature': 'The event signature, which is a string that includes the name and type of each parameter'
-                    }
-                    # for param in event.parameters:
-                    #     param_name = param.name
-                        # field_descriptions[param_name] = self.event_descriptions[event][param_name]
-                    self.tables.register_table(table_name, output_path, schema, table_description, field_descriptions)
-                    self._event_tables[event.name] = table_name
-            
-        self._preprocessed = True
-
-
-    def build_event_query(self, event: Event, run: bool = False) -> str:
-        columns = [
-            "block_num",
-            "timestamp",
-            "tx_hash",
-            "log_index",
-            "address",
-            f"'{event.signature}' as event_signature"
-        ]
         
-        decoded_columns = []
-        for param in event.parameters:
-            param_name = param.name
-            param_type = param.type
-            decoded_columns.append(f"decoded.{param_name} as {param_name}")
-        
-        decoded_columns_str = ", ".join(decoded_columns)
-        columns_str = ", ".join(columns + [decoded_columns_str])
-        
-        return f"""
-        SELECT {columns_str}
-        FROM (
-            SELECT *,
-                evm_decode(topic1, topic2, topic3, data, '{event.signature}') as decoded
-            FROM {BASE_FIREHOSE_TABLE}
-            WHERE address = arrow_cast(x'{str(event.contract.address)[2:]}', 'FixedSizeBinary(20)')
-            AND topic0 = evm_topic('{event.signature}')
-            AND block_num BETWEEN {self.start_block} AND {self.end_block}
-            {f"" if run else "LIMIT 1000"}
-        )
-        """
+        # Check whether input tables are registered
+        for table in self.input_tables:
+            print('table ', table.name)
+            print('tables ', self._ctx.tables())
+            if table.name not in self._ctx.tables():
+                raise ValueError(f"Input table {table.name} is not registered")
 
+    
     def get_sql_type(self, eth_type: str) -> str:
         if eth_type.startswith('uint') or eth_type.startswith('int'):
             return 'DECIMAL(76, 0)'
@@ -244,6 +168,17 @@ class View(ABC):
     class InvalidDataFusionQueryError(Exception):
         pass
 
+
+    def validate_event_parameter_descriptions(self):
+        pass
+        # if self.events:
+        #     for event in self.events:
+        #         event_params = event_parameter_registry.get_event_parameters(event.contract.name, event.name)
+        #         for param_name, param in event_params.items():
+        #             if not param.description:
+        #                 raise ValueError(f"Description for parameter '{param_name}' of event '{event.name}' in contract '{event.contract.name}' is missing. Please provide a description.")
+
+
     @abstractmethod
     def query(self) -> Union[str, Callable[[DataFrame], DataFrame]]:
         pass
@@ -260,21 +195,18 @@ class View(ABC):
             print("Running full run (on all specified data)")
         else:
             print("Running test run (event preprocessing queries limited to 1000 records)")
-        self.preprocess_data(run)  # Ensure data is preprocessed
-        # Validate the DataFusion query of the subclass implementation
-        # self.validate_query(self.query())
         print(self.query())
         query = self.query()
         view_name = self.__class__.__name__
         output_dir = DATA_DIR / view_name
         output_dir.mkdir(parents=True, exist_ok=True)
         output_path = output_dir / f"{self.start_block}_{self.end_block}.parquet"
-        table_name = f"{view_name}_{self.start_block}_{self.end_block}"
+        table_name = f"{view_name}"
         table = self.tables.execute_query(query, view_name)
         schema = table.schema
         pq.write_table(table, output_path)
         print(f"{table_name} run data saved to {output_path}")
-        self.tables.register_table(table_name, output_path, schema, f"{self.description}. {view_name} view output from blocks {self.start_block} to {self.end_block}", self.field_descriptions())
+        self.tables.register_table(table_name, output_path, schema, f"{self.description}. {view_name} view output from blocks {self.start_block} to {self.end_block}", self.field_descriptions(), self.start_block, self.end_block)
         print(f"Table {table_name} registered with {table.num_rows} rows")
         print(table.take(list(range(min(5, table.num_rows)))).to_pandas().head())
         return table

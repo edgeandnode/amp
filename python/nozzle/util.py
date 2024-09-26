@@ -1,6 +1,6 @@
 import json
-from nozzle.contract_registry import ContractRegistry
-from nozzle.event_registry import EventRegistry
+import pyarrow as pa
+import re
 
 # Convert bytes columns to hex
 def to_hex(val):
@@ -35,13 +35,42 @@ class Event:
         sig = self.name + "(" + ",".join(self.inputs) + ")"
         return sig
 
-def get_all_event_strings():
-    """ Get all even strings in the format of contract_name.event_name """
-    event_strings = []
-    for contract in dir(EventRegistry):
-        if EventRegistry.__dict__.get(contract).__class__.__qualname__.endswith("Events"):
-            for event in dir(EventRegistry.__dict__.get(contract)):
-                if not event.startswith("_"):
-                    event_strings.append(f"{EventRegistry.__dict__.get(contract).__getattribute__(event).contract.name}.{EventRegistry.__dict__.get(contract).__getattribute__(event).name}")
-                
-    return event_strings
+
+
+def get_pyarrow_type(solidity_type: str) -> pa.DataType:
+    if solidity_type.startswith(('uint', 'int')):
+        bits = int(solidity_type[4:] if solidity_type.startswith('uint') else solidity_type[3:])
+        if bits <= 64:
+            return pa.int64()
+        else:
+            # For integers larger than 64 bits, use decimal
+            # Precision is ceil(bits / log2(10)) and scale is 0 for integers
+            precision = min(-(-bits // 3), 76)  # Cap at 76 for decimal256
+            if precision <= 38:
+                return pa.decimal128(precision, scale=0)
+            else:
+                return pa.decimal256(precision, scale=0)
+    elif solidity_type == 'address':
+        return pa.string()
+    elif solidity_type == 'bool':
+        return pa.bool_()
+    elif solidity_type.startswith('bytes'):
+        if solidity_type == 'bytes':
+            return pa.binary()
+        else:
+            size = int(solidity_type[5:])
+            return pa.binary(size)
+    elif solidity_type == 'string':
+        return pa.string()
+    elif solidity_type.startswith('fixed') or solidity_type.startswith('ufixed'):
+        match = re.match(r'(u?)fixed(\d+)x(\d+)', solidity_type)
+        if match:
+            _, bits, decimals = match.groups()
+            bits, decimals = int(bits), int(decimals)
+            precision = min(-(-bits // 3), 76)  # Cap at 76 for decimal256
+            if precision <= 38:
+                return pa.decimal128(precision, scale=min(decimals, precision))
+            else:
+                return pa.decimal256(precision, scale=min(decimals, precision))
+    else:
+        return pa.string()  # Default to string for unknown types
