@@ -31,6 +31,7 @@
             # Includes cargo, clippy, cargo-fmt, rustdoc, rustfmt, and other tools.
             rustToolchain
             protobuf
+            poetry
             cmake
           ]) ++ pkgs.lib.optionals pkgs.stdenv.isDarwin (with pkgs; [
             libiconv
