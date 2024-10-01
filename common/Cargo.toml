@@ -23,3 +23,7 @@ async-trait.workspace = true
 bytes.workspace = true
 log.workspace = true
 figment.workspace = true
+stable-hash = { git = "https://github.com/graphprotocol/stable-hash" }
+
+[dev-dependencies]
+rand = "0.8.5"

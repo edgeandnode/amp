@@ -1,4 +1,5 @@
 pub mod arrow_helpers;
+pub mod attestation;
 pub mod catalog;
 pub mod config;
 pub mod evm;
