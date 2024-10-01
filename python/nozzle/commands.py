@@ -45,7 +45,10 @@ def add_contract(name, address, chain, abi_path, force_refresh):
             contract_name = requests.get(f"{chain.contract_api_url}{address}").json()['name']
             name = contract_name
         else:
-            contract_name = name
+            if name and abi_path:
+                contract_name = name
+            else:
+                raise ValueError("Both contract name and a local ABI file path must be provided if the contract is not found in the BlockScoutAPI")
         if force_refresh:
             # Remove stored ABI if it exists
             storage_path = ABI._get_storage_path(chain, contract_name, address)
@@ -53,7 +56,7 @@ def add_contract(name, address, chain, abi_path, force_refresh):
                 os.remove(storage_path)
                 click.echo(f"Removed stored ABI for {name}")
         
-        contract = Contracts.add_contract(address, chain, name, abi_path, force_refresh)
+        contract = Contracts.add_contract(address, chain, contract_name, abi_path, force_refresh)
         click.echo(f"Contract {name} added successfully.")
 
         event_params = prompt_for_event_descriptions(contract)
