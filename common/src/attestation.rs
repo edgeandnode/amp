@@ -9,6 +9,7 @@ use datafusion::arrow::datatypes::IntervalMonthDayNano;
 use datafusion::arrow::datatypes::IntervalUnit;
 use datafusion::arrow::datatypes::Schema;
 use datafusion::arrow::datatypes::TimeUnit;
+use datafusion::error::DataFusionError;
 use datafusion::logical_expr::function::AccumulatorArgs;
 use datafusion::logical_expr::Accumulator;
 use datafusion::logical_expr::AggregateUDFImpl;
@@ -117,7 +118,7 @@ impl Accumulator for AttestationHasher {
 
         let mut row_hashers: Vec<Hasher> = Default::default();
         for ((field_index, field), column) in fields.into_iter().enumerate().zip(values) {
-            hash_column(&mut row_hashers, field, field_index, &column);
+            hash_column(&mut row_hashers, field, field_index, &column)?;
         }
 
         for row in &row_hashers {
@@ -130,7 +131,12 @@ impl Accumulator for AttestationHasher {
     // TODO: support retract_batch?
 }
 
-fn hash_column(row_hashers: &mut Vec<Hasher>, field: &Field, field_index: usize, data: &dyn Array) {
+fn hash_column(
+    row_hashers: &mut Vec<Hasher>,
+    field: &Field,
+    field_index: usize,
+    data: &dyn Array,
+) -> datafusion::error::Result<()> {
     fn hash_column_inner<I, V>(row_hashers: &mut Vec<Hasher>, field_index: usize, field_values: I)
     where
         I: IntoIterator<Item = Option<V>>,
@@ -224,8 +230,25 @@ fn hash_column(row_hashers: &mut Vec<Hasher>, field: &Field, field_index: usize,
         DataType::Utf8 => hash!(array::StringArray, |v| v),
         DataType::LargeUtf8 => hash!(array::LargeStringArray, |v| v),
         DataType::Utf8View => hash!(array::StringViewArray, |v| v),
-        t => unimplemented!("hash column type {t}"),
-    }
+        t @ DataType::Float16
+        | t @ DataType::Float32
+        | t @ DataType::Float64
+        | t @ DataType::List(_)
+        | t @ DataType::ListView(_)
+        | t @ DataType::FixedSizeList(_, _)
+        | t @ DataType::LargeList(_)
+        | t @ DataType::LargeListView(_)
+        | t @ DataType::Struct(_)
+        | t @ DataType::Union(_, _)
+        | t @ DataType::Dictionary(_, _)
+        | t @ DataType::Map(_, _)
+        | t @ DataType::RunEndEncoded(_, _) => {
+            return Err(DataFusionError::NotImplemented(format!(
+                "hash column type {t}"
+            )))
+        }
+    };
+    Ok(())
 }
 
 #[cfg(test)]
