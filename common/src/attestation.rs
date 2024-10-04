@@ -395,4 +395,19 @@ mod test {
             )
         }
     }
+
+    #[test]
+    fn test_hash_string() {
+        let schema = Schema::new(vec![Field::new("1", DataType::Utf8, false)]);
+        let mut column = datafusion::arrow::array::StringBuilder::new();
+        column.append_value("foo");
+        let column = column.finish();
+        let mut udf = super::AttestationHasher::new(schema.clone());
+        udf.update_batch(&[Arc::new(column)]).unwrap();
+        let hash = match udf.evaluate().unwrap() {
+            ScalarValue::Binary(Some(bytes)) => bytes,
+            _ => unreachable!(),
+        };
+        assert_eq!(hash.encode_hex(), "d6e778fc6b523cb0cdff0c32b9e7a570");
+    }
 }
