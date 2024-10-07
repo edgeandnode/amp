@@ -37,7 +37,7 @@ use url::Url;
 
 use crate::catalog::physical::{Catalog, PhysicalTable};
 use crate::evm::udfs::{EvmDecode, EvmTopic};
-use crate::{arrow, BoxError, Store};
+use crate::{arrow, attestation, BoxError, Store};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -207,6 +207,7 @@ impl QueryContext {
         for udf in udfs() {
             ctx.register_udf(udf);
         }
+        ctx.register_udaf(attestation::AttestationHasherUDF::new().into());
 
         Ok(ctx)
     }
