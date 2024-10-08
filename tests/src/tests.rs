@@ -4,30 +4,32 @@ use log::warn;
 
 #[tokio::test]
 async fn evm_rpc_single() {
+    let dataset_name = "eth_rpc";
     tracing::register_logger();
 
-    if std::env::var("EVM_RPC_TESTS_BLESS").is_ok() {
-        bless("eth_rpc", 15_000_000, 15_000_000).await.unwrap();
+    if std::env::var("NOZZLE_TESTS_BLESS").is_ok() {
+        bless(dataset_name, 15_000_000, 15_000_000).await.unwrap();
 
-        warn!("bless completed successfully, running check blocks");
+        warn!("wrote new blessed dataset for {dataset_name}");
     }
 
-    check_blocks("eth_rpc", 15_000_000, 15_000_000)
+    check_blocks(dataset_name, 15_000_000, 15_000_000)
         .await
         .unwrap();
 }
 
 #[tokio::test]
 async fn eth_firehose_single() {
+    let dataset_name = "eth_firehose";
     tracing::register_logger();
 
     if std::env::var("NOZZLE_TESTS_BLESS").is_ok() {
-        bless("eth_firehose", 15_000_000, 15_000_000).await.unwrap();
+        bless(&dataset_name, 15_000_000, 15_000_000).await.unwrap();
 
-        warn!("bless completed successfully, running check blocks");
+        warn!("wrote new blessed dataset for {dataset_name}");
     }
 
-    check_blocks("eth_firehose", 15_000_000, 15_000_000)
+    check_blocks(dataset_name, 15_000_000, 15_000_000)
         .await
         .unwrap();
 }
