@@ -18,7 +18,6 @@ pub(crate) mod test_support {
     use tokio::fs;
 
     pub async fn bless(dataset_name: &str, start: u64, end: u64) -> Result<(), BoxError> {
-        check_provider_files().await;
         let config = Arc::new(Config::load("config/config.toml", false)?);
         let dataset_store = DatasetStore::new(config.clone());
         let partition_size = 1024 * 1024; // 100 kB
@@ -77,20 +76,16 @@ pub(crate) mod test_support {
         Ok(())
     }
 
-    async fn check_provider_files() {
-        let expected_providers = ["firehose_eth_mainnet.toml"];
-
-        for provider in expected_providers {
-            let path = format!("config/providers/{}", provider);
-            if matches!(
-                fs::metadata(&path).await.map_err(|e| e.kind()),
-                Err(ErrorKind::NotFound)
-            ) {
-                panic!(
-                "Provider file {path} does not exist. To run tests, copy `COPY_ME_{provider}` as `{provider}`, \
+    pub async fn check_provider_file(filename: &str) {
+        let path = format!("config/providers/{}", filename);
+        if matches!(
+            fs::metadata(&path).await.map_err(|e| e.kind()),
+            Err(ErrorKind::NotFound)
+        ) {
+            panic!(
+                "Provider file '{path}' does not exist. To run this test, copy 'COPY_ME_{filename}' as '{filename}', \
                  filling in the required endpoints and credentials.",
             );
-            }
         }
     }
 }

@@ -1,10 +1,11 @@
-use crate::test_support::{bless, check_blocks};
+use crate::test_support::{bless, check_blocks, check_provider_file};
 use common::tracing;
 use log::warn;
 
 #[tokio::test]
 async fn evm_rpc_single() {
     let dataset_name = "eth_rpc";
+    check_provider_file("rpc_eth_mainnet.toml").await;
     tracing::register_logger();
 
     if std::env::var("NOZZLE_TESTS_BLESS").is_ok() {
@@ -21,6 +22,7 @@ async fn evm_rpc_single() {
 #[tokio::test]
 async fn eth_firehose_single() {
     let dataset_name = "eth_firehose";
+    check_provider_file("firehose_eth_mainnet.toml").await;
     tracing::register_logger();
 
     if std::env::var("NOZZLE_TESTS_BLESS").is_ok() {
