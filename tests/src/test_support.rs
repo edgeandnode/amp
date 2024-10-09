@@ -1,0 +1,153 @@
+use std::{io::ErrorKind, sync::Arc};
+
+use common::{
+    arrow::{
+        self,
+        array::{BinaryArray, FixedSizeBinaryArray, RecordBatch, StringArray},
+        datatypes::DataType,
+        json::writer::JsonArray,
+    },
+    config::Config,
+    parquet::basic::{Compression, ZstdLevel},
+    BoxError,
+};
+use dataset_store::DatasetStore;
+use futures::{stream::TryStreamExt, StreamExt as _};
+use object_store::path::Path;
+
+use dump::{dump_dataset, parquet_opts};
+use tokio::fs;
+
+pub async fn bless(dataset_name: &str, start: u64, end: u64) -> Result<(), BoxError> {
+    let config = Arc::new(Config::load("config/config.toml", false)?);
+    let dataset_store = DatasetStore::new(config.clone());
+    let partition_size = 1024 * 1024; // 100 kB
+    let compression = Compression::ZSTD(ZstdLevel::try_new(1).unwrap());
+
+    // Disable bloom filters, as they take over 10 MB per file, too large for files that we'd be
+    // willing to commit to git.
+    let parquet_opts = parquet_opts(compression, false);
+    let env = Arc::new(config.make_runtime_env()?);
+
+    // Clear the data dir.
+    clear_dataset(&config, dataset_name).await?;
+
+    dump_dataset(
+        dataset_name,
+        &dataset_store,
+        &config,
+        &env,
+        1,
+        partition_size,
+        &parquet_opts,
+        start,
+        Some(end),
+    )
+    .await?;
+    Ok(())
+}
+
+pub async fn check_blocks(dataset_name: &str, start: u64, end: u64) -> Result<(), BoxError> {
+    let config = Arc::new(Config::load("config/config.toml", false)?);
+    let dataset_store = DatasetStore::new(config.clone());
+    let env = Arc::new(config.make_runtime_env()?);
+
+    dump_check::dump_check(
+        dataset_name,
+        &dataset_store,
+        &config,
+        &env,
+        1000,
+        1,
+        start,
+        end,
+    )
+    .await
+}
+
+async fn clear_dataset(config: &Config, dataset_name: &str) -> Result<(), BoxError> {
+    let store = config.data_store.prefixed_store();
+    let path = Path::parse(dataset_name).unwrap();
+    let path_stream = store.list(Some(&path)).map_ok(|o| o.location).boxed();
+    store
+        .delete_stream(path_stream)
+        .try_collect::<Vec<_>>()
+        .await?;
+    Ok(())
+}
+
+pub async fn check_provider_file(filename: &str) {
+    let path = format!("config/providers/{}", filename);
+    if matches!(
+        fs::metadata(&path).await.map_err(|e| e.kind()),
+        Err(ErrorKind::NotFound)
+    ) {
+        panic!(
+                "Provider file '{path}' does not exist. To run this test, copy 'COPY_ME_{filename}' as '{filename}', \
+                 filling in the required endpoints and credentials.",
+            );
+    }
+}
+
+#[allow(unused)]
+pub fn assert_batch_eq(left: &RecordBatch, right: &RecordBatch) {
+    use pretty_assertions::assert_str_eq;
+
+    if left != right {
+        let left = record_batch_to_json(left.clone());
+        let right = record_batch_to_json(right.clone());
+        assert_str_eq!(left, right);
+    }
+}
+
+fn convert_binary_to_hex_strings(mut record_batch: RecordBatch) -> RecordBatch {
+    let mut new_columns = Vec::with_capacity(record_batch.num_columns());
+    let schema = record_batch.schema();
+    let num_columns = record_batch.num_columns();
+
+    for column_index in 0..num_columns {
+        let column = record_batch.remove_column(0);
+        let field = schema.field(column_index);
+
+        let values: Box<dyn Iterator<Item = Option<&[u8]>>> = match field.data_type() {
+            DataType::Binary => Box::new(
+                column
+                    .as_any()
+                    .downcast_ref::<BinaryArray>()
+                    .unwrap()
+                    .into_iter(),
+            ),
+            DataType::FixedSizeBinary(_) => Box::new(Box::new(
+                column
+                    .as_any()
+                    .downcast_ref::<FixedSizeBinaryArray>()
+                    .unwrap()
+                    .into_iter(),
+            )),
+            _ => {
+                // Not a binary column, so just add it back
+                new_columns.push(column);
+                continue;
+            }
+        };
+
+        let string_array = values.map(|v| v.map(hex::encode)).collect::<StringArray>();
+        new_columns.push(Arc::new(string_array));
+    }
+
+    RecordBatch::try_new(schema, new_columns).unwrap()
+}
+
+fn record_batch_to_json(record_batch: RecordBatch) -> String {
+    // JSON does not support binary data, so encode any binary fields as hex strings.
+    let record_batch = convert_binary_to_hex_strings(record_batch);
+
+    let buffer = vec![];
+    let mut writer = arrow::json::WriterBuilder::new()
+        .with_explicit_nulls(true)
+        .build::<_, JsonArray>(buffer);
+    writer.write(&record_batch).unwrap();
+    writer.finish().unwrap();
+
+    String::from_utf8(writer.into_inner()).unwrap()
+}
