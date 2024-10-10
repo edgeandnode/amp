@@ -9,6 +9,9 @@ pub mod query_context;
 pub mod store;
 pub mod tracing;
 
+#[cfg(test)]
+mod tests;
+
 pub use arrow_helpers::*;
 pub use catalog::logical::*;
 pub use datafusion::arrow;

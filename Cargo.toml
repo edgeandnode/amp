@@ -53,7 +53,9 @@ itertools = "0.12.1"
 atty = "0.2.14"
 snmalloc-rs = "0.3.4"
 prometheus = "0.13"
-figment = { version = "0.10.19", features = ["toml", "env"] }
+figment = { version = "0.10.19", features = ["toml", "env", "json"] }
+pretty_assertions = "1.4.1"
+tempfile = "3.13.0"
 
 # Datafusion and Arrow crates
 datafusion = { version = "41", features = ["serde"] }

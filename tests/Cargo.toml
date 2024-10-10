@@ -14,4 +14,6 @@ tokio.workspace = true
 log.workspace = true
 hex.workspace = true
 serde_json.workspace = true
-pretty_assertions = "1.4.1"
+pretty_assertions.workspace = true
+tempfile.workspace = true
+figment.workspace = true

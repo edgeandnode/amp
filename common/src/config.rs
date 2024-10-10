@@ -26,7 +26,7 @@ pub struct Config {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-struct ConfigFile {
+pub struct ConfigFile {
     pub data_dir: String,
     pub providers_dir: String,
     pub dataset_defs_dir: String,
@@ -34,18 +34,27 @@ struct ConfigFile {
     pub spill_location: Vec<PathBuf>,
 }
 
+type FigmentJson = figment::providers::Data<figment::providers::Json>;
+
 impl Config {
-    /// `data_dir` is an optional override for the data directory.
     ///
     /// `env_override` allows env vars prefixed with `NOZZLE_CONFIG_` to override config values.
-    pub fn load(file: impl Into<PathBuf>, env_override: bool) -> Result<Self, BoxError> {
+    ///
+    pub fn load(
+        file: impl Into<PathBuf>,
+        env_override: bool,
+        literal_override: Option<FigmentJson>,
+    ) -> Result<Self, BoxError> {
         let config_path: PathBuf = fs::canonicalize(file.into())?;
-        let contents = fs_err::read_to_string(&config_path)?;
+        let contents = fs::read_to_string(&config_path)?;
 
         let config_file: ConfigFile = {
             let mut config_builder = Figment::new().merge(Toml::string(&contents));
             if env_override {
                 config_builder = config_builder.merge(Env::prefixed("NOZZLE_CONFIG_"));
+            }
+            if let Some(literal_override) = literal_override {
+                config_builder = config_builder.merge(literal_override);
             }
             config_builder.extract()?
         };

@@ -89,7 +89,7 @@ async fn main_inner() -> Result<(), BoxError> {
         run_every_mins,
     } = args;
 
-    let config = Arc::new(Config::load(config_path, true)?);
+    let config = Arc::new(Config::load(config_path, true, None)?);
     let dataset_store = DatasetStore::new(config.clone());
     let partition_size = partition_size_mb * 1024 * 1024;
     let compression = if disable_compression {

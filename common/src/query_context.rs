@@ -30,7 +30,7 @@ use datafusion_proto::bytes::{
     logical_plan_from_bytes_with_extension_codec, logical_plan_to_bytes_with_extension_codec,
 };
 use datafusion_proto::logical_plan::LogicalExtensionCodec;
-use futures::StreamExt as _;
+use futures::{StreamExt as _, TryStreamExt};
 use log::trace;
 use thiserror::Error;
 use url::Url;
@@ -278,6 +278,18 @@ impl QueryContext {
     ) -> Result<SendableRecordBatchStream, Error> {
         let ctx = self.datafusion_ctx().await?;
         execute_plan(&ctx, plan).await
+    }
+
+    /// This will load the result set entirely in memory, so it should be used with caution.
+    pub async fn execute_and_concat(&self, plan: LogicalPlan) -> Result<RecordBatch, Error> {
+        let schema = plan.schema().inner().clone();
+        let ctx = self.datafusion_ctx().await?;
+        let batch_stream = execute_plan(&ctx, plan)
+            .await?
+            .try_collect::<Vec<_>>()
+            .await
+            .map_err(Error::ExecutionError)?;
+        Ok(concat_batches(&schema, &batch_stream).unwrap())
     }
 
     /// Insert rows into a metadata table.

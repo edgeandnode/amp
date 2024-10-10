@@ -7,19 +7,105 @@ use common::{
         datatypes::DataType,
         json::writer::JsonArray,
     },
+    catalog::physical::Catalog,
     config::Config,
     parquet::basic::{Compression, ZstdLevel},
-    BoxError,
+    query_context::parse_sql,
+    BoxError, Dataset, QueryContext,
 };
 use dataset_store::DatasetStore;
+use figment::providers::Format as _;
 use futures::{stream::TryStreamExt, StreamExt as _};
+use log::info;
 use object_store::path::Path;
 
 use dump::{dump_dataset, parquet_opts};
+use tempfile::TempDir;
 use tokio::fs;
 
+pub const TEST_CONFIG_PATH: &str = "config/config.toml";
+
 pub async fn bless(dataset_name: &str, start: u64, end: u64) -> Result<(), BoxError> {
-    let config = Arc::new(Config::load("config/config.toml", false)?);
+    let config = Arc::new(Config::load(TEST_CONFIG_PATH, false, None)?);
+    dump(config, dataset_name, start, end).await
+}
+
+pub async fn assert_temp_eq_blessed(temp: &TempDatasetDump) -> Result<(), BoxError> {
+    let blessed_ctx = {
+        let config = Arc::new(Config::load(TEST_CONFIG_PATH, false, None)?);
+        let dataset_store = DatasetStore::new(config.clone());
+        let dataset = dataset_store.load_dataset(&temp.dataset.name).await?;
+        let catalog = Catalog::for_dataset(&dataset, config.data_store.clone())?;
+        QueryContext::for_catalog(catalog, Arc::new(config.make_runtime_env()?))?
+    };
+
+    let temp_ctx = {
+        let catalog = Catalog::for_dataset(&temp.dataset, temp.config.data_store.clone())?;
+        QueryContext::for_catalog(catalog, Arc::new(temp.config.make_runtime_env()?))?
+    };
+
+    for table in blessed_ctx.catalog().all_tables() {
+        let query = parse_sql(&format!(
+            "select * from {} order by block_num",
+            table.table_ref()
+        ))?;
+        let blessed_all_rows: RecordBatch = blessed_ctx
+            .execute_and_concat(blessed_ctx.plan_sql(query.clone()).await?)
+            .await?;
+        let temp_all_rows: RecordBatch = temp_ctx
+            .execute_and_concat(temp_ctx.plan_sql(query.clone()).await?)
+            .await?;
+
+        assert_batch_eq(&temp_all_rows, &blessed_all_rows);
+    }
+
+    Ok(())
+}
+
+/// Context for a dataset dumped to a temporary directory. The directory is deleted on drop.
+pub struct TempDatasetDump {
+    pub config: Arc<Config>,
+    pub _temp_dir: TempDir,
+    pub dataset: Dataset,
+}
+
+// Dump the dataset to a temporary data directory.
+pub async fn temp_dump(
+    dataset_name: &str,
+    start: u64,
+    end: u64,
+) -> Result<TempDatasetDump, BoxError> {
+    use figment::providers::Json;
+
+    let temp_dir = tempfile::tempdir()?;
+    let path = temp_dir.path();
+    info!("Dumping dataset to {}", path.display());
+
+    let config_override = Some(Json::string(&format!(
+        r#"{{ "data_dir": "{}" }}"#,
+        path.display()
+    )));
+
+    let config = Arc::new(Config::load(TEST_CONFIG_PATH, false, config_override)?);
+
+    dump(config.clone(), dataset_name, start, end).await?;
+
+    let dataset_store = DatasetStore::new(config.clone());
+    let dataset = dataset_store.load_dataset(&dataset_name).await?;
+
+    Ok(TempDatasetDump {
+        config,
+        _temp_dir: temp_dir,
+        dataset,
+    })
+}
+
+async fn dump(
+    config: Arc<Config>,
+    dataset_name: &str,
+    start: u64,
+    end: u64,
+) -> Result<(), BoxError> {
     let dataset_store = DatasetStore::new(config.clone());
     let partition_size = 1024 * 1024; // 100 kB
     let compression = Compression::ZSTD(ZstdLevel::try_new(1).unwrap());
@@ -48,7 +134,7 @@ pub async fn bless(dataset_name: &str, start: u64, end: u64) -> Result<(), BoxEr
 }
 
 pub async fn check_blocks(dataset_name: &str, start: u64, end: u64) -> Result<(), BoxError> {
-    let config = Arc::new(Config::load("config/config.toml", false)?);
+    let config = Arc::new(Config::load(TEST_CONFIG_PATH, false, None)?);
     let dataset_store = DatasetStore::new(config.clone());
     let env = Arc::new(config.make_runtime_env()?);
 
@@ -89,7 +175,6 @@ pub async fn check_provider_file(filename: &str) {
     }
 }
 
-#[allow(unused)]
 pub fn assert_batch_eq(left: &RecordBatch, right: &RecordBatch) {
     use pretty_assertions::assert_str_eq;
 

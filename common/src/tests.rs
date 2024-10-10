@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use arrow::datatypes::SchemaRef;
 use datafusion::arrow::{
     array::UInt64Array,
     datatypes::{Field, Schema},
@@ -20,9 +21,10 @@ fn empty_dataset_rows() {
     let table = Table {
         name: "table".to_string(),
         schema: schema.clone(),
+        network: None,
     };
     let column = Arc::new(UInt64Array::from(Vec::<u64>::new()));
-    let table_rows = TableRows::try_new(table, vec![column]).unwrap();
+    let table_rows = TableRows::new(table, vec![column]).unwrap();
     let dataset_rows = DatasetRows(vec![table_rows]);
     assert!(dataset_rows.is_empty());
     assert!(dataset_rows.block_num().is_err());
@@ -33,9 +35,10 @@ fn empty_dataset_rows() {
     let table = Table {
         name: "table".to_string(),
         schema: schema.clone(),
+        network: None,
     };
     let column = Arc::new(UInt64Array::from(vec![1, 2, 3]));
-    let table_rows = TableRows::try_new(table, vec![column]).unwrap();
+    let table_rows = TableRows::new(table, vec![column]).unwrap();
     let dataset_rows = DatasetRows(vec![table_rows]);
     assert!(!dataset_rows.is_empty());
     assert!(dataset_rows.block_num().is_err());
@@ -48,17 +51,19 @@ fn dataset_rows_unify_block_num() {
     let blocks_table = Table {
         name: "blocks".to_string(),
         schema: schema.clone(),
+        network: None,
     };
     let logs_table = Table {
         name: "logs".to_string(),
         schema: schema.clone(),
+        network: None,
     };
 
     let dataset_rows_from_nums = |block_nums: Vec<u64>, logs_nums: Vec<u64>| {
         let blocks_column = Arc::new(UInt64Array::from(block_nums));
         let logs_column = Arc::new(UInt64Array::from(logs_nums));
-        let blocks_rows = TableRows::try_new(blocks_table.clone(), vec![blocks_column]).unwrap();
-        let logs_rows = TableRows::try_new(logs_table.clone(), vec![logs_column]).unwrap();
+        let blocks_rows = TableRows::new(blocks_table.clone(), vec![blocks_column]).unwrap();
+        let logs_rows = TableRows::new(logs_table.clone(), vec![logs_column]).unwrap();
         DatasetRows(vec![blocks_rows, logs_rows])
     };
 

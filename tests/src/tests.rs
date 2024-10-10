@@ -1,4 +1,6 @@
-use crate::test_support::{bless, check_blocks, check_provider_file};
+use crate::test_support::{
+    assert_temp_eq_blessed, bless, check_blocks, check_provider_file, temp_dump,
+};
 use common::tracing;
 use log::warn;
 
@@ -14,9 +16,16 @@ async fn evm_rpc_single() {
         warn!("wrote new blessed dataset for {dataset_name}");
     }
 
+    // Check the dataset directly against the RPC provider with `check_blocks`.
     check_blocks(dataset_name, 15_000_000, 15_000_000)
         .await
-        .unwrap();
+        .expect("blessed data differed from provider");
+
+    // Now dump the dataset to a temporary directory and check it again against the blessed files.
+    let temp_dataset_dump = temp_dump(&dataset_name, 15_000_000, 15_000_000)
+        .await
+        .expect("temp dump failed");
+    assert_temp_eq_blessed(&temp_dataset_dump).await.unwrap();
 }
 
 #[tokio::test]
@@ -31,7 +40,14 @@ async fn eth_firehose_single() {
         warn!("wrote new blessed dataset for {dataset_name}");
     }
 
+    // Check the dataset directly against the Firehose provider with `check_blocks`.
     check_blocks(dataset_name, 15_000_000, 15_000_000)
         .await
-        .unwrap();
+        .expect("blessed data differed from provider");
+
+    // Now dump the dataset to a temporary directory and check it again against the blessed files.
+    let temp_dataset_dump = temp_dump(&dataset_name, 15_000_000, 15_000_000)
+        .await
+        .expect("temp dump failed");
+    assert_temp_eq_blessed(&temp_dataset_dump).await.unwrap();
 }
