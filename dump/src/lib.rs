@@ -12,7 +12,6 @@ use common::catalog::physical::Catalog;
 use common::catalog::physical::PhysicalDataset;
 use common::config::Config;
 use common::meta_tables::scanned_ranges;
-use common::meta_tables::scanned_ranges::filenames_for_table;
 use common::multirange::MultiRange;
 use common::parquet;
 use common::query_context::Error as CoreError;
@@ -55,7 +54,7 @@ pub async fn dump_dataset(
     let ctx = Arc::new(QueryContext::for_catalog(catalog, env.clone())?);
 
     // Ensure consistency before starting the dump procedure.
-    delete_orphaned_files(&physical_dataset, &ctx).await?;
+    consistency_check(&physical_dataset, &ctx).await?;
 
     // Query the scanned ranges, we might already have some ranges if this is not the first dump run
     // for this dataset.
@@ -287,15 +286,39 @@ enum ConsistencyCheckError {
     CorruptedDataset(String, BoxError),
 }
 
-// As a consistency check, ensure that all previously written are accounted for in
-// `__scanned_ranges`. If they are not, delete them as that is an inconsistent state.
-//
-// See also: scanned-ranges-consistency
-async fn delete_orphaned_files(
+/// This will check and fix consistency issues when possible. When fixing is not possible, it will
+/// return a `CorruptedDataset` error.
+///
+/// ## List of checks
+///
+/// Check: All files in the data store are accounted for in `__scanned_ranges`.
+/// On fail: Fix by deleting orphaned files to restore consistency.
+///
+/// Check: All files in `__scanned_ranges` exist in the data store.
+/// On fail: Return a `CorruptedDataset` error.
+///
+/// Check: `__scanned_ranges` does not contain overlapping ranges.
+/// On fail: Return a `CorruptedDataset` error.
+async fn consistency_check(
     physical_dataset: &PhysicalDataset,
     ctx: &QueryContext,
 ) -> Result<(), ConsistencyCheckError> {
+    // See also: scanned-ranges-consistency
+
+    use scanned_ranges::{filenames_for_table, ranges_for_table};
+    use ConsistencyCheckError::CorruptedDataset;
+
     for table in physical_dataset.tables() {
+        let dataset_name = table.catalog_schema().to_string();
+
+        // Check that `__scanned_ranges` does not contain overlapping ranges.
+        {
+            let ranges = ranges_for_table(ctx, table.catalog_schema(), table.table_name()).await?;
+            if let Err(e) = MultiRange::from_ranges(ranges) {
+                return Err(CorruptedDataset(dataset_name, e.into()));
+            }
+        }
+
         let registered_files = {
             let f = filenames_for_table(&ctx, table.catalog_schema(), table.table_name()).await?;
             BTreeSet::from_iter(f.into_iter())
@@ -336,7 +359,6 @@ async fn delete_orphaned_files(
         // Check for files in `__scanned_ranges` that do not exist in the store.
         for filename in registered_files {
             if !stored_files.contains_key(&filename) {
-                let dataset_name = table.catalog_schema().to_string();
                 let err =
                     format!("file `{path}` is registered in `__scanned_ranges` but is not in the data store")
                         .into();
