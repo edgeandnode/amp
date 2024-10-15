@@ -337,11 +337,9 @@ async fn delete_orphaned_files(
         for filename in registered_files {
             if !stored_files.contains_key(&filename) {
                 let dataset_name = table.catalog_schema().to_string();
-                let err = format!(
-                    "file in __scanned_ranges does not exist in store: {}",
-                    filename
-                )
-                .into();
+                let err =
+                    format!("file `{path}` is registered in `__scanned_ranges` but is not in the data store")
+                        .into();
                 return Err(ConsistencyCheckError::CorruptedDataset(dataset_name, err));
             }
         }
