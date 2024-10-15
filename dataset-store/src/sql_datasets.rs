@@ -10,7 +10,7 @@ use datafusion::{
     error::DataFusionError,
     execution::{runtime_env::RuntimeEnv, SendableRecordBatchStream},
     logical_expr::{col, lit, Filter, LogicalPlan, Sort, TableScan},
-    sql::parser,
+    sql::{parser, TableReference},
 };
 
 use common::{
@@ -150,16 +150,30 @@ pub async fn max_end_block(
 ) -> Result<Option<BlockNum>, BoxError> {
     let (tables, _) =
         resolve_table_references(&query, true).map_err(|e| CoreError::SqlParseError(e.into()))?;
+
+    if tables.is_empty() {
+        return Ok(None);
+    }
+
     let ctx = dataset_store.ctx_for_sql(&query, env).await?;
 
-    // Infer the end block
-    let mut end = None;
-    for table in tables {
+    let synced_block_for_table = move |ctx, table: TableReference| async move {
         // Unwrap: A valid catalog was built with this table name.
         let catalog_schema = table.schema().unwrap();
-        let ranges = scanned_ranges::ranges_for_table(&ctx, catalog_schema, table.table()).await?;
+        let ranges = scanned_ranges::ranges_for_table(ctx, catalog_schema, table.table()).await?;
         let ranges = MultiRange::from_ranges(ranges)?;
-        end = ranges.max();
+
+        // Take the end block of the earliest contiguous range as the "synced block"
+        Ok::<_, BoxError>(ranges.first().map(|r| r.1))
+    };
+
+    let mut tables = tables.into_iter();
+
+    // Unwrap: `tables` is not empty.
+    let mut end = synced_block_for_table(&ctx, tables.next().unwrap()).await?;
+    for table in tables {
+        let next_end = synced_block_for_table(&ctx, table).await?;
+        end = end.min(next_end);
     }
 
     Ok(end)

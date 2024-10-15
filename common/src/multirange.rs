@@ -13,8 +13,8 @@ pub enum Error {
     #[error("tried to append ranges that are not consecutive: left ends with {0} and right starts with {1}")]
     NonConsecutive(u64, u64),
 
-    #[error("tried to append ranges that are overlapping: {0:?} and {1:?}")]
-    OverlappingRanges((u64, u64), (u64, u64)),
+    #[error("range overlap: {0:?} and {1:?}")]
+    RangeOverlap((u64, u64), (u64, u64)),
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -64,6 +64,10 @@ impl MultiRange {
             })
     }
 
+    pub fn first(&self) -> Option<(u64, u64)> {
+        self.ranges.first().copied()
+    }
+
     /// If the range is adjacent to the last range, it will be merged with it.
     /// Otherwise, it will be added as a new range.
     ///
@@ -80,7 +84,7 @@ impl MultiRange {
 
         // Check overlap
         if last.1 >= range.0 {
-            return Err(Error::OverlappingRanges(*last, range));
+            return Err(Error::RangeOverlap(*last, range));
         }
 
         if last.1 == range.0 - 1 {
