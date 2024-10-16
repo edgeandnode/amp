@@ -5001,11 +5001,13 @@ dependencies = [
 name = "tests"
 version = "0.1.0"
 dependencies = [
+ "clap",
  "common",
  "dataset-store",
  "dump",
  "dump-check",
  "figment",
+ "fs-err",
  "futures",
  "hex",
  "log",

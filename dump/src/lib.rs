@@ -48,6 +48,8 @@ pub async fn dump_dataset(
     start: u64,
     end_block: Option<u64>,
 ) -> Result<(), BoxError> {
+    use common::meta_tables::scanned_ranges::scanned_ranges_by_table;
+
     let dataset = dataset_store.load_dataset(&dataset_name).await?;
     let catalog = Catalog::for_dataset(&dataset, config.data_store.clone())?;
     let physical_dataset = catalog.datasets()[0].clone();
@@ -252,25 +254,6 @@ pub fn parquet_opts(compression: Compression, bloom_filters: bool) -> ParquetWri
         .set_compression(compression)
         .set_bloom_filter_enabled(bloom_filters)
         .build()
-}
-
-// This is the intersection of the `__scanned_ranges` for all tables. That is, a range is only
-// considered scanned if it is scanned for all tables.
-async fn scanned_ranges_by_table(
-    ctx: &QueryContext,
-) -> Result<BTreeMap<String, MultiRange>, BoxError> {
-    use common::meta_tables::scanned_ranges::ranges_for_table;
-
-    let mut multirange_by_table = BTreeMap::default();
-
-    for table in ctx.catalog().all_tables() {
-        let table_name = table.table_name().to_string();
-        let ranges = ranges_for_table(ctx, table.catalog_schema(), &table_name).await?;
-        let multi_range = MultiRange::from_ranges(ranges)?;
-        multirange_by_table.insert(table_name, multi_range);
-    }
-
-    Ok(multirange_by_table)
 }
 
 #[derive(Error, Debug)]

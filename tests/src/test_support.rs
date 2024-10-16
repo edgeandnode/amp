@@ -8,7 +8,8 @@ use common::{
         json::writer::JsonArray,
     },
     catalog::physical::Catalog,
-    config::Config,
+    config::{Config, FigmentJson},
+    multirange::MultiRange,
     parquet::basic::{Compression, ZstdLevel},
     query_context::parse_sql,
     BoxError, Dataset, QueryContext,
@@ -20,87 +21,139 @@ use log::info;
 use object_store::path::Path;
 
 use dump::{dump_dataset, parquet_opts};
+use fs_err as fs;
 use tempfile::TempDir;
-use tokio::fs;
 
-pub const TEST_CONFIG_PATH: &str = "config/config.toml";
+/// Assume the `cargo test` command is run either from the workspace root or from the crate root.
+const TEST_CONFIG_PATHS: [&str; 2] = ["tests/config/config.toml", "config/config.toml"];
 
-pub async fn bless(dataset_name: &str, start: u64, end: u64) -> Result<(), BoxError> {
-    let config = Arc::new(Config::load(TEST_CONFIG_PATH, false, None)?);
-    dump(config, dataset_name, start, end).await
-}
-
-pub async fn assert_temp_eq_blessed(temp: &TempDatasetDump) -> Result<(), BoxError> {
-    let blessed_ctx = {
-        let config = Arc::new(Config::load(TEST_CONFIG_PATH, false, None)?);
-        let dataset_store = DatasetStore::new(config.clone());
-        let dataset = dataset_store.load_dataset(&temp.dataset.name).await?;
-        let catalog = Catalog::for_dataset(&dataset, config.data_store.clone())?;
-        QueryContext::for_catalog(catalog, Arc::new(config.make_runtime_env()?))?
-    };
-
-    let temp_ctx = {
-        let catalog = Catalog::for_dataset(&temp.dataset, temp.config.data_store.clone())?;
-        QueryContext::for_catalog(catalog, Arc::new(temp.config.make_runtime_env()?))?
-    };
-
-    for table in blessed_ctx.catalog().all_tables() {
-        let query = parse_sql(&format!(
-            "select * from {} order by block_num",
-            table.table_ref()
-        ))?;
-        let blessed_all_rows: RecordBatch = blessed_ctx
-            .execute_and_concat(blessed_ctx.plan_sql(query.clone()).await?)
-            .await?;
-        let temp_all_rows: RecordBatch = temp_ctx
-            .execute_and_concat(temp_ctx.plan_sql(query.clone()).await?)
-            .await?;
-
-        assert_batch_eq(&temp_all_rows, &blessed_all_rows);
+pub fn load_test_config(literal_override: Option<FigmentJson>) -> Result<Arc<Config>, BoxError> {
+    let mut path = None;
+    for p in TEST_CONFIG_PATHS.iter() {
+        if matches!(
+            fs::metadata(p).map_err(|e| e.kind()),
+            Err(ErrorKind::NotFound)
+        ) {
+            continue;
+        }
+        path = Some(p);
+        break;
     }
 
-    Ok(())
+    let path = path.expect(
+        "Couldn't find a test config file, `cargo test` must be run from the workspace root or the tests crate root"
+    );
+    Ok(Arc::new(Config::load(path, false, literal_override)?))
 }
 
-/// Context for a dataset dumped to a temporary directory. The directory is deleted on drop.
-pub struct TempDatasetDump {
-    pub config: Arc<Config>,
-    pub _temp_dir: TempDir,
-    pub dataset: Dataset,
+pub async fn bless(dataset_name: &str, start: u64, end: u64) -> Result<(), BoxError> {
+    let config = load_test_config(None)?;
+    redump(config, dataset_name, start, end).await
 }
 
-// Dump the dataset to a temporary data directory.
-pub async fn temp_dump(
-    dataset_name: &str,
-    start: u64,
-    end: u64,
-) -> Result<TempDatasetDump, BoxError> {
-    use figment::providers::Json;
+pub struct SnapshotContext {
+    dataset: Dataset,
+    ctx: QueryContext,
 
-    let temp_dir = tempfile::tempdir()?;
-    let path = temp_dir.path();
-    info!("Dumping dataset to {}", path.display());
-
-    let config_override = Some(Json::string(&format!(
-        r#"{{ "data_dir": "{}" }}"#,
-        path.display()
-    )));
-
-    let config = Arc::new(Config::load(TEST_CONFIG_PATH, false, config_override)?);
-
-    dump(config.clone(), dataset_name, start, end).await?;
-
-    let dataset_store = DatasetStore::new(config.clone());
-    let dataset = dataset_store.load_dataset(&dataset_name).await?;
-
-    Ok(TempDatasetDump {
-        config,
-        _temp_dir: temp_dir,
-        dataset,
-    })
+    /// For a dataset dumped to a temporary directory. The directory is deleted on drop.
+    _temp_dir: Option<TempDir>,
 }
 
-async fn dump(
+impl SnapshotContext {
+    pub async fn blessed(dataset: &str) -> Result<Self, BoxError> {
+        let config = load_test_config(None)?;
+        let dataset_store = DatasetStore::new(config.clone());
+        let dataset = dataset_store.load_dataset(dataset).await?;
+        let catalog = Catalog::for_dataset(&dataset, config.data_store.clone())?;
+        let ctx = QueryContext::for_catalog(catalog, Arc::new(config.make_runtime_env()?))?;
+        Ok(Self {
+            dataset,
+            ctx,
+            _temp_dir: None,
+        })
+    }
+
+    /// Dump the dataset to a temporary data directory.
+    pub async fn temp_dump(
+        dataset_name: &str,
+        start: u64,
+        end: u64,
+    ) -> Result<SnapshotContext, BoxError> {
+        use figment::providers::Json;
+
+        let temp_dir = tempfile::tempdir()?;
+        let path = temp_dir.path();
+        info!("Dumping dataset to {}", path.display());
+
+        let config_override = Some(Json::string(&format!(
+            r#"{{ "data_dir": "{}" }}"#,
+            path.display()
+        )));
+
+        let config = load_test_config(config_override)?;
+
+        redump(config.clone(), dataset_name, start, end).await?;
+
+        let dataset_store = DatasetStore::new(config.clone());
+        let dataset = dataset_store.load_dataset(&dataset_name).await?;
+        let catalog = Catalog::for_dataset(&dataset, config.data_store.clone())?;
+        let ctx = QueryContext::for_catalog(catalog, Arc::new(config.make_runtime_env()?))?;
+
+        Ok(SnapshotContext {
+            dataset,
+            ctx,
+            _temp_dir: Some(temp_dir),
+        })
+    }
+
+    async fn check_scanned_range_eq(&self, other: &SnapshotContext) -> Result<(), BoxError> {
+        use common::meta_tables::scanned_ranges::{ranges_for_table, scanned_ranges_by_table};
+
+        let other_scanned_ranges = scanned_ranges_by_table(&other.ctx).await?;
+
+        for table in self.ctx.catalog().all_tables() {
+            let table_name = table.table_name().to_string();
+            let ranges = ranges_for_table(&self.ctx, table.catalog_schema(), &table_name).await?;
+            let expected_range = MultiRange::from_ranges(ranges)?;
+            let actual_range = &other_scanned_ranges[&table_name];
+            let dataset_name = &self.dataset.name;
+            assert_eq!(
+                expected_range, *actual_range,
+                "for table {table_name} of dataset {dataset_name}, \
+                 the test expected data ranges to be exactly {expected_range}, but dataset has data ranges {actual_range}"
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Typically used to check a fresh snapshot against a blessed one.
+    pub async fn assert_eq(&self, other: &SnapshotContext) -> Result<(), BoxError> {
+        self.check_scanned_range_eq(other).await?;
+
+        for table in self.ctx.catalog().all_tables() {
+            let query = parse_sql(&format!(
+                "select * from {} order by block_num",
+                table.table_ref()
+            ))?;
+            let self_all_rows: RecordBatch = self
+                .ctx
+                .execute_and_concat(self.ctx.plan_sql(query.clone()).await?)
+                .await?;
+            let other_all_rows: RecordBatch = other
+                .ctx
+                .execute_and_concat(other.ctx.plan_sql(query.clone()).await?)
+                .await?;
+
+            assert_batch_eq(&self_all_rows, &other_all_rows);
+        }
+
+        Ok(())
+    }
+}
+
+/// Clears the dataset directory, if it exists, before dumping.
+async fn redump(
     config: Arc<Config>,
     dataset_name: &str,
     start: u64,
@@ -134,7 +187,7 @@ async fn dump(
 }
 
 pub async fn check_blocks(dataset_name: &str, start: u64, end: u64) -> Result<(), BoxError> {
-    let config = Arc::new(Config::load(TEST_CONFIG_PATH, false, None)?);
+    let config = load_test_config(None)?;
     let dataset_store = DatasetStore::new(config.clone());
     let env = Arc::new(config.make_runtime_env()?);
 
@@ -165,7 +218,7 @@ async fn clear_dataset(config: &Config, dataset_name: &str) -> Result<(), BoxErr
 pub async fn check_provider_file(filename: &str) {
     let path = format!("config/providers/{}", filename);
     if matches!(
-        fs::metadata(&path).await.map_err(|e| e.kind()),
+        fs::metadata(&path).map_err(|e| e.kind()),
         Err(ErrorKind::NotFound)
     ) {
         panic!(

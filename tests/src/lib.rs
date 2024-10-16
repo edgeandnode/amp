@@ -1,5 +1,4 @@
-#[cfg(test)]
-mod tests;
+pub mod test_support;
 
 #[cfg(test)]
-mod test_support;
+mod tests;

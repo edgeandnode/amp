@@ -3,7 +3,13 @@ name = "tests"
 edition.workspace = true
 version.workspace = true
 
-[dev-dependencies]
+[lib]
+name = "tests"
+
+[[bin]]
+name = "tests"
+
+[dependencies]
 common = { path = "../common" }
 dataset-store = { path = "../dataset-store" }
 dump = { path = "../dump" }
@@ -17,3 +23,5 @@ serde_json.workspace = true
 pretty_assertions.workspace = true
 tempfile.workspace = true
 figment.workspace = true
+clap.workspace = true
+fs-err.workspace = true

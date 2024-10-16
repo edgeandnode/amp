@@ -34,7 +34,7 @@ pub struct ConfigFile {
     pub spill_location: Vec<PathBuf>,
 }
 
-type FigmentJson = figment::providers::Data<figment::providers::Json>;
+pub type FigmentJson = figment::providers::Data<figment::providers::Json>;
 
 impl Config {
     ///

@@ -19,12 +19,16 @@
 //!
 //! See also: scanned-ranges-consistency
 
-use std::sync::{Arc, LazyLock};
+use std::{
+    collections::BTreeMap,
+    sync::{Arc, LazyLock},
+};
 
 use crate::{
     arrow::array::{ArrayRef, StringBuilder},
+    multirange::MultiRange,
     query_context::Error as CoreError,
-    timestamp_type, QueryContext, Timestamp, TimestampArrayBuilder,
+    timestamp_type, BoxError, QueryContext, Timestamp, TimestampArrayBuilder,
 };
 use datafusion::{
     arrow::{
@@ -75,6 +79,21 @@ pub async fn ranges_for_table(
 
     let ranges = start_blocks.iter().zip(end_blocks).map(|(s, e)| (*s, *e));
     Ok(ranges.collect())
+}
+
+pub async fn scanned_ranges_by_table(
+    ctx: &QueryContext,
+) -> Result<BTreeMap<String, MultiRange>, BoxError> {
+    let mut multirange_by_table = BTreeMap::default();
+
+    for table in ctx.catalog().all_tables() {
+        let table_name = table.table_name().to_string();
+        let ranges = ranges_for_table(ctx, table.catalog_schema(), &table_name).await?;
+        let multi_range = MultiRange::from_ranges(ranges)?;
+        multirange_by_table.insert(table_name, multi_range);
+    }
+
+    Ok(multirange_by_table)
 }
 
 pub async fn filenames_for_table(

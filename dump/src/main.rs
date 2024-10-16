@@ -15,9 +15,9 @@ use parquet::basic::ZstdLevel;
 #[global_allocator]
 static ALLOC: snmalloc_rs::SnMalloc = snmalloc_rs::SnMalloc;
 
-/// A tool for dumping firehose or substreams data to parquet files.
+/// A tool for dumping datasets to parquet files.
 #[derive(Parser, Debug)]
-#[command(name = "firehose-dump")]
+#[command(name = "dump")]
 struct Args {
     /// Path to a config file. See README for details on the format.
     #[arg(long, env = "NOZZLE_CONFIG")]
