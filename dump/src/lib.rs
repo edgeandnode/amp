@@ -22,6 +22,7 @@ use common::BoxError;
 use datafusion::execution::runtime_env::RuntimeEnv;
 use datafusion::sql::TableReference;
 use dataset_store::sql_datasets::max_end_block;
+use dataset_store::sql_datasets::Materialization;
 use dataset_store::DatasetKind;
 use dataset_store::DatasetStore;
 use futures::future::try_join_all;
@@ -98,6 +99,7 @@ pub async fn dump_dataset(
             dump_sql_dataset(
                 ctx,
                 &dataset_name,
+                config.data_store.clone(),
                 dataset_store,
                 env,
                 scanned_ranges_by_table,
@@ -181,8 +183,9 @@ async fn run_block_stream_jobs(
 }
 
 async fn dump_sql_dataset(
-    ctx: Arc<QueryContext>,
+    dst_ctx: Arc<QueryContext>,
     dataset_name: &str,
+    data_store: Arc<common::Store>,
     dataset_store: &Arc<DatasetStore>,
     env: &Arc<RuntimeEnv>,
     scanned_ranges_by_table: BTreeMap<String, MultiRange>,
@@ -190,10 +193,8 @@ async fn dump_sql_dataset(
     start: BlockNum,
     end: Option<BlockNum>,
 ) -> Result<(), BoxError> {
-    use dataset_store::sql_datasets::execute_query_for_range;
-
     let dataset = dataset_store.load_sql_dataset(dataset_name).await?;
-    let physical_dataset = &ctx.catalog().datasets()[0].clone();
+    let physical_dataset = &dst_ctx.catalog().datasets()[0].clone();
 
     for (table, query) in dataset.queries {
         let end = match end {
@@ -213,29 +214,87 @@ async fn dump_sql_dataset(
             let mut tables = physical_dataset.tables();
             tables.find(|t| t.table_name() == table).unwrap()
         };
-        let ranges_to_scan = scanned_ranges_by_table[&table].complement(start, end);
+        let src_ctx = dataset_store
+            .clone()
+            .ctx_for_sql(&query, env.clone())
+            .await?;
+        let plan = src_ctx.plan_sql(query.clone()).await?;
+        let matzn = Materialization::for_plan(&plan, start, end)?;
 
-        for (start, end) in ranges_to_scan.ranges {
-            info!(
-                "dumping {} between blocks {start} and {end}",
-                physical_table.table_ref()
-            );
+        match matzn {
+            Materialization::Incremental { start, end } => {
+                let ranges_to_scan = scanned_ranges_by_table[&table].complement(start, end);
+                for (start, end) in ranges_to_scan.ranges {
+                    info!(
+                        "dumping {} between blocks {start} and {end}",
+                        physical_table.table_ref()
+                    );
 
-            let store = dataset_store.clone();
-            let mut stream =
-                execute_query_for_range(query.clone(), store, env.clone(), Some(start), end)
+                    dump_sql_query(
+                        dataset_store,
+                        &query,
+                        env,
+                        Materialization::Incremental { start, end },
+                        physical_table,
+                        parquet_opts,
+                        dataset_name,
+                        &dst_ctx,
+                    )
                     .await?;
-            let mut writer =
-                ParquetFileWriter::new(physical_table.clone(), parquet_opts.clone(), start)?;
-            while let Some(batch) = stream.try_next().await? {
-                writer.write(&batch).await?;
+                }
             }
-            let scanned_range = writer.close(end).await?.as_record_batch();
-            let table_ref = TableReference::partial(dataset_name, scanned_ranges::TABLE_NAME);
-            ctx.meta_insert_into(table_ref, scanned_range).await?;
+            Materialization::Entire { .. } => {
+                let Some(metadata_db) = dataset_store.metadata_db.as_ref() else {
+                    return Err("metadata_db is required for entire materialization".into());
+                };
+                let physical_table = physical_table
+                    .next_revision(&data_store, dataset_name, metadata_db)
+                    .await?;
+                info!(
+                    "dumping entire {} to {}",
+                    physical_table.table_ref(),
+                    physical_table.url()
+                );
+                dump_sql_query(
+                    dataset_store,
+                    &query,
+                    env,
+                    matzn,
+                    &physical_table,
+                    parquet_opts,
+                    dataset_name,
+                    &dst_ctx,
+                )
+                .await?;
+            }
         }
     }
 
+    Ok(())
+}
+
+async fn dump_sql_query(
+    dataset_store: &Arc<DatasetStore>,
+    query: &datafusion::sql::parser::Statement,
+    env: &Arc<RuntimeEnv>,
+    matzn: Materialization,
+    physical_table: &common::catalog::physical::PhysicalTable,
+    parquet_opts: &ParquetWriterProperties,
+    dataset_name: &str,
+    dst_ctx: &QueryContext,
+) -> Result<(), BoxError> {
+    use dataset_store::sql_datasets::execute_query_for_range;
+
+    let store = dataset_store.clone();
+    let mut stream = execute_query_for_range(query.clone(), store, env.clone(), matzn).await?;
+    let mut writer =
+        ParquetFileWriter::new(physical_table.clone(), parquet_opts.clone(), matzn.start())?;
+    while let Some(batch) = stream.try_next().await? {
+        writer.write(&batch).await?;
+    }
+    let scanned_range = writer.close(matzn.end()).await?.as_record_batch();
+    let table_ref = TableReference::partial(dataset_name, scanned_ranges::TABLE_NAME);
+    dst_ctx.meta_insert_into(table_ref, scanned_range).await?;
     Ok(())
 }
 

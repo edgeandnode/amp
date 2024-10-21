@@ -257,6 +257,34 @@ impl PhysicalTable {
     pub fn object_store(&self) -> Arc<dyn ObjectStore> {
         self.object_store.clone()
     }
+
+    pub async fn next_revision(
+        &self,
+        data_store: &Store,
+        dataset_name: &str,
+        db: &MetadataDb,
+    ) -> Result<Self, BoxError> {
+        let view_id = ViewId {
+            dataset: dataset_name,
+            dataset_version: None,
+            view: &self.table.name,
+        };
+
+        let path = make_location_path(view_id);
+        let url = data_store.url().join(&path)?;
+        db.register_location(view_id, data_store.bucket(), &path, &url, false)
+            .await?;
+        db.set_active_location(view_id, &url.as_str()).await?;
+
+        let path = Path::from_url_path(url.path()).unwrap();
+        Ok(Self {
+            table: self.table.clone(),
+            table_ref: self.table_ref.clone(),
+            url,
+            path,
+            object_store: self.object_store.clone(),
+        })
+    }
 }
 
 fn validate_name(name: &str) -> Result<(), BoxError> {

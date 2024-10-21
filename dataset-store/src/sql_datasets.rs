@@ -5,7 +5,7 @@ use std::{
 
 use datafusion::{
     catalog_common::resolve_table_references,
-    common::tree_node::{Transformed, TreeNode},
+    common::tree_node::{Transformed, TreeNode, TreeNodeRecursion},
     datasource::TableType,
     error::DataFusionError,
     execution::{runtime_env::RuntimeEnv, SendableRecordBatchStream},
@@ -110,8 +110,7 @@ pub async fn execute_query_for_range(
     query: parser::Statement,
     dataset_store: Arc<DatasetStore>,
     env: Arc<RuntimeEnv>,
-    start: Option<BlockNum>,
-    end: BlockNum,
+    matzn: Materialization,
 ) -> Result<SendableRecordBatchStream, BoxError> {
     let (tables, _) =
         resolve_table_references(&query, true).map_err(|e| CoreError::SqlParseError(e.into()))?;
@@ -119,8 +118,7 @@ pub async fn execute_query_for_range(
 
     // Validate dependency scanned ranges
     {
-        let needed_start = start.unwrap_or(0);
-        let needed_range = MultiRange::from_ranges(vec![(needed_start, end)]).unwrap();
+        let needed_range = matzn.range();
         for table in tables {
             // Unwrap: A valid catalog was built with this table name.
             let catalog_schema = table.schema().unwrap();
@@ -135,9 +133,13 @@ pub async fn execute_query_for_range(
     }
 
     let plan = ctx.plan_sql(query).await?;
-    check_support(&plan)?;
-    let plan = inject_block_range_constraints(plan, start, end)?;
-    let plan = order_by_block_num(plan);
+    let plan = match matzn {
+        Materialization::Entire { .. } => plan,
+        Materialization::Incremental { start, end } => {
+            let plan = inject_block_range_constraints(plan, start, end)?;
+            order_by_block_num(plan)
+        }
+    };
     Ok(ctx.execute_plan(plan).await?)
 }
 
@@ -178,72 +180,115 @@ pub async fn max_end_block(
     Ok(end)
 }
 
-/// This function validates that a query can be used in a dataset definiton.
-///
-/// Currently, only 'embarassingly parallel' queries consisting of just projections and filters are
-/// supported, these are easy to compute incrementally as they are just maps of the input rows.
-///
-/// Support for aggregations and joins would be desirable but will require more thought.
-fn check_support(plan: &LogicalPlan) -> Result<bool, BoxError> {
-    use LogicalPlan::*;
+/// How a logical plan can be materialized in a dataset. For some queries,
+/// we support incremental materialization, whereas for others we need to
+/// recalculate the entire output.
+#[derive(Clone, Copy, Debug)]
+pub enum Materialization {
+    /// Can be materialized incrementally.
+    Incremental { start: BlockNum, end: BlockNum },
+    /// Can be materialized by rerunning the query in its entirety. The
+    /// `end` isn't really meaningful here as we have no control over which
+    /// block numbers get used by the underlying query, but we remember what
+    /// the user asked for for some plausibility checks.
+    Entire { end: BlockNum },
+}
 
-    // For error messages if an invalid node is found.
-    let mut bad_operator = String::new();
+impl Materialization {
+    pub fn for_plan(plan: &LogicalPlan, start: BlockNum, end: BlockNum) -> Result<Self, BoxError> {
+        use LogicalPlan::*;
+        use Materialization::*;
 
-    // The plan is materializable if no non-materializable nodes are found.
-    let is_materializable = !plan
-        .exists(|node| {
-            let is_materializable = match node {
+        fn unsupported(op: String) -> Option<BoxError> {
+            Some(format!("unsupported operation in query: {op}").into())
+        }
+
+        // As we traverse the tree, assume we can materialize incrementally.
+        // If we find a node that requires materialization of the entire
+        // query nonincrementally, we set `matzn` to `Entire`. If we find
+        // anything that cannot be materialized, we set `Err` to `Some(_)`.
+        // This ensures that we always report an error if there is one, and
+        // never go from `Entire` to `Incremental`.
+        let mut matzn = Incremental { start, end };
+        let mut err: Option<BoxError> = None;
+
+        // The plan is materializable if no non-materializable nodes are found.
+        plan.apply(|node| {
+            match node {
                 // Embarrassingly parallel operators
-                Projection(_) | Filter(_) | Union(_) | Unnest(_) => true,
+                Projection(_) | Filter(_) | Union(_) | Unnest(_) => { /* incremental */ }
 
                 // Not really logical operators, so we just skip them.
                 Repartition(_) | TableScan(_) | EmptyRelation(_) | Values(_) | Subquery(_)
-                | SubqueryAlias(_) => true,
+                | SubqueryAlias(_) => { /* incremental */ }
 
                 // Aggregations and join materialization seem doable but need thinking through.
-                Aggregate(_) | Distinct(_) => false,
-                Join(_) => false,
+                Aggregate(_) | Distinct(_) => err = unsupported(format!("{}", node.display())),
+                Join(_) => matzn = Entire { end },
 
                 // Sorts are not parallel or incremental, so a questionable thing to materialize
                 // unless the input is truly bounded. Top K queries may be something to think about.
-                Sort(_) | Limit(_) => false,
+                Sort(_) | Limit(_) => err = unsupported(format!("{}", node.display())),
 
                 // Window functions are complicated, they often result in a sort.
-                Window(_) => false,
+                Window(_) => err = unsupported(format!("{}", node.display())),
 
                 // Another complicated one.
-                RecursiveQuery(_) => false,
+                RecursiveQuery(_) => err = unsupported(format!("{}", node.display())),
 
                 // Commands that don't make sense in a dataset definition.
-                DescribeTable(_) | Explain(_) | Analyze(_) => false,
+                DescribeTable(_) | Explain(_) | Analyze(_) => {
+                    err = unsupported(format!("{}", node.display()))
+                }
 
                 // Definitely not supported and would be caught eleswhere.
-                Dml(_) | Ddl(_) | Statement(_) | Copy(_) => false,
+                Dml(_) | Ddl(_) | Statement(_) | Copy(_) => {
+                    err = unsupported(format!("{}", node.display()))
+                }
 
                 // We don't currently have any custom operators.
-                Extension(_) => false,
+                Extension(_) => err = unsupported(format!("{}", node.display())),
             };
 
-            if !is_materializable {
-                bad_operator = format!("{}", node.display());
-            }
-
             // Stop recursion if we found a non-materializable node.
-            Ok(!is_materializable)
+            match err {
+                Some(_) => Ok(TreeNodeRecursion::Stop),
+                None => Ok(TreeNodeRecursion::Continue),
+            }
         })
         .unwrap();
 
-    if is_materializable {
-        Ok(true)
-    } else {
-        Err(format!("unsupported operation in query: {bad_operator}").into())
+        match err {
+            Some(err) => Err(err),
+            None => Ok(matzn),
+        }
+    }
+
+    /// The block number at which to start materializing the query.
+    pub fn start(&self) -> BlockNum {
+        match self {
+            Materialization::Incremental { start, .. } => *start,
+            Materialization::Entire { .. } => 0,
+        }
+    }
+
+    /// The block number at which to stop materializing the query.
+    pub fn end(&self) -> BlockNum {
+        match self {
+            Materialization::Incremental { end, .. } => *end,
+            Materialization::Entire { end } => *end,
+        }
+    }
+
+    /// The range of blocks to materialize.
+    pub fn range(&self) -> MultiRange {
+        MultiRange::from_ranges(vec![(self.start(), self.end())]).unwrap()
     }
 }
 
 fn inject_block_range_constraints(
     plan: LogicalPlan,
-    start: Option<u64>,
+    start: u64,
     end: u64,
 ) -> Result<LogicalPlan, DataFusionError> {
     plan.transform(|node| match &node {
@@ -254,10 +299,7 @@ fn inject_block_range_constraints(
             // `where start <= block_num and block_num <= end`
             // Is it ok for this to be unqualified? Or should it be `TABLE_NAME.block_num`?
             let mut predicate = col(BLOCK_NUM).lt_eq(lit(end));
-
-            if let Some(start) = start {
-                predicate = predicate.and(lit(start).lt_eq(col(BLOCK_NUM)));
-            }
+            predicate = predicate.and(lit(start).lt_eq(col(BLOCK_NUM)));
 
             let with_filter = Filter::try_new(predicate, Arc::new(node))?;
             Ok(Transformed::yes(LogicalPlan::Filter(with_filter)))

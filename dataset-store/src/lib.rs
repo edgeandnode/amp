@@ -162,7 +162,7 @@ impl fmt::Display for DatasetError {
 
 pub struct DatasetStore {
     config: Arc<Config>,
-    metadata_db: Option<MetadataDb>,
+    pub metadata_db: Option<MetadataDb>,
 }
 
 impl DatasetStore {
