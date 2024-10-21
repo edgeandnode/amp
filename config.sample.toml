@@ -1,31 +1,10 @@
 # Sample of a configuration. Copy this file and edit it. Set the environment variable `NOZZLE_CONFIG`
-# to its location. See `configuration.md` for more context.
-
-# All directory configurations (the `*_dir` keys) support both filesystem and object store locations.
-# So they can either be a filesystem path, for local storage, or a URL for object an store. When
-# using filesystem paths, any relative paths will be resolved relative to the directory of this file.
-# Object store URLs can be in one of the following formats:
-#
-# # S3-compatible stores
+# to its location. See the CONFIG.md for more context.
 # 
-#   URL format: `s3://<bucket>` Sessions can be configured through the following environment
-#   variables:
+# Note that using a config file is not mandatory. You can alternatively provide some or all values
+# through env vars. See the 'Using env vars' section of CONFIG.md for how to do this.
 #
-#     * AWS_ACCESS_KEY_ID: access key ID
-#     * AWS_SECRET_ACCESS_KEY: secret access key
-#     * AWS_DEFAULT_REGION: AWS region
-#     * AWS_ENDPOINT: endpoint
-#     * AWS_SESSION_TOKEN: session token
-#     * AWS_ALLOW_HTTP: allow non-TLS connections
-#
-# # Google Cloud Storage (GCS)
-#
-#  URL format: `gs://<bucket>`. GCS Authorization can be configured through one of the following
-#  environment variables:
-#
-#     * GOOGLE_SERVICE_ACCOUNT_PATH: location of service account file, or
-#     * GOOGLE_SERVICE_ACCOUNT_KEY: JSON serialized service account key, or
-#     * Appication Default Credentials.
+# When using filesystem paths, any relative paths will be resolved from the directory of this file.
 
 # Where the extracted datasets are stored.
 data_dir = "<config_dir/data>"
