@@ -13,6 +13,7 @@ use datafusion::{
     sql::{parser, TableReference},
 };
 use futures::{future::BoxFuture, FutureExt as _, TryFutureExt as _};
+use metadata_db::MetadataDb;
 use serde::Deserialize;
 use sql_datasets::SqlDataset;
 use thiserror::Error;
@@ -158,11 +159,15 @@ impl fmt::Display for DatasetError {
 
 pub struct DatasetStore {
     config: Arc<Config>,
+    metadata_db: Option<MetadataDb>,
 }
 
 impl DatasetStore {
-    pub fn new(config: Arc<Config>) -> Arc<Self> {
-        Arc::new(Self { config })
+    pub fn new(config: Arc<Config>, metadata_db: Option<MetadataDb>) -> Arc<Self> {
+        Arc::new(Self {
+            config,
+            metadata_db,
+        })
     }
 
     pub async fn load_dataset(self: &Arc<Self>, dataset: &str) -> Result<Dataset, DatasetError> {
@@ -309,8 +314,6 @@ impl DatasetStore {
     }
 
     /// Looks up the datasets for the given table references and loads them into a catalog.
-    ///
-    /// The
     pub async fn load_catalog_for_table_refs<'a>(
         self: Arc<Self>,
         table_refs: impl Iterator<Item = &'a TableReference>,
@@ -322,8 +325,13 @@ impl DatasetStore {
 
             // We currently assume all datasets live in the same `data_store`.
             catalog
-                .register(&dataset, self.config.data_store.clone())
-                .map_err(|e| (dataset_name, Error::UnsupportedName(e)))?;
+                .register(
+                    &dataset,
+                    self.config.data_store.clone(),
+                    self.metadata_db.as_ref(),
+                )
+                .await
+                .map_err(|e| (dataset_name, Error::Unknown(e)))?;
         }
         Ok(catalog)
     }

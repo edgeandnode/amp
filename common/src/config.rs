@@ -21,6 +21,7 @@ pub struct Config {
     pub data_store: Arc<Store>,
     pub providers_store: Arc<Store>,
     pub dataset_defs_store: Arc<Store>,
+    pub metadata_db_url: Option<String>,
     pub max_mem_mb: usize,
     pub spill_location: Vec<PathBuf>,
 }
@@ -30,6 +31,7 @@ pub struct ConfigFile {
     pub data_dir: String,
     pub providers_dir: String,
     pub dataset_defs_dir: String,
+    pub metadata_db_url: Option<String>,
     pub max_mem_mb: usize,
     pub spill_location: Vec<PathBuf>,
 }
@@ -69,6 +71,7 @@ impl Config {
             data_store: Arc::new(data_store),
             providers_store: Arc::new(providers_store),
             dataset_defs_store: Arc::new(dataset_defs_store),
+            metadata_db_url: config_file.metadata_db_url,
             max_mem_mb: config_file.max_mem_mb,
             spill_location: config_file.spill_location,
         })
@@ -84,6 +87,7 @@ impl Config {
             data_store,
             providers_store,
             dataset_defs_store,
+            metadata_db_url: None,
             max_mem_mb: 0,
             spill_location: vec![],
         }

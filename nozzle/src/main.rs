@@ -7,6 +7,7 @@ use common::{config::Config, tracing, BoxError};
 use datafusion::parquet;
 use dataset_store::DatasetStore;
 use log::info;
+use metadata_db::MetadataDb;
 use parquet::basic::Compression;
 use parquet::basic::ZstdLevel;
 use tonic::transport::Server;
@@ -71,8 +72,14 @@ async fn main() -> Result<(), BoxError> {
     tracing::register_logger();
     let args = Args::parse();
 
-    let config =
-        Config::load(args.config, true, None).map_err(|e| format!("failed to load config: {e}"))?;
+    let config = Arc::new(
+        Config::load(args.config, true, None).map_err(|e| format!("failed to load config: {e}"))?,
+    );
+    let metadata_db = if let Some(url) = &config.metadata_db_url {
+        Some(MetadataDb::connect(url).await?)
+    } else {
+        None
+    };
 
     match args.command {
         Command::Dump {
@@ -84,8 +91,7 @@ async fn main() -> Result<(), BoxError> {
             dataset: datasets,
             run_every_mins,
         } => {
-            let config = Arc::new(config);
-            let dataset_store = DatasetStore::new(config.clone());
+            let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
             let partition_size = partition_size_mb * 1024 * 1024;
             let compression = if disable_compression {
                 parquet::basic::Compression::UNCOMPRESSED
@@ -105,6 +111,7 @@ async fn main() -> Result<(), BoxError> {
                             &dataset_name,
                             &dataset_store,
                             &config,
+                            metadata_db.as_ref(),
                             &env,
                             n_jobs,
                             partition_size,
@@ -123,6 +130,7 @@ async fn main() -> Result<(), BoxError> {
                             dataset_name,
                             &dataset_store,
                             &config,
+                            metadata_db.as_ref(),
                             &env,
                             n_jobs,
                             partition_size,
@@ -144,7 +152,7 @@ async fn main() -> Result<(), BoxError> {
                 !config.spill_location.is_empty()
             );
 
-            let service = server::service::Service::new(Arc::new(config))?;
+            let service = server::service::Service::new(config, metadata_db)?;
             let addr: SocketAddr = ([0, 0, 0, 0], 1602).into();
             info!("Serving at {}", addr);
             Server::builder()

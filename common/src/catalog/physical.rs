@@ -5,6 +5,7 @@ use datafusion::{
     logical_expr::{col, Expr},
     sql::TableReference,
 };
+use metadata_db::{make_location_path, MetadataDb, ViewId};
 use url::Url;
 
 use super::logical::Table;
@@ -19,19 +20,26 @@ impl Catalog {
         Catalog { datasets: vec![] }
     }
 
-    /// The tables are assumed to live in the path:
-    /// `<url>/<dataset_name>/<table_name>`
-    /// Where `url` is the base URL of this catalog.
-    pub fn register(&mut self, dataset: &Dataset, data_store: Arc<Store>) -> Result<(), BoxError> {
-        let physical_dataset = PhysicalDataset::from_dataset_at(dataset.clone(), data_store)?;
+    pub async fn register(
+        &mut self,
+        dataset: &Dataset,
+        data_store: Arc<Store>,
+        metadata_db: Option<&MetadataDb>,
+    ) -> Result<(), BoxError> {
+        let physical_dataset =
+            PhysicalDataset::from_dataset_at(dataset.clone(), data_store, metadata_db).await?;
         self.datasets.push(physical_dataset);
         Ok(())
     }
 
     /// Will include meta tables.
-    pub fn for_dataset(dataset: &Dataset, data_store: Arc<Store>) -> Result<Self, BoxError> {
+    pub async fn for_dataset(
+        dataset: &Dataset,
+        data_store: Arc<Store>,
+        metadata_db: Option<&MetadataDb>,
+    ) -> Result<Self, BoxError> {
         let mut this = Self::empty();
-        this.register(dataset, data_store)?;
+        this.register(dataset, data_store, metadata_db).await?;
         Ok(this)
     }
 
@@ -60,7 +68,11 @@ pub struct PhysicalDataset {
 impl PhysicalDataset {
     /// The tables are assumed to live in the subpath:
     /// `<url>/<dataset_name>/<table_name>`
-    pub fn from_dataset_at(dataset: Dataset, data_store: Arc<Store>) -> Result<Self, BoxError> {
+    pub async fn from_dataset_at(
+        dataset: Dataset,
+        data_store: Arc<Store>,
+        metadata_db: Option<&MetadataDb>,
+    ) -> Result<Self, BoxError> {
         let dataset_name = dataset.name.clone();
         validate_name(&dataset_name)?;
 
@@ -70,10 +82,30 @@ impl PhysicalDataset {
             tables
         };
 
-        let physical_tables = tables
-            .iter()
-            .map(|table| PhysicalTable::resolve(data_store.url(), &dataset_name, table))
-            .collect::<Result<Vec<_>, _>>()?;
+        let mut physical_tables = vec![];
+        for table in tables {
+            let base = &data_store.url();
+            match metadata_db {
+                Some(db) => {
+                    physical_tables.push(
+                        PhysicalTable::resolve_or_register_location(
+                            base,
+                            db,
+                            &dataset_name,
+                            &table,
+                        )
+                        .await?,
+                    );
+                }
+                None => {
+                    physical_tables.push(PhysicalTable::static_location(
+                        base,
+                        &dataset_name,
+                        &table,
+                    )?);
+                }
+            }
+        }
 
         Ok(PhysicalDataset {
             dataset,
@@ -108,12 +140,56 @@ pub struct PhysicalTable {
     // Absolute URL.
     url: Url,
 
-    // Path relative the store URL.
+    // Location path relative the store URL.
     path: String,
 }
 
 impl PhysicalTable {
-    fn resolve(base: &Url, dataset_name: &str, table: &Table) -> Result<Self, BoxError> {
+    /// If an active location exists for this view, this `PhysicalTable` will point to that location.
+    /// Otherwise, a new location will be registered in the metadata DB. The location will be active.
+    async fn resolve_or_register_location(
+        base: &Url,
+        metadata_db: &MetadataDb,
+        dataset_name: &str,
+        table: &Table,
+    ) -> Result<Self, BoxError> {
+        validate_name(&table.name)?;
+
+        let (path, url) = {
+            let view_id = ViewId {
+                dataset: dataset_name,
+                dataset_version: None,
+                view: &table.name,
+            };
+
+            let active_location = metadata_db.get_active_location(view_id).await?;
+            let location = match active_location {
+                Some(location) => location,
+                None => {
+                    let path = make_location_path(view_id);
+                    metadata_db.register_location(view_id, &path, true).await?;
+                    path
+                }
+            };
+            (location.clone(), base.join(&location)?)
+        };
+
+        let table_ref = TableReference::partial(dataset_name, table.name.as_str());
+
+        Ok(PhysicalTable {
+            table: table.clone(),
+            table_ref,
+            url,
+            path,
+        })
+    }
+
+    /// The static location is always `<base>/<dataset_name>/<table_name>/`.
+    ///
+    /// This is used in a few situations where no metadata DB is available:
+    /// - When using `dump` as a simple CLI tool without a Postgres for metadata.
+    /// - For snapshot testing.
+    fn static_location(base: &Url, dataset_name: &str, table: &Table) -> Result<Self, BoxError> {
         validate_name(&table.name)?;
 
         let path = format!("{}/{}/", dataset_name, table.name);

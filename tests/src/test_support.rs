@@ -62,9 +62,9 @@ pub struct SnapshotContext {
 impl SnapshotContext {
     pub async fn blessed(dataset: &str) -> Result<Self, BoxError> {
         let config = load_test_config(None)?;
-        let dataset_store = DatasetStore::new(config.clone());
+        let dataset_store = DatasetStore::new(config.clone(), None);
         let dataset = dataset_store.load_dataset(dataset).await?;
-        let catalog = Catalog::for_dataset(&dataset, config.data_store.clone())?;
+        let catalog = Catalog::for_dataset(&dataset, config.data_store.clone(), None).await?;
         let ctx = QueryContext::for_catalog(catalog, Arc::new(config.make_runtime_env()?))?;
         Ok(Self {
             dataset,
@@ -94,9 +94,9 @@ impl SnapshotContext {
 
         redump(config.clone(), dataset_name, start, end).await?;
 
-        let dataset_store = DatasetStore::new(config.clone());
+        let dataset_store = DatasetStore::new(config.clone(), None);
         let dataset = dataset_store.load_dataset(&dataset_name).await?;
-        let catalog = Catalog::for_dataset(&dataset, config.data_store.clone())?;
+        let catalog = Catalog::for_dataset(&dataset, config.data_store.clone(), None).await?;
         let ctx = QueryContext::for_catalog(catalog, Arc::new(config.make_runtime_env()?))?;
 
         Ok(SnapshotContext {
@@ -159,7 +159,7 @@ async fn redump(
     start: u64,
     end: u64,
 ) -> Result<(), BoxError> {
-    let dataset_store = DatasetStore::new(config.clone());
+    let dataset_store = DatasetStore::new(config.clone(), None);
     let partition_size = 1024 * 1024; // 100 kB
     let compression = Compression::ZSTD(ZstdLevel::try_new(1).unwrap());
 
@@ -175,6 +175,7 @@ async fn redump(
         dataset_name,
         &dataset_store,
         &config,
+        None,
         &env,
         1,
         partition_size,
@@ -188,13 +189,14 @@ async fn redump(
 
 pub async fn check_blocks(dataset_name: &str, start: u64, end: u64) -> Result<(), BoxError> {
     let config = load_test_config(None)?;
-    let dataset_store = DatasetStore::new(config.clone());
+    let dataset_store = DatasetStore::new(config.clone(), None);
     let env = Arc::new(config.make_runtime_env()?);
 
     dump_check::dump_check(
         dataset_name,
         &dataset_store,
         &config,
+        None,
         &env,
         1000,
         1,

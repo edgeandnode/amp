@@ -4,6 +4,7 @@ edition.workspace = true
 version.workspace = true
 
 [dependencies]
+metadata-db = { path = "../metadata-db" }
 common = { path = "../common" }
 evm-rpc-datasets = { path = "../evm-rpc-datasets" }
 firehose-datasets = { path = "../firehose-datasets" }

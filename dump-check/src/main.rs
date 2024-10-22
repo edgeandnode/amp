@@ -3,6 +3,7 @@ mod ui;
 use clap::Parser;
 use common::{config::Config, BoxError};
 use dataset_store::DatasetStore;
+use metadata_db::MetadataDb;
 use std::sync::Arc;
 
 /// Checks the output of `dump` against a provider.
@@ -52,7 +53,12 @@ async fn main() -> Result<(), BoxError> {
     } = args;
 
     let config = Arc::new(Config::load(config_path, true, None)?);
-    let dataset_store = DatasetStore::new(config.clone());
+    let metadata_db = if let Some(url) = &config.metadata_db_url {
+        Some(MetadataDb::connect(url).await?)
+    } else {
+        None
+    };
+    let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
 
     if end_block == 0 {
         return Err("The end block number must be greater than 0".into());
@@ -74,6 +80,7 @@ async fn main() -> Result<(), BoxError> {
         &dataset_name,
         &dataset_store,
         &config,
+        metadata_db.as_ref(),
         &env,
         batch_size,
         n_jobs,
