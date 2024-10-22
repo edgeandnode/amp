@@ -3,12 +3,6 @@ name = "dump"
 edition.workspace = true
 version.workspace = true
 
-[lib]
-name = "dump"
-
-[[bin]]
-name = "dump"
-
 [dependencies]
 common = { path = "../common" }
 dataset-store = { path = "../dataset-store" }
