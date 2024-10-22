@@ -19,50 +19,48 @@ edition = "2021"
 version = "0.1.0"
 
 [workspace.dependencies]
-tokio = { version = "1.36.0", features = [
-    "macros",
-    "test-util",
-    "rt-multi-thread",
-    "parking_lot",
-] }
-tonic = { version = "0.11.0", features = ["transport", "gzip", "tls-roots"] }
-tonic-build = "0.11"
-prost = "0.12"
-prost-types = "0.12"
-prost-build = "0.12"
-thiserror = "1.0"
-futures = "0.3"
-hex = "0.4.3"
-serde = { version = "1.0.197", features = ["derive"] }
-serde_derive = "1.0.197"
-clap = { version = "4.5.2", features = ["derive", "env"] }
-toml = "0.8.10"
-fs-err = "2.11.0"
-serde_json = "1.0.114"
-url = "2.5.0"
-async-trait = "0.1.80"
-bytes = "1"
-tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
-log = "0.4"
 alloy = { version = "0.3.3", features = [
     "json-abi",
     "dyn-abi",
     "provider-http",
     "rpc-types",
 ] }
-itertools = "0.12.1"
+async-trait = "0.1.80"
 atty = "0.2.14"
-snmalloc-rs = "0.3.4"
-prometheus = "0.13"
+bytes = "1"
+clap = { version = "4.5.2", features = ["derive", "env"] }
 figment = { version = "0.10.19", features = ["toml", "env", "json"] }
+fs-err = "2.11.0"
+futures = "0.3"
+hex = "0.4.3"
+itertools = "0.12.1"
+log = "0.4"
 pretty_assertions = "1.4.1"
+prometheus = "0.13"
+prost = "0.12"
+prost-build = "0.12"
+serde = { version = "1.0.197", features = ["derive"] }
+serde_json = "1.0.114"
+snmalloc-rs = "0.3.4"
 tempfile = "3.13.0"
+thiserror = "1.0"
+toml = "0.8.10"
+tonic = { version = "0.11.0", features = ["transport", "gzip", "tls-roots"] }
+tonic-build = "0.11"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+tokio = { version = "1.36.0", features = [
+    "macros",
+    "test-util",
+    "rt-multi-thread",
+    "parking_lot",
+] }
+url = "2.5.0"
 
 # Datafusion and Arrow crates
+arrow-flight = { version = "52.2.0", features = ["flight-sql-experimental"] }
 datafusion = { version = "41", features = ["serde"] }
 datafusion-proto = "41"
 object_store = { version = "0.10.2", features = ["aws", "gcp"] }
-arrow-flight = { version = "52.2.0", features = ["flight-sql-experimental"] }
 
 # Prost fork
 #

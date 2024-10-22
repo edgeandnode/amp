@@ -10,18 +10,17 @@ name = "tests"
 name = "tests"
 
 [dependencies]
+clap.workspace = true
 common = { path = "../common" }
 dataset-store = { path = "../dataset-store" }
 dump = { path = "../dump" }
 dump-check = { path = "../dump-check" }
-object_store.workspace = true
+figment.workspace = true
+fs-err.workspace = true
 futures.workspace = true
-tokio.workspace = true
-log.workspace = true
 hex.workspace = true
-serde_json.workspace = true
+log.workspace = true
+object_store.workspace = true
 pretty_assertions.workspace = true
 tempfile.workspace = true
-figment.workspace = true
-clap.workspace = true
-fs-err.workspace = true
+tokio.workspace = true

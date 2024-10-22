@@ -10,20 +10,17 @@ name = "dump_check"
 name = "dump-check"
 
 [dependencies]
-common = { path = "../common" }
-dataset-store = { path = "../dataset-store" }
-tokio.workspace = true
-serde_json.workspace = true
-futures.workspace = true
-clap.workspace = true
-object_store.workspace = true
-url.workspace = true
-indicatif = "0.17"
-human_bytes = { version = "0.4", default-features = false }
-prometheus.workspace = true
-prometheus_exporter = "0.8"
 atty = "0.2.14"
-log.workspace = true
-tracing-subscriber.workspace = true
+clap.workspace = true
+common = { path = "../common" }
 datafusion.workspace = true
+dataset-store = { path = "../dataset-store" }
+futures.workspace = true
+human_bytes = { version = "0.4", default-features = false }
+indicatif = "0.17"
 lazy_static = "1.5.0"
+log.workspace = true
+prometheus_exporter = "0.8"
+prometheus.workspace = true
+tokio.workspace = true
+tracing-subscriber.workspace = true

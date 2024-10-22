@@ -1454,7 +1454,6 @@ name = "common"
 version = "0.1.0"
 dependencies = [
  "alloy",
- "async-trait",
  "atty",
  "bytes",
  "datafusion",
@@ -1467,7 +1466,6 @@ dependencies = [
  "object_store",
  "rand",
  "serde",
- "serde_json",
  "stable-hash",
  "thiserror",
  "tokio",
@@ -2142,7 +2140,6 @@ checksum = "fea41bba32d969b513997752735605054bc0dfa92b4c56bf1189f2e174be7a10"
 name = "dump"
 version = "0.1.0"
 dependencies = [
- "clap",
  "common",
  "datafusion",
  "dataset-store",
@@ -2150,11 +2147,8 @@ dependencies = [
  "log",
  "object_store",
  "prometheus",
- "serde_json",
- "snmalloc-rs",
  "thiserror",
  "tokio",
- "url",
 ]
 
 [[package]]
@@ -2171,13 +2165,10 @@ dependencies = [
  "indicatif",
  "lazy_static",
  "log",
- "object_store",
  "prometheus",
  "prometheus_exporter",
- "serde_json",
  "tokio",
  "tracing-subscriber",
- "url",
 ]
 
 [[package]]
@@ -2263,7 +2254,6 @@ dependencies = [
  "alloy",
  "common",
  "serde",
- "serde_json",
  "serde_with",
  "thiserror",
  "tokio",
@@ -2316,19 +2306,14 @@ dependencies = [
 name = "firehose-datasets"
 version = "0.1.0"
 dependencies = [
- "clap",
  "common",
- "datafusion",
  "fs-err",
  "futures",
  "hex",
  "log",
- "object_store",
  "prost",
  "prost-build",
- "prost-types",
  "serde",
- "serde_derive",
  "serde_json",
  "thiserror",
  "tokio",
@@ -4657,15 +4642,10 @@ dependencies = [
  "bytes",
  "common",
  "datafusion",
- "datafusion-proto",
  "dataset-store",
- "firehose-datasets",
  "futures",
- "log",
  "prost",
- "snmalloc-rs",
  "thiserror",
- "tokio",
  "tonic",
 ]
 
@@ -4893,25 +4873,19 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
- "clap",
  "common",
- "datafusion",
  "firehose-datasets",
  "fs-err",
  "futures",
- "hex",
  "log",
  "object_store",
  "prost",
  "prost-build",
  "prost-reflect",
- "prost-types",
  "reqwest",
  "serde",
- "serde_derive",
  "serde_json",
  "sqlparser 0.46.0",
- "thiserror",
  "tokio",
  "toml",
  "tonic",
@@ -5030,7 +5004,6 @@ dependencies = [
  "log",
  "object_store",
  "pretty_assertions",
- "serde_json",
  "tempfile",
  "tokio",
 ]
