@@ -1,14 +1,15 @@
 [workspace]
 members = [
-    "firehose-datasets",
-    "common",
-    "dump",
+    "nozzle",
     "server",
+    "dump",
     "dump-check",
-    "substreams-datasets",
-    "evm-rpc-datasets",
-    "dataset-store",
     "tests",
+    "common",
+    "dataset-store",
+    "evm-rpc-datasets",
+    "firehose-datasets",
+    "substreams-datasets",
 ]
 
 resolver = "2"

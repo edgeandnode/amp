@@ -3328,6 +3328,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "nozzle"
+version = "0.1.0"
+dependencies = [
+ "arrow-flight",
+ "clap",
+ "common",
+ "datafusion",
+ "dataset-store",
+ "dump",
+ "log",
+ "server",
+ "snmalloc-rs",
+ "tokio",
+ "tonic",
+]
+
+[[package]]
 name = "nu-ansi-term"
 version = "0.46.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
