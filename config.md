@@ -5,6 +5,7 @@ is exemplified and documented in the [sample config](config.sample.toml). Its pa
 in as the `NOZZLE_CONFIG` environment variable.
 
 Configuring datasets to be extracted and served requires three different object storage directories:
+
 - `dataset_defs_dir`: Contains the dataset definitions. This is the input to the extraction process.
 - `providers_dir`: Auxiliary to the dataset definitions, configures providers for external services
   like Firehose and Substreams.
@@ -21,10 +22,10 @@ the env var name with `NOZZLE_CONFIG_`. For example, to override the `data_dir` 
 
 # Configuring object stores
 
- All directory configurations (the `*_dir` keys) support both filesystem and object store locations.
- So they can either be a filesystem path, for local storage, or a URL for object an store. For
- production usage, an object store is recommended. Object store URLs can be in one of the following
- formats:
+All directory configurations (the `*_dir` keys) support both filesystem and object store locations.
+So they can either be a filesystem path, for local storage, or a URL for object an store. For
+production usage, an object store is recommended. Object store URLs can be in one of the following
+formats:
 
 ### S3-compatible stores
 
@@ -50,6 +51,7 @@ GCS Authorization can be configured through one of the following environment var
 - Application Default Credentials.
 
 ## Datasets
+
 All datasets have a name. This will be used as the dataset directory name under the data directory,
 and also as the catalog schema name in the SQL interface. So if you have a dataset name `foobar`, it
 will by default be placed under `<data_dir>/foobar/` and tables will be refered to in SQL as
@@ -61,6 +63,7 @@ Substreams, and then there are datasets defined as views on other datasets.
 ## Raw datasets
 
 Details for the raw datasets currently implemented:
+
 - EVM RPC [dataset docs](evm-rpc-datasets/README.md)
 - Firehose [dataset docs](firehose-datasets/README.md)
 - Substreams [dataset docs](substreams-datasets/README.md)
@@ -71,12 +74,15 @@ A dataset can be defined as a set of queries on other datasets, with each query 
 among multiple queries or to do ahead of time work that is too slow or expensive to do at query time.
 As an example, we will show how to define an `erc20_transfer` dataset, containing all erc20 transfer
 events. The `erc20_transfer.toml` is straightforward:
+
 ```
 kind = "sql"
 name = "erc20_transfer"
 ```
+
 The actual SQL queries should be placed beside the dataset definition, in a directory of the same
 name. In this case we will only have one query for the transfers table, so the file `erc_20_transfer/transfers.sql` would contain the query:
+
 ```sql
 select t.block_num,
     t.timestamp,
@@ -89,5 +95,6 @@ select t.block_num,
             from eth_firehose.logs l
             where l.topic0 = evm_topic('Transfer(address indexed from, address indexed to, uint256 value)')) t
 ```
-The dataset is now ready to be dumped with `dump --dataset erc_20_transfer`, assuming the dependency
+
+The dataset is now ready to be dumped with `nozzle dump --dataset erc_20_transfer`, assuming the dependency
 `eth_firehose` is already present, and then queried as in `select * from erc_20_transfer.transfers`.

@@ -3,23 +3,13 @@ name = "dump"
 edition.workspace = true
 version.workspace = true
 
-[lib]
-name = "dump"
-
-[[bin]]
-name = "dump"
-
 [dependencies]
 common = { path = "../common" }
-dataset-store = { path = "../dataset-store" }
-tokio.workspace = true
-serde_json.workspace = true
-futures.workspace = true
-clap.workspace = true
-object_store.workspace = true
-url.workspace = true
-log.workspace = true
 datafusion.workspace = true
-snmalloc-rs.workspace = true
+dataset-store = { path = "../dataset-store" }
+futures.workspace = true
+log.workspace = true
+object_store.workspace = true
 prometheus.workspace = true
 thiserror.workspace = true
+tokio.workspace = true

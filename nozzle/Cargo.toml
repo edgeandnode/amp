@@ -1,16 +1,17 @@
 [package]
-name = "server"
+name = "nozzle"
 edition.workspace = true
 version.workspace = true
 
 [dependencies]
 arrow-flight.workspace = true
-async-trait.workspace = true
-bytes.workspace = true
+clap.workspace = true
 common = { path = "../common" }
 datafusion.workspace = true
 dataset-store = { path = "../dataset-store" }
-futures.workspace = true
-prost.workspace = true
-thiserror.workspace = true
+dump = { path = "../dump" }
+log.workspace = true
+server = { path = "../server" }
+snmalloc-rs.workspace = true
+tokio.workspace = true
 tonic.workspace = true
