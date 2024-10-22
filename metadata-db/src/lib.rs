@@ -28,9 +28,9 @@ pub struct MetadataDb {
     pool: Pool<Postgres>,
 }
 
-/// Cached views are commonly looked up by the view definition being cached.
-/// Views are identified by the triple: `(dataset, dataset_version, view)`.
-/// For each view, there is at most one active cache location.
+/// Materialized views are commonly looked up by the view being materialized. Views are identified by
+/// the triple: `(dataset, dataset_version, view)`. For each view, there is at most one active
+/// materialized location.
 #[derive(Debug, Copy, Clone)]
 pub struct ViewId<'a> {
     pub dataset: &'a str,
@@ -55,7 +55,7 @@ impl MetadataDb {
         Ok(MIGRATOR.run(&self.pool).await?)
     }
 
-    /// Register a cached view into the metadata database.
+    /// Register a materialized view into the metadata database.
     ///
     /// If setting `active = true`, make sure no other active location exists for this view, to avoid
     /// a constraint violation. If an active location might exist, it is better to initialize the
@@ -86,7 +86,9 @@ impl MetadataDb {
         Ok(())
     }
 
-    /// Returns the active location where the view is being cached, if any.
+    /// Returns the active location. The active location has meaning on both the write and read side:
+    /// - On the write side, it is the location that is being kept in sync with the source data.
+    /// - On the read side, it is default location that should receive queries.
     pub async fn get_active_location(&self, view: ViewId<'_>) -> Result<Option<String>, Error> {
         let ViewId {
             dataset,
@@ -122,9 +124,9 @@ impl MetadataDb {
         }
     }
 
-    /// Set a location as the active cache for a view. If there was a previously active location, it will be
-    /// made inactive in the same transaction, achieving an atomic switch of the active location.
-    pub async fn set_active_cache(&self, view: ViewId<'_>, location: &str) -> Result<(), Error> {
+    /// Set a location as the active materialization for a view. If there was a previously active
+    /// location, it will be made inactive in the same transaction, achieving an atomic switch.
+    pub async fn set_active_location(&self, view: ViewId<'_>, location: &str) -> Result<(), Error> {
         let ViewId {
             dataset,
             dataset_version,
