@@ -8,11 +8,13 @@ use datafusion::execution::runtime_env::RuntimeEnv;
 use dataset_store::DatasetStore;
 use futures::future::try_join_all;
 use job::Job;
+use metadata_db::MetadataDb;
 
 pub async fn dump_check(
     dataset_name: &str,
     dataset_store: &Arc<DatasetStore>,
     config: &Config,
+    metadata_db: Option<&MetadataDb>,
     env: &Arc<RuntimeEnv>,
     batch_size: u64,
     n_jobs: u8,
@@ -22,7 +24,7 @@ pub async fn dump_check(
     let dataset = dataset_store.load_dataset(&dataset_name).await?;
     let client = dataset_store.load_client(&dataset_name).await?;
     let total_blocks = end_block - start + 1;
-    let catalog = Catalog::for_dataset(&dataset, config.data_store.clone())?;
+    let catalog = Catalog::for_dataset(&dataset, config.data_store.clone(), metadata_db).await?;
     let ctx = Arc::new(QueryContext::for_catalog(catalog, env.clone())?);
 
     let jobs = {

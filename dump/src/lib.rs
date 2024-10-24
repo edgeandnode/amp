@@ -30,6 +30,7 @@ use futures::TryStreamExt;
 use job::Job;
 use log::info;
 use log::warn;
+use metadata_db::MetadataDb;
 use object_store::path::Path;
 use object_store::ObjectMeta;
 use parquet::basic::Compression;
@@ -41,6 +42,7 @@ pub async fn dump_dataset(
     dataset_name: &str,
     dataset_store: &Arc<DatasetStore>,
     config: &Config,
+    metadata_db: Option<&MetadataDb>,
     env: &Arc<RuntimeEnv>,
     n_jobs: u16,
     partition_size: u64,
@@ -51,7 +53,7 @@ pub async fn dump_dataset(
     use common::meta_tables::scanned_ranges::scanned_ranges_by_table;
 
     let dataset = dataset_store.load_dataset(&dataset_name).await?;
-    let catalog = Catalog::for_dataset(&dataset, config.data_store.clone())?;
+    let catalog = Catalog::for_dataset(&dataset, config.data_store.clone(), metadata_db).await?;
     let physical_dataset = catalog.datasets()[0].clone();
     let ctx = Arc::new(QueryContext::for_catalog(catalog, env.clone())?);
 

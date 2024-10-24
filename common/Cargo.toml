@@ -4,6 +4,7 @@ edition.workspace = true
 version.workspace = true
 
 [dependencies]
+metadata-db = { path = "../metadata-db" }
 alloy.workspace = true
 atty.workspace = true
 bytes.workspace = true

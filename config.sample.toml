@@ -16,6 +16,9 @@ providers_dir = "<config_dir/providers>"
 # Path to a directory containing dataset definition files.
 dataset_defs_dir = "<config_dir/dataset_defs>"
 
+# Connection to the metadata DB. Optional and experimental.
+metadata_db_url = "postgres://<pg_url>"
+
 # How much memory the server can use in MB. Setting this to 0 means unlimited
 max_mem_mb = 0
 

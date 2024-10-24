@@ -4,6 +4,7 @@ edition.workspace = true
 version.workspace = true
 
 [dependencies]
+metadata-db = { path = "../metadata-db" }
 arrow-flight.workspace = true
 async-trait.workspace = true
 bytes.workspace = true

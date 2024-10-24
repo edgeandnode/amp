@@ -20,6 +20,7 @@ impl Dataset {
     }
 }
 
+// TODO: Rename this to `View`?
 #[derive(Clone, Hash, PartialEq, Eq, Debug)]
 pub struct Table {
     /// Bare table name.
