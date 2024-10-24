@@ -172,7 +172,7 @@ impl MetadataDb {
     }
 }
 
-// The path format is: `<dataset>/<version>/<view>/<UUIDv7>/`
+// The path format is: `<dataset>/[<version>/]<view>/<UUIDv7>/`
 pub fn make_location_path(view_id: ViewId<'_>) -> String {
     let mut path = String::new();
 
