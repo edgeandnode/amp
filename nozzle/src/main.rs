@@ -1,11 +1,13 @@
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 use std::{net::SocketAddr, sync::Arc};
 
 use arrow_flight::flight_service_server::FlightServiceServer;
 use clap::Parser as _;
 use common::{config::Config, tracing, BoxError};
+use datafusion::catalog_common::resolve_table_references;
 use datafusion::parquet;
-use dataset_store::DatasetStore;
+use dataset_store::{sql_datasets, DatasetStore};
 use log::info;
 use metadata_db::MetadataDb;
 use parquet::basic::Compression;
@@ -104,6 +106,8 @@ async fn main() -> Result<(), BoxError> {
             let run_every =
                 run_every_mins.map(|s| tokio::time::interval(Duration::from_secs(s * 60)));
 
+            let datasets = datasets_and_dependencies(&dataset_store, datasets).await?;
+
             match run_every {
                 None => {
                     for dataset_name in datasets {
@@ -164,6 +168,77 @@ async fn main() -> Result<(), BoxError> {
     }
 }
 
+/// Return the input datasets and their dataset dependencies. The output set is ordered such that
+/// each dataset comes after all datasets it depends on.
+async fn datasets_and_dependencies(
+    store: &Arc<DatasetStore>,
+    datasets: Vec<String>,
+) -> Result<Vec<String>, BoxError> {
+    let mut deps: BTreeMap<String, Vec<String>> = Default::default();
+    for dataset in datasets {
+        let dataset = store.load_dataset(&dataset).await?;
+        if dataset.kind != sql_datasets::DATASET_KIND {
+            deps.insert(dataset.name, vec![]);
+            continue;
+        }
+        let sql_dataset = store.load_sql_dataset(&dataset.name).await?;
+        let mut refs: Vec<String> = Default::default();
+        for query in sql_dataset.queries.values() {
+            let (tables, _) = resolve_table_references(query, true)?;
+            refs.append(
+                &mut tables
+                    .iter()
+                    .filter_map(|t| t.schema())
+                    .map(ToString::to_string)
+                    .collect(),
+            );
+        }
+        deps.insert(dataset.name, refs);
+    }
+
+    dependency_sort(deps)
+}
+
+/// Given a map of values to their dependencies, return a set where each value is ordered after
+/// all of its dependencies. An error is returned if a cycle is detected.
+fn dependency_sort(deps: BTreeMap<String, Vec<String>>) -> Result<Vec<String>, BoxError> {
+    let nodes: BTreeSet<&String> = deps
+        .iter()
+        .flat_map(|(ds, deps)| std::iter::once(ds).chain(deps))
+        .collect();
+    let mut ordered: Vec<String> = Default::default();
+    let mut visited: BTreeSet<&String> = Default::default();
+    let mut visited_cycle: BTreeSet<&String> = Default::default();
+    fn dfs<'a>(
+        node: &'a String,
+        deps: &'a BTreeMap<String, Vec<String>>,
+        ordered: &mut Vec<String>,
+        visited: &mut BTreeSet<&'a String>,
+        visited_cycle: &mut BTreeSet<&'a String>,
+    ) -> Result<(), BoxError> {
+        if visited_cycle.contains(node) {
+            return Err(format!("dependency cycle detected on dataset {node}").into());
+        }
+        if visited.contains(node) {
+            return Ok(());
+        }
+        visited_cycle.insert(node);
+        for dep in deps.get(node).into_iter().flatten() {
+            dfs(dep, deps, ordered, visited, visited_cycle)?;
+        }
+        visited_cycle.remove(node);
+        visited.insert(node);
+        ordered.push(node.to_string());
+        Ok(())
+    }
+    for node in nodes {
+        if !visited.contains(node) {
+            dfs(node, &deps, &mut ordered, &mut visited, &mut visited_cycle)?;
+        }
+    }
+    Ok(ordered)
+}
+
 // if end_block starts with "+" then it is a relative block number
 // otherwise, it's an absolute block number and should be after start_block
 fn resolve_end_block(start_block: u64, end_block: String) -> Result<u64, BoxError> {
@@ -214,6 +289,37 @@ mod tests {
             match resolve_end_block(start_block, end_block.into()) {
                 Ok(result) => assert_eq!(expected.unwrap(), result),
                 Err(_) => assert!(expected.is_err()),
+            }
+        }
+    }
+
+    #[test]
+    fn dependency_sort_order() {
+        #[allow(clippy::type_complexity)]
+        let cases: &[(&[(&str, &[&str])], Option<&[&str]>)] = &[
+            (&[("a", &["b"]), ("b", &["a"])], None),
+            (&[("a", &["b"])], Some(&["b", "a"])),
+            (&[("a", &["b", "c"])], Some(&["b", "c", "a"])),
+            (&[("a", &["b"]), ("c", &[])], Some(&["b", "a", "c"])),
+            (&[("a", &["b"]), ("c", &["b"])], Some(&["b", "a", "c"])),
+            (
+                &[("a", &["b", "c"]), ("b", &["d"]), ("c", &["d"])],
+                Some(&["d", "b", "c", "a"]),
+            ),
+            (
+                &[("a", &["b", "c"]), ("b", &["c", "d"])],
+                Some(&["c", "d", "b", "a"]),
+            ),
+        ];
+        for (input, expected) in cases {
+            let deps = input
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.iter().map(ToString::to_string).collect()))
+                .collect();
+            let result = dependency_sort(deps);
+            match expected {
+                Some(expected) => assert_eq!(*expected, result.unwrap()),
+                None => assert!(result.is_err()),
             }
         }
     }
