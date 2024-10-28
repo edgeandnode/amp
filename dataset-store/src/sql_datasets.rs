@@ -222,19 +222,19 @@ impl Materialization {
                 Repartition(_) | TableScan(_) | EmptyRelation(_) | Values(_) | Subquery(_)
                 | SubqueryAlias(_) => { /* incremental */ }
 
-                // Aggregations and join materialization seem doable but need thinking through.
-                Aggregate(_) | Distinct(_) => err = unsupported(format!("{}", node.display())),
+                // Aggregations and join materialization seem doable
+                // incrementally but need thinking through.
+                Aggregate(_) | Distinct(_) => matzn = Entire { end },
                 Join(_) => matzn = Entire { end },
 
-                // Sorts are not parallel or incremental, so a questionable thing to materialize
-                // unless the input is truly bounded. Top K queries may be something to think about.
-                Sort(_) | Limit(_) => err = unsupported(format!("{}", node.display())),
+                // Sorts are not parallel or incremental
+                Sort(_) | Limit(_) => matzn = Entire { end },
 
                 // Window functions are complicated, they often result in a sort.
-                Window(_) => err = unsupported(format!("{}", node.display())),
+                Window(_) => matzn = Entire { end },
 
                 // Another complicated one.
-                RecursiveQuery(_) => err = unsupported(format!("{}", node.display())),
+                RecursiveQuery(_) => matzn = Entire { end },
 
                 // Commands that don't make sense in a dataset definition.
                 DescribeTable(_) | Explain(_) | Analyze(_) => {
