@@ -172,11 +172,11 @@ async fn main() -> Result<(), BoxError> {
 /// each dataset comes after all datasets it depends on.
 async fn datasets_and_dependencies(
     store: &Arc<DatasetStore>,
-    datasets: Vec<String>,
+    mut datasets: Vec<String>,
 ) -> Result<Vec<String>, BoxError> {
     let mut deps: BTreeMap<String, Vec<String>> = Default::default();
-    for dataset in datasets {
-        let dataset = store.load_dataset(&dataset).await?;
+    while !datasets.is_empty() {
+        let dataset = store.load_dataset(&datasets.pop().unwrap()).await?;
         if dataset.kind != sql_datasets::DATASET_KIND {
             deps.insert(dataset.name, vec![]);
             continue;
@@ -193,6 +193,7 @@ async fn datasets_and_dependencies(
                     .collect(),
             );
         }
+        datasets.append(&mut refs.clone());
         deps.insert(dataset.name, refs);
     }
 
