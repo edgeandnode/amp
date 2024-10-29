@@ -202,7 +202,12 @@ async fn datasets_and_dependencies(
                     .collect(),
             );
         }
-        datasets.append(&mut refs.clone());
+        let mut untracked_refs = refs
+            .iter()
+            .filter(|r| deps.keys().all(|d| d != *r))
+            .cloned()
+            .collect();
+        datasets.append(&mut untracked_refs);
         deps.insert(dataset.name, refs);
     }
 
