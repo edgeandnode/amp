@@ -35,6 +35,12 @@ enum Command {
         #[arg(long, required = true, env = "DUMP_DATASET", value_delimiter = ',')]
         dataset: Vec<String>,
 
+        /// If set to true, only the listed datasets will be dumped in the order they are listed.
+        /// By default dump listed datasets and their dependencies, ordered such that each dataset
+        /// will be dumped after all datasets they depend on.
+        #[arg(long, env = "DUMP_IGNORE_DEPS")]
+        ignore_deps: bool,
+
         /// The block number to start from, inclusive. If ommited, defaults to `0`. Note that `dump` is
         /// smart about keeping track of what blocks have already been dumped, so you only need to set
         /// this if you really don't want the data before this block.
@@ -90,7 +96,8 @@ async fn main() -> Result<(), BoxError> {
             n_jobs,
             partition_size_mb,
             disable_compression,
-            dataset: datasets,
+            dataset: mut datasets,
+            ignore_deps,
             run_every_mins,
         } => {
             let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
@@ -106,7 +113,9 @@ async fn main() -> Result<(), BoxError> {
             let run_every =
                 run_every_mins.map(|s| tokio::time::interval(Duration::from_secs(s * 60)));
 
-            let datasets = datasets_and_dependencies(&dataset_store, datasets).await?;
+            if !ignore_deps {
+                datasets = datasets_and_dependencies(&dataset_store, datasets).await?;
+            }
 
             match run_every {
                 None => {
