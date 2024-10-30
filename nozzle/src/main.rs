@@ -117,6 +117,9 @@ async fn main() -> Result<(), BoxError> {
                 datasets = datasets_and_dependencies(&dataset_store, datasets).await?;
             }
 
+            let dump_order: Vec<&str> = datasets.iter().map(|d| d.as_str()).collect();
+            info!("dump order: {}", dump_order.join(", "));
+
             match run_every {
                 None => {
                     for dataset_name in datasets {
