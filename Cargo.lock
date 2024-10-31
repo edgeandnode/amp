@@ -2195,6 +2195,7 @@ dependencies = [
  "prometheus",
  "thiserror",
  "tokio",
+ "url",
 ]
 
 [[package]]

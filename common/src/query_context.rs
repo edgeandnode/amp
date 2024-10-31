@@ -37,7 +37,7 @@ use url::Url;
 
 use crate::catalog::physical::{Catalog, PhysicalTable};
 use crate::evm::udfs::{EvmDecode, EvmTopic};
-use crate::{arrow, attestation, BoxError, Store};
+use crate::{arrow, attestation, BoxError};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -199,9 +199,7 @@ impl QueryContext {
         ctx.register_udf(datafusion::functions::core::get_field().as_ref().clone());
 
         for ds in self.catalog.datasets() {
-            let ds_name = ds.name().to_string();
-            create_dataset_tables(&ctx, ds_name, ds.data_store(), ds.tables(), external_tables)
-                .await?;
+            create_tables(&ctx, ds.tables(), external_tables).await?;
         }
 
         for udf in udfs() {
@@ -244,8 +242,7 @@ impl QueryContext {
     async fn meta_datafusion_ctx(&self) -> Result<SessionContext, Error> {
         let ctx = SessionContext::new_with_config_rt(self.session_config.clone(), self.env.clone());
         for ds in self.catalog.datasets() {
-            let ds_name = ds.name().to_string();
-            create_dataset_tables(&ctx, ds_name, ds.data_store(), ds.meta_tables(), true).await?;
+            create_tables(&ctx, ds.meta_tables(), true).await?;
         }
         Ok(ctx)
     }
@@ -340,22 +337,17 @@ fn verify_plan(plan: &LogicalPlan) -> Result<(), Error> {
         .map_err(Error::InvalidPlan)
 }
 
-async fn create_dataset_tables(
+async fn create_tables(
     ctx: &SessionContext,
-    dataset_name: String,
-    dataset_store: Arc<Store>,
     tables: impl Iterator<Item = &PhysicalTable>,
     external_tables: bool,
 ) -> Result<(), Error> {
-    // This may overwrite a previously registered store, but that should not make a difference.
-    dataset_store.register_in(ctx);
-
-    // The catalog schema needs to be explicitly created or table creation will fail.
-    let create_schema_cmd = create_catalog_schema_cmd(dataset_name);
-    ctx.execute_logical_plan(create_schema_cmd)
-        .await
-        .map_err(|e| Error::DatasetError(e.into()))?;
     for table in tables {
+        // The catalog schema needs to be explicitly created or table creation will fail.
+        create_catalog_schema(ctx, table.catalog_schema().to_string())
+            .await
+            .map_err(|e| Error::DatasetError(e.into()))?;
+
         create_table(ctx, table, external_tables)
             .await
             .map_err(|e| Error::DatasetError(e.into()))?;
@@ -371,6 +363,10 @@ async fn create_table(
     let table_ref = table.table_ref().clone();
     let schema = table.schema().to_dfschema_ref()?;
     if external {
+        // This may overwrite a previously registered store, but that should not make a difference.
+        // The only segment of the `table.url()` that matters here is the schema and bucket name.
+        ctx.register_object_store(table.url(), table.object_store());
+
         let cmd = create_external_table_cmd(table_ref, schema, &table.url(), table.order_exprs());
         ctx.execute_logical_plan(cmd).await?;
     } else {
@@ -410,18 +406,22 @@ fn create_external_table_cmd(
     LogicalPlan::Ddl(DdlStatement::CreateExternalTable(command))
 }
 
-fn create_catalog_schema_cmd(schema_name: String) -> LogicalPlan {
+async fn create_catalog_schema(ctx: &SessionContext, schema_name: String) -> Result<(), Error> {
     let command = DdlStatement::CreateCatalogSchema(CreateCatalogSchema {
         schema_name,
 
-        // Better to explicitly check duplicates.
-        if_not_exists: false,
+        // We call this for every table so we may create the schema multiple times.
+        if_not_exists: true,
 
         // This 'schema' has no meaning.
         schema: Arc::new(DFSchema::empty()),
     });
 
-    LogicalPlan::Ddl(command)
+    ctx.execute_logical_plan(LogicalPlan::Ddl(command))
+        .await
+        .map_err(|e| Error::DatasetError(e.into()))?;
+
+    Ok(())
 }
 
 fn udfs() -> Vec<ScalarUDF> {

@@ -1,7 +1,6 @@
 use std::{path::PathBuf, sync::Arc};
 
 use bytes::Bytes;
-use datafusion::prelude::SessionContext;
 use fs_err as fs;
 use futures::{stream::BoxStream, StreamExt, TryStreamExt};
 use object_store::{
@@ -34,13 +33,15 @@ pub struct Store {
 }
 
 impl Store {
-    /// Creates a store for an object store path or filesystem directory. Examples of valid formats
-    /// for `data_location`:
-    /// - Filesystem path: `relative/path/to/data/`
-    /// - GCS: `gs://bucket-name/`
-    /// - S3: `s3://bucket-name/`
+    /// Creates a store for an object store url or filesystem directory.
     ///
-    /// If `data_location` is not a URL, but a relative path, then `base` will be used as the prefix.
+    /// Examples of valid formats for `data_location`:
+    /// - Filesystem path: `relative/path/to/data/`
+    /// - GCS: `gs://bucket-name`
+    /// - S3: `s3://bucket-name`
+    /// - Prefixed: `s3://bucket-name/my_prefix/`
+    ///
+    /// If `data_location` is a relative filesystem path, then `base` will be used as the prefix.
     pub fn new(data_location: String, base: Option<&std::path::Path>) -> Result<Self, BoxError> {
         let (url, unprefixed) = infer_object_store(data_location, base)?;
         let prefix = url.path().to_string();
@@ -74,12 +75,9 @@ impl Store {
         self.store.clone()
     }
 
-    /// Registers the store in a datafusion context so that it can be used in queries.
-    pub fn register_in(&self, ctx: &SessionContext) {
-        // It's important to register the unprefixed store, as we give absolute URLs to the
-        // `CreateExternalTable` command, which will do its own prefixing. Using the prefixed store
-        // here would result in double prefixing.
-        ctx.register_object_store(self.url(), self.unprefixed.clone());
+    /// Returns the unprefixed store. Use this when you have an URL which already contains the prefix.
+    pub fn object_store(&self) -> Arc<dyn ObjectStore> {
+        self.unprefixed.clone()
     }
 
     pub async fn get_bytes(&self, location: impl Into<Path>) -> Result<Bytes, StoreError> {
@@ -106,17 +104,11 @@ impl std::fmt::Display for Store {
     }
 }
 
-/// The location must be a directory. Examples of valid formats for `data_location`:
-/// - Filesystem path: `relative/path/to/data/`
-/// - GCS: `gs://bucket-name/`
-/// - S3: `s3://bucket-name/`
-///
-/// `base` is used as the base directory for relative filesystem paths.
 fn infer_object_store(
     mut data_location: String,
     base: Option<&std::path::Path>,
 ) -> Result<(Url, Arc<dyn ObjectStore>), BoxError> {
-    // Make sure there is a trailing slash so it's recognized as a directory.
+    // Make sure there is a trailing slash, so that `Url::join` works as expected.
     if !data_location.ends_with('/') {
         data_location.push('/');
     }
