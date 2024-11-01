@@ -66,12 +66,11 @@ pub(super) async fn dataset(
 
         let raw_query = defs_store.get_string(file.location.clone()).await?;
         let query = parse_sql(&raw_query)?;
-        let env = Arc::new(store.config.make_runtime_env()?);
-        let ctx = store.clone().ctx_for_sql(&query, env).await?;
+        let ctx = store.clone().planning_ctx_for_sql(&query).await?;
         let schema = ctx.sql_output_schema(query.clone()).await?;
         let network = {
-            let tables = ctx.catalog().all_tables().into_iter();
-            let mut networks: BTreeSet<_> = tables.map(|t| t.network()).collect();
+            let tables = ctx.catalog().iter();
+            let mut networks: BTreeSet<_> = tables.map(|t| t.table.network.clone()).collect();
             if networks.len() > 1 {
                 return Err(format!(
                     "table {} has dependencies in multiple networks: {:?}",

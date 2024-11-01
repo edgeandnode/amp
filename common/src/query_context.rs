@@ -37,7 +37,7 @@ use url::Url;
 
 use crate::catalog::physical::{Catalog, PhysicalTable};
 use crate::evm::udfs::{EvmDecode, EvmTopic};
-use crate::{arrow, attestation, BoxError};
+use crate::{arrow, attestation, BoxError, Table};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -67,6 +67,72 @@ pub enum Error {
     ConfigError(DataFusionError),
 }
 
+pub struct ResolvedTable {
+    pub catalog_schema: String,
+    pub table: Table,
+    pub table_ref: TableReference,
+}
+
+impl ResolvedTable {
+    pub fn new(catalog_schema: String, table: Table) -> Self {
+        Self {
+            catalog_schema: catalog_schema.clone(),
+            table: table.clone(),
+            table_ref: TableReference::partial(catalog_schema, table.name),
+        }
+    }
+}
+
+/// A context for planning SQL queries.
+pub struct PlanningContext {
+    session_config: SessionConfig,
+    catalog: Vec<ResolvedTable>,
+}
+
+impl PlanningContext {
+    pub fn new(catalog: Vec<ResolvedTable>) -> Self {
+        Self {
+            session_config: SessionConfig::from_env().unwrap(),
+            catalog,
+        }
+    }
+
+    /// Infers the output schema of the query by planning it against empty tables.
+    pub async fn sql_output_schema(&self, query: parser::Statement) -> Result<DFSchemaRef, Error> {
+        let ctx = self.datafusion_ctx().await?;
+        let plan = sql_to_plan(&ctx, query).await?;
+        Ok(plan.schema().clone())
+    }
+
+    /// This will plan the query against empty tables, and then serialize that plan using
+    /// datafusion-proto. This is useful for sending the plan to a remote server for execution.
+    ///
+    /// Returns the serialized plan and its output schema.
+    pub async fn sql_to_remote_plan(
+        &self,
+        query: parser::Statement,
+    ) -> Result<(Bytes, DFSchemaRef), Error> {
+        let ctx = self.datafusion_ctx().await?;
+        let plan = sql_to_plan(&ctx, query).await?;
+        let schema = plan.schema().clone();
+        let serialized_plan = logical_plan_to_bytes_with_extension_codec(&plan, &EmptyTableCodec)
+            .map_err(Error::PlanEncodingError)?;
+        Ok((serialized_plan, schema))
+    }
+
+    async fn datafusion_ctx(&self) -> Result<SessionContext, Error> {
+        let ctx = SessionContext::new_with_config(self.session_config.clone());
+        create_empty_tables(&ctx, self.catalog.iter()).await?;
+        register_udfs(&ctx);
+        Ok(ctx)
+    }
+
+    pub fn catalog(&self) -> &[ResolvedTable] {
+        &self.catalog
+    }
+}
+
+/// A context for executing queries against a catalog.
 pub struct QueryContext {
     env: Arc<RuntimeEnv>,
     session_config: SessionConfig,
@@ -115,13 +181,6 @@ impl QueryContext {
         &self.catalog
     }
 
-    /// Infers the output schema of the query by planning it against empty tables
-    pub async fn sql_output_schema(&self, query: parser::Statement) -> Result<DFSchemaRef, Error> {
-        let ctx = self.datafusion_ctx_inner(false).await?;
-        let plan = sql_to_plan(&ctx, query).await?;
-        Ok(plan.schema().clone())
-    }
-
     pub async fn plan_sql(&self, query: parser::Statement) -> Result<LogicalPlan, Error> {
         let ctx = self.datafusion_ctx().await?;
         let plan = sql_to_plan(&ctx, query).await?;
@@ -136,22 +195,6 @@ impl QueryContext {
         let ctx = self.datafusion_ctx().await?;
         let plan = sql_to_plan(&ctx, statement).await?;
         execute_plan(&ctx, plan).await
-    }
-
-    /// This will plan the query against empty tables, and then serialize that plan using
-    /// datafusion-proto. This is useful for sending the plan to a remote server for execution.
-    ///
-    /// Returns the serialized plan and its output schema.
-    pub async fn sql_to_remote_plan(
-        &self,
-        query: parser::Statement,
-    ) -> Result<(Bytes, DFSchemaRef), Error> {
-        let ctx = self.datafusion_ctx_inner(false).await?;
-        let plan = sql_to_plan(&ctx, query).await?;
-        let schema = plan.schema().clone();
-        let serialized_plan = logical_plan_to_bytes_with_extension_codec(&plan, &EmptyTableCodec)
-            .map_err(Error::PlanEncodingError)?;
-        Ok((serialized_plan, schema))
     }
 
     /// This will deserialize the plan with empty tables in the `TableScan` nodes.
@@ -186,26 +229,13 @@ impl QueryContext {
     /// sessions created by this function, and they will behave the same as if they had been run
     /// against a persistent `SessionContext`
     async fn datafusion_ctx(&self) -> Result<SessionContext, Error> {
-        self.datafusion_ctx_inner(true).await
-    }
-
-    /// If `external_tables` is `false`, This will create empty in-memory tables, so the context will
-    /// be able to plan queries but will be useless for executing them.
-    async fn datafusion_ctx_inner(&self, external_tables: bool) -> Result<SessionContext, Error> {
         let ctx = SessionContext::new_with_config_rt(self.session_config.clone(), self.env.clone());
 
-        // Remove after updating to datafusion 42, when
-        // https://github.com/apache/datafusion/pull/11959 will have been merged and released.
-        ctx.register_udf(datafusion::functions::core::get_field().as_ref().clone());
-
         for ds in self.catalog.datasets() {
-            create_tables(&ctx, ds.tables(), external_tables).await?;
+            create_physical_tables(&ctx, ds.tables()).await?;
         }
 
-        for udf in udfs() {
-            ctx.register_udf(udf);
-        }
-        ctx.register_udaf(attestation::AttestationHasherUDF::new().into());
+        register_udfs(&ctx);
 
         Ok(ctx)
     }
@@ -242,7 +272,7 @@ impl QueryContext {
     async fn meta_datafusion_ctx(&self) -> Result<SessionContext, Error> {
         let ctx = SessionContext::new_with_config_rt(self.session_config.clone(), self.env.clone());
         for ds in self.catalog.datasets() {
-            create_tables(&ctx, ds.meta_tables(), true).await?;
+            create_physical_tables(&ctx, ds.meta_tables()).await?;
         }
         Ok(ctx)
     }
@@ -337,10 +367,28 @@ fn verify_plan(plan: &LogicalPlan) -> Result<(), Error> {
         .map_err(Error::InvalidPlan)
 }
 
-async fn create_tables(
+async fn create_empty_tables(
+    ctx: &SessionContext,
+    tables: impl Iterator<Item = &ResolvedTable>,
+) -> Result<(), Error> {
+    for table in tables {
+        // The catalog schema needs to be explicitly created or table creation will fail.
+        create_catalog_schema(ctx, table.catalog_schema.to_string())
+            .await
+            .map_err(|e| Error::DatasetError(e.into()))?;
+
+        // Unwrap: Table is empty.
+        let mem_table =
+            MemTable::try_new(table.table.schema.as_ref().clone().into(), vec![vec![]]).unwrap();
+        ctx.register_table(table.table_ref.clone(), Arc::new(mem_table))
+            .map_err(|e| Error::DatasetError(e.into()))?;
+    }
+    Ok(())
+}
+
+async fn create_physical_tables(
     ctx: &SessionContext,
     tables: impl Iterator<Item = &PhysicalTable>,
-    external_tables: bool,
 ) -> Result<(), Error> {
     for table in tables {
         // The catalog schema needs to be explicitly created or table creation will fail.
@@ -348,32 +396,27 @@ async fn create_tables(
             .await
             .map_err(|e| Error::DatasetError(e.into()))?;
 
-        create_table(ctx, table, external_tables)
+        create_physical_table(ctx, table)
             .await
             .map_err(|e| Error::DatasetError(e.into()))?;
     }
     Ok(())
 }
 
-async fn create_table(
+async fn create_physical_table(
     ctx: &SessionContext,
     table: &PhysicalTable,
-    external: bool,
 ) -> Result<(), DataFusionError> {
     let table_ref = table.table_ref().clone();
     let schema = table.schema().to_dfschema_ref()?;
-    if external {
-        // This may overwrite a previously registered store, but that should not make a difference.
-        // The only segment of the `table.url()` that matters here is the schema and bucket name.
-        ctx.register_object_store(table.url(), table.object_store());
 
-        let cmd = create_external_table_cmd(table_ref, schema, &table.url(), table.order_exprs());
-        ctx.execute_logical_plan(cmd).await?;
-    } else {
-        // Unwrap: Table is empty.
-        let mem_table = MemTable::try_new(schema.as_ref().clone().into(), vec![vec![]]).unwrap();
-        ctx.register_table(table_ref, Arc::new(mem_table))?;
-    };
+    // This may overwrite a previously registered store, but that should not make a difference.
+    // The only segment of the `table.url()` that matters here is the schema and bucket name.
+    ctx.register_object_store(table.url(), table.object_store());
+
+    let cmd = create_external_table_cmd(table_ref, schema, &table.url(), table.order_exprs());
+    ctx.execute_logical_plan(cmd).await?;
+
     Ok(())
 }
 
@@ -507,6 +550,17 @@ async fn all_tables(ctx: &SessionContext) -> BTreeMap<TableReference, Arc<dyn Ta
     }
 
     tables
+}
+
+fn register_udfs(ctx: &SessionContext) {
+    // Remove after updating to datafusion 42, when
+    // https://github.com/apache/datafusion/pull/11959 will have been merged and released.
+    ctx.register_udf(datafusion::functions::core::get_field().as_ref().clone());
+
+    for udf in udfs() {
+        ctx.register_udf(udf);
+    }
+    ctx.register_udaf(attestation::AttestationHasherUDF::new().into());
 }
 
 #[derive(Debug)]
