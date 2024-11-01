@@ -213,7 +213,7 @@ impl Service {
                     let query = parse_sql(&sql_query.query)?;
                     let dataset_store =
                         DatasetStore::new(self.config.clone(), self.metadata_db.clone());
-                    let query_ctx = dataset_store.ctx_for_sql(&query, self.env.clone()).await?;
+                    let query_ctx = dataset_store.planning_ctx_for_sql(&query).await?;
                     query_ctx.sql_to_remote_plan(query).await?
                 } else {
                     return Err(Error::UnsupportedFlightDescriptorCommand(msg.type_url));

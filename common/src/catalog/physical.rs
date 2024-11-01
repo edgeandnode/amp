@@ -6,6 +6,7 @@ use datafusion::{
     sql::TableReference,
 };
 use metadata_db::{make_location_path, MetadataDb, ViewId};
+use object_store::{path::Path, ObjectStore};
 use url::Url;
 
 use super::logical::Table;
@@ -61,7 +62,6 @@ impl Catalog {
 #[derive(Debug, Clone)]
 pub struct PhysicalDataset {
     pub(crate) dataset: Dataset,
-    pub(crate) data_store: Arc<Store>,
     pub(crate) tables: Vec<PhysicalTable>,
 }
 
@@ -84,12 +84,11 @@ impl PhysicalDataset {
 
         let mut physical_tables = vec![];
         for table in tables {
-            let base = &data_store.url();
             match metadata_db {
                 Some(db) => {
                     physical_tables.push(
                         PhysicalTable::resolve_or_register_location(
-                            base,
+                            data_store.clone(),
                             db,
                             &dataset_name,
                             &table,
@@ -99,7 +98,7 @@ impl PhysicalDataset {
                 }
                 None => {
                     physical_tables.push(PhysicalTable::static_location(
-                        base,
+                        data_store.clone(),
                         &dataset_name,
                         &table,
                     )?);
@@ -109,7 +108,6 @@ impl PhysicalDataset {
 
         Ok(PhysicalDataset {
             dataset,
-            data_store,
             tables: physical_tables,
         })
     }
@@ -126,10 +124,6 @@ impl PhysicalDataset {
     pub fn name(&self) -> &str {
         &self.dataset.name
     }
-
-    pub fn data_store(&self) -> Arc<Store> {
-        self.data_store.clone()
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -137,25 +131,24 @@ pub struct PhysicalTable {
     table: Table,
     table_ref: TableReference,
 
-    // Absolute URL.
+    // Absolute URL to the data location, path section of the URL and the corresponding object store.
     url: Url,
-
-    // Location path relative the store URL.
-    path: String,
+    path: Path,
+    object_store: Arc<dyn ObjectStore>,
 }
 
 impl PhysicalTable {
     /// If an active location exists for this view, this `PhysicalTable` will point to that location.
     /// Otherwise, a new location will be registered in the metadata DB. The location will be active.
     async fn resolve_or_register_location(
-        base: &Url,
+        data_store: Arc<Store>,
         metadata_db: &MetadataDb,
         dataset_name: &str,
         table: &Table,
     ) -> Result<Self, BoxError> {
         validate_name(&table.name)?;
 
-        let (path, url) = {
+        let (url, object_store) = {
             let view_id = ViewId {
                 dataset: dataset_name,
                 dataset_version: None,
@@ -163,24 +156,30 @@ impl PhysicalTable {
             };
 
             let active_location = metadata_db.get_active_location(view_id).await?;
-            let location = match active_location {
-                Some(location) => location,
+            match active_location {
+                Some(location) => {
+                    let url = Url::parse(&location)?;
+                    let object_store = Store::new(url.to_string(), None)?.object_store();
+                    (url, object_store)
+                }
                 None => {
                     let path = make_location_path(view_id);
-                    metadata_db.register_location(view_id, &path, true).await?;
-                    path
+                    let url = data_store.url().join(&path)?;
+                    metadata_db.register_location(view_id, &url, true).await?;
+                    (url, data_store.object_store())
                 }
-            };
-            (location.clone(), base.join(&location)?)
+            }
         };
 
         let table_ref = TableReference::partial(dataset_name, table.name.as_str());
+        let path = Path::from_url_path(url.path()).unwrap();
 
         Ok(PhysicalTable {
             table: table.clone(),
             table_ref,
             url,
             path,
+            object_store,
         })
     }
 
@@ -189,18 +188,25 @@ impl PhysicalTable {
     /// This is used in a few situations where no metadata DB is available:
     /// - When using `dump` as a simple CLI tool without a Postgres for metadata.
     /// - For snapshot testing.
-    fn static_location(base: &Url, dataset_name: &str, table: &Table) -> Result<Self, BoxError> {
+    fn static_location(
+        data_store: Arc<Store>,
+        dataset_name: &str,
+        table: &Table,
+    ) -> Result<Self, BoxError> {
         validate_name(&table.name)?;
 
         let path = format!("{}/{}/", dataset_name, table.name);
-        let url = base.join(&path)?;
+        let url = data_store.url().join(&path)?;
+
         let table_ref = TableReference::partial(dataset_name, table.name.as_str());
+        let path = Path::from_url_path(url.path()).unwrap();
 
         Ok(PhysicalTable {
             table: table.clone(),
             table_ref,
             url,
             path,
+            object_store: data_store.object_store(),
         })
     }
 
@@ -212,7 +218,7 @@ impl PhysicalTable {
         &self.url
     }
 
-    pub fn path(&self) -> &str {
+    pub fn path(&self) -> &Path {
         &self.path
     }
 
@@ -244,6 +250,10 @@ impl PhysicalTable {
 
     pub fn network(&self) -> Option<&str> {
         self.table.network.as_ref().map(|n| n.as_str())
+    }
+
+    pub fn object_store(&self) -> Arc<dyn ObjectStore> {
+        self.object_store.clone()
     }
 }
 

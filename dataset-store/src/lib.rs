@@ -4,8 +4,11 @@ use core::fmt;
 use std::{collections::BTreeSet, str::FromStr, sync::Arc};
 
 use common::{
-    catalog::physical::Catalog, config::Config, store::StoreError, BlockNum, BlockStreamer,
-    BoxError, Dataset, QueryContext, Store,
+    catalog::physical::Catalog,
+    config::Config,
+    query_context::{PlanningContext, ResolvedTable},
+    store::StoreError,
+    BlockNum, BlockStreamer, BoxError, Dataset, QueryContext, Store,
 };
 use datafusion::{
     catalog_common::resolve_table_references,
@@ -334,6 +337,33 @@ impl DatasetStore {
                 .map_err(|e| (dataset_name, Error::Unknown(e)))?;
         }
         Ok(catalog)
+    }
+
+    /// Similar to `ctx_for_sql`, but only for planning and not execution. This does not require a
+    /// physical location to exist for the dataset views.
+    pub async fn planning_ctx_for_sql(
+        self: Arc<Self>,
+        query: &parser::Statement,
+    ) -> Result<PlanningContext, DatasetError> {
+        let (tables, _) = resolve_table_references(query, true).map_err(DatasetError::unknown)?;
+        let resolved_tables = self.load_resolved_tables(tables.iter()).await?;
+        Ok(PlanningContext::new(resolved_tables))
+    }
+
+    /// Looks up the datasets for the given table references and creates resolved tables.
+    async fn load_resolved_tables(
+        self: Arc<Self>,
+        table_refs: impl Iterator<Item = &TableReference>,
+    ) -> Result<Vec<ResolvedTable>, DatasetError> {
+        let dataset_names = datasets_from_table_refs(table_refs)?;
+        let mut resolved_tables = Vec::new();
+        for dataset_name in dataset_names {
+            let dataset = self.load_dataset(&dataset_name).await?;
+            for table in dataset.tables {
+                resolved_tables.push(ResolvedTable::new(dataset_name.clone(), table));
+            }
+        }
+        Ok(resolved_tables)
     }
 
     /// Each `.sql` file in the directory with the same name as the dataset will be loaded as a table.

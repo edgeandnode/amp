@@ -2195,6 +2195,7 @@ dependencies = [
  "prometheus",
  "thiserror",
  "tokio",
+ "url",
 ]
 
 [[package]]
@@ -3394,6 +3395,7 @@ version = "0.1.0"
 dependencies = [
  "sqlx",
  "thiserror",
+ "url",
  "uuid",
 ]
 

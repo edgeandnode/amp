@@ -6,20 +6,14 @@ use common::catalog::physical::PhysicalTable;
 use common::meta_tables::scanned_ranges::{self, ScannedRange, ScannedRangeRowsBuilder};
 use common::multirange::MultiRange;
 use common::parquet::errors::ParquetError;
-use common::{parquet, BlockNum, BoxError, QueryContext, Store, TableRows, Timestamp};
+use common::{parquet, BlockNum, BoxError, QueryContext, TableRows, Timestamp};
 use datafusion::sql::TableReference;
 use log::debug;
 use object_store::buffered::BufWriter;
 use object_store::path::Path;
 use parquet::arrow::AsyncArrowWriter;
 use parquet::file::properties::WriterProperties as ParquetWriterProperties;
-
-fn path_for_part(table_path: &str, start_block: u64) -> String {
-    // Pad `start` to 9 digits.
-    let padded_start = format!("{:09}", start_block);
-
-    format!("{}{}.parquet", table_path, padded_start)
-}
+use url::Url;
 
 pub struct DatasetWriter {
     writers: BTreeMap<String, TableWriter>,
@@ -43,16 +37,11 @@ impl DatasetWriter {
         scanned_ranges_by_table: BTreeMap<String, MultiRange>,
     ) -> Result<Self, BoxError> {
         let mut writers = BTreeMap::new();
-
-        // This only handles a single dataset.
-        let store = dataset_ctx.catalog().datasets()[0].data_store();
-
         for table in dataset_ctx.catalog().all_tables() {
             // Unwrap: `scanned_ranges_by_table` contains an entry for each table.
             let table_name = table.table_name();
             let scanned_ranges = scanned_ranges_by_table.get(table_name).unwrap().clone();
             let writer = TableWriter::new(
-                &store,
                 table.clone(),
                 opts.clone(),
                 partition_size,
@@ -128,7 +117,6 @@ async fn flush_scanned_ranges(
 }
 
 struct TableWriter {
-    store: Store,
     table: PhysicalTable,
     opts: ParquetWriterProperties,
     partition_size: u64,
@@ -143,7 +131,6 @@ struct TableWriter {
 
 impl TableWriter {
     pub fn new(
-        store: &Store,
         table: PhysicalTable,
         opts: ParquetWriterProperties,
         partition_size: u64,
@@ -158,7 +145,6 @@ impl TableWriter {
         };
 
         let mut this = TableWriter {
-            store: store.clone(),
             table,
             opts,
             ranges_to_write,
@@ -221,7 +207,6 @@ impl TableWriter {
             let end = self.current_range.unwrap().1;
             self.current_range = Some((block_num, end));
             self.current_file = Some(ParquetFileWriter::new(
-                &self.store,
                 self.table.clone(),
                 self.opts.clone(),
                 block_num,
@@ -241,7 +226,6 @@ impl TableWriter {
         self.current_range = self.ranges_to_write.pop();
         self.current_file = match self.current_range {
             Some((start, _)) => Some(ParquetFileWriter::new(
-                &self.store,
                 self.table.clone(),
                 self.opts.clone(),
                 start,
@@ -278,7 +262,8 @@ impl TableWriter {
 
 pub struct ParquetFileWriter {
     writer: AsyncArrowWriter<BufWriter>,
-    path: Path,
+    file_url: Url,
+    filename: String,
 
     table: PhysicalTable,
 
@@ -292,19 +277,25 @@ pub struct ParquetFileWriter {
 
 impl ParquetFileWriter {
     pub fn new(
-        store: &Store,
         table: PhysicalTable,
         opts: ParquetWriterProperties,
         start: BlockNum,
     ) -> Result<ParquetFileWriter, BoxError> {
-        let path = Path::parse(path_for_part(table.path(), start))?;
-        let object_writer = BufWriter::new(store.prefixed_store(), path.clone());
+        let filename = {
+            // Pad `start` to 9 digits for lexicographical sorting.
+            let padded_start = format!("{:09}", start);
+            format!("{padded_start}.parquet")
+        };
+        let file_url = table.url().join(&filename)?;
+        let file_path = Path::from_url_path(file_url.path())?;
+        let object_writer = BufWriter::new(table.object_store(), file_path);
         let writer = AsyncArrowWriter::try_new(object_writer, table.schema(), Some(opts))?;
         Ok(ParquetFileWriter {
             writer,
             start,
             table,
-            path,
+            file_url,
+            filename,
             bytes_written: 0,
         })
     }
@@ -330,15 +321,16 @@ impl ParquetFileWriter {
 
         self.writer.close().await?;
 
-        debug!("wrote {} for range {} to {}", self.path, self.start, end);
+        debug!(
+            "wrote {} for range {} to {}",
+            self.file_url, self.start, end
+        );
 
-        // Unwrap: The path is a file.
-        let filename = self.path.filename().unwrap().to_string();
         let scanned_range = ScannedRange {
             table: self.table.table_name().to_string(),
             range_start: self.start,
             range_end: end,
-            filename,
+            filename: self.filename,
             created_at: Timestamp::now(),
         };
         Ok(scanned_range)

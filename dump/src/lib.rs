@@ -31,7 +31,6 @@ use job::Job;
 use log::info;
 use log::warn;
 use metadata_db::MetadataDb;
-use object_store::path::Path;
 use object_store::ObjectMeta;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties as ParquetWriterProperties;
@@ -195,7 +194,6 @@ async fn dump_sql_dataset(
 
     let dataset = dataset_store.load_sql_dataset(dataset_name).await?;
     let physical_dataset = &ctx.catalog().datasets()[0].clone();
-    let data_store = physical_dataset.data_store();
 
     for (table, query) in dataset.queries {
         let end = match end {
@@ -227,12 +225,8 @@ async fn dump_sql_dataset(
             let mut stream =
                 execute_query_for_range(query.clone(), store, env.clone(), Some(start), end)
                     .await?;
-            let mut writer = ParquetFileWriter::new(
-                &data_store,
-                physical_table.clone(),
-                parquet_opts.clone(),
-                start,
-            )?;
+            let mut writer =
+                ParquetFileWriter::new(physical_table.clone(), parquet_opts.clone(), start)?;
             while let Some(batch) = stream.try_next().await? {
                 writer.write(&batch).await?;
             }
@@ -309,10 +303,8 @@ async fn consistency_check(
             BTreeSet::from_iter(f.into_iter())
         };
 
-        let store = physical_dataset.data_store().prefixed_store();
-
-        // Unwrap: The table path is syntatically valid.
-        let path = Path::parse(table.path()).unwrap();
+        let store = table.object_store();
+        let path = table.path();
 
         // Check that this is a file written by a dump job, with name in the format:
         // "<block_num>.parquet".
@@ -322,8 +314,9 @@ async fn consistency_check(
         };
 
         // Collect all stored files whose filename matches `is_dump_file`.
-        let stored_files: BTreeMap<String, ObjectMeta> = store
-            .list(Some(&path))
+        let stored_files: BTreeMap<String, ObjectMeta> = table
+            .object_store()
+            .list(Some(table.path()))
             .try_collect::<Vec<ObjectMeta>>()
             .await?
             .into_iter()
@@ -345,7 +338,7 @@ async fn consistency_check(
         for filename in registered_files {
             if !stored_files.contains_key(&filename) {
                 let err =
-                    format!("file `{path}` is registered in `__scanned_ranges` but is not in the data store")
+                    format!("file `{path}/{filename}` is registered in `__scanned_ranges` but is not in the data store")
                         .into();
                 return Err(ConsistencyCheckError::CorruptedDataset(dataset_name, err));
             }
