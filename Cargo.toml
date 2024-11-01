@@ -62,7 +62,7 @@ uuid = { version = "1.11.0", features = ["v7"] }
 arrow-flight = { version = "52.2.0", features = ["flight-sql-experimental"] }
 datafusion = { version = "41", features = ["serde"] }
 datafusion-proto = "41"
-object_store = { version = "0.10.2", features = ["aws", "gcp"] }
+object_store = { version = "0.10.2", features = ["aws", "gcp", "azure"] }
 
 # Prost fork
 #

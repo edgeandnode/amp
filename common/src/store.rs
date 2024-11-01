@@ -4,8 +4,9 @@ use bytes::Bytes;
 use fs_err as fs;
 use futures::{stream::BoxStream, StreamExt, TryStreamExt};
 use object_store::{
-    aws::AmazonS3Builder, gcp::GoogleCloudStorageBuilder, local::LocalFileSystem, path::Path,
-    prefix::PrefixStore, ObjectMeta, ObjectStore,
+    aws::AmazonS3Builder, azure::MicrosoftAzureBuilder, gcp::GoogleCloudStorageBuilder,
+    local::LocalFileSystem, path::Path, prefix::PrefixStore, ObjectMeta, ObjectStore,
+    ObjectStoreScheme,
 };
 use url::Url;
 
@@ -113,45 +114,66 @@ fn infer_object_store(
         data_location.push('/');
     }
 
-    // TODO: Use `ObjectStoreScheme` once `https://github.com/apache/arrow-rs/pull/5912` is merged
-    // and released.
-    if data_location.starts_with("gs://") {
-        let bucket = {
-            let segment = data_location.trim_start_matches("gs://").split('/').next();
-            segment.ok_or("invalid GCS url")?
-        };
+    let url = match Url::parse(&data_location) {
+        Ok(url) => url,
 
-        let store = Arc::new(
-            GoogleCloudStorageBuilder::from_env()
-                .with_bucket_name(bucket)
-                .build()?,
-        );
-        Ok((Url::parse(&data_location)?, store))
-    } else if data_location.starts_with("s3://") {
-        let bucket = {
-            let segment = data_location.trim_start_matches("s3://").split('/').next();
-            segment.ok_or("invalid S3 url")?
-        };
-
-        let store = Arc::new(
-            AmazonS3Builder::from_env()
-                .with_bucket_name(bucket)
-                .build()?,
-        );
-        Ok((Url::parse(&data_location)?, store))
-    } else {
-        let mut path = PathBuf::from(&data_location);
-        if !path.is_absolute() {
-            if let Some(base) = base {
-                path = PathBuf::from(base).join(path);
+        // If the location is not an URL, we can still try to parse it as a relative filesystem path.
+        Err(_) => {
+            let mut path = PathBuf::from(&data_location);
+            if !path.is_absolute() {
+                if let Some(base) = base {
+                    path = PathBuf::from(base).join(path);
+                }
             }
+
+            // Error if the directory does not exist.
+            let path = fs::canonicalize(path)?;
+
+            let url = Url::from_directory_path(path).unwrap();
+            let store = Arc::new(LocalFileSystem::new());
+            return Ok((url, store));
         }
+    };
 
-        // Error if the directory does not exist.
-        let path = fs::canonicalize(path)?;
+    let (object_store_scheme, _) = ObjectStoreScheme::parse(&url)?;
 
-        let url = Url::from_directory_path(path).unwrap();
-        let store = Arc::new(LocalFileSystem::new());
-        Ok((url, store))
+    match object_store_scheme {
+        ObjectStoreScheme::GoogleCloudStorage => {
+            let store = Arc::new(
+                GoogleCloudStorageBuilder::from_env()
+                    .with_url(url.to_string())
+                    .build()?,
+            );
+            Ok((url, store))
+        }
+        ObjectStoreScheme::AmazonS3 => {
+            let store = Arc::new(
+                AmazonS3Builder::from_env()
+                    .with_url(url.to_string())
+                    .build()?,
+            );
+            Ok((url, store))
+        }
+        ObjectStoreScheme::MicrosoftAzure => {
+            let store = Arc::new(
+                MicrosoftAzureBuilder::from_env()
+                    .with_url(url.to_string())
+                    .build()?,
+            );
+            Ok((url, store))
+        }
+        ObjectStoreScheme::Local => {
+            let store = Arc::new(LocalFileSystem::new());
+            Ok((url, store))
+        }
+        ObjectStoreScheme::Http => Err(format!(
+            "unsupported object store url: {}. If you are attempting to configure an S3-compatible object store, \
+             please use the `s3://` scheme and configure AWS_ENDPOINT. See the documentation for more details.",
+            url
+        )
+        .into()),
+        ObjectStoreScheme::Memory | _ => {
+            Err(format!("unsupported object store scheme: {:?}", object_store_scheme).into())
+        },
     }
 }
