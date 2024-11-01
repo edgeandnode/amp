@@ -3,6 +3,7 @@ use sqlx::{
     Pool, Postgres,
 };
 use thiserror::Error;
+use url::Url;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -63,7 +64,7 @@ impl MetadataDb {
     pub async fn register_location(
         &self,
         view: ViewId<'_>,
-        location: &str,
+        url: &Url,
         active: bool,
     ) -> Result<(), sqlx::Error> {
         // An empty `dataset_version` is represented as an empty string in the DB.
@@ -78,7 +79,7 @@ impl MetadataDb {
             .bind(view.dataset)
             .bind(dataset_version)
             .bind(view.view)
-            .bind(location)
+            .bind(url.to_string())
             .bind(active)
             .execute(&self.pool)
             .await?;

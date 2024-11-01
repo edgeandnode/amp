@@ -7,3 +7,4 @@ version.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
+url.workspace = true

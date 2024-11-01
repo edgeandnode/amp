@@ -165,7 +165,7 @@ impl PhysicalTable {
                 None => {
                     let path = make_location_path(view_id);
                     let url = data_store.url().join(&path)?;
-                    metadata_db.register_location(view_id, &path, true).await?;
+                    metadata_db.register_location(view_id, &url, true).await?;
                     (url, data_store.object_store())
                 }
             }
