@@ -71,11 +71,12 @@ impl MetadataDb {
         let dataset_version = view.dataset_version.unwrap_or("");
 
         let query = "
-        INSERT INTO locations (dataset, dataset_version, view, location, active) \
-        VALUES ($1, $2, $3, $4, $5)
+        INSERT INTO locations (vid, dataset, dataset_version, view, location, active) \
+        VALUES ($1, $2, $3, $4, $5, $6)
         ";
 
         sqlx::query(query)
+            .bind(new_uuid())
             .bind(view.dataset)
             .bind(dataset_version)
             .bind(view.view)
@@ -197,4 +198,8 @@ pub fn make_location_path(view_id: ViewId<'_>) -> String {
     path.push('/');
 
     path
+}
+
+fn new_uuid() -> sqlx::types::Uuid {
+    sqlx::types::Uuid::from_bytes(*uuid::Uuid::now_v7().as_bytes())
 }
