@@ -20,6 +20,12 @@ Note that the values in the `NOZZLE_CONFIG` file can be overridden from the envi
 the env var name with `NOZZLE_CONFIG_`. For example, to override the `data_dir` value, you can set a
 `NOZZLE_CONFIG_DATA_DIR` env var to the desired path.
 
+## Logging
+
+Simplified control of the logging verbosity level is offered by the `NOZZLE_LOG` env var. It accepts
+the values `error`, `warn`, `info`, `debug` or `trace`. The default value is `debug`. The standard
+`RUST_LOG` env var can be used for finer-grained log filtering.
+
 # Configuring object stores
 
 All directory configurations (the `*_dir` keys) support both filesystem and object store locations.

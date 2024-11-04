@@ -1,12 +1,12 @@
 # Project Nozzle
 
-_Possibly Something_
+_The data goes in the bucket_
 
 **This repository is currently private. But it may eventually be open sourced, retaining commit history, issues and PRs so don't commit sensitive stuff.**
 
 ## What is this
 
-An experiment in ETL architecture for data services in The Graph. 'Project Nozzle' is a codename.
+An experiment in ETL architecture for data services on The Graph. 'Project Nozzle' is a codename.
 
 ### Python Quickstart
 
