@@ -76,7 +76,18 @@ enum Command {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), BoxError> {
+async fn main() {
+    match main_inner().await {
+        Ok(()) => {}
+        Err(e) => {
+            // Manually print the error so we can control the format.
+            eprintln!("Exiting with error: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+async fn main_inner() -> Result<(), BoxError> {
     tracing::register_logger();
     let args = Args::parse();
 
