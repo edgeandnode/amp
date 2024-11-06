@@ -5,7 +5,7 @@ use datafusion::{
     logical_expr::{col, Expr},
     sql::TableReference,
 };
-use metadata_db::{make_location_path, MetadataDb, ViewId};
+use metadata_db::{MetadataDb, ViewId};
 use object_store::{path::Path, ObjectStore};
 use url::Url;
 
@@ -165,7 +165,9 @@ impl PhysicalTable {
                 None => {
                     let path = make_location_path(view_id);
                     let url = data_store.url().join(&path)?;
-                    metadata_db.register_location(view_id, &url, true).await?;
+                    metadata_db
+                        .register_location(view_id, data_store.bucket(), &path, &url, true)
+                        .await?;
                     (url, data_store.object_store())
                 }
             }
@@ -270,4 +272,30 @@ fn validate_name(name: &str) -> Result<(), BoxError> {
     }
 
     Ok(())
+}
+
+// The path format is: `<dataset>/[<version>/]<view>/<UUIDv7>/`
+fn make_location_path(view_id: ViewId<'_>) -> String {
+    let mut path = String::new();
+
+    // Add dataset
+    path.push_str(view_id.dataset);
+    path.push('/');
+
+    // Add version if present
+    if let Some(version) = view_id.dataset_version {
+        path.push_str(version);
+        path.push('/');
+    }
+
+    // Add view
+    path.push_str(view_id.view);
+    path.push('/');
+
+    // Add UUIDv7
+    let uuid = uuid::Uuid::now_v7();
+    path.push_str(&uuid.to_string());
+    path.push('/');
+
+    path
 }

@@ -60,10 +60,12 @@ impl MetadataDb {
     ///
     /// If setting `active = true`, make sure no other active location exists for this view, to avoid
     /// a constraint violation. If an active location might exist, it is better to initialize the
-    /// location with `active = fasle` and then call `set_active_cache` to switch it as active.
+    /// location with `active = false` and then call `set_active_location` to switch it as active.
     pub async fn register_location(
         &self,
         view: ViewId<'_>,
+        bucket: Option<&str>,
+        path: &str,
         url: &Url,
         active: bool,
     ) -> Result<(), sqlx::Error> {
@@ -71,8 +73,8 @@ impl MetadataDb {
         let dataset_version = view.dataset_version.unwrap_or("");
 
         let query = "
-        INSERT INTO locations (vid, dataset, dataset_version, view, location, active) \
-        VALUES ($1, $2, $3, $4, $5, $6)
+        INSERT INTO locations (vid, dataset, dataset_version, view, bucket, path, url, active) \
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         ";
 
         sqlx::query(query)
@@ -80,6 +82,8 @@ impl MetadataDb {
             .bind(view.dataset)
             .bind(dataset_version)
             .bind(view.view)
+            .bind(bucket)
+            .bind(path)
             .bind(url.to_string())
             .bind(active)
             .execute(&self.pool)
@@ -100,28 +104,28 @@ impl MetadataDb {
         let dataset_version = dataset_version.unwrap_or("");
 
         let query = "
-        SELECT location
+        SELECT url
         FROM locations
         WHERE dataset = $1 AND dataset_version = $2 AND view = $3 AND active
         ";
 
-        let mut locations: Vec<String> = sqlx::query_scalar(query)
+        let mut urls: Vec<String> = sqlx::query_scalar(query)
             .bind(dataset)
             .bind(dataset_version)
             .bind(view)
             .fetch_all(&self.pool)
             .await?;
 
-        match locations.len() {
+        match urls.len() {
             0 => Ok(None),
-            1 => Ok(Some(locations.pop().unwrap())),
+            1 => Ok(Some(urls.pop().unwrap())),
 
             // Currently unreachable thanks to DB constraints.
             _ => Err(Error::MultipleActiveLocations(
                 dataset.to_string(),
                 dataset_version.to_string(),
                 view.to_string(),
-                locations,
+                urls,
             )),
         }
     }
@@ -157,7 +161,7 @@ impl MetadataDb {
         let query = "
         UPDATE locations
         SET active = true
-        WHERE dataset = $1 AND dataset_version = $2 AND view = $3 AND location = $4
+        WHERE dataset = $1 AND dataset_version = $2 AND view = $3 AND url = $4
         ";
 
         sqlx::query(query)
@@ -172,32 +176,6 @@ impl MetadataDb {
 
         Ok(())
     }
-}
-
-// The path format is: `<dataset>/[<version>/]<view>/<UUIDv7>/`
-pub fn make_location_path(view_id: ViewId<'_>) -> String {
-    let mut path = String::new();
-
-    // Add dataset
-    path.push_str(view_id.dataset);
-    path.push('/');
-
-    // Add version if present
-    if let Some(version) = view_id.dataset_version {
-        path.push_str(version);
-        path.push('/');
-    }
-
-    // Add view
-    path.push_str(view_id.view);
-    path.push('/');
-
-    // Add UUIDv7
-    let uuid = uuid::Uuid::now_v7();
-    path.push_str(&uuid.to_string());
-    path.push('/');
-
-    path
 }
 
 fn new_uuid() -> sqlx::types::Uuid {
