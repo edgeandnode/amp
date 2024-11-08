@@ -4,9 +4,13 @@ use bytes::Bytes;
 use fs_err as fs;
 use futures::{stream::BoxStream, StreamExt, TryStreamExt};
 use object_store::{
-    aws::AmazonS3Builder, azure::MicrosoftAzureBuilder, gcp::GoogleCloudStorageBuilder,
-    local::LocalFileSystem, path::Path, prefix::PrefixStore, ObjectMeta, ObjectStore,
-    ObjectStoreScheme,
+    aws::{AmazonS3Builder, AmazonS3ConfigKey},
+    azure::{AzureConfigKey, MicrosoftAzureBuilder},
+    gcp::{GoogleCloudStorageBuilder, GoogleConfigKey},
+    local::LocalFileSystem,
+    path::Path,
+    prefix::PrefixStore,
+    ObjectMeta, ObjectStore, ObjectStoreScheme,
 };
 use url::Url;
 
@@ -31,6 +35,9 @@ pub struct Store {
     prefix: String,
     store: Arc<PrefixStore<Arc<dyn ObjectStore>>>,
     unprefixed: Arc<dyn ObjectStore>,
+
+    /// `bucket` is `None` for local filesystem stores.
+    bucket: Option<String>,
 }
 
 impl Store {
@@ -44,7 +51,7 @@ impl Store {
     ///
     /// If `data_location` is a relative filesystem path, then `base` will be used as the prefix.
     pub fn new(data_location: String, base: Option<&std::path::Path>) -> Result<Self, BoxError> {
-        let (url, unprefixed) = infer_object_store(data_location, base)?;
+        let (url, unprefixed, bucket) = infer_object_store(data_location, base)?;
         let prefix = url.path().to_string();
         let store = Arc::new(PrefixStore::new(unprefixed.clone(), prefix.as_str()));
         Ok(Self {
@@ -52,6 +59,7 @@ impl Store {
             prefix,
             store,
             unprefixed,
+            bucket,
         })
     }
 
@@ -63,6 +71,7 @@ impl Store {
             prefix: "".to_string(),
             store: Arc::new(PrefixStore::new(store.clone(), "")),
             unprefixed: store,
+            bucket: None,
         }
     }
 
@@ -97,6 +106,10 @@ impl Store {
             .map_err(|e| e.into())
             .boxed()
     }
+
+    pub fn bucket(&self) -> Option<&str> {
+        self.bucket.as_deref()
+    }
 }
 
 impl std::fmt::Display for Store {
@@ -105,10 +118,12 @@ impl std::fmt::Display for Store {
     }
 }
 
+/// Returns a tuple of (url, object_store, bucket).
+/// `bucket` is `None` for local filesystem stores.
 fn infer_object_store(
     mut data_location: String,
     base: Option<&std::path::Path>,
-) -> Result<(Url, Arc<dyn ObjectStore>), BoxError> {
+) -> Result<(Url, Arc<dyn ObjectStore>, Option<String>), BoxError> {
     // Make sure there is a trailing slash, so that `Url::join` works as expected.
     if !data_location.ends_with('/') {
         data_location.push('/');
@@ -129,9 +144,7 @@ fn infer_object_store(
             // Error if the directory does not exist.
             let path = fs::canonicalize(path)?;
 
-            let url = Url::from_directory_path(path).unwrap();
-            let store = Arc::new(LocalFileSystem::new());
-            return Ok((url, store));
+            Url::from_directory_path(path).unwrap()
         }
     };
 
@@ -139,32 +152,32 @@ fn infer_object_store(
 
     match object_store_scheme {
         ObjectStoreScheme::GoogleCloudStorage => {
-            let store = Arc::new(
+            let builder =
                 GoogleCloudStorageBuilder::from_env()
-                    .with_url(url.to_string())
-                    .build()?,
-            );
-            Ok((url, store))
+                    .with_url(url.to_string());
+            let bucket = builder.get_config_value(&GoogleConfigKey::Bucket);
+            let store = Arc::new(builder.build()?);
+            Ok((url, store, bucket))
         }
         ObjectStoreScheme::AmazonS3 => {
-            let store = Arc::new(
+            let builder =
                 AmazonS3Builder::from_env()
-                    .with_url(url.to_string())
-                    .build()?,
-            );
-            Ok((url, store))
+                    .with_url(url.to_string());
+            let bucket = builder.get_config_value(&AmazonS3ConfigKey::Bucket);
+            let store = Arc::new(builder.build()?);
+            Ok((url, store, bucket))
         }
         ObjectStoreScheme::MicrosoftAzure => {
-            let store = Arc::new(
+            let builder =
                 MicrosoftAzureBuilder::from_env()
-                    .with_url(url.to_string())
-                    .build()?,
-            );
-            Ok((url, store))
+                    .with_url(url.to_string());
+            let bucket = builder.get_config_value(&AzureConfigKey::ContainerName);
+            let store = Arc::new(builder.build()?);
+            Ok((url, store, bucket))
         }
         ObjectStoreScheme::Local => {
             let store = Arc::new(LocalFileSystem::new());
-            Ok((url, store))
+            Ok((url, store, None))
         }
         ObjectStoreScheme::Http => Err(format!(
             "unsupported object store url: {}. If you are attempting to configure an S3-compatible object store, \
