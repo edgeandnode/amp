@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use datafusion::{
     arrow::datatypes::SchemaRef,
-    logical_expr::{col, Expr},
+    logical_expr::{col, SortExpr},
     sql::TableReference,
 };
 use metadata_db::{MetadataDb, ViewId};
@@ -242,7 +242,7 @@ impl PhysicalTable {
         &self.table_ref
     }
 
-    pub fn order_exprs(&self) -> Vec<Vec<Expr>> {
+    pub fn order_exprs(&self) -> Vec<Vec<SortExpr>> {
         self.table
             .sorted_by()
             .iter()

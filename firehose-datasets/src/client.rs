@@ -24,6 +24,7 @@ use tonic::codec::CompressionEncoding;
 use tonic::metadata::{Ascii, MetadataValue};
 use tonic::service::interceptor::InterceptedService;
 use tonic::service::Interceptor;
+use tonic::transport::ClientTlsConfig;
 use tonic::transport::Endpoint;
 use tonic::transport::Uri;
 
@@ -48,7 +49,8 @@ impl Client {
 
         let client = {
             let uri = Uri::from_str(&url)?;
-            let endpoint = Endpoint::from(uri);
+            let mut endpoint = Endpoint::from(uri);
+            endpoint = endpoint.tls_config(ClientTlsConfig::new().with_native_roots())?;
             let auth = AuthInterceptor::new(token)?;
             Client {
                 endpoint,
@@ -108,7 +110,7 @@ impl Client {
                     step,
                     cursor: _,
                 } = response;
-                let step = ForkStep::try_from(step)?;
+                let step = ForkStep::try_from(step).map_err(|e| Error::AssertFail(e.into()))?;
 
                 // Assert we have a final block.
                 // See also: only-final-blocks

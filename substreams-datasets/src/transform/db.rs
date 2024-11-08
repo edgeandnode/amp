@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context as _};
+use datafusion::sql::sqlparser::ast::CreateTable;
 use prost::Message as _;
 
 use crate::proto::sf::substreams::sink::database::v1::{
@@ -19,7 +20,7 @@ use common::{
     timestamp_type, DatasetRows, Table, TableRows, BLOCK_NUM,
 };
 
-use sqlparser::{
+use datafusion::sql::sqlparser::{
     ast::{DataType as SqlDataType, Statement},
     dialect,
     parser::Parser,
@@ -264,7 +265,7 @@ fn sql_to_schemas(sql: String, network: &str) -> Result<Vec<Table>, anyhow::Erro
 
 fn statement_to_table(statement: &Statement, network: &str) -> Option<Table> {
     match statement {
-        Statement::CreateTable { name, columns, .. } => {
+        Statement::CreateTable(CreateTable { name, columns, .. }) => {
             let fields = std::iter::once(Field::new(BLOCK_NUM, ArrowDataType::UInt64, false))
                 .chain(
                     columns

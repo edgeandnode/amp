@@ -196,7 +196,9 @@ impl FlightService for Service {
 
 impl Service {
     async fn get_flight_info(&self, descriptor: FlightDescriptor) -> Result<FlightInfo, Error> {
-        let (serialized_plan, schema) = match DescriptorType::try_from(descriptor.r#type)? {
+        let (serialized_plan, schema) = match DescriptorType::try_from(descriptor.r#type)
+            .map_err(|e| Error::PbDecodeError(e.to_string()))?
+        {
             DescriptorType::Cmd => {
                 let msg = Any::decode(descriptor.cmd.as_ref())?;
                 if let Some(sql_query) = msg
@@ -287,8 +289,15 @@ impl Service {
 }
 
 fn ipc_schema(schema: &DFSchema) -> Bytes {
+    use arrow::ipc::writer::DictionaryTracker;
+
     let ipc_opts = &Default::default();
-    let encoded = IpcDataGenerator::default().schema_to_bytes(&schema.into(), ipc_opts);
+    let mut dictionary_tracker = DictionaryTracker::new(true);
+    let encoded = IpcDataGenerator::default().schema_to_bytes_with_dictionary_tracker(
+        &schema.into(),
+        &mut dictionary_tracker,
+        ipc_opts,
+    );
 
     // Unwrap: writing to `BytesMut` never fails.
     let mut bytes = BytesMut::new().writer();
