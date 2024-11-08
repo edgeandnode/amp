@@ -536,12 +536,16 @@ pub struct FileOptions {
     #[deprecated]
     #[prost(bool, optional, tag = "20")]
     pub java_generate_equals_and_hash: ::core::option::Option<bool>,
-    /// If set true, then the Java2 code generator will generate code that
-    /// throws an exception whenever an attempt is made to assign a non-UTF-8
-    /// byte sequence to a string field.
-    /// Message reflection will do the same.
-    /// However, an extension field still accepts non-UTF-8 byte sequences.
-    /// This option has no effect on when used with the lite runtime.
+    /// A proto2 file can set this to true to opt in to UTF-8 checking for Java,
+    /// which will throw an exception if invalid UTF-8 is parsed from the wire or
+    /// assigned to a string field.
+    ///
+    /// TODO: clarify exactly what kinds of field types this option
+    /// applies to, and update these docs accordingly.
+    ///
+    /// Proto3 files already perform these checks. Setting the option explicitly to
+    /// false has no effect: it cannot be used to opt proto3 files out of UTF-8
+    /// checks.
     #[prost(bool, optional, tag = "27", default = "false")]
     pub java_string_check_utf8: ::core::option::Option<bool>,
     #[prost(
@@ -753,12 +757,13 @@ pub struct MessageOptions {
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct FieldOptions {
+    /// NOTE: ctype is deprecated. Use `features.(pb.cpp).string_type` instead.
     /// The ctype option instructs the C++ code generator to use a different
     /// representation of the field than it normally would.  See the specific
     /// options below.  This option is only implemented to support use of
     /// \[ctype=CORD\] and \[ctype=STRING\] (the default) on non-repeated fields of
-    /// type "bytes" in the open source release -- sorry, we'll try to include
-    /// other types in a future version!
+    /// type "bytes" in the open source release.
+    /// TODO: make ctype actually deprecated.
     #[prost(
         enumeration = "field_options::CType",
         optional,
@@ -849,6 +854,8 @@ pub struct FieldOptions {
     /// Any features defined in the specific edition.
     #[prost(message, optional, tag = "21")]
     pub features: ::core::option::Option<FeatureSet>,
+    #[prost(message, optional, tag = "22")]
+    pub feature_support: ::core::option::Option<field_options::FeatureSupport>,
     /// The parser stores options it doesn't recognize here. See above.
     #[prost(message, repeated, tag = "999")]
     pub uninterpreted_option: ::prost::alloc::vec::Vec<UninterpretedOption>,
@@ -863,6 +870,29 @@ pub mod field_options {
         /// Textproto value.
         #[prost(string, optional, tag = "2")]
         pub value: ::core::option::Option<::prost::alloc::string::String>,
+    }
+    /// Information about the support window of a feature.
+    #[derive(serde::Serialize, serde::Deserialize)]
+    #[derive(Clone, PartialEq, ::prost::Message)]
+    pub struct FeatureSupport {
+        /// The edition that this feature was first available in.  In editions
+        /// earlier than this one, the default assigned to EDITION_LEGACY will be
+        /// used, and proto files will not be able to override it.
+        #[prost(enumeration = "super::Edition", optional, tag = "1")]
+        pub edition_introduced: ::core::option::Option<i32>,
+        /// The edition this feature becomes deprecated in.  Using this after this
+        /// edition may trigger warnings.
+        #[prost(enumeration = "super::Edition", optional, tag = "2")]
+        pub edition_deprecated: ::core::option::Option<i32>,
+        /// The deprecation warning text if this feature is used after the edition it
+        /// was marked deprecated in.
+        #[prost(string, optional, tag = "3")]
+        pub deprecation_warning: ::core::option::Option<::prost::alloc::string::String>,
+        /// The edition this feature is no longer available in.  In editions after
+        /// this one, the last default assigned will be used, and proto files will
+        /// not be able to override it.
+        #[prost(enumeration = "super::Edition", optional, tag = "4")]
+        pub edition_removed: ::core::option::Option<i32>,
     }
     #[derive(serde::Serialize, serde::Deserialize)]
     #[derive(
@@ -1119,6 +1149,9 @@ pub struct EnumValueOptions {
     /// credentials.
     #[prost(bool, optional, tag = "3", default = "false")]
     pub debug_redact: ::core::option::Option<bool>,
+    /// Information about the support window of a feature value.
+    #[prost(message, optional, tag = "4")]
+    pub feature_support: ::core::option::Option<field_options::FeatureSupport>,
     /// The parser stores options it doesn't recognize here. See above.
     #[prost(message, repeated, tag = "999")]
     pub uninterpreted_option: ::prost::alloc::vec::Vec<UninterpretedOption>,
@@ -1551,8 +1584,12 @@ pub mod feature_set_defaults {
     pub struct FeatureSetEditionDefault {
         #[prost(enumeration = "super::Edition", optional, tag = "3")]
         pub edition: ::core::option::Option<i32>,
-        #[prost(message, optional, tag = "2")]
-        pub features: ::core::option::Option<super::FeatureSet>,
+        /// Defaults of features that can be overridden in this edition.
+        #[prost(message, optional, tag = "4")]
+        pub overridable_features: ::core::option::Option<super::FeatureSet>,
+        /// Defaults of features that can't be overridden in this edition.
+        #[prost(message, optional, tag = "5")]
+        pub fixed_features: ::core::option::Option<super::FeatureSet>,
     }
 }
 /// Encapsulates information about the original source file from which a
@@ -1791,6 +1828,9 @@ pub mod generated_code_info {
 pub enum Edition {
     /// A placeholder for an unknown edition value.
     Unknown = 0,
+    /// A placeholder edition for specifying default behaviors *before* a feature
+    /// was first introduced.  This is effectively an "infinite past".
+    Legacy = 900,
     /// Legacy syntax "editions".  These pre-date editions, but behave much like
     /// distinct editions.  These can't be used to specify the edition of proto
     /// files, but feature definitions must supply proto2/proto3 defaults for
@@ -1822,6 +1862,7 @@ impl Edition {
     pub fn as_str_name(&self) -> &'static str {
         match self {
             Self::Unknown => "EDITION_UNKNOWN",
+            Self::Legacy => "EDITION_LEGACY",
             Self::Proto2 => "EDITION_PROTO2",
             Self::Proto3 => "EDITION_PROTO3",
             Self::Edition2023 => "EDITION_2023",
@@ -1838,6 +1879,7 @@ impl Edition {
     pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
         match value {
             "EDITION_UNKNOWN" => Some(Self::Unknown),
+            "EDITION_LEGACY" => Some(Self::Legacy),
             "EDITION_PROTO2" => Some(Self::Proto2),
             "EDITION_PROTO3" => Some(Self::Proto3),
             "EDITION_2023" => Some(Self::Edition2023),
