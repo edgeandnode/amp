@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use alloy::eips::BlockNumberOrTag;
 use alloy::providers::Provider as _;
+use alloy::rpc::types::BlockTransactionsKind;
 use alloy::rpc::types::Filter as LogsFilter;
 use alloy::rpc::types::Header;
 use alloy::rpc::types::Log as RpcLog;
@@ -50,8 +51,10 @@ impl JsonRpcClient {
         for block_num in start_block..=end_block {
             let filter = LogsFilter::new().select(block_num);
             let (block, logs) = try_join!(
-                self.client
-                    .get_block_by_number(BlockNumberOrTag::Number(block_num), false),
+                self.client.get_block_by_number(
+                    BlockNumberOrTag::Number(block_num),
+                    BlockTransactionsKind::Hashes,
+                ),
                 self.client.get_logs(&filter),
             )?;
             let block = match block {
@@ -89,7 +92,7 @@ impl BlockStreamer for JsonRpcClient {
     async fn recent_final_block_num(&mut self) -> Result<BlockNum, BoxError> {
         let block = self
             .client
-            .get_block_by_number(BlockNumberOrTag::Finalized, false)
+            .get_block_by_number(BlockNumberOrTag::Finalized, BlockTransactionsKind::Hashes)
             .await?;
         Ok(block.map(|b| b.header.number).unwrap_or(0))
     }
@@ -125,8 +128,8 @@ fn rpc_header_to_row(header: Header) -> Result<Block, ToRowError> {
         timestamp: Timestamp(Duration::from_secs(header.timestamp)),
         hash: header.hash.into(),
         parent_hash: header.parent_hash.into(),
-        ommers_hash: header.uncles_hash.into(),
-        miner: header.miner.into(),
+        ommers_hash: header.ommers_hash.into(),
+        miner: header.beneficiary.into(),
         state_root: header.state_root.into(),
         transactions_root: header.transactions_root.into(),
         receipt_root: header.receipts_root.into(),
@@ -138,11 +141,8 @@ fn rpc_header_to_row(header: Header) -> Result<Block, ToRowError> {
         gas_used: u64::try_from(header.gas_used)
             .map_err(|e| ToRowError::Overflow("gas_used", e.into()))?,
         extra_data: header.extra_data.0.to_vec(),
-        mix_hash: header
-            .mix_hash
-            .ok_or(ToRowError::Missing("mix_hash"))?
-            .into(),
-        nonce: header.nonce.ok_or(ToRowError::Missing("nonce"))?.into(),
+        mix_hash: header.mix_hash.into(),
+        nonce: header.nonce.into(),
         base_fee_per_gas: header
             .base_fee_per_gas
             .map(|b| {
