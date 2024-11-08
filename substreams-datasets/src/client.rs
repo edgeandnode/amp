@@ -9,7 +9,7 @@ use futures::{Stream, StreamExt as _, TryStreamExt as _};
 use tonic::{
     codec::CompressionEncoding,
     service::interceptor::InterceptedService,
-    transport::{Channel, Endpoint, Uri},
+    transport::{Channel, ClientTlsConfig, Endpoint, Uri},
 };
 
 use super::tables::Tables;
@@ -59,7 +59,9 @@ impl Client {
 
         let stream_client = {
             let uri = Uri::from_str(&provider.url)?;
-            let channel = Endpoint::from(uri).connect().await?;
+            let mut endpoint = Endpoint::from(uri);
+            endpoint = endpoint.tls_config(ClientTlsConfig::new().with_native_roots())?;
+            let channel = endpoint.connect().await?;
             let auth = AuthInterceptor::new(provider.token)?;
             StreamClient::with_interceptor(channel, auth)
                 .accept_compressed(CompressionEncoding::Gzip)

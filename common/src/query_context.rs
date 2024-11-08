@@ -10,8 +10,8 @@ use datafusion::common::tree_node::{Transformed, TreeNode as _, TreeNodeRewriter
 use datafusion::common::{not_impl_err, DFSchema};
 use datafusion::datasource::{DefaultTableSource, MemTable, TableProvider, TableType};
 use datafusion::logical_expr::{
-    CreateCatalogSchema, DmlStatement, Expr, Extension, LogicalPlanBuilder, ScalarUDF, TableScan,
-    WriteOp,
+    CreateCatalogSchema, DmlStatement, Extension, LogicalPlanBuilder, ScalarUDF, SortExpr,
+    TableScan, WriteOp,
 };
 use datafusion::sql::parser;
 use datafusion::{
@@ -424,7 +424,7 @@ fn create_external_table_cmd(
     name: TableReference,
     schema: DFSchemaRef,
     url: &Url,
-    order_exprs: Vec<Vec<Expr>>,
+    order_exprs: Vec<Vec<SortExpr>>,
 ) -> LogicalPlan {
     let command = CreateExternalTable {
         file_type: "PARQUET".to_string(),

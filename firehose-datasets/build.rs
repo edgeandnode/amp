@@ -19,7 +19,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute(".", "#[derive(serde::Serialize, serde::Deserialize)]")
         .emit_rerun_if_changed(false); // See https://github.com/hyperium/tonic/issues/1070
 
-    config.compile_with_config(
+    config.compile_protos_with_config(
         prost_config,
         &["proto/firehose.proto", "proto/ethereum.proto"],
         &[""],
