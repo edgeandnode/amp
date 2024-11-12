@@ -129,6 +129,6 @@ impl Config {
             ..Default::default()
         };
 
-        RuntimeEnv::new(runtime_config)
+        RuntimeEnv::try_new(runtime_config)
     }
 }

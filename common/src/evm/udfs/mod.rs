@@ -824,7 +824,7 @@ mod tests {
             SIG.to_string(),
         )))];
 
-        let result = evm_topic.invoke(&args).unwrap();
+        let result = evm_topic.invoke_batch(&args, 1).unwrap();
         let ColumnarValue::Scalar(result) = result else {
             panic!("expected ScalarValue, got {:?}", result);
         };
@@ -875,7 +875,7 @@ mod tests {
             ColumnarValue::Scalar(ScalarValue::Utf8(Some(SIG.to_string()))),
         ];
 
-        let result = evm_decode.invoke(&args).unwrap();
+        let result = evm_decode.invoke_batch(&args, CSV.len()).unwrap();
         let ColumnarValue::Array(result) = result else {
             panic!("expected Array, got {:?}", result);
         };

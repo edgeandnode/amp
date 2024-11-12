@@ -199,7 +199,7 @@ fn check_support(plan: &LogicalPlan) -> Result<bool, BoxError> {
 
                 // Not really logical operators, so we just skip them.
                 Repartition(_) | TableScan(_) | EmptyRelation(_) | Values(_) | Subquery(_)
-                | SubqueryAlias(_) => true,
+                | SubqueryAlias(_) | Execute(_) => true,
 
                 // Aggregations and join materialization seem doable but need thinking through.
                 Aggregate(_) | Distinct(_) => false,
@@ -214,9 +214,6 @@ fn check_support(plan: &LogicalPlan) -> Result<bool, BoxError> {
 
                 // Another complicated one.
                 RecursiveQuery(_) => false,
-
-                // Nobody uses cross-joins.
-                CrossJoin(_) => false,
 
                 // Commands that don't make sense in a dataset definition.
                 DescribeTable(_) | Explain(_) | Analyze(_) | Prepare(_) => false,

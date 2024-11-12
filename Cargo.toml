@@ -56,8 +56,8 @@ uuid = { version = "1.11.0", features = ["v7"] }
 
 # Datafusion and Arrow crates
 arrow-flight = { version = "53.2.0", features = ["flight-sql-experimental"] }
-datafusion = { version = "42.2", features = ["serde"] }
-datafusion-proto = "42.2"
+datafusion = { version = "43.0", features = ["serde"] }
+datafusion-proto = "43.0"
 object_store = { version = "0.11.1", features = ["aws", "gcp", "azure"] }
 
 # Crates that should follow the version used by DataFusion and Arrow
