@@ -9,6 +9,7 @@ use bytes::Bytes;
 use datafusion::common::tree_node::{Transformed, TreeNode as _, TreeNodeRewriter};
 use datafusion::common::{not_impl_err, DFSchema};
 use datafusion::datasource::{DefaultTableSource, MemTable, TableProvider, TableType};
+use datafusion::logical_expr::dml::InsertOp;
 use datafusion::logical_expr::{
     CreateCatalogSchema, DmlStatement, Extension, LogicalPlanBuilder, ScalarUDF, SortExpr,
     TableScan, WriteOp,
@@ -339,7 +340,12 @@ impl QueryContext {
 
         // Unwrap: Not really fallible.
         let df_schema = schema.to_dfschema_ref().unwrap();
-        let insert = DmlStatement::new(table_ref, df_schema, WriteOp::InsertInto, values);
+        let insert = DmlStatement::new(
+            table_ref,
+            df_schema,
+            WriteOp::Insert(InsertOp::Append),
+            values,
+        );
 
         // Execute plan against meta ctx
         self.meta_execute_plan(LogicalPlan::Dml(insert)).await?;
@@ -444,6 +450,7 @@ fn create_external_table_cmd(
         column_defaults: Default::default(),
         definition: None,
         unbounded: false,
+        temporary: false,
     };
 
     LogicalPlan::Ddl(DdlStatement::CreateExternalTable(command))
