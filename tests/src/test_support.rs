@@ -163,8 +163,7 @@ async fn redump(
     let partition_size = 1024 * 1024; // 100 kB
     let compression = Compression::ZSTD(ZstdLevel::try_new(1).unwrap());
 
-    // Disable bloom filters, as they take over 10 MB per file, too large for files that we'd be
-    // willing to commit to git.
+    // Disable bloom filters, as they bloat the test files and are not tested themselves.
     let parquet_opts = parquet_opts(compression, false);
     let env = Arc::new(config.make_runtime_env()?);
 
