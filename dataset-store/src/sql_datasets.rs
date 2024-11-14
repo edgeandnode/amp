@@ -134,7 +134,7 @@ pub async fn execute_query_for_range(
 
     let plan = ctx.plan_sql(query).await?;
     let plan = match matzn {
-        Materialization::Entire { .. } => plan,
+        Materialization::Entire { start, end } => inject_block_range_constraints(plan, start, end)?,
         Materialization::Incremental { start, end } => {
             let plan = inject_block_range_constraints(plan, start, end)?;
             order_by_block_num(plan)
@@ -191,7 +191,7 @@ pub enum Materialization {
     /// `end` isn't really meaningful here as we have no control over which
     /// block numbers get used by the underlying query, but we remember what
     /// the user asked for for some plausibility checks.
-    Entire { end: BlockNum },
+    Entire { start: BlockNum, end: BlockNum },
 }
 
 impl Materialization {
@@ -212,6 +212,9 @@ impl Materialization {
         let mut matzn = Incremental { start, end };
         let mut err: Option<BoxError> = None;
 
+        // Notational convenience for when we need to switch to 'Entire'
+        let entire = Materialization::Entire { start, end };
+
         // The plan is materializable if no non-materializable nodes are found.
         plan.apply(|node| {
             match node {
@@ -224,17 +227,17 @@ impl Materialization {
 
                 // Aggregations and join materialization seem doable
                 // incrementally but need thinking through.
-                Aggregate(_) | Distinct(_) => matzn = Entire { end },
-                Join(_) => matzn = Entire { end },
+                Aggregate(_) | Distinct(_) => matzn = entire,
+                Join(_) => matzn = entire,
 
                 // Sorts are not parallel or incremental
-                Sort(_) | Limit(_) => matzn = Entire { end },
+                Sort(_) | Limit(_) => matzn = entire,
 
                 // Window functions are complicated, they often result in a sort.
-                Window(_) => matzn = Entire { end },
+                Window(_) => matzn = entire,
 
                 // Another complicated one.
-                RecursiveQuery(_) => matzn = Entire { end },
+                RecursiveQuery(_) => matzn = entire,
 
                 // Commands that don't make sense in a dataset definition.
                 DescribeTable(_) | Explain(_) | Analyze(_) => {
@@ -267,22 +270,33 @@ impl Materialization {
     /// The block number at which to start materializing the query.
     pub fn start(&self) -> BlockNum {
         match self {
-            Materialization::Incremental { start, .. } => *start,
-            Materialization::Entire { .. } => 0,
+            Materialization::Incremental { start, end: _ } => *start,
+            Materialization::Entire { start, end: _ } => *start,
         }
     }
 
     /// The block number at which to stop materializing the query.
     pub fn end(&self) -> BlockNum {
         match self {
-            Materialization::Incremental { end, .. } => *end,
-            Materialization::Entire { end } => *end,
+            Materialization::Incremental { end, start: _ } => *end,
+            Materialization::Entire { end, start: _ } => *end,
         }
     }
 
     /// The range of blocks to materialize.
     pub fn range(&self) -> MultiRange {
-        MultiRange::from_ranges(vec![(self.start(), self.end())]).unwrap()
+        let (start, end) = match self {
+            Materialization::Incremental { start, end } => (*start, *end),
+            Materialization::Entire { start, end } => (*start, *end),
+        };
+        MultiRange::from_ranges(vec![(start, end)]).unwrap()
+    }
+
+    pub fn restrict(&self, start: u64, end: u64) -> Self {
+        match self {
+            Materialization::Incremental { .. } => Materialization::Incremental { start, end },
+            Materialization::Entire { .. } => Materialization::Entire { start, end },
+        }
     }
 }
 
