@@ -195,6 +195,7 @@ async fn dump_sql_dataset(
 ) -> Result<(), BoxError> {
     let dataset = dataset_store.load_sql_dataset(dataset_name).await?;
     let physical_dataset = &dst_ctx.catalog().datasets()[0].clone();
+    let mut matzn_tracker = MatznTracker::new();
 
     for (table, query) in dataset.queries {
         let end = match end {
@@ -220,6 +221,7 @@ async fn dump_sql_dataset(
             .await?;
         let plan = src_ctx.plan_sql(query.clone()).await?;
         let matzn = Materialization::for_plan(&plan, start, end)?;
+        matzn_tracker.record(&matzn, &dst_ctx, dataset_name).await?;
 
         match matzn {
             Materialization::Incremental { start, end } => {
@@ -372,24 +374,11 @@ async fn consistency_check(
         let store = table.object_store();
         let path = table.path();
 
-        // Check that this is a file written by a dump job, with name in the format:
-        // "<block_num>.parquet".
-        let is_dump_file = |filename: &str| {
-            filename.ends_with(".parquet")
-                && filename.trim_end_matches(".parquet").parse::<u64>().is_ok()
-        };
-
         // Collect all stored files whose filename matches `is_dump_file`.
         let stored_files: BTreeMap<String, ObjectMeta> = table
-            .object_store()
-            .list(Some(table.path()))
-            .try_collect::<Vec<ObjectMeta>>()
-            .await?
-            .into_iter()
-            // Unwrap: A full object path always has a filename.
-            .map(|f| (f.location.filename().unwrap().to_string(), f))
-            .filter(|(filename, _)| is_dump_file(filename))
-            .collect();
+            .parquet_files(true)
+            .await
+            .map_err(|e| ConsistencyCheckError::ObjectStoreError(e))?;
 
         for (filename, object_meta) in &stored_files {
             if !registered_files.contains(filename) {
@@ -411,4 +400,62 @@ async fn consistency_check(
         }
     }
     Ok(())
+}
+
+// We work around some deficiencies in our metadata handling by deleting the
+// scanned ranges for a table in its entirety. This struct encapsulates the
+// logic for that and hides it from the casual reader because it's ugly
+//
+// We truncate __scanned_ranges for the first entire materialization we see,
+// but we do not allow mixing entire and incremental materializations for
+// safety
+struct MatznTracker {
+    had_entire: bool,
+    had_incremental: bool,
+    ranges_cleared: bool,
+}
+
+impl MatznTracker {
+    fn new() -> Self {
+        Self {
+            had_entire: false,
+            had_incremental: false,
+            ranges_cleared: false,
+        }
+    }
+
+    async fn record(
+        &mut self,
+        matzn: &Materialization,
+        ctx: &QueryContext,
+        dataset_name: &str,
+    ) -> Result<(), BoxError> {
+        fn not_supported() -> Result<(), BoxError> {
+            Err(
+                "Currently, a dataset may not mix incremental and non-incremental \
+                 queries. We're working on removing this restriction"
+                    .into(),
+            )
+        }
+
+        match matzn {
+            Materialization::Entire { .. } => {
+                if self.had_incremental {
+                    return not_supported();
+                }
+                self.had_entire = true;
+                if !self.ranges_cleared {
+                    ctx.meta_truncate(dataset_name).await?;
+                    self.ranges_cleared = true;
+                }
+            }
+            Materialization::Incremental { .. } => {
+                if self.had_entire {
+                    return not_supported();
+                }
+                self.had_incremental = true;
+            }
+        }
+        Ok(())
+    }
 }

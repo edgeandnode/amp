@@ -1,12 +1,13 @@
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 use datafusion::{
     arrow::datatypes::SchemaRef,
     logical_expr::{col, SortExpr},
     sql::TableReference,
 };
+use futures::{stream, TryStreamExt};
 use metadata_db::{MetadataDb, ViewId};
-use object_store::{path::Path, ObjectStore};
+use object_store::{path::Path, ObjectMeta, ObjectStore};
 use url::Url;
 
 use super::logical::Table;
@@ -284,6 +285,54 @@ impl PhysicalTable {
             path,
             object_store: self.object_store.clone(),
         })
+    }
+
+    /// Return all parquet files for this table. If `dump_only` is `true`,
+    /// only files of the form `<number>.parquet` will be returned. The
+    /// result is a map from filename to object metadata.
+    pub async fn parquet_files(
+        &self,
+        dump_only: bool,
+    ) -> object_store::Result<BTreeMap<String, ObjectMeta>> {
+        // Check that this is a file written by a dump job, with name in the format:
+        // "<block_num>.parquet".
+        let is_dump_file = |filename: &str| {
+            filename.ends_with(".parquet")
+                && (!dump_only || filename.trim_end_matches(".parquet").parse::<u64>().is_ok())
+        };
+
+        let files = self
+            .object_store
+            .list(Some(&self.path))
+            .try_collect::<Vec<ObjectMeta>>()
+            .await?
+            .into_iter()
+            // Unwrap: A full object path always has a filename.
+            .map(|f| (f.location.filename().unwrap().to_string(), f))
+            .filter(|(filename, _)| is_dump_file(filename))
+            .collect();
+        Ok(files)
+    }
+
+    /// Truncate this table by deleting all dump files making up the table
+    pub async fn truncate(&self) -> Result<(), BoxError> {
+        let files = self.parquet_files(false).await?;
+        let num_files = files.len();
+        let locations = Box::pin(stream::iter(files.into_values().map(|m| Ok(m.location))));
+        let deleted = self
+            .object_store
+            .delete_stream(locations)
+            .try_collect::<Vec<Path>>()
+            .await?;
+        if deleted.len() != num_files {
+            return Err(format!(
+                "expected to delete {} files, but deleted {}",
+                num_files,
+                deleted.len()
+            )
+            .into());
+        }
+        Ok(())
     }
 }
 

@@ -38,6 +38,7 @@ use url::Url;
 
 use crate::catalog::physical::{Catalog, PhysicalTable};
 use crate::evm::udfs::{EvmDecode, EvmTopic};
+use crate::meta_tables::scanned_ranges;
 use crate::{arrow, attestation, BoxError, Table};
 
 #[derive(Error, Debug)]
@@ -350,6 +351,31 @@ impl QueryContext {
         // Execute plan against meta ctx
         self.meta_execute_plan(LogicalPlan::Dml(insert)).await?;
 
+        Ok(())
+    }
+
+    pub async fn meta_truncate(&self, dataset_name: &str) -> Result<(), Error> {
+        let ranges_table = self
+            .catalog
+            .all_meta_tables()
+            .find(|t| {
+                t.table_ref().table() == scanned_ranges::TABLE_NAME
+                    && t.table_ref().schema() == Some(dataset_name)
+            })
+            .ok_or_else(|| {
+                Error::DatasetError(
+                    format!(
+                        "table `{}.{}` not found",
+                        dataset_name,
+                        scanned_ranges::TABLE_NAME
+                    )
+                    .into(),
+                )
+            })?;
+        ranges_table
+            .truncate()
+            .await
+            .map_err(|e| Error::DatasetError(e))?;
         Ok(())
     }
 }
