@@ -56,8 +56,10 @@ uuid = { version = "1.11.0", features = ["v7"] }
 
 # Datafusion and Arrow crates
 arrow-flight = { version = "53.2.0", features = ["flight-sql-experimental"] }
-datafusion = { version = "43.0", features = ["serde"] }
-datafusion-proto = "43.0"
+# TODO: Go back to released once DataFusion 44.0 or 43.1 is released
+# We need this for https://github.com/apache/datafusion/pull/13314
+datafusion = { git = "https://github.com/apache/arrow-datafusion", rev = "e25f5e7485ffcd810f96c7be096b04b3cacf30b3", features = ["serde"] }
+datafusion-proto = { git = "https://github.com/apache/arrow-datafusion", rev = "e25f5e7485ffcd810f96c7be096b04b3cacf30b3" }
 object_store = { version = "0.11.1", features = ["aws", "gcp", "azure"] }
 
 # Crates that should follow the version used by DataFusion and Arrow
