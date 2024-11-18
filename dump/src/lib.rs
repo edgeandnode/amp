@@ -21,8 +21,8 @@ use common::BlockStreamer as _;
 use common::BoxError;
 use datafusion::execution::runtime_env::RuntimeEnv;
 use datafusion::sql::TableReference;
+use dataset_store::sql_datasets::is_incremental;
 use dataset_store::sql_datasets::max_end_block;
-use dataset_store::sql_datasets::Materialization;
 use dataset_store::DatasetKind;
 use dataset_store::DatasetStore;
 use futures::future::try_join_all;
@@ -220,55 +220,57 @@ async fn dump_sql_dataset(
             .ctx_for_sql(&query, env.clone())
             .await?;
         let plan = src_ctx.plan_sql(query.clone()).await?;
-        let matzn = Materialization::for_plan(&plan, start, end)?;
-        matzn_tracker.record(&matzn, &dst_ctx, dataset_name).await?;
+        let is_incr = is_incremental(&plan)?;
 
-        match matzn {
-            Materialization::Incremental { start, end } => {
-                let ranges_to_scan = scanned_ranges_by_table[&table].complement(start, end);
-                for (start, end) in ranges_to_scan.ranges {
-                    info!(
-                        "dumping {} between blocks {start} and {end}",
-                        physical_table.table_ref()
-                    );
+        matzn_tracker
+            .record(is_incr, &dst_ctx, dataset_name)
+            .await?;
 
-                    dump_sql_query(
-                        dataset_store,
-                        &query,
-                        env,
-                        Materialization::Incremental { start, end },
-                        physical_table,
-                        parquet_opts,
-                        dataset_name,
-                        &dst_ctx,
-                    )
-                    .await?;
-                }
-            }
-            Materialization::Entire { .. } => {
-                let Some(metadata_db) = dataset_store.metadata_db.as_ref() else {
-                    return Err("metadata_db is required for entire materialization".into());
-                };
-                let physical_table = physical_table
-                    .next_revision(&data_store, dataset_name, metadata_db)
-                    .await?;
+        if is_incr {
+            let ranges_to_scan = scanned_ranges_by_table[&table].complement(start, end);
+            for (start, end) in ranges_to_scan.ranges {
                 info!(
-                    "dumping entire {} to {}",
-                    physical_table.table_ref(),
-                    physical_table.url()
+                    "dumping {} between blocks {start} and {end}",
+                    physical_table.table_ref()
                 );
+
                 dump_sql_query(
                     dataset_store,
                     &query,
                     env,
-                    matzn,
-                    &physical_table,
+                    start,
+                    end,
+                    physical_table,
                     parquet_opts,
                     dataset_name,
                     &dst_ctx,
                 )
                 .await?;
             }
+        } else {
+            let Some(metadata_db) = dataset_store.metadata_db.as_ref() else {
+                return Err("metadata_db is required for entire materialization".into());
+            };
+            let physical_table = physical_table
+                .next_revision(&data_store, dataset_name, metadata_db)
+                .await?;
+            info!(
+                "dumping entire {} to {}",
+                physical_table.table_ref(),
+                physical_table.url()
+            );
+            dump_sql_query(
+                dataset_store,
+                &query,
+                env,
+                start,
+                end,
+                &physical_table,
+                parquet_opts,
+                dataset_name,
+                &dst_ctx,
+            )
+            .await?;
         }
     }
 
@@ -279,7 +281,8 @@ async fn dump_sql_query(
     dataset_store: &Arc<DatasetStore>,
     query: &datafusion::sql::parser::Statement,
     env: &Arc<RuntimeEnv>,
-    matzn: Materialization,
+    start: BlockNum,
+    end: BlockNum,
     physical_table: &common::catalog::physical::PhysicalTable,
     parquet_opts: &ParquetWriterProperties,
     dataset_name: &str,
@@ -288,13 +291,12 @@ async fn dump_sql_query(
     use dataset_store::sql_datasets::execute_query_for_range;
 
     let store = dataset_store.clone();
-    let mut stream = execute_query_for_range(query.clone(), store, env.clone(), matzn).await?;
-    let mut writer =
-        ParquetFileWriter::new(physical_table.clone(), parquet_opts.clone(), matzn.start())?;
+    let mut stream = execute_query_for_range(query.clone(), store, env.clone(), start, end).await?;
+    let mut writer = ParquetFileWriter::new(physical_table.clone(), parquet_opts.clone(), start)?;
     while let Some(batch) = stream.try_next().await? {
         writer.write(&batch).await?;
     }
-    let scanned_range = writer.close(matzn.end()).await?.as_record_batch();
+    let scanned_range = writer.close(end).await?.as_record_batch();
     let table_ref = TableReference::partial(dataset_name, scanned_ranges::TABLE_NAME);
     dst_ctx.meta_insert_into(table_ref, scanned_range).await?;
     Ok(())
@@ -426,7 +428,7 @@ impl MatznTracker {
 
     async fn record(
         &mut self,
-        matzn: &Materialization,
+        is_incremental: bool,
         ctx: &QueryContext,
         dataset_name: &str,
     ) -> Result<(), BoxError> {
@@ -438,22 +440,19 @@ impl MatznTracker {
             )
         }
 
-        match matzn {
-            Materialization::Entire { .. } => {
-                if self.had_incremental {
-                    return not_supported();
-                }
-                self.had_entire = true;
-                if !self.ranges_cleared {
-                    ctx.meta_truncate(dataset_name).await?;
-                    self.ranges_cleared = true;
-                }
+        if is_incremental {
+            if self.had_entire {
+                return not_supported();
             }
-            Materialization::Incremental { .. } => {
-                if self.had_entire {
-                    return not_supported();
-                }
-                self.had_incremental = true;
+            self.had_incremental = true;
+        } else {
+            if self.had_incremental {
+                return not_supported();
+            }
+            self.had_entire = true;
+            if !self.ranges_cleared {
+                ctx.meta_truncate(dataset_name).await?;
+                self.ranges_cleared = true;
             }
         }
         Ok(())

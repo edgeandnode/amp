@@ -110,7 +110,8 @@ pub async fn execute_query_for_range(
     query: parser::Statement,
     dataset_store: Arc<DatasetStore>,
     env: Arc<RuntimeEnv>,
-    matzn: Materialization,
+    start: BlockNum,
+    end: BlockNum,
 ) -> Result<SendableRecordBatchStream, BoxError> {
     let (tables, _) =
         resolve_table_references(&query, true).map_err(|e| CoreError::SqlParseError(e.into()))?;
@@ -118,7 +119,7 @@ pub async fn execute_query_for_range(
 
     // Validate dependency scanned ranges
     {
-        let needed_range = matzn.range();
+        let needed_range = MultiRange::from_ranges(vec![(start, end)]).unwrap();
         for table in tables {
             // Unwrap: A valid catalog was built with this table name.
             let catalog_schema = table.schema().unwrap();
@@ -133,12 +134,9 @@ pub async fn execute_query_for_range(
     }
 
     let plan = ctx.plan_sql(query).await?;
-    let plan = match matzn {
-        Materialization::Entire { start, end } => inject_block_range_constraints(plan, start, end)?,
-        Materialization::Incremental { start, end } => {
-            let plan = inject_block_range_constraints(plan, start, end)?;
-            order_by_block_num(plan)
-        }
+    let plan = {
+        let plan = inject_block_range_constraints(plan, start, end)?;
+        order_by_block_num(plan)
     };
     Ok(ctx.execute_plan(plan).await?)
 }
@@ -183,120 +181,71 @@ pub async fn max_end_block(
 /// How a logical plan can be materialized in a dataset. For some queries,
 /// we support incremental materialization, whereas for others we need to
 /// recalculate the entire output.
-#[derive(Clone, Copy, Debug)]
-pub enum Materialization {
-    /// Can be materialized incrementally.
-    Incremental { start: BlockNum, end: BlockNum },
-    /// Can be materialized by rerunning the query in its entirety. The
-    /// `end` isn't really meaningful here as we have no control over which
-    /// block numbers get used by the underlying query, but we remember what
-    /// the user asked for for some plausibility checks.
-    Entire { start: BlockNum, end: BlockNum },
-}
+pub fn is_incremental(plan: &LogicalPlan) -> Result<bool, BoxError> {
+    use LogicalPlan::*;
 
-impl Materialization {
-    pub fn for_plan(plan: &LogicalPlan, start: BlockNum, end: BlockNum) -> Result<Self, BoxError> {
-        use LogicalPlan::*;
-        use Materialization::*;
+    fn unsupported(op: String) -> Option<BoxError> {
+        Some(format!("unsupported operation in query: {op}").into())
+    }
 
-        fn unsupported(op: String) -> Option<BoxError> {
-            Some(format!("unsupported operation in query: {op}").into())
-        }
+    // As we traverse the tree, assume we can materialize incrementally.
+    // If we find a node that requires materialization of the entire
+    // query nonincrementally, we set `matzn` to `Entire`. If we find
+    // anything that cannot be materialized, we set `Err` to `Some(_)`.
+    // This ensures that we always report an error if there is one, and
+    // never go from `Entire` to `Incremental`.
+    let mut is_incr = true;
+    let mut err: Option<BoxError> = None;
 
-        // As we traverse the tree, assume we can materialize incrementally.
-        // If we find a node that requires materialization of the entire
-        // query nonincrementally, we set `matzn` to `Entire`. If we find
-        // anything that cannot be materialized, we set `Err` to `Some(_)`.
-        // This ensures that we always report an error if there is one, and
-        // never go from `Entire` to `Incremental`.
-        let mut matzn = Incremental { start, end };
-        let mut err: Option<BoxError> = None;
+    // The plan is materializable if no non-materializable nodes are found.
+    plan.apply(|node| {
+        match node {
+            // Embarrassingly parallel operators
+            Projection(_) | Filter(_) | Union(_) | Unnest(_) => { /* incremental */ }
 
-        // Notational convenience for when we need to switch to 'Entire'
-        let entire = Materialization::Entire { start, end };
+            // Not really logical operators, so we just skip them.
+            Repartition(_) | TableScan(_) | EmptyRelation(_) | Values(_) | Subquery(_)
+            | SubqueryAlias(_) => { /* incremental */ }
 
-        // The plan is materializable if no non-materializable nodes are found.
-        plan.apply(|node| {
-            match node {
-                // Embarrassingly parallel operators
-                Projection(_) | Filter(_) | Union(_) | Unnest(_) => { /* incremental */ }
+            // Aggregations and join materialization seem doable
+            // incrementally but need thinking through.
+            Aggregate(_) | Distinct(_) => is_incr = false,
+            Join(_) => is_incr = false,
 
-                // Not really logical operators, so we just skip them.
-                Repartition(_) | TableScan(_) | EmptyRelation(_) | Values(_) | Subquery(_)
-                | SubqueryAlias(_) => { /* incremental */ }
+            // Sorts are not parallel or incremental
+            Sort(_) | Limit(_) => is_incr = false,
 
-                // Aggregations and join materialization seem doable
-                // incrementally but need thinking through.
-                Aggregate(_) | Distinct(_) => matzn = entire,
-                Join(_) => matzn = entire,
+            // Window functions are complicated, they often result in a sort.
+            Window(_) => is_incr = false,
 
-                // Sorts are not parallel or incremental
-                Sort(_) | Limit(_) => matzn = entire,
+            // Another complicated one.
+            RecursiveQuery(_) => is_incr = false,
 
-                // Window functions are complicated, they often result in a sort.
-                Window(_) => matzn = entire,
-
-                // Another complicated one.
-                RecursiveQuery(_) => matzn = entire,
-
-                // Commands that don't make sense in a dataset definition.
-                DescribeTable(_) | Explain(_) | Analyze(_) => {
-                    err = unsupported(format!("{}", node.display()))
-                }
-
-                // Definitely not supported and would be caught eleswhere.
-                Dml(_) | Ddl(_) | Statement(_) | Copy(_) => {
-                    err = unsupported(format!("{}", node.display()))
-                }
-
-                // We don't currently have any custom operators.
-                Extension(_) => err = unsupported(format!("{}", node.display())),
-            };
-
-            // Stop recursion if we found a non-materializable node.
-            match err {
-                Some(_) => Ok(TreeNodeRecursion::Stop),
-                None => Ok(TreeNodeRecursion::Continue),
+            // Commands that don't make sense in a dataset definition.
+            DescribeTable(_) | Explain(_) | Analyze(_) => {
+                err = unsupported(format!("{}", node.display()))
             }
-        })
-        .unwrap();
 
-        match err {
-            Some(err) => Err(err),
-            None => Ok(matzn),
-        }
-    }
+            // Definitely not supported and would be caught eleswhere.
+            Dml(_) | Ddl(_) | Statement(_) | Copy(_) => {
+                err = unsupported(format!("{}", node.display()))
+            }
 
-    /// The block number at which to start materializing the query.
-    pub fn start(&self) -> BlockNum {
-        match self {
-            Materialization::Incremental { start, end: _ } => *start,
-            Materialization::Entire { start, end: _ } => *start,
-        }
-    }
-
-    /// The block number at which to stop materializing the query.
-    pub fn end(&self) -> BlockNum {
-        match self {
-            Materialization::Incremental { end, start: _ } => *end,
-            Materialization::Entire { end, start: _ } => *end,
-        }
-    }
-
-    /// The range of blocks to materialize.
-    pub fn range(&self) -> MultiRange {
-        let (start, end) = match self {
-            Materialization::Incremental { start, end } => (*start, *end),
-            Materialization::Entire { start, end } => (*start, *end),
+            // We don't currently have any custom operators.
+            Extension(_) => err = unsupported(format!("{}", node.display())),
         };
-        MultiRange::from_ranges(vec![(start, end)]).unwrap()
-    }
 
-    pub fn restrict(&self, start: u64, end: u64) -> Self {
-        match self {
-            Materialization::Incremental { .. } => Materialization::Incremental { start, end },
-            Materialization::Entire { .. } => Materialization::Entire { start, end },
+        // Stop recursion if we found a non-materializable node.
+        match err {
+            Some(_) => Ok(TreeNodeRecursion::Stop),
+            None => Ok(TreeNodeRecursion::Continue),
         }
+    })
+    .unwrap();
+
+    match err {
+        Some(err) => Err(err),
+        None => Ok(is_incr),
     }
 }
 
