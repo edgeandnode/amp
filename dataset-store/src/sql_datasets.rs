@@ -188,12 +188,12 @@ pub fn is_incremental(plan: &LogicalPlan) -> Result<bool, BoxError> {
         Some(format!("unsupported operation in query: {op}").into())
     }
 
-    // As we traverse the tree, assume we can materialize incrementally.
-    // If we find a node that requires materialization of the entire
-    // query nonincrementally, we set `matzn` to `Entire`. If we find
-    // anything that cannot be materialized, we set `Err` to `Some(_)`.
-    // This ensures that we always report an error if there is one, and
-    // never go from `Entire` to `Incremental`.
+    // As we traverse the tree, assume we can materialize incrementally. If
+    // we find a node that requires materialization of the entire query
+    // nonincrementally, `is_incr` to `true`. If we find anything that
+    // cannot be materialized, we set `Err` to `Some(_)`. This ensures that
+    // we always report an error if there is one, and never go from entire
+    // to incremental materialization.
     let mut is_incr = true;
     let mut err: Option<BoxError> = None;
 
