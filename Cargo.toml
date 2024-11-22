@@ -10,6 +10,7 @@ members = [
     "evm-rpc-datasets",
     "firehose-datasets",
     "substreams-datasets",
+    "metadata-db",
 ]
 
 resolver = "2"
@@ -43,6 +44,7 @@ snmalloc-rs = "0.3.4"
 tempfile = "3.13.0"
 thiserror = "1.0"
 toml = "0.8.10"
+tracing = "0.1"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 tokio = { version = "1.36.0", features = [
     "macros",

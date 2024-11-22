@@ -93,7 +93,7 @@ pub async fn dump_dataset(
         }
         DatasetKind::Sql => {
             if n_jobs > 1 {
-                warn!("n_jobs > 1 has no effect for SQL datasets");
+                info!("n_jobs > 1 has no effect for SQL datasets");
             }
 
             dump_sql_dataset(
