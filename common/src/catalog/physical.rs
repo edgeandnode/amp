@@ -150,13 +150,13 @@ impl PhysicalTable {
         validate_name(&table.name)?;
 
         let (url, object_store) = {
-            let view_id = TableId {
+            let table_id = TableId {
                 dataset: dataset_name,
                 dataset_version: None,
                 table: &table.name,
             };
 
-            let active_location = metadata_db.get_active_location(view_id).await?;
+            let active_location = metadata_db.get_active_location(table_id).await?;
             match active_location {
                 Some(location) => {
                     let url = Url::parse(&location)?;
@@ -164,10 +164,10 @@ impl PhysicalTable {
                     (url, object_store)
                 }
                 None => {
-                    let path = make_location_path(view_id);
+                    let path = make_location_path(table_id);
                     let url = data_store.url().join(&path)?;
                     metadata_db
-                        .register_location(view_id, data_store.bucket(), &path, &url, true)
+                        .register_location(table_id, data_store.bucket(), &path, &url, true)
                         .await?;
                     (url, data_store.object_store())
                 }
@@ -265,17 +265,17 @@ impl PhysicalTable {
         dataset_name: &str,
         db: &MetadataDb,
     ) -> Result<Self, BoxError> {
-        let view_id = TableId {
+        let table_id = TableId {
             dataset: dataset_name,
             dataset_version: None,
             table: &self.table.name,
         };
 
-        let path = make_location_path(view_id);
+        let path = make_location_path(table_id);
         let url = data_store.url().join(&path)?;
-        db.register_location(view_id, data_store.bucket(), &path, &url, false)
+        db.register_location(table_id, data_store.bucket(), &path, &url, false)
             .await?;
-        db.set_active_location(view_id, &url.as_str()).await?;
+        db.set_active_location(table_id, &url.as_str()).await?;
 
         let path = Path::from_url_path(url.path()).unwrap();
         Ok(Self {

@@ -30,9 +30,8 @@ pub struct MetadataDb {
     pool: Pool<Postgres>,
 }
 
-/// Materialized views are commonly looked up by the table being materialized. Tables are identified
-/// by the triple: `(dataset, dataset_version, table)`. For each table, there is at most one active
-/// materialized location.
+/// Tables are identified by the triple: `(dataset, dataset_version, table)`. For each table, there
+/// is at most one active location.
 #[derive(Debug, Copy, Clone)]
 pub struct TableId<'a> {
     pub dataset: &'a str,
