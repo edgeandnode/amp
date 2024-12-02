@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS locations (
 
     dataset TEXT NOT NULL,
     dataset_version TEXT NOT NULL,
-    view TEXT NOT NULL,
+    tbl TEXT NOT NULL,
 
     bucket TEXT,
     path TEXT NOT NULL,
@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS locations (
     CONSTRAINT unique_bucket_path UNIQUE (bucket, path)
 );
 
--- Partial index to ensure only one active row per (dataset, dataset_version, view)
-CREATE UNIQUE INDEX unique_active_per_dataset_version_view
-ON locations (dataset, dataset_version, view)
+-- Partial index to ensure only one active row per (dataset, dataset_version, tbl)
+CREATE UNIQUE INDEX unique_active_per_dataset_version_table
+ON locations (dataset, dataset_version, tbl)
 WHERE active;

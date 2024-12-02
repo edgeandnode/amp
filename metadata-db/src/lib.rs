@@ -3,6 +3,7 @@ use sqlx::{
     Pool, Postgres,
 };
 use thiserror::Error;
+use tracing::instrument;
 use url::Url;
 
 #[derive(Error, Debug)]
@@ -17,7 +18,7 @@ pub enum Error {
     DbError(#[from] sqlx::Error),
 
     #[error(
-        "Multiple active locations found for dataset={0}, dataset_version={1}, view={2}: {3:?}"
+        "Multiple active locations found for dataset={0}, dataset_version={1}, table={2}: {3:?}"
     )]
     MultipleActiveLocations(String, String, String, Vec<String>),
 }
@@ -29,18 +30,18 @@ pub struct MetadataDb {
     pool: Pool<Postgres>,
 }
 
-/// Materialized views are commonly looked up by the view being materialized. Views are identified by
-/// the triple: `(dataset, dataset_version, view)`. For each view, there is at most one active
-/// materialized location.
+/// Tables are identified by the triple: `(dataset, dataset_version, table)`. For each table, there
+/// is at most one active location.
 #[derive(Debug, Copy, Clone)]
-pub struct ViewId<'a> {
+pub struct TableId<'a> {
     pub dataset: &'a str,
     pub dataset_version: Option<&'a str>,
-    pub view: &'a str,
+    pub table: &'a str,
 }
 
 impl MetadataDb {
     /// Sets up a connection pool to the metadata DB. Runs migrations if necessary.
+    #[instrument(skip_all, err)]
     pub async fn connect(url: &str) -> Result<MetadataDb, Error> {
         let pool = Pool::connect(url).await.map_err(Error::ConnectionError)?;
         let db = MetadataDb { pool };
@@ -52,35 +53,37 @@ impl MetadataDb {
     /// - Locks the DB before running migrations.
     /// - Never runs the same migration twice.
     /// - Errors on changes to old migrations.
+    #[instrument(skip(self), err)]
     async fn run_migrations(&self) -> Result<(), Error> {
         Ok(MIGRATOR.run(&self.pool).await?)
     }
 
-    /// Register a materialized view into the metadata database.
+    /// Register a materialized table into the metadata database.
     ///
-    /// If setting `active = true`, make sure no other active location exists for this view, to avoid
+    /// If setting `active = true`, make sure no other active location exists for this table, to avoid
     /// a constraint violation. If an active location might exist, it is better to initialize the
     /// location with `active = false` and then call `set_active_location` to switch it as active.
+    #[instrument(skip(self), err)]
     pub async fn register_location(
         &self,
-        view: ViewId<'_>,
+        table: TableId<'_>,
         bucket: Option<&str>,
         path: &str,
         url: &Url,
         active: bool,
     ) -> Result<(), sqlx::Error> {
         // An empty `dataset_version` is represented as an empty string in the DB.
-        let dataset_version = view.dataset_version.unwrap_or("");
+        let dataset_version = table.dataset_version.unwrap_or("");
 
         let query = "
-        INSERT INTO locations (dataset, dataset_version, view, bucket, path, url, active) \
+        INSERT INTO locations (dataset, dataset_version, tbl, bucket, path, url, active) \
         VALUES ($1, $2, $3, $4, $5, $6, $7)
         ";
 
         sqlx::query(query)
-            .bind(view.dataset)
+            .bind(table.dataset)
             .bind(dataset_version)
-            .bind(view.view)
+            .bind(table.table)
             .bind(bucket)
             .bind(path)
             .bind(url.to_string())
@@ -94,24 +97,25 @@ impl MetadataDb {
     /// Returns the active location. The active location has meaning on both the write and read side:
     /// - On the write side, it is the location that is being kept in sync with the source data.
     /// - On the read side, it is default location that should receive queries.
-    pub async fn get_active_location(&self, view: ViewId<'_>) -> Result<Option<String>, Error> {
-        let ViewId {
+    #[instrument(skip(self), err)]
+    pub async fn get_active_location(&self, table: TableId<'_>) -> Result<Option<String>, Error> {
+        let TableId {
             dataset,
             dataset_version,
-            view,
-        } = view;
+            table,
+        } = table;
         let dataset_version = dataset_version.unwrap_or("");
 
         let query = "
         SELECT url
         FROM locations
-        WHERE dataset = $1 AND dataset_version = $2 AND view = $3 AND active
+        WHERE dataset = $1 AND dataset_version = $2 AND tbl = $3 AND active
         ";
 
         let mut urls: Vec<String> = sqlx::query_scalar(query)
             .bind(dataset)
             .bind(dataset_version)
-            .bind(view)
+            .bind(table)
             .fetch_all(&self.pool)
             .await?;
 
@@ -123,20 +127,25 @@ impl MetadataDb {
             _ => Err(Error::MultipleActiveLocations(
                 dataset.to_string(),
                 dataset_version.to_string(),
-                view.to_string(),
+                table.to_string(),
                 urls,
             )),
         }
     }
 
-    /// Set a location as the active materialization for a view. If there was a previously active
+    /// Set a location as the active materialization for a table. If there was a previously active
     /// location, it will be made inactive in the same transaction, achieving an atomic switch.
-    pub async fn set_active_location(&self, view: ViewId<'_>, location: &str) -> Result<(), Error> {
-        let ViewId {
+    #[instrument(skip(self), err)]
+    pub async fn set_active_location(
+        &self,
+        table: TableId<'_>,
+        location: &str,
+    ) -> Result<(), Error> {
+        let TableId {
             dataset,
             dataset_version,
-            view,
-        } = view;
+            table,
+        } = table;
         let dataset_version = dataset_version.unwrap_or("");
 
         // Transactionally update the active location.
@@ -146,13 +155,13 @@ impl MetadataDb {
         let query = "
         UPDATE locations
         SET active = false
-        WHERE dataset = $1 AND dataset_version = $2 AND view = $3 AND active
+        WHERE dataset = $1 AND dataset_version = $2 AND tbl = $3 AND active
         ";
 
         sqlx::query(query)
             .bind(dataset)
             .bind(dataset_version)
-            .bind(view)
+            .bind(table)
             .execute(&mut *tx)
             .await?;
 
@@ -160,13 +169,13 @@ impl MetadataDb {
         let query = "
         UPDATE locations
         SET active = true
-        WHERE dataset = $1 AND dataset_version = $2 AND view = $3 AND url = $4
+        WHERE dataset = $1 AND dataset_version = $2 AND tbl = $3 AND url = $4
         ";
 
         sqlx::query(query)
             .bind(dataset)
             .bind(dataset_version)
-            .bind(view)
+            .bind(table)
             .bind(location)
             .execute(&mut *tx)
             .await?;

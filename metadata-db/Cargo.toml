@@ -8,3 +8,5 @@ sqlx.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
 url.workspace = true
+tracing.workspace = true
+log.workspace = true

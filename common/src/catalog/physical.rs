@@ -6,7 +6,7 @@ use datafusion::{
     sql::TableReference,
 };
 use futures::{stream, TryStreamExt};
-use metadata_db::{MetadataDb, ViewId};
+use metadata_db::{MetadataDb, TableId};
 use object_store::{path::Path, ObjectMeta, ObjectStore};
 use url::Url;
 
@@ -139,7 +139,7 @@ pub struct PhysicalTable {
 }
 
 impl PhysicalTable {
-    /// If an active location exists for this view, this `PhysicalTable` will point to that location.
+    /// If an active location exists for this table, this `PhysicalTable` will point to that location.
     /// Otherwise, a new location will be registered in the metadata DB. The location will be active.
     async fn resolve_or_register_location(
         data_store: Arc<Store>,
@@ -150,13 +150,13 @@ impl PhysicalTable {
         validate_name(&table.name)?;
 
         let (url, object_store) = {
-            let view_id = ViewId {
+            let table_id = TableId {
                 dataset: dataset_name,
                 dataset_version: None,
-                view: &table.name,
+                table: &table.name,
             };
 
-            let active_location = metadata_db.get_active_location(view_id).await?;
+            let active_location = metadata_db.get_active_location(table_id).await?;
             match active_location {
                 Some(location) => {
                     let url = Url::parse(&location)?;
@@ -164,10 +164,10 @@ impl PhysicalTable {
                     (url, object_store)
                 }
                 None => {
-                    let path = make_location_path(view_id);
+                    let path = make_location_path(table_id);
                     let url = data_store.url().join(&path)?;
                     metadata_db
-                        .register_location(view_id, data_store.bucket(), &path, &url, true)
+                        .register_location(table_id, data_store.bucket(), &path, &url, true)
                         .await?;
                     (url, data_store.object_store())
                 }
@@ -265,17 +265,17 @@ impl PhysicalTable {
         dataset_name: &str,
         db: &MetadataDb,
     ) -> Result<Self, BoxError> {
-        let view_id = ViewId {
+        let table_id = TableId {
             dataset: dataset_name,
             dataset_version: None,
-            view: &self.table.name,
+            table: &self.table.name,
         };
 
-        let path = make_location_path(view_id);
+        let path = make_location_path(table_id);
         let url = data_store.url().join(&path)?;
-        db.register_location(view_id, data_store.bucket(), &path, &url, false)
+        db.register_location(table_id, data_store.bucket(), &path, &url, false)
             .await?;
-        db.set_active_location(view_id, &url.as_str()).await?;
+        db.set_active_location(table_id, &url.as_str()).await?;
 
         let path = Path::from_url_path(url.path()).unwrap();
         Ok(Self {
@@ -351,22 +351,22 @@ fn validate_name(name: &str) -> Result<(), BoxError> {
     Ok(())
 }
 
-// The path format is: `<dataset>/[<version>/]<view>/<UUIDv7>/`
-fn make_location_path(view_id: ViewId<'_>) -> String {
+// The path format is: `<dataset>/[<version>/]<table>/<UUIDv7>/`
+fn make_location_path(table_id: TableId<'_>) -> String {
     let mut path = String::new();
 
     // Add dataset
-    path.push_str(view_id.dataset);
+    path.push_str(table_id.dataset);
     path.push('/');
 
     // Add version if present
-    if let Some(version) = view_id.dataset_version {
+    if let Some(version) = table_id.dataset_version {
         path.push_str(version);
         path.push('/');
     }
 
-    // Add view
-    path.push_str(view_id.view);
+    // Add table
+    path.push_str(table_id.table);
     path.push('/');
 
     // Add UUIDv7
