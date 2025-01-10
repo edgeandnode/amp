@@ -1,0 +1,14 @@
+{
+  "name": "project-nozzle",
+  "version": "0.1.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc -w"
+  },
+  "dependencies": {
+    "@effect/cli": "^0.51.0",
+    "effect": "^3.12.0"
+  }
+}
