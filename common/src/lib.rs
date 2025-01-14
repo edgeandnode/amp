@@ -3,6 +3,7 @@ pub mod attestation;
 pub mod catalog;
 pub mod config;
 pub mod evm;
+pub mod manifest;
 pub mod meta_tables;
 pub mod multirange;
 pub mod query_context;

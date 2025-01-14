@@ -1,2 +1,3 @@
 export { defineDataset, DatasetConfig } from './definition'
-export { build } from './build' 
+export { build } from './commands/build'
+export { deploy_local } from './commands/deploy_local'
