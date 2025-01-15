@@ -18,13 +18,10 @@ use crate::{
 use alloy::{
     dyn_abi::{DynSolType, DynSolValue, DynToken, Specifier as _},
     json_abi::Event as AlloyEvent,
-    primitives::{
-        ruint::{mask, FromUintError},
-        BigIntConversionError, Signed, B256,
-    },
+    primitives::{ruint::FromUintError, BigIntConversionError, Signed, B256},
 };
 use datafusion::{
-    arrow::array::ArrayBuilder,
+    arrow::{array::ArrayBuilder, error::ArrowError},
     common::{internal_err, plan_err, ExprSchema},
     error::DataFusionError,
     logical_expr::{
@@ -41,6 +38,17 @@ type Unsigned = alloy::primitives::Uint<256, 4>;
 
 const DEC128_PREC: u8 = DECIMAL128_MAX_PRECISION;
 const DEC256_PREC: u8 = DECIMAL256_MAX_PRECISION;
+
+// This is `log2(10)*76 - 1`.
+//
+// Where 76 is DEC256_PREC, and 1 bit of precision is subtracted because we need
+// to account for the sign bit.
+const DEC_256_MAX_BINARY_PREC: usize = 251;
+
+// This is `log2(10)*38 - 1`.
+// Where 38s is DEC128_PREC, and 1 bit of precision is subtracted because we need
+// to account for the sign bit.
+const DEC_128_MAX_BINARY_PREC: usize = 125;
 
 // Convenience to report an internal error. Same as DataFusion's
 // `internal_err!`, but the error is not wrapped in an `Err`
@@ -64,8 +72,9 @@ fn arrow_type(ty: &DynSolType) -> Result<DataType, DataFusionError> {
             16 => F::Int16,
             n if n <= 32 => F::Int32,
             n if n <= 64 => F::Int64,
-            n if n <= 126 => F::Decimal128(DEC128_PREC, 0),
-            n if n <= 256 => F::Decimal256(DEC256_PREC, 0),
+            n if n <= DEC_128_MAX_BINARY_PREC => F::Decimal128(DEC128_PREC, 0),
+            n if n <= DEC_256_MAX_BINARY_PREC => F::Decimal256(DEC256_PREC, 0),
+            n if n <= 256 => F::Utf8,
             _ => return internal_err!("unexpected number of bits for {}: {}", ty, bits),
         },
         S::Uint(bits) => match *bits {
@@ -73,8 +82,9 @@ fn arrow_type(ty: &DynSolType) -> Result<DataType, DataFusionError> {
             16 => F::UInt16,
             n if n <= 32 => F::UInt32,
             n if n <= 64 => F::UInt64,
-            n if n <= 126 => F::Decimal128(DEC128_PREC, 0),
-            n if n <= 256 => F::Decimal256(DEC256_PREC, 0),
+            n if n <= DEC_128_MAX_BINARY_PREC => F::Decimal128(DEC128_PREC, 0),
+            n if n <= DEC_256_MAX_BINARY_PREC => F::Decimal256(DEC256_PREC, 0),
+            n if n <= 256 => F::Utf8,
             _ => return internal_err!("unexpected number of bits for {}: {}", ty, bits),
         },
         S::FixedBytes(bytes) => F::FixedSizeBinary(*bytes as i32),
@@ -104,6 +114,12 @@ impl From<BigIntConversionError> for AppendError {
 
 impl<T> From<FromUintError<T>> for AppendError {
     fn from(e: FromUintError<T>) -> Self {
+        AppendError(e.to_string())
+    }
+}
+
+impl From<ArrowError> for AppendError {
+    fn from(e: ArrowError) -> Self {
         AppendError(e.to_string())
     }
 }
@@ -165,13 +181,16 @@ impl<'a> FieldBuilder<'a> {
     /// of large integers is a headache.
     ///
     ///  DF only provides up to 64 bit integers, but solidity supports
-    /// signed and unsigned integers up to 256 bits. For those, we use
-    /// `Decimal128` or `Decimal256` types. But since they are decimal
+    /// signed and unsigned integers up to 256 bits. Arrow also provides
+    /// `Decimal128` and `Decimal256` types. But since they are decimal
     /// types, they can't represent the full 128 or 256 bits of the original
     /// integer, and for `uint256` we can only represent roughly half the
     /// range as DF doesn't have any unsigned 256 bit integer and we have to
-    /// resort to `i256`. In cases where the conversion would not be
-    /// possible without loss, we convert to `null`
+    /// resort to `i256`.
+    ///
+    /// To avoid lossy conversion, we convert `uint256` and `int256` to `Utf8`,
+    /// leaving it up to the user to cast to an appropriate numeric type if
+    /// they need to perform arithmetic operations.
     fn append_value(&'a mut self, value: DynSolValue) -> Result<(), DataFusionError> {
         fn primitive_int<'a>(
             builder: &'a mut FieldBuilder<'a>,
@@ -191,21 +210,22 @@ impl<'a> FieldBuilder<'a> {
                 n if n <= 64 => builder
                     .field::<Int64Builder>()?
                     .append_value(i64::try_from(s)?),
-                n if n <= 128 => {
+                n if n <= DEC_128_MAX_BINARY_PREC => {
                     let val = i128::try_from(s)?;
                     let builder = builder.field::<Decimal128Builder>()?;
-                    match validate_decimal_precision(val, DEC128_PREC) {
-                        Ok(_) => builder.append_value(val),
-                        Err(_) => builder.append_null(),
-                    }
+                    validate_decimal_precision(val, DEC128_PREC)?;
+                    builder.append_value(val);
                 }
-                n if n <= 256 => {
+                n if n <= DEC_256_MAX_BINARY_PREC => {
                     let val = i256::from_le_bytes(s.to_le_bytes());
                     let builder = builder.field::<Decimal256Builder>()?;
-                    match validate_decimal256_precision(val, DEC256_PREC) {
-                        Ok(_) => builder.append_value(val),
-                        Err(_) => builder.append_null(),
-                    }
+                    validate_decimal256_precision(val, DEC256_PREC)?;
+                    builder.append_value(val);
+                }
+                n if n <= 256 => {
+                    builder
+                        .field::<StringBuilder>()?
+                        .append_value(s.to_string());
                 }
                 _ => unreachable!("unexpected number of bits for int: {}", bits),
             };
@@ -230,28 +250,22 @@ impl<'a> FieldBuilder<'a> {
                 n if n <= 64 => builder
                     .field::<UInt64Builder>()?
                     .append_value(u64::try_from(u)?),
+                n if n <= DEC_128_MAX_BINARY_PREC => {
+                    let val = i128::try_from(u)?;
+                    let builder = builder.field::<Decimal128Builder>()?;
+                    validate_decimal_precision(val as i128, DEC128_PREC)?;
+                    builder.append_value(val);
+                }
+                n if n <= DEC_256_MAX_BINARY_PREC => {
+                    let val = i256::from_le_bytes(u.to_le_bytes());
+                    let builder = builder.field::<Decimal256Builder>()?;
+                    validate_decimal256_precision(val, DEC256_PREC)?;
+                    builder.append_value(val);
+                }
                 n if n <= 256 => {
-                    // Some Voodoo to get 2^255 - 1, the maximum positive
-                    // value an `i256` can represent. See the implementation
-                    // of Uint in alloy_core for where this all comes from
-                    const LIMBS: usize = 4;
-                    const BITS: usize = 256;
-                    const MASK: u64 = mask(BITS - 1);
-                    const MAX_SIGNED: Unsigned = {
-                        let mut limbs = [u64::MAX; LIMBS];
-                        limbs[LIMBS - 1] &= MASK;
-                        Unsigned::from_limbs(limbs)
-                    };
-                    let field_builder = builder.field::<Decimal256Builder>()?;
-                    if u > MAX_SIGNED {
-                        field_builder.append_null()
-                    } else {
-                        let val = i256::from_le_bytes(u.to_le_bytes());
-                        match validate_decimal256_precision(val, DEC256_PREC) {
-                            Ok(_) => field_builder.append_value(val),
-                            Err(_) => field_builder.append_null(),
-                        }
-                    }
+                    builder
+                        .field::<StringBuilder>()?
+                        .append_value(u.to_string());
                 }
                 _ => unreachable!("unexpected number of bits for uint: {}", bits),
             };
@@ -678,6 +692,7 @@ mod tests {
         hex::FromHex as _,
         primitives::{Bytes, B256},
     };
+    use datafusion::arrow::array::StringArray;
 
     use super::*;
 
@@ -766,8 +781,8 @@ mod tests {
         )
         .expect("recipient can be turned into FixedSizeBinaryArray")
     });
-    static AMOUNT0: LazyLock<Decimal256Array> = LazyLock::new(|| {
-        parse_dec256([
+    static AMOUNT0: LazyLock<StringArray> = LazyLock::new(|| {
+        StringArray::from(vec![
             "1000000000",
             "2515363509",
             "-3079847368",
@@ -775,8 +790,8 @@ mod tests {
             "-149245246228",
         ])
     });
-    static AMOUNT1: LazyLock<Decimal256Array> = LazyLock::new(|| {
-        parse_dec256([
+    static AMOUNT1: LazyLock<StringArray> = LazyLock::new(|| {
+        StringArray::from(vec![
             "-306731836130196125",
             "-771534952448026751",
             "945625318260095903",
