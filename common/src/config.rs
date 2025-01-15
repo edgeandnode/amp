@@ -10,7 +10,7 @@ use datafusion::{
     execution::{
         disk_manager::DiskManagerConfig,
         memory_pool::{FairSpillPool, GreedyMemoryPool, MemoryPool},
-        runtime_env::{RuntimeConfig, RuntimeEnv},
+        runtime_env::{RuntimeEnv, RuntimeEnvBuilder},
     },
 };
 use serde::Deserialize;
@@ -122,13 +122,13 @@ impl Config {
             list_files_cache: None,
         };
 
-        let runtime_config = RuntimeConfig {
+        let runtime_config = RuntimeEnvBuilder {
             disk_manager,
             memory_pool,
             cache_manager,
             ..Default::default()
         };
 
-        RuntimeEnv::try_new(runtime_config)
+        runtime_config.build()
     }
 }

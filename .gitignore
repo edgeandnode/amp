@@ -10,3 +10,6 @@
 /target
 /tests/config/providers/firehose_eth_mainnet.toml
 /tests/config/providers/rpc_eth_mainnet.toml
+**/node_modules/**
+ts/**/dist
+tsconfig.tsbuildinfo
