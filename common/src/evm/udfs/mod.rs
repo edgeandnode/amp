@@ -43,11 +43,12 @@ const DEC256_PREC: u8 = DECIMAL256_MAX_PRECISION;
 //
 // Where 76 is DEC256_PREC, and 1 bit of precision is subtracted because we need
 // to account for the sign bit.
+//
+// When the precision on a Solidity type is greater than this, such as uint256,
+// we decode the value as a string instead of a decimal.
 const DEC_256_MAX_BINARY_PREC: usize = 251;
 
-// This is `log2(10)*38 - 1`.
-// Where 38s is DEC128_PREC, and 1 bit of precision is subtracted because we need
-// to account for the sign bit.
+// See comment for DEC_256_MAX_BINARY_PREC
 const DEC_128_MAX_BINARY_PREC: usize = 125;
 
 // Convenience to report an internal error. Same as DataFusion's
