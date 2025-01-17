@@ -1,26 +1,27 @@
-use axum::{extract::Json, response::IntoResponse, routing::post, BoxError, Router};
-use serde::Deserialize;
-use std::net::SocketAddr;
+mod deploy;
+mod error;
+
+use axum::{routing::post, Router};
+use common::{config::Config, BoxError};
+use deploy::deploy_handler;
+use std::{net::SocketAddr, sync::Arc};
 use tokio::net::TcpListener;
 
-// Define the request payload structure
-#[derive(Deserialize)]
-struct DeployRequest {
-    cid: String,
+pub struct ServiceState {
+    pub config: Arc<Config>,
+    pub ipfs_client: reqwest::Client,
 }
 
-// Handler for the /deploy endpoint
-async fn deploy_handler(Json(payload): Json<DeployRequest>) -> impl IntoResponse {
-    // Simulate processing the CID (content identifier)
-    println!("Received CID: {}", payload.cid);
+pub async fn serve(at: SocketAddr, config: Arc<Config>) -> Result<(), BoxError> {
+    let state = Arc::new(ServiceState {
+        config,
+        ipfs_client: reqwest::Client::new(),
+    });
 
-    // Respond with a success message
-    (axum::http::StatusCode::OK, "Deployment successful")
-}
-
-pub async fn serve(at: SocketAddr) -> Result<(), BoxError> {
     // Build the application with the /deploy route
-    let app = Router::new().route("/deploy", post(deploy_handler));
+    let app = Router::new()
+        .route("/deploy", post(deploy_handler))
+        .with_state(state);
 
     // Specify the address to run the server
     let listener = TcpListener::bind(at).await?;

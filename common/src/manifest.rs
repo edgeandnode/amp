@@ -7,12 +7,9 @@ use std::collections::BTreeMap;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
-pub struct DatasetDef {
+pub struct DatasetManifest {
     pub name: String,
     pub version: String,
-    pub repository: Option<String>,
-    // Optional, defaults to `Dataset.md` if not provided
-    pub readme: Option<String>,
     pub dependencies: BTreeMap<String, Dependency>,
     pub tables: BTreeMap<String, Query>,
 }

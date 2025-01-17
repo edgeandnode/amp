@@ -23,7 +23,9 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "axum 0.8.1",
+ "common",
  "futures",
+ "reqwest",
  "serde",
  "serde_json",
  "thiserror",

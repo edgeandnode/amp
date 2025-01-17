@@ -204,7 +204,7 @@ async fn main_inner() -> Result<(), BoxError> {
         Command::AdminApi => {
             let addr: SocketAddr = ([0, 0, 0, 0], 1603).into();
             info!("Admin API running at {}", addr);
-            admin_api::serve(addr).await?;
+            admin_api::serve(addr, config).await?;
             Err("admin api shutdown unexpectedly, it should run forever".into())
         }
     }
