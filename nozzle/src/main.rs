@@ -76,6 +76,7 @@ enum Command {
         run_every_mins: Option<u64>,
     },
     Server,
+    AdminApi,
 }
 
 #[tokio::main]
@@ -199,6 +200,12 @@ async fn main_inner() -> Result<(), BoxError> {
                 result = jsonl_server => result?,
             };
             Err("server shutdown unexpectedly, it should run forever".into())
+        }
+        Command::AdminApi => {
+            let addr: SocketAddr = ([0, 0, 0, 0], 1603).into();
+            info!("Admin API running at {}", addr);
+            admin_api::serve(addr).await?;
+            Err("admin api shutdown unexpectedly, it should run forever".into())
         }
     }
 }

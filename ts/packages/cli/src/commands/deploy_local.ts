@@ -63,6 +63,9 @@ type IpfsAddResponse = {
 async function deploy_to_nozzle(cid: string, nozzle_url: string) {
     const response = await fetch(`${nozzle_url}/deploy`, {
         method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
         body: JSON.stringify({ cid }),
     })
     if (!response.ok) {

@@ -11,6 +11,7 @@ members = [
     "firehose-datasets",
     "substreams-datasets",
     "metadata-db",
+    "admin-api",
 ]
 
 resolver = "2"
@@ -60,6 +61,7 @@ sqlx = { version = "0.8", features = [
     "macros",
 ] }
 uuid = { version = "1.11.0", features = ["v7"] }
+axum = "0.8.0"
 
 # Datafusion and Arrow crates
 arrow-flight = { version = "53.3", features = ["flight-sql-experimental"] }
