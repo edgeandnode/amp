@@ -8,10 +8,13 @@ use common::{config::Config, tracing, BoxError};
 use datafusion::catalog_common::resolve_table_references;
 use datafusion::parquet;
 use dataset_store::{sql_datasets, DatasetStore};
+use futures::{StreamExt as _, TryStreamExt as _};
 use log::info;
 use metadata_db::MetadataDb;
 use parquet::basic::Compression;
 use parquet::basic::ZstdLevel;
+use server::service::Service;
+use tokio::net::TcpListener;
 use tonic::transport::Server;
 
 #[global_allocator]
@@ -179,16 +182,69 @@ async fn main_inner() -> Result<(), BoxError> {
                 !config.spill_location.is_empty()
             );
 
-            let service = server::service::Service::new(config, metadata_db)?;
-            let addr: SocketAddr = ([0, 0, 0, 0], 1602).into();
-            info!("Serving at {}", addr);
-            Server::builder()
-                .add_service(FlightServiceServer::new(service))
-                .serve(addr)
-                .await?;
+            let service = Service::new(config, metadata_db)?;
+
+            let flight_addr: SocketAddr = ([0, 0, 0, 0], 1602).into();
+            let flight_server = Server::builder()
+                .add_service(FlightServiceServer::new(service.clone()))
+                .serve(flight_addr);
+            info!("Serving Arrow Flight RPC at {}", flight_addr);
+
+            let jsonl_addr: SocketAddr = ([0, 0, 0, 0], 1603).into();
+            let jsonl_server = run_jsonl_server(service, jsonl_addr);
+            info!("Serving JSON lines at {}", jsonl_addr);
+
+            tokio::select! {
+                result = flight_server => result?,
+                result = jsonl_server => result?,
+            };
             Err("server shutdown unexpectedly, it should run forever".into())
         }
     }
+}
+
+async fn run_jsonl_server(service: Service, addr: SocketAddr) -> Result<(), BoxError> {
+    let app = axum::Router::new()
+        .route(
+            "/",
+            axum::routing::post(handle_jsonl_request).with_state(service),
+        )
+        .layer(
+            tower_http::compression::CompressionLayer::new()
+                .br(true)
+                .gzip(true),
+        );
+    let listener = TcpListener::bind(addr).await?;
+    axum::serve(listener, app.into_make_service())
+        .tcp_nodelay(true)
+        .await?;
+    Ok(())
+}
+
+async fn handle_jsonl_request(
+    axum::extract::State(service): axum::extract::State<Service>,
+    request: String,
+) -> axum::response::Response {
+    fn error_payload(message: impl std::fmt::Display) -> String {
+        format!(r#"{{"error": "{}"}}"#, message)
+    }
+    let stream = match service.execute_query(&request).await {
+        Ok(stream) => stream,
+        Err(err) => return axum::response::Response::new(error_payload(err.message()).into()),
+    };
+    let stream = stream
+        .map(|result| -> Result<String, BoxError> {
+            let batch = result.map_err(error_payload)?;
+            let mut buf: Vec<u8> = Default::default();
+            let mut writer = arrow_json::writer::LineDelimitedWriter::new(&mut buf);
+            writer.write(&batch)?;
+            Ok(String::from_utf8(buf).unwrap())
+        })
+        .map_err(error_payload);
+    axum::response::Response::builder()
+        .header("content-type", "application/x-ndjson")
+        .body(axum::body::Body::from_stream(stream))
+        .unwrap()
 }
 
 /// Return the input datasets and their dataset dependencies. The output set is ordered such that

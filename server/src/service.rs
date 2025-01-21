@@ -4,7 +4,11 @@ use common::{
     config::Config,
     query_context::{parse_sql, Error as CoreError, QueryContext},
 };
-use datafusion::{common::DFSchema, error::DataFusionError, execution::runtime_env::RuntimeEnv};
+use datafusion::{
+    common::DFSchema,
+    error::DataFusionError,
+    execution::{runtime_env::RuntimeEnv, SendableRecordBatchStream},
+};
 use dataset_store::{DatasetError, DatasetStore};
 use futures::{Stream, StreamExt as _, TryStreamExt};
 use metadata_db::MetadataDb;
@@ -89,6 +93,7 @@ impl From<Error> for Status {
     }
 }
 
+#[derive(Clone)]
 pub struct Service {
     config: Arc<Config>,
     metadata_db: Option<MetadataDb>,
@@ -106,6 +111,24 @@ impl Service {
             metadata_db,
             env,
         })
+    }
+
+    pub async fn execute_query(&self, sql: &str) -> Result<SendableRecordBatchStream, Status> {
+        let query = parse_sql(sql).map_err(|err| Status::from(Error::from(err)))?;
+        let dataset_store = DatasetStore::new(self.config.clone(), self.metadata_db.clone());
+        let ctx = dataset_store
+            .ctx_for_sql(&query, self.env.clone())
+            .await
+            .map_err(|err| Status::from(Error::DatasetStoreError(err)))?;
+        let plan = ctx
+            .plan_sql(query)
+            .await
+            .map_err(|err| Status::from(Error::from(err)))?;
+        let stream = ctx
+            .execute_plan(plan)
+            .await
+            .map_err(|err| Status::from(Error::from(err)))?;
+        Ok(stream)
     }
 }
 
