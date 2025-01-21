@@ -1,6 +1,6 @@
-import { DatasetConfig } from "../definition";
 import * as fs from 'fs'
 import * as path from 'path'
+import { DatasetManifest } from "../manifest";
 
 export async function deploy_local(manifest_path: string, nozzle_url: string) {
     // `manifest_path` validation checks
@@ -14,7 +14,7 @@ export async function deploy_local(manifest_path: string, nozzle_url: string) {
         )
     }
 
-    const manifest: DatasetConfig = JSON.parse(fs.readFileSync(manifest_path, 'utf8'))
+    const manifest: DatasetManifest = JSON.parse(fs.readFileSync(manifest_path, 'utf8'))
 
     // Assume a local IPFS node
     const ipfsApiUrl = 'http://127.0.0.1:5001/api/v0'
@@ -37,7 +37,7 @@ export async function deploy_local(manifest_path: string, nozzle_url: string) {
     }
 }
 
-async function upload_to_ipfs(manifest: DatasetConfig, ipfs: string): Promise<string> {
+async function upload_to_ipfs(manifest: DatasetManifest, ipfs: string): Promise<string> {
     const manifestBuffer = Buffer.from(JSON.stringify(manifest))
     const formData = new FormData()
     formData.append('file', new Blob([manifestBuffer]))

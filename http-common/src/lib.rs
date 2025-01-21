@@ -1,10 +1,11 @@
 use std::fmt::Display;
 
+use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use reqwest::StatusCode;
 use serde_json::json;
 
 pub type BoxRequestError = Box<dyn RequestError>;
+
 pub trait RequestError: Display + Send + Sync + 'static {
     fn error_code(&self) -> &'static str;
     fn status_code(&self) -> StatusCode;

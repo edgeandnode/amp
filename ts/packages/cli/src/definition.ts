@@ -1,6 +1,6 @@
 import { Schema } from "effect"
 
-export type DatasetConfig = {
+export type DatasetDefinition = {
     name: string;
     version: string;
     repository?: string;
@@ -9,8 +9,7 @@ export type DatasetConfig = {
     readme?: string;
 
     dependencies: Record<string, Dependency>;
-    tables: Record<string, Query>;
-    stream_handlers: Record<string, StreamHandler>;
+    tables: Record<string, Table>;
 }
 
 type Dependency = {
@@ -19,24 +18,16 @@ type Dependency = {
     version: string,
 };
 
-type Query = {
+type Table = View;
+
+type View = {
     sql: string,
 }
-
-type StreamDefinition = {
-    stream: unknown,
-    partitionBy: string,
-};
-
-type StreamHandler = {
-    stream: StreamDefinition;
-    handler: string; // Assuming ctx.handler_from_path returns a string
-};
 
 type Context = {};
 
 
-export function defineDataset(fn: (ctx: Context) => DatasetConfig): DatasetConfig {
+export function defineDataset(fn: (ctx: Context) => DatasetDefinition): DatasetDefinition {
     return fn({})
 }
 

@@ -2,15 +2,13 @@ use std::sync::Arc;
 
 use axum::{extract::State, Json};
 use common::manifest::DatasetManifest;
+use http_common::{BoxRequestError, RequestError};
 use reqwest::StatusCode;
 use serde::Deserialize;
 use thiserror::Error;
 use tracing::instrument;
 
-use crate::{
-    error::{BoxRequestError, RequestError},
-    ServiceState,
-};
+use crate::ServiceState;
 
 // Define the request payload structure
 #[derive(Deserialize)]
