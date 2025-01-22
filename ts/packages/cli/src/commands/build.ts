@@ -14,9 +14,12 @@ export async function build(config: DatasetDefinition, out_dir: string): Promise
     if (!fs.existsSync(out_dir)) {
         fs.mkdirSync(out_dir)
     }
-    const json = JSON.stringify(manifest)
+
+    // Output formatted JSON
+    const json = JSON.stringify(manifest, null, 4)
     const manifest_path = out_dir + '/manifest.json'
     fs.writeFileSync(manifest_path, json)
+
     return manifest_path
 }
 
