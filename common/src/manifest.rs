@@ -3,12 +3,21 @@
 //! Note: This replaces the "sql dataset".
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
-use datafusion::common::DFSchemaRef;
+use datafusion::{
+    arrow::datatypes::{DataType, Field as ArrowField, Fields, Schema, SchemaRef},
+    common::DFSchemaRef,
+};
+
 use serde::{Deserialize, Serialize};
 
+use crate::Dataset;
+
+pub const DATASET_KIND: &str = "manifest";
+
 #[derive(Debug, Deserialize)]
-pub struct DatasetManifest {
+pub struct Manifest {
     pub name: String,
     pub version: String,
     pub dependencies: BTreeMap<String, Dependency>,
@@ -54,7 +63,7 @@ pub struct ArrowSchema {
 pub struct Field {
     pub name: String,
     #[serde(rename = "type")]
-    pub type_: String,
+    pub type_: DataType,
     pub nullable: bool,
 }
 
@@ -66,12 +75,44 @@ impl From<DFSchemaRef> for TableSchema {
                     .fields()
                     .iter()
                     .map(|f| Field {
-                        name: f.name().to_string(),
-                        type_: f.data_type().to_string(),
+                        name: f.name().clone(),
+                        type_: f.data_type().clone(),
                         nullable: f.is_nullable(),
                     })
                     .collect(),
             },
+        }
+    }
+}
+
+impl From<ArrowSchema> for SchemaRef {
+    fn from(schema: ArrowSchema) -> Self {
+        let fields = schema
+            .fields
+            .into_iter()
+            .map(|f| ArrowField::new(f.name, f.type_, f.nullable));
+
+        Arc::new(Schema::new(Fields::from_iter(fields)))
+    }
+}
+
+impl From<Manifest> for Dataset {
+    fn from(manifest: Manifest) -> Self {
+        // Convert manifest tables into logical Tables
+        let tables = manifest
+            .tables
+            .into_iter()
+            .map(|(name, table)| crate::Table {
+                name,
+                schema: table.schema.arrow.into(),
+                network: None, // Network is not part of the manifest yet
+            })
+            .collect();
+
+        Dataset {
+            kind: DATASET_KIND.to_string(),
+            name: manifest.name,
+            tables,
         }
     }
 }

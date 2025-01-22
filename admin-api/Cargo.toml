@@ -17,6 +17,8 @@ thiserror.workspace = true
 tracing.workspace = true
 
 axum.workspace = true
-reqwest = "0.12.0"
 http-common = { path = "../http-common" }
 common = { path = "../common" }
+dataset-store = { path = "../dataset-store" }
+metadata-db = { path = "../metadata-db" }
+dump = { path = "../dump" }

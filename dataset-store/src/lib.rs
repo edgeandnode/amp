@@ -6,6 +6,7 @@ use std::{collections::BTreeSet, str::FromStr, sync::Arc};
 use common::{
     catalog::physical::Catalog,
     config::Config,
+    manifest::Manifest,
     query_context::{PlanningContext, ResolvedTable},
     store::StoreError,
     BlockNum, BlockStreamer, BoxError, Dataset, QueryContext, Store,
@@ -48,6 +49,9 @@ pub enum Error {
     #[error("error loading sql dataset: {0}")]
     SqlDatasetError(BoxError),
 
+    #[error("error deserializing manifest: {0}")]
+    ManifestError(serde_json::Error),
+
     #[error("{0}")]
     Unknown(BoxError),
 }
@@ -57,7 +61,8 @@ pub enum DatasetKind {
     EvmRpc,
     Firehose,
     Substreams,
-    Sql,
+    Sql, // Will be deprecated in favor of `Manifest`
+    Manifest,
 }
 
 impl DatasetKind {
@@ -67,6 +72,7 @@ impl DatasetKind {
             Self::Firehose => firehose_datasets::DATASET_KIND,
             Self::Substreams => substreams_datasets::DATASET_KIND,
             Self::Sql => sql_datasets::DATASET_KIND,
+            Self::Manifest => common::manifest::DATASET_KIND,
         }
     }
 }
@@ -78,6 +84,7 @@ impl fmt::Display for DatasetKind {
             Self::Firehose => f.write_str(firehose_datasets::DATASET_KIND),
             Self::Substreams => f.write_str(substreams_datasets::DATASET_KIND),
             Self::Sql => f.write_str(sql_datasets::DATASET_KIND),
+            Self::Manifest => f.write_str(common::manifest::DATASET_KIND),
         }
     }
 }
@@ -91,6 +98,7 @@ impl FromStr for DatasetKind {
             firehose_datasets::DATASET_KIND => Ok(Self::Firehose),
             substreams_datasets::DATASET_KIND => Ok(Self::Substreams),
             sql_datasets::DATASET_KIND => Ok(Self::Sql),
+            common::manifest::DATASET_KIND => Ok(Self::Manifest),
             k => Err(Error::UnsupportedKind(k.to_string())),
         }
     }
@@ -193,12 +201,17 @@ impl DatasetStore {
     async fn load_dataset_inner(self: Arc<Self>, dataset_name: &str) -> Result<Dataset, Error> {
         let (kind, dataset_toml) = self.kind_and_dataset(dataset_name).await?;
 
-        let dataset = match kind.as_str() {
-            evm_rpc_datasets::DATASET_KIND => evm_rpc_datasets::dataset(dataset_toml)?,
-            firehose_datasets::DATASET_KIND => firehose_datasets::evm::dataset(dataset_toml)?,
-            substreams_datasets::DATASET_KIND => substreams_datasets::dataset(dataset_toml).await?,
-            sql_datasets::DATASET_KIND => self.sql_dataset(dataset_toml).await?.dataset,
-            _ => return Err(Error::UnsupportedKind(kind.to_string())),
+        let dataset = match kind {
+            DatasetKind::EvmRpc => evm_rpc_datasets::dataset(dataset_toml)?,
+            DatasetKind::Firehose => firehose_datasets::evm::dataset(dataset_toml)?,
+            DatasetKind::Substreams => substreams_datasets::dataset(dataset_toml).await?,
+            DatasetKind::Sql => self.sql_dataset(dataset_toml).await?.dataset,
+            DatasetKind::Manifest => {
+                let raw_manifest = self.dataset_defs_store().get_string(dataset_name).await?;
+                let manifest: Manifest =
+                    serde_json::from_str(&raw_manifest).map_err(Error::ManifestError)?;
+                Dataset::from(manifest)
+            }
         };
 
         Ok(dataset)
@@ -270,7 +283,9 @@ impl DatasetStore {
                 let client = substreams_datasets::Client::new(toml, self.providers_store()).await?;
                 Ok(BlockStreamClient::Substreams(client))
             }
-            DatasetKind::Sql => Err(Error::UnsupportedKind(kind.to_string())),
+            DatasetKind::Sql | DatasetKind::Manifest => {
+                Err(Error::UnsupportedKind(kind.to_string()))
+            }
         }
     }
 

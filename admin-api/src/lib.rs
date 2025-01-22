@@ -3,18 +3,24 @@ mod handlers;
 use axum::{routing::post, Router};
 use common::{config::Config, BoxError};
 use handlers::deploy_handler;
+use metadata_db::MetadataDb;
 use std::{net::SocketAddr, sync::Arc};
 use tokio::net::TcpListener;
 
 pub struct ServiceState {
     pub config: Arc<Config>,
-    pub ipfs_client: reqwest::Client,
+    pub metadata_db: Option<MetadataDb>,
 }
 
 pub async fn serve(at: SocketAddr, config: Arc<Config>) -> Result<(), BoxError> {
+    let metadata_db = if let Some(url) = &config.metadata_db_url {
+        Some(MetadataDb::connect(url).await?)
+    } else {
+        None
+    };
     let state = Arc::new(ServiceState {
         config,
-        ipfs_client: reqwest::Client::new(),
+        metadata_db,
     });
 
     // Build the application with the /deploy route

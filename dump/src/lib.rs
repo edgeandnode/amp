@@ -14,6 +14,7 @@ use common::config::Config;
 use common::meta_tables::scanned_ranges;
 use common::multirange::MultiRange;
 use common::parquet;
+use common::parquet::basic::ZstdLevel;
 use common::query_context::Error as CoreError;
 use common::query_context::QueryContext;
 use common::BlockNum;
@@ -43,7 +44,6 @@ pub async fn dump_dataset(
     dataset_store: &Arc<DatasetStore>,
     config: &Config,
     metadata_db: Option<&MetadataDb>,
-    env: &Arc<RuntimeEnv>,
     n_jobs: u16,
     partition_size: u64,
     parquet_opts: &ParquetWriterProperties,
@@ -52,9 +52,10 @@ pub async fn dump_dataset(
 ) -> Result<(), BoxError> {
     use common::meta_tables::scanned_ranges::scanned_ranges_by_table;
 
-    let dataset = dataset_store.load_dataset(&dataset_name).await?;
+    let dataset = dataset_store.load_dataset(dataset_name).await?;
     let catalog = Catalog::for_dataset(&dataset, config.data_store.clone(), metadata_db).await?;
     let physical_dataset = catalog.datasets()[0].clone();
+    let env = Arc::new(config.make_runtime_env()?);
     let ctx = Arc::new(QueryContext::for_catalog(catalog, env.clone())?);
 
     // Ensure consistency before starting the dump procedure.
@@ -81,7 +82,7 @@ pub async fn dump_dataset(
             run_block_stream_jobs(
                 n_jobs,
                 ctx,
-                dataset_name,
+                &dataset.name,
                 dataset_store,
                 scanned_ranges_by_table,
                 partition_size,
@@ -91,17 +92,17 @@ pub async fn dump_dataset(
             )
             .await?;
         }
-        DatasetKind::Sql => {
+        DatasetKind::Sql | DatasetKind::Manifest => {
             if n_jobs > 1 {
                 info!("n_jobs > 1 has no effect for SQL datasets");
             }
 
             dump_sql_dataset(
                 ctx,
-                &dataset_name,
+                &dataset.name,
                 config.data_store.clone(),
                 dataset_store,
-                env,
+                &env,
                 scanned_ranges_by_table,
                 parquet_opts,
                 start,
@@ -111,7 +112,7 @@ pub async fn dump_dataset(
         }
     }
 
-    info!("dump of dataset {dataset_name} completed successfully");
+    info!("dump of dataset {} completed successfully", dataset.name);
 
     Ok(())
 }
@@ -300,6 +301,14 @@ async fn dump_sql_query(
     let table_ref = TableReference::partial(dataset_name, scanned_ranges::TABLE_NAME);
     dst_ctx.meta_insert_into(table_ref, scanned_range).await?;
     Ok(())
+}
+
+pub fn default_partition_size() -> u64 {
+    4096 * 1024 * 1024 // 4 GB
+}
+
+pub fn default_parquet_opts() -> ParquetWriterProperties {
+    parquet_opts(Compression::ZSTD(ZstdLevel::try_new(1).unwrap()), true)
 }
 
 pub fn parquet_opts(compression: Compression, bloom_filters: bool) -> ParquetWriterProperties {

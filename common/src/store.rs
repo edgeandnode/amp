@@ -100,6 +100,11 @@ impl Store {
         String::from_utf8(bytes.to_vec()).map_err(|_| StoreError::NotUtf8(path.to_string()))
     }
 
+    pub async fn put_string(&self, location: impl Into<Path>, s: String) -> Result<(), StoreError> {
+        self.store.put(&location.into(), s.into()).await?;
+        Ok(())
+    }
+
     pub fn list(&self, prefix: impl Into<Path>) -> BoxStream<'_, Result<ObjectMeta, StoreError>> {
         self.store
             .list(Some(&prefix.into()))

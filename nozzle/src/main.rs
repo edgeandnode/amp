@@ -124,7 +124,6 @@ async fn main_inner() -> Result<(), BoxError> {
             };
             let parquet_opts = dump::parquet_opts(compression, true);
             let end_block = end_block.map(|e| resolve_end_block(start, e)).transpose()?;
-            let env = Arc::new(config.make_runtime_env()?);
             let run_every =
                 run_every_mins.map(|s| tokio::time::interval(Duration::from_secs(s * 60)));
 
@@ -143,7 +142,6 @@ async fn main_inner() -> Result<(), BoxError> {
                             &dataset_store,
                             &config,
                             metadata_db.as_ref(),
-                            &env,
                             n_jobs,
                             partition_size,
                             &parquet_opts,
@@ -162,7 +160,6 @@ async fn main_inner() -> Result<(), BoxError> {
                             &dataset_store,
                             &config,
                             metadata_db.as_ref(),
-                            &env,
                             n_jobs,
                             partition_size,
                             &parquet_opts,

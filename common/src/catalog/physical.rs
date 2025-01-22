@@ -339,10 +339,10 @@ impl PhysicalTable {
 fn validate_name(name: &str) -> Result<(), BoxError> {
     if let Some(c) = name
         .chars()
-        .find(|&c| !(c.is_ascii_lowercase() || c == '_'))
+        .find(|&c| !(c.is_ascii_lowercase() || c == '_' || c.is_numeric()))
     {
         return Err(format!(
-            "names must be lowercase and contain only letters and underscores, \
+            "names must be lowercase and contain only letters, underscores, and numbers, \
              the name: '{name}' is not allowed because it contains the character '{c}'"
         )
         .into());

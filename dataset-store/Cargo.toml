@@ -16,3 +16,4 @@ object_store.workspace = true
 datafusion.workspace = true
 serde.workspace = true
 futures.workspace = true
+serde_json.workspace = true

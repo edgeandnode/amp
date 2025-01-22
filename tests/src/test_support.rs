@@ -165,7 +165,6 @@ async fn redump(
 
     // Disable bloom filters, as they bloat the test files and are not tested themselves.
     let parquet_opts = parquet_opts(compression, false);
-    let env = Arc::new(config.make_runtime_env()?);
 
     // Clear the data dir.
     clear_dataset(&config, dataset_name).await?;
@@ -175,7 +174,6 @@ async fn redump(
         &dataset_store,
         &config,
         None,
-        &env,
         1,
         partition_size,
         &parquet_opts,
