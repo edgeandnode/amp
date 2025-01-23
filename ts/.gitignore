@@ -9,3 +9,6 @@ dist/
 
 # Operating System
 .DS_Store 
+
+# lockfile
+pnpm-lock.yaml
