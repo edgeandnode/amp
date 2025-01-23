@@ -24,6 +24,7 @@ use datafusion::execution::runtime_env::RuntimeEnv;
 use datafusion::sql::TableReference;
 use dataset_store::sql_datasets::is_incremental;
 use dataset_store::sql_datasets::max_end_block;
+use dataset_store::sql_datasets::SqlDataset;
 use dataset_store::DatasetKind;
 use dataset_store::DatasetStore;
 use futures::future::try_join_all;
@@ -77,7 +78,8 @@ pub async fn dump_dataset(
         );
     }
 
-    match DatasetKind::from_str(&dataset.kind)? {
+    let kind = DatasetKind::from_str(&dataset.kind)?;
+    match kind {
         DatasetKind::EvmRpc | DatasetKind::Firehose | DatasetKind::Substreams => {
             run_block_stream_jobs(
                 n_jobs,
@@ -97,9 +99,15 @@ pub async fn dump_dataset(
                 info!("n_jobs > 1 has no effect for SQL datasets");
             }
 
+            let dataset = match kind {
+                DatasetKind::Sql => dataset_store.load_sql_dataset(dataset_name).await?,
+                DatasetKind::Manifest => dataset_store.load_manifest_dataset(dataset_name).await?,
+                _ => unreachable!(),
+            };
+
             dump_sql_dataset(
                 ctx,
-                &dataset.name,
+                dataset,
                 config.data_store.clone(),
                 dataset_store,
                 &env,
@@ -185,7 +193,7 @@ async fn run_block_stream_jobs(
 
 async fn dump_sql_dataset(
     dst_ctx: Arc<QueryContext>,
-    dataset_name: &str,
+    dataset: SqlDataset,
     data_store: Arc<common::Store>,
     dataset_store: &Arc<DatasetStore>,
     env: &Arc<RuntimeEnv>,
@@ -194,11 +202,10 @@ async fn dump_sql_dataset(
     start: BlockNum,
     end: Option<BlockNum>,
 ) -> Result<(), BoxError> {
-    let dataset = dataset_store.load_sql_dataset(dataset_name).await?;
     let physical_dataset = &dst_ctx.catalog().datasets()[0].clone();
     let mut matzn_tracker = MatznTracker::new();
 
-    for (table, query) in dataset.queries {
+    for (table, query) in &dataset.queries {
         let end = match end {
             Some(end) => end,
             None => {
@@ -224,11 +231,11 @@ async fn dump_sql_dataset(
         let is_incr = is_incremental(&plan)?;
 
         matzn_tracker
-            .record(is_incr, &dst_ctx, dataset_name)
+            .record(is_incr, &dst_ctx, dataset.name())
             .await?;
 
         if is_incr {
-            let ranges_to_scan = scanned_ranges_by_table[&table].complement(start, end);
+            let ranges_to_scan = scanned_ranges_by_table[table].complement(start, end);
             for (start, end) in ranges_to_scan.ranges {
                 info!(
                     "dumping {} between blocks {start} and {end}",
@@ -243,7 +250,7 @@ async fn dump_sql_dataset(
                     end,
                     physical_table,
                     parquet_opts,
-                    dataset_name,
+                    dataset.name(),
                     &dst_ctx,
                 )
                 .await?;
@@ -253,7 +260,7 @@ async fn dump_sql_dataset(
                 return Err("metadata_db is required for entire materialization".into());
             };
             let physical_table = physical_table
-                .next_revision(&data_store, dataset_name, metadata_db)
+                .next_revision(&data_store, dataset.name(), metadata_db)
                 .await?;
             info!(
                 "dumping entire {} to {}",
@@ -268,7 +275,7 @@ async fn dump_sql_dataset(
                 end,
                 &physical_table,
                 parquet_opts,
-                dataset_name,
+                dataset.name(),
                 &dst_ctx,
             )
             .await?;

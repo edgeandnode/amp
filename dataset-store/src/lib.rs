@@ -1,13 +1,17 @@
 pub mod sql_datasets;
 
 use core::fmt;
-use std::{collections::BTreeSet, str::FromStr, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    str::FromStr,
+    sync::Arc,
+};
 
 use common::{
     catalog::physical::Catalog,
     config::Config,
-    manifest::Manifest,
-    query_context::{PlanningContext, ResolvedTable},
+    manifest::{Manifest, TableInput},
+    query_context::{self, parse_sql, PlanningContext, ResolvedTable},
     store::StoreError,
     BlockNum, BlockStreamer, BoxError, Dataset, QueryContext, Store,
 };
@@ -22,6 +26,7 @@ use serde::Deserialize;
 use sql_datasets::SqlDataset;
 use thiserror::Error;
 use tokio::sync::mpsc;
+use tracing::{error, instrument};
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -30,6 +35,9 @@ pub enum Error {
 
     #[error("TOML parse error: {0}")]
     Toml(#[from] toml::de::Error),
+
+    #[error("JSON parse error: {0}")]
+    Json(#[from] serde_json::Error),
 
     #[error("unsupported dataset kind '{0}'")]
     UnsupportedKind(String),
@@ -51,6 +59,9 @@ pub enum Error {
 
     #[error("error deserializing manifest: {0}")]
     ManifestError(serde_json::Error),
+
+    #[error("error parsing SQL: {0}")]
+    SqlParseError(query_context::Error),
 
     #[error("{0}")]
     Unknown(BoxError),
@@ -129,10 +140,8 @@ impl DatasetError {
 
     pub fn is_not_found(&self) -> bool {
         matches!(
-            self.error,
-            Error::FetchError(StoreError::ObjectStore(
-                object_store::Error::NotFound { .. }
-            ))
+            &self.error,
+            Error::FetchError(e) if e.is_not_found()
         )
     }
 }
@@ -198,16 +207,59 @@ impl DatasetStore {
             .map_err(|e| (dataset, e).into())
     }
 
+    /// It's a hack for this to return a `SqlDataset`. Soon we should deprecate `SqlDataset` and
+    /// define a new struct to represent manifest datasets.
+    pub async fn load_manifest_dataset(
+        self: &Arc<Self>,
+        dataset: &str,
+    ) -> Result<SqlDataset, DatasetError> {
+        self.clone()
+            .load_manifest_dataset_inner(dataset)
+            .await
+            .map_err(|e| (dataset, e).into())
+    }
+
+    async fn load_manifest_dataset_inner(
+        self: Arc<Self>,
+        dataset_name: &str,
+    ) -> Result<SqlDataset, Error> {
+        let filename = format!("{}.json", dataset_name);
+        let raw_manifest = self.dataset_defs_store().get_string(filename).await?;
+        let manifest: Manifest =
+            serde_json::from_str(&raw_manifest).map_err(Error::ManifestError)?;
+        let dataset = Dataset::from(manifest.clone());
+        let mut queries = BTreeMap::new();
+        for table in manifest.tables {
+            let TableInput::View(query) = table.1.input;
+            let query = parse_sql(&query.sql).map_err(Error::SqlParseError)?;
+            queries.insert(table.0, query);
+        }
+        Ok(SqlDataset { dataset, queries })
+    }
+
     async fn load_dataset_inner(self: Arc<Self>, dataset_name: &str) -> Result<Dataset, Error> {
-        let (kind, dataset_toml) = self.kind_and_dataset(dataset_name).await?;
+        let (kind, raw_dataset) = self.kind_and_dataset(dataset_name).await?;
 
         let dataset = match kind {
-            DatasetKind::EvmRpc => evm_rpc_datasets::dataset(dataset_toml)?,
-            DatasetKind::Firehose => firehose_datasets::evm::dataset(dataset_toml)?,
-            DatasetKind::Substreams => substreams_datasets::dataset(dataset_toml).await?,
-            DatasetKind::Sql => self.sql_dataset(dataset_toml).await?.dataset,
+            DatasetKind::EvmRpc => {
+                let dataset_toml: toml::Value = toml::from_str(&raw_dataset)?;
+                evm_rpc_datasets::dataset(dataset_toml)?
+            }
+            DatasetKind::Firehose => {
+                let dataset_toml: toml::Value = toml::from_str(&raw_dataset)?;
+                firehose_datasets::evm::dataset(dataset_toml)?
+            }
+            DatasetKind::Substreams => {
+                let dataset_toml: toml::Value = toml::from_str(&raw_dataset)?;
+                substreams_datasets::dataset(dataset_toml).await?
+            }
+            DatasetKind::Sql => {
+                let dataset_toml: toml::Value = toml::from_str(&raw_dataset)?;
+                self.sql_dataset(dataset_toml).await?.dataset
+            }
             DatasetKind::Manifest => {
-                let raw_manifest = self.dataset_defs_store().get_string(dataset_name).await?;
+                let filename = format!("{}.json", dataset_name);
+                let raw_manifest = self.dataset_defs_store().get_string(filename).await?;
                 let manifest: Manifest =
                     serde_json::from_str(&raw_manifest).map_err(Error::ManifestError)?;
                 Dataset::from(manifest)
@@ -217,14 +269,17 @@ impl DatasetStore {
         Ok(dataset)
     }
 
+    #[instrument(skip(self), err)]
     async fn load_sql_dataset_inner(
         self: Arc<Self>,
         dataset_name: &str,
     ) -> Result<SqlDataset, Error> {
-        let (kind, dataset_toml) = self.kind_and_dataset(dataset_name).await?;
+        let (kind, raw_dataset) = self.kind_and_dataset(dataset_name).await?;
         if kind != DatasetKind::Sql {
             return Err(Error::UnsupportedKind(kind.to_string()));
         }
+
+        let dataset_toml: toml::Value = toml::from_str(&raw_dataset)?;
 
         self.sql_dataset(dataset_toml).await
     }
@@ -235,6 +290,7 @@ impl DatasetStore {
             .map_err(|e| (dataset, e).into())
     }
 
+    #[instrument(skip(self), err)]
     async fn load_client_inner(&self, dataset_name: &str) -> Result<impl BlockStreamer, Error> {
         #[derive(Clone)]
         pub enum BlockStreamClient {
@@ -268,7 +324,8 @@ impl DatasetStore {
             }
         }
 
-        let (kind, toml) = self.kind_and_dataset(dataset_name).await?;
+        let (kind, raw_dataset) = self.kind_and_dataset(dataset_name).await?;
+        let toml: toml::Value = toml::from_str(&raw_dataset)?;
 
         match kind {
             DatasetKind::EvmRpc => {
@@ -289,10 +346,7 @@ impl DatasetStore {
         }
     }
 
-    async fn kind_and_dataset(
-        &self,
-        dataset_name: &str,
-    ) -> Result<(DatasetKind, toml::Value), Error> {
+    async fn kind_and_dataset(&self, dataset_name: &str) -> Result<(DatasetKind, String), Error> {
         use Error::*;
 
         /// All dataset definitions must have a kind and name. The name must match the filename.
@@ -302,16 +356,30 @@ impl DatasetStore {
             name: String,
         }
 
-        let filename = format!("{}.toml", dataset_name);
-        let raw_dataset = self.dataset_defs_store().get_string(filename).await?;
-        let dataset_def: toml::Value = toml::from_str(&raw_dataset)?;
-        let common_fields = CommonFields::deserialize(dataset_def.clone())?;
+        let (raw, common_fields) = {
+            let filename = format!("{}.toml", dataset_name);
+            match self.dataset_defs_store().get_string(filename).await {
+                Ok(raw_dataset) => {
+                    let toml_value: toml::Value = toml::from_str(&raw_dataset)?;
+                    (raw_dataset, CommonFields::deserialize(toml_value)?)
+                }
+                Err(e) if e.is_not_found() => {
+                    // If it's not a TOML file, it might be a JSON file.
+                    // Ideally we migrate everything to JSON, but this is a stopgap.
+                    let filename = format!("{}.json", dataset_name);
+                    let raw_dataset = self.dataset_defs_store().get_string(filename).await?;
+                    let json_value: serde_json::Value = serde_json::from_str(&raw_dataset)?;
+                    (raw_dataset, CommonFields::deserialize(json_value)?)
+                }
+                Err(e) => return Err(e.into()),
+            }
+        };
         if common_fields.name != dataset_name {
             return Err(NameMismatch(common_fields.name, dataset_name.to_string()));
         }
         let kind = DatasetKind::from_str(&common_fields.kind)?;
 
-        Ok((kind, dataset_def))
+        Ok((kind, raw))
     }
 
     /// Creates a `QueryContext` for a SQL query, this will infer and load any dependencies. The

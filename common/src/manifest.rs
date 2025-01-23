@@ -16,7 +16,7 @@ use crate::Dataset;
 
 pub const DATASET_KIND: &str = "manifest";
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct Manifest {
     pub name: String,
     pub version: String,
@@ -24,42 +24,42 @@ pub struct Manifest {
     pub tables: BTreeMap<String, Table>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct Dependency {
     pub owner: String,
     pub name: String,
     pub version: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Table {
     pub input: TableInput,
     pub schema: TableSchema,
 }
 
 // TODO: Tagging
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum TableInput {
     View(View),
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct View {
     pub sql: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TableSchema {
     pub arrow: ArrowSchema,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ArrowSchema {
     pub fields: Vec<Field>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Field {
     pub name: String,
     #[serde(rename = "type")]

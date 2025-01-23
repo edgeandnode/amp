@@ -1,4 +1,5 @@
 {
+    "kind": "manifest",
     "name": "transfers_eth_mainnet",
     "version": "0.1.0",
     "dependencies": {

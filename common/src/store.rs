@@ -24,6 +24,15 @@ pub enum StoreError {
     NotUtf8(String),
 }
 
+impl StoreError {
+    pub fn is_not_found(&self) -> bool {
+        matches!(
+            self,
+            StoreError::ObjectStore(object_store::Error::NotFound { .. })
+        )
+    }
+}
+
 /// A wrapper around an `ObjectStore`. There are a few things it helps us with over a plain
 /// `ObjectStore`:
 /// - Keeps track of the URL of the store, in case we need it.

@@ -32,6 +32,12 @@ pub struct SqlDataset {
     pub queries: BTreeMap<String, parser::Statement>,
 }
 
+impl SqlDataset {
+    pub fn name(&self) -> &str {
+        &self.dataset.name
+    }
+}
+
 pub const DATASET_KIND: &str = "sql";
 
 #[derive(Debug, Deserialize)]

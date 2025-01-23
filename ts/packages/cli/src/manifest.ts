@@ -1,4 +1,5 @@
 export type DatasetManifest = {
+    kind: "manifest";
     name: string;
     version: string;
     repository?: string;

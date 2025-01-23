@@ -38,6 +38,7 @@ async function build_manifest(config: DatasetDefinition): Promise<DatasetManifes
     }
 
     return {
+        kind: "manifest",
         name: config.name,
         version: config.version,
         dependencies: config.dependencies,
