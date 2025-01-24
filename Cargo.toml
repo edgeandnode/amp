@@ -64,6 +64,7 @@ sqlx = { version = "0.8", features = [
 ] }
 uuid = { version = "1.11.0", features = ["v7"] }
 axum = "0.8.0"
+semver = { version = "1.0.18", features = ["serde"] }
 
 # Datafusion and Arrow crates
 arrow-flight = { version = "53.3", features = ["flight-sql-experimental"] }

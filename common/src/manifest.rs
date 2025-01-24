@@ -19,7 +19,7 @@ pub const DATASET_KIND: &str = "manifest";
 #[derive(Debug, Clone, Deserialize)]
 pub struct Manifest {
     pub name: String,
-    pub version: String,
+    pub version: semver::Version,
     pub dependencies: BTreeMap<String, Dependency>,
     pub tables: BTreeMap<String, Table>,
 }
@@ -28,7 +28,7 @@ pub struct Manifest {
 pub struct Dependency {
     pub owner: String,
     pub name: String,
-    pub version: String,
+    pub version: semver::VersionReq,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
