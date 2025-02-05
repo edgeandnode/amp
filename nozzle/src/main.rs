@@ -15,7 +15,6 @@ use metadata_db::MetadataDb;
 use parquet::basic::Compression;
 use parquet::basic::ZstdLevel;
 use server::service::Service;
-use tokio::net::TcpListener;
 use tonic::transport::Server;
 
 #[global_allocator]
@@ -238,10 +237,7 @@ async fn run_jsonl_server(service: Service, addr: SocketAddr) -> Result<(), BoxE
                 .br(true)
                 .gzip(true),
         );
-    let listener = TcpListener::bind(addr).await?;
-    axum::serve(listener, app.into_make_service())
-        .tcp_nodelay(true)
-        .await?;
+    http_common::serve_at(addr, app).await?;
     Ok(())
 }
 

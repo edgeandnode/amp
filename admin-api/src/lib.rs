@@ -5,7 +5,6 @@ use common::{config::Config, BoxError};
 use handlers::deploy_handler;
 use metadata_db::MetadataDb;
 use std::{net::SocketAddr, sync::Arc};
-use tokio::net::TcpListener;
 
 pub struct ServiceState {
     pub config: Arc<Config>,
@@ -28,11 +27,7 @@ pub async fn serve(at: SocketAddr, config: Arc<Config>) -> Result<(), BoxError> 
         .route("/deploy", post(deploy_handler))
         .with_state(state);
 
-    // Specify the address to run the server
-    let listener = TcpListener::bind(at).await?;
-
-    // Run the server
-    axum::serve(listener, app).await?;
+    http_common::serve_at(at, app).await?;
 
     Ok(())
 }

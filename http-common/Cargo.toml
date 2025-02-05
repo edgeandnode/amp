@@ -8,3 +8,4 @@ serde_json.workspace = true
 axum.workspace = true
 reqwest = "0.12.0"
 common = { path = "../common" }
+tokio.workspace = true

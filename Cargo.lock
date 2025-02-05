@@ -1119,8 +1119,6 @@ dependencies = [
  "http",
  "http-body",
  "http-body-util",
- "hyper",
- "hyper-util",
  "itoa",
  "matchit 0.7.3",
  "memchr",
@@ -1129,15 +1127,10 @@ dependencies = [
  "pin-project-lite",
  "rustversion",
  "serde",
- "serde_json",
- "serde_path_to_error",
- "serde_urlencoded",
  "sync_wrapper",
- "tokio",
  "tower 0.5.2",
  "tower-layer",
  "tower-service",
- "tracing",
 ]
 
 [[package]]
@@ -1192,7 +1185,6 @@ dependencies = [
  "sync_wrapper",
  "tower-layer",
  "tower-service",
- "tracing",
 ]
 
 [[package]]
@@ -3086,6 +3078,7 @@ dependencies = [
  "common",
  "reqwest",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -3822,13 +3815,14 @@ dependencies = [
  "admin-api",
  "arrow-flight",
  "arrow-json",
- "axum 0.7.9",
+ "axum 0.8.1",
  "clap",
  "common",
  "datafusion",
  "dataset-store",
  "dump",
  "futures",
+ "http-common",
  "log",
  "metadata-db",
  "registry-service",
