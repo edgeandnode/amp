@@ -16,7 +16,7 @@ use crate::Dataset;
 
 pub const DATASET_KIND: &str = "manifest";
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manifest {
     pub name: String,
     pub version: semver::Version,
@@ -24,7 +24,7 @@ pub struct Manifest {
     pub tables: BTreeMap<String, Table>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Dependency {
     pub owner: String,
     pub name: String,
