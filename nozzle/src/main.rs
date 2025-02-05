@@ -4,6 +4,7 @@ use std::{net::SocketAddr, sync::Arc};
 
 use arrow_flight::flight_service_server::FlightServiceServer;
 use clap::Parser as _;
+use common::manifest;
 use common::{config::Config, tracing, BoxError};
 use datafusion::catalog_common::resolve_table_references;
 use datafusion::parquet;
@@ -279,11 +280,17 @@ async fn datasets_and_dependencies(
     let mut deps: BTreeMap<String, Vec<String>> = Default::default();
     while !datasets.is_empty() {
         let dataset = store.load_dataset(&datasets.pop().unwrap()).await?;
-        if dataset.kind != sql_datasets::DATASET_KIND {
-            deps.insert(dataset.name, vec![]);
-            continue;
-        }
-        let sql_dataset = store.load_sql_dataset(&dataset.name).await?;
+        match dataset.kind.as_str() {
+            sql_datasets::DATASET_KIND | manifest::DATASET_KIND => {
+                deps.insert(dataset.name.clone(), vec![]);
+            }
+            _ => continue,
+        };
+        let sql_dataset = match dataset.kind.as_str() {
+            sql_datasets::DATASET_KIND => store.load_sql_dataset(&dataset.name).await?,
+            manifest::DATASET_KIND => store.load_manifest_dataset(&dataset.name).await?,
+            _ => continue,
+        };
         let mut refs: Vec<String> = Default::default();
         for query in sql_dataset.queries.values() {
             let (tables, _) = resolve_table_references(query, true)?;
