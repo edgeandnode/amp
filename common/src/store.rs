@@ -24,6 +24,15 @@ pub enum StoreError {
     NotUtf8(String),
 }
 
+impl StoreError {
+    pub fn is_not_found(&self) -> bool {
+        matches!(
+            self,
+            StoreError::ObjectStore(object_store::Error::NotFound { .. })
+        )
+    }
+}
+
 /// A wrapper around an `ObjectStore`. There are a few things it helps us with over a plain
 /// `ObjectStore`:
 /// - Keeps track of the URL of the store, in case we need it.
@@ -98,6 +107,11 @@ impl Store {
         let path = location.into();
         let bytes = self.get_bytes(path.clone()).await?;
         String::from_utf8(bytes.to_vec()).map_err(|_| StoreError::NotUtf8(path.to_string()))
+    }
+
+    pub async fn put_string(&self, location: impl Into<Path>, s: String) -> Result<(), StoreError> {
+        self.store.put(&location.into(), s.into()).await?;
+        Ok(())
     }
 
     pub fn list(&self, prefix: impl Into<Path>) -> BoxStream<'_, Result<ObjectMeta, StoreError>> {

@@ -4,6 +4,7 @@ use std::{net::SocketAddr, sync::Arc};
 
 use arrow_flight::flight_service_server::FlightServiceServer;
 use clap::Parser as _;
+use common::manifest;
 use common::{config::Config, tracing, BoxError};
 use datafusion::catalog_common::resolve_table_references;
 use datafusion::parquet;
@@ -76,6 +77,7 @@ enum Command {
         run_every_mins: Option<u64>,
     },
     Server,
+    AdminApi,
 }
 
 #[tokio::main]
@@ -123,7 +125,6 @@ async fn main_inner() -> Result<(), BoxError> {
             };
             let parquet_opts = dump::parquet_opts(compression, true);
             let end_block = end_block.map(|e| resolve_end_block(start, e)).transpose()?;
-            let env = Arc::new(config.make_runtime_env()?);
             let run_every =
                 run_every_mins.map(|s| tokio::time::interval(Duration::from_secs(s * 60)));
 
@@ -142,7 +143,6 @@ async fn main_inner() -> Result<(), BoxError> {
                             &dataset_store,
                             &config,
                             metadata_db.as_ref(),
-                            &env,
                             n_jobs,
                             partition_size,
                             &parquet_opts,
@@ -161,7 +161,6 @@ async fn main_inner() -> Result<(), BoxError> {
                             &dataset_store,
                             &config,
                             metadata_db.as_ref(),
-                            &env,
                             n_jobs,
                             partition_size,
                             &parquet_opts,
@@ -199,6 +198,31 @@ async fn main_inner() -> Result<(), BoxError> {
                 result = jsonl_server => result?,
             };
             Err("server shutdown unexpectedly, it should run forever".into())
+        }
+        Command::AdminApi => {
+            let admin_api_addr: SocketAddr = ([0, 0, 0, 0], 1610).into();
+            info!("Admin API running at {}", admin_api_addr);
+
+            let registry_service_addr: SocketAddr = ([0, 0, 0, 0], 1611).into();
+            info!("Registry service running at {}", registry_service_addr);
+
+            let admin_api = admin_api::serve(admin_api_addr, config.clone());
+
+            let metadata_db = if let Some(url) = &config.metadata_db_url {
+                Some(MetadataDb::connect(url).await?)
+            } else {
+                None
+            };
+            let registry_service =
+                registry_service::serve(registry_service_addr, config, metadata_db);
+
+            // Run the admin api and registry service concurrently
+            tokio::select! {
+                _ = admin_api => {}
+                _ = registry_service => {}
+            }
+
+            Err("admin api shutdown unexpectedly, it should run forever".into())
         }
     }
 }
@@ -256,11 +280,17 @@ async fn datasets_and_dependencies(
     let mut deps: BTreeMap<String, Vec<String>> = Default::default();
     while !datasets.is_empty() {
         let dataset = store.load_dataset(&datasets.pop().unwrap()).await?;
-        if dataset.kind != sql_datasets::DATASET_KIND {
-            deps.insert(dataset.name, vec![]);
-            continue;
-        }
-        let sql_dataset = store.load_sql_dataset(&dataset.name).await?;
+        match dataset.kind.as_str() {
+            sql_datasets::DATASET_KIND | manifest::DATASET_KIND => {
+                deps.insert(dataset.name.clone(), vec![]);
+            }
+            _ => continue,
+        };
+        let sql_dataset = match dataset.kind.as_str() {
+            sql_datasets::DATASET_KIND => store.load_sql_dataset(&dataset.name).await?,
+            manifest::DATASET_KIND => store.load_manifest_dataset(&dataset.name).await?,
+            _ => continue,
+        };
         let mut refs: Vec<String> = Default::default();
         for query in sql_dataset.queries.values() {
             let (tables, _) = resolve_table_references(query, true)?;

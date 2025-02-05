@@ -1,0 +1,24 @@
+[package]
+name = "registry-service"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+# Common async runtime and utilities
+tokio.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+
+# Serialization
+serde.workspace = true
+serde_json.workspace = true
+
+# Error handling and logging
+thiserror.workspace = true
+tracing.workspace = true
+
+axum.workspace = true
+common = { path = "../common" } 
+dataset-store = { path = "../dataset-store" }
+metadata-db = { path = "../metadata-db" }
+http-common = { path = "../http-common" }

@@ -14,6 +14,7 @@ use common::config::Config;
 use common::meta_tables::scanned_ranges;
 use common::multirange::MultiRange;
 use common::parquet;
+use common::parquet::basic::ZstdLevel;
 use common::query_context::Error as CoreError;
 use common::query_context::QueryContext;
 use common::BlockNum;
@@ -23,6 +24,7 @@ use datafusion::execution::runtime_env::RuntimeEnv;
 use datafusion::sql::TableReference;
 use dataset_store::sql_datasets::is_incremental;
 use dataset_store::sql_datasets::max_end_block;
+use dataset_store::sql_datasets::SqlDataset;
 use dataset_store::DatasetKind;
 use dataset_store::DatasetStore;
 use futures::future::try_join_all;
@@ -43,7 +45,6 @@ pub async fn dump_dataset(
     dataset_store: &Arc<DatasetStore>,
     config: &Config,
     metadata_db: Option<&MetadataDb>,
-    env: &Arc<RuntimeEnv>,
     n_jobs: u16,
     partition_size: u64,
     parquet_opts: &ParquetWriterProperties,
@@ -52,9 +53,10 @@ pub async fn dump_dataset(
 ) -> Result<(), BoxError> {
     use common::meta_tables::scanned_ranges::scanned_ranges_by_table;
 
-    let dataset = dataset_store.load_dataset(&dataset_name).await?;
+    let dataset = dataset_store.load_dataset(dataset_name).await?;
     let catalog = Catalog::for_dataset(&dataset, config.data_store.clone(), metadata_db).await?;
     let physical_dataset = catalog.datasets()[0].clone();
+    let env = Arc::new(config.make_runtime_env()?);
     let ctx = Arc::new(QueryContext::for_catalog(catalog, env.clone())?);
 
     // Ensure consistency before starting the dump procedure.
@@ -76,12 +78,13 @@ pub async fn dump_dataset(
         );
     }
 
-    match DatasetKind::from_str(&dataset.kind)? {
+    let kind = DatasetKind::from_str(&dataset.kind)?;
+    match kind {
         DatasetKind::EvmRpc | DatasetKind::Firehose | DatasetKind::Substreams => {
             run_block_stream_jobs(
                 n_jobs,
                 ctx,
-                dataset_name,
+                &dataset.name,
                 dataset_store,
                 scanned_ranges_by_table,
                 partition_size,
@@ -91,17 +94,23 @@ pub async fn dump_dataset(
             )
             .await?;
         }
-        DatasetKind::Sql => {
+        DatasetKind::Sql | DatasetKind::Manifest => {
             if n_jobs > 1 {
                 info!("n_jobs > 1 has no effect for SQL datasets");
             }
 
+            let dataset = match kind {
+                DatasetKind::Sql => dataset_store.load_sql_dataset(dataset_name).await?,
+                DatasetKind::Manifest => dataset_store.load_manifest_dataset(dataset_name).await?,
+                _ => unreachable!(),
+            };
+
             dump_sql_dataset(
                 ctx,
-                &dataset_name,
+                dataset,
                 config.data_store.clone(),
                 dataset_store,
-                env,
+                &env,
                 scanned_ranges_by_table,
                 parquet_opts,
                 start,
@@ -111,7 +120,7 @@ pub async fn dump_dataset(
         }
     }
 
-    info!("dump of dataset {dataset_name} completed successfully");
+    info!("dump of dataset {} completed successfully", dataset.name);
 
     Ok(())
 }
@@ -184,7 +193,7 @@ async fn run_block_stream_jobs(
 
 async fn dump_sql_dataset(
     dst_ctx: Arc<QueryContext>,
-    dataset_name: &str,
+    dataset: SqlDataset,
     data_store: Arc<common::Store>,
     dataset_store: &Arc<DatasetStore>,
     env: &Arc<RuntimeEnv>,
@@ -193,11 +202,10 @@ async fn dump_sql_dataset(
     start: BlockNum,
     end: Option<BlockNum>,
 ) -> Result<(), BoxError> {
-    let dataset = dataset_store.load_sql_dataset(dataset_name).await?;
     let physical_dataset = &dst_ctx.catalog().datasets()[0].clone();
     let mut matzn_tracker = MatznTracker::new();
 
-    for (table, query) in dataset.queries {
+    for (table, query) in &dataset.queries {
         let end = match end {
             Some(end) => end,
             None => {
@@ -223,11 +231,11 @@ async fn dump_sql_dataset(
         let is_incr = is_incremental(&plan)?;
 
         matzn_tracker
-            .record(is_incr, &dst_ctx, dataset_name)
+            .record(is_incr, &dst_ctx, dataset.name())
             .await?;
 
         if is_incr {
-            let ranges_to_scan = scanned_ranges_by_table[&table].complement(start, end);
+            let ranges_to_scan = scanned_ranges_by_table[table].complement(start, end);
             for (start, end) in ranges_to_scan.ranges {
                 info!(
                     "dumping {} between blocks {start} and {end}",
@@ -242,7 +250,7 @@ async fn dump_sql_dataset(
                     end,
                     physical_table,
                     parquet_opts,
-                    dataset_name,
+                    dataset.name(),
                     &dst_ctx,
                 )
                 .await?;
@@ -252,7 +260,7 @@ async fn dump_sql_dataset(
                 return Err("metadata_db is required for entire materialization".into());
             };
             let physical_table = physical_table
-                .next_revision(&data_store, dataset_name, metadata_db)
+                .next_revision(&data_store, dataset.name(), metadata_db)
                 .await?;
             info!(
                 "dumping entire {} to {}",
@@ -267,7 +275,7 @@ async fn dump_sql_dataset(
                 end,
                 &physical_table,
                 parquet_opts,
-                dataset_name,
+                dataset.name(),
                 &dst_ctx,
             )
             .await?;
@@ -300,6 +308,14 @@ async fn dump_sql_query(
     let table_ref = TableReference::partial(dataset_name, scanned_ranges::TABLE_NAME);
     dst_ctx.meta_insert_into(table_ref, scanned_range).await?;
     Ok(())
+}
+
+pub fn default_partition_size() -> u64 {
+    4096 * 1024 * 1024 // 4 GB
+}
+
+pub fn default_parquet_opts() -> ParquetWriterProperties {
+    parquet_opts(Compression::ZSTD(ZstdLevel::try_new(1).unwrap()), true)
 }
 
 pub fn parquet_opts(compression: Compression, bloom_filters: bool) -> ParquetWriterProperties {

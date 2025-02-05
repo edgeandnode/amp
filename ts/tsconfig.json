@@ -1,0 +1,11 @@
+{
+    "compilerOptions": {
+        "module": "node16",
+        "composite": true,
+        "strict": true
+    },
+    "exclude": [
+        "node_modules",
+        "dist"
+    ]
+}
