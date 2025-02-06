@@ -21,7 +21,10 @@ use alloy::{
     primitives::{ruint::FromUintError, BigIntConversionError, Signed, B256},
 };
 use datafusion::{
-    arrow::{array::ArrayBuilder, error::ArrowError},
+    arrow::{
+        array::{ArrayBuilder, NullBuilder},
+        error::ArrowError,
+    },
     common::{internal_err, plan_err, ExprSchema},
     error::DataFusionError,
     logical_expr::{
@@ -152,7 +155,7 @@ impl<'a> FieldBuilder<'a> {
     }
 
     fn append_null_value(&'a mut self) -> Result<(), DataFusionError> {
-        let ty = arrow_type(&self.ty)?;
+        let ty = arrow_type(self.ty)?;
         match ty {
             DataType::Boolean => self.field::<BooleanBuilder>()?.append_null(),
             DataType::Int8 => self.field::<Int8Builder>()?.append_null(),
@@ -254,7 +257,7 @@ impl<'a> FieldBuilder<'a> {
                 n if n <= DEC_128_MAX_BINARY_PREC => {
                     let val = i128::try_from(u)?;
                     let builder = builder.field::<Decimal128Builder>()?;
-                    validate_decimal_precision(val as i128, DEC128_PREC)?;
+                    validate_decimal_precision(val, DEC128_PREC)?;
                     builder.append_value(val);
                 }
                 n if n <= DEC_256_MAX_BINARY_PREC => {
@@ -498,6 +501,11 @@ pub fn decode(
 ) -> Result<Arc<dyn Array>, DataFusionError> {
     let event = Event::try_from(signature)?;
     let fields = event.fields()?;
+    if fields.is_empty() {
+        let mut builder = NullBuilder::new();
+        builder.append_nulls(topic1.len());
+        return Ok(Arc::new(builder.finish()));
+    }
 
     let mut builder = StructBuilder::from_fields(fields, topic1.len());
     for (t1, t2, t3, d) in izip!(topic1, topic2, topic3, data) {
@@ -605,6 +613,9 @@ impl ScalarUDFImpl for EvmDecode {
         };
         let event = Event::try_from(signature).map_err(|e| e.context(self.name()))?;
         let fields = event.fields()?;
+        if fields.is_empty() {
+            return Ok(DataType::Null);
+        }
         Ok(DataType::Struct(fields))
     }
 
