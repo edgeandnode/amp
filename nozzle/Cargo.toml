@@ -4,7 +4,8 @@ edition.workspace = true
 version.workspace = true
 
 [dependencies]
-metadata-db = { path = "../metadata-db" }
+alloy.workspace = true
+anyhow = "1.0.95"
 arrow-flight.workspace = true
 arrow-json = "53.3.0"
 axum.workspace = true
@@ -14,7 +15,9 @@ datafusion.workspace = true
 dataset-store = { path = "../dataset-store" }
 dump = { path = "../dump" }
 futures.workspace = true
+indoc = "2.0.5"
 log.workspace = true
+metadata-db = { path = "../metadata-db" }
 server = { path = "../server" }
 snmalloc-rs.workspace = true
 tokio.workspace = true

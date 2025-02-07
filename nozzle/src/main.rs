@@ -1,8 +1,13 @@
+mod dev;
+
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
 use std::time::Duration;
 use std::{net::SocketAddr, sync::Arc};
 
+use alloy::transports::http::reqwest::Url;
 use arrow_flight::flight_service_server::FlightServiceServer;
+use axum::response::Response;
 use axum::serve::ListenerExt;
 use clap::Parser as _;
 use common::manifest;
@@ -24,15 +29,22 @@ static ALLOC: snmalloc_rs::SnMalloc = snmalloc_rs::SnMalloc;
 
 #[derive(Debug, clap::Parser)]
 struct Args {
-    #[arg(long, env = "NOZZLE_CONFIG")]
-    config: String,
     #[command(subcommand)]
     command: Command,
 }
 
 #[derive(Debug, clap::Subcommand)]
 enum Command {
+    Dev {
+        #[arg(long, default_value = "./nozzle/")]
+        nozzle_dir: PathBuf,
+        #[arg(long, default_value = "http://localhost:8545")]
+        rpc_url: Url,
+    },
     Dump {
+        #[arg(long, env = "NOZZLE_CONFIG")]
+        config: String,
+
         /// The name of the dataset to dump. This will be looked up in the dataset definiton directory.
         /// Will also be used as a subdirectory in the output path, `<data_dir>/<dataset>`.
         ///
@@ -77,7 +89,10 @@ enum Command {
         #[arg(long, env = "DUMP_RUN_EVERY_MINS")]
         run_every_mins: Option<u64>,
     },
-    Server,
+    Server {
+        #[arg(long, env = "NOZZLE_CONFIG")]
+        config: String,
+    },
 }
 
 #[tokio::main]
@@ -95,18 +110,46 @@ async fn main() {
 async fn main_inner() -> Result<(), BoxError> {
     tracing::register_logger();
     let args = Args::parse();
-
-    let config = Arc::new(
-        Config::load(args.config, true, None).map_err(|e| format!("failed to load config: {e}"))?,
-    );
-    let metadata_db = if let Some(url) = &config.metadata_db_url {
-        Some(MetadataDb::connect(url).await?)
-    } else {
-        None
-    };
-
     match args.command {
+        Command::Dev {
+            nozzle_dir,
+            rpc_url,
+        } => {
+            let addr: SocketAddr = ([0, 0, 0, 0], 1610).into();
+
+            let nozzle = Arc::new(tokio::sync::Mutex::new(dev::Nozzle::new(nozzle_dir)?));
+            nozzle.lock().await.add_rpc_dataset(rpc_url.as_str())?;
+
+            let router = axum::Router::new()
+                .route(
+                    "/sql",
+                    axum::routing::post(
+                        |axum::extract::State(nozzle): axum::extract::State<
+                            Arc<tokio::sync::Mutex<dev::Nozzle>>,
+                        >,
+                         request| async move {
+                            let service = match nozzle.lock().await.service() {
+                                Ok(service) => service,
+                                Err(err) => return Response::new(json_error(err).into()),
+                            };
+                            handle_jsonl_request(&service, request).await
+                        },
+                    )
+                    .with_state(nozzle.clone()),
+                )
+                .layer(
+                    tower_http::compression::CompressionLayer::new()
+                        .br(true)
+                        .gzip(true),
+                );
+            let listener = TcpListener::bind(addr)
+                .await?
+                .tap_io(|tcp_stream| tcp_stream.set_nodelay(true).unwrap());
+            axum::serve(listener, router).await?;
+            Ok(())
+        }
         Command::Dump {
+            config,
             start,
             end_block,
             n_jobs,
@@ -116,6 +159,15 @@ async fn main_inner() -> Result<(), BoxError> {
             ignore_deps,
             run_every_mins,
         } => {
+            let config = Arc::new(
+                Config::load(config, true, None)
+                    .map_err(|e| format!("failed to load config: {e}"))?,
+            );
+            let metadata_db = match &config.metadata_db_url {
+                Some(url) => Some(MetadataDb::connect(url).await?),
+                None => None,
+            };
+
             let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
             let partition_size = partition_size_mb * 1024 * 1024;
             let compression = if disable_compression {
@@ -174,7 +226,16 @@ async fn main_inner() -> Result<(), BoxError> {
 
             Ok(())
         }
-        Command::Server => {
+        Command::Server { config } => {
+            let config = Arc::new(
+                Config::load(config, true, None)
+                    .map_err(|e| format!("failed to load config: {e}"))?,
+            );
+            let metadata_db = match &config.metadata_db_url {
+                Some(url) => Some(MetadataDb::connect(url).await?),
+                None => None,
+            };
+
             info!("memory limit is {} MB", config.max_mem_mb);
             info!(
                 "spill to disk allowed: {}",
@@ -206,7 +267,10 @@ async fn run_jsonl_server(service: Service, addr: SocketAddr) -> Result<(), BoxE
     let router = axum::Router::new()
         .route(
             "/",
-            axum::routing::post(handle_jsonl_request).with_state(service),
+            axum::routing::post(|axum::extract::State(service), request| async move {
+                handle_jsonl_request(&service, request).await
+            })
+            .with_state(service),
         )
         .layer(
             tower_http::compression::CompressionLayer::new()
@@ -220,30 +284,28 @@ async fn run_jsonl_server(service: Service, addr: SocketAddr) -> Result<(), BoxE
     Ok(())
 }
 
-async fn handle_jsonl_request(
-    axum::extract::State(service): axum::extract::State<Service>,
-    request: String,
-) -> axum::response::Response {
-    fn error_payload(message: impl std::fmt::Display) -> String {
-        format!(r#"{{"error": "{}"}}"#, message)
-    }
+async fn handle_jsonl_request(service: &Service, request: String) -> axum::response::Response {
     let stream = match service.execute_query(&request).await {
         Ok(stream) => stream,
-        Err(err) => return axum::response::Response::new(error_payload(err.message()).into()),
+        Err(err) => return axum::response::Response::new(json_error(err.message()).into()),
     };
     let stream = stream
         .map(|result| -> Result<String, BoxError> {
-            let batch = result.map_err(error_payload)?;
+            let batch = result.map_err(json_error)?;
             let mut buf: Vec<u8> = Default::default();
             let mut writer = arrow_json::writer::LineDelimitedWriter::new(&mut buf);
             writer.write(&batch)?;
             Ok(String::from_utf8(buf).unwrap())
         })
-        .map_err(error_payload);
+        .map_err(json_error);
     axum::response::Response::builder()
         .header("content-type", "application/x-ndjson")
         .body(axum::body::Body::from_stream(stream))
         .unwrap()
+}
+
+fn json_error(message: impl std::fmt::Display) -> String {
+    format!(r#"{{"error": "{}"}}"#, message)
 }
 
 /// Return the input datasets and their dataset dependencies. The output set is ordered such that

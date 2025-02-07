@@ -591,9 +591,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.93"
+version = "1.0.95"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c95c10ba0b00a02636238b814946408b1322d5ac4760326e6fb8ec956d85775"
+checksum = "34ac096ce696dc2fcabef30516bb13c0a68a11d30131d3df6f04711467681b04"
 
 [[package]]
 name = "ark-ff"
@@ -3399,6 +3399,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "indoc"
+version = "2.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b248f5224d1d606005e02c97f5aa4e88eeb230488bcc03bc9ca4d7991399f2b5"
+
+[[package]]
 name = "inlinable_string"
 version = "0.1.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3783,6 +3789,8 @@ dependencies = [
 name = "nozzle"
 version = "0.1.0"
 dependencies = [
+ "alloy",
+ "anyhow",
  "arrow-flight",
  "arrow-json",
  "axum 0.8.1",
@@ -3792,6 +3800,7 @@ dependencies = [
  "dataset-store",
  "dump",
  "futures",
+ "indoc",
  "log",
  "metadata-db",
  "server",
