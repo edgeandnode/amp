@@ -23,6 +23,3 @@ tower-http = { version = "0.6.2", features = [
   "compression-br",
   "compression-gzip",
 ] }
-admin-api = { path = "../admin-api" }
-registry-service = { path = "../registry-service" }
-http-common = { path = "../http-common" }

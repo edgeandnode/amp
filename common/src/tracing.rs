@@ -6,17 +6,14 @@ static NOZZLE_LOG_ENV_VAR: &str = "NOZZLE_LOG";
 
 /// List of crates in the workspace.
 const NOZZLE_CRATES: &[&str] = &[
-    "admin-api",
     "common",
     "dataset-store",
     "dump",
     "dump-check",
     "evm-rpc-datasets",
     "firehose-datasets",
-    "http-common",
     "metadata-db",
     "nozzle",
-    "registry-service",
     "server",
     "substreams-datasets",
     "tests",

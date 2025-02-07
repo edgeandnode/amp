@@ -11,9 +11,6 @@ members = [
     "firehose-datasets",
     "substreams-datasets",
     "metadata-db",
-    "admin-api",
-    "http-common",
-    "registry-service",
 ]
 
 resolver = "2"
