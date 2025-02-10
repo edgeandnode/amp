@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 use std::{net::SocketAddr, sync::Arc};
 
-use alloy::transports::http::reqwest::Url;
+use alloy::{rpc::client::ReqwestClient as RpcClient, transports::http::reqwest::Url};
 use arrow_flight::flight_service_server::FlightServiceServer;
 use axum::response::Response;
 use axum::serve::ListenerExt;
@@ -15,6 +15,7 @@ use common::{config::Config, tracing, BoxError};
 use datafusion::catalog_common::resolve_table_references;
 use datafusion::parquet;
 use dataset_store::{sql_datasets, DatasetStore};
+use dev::watch_chain_head;
 use futures::{StreamExt as _, TryStreamExt as _};
 use log::info;
 use metadata_db::MetadataDb;
@@ -119,6 +120,27 @@ async fn main_inner() -> Result<(), BoxError> {
 
             let nozzle = Arc::new(tokio::sync::Mutex::new(dev::Nozzle::new(nozzle_dir)?));
             nozzle.lock().await.add_rpc_dataset(rpc_url.as_str())?;
+
+            {
+                let rpc = RpcClient::new_http(rpc_url);
+                let mut chain_head = watch_chain_head(rpc);
+                let nozzle = nozzle.clone();
+                tokio::spawn(async move {
+                    loop {
+                        let chain_head = match chain_head.changed().await {
+                            Ok(()) => match *chain_head.borrow() {
+                                Some(block) => block,
+                                None => break,
+                            },
+                            Err(_) => break,
+                        };
+                        match nozzle.lock().await.dump_datasets(Some(chain_head)).await {
+                            Ok(()) => (),
+                            Err(err) => log::error!("dump error: {err}"),
+                        };
+                    }
+                });
+            }
 
             let router = axum::Router::new()
                 .route(
@@ -321,7 +343,10 @@ async fn datasets_and_dependencies(
             sql_datasets::DATASET_KIND | manifest::DATASET_KIND => {
                 deps.insert(dataset.name.clone(), vec![]);
             }
-            _ => continue,
+            _ => {
+                deps.insert(dataset.name, vec![]);
+                continue;
+            }
         };
         let sql_dataset = match dataset.kind.as_str() {
             sql_datasets::DATASET_KIND => store.load_sql_dataset(&dataset.name).await?,
