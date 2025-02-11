@@ -7,7 +7,10 @@ use std::{
 
 use alloy::primitives::BlockNumber;
 use anyhow::{anyhow, Context as _};
-use common::manifest::Manifest;
+use common::{
+    manifest::{Manifest, TableSchema},
+    query_context::parse_sql,
+};
 use dataset_store::DatasetStore;
 use indoc::formatdoc;
 
@@ -56,7 +59,7 @@ impl Nozzle {
             .as_bytes(),
         )?;
         write_file(
-            &self.dir.join("datasets/{name}.toml"),
+            &self.dir.join(format!("datasets/{name}.toml")),
             formatdoc! {r#"
                     name = "{name}"
                     network = "{name}"
@@ -82,6 +85,14 @@ impl Nozzle {
         )?;
         self.datasets.insert(dataset);
         Ok(())
+    }
+
+    pub async fn schema(&self, sql: &str) -> anyhow::Result<TableSchema> {
+        let query = parse_sql(sql)?;
+        let dataset_store = DatasetStore::new(self.config(), None);
+        let ctx = dataset_store.planning_ctx_for_sql(&query).await?;
+        let schema = ctx.sql_output_schema(query).await?;
+        Ok(schema.into())
     }
 
     pub fn service(&self) -> anyhow::Result<server::service::Service> {

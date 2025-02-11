@@ -28,7 +28,7 @@ pub async fn run(artifact_dir: &Path, nozzle_dir: PathBuf, rpc_url: Url) -> anyh
         .await
         .add_rpc_dataset("anvil", rpc_url.as_str())?;
 
-    let manifests = artifacts::load_manifests(&artifact_dir)?;
+    let manifests = artifacts::load_manifests(&artifact_dir, &*nozzle.lock().await).await?;
     for manifest in manifests {
         nozzle.lock().await.add_manifest_dataset(manifest)?;
     }

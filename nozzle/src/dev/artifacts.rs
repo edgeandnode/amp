@@ -1,11 +1,13 @@
-use std::path::Path;
+use std::{collections::BTreeMap, path::Path};
 
 use alloy::json_abi::JsonAbi;
 use anyhow::{anyhow, Context as _};
-use common::manifest::{ArrowSchema, Manifest};
+use common::manifest::{self, Manifest};
 use indoc::formatdoc;
 
-pub fn load_manifests(dir: &Path) -> anyhow::Result<Vec<Manifest>> {
+use super::nozzle::Nozzle;
+
+pub async fn load_manifests(dir: &Path, nozzle: &Nozzle) -> anyhow::Result<Vec<Manifest>> {
     let mut manifests: Vec<Manifest> = Default::default();
     for entry in std::fs::read_dir(dir).context(anyhow!("read {}", dir.display()))? {
         let entry = entry.context(anyhow!("read {}", dir.display()))?;
@@ -41,45 +43,31 @@ pub fn load_manifests(dir: &Path) -> anyhow::Result<Vec<Manifest>> {
                     continue;
                 }
             };
-            for event in &events {
+            let mut tables: BTreeMap<String, manifest::Table> = Default::default();
+            for event in events {
+                let table = camelcase_to_snakecase(&event.name);
                 log::info!(
-                    "adding table {}.{} for {}",
-                    dataset,
-                    camelcase_to_snakecase(&event.name),
+                    "adding table {dataset}.{table} for {}",
                     event.full_signature(),
                 );
+                let sql = sql_for_event(&event.full_signature());
+                let schema = nozzle.schema(&sql).await?;
+                let input = manifest::TableInput::View(manifest::View { sql });
+                tables.insert(table, manifest::Table { input, schema });
             }
-            // TODO: set the correct schema
             manifests.push(Manifest {
                 name: dataset,
                 version: semver::Version::new(0, 0, 0),
                 dependencies: [(
                     "anvil".into(),
-                    common::manifest::Dependency {
+                    manifest::Dependency {
                         owner: "".into(),
                         name: "anvil".into(),
                         version: "*".parse().unwrap(),
                     },
                 )]
                 .into(),
-                tables: events
-                    .into_iter()
-                    .map(|event| {
-                        (
-                            camelcase_to_snakecase(&event.name),
-                            common::manifest::Table {
-                                input: common::manifest::TableInput::View(common::manifest::View {
-                                    sql: sql_for_event(&event.full_signature()),
-                                }),
-                                schema: common::manifest::TableSchema {
-                                    arrow: ArrowSchema {
-                                        fields: Default::default(),
-                                    },
-                                },
-                            },
-                        )
-                    })
-                    .collect(),
+                tables,
             });
         }
     }
