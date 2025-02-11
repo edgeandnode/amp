@@ -15,7 +15,7 @@ use common::{config::Config, tracing, BoxError};
 use datafusion::catalog_common::resolve_table_references;
 use datafusion::parquet;
 use dataset_store::{sql_datasets, DatasetStore};
-use dev::watch_chain_head;
+use dev::{load_artifact_manifests, watch_chain_head};
 use futures::{StreamExt as _, TryStreamExt as _};
 use log::info;
 use metadata_db::MetadataDb;
@@ -37,6 +37,8 @@ struct Args {
 #[derive(Debug, clap::Subcommand)]
 enum Command {
     Dev {
+        #[arg(long, default_value = "./out/")]
+        artifact_dir: PathBuf,
         #[arg(long, default_value = "./nozzle/")]
         nozzle_dir: PathBuf,
         #[arg(long, default_value = "http://localhost:8545")]
@@ -113,13 +115,22 @@ async fn main_inner() -> Result<(), BoxError> {
     let args = Args::parse();
     match args.command {
         Command::Dev {
+            artifact_dir,
             nozzle_dir,
             rpc_url,
         } => {
             let addr: SocketAddr = ([0, 0, 0, 0], 1610).into();
 
             let nozzle = Arc::new(tokio::sync::Mutex::new(dev::Nozzle::new(nozzle_dir)?));
-            nozzle.lock().await.add_rpc_dataset(rpc_url.as_str())?;
+            nozzle
+                .lock()
+                .await
+                .add_rpc_dataset("anvil", rpc_url.as_str())?;
+
+            let manifests = load_artifact_manifests(&artifact_dir)?;
+            for manifest in manifests {
+                nozzle.lock().await.add_manifest_dataset(manifest)?;
+            }
 
             {
                 let rpc = RpcClient::new_http(rpc_url);

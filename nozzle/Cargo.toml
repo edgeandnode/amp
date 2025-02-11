@@ -18,7 +18,9 @@ futures.workspace = true
 indoc = "2.0.5"
 log.workspace = true
 metadata-db = { path = "../metadata-db" }
+semver.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 server = { path = "../server" }
 snmalloc-rs.workspace = true
 tokio.workspace = true
