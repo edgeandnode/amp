@@ -5,17 +5,15 @@ use std::path::PathBuf;
 use std::time::Duration;
 use std::{net::SocketAddr, sync::Arc};
 
-use alloy::{rpc::client::ReqwestClient as RpcClient, transports::http::reqwest::Url};
+use alloy::transports::http::reqwest::Url;
 use arrow_flight::flight_service_server::FlightServiceServer;
-use axum::response::Response;
-use axum::serve::ListenerExt;
+use axum::serve::ListenerExt as _;
 use clap::Parser as _;
 use common::manifest;
 use common::{config::Config, tracing, BoxError};
 use datafusion::catalog_common::resolve_table_references;
 use datafusion::parquet;
 use dataset_store::{sql_datasets, DatasetStore};
-use dev::{load_artifact_manifests, watch_chain_head};
 use futures::{StreamExt as _, TryStreamExt as _};
 use log::info;
 use metadata_db::MetadataDb;
@@ -119,66 +117,7 @@ async fn main_inner() -> Result<(), BoxError> {
             nozzle_dir,
             rpc_url,
         } => {
-            let addr: SocketAddr = ([0, 0, 0, 0], 1610).into();
-
-            let nozzle = Arc::new(tokio::sync::Mutex::new(dev::Nozzle::new(nozzle_dir)?));
-            nozzle
-                .lock()
-                .await
-                .add_rpc_dataset("anvil", rpc_url.as_str())?;
-
-            let manifests = load_artifact_manifests(&artifact_dir)?;
-            for manifest in manifests {
-                nozzle.lock().await.add_manifest_dataset(manifest)?;
-            }
-
-            {
-                let rpc = RpcClient::new_http(rpc_url);
-                let mut chain_head = watch_chain_head(rpc);
-                let nozzle = nozzle.clone();
-                tokio::spawn(async move {
-                    loop {
-                        let chain_head = match chain_head.changed().await {
-                            Ok(()) => match *chain_head.borrow() {
-                                Some(block) => block,
-                                None => break,
-                            },
-                            Err(_) => break,
-                        };
-                        match nozzle.lock().await.dump_datasets(Some(chain_head)).await {
-                            Ok(()) => (),
-                            Err(err) => log::error!("dump error: {err}"),
-                        };
-                    }
-                });
-            }
-
-            let router = axum::Router::new()
-                .route(
-                    "/sql",
-                    axum::routing::post(
-                        |axum::extract::State(nozzle): axum::extract::State<
-                            Arc<tokio::sync::Mutex<dev::Nozzle>>,
-                        >,
-                         request| async move {
-                            let service = match nozzle.lock().await.service() {
-                                Ok(service) => service,
-                                Err(err) => return Response::new(json_error(err).into()),
-                            };
-                            handle_jsonl_request(&service, request).await
-                        },
-                    )
-                    .with_state(nozzle.clone()),
-                )
-                .layer(
-                    tower_http::compression::CompressionLayer::new()
-                        .br(true)
-                        .gzip(true),
-                );
-            let listener = TcpListener::bind(addr)
-                .await?
-                .tap_io(|tcp_stream| tcp_stream.set_nodelay(true).unwrap());
-            axum::serve(listener, router).await?;
+            dev::run(&artifact_dir, nozzle_dir, rpc_url).await?;
             Ok(())
         }
         Command::Dump {
