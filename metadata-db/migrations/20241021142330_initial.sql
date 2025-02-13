@@ -1,5 +1,5 @@
 CREATE TABLE IF NOT EXISTS locations (
-    vid BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     created_at TIMESTAMP DEFAULT (now() AT TIME ZONE 'utc') NOT NULL,
 
     dataset TEXT NOT NULL,
@@ -19,3 +19,17 @@ CREATE TABLE IF NOT EXISTS locations (
 CREATE UNIQUE INDEX unique_active_per_dataset_version_table
 ON locations (dataset, dataset_version, tbl)
 WHERE active;
+
+CREATE TABLE workers (
+    vid BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    node_id TEXT UNIQUE NOT NULL,
+    last_heartbeat TIMESTAMP NOT NULL
+);
+
+CREATE TABLE jobs (
+    vid BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    node_id TEXT NOT NULL,
+    location BIGINT UNIQUE NOT NULL,
+    state TEXT NOT NULL,
+    FOREIGN KEY (location) REFERENCES locations(id)
+);

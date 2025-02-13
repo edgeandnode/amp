@@ -184,4 +184,16 @@ impl MetadataDb {
 
         Ok(())
     }
+
+    pub async fn heartbeat(&self, node_id: &str) -> Result<(), Error> {
+        let query = "
+        INSERT INTO workers (node_id, last_heartbeat)
+        VALUES ($1, now() at time zone 'utc')
+        ON CONFLICT (node_id) DO UPDATE SET last_heartbeat = (now() at time zone 'utc')
+        ";
+
+        sqlx::query(query).bind(node_id).execute(&self.pool).await?;
+
+        Ok(())
+    }
 }

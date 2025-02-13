@@ -1,7 +1,7 @@
 mod dump;
 mod server;
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use clap::Parser as _;
 use common::{config::Config, tracing, BoxError};
@@ -70,6 +70,11 @@ enum Command {
         #[arg(long, env = "SERVER_NO_ADMIN")]
         no_admin: bool,
     },
+    Worker {
+        /// The node id of the worker.
+        #[arg(long, env = "NOZZLE_NODE_ID")]
+        node_id: String,
+    },
 }
 
 #[tokio::main]
@@ -122,5 +127,23 @@ async fn main_inner() -> Result<(), BoxError> {
             .await
         }
         Command::Server { no_admin } => server::run(config, metadata_db, no_admin).await,
+        Command::Worker { node_id } => {
+            let Some(metadata_db_url) = &config.metadata_db_url else {
+                return Err("metadata db not configured".into());
+            };
+            let metadata_db = MetadataDb::connect(metadata_db_url).await?;
+
+            // Heartbeat task. This will also register the worker if running for the first time.
+            let heartbeat_interval = Duration::from_secs(1);
+            let heartbeat_task = tokio::spawn(async move {
+                let mut interval = tokio::time::interval(heartbeat_interval);
+                loop {
+                    let result = metadata_db.heartbeat(&node_id).await;
+                    interval.tick().await;
+                }
+            });
+
+            heartbeat_task.await?
+        }
     }
 }
