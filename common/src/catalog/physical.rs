@@ -6,7 +6,7 @@ use datafusion::{
     sql::TableReference,
 };
 use futures::{stream, TryStreamExt};
-use metadata_db::{MetadataDb, TableId};
+use metadata_db::{LocationId, MetadataDb, TableId};
 use object_store::{path::Path, ObjectMeta, ObjectStore};
 use url::Url;
 
@@ -259,32 +259,39 @@ impl PhysicalTable {
         self.object_store.clone()
     }
 
+    pub fn table(&self) -> &Table {
+        &self.table
+    }
+
     pub async fn next_revision(
-        &self,
+        table: &Table,
         data_store: &Store,
         dataset_name: &str,
         db: &MetadataDb,
-    ) -> Result<Self, BoxError> {
+    ) -> Result<(Self, LocationId), BoxError> {
         let table_id = TableId {
             dataset: dataset_name,
             dataset_version: None,
-            table: &self.table.name,
+            table: &table.name,
         };
 
         let path = make_location_path(table_id);
         let url = data_store.url().join(&path)?;
-        db.register_location(table_id, data_store.bucket(), &path, &url, false)
+        let location_id = db
+            .register_location(table_id, data_store.bucket(), &path, &url, false)
             .await?;
         db.set_active_location(table_id, &url.as_str()).await?;
 
         let path = Path::from_url_path(url.path()).unwrap();
-        Ok(Self {
-            table: self.table.clone(),
-            table_ref: self.table_ref.clone(),
+        let table_ref = TableReference::partial(dataset_name, table.name.as_str());
+        let physical_table = Self {
+            table: table.clone(),
+            table_ref,
             url,
             path,
-            object_store: self.object_store.clone(),
-        })
+            object_store: data_store.object_store(),
+        };
+        Ok((physical_table, location_id))
     }
 
     /// Return all parquet files for this table. If `dump_only` is `true`,

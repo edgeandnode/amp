@@ -17,6 +17,7 @@ thiserror.workspace = true
 tracing.workspace = true
 
 axum.workspace = true
+rand.workspace = true
 http-common = { path = "../http-common" }
 common = { path = "../common" }
 dataset-store = { path = "../dataset-store" }

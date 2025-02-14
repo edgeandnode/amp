@@ -63,7 +63,7 @@ pub async fn deploy_handler(
     } = state;
 
     // Validate the manifest
-    let _: Manifest = serde_json::from_str(&payload.manifest).map_err(ManifestParseError)?;
+    let manifest: Manifest = serde_json::from_str(&payload.manifest).map_err(ManifestParseError)?;
 
     // Write the manifest to the dataset def store
     let path = payload.dataset_name.clone() + ".json";
@@ -77,7 +77,7 @@ pub async fn deploy_handler(
     let join_handle = tokio::spawn(
         job_scheduler
             .clone()
-            .schedule_dataset_dump(payload.dataset_name)
+            .schedule_dataset_dump(manifest)
             .map_err(SchedulerError),
     );
 

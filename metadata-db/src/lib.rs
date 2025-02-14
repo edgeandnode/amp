@@ -1,3 +1,6 @@
+use std::fmt;
+
+use serde::{Deserialize, Serialize};
 use sqlx::{
     migrate::{MigrateError, Migrator},
     Pool, Postgres,
@@ -5,6 +8,9 @@ use sqlx::{
 use thiserror::Error;
 use tracing::instrument;
 use url::Url;
+
+/// Always non-negative.
+pub type LocationId = i64;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -28,6 +34,26 @@ static MIGRATOR: Migrator = sqlx::migrate!();
 #[derive(Clone)]
 pub struct MetadataDb {
     pool: Pool<Postgres>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum JobState {
+    Created,
+    Running,
+}
+
+impl fmt::Display for JobState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct WorkerAction {
+    pub node_id: String,
+    pub location: LocationId,
+    pub current_state: JobState,
+    pub next_state: JobState,
 }
 
 /// Tables are identified by the triple: `(dataset, dataset_version, table)`. For each table, there
@@ -71,16 +97,17 @@ impl MetadataDb {
         path: &str,
         url: &Url,
         active: bool,
-    ) -> Result<(), sqlx::Error> {
+    ) -> Result<LocationId, sqlx::Error> {
         // An empty `dataset_version` is represented as an empty string in the DB.
         let dataset_version = table.dataset_version.unwrap_or("");
 
         let query = "
         INSERT INTO locations (dataset, dataset_version, tbl, bucket, path, url, active) \
         VALUES ($1, $2, $3, $4, $5, $6, $7)
+        RETURNING id;
         ";
 
-        sqlx::query(query)
+        let location_id: LocationId = sqlx::query_scalar(query)
             .bind(table.dataset)
             .bind(dataset_version)
             .bind(table.table)
@@ -88,10 +115,10 @@ impl MetadataDb {
             .bind(path)
             .bind(url.to_string())
             .bind(active)
-            .execute(&self.pool)
+            .fetch_one(&self.pool)
             .await?;
 
-        Ok(())
+        Ok(location_id)
     }
 
     /// Returns the active location. The active location has meaning on both the write and read side:
@@ -194,6 +221,32 @@ impl MetadataDb {
 
         sqlx::query(query).bind(node_id).execute(&self.pool).await?;
 
+        Ok(())
+    }
+
+    /// Returns a list of live workers. A worker is live if it has sent a heartbeat in the last 5 seconds.
+    pub async fn live_workers(&self) -> Result<Vec<String>, Error> {
+        let query = "SELECT node_id FROM workers WHERE last_heartbeat > (now() at time zone 'utc') - interval '5 seconds'";
+        Ok(sqlx::query_scalar(query).fetch_all(&self.pool).await?)
+    }
+
+    pub async fn create_job(&self, node_id: &str, location: LocationId) -> Result<(), Error> {
+        let initial_state = JobState::Created;
+        let query = "INSERT INTO jobs (node_id, location, state) VALUES ($1, $2, $3)";
+        sqlx::query(query)
+            .bind(node_id)
+            .bind(location)
+            .bind(initial_state.to_string())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn notify_worker(&self, action: WorkerAction) -> Result<(), Error> {
+        sqlx::query("NOTIFY worker_actions, $1")
+            .bind(serde_json::to_string(&action).unwrap())
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 }

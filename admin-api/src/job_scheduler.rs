@@ -1,6 +1,7 @@
-use common::{config::Config, BoxError};
+use common::{catalog::physical::PhysicalTable, config::Config, manifest::Manifest, BoxError};
 use dataset_store::DatasetStore;
-use metadata_db::MetadataDb;
+use metadata_db::{JobState, MetadataDb, WorkerAction};
+use rand::seq::SliceRandom as _;
 use std::sync::Arc;
 
 #[derive(Clone)]
@@ -21,14 +22,14 @@ impl Scheduler {
         })
     }
 
-    pub async fn schedule_dataset_dump(self, dataset_name: String) -> Result<(), BoxError> {
+    pub async fn schedule_dataset_dump(self, manifest: Manifest) -> Result<(), BoxError> {
         match self {
-            Self::Full(scheduler) => scheduler.schedule_dataset_dump(dataset_name).await,
+            Self::Full(scheduler) => scheduler.schedule_dataset_dump(manifest).await,
             Self::Ephemeral(config) => {
                 let dataset_store = DatasetStore::new(config.clone(), None);
 
                 dump::dump_dataset(
-                    &dataset_name,
+                    &manifest.name,
                     &dataset_store,
                     &config,
                     None,
@@ -57,12 +58,41 @@ impl FullScheduler {
         }
     }
 
-    pub async fn schedule_dataset_dump(&self, dataset_name: String) -> Result<(), BoxError> {
+    /// Schedule dump jobs to workers. Each table in the dataset will become a separate job.
+    pub async fn schedule_dataset_dump(&self, dataset: Manifest) -> Result<(), BoxError> {
         // Scheduling procedure:
-        // 1. Create a location for each table and insert it in the metadata DB.
-        // 2. Choose a responsive node.
-        // 3. Sends a notification through `worker_actions`, with the node, location, current state and next state.
-        // 4. The node receives the notification, and starts the dump run.
-        todo!()
+        // 1. Choose a responsive node.
+        // 2. Create a location for each table.
+        // 3. Create the job in the 'created' state.
+        // 4. Sends a notification through `worker_actions`, with the node, location, current state and next state.
+        //
+        // The worker node should then receive the notification and starts the dump run for those tables.
+
+        let candidates = self.metadata_db.live_workers().await?;
+        let Some(node_id) = candidates.choose(&mut rand::thread_rng()) else {
+            return Err("no available workers".into());
+        };
+
+        let mut locations = Vec::new();
+        for table in dataset.tables() {
+            let (_, location_id) = PhysicalTable::next_revision(
+                &table,
+                &self.config.data_store,
+                &dataset.name,
+                &self.metadata_db,
+            )
+            .await?;
+            self.metadata_db.create_job(node_id, location_id).await?;
+            let action = WorkerAction {
+                node_id: node_id.to_string(),
+                location: location_id,
+                current_state: JobState::Created,
+                next_state: JobState::Running,
+            };
+            self.metadata_db.notify_worker(action).await?;
+            locations.push(location_id);
+        }
+
+        Ok(())
     }
 }

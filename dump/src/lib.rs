@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use common::catalog::physical::Catalog;
 use common::catalog::physical::PhysicalDataset;
+use common::catalog::physical::PhysicalTable;
 use common::config::Config;
 use common::meta_tables::scanned_ranges;
 use common::multirange::MultiRange;
@@ -259,9 +260,13 @@ async fn dump_sql_dataset(
             let Some(metadata_db) = dataset_store.metadata_db.as_ref() else {
                 return Err("metadata_db is required for entire materialization".into());
             };
-            let physical_table = physical_table
-                .next_revision(&data_store, dataset.name(), metadata_db)
-                .await?;
+            let (physical_table, _) = PhysicalTable::next_revision(
+                physical_table.table(),
+                &data_store,
+                dataset.name(),
+                metadata_db,
+            )
+            .await?;
             info!(
                 "dumping entire {} to {}",
                 physical_table.table_ref(),

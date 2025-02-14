@@ -65,6 +65,7 @@ sqlx = { version = "0.8", features = [
 uuid = { version = "1.11.0", features = ["v7"] }
 axum = "0.8.0"
 semver = { version = "1.0.18", features = ["serde"] }
+rand = "0.8.5"
 
 # Datafusion and Arrow crates
 arrow-flight = { version = "53.3", features = ["flight-sql-experimental"] }
@@ -77,7 +78,6 @@ prost = "0.13.3"
 prost-build = "0.13.3"
 tonic = { version = "0.12.3", features = ["transport", "gzip", "tls-roots"] }
 tonic-build = "0.12.3"
-
 
 # Prost fork
 #

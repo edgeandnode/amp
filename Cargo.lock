@@ -28,6 +28,7 @@ dependencies = [
  "futures",
  "http-common",
  "metadata-db",
+ "rand",
  "serde",
  "serde_json",
  "thiserror",
@@ -3735,6 +3736,8 @@ name = "metadata-db"
 version = "0.1.0"
 dependencies = [
  "log",
+ "serde",
+ "serde_json",
  "sqlx",
  "thiserror",
  "tracing",
