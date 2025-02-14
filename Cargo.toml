@@ -11,6 +11,7 @@ members = [
     "firehose-datasets",
     "substreams-datasets",
     "metadata-db",
+    "nve",
     "admin-api",
     "http-common",
     "registry-service",

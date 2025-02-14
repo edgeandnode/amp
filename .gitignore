@@ -13,3 +13,5 @@
 **/node_modules/**
 ts/**/dist
 tsconfig.tsbuildinfo
+
+/my_config

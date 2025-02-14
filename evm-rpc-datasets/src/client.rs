@@ -62,6 +62,8 @@ impl JsonRpcClient {
                 None => return Err(format!("block not found: {block_num}").into()),
             };
 
+            dbg!("{:?}", block.clone());
+
             let rows = rpc_to_rows(block.header, logs, &self.network)?;
 
             // Send the block and check if the receiver has gone away.
