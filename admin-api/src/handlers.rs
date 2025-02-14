@@ -1,10 +1,7 @@
-use std::sync::Arc;
-
 use axum::http::StatusCode;
 use axum::{extract::State, Json};
 use common::{manifest::Manifest, BoxError};
-use dataset_store::DatasetStore;
-use dump::dump_dataset;
+use futures::TryFutureExt as _;
 use http_common::{BoxRequestError, RequestError};
 use serde::Deserialize;
 use thiserror::Error;
@@ -22,13 +19,13 @@ pub struct DeployRequest {
 
 #[derive(Debug, Error)]
 enum DeployError {
-    #[error("Failed to parse manifest: {0}")]
+    #[error("failed to parse manifest: {0}")]
     ManifestParseError(serde_json::Error),
-    #[error("Failed to sync dataset: {0}")]
-    SyncError(BoxError),
-    #[error("Failed to join dataset sync task: {0}")]
+    #[error("scheduler error: {0}")]
+    SchedulerError(BoxError),
+    #[error("task panicked: {0}")]
     JoinError(JoinError),
-    #[error("Failed to write manifest to internal store")]
+    #[error("failed to write manifest to internal store")]
     DatasetDefStoreError,
 }
 
@@ -36,7 +33,7 @@ impl RequestError for DeployError {
     fn status_code(&self) -> StatusCode {
         match self {
             DeployError::ManifestParseError(_) => StatusCode::BAD_REQUEST,
-            DeployError::SyncError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            DeployError::SchedulerError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             DeployError::JoinError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             DeployError::DatasetDefStoreError => StatusCode::INTERNAL_SERVER_ERROR,
         }
@@ -45,7 +42,7 @@ impl RequestError for DeployError {
     fn error_code(&self) -> &'static str {
         match self {
             DeployError::ManifestParseError(_) => "MANIFEST_PARSE_ERROR",
-            DeployError::SyncError(_) => "DATASET_SYNC_ERROR",
+            DeployError::SchedulerError(_) => "SCHEDULER_ERROR",
             DeployError::JoinError(_) => "JOIN_ERROR",
             DeployError::DatasetDefStoreError => "DATASET_DEF_STORE_ERROR",
         }
@@ -55,54 +52,45 @@ impl RequestError for DeployError {
 // Handler for the /deploy endpoint
 #[instrument(skip_all, err)]
 pub async fn deploy_handler(
-    State(state): State<Arc<ServiceState>>,
+    State(state): State<ServiceState>,
     Json(payload): Json<DeployRequest>,
 ) -> Result<(StatusCode, &'static str), BoxRequestError> {
     use DeployError::*;
 
+    let ServiceState {
+        config,
+        job_scheduler,
+    } = state;
+
     // Validate the manifest
-    let _: Manifest =
-        serde_json::from_str(&payload.manifest).map_err(DeployError::ManifestParseError)?;
+    let _: Manifest = serde_json::from_str(&payload.manifest).map_err(ManifestParseError)?;
 
     // Write the manifest to the dataset def store
     let path = payload.dataset_name.clone() + ".json";
-    state
-        .config
+    config
         .dataset_defs_store
         .prefixed_store()
         .put(&path.into(), payload.manifest.clone().into())
         .await
         .map_err(|_| DatasetDefStoreError)?;
 
-    let dataset_store = DatasetStore::new(state.config.clone(), state.metadata_db.clone());
+    let join_handle = tokio::spawn(
+        job_scheduler
+            .clone()
+            .schedule_dataset_dump(payload.dataset_name)
+            .map_err(SchedulerError),
+    );
 
-    let dump_task = tokio::spawn(async move {
-        dump_dataset(
-            &payload.dataset_name,
-            &dataset_store,
-            &state.config,
-            state.metadata_db.as_ref(),
-            1,
-            dump::default_partition_size(),
-            &dump::default_parquet_opts(),
-            0,
-            None,
-        )
-        .await
-        .map_err(SyncError)
-    });
-
-    // Wait for a couple of seconds to see if the dump task errors
+    // Wait for a couple of seconds to see if the scheduler task errors
     select! {
-        res = dump_task => {
-            // The dump task completed in under a second, return the error.
-            // Or even a success if it completed successfully that fast.
+        res = join_handle => {
+            // The scheduler task completed quickly, return the error if any.
             let () = res.map_err(JoinError)??;
-            Ok((axum::http::StatusCode::OK, "Deployment successful, sync done"))
+            Ok((axum::http::StatusCode::OK, "Deployment successful"))
         }
         _ = tokio::time::sleep(tokio::time::Duration::from_secs(2)) => {
-            // The dump task did not complete within 1 second
-            Ok((axum::http::StatusCode::OK, "Deployment successful, dataset being synced"))
+            // The scheduler task did not complete, detach it and assume success.
+            Ok((axum::http::StatusCode::OK, "Deployment successful"))
         }
     }
 }

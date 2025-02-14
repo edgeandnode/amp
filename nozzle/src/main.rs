@@ -138,7 +138,7 @@ async fn main_inner() -> Result<(), BoxError> {
             let heartbeat_task = tokio::spawn(async move {
                 let mut interval = tokio::time::interval(heartbeat_interval);
                 loop {
-                    let result = metadata_db.heartbeat(&node_id).await;
+                    metadata_db.heartbeat(&node_id).await?;
                     interval.tick().await;
                 }
             });
