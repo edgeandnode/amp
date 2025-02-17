@@ -3,6 +3,7 @@ use dataset_store::DatasetStore;
 use metadata_db::{JobState, MetadataDb, WorkerAction};
 use rand::seq::SliceRandom as _;
 use std::sync::Arc;
+use tokio::select;
 
 #[derive(Clone)]
 pub enum Scheduler {
@@ -28,18 +29,33 @@ impl Scheduler {
             Self::Ephemeral(config) => {
                 let dataset_store = DatasetStore::new(config.clone(), None);
 
-                dump::dump_dataset(
-                    &manifest.name,
-                    &dataset_store,
-                    &config,
-                    None,
-                    1,
-                    dump::default_partition_size(),
-                    &dump::default_parquet_opts(),
-                    0,
-                    None,
-                )
-                .await
+                let join_handle = tokio::spawn(async move {
+                    dump::dump_dataset(
+                        &manifest.name.clone(),
+                        &dataset_store.clone(),
+                        &config.clone(),
+                        None,
+                        1,
+                        dump::default_partition_size(),
+                        &dump::default_parquet_opts(),
+                        0,
+                        None,
+                    )
+                    .await
+                });
+
+                // Wait for a couple of seconds to see if the scheduler task errors
+                select! {
+                    res = join_handle => {
+                        // The scheduler task completed quickly, return the error if any.
+                        let () = res??;
+                        Ok(())
+                    }
+                    _ = tokio::time::sleep(tokio::time::Duration::from_secs(2)) => {
+                    // The scheduler task did not complete, detach it and assume success.
+                        Ok(())
+                    }
+                }
             }
         }
     }

@@ -1,11 +1,9 @@
 use axum::http::StatusCode;
 use axum::{extract::State, Json};
 use common::{manifest::Manifest, BoxError};
-use futures::TryFutureExt as _;
 use http_common::{BoxRequestError, RequestError};
 use serde::Deserialize;
 use thiserror::Error;
-use tokio::{select, task::JoinError};
 use tracing::instrument;
 
 use crate::ServiceState;
@@ -23,8 +21,6 @@ enum DeployError {
     ManifestParseError(serde_json::Error),
     #[error("scheduler error: {0}")]
     SchedulerError(BoxError),
-    #[error("task panicked: {0}")]
-    JoinError(JoinError),
     #[error("failed to write manifest to internal store")]
     DatasetDefStoreError,
 }
@@ -34,7 +30,6 @@ impl RequestError for DeployError {
         match self {
             DeployError::ManifestParseError(_) => StatusCode::BAD_REQUEST,
             DeployError::SchedulerError(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            DeployError::JoinError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             DeployError::DatasetDefStoreError => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -43,7 +38,6 @@ impl RequestError for DeployError {
         match self {
             DeployError::ManifestParseError(_) => "MANIFEST_PARSE_ERROR",
             DeployError::SchedulerError(_) => "SCHEDULER_ERROR",
-            DeployError::JoinError(_) => "JOIN_ERROR",
             DeployError::DatasetDefStoreError => "DATASET_DEF_STORE_ERROR",
         }
     }
@@ -74,23 +68,11 @@ pub async fn deploy_handler(
         .await
         .map_err(|_| DatasetDefStoreError)?;
 
-    let join_handle = tokio::spawn(
-        job_scheduler
-            .clone()
-            .schedule_dataset_dump(manifest)
-            .map_err(SchedulerError),
-    );
+    job_scheduler
+        .clone()
+        .schedule_dataset_dump(manifest)
+        .await
+        .map_err(SchedulerError)?;
 
-    // Wait for a couple of seconds to see if the scheduler task errors
-    select! {
-        res = join_handle => {
-            // The scheduler task completed quickly, return the error if any.
-            let () = res.map_err(JoinError)??;
-            Ok((axum::http::StatusCode::OK, "Deployment successful"))
-        }
-        _ = tokio::time::sleep(tokio::time::Duration::from_secs(2)) => {
-            // The scheduler task did not complete, detach it and assume success.
-            Ok((axum::http::StatusCode::OK, "Deployment successful"))
-        }
-    }
+    Ok((axum::http::StatusCode::OK, "Deployment successful"))
 }
