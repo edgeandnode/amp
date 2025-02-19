@@ -1,7 +1,7 @@
 mod dump;
 mod server;
 
-use std::{net::SocketAddr, sync::Arc};
+use std::sync::Arc;
 
 use clap::Parser as _;
 use common::{config::Config, tracing, BoxError};
@@ -66,7 +66,6 @@ enum Command {
         run_every_mins: Option<u64>,
     },
     Server,
-    AdminApi,
 }
 
 #[tokio::main]
@@ -119,30 +118,5 @@ async fn main_inner() -> Result<(), BoxError> {
             .await
         }
         Command::Server => server::run(config, metadata_db).await,
-        Command::AdminApi => {
-            let admin_api_addr: SocketAddr = ([0, 0, 0, 0], 1610).into();
-            log::info!("Admin API running at {}", admin_api_addr);
-
-            let registry_service_addr: SocketAddr = ([0, 0, 0, 0], 1611).into();
-            log::info!("Registry service running at {}", registry_service_addr);
-
-            let admin_api = admin_api::serve(admin_api_addr, config.clone());
-
-            let metadata_db = if let Some(url) = &config.metadata_db_url {
-                Some(MetadataDb::connect(url).await?)
-            } else {
-                None
-            };
-            let registry_service =
-                registry_service::serve(registry_service_addr, config, metadata_db);
-
-            // Run the admin api and registry service concurrently
-            tokio::select! {
-                _ = admin_api => {}
-                _ = registry_service => {}
-            }
-
-            Err("admin api shutdown unexpectedly, it should run forever".into())
-        }
     }
 }

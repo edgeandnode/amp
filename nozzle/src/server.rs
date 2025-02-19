@@ -14,7 +14,7 @@ pub async fn run(config: Arc<Config>, metadata_db: Option<MetadataDb>) -> Result
         !config.spill_location.is_empty()
     );
 
-    let service = Service::new(config, metadata_db)?;
+    let service = Service::new(config.clone(), metadata_db.clone())?;
 
     let flight_addr: SocketAddr = ([0, 0, 0, 0], 1602).into();
     let flight_server = Server::builder()
@@ -26,11 +26,21 @@ pub async fn run(config: Arc<Config>, metadata_db: Option<MetadataDb>) -> Result
     let jsonl_server = run_jsonl_server(service, jsonl_addr);
     log::info!("Serving JSON lines at {}", jsonl_addr);
 
+    let admin_api_addr: SocketAddr = ([0, 0, 0, 0], 1610).into();
+    log::info!("Admin API running at {}", admin_api_addr);
+
+    let registry_service_addr: SocketAddr = ([0, 0, 0, 0], 1611).into();
+    log::info!("Registry service running at {}", registry_service_addr);
+    let admin_api = admin_api::serve(admin_api_addr, config.clone());
+    let registry_service = registry_service::serve(registry_service_addr, config, metadata_db);
+
     tokio::select! {
         result = flight_server => result?,
         result = jsonl_server => result?,
+        result = admin_api => result?,
+        result = registry_service => result?,
     };
-    Err("server shutdown unexpectedly, it should run forever".into())
+    Err("server shutdown unexpectedly".into())
 }
 
 async fn run_jsonl_server(service: Service, addr: SocketAddr) -> Result<(), BoxError> {
