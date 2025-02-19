@@ -1,8 +1,11 @@
 use std::fmt;
 
+use futures::Stream;
+use log::error;
 use serde::{Deserialize, Serialize};
 use sqlx::{
     migrate::{MigrateError, Migrator},
+    postgres::{PgListener, PgNotification},
     Pool, Postgres,
 };
 use thiserror::Error;
@@ -31,9 +34,11 @@ pub enum Error {
 
 static MIGRATOR: Migrator = sqlx::migrate!();
 
+/// Connection pool to the metadata DB. Clones will refer to the same instance.
 #[derive(Clone)]
 pub struct MetadataDb {
     pool: Pool<Postgres>,
+    url: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -70,7 +75,10 @@ impl MetadataDb {
     #[instrument(skip_all, err)]
     pub async fn connect(url: &str) -> Result<MetadataDb, Error> {
         let pool = Pool::connect(url).await.map_err(Error::ConnectionError)?;
-        let db = MetadataDb { pool };
+        let db = MetadataDb {
+            pool,
+            url: url.to_string(),
+        };
         db.run_migrations().await?;
         Ok(db)
     }
@@ -242,11 +250,33 @@ impl MetadataDb {
         Ok(())
     }
 
-    pub async fn notify_worker(&self, action: WorkerAction) -> Result<(), Error> {
-        sqlx::query("NOTIFY worker_actions, $1")
-            .bind(serde_json::to_string(&action).unwrap())
+    pub async fn notify(&self, channel_name: &str, payload: &str) -> Result<(), Error> {
+        sqlx::query("NOTIFY $1, $2")
+            .bind(channel_name)
+            .bind(payload)
             .execute(&self.pool)
             .await?;
         Ok(())
+    }
+
+    /// Listens on a Postgres notification channel using LISTEN.
+    ///
+    /// # Error cases
+    ///
+    /// This stream will generally not return `Err`, except on failure to estabilish the intial
+    /// connection, because connection errors are retried.
+    ///
+    /// # Delivery Guarantees
+    ///
+    /// - Notifications sent before the LISTEN command is issued will not be delivered.
+    /// - Notifications may be lost during automatic retry of a closed DB connection.
+    #[instrument(skip(self), err)]
+    pub async fn listen(
+        &self,
+        channel_name: &str,
+    ) -> Result<impl Stream<Item = Result<PgNotification, sqlx::Error>>, sqlx::Error> {
+        let mut channel = PgListener::connect(&self.url).await?;
+        channel.listen(channel_name).await?;
+        Ok(channel.into_stream())
     }
 }

@@ -1,5 +1,6 @@
 use common::{catalog::physical::PhysicalTable, config::Config, manifest::Manifest, BoxError};
 use dataset_store::DatasetStore;
+use dump::WORKER_ACTIONS_PG_CHANNEL;
 use metadata_db::{JobState, MetadataDb, WorkerAction};
 use rand::seq::SliceRandom as _;
 use std::sync::Arc;
@@ -10,8 +11,9 @@ pub enum Scheduler {
     /// Regular scheduler, uses the metadata db to coordinate with worker nodes.
     Full(FullScheduler),
 
-    /// If no metadata db is configured, the ephemeral scheduler is used. It just invokes a dump run.
-    /// This is to support local dev or testing environments that don't want to run PG.
+    /// If no metadata db is configured, an ephemeral worker is used. It just invokes a dump run,
+    /// which is not resumed on restart. This is to support local dev or testing environments that
+    /// don't want to run PG.
     Ephemeral(Arc<Config>),
 }
 
@@ -105,7 +107,12 @@ impl FullScheduler {
                 current_state: JobState::Created,
                 next_state: JobState::Running,
             };
-            self.metadata_db.notify_worker(action).await?;
+            self.metadata_db
+                .notify(
+                    WORKER_ACTIONS_PG_CHANNEL,
+                    &serde_json::to_string(&action).unwrap(),
+                )
+                .await?;
             locations.push(location_id);
         }
 

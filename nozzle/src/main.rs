@@ -1,10 +1,12 @@
 mod dump;
 mod server;
 
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 
 use clap::Parser as _;
 use common::{config::Config, tracing, BoxError};
+use dump::worker::Worker;
+use futures::TryStreamExt as _;
 use metadata_db::MetadataDb;
 
 #[global_allocator]
@@ -133,17 +135,8 @@ async fn main_inner() -> Result<(), BoxError> {
             };
             let metadata_db = MetadataDb::connect(metadata_db_url).await?;
 
-            // Heartbeat task. This will also register the worker if running for the first time.
-            let heartbeat_interval = Duration::from_secs(1);
-            let heartbeat_task = tokio::spawn(async move {
-                let mut interval = tokio::time::interval(heartbeat_interval);
-                loop {
-                    metadata_db.heartbeat(&node_id).await?;
-                    interval.tick().await;
-                }
-            });
-
-            heartbeat_task.await?
+            let worker = Worker::new(config.clone(), metadata_db, node_id);
+            worker.run().await.map_err(Into::into)
         }
     }
 }

@@ -1,6 +1,7 @@
 mod job;
 mod metrics; // unused for now
 mod parquet_writer;
+pub mod worker;
 
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -40,6 +41,8 @@ use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties as ParquetWriterProperties;
 use parquet_writer::ParquetFileWriter;
 use thiserror::Error;
+
+pub const WORKER_ACTIONS_PG_CHANNEL: &str = "worker_actions";
 
 pub async fn dump_dataset(
     dataset_name: &str,

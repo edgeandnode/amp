@@ -43,7 +43,19 @@ impl RequestError for DeployError {
     }
 }
 
-// Handler for the /deploy endpoint
+/// Handler for the /deploy endpoint
+///
+/// This handler has very different behaviour depending on whether a metadata DB is configured.
+///
+/// # No Metadata DB
+///
+/// If no metadata DB is configured, the job run is spawned on this node. The job will not be resumed
+/// on restart. This is for local usage that wants to avoid the operational overhead of Postgres.
+///
+/// # Metadata DB
+///
+/// If a metadata DB is configured, the job is scheduled on a worker node by means of a DB
+/// notification.
 #[instrument(skip_all, err)]
 pub async fn deploy_handler(
     State(state): State<ServiceState>,
