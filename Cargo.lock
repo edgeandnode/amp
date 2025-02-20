@@ -2441,6 +2441,7 @@ dependencies = [
  "metadata-db",
  "object_store",
  "prometheus",
+ "serde",
  "serde_json",
  "sqlx",
  "thiserror 2.0.11",

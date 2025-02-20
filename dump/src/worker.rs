@@ -3,23 +3,48 @@ use std::{collections::BTreeMap, pin::pin, sync::Arc, time::Duration};
 use common::{config::Config, BoxError};
 use futures::{TryFutureExt as _, TryStreamExt};
 use log::{debug, error};
-use metadata_db::{LocationId, MetadataDb, WorkerAction};
+use metadata_db::MetadataDb;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::{
     sync::mpsc::{UnboundedReceiver, UnboundedSender},
     task::JoinHandle,
 };
 
-use crate::WORKER_ACTIONS_PG_CHANNEL;
+use crate::operator::Operator;
+
+pub const WORKER_ACTIONS_PG_CHANNEL: &str = "worker_actions";
+
+/// These actions coordinate the job state and the write lock on the output table locations.
+///
+/// Start action:
+/// - Lock the locations by setting `locked_by` in the `locations` table.
+/// - Start the operator.
+///
+/// Stop action:
+/// - Stop the operator.
+/// - Release the location by deleting the row from the `jobs` table.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum Action {
+    Start,
+    Stop,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct WorkerAction {
+    pub node_id: String,
+    pub operator: Operator,
+    pub action: Action,
+}
 
 pub struct Worker {
     config: Arc<Config>,
     metadata_db: MetadataDb,
     node_id: String,
 
-    // To prevent race conditions, actions for a same location are processed sequentially.
-    // Each location has a dedicated handler task.
-    action_queue: BTreeMap<LocationId, UnboundedSender<WorkerAction>>,
+    // To prevent start/stop race conditions, actions for a same operator are processed sequentially.
+    // Each operator has a dedicated handler task.
+    action_queue: BTreeMap<Operator, UnboundedSender<WorkerAction>>,
 }
 
 #[derive(Error, Debug)]
@@ -106,41 +131,44 @@ impl Worker {
         if action.node_id != self.node_id {
             return Ok(());
         }
-        let location_task = self.action_queue.entry(action.location).or_insert_with(|| {
-            let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-            let location_handler = LocationHandler::new(
-                self.metadata_db.clone(),
-                self.node_id.clone(),
-                action.location,
-                rx,
-            );
-            tokio::spawn(location_handler.run());
-            tx
-        });
-        location_task
+        let operator_task = self
+            .action_queue
+            .entry(action.operator.clone())
+            .or_insert_with(|| {
+                let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+                let operator_handler = OperatorHandler::new(
+                    self.metadata_db.clone(),
+                    self.node_id.clone(),
+                    action.operator.clone(),
+                    rx,
+                );
+                tokio::spawn(operator_handler.run());
+                tx
+            });
+        operator_task
             .send(action)
             .map_err(|_| WorkerError::HandlerPanic)
     }
 }
 
-struct LocationHandler {
+struct OperatorHandler {
     metadata_db: MetadataDb,
     node_id: String,
-    location: LocationId,
+    operator: Operator,
     recv: UnboundedReceiver<WorkerAction>,
 }
 
-impl LocationHandler {
+impl OperatorHandler {
     fn new(
         metadata_db: MetadataDb,
         node_id: String,
-        location: LocationId,
+        operator: Operator,
         recv: UnboundedReceiver<WorkerAction>,
     ) -> Self {
         Self {
             metadata_db,
             node_id,
-            location,
+            operator,
             recv,
         }
     }
@@ -148,18 +176,28 @@ impl LocationHandler {
     async fn run(mut self) {
         while let Some(action) = self.recv.recv().await {
             assert!(action.node_id == self.node_id);
-            assert!(action.location == self.location);
+            assert!(action.operator == self.operator);
+
+            // TODO: Remove unwrap, or make the function not error.
             self.handle_action(action).await.unwrap();
         }
 
         // Only happens if the `Worker` is dropped.
         debug!(
-            "Dropping location handler for node {} and location {}",
-            self.node_id, self.location
+            "Dropping operator handler for node {} and operator {:?}",
+            self.node_id, self.operator
         );
     }
 
     async fn handle_action(&self, action: WorkerAction) -> Result<(), WorkerError> {
+        // match action.action {
+        //     Action::Start => {
+        //         self.metadata_db.create_job(self.node_id, self.operator).await?;
+
+        //     }
+        //     Action::Stop => self.metadata_db.delete_job(self.node_id, self.location).await?,
+        // }
+
         todo!()
     }
 }

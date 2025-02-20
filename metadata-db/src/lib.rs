@@ -1,8 +1,5 @@
-use std::fmt;
-
 use futures::Stream;
 use log::error;
-use serde::{Deserialize, Serialize};
 use sqlx::{
     migrate::{MigrateError, Migrator},
     postgres::{PgListener, PgNotification},
@@ -39,26 +36,6 @@ static MIGRATOR: Migrator = sqlx::migrate!();
 pub struct MetadataDb {
     pool: Pool<Postgres>,
     url: String,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub enum JobState {
-    Created,
-    Running,
-}
-
-impl fmt::Display for JobState {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct WorkerAction {
-    pub node_id: String,
-    pub location: LocationId,
-    pub current_state: JobState,
-    pub next_state: JobState,
 }
 
 /// Tables are identified by the triple: `(dataset, dataset_version, table)`. For each table, there
@@ -239,12 +216,10 @@ impl MetadataDb {
     }
 
     pub async fn create_job(&self, node_id: &str, location: LocationId) -> Result<(), Error> {
-        let initial_state = JobState::Created;
-        let query = "INSERT INTO jobs (node_id, location, state) VALUES ($1, $2, $3)";
+        let query = "INSERT INTO jobs (node_id, location) VALUES ($1, $2)";
         sqlx::query(query)
             .bind(node_id)
             .bind(location)
-            .bind(initial_state.to_string())
             .execute(&self.pool)
             .await?;
         Ok(())
