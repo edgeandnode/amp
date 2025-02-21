@@ -1,0 +1,10 @@
+[package]
+name = "embed"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+common = { path = "../common" }
+datafusion.workspace = true
+dataset-store = { path = "../dataset-store" }
+metadata-db = { path = "../metadata-db" }
