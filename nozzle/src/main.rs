@@ -1,4 +1,4 @@
-mod dump;
+mod dump_cmd;
 mod server;
 
 use std::sync::Arc;
@@ -6,7 +6,6 @@ use std::sync::Arc;
 use clap::Parser as _;
 use common::{config::Config, tracing, BoxError};
 use dump::worker::Worker;
-use futures::TryStreamExt as _;
 use metadata_db::MetadataDb;
 
 #[global_allocator]
@@ -114,7 +113,7 @@ async fn main_inner() -> Result<(), BoxError> {
             ignore_deps,
             run_every_mins,
         } => {
-            dump::dump(
+            dump_cmd::dump(
                 config,
                 metadata_db,
                 datasets,

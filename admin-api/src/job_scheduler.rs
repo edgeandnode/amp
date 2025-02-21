@@ -1,4 +1,9 @@
-use common::{catalog::physical::PhysicalTable, config::Config, manifest::Manifest, BoxError};
+use common::{
+    catalog::physical::{PhysicalDataset, PhysicalTable},
+    config::Config,
+    manifest::Manifest,
+    BoxError,
+};
 use dataset_store::DatasetStore;
 use dump::{
     operator::Operator,
@@ -33,13 +38,17 @@ impl Scheduler {
             Self::Full(scheduler) => scheduler.schedule_dataset_dump(manifest).await,
             Self::Ephemeral(config) => {
                 let dataset_store = DatasetStore::new(config.clone(), None);
+                let dataset = {
+                    let dataset = dataset_store.load_dataset(&manifest.name).await?;
+                    PhysicalDataset::from_dataset_at(dataset, config.data_store.clone(), None)
+                        .await?
+                };
 
                 let join_handle = tokio::spawn(async move {
                     dump::dump_dataset(
-                        &manifest.name.clone(),
+                        &dataset,
                         &dataset_store.clone(),
                         &config.clone(),
-                        None,
                         1,
                         dump::default_partition_size(),
                         &dump::default_parquet_opts(),

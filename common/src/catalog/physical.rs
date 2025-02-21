@@ -22,6 +22,10 @@ impl Catalog {
         Catalog { datasets: vec![] }
     }
 
+    pub fn new(datasets: Vec<PhysicalDataset>) -> Self {
+        Catalog { datasets }
+    }
+
     pub async fn register(
         &mut self,
         dataset: &Dataset,
@@ -62,8 +66,8 @@ impl Catalog {
 
 #[derive(Debug, Clone)]
 pub struct PhysicalDataset {
-    pub(crate) dataset: Dataset,
-    pub(crate) tables: Vec<PhysicalTable>,
+    dataset: Dataset,
+    tables: Vec<PhysicalTable>,
 }
 
 impl PhysicalDataset {
@@ -124,6 +128,10 @@ impl PhysicalDataset {
 
     pub fn name(&self) -> &str {
         &self.dataset.name
+    }
+
+    pub fn kind(&self) -> &str {
+        &self.dataset.kind
     }
 }
 
