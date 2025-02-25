@@ -217,6 +217,7 @@ impl MetadataDb {
         Ok(sqlx::query_scalar(query).fetch_all(&self.pool).await?)
     }
 
+    #[instrument(skip(self), err)]
     pub async fn create_job(&self, node_id: &str, operator_json: &str) -> Result<JobId, Error> {
         let query = "INSERT INTO jobs (node_id, operator) VALUES ($1, $2) RETURNING id";
         let job_id: JobId = sqlx::query_scalar(query)
@@ -227,6 +228,7 @@ impl MetadataDb {
         Ok(job_id)
     }
 
+    #[instrument(skip(self), err)]
     pub async fn job_exists(&self, node_id: &str, operator_json: &str) -> Result<bool, Error> {
         let query = "SELECT EXISTS (SELECT 1 FROM jobs WHERE node_id = $1 AND operator = $2)";
         let exists: bool = sqlx::query_scalar(query)
@@ -237,8 +239,9 @@ impl MetadataDb {
         Ok(exists)
     }
 
+    #[instrument(skip(self), err)]
     pub async fn notify(&self, channel_name: &str, payload: &str) -> Result<(), Error> {
-        sqlx::query("NOTIFY $1, $2")
+        sqlx::query("SELECT pg_notify($1, $2)")
             .bind(channel_name)
             .bind(payload)
             .execute(&self.pool)
