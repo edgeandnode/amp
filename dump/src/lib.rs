@@ -41,6 +41,7 @@ use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties as ParquetWriterProperties;
 use parquet_writer::ParquetFileWriter;
 use thiserror::Error;
+use tracing::instrument;
 
 pub async fn dump_dataset(
     dataset: &PhysicalDataset,
@@ -192,6 +193,7 @@ async fn run_block_stream_jobs(
     Ok(())
 }
 
+#[instrument(skip_all, err, fields(dataset = %dataset.name()))]
 async fn dump_sql_dataset(
     dst_ctx: Arc<QueryContext>,
     dataset: SqlDataset,
@@ -214,6 +216,7 @@ async fn dump_sql_dataset(
                     Some(end) => end,
                     None => {
                         // If the dependencies have synced nothing, we have nothing to do.
+                        warn!("no blocks to dump for {table}, dependencies are empty");
                         continue;
                     }
                 }
