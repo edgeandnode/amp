@@ -50,7 +50,12 @@ pub async fn dump(
     for dataset_name in datasets {
         let dataset = dataset_store.load_dataset(&dataset_name).await?;
         physical_datasets.push(
-            PhysicalDataset::from_dataset_at(dataset, config.data_store.clone(), None).await?,
+            PhysicalDataset::from_dataset_at(
+                dataset,
+                config.data_store.clone(),
+                metadata_db.as_ref(),
+            )
+            .await?,
         );
     }
 
