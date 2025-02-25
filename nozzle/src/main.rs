@@ -65,7 +65,11 @@ enum Command {
         #[arg(long, env = "DUMP_RUN_EVERY_MINS")]
         run_every_mins: Option<u64>,
     },
-    Server,
+    Server {
+        /// Disable admin API
+        #[arg(long, env = "SERVER_NO_ADMIN")]
+        no_admin: bool,
+    },
 }
 
 #[tokio::main]
@@ -117,6 +121,6 @@ async fn main_inner() -> Result<(), BoxError> {
             )
             .await
         }
-        Command::Server => server::run(config, metadata_db).await,
+        Command::Server { no_admin } => server::run(config, metadata_db, no_admin).await,
     }
 }

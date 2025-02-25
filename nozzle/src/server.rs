@@ -2,12 +2,16 @@ use std::{net::SocketAddr, sync::Arc};
 
 use arrow_flight::flight_service_server::FlightServiceServer;
 use common::{config::Config, BoxError};
-use futures::{StreamExt as _, TryStreamExt as _};
+use futures::{FutureExt, StreamExt as _, TryStreamExt as _};
 use metadata_db::MetadataDb;
 use server::service::Service;
 use tonic::transport::Server;
 
-pub async fn run(config: Arc<Config>, metadata_db: Option<MetadataDb>) -> Result<(), BoxError> {
+pub async fn run(
+    config: Arc<Config>,
+    metadata_db: Option<MetadataDb>,
+    no_admin: bool,
+) -> Result<(), BoxError> {
     log::info!("memory limit is {} MB", config.max_mem_mb);
     log::info!(
         "spill to disk allowed: {}",
@@ -26,19 +30,25 @@ pub async fn run(config: Arc<Config>, metadata_db: Option<MetadataDb>) -> Result
     let jsonl_server = run_jsonl_server(service, jsonl_addr);
     log::info!("Serving JSON lines at {}", jsonl_addr);
 
-    let admin_api_addr: SocketAddr = ([0, 0, 0, 0], 1610).into();
-    log::info!("Admin API running at {}", admin_api_addr);
-
     let registry_service_addr: SocketAddr = ([0, 0, 0, 0], 1611).into();
+    let registry_service =
+        registry_service::serve(registry_service_addr, config.clone(), metadata_db);
     log::info!("Registry service running at {}", registry_service_addr);
-    let admin_api = admin_api::serve(admin_api_addr, config.clone());
-    let registry_service = registry_service::serve(registry_service_addr, config, metadata_db);
+
+    let admin_api = match no_admin {
+        true => std::future::pending().boxed(),
+        false => {
+            let admin_api_addr: SocketAddr = ([0, 0, 0, 0], 1610).into();
+            log::info!("Admin API running at {}", admin_api_addr);
+            admin_api::serve(admin_api_addr, config).boxed()
+        }
+    };
 
     tokio::select! {
         result = flight_server => result?,
         result = jsonl_server => result?,
-        result = admin_api => result?,
         result = registry_service => result?,
+        result = admin_api => result?,
     };
     Err("server shutdown unexpectedly".into())
 }
