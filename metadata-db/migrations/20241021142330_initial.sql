@@ -27,5 +27,6 @@ CREATE TABLE workers (
 CREATE TABLE jobs (
     vid BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     node_id TEXT NOT NULL REFERENCES workers(node_id),
-    operator TEXT NOT NULL UNIQUE
+    operator TEXT NOT NULL,
+    CONSTRAINT unique_jobs UNIQUE (node_id, operator)
 );

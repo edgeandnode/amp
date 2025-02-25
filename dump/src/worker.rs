@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, pin::pin, sync::Arc, time::Duration};
 
 use common::{config::Config, BoxError};
 use futures::{TryFutureExt as _, TryStreamExt};
-use log::{debug, error};
+use log::{debug, error, warn};
 use metadata_db::MetadataDb;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -10,6 +10,7 @@ use tokio::{
     sync::mpsc::{UnboundedReceiver, UnboundedSender},
     task::JoinHandle,
 };
+use tracing::{info, instrument};
 
 use crate::operator::Operator;
 
@@ -18,6 +19,7 @@ pub const WORKER_ACTIONS_PG_CHANNEL: &str = "worker_actions";
 /// These actions coordinate the job state and the write lock on the output table locations.
 ///
 /// Start action:
+/// - Create a job in the `jobs` table.
 /// - Lock the locations by setting `locked_by` in the `locations` table.
 /// - Start the operator.
 ///
@@ -30,7 +32,7 @@ pub enum Action {
     Stop,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct WorkerAction {
     pub node_id: String,
     pub operator: Operator,
@@ -57,6 +59,9 @@ pub enum WorkerError {
 
     #[error("location handler panicked")]
     HandlerPanic,
+
+    #[error("database error: {0}")]
+    DbError(#[from] metadata_db::Error),
 }
 
 impl Worker {
@@ -137,6 +142,7 @@ impl Worker {
             .or_insert_with(|| {
                 let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
                 let operator_handler = OperatorHandler::new(
+                    self.config.clone(),
                     self.metadata_db.clone(),
                     self.node_id.clone(),
                     action.operator.clone(),
@@ -152,6 +158,7 @@ impl Worker {
 }
 
 struct OperatorHandler {
+    config: Arc<Config>,
     metadata_db: MetadataDb,
     node_id: String,
     operator: Operator,
@@ -160,12 +167,14 @@ struct OperatorHandler {
 
 impl OperatorHandler {
     fn new(
+        config: Arc<Config>,
         metadata_db: MetadataDb,
         node_id: String,
         operator: Operator,
         recv: UnboundedReceiver<WorkerAction>,
     ) -> Self {
         Self {
+            config,
             metadata_db,
             node_id,
             operator,
@@ -184,19 +193,42 @@ impl OperatorHandler {
 
         // Only happens if the `Worker` is dropped.
         debug!(
-            "Dropping operator handler for node {} and operator {:?}",
+            "Dropping operator handler for node {} and operator {}",
             self.node_id, self.operator
         );
     }
 
+    #[instrument(skip(self), err)]
     async fn handle_action(&self, action: WorkerAction) -> Result<(), WorkerError> {
-        // match action.action {
-        //     Action::Start => {
-        //         self.metadata_db.create_job(self.node_id, self.operator).await?;
+        match action.action {
+            Action::Start => {
+                let json = serde_json::to_string(&self.operator).unwrap();
+                if self.metadata_db.job_exists(&self.node_id, &json).await? {
+                    warn!("duplicate job, ignoring");
+                    return Ok(());
+                }
+                self.metadata_db.create_job(&self.node_id, &json).await?;
+                let config = self.config.clone();
+                let metadata_db = self.metadata_db.clone();
 
-        //     }
-        //     Action::Stop => self.metadata_db.delete_job(self.node_id, self.location).await?,
-        // }
+                tokio::spawn(async move {
+                    let operator_desc = action.operator.to_string();
+                    match action.operator.run(config, metadata_db).await {
+                        Ok(()) => {
+                            info!("operator {} finished running", operator_desc);
+                        }
+                        Err(e) => {
+                            error!("error running operator {}: {}", operator_desc, e);
+                        }
+                    }
+                });
+            }
+
+            Action::Stop => {
+                // No code path currently calls this.
+                unimplemented!()
+            }
+        }
 
         todo!()
     }
