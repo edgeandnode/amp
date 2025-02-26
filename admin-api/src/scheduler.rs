@@ -92,7 +92,7 @@ impl FullScheduler {
         //
         // The worker node should then receive the notification and start the dump run.
 
-        let candidates = self.metadata_db.live_workers().await?;
+        let candidates = self.metadata_db.active_workers().await?;
         let Some(node_id) = candidates.choose(&mut rand::thread_rng()) else {
             return Err("no available workers".into());
         };

@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, pin::pin, sync::Arc, time::Duration};
+use std::{collections::BTreeMap, pin::pin, sync::Arc};
 
 use common::{config::Config, BoxError};
 use futures::{TryFutureExt as _, TryStreamExt};
@@ -77,55 +77,62 @@ impl Worker {
     pub async fn run(mut self) -> Result<(), WorkerError> {
         use WorkerError::*;
 
-        // Heartbeat task. This will also register the worker if running for the first time.
-        let heartbeat_interval = Duration::from_secs(1);
-        let heartbeat_task: JoinHandle<Result<(), WorkerError>> = {
-            let node_id = self.node_id.clone();
-            let metadata_db = self.metadata_db.clone();
-            tokio::spawn(async move {
-                let mut interval = tokio::time::interval(heartbeat_interval);
-                loop {
-                    metadata_db
-                        .heartbeat(&node_id)
-                        .await
-                        .map_err(|e| HeartbeatError(e.into()))?;
-                    interval.tick().await;
-                }
-            })
-        };
+        // Say hello before anything else, to make sure this worker is seen by the system as
+        // registered and active.
+        self.metadata_db.hello_worker(&self.node_id).await?;
 
-        let scheduler_loop = {
-            let action_stream = self
-                .metadata_db
-                .listen(WORKER_ACTIONS_PG_CHANNEL)
-                .await
-                .map_err(|e| ListenError(e.into()))?
-                .map_err(|e| ListenError(e.into()))
-                .try_filter_map(|n| async move {
-                    match serde_json::from_str(&n.payload()) {
-                        Ok(action) => Ok(Some(action)),
-                        Err(e) => {
-                            // Warn the operator about invalid notifications, but don't fail the worker.
-                            error!(
-                                "Invalid notification, error: `{}`, payload: `{}`",
-                                e,
-                                n.payload()
-                            );
-                            Ok(None)
-                        }
+        // Periodic heartbeat task.
+        let heartbeat_task: JoinHandle<Result<(), WorkerError>> = tokio::spawn(
+            self.metadata_db
+                .clone()
+                .heartbeat_loop(self.node_id.clone())
+                .map_err(|e| HeartbeatError(e.into())),
+        );
+
+        // Start listening for actions.
+        let action_stream = self
+            .metadata_db
+            .listen(WORKER_ACTIONS_PG_CHANNEL)
+            .await
+            .map_err(|e| ListenError(e.into()))?
+            .map_err(|e| ListenError(e.into()))
+            .try_filter_map(|n| async move {
+                match serde_json::from_str(&n.payload()) {
+                    Ok(action) => Ok(Some(action)),
+                    Err(e) => {
+                        // Warn the operator about invalid notifications, but don't fail the worker.
+                        error!(
+                            "Invalid notification, error: `{}`, payload: `{}`",
+                            e,
+                            n.payload()
+                        );
+                        Ok(None)
                     }
-                });
-
-            async move {
-                let mut stream = pin!(action_stream);
-                while let Some(action) = stream.try_next().await? {
-                    self.handle_action(action)?;
                 }
-                Ok(())
+            });
+
+        // Spawn scheduled operators.
+        let scheduled_operators = self.metadata_db.scheduled_operators(&self.node_id).await?;
+        for operator in scheduled_operators {
+            let operator = match serde_json::from_str(&operator) {
+                Ok(operator) => operator,
+                Err(e) => {
+                    error!("scheduled operator is invalid, ignoring: {}", e);
+                    continue;
+                }
+            };
+            spawn_operator(self.config.clone(), self.metadata_db.clone(), operator);
+        }
+
+        let scheduler_loop = async move {
+            let mut stream = pin!(action_stream);
+            while let Some(action) = stream.try_next().await? {
+                self.handle_action(action)?;
             }
+            Ok(())
         };
 
-        // Run forever or until a fatal error
+        // Run forever or until a fatal error.
         tokio::select! {
             res = heartbeat_task.map_err(|e| HeartbeatError(e.into())) => res?,
             res = scheduler_loop => res,
@@ -204,7 +211,11 @@ impl OperatorHandler {
             Action::Start => {
                 let json = serde_json::to_string(&self.operator).unwrap();
 
-                if self.metadata_db.operator_is_scheduled(&self.node_id, &json).await? {
+                if self
+                    .metadata_db
+                    .operator_is_scheduled(&self.node_id, &json)
+                    .await?
+                {
                     warn!("operator already scheduled to this node, ignoring");
                     return Ok(());
                 }
@@ -213,20 +224,11 @@ impl OperatorHandler {
                     .schedule_operator(&self.node_id, &json, action.operator.output_locations())
                     .await?;
 
-                // Spawn the operator.
-                let config = self.config.clone();
-                let metadata_db = self.metadata_db.clone();
-                tokio::spawn(async move {
-                    let operator_desc = action.operator.to_string();
-                    match action.operator.run(config, metadata_db).await {
-                        Ok(()) => {
-                            info!("operator {} finished running", operator_desc);
-                        }
-                        Err(e) => {
-                            error!("error running operator {}: {}", operator_desc, e);
-                        }
-                    }
-                });
+                spawn_operator(
+                    self.config.clone(),
+                    self.metadata_db.clone(),
+                    action.operator,
+                );
             }
 
             Action::Stop => {
@@ -236,4 +238,22 @@ impl OperatorHandler {
         }
         Ok(())
     }
+}
+
+fn spawn_operator(
+    config: Arc<Config>,
+    metadata_db: MetadataDb,
+    operator: Operator,
+) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        let operator_desc = operator.to_string();
+        match operator.run(config, metadata_db).await {
+            Ok(()) => {
+                info!("operator {} finished running", operator_desc);
+            }
+            Err(e) => {
+                error!("error running operator {}: {}", operator_desc, e);
+            }
+        }
+    })
 }

@@ -1,13 +1,22 @@
+use std::time::Duration;
+
 use futures::Stream;
 use log::error;
 use sqlx::{
     migrate::{MigrateError, Migrator},
     postgres::{PgListener, PgNotification},
-    Executor, Pool, Postgres,
+    Connection as _, Executor, PgConnection, Pool, Postgres,
 };
 use thiserror::Error;
 use tracing::instrument;
 use url::Url;
+
+/// Frequency on which to send a heartbeat.
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
+
+/// A worker is considered active if it has sent a heartbeat in this period. The scheduler will
+/// schedule new operators only on active workers.
+const ACTIVE_INTERVAL_SECS: i32 = 5;
 
 /// Row ids, always non-negative.
 pub type LocationId = i64;
@@ -201,8 +210,7 @@ impl MetadataDb {
         Ok(())
     }
 
-    // TODO: Use dedicated connection.
-    pub async fn heartbeat(&self, node_id: &str) -> Result<(), Error> {
+    pub async fn hello_worker(&self, node_id: &str) -> Result<(), Error> {
         let query = "
         INSERT INTO workers (node_id, last_heartbeat)
         VALUES ($1, now() at time zone 'utc')
@@ -214,10 +222,27 @@ impl MetadataDb {
         Ok(())
     }
 
-    /// Returns a list of live workers. A worker is live if it has sent a heartbeat in the last 5 seconds.
-    pub async fn live_workers(&self) -> Result<Vec<String>, Error> {
-        let query = "SELECT node_id FROM workers WHERE last_heartbeat > (now() at time zone 'utc') - interval '5 seconds'";
-        Ok(sqlx::query_scalar(query).fetch_all(&self.pool).await?)
+    /// Periodically updates the worker's heartbeat in a dedicated DB connection.
+    ///
+    /// Loops forever unless the DB returns an error.
+    pub async fn heartbeat_loop(self, node_id: String) -> Result<(), Error> {
+        let mut conn = PgConnection::connect(&self.url).await?;
+        let mut interval = tokio::time::interval(HEARTBEAT_INTERVAL);
+        loop {
+            let query =
+                "UPDATE workers SET last_heartbeat = (now() at time zone 'utc') WHERE node_id = $1";
+            sqlx::query(query).bind(&node_id).execute(&mut conn).await?;
+            interval.tick().await;
+        }
+    }
+
+    /// Returns a list of active workers. A worker is active if it has sent a sufficiently recent heartbeat.
+    pub async fn active_workers(&self) -> Result<Vec<String>, Error> {
+        let query = "SELECT node_id FROM workers WHERE last_heartbeat > (now() at time zone 'utc') - make_interval(secs => $1)";
+        Ok(sqlx::query_scalar(query)
+            .bind(ACTIVE_INTERVAL_SECS)
+            .fetch_all(&self.pool)
+            .await?)
     }
 
     #[instrument(skip(self), err)]
@@ -259,6 +284,14 @@ impl MetadataDb {
             .fetch_one(&self.pool)
             .await?;
         Ok(exists)
+    }
+
+    pub async fn scheduled_operators(&self, node_id: &str) -> Result<Vec<String>, Error> {
+        let query = "SELECT operator FROM scheduled_operators WHERE node_id = $1";
+        Ok(sqlx::query_scalar(query)
+            .bind(node_id)
+            .fetch_all(&self.pool)
+            .await?)
     }
 
     #[instrument(skip(self), err)]
