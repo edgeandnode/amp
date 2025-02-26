@@ -144,6 +144,7 @@ pub struct PhysicalTable {
     url: Url,
     path: Path,
     object_store: Arc<dyn ObjectStore>,
+    location_id: Option<LocationId>,
 }
 
 impl PhysicalTable {
@@ -157,7 +158,7 @@ impl PhysicalTable {
     ) -> Result<Self, BoxError> {
         validate_name(&table.name)?;
 
-        let (url, object_store) = {
+        let (url, object_store, location_id) = {
             let table_id = TableId {
                 dataset: dataset_name,
                 dataset_version: None,
@@ -166,18 +167,18 @@ impl PhysicalTable {
 
             let active_location = metadata_db.get_active_location(table_id).await?;
             match active_location {
-                Some(location) => {
-                    let url = Url::parse(&location)?;
+                Some((url, location_id)) => {
+                    let url = Url::parse(&url)?;
                     let object_store = Store::new(url.to_string(), None)?.object_store();
-                    (url, object_store)
+                    (url, object_store, Some(location_id))
                 }
                 None => {
                     let path = make_location_path(table_id);
                     let url = data_store.url().join(&path)?;
-                    metadata_db
+                    let location_id = metadata_db
                         .register_location(table_id, data_store.bucket(), &path, &url, true)
                         .await?;
-                    (url, data_store.object_store())
+                    (url, data_store.object_store(), Some(location_id))
                 }
             }
         };
@@ -191,6 +192,7 @@ impl PhysicalTable {
             url,
             path,
             object_store,
+            location_id,
         })
     }
 
@@ -218,6 +220,7 @@ impl PhysicalTable {
             url,
             path,
             object_store: data_store.object_store(),
+            location_id: None,
         })
     }
 
@@ -244,6 +247,10 @@ impl PhysicalTable {
 
     pub fn schema(&self) -> SchemaRef {
         self.table.schema.clone()
+    }
+
+    pub fn location_id(&self) -> Option<LocationId> {
+        self.location_id
     }
 
     /// Qualified table reference in the format `dataset_name.table_name`.
@@ -276,7 +283,7 @@ impl PhysicalTable {
         data_store: &Store,
         dataset_name: &str,
         db: &MetadataDb,
-    ) -> Result<(Self, LocationId), BoxError> {
+    ) -> Result<Self, BoxError> {
         let table_id = TableId {
             dataset: dataset_name,
             dataset_version: None,
@@ -298,8 +305,9 @@ impl PhysicalTable {
             url,
             path,
             object_store: data_store.object_store(),
+            location_id: Some(location_id),
         };
-        Ok((physical_table, location_id))
+        Ok(physical_table)
     }
 
     /// Return all parquet files for this table. If `dump_only` is `true`,

@@ -263,7 +263,7 @@ async fn dump_sql_dataset(
             let Some(metadata_db) = dataset_store.metadata_db.as_ref() else {
                 return Err("metadata_db is required for entire materialization".into());
             };
-            let (physical_table, _) = PhysicalTable::next_revision(
+            let physical_table = PhysicalTable::next_revision(
                 physical_table.table(),
                 &data_store,
                 dataset.name(),

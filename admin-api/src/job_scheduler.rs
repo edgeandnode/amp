@@ -1,9 +1,4 @@
-use common::{
-    catalog::physical::{PhysicalDataset, PhysicalTable},
-    config::Config,
-    manifest::Manifest,
-    BoxError,
-};
+use common::{catalog::physical::PhysicalDataset, config::Config, manifest::Manifest, BoxError};
 use dataset_store::DatasetStore;
 use dump::{
     operator::Operator,
@@ -92,7 +87,7 @@ impl FullScheduler {
     pub async fn schedule_dataset_dump(&self, dataset: Manifest) -> Result<(), BoxError> {
         // Scheduling procedure for a new `DumpDataset` operator:
         // 1. Choose a responsive node.
-        // 2. Create a location for each table.
+        // 2. Resolve the location for each table.
         // 3. Instantiate the operator description.
         // 4. Send a `Start` command through `worker_actions` for that node and operator description.
         //
@@ -103,21 +98,18 @@ impl FullScheduler {
             return Err("no available workers".into());
         };
 
-        let mut locations = Vec::new();
-        for table in dataset.tables() {
-            let (_, location_id) = PhysicalTable::next_revision(
-                &table,
-                &self.config.data_store,
-                &dataset.name,
-                &self.metadata_db,
-            )
-            .await?;
-            locations.push(location_id);
-        }
+        let data_store = self.config.data_store.clone();
+        let dataset =
+            PhysicalDataset::from_dataset_at(dataset.into(), data_store, Some(&self.metadata_db))
+                .await?;
+        let locations = dataset
+            .tables()
+            .map(|table| table.location_id().unwrap()) // Unwrap: The metadata db is configured.
+            .collect();
         let action = WorkerAction {
             node_id: node_id.to_string(),
             operator: Operator::DumpDataset {
-                dataset: dataset.name,
+                dataset: dataset.name().to_string(),
                 locations,
             },
             action: Action::Start,

@@ -111,7 +111,10 @@ impl MetadataDb {
     /// - On the write side, it is the location that is being kept in sync with the source data.
     /// - On the read side, it is default location that should receive queries.
     #[instrument(skip(self), err)]
-    pub async fn get_active_location(&self, table: TableId<'_>) -> Result<Option<String>, Error> {
+    pub async fn get_active_location(
+        &self,
+        table: TableId<'_>,
+    ) -> Result<Option<(String, LocationId)>, Error> {
         let TableId {
             dataset,
             dataset_version,
@@ -120,12 +123,12 @@ impl MetadataDb {
         let dataset_version = dataset_version.unwrap_or("");
 
         let query = "
-        SELECT url
+        SELECT url, id
         FROM locations
         WHERE dataset = $1 AND dataset_version = $2 AND tbl = $3 AND active
         ";
 
-        let mut urls: Vec<String> = sqlx::query_scalar(query)
+        let mut urls: Vec<(String, LocationId)> = sqlx::query_as(query)
             .bind(dataset)
             .bind(dataset_version)
             .bind(table)
@@ -141,7 +144,7 @@ impl MetadataDb {
                 dataset.to_string(),
                 dataset_version.to_string(),
                 table.to_string(),
-                urls,
+                urls.iter().map(|(url, _)| url.clone()).collect(),
             )),
         }
     }
