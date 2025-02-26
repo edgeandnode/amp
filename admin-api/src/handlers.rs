@@ -49,12 +49,13 @@ impl RequestError for DeployError {
 ///
 /// # No Metadata DB
 ///
-/// If no metadata DB is configured, the job run is spawned on this node. The job will not be resumed
-/// on restart. This is for local usage that wants to avoid the operational overhead of Postgres.
+/// If no metadata DB is configured, the dump run is spawned on this node. The run will not be
+/// resumed on restart. This is for local usage that wants to avoid the operational overhead of
+/// Postgres.
 ///
 /// # Metadata DB
 ///
-/// If a metadata DB is configured, the job is scheduled on a worker node by means of a DB
+/// If a metadata DB is configured, a dump operator is scheduled on a worker node by means of a DB
 /// notification.
 #[instrument(skip_all, err)]
 pub async fn deploy_handler(
@@ -63,10 +64,7 @@ pub async fn deploy_handler(
 ) -> Result<(StatusCode, &'static str), BoxRequestError> {
     use DeployError::*;
 
-    let ServiceState {
-        config,
-        job_scheduler,
-    } = state;
+    let ServiceState { config, scheduler } = state;
 
     // Validate the manifest
     let manifest: Manifest = serde_json::from_str(&payload.manifest).map_err(ManifestParseError)?;
@@ -80,7 +78,7 @@ pub async fn deploy_handler(
         .await
         .map_err(|_| DatasetDefStoreError)?;
 
-    job_scheduler
+    scheduler
         .clone()
         .schedule_dataset_dump(manifest)
         .await

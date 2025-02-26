@@ -17,7 +17,7 @@ use crate::{default_parquet_opts, default_partition_size, dump_dataset};
 ///   to multiple tables.
 ///
 /// Currently, the "dump operator" is what have implemented so that's what we have here. This
-/// representation is for the `operator` column in the `jobs` table.
+/// representation is what is serialized into the `operator` column of the `scheduled_operators` table.
 #[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Serialize, Deserialize)]
 pub enum Operator {
     DumpDataset {

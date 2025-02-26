@@ -83,7 +83,6 @@ impl FullScheduler {
         }
     }
 
-    /// Schedule dump jobs to workers. Each table in the dataset will become a separate job.
     pub async fn schedule_dataset_dump(&self, dataset: Manifest) -> Result<(), BoxError> {
         // Scheduling procedure for a new `DumpDataset` operator:
         // 1. Choose a responsive node.

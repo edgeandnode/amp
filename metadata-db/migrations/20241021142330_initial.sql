@@ -4,11 +4,11 @@ CREATE TABLE workers (
     last_heartbeat TIMESTAMP NOT NULL
 );
 
-CREATE TABLE jobs (
+CREATE TABLE scheduled_operators (
     id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     node_id TEXT NOT NULL REFERENCES workers(node_id),
     operator TEXT NOT NULL,
-    CONSTRAINT unique_jobs UNIQUE (node_id, operator)
+    CONSTRAINT unique_scheduled_operators UNIQUE (node_id, operator)
 );
 
 CREATE TABLE IF NOT EXISTS locations (
@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS locations (
     url TEXT NOT NULL UNIQUE,
 
     active BOOLEAN NOT NULL,
-    locked_by BIGINT REFERENCES jobs(id) ON DELETE SET NULL,
+    locked_by BIGINT REFERENCES scheduled_operators(id) ON DELETE SET NULL,
     CONSTRAINT unique_bucket_path UNIQUE (bucket, path)
 );
 

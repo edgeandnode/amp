@@ -16,16 +16,16 @@ use crate::operator::Operator;
 
 pub const WORKER_ACTIONS_PG_CHANNEL: &str = "worker_actions";
 
-/// These actions coordinate the job state and the write lock on the output table locations.
+/// These actions coordinate the operator state and the write lock on the output table locations.
 ///
 /// Start action:
-/// - Create a job in the `jobs` table.
+/// - Accept the scheduling by creating an entry in the `scheduled_operators` table.
 /// - Lock the locations by setting `locked_by` in the `locations` table.
 /// - Start the operator.
 ///
 /// Stop action:
 /// - Stop the operator.
-/// - Release the location by deleting the row from the `jobs` table.
+/// - Release the location by deleting the row from the `scheduled_operators` table.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum Action {
     Start,
@@ -204,15 +204,13 @@ impl OperatorHandler {
             Action::Start => {
                 let json = serde_json::to_string(&self.operator).unwrap();
 
-                // Check if the command is redundant.
-                if self.metadata_db.job_exists(&self.node_id, &json).await? {
-                    warn!("duplicate job, ignoring");
+                if self.metadata_db.operator_is_scheduled(&self.node_id, &json).await? {
+                    warn!("operator already scheduled to this node, ignoring");
                     return Ok(());
                 }
 
-                // Create the entry in the `jobs` table.
                 self.metadata_db
-                    .create_job(&self.node_id, &json, action.operator.output_locations())
+                    .schedule_operator(&self.node_id, &json, action.operator.output_locations())
                     .await?;
 
                 // Spawn the operator.

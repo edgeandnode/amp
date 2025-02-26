@@ -11,7 +11,7 @@ use url::Url;
 
 /// Row ids, always non-negative.
 pub type LocationId = i64;
-pub type JobId = i64;
+pub type ScheduledOperatorId = i64;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -221,32 +221,38 @@ impl MetadataDb {
     }
 
     #[instrument(skip(self), err)]
-    pub async fn create_job(
+    pub async fn schedule_operator(
         &self,
         node_id: &str,
         operator_json: &str,
         locations: &[LocationId],
-    ) -> Result<JobId, Error> {
-        // Use a transaction, such that the job will only be created if the locations are successfully locked.
+    ) -> Result<ScheduledOperatorId, Error> {
+        // Use a transaction, such that the operator will only be scheduled if the locations are
+        // successfully locked.
         let mut tx = self.pool.begin().await?;
 
-        let query = "INSERT INTO jobs (node_id, operator) VALUES ($1, $2) RETURNING id";
-        let job_id: JobId = sqlx::query_scalar(query)
+        let query =
+            "INSERT INTO scheduled_operators (node_id, operator) VALUES ($1, $2) RETURNING id";
+        let id: ScheduledOperatorId = sqlx::query_scalar(query)
             .bind(node_id)
             .bind(operator_json)
             .fetch_one(&self.pool)
             .await?;
 
-        lock_locations(&mut *tx, job_id, locations).await?;
+        lock_locations(&mut *tx, id, locations).await?;
 
         tx.commit().await?;
 
-        Ok(job_id)
+        Ok(id)
     }
 
     #[instrument(skip(self), err)]
-    pub async fn job_exists(&self, node_id: &str, operator_json: &str) -> Result<bool, Error> {
-        let query = "SELECT EXISTS (SELECT 1 FROM jobs WHERE node_id = $1 AND operator = $2)";
+    pub async fn operator_is_scheduled(
+        &self,
+        node_id: &str,
+        operator_json: &str,
+    ) -> Result<bool, Error> {
+        let query = "SELECT EXISTS (SELECT 1 FROM scheduled_operators WHERE node_id = $1 AND operator = $2)";
         let exists: bool = sqlx::query_scalar(query)
             .bind(node_id)
             .bind(operator_json)
@@ -290,12 +296,12 @@ impl MetadataDb {
 #[instrument(skip(executor), err)]
 async fn lock_locations(
     executor: impl Executor<'_, Database = Postgres>,
-    job_id: JobId,
+    operator_id: ScheduledOperatorId,
     locations: &[LocationId],
 ) -> Result<(), Error> {
     let query = "UPDATE locations SET locked_by = $1 WHERE id = ANY($2)";
     sqlx::query(query)
-        .bind(job_id)
+        .bind(operator_id)
         .bind(locations)
         .execute(executor)
         .await?;
