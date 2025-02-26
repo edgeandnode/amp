@@ -76,4 +76,10 @@ impl Operator {
             }
         }
     }
+
+    pub fn output_locations(&self) -> &[LocationId] {
+        match self {
+            Operator::DumpDataset { locations, .. } => locations,
+        }
+    }
 }

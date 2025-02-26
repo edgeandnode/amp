@@ -3,7 +3,7 @@ use log::error;
 use sqlx::{
     migrate::{MigrateError, Migrator},
     postgres::{PgListener, PgNotification},
-    Pool, Postgres,
+    Executor, Pool, Postgres,
 };
 use thiserror::Error;
 use tracing::instrument;
@@ -218,13 +218,26 @@ impl MetadataDb {
     }
 
     #[instrument(skip(self), err)]
-    pub async fn create_job(&self, node_id: &str, operator_json: &str) -> Result<JobId, Error> {
+    pub async fn create_job(
+        &self,
+        node_id: &str,
+        operator_json: &str,
+        locations: &[LocationId],
+    ) -> Result<JobId, Error> {
+        // Use a transaction, such that the job will only be created if the locations are successfully locked.
+        let mut tx = self.pool.begin().await?;
+
         let query = "INSERT INTO jobs (node_id, operator) VALUES ($1, $2) RETURNING id";
         let job_id: JobId = sqlx::query_scalar(query)
             .bind(node_id)
             .bind(operator_json)
             .fetch_one(&self.pool)
             .await?;
+
+        lock_locations(&mut *tx, job_id, locations).await?;
+
+        tx.commit().await?;
+
         Ok(job_id)
     }
 
@@ -269,4 +282,19 @@ impl MetadataDb {
         channel.listen(channel_name).await?;
         Ok(channel.into_stream())
     }
+}
+
+#[instrument(skip(executor), err)]
+async fn lock_locations(
+    executor: impl Executor<'_, Database = Postgres>,
+    job_id: JobId,
+    locations: &[LocationId],
+) -> Result<(), Error> {
+    let query = "UPDATE locations SET locked_by = $1 WHERE id = ANY($2)";
+    sqlx::query(query)
+        .bind(job_id)
+        .bind(locations)
+        .execute(executor)
+        .await?;
+    Ok(())
 }

@@ -203,14 +203,21 @@ impl OperatorHandler {
         match action.action {
             Action::Start => {
                 let json = serde_json::to_string(&self.operator).unwrap();
+
+                // Check if the command is redundant.
                 if self.metadata_db.job_exists(&self.node_id, &json).await? {
                     warn!("duplicate job, ignoring");
                     return Ok(());
                 }
-                self.metadata_db.create_job(&self.node_id, &json).await?;
+
+                // Create the entry in the `jobs` table.
+                self.metadata_db
+                    .create_job(&self.node_id, &json, action.operator.output_locations())
+                    .await?;
+
+                // Spawn the operator.
                 let config = self.config.clone();
                 let metadata_db = self.metadata_db.clone();
-
                 tokio::spawn(async move {
                     let operator_desc = action.operator.to_string();
                     match action.operator.run(config, metadata_db).await {
