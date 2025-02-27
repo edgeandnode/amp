@@ -81,14 +81,8 @@ impl PhysicalDataset {
         let dataset_name = dataset.name.clone();
         validate_name(&dataset_name)?;
 
-        let tables = {
-            let mut tables = dataset.tables.clone();
-            tables.append(&mut dataset.meta_tables());
-            tables
-        };
-
         let mut physical_tables = vec![];
-        for table in tables {
+        for table in dataset.tables_with_meta() {
             match metadata_db {
                 Some(db) => {
                     physical_tables.push(

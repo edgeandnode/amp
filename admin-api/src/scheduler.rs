@@ -1,4 +1,4 @@
-use common::{catalog::physical::PhysicalDataset, config::Config, manifest::Manifest, BoxError};
+use common::{catalog::physical::{PhysicalDataset, PhysicalTable}, config::Config, manifest::Manifest, BoxError, Dataset};
 use dataset_store::DatasetStore;
 use dump::{
     operator::Operator,
@@ -83,12 +83,13 @@ impl FullScheduler {
         }
     }
 
+    /// Schedule a dump for a new copy of a dataset.
     pub async fn schedule_dataset_dump(&self, dataset: Manifest) -> Result<(), BoxError> {
         // Scheduling procedure for a new `DumpDataset` operator:
         // 1. Choose a responsive node.
-        // 2. Resolve the location for each table.
-        // 3. Instantiate the operator description.
-        // 4. Send a `Start` command through `worker_actions` for that node and operator description.
+        // 2. Create a new location for each table.
+        // 3. Register the operator in the metadata db.
+        // 4. Send a `Start` command through `worker_actions` for that operator.
         //
         // The worker node should then receive the notification and start the dump run.
 
@@ -97,18 +98,24 @@ impl FullScheduler {
             return Err("no available workers".into());
         };
 
-        let data_store = self.config.data_store.clone();
-        let dataset =
-            PhysicalDataset::from_dataset_at(dataset.into(), data_store, Some(&self.metadata_db))
-                .await?;
-        let locations = dataset
-            .tables()
-            .map(|table| table.location_id().unwrap()) // Unwrap: The metadata db is configured.
-            .collect();
+        let dataset: Dataset = dataset.into();
+
+        let mut locations = Vec::new();
+        for table in dataset.tables_with_meta() {
+            let physical_table = PhysicalTable::next_revision(
+                &table,
+                &self.config.data_store,
+                &dataset.name,
+                &self.metadata_db,
+            )
+            .await?;
+            locations.push(physical_table.location_id().unwrap());
+        }
+
         let action = WorkerAction {
             node_id: node_id.to_string(),
             operator: Operator::DumpDataset {
-                dataset: dataset.name().to_string(),
+                dataset: dataset.name,
                 locations,
             },
             action: Action::Start,
