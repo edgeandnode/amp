@@ -20,7 +20,7 @@ pub const WORKER_ACTIONS_PG_CHANNEL: &str = "worker_actions";
 ///
 /// Start action:
 /// - Accept the scheduling by creating an entry in the `scheduled_operators` table.
-/// - Lock the locations by setting `locked_by` in the `locations` table.
+/// - Lock the output locations.
 /// - Start the operator.
 ///
 /// Stop action:

@@ -332,7 +332,7 @@ async fn lock_locations(
     operator_id: ScheduledOperatorId,
     locations: &[LocationId],
 ) -> Result<(), Error> {
-    let query = "UPDATE locations SET locked_by = $1 WHERE id = ANY($2)";
+    let query = "UPDATE locations SET writer = $1 WHERE id = ANY($2)";
     sqlx::query(query)
         .bind(operator_id)
         .bind(locations)

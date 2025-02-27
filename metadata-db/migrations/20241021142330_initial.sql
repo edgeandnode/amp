@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS locations (
     url TEXT NOT NULL UNIQUE,
 
     active BOOLEAN NOT NULL,
-    locked_by BIGINT REFERENCES scheduled_operators(id) ON DELETE SET NULL,
+    writer BIGINT REFERENCES scheduled_operators(id) ON DELETE SET NULL,
     CONSTRAINT unique_bucket_path UNIQUE (bucket, path)
 );
 
