@@ -6,19 +6,19 @@ static NOZZLE_LOG_ENV_VAR: &str = "NOZZLE_LOG";
 
 /// List of crates in the workspace.
 const NOZZLE_CRATES: &[&str] = &[
-    "admin-api",
+    "admin_api",
     "common",
-    "dataset-store",
+    "dataset_store",
     "dump",
-    "dump-check",
-    "evm-rpc-datasets",
-    "firehose-datasets",
-    "http-common",
-    "metadata-db",
+    "dump_check",
+    "evm_rpc_datasets",
+    "firehose_datasets",
+    "http_common",
+    "metadata_db",
     "nozzle",
-    "registry-service",
+    "registry_service",
     "server",
-    "substreams-datasets",
+    "substreams_datasets",
     "tests",
 ];
 
@@ -57,7 +57,7 @@ fn assert_nozzle_crates() {
     let mut names: Vec<String> = cmd
         .workspace_packages()
         .into_iter()
-        .map(|pkg| pkg.name.clone())
+        .map(|pkg| pkg.name.replace("-", "_").clone())
         .collect();
     names.sort();
     assert_eq!(names, NOZZLE_CRATES);

@@ -67,6 +67,19 @@ pub struct Field {
     pub nullable: bool,
 }
 
+impl Manifest {
+    pub fn tables(&self) -> Vec<crate::Table> {
+        self.tables
+            .iter()
+            .map(|(name, table)| crate::Table {
+                name: name.clone(),
+                schema: table.schema.arrow.clone().into(),
+                network: None, // Network is not part of the manifest yet
+            })
+            .collect()
+    }
+}
+
 impl From<DFSchemaRef> for TableSchema {
     fn from(arrow: DFSchemaRef) -> Self {
         Self {
@@ -99,15 +112,7 @@ impl From<ArrowSchema> for SchemaRef {
 impl From<Manifest> for Dataset {
     fn from(manifest: Manifest) -> Self {
         // Convert manifest tables into logical Tables
-        let tables = manifest
-            .tables
-            .into_iter()
-            .map(|(name, table)| crate::Table {
-                name,
-                schema: table.schema.arrow.into(),
-                network: None, // Network is not part of the manifest yet
-            })
-            .collect();
+        let tables = manifest.tables();
 
         Dataset {
             kind: DATASET_KIND.to_string(),

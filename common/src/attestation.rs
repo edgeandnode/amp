@@ -268,8 +268,8 @@ mod test {
     use datafusion::logical_expr::Accumulator;
     use datafusion::scalar::ScalarValue;
     use rand::prelude::SliceRandom as _;
+    use rand::rng;
     use rand::rngs::StdRng;
-    use rand::thread_rng;
     use rand::Rng as _;
     use rand::RngCore;
     use rand::SeedableRng;
@@ -298,8 +298,8 @@ mod test {
 
         fn new(rng: &mut impl RngCore, schema: &Schema) -> Self {
             let column_count = schema.fields().len();
-            let row_count = rng.gen_range(1..=5);
-            let mut gen_element = || rng.gen_bool(0.8).then(|| rng.gen_range(0..=3));
+            let row_count = rng.random_range(1..=5);
+            let mut gen_element = || rng.random_bool(0.8).then(|| rng.random_range(0..=3));
             let mut gen_row = || TestRow((0..column_count).map(|_| gen_element()).collect());
             let rows: HashSet<TestRow> = (0..row_count).map(|_| gen_row()).collect();
             Self(rows.into_iter().collect())
@@ -347,11 +347,11 @@ mod test {
     #[test]
     /// forall t in Table: t = TestRecords::from_record_batch(t.to_record_batch())
     fn test_batch_serialize() {
-        let seed = thread_rng().next_u64();
+        let seed = rng().next_u64();
         println!("seed: {seed}");
         let mut rng = StdRng::seed_from_u64(seed);
         for _ in 0..1_000 {
-            let schema = TestRecords::schema(rng.gen_range(1..=3));
+            let schema = TestRecords::schema(rng.random_range(1..=3));
             let records = TestRecords::new(&mut rng, &schema);
             assert_eq!(
                 records,
@@ -363,11 +363,11 @@ mod test {
     #[test]
     /// forall t in Table: hash(t) = hash(shuffle(t))
     fn test_hash_shuffle() {
-        let seed = thread_rng().next_u64();
+        let seed = rng().next_u64();
         println!("seed: {seed}");
         let mut rng = StdRng::seed_from_u64(seed);
         for _ in 0..1_000 {
-            let schema = TestRecords::schema(rng.gen_range(1..=3));
+            let schema = TestRecords::schema(rng.random_range(1..=3));
             let mut records = TestRecords::new(&mut rng, &schema);
             let hash1 = hash_records(&schema, &records);
             records.0.shuffle(&mut rng);
@@ -382,11 +382,11 @@ mod test {
     #[test]
     /// forall a, b in Table: (a = b) = (hash(a) = hash(b))
     fn test_hash_eq() {
-        let seed = thread_rng().next_u64();
+        let seed = rng().next_u64();
         println!("seed: {seed}");
         let mut rng = StdRng::seed_from_u64(seed);
         for _ in 0..1_000 {
-            let schema = TestRecords::schema(rng.gen_range(1..=3));
+            let schema = TestRecords::schema(rng.random_range(1..=3));
             let a = TestRecords::new(&mut rng, &schema);
             let b = TestRecords::new(&mut rng, &schema);
             assert_eq!(

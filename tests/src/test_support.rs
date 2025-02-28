@@ -7,7 +7,7 @@ use common::{
         datatypes::DataType,
         json::writer::JsonArray,
     },
-    catalog::physical::Catalog,
+    catalog::physical::{Catalog, PhysicalDataset},
     config::{Config, FigmentJson},
     multirange::MultiRange,
     parquet::basic::{Compression, ZstdLevel},
@@ -169,19 +169,22 @@ async fn redump(
     // Clear the data dir.
     clear_dataset(&config, dataset_name).await?;
 
+    let dataset = {
+        let dataset = dataset_store.load_dataset(dataset_name).await?;
+        PhysicalDataset::from_dataset_at(dataset, config.data_store.clone(), None).await?
+    };
+
     dump_dataset(
-        dataset_name,
+        &dataset,
         &dataset_store,
         &config,
-        None,
         1,
         partition_size,
         &parquet_opts,
         start,
         Some(end),
     )
-    .await?;
-    Ok(())
+    .await
 }
 
 pub async fn check_blocks(dataset_name: &str, start: u64, end: u64) -> Result<(), BoxError> {

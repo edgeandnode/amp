@@ -14,9 +14,9 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum ProtobufToRowError {
-    #[error("malformed field {0}, bytes: {}", hex::encode(.1))]
+    #[error("malformed field {}, bytes: {}", .0, hex::encode(.1))]
     Malformed(&'static str, Vec<u8>),
-    #[error("overflow in field {0}, bytes: {}", hex::encode(.1))]
+    #[error("overflow in field {}, bytes: {}", .0, hex::encode(.1))]
     Overflow(&'static str, Vec<u8>),
     #[error("missing field: {0}")]
     Missing(&'static str),

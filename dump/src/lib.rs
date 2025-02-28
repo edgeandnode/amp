@@ -1,6 +1,8 @@
 mod job;
 mod metrics; // unused for now
+pub mod operator;
 mod parquet_writer;
+pub mod worker;
 
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -10,6 +12,7 @@ use std::time::Duration;
 
 use common::catalog::physical::Catalog;
 use common::catalog::physical::PhysicalDataset;
+use common::catalog::physical::PhysicalTable;
 use common::config::Config;
 use common::meta_tables::scanned_ranges;
 use common::multirange::MultiRange;
@@ -33,18 +36,17 @@ use futures::TryStreamExt;
 use job::Job;
 use log::info;
 use log::warn;
-use metadata_db::MetadataDb;
 use object_store::ObjectMeta;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties as ParquetWriterProperties;
 use parquet_writer::ParquetFileWriter;
 use thiserror::Error;
+use tracing::instrument;
 
 pub async fn dump_dataset(
-    dataset_name: &str,
+    dataset: &PhysicalDataset,
     dataset_store: &Arc<DatasetStore>,
     config: &Config,
-    metadata_db: Option<&MetadataDb>,
     n_jobs: u16,
     partition_size: u64,
     parquet_opts: &ParquetWriterProperties,
@@ -53,14 +55,12 @@ pub async fn dump_dataset(
 ) -> Result<(), BoxError> {
     use common::meta_tables::scanned_ranges::scanned_ranges_by_table;
 
-    let dataset = dataset_store.load_dataset(dataset_name).await?;
-    let catalog = Catalog::for_dataset(&dataset, config.data_store.clone(), metadata_db).await?;
-    let physical_dataset = catalog.datasets()[0].clone();
+    let catalog = Catalog::new(vec![dataset.clone()]);
     let env = Arc::new(config.make_runtime_env()?);
     let ctx = Arc::new(QueryContext::for_catalog(catalog, env.clone())?);
 
     // Ensure consistency before starting the dump procedure.
-    consistency_check(&physical_dataset, &ctx).await?;
+    consistency_check(dataset, &ctx).await?;
 
     // Query the scanned ranges, we might already have some ranges if this is not the first dump run
     // for this dataset.
@@ -78,13 +78,13 @@ pub async fn dump_dataset(
         );
     }
 
-    let kind = DatasetKind::from_str(&dataset.kind)?;
+    let kind = DatasetKind::from_str(dataset.kind())?;
     match kind {
         DatasetKind::EvmRpc | DatasetKind::Firehose | DatasetKind::Substreams => {
             run_block_stream_jobs(
                 n_jobs,
                 ctx,
-                &dataset.name,
+                &dataset.name(),
                 dataset_store,
                 scanned_ranges_by_table,
                 partition_size,
@@ -100,8 +100,10 @@ pub async fn dump_dataset(
             }
 
             let dataset = match kind {
-                DatasetKind::Sql => dataset_store.load_sql_dataset(dataset_name).await?,
-                DatasetKind::Manifest => dataset_store.load_manifest_dataset(dataset_name).await?,
+                DatasetKind::Sql => dataset_store.load_sql_dataset(dataset.name()).await?,
+                DatasetKind::Manifest => {
+                    dataset_store.load_manifest_dataset(dataset.name()).await?
+                }
                 _ => unreachable!(),
             };
 
@@ -120,7 +122,7 @@ pub async fn dump_dataset(
         }
     }
 
-    info!("dump of dataset {} completed successfully", dataset.name);
+    info!("dump of dataset {} completed successfully", dataset.name());
 
     Ok(())
 }
@@ -191,6 +193,7 @@ async fn run_block_stream_jobs(
     Ok(())
 }
 
+#[instrument(skip_all, err, fields(dataset = %dataset.name()))]
 async fn dump_sql_dataset(
     dst_ctx: Arc<QueryContext>,
     dataset: SqlDataset,
@@ -213,6 +216,7 @@ async fn dump_sql_dataset(
                     Some(end) => end,
                     None => {
                         // If the dependencies have synced nothing, we have nothing to do.
+                        warn!("no blocks to dump for {table}, dependencies are empty");
                         continue;
                     }
                 }
@@ -259,9 +263,13 @@ async fn dump_sql_dataset(
             let Some(metadata_db) = dataset_store.metadata_db.as_ref() else {
                 return Err("metadata_db is required for entire materialization".into());
             };
-            let physical_table = physical_table
-                .next_revision(&data_store, dataset.name(), metadata_db)
-                .await?;
+            let physical_table = PhysicalTable::next_revision(
+                physical_table.table(),
+                &data_store,
+                dataset.name(),
+                metadata_db,
+            )
+            .await?;
             info!(
                 "dumping entire {} to {}",
                 physical_table.table_ref(),

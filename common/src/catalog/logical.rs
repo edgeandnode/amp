@@ -18,6 +18,12 @@ impl Dataset {
     pub fn meta_tables(&self) -> Vec<Table> {
         vec![crate::meta_tables::scanned_ranges::table()]
     }
+
+    pub fn tables_with_meta(&self) -> Vec<Table> {
+        let mut tables = self.tables.clone();
+        tables.extend(self.meta_tables());
+        tables
+    }
 }
 
 #[derive(Clone, Hash, PartialEq, Eq, Debug)]

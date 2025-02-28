@@ -4,9 +4,16 @@ use std::{
     time::Duration,
 };
 
-use common::{config::Config, manifest, BoxError};
+use common::{
+    catalog::physical::PhysicalDataset,
+    config::Config,
+    manifest,
+    parquet::basic::{Compression, ZstdLevel},
+    BoxError,
+};
 use datafusion::{catalog_common::resolve_table_references, parquet};
 use dataset_store::{sql_datasets, DatasetStore};
+use log::info;
 use metadata_db::MetadataDb;
 
 pub async fn dump(
@@ -26,7 +33,7 @@ pub async fn dump(
     let compression = if disable_compression {
         parquet::basic::Compression::UNCOMPRESSED
     } else {
-        parquet::basic::Compression::ZSTD(parquet::basic::ZstdLevel::try_new(1).unwrap())
+        Compression::ZSTD(ZstdLevel::try_new(1).unwrap())
     };
     let parquet_opts = dump::parquet_opts(compression, true);
     let end_block = end_block.map(|e| resolve_end_block(start, e)).transpose()?;
@@ -37,16 +44,28 @@ pub async fn dump(
     }
 
     let dump_order: Vec<&str> = datasets.iter().map(|d| d.as_str()).collect();
-    log::info!("dump order: {}", dump_order.join(", "));
+    info!("dump order: {}", dump_order.join(", "));
+
+    let mut physical_datasets = vec![];
+    for dataset_name in datasets {
+        let dataset = dataset_store.load_dataset(&dataset_name).await?;
+        physical_datasets.push(
+            PhysicalDataset::from_dataset_at(
+                dataset,
+                config.data_store.clone(),
+                metadata_db.as_ref(),
+            )
+            .await?,
+        );
+    }
 
     match run_every {
         None => {
-            for dataset_name in datasets {
+            for dataset in physical_datasets {
                 dump::dump_dataset(
-                    &dataset_name,
+                    &dataset,
                     &dataset_store,
                     &config,
-                    metadata_db.as_ref(),
                     n_jobs,
                     partition_size,
                     &parquet_opts,
@@ -59,12 +78,11 @@ pub async fn dump(
         Some(mut run_every) => loop {
             run_every.tick().await;
 
-            for dataset_name in &datasets {
+            for dataset in &physical_datasets {
                 dump::dump_dataset(
-                    dataset_name,
+                    dataset,
                     &dataset_store,
                     &config,
-                    metadata_db.as_ref(),
                     n_jobs,
                     partition_size,
                     &parquet_opts,

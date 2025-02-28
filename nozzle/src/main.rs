@@ -1,10 +1,11 @@
-mod dump;
+mod dump_cmd;
 mod server;
 
 use std::sync::Arc;
 
 use clap::Parser as _;
 use common::{config::Config, tracing, BoxError};
+use dump::worker::Worker;
 use metadata_db::MetadataDb;
 
 #[global_allocator]
@@ -70,6 +71,11 @@ enum Command {
         #[arg(long, env = "SERVER_NO_ADMIN")]
         no_admin: bool,
     },
+    Worker {
+        /// The node id of the worker.
+        #[arg(long, env = "NOZZLE_NODE_ID")]
+        node_id: String,
+    },
 }
 
 #[tokio::main]
@@ -107,7 +113,7 @@ async fn main_inner() -> Result<(), BoxError> {
             ignore_deps,
             run_every_mins,
         } => {
-            dump::dump(
+            dump_cmd::dump(
                 config,
                 metadata_db,
                 datasets,
@@ -122,5 +128,14 @@ async fn main_inner() -> Result<(), BoxError> {
             .await
         }
         Command::Server { no_admin } => server::run(config, metadata_db, no_admin).await,
+        Command::Worker { node_id } => {
+            let Some(metadata_db_url) = &config.metadata_db_url else {
+                return Err("metadata db not configured".into());
+            };
+            let metadata_db = MetadataDb::connect(metadata_db_url).await?;
+
+            let worker = Worker::new(config.clone(), metadata_db, node_id);
+            worker.run().await.map_err(Into::into)
+        }
     }
 }
