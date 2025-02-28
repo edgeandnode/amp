@@ -82,7 +82,7 @@ impl Operator {
                     ).into());
                 }
 
-                // Instaantiate the physical tables.
+                // Instantiate the physical tables.
                 let mut output_locations_by_name = output_locations
                     .into_iter()
                     .map(|(id, tbl, url)| (tbl.clone(), (id, url)))

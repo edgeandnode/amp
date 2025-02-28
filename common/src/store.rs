@@ -139,44 +139,40 @@ pub fn infer_object_store(url: &Url) -> Result<(Arc<dyn ObjectStore>, Option<Str
     let (object_store_scheme, _) = ObjectStoreScheme::parse(&url)?;
 
     match object_store_scheme {
-    ObjectStoreScheme::GoogleCloudStorage => {
-        let builder =
-            GoogleCloudStorageBuilder::from_env()
-                .with_url(url.to_string());
-        let bucket = builder.get_config_value(&GoogleConfigKey::Bucket);
-        let store = Arc::new(builder.build()?);
-        Ok((store, bucket))
-    }
-    ObjectStoreScheme::AmazonS3 => {
-        let builder =
-            AmazonS3Builder::from_env()
-                .with_url(url.to_string());
-        let bucket = builder.get_config_value(&AmazonS3ConfigKey::Bucket);
-        let store = Arc::new(builder.build()?);
-        Ok((store, bucket))
-    }
-    ObjectStoreScheme::MicrosoftAzure => {
-        let builder =
-            MicrosoftAzureBuilder::from_env()
-                .with_url(url.to_string());
-        let bucket = builder.get_config_value(&AzureConfigKey::ContainerName);
-        let store = Arc::new(builder.build()?);
-        Ok((store, bucket))
-    }
-    ObjectStoreScheme::Local => {
-        let store = Arc::new(LocalFileSystem::new());
-        Ok((store, None))
-    }
-    ObjectStoreScheme::Http => Err(format!(
+        ObjectStoreScheme::GoogleCloudStorage => {
+            let builder = GoogleCloudStorageBuilder::from_env().with_url(url.to_string());
+            let bucket = builder.get_config_value(&GoogleConfigKey::Bucket);
+            let store = Arc::new(builder.build()?);
+            Ok((store, bucket))
+        }
+        ObjectStoreScheme::AmazonS3 => {
+            let builder = AmazonS3Builder::from_env().with_url(url.to_string());
+            let bucket = builder.get_config_value(&AmazonS3ConfigKey::Bucket);
+            let store = Arc::new(builder.build()?);
+            Ok((store, bucket))
+        }
+        ObjectStoreScheme::MicrosoftAzure => {
+            let builder = MicrosoftAzureBuilder::from_env().with_url(url.to_string());
+            let bucket = builder.get_config_value(&AzureConfigKey::ContainerName);
+            let store = Arc::new(builder.build()?);
+            Ok((store, bucket))
+        }
+        ObjectStoreScheme::Local => {
+            let store = Arc::new(LocalFileSystem::new());
+            Ok((store, None))
+        }
+        ObjectStoreScheme::Http => {
+            let err_msg = format!(
         "unsupported object store url: {}. If you are attempting to configure an S3-compatible object store, \
          please use the `s3://` scheme and configure AWS_ENDPOINT. See the documentation for more details.",
-        url
-    )
-    .into()),
-    ObjectStoreScheme::Memory | _ => {
-        Err(format!("unsupported object store scheme: {:?}", object_store_scheme).into())
-    },
-}
+            url
+        );
+            Err(err_msg.into())
+        }
+        ObjectStoreScheme::Memory | _ => {
+            Err(format!("unsupported object store scheme: {:?}", object_store_scheme).into())
+        }
+    }
 }
 
 fn infer_url(mut data_location: String, base: Option<&std::path::Path>) -> Result<Url, BoxError> {
