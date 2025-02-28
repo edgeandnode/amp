@@ -1,9 +1,9 @@
-use std::{collections::BTreeMap, pin::pin, sync::Arc};
+use std::{collections::BTreeMap, fmt, pin::pin, sync::Arc};
 
 use common::{config::Config, BoxError};
 use futures::{TryFutureExt as _, TryStreamExt};
-use log::{debug, error, warn};
-use metadata_db::MetadataDb;
+use log::{debug, error};
+use metadata_db::{MetadataDb, OperatorDatabaseId};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::{
@@ -19,24 +19,29 @@ pub const WORKER_ACTIONS_PG_CHANNEL: &str = "worker_actions";
 /// These actions coordinate the operator state and the write lock on the output table locations.
 ///
 /// Start action:
-/// - Accept the scheduling by creating an entry in the `scheduled_operators` table.
-/// - Lock the output locations.
+/// - Fetch the operator descriptor and output locations from the `metadata_db`.
 /// - Start the operator.
 ///
-/// Stop action:
+/// Stop action (currently unimplemented):
 /// - Stop the operator.
-/// - Release the location by deleting the row from the `scheduled_operators` table.
+/// - Release the locations by deleting the row from the `operators` table.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum Action {
     Start,
     Stop,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize)]
 pub struct WorkerAction {
     pub node_id: String,
-    pub operator: Operator,
+    pub operator_id: OperatorDatabaseId,
     pub action: Action,
+}
+
+impl fmt::Debug for WorkerAction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", serde_json::to_string(self).unwrap())
+    }
 }
 
 pub struct Worker {
@@ -46,7 +51,7 @@ pub struct Worker {
 
     // To prevent start/stop race conditions, actions for a same operator are processed sequentially.
     // Each operator has a dedicated handler task.
-    action_queue: BTreeMap<Operator, UnboundedSender<WorkerAction>>,
+    action_queue: BTreeMap<OperatorDatabaseId, UnboundedSender<WorkerAction>>,
 }
 
 #[derive(Error, Debug)]
@@ -62,6 +67,9 @@ pub enum WorkerError {
 
     #[error("database error: {0}")]
     DbError(#[from] metadata_db::Error),
+
+    #[error("error loading operator: {0}")]
+    OperatorLoadError(BoxError),
 }
 
 impl Worker {
@@ -113,14 +121,11 @@ impl Worker {
 
         // Spawn scheduled operators.
         let scheduled_operators = self.metadata_db.scheduled_operators(&self.node_id).await?;
-        for operator in scheduled_operators {
-            let operator = match serde_json::from_str(&operator) {
-                Ok(operator) => operator,
-                Err(e) => {
-                    error!("scheduled operator is invalid, ignoring: {}", e);
-                    continue;
-                }
-            };
+        for operator_id in scheduled_operators {
+            let operator =
+                Operator::load(operator_id, self.config.clone(), self.metadata_db.clone())
+                    .await
+                    .map_err(OperatorLoadError)?;
             spawn_operator(self.config.clone(), self.metadata_db.clone(), operator);
         }
 
@@ -145,14 +150,14 @@ impl Worker {
         }
         let operator_task = self
             .action_queue
-            .entry(action.operator.clone())
+            .entry(action.operator_id)
             .or_insert_with(|| {
                 let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
                 let operator_handler = OperatorHandler::new(
                     self.config.clone(),
                     self.metadata_db.clone(),
                     self.node_id.clone(),
-                    action.operator.clone(),
+                    action.operator_id,
                     rx,
                 );
                 tokio::spawn(operator_handler.run());
@@ -168,7 +173,7 @@ struct OperatorHandler {
     config: Arc<Config>,
     metadata_db: MetadataDb,
     node_id: String,
-    operator: Operator,
+    operator_id: OperatorDatabaseId,
     recv: UnboundedReceiver<WorkerAction>,
 }
 
@@ -177,14 +182,14 @@ impl OperatorHandler {
         config: Arc<Config>,
         metadata_db: MetadataDb,
         node_id: String,
-        operator: Operator,
+        operator_id: OperatorDatabaseId,
         recv: UnboundedReceiver<WorkerAction>,
     ) -> Self {
         Self {
             config,
             metadata_db,
             node_id,
-            operator,
+            operator_id,
             recv,
         }
     }
@@ -192,43 +197,34 @@ impl OperatorHandler {
     async fn run(mut self) {
         while let Some(action) = self.recv.recv().await {
             assert!(action.node_id == self.node_id);
-            assert!(action.operator == self.operator);
+            assert!(action.operator_id == self.operator_id);
 
-            // TODO: Remove unwrap, or make the function not error.
-            self.handle_action(action).await.unwrap();
+            if let Err(e) = self.handle_action(action.action).await {
+                error!("error handling action `{:?}`: {}", action, e);
+            }
         }
 
         // Only happens if the `Worker` is dropped.
         debug!(
             "Dropping operator handler for node {} and operator {}",
-            self.node_id, self.operator
+            self.node_id, self.operator_id
         );
     }
 
     #[instrument(skip(self), err)]
-    async fn handle_action(&self, action: WorkerAction) -> Result<(), WorkerError> {
-        match action.action {
+    async fn handle_action(&self, action: Action) -> Result<(), WorkerError> {
+        use WorkerError::*;
+
+        match action {
             Action::Start => {
-                let json = serde_json::to_string(&self.operator).unwrap();
-
-                if self
-                    .metadata_db
-                    .operator_is_scheduled(&self.node_id, &json)
-                    .await?
-                {
-                    warn!("operator already scheduled to this node, ignoring");
-                    return Ok(());
-                }
-
-                self.metadata_db
-                    .schedule_operator(&self.node_id, &json, action.operator.output_locations())
-                    .await?;
-
-                spawn_operator(
+                let operator = Operator::load(
+                    self.operator_id,
                     self.config.clone(),
                     self.metadata_db.clone(),
-                    action.operator,
-                );
+                )
+                .await
+                .map_err(OperatorLoadError)?;
+                spawn_operator(self.config.clone(), self.metadata_db.clone(), operator);
             }
 
             Action::Stop => {

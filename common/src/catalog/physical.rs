@@ -11,7 +11,10 @@ use object_store::{path::Path, ObjectMeta, ObjectStore};
 use url::Url;
 
 use super::logical::Table;
-use crate::{store::Store, BoxError, Dataset};
+use crate::{
+    store::{infer_object_store, Store},
+    BoxError, Dataset,
+};
 
 pub struct Catalog {
     datasets: Vec<PhysicalDataset>,
@@ -71,6 +74,10 @@ pub struct PhysicalDataset {
 }
 
 impl PhysicalDataset {
+    pub fn new(dataset: Dataset, tables: Vec<PhysicalTable>) -> Self {
+        Self { dataset, tables }
+    }
+
     /// The tables are assumed to live in the subpath:
     /// `<url>/<dataset_name>/<table_name>`
     pub async fn from_dataset_at(
@@ -127,6 +134,10 @@ impl PhysicalDataset {
     pub fn kind(&self) -> &str {
         &self.dataset.kind
     }
+
+    pub fn location_ids(&self) -> Vec<LocationId> {
+        self.tables.iter().filter_map(|t| t.location_id()).collect()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -142,6 +153,28 @@ pub struct PhysicalTable {
 }
 
 impl PhysicalTable {
+    pub fn new(
+        dataset_name: &str,
+        table: Table,
+        url: Url,
+        location_id: Option<LocationId>,
+    ) -> Result<Self, BoxError> {
+        validate_name(&table.name)?;
+
+        let table_ref = TableReference::partial(dataset_name, table.name.as_str());
+        let path = Path::from_url_path(url.path()).unwrap();
+        let (object_store, _) = infer_object_store(&url)?;
+
+        Ok(Self {
+            table,
+            table_ref,
+            url,
+            path,
+            object_store,
+            location_id,
+        })
+    }
+
     /// If an active location exists for this table, this `PhysicalTable` will point to that location.
     /// Otherwise, a new location will be registered in the metadata DB. The location will be active.
     async fn resolve_or_register_location(
@@ -150,9 +183,7 @@ impl PhysicalTable {
         dataset_name: &str,
         table: &Table,
     ) -> Result<Self, BoxError> {
-        validate_name(&table.name)?;
-
-        let (url, object_store, location_id) = {
+        let (url, location_id) = {
             let table_id = TableId {
                 dataset: dataset_name,
                 dataset_version: None,
@@ -161,33 +192,19 @@ impl PhysicalTable {
 
             let active_location = metadata_db.get_active_location(table_id).await?;
             match active_location {
-                Some((url, location_id)) => {
-                    let url = Url::parse(&url)?;
-                    let object_store = Store::new(url.to_string(), None)?.object_store();
-                    (url, object_store, Some(location_id))
-                }
+                Some((url, location_id)) => (url, location_id),
                 None => {
                     let path = make_location_path(table_id);
                     let url = data_store.url().join(&path)?;
                     let location_id = metadata_db
                         .register_location(table_id, data_store.bucket(), &path, &url, true)
                         .await?;
-                    (url, data_store.object_store(), Some(location_id))
+                    (url, location_id)
                 }
             }
         };
 
-        let table_ref = TableReference::partial(dataset_name, table.name.as_str());
-        let path = Path::from_url_path(url.path()).unwrap();
-
-        Ok(PhysicalTable {
-            table: table.clone(),
-            table_ref,
-            url,
-            path,
-            object_store,
-            location_id,
-        })
+        Self::new(dataset_name, table.clone(), url, Some(location_id))
     }
 
     /// The static location is always `<base>/<dataset_name>/<table_name>/`.

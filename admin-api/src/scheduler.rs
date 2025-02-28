@@ -1,7 +1,12 @@
-use common::{catalog::physical::{PhysicalDataset, PhysicalTable}, config::Config, manifest::Manifest, BoxError, Dataset};
+use common::{
+    catalog::physical::{PhysicalDataset, PhysicalTable},
+    config::Config,
+    manifest::Manifest,
+    BoxError, Dataset,
+};
 use dataset_store::DatasetStore;
 use dump::{
-    operator::Operator,
+    operator::OperatorDesc,
     worker::{Action, WorkerAction, WORKER_ACTIONS_PG_CHANNEL},
 };
 use metadata_db::MetadataDb;
@@ -112,12 +117,18 @@ impl FullScheduler {
             locations.push(physical_table.location_id().unwrap());
         }
 
+        let operator_desc = serde_json::to_string(&OperatorDesc::DumpDataset {
+            dataset: dataset.name,
+        })?;
+
+        let operator_id = self
+            .metadata_db
+            .schedule_operator(&node_id, &operator_desc, &locations)
+            .await?;
+
         let action = WorkerAction {
             node_id: node_id.to_string(),
-            operator: Operator::DumpDataset {
-                dataset: dataset.name,
-                locations,
-            },
+            operator_id,
             action: Action::Start,
         };
         self.metadata_db

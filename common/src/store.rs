@@ -133,11 +133,9 @@ impl std::fmt::Display for Store {
     }
 }
 
-/// Returns a tuple of (url, object_store, bucket).
+/// Returns a tuple of (object_store, bucket).
 /// `bucket` is `None` for local filesystem stores.
-pub fn infer_object_store(
-    url: &Url,
-) -> Result<(Arc<dyn ObjectStore>, Option<String>), BoxError> {
+pub fn infer_object_store(url: &Url) -> Result<(Arc<dyn ObjectStore>, Option<String>), BoxError> {
     let (object_store_scheme, _) = ObjectStoreScheme::parse(&url)?;
 
     match object_store_scheme {
@@ -187,7 +185,7 @@ fn infer_url(mut data_location: String, base: Option<&std::path::Path>) -> Resul
     }
     let url = match Url::parse(&data_location) {
         Ok(url) => url,
-    
+
         // If the location is not an URL, we can still try to parse it as a relative filesystem path.
         Err(_) => {
             let mut path = PathBuf::from(&data_location);
@@ -196,10 +194,10 @@ fn infer_url(mut data_location: String, base: Option<&std::path::Path>) -> Resul
                     path = PathBuf::from(base).join(path);
                 }
             }
-    
+
             // Error if the directory does not exist.
             let path = fs::canonicalize(path)?;
-    
+
             Url::from_directory_path(path).unwrap()
         }
     };

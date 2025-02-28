@@ -20,7 +20,7 @@ const ACTIVE_INTERVAL_SECS: i32 = 5;
 
 /// Row ids, always non-negative.
 pub type LocationId = i64;
-pub type ScheduledOperatorId = i64;
+pub type OperatorDatabaseId = i64;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -37,6 +37,9 @@ pub enum Error {
         "Multiple active locations found for dataset={0}, dataset_version={1}, table={2}: {3:?}"
     )]
     MultipleActiveLocations(String, String, String, Vec<String>),
+
+    #[error("Error parsing URL: {0}")]
+    UrlParseError(#[from] url::ParseError),
 }
 
 static MIGRATOR: Migrator = sqlx::migrate!();
@@ -123,7 +126,7 @@ impl MetadataDb {
     pub async fn get_active_location(
         &self,
         table: TableId<'_>,
-    ) -> Result<Option<(String, LocationId)>, Error> {
+    ) -> Result<Option<(Url, LocationId)>, Error> {
         let TableId {
             dataset,
             dataset_version,
@@ -137,12 +140,17 @@ impl MetadataDb {
         WHERE dataset = $1 AND dataset_version = $2 AND tbl = $3 AND active
         ";
 
-        let mut urls: Vec<(String, LocationId)> = sqlx::query_as(query)
+        let tuples: Vec<(String, LocationId)> = sqlx::query_as(query)
             .bind(dataset)
             .bind(dataset_version)
             .bind(table)
             .fetch_all(&self.pool)
             .await?;
+
+        let mut urls = tuples
+            .into_iter()
+            .map(|(url, id)| Ok((Url::parse(&url)?, id)))
+            .collect::<Result<Vec<_>, Error>>()?;
 
         match urls.len() {
             0 => Ok(None),
@@ -153,7 +161,7 @@ impl MetadataDb {
                 dataset.to_string(),
                 dataset_version.to_string(),
                 table.to_string(),
-                urls.iter().map(|(url, _)| url.clone()).collect(),
+                urls.iter().map(|(url, _)| url.to_string()).collect(),
             )),
         }
     }
@@ -249,18 +257,17 @@ impl MetadataDb {
     pub async fn schedule_operator(
         &self,
         node_id: &str,
-        operator_json: &str,
+        operator_desc: &str,
         locations: &[LocationId],
-    ) -> Result<ScheduledOperatorId, Error> {
+    ) -> Result<OperatorDatabaseId, Error> {
         // Use a transaction, such that the operator will only be scheduled if the locations are
         // successfully locked.
         let mut tx = self.pool.begin().await?;
 
-        let query =
-            "INSERT INTO scheduled_operators (node_id, operator) VALUES ($1, $2) RETURNING id";
-        let id: ScheduledOperatorId = sqlx::query_scalar(query)
+        let query = "INSERT INTO operators (node_id, descriptor) VALUES ($1, $2) RETURNING id";
+        let id: OperatorDatabaseId = sqlx::query_scalar(query)
             .bind(node_id)
-            .bind(operator_json)
+            .bind(operator_desc)
             .fetch_one(&self.pool)
             .await?;
 
@@ -271,27 +278,42 @@ impl MetadataDb {
         Ok(id)
     }
 
-    #[instrument(skip(self), err)]
-    pub async fn operator_is_scheduled(
+    pub async fn scheduled_operators(
         &self,
         node_id: &str,
-        operator_json: &str,
-    ) -> Result<bool, Error> {
-        let query = "SELECT EXISTS (SELECT 1 FROM scheduled_operators WHERE node_id = $1 AND operator = $2)";
-        let exists: bool = sqlx::query_scalar(query)
-            .bind(node_id)
-            .bind(operator_json)
-            .fetch_one(&self.pool)
-            .await?;
-        Ok(exists)
-    }
-
-    pub async fn scheduled_operators(&self, node_id: &str) -> Result<Vec<String>, Error> {
-        let query = "SELECT operator FROM scheduled_operators WHERE node_id = $1";
+    ) -> Result<Vec<OperatorDatabaseId>, Error> {
+        let query = "SELECT id FROM operators WHERE node_id = $1";
         Ok(sqlx::query_scalar(query)
             .bind(node_id)
             .fetch_all(&self.pool)
             .await?)
+    }
+
+    pub async fn operator_desc(&self, operator_id: OperatorDatabaseId) -> Result<String, Error> {
+        let query = "SELECT descriptor FROM operators WHERE id = $1";
+        Ok(sqlx::query_scalar(query)
+            .bind(operator_id)
+            .fetch_one(&self.pool)
+            .await?)
+    }
+
+    /// Returns tuples of `(location_id, table_name, url)`.
+    pub async fn output_locations(
+        &self,
+        operator_id: OperatorDatabaseId,
+    ) -> Result<Vec<(LocationId, String, Url)>, Error> {
+        let query = "SELECT id, tbl, url FROM locations WHERE writer = $1";
+        let tuples: Vec<(LocationId, String, String)> = sqlx::query_as(query)
+            .bind(operator_id)
+            .fetch_all(&self.pool)
+            .await?;
+
+        let urls = tuples
+            .into_iter()
+            .map(|(id, tbl, url)| Ok((id, tbl, Url::parse(&url)?)))
+            .collect::<Result<Vec<_>, Error>>()?;
+
+        Ok(urls)
     }
 
     #[instrument(skip(self), err)]
@@ -329,7 +351,7 @@ impl MetadataDb {
 #[instrument(skip(executor), err)]
 async fn lock_locations(
     executor: impl Executor<'_, Database = Postgres>,
-    operator_id: ScheduledOperatorId,
+    operator_id: OperatorDatabaseId,
     locations: &[LocationId],
 ) -> Result<(), Error> {
     let query = "UPDATE locations SET writer = $1 WHERE id = ANY($2)";
