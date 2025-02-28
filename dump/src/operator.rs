@@ -55,8 +55,9 @@ impl Operator {
         config: Arc<Config>,
         metadata_db: MetadataDb,
     ) -> Result<Operator, BoxError> {
-        let operator_desc: OperatorDesc =
-            serde_json::from_str(&metadata_db.operator_desc(operator_id).await?)?;
+        let raw_desc = metadata_db.operator_desc(operator_id).await?;
+        let operator_desc: OperatorDesc = serde_json::from_str(&raw_desc)
+            .map_err(|e| format!("error parsing operator descriptor `{}`: {}", raw_desc, e))?;
         let output_locations = metadata_db.output_locations(operator_id).await?;
 
         match operator_desc {

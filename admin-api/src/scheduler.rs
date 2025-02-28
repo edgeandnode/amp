@@ -10,7 +10,7 @@ use dump::{
     worker::{Action, WorkerAction, WORKER_ACTIONS_PG_CHANNEL},
 };
 use metadata_db::MetadataDb;
-use rand::seq::SliceRandom as _;
+use rand::seq::IndexedRandom as _;
 use std::sync::Arc;
 use tokio::select;
 
@@ -66,7 +66,7 @@ impl Scheduler {
                         Ok(())
                     }
                     _ = tokio::time::sleep(tokio::time::Duration::from_secs(2)) => {
-                    // The scheduler task did not complete, detach it and assume success.
+                        // The scheduler task did not complete, detach it and assume success.
                         Ok(())
                     }
                 }
@@ -99,7 +99,7 @@ impl FullScheduler {
         // The worker node should then receive the notification and start the dump run.
 
         let candidates = self.metadata_db.active_workers().await?;
-        let Some(node_id) = candidates.choose(&mut rand::thread_rng()) else {
+        let Some(node_id) = candidates.choose(&mut rand::rng()) else {
             return Err("no available workers".into());
         };
 

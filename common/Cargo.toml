@@ -27,5 +27,5 @@ uuid.workspace = true
 semver.workspace = true
 
 [dev-dependencies]
-rand = "0.8.5"
+rand = "0.9.0"
 cargo_metadata = "0.18.1"

@@ -8,6 +8,7 @@ use sqlx::{
     Connection as _, Executor, PgConnection, Pool, Postgres,
 };
 use thiserror::Error;
+use tokio::time::MissedTickBehavior;
 use tracing::instrument;
 use url::Url;
 
@@ -236,11 +237,12 @@ impl MetadataDb {
     pub async fn heartbeat_loop(self, node_id: String) -> Result<(), Error> {
         let mut conn = PgConnection::connect(&self.url).await?;
         let mut interval = tokio::time::interval(HEARTBEAT_INTERVAL);
+        interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
         loop {
+            interval.tick().await;
             let query =
                 "UPDATE workers SET last_heartbeat = (now() at time zone 'utc') WHERE node_id = $1";
             sqlx::query(query).bind(&node_id).execute(&mut conn).await?;
-            interval.tick().await;
         }
     }
 
