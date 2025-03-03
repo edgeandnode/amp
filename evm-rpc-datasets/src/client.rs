@@ -1,4 +1,3 @@
-use std::future::Future;
 use std::time::Duration;
 
 use alloy::eips::BlockNumberOrTag;
@@ -80,20 +79,22 @@ impl AsRef<alloy::providers::ReqwestProvider> for JsonRpcClient {
 }
 
 impl BlockStreamer for JsonRpcClient {
-    fn block_stream(
+    async fn block_stream(
         self,
-        start_block: u64,
-        end_block: u64,
+        start: BlockNum,
+        end: BlockNum,
         tx: mpsc::Sender<common::DatasetRows>,
-    ) -> impl Future<Output = Result<(), BoxError>> + Send {
-        self.block_stream(start_block, end_block, tx)
+    ) -> Result<(), BoxError> {
+        self.block_stream(start, end, tx).await
     }
 
-    async fn recent_final_block_num(&mut self) -> Result<BlockNum, BoxError> {
-        let block = self
-            .client
-            .get_block_by_number(BlockNumberOrTag::Finalized, BlockTransactionsKind::Hashes)
-            .await?;
+    async fn latest_block(&mut self, finalized: bool) -> Result<BlockNum, BoxError> {
+        let number = match finalized {
+            true => BlockNumberOrTag::Finalized,
+            false => BlockNumberOrTag::Latest,
+        };
+        let kind = BlockTransactionsKind::Hashes;
+        let block = self.client.get_block_by_number(number, kind).await?;
         Ok(block.map(|b| b.header.number).unwrap_or(0))
     }
 }
