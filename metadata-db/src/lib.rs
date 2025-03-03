@@ -266,7 +266,8 @@ impl MetadataDb {
         // successfully locked.
         let mut tx = self.pool.begin().await?;
 
-        let query = "INSERT INTO operators (node_id, descriptor) VALUES ($1, $2) RETURNING id";
+        let query =
+            "INSERT INTO operators (node_id, descriptor) VALUES ($1, $2::jsonb) RETURNING id";
         let id: OperatorDatabaseId = sqlx::query_scalar(query)
             .bind(node_id)
             .bind(operator_desc)
@@ -292,7 +293,7 @@ impl MetadataDb {
     }
 
     pub async fn operator_desc(&self, operator_id: OperatorDatabaseId) -> Result<String, Error> {
-        let query = "SELECT descriptor FROM operators WHERE id = $1";
+        let query = "SELECT descriptor::text FROM operators WHERE id = $1";
         Ok(sqlx::query_scalar(query)
             .bind(operator_id)
             .fetch_one(&self.pool)

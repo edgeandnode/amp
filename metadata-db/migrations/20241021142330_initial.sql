@@ -7,7 +7,7 @@ CREATE TABLE workers (
 CREATE TABLE operators (
     id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     node_id TEXT NOT NULL REFERENCES workers(node_id),
-    descriptor TEXT NOT NULL
+    descriptor JSONB NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS locations (
