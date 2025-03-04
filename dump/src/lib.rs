@@ -142,7 +142,7 @@ async fn run_block_stream_jobs(
 
     let end = match end {
         Some(end) => end,
-        None => client.recent_final_block_num().await?,
+        None => client.latest_block(true).await?,
     };
 
     // This is the intersection of the `__scanned_ranges` for all tables. That is, a range is only

@@ -21,6 +21,8 @@ use crate::{
 use common::{BlockNum, BlockStreamer, BoxError, DatasetRows, Store, Table};
 use pbsubstreams::{response::Message, stream_client::StreamClient, Request as StreamRequest};
 
+/// This client only handles final blocks.
+// See also: only-final-blocks
 // Cloning is cheap and shares the underlying connection.
 #[derive(Clone)]
 pub struct Client {
@@ -99,6 +101,7 @@ impl Client {
             stop_block_num: stop,
 
             start_cursor: String::new(),
+            // See also: only-final-blocks
             final_blocks_only: true,
             modules: self.package.modules.clone(),
             production_mode: true,
@@ -140,17 +143,17 @@ impl BlockStreamer for Client {
     /// Errors from the Firehose stream are logged and retried.
     async fn block_stream(
         mut self,
-        start_block: u64,
-        end_block: u64,
+        start: BlockNum,
+        end: BlockNum,
         tx: mpsc::Sender<DatasetRows>,
     ) -> Result<(), BoxError> {
         // Explicitly track the next block in case we need to restart the Firehose stream.
-        let mut next_block = start_block;
+        let mut next_block = start;
         const RETRY_BACKOFF: Duration = Duration::from_secs(5);
 
         // A retry loop for consuming the Firehose.
         'retry: loop {
-            let mut stream = match self.blocks(next_block as i64, end_block).await {
+            let mut stream = match self.blocks(next_block as i64, end).await {
                 Ok(stream) => Box::pin(stream),
 
                 // If there is an error at the initial connection, we don't retry here as that's
@@ -196,7 +199,9 @@ impl BlockStreamer for Client {
         }
     }
 
-    async fn recent_final_block_num(&mut self) -> Result<BlockNum, BoxError> {
+    async fn latest_block(&mut self, finalized: bool) -> Result<BlockNum, BoxError> {
+        // See also: only-final-blocks
+        _ = finalized;
         Ok(self
             .blocks(-1, 0)
             .await?

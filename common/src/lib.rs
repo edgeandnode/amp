@@ -198,11 +198,13 @@ impl IntoIterator for DatasetRows {
 pub trait BlockStreamer: Clone + 'static {
     fn block_stream(
         self,
-        start_block: u64,
-        end_block: u64,
+        start: BlockNum,
+        end: BlockNum,
         tx: mpsc::Sender<DatasetRows>,
     ) -> impl Future<Output = Result<(), BoxError>> + Send;
 
-    fn recent_final_block_num(&mut self)
-        -> impl Future<Output = Result<BlockNum, BoxError>> + Send;
+    fn latest_block(
+        &mut self,
+        finalized: bool,
+    ) -> impl Future<Output = Result<BlockNum, BoxError>> + Send;
 }

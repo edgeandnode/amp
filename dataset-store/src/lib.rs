@@ -315,11 +315,11 @@ impl DatasetStore {
                 }
             }
 
-            async fn recent_final_block_num(&mut self) -> Result<BlockNum, BoxError> {
+            async fn latest_block(&mut self, finalized: bool) -> Result<BlockNum, BoxError> {
                 match self {
-                    Self::EvmRpc(client) => client.recent_final_block_num().await,
-                    Self::Firehose(client) => client.recent_final_block_num().await,
-                    Self::Substreams(client) => client.recent_final_block_num().await,
+                    Self::EvmRpc(client) => client.latest_block(finalized).await,
+                    Self::Firehose(client) => client.latest_block(finalized).await,
+                    Self::Substreams(client) => client.latest_block(finalized).await,
                 }
             }
         }

@@ -28,6 +28,8 @@ use tonic::transport::ClientTlsConfig;
 use tonic::transport::Endpoint;
 use tonic::transport::Uri;
 
+/// This client only handles final blocks.
+// See also: only-final-blocks
 // Cloning is cheap and shares the underlying connection.
 #[derive(Clone)]
 pub struct Client {
@@ -90,8 +92,6 @@ impl Client {
         let request = tonic::Request::new(pbfirehose::Request {
             start_block_num: start as i64,
             stop_block_num: stop,
-
-            // We don't handle non-final blocks yet.
             // See also: only-final-blocks
             final_blocks_only: true,
             cursor: String::new(),
@@ -112,7 +112,6 @@ impl Client {
                 } = response;
                 let step = ForkStep::try_from(step).map_err(|e| Error::AssertFail(e.into()))?;
 
-                // Assert we have a final block.
                 // See also: only-final-blocks
                 if step != ForkStep::StepFinal {
                     let err = format!("Only STEP_FINAL is expected, found {}", step.as_str_name());
@@ -230,10 +229,10 @@ impl BlockStreamer for Client {
         }
     }
 
-    async fn recent_final_block_num(&mut self) -> Result<BlockNum, BoxError> {
-        // We don't know for sure that `chain_head - 100` is final, but it's a good guess as in
-        // Ethereum mainnnet blocks are finalized every two epochs, which are 64 blocks.
-        let block = self.blocks(-100, 0).await?.boxed().next().await;
+    async fn latest_block(&mut self, finalized: bool) -> Result<BlockNum, BoxError> {
+        // See also: only-final-blocks
+        _ = finalized;
+        let block = self.blocks(-1, 0).await?.boxed().next().await;
         Ok(block.transpose()?.map(|b| b.number).unwrap_or(0))
     }
 }
