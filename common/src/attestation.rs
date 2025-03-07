@@ -99,7 +99,7 @@ impl Accumulator for AttestationHasher {
         }
         assert!(states.len() == 1);
         let states = &states[0];
-        for state in states.as_binary_view() {
+        for state in states.as_binary::<i32>() {
             let mut bytes = <Hasher as StableHasher>::Bytes::default();
             match state {
                 Some(state) => bytes.copy_from_slice(state),
@@ -409,5 +409,33 @@ mod test {
             _ => unreachable!(),
         };
         assert_eq!(hash.encode_hex(), "d6e778fc6b523cb0cdff0c32b9e7a570");
+    }
+
+    #[test]
+    fn merge_batch() {
+        let schema = Schema::new(vec![Field::new("1", DataType::Utf8, false)]);
+
+        let scalar_bytes = |value: ScalarValue| match value {
+            ScalarValue::Binary(Some(bytes)) => bytes,
+            _ => unreachable!(),
+        };
+        let column_hasher = |values: Vec<&str>| {
+            let mut udf = super::AttestationHasher::new(schema.clone());
+            let column = datafusion::arrow::array::StringArray::from(values);
+            udf.update_batch(&[Arc::new(column)]).unwrap();
+            udf
+        };
+
+        let h1 = scalar_bytes(column_hasher(vec!["foo", "bar"]).evaluate().unwrap()).encode_hex();
+
+        let states = datafusion::arrow::array::BinaryArray::from(vec![
+            scalar_bytes(column_hasher(vec!["bar"]).state().unwrap()[0].clone()).as_slice(),
+            scalar_bytes(column_hasher(vec!["foo"]).state().unwrap()[0].clone()).as_slice(),
+        ]);
+        let mut udf = super::AttestationHasher::new(schema.clone());
+        udf.merge_batch(&[Arc::new(states)]).unwrap();
+        let h2 = scalar_bytes(udf.evaluate().unwrap()).encode_hex();
+
+        assert_eq!(h1, h2);
     }
 }
