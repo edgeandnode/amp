@@ -11,7 +11,7 @@ use common::{
     parquet::basic::{Compression, ZstdLevel},
     BoxError,
 };
-use datafusion::{catalog_common::resolve_table_references, parquet};
+use datafusion::{catalog::resolve_table_references, parquet};
 use dataset_store::{sql_datasets, DatasetStore};
 use log::info;
 use metadata_db::MetadataDb;

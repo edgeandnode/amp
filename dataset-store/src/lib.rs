@@ -16,7 +16,7 @@ use common::{
     BlockNum, BlockStreamer, BoxError, Dataset, QueryContext, Store,
 };
 use datafusion::{
-    catalog_common::resolve_table_references,
+    catalog::resolve_table_references,
     execution::runtime_env::RuntimeEnv,
     sql::{parser, TableReference},
 };

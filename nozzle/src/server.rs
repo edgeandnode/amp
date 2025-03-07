@@ -1,7 +1,7 @@
 use std::{net::SocketAddr, sync::Arc};
 
 use arrow_flight::flight_service_server::FlightServiceServer;
-use common::{config::Config, BoxError};
+use common::{arrow, config::Config, BoxError};
 use futures::{FutureExt, StreamExt as _, TryStreamExt as _};
 use metadata_db::MetadataDb;
 use server::service::Service;
@@ -83,7 +83,7 @@ async fn handle_jsonl_request(
         .map(|result| -> Result<String, BoxError> {
             let batch = result.map_err(error_payload)?;
             let mut buf: Vec<u8> = Default::default();
-            let mut writer = arrow_json::writer::LineDelimitedWriter::new(&mut buf);
+            let mut writer = arrow::json::writer::LineDelimitedWriter::new(&mut buf);
             writer.write(&batch)?;
             Ok(String::from_utf8(buf).unwrap())
         })
