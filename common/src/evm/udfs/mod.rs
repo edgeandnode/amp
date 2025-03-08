@@ -25,11 +25,11 @@ use datafusion::{
         array::{ArrayBuilder, NullBuilder},
         error::ArrowError,
     },
-    common::{internal_err, plan_err, ExprSchema},
+    common::{internal_err, plan_err},
     error::DataFusionError,
     logical_expr::{
         simplify::{ExprSimplifyResult, SimplifyInfo},
-        ColumnarValue, ScalarUDFImpl, Signature, Volatility,
+        ColumnarValue, ReturnInfo, ReturnTypeArgs, ScalarUDFImpl, Signature, Volatility,
     },
     prelude::Expr,
     scalar::ScalarValue,
@@ -588,12 +588,8 @@ impl ScalarUDFImpl for EvmDecode {
         Ok(ColumnarValue::Array(ary))
     }
 
-    fn return_type_from_exprs(
-        &self,
-        args: &[Expr],
-        _schema: &dyn ExprSchema,
-        _arg_types: &[DataType],
-    ) -> datafusion::error::Result<DataType> {
+    fn return_type_from_args(&self, args: ReturnTypeArgs) -> datafusion::error::Result<ReturnInfo> {
+        let args = args.scalar_arguments;
         if args.len() != 5 {
             return internal_err!(
                 "{}: expected at 5 arguments, but got {}",
@@ -601,9 +597,9 @@ impl ScalarUDFImpl for EvmDecode {
                 args.len()
             );
         }
-        let signature = &args[4];
+        let signature = args[4];
         let signature = match signature {
-            Expr::Literal(scalar) => scalar,
+            Some(scalar) => scalar,
             _ => {
                 return plan_err!(
                     "{}: expected a string literal for the signature",
@@ -614,9 +610,9 @@ impl ScalarUDFImpl for EvmDecode {
         let event = Event::try_from(signature).map_err(|e| e.context(self.name()))?;
         let fields = event.fields()?;
         if fields.is_empty() {
-            return Ok(DataType::Null);
+            return Ok(ReturnInfo::new_nullable(DataType::Null));
         }
-        Ok(DataType::Struct(fields))
+        Ok(ReturnInfo::new_non_nullable(DataType::Struct(fields)))
     }
 
     fn aliases(&self) -> &[String] {
