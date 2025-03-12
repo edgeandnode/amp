@@ -6,7 +6,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc -w",
-    "postinstall": "pnpm run build"
+    "prepare": "pnpm run build"
   },
   "dependencies": {
     "@effect/cli": "^0.51.0",
