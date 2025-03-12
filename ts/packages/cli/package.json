@@ -5,8 +5,7 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
-    "dev": "tsc -w",
-    "prepare": "pnpm run build"
+    "dev": "tsc -w"
   },
   "dependencies": {
     "@effect/cli": "^0.51.0",
