@@ -55,11 +55,11 @@ async fn run_job_range(
     start: u64,
     end: u64,
 ) -> Result<(), BoxError> {
-    let (mut firehose, firehose_join_handle) = {
+    let (mut extractor, extractor_join_handle) = {
         let block_streamer = job.block_streamer.clone();
         let (tx, rx) = tokio::sync::mpsc::channel(100);
-        let firehose_task = block_streamer.block_stream(start, end, tx);
-        (rx, tokio::spawn(firehose_task))
+        let extractor_task = block_streamer.block_stream(start, end, tx);
+        (rx, tokio::spawn(extractor_task))
     };
 
     let mut writer = DatasetWriter::new(
@@ -71,16 +71,16 @@ async fn run_job_range(
         job.scanned_ranges_by_table.clone(),
     )?;
 
-    while let Some(dataset_rows) = firehose.recv().await {
+    while let Some(dataset_rows) = extractor.recv().await {
         for table_rows in dataset_rows {
             writer.write(table_rows).await?;
         }
     }
 
-    // The Firehose task stopped sending blocks, so it must have terminated. Here we wait for it to
+    // The extraction task stopped sending blocks, so it must have terminated. Here we wait for it to
     // finish and check for any errors and panics.
-    log::debug!("Waiting for firehose job #{} to finish", job.job_id);
-    firehose_join_handle.await??;
+    log::debug!("Waiting for job #{} to finish", job.job_id);
+    extractor_join_handle.await??;
 
     // Close the last part file for each table, checking for any errors.
     writer.close().await?;
