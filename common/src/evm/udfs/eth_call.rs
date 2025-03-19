@@ -31,13 +31,13 @@ use itertools::izip;
 #[derive(Debug, Clone)]
 pub struct EthCall {
     name: String,
-    client: alloy::providers::ReqwestProvider,
+    client: alloy::providers::RootProvider,
     signature: Signature,
     fields: Fields,
 }
 
 impl EthCall {
-    pub fn new(dataset_name: &str, client: alloy::providers::ReqwestProvider) -> Self {
+    pub fn new(dataset_name: &str, client: alloy::providers::RootProvider) -> Self {
         EthCall {
             name: format!("{dataset_name}.eth_call"),
             client,
@@ -221,12 +221,12 @@ impl AsyncScalarUDFImpl for EthCall {
 }
 
 async fn eth_call_retry(
-    client: &alloy::providers::ReqwestProvider,
+    client: &alloy::providers::RootProvider,
     block: BlockNumberOrTag,
     req: &TransactionRequest,
 ) -> Result<Bytes, EthCallRetryError> {
     for _ in 0..3 {
-        let result = client.call(req).block(block.into()).await;
+        let result = client.call(req.clone()).block(block.into()).await;
         match result {
             Ok(bytes) => {
                 return Ok(bytes);

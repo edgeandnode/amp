@@ -24,13 +24,14 @@ edition = "2021"
 version = "0.1.0"
 
 [workspace.dependencies]
-alloy = { version = "0.6.2", features = [
+alloy = { version = "0.12.6", features = [
     "json-abi",
     "dyn-abi",
     "provider-http",
     "rpc-types",
     "rpc",
     "json-rpc",
+    "eip712",
 ] }
 async-trait = "0.1.80"
 atty = "0.2.14"

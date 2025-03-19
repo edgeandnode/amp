@@ -105,6 +105,11 @@ fn arrow_type(ty: &DynSolType) -> Result<DataType, DataFusionError> {
         S::Function | S::Array(_) | S::FixedArray(_, _) | S::Tuple(_) => {
             return plan_err!("cannot convert solidity type {} to arrow data type", ty)
         }
+        S::CustomStruct {
+            name: _,
+            prop_names: _,
+            tuple: _,
+        } => unreachable!(),
     };
     Ok(df)
 }
@@ -303,6 +308,11 @@ impl<'a> FieldBuilder<'a> {
             Function(_) | Tuple(_) | Array(_) | FixedArray(_) => {
                 return plan_err!("cannot convert function to arrow scalar")
             }
+            CustomStruct {
+                name: _,
+                prop_names: _,
+                tuple: _,
+            } => unreachable!(),
         };
         Ok(())
     }

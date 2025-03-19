@@ -2,11 +2,10 @@ use std::mem;
 use std::time::Duration;
 
 use alloy::consensus::Transaction as _;
-use alloy::consensus::TxEnvelope;
 use alloy::eips::BlockNumberOrTag;
+use alloy::eips::Typed2718 as _;
 use alloy::hex::ToHexExt;
 use alloy::providers::Provider as _;
-use alloy::rpc::types::BlockTransactionsKind;
 use alloy::rpc::types::Header;
 use alloy::rpc::types::Log as RpcLog;
 use alloy::rpc::types::TransactionReceipt;
@@ -38,13 +37,13 @@ pub enum ToRowError {
 
 #[derive(Clone)]
 pub struct JsonRpcClient {
-    client: alloy::providers::ReqwestProvider,
+    client: alloy::providers::RootProvider,
     network: String,
 }
 
 impl JsonRpcClient {
     pub fn new(url: Url, network: String) -> Result<Self, BoxError> {
-        let client = alloy::providers::ProviderBuilder::new().on_http(url);
+        let client = alloy::providers::RootProvider::builder().on_http(url);
         Ok(Self { client, network })
     }
 
@@ -57,10 +56,7 @@ impl JsonRpcClient {
         for block_num in start_block..=end_block {
             let block = self
                 .client
-                .get_block_by_number(
-                    BlockNumberOrTag::Number(block_num),
-                    BlockTransactionsKind::Full,
-                )
+                .get_block_by_number(BlockNumberOrTag::Number(block_num))
                 .await?
                 .ok_or_else(|| format!("block {} not found", block_num))?;
             let receipts = try_join_all(
@@ -82,8 +78,8 @@ impl JsonRpcClient {
     }
 }
 
-impl AsRef<alloy::providers::ReqwestProvider> for JsonRpcClient {
-    fn as_ref(&self) -> &alloy::providers::ReqwestProvider {
+impl AsRef<alloy::providers::RootProvider> for JsonRpcClient {
+    fn as_ref(&self) -> &alloy::providers::RootProvider {
         &self.client
     }
 }
@@ -103,8 +99,7 @@ impl BlockStreamer for JsonRpcClient {
             true => BlockNumberOrTag::Finalized,
             false => BlockNumberOrTag::Latest,
         };
-        let kind = BlockTransactionsKind::Hashes;
-        let block = self.client.get_block_by_number(number, kind).await?;
+        let block = self.client.get_block_by_number(number).await?;
         Ok(block.map(|b| b.header.number).unwrap_or(0))
     }
 }
@@ -146,10 +141,6 @@ fn rpc_to_rows(
             }
             alloy::consensus::ReceiptEnvelope::Eip7702(receipt_with_bloom) => {
                 mem::take(&mut receipt_with_bloom.receipt.logs)
-            }
-            _ => {
-                tracing::warn!("unexpected receipt type");
-                vec![]
             }
         };
         for log in receipt_logs {
@@ -256,16 +247,12 @@ fn rpc_transaction_to_row(
     receipt: TransactionReceipt,
     tx_index: usize,
 ) -> Result<Option<Transaction>, ToRowError> {
-    let sig = match &tx.inner {
-        TxEnvelope::Legacy(signed) => signed.signature(),
-        TxEnvelope::Eip2930(signed) => signed.signature(),
-        TxEnvelope::Eip1559(signed) => signed.signature(),
-        TxEnvelope::Eip4844(signed) => signed.signature(),
-        TxEnvelope::Eip7702(signed) => signed.signature(),
-        _ => {
-            tracing::warn!("unexpected tx type");
-            return Ok(None);
-        }
+    let sig = match &*tx.inner {
+        alloy::consensus::EthereumTxEnvelope::Legacy(signed) => signed.signature(),
+        alloy::consensus::EthereumTxEnvelope::Eip2930(signed) => signed.signature(),
+        alloy::consensus::EthereumTxEnvelope::Eip1559(signed) => signed.signature(),
+        alloy::consensus::EthereumTxEnvelope::Eip4844(signed) => signed.signature(),
+        alloy::consensus::EthereumTxEnvelope::Eip7702(signed) => signed.signature(),
     };
     Ok(Some(Transaction {
         block_hash: block.hash,
@@ -302,7 +289,7 @@ fn rpc_transaction_to_row(
             .map(i128::try_from)
             .transpose()
             .map_err(|e| ToRowError::Overflow("max_fee_per_blob_gas", e.into()))?,
-        from: tx.from.0 .0,
+        from: tx.inner.signer().into(),
         status: receipt.status().into(),
     }))
 }
