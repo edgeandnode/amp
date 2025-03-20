@@ -985,8 +985,6 @@ pub mod field_options {
         }
     }
     /// If set to RETENTION_SOURCE, the option will be omitted from the binary.
-    /// Note: as of January 2023, support for this is in progress and does not yet
-    /// have an effect (b/264593489).
     #[derive(serde::Serialize, serde::Deserialize)]
     #[derive(
         Clone,
@@ -1029,8 +1027,7 @@ pub mod field_options {
     }
     /// This indicates the types of entities that the field may apply to when used
     /// as an option. If it is unset, then the field may be freely used as an
-    /// option on any kind of entity. Note: as of January 2023, support for this is
-    /// in progress and does not yet have an effect (b/264593489).
+    /// option on any kind of entity.
     #[derive(serde::Serialize, serde::Deserialize)]
     #[derive(
         Clone,
@@ -1843,7 +1840,7 @@ pub enum Edition {
     Edition2023 = 1000,
     Edition2024 = 1001,
     /// Placeholder editions for testing feature resolution.  These should not be
-    /// used or relyed on outside of tests.
+    /// used or relied on outside of tests.
     Edition1TestOnly = 1,
     Edition2TestOnly = 2,
     Edition99997TestOnly = 99997,
