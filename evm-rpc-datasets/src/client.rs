@@ -151,6 +151,10 @@ fn rpc_header_to_row(header: Header) -> Result<Block, ToRowError> {
                     .map_err(|e| ToRowError::Overflow("base_fee_per_gas", e.into()))
             })
             .transpose()?,
+        withdrawals_root: header.withdrawals_root.map(Into::into),
+        blob_gas_used: header.blob_gas_used,
+        excess_blob_gas: header.excess_blob_gas,
+        parent_beacon_root: header.parent_beacon_block_root.map(Into::into),
     })
 }
 

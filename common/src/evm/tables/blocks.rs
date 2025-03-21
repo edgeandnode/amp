@@ -24,45 +24,29 @@ pub const TABLE_NAME: &'static str = "blocks";
 
 /// Prefer using the pre-computed SCHEMA
 fn schema() -> Schema {
-    let number = Field::new(BLOCK_NUM, DataType::UInt64, false);
-    let timestamp = Field::new("timestamp", timestamp_type(), false);
-    let hash = Field::new("hash", BYTES32_TYPE, false);
-    let parent_hash = Field::new("parent_hash", BYTES32_TYPE, false);
-    let ommers_hash = Field::new("ommers_hash", BYTES32_TYPE, false);
-    let miner = Field::new("miner", ADDRESS_TYPE, false);
-    let state_root = Field::new("state_root", BYTES32_TYPE, false);
-    let transactions_root = Field::new("transactions_root", BYTES32_TYPE, false);
-    let receipt_root = Field::new("receipt_root", BYTES32_TYPE, false);
-    let logs_bloom = Field::new("logs_bloom", DataType::Binary, false);
-    let difficulty = Field::new("difficulty", EVM_CURRENCY_TYPE, false);
-    let gas_limit = Field::new("gas_limit", DataType::UInt64, false);
-    let gas_used = Field::new("gas_used", DataType::UInt64, false);
-    let extra_data = Field::new("extra_data", DataType::Binary, false);
-    let mix_hash = Field::new("mix_hash", BYTES32_TYPE, false);
-    let nonce = Field::new("nonce", DataType::UInt64, false);
-    let base_fee_per_gas = Field::new("base_fee_per_gas", EVM_CURRENCY_TYPE, true);
-
-    let fields = vec![
-        number,
-        timestamp,
-        hash,
-        parent_hash,
-        ommers_hash,
-        miner,
-        state_root,
-        transactions_root,
-        receipt_root,
-        logs_bloom,
-        difficulty,
-        gas_limit,
-        gas_used,
-        extra_data,
-        mix_hash,
-        nonce,
-        base_fee_per_gas,
-    ];
-
-    Schema::new(fields)
+    Schema::new(vec![
+        Field::new(BLOCK_NUM, DataType::UInt64, false),
+        Field::new("timestamp", timestamp_type(), false),
+        Field::new("hash", BYTES32_TYPE, false),
+        Field::new("parent_hash", BYTES32_TYPE, false),
+        Field::new("ommers_hash", BYTES32_TYPE, false),
+        Field::new("miner", ADDRESS_TYPE, false),
+        Field::new("state_root", BYTES32_TYPE, false),
+        Field::new("transactions_root", BYTES32_TYPE, false),
+        Field::new("receipt_root", BYTES32_TYPE, false),
+        Field::new("logs_bloom", DataType::Binary, false),
+        Field::new("difficulty", EVM_CURRENCY_TYPE, false),
+        Field::new("gas_limit", DataType::UInt64, false),
+        Field::new("gas_used", DataType::UInt64, false),
+        Field::new("extra_data", DataType::Binary, false),
+        Field::new("mix_hash", BYTES32_TYPE, false),
+        Field::new("nonce", DataType::UInt64, false),
+        Field::new("base_fee_per_gas", EVM_CURRENCY_TYPE, true),
+        Field::new("withdrawals_root", BYTES32_TYPE, true),
+        Field::new("blob_gas_used", DataType::UInt64, true),
+        Field::new("excess_blob_gas", DataType::UInt64, true),
+        Field::new("parent_beacon_root", BYTES32_TYPE, true),
+    ])
 }
 
 #[derive(Debug, Default)]
@@ -88,6 +72,10 @@ pub struct Block {
     pub mix_hash: Bytes32,
     pub nonce: u64,
     pub base_fee_per_gas: Option<EvmCurrency>,
+    pub withdrawals_root: Option<Bytes32>,
+    pub blob_gas_used: Option<u64>,
+    pub excess_blob_gas: Option<u64>,
+    pub parent_beacon_root: Option<Bytes32>,
 }
 
 pub struct BlockRowsBuilder {
@@ -108,6 +96,10 @@ pub struct BlockRowsBuilder {
     mix_hash: Bytes32ArrayBuilder,
     nonce: UInt64Builder,
     base_fee_per_gas: EvmCurrencyArrayBuilder,
+    withdrawals_root: Bytes32ArrayBuilder,
+    blob_gas_used: UInt64Builder,
+    excess_blob_gas: UInt64Builder,
+    parent_beacon_root: Bytes32ArrayBuilder,
 }
 
 impl BlockRowsBuilder {
@@ -130,6 +122,10 @@ impl BlockRowsBuilder {
             mix_hash: Bytes32ArrayBuilder::with_capacity(capacity),
             nonce: UInt64Builder::with_capacity(capacity),
             base_fee_per_gas: EvmCurrencyArrayBuilder::with_capacity(capacity),
+            withdrawals_root: Bytes32ArrayBuilder::with_capacity(capacity),
+            blob_gas_used: UInt64Builder::with_capacity(capacity),
+            excess_blob_gas: UInt64Builder::with_capacity(capacity),
+            parent_beacon_root: Bytes32ArrayBuilder::with_capacity(capacity),
         }
     }
 
@@ -152,6 +148,10 @@ impl BlockRowsBuilder {
             mix_hash,
             nonce,
             base_fee_per_gas,
+            withdrawals_root,
+            blob_gas_used,
+            excess_blob_gas,
+            parent_beacon_root,
         } = row;
 
         self.block_num.append_value(*block_num);
@@ -171,6 +171,10 @@ impl BlockRowsBuilder {
         self.mix_hash.append_value(*mix_hash);
         self.nonce.append_value(*nonce);
         self.base_fee_per_gas.append_option(*base_fee_per_gas);
+        self.withdrawals_root.append_option(*withdrawals_root);
+        self.blob_gas_used.append_option(*blob_gas_used);
+        self.excess_blob_gas.append_option(*excess_blob_gas);
+        self.parent_beacon_root.append_option(*parent_beacon_root);
     }
 
     pub fn build(self, network: String) -> Result<TableRows, ArrowError> {
@@ -192,6 +196,10 @@ impl BlockRowsBuilder {
             mix_hash,
             mut nonce,
             base_fee_per_gas,
+            withdrawals_root,
+            mut blob_gas_used,
+            mut excess_blob_gas,
+            parent_beacon_root,
         } = self;
 
         let columns = vec![
@@ -212,6 +220,10 @@ impl BlockRowsBuilder {
             Arc::new(mix_hash.finish()),
             Arc::new(nonce.finish()),
             Arc::new(base_fee_per_gas.finish()),
+            Arc::new(withdrawals_root.finish()),
+            Arc::new(blob_gas_used.finish()),
+            Arc::new(excess_blob_gas.finish()),
+            Arc::new(parent_beacon_root.finish()),
         ];
 
         TableRows::new(table(network), columns)
@@ -226,6 +238,6 @@ fn default_to_arrow() {
         builder.append(&block);
         builder.build("test_network".to_string()).unwrap()
     };
-    assert_eq!(rows.rows.num_columns(), 17);
+    assert_eq!(rows.rows.num_columns(), 21);
     assert_eq!(rows.rows.num_rows(), 1);
 }

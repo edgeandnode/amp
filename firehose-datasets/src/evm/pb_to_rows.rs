@@ -265,6 +265,26 @@ fn header_from_pb(header: pbethereum::BlockHeader) -> Result<Block, ProtobufToRo
             .map_err(|b| Malformed("mix_hash", b))?,
         nonce: header.nonce,
         base_fee_per_gas: base_fee_per_gas.map(|b| b as i128),
+        withdrawals_root: match header.withdrawals_root.is_empty() {
+            true => None,
+            false => Some(
+                header
+                    .withdrawals_root
+                    .try_into()
+                    .map_err(|b| Malformed("withdrawals_root", b))?,
+            ),
+        },
+        blob_gas_used: header.blob_gas_used,
+        excess_blob_gas: header.excess_blob_gas,
+        parent_beacon_root: match header.parent_beacon_root.is_empty() {
+            true => None,
+            false => Some(
+                header
+                    .parent_beacon_root
+                    .try_into()
+                    .map_err(|b| Malformed("parent_beacon_root", b))?,
+            ),
+        },
     };
 
     Ok(header)
