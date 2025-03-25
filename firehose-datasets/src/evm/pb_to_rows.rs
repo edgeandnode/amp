@@ -105,6 +105,7 @@ pub fn protobufs_to_rows(
                 .map(|b| non_negative_pb_bigint_to_evm_currency("tx.max_priority_fee_per_gas", b))
                 .transpose()?,
             from: tx.from.try_into().map_err(|b| Malformed("tx.from", b))?,
+            status: tx.status,
             return_data: tx.return_data,
             public_key: tx.public_key,
             begin_ordinal: tx.begin_ordinal,
