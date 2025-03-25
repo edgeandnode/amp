@@ -129,6 +129,7 @@ pub fn protobufs_to_rows(
                 index: call_index,
                 parent_index: call.parent_index,
                 depth: call.depth,
+                call_type: call.call_type,
                 caller: call
                     .caller
                     .try_into()
@@ -197,11 +198,13 @@ pub fn protobufs_to_rows(
     let header_row = {
         let mut builder = BlockRowsBuilder::with_capacity(1);
         builder.append(&header);
-        builder.build(network.to_string())?
+        builder.build(network.to_string()).map_err(|e| dbg!(e))?
     };
-    let transactions_rows = transactions.build(network.to_string())?;
-    let calls_rows = calls.build(network.to_string())?;
-    let logs_rows = logs.build(network.to_string())?;
+    let transactions_rows = transactions
+        .build(network.to_string())
+        .map_err(|e| dbg!(e))?;
+    let calls_rows = calls.build(network.to_string()).map_err(|e| dbg!(e))?;
+    let logs_rows = logs.build(network.to_string()).map_err(|e| dbg!(e))?;
 
     Ok(DatasetRows(vec![
         header_row,

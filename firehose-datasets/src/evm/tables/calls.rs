@@ -1,6 +1,8 @@
 use std::sync::{Arc, LazyLock};
 
-use common::arrow::array::{ArrayRef, BinaryBuilder, BooleanBuilder, UInt32Builder, UInt64Builder};
+use common::arrow::array::{
+    ArrayRef, BinaryBuilder, BooleanBuilder, Int32Builder, UInt32Builder, UInt64Builder,
+};
 use common::arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use common::arrow::error::ArrowError;
 use common::{
@@ -31,6 +33,7 @@ fn schema() -> Schema {
     let index = Field::new("index", DataType::UInt32, false);
     let parent_index = Field::new("parent_index", DataType::UInt32, false);
     let depth = Field::new("depth", DataType::UInt32, false);
+    let call_type = Field::new("call_type", DataType::Int32, false);
     let caller = Field::new("caller", ADDRESS_TYPE, false);
     let address = Field::new("address", ADDRESS_TYPE, false);
     let value = Field::new("value", EVM_CURRENCY_TYPE, true);
@@ -52,6 +55,7 @@ fn schema() -> Schema {
         index,
         parent_index,
         depth,
+        call_type,
         caller,
         address,
         value,
@@ -82,6 +86,7 @@ pub struct Call {
 
     pub(crate) parent_index: u32,
     pub(crate) depth: u32,
+    pub(crate) call_type: i32,
     pub(crate) caller: Address,
     pub(crate) address: Address,
     pub(crate) value: Option<EvmCurrency>,
@@ -106,6 +111,7 @@ pub(crate) struct CallRowsBuilder {
     index: UInt32Builder,
     parent_index: UInt32Builder,
     depth: UInt32Builder,
+    call_type: Int32Builder,
     caller: EvmAddressArrayBuilder,
     address: EvmAddressArrayBuilder,
     value: EvmCurrencyArrayBuilder,
@@ -130,6 +136,7 @@ impl CallRowsBuilder {
             index: UInt32Builder::with_capacity(capacity),
             parent_index: UInt32Builder::with_capacity(capacity),
             depth: UInt32Builder::with_capacity(capacity),
+            call_type: Int32Builder::with_capacity(capacity),
             caller: EvmAddressArrayBuilder::with_capacity(capacity),
             address: EvmAddressArrayBuilder::with_capacity(capacity),
             value: EvmCurrencyArrayBuilder::with_capacity(capacity),
@@ -154,6 +161,7 @@ impl CallRowsBuilder {
             index,
             parent_index,
             depth,
+            call_type,
             caller,
             address,
             value,
@@ -175,6 +183,7 @@ impl CallRowsBuilder {
         self.index.append_value(*index);
         self.parent_index.append_value(*parent_index);
         self.depth.append_value(*depth);
+        self.call_type.append_value(*call_type);
         self.caller.append_value(*caller);
         self.address.append_value(*address);
         self.value.append_option(*value);
@@ -198,6 +207,7 @@ impl CallRowsBuilder {
             mut index,
             mut parent_index,
             mut depth,
+            mut call_type,
             caller,
             address,
             value,
@@ -220,6 +230,7 @@ impl CallRowsBuilder {
             Arc::new(index.finish()),
             Arc::new(parent_index.finish()),
             Arc::new(depth.finish()),
+            Arc::new(call_type.finish()),
             Arc::new(caller.finish()),
             Arc::new(address.finish()),
             Arc::new(value.finish()),
