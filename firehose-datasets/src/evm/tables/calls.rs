@@ -256,6 +256,6 @@ fn default_to_arrow() {
         builder.append(&call);
         builder.build("test_network".to_string()).unwrap()
     };
-    assert_eq!(rows.rows.num_columns(), 19);
+    assert_eq!(rows.rows.num_columns(), 20);
     assert_eq!(rows.rows.num_rows(), 1);
 }
