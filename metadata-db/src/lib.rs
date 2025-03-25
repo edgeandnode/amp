@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use futures::Stream;
+use futures::stream::{BoxStream, Stream};
 use log::error;
 use sqlx::{
     migrate::{MigrateError, Migrator},
@@ -348,6 +348,33 @@ impl MetadataDb {
         let mut channel = PgListener::connect(&self.url).await?;
         channel.listen(channel_name).await?;
         Ok(channel.into_stream())
+    }
+
+    pub fn stream_file_names(&self, tbl: String) -> BoxStream<Result<String, sqlx::Error>> {
+        let sql = "
+            SELECT DISTINCT sr.file_name
+              FROM scanned_ranges sr
+        INNER JOIN locations l
+                ON sr.location_id = l.vid
+             WHERE l.tbl = $1 AND l.active
+          ORDER BY 1 ASC
+        ";
+
+        sqlx::query_scalar(sql).bind(tbl).fetch(&self.pool)
+    }
+
+    pub fn stream_ranges(&self, tbl: String) -> BoxStream<Result<(i64, i64), sqlx::Error>> {
+        let sql = "
+            SELECT DISTINCT sr.metadata->range_start
+                 , sr.metadata->range_end 
+              FROM scanned_ranges sr 
+        INNER JOIN locations l 
+                ON sr.location_id = l.vid 
+             WHERE l.tbl = $1 AND l.active
+          ORDER BY 1 ASC
+        ";
+
+        sqlx::query_scalar(sql).bind(tbl).fetch(&self.pool)
     }
 }
 
