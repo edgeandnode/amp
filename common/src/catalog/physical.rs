@@ -352,7 +352,7 @@ impl PhysicalTable {
 
     // TODO: Break this into smaller functions
     // TODO: Buffer the stream and sort the ranges after
-    pub async fn scanned_ranges(&self) -> Result<Vec<(u64, u64)>, BoxError> {
+    pub async fn ranges(&self) -> Result<Vec<(u64, u64)>, BoxError> {
         let ranges = self
             .object_store
             .list(Some(self.path()))
