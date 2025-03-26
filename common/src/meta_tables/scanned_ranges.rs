@@ -20,7 +20,8 @@
 //! See also: scanned-ranges-consistency
 
 use std::{
-    collections::BTreeMap, sync::{Arc, LazyLock}
+    collections::BTreeMap,
+    sync::{Arc, LazyLock},
 };
 
 use crate::{
@@ -28,21 +29,18 @@ use crate::{
     multirange::MultiRange,
     query_context::Error as CoreError,
     timestamp_type, BoxError, QueryContext, Timestamp, TimestampArrayBuilder,
-    store::infer_object_store
 };
 use datafusion::{
     arrow::{
         array::{ArrayBuilder as _, AsArray as _, RecordBatch, UInt64Builder},
-        datatypes::{DataType, Field, Schema, SchemaRef, UInt64Type},
-    }, parquet::{self, file::metadata::ParquetMetaDataReader}, sql::TableReference
+        datatypes::{DataType, Field, Schema, SchemaRef},
+    },
+    sql::TableReference,
 };
-use futures::{stream, FutureExt, TryStream, TryStreamExt, StreamExt};
+use futures:: TryStreamExt;
 
-use itertools::Itertools;
 use metadata_db::MetadataDb;
-use object_store::{ObjectMeta, ObjectStore};
 use serde::{Deserialize, Serialize};
-use url::Url;
 
 use crate::Table;
 
@@ -71,27 +69,29 @@ fn schema() -> Schema {
 
 pub async fn ranges_for_table(
     ctx: &QueryContext,
-    catalog_schema: &str,
     table_name: &str,
     metadata_db: Option<&MetadataDb>,
-) -> Result<Vec<(u64, u64)>, CoreError> {
-    let scanned_ranges_ref = TableReference::partial(catalog_schema, TABLE_NAME);
-    let ranges = match metadata_db {
-        Some(metadata_db) => {
-            let thing = metadata_db.stream_ranges(table_name.into());
-        },
-        _ => todo!()
-    };
-    let rb = ctx
-        .meta_execute_sql(&format!(
-            "select range_start, range_end from {scanned_ranges_ref} where table = '{table_name}' order by range_start, range_end",
-        ))
-        .await?;
-    let start_blocks: &[u64] = rb.column(0).as_primitive::<UInt64Type>().values().as_ref();
-    let end_blocks: &[u64] = rb.column(1).as_primitive::<UInt64Type>().values().as_ref();
-
-    let ranges = start_blocks.iter().zip(end_blocks).map(|(s, e)| (*s, *e));
-    Ok(ranges.collect())
+) -> Result<Vec<(u64, u64)>, BoxError> {
+    match metadata_db {
+        // If MetadataDb is provided, then stream the ranges directly from it (nice)
+        Some(metadata_db) => Ok(metadata_db
+            .stream_ranges(table_name.into())
+            .try_collect::<Vec<_>>()
+            .await?
+            .into_iter()
+            .map(|(range_start, range_end)| (range_start as u64, range_end as u64))
+            .collect::<Vec<_>>()),
+        _ => {
+        // Otherwise read the metadata from all of the parquet files (painful)
+            ctx.catalog()
+                .all_tables()
+                .find(|tbl| tbl.table_name() == table_name)
+                // Unwrap: table_name comes from schema.table_names()
+                .unwrap()
+                .ranges()
+                .await
+        }
+    }
 }
 
 pub async fn scanned_ranges_by_table(
@@ -103,7 +103,7 @@ pub async fn scanned_ranges_by_table(
     for table in ctx.catalog().all_tables() {
         let table_name = table.table_name().to_string();
         let ranges =
-            ranges_for_table(ctx, table.catalog_schema(), &table_name, metadata_db).await?;
+            ranges_for_table(ctx, &table_name, metadata_db).await?;
         let multi_range = MultiRange::from_ranges(ranges)?;
         multirange_by_table.insert(table_name, multi_range);
     }
