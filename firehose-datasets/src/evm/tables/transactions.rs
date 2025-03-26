@@ -42,6 +42,7 @@ fn schema() -> Schema {
     let max_fee_per_gas = Field::new("max_fee_per_gas", EVM_CURRENCY_TYPE, true);
     let max_priority_fee_per_gas = Field::new("max_priority_fee_per_gas", EVM_CURRENCY_TYPE, true);
     let from = Field::new("from", ADDRESS_TYPE, false);
+    let status = Field::new("status", DataType::Int32, false);
     let return_data = Field::new("return_data", DataType::Binary, false);
     let public_key = Field::new("public_key", DataType::Binary, false);
     let begin_ordinal = Field::new("begin_ordinal", DataType::UInt64, false);
@@ -67,6 +68,7 @@ fn schema() -> Schema {
         max_fee_per_gas,
         max_priority_fee_per_gas,
         from,
+        status,
         return_data,
         public_key,
         begin_ordinal,
@@ -109,6 +111,7 @@ pub(crate) struct Transaction {
     pub(crate) max_fee_per_gas: Option<EvmCurrency>,
     pub(crate) max_priority_fee_per_gas: Option<EvmCurrency>,
     pub(crate) from: Address,
+    pub(crate) status: i32,
     pub(crate) return_data: Vec<u8>,
     pub(crate) public_key: Vec<u8>,
 
@@ -137,6 +140,7 @@ pub(crate) struct TransactionRowsBuilder {
     max_fee_per_gas: EvmCurrencyArrayBuilder,
     max_priority_fee_per_gas: EvmCurrencyArrayBuilder,
     from: EvmAddressArrayBuilder,
+    status: Int32Builder,
     return_data: BinaryBuilder,
     public_key: BinaryBuilder,
     begin_ordinal: UInt64Builder,
@@ -165,6 +169,7 @@ impl TransactionRowsBuilder {
             max_fee_per_gas: EvmCurrencyArrayBuilder::with_capacity(capacity),
             max_priority_fee_per_gas: EvmCurrencyArrayBuilder::with_capacity(capacity),
             from: EvmAddressArrayBuilder::with_capacity(capacity),
+            status: Int32Builder::with_capacity(capacity),
             return_data: BinaryBuilder::with_capacity(capacity, 0),
             public_key: BinaryBuilder::with_capacity(capacity, 0),
             begin_ordinal: UInt64Builder::with_capacity(capacity),
@@ -193,6 +198,7 @@ impl TransactionRowsBuilder {
             max_fee_per_gas,
             max_priority_fee_per_gas,
             from,
+            status,
             return_data,
             public_key,
             begin_ordinal,
@@ -219,6 +225,7 @@ impl TransactionRowsBuilder {
         self.max_priority_fee_per_gas
             .append_option(*max_priority_fee_per_gas);
         self.from.append_value(*from);
+        self.status.append_value(*status);
         self.return_data.append_value(return_data);
         self.public_key.append_value(public_key);
         self.begin_ordinal.append_value(*begin_ordinal);
@@ -246,6 +253,7 @@ impl TransactionRowsBuilder {
             max_fee_per_gas,
             max_priority_fee_per_gas,
             from,
+            mut status,
             mut return_data,
             mut public_key,
             mut begin_ordinal,
@@ -272,6 +280,7 @@ impl TransactionRowsBuilder {
             Arc::new(max_fee_per_gas.finish()),
             Arc::new(max_priority_fee_per_gas.finish()),
             Arc::new(from.finish()),
+            Arc::new(status.finish()),
             Arc::new(return_data.finish()),
             Arc::new(public_key.finish()),
             Arc::new(begin_ordinal.finish()),
@@ -290,6 +299,6 @@ fn default_to_arrow() {
         builder.append(&tx);
         builder.build("test_network".to_string()).unwrap()
     };
-    assert_eq!(rows.rows.num_columns(), 23);
+    assert_eq!(rows.rows.num_columns(), 24);
     assert_eq!(rows.rows.num_rows(), 1);
 }
