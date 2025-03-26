@@ -36,6 +36,7 @@ use futures::TryStreamExt;
 use job::Job;
 use log::info;
 use log::warn;
+use metadata_db::MetadataDb;
 use object_store::ObjectMeta;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties as ParquetWriterProperties;
@@ -58,13 +59,14 @@ pub async fn dump_dataset(
     let catalog = Catalog::new(vec![dataset.clone()]);
     let env = Arc::new(config.make_runtime_env()?);
     let ctx = Arc::new(QueryContext::for_catalog(catalog, env.clone())?);
+    let metadata_db = dataset_store.metadata_db.as_ref();
 
     // Ensure consistency before starting the dump procedure.
-    consistency_check(dataset, &ctx).await?;
+    consistency_check(dataset, &ctx, metadata_db).await?;
 
     // Query the scanned ranges, we might already have some ranges if this is not the first dump run
     // for this dataset.
-    let scanned_ranges_by_table = scanned_ranges_by_table(&ctx).await?;
+    let scanned_ranges_by_table = scanned_ranges_by_table(&ctx, metadata_db).await.unwrap_or_default();
     for (table_name, multirange) in &scanned_ranges_by_table {
         if multirange.total_len() == 0 {
             continue;
@@ -375,6 +377,7 @@ enum ConsistencyCheckError {
 async fn consistency_check(
     physical_dataset: &PhysicalDataset,
     ctx: &QueryContext,
+    metadata_db: Option<&MetadataDb>
 ) -> Result<(), ConsistencyCheckError> {
     // See also: scanned-ranges-consistency
 
@@ -386,7 +389,7 @@ async fn consistency_check(
 
         // Check that `__scanned_ranges` does not contain overlapping ranges.
         {
-            let ranges = ranges_for_table(ctx, table.catalog_schema(), table.table_name()).await?;
+            let ranges = ranges_for_table(ctx, table.table_name(), metadata_db).await.unwrap_or_default();
             if let Err(e) = MultiRange::from_ranges(ranges) {
                 return Err(CorruptedDataset(dataset_name, e.into()));
             }
