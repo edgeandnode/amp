@@ -25,19 +25,12 @@ use std::{
 };
 
 use crate::{
-    arrow::array::{ArrayRef, StringBuilder},
-    multirange::MultiRange,
-    query_context::Error as CoreError,
-    timestamp_type, BoxError, QueryContext, Timestamp, TimestampArrayBuilder,
+    multirange::MultiRange, timestamp_type, BoxError,
+    QueryContext, Timestamp,
 };
-use datafusion::{
-    arrow::{
-        array::{ArrayBuilder as _, AsArray as _, RecordBatch, UInt64Builder},
-        datatypes::{DataType, Field, Schema, SchemaRef},
-    },
-    sql::TableReference,
-};
-use futures:: TryStreamExt;
+
+use datafusion::arrow::datatypes::{DataType, Field, Schema, SchemaRef};
+use futures::TryStreamExt;
 
 use metadata_db::MetadataDb;
 use serde::{Deserialize, Serialize};
@@ -76,13 +69,13 @@ pub async fn ranges_for_table(
         // If MetadataDb is provided, then stream the ranges directly from it (nice)
         Some(metadata_db) => Ok(metadata_db
             .stream_ranges(table_name.into())
+            .try_filter_map(|(range_start, range_end)| async move {
+                Ok(Some((range_start as u64, range_end as u64)))
+            })
             .try_collect::<Vec<_>>()
-            .await?
-            .into_iter()
-            .map(|(range_start, range_end)| (range_start as u64, range_end as u64))
-            .collect::<Vec<_>>()),
-        _ => {
+            .await?),
         // Otherwise read the metadata from all of the parquet files (painful)
+        _ => {
             ctx.catalog()
                 .all_tables()
                 .find(|tbl| tbl.table_name() == table_name)
@@ -102,8 +95,7 @@ pub async fn scanned_ranges_by_table(
 
     for table in ctx.catalog().all_tables() {
         let table_name = table.table_name().to_string();
-        let ranges =
-            ranges_for_table(ctx, &table_name, metadata_db).await?;
+        let ranges = ranges_for_table(ctx, &table_name, metadata_db).await?;
         let multi_range = MultiRange::from_ranges(ranges)?;
         multirange_by_table.insert(table_name, multi_range);
     }
@@ -113,17 +105,30 @@ pub async fn scanned_ranges_by_table(
 
 pub async fn filenames_for_table(
     ctx: &QueryContext,
-    catalog_schema: &str,
     table_name: &str,
-) -> Result<Vec<String>, CoreError> {
-    let scanned_ranges_ref = TableReference::partial(catalog_schema, TABLE_NAME);
-    let rb = ctx
-            .meta_execute_sql(&format!(
-                "select filename from {scanned_ranges_ref} where table = '{table_name}' order by range_start, range_end",
-            ))
-            .await?;
-    let filenames = rb.column(0).as_string::<i32>().iter().map(|s| s.unwrap());
-    Ok(filenames.map(|s| s.to_string()).collect())
+    metadata_db: Option<&MetadataDb>,
+) -> Result<Vec<String>, BoxError> {
+    match metadata_db {
+        // If MetadataDb is provided, then stream the file names directly from it (nice)
+        Some(metadata_db) => {
+            let tbl = table_name.to_string();
+            let file_names = metadata_db
+                .stream_file_names(tbl)
+                .try_collect::<Vec<_>>()
+                .await?;
+            Ok(file_names)
+        }
+        // Otherwise read the metadata from all of the parquet files (painful)
+        _ => Ok(ctx
+            .catalog()
+            .all_tables()
+            .find(|tbl| tbl.table_name() == table_name)
+            .unwrap()
+            .parquet_files(true)
+            .await?
+            .into_keys()
+            .collect()),
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -133,58 +138,4 @@ pub struct ScannedRange {
     pub range_end: u64,
     pub filename: String,
     pub created_at: Timestamp,
-}
-
-impl ScannedRange {
-    pub fn as_record_batch(&self) -> RecordBatch {
-        let mut builder = ScannedRangeRowsBuilder::new();
-        builder.append(self);
-        builder.build()
-    }
-}
-
-#[derive(Debug)]
-pub struct ScannedRangeRowsBuilder {
-    table: StringBuilder,
-    range_start: UInt64Builder,
-    range_end: UInt64Builder,
-    filename: StringBuilder,
-    timestamp: TimestampArrayBuilder,
-}
-
-impl ScannedRangeRowsBuilder {
-    pub fn new() -> Self {
-        Self {
-            table: StringBuilder::new(),
-            range_start: UInt64Builder::new(),
-            range_end: UInt64Builder::new(),
-            filename: StringBuilder::new(),
-            timestamp: TimestampArrayBuilder::with_capacity(0),
-        }
-    }
-
-    pub fn append(&mut self, range: &ScannedRange) {
-        self.table.append_value(&range.table);
-        self.range_start.append_value(range.range_start);
-        self.range_end.append_value(range.range_end);
-        self.filename.append_value(&range.filename);
-        self.timestamp.append_value(range.created_at);
-    }
-
-    pub fn build(&mut self) -> RecordBatch {
-        let columns = vec![
-            Arc::new(self.table.finish()) as ArrayRef,
-            Arc::new(self.range_start.finish()),
-            Arc::new(self.range_end.finish()),
-            Arc::new(self.filename.finish()),
-            Arc::new(self.timestamp.finish()),
-        ];
-
-        // Unwrap: The columns follow the schema and have an equal length.
-        RecordBatch::try_new(SCHEMA.clone(), columns).unwrap()
-    }
-
-    pub fn len(&self) -> usize {
-        self.table.len()
-    }
 }
