@@ -20,8 +20,7 @@
 //! See also: scanned-ranges-consistency
 
 use std::{
-    collections::BTreeMap,
-    sync::{Arc, LazyLock},
+    collections::BTreeMap, sync::{Arc, LazyLock}
 };
 
 use crate::{
@@ -29,14 +28,21 @@ use crate::{
     multirange::MultiRange,
     query_context::Error as CoreError,
     timestamp_type, BoxError, QueryContext, Timestamp, TimestampArrayBuilder,
+    store::infer_object_store
 };
 use datafusion::{
     arrow::{
         array::{ArrayBuilder as _, AsArray as _, RecordBatch, UInt64Builder},
         datatypes::{DataType, Field, Schema, SchemaRef, UInt64Type},
-    },
-    sql::TableReference,
+    }, parquet::{self, file::metadata::ParquetMetaDataReader}, sql::TableReference
 };
+use futures::{stream, FutureExt, TryStream, TryStreamExt, StreamExt};
+
+use itertools::Itertools;
+use metadata_db::MetadataDb;
+use object_store::{ObjectMeta, ObjectStore};
+use serde::{Deserialize, Serialize};
+use url::Url;
 
 use crate::Table;
 
@@ -67,13 +73,20 @@ pub async fn ranges_for_table(
     ctx: &QueryContext,
     catalog_schema: &str,
     table_name: &str,
+    metadata_db: Option<&MetadataDb>,
 ) -> Result<Vec<(u64, u64)>, CoreError> {
     let scanned_ranges_ref = TableReference::partial(catalog_schema, TABLE_NAME);
+    let ranges = match metadata_db {
+        Some(metadata_db) => {
+            let thing = metadata_db.stream_ranges(table_name.into());
+        },
+        _ => todo!()
+    };
     let rb = ctx
-            .meta_execute_sql(&format!(
-                "select range_start, range_end from {scanned_ranges_ref} where table = '{table_name}' order by range_start, range_end",
-            ))
-            .await?;
+        .meta_execute_sql(&format!(
+            "select range_start, range_end from {scanned_ranges_ref} where table = '{table_name}' order by range_start, range_end",
+        ))
+        .await?;
     let start_blocks: &[u64] = rb.column(0).as_primitive::<UInt64Type>().values().as_ref();
     let end_blocks: &[u64] = rb.column(1).as_primitive::<UInt64Type>().values().as_ref();
 
@@ -83,12 +96,14 @@ pub async fn ranges_for_table(
 
 pub async fn scanned_ranges_by_table(
     ctx: &QueryContext,
+    metadata_db: Option<&MetadataDb>,
 ) -> Result<BTreeMap<String, MultiRange>, BoxError> {
     let mut multirange_by_table = BTreeMap::default();
 
     for table in ctx.catalog().all_tables() {
         let table_name = table.table_name().to_string();
-        let ranges = ranges_for_table(ctx, table.catalog_schema(), &table_name).await?;
+        let ranges =
+            ranges_for_table(ctx, table.catalog_schema(), &table_name, metadata_db).await?;
         let multi_range = MultiRange::from_ranges(ranges)?;
         multirange_by_table.insert(table_name, multi_range);
     }
@@ -111,6 +126,7 @@ pub async fn filenames_for_table(
     Ok(filenames.map(|s| s.to_string()).collect())
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ScannedRange {
     pub table: String,
     pub range_start: u64,
