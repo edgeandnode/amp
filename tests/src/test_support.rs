@@ -109,11 +109,11 @@ impl SnapshotContext {
     async fn check_scanned_range_eq(&self, other: &SnapshotContext) -> Result<(), BoxError> {
         use common::meta_tables::scanned_ranges::{ranges_for_table, scanned_ranges_by_table};
 
-        let other_scanned_ranges = scanned_ranges_by_table(&other.ctx).await?;
+        let other_scanned_ranges = scanned_ranges_by_table(&other.ctx, None).await?;
 
         for table in self.ctx.catalog().all_tables() {
             let table_name = table.table_name().to_string();
-            let ranges = ranges_for_table(&self.ctx, table.catalog_schema(), &table_name).await?;
+            let ranges = ranges_for_table(&self.ctx, &table_name, None).await?;
             let expected_range = MultiRange::from_ranges(ranges)?;
             let actual_range = &other_scanned_ranges[&table_name];
             let dataset_name = &self.dataset.name;
