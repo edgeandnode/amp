@@ -55,3 +55,21 @@ pub async fn client(
     let client = JsonRpcClient::new(provider.url, def.network).map_err(Error::Client)?;
     Ok(client)
 }
+
+/// Automatically generate a README.md file with the schema whenever tests are executed.
+#[tokio::test]
+async fn print_schema_to_readme() {
+    fs_err::write(
+        "src/README.md",
+        common::catalog::schema_to_markdown(
+            vec![
+                common::evm::tables::blocks::table("test_network".to_string()),
+                common::evm::tables::logs::table("test_network".to_string()),
+            ],
+            crate::DATASET_KIND.to_string(),
+        )
+        .await
+        .unwrap(),
+    )
+    .unwrap();
+}
