@@ -3,6 +3,7 @@ use std::{collections::BTreeMap, sync::Arc};
 use datafusion::{
     arrow::datatypes::SchemaRef,
     logical_expr::{col, SortExpr},
+    parquet::arrow::async_reader::{AsyncFileReader, ParquetObjectReader},
     sql::TableReference,
 };
 use futures::{stream, TryStreamExt};
@@ -12,6 +13,7 @@ use url::Url;
 
 use super::logical::Table;
 use crate::{
+    meta_tables::scanned_ranges::{self, ScannedRange},
     store::{infer_object_store, Store},
     BoxError, Dataset,
 };
@@ -346,6 +348,38 @@ impl PhysicalTable {
             .filter(|(filename, _)| is_dump_file(filename))
             .collect();
         Ok(files)
+    }
+
+    // TODO: Break this into smaller functions
+    // TODO: Buffer the stream and sort the ranges after
+    pub async fn scanned_ranges(&self) -> Result<Vec<(u64, u64)>, BoxError> {
+        let ranges = self
+            .object_store
+            .list(Some(self.path()))
+            .try_filter_map(|f| async move {
+                let mut reader = ParquetObjectReader::new(self.object_store.clone(), f);
+                let scanned_range: Option<(u64, u64)> =
+                    reader.get_metadata().await.map_or(None, |parquet_meta| {
+                        parquet_meta
+                            .file_metadata()
+                            .key_value_metadata()
+                            .map(|kv_meta| {
+                                kv_meta
+                                    .into_iter()
+                                    .find(|kv| kv.key.as_str() == scanned_ranges::TABLE_NAME)
+                            })
+                            .flatten()
+                            .map(|kv| {
+                                let scanned_range: ScannedRange = serde_json::from_str(kv.value.clone().unwrap().as_str()).ok()?;
+                                Some((scanned_range.range_start, scanned_range.range_end))
+                            })
+                            .flatten()
+                    });
+                Ok(scanned_range)
+            })
+            .try_collect::<Vec<_>>()
+            .await?;
+        Ok(ranges)
     }
 
     /// Truncate this table by deleting all dump files making up the table
