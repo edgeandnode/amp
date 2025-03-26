@@ -24,7 +24,6 @@ use common::BlockNum;
 use common::BlockStreamer as _;
 use common::BoxError;
 use datafusion::execution::runtime_env::RuntimeEnv;
-use datafusion::sql::TableReference;
 use dataset_store::sql_datasets::is_incremental;
 use dataset_store::sql_datasets::max_end_block;
 use dataset_store::sql_datasets::SqlDataset;
@@ -40,6 +39,7 @@ use metadata_db::MetadataDb;
 use object_store::ObjectMeta;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties as ParquetWriterProperties;
+use parquet_writer::insert_scanned_range;
 use parquet_writer::ParquetFileWriter;
 use thiserror::Error;
 use tracing::instrument;
@@ -66,7 +66,9 @@ pub async fn dump_dataset(
 
     // Query the scanned ranges, we might already have some ranges if this is not the first dump run
     // for this dataset.
-    let scanned_ranges_by_table = scanned_ranges_by_table(&ctx, metadata_db).await.unwrap_or_default();
+    let scanned_ranges_by_table = scanned_ranges_by_table(&ctx, metadata_db)
+        .await
+        .unwrap_or_default();
     for (table_name, multirange) in &scanned_ranges_by_table {
         if multirange.total_len() == 0 {
             continue;
@@ -167,9 +169,12 @@ async fn run_block_stream_jobs(
 
     // Split them across the target number of jobs as to balance the number of blocks per job.
     let multiranges = ranges.split_and_partition(n_jobs as u64, 2000);
+
+    let metadata_db = dataset_store.metadata_db.as_ref().cloned().map(Arc::new);
     let jobs = multiranges.into_iter().enumerate().map(|(i, multirange)| {
         Arc::new(Job {
             dataset_ctx: ctx.clone(),
+            metadata_db: metadata_db.clone(),
             block_streamer: client.clone(),
             multirange,
             job_id: i as u32,
@@ -256,8 +261,6 @@ async fn dump_sql_dataset(
                     end,
                     physical_table,
                     parquet_opts,
-                    dataset.name(),
-                    &dst_ctx,
                 )
                 .await?;
             }
@@ -285,8 +288,6 @@ async fn dump_sql_dataset(
                 end,
                 &physical_table,
                 parquet_opts,
-                dataset.name(),
-                &dst_ctx,
             )
             .await?;
         }
@@ -303,21 +304,24 @@ async fn dump_sql_query(
     end: BlockNum,
     physical_table: &common::catalog::physical::PhysicalTable,
     parquet_opts: &ParquetWriterProperties,
-    dataset_name: &str,
-    dst_ctx: &QueryContext,
 ) -> Result<(), BoxError> {
     use dataset_store::sql_datasets::execute_query_for_range;
 
     let store = dataset_store.clone();
+    let metadata_db = store.metadata_db.as_ref().cloned().map(Arc::new);
     let mut stream = execute_query_for_range(query.clone(), store, env.clone(), start, end).await?;
     let mut writer = ParquetFileWriter::new(physical_table.clone(), parquet_opts.clone(), start)?;
     while let Some(batch) = stream.try_next().await? {
         writer.write(&batch).await?;
     }
-    let scanned_range = writer.close(end).await?.as_record_batch();
-    let table_ref = TableReference::partial(dataset_name, scanned_ranges::TABLE_NAME);
-    dst_ctx.meta_insert_into(table_ref, scanned_range).await?;
-    Ok(())
+    let scanned_range = writer.close(end).await?;
+
+    insert_scanned_range(
+        Some(scanned_range),
+        metadata_db,
+        physical_table.location_id(),
+    )
+    .await
 }
 
 pub fn default_partition_size() -> u64 {
@@ -377,7 +381,7 @@ enum ConsistencyCheckError {
 async fn consistency_check(
     physical_dataset: &PhysicalDataset,
     ctx: &QueryContext,
-    metadata_db: Option<&MetadataDb>
+    metadata_db: Option<&MetadataDb>,
 ) -> Result<(), ConsistencyCheckError> {
     // See also: scanned-ranges-consistency
 
@@ -389,14 +393,16 @@ async fn consistency_check(
 
         // Check that `__scanned_ranges` does not contain overlapping ranges.
         {
-            let ranges = ranges_for_table(ctx, table.table_name(), metadata_db).await.unwrap_or_default();
+            let ranges = ranges_for_table(ctx, table.table_name(), metadata_db)
+                .await
+                .unwrap_or_default();
             if let Err(e) = MultiRange::from_ranges(ranges) {
                 return Err(CorruptedDataset(dataset_name, e.into()));
             }
         }
 
         let registered_files = {
-            let f = filenames_for_table(&ctx, table.catalog_schema(), table.table_name()).await?;
+            let f = filenames_for_table(&ctx, table.table_name(), metadata_db).await.unwrap_or_default();
             BTreeSet::from_iter(f.into_iter())
         };
 

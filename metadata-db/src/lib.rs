@@ -350,31 +350,86 @@ impl MetadataDb {
         Ok(channel.into_stream())
     }
 
-    pub fn stream_file_names(&self, tbl: String) -> BoxStream<Result<String, sqlx::Error>> {
+    /// Produces a stream of all names of files for a given tbl catalogued by the MetadataDb
+    pub fn stream_file_names<'a>(
+        &'a self,
+        tbl: TableId<'a>,
+    ) -> BoxStream<'a, Result<String, sqlx::Error>> {
+        let TableId {
+            dataset,
+            dataset_version,
+            table,
+        } = tbl;
         let sql = "
             SELECT DISTINCT sr.file_name
               FROM scanned_ranges sr
         INNER JOIN locations l
                 ON sr.location_id = l.vid
-             WHERE l.tbl = $1 AND l.active
+             WHERE l.dataset = $1 
+                   AND l.dataset_version = $2
+                   AND l.tbl = $3
+                   AND l.active
           ORDER BY 1 ASC
         ";
 
-        sqlx::query_scalar(sql).bind(tbl).fetch(&self.pool)
+        sqlx::query_scalar(sql)
+            .bind(dataset)
+            .bind(dataset_version.unwrap_or("*"))
+            .bind(table.to_string())
+            .fetch(&self.pool)
     }
 
-    pub fn stream_ranges(&self, tbl: String) -> BoxStream<Result<(i64, i64), sqlx::Error>> {
+    /// Produces a stream of all scanned block ranges for a given tbl catalogued by the MetadataDb
+    pub fn stream_ranges<'a>(&'a self, tbl: TableId<'a>) -> BoxStream<'a, Result<(i64, i64), sqlx::Error>> {
+        let TableId {
+            dataset,
+            dataset_version,
+            table,
+        } = tbl;
         let sql = "
             SELECT DISTINCT sr.metadata->range_start
                  , sr.metadata->range_end 
               FROM scanned_ranges sr 
         INNER JOIN locations l 
                 ON sr.location_id = l.vid 
-             WHERE l.tbl = $1 AND l.active
+             WHERE l.dataset = $1 
+                   AND l.dataset_version = $2
+                   AND l.tbl = $3
+                   AND l.active
           ORDER BY 1 ASC
         ";
 
-        sqlx::query_scalar(sql).bind(tbl).fetch(&self.pool)
+        sqlx::query_scalar(sql)
+            .bind(dataset)
+            .bind(dataset_version.unwrap_or("*"))
+            .bind(table.to_string())
+            .fetch(&self.pool)
+    }
+
+    pub async fn insert_scanned_range(
+        &self,
+        location_id: i64,
+        file_name: String,
+        scanned_range: serde_json::Value,
+    ) -> Result<(), Error> {
+        let mut tx = self.pool.begin().await?;
+
+        let sql = "
+        INSERT INTO scanned_ranges (location_id, file_name, metadata) \
+        VALUES ($1, $2, $3)
+        RETURNING id;
+        ";
+
+        let _id = sqlx::query(sql)
+            .bind(location_id)
+            .bind(file_name)
+            .bind(scanned_range)
+            .execute(&mut *tx)
+            .await?;
+
+        tx.commit().await?;
+
+        Ok(())
     }
 }
 
