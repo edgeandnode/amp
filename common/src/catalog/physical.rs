@@ -390,13 +390,12 @@ impl PhysicalTable {
             let range = scanned_range_key_value_pair
                 .value
                 .as_ref()
-                .map(|scanned_range_json| serde_json::from_str::<ScannedRange>(scanned_range_json))
-                .transpose()?
-                .map(|scanned_range| (scanned_range.range_start, scanned_range.range_end))
                 .ok_or(crate::ArrowError::ParseError(format!(
                     "Unable to parse ScannedRange from key value metadata for file {}",
                     self.url()
-                )))?;
+                )))
+                .map(|scanned_range_json| serde_json::from_str::<ScannedRange>(scanned_range_json))?
+                .map(|scanned_range| (scanned_range.range_start, scanned_range.range_end))?;
 
             ranges.push(range);
         }
