@@ -1,11 +1,15 @@
+use std::mem;
 use std::time::Duration;
 
+use alloy::consensus::Transaction as _;
+use alloy::consensus::TxEnvelope;
 use alloy::eips::BlockNumberOrTag;
+use alloy::hex::ToHexExt;
 use alloy::providers::Provider as _;
 use alloy::rpc::types::BlockTransactionsKind;
-use alloy::rpc::types::Filter as LogsFilter;
 use alloy::rpc::types::Header;
 use alloy::rpc::types::Log as RpcLog;
+use alloy::rpc::types::TransactionReceipt;
 use alloy::transports::http::reqwest::Url;
 use common::evm::tables::blocks::Block;
 use common::evm::tables::blocks::BlockRowsBuilder;
@@ -17,9 +21,12 @@ use common::BoxError;
 use common::DatasetRows;
 use common::EvmCurrency;
 use common::Timestamp;
+use futures::future::try_join_all;
 use thiserror::Error;
 use tokio::sync::mpsc;
-use tokio::try_join;
+
+use crate::tables::transactions::Transaction;
+use crate::tables::transactions::TransactionRowsBuilder;
 
 #[derive(Error, Debug)]
 pub enum ToRowError {
@@ -48,20 +55,23 @@ impl JsonRpcClient {
         tx: mpsc::Sender<DatasetRows>,
     ) -> Result<(), BoxError> {
         for block_num in start_block..=end_block {
-            let filter = LogsFilter::new().select(block_num);
-            let (block, logs) = try_join!(
-                self.client.get_block_by_number(
+            let block = self
+                .client
+                .get_block_by_number(
                     BlockNumberOrTag::Number(block_num),
-                    BlockTransactionsKind::Hashes,
-                ),
-                self.client.get_logs(&filter),
-            )?;
-            let block = match block {
-                Some(block) => block,
-                None => return Err(format!("block not found: {block_num}").into()),
-            };
+                    BlockTransactionsKind::Full,
+                )
+                .await?
+                .ok_or_else(|| format!("block {} not found", block_num))?;
+            let receipts = try_join_all(
+                block
+                    .transactions
+                    .hashes()
+                    .map(|hash| self.client.get_transaction_receipt(hash)),
+            )
+            .await?;
 
-            let rows = rpc_to_rows(block.header, logs, &self.network)?;
+            let rows = rpc_to_rows(block, receipts, &self.network)?;
 
             // Send the block and check if the receiver has gone away.
             if tx.send(rows).await.is_err() {
@@ -99,12 +109,51 @@ impl BlockStreamer for JsonRpcClient {
     }
 }
 
-fn rpc_to_rows(block: Header, logs: Vec<RpcLog>, network: &str) -> Result<DatasetRows, BoxError> {
-    let header = rpc_header_to_row(block)?;
-    let logs = logs
-        .into_iter()
-        .map(|log| rpc_log_to_row(log, header.timestamp))
-        .collect::<Result<Vec<_>, _>>()?;
+fn rpc_to_rows(
+    block: alloy::rpc::types::Block,
+    receipts: Vec<Option<TransactionReceipt>>,
+    network: &str,
+) -> Result<DatasetRows, BoxError> {
+    let header = rpc_header_to_row(block.header)?;
+    let mut logs = Vec::new();
+    let mut transactions = Vec::new();
+
+    for (idx, (tx, receipt)) in block
+        .transactions
+        .into_transactions()
+        .zip(receipts)
+        .enumerate()
+    {
+        let mut receipt = receipt.ok_or_else(|| {
+            format!(
+                "receipt not found for tx {:?}",
+                tx.inner.tx_hash().encode_hex()
+            )
+        })?;
+        // Move the logs out of the nested structure.
+        let receipt_logs = match &mut receipt.inner {
+            alloy::consensus::ReceiptEnvelope::Legacy(receipt_with_bloom) => {
+                mem::take(&mut receipt_with_bloom.receipt.logs)
+            }
+            alloy::consensus::ReceiptEnvelope::Eip2930(receipt_with_bloom) => {
+                mem::take(&mut receipt_with_bloom.receipt.logs)
+            }
+            alloy::consensus::ReceiptEnvelope::Eip1559(receipt_with_bloom) => {
+                mem::take(&mut receipt_with_bloom.receipt.logs)
+            }
+            alloy::consensus::ReceiptEnvelope::Eip4844(receipt_with_bloom) => {
+                mem::take(&mut receipt_with_bloom.receipt.logs)
+            }
+            alloy::consensus::ReceiptEnvelope::Eip7702(receipt_with_bloom) => {
+                mem::take(&mut receipt_with_bloom.receipt.logs)
+            }
+            _ => panic!("unexpected receipt type"),
+        };
+        for log in receipt_logs {
+            logs.push(rpc_log_to_row(log, header.timestamp)?);
+        }
+        transactions.push(rpc_transaction_to_row(&header, tx, receipt, idx)?);
+    }
 
     let header_row = {
         let mut builder = BlockRowsBuilder::with_capacity(1);
@@ -120,7 +169,15 @@ fn rpc_to_rows(block: Header, logs: Vec<RpcLog>, network: &str) -> Result<Datase
         builder.build(network.to_string())?
     };
 
-    Ok(DatasetRows(vec![header_row, logs_row]))
+    let transactions_row = {
+        let mut builder = TransactionRowsBuilder::with_capacity(transactions.len());
+        for tx in transactions {
+            builder.append(&tx);
+        }
+        builder.build(network.to_string())?
+    };
+
+    Ok(DatasetRows(vec![header_row, logs_row, transactions_row]))
 }
 
 fn rpc_header_to_row(header: Header) -> Result<Block, ToRowError> {
@@ -185,5 +242,59 @@ fn rpc_log_to_row(log: RpcLog, timestamp: Timestamp) -> Result<Log, ToRowError> 
         topic2: log.topics().get(2).cloned().map(Into::into),
         topic3: log.topics().get(3).cloned().map(Into::into),
         data: log.data().data.to_vec(),
+    })
+}
+
+fn rpc_transaction_to_row(
+    block: &Block,
+    tx: alloy::rpc::types::Transaction,
+    receipt: TransactionReceipt,
+    tx_index: usize,
+) -> Result<Transaction, ToRowError> {
+    let sig = match &tx.inner {
+        TxEnvelope::Legacy(signed) => signed.signature(),
+        TxEnvelope::Eip2930(signed) => signed.signature(),
+        TxEnvelope::Eip1559(signed) => signed.signature(),
+        TxEnvelope::Eip4844(signed) => signed.signature(),
+        TxEnvelope::Eip7702(signed) => signed.signature(),
+        _ => panic!("unexpected transaction type"),
+    };
+    Ok(Transaction {
+        block_hash: block.hash,
+        block_num: block.block_num,
+        timestamp: block.timestamp,
+        tx_index: u32::try_from(tx_index)
+            .map_err(|e| ToRowError::Overflow("tx_index", e.into()))?,
+        tx_hash: tx.inner.tx_hash().0,
+        to: tx.to().map(|addr| addr.0 .0.to_vec()).unwrap_or_default(),
+        nonce: tx.nonce(),
+        gas_price: tx
+            .gas_price()
+            .map(i128::try_from)
+            .transpose()
+            .map_err(|e| ToRowError::Overflow("gas_price", e.into()))?,
+        gas_limit: tx.gas_limit(),
+        value: i128::try_from(tx.value()).map_err(|e| ToRowError::Overflow("value", e.into()))?,
+        input: tx.input().to_vec(),
+        v: if sig.v() { vec![1] } else { vec![] },
+        r: sig.r().to_be_bytes_vec(),
+        s: sig.s().to_be_bytes_vec(),
+        receipt_cumulative_gas_used: u64::try_from(receipt.inner.cumulative_gas_used())
+            .map_err(|e| ToRowError::Overflow("cumulative_gas_used", e.into()))?,
+        r#type: tx.ty().into(),
+        max_fee_per_gas: i128::try_from(tx.max_fee_per_gas())
+            .map_err(|e| ToRowError::Overflow("max_fee_per_gas", e.into()))?,
+        max_priority_fee_per_gas: tx
+            .max_priority_fee_per_gas()
+            .map(i128::try_from)
+            .transpose()
+            .map_err(|e| ToRowError::Overflow("max_priority_fee_per_gas", e.into()))?,
+        max_fee_per_blob_gas: tx
+            .max_fee_per_blob_gas()
+            .map(i128::try_from)
+            .transpose()
+            .map_err(|e| ToRowError::Overflow("max_fee_per_blob_gas", e.into()))?,
+        from: tx.from.0 .0,
+        status: receipt.status().into(),
     })
 }

@@ -2588,6 +2588,7 @@ dependencies = [
  "alloy",
  "common",
  "fs-err",
+ "futures",
  "serde",
  "serde_with",
  "thiserror 2.0.11",

@@ -28,6 +28,34 @@ Auto-generated file. See `schema_to_markdown` in `common/src/catalog/mod.rs`.
 | parent_beacon_root | Binary32                              | YES         |
 +--------------------+---------------------------------------+-------------+
 ````
+## transactions
+````
++--------------------------+---------------------------------------+-------------+
+| column_name              | data_type                             | is_nullable |
++--------------------------+---------------------------------------+-------------+
+| block_hash               | Binary32                              | NO          |
+| block_num                | UInt64                                | NO          |
+| timestamp                | Timestamp                             | NO          |
+| tx_index                 | UInt32                                | NO          |
+| tx_hash                  | Binary32                              | NO          |
+| to                       | Binary                                | NO          |
+| nonce                    | UInt64                                | NO          |
+| gas_price                | UInt126                               | YES         |
+| gas_limit                | UInt64                                | NO          |
+| value                    | UInt126                               | NO          |
+| input                    | Binary                                | NO          |
+| v                        | Binary                                | NO          |
+| r                        | Binary                                | NO          |
+| s                        | Binary                                | NO          |
+| gas_used                 | UInt64                                | NO          |
+| type                     | Int32                                 | NO          |
+| max_fee_per_gas          | UInt126                               | YES         |
+| max_priority_fee_per_gas | UInt126                               | YES         |
+| max_fee_per_blob_gas     | UInt126                               | YES         |
+| from                     | Binary20                              | NO          |
+| status                   | Int32                                 | NO          |
++--------------------------+---------------------------------------+-------------+
+````
 ## logs
 ````
 +-------------+---------------------------------------+-------------+
