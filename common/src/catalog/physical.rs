@@ -271,6 +271,14 @@ impl PhysicalTable {
         &self.table_ref
     }
 
+    pub fn table_id(&self) -> TableId<'_> {
+        TableId {
+            dataset: self.catalog_schema(),
+            dataset_version: None,
+            table: self.table_name()
+        }
+    }
+
     pub fn order_exprs(&self) -> Vec<Vec<SortExpr>> {
         self.table
             .sorted_by()
