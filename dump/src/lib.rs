@@ -227,6 +227,7 @@ async fn dump_sql_dataset(
             let mut tables = physical_dataset.tables();
             tables.find(|t| t.table_name() == table).unwrap()
         };
+
         let src_ctx = dataset_store
             .clone()
             .ctx_for_sql(&query, env.clone())
@@ -293,6 +294,7 @@ async fn dump_sql_dataset(
     Ok(())
 }
 
+#[instrument(skip_all, err)]
 async fn dump_sql_query(
     dataset_store: &Arc<DatasetStore>,
     query: &datafusion::sql::parser::Statement,
