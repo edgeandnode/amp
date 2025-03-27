@@ -315,13 +315,17 @@ async fn dump_sql_query(
         writer.write(&batch).await?;
     }
     let scanned_range = writer.close(end).await?;
-
-    insert_scanned_range(
-        Some(scanned_range),
-        metadata_db,
-        physical_table.location_id(),
-    )
-    .await
+    match (metadata_db, physical_table.location_id()) {
+        (Some(metadata_db), Some(location_id)) => {
+            insert_scanned_range(
+                scanned_range,
+                metadata_db,
+                location_id,
+            )
+            .await
+        }
+        _ => Ok(())
+    }
 }
 
 pub fn default_partition_size() -> u64 {

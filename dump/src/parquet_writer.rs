@@ -75,25 +75,27 @@ impl DatasetWriter {
         for (_, writer) in self.writers {
             let location_id = writer.table.location_id();
             let scanned_range = writer.close().await?;
-            insert_scanned_range(scanned_range, self.metadata_db.clone(), location_id)?;
+            let _ = match (location_id, self.metadata_db.clone(), scanned_range) {
+                (Some(location_id), Some(metadata_db), Some(scanned_range)) => {
+                    insert_scanned_range(scanned_range, metadata_db, location_id).await?
+                }
+                _ => {}
+            };
         }
         Ok(())
     }
 }
 
 pub async fn insert_scanned_range(
-    scanned_range: Option<ScannedRange>,
-    metadata_db: Option<Arc<MetadataDb>>,
-    location_id: Option<i64>
+    scanned_range: ScannedRange,
+    metadata_db: Arc<MetadataDb>,
+    location_id: i64,
 ) -> Result<(), BoxError> {
-    match (location_id, scanned_range, metadata_db) {
-        (Some(location_id), Some(scanned_range), Some(metadata_db)) => {
-            let file_name = scanned_range.filename.clone();
-            let scanned_range = serde_json::to_value(scanned_range)?;
-            Ok(metadata_db.insert_scanned_range(location_id, file_name, scanned_range).await?)
-        },
-        _ => Ok(()),
-    }
+    let file_name = scanned_range.filename.clone();
+    let scanned_range = serde_json::to_value(scanned_range)?;
+    Ok(metadata_db
+        .insert_scanned_range(location_id, file_name, scanned_range)
+        .await?)
 }
 
 struct TableWriter {
