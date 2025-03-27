@@ -1,4 +1,4 @@
-CREATE TABLE scanned_ranges (
+CREATE TABLE file_metadata (
     id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     location_id BIGINT REFERENCES locations(vid) ON DELETE CASCADE NOT NULL,
     file_name TEXT NOT NULL
