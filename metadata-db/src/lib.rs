@@ -54,7 +54,7 @@ pub struct MetadataDb {
 
 /// Tables are identified by the triple: `(dataset, dataset_version, table)`. For each table, there
 /// is at most one active location.
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct TableId<'a> {
     pub dataset: &'a str,
     pub dataset_version: Option<&'a str>,

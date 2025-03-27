@@ -24,15 +24,12 @@ use std::{
     sync::{Arc, LazyLock},
 };
 
-use crate::{
-    multirange::MultiRange, timestamp_type, BoxError,
-    QueryContext, Timestamp,
-};
+use crate::{multirange::MultiRange, timestamp_type, BoxError, QueryContext, Timestamp};
 
 use datafusion::arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use futures::TryStreamExt;
 
-use metadata_db::MetadataDb;
+use metadata_db::{MetadataDb, TableId};
 use serde::{Deserialize, Serialize};
 
 use crate::Table;
@@ -62,28 +59,29 @@ fn schema() -> Schema {
 
 pub async fn ranges_for_table(
     ctx: &QueryContext,
-    table_name: &str,
     metadata_db: Option<&MetadataDb>,
+    tbl: TableId<'_>,
 ) -> Result<Vec<(u64, u64)>, BoxError> {
     match metadata_db {
         // If MetadataDb is provided, then stream the ranges directly from it (nice)
         Some(metadata_db) => Ok(metadata_db
-            .stream_ranges(table_name.into())
+            .stream_ranges(tbl)
             .try_filter_map(|(range_start, range_end)| async move {
                 Ok(Some((range_start as u64, range_end as u64)))
             })
             .try_collect::<Vec<_>>()
             .await?),
         // Otherwise read the metadata from all of the parquet files (painful)
-        _ => {
-            ctx.catalog()
-                .all_tables()
-                .find(|tbl| tbl.table_name() == table_name)
-                // Unwrap: table_name comes from schema.table_names()
-                .unwrap()
-                .ranges()
-                .await
-        }
+        _ => Ok(ctx
+            .catalog()
+            .all_tables()
+            .find(|physical_table| physical_table.table_id() == tbl)
+            // TODO: method to select a table from the catalog by TableId, returning a Result<PhysicalTable> 
+            // to avoid this whole iteration + combinator + unwrap pattern. 
+            // Unwrap: the caller has already confirmed the existence of the physical table with this TableId
+            .unwrap()
+            .ranges()
+            .await?),
     }
 }
 
@@ -94,10 +92,16 @@ pub async fn scanned_ranges_by_table(
     let mut multirange_by_table = BTreeMap::default();
 
     for table in ctx.catalog().all_tables() {
-        let table_name = table.table_name().to_string();
-        let ranges = ranges_for_table(ctx, &table_name, metadata_db).await?;
+        let tbl = TableId {
+            // Unwrap: all tables in ctx.catalog().all_tables() are of the form: [dataset].[table_name]
+            // we can access the dataset from the partial table reference's schema.
+            dataset: table.table_ref().schema().unwrap(),
+            dataset_version: None,
+            table: table.table_name(),
+        };
+        let ranges = ranges_for_table(ctx, metadata_db, tbl).await?;
         let multi_range = MultiRange::from_ranges(ranges)?;
-        multirange_by_table.insert(table_name, multi_range);
+        multirange_by_table.insert(tbl.table.to_string(), multi_range);
     }
 
     Ok(multirange_by_table)
@@ -105,13 +109,12 @@ pub async fn scanned_ranges_by_table(
 
 pub async fn filenames_for_table(
     ctx: &QueryContext,
-    table_name: &str,
     metadata_db: Option<&MetadataDb>,
+    tbl: TableId<'_>,
 ) -> Result<Vec<String>, BoxError> {
     match metadata_db {
         // If MetadataDb is provided, then stream the file names directly from it (nice)
         Some(metadata_db) => {
-            let tbl = table_name.to_string();
             let file_names = metadata_db
                 .stream_file_names(tbl)
                 .try_collect::<Vec<_>>()
@@ -122,7 +125,10 @@ pub async fn filenames_for_table(
         _ => Ok(ctx
             .catalog()
             .all_tables()
-            .find(|tbl| tbl.table_name() == table_name)
+            .find(|physical_table| physical_table.table_id() == tbl)
+            // TODO: method to select a table from the catalog by TableId, returning a Result<PhysicalTable> 
+            // to avoid this whole iteration + combinator + unwrap pattern. 
+            // Unwrap: the caller has already confirmed the existence of the physical table with this TableId
             .unwrap()
             .parquet_files(true)
             .await?

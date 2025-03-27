@@ -113,7 +113,9 @@ impl SnapshotContext {
 
         for table in self.ctx.catalog().all_tables() {
             let table_name = table.table_name().to_string();
-            let ranges = ranges_for_table(&self.ctx, &table_name, None).await?;
+            let tbl = table.table_id();
+            let metadata_db = None;
+            let ranges = ranges_for_table(&self.ctx, metadata_db, tbl).await?;
             let expected_range = MultiRange::from_ranges(ranges)?;
             let actual_range = &other_scanned_ranges[&table_name];
             let dataset_name = &self.dataset.name;

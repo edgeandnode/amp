@@ -390,10 +390,10 @@ async fn consistency_check(
 
     for table in physical_dataset.tables() {
         let dataset_name = table.catalog_schema().to_string();
-
+        let tbl = table.table_id();
         // Check that `__scanned_ranges` does not contain overlapping ranges.
         {
-            let ranges = ranges_for_table(ctx, table.table_name(), metadata_db)
+            let ranges = ranges_for_table(ctx, metadata_db, tbl)
                 .await
                 .unwrap_or_default();
             if let Err(e) = MultiRange::from_ranges(ranges) {
@@ -402,7 +402,7 @@ async fn consistency_check(
         }
 
         let registered_files = {
-            let f = filenames_for_table(&ctx, table.table_name(), metadata_db).await.unwrap_or_default();
+            let f = filenames_for_table(&ctx, metadata_db, tbl).await.unwrap_or_default();
             BTreeSet::from_iter(f.into_iter())
         };
 
