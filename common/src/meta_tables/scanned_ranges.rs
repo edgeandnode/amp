@@ -34,7 +34,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::Table;
 
-pub const TABLE_NAME: &'static str = "__scanned_ranges";
+pub const TABLE_NAME: &'static str = "file_metadata";
+pub const METADATA_KEY: &'static str = "nozzle_metadata";
 
 static SCHEMA: LazyLock<SchemaRef> = LazyLock::new(|| Arc::new(schema()));
 

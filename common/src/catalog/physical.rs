@@ -374,7 +374,7 @@ impl PhysicalTable {
                             .map(|kv_meta| {
                                 kv_meta
                                     .into_iter()
-                                    .find(|kv| kv.key.as_str() == scanned_ranges::TABLE_NAME)
+                                    .find(|kv| kv.key.as_str() == scanned_ranges::METADATA_KEY)
                             })
                             .flatten()
                             .map(|kv| {
