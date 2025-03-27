@@ -75,7 +75,7 @@ impl DatasetWriter {
         for (_, writer) in self.writers {
             let location_id = writer.table.location_id();
             let scanned_range = writer.close().await?;
-            let _ = insert_scanned_range(scanned_range, self.metadata_db.clone(), location_id);
+            insert_scanned_range(scanned_range, self.metadata_db.clone(), location_id)?;
         }
         Ok(())
     }
