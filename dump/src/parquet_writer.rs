@@ -3,9 +3,10 @@ use std::sync::Arc;
 
 use common::arrow::array::RecordBatch;
 use common::catalog::physical::PhysicalTable;
-use common::meta_tables::scanned_ranges::ScannedRange;
+use common::meta_tables::scanned_ranges::{self, ScannedRange};
 use common::multirange::MultiRange;
 use common::parquet::errors::ParquetError;
+use common::parquet::format::KeyValue;
 use common::{parquet, BlockNum, BoxError, QueryContext, TableRows, Timestamp};
 use log::debug;
 use metadata_db::MetadataDb;
@@ -294,14 +295,12 @@ impl ParquetFileWriter {
     }
 
     #[must_use]
-    pub async fn close(self, end: BlockNum) -> Result<ScannedRange, BoxError> {
+    pub async fn close(mut self, end: BlockNum) -> Result<ScannedRange, BoxError> {
         if end < self.start {
             return Err(
                 format!("end block {} must be after start block {}", end, self.start).into(),
             );
         }
-
-        self.writer.close().await?;
 
         debug!(
             "wrote {} for range {} to {}",
@@ -315,6 +314,12 @@ impl ParquetFileWriter {
             filename: self.filename,
             created_at: Timestamp::now(),
         };
+
+        let kv_metadata = KeyValue::new(scanned_ranges::METADATA_KEY.to_string(), Some(serde_json::to_string(&scanned_range)?));
+        
+        self.writer.append_key_value_metadata(kv_metadata);
+        self.writer.close().await?;
+
         Ok(scanned_range)
     }
 
