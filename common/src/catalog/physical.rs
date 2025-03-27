@@ -6,7 +6,7 @@ use datafusion::{
     parquet::arrow::async_reader::{AsyncFileReader, ParquetObjectReader},
     sql::TableReference,
 };
-use futures::{stream, TryStreamExt};
+use futures::{stream, StreamExt, TryStreamExt};
 use metadata_db::{LocationId, MetadataDb, TableId};
 use object_store::{path::Path, ObjectMeta, ObjectStore};
 use url::Url;
@@ -275,7 +275,7 @@ impl PhysicalTable {
         TableId {
             dataset: self.catalog_schema(),
             dataset_version: None,
-            table: self.table_name()
+            table: self.table_name(),
         }
     }
 
@@ -361,32 +361,46 @@ impl PhysicalTable {
     // TODO: Break this into smaller functions
     // TODO: Buffer the stream and sort the ranges after
     pub async fn ranges(&self) -> Result<Vec<(u64, u64)>, BoxError> {
-        let ranges = self
-            .object_store
-            .list(Some(self.path()))
-            .try_filter_map(|f| async move {
-                let mut reader = ParquetObjectReader::new(self.object_store.clone(), f);
-                let scanned_range: Option<(u64, u64)> =
-                    reader.get_metadata().await.map_or(None, |parquet_meta| {
-                        parquet_meta
-                            .file_metadata()
-                            .key_value_metadata()
-                            .map(|kv_meta| {
-                                kv_meta
-                                    .into_iter()
-                                    .find(|kv| kv.key.as_str() == scanned_ranges::METADATA_KEY)
-                            })
-                            .flatten()
-                            .map(|kv| {
-                                let scanned_range: ScannedRange = serde_json::from_str(kv.value.clone().unwrap().as_str()).ok()?;
-                                Some((scanned_range.range_start, scanned_range.range_end))
-                            })
-                            .flatten()
-                    });
-                Ok(scanned_range)
-            })
-            .try_collect::<Vec<_>>()
-            .await?;
+        let mut ranges = vec![];
+        let mut file_list = self.object_store.list(Some(self.path()));
+
+        while let Some(object_meta_result) = file_list.next().await {
+            let mut reader =
+                ParquetObjectReader::new(self.object_store.clone(), object_meta_result?);
+
+            let parquet_metadata = reader.get_metadata().await?;
+
+            let key_value_metadata = parquet_metadata
+                .file_metadata()
+                .key_value_metadata()
+                .ok_or(crate::ArrowError::ParquetError(format!(
+                    "Unable to fetch Key Value metadata for file {}",
+                    self.url()
+                )))?;
+
+            let scanned_range_key_value_pair = key_value_metadata
+                .iter()
+                .find(|key_value| key_value.key == scanned_ranges::METADATA_KEY)
+                .ok_or(crate::ArrowError::ParquetError(format!(
+                    "Missing key: {} in file metadata for file {}",
+                    scanned_ranges::METADATA_KEY,
+                    self.url()
+                )))?;
+
+            let range = scanned_range_key_value_pair
+                .value
+                .as_ref()
+                .map(|scanned_range_json| serde_json::from_str::<ScannedRange>(scanned_range_json))
+                .transpose()?
+                .map(|scanned_range| (scanned_range.range_start, scanned_range.range_end))
+                .ok_or(crate::ArrowError::ParseError(format!(
+                    "Unable to parse ScannedRange from key value metadata for file {}",
+                    self.url()
+                )))?;
+
+            ranges.push(range);
+        }
+
         Ok(ranges)
     }
 
