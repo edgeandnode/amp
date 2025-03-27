@@ -101,7 +101,7 @@ impl MetadataDb {
         let dataset_version = table.dataset_version.unwrap_or("");
 
         let query = "
-        INSERT INTO locations (dataset, dataset_version, tbl, bucket, path, url, active) \
+        INSERT INTO locations (dataset, dataset_version, tbl, bucket, path, url, active)
         VALUES ($1, $2, $3, $4, $5, $6, $7)
         RETURNING id;
         ";
@@ -415,7 +415,7 @@ impl MetadataDb {
         let mut tx = self.pool.begin().await?;
 
         let sql = "
-        INSERT INTO scanned_ranges (location_id, file_name, metadata) \
+        INSERT INTO scanned_ranges (location_id, file_name, metadata)
         VALUES ($1, $2, $3)
         RETURNING id;
         ";
