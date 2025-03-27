@@ -374,7 +374,7 @@ impl MetadataDb {
 
         sqlx::query_scalar(sql)
             .bind(dataset)
-            .bind(dataset_version.unwrap_or("*"))
+            .bind(dataset_version.unwrap_or_default())
             .bind(table.to_string())
             .fetch(&self.pool)
     }
@@ -401,7 +401,7 @@ impl MetadataDb {
 
         sqlx::query_scalar(sql)
             .bind(dataset)
-            .bind(dataset_version.unwrap_or("*"))
+            .bind(dataset_version.unwrap_or_default())
             .bind(table.to_string())
             .fetch(&self.pool)
     }
