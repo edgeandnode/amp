@@ -315,7 +315,6 @@ async fn dump_sql_query(
         writer.write(&batch).await?;
     }
     let scanned_range = writer.close(end).await?;
-<<<<<<< HEAD
     match (metadata_db, physical_table.location_id()) {
         (Some(metadata_db), Some(location_id)) => {
             insert_scanned_range(
@@ -327,20 +326,6 @@ async fn dump_sql_query(
         }
         _ => Ok(())
     }
-=======
-    let location_id = physical_table.location_id();
-    match (metadata_db, location_id) {
-        (Some(metadata_db), Some(location_id)) => insert_scanned_range(
-            scanned_range,
-            metadata_db,
-            location_id,
-        )
-        .await,
-        _ => Ok(())
-    }
-
-    
->>>>>>> 6c5f84e (removing options from insert_scanned_ranges)
 }
 
 pub fn default_partition_size() -> u64 {
