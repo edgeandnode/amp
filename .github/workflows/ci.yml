@@ -13,12 +13,12 @@ env:
 jobs:
   unit-tests:
     name: Unit tests
-    runs-on: ubuntu-latest
+    runs-on: nscloud-ubuntu-22.04-amd64-16x32
     timeout-minutes: 10
     env:
       RUSTFLAGS: "-D warnings"
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
       - name: Install deps
         run: sudo apt-get install -y protobuf-compiler
@@ -30,7 +30,7 @@ jobs:
 
   integration-tests:
     name: Integration tests
-    runs-on: ubuntu-latest
+    runs-on: nscloud-ubuntu-22.04-amd64-16x32
     timeout-minutes: 10
     env:
       RUSTFLAGS: "-D warnings"
@@ -58,10 +58,10 @@ jobs:
 
   rustfmt:
     name: Check rustfmt style
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-default
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Check formatting
         uses: actions-rs/cargo@v1
         with:
@@ -70,12 +70,12 @@ jobs:
 
   release-check:
     name: Build in release mode
-    runs-on: ubuntu-latest
+    runs-on: nscloud-ubuntu-22.04-amd64-16x32
     timeout-minutes: 60
     env:
       RUSTFLAGS: "-D warnings"
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
       - name: Install deps
         run: sudo apt-get install -y protobuf-compiler
