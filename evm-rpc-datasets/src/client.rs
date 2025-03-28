@@ -267,6 +267,10 @@ fn rpc_transaction_to_row(
             return Ok(None);
         }
     };
+    if !receipt.status() {
+        // Ignore failed transactions.
+        return Ok(None);
+    }
     Ok(Some(Transaction {
         block_hash: block.hash,
         block_num: block.block_num,
