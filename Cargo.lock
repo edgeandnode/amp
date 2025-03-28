@@ -2589,6 +2589,7 @@ dependencies = [
  "common",
  "fs-err",
  "futures",
+ "log",
  "serde",
  "serde_with",
  "thiserror 2.0.11",

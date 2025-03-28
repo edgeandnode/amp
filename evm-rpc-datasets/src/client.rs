@@ -147,7 +147,10 @@ fn rpc_to_rows(
             alloy::consensus::ReceiptEnvelope::Eip7702(receipt_with_bloom) => {
                 mem::take(&mut receipt_with_bloom.receipt.logs)
             }
-            _ => panic!("unexpected receipt type"),
+            _ => {
+                log::warn!("unexpected receipt type");
+                vec![]
+            }
         };
         for log in receipt_logs {
             logs.push(rpc_log_to_row(log, header.timestamp)?);
@@ -172,7 +175,9 @@ fn rpc_to_rows(
     let transactions_row = {
         let mut builder = TransactionRowsBuilder::with_capacity(transactions.len());
         for tx in transactions {
-            builder.append(&tx);
+            if let Some(tx) = tx {
+                builder.append(&tx);
+            }
         }
         builder.build(network.to_string())?
     };
@@ -250,16 +255,19 @@ fn rpc_transaction_to_row(
     tx: alloy::rpc::types::Transaction,
     receipt: TransactionReceipt,
     tx_index: usize,
-) -> Result<Transaction, ToRowError> {
+) -> Result<Option<Transaction>, ToRowError> {
     let sig = match &tx.inner {
         TxEnvelope::Legacy(signed) => signed.signature(),
         TxEnvelope::Eip2930(signed) => signed.signature(),
         TxEnvelope::Eip1559(signed) => signed.signature(),
         TxEnvelope::Eip4844(signed) => signed.signature(),
         TxEnvelope::Eip7702(signed) => signed.signature(),
-        _ => panic!("unexpected transaction type"),
+        _ => {
+            log::warn!("unexpected tx type");
+            return Ok(None);
+        }
     };
-    Ok(Transaction {
+    Ok(Some(Transaction {
         block_hash: block.hash,
         block_num: block.block_num,
         timestamp: block.timestamp,
@@ -296,5 +304,5 @@ fn rpc_transaction_to_row(
             .map_err(|e| ToRowError::Overflow("max_fee_per_blob_gas", e.into()))?,
         from: tx.from.0 .0,
         status: receipt.status().into(),
-    })
+    }))
 }
