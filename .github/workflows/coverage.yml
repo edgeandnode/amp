@@ -14,12 +14,12 @@ jobs:
       FIREHOSE_ETH_MAINNET_TOKEN: ${{ secrets.FIREHOSE_ETH_MAINNET_TOKEN }}
       RPC_ETH_MAINNET_URL: ${{ secrets.RPC_ETH_MAINNET_URL }}
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
       - name: Install deps
         run: |
           apt-get update
-          apt-get install -y protobuf-compiler cmake
-      - name: Checkout repository
-        uses: actions/checkout@v4
+          apt-get install -y protobuf-compiler cmake gettext
       - name: Copy firehose provider file
         run: |
           envsubst < tests/config/providers/COPY_ME_firehose_eth_mainnet.toml \
