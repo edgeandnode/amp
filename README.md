@@ -10,7 +10,7 @@ An experiment in ETL architecture for data services on The Graph. 'Project Nozzl
 
 ### Python Quickstart
 
-To quickly dive into the power of Nozzle with Python, best is to run the [`getting-started.ipynb](python/examples/getting-started.ipynb). Follow the instructions in thy [Python README](python/README.md).
+To quickly dive into the power of Nozzle with Python, best is to run the [`marimo_example_nb.ipynb](python/notebooks/marimo_example_nb.pyy). Follow the instructions in thy [Python README](python/README.md).
 
 ## Components
 

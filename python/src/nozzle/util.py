@@ -1,62 +1,17 @@
-from pyarrow import flight
-from google.protobuf.any_pb2 import Any
-
-from . import FlightSql_pb2
-
-class Client:
-    def __init__(self, url):
-        self.conn =  flight.connect(url)
-
-    # If `read_all` is `True`, returns a `pyarrow.Table` with the complete result set. This is a
-    # convenience for small result sets that don't need to be streamed.
-    # 
-    # If `read_all` is `False`, returns a generator of `pyarrow.RecordBatch`. This is suitable for
-    # streaming larger result sets.
-    def get_sql(self, query, read_all=False):
-        # Create a CommandStatementQuery message
-        command_query = FlightSql_pb2.CommandStatementQuery()
-        command_query.query = query
-
-
-        # Wrap the CommandStatementQuery in an Any type
-        any_command = Any()
-        any_command.Pack(command_query)
-        cmd = any_command.SerializeToString()
-
-
-        flight_descriptor = flight.FlightDescriptor.for_command(cmd)
-        info = self.conn.get_flight_info(flight_descriptor)
-        reader = self.conn.do_get(info.endpoints[0].ticket)
-
-        if read_all:
-            return reader.read_all()
-        else:
-            return self._batch_generator(reader)
-
-    def _batch_generator(self, reader):
-        while True:
-            try:
-                chunk = reader.read_chunk()
-                yield chunk.data
-            except StopIteration:
-                break
+import json
 
 
 
 import os.path
 import os
-from decimal import Decimal
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pandas as pd
 import time
-import hashlib
 from eth_utils import to_hex
-from eth_utils.crypto import keccak
 from eth_utils import keccak
 from google.cloud import storage, bigquery
 
-import binascii
 import decimal
 import base58
 import json
@@ -102,7 +57,7 @@ def generate_signatures_from_abi(file_path, specific_event_name=None):
     # Read the ABI file
     with open(file_path, 'r') as file:
         abi = json.load(file)
-    
+
     # Initialize a list to store signatures
     signatures = []
 
@@ -112,16 +67,16 @@ def generate_signatures_from_abi(file_path, specific_event_name=None):
         if item['type'] == 'event':
             # Extract the event name
             event_name = item['name']
-            
+
             # Extract the inputs and construct the input part of the signature
             inputs = item['inputs']
             inputs_signature = ', '.join(
                 f"{input['type']} {'indexed ' if input['indexed'] else ''}{input['name']}" for input in inputs
             )
-            
+
             # Construct the full signature
             signature = f"{event_name}({inputs_signature})"
-            
+
             # If specific_event_name is given, check if it matches the current event name
             if specific_event_name:
                 if event_name == specific_event_name:
@@ -135,21 +90,21 @@ def generate_signatures_from_abi(file_path, specific_event_name=None):
 def generate_signature(json_string):
     # Parse the JSON string
     data = json.loads(json_string)
-    
+
     # Extract the event name
     event_name = data['name']
-    
+
     # Extract the inputs and construct the input part of the signature
     inputs = data['inputs']
     inputs_signature = ', '.join(f"{input['type']} {'indexed ' if input['indexed'] else ''}{input['name']}" for input in inputs)
-    
+
     # Construct the full signature
     signature = f"{event_name}({inputs_signature})"
-    
+
     return signature
 
 def elapsed(start):
-    return round(time.time() - start, 4) 
+    return round(time.time() - start, 4)
 
 def process_query(client, query):
     # df = pd.DataFrame()
@@ -168,7 +123,7 @@ def process_query(client, query):
         df = batch.to_pandas().map(to_hex)
 
         print('The type of df is ', type(df))
-        
+
         batch_start = time.time()
 
         for batch in result_stream:
@@ -184,7 +139,7 @@ def process_query(client, query):
         print('total time to consume the stream: ', elapsed(start), 's')
         print('rows/s: ', total_events / elapsed(start))
         print('Here are some data ', df.head())
-        return df 
+        return df
 
     except StopIteration:
         print("No more batches available in the result stream.")
@@ -192,7 +147,7 @@ def process_query(client, query):
 def convert_bigint_subgraph_id_to_base58(bigint_representation: int) -> str:
     # Convert the bigint to a hex string
     hex_string = hex(bigint_representation)
-    
+
     # Check if the hex string length is even
     if len(hex_string) % 2 != 0:
         # Log a warning if the hex string length is not even and pad it to even length
@@ -201,10 +156,10 @@ def convert_bigint_subgraph_id_to_base58(bigint_representation: int) -> str:
 
     # Convert the hex string to a byte array
     bytes_data = bytes.fromhex(hex_string[2:])
-    
+
     # Convert the byte array to a Base58 string
     base58_string = base58.b58encode(bytes_data).decode('utf-8')
-    
+
     return base58_string
 
 def convert_to_base58(subgraph_metadata_hex):
@@ -212,42 +167,28 @@ def convert_to_base58(subgraph_metadata_hex):
     subgraph_metadata_hex = subgraph_metadata_hex[2:]
     # Convert hex string to bytes
     subgraph_metadata_bytes = bytes.fromhex(subgraph_metadata_hex)
-    
+
     # Add the prefix using add_qm function
     prefixed_bytes = add_qm(subgraph_metadata_bytes)
-    
+
     # Convert bytes to Base58
     base58_string = base58.b58encode(prefixed_bytes).decode('utf-8')
-    
+
     return base58_string
 
 def add_qm(byte_array):
     # Create an output bytearray with a size of 34
     out = bytearray(34)
-    
+
     # Set the first two bytes
     out[0] = 0x12
     out[1] = 0x20
-    
+
     # Copy the input byte array into the output starting from the third byte
     for i in range(32):
         out[i + 2] = byte_array[i]
-    
-    return bytes(out)
 
-def convert_to_base58(subgraph_metadata_hex):
-    print(subgraph_metadata_hex)
-    subgraph_metadata_hex = subgraph_metadata_hex[2:]
-    # Convert hex string to bytes
-    subgraph_metadata_bytes = bytes.fromhex(subgraph_metadata_hex)
-    
-    # Add the prefix using add_qm function
-    prefixed_bytes = add_qm(subgraph_metadata_bytes)
-    
-    # Convert bytes to Base58
-    base58_string = base58.b58encode(prefixed_bytes).decode('utf-8')
-    
-    return base58_string
+    return bytes(out)
 
 def get_subgraph_id(graphAccount, subgraphNumber):
     # Step 1: Remove '0x' prefix if present and convert graphAccount to bytes
@@ -255,25 +196,25 @@ def get_subgraph_id(graphAccount, subgraphNumber):
         if graphAccount.startswith('0x'):
             graphAccount = graphAccount[2:]
         graphAccount = bytes.fromhex(graphAccount)
-    
+
     # Step 2: Convert graphAccount to a hexadecimal string
     graphAccountStr = graphAccount.hex()
-    
+
     # Step 3: Convert subgraphNumber to an integer if it's a decimal.Decimal, then to a hexadecimal string
     if isinstance(subgraphNumber, decimal.Decimal):
         subgraphNumber = int(subgraphNumber)
-    
+
     subgraphNumberStr = hex(subgraphNumber)[2:].zfill(64)
-    
+
     # Step 4: Concatenate the two strings
     unhashedSubgraphID = graphAccountStr + subgraphNumberStr
-    
+
     # Step 5: Hash the concatenated string using Keccak256
     hashedId = keccak(bytes.fromhex(unhashedSubgraphID))
-    
+
     # Step 6: Convert the hash to a BigInt
     bigIntRepresentation = int.from_bytes(hashedId, byteorder='big')
-    
+
     return convert_bigint_subgraph_id_to_base58(bigIntRepresentation)
 
 def export_df_to_csv(path, df):
@@ -289,7 +230,7 @@ def fetch_ipfs_data(url):
     except requests.RequestException as e:
         print(f"Error fetching IPFS data: {e}")
         return None
-    
+
 def save_json_file(data, filename):
     try:
         with open(filename, 'w') as file:
@@ -311,7 +252,7 @@ def get_ipfs_data(df):
         ipfs_url = "https://api.thegraph.com/ipfs/api/v0/cat?arg=" + ipfs_hash
         ipfs_data = fetch_ipfs_data(ipfs_url)
         if ipfs_data:
-            json_data = json.loads(ipfs_data)  # Convert the fetched data to a JSON object    
+            json_data = json.loads(ipfs_data)  # Convert the fetched data to a JSON object
         # Process the subgraph metadata
         df['display_name']= json_data['displayName']
         df['code_repository'] = json_data['codeRepository']
