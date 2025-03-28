@@ -8,6 +8,11 @@ jobs:
     container:
       image: xd009642/tarpaulin:develop-nightly
       options: --security-opt seccomp=unconfined
+    env:
+      RUSTFLAGS: "-D warnings"
+      FIREHOSE_ETH_MAINNET_URL: ${{ secrets.FIREHOSE_ETH_MAINNET_URL }}
+      FIREHOSE_ETH_MAINNET_TOKEN: ${{ secrets.FIREHOSE_ETH_MAINNET_TOKEN }}
+      RPC_ETH_MAINNET_URL: ${{ secrets.RPC_ETH_MAINNET_URL }}
     steps:
       - name: Install deps
         run: |
@@ -15,10 +20,17 @@ jobs:
           apt-get install -y protobuf-compiler cmake
       - name: Checkout repository
         uses: actions/checkout@v4
-
+      - name: Copy firehose provider file
+        run: |
+          envsubst < tests/config/providers/COPY_ME_firehose_eth_mainnet.toml \
+                   > tests/config/providers/firehose_eth_mainnet.toml
+      - name: Copy rpc provider file
+        run: |
+          envsubst < tests/config/providers/COPY_ME_rpc_eth_mainnet.toml \
+                   > tests/config/providers/rpc_eth_mainnet.toml
       - name: Generate code coverage
         run: |
-          cargo +nightly tarpaulin --verbose --all-features --workspace --timeout 120 --out xml
+          cargo +nightly tarpaulin --all-features --workspace --timeout 120 --out xml
 
       - name: Upload to codecov.io
         uses: codecov/codecov-action@v5
