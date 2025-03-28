@@ -12,9 +12,14 @@ pub async fn run(
     metadata_db: Option<MetadataDb>,
     no_admin: bool,
 ) -> Result<(), BoxError> {
-    log::info!("memory limit is {} MB", config.max_mem_mb);
+    if config.max_mem_mb == 0 {
+        log::info!("Memory limit is unlimited");
+    } else {
+        log::info!("Memory limit is {} MB", config.max_mem_mb);
+    }
+
     log::info!(
-        "spill to disk allowed: {}",
+        "Spill to disk allowed: {}",
         !config.spill_location.is_empty()
     );
 
