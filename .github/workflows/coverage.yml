@@ -4,17 +4,17 @@ on: [push]
 jobs:
   test:
     name: coverage
-    runs-on: ubuntu-latest
+    runs-on: nscloud-ubuntu-22.04-amd64-16x32
     container:
       image: xd009642/tarpaulin:develop-nightly
       options: --security-opt seccomp=unconfined
     steps:
       - name: Install deps
         run: |
-            apt-get update
-            apt-get install -y protobuf-compiler cmake
+          apt-get update
+          apt-get install -y protobuf-compiler cmake
       - name: Checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: Generate code coverage
         run: |
