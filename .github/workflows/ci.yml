@@ -19,14 +19,10 @@ jobs:
       RUSTFLAGS: "-D warnings"
     steps:
       - uses: actions/checkout@v4
-      - uses: Swatinem/rust-cache@v2
       - name: Install deps
         run: sudo apt-get install -y protobuf-compiler
       - name: Unit tests
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --verbose --workspace --exclude tests -- --nocapture
+        run: cargo test --verbose --workspace --exclude tests -- --nocapture
 
   integration-tests:
     name: Integration tests
@@ -38,8 +34,7 @@ jobs:
       FIREHOSE_ETH_MAINNET_TOKEN: ${{ secrets.FIREHOSE_ETH_MAINNET_TOKEN }}
       RPC_ETH_MAINNET_URL: ${{ secrets.RPC_ETH_MAINNET_URL }}
     steps:
-      - uses: actions/checkout@v2
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@v4
       - name: Install deps
         run: sudo apt-get install -y protobuf-compiler
       - name: Copy firehose provider file
@@ -51,10 +46,7 @@ jobs:
           envsubst < tests/config/providers/COPY_ME_rpc_eth_mainnet.toml \
                    > tests/config/providers/rpc_eth_mainnet.toml
       - name: Integration tests
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --verbose -p tests -- --nocapture
+        run: cargo test --verbose -p tests -- --nocapture
 
   rustfmt:
     name: Check rustfmt style
@@ -63,10 +55,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Check formatting
-        uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --all -- --check
+        run: cargo fmt --all -- --check
 
   release-check:
     name: Build in release mode
@@ -76,11 +65,7 @@ jobs:
       RUSTFLAGS: "-D warnings"
     steps:
       - uses: actions/checkout@v4
-      - uses: Swatinem/rust-cache@v2
       - name: Install deps
         run: sudo apt-get install -y protobuf-compiler
       - name: Cargo check (release)
-        uses: actions-rs/cargo@v1
-        with:
-          command: check
-          args: --release
+        run: cargo check --release
