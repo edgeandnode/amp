@@ -19,7 +19,6 @@ jobs:
       RUSTFLAGS: "-D warnings"
     steps:
       - uses: actions/checkout@v3
-      - uses: Swatinem/rust-cache@v2
       - name: Install deps
         run: sudo apt-get install -y protobuf-compiler
       - name: Unit tests
@@ -39,7 +38,6 @@ jobs:
       RPC_ETH_MAINNET_URL: ${{ secrets.RPC_ETH_MAINNET_URL }}
     steps:
       - uses: actions/checkout@v2
-      - uses: Swatinem/rust-cache@v2
       - name: Install deps
         run: sudo apt-get install -y protobuf-compiler
       - name: Copy firehose provider file
@@ -76,7 +74,6 @@ jobs:
       RUSTFLAGS: "-D warnings"
     steps:
       - uses: actions/checkout@v3
-      - uses: Swatinem/rust-cache@v2
       - name: Install deps
         run: sudo apt-get install -y protobuf-compiler
       - name: Cargo check (release)
