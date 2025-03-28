@@ -72,9 +72,6 @@ fn schema() -> Schema {
     Schema::new(fields)
 }
 
-// TODO The only information that we're not storing is the access lists
-// These would probably make more sense in their own table though, since it's a
-// one-to-many relationship with the transaction
 #[derive(Debug, Default)]
 pub(crate) struct Transaction {
     pub(crate) block_hash: Bytes32,
