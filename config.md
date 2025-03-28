@@ -90,16 +90,23 @@ The actual SQL queries should be placed beside the dataset definition, in a dire
 name. In this case we will only have one query for the transfers table, so the file `erc_20_transfer/transfers.sql` would contain the query:
 
 ```sql
-select t.block_num,
+SELECT 
+    t.block_num,
     t.timestamp,
-    t.event['from'] as from,
-    t.event['to'] as to,
-    t.event['value'] as value
-    from (select l.block_num,
-                l.timestamp,
-                evm_decode(l.topic1, l.topic2, l.topic3, l.data, 'Transfer(address indexed from, address indexed to, uint256 value)') as event
-            from eth_firehose.logs l
-            where l.topic0 = evm_topic('Transfer(address indexed from, address indexed to, uint256 value)')) t
+    t.event['from'] AS from,
+    t.event['to'] AS to,
+    t.event['value'] AS value
+FROM (
+    SELECT 
+        l.block_num,
+        l.timestamp,
+        evm_decode(l.topic1, l.topic2, l.topic3, l.data, 'Transfer(address indexed from, address indexed to, uint256 value)') AS event
+    FROM eth_firehose.logs l
+    WHERE 
+        l.topic0 = evm_topic('Transfer(address indexed from, address indexed to, uint256 value)')
+        and l.topic3 is null
+) t;
+
 ```
 
 The dataset is now ready to be dumped with `nozzle dump --dataset erc_20_transfer`, assuming the dependency
