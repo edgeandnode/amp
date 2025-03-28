@@ -43,7 +43,6 @@ fn schema() -> Schema {
     let max_priority_fee_per_gas = Field::new("max_priority_fee_per_gas", EVM_CURRENCY_TYPE, true);
     let max_fee_per_blob_gas = Field::new("max_fee_per_blob_gas", EVM_CURRENCY_TYPE, true);
     let from = Field::new("from", ADDRESS_TYPE, false);
-    let status = Field::new("status", DataType::Int32, false);
 
     let fields = vec![
         block_hash,
@@ -66,7 +65,6 @@ fn schema() -> Schema {
         max_priority_fee_per_gas,
         max_fee_per_blob_gas,
         from,
-        status,
     ];
 
     Schema::new(fields)
@@ -104,7 +102,6 @@ pub(crate) struct Transaction {
     pub(crate) max_priority_fee_per_gas: Option<EvmCurrency>,
     pub(crate) max_fee_per_blob_gas: Option<EvmCurrency>,
     pub(crate) from: Address,
-    pub(crate) status: i32,
 }
 
 pub(crate) struct TransactionRowsBuilder {
@@ -128,7 +125,6 @@ pub(crate) struct TransactionRowsBuilder {
     max_priority_fee_per_gas: EvmCurrencyArrayBuilder,
     max_fee_per_blob_gas: EvmCurrencyArrayBuilder,
     from: EvmAddressArrayBuilder,
-    status: Int32Builder,
 }
 
 impl TransactionRowsBuilder {
@@ -154,7 +150,6 @@ impl TransactionRowsBuilder {
             max_priority_fee_per_gas: EvmCurrencyArrayBuilder::with_capacity(capacity),
             max_fee_per_blob_gas: EvmCurrencyArrayBuilder::with_capacity(capacity),
             from: EvmAddressArrayBuilder::with_capacity(capacity),
-            status: Int32Builder::with_capacity(capacity),
         }
     }
 
@@ -180,7 +175,6 @@ impl TransactionRowsBuilder {
             max_priority_fee_per_gas,
             max_fee_per_blob_gas,
             from,
-            status,
         } = tx;
 
         self.block_hash.append_value(*block_hash);
@@ -205,7 +199,6 @@ impl TransactionRowsBuilder {
         self.max_fee_per_blob_gas
             .append_option(*max_fee_per_blob_gas);
         self.from.append_value(*from);
-        self.status.append_value(*status);
     }
 
     pub(crate) fn build(self, network: String) -> Result<TableRows, ArrowError> {
@@ -230,7 +223,6 @@ impl TransactionRowsBuilder {
             max_priority_fee_per_gas,
             max_fee_per_blob_gas,
             from,
-            mut status,
         } = self;
 
         let columns = vec![
@@ -254,7 +246,6 @@ impl TransactionRowsBuilder {
             Arc::new(max_priority_fee_per_gas.finish()),
             Arc::new(max_fee_per_blob_gas.finish()),
             Arc::new(from.finish()),
-            Arc::new(status.finish()),
         ];
 
         TableRows::new(table(network), columns)
@@ -269,6 +260,6 @@ fn default_to_arrow() {
         builder.append(&tx);
         builder.build("test_network".to_string()).unwrap()
     };
-    assert_eq!(rows.rows.num_columns(), 21);
+    assert_eq!(rows.rows.num_columns(), 20);
     assert_eq!(rows.rows.num_rows(), 1);
 }

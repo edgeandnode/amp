@@ -307,6 +307,5 @@ fn rpc_transaction_to_row(
             .transpose()
             .map_err(|e| ToRowError::Overflow("max_fee_per_blob_gas", e.into()))?,
         from: tx.from.0 .0,
-        status: receipt.status().into(),
     }))
 }
