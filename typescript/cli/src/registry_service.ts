@@ -1,4 +1,4 @@
-import { TableSchema } from './manifest'
+import { TableSchema } from './manifest.js'
 
 export class RegistryService {
     private url: string

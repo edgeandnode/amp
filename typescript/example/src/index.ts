@@ -1,4 +1,4 @@
-import { build, deploy_local } from 'project-nozzle'
+import { build, deploy_local } from '@nozzle/cli'
 import dataset from './dataset.js'
 import * as path from 'path'
 

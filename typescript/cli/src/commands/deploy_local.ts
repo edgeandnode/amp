@@ -1,6 +1,6 @@
 import * as fs from 'fs'
 import * as path from 'path'
-import { DatasetManifest } from "../manifest";
+import { DatasetManifest } from "../manifest.js";
 
 export async function deploy_local(manifest_path: string, nozzle_url: string) {
     // `manifest_path` validation checks

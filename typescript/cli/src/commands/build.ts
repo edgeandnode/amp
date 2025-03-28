@@ -1,8 +1,8 @@
-import { DatasetDefinition } from '../definition'
+import { DatasetDefinition } from '../definition.js'
 import * as fs from 'fs'
 import * as path from 'path'
-import { DatasetManifest, Table } from '../manifest'
-import { RegistryService } from '../registry_service'
+import { DatasetManifest, Table } from '../manifest.js'
+import { RegistryService } from '../registry_service.js'
 
 // Returns the path to the manifest.json file
 export async function build(config: DatasetDefinition, out_dir: string): Promise<string> {

@@ -1,4 +1,4 @@
-import { defineDataset } from 'project-nozzle'
+import { defineDataset } from '@nozzle/cli'
 
 export default defineDataset((ctx) => ({
     name: "transfers_eth_mainnet",
