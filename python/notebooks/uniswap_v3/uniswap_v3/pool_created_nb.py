@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.11.31"
+__generated_with = '0.11.31'
 app = marimo.App()
 
 
@@ -18,20 +18,22 @@ def _(mo):
 
 @app.cell
 def _():
-    from nozzle.client import Client
-    from nozzle.util import to_hex, process_query
     import os.path
+
     import marimo as mo
 
-    client_url = os.getenv("NOZZLE_URL", "grpc://127.0.0.1:1602")
-    client = Client("grpc://34.27.238.174:80")
+    from nozzle.client import Client
+    from nozzle.util import process_query, to_hex
+
+    client_url = os.getenv('NOZZLE_URL', 'grpc://127.0.0.1:1602')
+    client = Client('grpc://34.27.238.174:80')
 
     # The address of the Uniswap factory contract
-    uniswap_factory = "1F98431c8aD98523631AE4a59f267346ea31F984"
+    uniswap_factory = '1F98431c8aD98523631AE4a59f267346ea31F984'
 
     notebook_dir = mo.notebook_dir()
-    factory_path = f"{notebook_dir}/abis/factory.json"
-    pool_path = f"{notebook_dir}/abis/pool.json"
+    factory_path = f'{notebook_dir}/abis/factory.json'
+    pool_path = f'{notebook_dir}/abis/pool.json'
     return (
         Client,
         client,
@@ -49,13 +51,13 @@ def _():
 
 @app.cell
 def _(client):
-    client.get_sql("select count(*) logs_count from eth_firehose.logs", read_all=True)
+    client.get_sql('select count(*) logs_count from eth_firehose.logs', read_all=True)
     return
 
 
 @app.cell
 def _(client):
-    client.get_sql("select count(*) blocks_count, min(block_num) first_block, max(block_num) latest_block from eth_firehose.blocks", read_all=True)
+    client.get_sql('select count(*) blocks_count, min(block_num) first_block, max(block_num) latest_block from eth_firehose.blocks', read_all=True)
     return
 
 
@@ -66,7 +68,7 @@ def _(factory_path, uniswap_factory):
     # Load a JSON ABI and get the 'PoolCreated' event
     factory = Abi(factory_path)
 
-    pool_created_sig = factory.events["PoolCreated"].signature()
+    pool_created_sig = factory.events['PoolCreated'].signature()
 
     pool_created_query = f"""
         select pc.block_num,
@@ -96,8 +98,7 @@ def _(client, pool_created_query, process_query):
 @app.cell
 def _(Abi, client, pool_created_query, pool_path):
     pool_abi = Abi(pool_path)
-    swap_sig = pool_abi.events["Swap"].signature()
-
+    swap_sig = pool_abi.events['Swap'].signature()
 
     query = f"""
     with pc as ({pool_created_query})
@@ -121,7 +122,7 @@ def _(Abi, client, pool_created_query, pool_path):
     # process_query(client, query)
 
     # Explain
-    print(client.get_sql("explain " + query, read_all=True).to_pandas()['plan'][1])
+    print(client.get_sql('explain ' + query, read_all=True).to_pandas()['plan'][1])
     return pool_abi, query, swap_sig
 
 
@@ -145,5 +146,5 @@ def _():
     return
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     app.run()

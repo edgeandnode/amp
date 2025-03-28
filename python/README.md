@@ -50,4 +50,21 @@ Run all tests
 uv run pytest
 ```
 
+# Linting and formatting
 
+Ruff is configured to be used for linting and formatting of this project. 
+
+Run formatter
+```bash
+uv run ruff format
+```
+
+Run linter 
+```bash
+uv run ruff check .
+```
+
+Run linter and apply auto-fixes
+```bash 
+uv run ruff check . --fix
+```
