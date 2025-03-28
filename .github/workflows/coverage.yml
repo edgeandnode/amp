@@ -12,7 +12,7 @@ jobs:
       - name: Install deps
         run: |
             apt-get update
-            apt-get install -y protobuf-compiler
+            apt-get install -y protobuf-compiler cmake
       - name: Checkout repository
         uses: actions/checkout@v2
 
