@@ -19,7 +19,7 @@ jobs:
     runs-on: nscloud-ubuntu-22.04-amd64-16x32
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
       - name: Install deps
         run: sudo apt-get install -y protobuf-compiler
       - name: Unit tests
@@ -30,7 +30,7 @@ jobs:
     runs-on: nscloud-ubuntu-22.04-amd64-16x32
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
       - name: Install deps
         run: sudo apt-get install -y protobuf-compiler
       - name: Copy firehose provider file
@@ -53,7 +53,7 @@ jobs:
     runs-on: namespace-profile-default
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
       - name: Check formatting
         run: cargo fmt --all -- --check
 
@@ -62,7 +62,7 @@ jobs:
     runs-on: nscloud-ubuntu-22.04-amd64-16x32
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
       - name: Install deps
         run: sudo apt-get install -y protobuf-compiler
       - name: Cargo check (release)
@@ -72,11 +72,11 @@ jobs:
     name: Coverage
     runs-on: nscloud-ubuntu-22.04-amd64-8x16
     container:
+      # TODO: Can we lock this image to a specific sha?
       image: xd009642/tarpaulin:develop-nightly
       options: --security-opt seccomp=unconfined
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
       - name: Install deps
         run: |
           apt-get update
@@ -90,7 +90,7 @@ jobs:
           envsubst < tests/config/providers/COPY_ME_rpc_eth_mainnet.toml \
                     > tests/config/providers/rpc_eth_mainnet.toml
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
+        uses: taiki-e/install-action@305d37bb81325225cb9a77b3fcd7c23ff808afe1 # cargo-llvm-cov
       - name: Generate code coverage
         run: cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
         env:
@@ -98,7 +98,7 @@ jobs:
           FIREHOSE_ETH_MAINNET_TOKEN: ${{ secrets.FIREHOSE_ETH_MAINNET_TOKEN }}
           RPC_ETH_MAINNET_URL: ${{ secrets.RPC_ETH_MAINNET_URL }}
       - name: Upload to codecov.io
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@0565863a31f2c772f9f0395002a31e3f06189574 # v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: lcov.info
