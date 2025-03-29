@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref }}
+
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: full
@@ -20,7 +24,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
-      - name: Install deps
+      - name: Install dependencies
         run: sudo apt-get install -y protobuf-compiler
       - name: Unit tests
         run: cargo test --verbose --workspace --exclude tests -- --nocapture
@@ -31,20 +35,17 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
-      - name: Install deps
+      - name: Install dependencies
         run: sudo apt-get install -y protobuf-compiler
-      - name: Copy firehose provider file
+      - name: Copy provider files
         run: |
-          envsubst < tests/config/providers/COPY_ME_firehose_eth_mainnet.toml \
-                   > tests/config/providers/firehose_eth_mainnet.toml
+          cp tests/config/providers/COPY_ME_firehose_eth_mainnet.toml tests/config/providers/firehose_eth_mainnet.toml
+          cp tests/config/providers/COPY_ME_rpc_eth_mainnet.toml tests/config/providers/rpc_eth_mainnet.toml
+          sed -i -e "s@\$FIREHOSE_ETH_MAINNET_URL@$FIREHOSE_ETH_MAINNET_URL@g" -e "s@\$FIREHOSE_ETH_MAINNET_TOKEN@$FIREHOSE_ETH_MAINNET_TOKEN@g" tests/config/providers/firehose_eth_mainnet.toml
+          sed -i -e "s@\$RPC_ETH_MAINNET_URL@$RPC_ETH_MAINNET_URL@g" tests/config/providers/rpc_eth_mainnet.toml
         env:
           FIREHOSE_ETH_MAINNET_URL: ${{ secrets.FIREHOSE_ETH_MAINNET_URL }}
           FIREHOSE_ETH_MAINNET_TOKEN: ${{ secrets.FIREHOSE_ETH_MAINNET_TOKEN }}
-      - name: Copy rpc provider file
-        run: |
-          envsubst < tests/config/providers/COPY_ME_rpc_eth_mainnet.toml \
-                   > tests/config/providers/rpc_eth_mainnet.toml
-        env:
           RPC_ETH_MAINNET_URL: ${{ secrets.RPC_ETH_MAINNET_URL }}
       - name: Integration tests
         run: cargo test --verbose -p tests -- --nocapture
@@ -61,10 +62,10 @@ jobs:
   release-check:
     name: Build in release mode
     runs-on: nscloud-ubuntu-22.04-amd64-16x32
-    timeout-minutes: 60
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
-      - name: Install deps
+      - name: Install dependencies
         run: sudo apt-get install -y protobuf-compiler
       - name: Cargo check (release)
         run: cargo check --release
@@ -72,31 +73,29 @@ jobs:
   coverage:
     name: Coverage
     runs-on: nscloud-ubuntu-22.04-amd64-8x16
+    timeout-minutes: 10
     container:
       # TODO: Can we lock this image to a specific sha?
       image: xd009642/tarpaulin:develop-nightly
       options: --security-opt seccomp=unconfined
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
-      - name: Install deps
+      - name: Install dependencies
         run: |
           apt-get update
-          apt-get install -y protobuf-compiler cmake gettext
-      - name: Copy firehose provider file
+          apt-get install -y cmake protobuf-compiler
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@305d37bb81325225cb9a77b3fcd7c23ff808afe1 # cargo-llvm-cov
+      - name: Copy provider files
         run: |
-          envsubst < tests/config/providers/COPY_ME_firehose_eth_mainnet.toml \
-                    > tests/config/providers/firehose_eth_mainnet.toml
+          cp tests/config/providers/COPY_ME_firehose_eth_mainnet.toml tests/config/providers/firehose_eth_mainnet.toml
+          cp tests/config/providers/COPY_ME_rpc_eth_mainnet.toml tests/config/providers/rpc_eth_mainnet.toml
+          sed -i -e "s@\$FIREHOSE_ETH_MAINNET_URL@$FIREHOSE_ETH_MAINNET_URL@g" -e "s@\$FIREHOSE_ETH_MAINNET_TOKEN@$FIREHOSE_ETH_MAINNET_TOKEN@g" tests/config/providers/firehose_eth_mainnet.toml
+          sed -i -e "s@\$RPC_ETH_MAINNET_URL@$RPC_ETH_MAINNET_URL@g" tests/config/providers/rpc_eth_mainnet.toml
         env:
           FIREHOSE_ETH_MAINNET_URL: ${{ secrets.FIREHOSE_ETH_MAINNET_URL }}
           FIREHOSE_ETH_MAINNET_TOKEN: ${{ secrets.FIREHOSE_ETH_MAINNET_TOKEN }}
-      - name: Copy rpc provider file
-        run: |
-          envsubst < tests/config/providers/COPY_ME_rpc_eth_mainnet.toml \
-                    > tests/config/providers/rpc_eth_mainnet.toml
-        env:
           RPC_ETH_MAINNET_URL: ${{ secrets.RPC_ETH_MAINNET_URL }}
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@305d37bb81325225cb9a77b3fcd7c23ff808afe1 # cargo-llvm-cov
       - name: Generate code coverage
         run: cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
       - name: Upload to codecov.io
