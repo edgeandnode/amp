@@ -1,3 +1,10 @@
-export { defineDataset } from './definition.js'
-export { build } from './commands/build.js'
-export { deploy_local } from './commands/deploy_local.js'
+import { Schema } from "effect";
+import * as Model from "./Model.js";
+
+export type Context = any;
+
+export function defineDataset(
+  fn: (ctx: Context) => Model.DatasetDefinition,
+): Model.DatasetDefinition {
+  return Schema.decodeUnknownSync(Model.DatasetDefinition)(fn({}));
+}

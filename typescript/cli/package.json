@@ -3,13 +3,13 @@
   "version": "0.0.0",
   "type": "module",
   "dependencies": {
-    "@effect/cli": "^0.59.2",
-    "@effect/platform": "^0.80.2",
-    "@effect/platform-node": "^0.76.5",
+    "@effect/cli": "^0.59.5",
+    "@effect/platform": "^0.80.5",
+    "@effect/platform-node": "^0.76.9",
     "@effect/schema": "^0.75.5",
-    "effect": "^3.14.2"
+    "effect": "^3.14.5"
   },
   "devDependencies": {
-    "@types/node": "^22.13.14"
+    "@types/node": "^22.14.0"
   }
 }

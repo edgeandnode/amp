@@ -3,10 +3,12 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "scripts": {
+    "nozzle": "bun run ../cli/src/cli.ts nozzle",
+    "build": "pnpm run nozzle build ./nozzle.config.js",
+    "deploy": "pnpm run nozzle deploy ./nozzle.config.js"
+  },
   "dependencies": {
     "@nozzle/cli": "workspace:*"
-  },
-  "devDependencies": {
-    "@types/node": "^22.13.14"
   }
 }
