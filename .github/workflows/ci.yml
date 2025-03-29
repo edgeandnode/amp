@@ -35,8 +35,10 @@ jobs:
         uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b #v3
       - name: Copy provider files
         run: |
-          envsubst < tests/config/providers/COPY_ME_firehose_eth_mainnet.toml > tests/config/providers/firehose_eth_mainnet.toml
-          envsubst < tests/config/providers/COPY_ME_rpc_eth_mainnet.toml > tests/config/providers/rpc_eth_mainnet.toml
+          cp tests/config/providers/COPY_ME_firehose_eth_mainnet.toml tests/config/providers/firehose_eth_mainnet.toml
+          cp tests/config/providers/COPY_ME_rpc_eth_mainnet.toml tests/config/providers/rpc_eth_mainnet.toml
+          sed -i -e "s@\$FIREHOSE_ETH_MAINNET_URL@$FIREHOSE_ETH_MAINNET_URL@g" -e "s@\$FIREHOSE_ETH_MAINNET_TOKEN@$FIREHOSE_ETH_MAINNET_TOKEN@g" tests/config/providers/firehose_eth_mainnet.toml
+          sed -i -e "s@\$RPC_ETH_MAINNET_URL@$RPC_ETH_MAINNET_URL@g" tests/config/providers/rpc_eth_mainnet.toml
         env:
           FIREHOSE_ETH_MAINNET_URL: ${{ secrets.FIREHOSE_ETH_MAINNET_URL }}
           FIREHOSE_ETH_MAINNET_TOKEN: ${{ secrets.FIREHOSE_ETH_MAINNET_TOKEN }}
@@ -80,8 +82,10 @@ jobs:
         uses: taiki-e/install-action@305d37bb81325225cb9a77b3fcd7c23ff808afe1 # cargo-llvm-cov
       - name: Copy provider files
         run: |
-          envsubst < tests/config/providers/COPY_ME_firehose_eth_mainnet.toml > tests/config/providers/firehose_eth_mainnet.toml
-          envsubst < tests/config/providers/COPY_ME_rpc_eth_mainnet.toml > tests/config/providers/rpc_eth_mainnet.toml
+          cp tests/config/providers/COPY_ME_firehose_eth_mainnet.toml tests/config/providers/firehose_eth_mainnet.toml
+          cp tests/config/providers/COPY_ME_rpc_eth_mainnet.toml tests/config/providers/rpc_eth_mainnet.toml
+          sed -i -e "s@\$FIREHOSE_ETH_MAINNET_URL@$FIREHOSE_ETH_MAINNET_URL@g" -e "s@\$FIREHOSE_ETH_MAINNET_TOKEN@$FIREHOSE_ETH_MAINNET_TOKEN@g" tests/config/providers/firehose_eth_mainnet.toml
+          sed -i -e "s@\$RPC_ETH_MAINNET_URL@$RPC_ETH_MAINNET_URL@g" tests/config/providers/rpc_eth_mainnet.toml
         env:
           FIREHOSE_ETH_MAINNET_URL: ${{ secrets.FIREHOSE_ETH_MAINNET_URL }}
           FIREHOSE_ETH_MAINNET_TOKEN: ${{ secrets.FIREHOSE_ETH_MAINNET_TOKEN }}
