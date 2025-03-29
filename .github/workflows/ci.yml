@@ -24,8 +24,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
-      - name: Install Protoc
-        uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b #v3
+      - name: Install dependencies
+        run: sudo apt-get install -y protobuf-compiler
       - name: Unit tests
         run: cargo test --verbose --workspace --exclude tests -- --nocapture
 
@@ -35,8 +35,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
-      - name: Install protoc
-        uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b #v3
+      - name: Install dependencies
+        run: sudo apt-get install -y protobuf-compiler
       - name: Copy provider files
         run: |
           cp tests/config/providers/COPY_ME_firehose_eth_mainnet.toml tests/config/providers/firehose_eth_mainnet.toml
@@ -65,8 +65,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
-      - name: Install protoc
-        uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b #v3
+      - name: Install dependencies
+        run: sudo apt-get install -y protobuf-compiler
       - name: Cargo check (release)
         run: cargo check --release
 
@@ -80,12 +80,10 @@ jobs:
       options: --security-opt seccomp=unconfined
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
-      - name: Install cmake
+      - name: Install dependencies
         run: |
           apt-get update
-          apt-get install -y cmake
-      - name: Install protoc
-        uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b #v3
+          apt-get install -y cmake protobuf-compiler
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@305d37bb81325225cb9a77b3fcd7c23ff808afe1 # cargo-llvm-cov
       - name: Copy provider files
