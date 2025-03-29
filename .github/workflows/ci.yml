@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref }}
+
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: full
