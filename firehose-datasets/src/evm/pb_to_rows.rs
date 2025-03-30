@@ -69,20 +69,7 @@ pub fn protobufs_to_rows(
 
             to: tx.to.into(),
             nonce: tx.nonce,
-            gas_price: tx.gas_price.and_then(|b| {
-                // Null `gas_price` on overflow
-                //
-                // Unfourtnately, we have seen overflows values in the wild. Case in point:
-                // Arbitrum block 16464264 has one tx, with a nonsensically high gas price in
-                // both Firehose and JSON-RPC. Since the value is nonsense but the tx seems
-                // otherwise valid, 'NULL' seems like the best option. If more cases appear, we
-                // may revisit this behaviour.
-                match non_negative_pb_bigint_to_evm_currency("tx.gas_price", b) {
-                    Ok(v) => Some(v),
-                    Err(Overflow(_, _)) => None,
-                    Err(e) => unreachable!("expected ok or overflow, got: {}", e),
-                }
-            }),
+
             gas_limit: tx.gas_limit,
             value: tx
                 .value
@@ -96,20 +83,29 @@ pub fn protobufs_to_rows(
             receipt_cumulative_gas_used: tx.gas_used,
 
             r#type: tx.r#type,
-            max_fee_per_gas: tx
-                .max_fee_per_gas
-                .map(|b| non_negative_pb_bigint_to_evm_currency("tx.max_fee_per_gas", b))
-                .transpose()?,
-            max_priority_fee_per_gas: tx
-                .max_priority_fee_per_gas
-                .map(|b| non_negative_pb_bigint_to_evm_currency("tx.max_priority_fee_per_gas", b))
-                .transpose()?,
             from: tx.from.try_into().map_err(|b| Malformed("tx.from", b))?,
             status: tx.status,
             return_data: tx.return_data,
             public_key: tx.public_key,
             begin_ordinal: tx.begin_ordinal,
             end_ordinal: tx.end_ordinal,
+
+            // We've sense nonsensically high values in the wild, probably due to bugs in the chain.
+            // Example: Arbitrum One block 16464264.
+            gas_price: tx
+                .gas_price
+                .and_then(|b| non_negative_pb_bigint_to_evm_currency("tx.gas_price", b).ok()),
+
+            // Gas fee params are `null` on overflow. By EIP-1559 semantics, these can be huge but
+            // never actually be paid, allowing for nonsense values that overflow a Decimal128.
+            //
+            // For an example, see block `317116119` on Arbitrum One.
+            max_fee_per_gas: tx
+                .max_fee_per_gas
+                .and_then(|b| non_negative_pb_bigint_to_evm_currency("tx.max_fee_per_gas", b).ok()),
+            max_priority_fee_per_gas: tx.max_priority_fee_per_gas.and_then(|b| {
+                non_negative_pb_bigint_to_evm_currency("tx.max_priority_fee_per_gas", b).ok()
+            }),
         };
         transactions.append(&tx_trace_row);
 
