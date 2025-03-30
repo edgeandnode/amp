@@ -78,8 +78,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
       - name: Install dependencies
         run: |
-          apt-get update
-          apt-get install -y cmake protobuf-compiler
+          sudo apt-get install -y protobuf-compiler
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@305d37bb81325225cb9a77b3fcd7c23ff808afe1 # cargo-llvm-cov
       - name: Copy provider files
