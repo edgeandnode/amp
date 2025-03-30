@@ -74,10 +74,6 @@ jobs:
     name: Coverage
     runs-on: nscloud-ubuntu-22.04-amd64-8x16
     timeout-minutes: 10
-    container:
-      # TODO: Can we lock this image to a specific sha?
-      image: xd009642/tarpaulin:develop-nightly
-      options: --security-opt seccomp=unconfined
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
       - name: Install dependencies
