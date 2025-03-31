@@ -23,6 +23,7 @@ use futures::StreamExt as _;
 use metadata_db::TableId;
 use object_store::ObjectMeta;
 use serde::Deserialize;
+use tracing::instrument;
 
 use crate::DatasetStore;
 
@@ -113,6 +114,7 @@ pub(super) async fn dataset(
 /// - Inject block range constraints into the plan.
 /// - Inject 'order by block_num' into the plan.
 /// - Execute the plan.
+#[instrument(skip(dataset_store, env), err)]
 pub async fn execute_query_for_range(
     query: parser::Statement,
     dataset_store: Arc<DatasetStore>,
@@ -153,6 +155,7 @@ pub async fn execute_query_for_range(
 }
 
 /// The most recent block that has been synced for all tables in the query.
+#[instrument(skip_all, err)]
 pub async fn max_end_block(
     query: &parser::Statement,
     dataset_store: Arc<DatasetStore>,
@@ -266,6 +269,7 @@ pub fn is_incremental(plan: &LogicalPlan) -> Result<bool, BoxError> {
     }
 }
 
+#[instrument(skip_all, err)]
 fn inject_block_range_constraints(
     plan: LogicalPlan,
     start: u64,

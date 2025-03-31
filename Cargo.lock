@@ -2588,6 +2588,7 @@ version = "0.1.0"
 dependencies = [
  "alloy",
  "common",
+ "fs-err",
  "serde",
  "serde_with",
  "thiserror 2.0.11",
