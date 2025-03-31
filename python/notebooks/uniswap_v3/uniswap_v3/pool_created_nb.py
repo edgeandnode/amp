@@ -130,20 +130,10 @@ def _(Abi, client, pool_created_query, pool_path):
 def _(client, process_query, query):
     # This is used to benchmark the same work as the original query, but incurring less network trafic.
     agg_query = f"""
-    select count(*), max(a.amount0), max(a.liquidity), sum(a.amount0) from ({query}) a
+    select count(*), max(arrow_cast(a.amount0, 'Decimal256(76,0)')), max(a.liquidity), sum(arrow_cast(a.amount0, 'Decimal256(76,0)')) from ({query}) a
     """
     process_query(client, agg_query)
     return (agg_query,)
-
-
-@app.cell
-def _():
-    return
-
-
-@app.cell
-def _():
-    return
 
 
 if __name__ == '__main__':
