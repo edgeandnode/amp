@@ -90,7 +90,7 @@ pub fn protobufs_to_rows(
             begin_ordinal: tx.begin_ordinal,
             end_ordinal: tx.end_ordinal,
 
-            // We've sense nonsensically high values in the wild, probably due to bugs in the chain.
+            // We've seen nonsensically high values in the wild, probably due to bugs in the chain.
             // Example: Arbitrum One block 16464264.
             gas_price: tx
                 .gas_price
