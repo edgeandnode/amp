@@ -18,6 +18,7 @@ use dataset_store::DatasetStore;
 use figment::providers::Format as _;
 use futures::{stream::TryStreamExt, StreamExt as _};
 use log::info;
+use metadata_db::MetadataDb;
 use object_store::path::Path;
 
 use dump::{dump_dataset, parquet_opts};
@@ -60,11 +61,15 @@ pub struct SnapshotContext {
 }
 
 impl SnapshotContext {
-    pub async fn blessed(dataset: &str) -> Result<Self, BoxError> {
+    pub async fn blessed(
+        dataset: &str,
+        metadata_db: Option<&MetadataDb>,
+    ) -> Result<Self, BoxError> {
         let config = load_test_config(None)?;
-        let dataset_store = DatasetStore::new(config.clone(), None);
+        let dataset_store = DatasetStore::new(config.clone(), metadata_db.cloned());
         let dataset = dataset_store.load_dataset(dataset).await?;
-        let catalog = Catalog::for_dataset(&dataset, config.data_store.clone(), None).await?;
+        let catalog =
+            Catalog::for_dataset(&dataset, config.data_store.clone(), metadata_db).await?;
         let ctx = QueryContext::for_catalog(catalog, Arc::new(config.make_runtime_env()?))?;
         Ok(Self {
             dataset,
@@ -78,6 +83,7 @@ impl SnapshotContext {
         dataset_name: &str,
         start: u64,
         end: u64,
+        metadata_db: Option<&MetadataDb>,
     ) -> Result<SnapshotContext, BoxError> {
         use figment::providers::Json;
 
@@ -94,9 +100,10 @@ impl SnapshotContext {
 
         redump(config.clone(), dataset_name, start, end).await?;
 
-        let dataset_store = DatasetStore::new(config.clone(), None);
+        let dataset_store = DatasetStore::new(config.clone(), metadata_db.cloned());
         let dataset = dataset_store.load_dataset(&dataset_name).await?;
-        let catalog = Catalog::for_dataset(&dataset, config.data_store.clone(), None).await?;
+        let catalog =
+            Catalog::for_dataset(&dataset, config.data_store.clone(), metadata_db).await?;
         let ctx = QueryContext::for_catalog(catalog, Arc::new(config.make_runtime_env()?))?;
 
         Ok(SnapshotContext {
