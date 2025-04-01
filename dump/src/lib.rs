@@ -311,6 +311,8 @@ async fn dump_sql_query(
     let metadata_db = store.metadata_db.as_ref().cloned().map(Arc::new);
     let mut stream = execute_query_for_range(query.clone(), store, env.clone(), start, end).await?;
     let mut writer = ParquetFileWriter::new(physical_table.clone(), parquet_opts.clone(), start)?;
+    let table_name = physical_table.table_name();
+
     while let Some(batch) = stream.try_next().await? {
         writer.write(&batch).await?;
     }
@@ -319,7 +321,10 @@ async fn dump_sql_query(
         (Some(metadata_db), Some(location_id)) => {
             insert_scanned_range(scanned_range, metadata_db, location_id).await
         }
-        _ => Ok(()),
+        (None, ..) => Ok(()),
+        (Some(..), None) => panic!(
+            "Missing location_id for table {table_name}"
+        ),
     }
 }
 
