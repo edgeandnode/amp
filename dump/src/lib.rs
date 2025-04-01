@@ -322,9 +322,7 @@ async fn dump_sql_query(
             insert_scanned_range(scanned_range, metadata_db, location_id).await
         }
         (None, ..) => Ok(()),
-        (Some(..), None) => panic!(
-            "Missing location_id for table {table_name}"
-        ),
+        (Some(..), None) => panic!("Missing location_id for table {table_name}"),
     }
 }
 
