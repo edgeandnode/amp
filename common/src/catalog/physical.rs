@@ -61,12 +61,6 @@ impl Catalog {
     pub fn all_tables(&self) -> impl Iterator<Item = &PhysicalTable> {
         self.datasets.iter().flat_map(|dataset| dataset.tables())
     }
-
-    pub fn all_meta_tables(&self) -> impl Iterator<Item = &PhysicalTable> {
-        self.datasets
-            .iter()
-            .flat_map(|dataset| dataset.meta_tables())
-    }
 }
 
 #[derive(Debug, Clone)]

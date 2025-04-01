@@ -317,64 +317,6 @@ impl QueryContext {
             .map_err(Error::ExecutionError)?;
         Ok(concat_batches(&schema, &batch_stream).unwrap())
     }
-
-    // /// Insert rows into a metadata table.
-    // pub async fn meta_insert_into(
-    //     &self,
-    //     table_ref: TableReference,
-    //     batch: RecordBatch,
-    // ) -> Result<(), Error> {
-    //     let schema = batch.schema();
-    //     let values = {
-    //         // Unwrap: The schema is the batch schema.
-    //         let mem_table = MemTable::try_new(schema.clone(), vec![vec![batch]]).unwrap();
-    //         let table_source = Arc::new(DefaultTableSource::new(Arc::new(mem_table)));
-
-    //         // Unwrap: The scan is trivial.
-    //         let table_scan =
-    //             TableScan::try_new("temp_insert_input", table_source, None, vec![], None).unwrap();
-    //         Arc::new(LogicalPlan::TableScan(table_scan))
-    //     };
-
-    //     // Unwrap: Not really fallible.
-    //     let df_schema = schema.to_dfschema_ref().unwrap();
-    //     let insert = DmlStatement::new(
-    //         table_ref,
-    //         df_schema,
-    //         WriteOp::Insert(InsertOp::Append),
-    //         values,
-    //     );
-
-    //     // Execute plan against meta ctx
-    //     self.meta_execute_plan(LogicalPlan::Dml(insert)).await?;
-
-    //     Ok(())
-    // }
-
-    // pub async fn meta_truncate(&self, dataset_name: &str) -> Result<(), Error> {
-    //     let ranges_table = self
-    //         .catalog
-    //         .all_meta_tables()
-    //         .find(|t| {
-    //             t.table_ref().table() == scanned_ranges::TABLE_NAME
-    //                 && t.table_ref().schema() == Some(dataset_name)
-    //         })
-    //         .ok_or_else(|| {
-    //             Error::DatasetError(
-    //                 format!(
-    //                     "table `{}.{}` not found",
-    //                     dataset_name,
-    //                     scanned_ranges::TABLE_NAME
-    //                 )
-    //                 .into(),
-    //             )
-    //         })?;
-    //     ranges_table
-    //         .truncate()
-    //         .await
-    //         .map_err(|e| Error::DatasetError(e))?;
-    //     Ok(())
-    // }
 }
 
 async fn sql_to_plan(ctx: &SessionContext, query: parser::Statement) -> Result<LogicalPlan, Error> {
