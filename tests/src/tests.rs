@@ -15,9 +15,7 @@ async fn evm_rpc_single() {
     tracing::register_logger();
 
     let metadata_db = test_metadata_db(*KEEP_TEMP_DIRS).await;
-    let blessed = SnapshotContext::blessed(&dataset_name, Some(metadata_db))
-        .await
-        .unwrap();
+    let blessed = SnapshotContext::blessed(&dataset_name).await.unwrap();
 
     // Check the dataset directly against the RPC provider with `check_blocks`.
     check_blocks(dataset_name, 15_000_000, 15_000_000)
@@ -43,7 +41,7 @@ async fn eth_firehose_single() {
     check_provider_file("firehose_eth_mainnet.toml").await;
     tracing::register_logger();
 
-    let blessed = SnapshotContext::blessed(&dataset_name, None).await.unwrap();
+    let blessed = SnapshotContext::blessed(&dataset_name).await.unwrap();
 
     // Check the dataset directly against the Firehose provider with `check_blocks`.
     check_blocks(dataset_name, 15_000_000, 15_000_000)

@@ -61,14 +61,11 @@ pub struct SnapshotContext {
 }
 
 impl SnapshotContext {
-    pub async fn blessed(
-        dataset: &str,
-        metadata_db: Option<&MetadataDb>,
-    ) -> Result<Self, BoxError> {
+    pub async fn blessed(dataset: &str) -> Result<Self, BoxError> {
         let config = load_test_config(None)?;
-        let dataset_store = DatasetStore::new(config.clone(), metadata_db.cloned());
+        let dataset_store = DatasetStore::new(config.clone(), None);
         let dataset = dataset_store.load_dataset(dataset).await?;
-        let catalog = Catalog::for_dataset(dataset, config.data_store.clone(), metadata_db).await?;
+        let catalog = Catalog::for_dataset(dataset, config.data_store.clone(), None).await?;
         let ctx = QueryContext::for_catalog(catalog, Arc::new(config.make_runtime_env()?))?;
         Ok(Self {
             ctx,
