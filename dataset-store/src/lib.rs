@@ -414,6 +414,7 @@ impl DatasetStore {
                 dataset,
                 self.config.data_store.clone(),
                 self.metadata_db.as_ref(),
+                true,
             )
             .await
             .map_err(|e| (dataset_name, Error::Unknown(e)))?;
