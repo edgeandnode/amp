@@ -48,5 +48,14 @@ size, memory usage was measured to peak at about 10 GB for the EVM dataset with 
 
 ### nozzle server
 
-Arrow Flight server. To run, just `cargo run -p nozzle -- server`. See an [example](python/examples)
-for how to send a SQL query.
+To run, just `cargo run -p nozzle -- server`.
+
+This starts both a JSON Lines over HTTP server and an Arrow Flight (gRPC) server.
+The HTTP server is straightforward, send it a query and get results, one row per line:
+
+```
+curl -X POST http://localhost:1603 --data "select * from eth_rpc.logs limit 10"
+```
+
+The Arrow Flight server requires a specialized client. We currently have a Python client,
+see docs for that [here](https://github.com/edgeandnode/project-nozzle/tree/main/python).
