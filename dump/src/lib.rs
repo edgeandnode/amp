@@ -242,9 +242,7 @@ async fn dump_sql_dataset(
         let plan = src_ctx.plan_sql(query.clone()).await?;
         let is_incr = is_incremental(&plan)?;
 
-        matzn_tracker
-            .record(is_incr)
-            .await?;
+        matzn_tracker.record(is_incr).await?;
 
         if is_incr {
             let ranges_to_scan = scanned_ranges_by_table[table].complement(start, end);
@@ -319,11 +317,9 @@ async fn dump_sql_query(
     let scanned_range = writer.close(end).await?;
     match (metadata_db, physical_table.location_id()) {
         (Some(metadata_db), Some(location_id)) => {
-            insert_scanned_range(scanned_range, metadata_db, location_id,
-            )
-            .await
+            insert_scanned_range(scanned_range, metadata_db, location_id).await
         }
-        _ => Ok(())
+        _ => Ok(()),
     }
 }
 
@@ -405,7 +401,9 @@ async fn consistency_check(
         }
 
         let registered_files = {
-            let f = filenames_for_table(&ctx, metadata_db, tbl).await.unwrap_or_default();
+            let f = filenames_for_table(&ctx, metadata_db, tbl)
+                .await
+                .unwrap_or_default();
             BTreeSet::from_iter(f.into_iter())
         };
 
@@ -462,10 +460,7 @@ impl MatznTracker {
         }
     }
 
-    async fn record(
-        &mut self,
-        is_incremental: bool,
-    ) -> Result<(), BoxError> {
+    async fn record(&mut self, is_incremental: bool) -> Result<(), BoxError> {
         fn not_supported() -> Result<(), BoxError> {
             Err(
                 "Currently, a dataset may not mix incremental and non-incremental \

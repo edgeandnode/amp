@@ -77,8 +77,8 @@ pub async fn ranges_for_table(
             .catalog()
             .all_tables()
             .find(|physical_table| physical_table.table_id() == tbl)
-            // TODO: method to select a table from the catalog by TableId, returning a Result<PhysicalTable> 
-            // to avoid this whole iteration + combinator + unwrap pattern. 
+            // TODO: method to select a table from the catalog by TableId, returning a Result<PhysicalTable>
+            // to avoid this whole iteration + combinator + unwrap pattern.
             // Unwrap: the caller has already confirmed the existence of the physical table with this TableId
             .unwrap()
             .ranges()
@@ -127,8 +127,8 @@ pub async fn filenames_for_table(
             .catalog()
             .all_tables()
             .find(|physical_table| physical_table.table_id() == tbl)
-            // TODO: method to select a table from the catalog by TableId, returning a Result<PhysicalTable> 
-            // to avoid this whole iteration + combinator + unwrap pattern. 
+            // TODO: method to select a table from the catalog by TableId, returning a Result<PhysicalTable>
+            // to avoid this whole iteration + combinator + unwrap pattern.
             // Unwrap: the caller has already confirmed the existence of the physical table with this TableId
             .unwrap()
             .parquet_files(true)

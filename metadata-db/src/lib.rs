@@ -380,7 +380,10 @@ impl MetadataDb {
     }
 
     /// Produces a stream of all scanned block ranges for a given tbl catalogued by the MetadataDb
-    pub fn stream_ranges<'a>(&'a self, tbl: TableId<'a>) -> BoxStream<'a, Result<(i64, i64), sqlx::Error>> {
+    pub fn stream_ranges<'a>(
+        &'a self,
+        tbl: TableId<'a>,
+    ) -> BoxStream<'a, Result<(i64, i64), sqlx::Error>> {
         let TableId {
             dataset,
             dataset_version,

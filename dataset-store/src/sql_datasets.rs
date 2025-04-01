@@ -132,10 +132,10 @@ pub async fn execute_query_for_range(
         let needed_range = MultiRange::from_ranges(vec![(start, end)]).unwrap();
         for table in tables {
             let tbl = TableId {
-                // Unwrap: table references are of the partial form: [dataset].[table_name] 
+                // Unwrap: table references are of the partial form: [dataset].[table_name]
                 dataset: table.schema().unwrap(),
                 dataset_version: None,
-                table: table.table(), 
+                table: table.table(),
             };
             let ranges = scanned_ranges::ranges_for_table(&ctx, metadata_db, tbl).await?;
             let ranges = MultiRange::from_ranges(ranges)?;
@@ -173,7 +173,7 @@ pub async fn max_end_block(
 
     let synced_block_for_table = move |ctx, table: TableReference| async move {
         let tbl = TableId {
-            // Unwrap: table references are of the partial form: [dataset].[table_name] 
+            // Unwrap: table references are of the partial form: [dataset].[table_name]
             dataset: table.schema().unwrap(),
             dataset_version: None,
             table: table.table(),

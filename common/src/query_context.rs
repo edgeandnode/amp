@@ -10,8 +10,7 @@ use datafusion::common::tree_node::{Transformed, TreeNode as _, TreeNodeRewriter
 use datafusion::common::{not_impl_err, DFSchema};
 use datafusion::datasource::{DefaultTableSource, MemTable, TableProvider, TableType};
 use datafusion::logical_expr::{
-    CreateCatalogSchema, Extension, LogicalPlanBuilder, ScalarUDF, SortExpr,
-    TableScan, 
+    CreateCatalogSchema, Extension, LogicalPlanBuilder, ScalarUDF, SortExpr, TableScan,
 };
 use datafusion::sql::parser;
 use datafusion::{
