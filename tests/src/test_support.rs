@@ -12,12 +12,13 @@ use common::{
     multirange::MultiRange,
     parquet::basic::{Compression, ZstdLevel},
     query_context::parse_sql,
-    BoxError, Dataset, QueryContext,
+    BoxError, QueryContext,
 };
 use dataset_store::DatasetStore;
 use figment::providers::Format as _;
 use futures::{stream::TryStreamExt, StreamExt as _};
 use log::info;
+use metadata_db::MetadataDb;
 use object_store::path::Path;
 
 use dump::{dump_dataset, parquet_opts};
@@ -48,11 +49,11 @@ pub fn load_test_config(literal_override: Option<FigmentJson>) -> Result<Arc<Con
 
 pub async fn bless(dataset_name: &str, start: u64, end: u64) -> Result<(), BoxError> {
     let config = load_test_config(None)?;
-    redump(config, dataset_name, start, end).await
+    redump(config, dataset_name, start, end, None).await?;
+    Ok(())
 }
 
 pub struct SnapshotContext {
-    dataset: Dataset,
     ctx: QueryContext,
 
     /// For a dataset dumped to a temporary directory. The directory is deleted on drop.
@@ -64,10 +65,9 @@ impl SnapshotContext {
         let config = load_test_config(None)?;
         let dataset_store = DatasetStore::new(config.clone(), None);
         let dataset = dataset_store.load_dataset(dataset).await?;
-        let catalog = Catalog::for_dataset(&dataset, config.data_store.clone(), None).await?;
+        let catalog = Catalog::for_dataset(dataset, config.data_store.clone(), None).await?;
         let ctx = QueryContext::for_catalog(catalog, Arc::new(config.make_runtime_env()?))?;
         Ok(Self {
-            dataset,
             ctx,
             _temp_dir: None,
         })
@@ -78,10 +78,12 @@ impl SnapshotContext {
         dataset_name: &str,
         start: u64,
         end: u64,
+        metadata_db: Option<&MetadataDb>,
+        keep_temp_dir: bool,
     ) -> Result<SnapshotContext, BoxError> {
         use figment::providers::Json;
 
-        let temp_dir = tempfile::tempdir()?;
+        let temp_dir = tempfile::Builder::new().keep(keep_temp_dir).tempdir()?;
         let path = temp_dir.path();
         info!("Dumping dataset to {}", path.display());
 
@@ -92,15 +94,13 @@ impl SnapshotContext {
 
         let config = load_test_config(config_override)?;
 
-        redump(config.clone(), dataset_name, start, end).await?;
+        let physical_dataset =
+            redump(config.clone(), dataset_name, start, end, metadata_db).await?;
 
-        let dataset_store = DatasetStore::new(config.clone(), None);
-        let dataset = dataset_store.load_dataset(&dataset_name).await?;
-        let catalog = Catalog::for_dataset(&dataset, config.data_store.clone(), None).await?;
+        let catalog = Catalog::new(vec![physical_dataset]);
         let ctx = QueryContext::for_catalog(catalog, Arc::new(config.make_runtime_env()?))?;
 
         Ok(SnapshotContext {
-            dataset,
             ctx,
             _temp_dir: Some(temp_dir),
         })
@@ -116,10 +116,10 @@ impl SnapshotContext {
             let ranges = ranges_for_table(&self.ctx, table.catalog_schema(), &table_name).await?;
             let expected_range = MultiRange::from_ranges(ranges)?;
             let actual_range = &other_scanned_ranges[&table_name];
-            let dataset_name = &self.dataset.name;
+            let table_qualified = table.table_ref().to_string();
             assert_eq!(
                 expected_range, *actual_range,
-                "for table {table_name} of dataset {dataset_name}, \
+                "for table {table_qualified}, \
                  the test expected data ranges to be exactly {expected_range}, but dataset has data ranges {actual_range}"
             );
         }
@@ -158,8 +158,9 @@ async fn redump(
     dataset_name: &str,
     start: u64,
     end: u64,
-) -> Result<(), BoxError> {
-    let dataset_store = DatasetStore::new(config.clone(), None);
+    metadata_db: Option<&MetadataDb>,
+) -> Result<PhysicalDataset, BoxError> {
+    let dataset_store = DatasetStore::new(config.clone(), metadata_db.cloned());
     let partition_size = 1024 * 1024; // 100 kB
     let compression = Compression::ZSTD(ZstdLevel::try_new(1).unwrap());
 
@@ -171,7 +172,8 @@ async fn redump(
 
     let dataset = {
         let dataset = dataset_store.load_dataset(dataset_name).await?;
-        PhysicalDataset::from_dataset_at(dataset, config.data_store.clone(), None).await?
+        PhysicalDataset::from_dataset_at(dataset, config.data_store.clone(), metadata_db, false)
+            .await?
     };
 
     dump_dataset(
@@ -184,7 +186,9 @@ async fn redump(
         start,
         Some(end),
     )
-    .await
+    .await?;
+
+    Ok(dataset)
 }
 
 pub async fn check_blocks(dataset_name: &str, start: u64, end: u64) -> Result<(), BoxError> {

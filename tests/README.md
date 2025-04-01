@@ -13,3 +13,8 @@ To update the blessed snapshot for a dataset, run:
 ```
 cargo run -p tests -- bless <dataset_name> <start_block> <end_block>`
 ```
+
+## Debugging
+
+To help debug a failing test, you can set `KEEP_TEMP_DIRS` in the env to be able to inspect the
+temporary dump files and the temporary metadata DB.
