@@ -23,7 +23,7 @@ pub struct Job<T: BlockStreamer> {
 
     pub scanned_ranges_by_table: BTreeMap<String, MultiRange>,
 
-    pub metadata_db: Option<Arc<MetadataDb>>
+    pub metadata_db: Option<Arc<MetadataDb>>,
 }
 
 // Spawning a job:
@@ -64,7 +64,6 @@ async fn run_job_range(
         let extractor_task = block_streamer.block_stream(start, end, tx);
         (rx, tokio::spawn(extractor_task))
     };
-
 
     let mut writer = DatasetWriter::new(
         job.dataset_ctx.clone(),

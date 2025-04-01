@@ -243,7 +243,7 @@ async fn dump_sql_dataset(
         let is_incr = is_incremental(&plan)?;
 
         matzn_tracker
-            .record(is_incr, &dst_ctx, dataset.name())
+            .record(is_incr)
             .await?;
 
         if is_incr {
@@ -319,10 +319,7 @@ async fn dump_sql_query(
     let scanned_range = writer.close(end).await?;
     match (metadata_db, physical_table.location_id()) {
         (Some(metadata_db), Some(location_id)) => {
-            insert_scanned_range(
-                scanned_range,
-                metadata_db,
-                location_id,
+            insert_scanned_range(scanned_range, metadata_db, location_id,
             )
             .await
         }
@@ -468,8 +465,6 @@ impl MatznTracker {
     async fn record(
         &mut self,
         is_incremental: bool,
-        ctx: &QueryContext,
-        dataset_name: &str,
     ) -> Result<(), BoxError> {
         fn not_supported() -> Result<(), BoxError> {
             Err(
@@ -490,7 +485,6 @@ impl MatznTracker {
             }
             self.had_entire = true;
             if !self.ranges_cleared {
-                ctx.meta_truncate(dataset_name).await?;
                 self.ranges_cleared = true;
             }
         }

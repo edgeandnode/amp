@@ -19,8 +19,6 @@ use url::Url;
 pub struct DatasetWriter {
     writers: BTreeMap<String, TableWriter>,
 
-    // For inserting into `scanned_ranges`
-    _dataset_ctx: Arc<QueryContext>,
     metadata_db: Option<Arc<MetadataDb>>,
 }
 
@@ -53,7 +51,6 @@ impl DatasetWriter {
         }
         Ok(DatasetWriter {
             writers,
-            _dataset_ctx: dataset_ctx,
             metadata_db,
         })
     }
@@ -75,6 +72,7 @@ impl DatasetWriter {
     pub async fn close(self) -> Result<(), BoxError> {
         for (_, writer) in self.writers {
             let location_id = writer.table.location_id();
+
             let scanned_range = writer.close().await?;
             let _ = match (location_id, self.metadata_db.clone(), scanned_range) {
                 (Some(location_id), Some(metadata_db), Some(scanned_range)) => {
@@ -302,6 +300,8 @@ impl ParquetFileWriter {
             );
         }
 
+        self.writer.flush().await?;
+
         debug!(
             "wrote {} for range {} to {}",
             self.file_url, self.start, end
@@ -315,8 +315,11 @@ impl ParquetFileWriter {
             created_at: Timestamp::now(),
         };
 
-        let kv_metadata = KeyValue::new(scanned_ranges::METADATA_KEY.to_string(), Some(serde_json::to_string(&scanned_range)?));
-        
+        let kv_metadata = KeyValue::new(
+            scanned_ranges::METADATA_KEY.to_string(),
+            Some(serde_json::to_string(&scanned_range)?),
+        );
+
         self.writer.append_key_value_metadata(kv_metadata);
         self.writer.close().await?;
 
