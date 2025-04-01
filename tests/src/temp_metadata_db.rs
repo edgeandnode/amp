@@ -13,8 +13,8 @@ pub struct TempMetadataDb {
 }
 
 impl TempMetadataDb {
-    pub async fn new() -> Self {
-        let builder = PgTempDBBuilder::new();
+    pub async fn new(keep: bool) -> Self {
+        let builder = PgTempDBBuilder::new().persist_data(keep);
         let pg_temp = PgTempDB::from_builder(builder);
         info!(
             "initializing temp metadata db at: {}",
@@ -46,6 +46,8 @@ impl Deref for TempMetadataDb {
 /// catch more bugs, even if it is less deterministic.
 static TEST_METADATA_DB: OnceCell<TempMetadataDb> = OnceCell::const_new();
 
-pub async fn test_metadata_db() -> &'static TempMetadataDb {
-    TEST_METADATA_DB.get_or_init(TempMetadataDb::new).await
+pub async fn test_metadata_db(keep: bool) -> &'static TempMetadataDb {
+    TEST_METADATA_DB
+        .get_or_init(|| async { TempMetadataDb::new(keep).await })
+        .await
 }

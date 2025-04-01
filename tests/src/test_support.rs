@@ -84,10 +84,11 @@ impl SnapshotContext {
         start: u64,
         end: u64,
         metadata_db: Option<&MetadataDb>,
+        keep_temp_dir: bool,
     ) -> Result<SnapshotContext, BoxError> {
         use figment::providers::Json;
 
-        let temp_dir = tempfile::tempdir()?;
+        let temp_dir = tempfile::Builder::new().keep(keep_temp_dir).tempdir()?;
         let path = temp_dir.path();
         info!("Dumping dataset to {}", path.display());
 
