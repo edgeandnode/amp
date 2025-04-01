@@ -57,11 +57,7 @@ pub async fn schema_to_markdown(
     let config = Config::in_memory();
 
     let env = Arc::new(config.make_runtime_env()?);
-    let mut catalog = Catalog::empty();
-    catalog
-        .register(&dataset, config.data_store, None)
-        .await
-        .unwrap();
+    let catalog = Catalog::for_dataset(dataset, config.data_store, None).await?;
     let context = QueryContext::for_catalog(catalog, env).unwrap();
 
     let mut markdown = String::new();

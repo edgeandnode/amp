@@ -8,7 +8,7 @@ use std::{
 };
 
 use common::{
-    catalog::physical::Catalog,
+    catalog::physical::{Catalog, PhysicalDataset},
     config::Config,
     manifest::{Manifest, TableInput},
     query_context::{self, parse_sql, PlanningContext, ResolvedTable},
@@ -410,14 +410,14 @@ impl DatasetStore {
             let dataset = self.load_dataset(&dataset_name).await?;
 
             // We currently assume all datasets live in the same `data_store`.
-            catalog
-                .register(
-                    &dataset,
-                    self.config.data_store.clone(),
-                    self.metadata_db.as_ref(),
-                )
-                .await
-                .map_err(|e| (dataset_name, Error::Unknown(e)))?;
+            let physical_dataset = PhysicalDataset::from_dataset_at(
+                dataset,
+                self.config.data_store.clone(),
+                self.metadata_db.as_ref(),
+            )
+            .await
+            .map_err(|e| (dataset_name, Error::Unknown(e)))?;
+            catalog.add(physical_dataset);
         }
         Ok(catalog)
     }

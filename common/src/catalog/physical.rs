@@ -29,26 +29,18 @@ impl Catalog {
         Catalog { datasets }
     }
 
-    pub async fn register(
-        &mut self,
-        dataset: &Dataset,
-        data_store: Arc<Store>,
-        metadata_db: Option<&MetadataDb>,
-    ) -> Result<(), BoxError> {
-        let physical_dataset =
-            PhysicalDataset::from_dataset_at(dataset.clone(), data_store, metadata_db).await?;
-        self.datasets.push(physical_dataset);
-        Ok(())
+    pub fn add(&mut self, dataset: PhysicalDataset) {
+        self.datasets.push(dataset);
     }
 
     /// Will include meta tables.
     pub async fn for_dataset(
-        dataset: &Dataset,
+        dataset: Dataset,
         data_store: Arc<Store>,
         metadata_db: Option<&MetadataDb>,
     ) -> Result<Self, BoxError> {
         let mut this = Self::empty();
-        this.register(dataset, data_store, metadata_db).await?;
+        this.add(PhysicalDataset::from_dataset_at(dataset, data_store, metadata_db).await?);
         Ok(this)
     }
 
@@ -183,28 +175,19 @@ impl PhysicalTable {
         dataset_name: &str,
         table: &Table,
     ) -> Result<Self, BoxError> {
-        let (url, location_id) = {
-            let table_id = TableId {
-                dataset: dataset_name,
-                dataset_version: None,
-                table: &table.name,
-            };
-
-            let active_location = metadata_db.get_active_location(table_id).await?;
-            match active_location {
-                Some((url, location_id)) => (url, location_id),
-                None => {
-                    let path = make_location_path(table_id);
-                    let url = data_store.url().join(&path)?;
-                    let location_id = metadata_db
-                        .register_location(table_id, data_store.bucket(), &path, &url, true)
-                        .await?;
-                    (url, location_id)
-                }
-            }
+        let table_id = TableId {
+            dataset: dataset_name,
+            dataset_version: None,
+            table: &table.name,
         };
 
-        Self::new(dataset_name, table.clone(), url, Some(location_id))
+        let active_location = metadata_db.get_active_location(table_id).await?;
+        match active_location {
+            Some((url, location_id)) => {
+                Self::new(dataset_name, table.clone(), url, Some(location_id))
+            }
+            None => Self::next_revision(table, &data_store, dataset_name, metadata_db).await,
+        }
     }
 
     /// The static location is always `<base>/<dataset_name>/<table_name>/`.
