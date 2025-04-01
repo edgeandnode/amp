@@ -13,3 +13,4 @@
 **/node_modules/**
 ts/**/dist
 tsconfig.tsbuildinfo
+uv.lock
