@@ -1,23 +1,53 @@
-[tool.poetry]
+[project]
 name = "nozzle"
 version = "0.1.0"
-description = ""
-authors = ["David Lutterkort"]
+description = "Add your description here"
 readme = "README.md"
+authors = [
+    { name = "Ford", email = "ford@thegraph.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "base58>=2.1.1",
+    "eth-hash[pysha3]>=0.7.1",
+    "eth-utils>=5.2.0",
+    "google-cloud-bigquery>=3.30.0",
+    "google-cloud-storage>=3.1.0",
+    "pandas>=2.2.3",
+    "pyarrow>=19.0.1",
+    "typer>=0.15.2",
+]
 
-[tool.poetry.dependencies]
-python = "^3.11"
-protobuf = "^5.26.1"
-pyarrow = "^16.0.0"
-pandas = "^2.2.2"
-jupyter = "^1.0.0"
-eth-utils = "^5.0.0"
-google-cloud = "^0.34.0"
-google-cloud-bigquery = "^3.25.0"
-google-cloud-storage = "^2.18.2"
-base58 = "^2.1.1"
-
+[dependency-groups]
+dev = [
+    "altair>=5.5.0",
+    "marimo>=0.11.31",
+    "pytest>=8.3.5",
+]
 
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 20000
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E", # pycodestyle
+    "F", # pyflakes
+    "I", # isort
+    "B", # flake8-bugbear
+]
+exclude = ["src/nozzle/FlightSql_pb2.py"]
+
+[tool.ruff.lint.per-file-ignores]
+"*_nb.py" = ["B018"]
+
+[tool.ruff.format]
+quote-style = "single"

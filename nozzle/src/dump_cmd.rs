@@ -54,6 +54,7 @@ pub async fn dump(
                 dataset,
                 config.data_store.clone(),
                 metadata_db.as_ref(),
+                false,
             )
             .await?,
         );
