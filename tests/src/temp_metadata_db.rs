@@ -14,6 +14,9 @@ pub struct TempMetadataDb {
 
 impl TempMetadataDb {
     pub async fn new(keep: bool) -> Self {
+        // Set C locale
+        std::env::set_var("LANG", "C");
+
         let builder = PgTempDBBuilder::new().persist_data(keep);
         let pg_temp = PgTempDB::from_builder(builder);
         info!(
