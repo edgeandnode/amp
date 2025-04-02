@@ -321,8 +321,8 @@ async fn dump_sql_query(
         (Some(metadata_db), Some(location_id)) => {
             insert_scanned_range(scanned_range, metadata_db, location_id).await
         }
-        (None, ..) => Ok(()),
-        (Some(..), None) => panic!("Missing location_id for table {table_name}"),
+        (None, None) => Ok(()),
+       _ => panic!("inconsistent metadata state for {}, location id: {:?}", table_name,  physical_table.location_id()),
     }
 }
 
