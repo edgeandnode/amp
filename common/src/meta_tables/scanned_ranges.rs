@@ -98,7 +98,6 @@ pub async fn scanned_ranges_by_table(
     let mut multirange_by_table = BTreeMap::default();
 
     for table in ctx.catalog().all_tables() {
-
         let tbl = TableId {
             // Unwrap: all tables in ctx.catalog().all_tables() are of the form: [dataset].[table_name]
             // we can access the dataset from the partial table reference's schema.

@@ -200,11 +200,7 @@ impl TableWriter {
             let location_id = self.table.location_id();
             let dataset_name = self.table.catalog_schema().to_string();
 
-            match (
-                &scanned_range,
-                metadata_db,
-                location_id,
-            ) {
+            match (&scanned_range, metadata_db, location_id) {
                 (Some(scanned_range), Some(metadata_db), Some(location_id)) => {
                     insert_scanned_range(scanned_range.clone(), metadata_db, location_id).await?
                 }

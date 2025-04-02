@@ -320,7 +320,11 @@ async fn dump_sql_query(
             insert_scanned_range(scanned_range, metadata_db, location_id).await
         }
         (None, None) => Ok(()),
-       _ => panic!("inconsistent metadata state for {}, location id: {:?}", table_name,  physical_table.location_id()),
+        _ => panic!(
+            "inconsistent metadata state for {}, location id: {:?}",
+            table_name,
+            physical_table.location_id()
+        ),
     }
 }
 
