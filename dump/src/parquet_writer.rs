@@ -253,7 +253,6 @@ impl TableWriter {
             let end = range.1;
             file.close(end).await.map(Some)
         } else {
-            println!("fuck");
             Ok(None)
         }
     }
