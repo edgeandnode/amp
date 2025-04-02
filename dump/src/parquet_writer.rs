@@ -73,13 +73,20 @@ impl DatasetWriter {
     pub async fn close(self) -> Result<(), BoxError> {
         for (_, writer) in self.writers {
             let location_id = writer.table.location_id();
+            let dataset_name = writer.table.catalog_schema().to_string();
 
             let scanned_range = writer.close().await?;
             match (location_id, self.metadata_db.clone(), scanned_range) {
                 (Some(location_id), Some(metadata_db), Some(scanned_range)) => {
                     insert_scanned_range(scanned_range, metadata_db, location_id).await?
                 }
-                _ => {}
+                (None, None, None) => {}
+                _ => {
+                    panic!(
+                        "inconsistent metadata state for {}, location id: {:?}",
+                        dataset_name, location_id
+                    )
+                }
             };
         }
         Ok(())
@@ -189,16 +196,25 @@ impl TableWriter {
             let end = block_num - 1;
             let file_to_close = self.current_file.take().unwrap();
             scanned_range = Some(file_to_close.close(end).await?);
+            let metadata_db = self.metadata_db.clone();
+            let location_id = self.table.location_id();
+            let dataset_name = self.table.catalog_schema().to_string();
 
             match (
                 &scanned_range,
-                self.metadata_db.clone(),
-                self.table.location_id(),
+                metadata_db,
+                location_id,
             ) {
                 (Some(scanned_range), Some(metadata_db), Some(location_id)) => {
                     insert_scanned_range(scanned_range.clone(), metadata_db, location_id).await?
                 }
-                _ => {}
+                (None, None, None) => {}
+                _ => {
+                    panic!(
+                        "inconsistent metadata state for {}, location id: {:?}",
+                        dataset_name, location_id
+                    )
+                }
             }
 
             // The current range was partially written, so we need to split it.
