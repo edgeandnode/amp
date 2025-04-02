@@ -70,15 +70,9 @@ pub async fn ranges_for_table(
             let mut ranges_stream = metadata_db.stream_ranges(tbl);
 
             while let Some(range) = ranges_stream.next().await {
-                match range {
-                    Ok(range) => {
-                        println!("{}: ({}, {})", tbl.table, range.0, range.1);
-                        ranges.push((range.0 as u64, range.1 as u64));
-                    }
-                    Err(err) => {
-                        panic!("{:?}", err)
-                    }
-                }
+                let (range_start, range_end) = range?;
+
+                ranges.push((range_start as u64, range_end as u64));
             }
 
             Ok(ranges)
