@@ -27,7 +27,7 @@ use std::{
 use crate::{multirange::MultiRange, timestamp_type, BoxError, QueryContext, Timestamp};
 
 use datafusion::arrow::datatypes::{DataType, Field, Schema, SchemaRef};
-use futures::TryStreamExt;
+use futures::{StreamExt, TryStreamExt};
 
 use metadata_db::{MetadataDb, TableId};
 use serde::{Deserialize, Serialize};
@@ -65,13 +65,24 @@ pub async fn ranges_for_table(
 ) -> Result<Vec<(u64, u64)>, BoxError> {
     match metadata_db {
         // If MetadataDb is provided, then stream the ranges directly from it (nice)
-        Some(metadata_db) => Ok(metadata_db
-            .stream_ranges(tbl)
-            .try_filter_map(|(range_start, range_end)| async move {
-                Ok(Some((range_start as u64, range_end as u64)))
-            })
-            .try_collect::<Vec<_>>()
-            .await?),
+        Some(metadata_db) => {
+            let mut ranges = Vec::new();
+            let mut ranges_stream = metadata_db.stream_ranges(tbl);
+
+            while let Some(range) = ranges_stream.next().await {
+                match range {
+                    Ok(range) => {
+                        println!("{}: ({}, {})", tbl.table, range.0, range.1);
+                        ranges.push((range.0 as u64, range.1 as u64));
+                    },
+                    Err(err) => {
+                        panic!("{:?}", err)
+                    }
+                }
+            }
+
+            Ok(ranges)
+        }
         // Otherwise read the metadata from all of the parquet files (painful)
         _ => Ok(ctx
             .catalog()
@@ -93,6 +104,8 @@ pub async fn scanned_ranges_by_table(
     let mut multirange_by_table = BTreeMap::default();
 
     for table in ctx.catalog().all_tables() {
+        println!("Table: {}", table.table_ref());
+
         let tbl = TableId {
             // Unwrap: all tables in ctx.catalog().all_tables() are of the form: [dataset].[table_name]
             // we can access the dataset from the partial table reference's schema.
@@ -100,6 +113,7 @@ pub async fn scanned_ranges_by_table(
             dataset_version: None,
             table: table.table_name(),
         };
+
         let ranges = ranges_for_table(ctx, metadata_db, tbl).await?;
         let multi_range = MultiRange::from_ranges(ranges)?;
         multirange_by_table.insert(tbl.table.to_string(), multi_range);
