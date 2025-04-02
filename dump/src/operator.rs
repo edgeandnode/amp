@@ -91,7 +91,12 @@ impl Operator {
                 for table in dataset.tables() {
                     // Unwrap: We checked consistency above.
                     let (id, url) = output_locations_by_name.remove(&table.name).unwrap();
-                    physical_tables.push(PhysicalTable::new(&dataset.name, table.clone(), url, Some(id))?);
+                    physical_tables.push(PhysicalTable::new(
+                        &dataset.name,
+                        table.clone(),
+                        url,
+                        Some(id),
+                    )?);
                 }
 
                 Ok(Operator::DumpDataset {

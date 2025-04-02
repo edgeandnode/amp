@@ -46,7 +46,7 @@ impl DatasetWriter {
                 scanned_ranges,
                 start,
                 end,
-                metadata_db.clone()
+                metadata_db.clone(),
             )?;
             writers.insert(table_name.to_string(), writer);
         }

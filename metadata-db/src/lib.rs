@@ -413,13 +413,12 @@ impl MetadataDb {
         file_name: String,
         scanned_range: serde_json::Value,
     ) -> Result<(), Error> {
-
         let sql = "
         INSERT INTO file_metadata (location_id, file_name, metadata)
         VALUES ($1, $2, $3)
         ";
 
-       sqlx::query(sql)
+        sqlx::query(sql)
             .bind(location_id)
             .bind(file_name)
             .bind(scanned_range)

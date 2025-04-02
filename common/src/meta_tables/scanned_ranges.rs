@@ -74,7 +74,7 @@ pub async fn ranges_for_table(
                     Ok(range) => {
                         println!("{}: ({}, {})", tbl.table, range.0, range.1);
                         ranges.push((range.0 as u64, range.1 as u64));
-                    },
+                    }
                     Err(err) => {
                         panic!("{:?}", err)
                     }
