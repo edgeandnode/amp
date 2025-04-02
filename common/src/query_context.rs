@@ -268,36 +268,6 @@ impl QueryContext {
         Ok(output)
     }
 
-    // async fn meta_datafusion_ctx(&self) -> Result<SessionContext, Error> {
-    //     let ctx = SessionContext::new_with_config_rt(self.session_config.clone(), self.env.clone());
-    //     for ds in self.catalog.datasets() {
-    //         create_physical_tables(&ctx, ds.meta_tables()).await?;
-    //     }
-    //     Ok(ctx)
-    // }
-
-    // /// Meta table queries are trusted and are expected to have small result sizes.
-    // pub async fn meta_execute_sql(&self, query: &str) -> Result<RecordBatch, Error> {
-    //     let ctx = self.meta_datafusion_ctx().await?;
-    //     let df = ctx.sql(query).await.map_err(Error::MetaTableError)?;
-    //     let schema = SchemaRef::new(df.schema().into());
-    //     let batches = df.collect().await.map_err(Error::MetaTableError)?;
-    //     let batch = concat_batches(&schema, &batches).unwrap();
-    //     Ok(batch)
-    // }
-
-    // pub async fn meta_execute_plan(&self, plan: LogicalPlan) -> Result<RecordBatch, Error> {
-    //     let ctx = self.meta_datafusion_ctx().await?;
-    //     let df = ctx
-    //         .execute_logical_plan(plan)
-    //         .await
-    //         .map_err(Error::MetaTableError)?;
-    //     let schema = SchemaRef::new(df.schema().into());
-    //     let batches = df.collect().await.map_err(Error::MetaTableError)?;
-    //     let batch = concat_batches(&schema, &batches).unwrap();
-    //     Ok(batch)
-    // }
-
     pub async fn execute_plan(
         &self,
         plan: LogicalPlan,
