@@ -66,9 +66,7 @@ pub async fn dump_dataset(
 
     // Query the scanned ranges, we might already have some ranges if this is not the first dump run
     // for this dataset.
-    let scanned_ranges_by_table = scanned_ranges_by_table(&ctx, metadata_db)
-        .await
-        .unwrap_or_default();
+    let scanned_ranges_by_table = scanned_ranges_by_table(&ctx, metadata_db).await?;
     for (table_name, multirange) in &scanned_ranges_by_table {
         if multirange.total_len() == 0 {
             continue;
@@ -397,7 +395,9 @@ async fn consistency_check(
         {
             let ranges = ranges_for_table(ctx, metadata_db, tbl)
                 .await
-                .unwrap_or_default();
+                .map_err(|err| {
+                    ConsistencyCheckError::CorruptedDataset(tbl.dataset.to_string(), err.into())
+                })?;
             if let Err(e) = MultiRange::from_ranges(ranges) {
                 return Err(CorruptedDataset(dataset_name, e.into()));
             }
@@ -406,7 +406,9 @@ async fn consistency_check(
         let registered_files = {
             let f = filenames_for_table(&ctx, metadata_db, tbl)
                 .await
-                .unwrap_or_default();
+                .map_err(|err| {
+                    ConsistencyCheckError::CorruptedDataset(tbl.dataset.to_string(), err.into())
+                })?;
             BTreeSet::from_iter(f.into_iter())
         };
 
