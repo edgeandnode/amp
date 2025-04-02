@@ -46,6 +46,7 @@ impl DatasetWriter {
                 scanned_ranges,
                 start,
                 end,
+                metadata_db.clone()
             )?;
             writers.insert(table_name.to_string(), writer);
         }
@@ -74,7 +75,7 @@ impl DatasetWriter {
             let location_id = writer.table.location_id();
 
             let scanned_range = writer.close().await?;
-            let _ = match (location_id, self.metadata_db.clone(), scanned_range) {
+            match (location_id, self.metadata_db.clone(), scanned_range) {
                 (Some(location_id), Some(metadata_db), Some(scanned_range)) => {
                     insert_scanned_range(scanned_range, metadata_db, location_id).await?
                 }
@@ -92,6 +93,7 @@ pub async fn insert_scanned_range(
 ) -> Result<(), BoxError> {
     let file_name = scanned_range.filename.clone();
     let scanned_range = serde_json::to_value(scanned_range)?;
+
     Ok(metadata_db
         .insert_scanned_range(location_id, file_name, scanned_range)
         .await?)
@@ -108,6 +110,8 @@ struct TableWriter {
 
     current_range: Option<(u64, u64)>,
     current_file: Option<ParquetFileWriter>,
+
+    metadata_db: Option<Arc<MetadataDb>>,
 }
 
 impl TableWriter {
@@ -118,6 +122,7 @@ impl TableWriter {
         scanned_ranges: MultiRange,
         start: BlockNum,
         end: BlockNum,
+        metadata_db: Option<Arc<MetadataDb>>,
     ) -> Result<TableWriter, BoxError> {
         let ranges_to_write = {
             let mut ranges = scanned_ranges.complement(start, end).ranges;
@@ -132,6 +137,7 @@ impl TableWriter {
             partition_size,
             current_range: None,
             current_file: None,
+            metadata_db,
         };
         this.next_range()?;
         Ok(this)
@@ -183,6 +189,17 @@ impl TableWriter {
             let end = block_num - 1;
             let file_to_close = self.current_file.take().unwrap();
             scanned_range = Some(file_to_close.close(end).await?);
+
+            match (
+                &scanned_range,
+                self.metadata_db.clone(),
+                self.table.location_id(),
+            ) {
+                (Some(scanned_range), Some(metadata_db), Some(location_id)) => {
+                    insert_scanned_range(scanned_range.clone(), metadata_db, location_id).await?
+                }
+                _ => {}
+            }
 
             // The current range was partially written, so we need to split it.
             let end = self.current_range.unwrap().1;
@@ -236,6 +253,7 @@ impl TableWriter {
             let end = range.1;
             file.close(end).await.map(Some)
         } else {
+            println!("fuck");
             Ok(None)
         }
     }
