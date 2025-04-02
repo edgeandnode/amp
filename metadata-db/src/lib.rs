@@ -361,10 +361,10 @@ impl MetadataDb {
             table,
         } = tbl;
         let sql = "
-            SELECT DISTINCT sr.file_name
-              FROM scanned_ranges sr
+            SELECT sr.file_name
+              FROM file_metadata sr
         INNER JOIN locations l
-                ON sr.location_id = l.vid
+                ON sr.location_id = l.id
              WHERE l.dataset = $1 
                    AND l.dataset_version = $2
                    AND l.tbl = $3
@@ -386,25 +386,23 @@ impl MetadataDb {
     ) -> BoxStream<'a, Result<(i64, i64), sqlx::Error>> {
         let TableId {
             dataset,
-            dataset_version,
+            dataset_version: _,
             table,
         } = tbl;
         let sql = "
-            SELECT DISTINCT sr.metadata->range_start
-                 , sr.metadata->range_end 
-              FROM scanned_ranges sr 
+            SELECT sr.metadata->>'range_start'
+                 , sr.metadata->>'range_end'
+              FROM file_metadata sr 
         INNER JOIN locations l 
-                ON sr.location_id = l.vid 
-             WHERE l.dataset = $1 
-                   AND l.dataset_version = $2
-                   AND l.tbl = $3
+                ON sr.location_id = l.id 
+             WHERE l.dataset = $1
+                   AND l.tbl = $2
                    AND l.active
           ORDER BY 1 ASC
         ";
 
         sqlx::query_scalar(sql)
             .bind(dataset)
-            .bind(dataset_version.unwrap_or_default())
             .bind(table.to_string())
             .fetch(&self.pool)
     }
@@ -415,22 +413,18 @@ impl MetadataDb {
         file_name: String,
         scanned_range: serde_json::Value,
     ) -> Result<(), Error> {
-        let mut tx = self.pool.begin().await?;
 
         let sql = "
-        INSERT INTO scanned_ranges (location_id, file_name, metadata)
+        INSERT INTO file_metadata (location_id, file_name, metadata)
         VALUES ($1, $2, $3)
-        RETURNING id;
         ";
 
-        let _id = sqlx::query(sql)
+       sqlx::query(sql)
             .bind(location_id)
             .bind(file_name)
             .bind(scanned_range)
-            .execute(&mut *tx)
+            .execute(&self.pool)
             .await?;
-
-        tx.commit().await?;
 
         Ok(())
     }
