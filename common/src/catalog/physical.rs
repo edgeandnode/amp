@@ -78,7 +78,7 @@ impl PhysicalDataset {
         validate_name(&dataset_name)?;
 
         let mut physical_tables = vec![];
-        for table in dataset.tables_with_meta() {
+        for table in dataset.tables() {
             match metadata_db {
                 Some(db) => {
                     // If an active location exists for this table, this `PhysicalTable` will point to that location.

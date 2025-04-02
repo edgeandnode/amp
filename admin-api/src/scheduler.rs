@@ -111,7 +111,7 @@ impl FullScheduler {
         let dataset: Dataset = dataset.into();
 
         let mut locations = Vec::new();
-        for table in dataset.tables_with_meta() {
+        for table in dataset.tables() {
             let physical_table = PhysicalTable::next_revision(
                 &table,
                 &self.config.data_store,
