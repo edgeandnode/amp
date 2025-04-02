@@ -53,6 +53,7 @@ Auto-generated file. See `schema_to_markdown` in `common/src/catalog/mod.rs`.
 | max_priority_fee_per_gas | UInt126                               | YES         |
 | max_fee_per_blob_gas     | UInt126                               | YES         |
 | from                     | Binary20                              | NO          |
+| status                   | Boolean                               | NO          |
 +--------------------------+---------------------------------------+-------------+
 ````
 ## logs

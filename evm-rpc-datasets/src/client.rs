@@ -267,10 +267,6 @@ fn rpc_transaction_to_row(
             return Ok(None);
         }
     };
-    if !receipt.status() {
-        // Ignore failed transactions.
-        return Ok(None);
-    }
     Ok(Some(Transaction {
         block_hash: block.hash,
         block_num: block.block_num,
@@ -307,5 +303,6 @@ fn rpc_transaction_to_row(
             .transpose()
             .map_err(|e| ToRowError::Overflow("max_fee_per_blob_gas", e.into()))?,
         from: tx.from.0 .0,
+        status: receipt.status().into(),
     }))
 }
