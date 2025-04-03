@@ -68,7 +68,7 @@ semver = { version = "1.0.18", features = ["serde"] }
 rand = "0.9.0"
 
 # Datafusion and Arrow crates
-arrow-flight = { version = "54.2", features = ["flight-sql-experimental"] }
+arrow-flight = { version = "54.3", features = ["flight-sql-experimental"] }
 datafusion = { version = "45", features = ["serde"] }
 datafusion-proto = "45"
 object_store = { version = "0.11.2", features = ["aws", "gcp", "azure"] }

@@ -1,4 +1,5 @@
 mod client;
+mod tables;
 
 use alloy::transports::http::reqwest::Url;
 pub use client::JsonRpcClient;
@@ -38,10 +39,7 @@ pub fn dataset(dataset_cfg: toml::Value) -> Result<Dataset, Error> {
     Ok(Dataset {
         kind: def.kind,
         name: def.name,
-        tables: vec![
-            common::evm::tables::blocks::table(def.network.clone()),
-            common::evm::tables::logs::table(def.network),
-        ],
+        tables: tables::all(&def.network),
     })
 }
 
@@ -62,10 +60,7 @@ async fn print_schema_to_readme() {
     fs_err::write(
         "src/README.md",
         common::catalog::schema_to_markdown(
-            vec![
-                common::evm::tables::blocks::table("test_network".to_string()),
-                common::evm::tables::logs::table("test_network".to_string()),
-            ],
+            tables::all("test_network"),
             crate::DATASET_KIND.to_string(),
         )
         .await
