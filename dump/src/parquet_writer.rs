@@ -346,9 +346,12 @@ impl ParquetFileWriter {
             created_at: Timestamp::now(),
         };
 
+        let scanned_range_key = scanned_ranges::METADATA_KEY.to_string();
+        let scanned_range_value = serde_json::to_string(&scanned_range)?;
+
         let kv_metadata = KeyValue::new(
-            scanned_ranges::METADATA_KEY.to_string(),
-            Some(serde_json::to_string(&scanned_range)?),
+            scanned_range_key,
+            scanned_range_value,
         );
 
         self.writer.append_key_value_metadata(kv_metadata);
