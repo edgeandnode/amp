@@ -390,8 +390,8 @@ impl MetadataDb {
             table,
         } = tbl;
         let sql = "
-            SELECT sr.metadata->>'range_start'
-                 , sr.metadata->>'range_end'
+            SELECT CAST(sr.metadata->>'range_start' AS BIGINT)
+                 , CAST(sr.metadata->>'range_end' AS BIGINT)
               FROM file_metadata sr 
         INNER JOIN locations l 
                 ON sr.location_id = l.id 
@@ -401,7 +401,7 @@ impl MetadataDb {
           ORDER BY 1 ASC
         ";
 
-        sqlx::query_scalar(sql)
+        sqlx::query_as(sql)
             .bind(dataset)
             .bind(table.to_string())
             .fetch(&self.pool)
