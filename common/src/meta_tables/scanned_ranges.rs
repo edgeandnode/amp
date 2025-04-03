@@ -19,44 +19,16 @@
 //!
 //! See also: scanned-ranges-consistency
 
-use std::{
-    collections::BTreeMap,
-    sync::{Arc, LazyLock},
-};
+use std::collections::BTreeMap;
 
-use crate::{multirange::MultiRange, timestamp_type, BoxError, QueryContext, Timestamp};
+use crate::{multirange::MultiRange, BoxError, QueryContext, Timestamp};
 
-use datafusion::arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use futures::{StreamExt, TryStreamExt};
 
 use metadata_db::{MetadataDb, TableId};
 use serde::{Deserialize, Serialize};
 
-use crate::Table;
-
-pub const TABLE_NAME: &'static str = "__nozzle_metadata";
 pub const METADATA_KEY: &'static str = "nozzle_metadata";
-
-static SCHEMA: LazyLock<SchemaRef> = LazyLock::new(|| Arc::new(schema()));
-
-pub fn table() -> Table {
-    Table {
-        name: TABLE_NAME.to_string(),
-        schema: SCHEMA.clone(),
-        network: None,
-    }
-}
-
-fn schema() -> Schema {
-    let table = Field::new("table", DataType::Utf8, false);
-    let start = Field::new("range_start", DataType::UInt64, false);
-    let end = Field::new("range_end", DataType::UInt64, false);
-    let filename = Field::new("filename", DataType::Utf8, false);
-    let created_at = Field::new("created_at", timestamp_type(), false);
-
-    let fields = vec![table, start, end, filename, created_at];
-    Schema::new(fields)
-}
 
 pub async fn ranges_for_table(
     ctx: &QueryContext,
