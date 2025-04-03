@@ -211,7 +211,6 @@ async fn dump_sql_dataset(
     end: Option<BlockNum>,
 ) -> Result<(), BoxError> {
     let physical_dataset = &dst_ctx.catalog().datasets()[0].clone();
-    let mut matzn_tracker = MatznTracker::new();
 
     for (table, query) in &dataset.queries {
         let end = match end {
@@ -239,8 +238,6 @@ async fn dump_sql_dataset(
             .await?;
         let plan = src_ctx.plan_sql(query.clone()).await?;
         let is_incr = is_incremental(&plan)?;
-
-        matzn_tracker.record(is_incr).await?;
 
         if is_incr {
             let ranges_to_scan = scanned_ranges_by_table[table].complement(start, end);
@@ -445,53 +442,4 @@ async fn consistency_check(
         }
     }
     Ok(())
-}
-
-// We work around some deficiencies in our metadata handling by deleting the
-// scanned ranges for a table in its entirety. This struct encapsulates the
-// logic for that and hides it from the casual reader because it's ugly
-//
-// We truncate __scanned_ranges for the first entire materialization we see,
-// but we do not allow mixing entire and incremental materializations for
-// safety
-struct MatznTracker {
-    had_entire: bool,
-    had_incremental: bool,
-    ranges_cleared: bool,
-}
-
-impl MatznTracker {
-    fn new() -> Self {
-        Self {
-            had_entire: false,
-            had_incremental: false,
-            ranges_cleared: false,
-        }
-    }
-
-    async fn record(&mut self, is_incremental: bool) -> Result<(), BoxError> {
-        fn not_supported() -> Result<(), BoxError> {
-            Err(
-                "Currently, a dataset may not mix incremental and non-incremental \
-                 queries. We're working on removing this restriction"
-                    .into(),
-            )
-        }
-
-        if is_incremental {
-            if self.had_entire {
-                return not_supported();
-            }
-            self.had_incremental = true;
-        } else {
-            if self.had_incremental {
-                return not_supported();
-            }
-            self.had_entire = true;
-            if !self.ranges_cleared {
-                self.ranges_cleared = true;
-            }
-        }
-        Ok(())
-    }
 }
