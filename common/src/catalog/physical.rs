@@ -361,7 +361,7 @@ impl PhysicalTable {
                 .ok_or(crate::ArrowError::ParquetError(format!(
                     "Missing key: {} in file metadata for file {}",
                     scanned_ranges::METADATA_KEY,
-                    self.url()
+                    self.path
                 )))?;
 
             let range = scanned_range_key_value_pair
