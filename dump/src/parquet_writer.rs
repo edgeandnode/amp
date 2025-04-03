@@ -73,23 +73,24 @@ impl DatasetWriter {
     pub async fn close(self) -> Result<(), BoxError> {
         for (_, writer) in self.writers {
             let location_id = writer.table.location_id();
-            let dataset_name = writer.table.catalog_schema().to_string();
+            let metadata_db = self.metadata_db.clone();
+            let table_ref = writer.table.table_ref().to_string();
 
-            // Unwrap: `writer.close()` always returns `Some(scanned_range)`
-            let scanned_range = writer.close().await?.unwrap();
-            match (location_id, self.metadata_db.clone()) {
+            let scanned_range = writer.close().await?;
+
+            match (location_id, metadata_db) {
                 (Some(location_id), Some(metadata_db)) => {
-                    insert_scanned_range(scanned_range, metadata_db, location_id).await?
+                    if let Some(scanned_range) = scanned_range {
+                        insert_scanned_range(scanned_range, metadata_db, location_id).await?
+                    }
                 }
                 (None, None) => {}
                 _ => {
-                    panic!(
-                        "inconsistent metadata state for {}, location id: {:?}",
-                        dataset_name, location_id
-                    )
+                    panic!("inconsistent metadata state for {}", table_ref)
                 }
-            };
+            }
         }
+
         Ok(())
     }
 }
@@ -199,19 +200,17 @@ impl TableWriter {
             scanned_range = Some(file_to_close.close(end).await?);
             let metadata_db = self.metadata_db.clone();
             let location_id = self.table.location_id();
-            let dataset_name = self.table.catalog_schema().to_string();
+            let table_ref = self.table.table_ref();
 
             match (metadata_db, location_id) {
                 (Some(metadata_db), Some(location_id)) => {
+                    // Unwrap: scanned_range must be Some here
                     insert_scanned_range(scanned_range.clone().unwrap(), metadata_db, location_id)
                         .await?
                 }
                 (None, None) => {}
                 _ => {
-                    panic!(
-                        "inconsistent metadata state for {}, location id: {:?}",
-                        dataset_name, location_id
-                    )
+                    panic!("inconsistent metadata state for {}", table_ref)
                 }
             }
 
