@@ -352,12 +352,12 @@ impl PhysicalTable {
                 .key_value_metadata()
                 .ok_or(crate::ArrowError::ParquetError(format!(
                     "Unable to fetch Key Value metadata for file {}",
-                    self.url()
+                    self.path
                 )))?;
 
             let scanned_range_key_value_pair = key_value_metadata
-                .iter()
-                .find(|key_value| key_value.key == scanned_ranges::METADATA_KEY)
+                .into_iter()
+                .find(|key_value| key_value.key.as_str() == scanned_ranges::METADATA_KEY)
                 .ok_or(crate::ArrowError::ParquetError(format!(
                     "Missing key: {} in file metadata for file {}",
                     scanned_ranges::METADATA_KEY,
@@ -369,7 +369,7 @@ impl PhysicalTable {
                 .as_ref()
                 .ok_or(crate::ArrowError::ParseError(format!(
                     "Unable to parse ScannedRange from key value metadata for file {}",
-                    self.url()
+                    self.path
                 )))
                 .map(|scanned_range_json| serde_json::from_str::<ScannedRange>(scanned_range_json))?
                 .map(|scanned_range| (scanned_range.range_start, scanned_range.range_end))?;
