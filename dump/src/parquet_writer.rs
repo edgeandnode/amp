@@ -3,12 +3,13 @@ use std::sync::Arc;
 
 use common::arrow::array::RecordBatch;
 use common::catalog::physical::PhysicalTable;
-use common::meta_tables::scanned_ranges::{self, ScannedRange, ScannedRangeRowsBuilder};
+use common::meta_tables::scanned_ranges::{self, ScannedRange};
 use common::multirange::MultiRange;
 use common::parquet::errors::ParquetError;
+use common::parquet::format::KeyValue;
 use common::{parquet, BlockNum, BoxError, QueryContext, TableRows, Timestamp};
-use datafusion::sql::TableReference;
 use log::debug;
+use metadata_db::MetadataDb;
 use object_store::buffered::BufWriter;
 use object_store::path::Path;
 use parquet::arrow::AsyncArrowWriter;
@@ -18,11 +19,7 @@ use url::Url;
 pub struct DatasetWriter {
     writers: BTreeMap<String, TableWriter>,
 
-    // The scanned ranges waiting to be written to the `__scanned_ranges` table.
-    scanned_range_batch: ScannedRangeRowsBuilder,
-
-    // For inserting into `__scanned_ranges`
-    dataset_ctx: Arc<QueryContext>,
+    metadata_db: Option<Arc<MetadataDb>>,
 }
 
 impl DatasetWriter {
@@ -30,6 +27,7 @@ impl DatasetWriter {
     /// one entry per table in that dataset.
     pub fn new(
         dataset_ctx: Arc<QueryContext>,
+        metadata_db: Option<Arc<MetadataDb>>,
         opts: ParquetWriterProperties,
         start: BlockNum,
         end: BlockNum,
@@ -48,13 +46,13 @@ impl DatasetWriter {
                 scanned_ranges,
                 start,
                 end,
+                metadata_db.clone(),
             )?;
             writers.insert(table_name.to_string(), writer);
         }
         Ok(DatasetWriter {
-            dataset_ctx,
             writers,
-            scanned_range_batch: ScannedRangeRowsBuilder::new(),
+            metadata_db,
         })
     }
 
@@ -66,54 +64,48 @@ impl DatasetWriter {
         let table_name = table_rows.table.name.as_str();
 
         let writer = self.writers.get_mut(table_name).unwrap();
-        let scanned_range = writer.write(&table_rows).await?;
-
-        if let Some(scanned_range) = scanned_range {
-            self.scanned_range_batch.append(&scanned_range);
-        }
-
-        // Periodically flush the scanned ranges to the `__scanned_ranges` table.
-        if self.scanned_range_batch.len() >= 10 {
-            flush_scanned_ranges(&self.dataset_ctx, &mut self.scanned_range_batch).await?;
-        }
+        let _scanned_range = writer.write(&table_rows).await?;
 
         Ok(())
     }
 
     /// Close and flush all pending writes.
-    pub async fn close(mut self) -> Result<(), BoxError> {
+    pub async fn close(self) -> Result<(), BoxError> {
         for (_, writer) in self.writers {
+            let location_id = writer.table.location_id();
+            let metadata_db = self.metadata_db.clone();
+            let table_ref = writer.table.table_ref().to_string();
+
             let scanned_range = writer.close().await?;
 
-            if let Some(scanned_range) = scanned_range {
-                self.scanned_range_batch.append(&scanned_range);
+            match (location_id, metadata_db) {
+                (Some(location_id), Some(metadata_db)) => {
+                    if let Some(scanned_range) = scanned_range {
+                        insert_scanned_range(scanned_range, metadata_db, location_id).await?
+                    }
+                }
+                (None, None) => {}
+                _ => {
+                    panic!("inconsistent metadata state for {}", table_ref)
+                }
             }
         }
-        flush_scanned_ranges(&self.dataset_ctx, &mut self.scanned_range_batch).await
+
+        Ok(())
     }
 }
 
-async fn flush_scanned_ranges(
-    ctx: &QueryContext,
-    ranges: &mut ScannedRangeRowsBuilder,
+pub async fn insert_scanned_range(
+    scanned_range: ScannedRange,
+    metadata_db: Arc<MetadataDb>,
+    location_id: i64,
 ) -> Result<(), BoxError> {
-    let batch = ranges.build();
-    let dataset_name = {
-        let datasets = ctx.catalog().datasets();
-        assert!(datasets.len() == 1, "expected one dataset");
-        datasets[0].name().to_string()
-    };
+    let file_name = scanned_range.filename.clone();
+    let scanned_range = serde_json::to_value(scanned_range)?;
 
-    debug!(
-        "flushing {} scanned ranges for dataset {dataset_name}",
-        batch.num_rows()
-    );
-
-    // Build a datafusion logical plan to insert the `batch` into the `__scanned_ranges` table.
-    let table_ref = TableReference::partial(dataset_name, scanned_ranges::TABLE_NAME);
-    ctx.meta_insert_into(table_ref, batch).await?;
-
-    Ok(())
+    Ok(metadata_db
+        .insert_scanned_range(location_id, file_name, scanned_range)
+        .await?)
 }
 
 struct TableWriter {
@@ -127,6 +119,8 @@ struct TableWriter {
 
     current_range: Option<(u64, u64)>,
     current_file: Option<ParquetFileWriter>,
+
+    metadata_db: Option<Arc<MetadataDb>>,
 }
 
 impl TableWriter {
@@ -137,6 +131,7 @@ impl TableWriter {
         scanned_ranges: MultiRange,
         start: BlockNum,
         end: BlockNum,
+        metadata_db: Option<Arc<MetadataDb>>,
     ) -> Result<TableWriter, BoxError> {
         let ranges_to_write = {
             let mut ranges = scanned_ranges.complement(start, end).ranges;
@@ -151,6 +146,7 @@ impl TableWriter {
             partition_size,
             current_range: None,
             current_file: None,
+            metadata_db,
         };
         this.next_range()?;
         Ok(this)
@@ -202,6 +198,21 @@ impl TableWriter {
             let end = block_num - 1;
             let file_to_close = self.current_file.take().unwrap();
             scanned_range = Some(file_to_close.close(end).await?);
+            let metadata_db = self.metadata_db.clone();
+            let location_id = self.table.location_id();
+            let table_ref = self.table.table_ref();
+
+            match (metadata_db, location_id) {
+                (Some(metadata_db), Some(location_id)) => {
+                    // Unwrap: scanned_range must be Some here
+                    insert_scanned_range(scanned_range.clone().unwrap(), metadata_db, location_id)
+                        .await?
+                }
+                (None, None) => {}
+                _ => {
+                    panic!("inconsistent metadata state for {}", table_ref)
+                }
+            }
 
             // The current range was partially written, so we need to split it.
             let end = self.current_range.unwrap().1;
@@ -312,14 +323,14 @@ impl ParquetFileWriter {
     }
 
     #[must_use]
-    pub async fn close(self, end: BlockNum) -> Result<ScannedRange, BoxError> {
+    pub async fn close(mut self, end: BlockNum) -> Result<ScannedRange, BoxError> {
         if end < self.start {
             return Err(
                 format!("end block {} must be after start block {}", end, self.start).into(),
             );
         }
 
-        self.writer.close().await?;
+        self.writer.flush().await?;
 
         debug!(
             "wrote {} for range {} to {}",
@@ -333,6 +344,15 @@ impl ParquetFileWriter {
             filename: self.filename,
             created_at: Timestamp::now(),
         };
+
+        let scanned_range_key = scanned_ranges::METADATA_KEY.to_string();
+        let scanned_range_value = serde_json::to_string(&scanned_range)?;
+
+        let kv_metadata = KeyValue::new(scanned_range_key, scanned_range_value);
+
+        self.writer.append_key_value_metadata(kv_metadata);
+        self.writer.close().await?;
+
         Ok(scanned_range)
     }
 

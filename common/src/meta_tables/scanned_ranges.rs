@@ -19,78 +19,68 @@
 //!
 //! See also: scanned-ranges-consistency
 
-use std::{
-    collections::BTreeMap,
-    sync::{Arc, LazyLock},
-};
+use std::collections::BTreeMap;
 
-use crate::{
-    arrow::array::{ArrayRef, StringBuilder},
-    multirange::MultiRange,
-    query_context::Error as CoreError,
-    timestamp_type, BoxError, QueryContext, Timestamp, TimestampArrayBuilder,
-};
-use datafusion::{
-    arrow::{
-        array::{ArrayBuilder as _, AsArray as _, RecordBatch, UInt64Builder},
-        datatypes::{DataType, Field, Schema, SchemaRef, UInt64Type},
-    },
-    sql::TableReference,
-};
+use crate::{multirange::MultiRange, BoxError, QueryContext, Timestamp};
 
-use crate::Table;
+use futures::{StreamExt, TryStreamExt};
 
-pub const TABLE_NAME: &'static str = "__scanned_ranges";
+use metadata_db::{MetadataDb, TableId};
+use serde::{Deserialize, Serialize};
 
-static SCHEMA: LazyLock<SchemaRef> = LazyLock::new(|| Arc::new(schema()));
-
-pub fn table() -> Table {
-    Table {
-        name: TABLE_NAME.to_string(),
-        schema: SCHEMA.clone(),
-        network: None,
-    }
-}
-
-fn schema() -> Schema {
-    let table = Field::new("table", DataType::Utf8, false);
-    let start = Field::new("range_start", DataType::UInt64, false);
-    let end = Field::new("range_end", DataType::UInt64, false);
-    let filename = Field::new("filename", DataType::Utf8, false);
-    let created_at = Field::new("created_at", timestamp_type(), false);
-
-    let fields = vec![table, start, end, filename, created_at];
-    Schema::new(fields)
-}
+pub const METADATA_KEY: &'static str = "nozzle_metadata";
 
 pub async fn ranges_for_table(
     ctx: &QueryContext,
-    catalog_schema: &str,
-    table_name: &str,
-) -> Result<Vec<(u64, u64)>, CoreError> {
-    let scanned_ranges_ref = TableReference::partial(catalog_schema, TABLE_NAME);
-    let rb = ctx
-            .meta_execute_sql(&format!(
-                "select range_start, range_end from {scanned_ranges_ref} where table = '{table_name}' order by range_start, range_end",
-            ))
-            .await?;
-    let start_blocks: &[u64] = rb.column(0).as_primitive::<UInt64Type>().values().as_ref();
-    let end_blocks: &[u64] = rb.column(1).as_primitive::<UInt64Type>().values().as_ref();
+    metadata_db: Option<&MetadataDb>,
+    tbl: TableId<'_>,
+) -> Result<Vec<(u64, u64)>, BoxError> {
+    match metadata_db {
+        // If MetadataDb is provided, then stream the ranges directly from it (nice)
+        Some(metadata_db) => {
+            let mut ranges = Vec::new();
+            let mut ranges_stream = metadata_db.stream_ranges(tbl);
 
-    let ranges = start_blocks.iter().zip(end_blocks).map(|(s, e)| (*s, *e));
-    Ok(ranges.collect())
+            while let Some(range) = ranges_stream.next().await {
+                let (range_start, range_end) = range?;
+
+                ranges.push((range_start as u64, range_end as u64));
+            }
+
+            Ok(ranges)
+        }
+        // Otherwise read the metadata from all of the parquet files (painful)
+        _ => Ok(ctx
+            .catalog()
+            .all_tables()
+            .find(|physical_table| physical_table.table_id() == tbl)
+            // TODO: method to select a table from the catalog by TableId, returning a Result<PhysicalTable>
+            // to avoid this whole iteration + combinator + unwrap pattern.
+            // Unwrap: the caller has already confirmed the existence of the physical table with this TableId
+            .unwrap()
+            .ranges()
+            .await?),
+    }
 }
 
 pub async fn scanned_ranges_by_table(
     ctx: &QueryContext,
+    metadata_db: Option<&MetadataDb>,
 ) -> Result<BTreeMap<String, MultiRange>, BoxError> {
     let mut multirange_by_table = BTreeMap::default();
 
     for table in ctx.catalog().all_tables() {
-        let table_name = table.table_name().to_string();
-        let ranges = ranges_for_table(ctx, table.catalog_schema(), &table_name).await?;
+        let tbl = TableId {
+            // Unwrap: all tables in ctx.catalog().all_tables() are of the form: [dataset].[table_name]
+            // we can access the dataset from the partial table reference's schema.
+            dataset: table.table_ref().schema().unwrap(),
+            dataset_version: None,
+            table: table.table_name(),
+        };
+
+        let ranges = ranges_for_table(ctx, metadata_db, tbl).await?;
         let multi_range = MultiRange::from_ranges(ranges)?;
-        multirange_by_table.insert(table_name, multi_range);
+        multirange_by_table.insert(tbl.table.to_string(), multi_range);
     }
 
     Ok(multirange_by_table)
@@ -98,77 +88,39 @@ pub async fn scanned_ranges_by_table(
 
 pub async fn filenames_for_table(
     ctx: &QueryContext,
-    catalog_schema: &str,
-    table_name: &str,
-) -> Result<Vec<String>, CoreError> {
-    let scanned_ranges_ref = TableReference::partial(catalog_schema, TABLE_NAME);
-    let rb = ctx
-            .meta_execute_sql(&format!(
-                "select filename from {scanned_ranges_ref} where table = '{table_name}' order by range_start, range_end",
-            ))
-            .await?;
-    let filenames = rb.column(0).as_string::<i32>().iter().map(|s| s.unwrap());
-    Ok(filenames.map(|s| s.to_string()).collect())
+    metadata_db: Option<&MetadataDb>,
+    tbl: TableId<'_>,
+) -> Result<Vec<String>, BoxError> {
+    match metadata_db {
+        // If MetadataDb is provided, then stream the file names directly from it (nice)
+        Some(metadata_db) => {
+            let file_names = metadata_db
+                .stream_file_names(tbl)
+                .try_collect::<Vec<_>>()
+                .await?;
+            Ok(file_names)
+        }
+        // Otherwise read the metadata from all of the parquet files (painful)
+        _ => Ok(ctx
+            .catalog()
+            .all_tables()
+            .find(|physical_table| physical_table.table_id() == tbl)
+            // TODO: method to select a table from the catalog by TableId, returning a Result<PhysicalTable>
+            // to avoid this whole iteration + combinator + unwrap pattern.
+            // Unwrap: the caller has already confirmed the existence of the physical table with this TableId
+            .unwrap()
+            .parquet_files(true)
+            .await?
+            .into_keys()
+            .collect()),
+    }
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ScannedRange {
     pub table: String,
     pub range_start: u64,
     pub range_end: u64,
     pub filename: String,
     pub created_at: Timestamp,
-}
-
-impl ScannedRange {
-    pub fn as_record_batch(&self) -> RecordBatch {
-        let mut builder = ScannedRangeRowsBuilder::new();
-        builder.append(self);
-        builder.build()
-    }
-}
-
-#[derive(Debug)]
-pub struct ScannedRangeRowsBuilder {
-    table: StringBuilder,
-    range_start: UInt64Builder,
-    range_end: UInt64Builder,
-    filename: StringBuilder,
-    timestamp: TimestampArrayBuilder,
-}
-
-impl ScannedRangeRowsBuilder {
-    pub fn new() -> Self {
-        Self {
-            table: StringBuilder::new(),
-            range_start: UInt64Builder::new(),
-            range_end: UInt64Builder::new(),
-            filename: StringBuilder::new(),
-            timestamp: TimestampArrayBuilder::with_capacity(0),
-        }
-    }
-
-    pub fn append(&mut self, range: &ScannedRange) {
-        self.table.append_value(&range.table);
-        self.range_start.append_value(range.range_start);
-        self.range_end.append_value(range.range_end);
-        self.filename.append_value(&range.filename);
-        self.timestamp.append_value(range.created_at);
-    }
-
-    pub fn build(&mut self) -> RecordBatch {
-        let columns = vec![
-            Arc::new(self.table.finish()) as ArrayRef,
-            Arc::new(self.range_start.finish()),
-            Arc::new(self.range_end.finish()),
-            Arc::new(self.filename.finish()),
-            Arc::new(self.timestamp.finish()),
-        ];
-
-        // Unwrap: The columns follow the schema and have an equal length.
-        RecordBatch::try_new(SCHEMA.clone(), columns).unwrap()
-    }
-
-    pub fn len(&self) -> usize {
-        self.table.len()
-    }
 }

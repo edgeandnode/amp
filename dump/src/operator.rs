@@ -67,9 +67,9 @@ impl Operator {
 
                 // Consistency check: All tables must be present in the operator's output.
                 let dataset_tables = dataset
-                    .tables_with_meta()
+                    .tables()
                     .into_iter()
-                    .map(|t| t.name)
+                    .map(|t| t.name.to_string())
                     .collect::<BTreeSet<_>>();
                 let operator_tables = output_locations
                     .iter()
@@ -88,10 +88,15 @@ impl Operator {
                     .map(|(id, tbl, url)| (tbl.clone(), (id, url)))
                     .collect::<BTreeMap<_, _>>();
                 let mut physical_tables = vec![];
-                for table in dataset.tables_with_meta() {
+                for table in dataset.tables() {
                     // Unwrap: We checked consistency above.
                     let (id, url) = output_locations_by_name.remove(&table.name).unwrap();
-                    physical_tables.push(PhysicalTable::new(&dataset.name, table, url, Some(id))?);
+                    physical_tables.push(PhysicalTable::new(
+                        &dataset.name,
+                        table.clone(),
+                        url,
+                        Some(id),
+                    )?);
                 }
 
                 Ok(Operator::DumpDataset {

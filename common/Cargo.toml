@@ -17,6 +17,7 @@ itertools.workspace = true
 log.workspace = true
 object_store.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 stable-hash = { git = "https://github.com/graphprotocol/stable-hash" }
 thiserror.workspace = true
 tokio.workspace = true

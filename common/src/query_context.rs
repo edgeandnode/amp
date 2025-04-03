@@ -9,10 +9,8 @@ use bytes::Bytes;
 use datafusion::common::tree_node::{Transformed, TreeNode as _, TreeNodeRewriter};
 use datafusion::common::{not_impl_err, DFSchema};
 use datafusion::datasource::{DefaultTableSource, MemTable, TableProvider, TableType};
-use datafusion::logical_expr::dml::InsertOp;
 use datafusion::logical_expr::{
-    CreateCatalogSchema, DmlStatement, Extension, LogicalPlanBuilder, ScalarUDF, SortExpr,
-    TableScan, WriteOp,
+    CreateCatalogSchema, Extension, LogicalPlanBuilder, ScalarUDF, SortExpr, TableScan,
 };
 use datafusion::sql::parser;
 use datafusion::{
@@ -38,7 +36,6 @@ use url::Url;
 
 use crate::catalog::physical::{Catalog, PhysicalTable};
 use crate::evm::udfs::{EvmDecode, EvmTopic};
-use crate::meta_tables::scanned_ranges;
 use crate::{arrow, attestation, BoxError, Table};
 
 #[derive(Error, Debug)]
@@ -271,36 +268,6 @@ impl QueryContext {
         Ok(output)
     }
 
-    async fn meta_datafusion_ctx(&self) -> Result<SessionContext, Error> {
-        let ctx = SessionContext::new_with_config_rt(self.session_config.clone(), self.env.clone());
-        for ds in self.catalog.datasets() {
-            create_physical_tables(&ctx, ds.meta_tables()).await?;
-        }
-        Ok(ctx)
-    }
-
-    /// Meta table queries are trusted and are expected to have small result sizes.
-    pub async fn meta_execute_sql(&self, query: &str) -> Result<RecordBatch, Error> {
-        let ctx = self.meta_datafusion_ctx().await?;
-        let df = ctx.sql(query).await.map_err(Error::MetaTableError)?;
-        let schema = SchemaRef::new(df.schema().into());
-        let batches = df.collect().await.map_err(Error::MetaTableError)?;
-        let batch = concat_batches(&schema, &batches).unwrap();
-        Ok(batch)
-    }
-
-    pub async fn meta_execute_plan(&self, plan: LogicalPlan) -> Result<RecordBatch, Error> {
-        let ctx = self.meta_datafusion_ctx().await?;
-        let df = ctx
-            .execute_logical_plan(plan)
-            .await
-            .map_err(Error::MetaTableError)?;
-        let schema = SchemaRef::new(df.schema().into());
-        let batches = df.collect().await.map_err(Error::MetaTableError)?;
-        let batch = concat_batches(&schema, &batches).unwrap();
-        Ok(batch)
-    }
-
     pub async fn execute_plan(
         &self,
         plan: LogicalPlan,
@@ -319,64 +286,6 @@ impl QueryContext {
             .await
             .map_err(Error::ExecutionError)?;
         Ok(concat_batches(&schema, &batch_stream).unwrap())
-    }
-
-    /// Insert rows into a metadata table.
-    pub async fn meta_insert_into(
-        &self,
-        table_ref: TableReference,
-        batch: RecordBatch,
-    ) -> Result<(), Error> {
-        let schema = batch.schema();
-        let values = {
-            // Unwrap: The schema is the batch schema.
-            let mem_table = MemTable::try_new(schema.clone(), vec![vec![batch]]).unwrap();
-            let table_source = Arc::new(DefaultTableSource::new(Arc::new(mem_table)));
-
-            // Unwrap: The scan is trivial.
-            let table_scan =
-                TableScan::try_new("temp_insert_input", table_source, None, vec![], None).unwrap();
-            Arc::new(LogicalPlan::TableScan(table_scan))
-        };
-
-        // Unwrap: Not really fallible.
-        let df_schema = schema.to_dfschema_ref().unwrap();
-        let insert = DmlStatement::new(
-            table_ref,
-            df_schema,
-            WriteOp::Insert(InsertOp::Append),
-            values,
-        );
-
-        // Execute plan against meta ctx
-        self.meta_execute_plan(LogicalPlan::Dml(insert)).await?;
-
-        Ok(())
-    }
-
-    pub async fn meta_truncate(&self, dataset_name: &str) -> Result<(), Error> {
-        let ranges_table = self
-            .catalog
-            .all_meta_tables()
-            .find(|t| {
-                t.table_ref().table() == scanned_ranges::TABLE_NAME
-                    && t.table_ref().schema() == Some(dataset_name)
-            })
-            .ok_or_else(|| {
-                Error::DatasetError(
-                    format!(
-                        "table `{}.{}` not found",
-                        dataset_name,
-                        scanned_ranges::TABLE_NAME
-                    )
-                    .into(),
-                )
-            })?;
-        ranges_table
-            .truncate()
-            .await
-            .map_err(|e| Error::DatasetError(e))?;
-        Ok(())
     }
 }
 

@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use futures::Stream;
+use futures::stream::{BoxStream, Stream};
 use log::error;
 use sqlx::{
     migrate::{MigrateError, Migrator},
@@ -54,7 +54,7 @@ pub struct MetadataDb {
 
 /// Tables are identified by the triple: `(dataset, dataset_version, table)`. For each table, there
 /// is at most one active location.
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct TableId<'a> {
     pub dataset: &'a str,
     pub dataset_version: Option<&'a str>,
@@ -101,7 +101,7 @@ impl MetadataDb {
         let dataset_version = table.dataset_version.unwrap_or("");
 
         let query = "
-        INSERT INTO locations (dataset, dataset_version, tbl, bucket, path, url, active) \
+        INSERT INTO locations (dataset, dataset_version, tbl, bucket, path, url, active)
         VALUES ($1, $2, $3, $4, $5, $6, $7)
         RETURNING id;
         ";
@@ -348,6 +348,84 @@ impl MetadataDb {
         let mut channel = PgListener::connect(&self.url).await?;
         channel.listen(channel_name).await?;
         Ok(channel.into_stream())
+    }
+
+    /// Produces a stream of all names of files for a given tbl catalogued by the MetadataDb
+    pub fn stream_file_names<'a>(
+        &'a self,
+        tbl: TableId<'a>,
+    ) -> BoxStream<'a, Result<String, sqlx::Error>> {
+        let TableId {
+            dataset,
+            dataset_version,
+            table,
+        } = tbl;
+        let sql = "
+            SELECT sr.file_name
+              FROM file_metadata sr
+        INNER JOIN locations l
+                ON sr.location_id = l.id
+             WHERE l.dataset = $1 
+                   AND l.dataset_version = $2
+                   AND l.tbl = $3
+                   AND l.active
+          ORDER BY 1 ASC
+        ";
+
+        sqlx::query_scalar(sql)
+            .bind(dataset)
+            .bind(dataset_version.unwrap_or_default())
+            .bind(table.to_string())
+            .fetch(&self.pool)
+    }
+
+    /// Produces a stream of all scanned block ranges for a given tbl catalogued by the MetadataDb
+    pub fn stream_ranges<'a>(
+        &'a self,
+        tbl: TableId<'a>,
+    ) -> BoxStream<'a, Result<(i64, i64), sqlx::Error>> {
+        let TableId {
+            dataset,
+            dataset_version: _,
+            table,
+        } = tbl;
+        let sql = "
+            SELECT CAST(sr.metadata->>'range_start' AS BIGINT)
+                 , CAST(sr.metadata->>'range_end' AS BIGINT)
+              FROM file_metadata sr 
+        INNER JOIN locations l 
+                ON sr.location_id = l.id 
+             WHERE l.dataset = $1
+                   AND l.tbl = $2
+                   AND l.active
+          ORDER BY 1 ASC
+        ";
+
+        sqlx::query_as(sql)
+            .bind(dataset)
+            .bind(table.to_string())
+            .fetch(&self.pool)
+    }
+
+    pub async fn insert_scanned_range(
+        &self,
+        location_id: i64,
+        file_name: String,
+        scanned_range: serde_json::Value,
+    ) -> Result<(), Error> {
+        let sql = "
+        INSERT INTO file_metadata (location_id, file_name, metadata)
+        VALUES ($1, $2, $3)
+        ";
+
+        sqlx::query(sql)
+            .bind(location_id)
+            .bind(file_name)
+            .bind(scanned_range)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
     }
 }
 

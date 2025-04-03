@@ -20,6 +20,7 @@ use common::{
     BlockNum, BoxError, Dataset, Table, BLOCK_NUM,
 };
 use futures::StreamExt as _;
+use metadata_db::TableId;
 use object_store::ObjectMeta;
 use serde::Deserialize;
 use tracing::instrument;
@@ -123,16 +124,20 @@ pub async fn execute_query_for_range(
 ) -> Result<SendableRecordBatchStream, BoxError> {
     let (tables, _) =
         resolve_table_references(&query, true).map_err(|e| CoreError::SqlParseError(e.into()))?;
-    let ctx = dataset_store.ctx_for_sql(&query, env).await?;
+    let ctx = dataset_store.clone().ctx_for_sql(&query, env).await?;
+    let metadata_db = dataset_store.metadata_db.as_ref();
 
     // Validate dependency scanned ranges
     {
         let needed_range = MultiRange::from_ranges(vec![(start, end)]).unwrap();
         for table in tables {
-            // Unwrap: A valid catalog was built with this table name.
-            let catalog_schema = table.schema().unwrap();
-            let ranges =
-                scanned_ranges::ranges_for_table(&ctx, catalog_schema, table.table()).await?;
+            let tbl = TableId {
+                // Unwrap: table references are of the partial form: [dataset].[table_name]
+                dataset: table.schema().unwrap(),
+                dataset_version: None,
+                table: table.table(),
+            };
+            let ranges = scanned_ranges::ranges_for_table(&ctx, metadata_db, tbl).await?;
             let ranges = MultiRange::from_ranges(ranges)?;
             let synced = ranges.intersection(&needed_range) == needed_range;
             if !synced {
@@ -163,12 +168,17 @@ pub async fn max_end_block(
         return Ok(None);
     }
 
-    let ctx = dataset_store.ctx_for_sql(&query, env).await?;
+    let ctx = dataset_store.clone().ctx_for_sql(&query, env).await?;
+    let metadata_db = &dataset_store.metadata_db;
 
     let synced_block_for_table = move |ctx, table: TableReference| async move {
-        // Unwrap: A valid catalog was built with this table name.
-        let catalog_schema = table.schema().unwrap();
-        let ranges = scanned_ranges::ranges_for_table(ctx, catalog_schema, table.table()).await?;
+        let tbl = TableId {
+            // Unwrap: table references are of the partial form: [dataset].[table_name]
+            dataset: table.schema().unwrap(),
+            dataset_version: None,
+            table: table.table(),
+        };
+        let ranges = scanned_ranges::ranges_for_table(ctx, metadata_db.as_ref(), tbl).await?;
         let ranges = MultiRange::from_ranges(ranges)?;
 
         // Take the end block of the earliest contiguous range as the "synced block"

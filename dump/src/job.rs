@@ -2,6 +2,7 @@ use common::multirange::MultiRange;
 use common::parquet::file::properties::WriterProperties as ParquetWriterProperties;
 use common::{BlockStreamer, BoxError, QueryContext};
 use log::info;
+use metadata_db::MetadataDb;
 use std::collections::BTreeMap;
 use std::{sync::Arc, time::Instant};
 
@@ -21,6 +22,8 @@ pub struct Job<T: BlockStreamer> {
     pub partition_size: u64,
 
     pub scanned_ranges_by_table: BTreeMap<String, MultiRange>,
+
+    pub metadata_db: Option<Arc<MetadataDb>>,
 }
 
 // Spawning a job:
@@ -64,6 +67,7 @@ async fn run_job_range(
 
     let mut writer = DatasetWriter::new(
         job.dataset_ctx.clone(),
+        job.metadata_db.clone(),
         job.parquet_opts.clone(),
         start,
         end,

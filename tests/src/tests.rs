@@ -32,7 +32,10 @@ async fn evm_rpc_single() {
     )
     .await
     .expect("temp dump failed");
-    temp_dump.assert_eq(&blessed).await.unwrap();
+    temp_dump
+        .assert_eq(&blessed, Some(&*metadata_db))
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
@@ -53,5 +56,5 @@ async fn eth_firehose_single() {
         SnapshotContext::temp_dump(&dataset_name, 15_000_000, 15_000_000, None, *KEEP_TEMP_DIRS)
             .await
             .expect("temp dump failed");
-    temp_dump.assert_eq(&blessed).await.unwrap();
+    temp_dump.assert_eq(&blessed, None).await.unwrap();
 }

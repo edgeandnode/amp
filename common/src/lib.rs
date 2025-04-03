@@ -18,6 +18,8 @@ pub use catalog::logical::*;
 pub use datafusion::arrow;
 pub use datafusion::parquet;
 pub use query_context::QueryContext;
+use serde::Deserialize;
+use serde::Serialize;
 pub use store::Store;
 
 use std::future::Future;
@@ -54,7 +56,7 @@ pub type EvmAddressArrayType = FixedSizeBinaryArray;
 /// Payment amount in the EVM. Used for gas or value transfers.
 pub const EVM_CURRENCY_TYPE: DataType = DataType::Decimal128(DECIMAL128_MAX_PRECISION, 0);
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize)]
 pub struct Timestamp(pub Duration);
 
 impl Timestamp {

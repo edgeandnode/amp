@@ -3,15 +3,17 @@ use std::{collections::BTreeMap, sync::Arc};
 use datafusion::{
     arrow::datatypes::SchemaRef,
     logical_expr::{col, SortExpr},
+    parquet::arrow::async_reader::{AsyncFileReader, ParquetObjectReader},
     sql::TableReference,
 };
-use futures::{stream, TryStreamExt};
+use futures::{stream, StreamExt, TryStreamExt};
 use metadata_db::{LocationId, MetadataDb, TableId};
 use object_store::{path::Path, ObjectMeta, ObjectStore};
 use url::Url;
 
 use super::logical::Table;
 use crate::{
+    meta_tables::scanned_ranges::{self, ScannedRange},
     store::{infer_object_store, Store},
     BoxError, Dataset,
 };
@@ -51,12 +53,6 @@ impl Catalog {
     pub fn all_tables(&self) -> impl Iterator<Item = &PhysicalTable> {
         self.datasets.iter().flat_map(|dataset| dataset.tables())
     }
-
-    pub fn all_meta_tables(&self) -> impl Iterator<Item = &PhysicalTable> {
-        self.datasets
-            .iter()
-            .flat_map(|dataset| dataset.meta_tables())
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -82,7 +78,7 @@ impl PhysicalDataset {
         validate_name(&dataset_name)?;
 
         let mut physical_tables = vec![];
-        for table in dataset.tables_with_meta() {
+        for table in dataset.tables() {
             match metadata_db {
                 Some(db) => {
                     // If an active location exists for this table, this `PhysicalTable` will point to that location.
@@ -252,6 +248,14 @@ impl PhysicalTable {
         &self.table_ref
     }
 
+    pub fn table_id(&self) -> TableId<'_> {
+        TableId {
+            dataset: self.catalog_schema(),
+            dataset_version: None,
+            table: self.table_name(),
+        }
+    }
+
     pub fn order_exprs(&self) -> Vec<Vec<SortExpr>> {
         self.table
             .sorted_by()
@@ -329,6 +333,51 @@ impl PhysicalTable {
             .filter(|(filename, _)| is_dump_file(filename))
             .collect();
         Ok(files)
+    }
+
+    // TODO: Break this into smaller functions
+    // TODO: Buffer the stream and sort the ranges after
+    pub async fn ranges(&self) -> Result<Vec<(u64, u64)>, BoxError> {
+        let mut ranges = vec![];
+        let mut file_list = self.object_store.list(Some(self.path()));
+
+        while let Some(object_meta_result) = file_list.next().await {
+            let mut reader =
+                ParquetObjectReader::new(self.object_store.clone(), object_meta_result?);
+
+            let parquet_metadata = reader.get_metadata().await?;
+
+            let key_value_metadata = parquet_metadata
+                .file_metadata()
+                .key_value_metadata()
+                .ok_or(crate::ArrowError::ParquetError(format!(
+                    "Unable to fetch Key Value metadata for file {}",
+                    self.path
+                )))?;
+
+            let scanned_range_key_value_pair = key_value_metadata
+                .into_iter()
+                .find(|key_value| key_value.key.as_str() == scanned_ranges::METADATA_KEY)
+                .ok_or(crate::ArrowError::ParquetError(format!(
+                    "Missing key: {} in file metadata for file {}",
+                    scanned_ranges::METADATA_KEY,
+                    self.path
+                )))?;
+
+            let range = scanned_range_key_value_pair
+                .value
+                .as_ref()
+                .ok_or(crate::ArrowError::ParseError(format!(
+                    "Unable to parse ScannedRange from key value metadata for file {}",
+                    self.path
+                )))
+                .map(|scanned_range_json| serde_json::from_str::<ScannedRange>(scanned_range_json))?
+                .map(|scanned_range| (scanned_range.range_start, scanned_range.range_end))?;
+
+            ranges.push(range);
+        }
+
+        Ok(ranges)
     }
 
     /// Truncate this table by deleting all dump files making up the table
