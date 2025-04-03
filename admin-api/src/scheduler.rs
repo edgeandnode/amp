@@ -40,8 +40,13 @@ impl Scheduler {
                 let dataset_store = DatasetStore::new(config.clone(), None);
                 let dataset = {
                     let dataset = dataset_store.load_dataset(&manifest.name).await?;
-                    PhysicalDataset::from_dataset_at(dataset, config.data_store.clone(), None)
-                        .await?
+                    PhysicalDataset::from_dataset_at(
+                        dataset,
+                        config.data_store.clone(),
+                        None,
+                        false,
+                    )
+                    .await?
                 };
 
                 let join_handle = tokio::spawn(async move {

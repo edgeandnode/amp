@@ -1,86 +1,75 @@
 name: Continuous Integration
-
 on:
   push:
     branches: [main]
   pull_request:
-    types: [opened, synchronize, reopened]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref }}
 
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: full
+  RUSTFLAGS: "-D warnings"
 
 jobs:
   unit-tests:
     name: Unit tests
-    runs-on: ubuntu-latest
+    runs-on: nscloud-ubuntu-22.04-amd64-16x32
     timeout-minutes: 10
-    env:
-      RUSTFLAGS: "-D warnings"
     steps:
-      - uses: actions/checkout@v3
-      - uses: Swatinem/rust-cache@v2
-      - name: Install deps
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - name: Install dependencies
         run: sudo apt-get install -y protobuf-compiler
       - name: Unit tests
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --verbose --workspace --exclude tests -- --nocapture
+        run: cargo test --verbose --workspace --exclude tests -- --nocapture
 
   integration-tests:
     name: Integration tests
-    runs-on: ubuntu-latest
+    runs-on: nscloud-ubuntu-22.04-amd64-16x32
     timeout-minutes: 10
-    env:
-      RUSTFLAGS: "-D warnings"
-      FIREHOSE_ETH_MAINNET_URL: ${{ secrets.FIREHOSE_ETH_MAINNET_URL }}
-      FIREHOSE_ETH_MAINNET_TOKEN: ${{ secrets.FIREHOSE_ETH_MAINNET_TOKEN }}
-      RPC_ETH_MAINNET_URL: ${{ secrets.RPC_ETH_MAINNET_URL }}
     steps:
-      - uses: actions/checkout@v2
-      - uses: Swatinem/rust-cache@v2
-      - name: Install deps
-        run: sudo apt-get install -y protobuf-compiler
-      - name: Copy firehose provider file
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - name: Install dependencies
+        run: sudo apt-get install -y protobuf-compiler postgresql
+      - name: Add PostgreSQL binaries to PATH
         run: |
-          envsubst < tests/config/providers/COPY_ME_firehose_eth_mainnet.toml \
-                   > tests/config/providers/firehose_eth_mainnet.toml
-      - name: Copy rpc provider file
+          echo "/usr/lib/postgresql/$(pg_lsclusters | awk 'NR==2 {print $1}')/bin" >> $GITHUB_PATH
+
+      - name: Copy provider files
         run: |
-          envsubst < tests/config/providers/COPY_ME_rpc_eth_mainnet.toml \
-                   > tests/config/providers/rpc_eth_mainnet.toml
+          cp tests/config/providers/COPY_ME_firehose_eth_mainnet.toml tests/config/providers/firehose_eth_mainnet.toml
+          cp tests/config/providers/COPY_ME_rpc_eth_mainnet.toml tests/config/providers/rpc_eth_mainnet.toml
+          sed -i -e "s@\$FIREHOSE_ETH_MAINNET_URL@$FIREHOSE_ETH_MAINNET_URL@g" -e "s@\$FIREHOSE_ETH_MAINNET_TOKEN@$FIREHOSE_ETH_MAINNET_TOKEN@g" tests/config/providers/firehose_eth_mainnet.toml
+          sed -i -e "s@\$RPC_ETH_MAINNET_URL@$RPC_ETH_MAINNET_URL@g" tests/config/providers/rpc_eth_mainnet.toml
+        env:
+          FIREHOSE_ETH_MAINNET_URL: ${{ secrets.FIREHOSE_ETH_MAINNET_URL }}
+          FIREHOSE_ETH_MAINNET_TOKEN: ${{ secrets.FIREHOSE_ETH_MAINNET_TOKEN }}
+          RPC_ETH_MAINNET_URL: ${{ secrets.RPC_ETH_MAINNET_URL }}
       - name: Integration tests
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --verbose -p tests -- --nocapture
+        run: cargo test --verbose -p tests -- --nocapture
 
   rustfmt:
     name: Check rustfmt style
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-default
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
       - name: Check formatting
-        uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --all -- --check
+        run: cargo fmt --all -- --check
 
   release-check:
     name: Build in release mode
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    env:
-      RUSTFLAGS: "-D warnings"
+    runs-on: nscloud-ubuntu-22.04-amd64-16x32
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v3
-      - uses: Swatinem/rust-cache@v2
-      - name: Install deps
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - name: Install dependencies
         run: sudo apt-get install -y protobuf-compiler
       - name: Cargo check (release)
-        uses: actions-rs/cargo@v1
-        with:
-          command: check
-          args: --release
+        run: cargo check --release

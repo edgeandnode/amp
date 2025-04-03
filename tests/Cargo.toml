@@ -10,11 +10,13 @@ name = "tests"
 name = "tests"
 
 [dependencies]
+pgtemp = "0.6.0"
 clap.workspace = true
 common = { path = "../common" }
 dataset-store = { path = "../dataset-store" }
 dump = { path = "../dump" }
 dump-check = { path = "../dump-check" }
+metadata-db = { path = "../metadata-db" }
 figment.workspace = true
 fs-err.workspace = true
 futures.workspace = true
