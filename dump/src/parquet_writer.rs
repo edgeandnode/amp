@@ -203,7 +203,8 @@ impl TableWriter {
 
             match (metadata_db, location_id) {
                 (Some(metadata_db), Some(location_id)) => {
-                    insert_scanned_range(scanned_range.clone().unwrap(), metadata_db, location_id).await?
+                    insert_scanned_range(scanned_range.clone().unwrap(), metadata_db, location_id)
+                        .await?
                 }
                 (None, None) => {}
                 _ => {
