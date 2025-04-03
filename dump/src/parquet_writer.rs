@@ -75,12 +75,13 @@ impl DatasetWriter {
             let location_id = writer.table.location_id();
             let dataset_name = writer.table.catalog_schema().to_string();
 
-            let scanned_range = writer.close().await?;
-            match (location_id, self.metadata_db.clone(), scanned_range) {
-                (Some(location_id), Some(metadata_db), Some(scanned_range)) => {
+            // Unwrap: `writer.close()` always returns `Some(scanned_range)`
+            let scanned_range = writer.close().await?.unwrap();
+            match (location_id, self.metadata_db.clone()) {
+                (Some(location_id), Some(metadata_db)) => {
                     insert_scanned_range(scanned_range, metadata_db, location_id).await?
                 }
-                (None, None, None) => {}
+                (None, None) => {}
                 _ => {
                     panic!(
                         "inconsistent metadata state for {}, location id: {:?}",
@@ -200,11 +201,11 @@ impl TableWriter {
             let location_id = self.table.location_id();
             let dataset_name = self.table.catalog_schema().to_string();
 
-            match (&scanned_range, metadata_db, location_id) {
-                (Some(scanned_range), Some(metadata_db), Some(location_id)) => {
-                    insert_scanned_range(scanned_range.clone(), metadata_db, location_id).await?
+            match (metadata_db, location_id) {
+                (Some(metadata_db), Some(location_id)) => {
+                    insert_scanned_range(scanned_range.clone().unwrap(), metadata_db, location_id).await?
                 }
-                (None, None, None) => {}
+                (None, None) => {}
                 _ => {
                     panic!(
                         "inconsistent metadata state for {}, location id: {:?}",
