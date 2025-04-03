@@ -106,7 +106,11 @@ impl SnapshotContext {
         })
     }
 
-    async fn check_scanned_range_eq(&self, other: &SnapshotContext, metadata_db: Option<&MetadataDb>) -> Result<(), BoxError> {
+    async fn check_scanned_range_eq(
+        &self,
+        other: &SnapshotContext,
+        metadata_db: Option<&MetadataDb>,
+    ) -> Result<(), BoxError> {
         use common::meta_tables::scanned_ranges::{ranges_for_table, scanned_ranges_by_table};
 
         let other_scanned_ranges = scanned_ranges_by_table(&other.ctx, None).await?;
@@ -129,7 +133,11 @@ impl SnapshotContext {
     }
 
     /// Typically used to check a fresh snapshot against a blessed one.
-    pub async fn assert_eq(&self, other: &SnapshotContext, metadata_db: Option<&MetadataDb>) -> Result<(), BoxError> {
+    pub async fn assert_eq(
+        &self,
+        other: &SnapshotContext,
+        metadata_db: Option<&MetadataDb>,
+    ) -> Result<(), BoxError> {
         self.check_scanned_range_eq(other, metadata_db).await?;
 
         for table in self.ctx.catalog().all_tables() {

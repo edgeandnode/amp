@@ -32,7 +32,10 @@ async fn evm_rpc_single() {
     )
     .await
     .expect("temp dump failed");
-    temp_dump.assert_eq(&blessed, Some(&*metadata_db)).await.unwrap();
+    temp_dump
+        .assert_eq(&blessed, Some(&*metadata_db))
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
