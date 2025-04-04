@@ -1,4 +1,4 @@
-mod job;
+mod job_partition;
 mod metrics; // unused for now
 pub mod operator;
 mod parquet_writer;
@@ -32,7 +32,7 @@ use dataset_store::DatasetStore;
 use futures::future::try_join_all;
 use futures::TryFutureExt as _;
 use futures::TryStreamExt;
-use job::JobPartition;
+use job_partition::JobPartition;
 use log::info;
 use log::warn;
 use metadata_db::MetadataDb;
