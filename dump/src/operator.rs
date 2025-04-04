@@ -10,75 +10,75 @@ use common::{
     BoxError,
 };
 use dataset_store::DatasetStore;
-use metadata_db::{MetadataDb, OperatorDatabaseId};
+use metadata_db::{JobDatabaseId, MetadataDb};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, instrument};
 
 use crate::{default_parquet_opts, default_partition_size, dump_dataset};
 
-/// This is currently very simple, but the operator abstraction is expected to become a central one.
+/// This is currently very simple, but the job abstraction is expected to become a central one.
 ///
-/// Three kinds of operators are expected to exist:
-/// - External Datasets, that read from an adapter and often write to all their tables at once.
+/// Three kinds of jobs are expected to exist:
+/// - Raw Datasets, that read from an adapter and often write to all their tables at once.
 /// - Views, which write the output of a SQL query to a single table.
 /// - Stream Handlers, which run stateful user code over an ordered input stream, potentially writing
 ///   to multiple tables.
 ///
-/// Currently, the "dump operator" is what have implemented so that's what we have here.
+/// Currently, the "dump job" is what have implemented so that's what we have here.
 #[derive(Debug, Clone)]
-pub enum Operator {
+pub enum Job {
     DumpDataset { dataset: PhysicalDataset },
 }
 
-impl fmt::Display for Operator {
+impl fmt::Display for Job {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Operator::DumpDataset { dataset } => {
+            Job::DumpDataset { dataset } => {
                 write!(f, "DumpDataset({})", dataset.name())
             }
         }
     }
 }
 
-/// The logical descriptor of an operator, as stored in the `descriptor` column of the `operators`
+/// The logical descriptor of an job, as stored in the `descriptor` column of the `jobs`
 /// metadata DB table.
 #[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Serialize, Deserialize)]
-pub enum OperatorDesc {
+pub enum JobDesc {
     DumpDataset { dataset: String },
 }
 
-impl Operator {
-    /// Load an operator from the database.
+impl Job {
+    /// Load a job from the database.
     #[instrument(skip(config, metadata_db), err)]
     pub async fn load(
-        operator_id: OperatorDatabaseId,
+        job_id: JobDatabaseId,
         config: Arc<Config>,
         metadata_db: MetadataDb,
-    ) -> Result<Operator, BoxError> {
-        let raw_desc = metadata_db.operator_desc(operator_id).await?;
-        let operator_desc: OperatorDesc = serde_json::from_str(&raw_desc)
-            .map_err(|e| format!("error parsing operator descriptor `{}`: {}", raw_desc, e))?;
-        let output_locations = metadata_db.output_locations(operator_id).await?;
+    ) -> Result<Job, BoxError> {
+        let raw_desc = metadata_db.job_desc(job_id).await?;
+        let job_desc: JobDesc = serde_json::from_str(&raw_desc)
+            .map_err(|e| format!("error parsing job descriptor `{}`: {}", raw_desc, e))?;
+        let output_locations = metadata_db.output_locations(job_id).await?;
 
-        match operator_desc {
-            OperatorDesc::DumpDataset { dataset } => {
+        match job_desc {
+            JobDesc::DumpDataset { dataset } => {
                 let dataset_store = DatasetStore::new(config.clone(), Some(metadata_db.clone()));
                 let dataset = dataset_store.load_dataset(&dataset).await?;
 
-                // Consistency check: All tables must be present in the operator's output.
+                // Consistency check: All tables must be present in the job's output.
                 let dataset_tables = dataset
                     .tables()
                     .into_iter()
                     .map(|t| t.name.to_string())
                     .collect::<BTreeSet<_>>();
-                let operator_tables = output_locations
+                let job_tables = output_locations
                     .iter()
                     .map(|(_, tbl, _)| tbl.clone())
                     .collect::<BTreeSet<_>>();
-                if dataset_tables != operator_tables {
+                if dataset_tables != job_tables {
                     return Err(format!(
-                        "Inconsistent operator state: dataset tables and operator output tables do not match: {:?} != {:?}",
-                        dataset_tables, operator_tables
+                        "Inconsistent job state: dataset tables and job output tables do not match: {:?} != {:?}",
+                        dataset_tables, job_tables
                     ).into());
                 }
 
@@ -99,7 +99,7 @@ impl Operator {
                     )?);
                 }
 
-                Ok(Operator::DumpDataset {
+                Ok(Job::DumpDataset {
                     dataset: PhysicalDataset::new(dataset, physical_tables),
                 })
             }
@@ -108,9 +108,9 @@ impl Operator {
 
     pub async fn run(&self, config: Arc<Config>, metadata_db: MetadataDb) -> Result<(), BoxError> {
         match self {
-            Operator::DumpDataset { dataset } => {
+            Job::DumpDataset { dataset } => {
                 debug!(
-                    "Starting dump operator for dataset {} with location ids {:?}",
+                    "Starting dump job for dataset {} with location ids {:?}",
                     dataset.name(),
                     dataset.location_ids()
                 );

@@ -55,7 +55,7 @@ impl RequestError for DeployError {
 ///
 /// # Metadata DB
 ///
-/// If a metadata DB is configured, a dump operator is scheduled on a worker node by means of a DB
+/// If a metadata DB is configured, a dump job is scheduled on a worker node by means of a DB
 /// notification.
 #[instrument(skip_all, err)]
 pub async fn deploy_handler(
