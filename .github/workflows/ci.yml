@@ -23,9 +23,6 @@ jobs:
     runs-on: nscloud-ubuntu-22.04-amd64-16x32
     timeout-minutes: 10
     steps:
-      - name: Set up GitHub credentials for private Git deps
-        run: |
-          git config --global url."https://${{ secrets.GITHUB_TOKEN }}:@github.com/".insteadOf "https://github.com/"
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
       - name: Install dependencies
         run: sudo apt-get install -y protobuf-compiler
