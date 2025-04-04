@@ -1,6 +1,6 @@
+pub mod job;
 mod job_partition;
 mod metrics; // unused for now
-pub mod operator;
 mod parquet_writer;
 pub mod worker;
 
