@@ -6,7 +6,7 @@ use common::{
 };
 use dataset_store::DatasetStore;
 use dump::{
-    operator::JobDesc,
+    job::JobDesc,
     worker::{Action, WorkerAction, WORKER_ACTIONS_PG_CHANNEL},
 };
 use metadata_db::MetadataDb;

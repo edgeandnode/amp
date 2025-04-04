@@ -12,7 +12,7 @@ use tokio::{
 };
 use tracing::{info, instrument};
 
-use crate::operator::Job;
+use crate::job::Job;
 
 pub const WORKER_ACTIONS_PG_CHANNEL: &str = "worker_actions";
 
