@@ -8,11 +8,11 @@ use std::{sync::Arc, time::Instant};
 
 use crate::parquet_writer::DatasetWriter;
 
-pub struct Job<T: BlockStreamer> {
+pub struct JobPartition<T: BlockStreamer> {
     pub dataset_ctx: Arc<QueryContext>,
     pub block_streamer: T,
     pub multirange: MultiRange,
-    pub job_id: u32,
+    pub id: u32,
     pub parquet_opts: ParquetWriterProperties,
 
     // The target size of each table partition file in bytes. This is measured as the estimated
@@ -26,68 +26,68 @@ pub struct Job<T: BlockStreamer> {
     pub metadata_db: Option<Arc<MetadataDb>>,
 }
 
-// Spawning a job:
-// - Spawns a task to fetch blocks from the `client`.
-// - Returns a future that will read that block stream and write a parquet file to the object store.
-pub async fn run(job: Arc<Job<impl BlockStreamer>>) -> Result<(), BoxError> {
-    info!("job #{} ranges to scan: {}", job.job_id, job.multirange);
-
-    // The ranges are run sequentially by design, as parallelism is controlled by the number of jobs.
-    for range in &job.multirange.ranges {
+impl<S: BlockStreamer> JobPartition<S> {
+    // - Spawns a task to fetch blocks from the `client`.
+    // - Returns a future that will read that block stream and write a parquet file to the object store.
+    pub async fn run(self: Arc<Self>) -> Result<(), BoxError> {
         info!(
-            "job #{} starting scan for range [{}, {}]",
-            job.job_id, range.0, range.1
+            "job partition #{} ranges to scan: {}",
+            self.id, self.multirange
         );
-        let start_time = Instant::now();
 
-        run_job_range(job.clone(), range.0, range.1).await?;
+        // The ranges are run sequentially by design, as parallelism is controlled by the number of jobs.
+        for range in &self.multirange.ranges {
+            info!(
+                "job partition #{} starting scan for range [{}, {}]",
+                self.id, range.0, range.1
+            );
+            let start_time = Instant::now();
 
-        info!(
-            "job #{} finished scan for range [{}, {}] in {} minutes",
-            job.job_id,
-            range.0,
-            range.1,
-            start_time.elapsed().as_secs() / 60
-        );
-    }
-    Ok(())
-}
+            self.run_range(range.0, range.1).await?;
 
-async fn run_job_range(
-    job: Arc<Job<impl BlockStreamer>>,
-    start: u64,
-    end: u64,
-) -> Result<(), BoxError> {
-    let (mut extractor, extractor_join_handle) = {
-        let block_streamer = job.block_streamer.clone();
-        let (tx, rx) = tokio::sync::mpsc::channel(100);
-        let extractor_task = block_streamer.block_stream(start, end, tx);
-        (rx, tokio::spawn(extractor_task))
-    };
-
-    let mut writer = DatasetWriter::new(
-        job.dataset_ctx.clone(),
-        job.metadata_db.clone(),
-        job.parquet_opts.clone(),
-        start,
-        end,
-        job.partition_size,
-        job.scanned_ranges_by_table.clone(),
-    )?;
-
-    while let Some(dataset_rows) = extractor.recv().await {
-        for table_rows in dataset_rows {
-            writer.write(table_rows).await?;
+            info!(
+                "job partition #{} finished scan for range [{}, {}] in {} minutes",
+                self.id,
+                range.0,
+                range.1,
+                start_time.elapsed().as_secs() / 60
+            );
         }
+        Ok(())
     }
 
-    // The extraction task stopped sending blocks, so it must have terminated. Here we wait for it to
-    // finish and check for any errors and panics.
-    log::debug!("Waiting for job #{} to finish", job.job_id);
-    extractor_join_handle.await??;
+    async fn run_range(&self, start: u64, end: u64) -> Result<(), BoxError> {
+        let (mut extractor, extractor_join_handle) = {
+            let block_streamer = self.block_streamer.clone();
+            let (tx, rx) = tokio::sync::mpsc::channel(100);
+            let extractor_task = block_streamer.block_stream(start, end, tx);
+            (rx, tokio::spawn(extractor_task))
+        };
 
-    // Close the last part file for each table, checking for any errors.
-    writer.close().await?;
+        let mut writer = DatasetWriter::new(
+            self.dataset_ctx.clone(),
+            self.metadata_db.clone(),
+            self.parquet_opts.clone(),
+            start,
+            end,
+            self.partition_size,
+            self.scanned_ranges_by_table.clone(),
+        )?;
 
-    Ok(())
+        while let Some(dataset_rows) = extractor.recv().await {
+            for table_rows in dataset_rows {
+                writer.write(table_rows).await?;
+            }
+        }
+
+        // The extraction task stopped sending blocks, so it must have terminated. Here we wait for it to
+        // finish and check for any errors and panics.
+        log::debug!("Waiting for job partition #{} to finish", self.id);
+        extractor_join_handle.await??;
+
+        // Close the last part file for each table, checking for any errors.
+        writer.close().await?;
+
+        Ok(())
+    }
 }

@@ -32,7 +32,7 @@ use dataset_store::DatasetStore;
 use futures::future::try_join_all;
 use futures::TryFutureExt as _;
 use futures::TryStreamExt;
-use job::Job;
+use job::JobPartition;
 use log::info;
 use log::warn;
 use metadata_db::MetadataDb;
@@ -83,7 +83,7 @@ pub async fn dump_dataset(
     let kind = DatasetKind::from_str(dataset.kind())?;
     match kind {
         DatasetKind::EvmRpc | DatasetKind::Firehose | DatasetKind::Substreams => {
-            run_block_stream_jobs(
+            dump_raw_dataset(
                 n_jobs,
                 ctx,
                 &dataset.name(),
@@ -129,7 +129,7 @@ pub async fn dump_dataset(
     Ok(())
 }
 
-async fn run_block_stream_jobs(
+async fn dump_raw_dataset(
     n_jobs: u16,
     ctx: Arc<QueryContext>,
     dataset_name: &str,
@@ -170,12 +170,12 @@ async fn run_block_stream_jobs(
 
     let metadata_db = dataset_store.metadata_db.as_ref().cloned().map(Arc::new);
     let jobs = multiranges.into_iter().enumerate().map(|(i, multirange)| {
-        Arc::new(Job {
+        Arc::new(JobPartition {
             dataset_ctx: ctx.clone(),
             metadata_db: metadata_db.clone(),
             block_streamer: client.clone(),
             multirange,
-            job_id: i as u32,
+            id: i as u32,
             partition_size,
             parquet_opts: parquet_opts.clone(),
             scanned_ranges_by_table: scanned_ranges_by_table.clone(),
@@ -185,7 +185,7 @@ async fn run_block_stream_jobs(
     // Spawn the jobs so they run in parallel, terminating early if any job fails.
     let mut join_handles = vec![];
     for job in jobs {
-        let handle = tokio::spawn(job::run(job));
+        let handle = tokio::spawn(job.run());
 
         // Stagger the start of each job by 1 second in an attempt to avoid client rate limits.
         tokio::time::sleep(Duration::from_secs(1)).await;
