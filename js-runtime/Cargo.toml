@@ -1,0 +1,10 @@
+[package]
+name = "js-runtime"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+v8 = "135.1.0"
+datafusion.workspace = true
+thiserror.workspace = true
+blake3.workspace = true

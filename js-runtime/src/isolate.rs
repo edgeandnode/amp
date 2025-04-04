@@ -1,0 +1,203 @@
+use crate::{
+    convert::FromV8,
+    exception::{exception_position, ExceptionMessage},
+    init_platform, BoxError,
+};
+use datafusion::common::HashMap;
+use v8::{
+    script_compiler::{CompileOptions, NoCacheReason},
+    Handle as _,
+};
+
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("exception in script: {0}")]
+    Exception(#[from] ExceptionMessage),
+
+    #[error("string too long: {0}")]
+    StringTooLong(usize),
+
+    #[error("function {0} not found")]
+    FunctionNotFound(String),
+
+    #[error("runtime error: {0}")]
+    Other(String),
+
+    #[error("error converting return value: {0}")]
+    ConvertReturnValue(BoxError),
+}
+
+pub struct Isolate {
+    isolate: v8::OwnedIsolate,
+
+    // TODO: Use cache capable of evicting
+    scripts: HashMap<blake3::Hash, v8::Global<v8::UnboundScript>>,
+}
+
+impl Isolate {
+    pub fn new() -> Self {
+        // Ensure the platform is initialized.
+        init_platform();
+
+        let isolate = v8::Isolate::new(v8::CreateParams::default());
+        Self {
+            isolate,
+            scripts: HashMap::new(),
+        }
+    }
+
+    /// Compile a script. This is cached.
+    ///
+    /// `filename` is only used for display in stack traces.
+    fn compile_script(
+        &mut self,
+        filename: &str,
+        script: &str,
+    ) -> Result<v8::Global<v8::UnboundScript>, Error> {
+        let key = blake3::hash(script.as_bytes());
+
+        if let Some(script) = self.scripts.get(&key) {
+            return Ok(script.clone());
+        }
+
+        let s = &mut v8::HandleScope::new(&mut self.isolate);
+        let origin = {
+            let filename = v8_string(s, filename)?;
+            script_origin(s, filename)
+        };
+        let mut source = v8::script_compiler::Source::new(v8_string(s, script)?, Some(&origin));
+        let context = v8::Context::new(s, v8::ContextOptions::default());
+        let compiled_script = {
+            let s = &mut v8::ContextScope::new(s, context);
+            let s = &mut v8::TryCatch::new(s);
+            match v8::script_compiler::compile_unbound_script(
+                s,
+                &mut source,
+                CompileOptions::EagerCompile,
+                NoCacheReason::NoReason,
+            ) {
+                Some(compiled_script) => v8::Global::new(s, compiled_script),
+                None => return Err(catch(s).into()),
+            }
+        };
+        self.scripts.insert(key, compiled_script.clone());
+        Ok(compiled_script)
+    }
+
+    /// Invoke a function in a fresh context (aka JS realm).
+    ///
+    /// `filename` is only used for display in stack traces.
+    ///
+    /// TODO: Support params
+    pub fn invoke<R: FromV8>(
+        &mut self,
+        filename: &str,
+        script: &str,
+        function: &str,
+    ) -> Result<R, Error> {
+        let script = self.compile_script(filename, script)?;
+
+        // Enter a fresh context.
+        let s = &mut v8::HandleScope::new(&mut self.isolate);
+        let context = v8::Context::new(s, v8::ContextOptions::default());
+        let s = &mut v8::ContextScope::new(s, context);
+
+        // Load script.
+        let script = v8::Local::new(s, &script).bind_to_current_context(s);
+        let s = &mut v8::TryCatch::new(s);
+        match script.run(s) {
+            Some(_) => {} // Ignore script return value
+            None => return Err(catch(s).into()),
+        }
+
+        // Call function
+        let func = get_function(s, function)?;
+        let undefined = v8::undefined(s);
+
+        // TODO: handle function return value
+        let ret_val = match func.open(s).call(s, undefined.into(), &[]) {
+            Some(ret_val) => ret_val,
+            None => return Err(catch(s).into()),
+        };
+
+        R::from_v8(s, ret_val).map_err(Error::ConvertReturnValue)
+    }
+}
+
+/// Global context must define a `Module` that contains a `run` function
+pub fn get_function<'s>(
+    s: &mut v8::HandleScope<'s>,
+    func_name: &str,
+) -> Result<v8::Local<'s, v8::Function>, Error> {
+    let context = s.get_current_context();
+
+    let global = context
+        .global(s)
+        .to_object(s)
+        .ok_or_else(|| Error::Other("Failed to get global object".to_string()))?;
+
+    let v8_func_name = v8_string(s, func_name)?;
+    let func = global
+        .get(s, v8_func_name.into())
+        .ok_or_else(|| Error::FunctionNotFound(func_name.to_string()))?;
+
+    if !func.is_function() {
+        return Err(Error::FunctionNotFound(func_name.to_string()));
+    }
+
+    // Unwrap: we checked that it is a function
+    Ok(v8::Local::<v8::Function>::try_from(func).unwrap())
+}
+
+// Errors if the string is too long
+fn v8_string<'s>(
+    scope: &mut v8::HandleScope<'s, ()>,
+    s: &str,
+) -> Result<v8::Local<'s, v8::String>, Error> {
+    v8::String::new_from_utf8(scope, s.as_bytes(), v8::NewStringType::Normal)
+        .ok_or(Error::StringTooLong(s.len()))
+}
+
+fn script_origin<'s>(
+    scope: &mut v8::HandleScope<'s, ()>,
+    filename: v8::Local<'s, v8::String>,
+) -> v8::ScriptOrigin<'s> {
+    v8::ScriptOrigin::new(
+        scope,
+        filename.into(),
+        0,
+        0,
+        false,
+        -1,
+        None,
+        false,
+        false,
+        false,
+        None,
+    )
+}
+
+// If this function is called but no exception has been caught by `s`, it will panic.
+fn catch<'s, 't, S>(s: &mut v8::TryCatch<'s, S>) -> ExceptionMessage
+where
+    v8::TryCatch<'s, S>: AsMut<v8::HandleScope<'t, ()>>,
+    v8::TryCatch<'s, S>: AsMut<v8::HandleScope<'t>>,
+    't: 's,
+{
+    assert!(s.has_caught());
+
+    // Unwrap: an exception has been caught
+    let exception = s.exception().unwrap().to_rust_string_lossy(s.as_mut());
+    let position = s.message().map(|m| exception_position(s.as_mut(), m));
+
+    let stack = s.stack_trace().and_then(|val| {
+        val.to_string(s.as_mut())
+            .map(|val| val.to_rust_string_lossy(s.as_mut()))
+    });
+
+    ExceptionMessage {
+        exception,
+        position,
+        stack,
+    }
+}

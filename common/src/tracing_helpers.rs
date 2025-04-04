@@ -15,6 +15,7 @@ const NOZZLE_CRATES: &[&str] = &[
     "evm_rpc_datasets",
     "firehose_datasets",
     "http_common",
+    "js_runtime",
     "metadata_db",
     "nozzle",
     "registry_service",
