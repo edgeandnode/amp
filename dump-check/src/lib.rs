@@ -39,7 +39,6 @@ pub async fn dump_check(
                 block_streamer: client.clone(),
                 start: from,
                 end: to,
-                job_id: jobs.len() as u8,
                 batch_size,
                 ctx: ctx.clone(),
             });
