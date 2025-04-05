@@ -37,6 +37,8 @@
     "removeComments": false,
     "plugins": [{ "name": "@effect/language-service" }],
     "paths": {
+      "@nozzle/nozzle": ["./nozzle/src/index.js"],
+      "@nozzle/nozzle/*": ["./nozzle/src/*.js"],
       "@nozzle/cli": ["./cli/src/index.js"],
       "@nozzle/cli/*": ["./cli/src/*.js"]
     }

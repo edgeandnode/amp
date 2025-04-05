@@ -26,6 +26,9 @@ importers:
       '@effect/schema':
         specifier: ^0.75.5
         version: 0.75.5(effect@3.14.5)
+      '@nozzle/nozzle':
+        specifier: workspace:*
+        version: link:../nozzle
       effect:
         specifier: ^3.14.5
         version: 3.14.5
@@ -39,6 +42,24 @@ importers:
       '@nozzle/cli':
         specifier: workspace:*
         version: link:../cli
+      '@nozzle/nozzle':
+        specifier: workspace:*
+        version: link:../nozzle
+
+  typescript/nozzle:
+    dependencies:
+      '@effect/cli':
+        specifier: ^0.59.5
+        version: 0.59.5(@effect/platform@0.80.5(effect@3.14.5))(@effect/printer-ansi@0.40.12(@effect/typeclass@0.31.12(effect@3.14.5))(effect@3.14.5))(@effect/printer@0.40.12(@effect/typeclass@0.31.12(effect@3.14.5))(effect@3.14.5))(effect@3.14.5)
+      '@effect/platform':
+        specifier: ^0.80.5
+        version: 0.80.5(effect@3.14.5)
+      '@effect/schema':
+        specifier: ^0.75.5
+        version: 0.75.5(effect@3.14.5)
+      effect:
+        specifier: ^3.14.5
+        version: 3.14.5
 
 packages:
 
