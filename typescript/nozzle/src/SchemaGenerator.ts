@@ -79,14 +79,14 @@ const convertType = (type: string) => {
       case "Boolean":
         return "Schema.Boolean";
       case "Binary":
-        return "Schema.Uint8Array";
+        return "Schema.String";
     }
 
     return "Schema.Unknown";
   }
 
   if ('FixedSizeBinary' in type) {
-    return "Schema.Uint8Array";
+    return "Schema.String";
   }
 
   if ('Time32' in type) {
@@ -100,7 +100,7 @@ const convertType = (type: string) => {
   }
 
   if ('Timestamp' in type) {
-    return "Schema.DateTime";
+    return "Schema.DateTimeUtc";
   }
 
   if ('Duration' in type) {
