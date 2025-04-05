@@ -8,6 +8,20 @@ import { ManifestDeployer } from "./ManifestDeployer.js";
 import { Path, FileSystem } from "@effect/platform";
 import * as Model from "./Model.js";
 
+const importFile = Effect.fn("importFile")((file: string) => Effect.tryPromise({
+  try: () => import(file).then((m) => m.default),
+  catch: () => new Error(`Failed to load dataset definition ${file}`),
+}))
+
+const readJson = Effect.fn("readJson")((file: string) => Effect.gen(function* () {
+  const fs = yield* FileSystem.FileSystem;
+  const json = yield* fs.readFileString(file);
+  return yield* Effect.try({
+    try: () => JSON.parse(json),
+    catch: () => new Error(`Failed to parse JSON from ${file}`),
+  })
+}))
+
 const build = Command.make("build", {
   args: {
     output: Options.text("output").pipe(
@@ -36,16 +50,10 @@ const build = Command.make("build", {
     onSome: (dataset) => Effect.succeed(Option.some(path.resolve(dataset))),
   }).pipe(Effect.flatten, Effect.mapError((e) => new Error(`Failed to find dataset definition file`, { cause: e })));
 
-  const dataset = yield* Match.value([path.extname(file), file]).pipe(
-    Match.when(([extension]) => extension === '.js', ([, file]) => Effect.tryPromise({
-      try: () => import(file).then((m) => m.default),
-      catch: () => new Error(`Failed to load dataset definition ${file}`),
-    })),
-    Match.when(([extension]) => extension === '.ts', ([, file]) => Effect.tryPromise({
-      try: () => import(file).then((m) => m.default),
-      catch: () => new Error(`Failed to load dataset definition ${file}`),
-    })),
-    Match.orElse(() => Effect.fail(new Error(`Failed to load dataset definition ${file}`)))
+  const dataset = yield* Match.value(path.extname(file)).pipe(
+    Match.when(Match.is(".js"), () => importFile(file)),
+    Match.when(Match.is(".ts"), () => importFile(file)),
+    Match.orElse(() => Effect.fail(new Error(`Expected a dataset definition file (.js or .ts).`)))
   ).pipe(Effect.flatMap(Schema.decodeUnknown(Model.DatasetDefinition)))
 
   const json = yield* builder.build(dataset).pipe(
@@ -59,10 +67,7 @@ const build = Command.make("build", {
       Effect.tap(() => Effect.log(`Manifest written to ${output}`)),
     ),
   });
-})).pipe(
-  Command.provide(ManifestBuilder.Default),
-  Command.withDescription("Build a dataset")
-);
+})).pipe(Command.withDescription("Build a dataset"));
 
 const deploy = Command.make("deploy", {
   args: {
@@ -90,39 +95,36 @@ const deploy = Command.make("deploy", {
     onSome: (dataset) => Effect.succeed(Option.some(path.resolve(dataset))),
   }).pipe(Effect.flatten, Effect.mapError((e) => new Error(`Failed to find dataset definition file`, { cause: e })));
 
-  const dataset = yield* Match.value([path.extname(file), file]).pipe(
-    Match.when(([extension]) => extension === '.json', ([, file]) => fs.readFileString(file).pipe(
-      Effect.map((json) => JSON.parse(json)),
+  const dataset = yield* Match.value(path.extname(file)).pipe(
+    Match.when(Match.is(".json"), () => readJson(file).pipe(
       Effect.flatMap(Schema.decodeUnknown(Model.DatasetManifest)),
     )),
-    Match.when(([extension]) => extension === '.js', ([, file]) => Effect.tryPromise({
-      try: () => import(file).then((m) => m.default),
-      catch: () => new Error(`Failed to load dataset definition from ${file}`),
-    }).pipe(
+    Match.when(Match.is(".js"), () => importFile(file).pipe(
       Effect.flatMap(Schema.decodeUnknown(Model.DatasetDefinition)),
       Effect.flatMap(builder.build),
     )),
-    Match.when(([extension]) => extension === '.ts', ([, file]) => Effect.tryPromise({
-      try: () => import(file).then((m) => m.default),
-      catch: () => new Error(`Failed to load dataset definition from ${file}`),
-    }).pipe(
+    Match.when(Match.is(".ts"), () => importFile(file).pipe(
       Effect.flatMap(Schema.decodeUnknown(Model.DatasetDefinition)),
       Effect.flatMap(builder.build),
     )),
-    Match.orElse(() => Effect.fail(new Error(`Failed to load dataset definition from ${file}`)))
+    Match.orElse(() => Effect.fail(new Error(`Expected a manifest (.json) or a dataset definition file (.js or .ts)`)))
   ).pipe(Effect.mapError((e) => new Error(`Failed to load manifest from ${file}`, { cause: e })))
 
   const result = yield* deployer.deploy(dataset);
   yield* Effect.log(result);
-})).pipe(
-  Command.provide(ManifestDeployer.Default),
-  Command.provide(ManifestBuilder.Default),
-  Command.withDescription("Deploy a dataset to Nozzle")
-);
+})).pipe(Command.withDescription("Deploy a dataset to Nozzle"));
 
 const command = Command.make("nozzle").pipe(
   Command.withDescription("The Nozzle Command Line Interface"),
-  Command.withSubcommands([build, deploy]),
+  Command.withSubcommands([
+    build.pipe(
+      Command.provide(ManifestBuilder.Default),
+    ),
+    deploy.pipe(
+      Command.provide(ManifestDeployer.Default),
+      Command.provide(ManifestBuilder.Default),
+    )
+  ]),
 );
 
 const cli = Command.run(command, {

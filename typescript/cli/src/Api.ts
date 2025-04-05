@@ -9,9 +9,7 @@ import {
 import { Config, Effect, Schema } from "effect";
 import * as Model from "./Model.js";
 
-class RegstistryApi extends HttpApiGroup.make("registry", {
-  topLevel: true,
-}).add(
+class RegstistryApi extends HttpApiGroup.make("registry", { topLevel: true }).add(
   HttpApiEndpoint.post("schema")`/output_schema`
     .setPayload(Schema.Struct({ sql_query: Schema.String }))
     .addSuccess(Schema.Struct({ schema: Model.TableSchema }))
