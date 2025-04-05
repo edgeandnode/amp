@@ -31,6 +31,17 @@ class AdminApi extends HttpApiGroup.make("admin", { topLevel: true }).add(
 
 export class Admin extends HttpApi.make("admin").add(AdminApi) {}
 
+class JsonLinesApi extends HttpApiGroup.make("jsonl", { topLevel: true }).add(
+  HttpApiEndpoint.post("query")`/`
+    .setPayload(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }))
+    .addSuccess(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }))
+    .addError(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }), { status: 404 })
+    .addError(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }), { status: 422 })
+    .addError(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }), { status: 500 }),
+) {}
+
+export class JsonLines extends HttpApi.make("jsonl").add(JsonLinesApi) {}
+
 export class Api extends Effect.Service<Api>()("Nozzle/Api", {
   dependencies: [FetchHttpClient.layer],
   effect: Effect.gen(function* () {
@@ -41,17 +52,23 @@ export class Api extends Effect.Service<Api>()("Nozzle/Api", {
       admin: Config.string("NOZZLE_ADMIN_URL").pipe(
         Config.withDefault("http://localhost:1610"),
       ),
+      jsonl: Config.string("NOZZLE_JSONL_URL").pipe(
+        Config.withDefault("http://localhost:1603"),
+      ),
     });
 
-    const { registry, admin } = yield* Effect.all({
+    const { registry, admin, jsonl } = yield* Effect.all({
       registry: HttpApiClient.make(Registry, {
         baseUrl: config.registry,
       }),
       admin: HttpApiClient.make(Admin, {
         baseUrl: config.admin,
       }),
+      jsonl: HttpApiClient.make(JsonLines, {
+        baseUrl: config.jsonl,
+      }),
     });
 
-    return { registry, admin };
+    return { registry, admin, jsonl };
   }),
 }) {}

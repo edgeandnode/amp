@@ -45,6 +45,9 @@ importers:
       '@nozzle/nozzle':
         specifier: workspace:*
         version: link:../nozzle
+      effect:
+        specifier: ^3.14.5
+        version: 3.14.5
 
   typescript/nozzle:
     dependencies:

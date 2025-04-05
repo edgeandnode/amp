@@ -4,11 +4,9 @@
     { "path": "../nozzle/tsconfig.src.json" },
     { "path": "../cli/tsconfig.src.json" }
   ],
-  "include": ["src"],
+  "include": ["examples", "nozzle.config.ts"],
   "compilerOptions": {
-    "types": ["node"],
-    "outDir": "build/src",
-    "tsBuildInfoFile": ".tsbuildinfo/src.tsbuildinfo",
-    "rootDir": "src"
+    "noEmit": true,
+    "rootDir": "."
   }
 }

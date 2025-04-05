@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@nozzle/cli": "workspace:*",
-    "@nozzle/nozzle": "workspace:*"
+    "@nozzle/nozzle": "workspace:*",
+    "effect": "^3.14.5"
   }
 }
