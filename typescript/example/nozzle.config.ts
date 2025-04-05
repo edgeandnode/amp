@@ -1,6 +1,6 @@
 import { defineDataset } from "@nozzle/cli";
 
-const event = (event) => {
+const event = (event: string) => {
   return `
     SELECT block_num, timestamp, evm_decode(topic1, topic2, topic3, data, '${event}') as event
     FROM firehose.logs
