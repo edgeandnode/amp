@@ -1,9 +1,10 @@
 use datafusion::arrow::datatypes::SchemaRef;
+use serde::Serialize;
 
 use crate::BLOCK_NUM;
 
 /// Identifies a dataset and its data schema.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct Dataset {
     pub kind: String,
     pub name: String,
@@ -16,7 +17,7 @@ impl Dataset {
     }
 }
 
-#[derive(Clone, Hash, PartialEq, Eq, Debug)]
+#[derive(Clone, Hash, PartialEq, Eq, Debug, Serialize)]
 pub struct Table {
     /// Bare table name.
     pub name: String,
