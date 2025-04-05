@@ -1,6 +1,6 @@
 import { Args, Command, Options } from "@effect/cli";
 import { NodeContext, NodeRuntime } from "@effect/platform-node";
-import { Effect, Schema, Console } from "effect";
+import { Effect, Schema } from "effect";
 import { ManifestBuilder } from "./ManifestBuilder.js";
 import { ManifestDeployer } from "./ManifestDeployer.js";
 import { Path, FileSystem } from "@effect/platform";
