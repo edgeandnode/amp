@@ -1,0 +1,13 @@
+{
+  "name": "@workspace/example",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "nozzle build",
+    "deploy": "nozzle deploy"
+  },
+  "dependencies": {
+    "@nozzle/cli": "workspace:*"
+  }
+}
