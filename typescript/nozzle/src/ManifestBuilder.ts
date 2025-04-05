@@ -6,7 +6,6 @@ export class ManifestBuilder extends Effect.Service<ManifestBuilder>()("Nozzle/M
   dependencies: [Api.Default],
   effect: Effect.gen(function* () {
     const client = yield* Api;
-
     const build = (manifest: Model.DatasetDefinition) => Effect.gen(function* () {
       const tables = yield* Effect.forEach(Object.entries(manifest.tables), ([name, table]) => Effect.gen(function* () {
         const schema = yield* client.registry.schema({
