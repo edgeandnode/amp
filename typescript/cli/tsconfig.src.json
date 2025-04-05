@@ -1,6 +1,7 @@
 {
   "extends": "../tsconfig.base.json",
   "include": ["src"],
+  "references": [{ "path": "../nozzle/tsconfig.src.json" }],
   "compilerOptions": {
     "types": ["node"],
     "outDir": "build/src",

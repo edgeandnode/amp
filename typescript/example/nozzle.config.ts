@@ -1,4 +1,4 @@
-import { defineDataset } from "@nozzle/cli";
+import { defineDataset } from "@nozzle/nozzle";
 
 const event = (event: string) => {
   return `

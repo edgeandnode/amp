@@ -8,6 +8,7 @@
     "deploy": "nozzle deploy"
   },
   "dependencies": {
-    "@nozzle/cli": "workspace:*"
+    "@nozzle/cli": "workspace:*",
+    "@nozzle/nozzle": "workspace:*"
   }
 }
