@@ -6,10 +6,11 @@ import { NodeContext, NodeRuntime } from "@effect/platform-node";
 
 import { deploy } from "./commands/deploy.js";
 import { build } from "./commands/build.js";
+import { codegen } from "./commands/codegen.js";
 
 const nozzle = Command.make("nozzle").pipe(
   Command.withDescription("The Nozzle Command Line Interface"),
-  Command.withSubcommands([build, deploy]),
+  Command.withSubcommands([build, deploy, codegen]),
 );
 
 const cli = Command.run(nozzle, {

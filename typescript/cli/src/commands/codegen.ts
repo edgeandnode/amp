@@ -1,10 +1,10 @@
 import { Args, Command } from "@effect/cli";
 import { Path, FileSystem } from "@effect/platform";
-import { Effect, Match, Option, Predicate, Schema } from "effect";
-import { ManifestBuilder, ManifestDeployer, Model } from "@nozzle/nozzle";
+import { Console, Effect, Match, Option, Predicate, Schema } from "effect";
+import { ManifestBuilder, Model, SchemaGenerator } from "@nozzle/nozzle";
 import { importFile, readJson } from "../common.js";
 
-export const deploy = Command.make("deploy", {
+export const codegen = Command.make("codegen", {
   args: {
     input: Args.text({ name: "file" }).pipe(
       Args.withDescription("The dataset definition or manifest file to deploy"),
@@ -14,7 +14,7 @@ export const deploy = Command.make("deploy", {
 }, ({ args }) => Effect.gen(function* () {
   const path = yield* Path.Path;
   const fs = yield* FileSystem.FileSystem;
-  const deployer = yield* ManifestDeployer.ManifestDeployer;
+  const generator = yield* SchemaGenerator.SchemaGenerator;
   const builder = yield* ManifestBuilder.ManifestBuilder;
   const file = yield* Option.match(args.input, {
     onNone: () => {
@@ -45,10 +45,10 @@ export const deploy = Command.make("deploy", {
     Match.orElse(() => Effect.fail(new Error(`Expected a manifest (.json) or a dataset definition file (.js or .ts)`)))
   ).pipe(Effect.mapError((e) => new Error(`Failed to load manifest from ${file}`, { cause: e })))
 
-  const result = yield* deployer.deploy(manifest);
-  yield* Effect.log(result);
+  const result = yield* generator.fromManifest(manifest);
+  yield* Console.log(result);
 })).pipe(
-  Command.withDescription("Deploy a dataset definition or manifest to Nozzle"),
-  Command.provide(ManifestDeployer.ManifestDeployer.Default),
+  Command.withDescription("Deploy a dataset to Nozzle"),
   Command.provide(ManifestBuilder.ManifestBuilder.Default),
+  Command.provide(SchemaGenerator.SchemaGenerator.Default),
 );

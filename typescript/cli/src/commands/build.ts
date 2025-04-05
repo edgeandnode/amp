@@ -10,7 +10,7 @@ export const build = Command.make("build", {
       Options.optional,
       Options.withDescription("The output file to write the manifest to")
     ),
-    dataset: Args.text({ name: "Dataset definition file" }).pipe(
+    input: Args.text({ name: "file" }).pipe(
       Args.optional,
       Args.withDescription("The dataset definition file to build")
     ),
@@ -19,7 +19,7 @@ export const build = Command.make("build", {
   const path = yield* Path.Path;
   const fs = yield* FileSystem.FileSystem;
   const builder = yield* ManifestBuilder.ManifestBuilder;
-  const file = yield* Option.match(args.dataset, {
+  const file = yield* Option.match(args.input, {
     onNone: () => {
       const candidates = [
         path.resolve("nozzle.config.ts"),
@@ -50,6 +50,6 @@ export const build = Command.make("build", {
     ),
   });
 })).pipe(
-  Command.withDescription("Build a dataset"),
+  Command.withDescription("Build a manifest from a dataset definition"),
   Command.provide(ManifestBuilder.ManifestBuilder.Default),
 );
