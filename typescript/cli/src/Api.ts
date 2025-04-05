@@ -24,12 +24,7 @@ export class Registry extends HttpApi.make("registry").add(RegstistryApi) {}
 
 class AdminApi extends HttpApiGroup.make("admin", { topLevel: true }).add(
   HttpApiEndpoint.post("deploy")`/deploy`
-    .setPayload(
-      Schema.Struct({
-        dataset_name: Schema.String,
-        manifest: Schema.parseJson(Model.DatasetManifest),
-      }),
-    )
+    .setPayload(Schema.Struct({ dataset_name: Schema.String, manifest: Schema.parseJson(Model.DatasetManifest) }))
     .addSuccess(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }))
     .addError(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }), { status: 404 })
     .addError(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }), { status: 422 })

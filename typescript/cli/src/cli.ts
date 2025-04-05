@@ -1,19 +1,23 @@
-import { Args, Command } from "@effect/cli";
+import { Args, Command, Options } from "@effect/cli";
 import { NodeContext, NodeRuntime } from "@effect/platform-node";
 import { Effect, Schema, Console } from "effect";
 import { ManifestBuilder } from "./ManifestBuilder.js";
 import { ManifestDeployer } from "./ManifestDeployer.js";
-import { Path } from "@effect/platform";
+import { Path, FileSystem } from "@effect/platform";
 import * as Model from "./Model.js";
 
 const build = Command.make("build", {
   args: {
-    dataset: Args.text({
-      name: "Dataset definition file",
-    }).pipe(Args.withDescription("The dataset definition file to build")),
+    output: Options.text("output").pipe(
+      Options.withDescription("The output file to write the manifest to")
+    ),
+    dataset: Args.text({ name: "Dataset definition file" }).pipe(
+      Args.withDescription("The dataset definition file to build")
+    ),
   },
 }, ({ args }) => Effect.gen(function* () {
   const path = yield* Path.Path;
+  const fs = yield* FileSystem.FileSystem;
   const builder = yield* ManifestBuilder;
   const dataset = yield* Effect.tryPromise({
     try: () => import(path.resolve(args.dataset)).then((m) => m.default),
@@ -23,8 +27,8 @@ const build = Command.make("build", {
   const parsed = yield* Schema.decodeUnknown(Model.DatasetDefinition)(dataset);
   const manifest = yield* builder.build(parsed);
   const encoded = yield* Schema.encode(Model.DatasetManifest)(manifest);
-  const output = JSON.stringify(Schema.encode(Model.DatasetManifest)(encoded), null, 2);
-  yield* Console.log(output);
+  const json = JSON.stringify(encoded, null, 2);
+  yield* fs.writeFileString(path.resolve(args.output), json);
 })).pipe(
   Command.provide(ManifestBuilder.Default),
   Command.withDescription("Build a dataset")
@@ -32,9 +36,9 @@ const build = Command.make("build", {
 
 const deploy = Command.make("deploy", {
   args: {
-    dataset: Args.text({
-      name: "Dataset definition file",
-    }).pipe(Args.withDescription("The dataset definition file to deploy")),
+    dataset: Args.text({ name: "Dataset definition file" }).pipe(
+      Args.withDescription("The dataset definition file to deploy")
+    ),
   }
 }, ({ args }) => Effect.gen(function* () {
   const path = yield* Path.Path;
@@ -45,7 +49,8 @@ const deploy = Command.make("deploy", {
   });
 
   const parsed = yield* Schema.decodeUnknown(Model.DatasetDefinition)(dataset);
-  yield* deployer.deploy(parsed)
+  const result = yield* deployer.deploy(parsed);
+  yield* Effect.log(result);
 })).pipe(
   Command.provide(ManifestDeployer.Default),
   Command.withDescription("Deploy a dataset to Nozzle")

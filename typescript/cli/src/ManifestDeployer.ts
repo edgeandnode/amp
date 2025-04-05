@@ -11,12 +11,14 @@ export class ManifestDeployer extends Effect.Service<ManifestDeployer>()("Nozzle
 
     const deploy = (definition: Model.DatasetDefinition) => Effect.gen(function* () {
       const manifest = yield* builder.build(definition);
-      yield* client.admin.deploy({
+      const result = yield* client.admin.deploy({
         payload: {
           dataset_name: manifest.name,
           manifest,
         },
       });
+
+      return result;
     });
 
     return { deploy };

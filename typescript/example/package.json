@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "nozzle": "bun run ../cli/src/cli.ts nozzle",
-    "build": "pnpm run nozzle build ./nozzle.config.js",
-    "deploy": "pnpm run nozzle deploy ./nozzle.config.js"
+    "build": "pnpm run nozzle build",
+    "deploy": "pnpm run nozzle deploy"
   },
   "dependencies": {
     "@nozzle/cli": "workspace:*"
