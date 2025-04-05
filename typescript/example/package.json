@@ -4,9 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "nozzle": "bun run ../cli/src/cli.ts nozzle",
-    "build": "pnpm run nozzle build",
-    "deploy": "pnpm run nozzle deploy"
+    "build": "nozzle build",
+    "deploy": "nozzle deploy"
   },
   "dependencies": {
     "@nozzle/cli": "workspace:*"

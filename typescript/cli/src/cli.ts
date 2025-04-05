@@ -1,6 +1,8 @@
+#!/usr/bin/env bun
+
 import { Args, Command, Options } from "@effect/cli";
 import { NodeContext, NodeRuntime } from "@effect/platform-node";
-import { Effect, Schema } from "effect";
+import { Console, Effect, Option, Schema } from "effect";
 import { ManifestBuilder } from "./ManifestBuilder.js";
 import { ManifestDeployer } from "./ManifestDeployer.js";
 import { Path, FileSystem } from "@effect/platform";
@@ -9,6 +11,7 @@ import * as Model from "./Model.js";
 const build = Command.make("build", {
   args: {
     output: Options.text("output").pipe(
+      Options.optional,
       Options.withDescription("The output file to write the manifest to")
     ),
     dataset: Args.text({ name: "Dataset definition file" }).pipe(
@@ -28,7 +31,13 @@ const build = Command.make("build", {
   const manifest = yield* builder.build(parsed);
   const encoded = yield* Schema.encode(Model.DatasetManifest)(manifest);
   const json = JSON.stringify(encoded, null, 2);
-  yield* fs.writeFileString(path.resolve(args.output), json);
+
+  yield* Option.match(args.output, {
+    onNone: () => Console.log(json),
+    onSome: (output) => fs.writeFileString(path.resolve(output), json).pipe(
+      Effect.tap(() => Effect.log(`Manifest written to ${output}`)),
+    ),
+  });
 })).pipe(
   Command.provide(ManifestBuilder.Default),
   Command.withDescription("Build a dataset")
