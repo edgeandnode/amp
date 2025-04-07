@@ -193,7 +193,7 @@ async fn redump(
 
     // First dump dependencies, then main dataset
     for dataset_name in dependencies {
-        let _ = clear_and_dump_dataset(
+        let _ = redump_dataset(
             dataset_name,
             &*config,
             &dataset_store,
@@ -204,7 +204,7 @@ async fn redump(
         )
         .await?;
     }
-    let dataset = clear_and_dump_dataset(
+    let dataset = redump_dataset(
         dataset_name,
         &*config,
         &dataset_store,
@@ -248,7 +248,7 @@ async fn clear_dataset(config: &Config, dataset_name: &str) -> Result<(), BoxErr
     Ok(())
 }
 
-async fn clear_and_dump_dataset(
+async fn redump_dataset(
     dataset_name: &str,
     config: &Config,
     dataset_store: &Arc<DatasetStore>,
