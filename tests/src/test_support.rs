@@ -190,41 +190,54 @@ async fn redump(
     metadata_db: Option<&MetadataDb>,
 ) -> Result<PhysicalDataset, BoxError> {
     let dataset_store = DatasetStore::new(config.clone(), metadata_db.cloned());
-    let partition_size = 1024 * 1024; // 100 kB
-    let compression = Compression::ZSTD(ZstdLevel::try_new(1).unwrap());
 
-    // Disable bloom filters, as they bloat the test files and are not tested themselves.
-    let parquet_opts = parquet_opts(compression, false);
-
-    let clear_and_dump = async |dataset_name| -> Result<PhysicalDataset, BoxError> {
-        clear_dataset(&config, dataset_name).await?;
-
-        let dataset = {
-            let dataset = dataset_store.load_dataset(dataset_name).await?;
-            PhysicalDataset::from_dataset_at(dataset, config.data_store.clone(), metadata_db, false)
-                .await?
-        };
-
-        dump_dataset(
-            &dataset,
-            &dataset_store,
-            &config,
-            n_jobs,
-            partition_size,
-            &parquet_opts,
-            start,
-            Some(end),
-        )
-        .await?;
-
-        Ok(dataset)
-    };
+    // let clear_and_dump = async |dataset_name| -> Result<PhysicalDataset, BoxError> {
+    //     clear_dataset(&config, dataset_name).await?;
+    //
+    //     let dataset = {
+    //         let dataset = dataset_store.load_dataset(dataset_name).await?;
+    //         PhysicalDataset::from_dataset_at(dataset, config.data_store.clone(), metadata_db, false)
+    //             .await?
+    //     };
+    //
+    //     dump_dataset(
+    //         &dataset,
+    //         &dataset_store,
+    //         &config,
+    //         n_jobs,
+    //         partition_size,
+    //         &parquet_opts,
+    //         start,
+    //         Some(end),
+    //     )
+    //     .await?;
+    //
+    //     Ok(dataset)
+    // };
 
     // First dump dependencies, then main dataset
     for dataset_name in dependencies {
-        let _ = clear_and_dump(dataset_name).await?;
+        let _ = clear_and_dump_dataset(
+            dataset_name,
+            &*config,
+            &dataset_store,
+            start,
+            end,
+            n_jobs,
+            metadata_db,
+        )
+        .await?;
     }
-    let dataset = clear_and_dump(dataset_name).await?;
+    let dataset = clear_and_dump_dataset(
+        dataset_name,
+        &*config,
+        &dataset_store,
+        start,
+        end,
+        n_jobs,
+        metadata_db,
+    )
+    .await?;
 
     Ok(dataset)
 }
@@ -257,6 +270,44 @@ async fn clear_dataset(config: &Config, dataset_name: &str) -> Result<(), BoxErr
         .try_collect::<Vec<_>>()
         .await?;
     Ok(())
+}
+
+async fn clear_and_dump_dataset(
+    dataset_name: &str,
+    config: &Config,
+    dataset_store: &Arc<DatasetStore>,
+    start: u64,
+    end: u64,
+    n_jobs: u16,
+    metadata_db: Option<&MetadataDb>,
+) -> Result<PhysicalDataset, BoxError> {
+    let partition_size = 1024 * 1024; // 100 kB
+    let compression = Compression::ZSTD(ZstdLevel::try_new(1).unwrap());
+
+    // Disable bloom filters, as they bloat the test files and are not tested themselves.
+    let parquet_opts = parquet_opts(compression, false);
+
+    clear_dataset(config, dataset_name).await?;
+
+    let dataset = {
+        let dataset = dataset_store.load_dataset(dataset_name).await?;
+        PhysicalDataset::from_dataset_at(dataset, config.data_store.clone(), metadata_db, false)
+            .await?
+    };
+
+    dump_dataset(
+        &dataset,
+        dataset_store,
+        config,
+        n_jobs,
+        partition_size,
+        &parquet_opts,
+        start,
+        Some(end),
+    )
+    .await?;
+
+    Ok(dataset)
 }
 
 pub async fn check_provider_file(filename: &str) {
