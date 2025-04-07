@@ -96,13 +96,22 @@ impl SnapshotContext {
 
         let config = load_test_config(config_override)?;
 
-        let physical_dataset =
-            redump(config.clone(), dataset_name, dependencies.clone(), start, end, n_jobs, metadata_db).await?;
+        let physical_dataset = redump(
+            config.clone(),
+            dataset_name,
+            dependencies.clone(),
+            start,
+            end,
+            n_jobs,
+            metadata_db,
+        )
+        .await?;
         let mut physical_datasets: Vec<PhysicalDataset> = vec![physical_dataset];
         let dataset_store = DatasetStore::new(config.clone(), None);
         for dep in dependencies {
             let dep = dataset_store.load_dataset(dep).await?;
-            let dep = PhysicalDataset::from_dataset_at(dep, config.data_store.clone(), None, true).await?;
+            let dep = PhysicalDataset::from_dataset_at(dep, config.data_store.clone(), None, true)
+                .await?;
             physical_datasets.push(dep);
         }
 
@@ -206,7 +215,7 @@ async fn redump(
             start,
             Some(end),
         )
-            .await?;
+        .await?;
 
         Ok(dataset)
     };

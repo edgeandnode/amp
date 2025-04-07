@@ -54,10 +54,17 @@ async fn eth_firehose_single() {
         .expect("blessed data differed from provider");
 
     // Now dump the dataset to a temporary directory and check it again against the blessed files.
-    let temp_dump =
-        SnapshotContext::temp_dump(&dataset_name, vec![],15_000_000, 15_000_000, 1, None, *KEEP_TEMP_DIRS)
-            .await
-            .expect("temp dump failed");
+    let temp_dump = SnapshotContext::temp_dump(
+        &dataset_name,
+        vec![],
+        15_000_000,
+        15_000_000,
+        1,
+        None,
+        *KEEP_TEMP_DIRS,
+    )
+    .await
+    .expect("temp dump failed");
     temp_dump.assert_eq(&blessed, None).await.unwrap();
 }
 
@@ -70,8 +77,16 @@ async fn sql_over_eth_firehose_dump() {
     let blessed = SnapshotContext::blessed(&dataset_name).await.unwrap();
 
     // Now dump the dataset to a temporary directory and check blessed files against it.
-    let temp_dump = SnapshotContext::temp_dump(&dataset_name, vec!["eth_firehose"], 15_000_000, 15_000_000, 2, None, *KEEP_TEMP_DIRS)
-        .await
-        .expect("temp dump failed");
+    let temp_dump = SnapshotContext::temp_dump(
+        &dataset_name,
+        vec!["eth_firehose"],
+        15_000_000,
+        15_000_000,
+        2,
+        None,
+        *KEEP_TEMP_DIRS,
+    )
+    .await
+    .expect("temp dump failed");
     blessed.assert_eq(&temp_dump, None).await.unwrap();
 }
