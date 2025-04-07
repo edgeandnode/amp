@@ -73,7 +73,6 @@ async fn sql_over_eth_firehose_dump() {
     let dataset_name = "sql_over_eth_firehose";
     tracing::register_logger();
 
-    //let metadata_db = test_metadata_db(*KEEP_TEMP_DIRS).await;
     let blessed = SnapshotContext::blessed(&dataset_name).await.unwrap();
 
     // Now dump the dataset to a temporary directory and check blessed files against it.
