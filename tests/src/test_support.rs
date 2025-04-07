@@ -49,7 +49,7 @@ pub fn load_test_config(literal_override: Option<FigmentJson>) -> Result<Arc<Con
 
 pub async fn bless(dataset_name: &str, start: u64, end: u64) -> Result<(), BoxError> {
     let config = load_test_config(None)?;
-    redump(config, dataset_name, start, end, None).await?;
+    redump(config, dataset_name, vec![], start, end, 1, None).await?;
     Ok(())
 }
 
@@ -76,8 +76,10 @@ impl SnapshotContext {
     /// Dump the dataset to a temporary data directory.
     pub async fn temp_dump(
         dataset_name: &str,
+        dependencies: Vec<&str>,
         start: u64,
         end: u64,
+        n_jobs: u16,
         metadata_db: Option<&MetadataDb>,
         keep_temp_dir: bool,
     ) -> Result<SnapshotContext, BoxError> {
@@ -94,10 +96,26 @@ impl SnapshotContext {
 
         let config = load_test_config(config_override)?;
 
-        let physical_dataset =
-            redump(config.clone(), dataset_name, start, end, metadata_db).await?;
+        let physical_dataset = redump(
+            config.clone(),
+            dataset_name,
+            dependencies.clone(),
+            start,
+            end,
+            n_jobs,
+            metadata_db,
+        )
+        .await?;
+        let mut physical_datasets: Vec<PhysicalDataset> = vec![physical_dataset];
+        let dataset_store = DatasetStore::new(config.clone(), None);
+        for dep in dependencies {
+            let dep = dataset_store.load_dataset(dep).await?;
+            let dep = PhysicalDataset::from_dataset_at(dep, config.data_store.clone(), None, true)
+                .await?;
+            physical_datasets.push(dep);
+        }
 
-        let catalog = Catalog::new(vec![physical_dataset]);
+        let catalog = Catalog::new(physical_datasets);
         let ctx = QueryContext::for_catalog(catalog, Arc::new(config.make_runtime_env()?))?;
 
         Ok(SnapshotContext {
@@ -165,35 +183,35 @@ impl SnapshotContext {
 async fn redump(
     config: Arc<Config>,
     dataset_name: &str,
+    dependencies: Vec<&str>,
     start: u64,
     end: u64,
+    n_jobs: u16,
     metadata_db: Option<&MetadataDb>,
 ) -> Result<PhysicalDataset, BoxError> {
     let dataset_store = DatasetStore::new(config.clone(), metadata_db.cloned());
-    let partition_size = 1024 * 1024; // 100 kB
-    let compression = Compression::ZSTD(ZstdLevel::try_new(1).unwrap());
 
-    // Disable bloom filters, as they bloat the test files and are not tested themselves.
-    let parquet_opts = parquet_opts(compression, false);
-
-    // Clear the data dir.
-    clear_dataset(&config, dataset_name).await?;
-
-    let dataset = {
-        let dataset = dataset_store.load_dataset(dataset_name).await?;
-        PhysicalDataset::from_dataset_at(dataset, config.data_store.clone(), metadata_db, false)
-            .await?
-    };
-
-    dump_dataset(
-        &dataset,
+    // First dump dependencies, then main dataset
+    for dataset_name in dependencies {
+        let _ = clear_and_dump_dataset(
+            dataset_name,
+            &*config,
+            &dataset_store,
+            start,
+            end,
+            n_jobs,
+            metadata_db,
+        )
+        .await?;
+    }
+    let dataset = clear_and_dump_dataset(
+        dataset_name,
+        &*config,
         &dataset_store,
-        &config,
-        1,
-        partition_size,
-        &parquet_opts,
         start,
-        Some(end),
+        end,
+        n_jobs,
+        metadata_db,
     )
     .await?;
 
@@ -228,6 +246,44 @@ async fn clear_dataset(config: &Config, dataset_name: &str) -> Result<(), BoxErr
         .try_collect::<Vec<_>>()
         .await?;
     Ok(())
+}
+
+async fn clear_and_dump_dataset(
+    dataset_name: &str,
+    config: &Config,
+    dataset_store: &Arc<DatasetStore>,
+    start: u64,
+    end: u64,
+    n_jobs: u16,
+    metadata_db: Option<&MetadataDb>,
+) -> Result<PhysicalDataset, BoxError> {
+    let partition_size = 1024 * 1024; // 100 kB
+    let compression = Compression::ZSTD(ZstdLevel::try_new(1).unwrap());
+
+    // Disable bloom filters, as they bloat the test files and are not tested themselves.
+    let parquet_opts = parquet_opts(compression, false);
+
+    clear_dataset(config, dataset_name).await?;
+
+    let dataset = {
+        let dataset = dataset_store.load_dataset(dataset_name).await?;
+        PhysicalDataset::from_dataset_at(dataset, config.data_store.clone(), metadata_db, false)
+            .await?
+    };
+
+    dump_dataset(
+        &dataset,
+        dataset_store,
+        config,
+        n_jobs,
+        partition_size,
+        &parquet_opts,
+        start,
+        Some(end),
+    )
+    .await?;
+
+    Ok(dataset)
 }
 
 pub async fn check_provider_file(filename: &str) {

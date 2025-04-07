@@ -5,7 +5,7 @@ run in parallel, and with input data that is small enough to be checked in direc
 
 ## Dump tests
 The dump tests are based on snapshot testing. A snapshot is commited into the repo, and the dump
-tests will do a fresh snapshot to a temporary directory and compare the resutls. The datasets
+tests will do a fresh snapshot to a temporary directory and compare the results. The datasets
 currently are configured just like in the real dump tool, so real Firehose and JSON-RPC providers are
 required.
 
