@@ -1,0 +1,2 @@
+kind = "sql"
+name = "sql_over_eth_firehose"
