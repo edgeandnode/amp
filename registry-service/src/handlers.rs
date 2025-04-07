@@ -5,6 +5,7 @@ use axum::{extract::State, Json};
 use common::manifest::TableSchema;
 use common::query_context::parse_sql;
 use common::query_context::Error as QueryContextError;
+use common::Dataset;
 use dataset_store::DatasetStore;
 use http_common::{BoxRequestError, RequestError};
 use serde::{Deserialize, Serialize};
@@ -24,7 +25,7 @@ pub struct OutputSchemaResponse {
 }
 
 #[derive(Debug, Error)]
-enum OutputSchemaError {
+enum Error {
     #[error("SQL parse error: {0}")]
     SqlParseError(QueryContextError),
     #[error("Dataset store error: {0}")]
@@ -33,20 +34,20 @@ enum OutputSchemaError {
     PlanningError(QueryContextError),
 }
 
-impl RequestError for OutputSchemaError {
+impl RequestError for Error {
     fn error_code(&self) -> &'static str {
         match self {
-            OutputSchemaError::SqlParseError(_) => "SQL_PARSE_ERROR",
-            OutputSchemaError::DatasetStoreError(_) => "DATASET_STORE_ERROR",
-            OutputSchemaError::PlanningError(_) => "PLANNING_ERROR",
+            Error::SqlParseError(_) => "SQL_PARSE_ERROR",
+            Error::DatasetStoreError(_) => "DATASET_STORE_ERROR",
+            Error::PlanningError(_) => "PLANNING_ERROR",
         }
     }
 
     fn status_code(&self) -> StatusCode {
         match self {
-            OutputSchemaError::SqlParseError(_) => StatusCode::BAD_REQUEST,
-            OutputSchemaError::DatasetStoreError(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            OutputSchemaError::PlanningError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::SqlParseError(_) => StatusCode::BAD_REQUEST,
+            Error::DatasetStoreError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::PlanningError(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 }
@@ -56,7 +57,7 @@ pub async fn output_schema_handler(
     State(state): State<Arc<ServiceState>>,
     Json(payload): Json<OutputSchemaRequest>,
 ) -> Result<Json<OutputSchemaResponse>, BoxRequestError> {
-    use OutputSchemaError::*;
+    use Error::*;
 
     let dataset_store = DatasetStore::new(state.config.clone(), state.metadata_db.clone());
 
@@ -70,4 +71,23 @@ pub async fn output_schema_handler(
     Ok(Json(OutputSchemaResponse {
         schema: schema.into(),
     }))
+}
+
+#[derive(Debug, Serialize)]
+pub struct DatasetsResponse {
+    datasets: Vec<Dataset>,
+}
+
+/// Handler for the /datasets endpoint
+#[instrument(skip_all, err)]
+pub async fn datasets_handler(
+    State(state): State<Arc<ServiceState>>,
+) -> Result<Json<DatasetsResponse>, BoxRequestError> {
+    let dataset_store = DatasetStore::new(state.config.clone(), state.metadata_db.clone());
+    let datasets = dataset_store
+        .all_datasets()
+        .await
+        .map_err(Error::DatasetStoreError)?;
+
+    Ok(Json(DatasetsResponse { datasets }))
 }
