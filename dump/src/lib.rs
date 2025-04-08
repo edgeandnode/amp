@@ -118,7 +118,7 @@ pub async fn dump_dataset(
                 start,
                 end_block,
             )
-                .await?;
+            .await?;
         }
     }
 
@@ -159,18 +159,21 @@ async fn run_dump_sql_dataset_jobs(
         let env = env.clone();
         let parquet_opts = parquet_opts.clone();
 
-        let handle = tokio::spawn( async move {dump_sql_dataset_queries(
-            &dataset_name,
-            queries,
-            &dst_ctx,
-            &data_store,
-            &dataset_store,
-            &env,
-            scanned_ranges_by_table,
-            &parquet_opts,
-            start,
-            end,
-        ).await});
+        let handle = tokio::spawn(async move {
+            dump_sql_dataset_queries(
+                &dataset_name,
+                queries,
+                &dst_ctx,
+                &data_store,
+                &dataset_store,
+                &env,
+                scanned_ranges_by_table,
+                &parquet_opts,
+                start,
+                end,
+            )
+            .await
+        });
 
         // Stagger the start of each job by 1 second in an attempt to avoid client rate limits.
         tokio::time::sleep(Duration::from_secs(1)).await;
