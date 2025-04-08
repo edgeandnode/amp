@@ -106,7 +106,7 @@ pub async fn dump_dataset(
                 _ => unreachable!(),
             };
 
-            run_dump_sql_dataset_jobs(
+            dump_sql_dataset(
                 n_jobs,
                 ctx,
                 dataset,
@@ -128,7 +128,7 @@ pub async fn dump_dataset(
 }
 
 #[instrument(skip_all, err, fields(dataset = %dataset.name()))]
-async fn run_dump_sql_dataset_jobs(
+async fn dump_sql_dataset(
     n_jobs: u16,
     dst_ctx: Arc<QueryContext>,
     dataset: SqlDataset,
