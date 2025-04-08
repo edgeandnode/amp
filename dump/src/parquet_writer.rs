@@ -104,7 +104,7 @@ pub async fn insert_scanned_range(
     let scanned_range = serde_json::to_value(scanned_range)?;
 
     Ok(metadata_db
-        .insert_scanned_range(location_id, file_name, scanned_range)
+        .insert_file_metadata(location_id, file_name, scanned_range)
         .await?)
 }
 

@@ -361,10 +361,10 @@ impl MetadataDb {
             table,
         } = tbl;
         let sql = "
-            SELECT sr.file_name
-              FROM file_metadata sr
+            SELECT fm.file_name
+              FROM file_metadata fm
         INNER JOIN locations l
-                ON sr.location_id = l.id
+                ON fm.location_id = l.id
              WHERE l.dataset = $1 
                    AND l.dataset_version = $2
                    AND l.tbl = $3
@@ -390,11 +390,11 @@ impl MetadataDb {
             table,
         } = tbl;
         let sql = "
-            SELECT CAST(sr.metadata->>'range_start' AS BIGINT)
-                 , CAST(sr.metadata->>'range_end' AS BIGINT)
-              FROM file_metadata sr 
+            SELECT CAST(fm.nozzle_metadata->>'range_start' AS BIGINT)
+                 , CAST(fm.nozzle_metadata->>'range_end' AS BIGINT)
+              FROM file_metadata fm
         INNER JOIN locations l 
-                ON sr.location_id = l.id 
+                ON fm.location_id = l.id 
              WHERE l.dataset = $1
                    AND l.tbl = $2
                    AND l.active
@@ -407,21 +407,21 @@ impl MetadataDb {
             .fetch(&self.pool)
     }
 
-    pub async fn insert_scanned_range(
+    pub async fn insert_file_metadata(
         &self,
         location_id: i64,
         file_name: String,
-        scanned_range: serde_json::Value,
+        nozzle_metadata: serde_json::Value,
     ) -> Result<(), Error> {
         let sql = "
-        INSERT INTO file_metadata (location_id, file_name, metadata)
+        INSERT INTO file_metadata (location_id, file_name, nozzle_metadata)
         VALUES ($1, $2, $3)
         ";
 
         sqlx::query(sql)
             .bind(location_id)
             .bind(file_name)
-            .bind(scanned_range)
+            .bind(nozzle_metadata)
             .execute(&self.pool)
             .await?;
 
