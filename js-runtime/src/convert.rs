@@ -13,7 +13,7 @@ pub trait FromV8: Sized {
 
 pub trait ToV8 {
     fn to_v8<'s>(
-        self,
+        &self,
         scope: &mut v8::HandleScope<'s>,
     ) -> Result<v8::Local<'s, v8::Value>, BoxError>;
 }
@@ -32,6 +32,22 @@ impl FromV8 for i32 {
     }
 }
 
+impl FromV8 for () {
+    fn from_v8<'s>(
+        scope: &mut v8::HandleScope<'s>,
+        value: v8::Local<'s, v8::Value>,
+    ) -> Result<Self, BoxError> {
+        if value.is_undefined() {
+            Ok(())
+        } else {
+            Err(BoxError::from(format!(
+                "value {} is not undefined",
+                value.to_rust_string_lossy(scope)
+            )))
+        }
+    }
+}
+
 impl<R: FromV8> FromV8 for Option<R> {
     fn from_v8<'s>(
         scope: &mut v8::HandleScope<'s>,
@@ -47,61 +63,61 @@ impl<R: FromV8> FromV8 for Option<R> {
 
 impl ToV8 for bool {
     fn to_v8<'s>(
-        self,
+        &self,
         scope: &mut v8::HandleScope<'s>,
     ) -> Result<v8::Local<'s, v8::Value>, BoxError> {
-        Ok(v8::Boolean::new(scope, self).into())
+        Ok(v8::Boolean::new(scope, *self).into())
     }
 }
 
 impl ToV8 for f64 {
     fn to_v8<'s>(
-        self,
+        &self,
         scope: &mut v8::HandleScope<'s>,
     ) -> Result<v8::Local<'s, v8::Value>, BoxError> {
-        Ok(v8::Number::new(scope, self).into())
+        Ok(v8::Number::new(scope, *self).into())
     }
 }
 
 impl ToV8 for i32 {
     fn to_v8<'s>(
-        self,
+        &self,
         scope: &mut v8::HandleScope<'s>,
     ) -> Result<v8::Local<'s, v8::Value>, BoxError> {
-        Ok(v8::Integer::new(scope, self).into())
+        Ok(v8::Integer::new(scope, *self).into())
     }
 }
 
 impl ToV8 for u32 {
     fn to_v8<'s>(
-        self,
+        &self,
         scope: &mut v8::HandleScope<'s>,
     ) -> Result<v8::Local<'s, v8::Value>, BoxError> {
-        Ok(v8::Integer::new_from_unsigned(scope, self).into())
+        Ok(v8::Integer::new_from_unsigned(scope, *self).into())
     }
 }
 
 impl ToV8 for u64 {
     fn to_v8<'s>(
-        self,
+        &self,
         scope: &mut v8::HandleScope<'s>,
     ) -> Result<v8::Local<'s, v8::Value>, BoxError> {
-        Ok(v8::BigInt::new_from_u64(scope, self).into())
+        Ok(v8::BigInt::new_from_u64(scope, *self).into())
     }
 }
 
 impl ToV8 for i64 {
     fn to_v8<'s>(
-        self,
+        &self,
         scope: &mut v8::HandleScope<'s>,
     ) -> Result<v8::Local<'s, v8::Value>, BoxError> {
-        Ok(v8::BigInt::new_from_i64(scope, self).into())
+        Ok(v8::BigInt::new_from_i64(scope, *self).into())
     }
 }
 
 impl ToV8 for &str {
     fn to_v8<'s>(
-        self,
+        &self,
         scope: &mut v8::HandleScope<'s>,
     ) -> Result<v8::Local<'s, v8::Value>, BoxError> {
         Ok(v8::String::new(scope, self)
@@ -117,7 +133,7 @@ impl ToV8 for &str {
 
 impl ToV8 for &[u8] {
     fn to_v8<'s>(
-        self,
+        &self,
         scope: &mut v8::HandleScope<'s>,
     ) -> Result<v8::Local<'s, v8::Value>, BoxError> {
         // Unwrap: The maximum length of a Uint8Array is larger than RAM
@@ -144,14 +160,14 @@ impl ToV8 for &[u8] {
 
 impl ToV8 for i128 {
     fn to_v8<'s>(
-        self,
+        &self,
         scope: &mut v8::HandleScope<'s>,
     ) -> Result<v8::Local<'s, v8::Value>, BoxError> {
-        let sign_bit = self < 0;
+        let sign_bit = *self < 0;
         let magnitude = if sign_bit {
             self.wrapping_neg() as u128 // two's complement negation
         } else {
-            self as u128
+            *self as u128
         };
 
         let lo = (magnitude & 0xFFFF_FFFF_FFFF_FFFF) as u64;
@@ -168,11 +184,11 @@ impl ToV8 for i128 {
 
 impl ToV8 for i256 {
     fn to_v8<'s>(
-        self,
+        &self,
         scope: &mut v8::HandleScope<'s>,
     ) -> Result<v8::Local<'s, v8::Value>, BoxError> {
-        let sign_bit = self < i256::ZERO;
-        let magnitude = if sign_bit { self.wrapping_neg() } else { self };
+        let sign_bit = self < &i256::ZERO;
+        let magnitude = if sign_bit { self.wrapping_neg() } else { *self };
 
         let mut words = [0u64; 4];
 
@@ -195,7 +211,7 @@ impl ToV8 for i256 {
 
 impl<T: ToV8> ToV8 for Option<T> {
     fn to_v8<'s>(
-        self,
+        &self,
         scope: &mut v8::HandleScope<'s>,
     ) -> Result<v8::Local<'s, v8::Value>, BoxError> {
         match self {
@@ -207,7 +223,7 @@ impl<T: ToV8> ToV8 for Option<T> {
 
 impl ToV8 for ScalarValue {
     fn to_v8<'s>(
-        self,
+        &self,
         scope: &mut v8::HandleScope<'s>,
     ) -> Result<v8::Local<'s, v8::Value>, BoxError> {
         match self {

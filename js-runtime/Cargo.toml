@@ -9,3 +9,6 @@ datafusion.workspace = true
 thiserror.workspace = true
 blake3.workspace = true
 num-traits = "0.2.19"
+
+[dev-dependencies]
+hex = "0.4.3"

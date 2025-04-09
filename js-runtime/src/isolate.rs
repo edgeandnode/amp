@@ -1,5 +1,5 @@
 use crate::{
-    convert::FromV8,
+    convert::{FromV8, ToV8},
     exception::{exception_position, ExceptionMessage},
     init_platform, BoxError,
 };
@@ -25,6 +25,9 @@ pub enum Error {
 
     #[error("error converting return value: {0}")]
     ConvertReturnValue(BoxError),
+
+    #[error("error converting param at idx {0}: {1}")]
+    ConvertParam(usize, BoxError),
 }
 
 pub struct Isolate {
@@ -87,13 +90,12 @@ impl Isolate {
     /// Invoke a function in a fresh context (aka JS realm).
     ///
     /// `filename` is only used for display in stack traces.
-    ///
-    /// TODO: Support params
     pub fn invoke<R: FromV8>(
         &mut self,
         filename: &str,
         script: &str,
         function: &str,
+        params: &[&dyn ToV8],
     ) -> Result<R, Error> {
         let script = self.compile_script(filename, script)?;
 
@@ -114,8 +116,13 @@ impl Isolate {
         let func = get_function(s, function)?;
         let undefined = v8::undefined(s);
 
-        // TODO: handle function return value
-        let ret_val = match func.open(s).call(s, undefined.into(), &[]) {
+        let params = params
+            .iter()
+            .enumerate()
+            .map(|(i, p)| p.to_v8(s).map_err(|e| Error::ConvertParam(i, e)))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let ret_val = match func.open(s).call(s, undefined.into(), &params) {
             Some(ret_val) => ret_val,
             None => return Err(catch(s).into()),
         };
