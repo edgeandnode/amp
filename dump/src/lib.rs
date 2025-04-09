@@ -208,7 +208,7 @@ async fn dump_sql_dataset(
 ) -> Result<(), BoxError> {
     let physical_dataset = &dst_ctx.catalog().datasets()[0].clone();
     let mut join_handles = vec![];
-    let dataset_name= dataset.name().to_string();
+    let dataset_name = dataset.name().to_string();
 
     for (table, query) in dataset.queries {
         let dataset_store = dataset_store.clone();
@@ -250,9 +250,9 @@ async fn dump_sql_dataset(
                 let ranges_to_scan = scanned_ranges_by_table[&table].complement(start, end);
                 for (start, end) in ranges_to_scan.ranges {
                     info!(
-                    "dumping {} between blocks {start} and {end}",
-                    physical_table.table_ref()
-                );
+                        "dumping {} between blocks {start} and {end}",
+                        physical_table.table_ref()
+                    );
 
                     dump_sql_query(
                         &dataset_store,
@@ -263,7 +263,7 @@ async fn dump_sql_dataset(
                         physical_table,
                         &parquet_opts,
                     )
-                        .await?;
+                    .await?;
                 }
             } else {
                 let Some(metadata_db) = dataset_store.metadata_db.as_ref() else {
@@ -275,12 +275,12 @@ async fn dump_sql_dataset(
                     &dataset_name,
                     metadata_db,
                 )
-                    .await?;
+                .await?;
                 info!(
-                "dumping entire {} to {}",
-                physical_table.table_ref(),
-                physical_table.url()
-            );
+                    "dumping entire {} to {}",
+                    physical_table.table_ref(),
+                    physical_table.url()
+                );
                 dump_sql_query(
                     &dataset_store,
                     &query,
@@ -290,7 +290,7 @@ async fn dump_sql_dataset(
                     &physical_table,
                     &parquet_opts,
                 )
-                    .await?;
+                .await?;
             }
 
             Ok::<(), BoxError>(())
