@@ -82,3 +82,9 @@ function assert_eq(actual, expected) {
 		);
 	}
 }
+
+function obj_param(obj) {
+	assert_eq(obj.a, 1);
+	assert_eq(obj.b, "perf");
+	assert_eq(obj.c, true);
+}

@@ -1,5 +1,10 @@
+use std::sync::Arc;
+
 use datafusion::{
-    arrow::datatypes::{i256, DECIMAL128_MAX_PRECISION, DECIMAL256_MAX_PRECISION},
+    arrow::{
+        array::{ArrayRef, BooleanArray, Int32Array, StringArray, StructArray},
+        datatypes::{i256, DataType, Field, DECIMAL128_MAX_PRECISION, DECIMAL256_MAX_PRECISION},
+    },
     scalar::ScalarValue,
 };
 
@@ -73,5 +78,29 @@ fn param_types() {
 
     isolate
         .invoke::<()>("test.js", TEST_JS, "param_types", params.as_slice())
+        .unwrap();
+}
+
+#[test]
+fn obj_param() {
+    let mut isolate = Isolate::new();
+    let struct_array = StructArray::from(vec![
+        (
+            Arc::new(Field::new("a", DataType::Int32, false)),
+            Arc::new(Int32Array::from(vec![1])) as ArrayRef,
+        ),
+        (
+            Arc::new(Field::new("b", DataType::Utf8, false)),
+            Arc::new(StringArray::from(vec!["perf"])) as ArrayRef,
+        ),
+        (
+            Arc::new(Field::new("c", DataType::Boolean, false)),
+            Arc::new(BooleanArray::from(vec![true])) as ArrayRef,
+        ),
+    ]);
+    let value = ScalarValue::Struct(Arc::new(struct_array));
+
+    isolate
+        .invoke::<()>("test.js", TEST_JS, "obj_param", &[&value])
         .unwrap();
 }

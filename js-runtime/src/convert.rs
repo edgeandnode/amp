@@ -1,4 +1,7 @@
-use datafusion::{arrow::datatypes::i256, scalar::ScalarValue};
+use datafusion::{
+    arrow::{array::Array as _, datatypes::i256},
+    scalar::ScalarValue,
+};
 use num_traits::cast::ToPrimitive;
 
 use crate::BoxError;
@@ -248,6 +251,21 @@ impl ToV8 for ScalarValue {
             | ScalarValue::LargeBinary(b) => b.as_ref().map(|b| b.as_slice()).to_v8(scope),
             ScalarValue::Decimal128(i, _, 0) => i.to_v8(scope),
             ScalarValue::Decimal256(i, _, 0) => i.to_v8(scope),
+            ScalarValue::Struct(struct_array) => {
+                // ScalarValue Struct should always have a single element
+                assert_eq!(struct_array.len(), 1);
+
+                let obj = v8::Object::new(scope);
+                for (column, field) in struct_array.columns().iter().zip(struct_array.fields()) {
+                    let sv = ScalarValue::try_from_array(column, 0)?;
+
+                    // Unwrap: A field name would not exceed the max length of a v8 string
+                    let key = v8::String::new(scope, field.name()).unwrap();
+                    let value = sv.to_v8(scope)?;
+                    obj.set(scope, key.into(), value);
+                }
+                Ok(obj.into())
+            }
 
             // Fractional decimals
             ScalarValue::Decimal128(_, _, _) | ScalarValue::Decimal256(_, _, _) => {
@@ -261,7 +279,6 @@ impl ToV8 for ScalarValue {
             | ScalarValue::FixedSizeList(_)
             | ScalarValue::List(_)
             | ScalarValue::LargeList(_)
-            | ScalarValue::Struct(_)
             | ScalarValue::Map(_)
             | ScalarValue::Date32(_)
             | ScalarValue::Date64(_)
