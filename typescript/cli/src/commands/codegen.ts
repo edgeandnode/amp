@@ -1,4 +1,4 @@
-import { Args, Command } from "@effect/cli";
+import { Args, Command, Options } from "@effect/cli";
 import { Path, FileSystem } from "@effect/platform";
 import { Console, Effect, Match, Option, Predicate, Schema } from "effect";
 import { ManifestBuilder, Model, SchemaGenerator } from "@nozzle/nozzle";
@@ -7,8 +7,12 @@ import { importFile, readJson } from "../common.js";
 export const codegen = Command.make("codegen", {
   args: {
     input: Args.text({ name: "file" }).pipe(
-      Args.withDescription("The dataset definition or manifest file to deploy"),
+      Args.withDescription("The dataset definition or manifest file to generate code for"),
       Args.optional,
+    ),
+    query: Options.text("query").pipe(
+      Options.withDescription("The query to generate code for"),
+      Options.optional,
     ),
   }
 }, ({ args }) => Effect.gen(function* () {
@@ -16,6 +20,13 @@ export const codegen = Command.make("codegen", {
   const fs = yield* FileSystem.FileSystem;
   const generator = yield* SchemaGenerator.SchemaGenerator;
   const builder = yield* ManifestBuilder.ManifestBuilder;
+
+  if (Option.isSome(args.query)) {
+    const result = yield* generator.fromSql(args.query.value);
+    yield* Console.log(result);
+    return;
+  }
+
   const file = yield* Option.match(args.input, {
     onNone: () => {
       const candidates = [
