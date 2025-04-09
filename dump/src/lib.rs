@@ -24,7 +24,6 @@ use common::BlockNum;
 use common::BlockStreamer as _;
 use common::BoxError;
 use datafusion::execution::runtime_env::RuntimeEnv;
-use datafusion::sql::parser;
 use dataset_store::sql_datasets::is_incremental;
 use dataset_store::sql_datasets::max_end_block;
 use dataset_store::sql_datasets::SqlDataset;
@@ -107,7 +106,6 @@ pub async fn dump_dataset(
             };
 
             dump_sql_dataset(
-                n_jobs,
                 ctx,
                 dataset,
                 config.data_store.clone(),
@@ -123,65 +121,6 @@ pub async fn dump_dataset(
     }
 
     info!("dump of dataset {} completed successfully", dataset.name());
-
-    Ok(())
-}
-
-#[instrument(skip_all, err, fields(dataset = %dataset.name()))]
-async fn dump_sql_dataset(
-    n_jobs: u16,
-    dst_ctx: Arc<QueryContext>,
-    dataset: SqlDataset,
-    data_store: Arc<common::Store>,
-    dataset_store: &Arc<DatasetStore>,
-    env: &Arc<RuntimeEnv>,
-    scanned_ranges_by_table: BTreeMap<String, MultiRange>,
-    parquet_opts: &ParquetWriterProperties,
-    start: BlockNum,
-    end: Option<BlockNum>,
-) -> Result<(), BoxError> {
-    let dataset_name = dataset.name().to_owned();
-    let queries_count = dataset.queries.len();
-    let chunk_size = (queries_count + n_jobs as usize - 1) / n_jobs as usize;
-    let queries = &dataset.queries.into_iter().collect::<Vec<_>>();
-    let mut chunks = queries.chunks(chunk_size);
-
-    // Spawn the jobs so they run in parallel, terminating early if any job fails.
-    let mut join_handles = vec![];
-
-    while let Some(chunk) = chunks.next() {
-        let queries: BTreeMap<_, _> = chunk.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-        let dataset_name = dataset_name.clone();
-        let dst_ctx = dst_ctx.clone();
-        let data_store = data_store.clone();
-        let scanned_ranges_by_table = scanned_ranges_by_table.clone();
-        let dataset_store = dataset_store.clone();
-        let env = env.clone();
-        let parquet_opts = parquet_opts.clone();
-
-        let handle = tokio::spawn(async move {
-            dump_sql_dataset_queries(
-                &dataset_name,
-                queries,
-                &dst_ctx,
-                &data_store,
-                &dataset_store,
-                &env,
-                scanned_ranges_by_table,
-                &parquet_opts,
-                start,
-                end,
-            )
-            .await
-        });
-
-        // Stagger the start of each job by 1 second in an attempt to avoid client rate limits.
-        tokio::time::sleep(Duration::from_secs(1)).await;
-
-        join_handles.push(async { handle.err_into().await.and_then(|x| x) });
-    }
-
-    try_join_all(join_handles).await?;
 
     Ok(())
 }
@@ -255,11 +194,11 @@ async fn dump_raw_dataset(
     Ok(())
 }
 
-async fn dump_sql_dataset_queries(
-    dataset_name: &str,
-    queries: BTreeMap<String, parser::Statement>,
-    dst_ctx: &Arc<QueryContext>,
-    data_store: &Arc<common::Store>,
+#[instrument(skip_all, err, fields(dataset = %dataset.name()))]
+async fn dump_sql_dataset(
+    dst_ctx: Arc<QueryContext>,
+    dataset: SqlDataset,
+    data_store: Arc<common::Store>,
     dataset_store: &Arc<DatasetStore>,
     env: &Arc<RuntimeEnv>,
     scanned_ranges_by_table: BTreeMap<String, MultiRange>,
@@ -268,81 +207,102 @@ async fn dump_sql_dataset_queries(
     end: Option<BlockNum>,
 ) -> Result<(), BoxError> {
     let physical_dataset = &dst_ctx.catalog().datasets()[0].clone();
+    let mut join_handles = vec![];
+    let dataset_name= dataset.name().to_string();
 
-    for (table, query) in &queries {
-        let end = match end {
-            Some(end) => end,
-            None => {
-                match max_end_block(&query, dataset_store.clone(), env.clone()).await? {
-                    Some(end) => end,
-                    None => {
-                        // If the dependencies have synced nothing, we have nothing to do.
-                        warn!("no blocks to dump for {table}, dependencies are empty");
-                        continue;
+    for (table, query) in dataset.queries {
+        let dataset_store = dataset_store.clone();
+        let env = env.clone();
+        let data_store = data_store.clone();
+        let physical_dataset = physical_dataset.clone();
+        let scanned_ranges_by_table = scanned_ranges_by_table.clone();
+        let parquet_opts = parquet_opts.clone();
+        let dataset_name = dataset_name.clone();
+
+        let handle = tokio::spawn(async move {
+            let end = match end {
+                Some(end) => end,
+                None => {
+                    match max_end_block(&query, dataset_store.clone(), env.clone()).await? {
+                        Some(end) => end,
+                        None => {
+                            // If the dependencies have synced nothing, we have nothing to do.
+                            warn!("no blocks to dump for {table}, dependencies are empty");
+                            return Ok::<(), BoxError>(());
+                        }
                     }
                 }
-            }
-        };
+            };
 
-        let physical_table = {
-            let mut tables = physical_dataset.tables();
-            tables.find(|t| t.table_name() == table).unwrap()
-        };
+            let physical_table = {
+                let mut tables = physical_dataset.tables();
+                tables.find(|t| t.table_name() == table).unwrap()
+            };
 
-        let src_ctx = dataset_store
-            .clone()
-            .ctx_for_sql(&query, env.clone())
-            .await?;
-        let plan = src_ctx.plan_sql(query.clone()).await?;
-        let is_incr = is_incremental(&plan)?;
+            let src_ctx = dataset_store
+                .clone()
+                .ctx_for_sql(&query, env.clone())
+                .await?;
+            let plan = src_ctx.plan_sql(query.clone()).await?;
+            let is_incr = is_incremental(&plan)?;
 
-        if is_incr {
-            let ranges_to_scan = scanned_ranges_by_table[table].complement(start, end);
-            for (start, end) in ranges_to_scan.ranges {
-                info!(
+            if is_incr {
+                let ranges_to_scan = scanned_ranges_by_table[&table].complement(start, end);
+                for (start, end) in ranges_to_scan.ranges {
+                    info!(
                     "dumping {} between blocks {start} and {end}",
                     physical_table.table_ref()
                 );
 
-                dump_sql_query(
-                    dataset_store,
-                    &query,
-                    env,
-                    start,
-                    end,
-                    physical_table,
-                    parquet_opts,
+                    dump_sql_query(
+                        &dataset_store,
+                        &query,
+                        &env,
+                        start,
+                        end,
+                        physical_table,
+                        &parquet_opts,
+                    )
+                        .await?;
+                }
+            } else {
+                let Some(metadata_db) = dataset_store.metadata_db.as_ref() else {
+                    return Err("metadata_db is required for entire materialization".into());
+                };
+                let physical_table = PhysicalTable::next_revision(
+                    physical_table.table(),
+                    &data_store,
+                    &dataset_name,
+                    metadata_db,
                 )
-                .await?;
-            }
-        } else {
-            let Some(metadata_db) = dataset_store.metadata_db.as_ref() else {
-                return Err("metadata_db is required for entire materialization".into());
-            };
-            let physical_table = PhysicalTable::next_revision(
-                physical_table.table(),
-                &data_store,
-                dataset_name,
-                metadata_db,
-            )
-            .await?;
-            info!(
+                    .await?;
+                info!(
                 "dumping entire {} to {}",
                 physical_table.table_ref(),
                 physical_table.url()
             );
-            dump_sql_query(
-                dataset_store,
-                &query,
-                env,
-                start,
-                end,
-                &physical_table,
-                parquet_opts,
-            )
-            .await?;
-        }
+                dump_sql_query(
+                    &dataset_store,
+                    &query,
+                    &env,
+                    start,
+                    end,
+                    &physical_table,
+                    &parquet_opts,
+                )
+                    .await?;
+            }
+
+            Ok::<(), BoxError>(())
+        });
+
+        // Stagger the start of each job by 1 second in an attempt to avoid client rate limits.
+        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        join_handles.push(async { handle.err_into().await.and_then(|x| x) });
     }
+
+    try_join_all(join_handles).await?;
 
     Ok(())
 }
