@@ -1,6 +1,8 @@
 import { Api } from "@nozzle/nozzle";
-import { Effect, Console, Stream, Schema } from "effect";
+import { Effect, Stream, Schema, Pretty } from "effect";
 import { Erc20Transfers } from "./schema.js";
+
+const pretty = Pretty.make(Erc20Transfers);
 
 const program = Effect.gen(function* () {
   const api = yield* Api.Api;
@@ -14,8 +16,7 @@ const program = Effect.gen(function* () {
     Stream.flatMap(Schema.decodeUnknown(Erc20Transfers)),
   );
 
-  const values = yield* Stream.runCollect(stream);
-  yield* Console.log(values);
+  yield* Stream.runForEach(stream, (value) => Effect.log(pretty(value)));
 });
 
 Effect.runPromise(program.pipe(Effect.provide(Api.Api.Default)));
