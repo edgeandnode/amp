@@ -97,6 +97,10 @@ pub async fn dump_dataset(
             .await?;
         }
         DatasetKind::Sql | DatasetKind::Manifest => {
+            if n_jobs > 1 {
+                info!("n_jobs > 1 has no effect for SQL datasets");
+            }
+
             let dataset = match kind {
                 DatasetKind::Sql => dataset_store.load_sql_dataset(dataset.name()).await?,
                 DatasetKind::Manifest => {
@@ -295,9 +299,6 @@ async fn dump_sql_dataset(
 
             Ok::<(), BoxError>(())
         });
-
-        // Stagger the start of each job by 1 second in an attempt to avoid client rate limits.
-        tokio::time::sleep(Duration::from_secs(1)).await;
 
         join_handles.push(async { handle.err_into().await.and_then(|x| x) });
     }
