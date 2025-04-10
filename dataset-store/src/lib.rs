@@ -477,7 +477,7 @@ impl DatasetStore {
                 .write()
                 .unwrap()
                 .insert(def.common.name.clone(), provider.clone());
-            return Ok(Some((def.common.name.clone(), provider)));
+            return Ok(Some((def.common.name, provider)));
         }
 
         Ok(None)
