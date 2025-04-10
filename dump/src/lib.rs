@@ -10,6 +10,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use common::arrow_helpers::RecordBatchExt as _;
 use common::catalog::physical::Catalog;
 use common::catalog::physical::PhysicalDataset;
 use common::catalog::physical::PhysicalTable;
@@ -308,13 +309,18 @@ async fn dump_sql_query(
     let mut writer = ParquetFileWriter::new(physical_table.clone(), parquet_opts.clone(), start)?;
     let table_name = physical_table.table_name();
 
+    let mut data_size: i64 = 0;
+
     while let Some(batch) = stream.try_next().await? {
+        data_size += batch.get_slice_memory_size();
         writer.write(&batch).await?;
     }
-    let scanned_range = writer.close(end).await?;
+
+    let nozzle_metadata = writer.close(end).await?;
+
     match (metadata_db, physical_table.location_id()) {
         (Some(metadata_db), Some(location_id)) => {
-            insert_scanned_range(scanned_range, metadata_db, location_id).await
+            insert_scanned_range(nozzle_metadata, metadata_db, location_id, data_size).await
         }
         (None, None) => Ok(()),
         _ => panic!(
