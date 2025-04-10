@@ -1,8 +1,10 @@
 import { Args, Command } from "@effect/cli";
 import { Path, FileSystem } from "@effect/platform";
 import { Effect, Match, Option, Predicate, Schema } from "effect";
-import { ManifestBuilder, ManifestDeployer, Model } from "@nozzle/nozzle";
 import { importFile, readJson } from "../common.js";
+import * as ManifestBuilder from "../../ManifestBuilder.js";
+import * as ManifestDeployer from "../../ManifestDeployer.js";
+import * as Model from "../../Model.js";
 
 export const deploy = Command.make("deploy", {
   args: {
