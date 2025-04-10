@@ -468,7 +468,7 @@ impl MetadataDb {
     }
 
     /// Produces a stream of nozzle metadata for a given table catalogued by the MetadataDb
-    /// 
+    ///
     /// Stream items are tuples of:
     /// - ObjectMeta
     /// - Range start and end
