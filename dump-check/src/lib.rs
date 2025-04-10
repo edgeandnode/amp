@@ -26,7 +26,11 @@ pub async fn dump_check(
     let total_blocks = end_block - start + 1;
     let catalog =
         Catalog::for_dataset(dataset.clone(), config.data_store.clone(), metadata_db).await?;
-    let ctx = Arc::new(QueryContext::for_catalog(catalog, env.clone())?);
+    let ctx = Arc::new(QueryContext::for_catalog(
+        catalog,
+        env.clone(),
+        dataset_store.evm_rpc_dataset_providers().await?,
+    )?);
 
     let jobs = {
         let mut jobs = vec![];

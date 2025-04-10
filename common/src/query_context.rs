@@ -35,7 +35,7 @@ use thiserror::Error;
 use url::Url;
 
 use crate::catalog::physical::{Catalog, PhysicalTable};
-use crate::evm::udfs::{EvmDecode, EvmTopic};
+use crate::evm::udfs::{EthCall, EvmDecode, EvmTopic};
 use crate::{arrow, attestation, BoxError, Table};
 
 #[derive(Error, Debug)]
@@ -86,13 +86,15 @@ impl ResolvedTable {
 pub struct PlanningContext {
     session_config: SessionConfig,
     catalog: Vec<ResolvedTable>,
+    evm_rpc_dataset_providers: Vec<(String, Url)>,
 }
 
 impl PlanningContext {
-    pub fn new(catalog: Vec<ResolvedTable>) -> Self {
+    pub fn new(catalog: Vec<ResolvedTable>, evm_rpc_dataset_providers: Vec<(String, Url)>) -> Self {
         Self {
             session_config: SessionConfig::from_env().unwrap(),
             catalog,
+            evm_rpc_dataset_providers,
         }
     }
 
@@ -122,7 +124,7 @@ impl PlanningContext {
     async fn datafusion_ctx(&self) -> Result<SessionContext, Error> {
         let ctx = SessionContext::new_with_config(self.session_config.clone());
         create_empty_tables(&ctx, self.catalog.iter()).await?;
-        register_udfs(&ctx);
+        register_udfs(&ctx, self.evm_rpc_dataset_providers.clone());
         Ok(ctx)
     }
 
@@ -136,14 +138,22 @@ pub struct QueryContext {
     env: Arc<RuntimeEnv>,
     session_config: SessionConfig,
     catalog: Catalog,
+    evm_rpc_dataset_providers: Vec<(String, Url)>,
 }
 
 impl QueryContext {
-    pub fn empty(env: Arc<RuntimeEnv>) -> Result<Self, Error> {
-        Self::for_catalog(Catalog::empty(), env)
+    pub fn empty(
+        env: Arc<RuntimeEnv>,
+        evm_rpc_dataset_providers: Vec<(String, Url)>,
+    ) -> Result<Self, Error> {
+        Self::for_catalog(Catalog::empty(), env, evm_rpc_dataset_providers)
     }
 
-    pub fn for_catalog(catalog: Catalog, env: Arc<RuntimeEnv>) -> Result<Self, Error> {
+    pub fn for_catalog(
+        catalog: Catalog,
+        env: Arc<RuntimeEnv>,
+        evm_rpc_dataset_providers: Vec<(String, Url)>,
+    ) -> Result<Self, Error> {
         // This contains various tuning options for the query engine.
         // Using `from_env` allows tinkering without re-compiling.
         let mut session_config = SessionConfig::from_env().map_err(Error::ConfigError)?;
@@ -171,6 +181,7 @@ impl QueryContext {
             env,
             session_config,
             catalog,
+            evm_rpc_dataset_providers,
         };
 
         Ok(this)
@@ -234,7 +245,7 @@ impl QueryContext {
             create_physical_tables(&ctx, ds.tables()).await?;
         }
 
-        register_udfs(&ctx);
+        register_udfs(&ctx, self.evm_rpc_dataset_providers.clone());
 
         Ok(ctx)
     }
@@ -409,8 +420,13 @@ async fn create_catalog_schema(ctx: &SessionContext, schema_name: String) -> Res
     Ok(())
 }
 
-fn udfs() -> Vec<ScalarUDF> {
-    vec![EvmDecode::new().into(), EvmTopic::new().into()]
+fn udfs(evm_rpc_dataset_providers: Vec<(String, Url)>) -> Vec<ScalarUDF> {
+    let mut udfs = vec![EvmDecode::new().into(), EvmTopic::new().into()];
+    for (dataset_name, provider_url) in evm_rpc_dataset_providers {
+        let client = alloy::providers::ProviderBuilder::new().on_http(provider_url);
+        udfs.push(EthCall::new(&dataset_name, client).into());
+    }
+    udfs
 }
 
 pub fn parse_sql(sql: &str) -> Result<parser::Statement, Error> {
@@ -494,12 +510,12 @@ async fn all_tables(ctx: &SessionContext) -> BTreeMap<TableReference, Arc<dyn Ta
     tables
 }
 
-fn register_udfs(ctx: &SessionContext) {
+fn register_udfs(ctx: &SessionContext, evm_rpc_dataset_providers: Vec<(String, Url)>) {
     // Remove after updating to datafusion 42, when
     // https://github.com/apache/datafusion/pull/11959 will have been merged and released.
     ctx.register_udf(datafusion::functions::core::get_field().as_ref().clone());
 
-    for udf in udfs() {
+    for udf in udfs(evm_rpc_dataset_providers) {
         ctx.register_udf(udf);
     }
     ctx.register_udaf(attestation::AttestationHasherUDF::new().into());

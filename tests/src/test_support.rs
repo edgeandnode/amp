@@ -66,7 +66,11 @@ impl SnapshotContext {
         let dataset_store = DatasetStore::new(config.clone(), None);
         let dataset = dataset_store.load_dataset(dataset).await?;
         let catalog = Catalog::for_dataset(dataset, config.data_store.clone(), None).await?;
-        let ctx = QueryContext::for_catalog(catalog, Arc::new(config.make_runtime_env()?))?;
+        let ctx = QueryContext::for_catalog(
+            catalog,
+            Arc::new(config.make_runtime_env()?),
+            dataset_store.evm_rpc_dataset_providers().await?,
+        )?;
         Ok(Self {
             ctx,
             _temp_dir: None,
@@ -116,7 +120,7 @@ impl SnapshotContext {
         }
 
         let catalog = Catalog::new(physical_datasets);
-        let ctx = QueryContext::for_catalog(catalog, Arc::new(config.make_runtime_env()?))?;
+        let ctx = QueryContext::for_catalog(catalog, Arc::new(config.make_runtime_env()?), vec![])?;
 
         Ok(SnapshotContext {
             ctx,

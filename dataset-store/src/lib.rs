@@ -20,13 +20,14 @@ use datafusion::{
     execution::runtime_env::RuntimeEnv,
     sql::{parser, TableReference},
 };
-use futures::{future::BoxFuture, FutureExt as _, TryFutureExt as _};
+use futures::{future::BoxFuture, FutureExt as _, StreamExt, TryFutureExt as _};
 use metadata_db::MetadataDb;
 use serde::Deserialize;
 use sql_datasets::SqlDataset;
 use thiserror::Error;
 use tokio::sync::mpsc;
 use tracing::{error, instrument};
+use url::Url;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -369,19 +370,12 @@ impl DatasetStore {
     async fn kind_and_dataset(&self, dataset_name: &str) -> Result<(DatasetKind, String), Error> {
         use Error::*;
 
-        /// All dataset definitions must have a kind and name. The name must match the filename.
-        #[derive(Deserialize)]
-        struct CommonFields {
-            kind: String,
-            name: String,
-        }
-
         let (raw, common_fields) = {
             let filename = format!("{}.toml", dataset_name);
             match self.dataset_defs_store().get_string(filename).await {
                 Ok(raw_dataset) => {
                     let toml_value: toml::Value = toml::from_str(&raw_dataset)?;
-                    (raw_dataset, CommonFields::deserialize(toml_value)?)
+                    (raw_dataset, DatasetDefsCommon::deserialize(toml_value)?)
                 }
                 Err(e) if e.is_not_found() => {
                     // If it's not a TOML file, it might be a JSON file.
@@ -389,7 +383,7 @@ impl DatasetStore {
                     let filename = format!("{}.json", dataset_name);
                     let raw_dataset = self.dataset_defs_store().get_string(filename).await?;
                     let json_value: serde_json::Value = serde_json::from_str(&raw_dataset)?;
-                    (raw_dataset, CommonFields::deserialize(json_value)?)
+                    (raw_dataset, DatasetDefsCommon::deserialize(json_value)?)
                 }
                 Err(e) => return Err(e.into()),
             }
@@ -400,6 +394,54 @@ impl DatasetStore {
         let kind = DatasetKind::from_str(&common_fields.kind)?;
 
         Ok((kind, raw))
+    }
+
+    pub async fn evm_rpc_dataset_providers(&self) -> Result<Vec<(String, Url)>, Error> {
+        #[derive(Deserialize)]
+        struct DatasetDef {
+            #[serde(flatten)]
+            common: DatasetDefsCommon,
+            provider: Option<String>,
+        }
+        #[derive(Deserialize)]
+        struct EvmRpcProvider {
+            url: Url,
+        }
+        let mut result = Vec::new();
+        let mut dataset_defs = self.config.dataset_defs_store.list("");
+        while let Some(dataset_def) = dataset_defs.next().await {
+            let dataset_def = dataset_def?;
+            let location = dataset_def.location;
+            let dataset_def = self
+                .dataset_defs_store()
+                .get_string(location.clone())
+                .await?;
+            let def: DatasetDef = match location.extension() {
+                Some("toml") => toml::from_str(&dataset_def)?,
+                Some("json") => serde_json::from_str(&dataset_def)?,
+                _ => continue,
+            };
+            if def.common.kind != "evm-rpc" {
+                continue;
+            }
+            if let Some(provider_location) = def.provider {
+                let provider = self
+                    .providers_store()
+                    .get_string(provider_location.clone())
+                    .await?;
+                let provider: EvmRpcProvider = if provider_location.ends_with(".toml") {
+                    toml::from_str(&provider)?
+                } else if provider_location.ends_with(".json") {
+                    serde_json::from_str(&provider)?
+                } else {
+                    return Err(Error::Unknown(
+                        format!("unknown provider format: {provider_location}").into(),
+                    ));
+                };
+                result.push((def.common.name, provider.url));
+            }
+        }
+        Ok(result)
     }
 
     /// Creates a `QueryContext` for a SQL query, this will infer and load any dependencies. The
@@ -415,8 +457,13 @@ impl DatasetStore {
         env: Arc<RuntimeEnv>,
     ) -> Result<QueryContext, DatasetError> {
         let (tables, _) = resolve_table_references(query, true).map_err(DatasetError::unknown)?;
+        let evm_rpc_dataset_providers = self
+            .evm_rpc_dataset_providers()
+            .await
+            .map_err(DatasetError::unknown)?;
         let catalog = self.load_catalog_for_table_refs(tables.iter()).await?;
-        QueryContext::for_catalog(catalog, env.clone()).map_err(DatasetError::unknown)
+        QueryContext::for_catalog(catalog, env.clone(), evm_rpc_dataset_providers)
+            .map_err(DatasetError::unknown)
     }
 
     /// Looks up the datasets for the given table references and loads them into a catalog.
@@ -450,8 +497,15 @@ impl DatasetStore {
         query: &parser::Statement,
     ) -> Result<PlanningContext, DatasetError> {
         let (tables, _) = resolve_table_references(query, true).map_err(DatasetError::unknown)?;
+        let evm_rpc_dataset_providers = self
+            .evm_rpc_dataset_providers()
+            .await
+            .map_err(DatasetError::unknown)?;
         let resolved_tables = self.load_resolved_tables(tables.iter()).await?;
-        Ok(PlanningContext::new(resolved_tables))
+        Ok(PlanningContext::new(
+            resolved_tables,
+            evm_rpc_dataset_providers,
+        ))
     }
 
     /// Looks up the datasets for the given table references and creates resolved tables.
@@ -487,6 +541,13 @@ impl DatasetStore {
     fn dataset_defs_store(&self) -> &Arc<Store> {
         &self.config.dataset_defs_store
     }
+}
+
+/// All dataset definitions must have a kind and name. The name must match the filename.
+#[derive(Deserialize)]
+struct DatasetDefsCommon {
+    kind: String,
+    name: String,
 }
 
 fn datasets_from_table_refs<'a>(

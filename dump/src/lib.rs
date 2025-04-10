@@ -58,7 +58,11 @@ pub async fn dump_dataset(
 
     let catalog = Catalog::new(vec![dataset.clone()]);
     let env = Arc::new(config.make_runtime_env()?);
-    let ctx = Arc::new(QueryContext::for_catalog(catalog, env.clone())?);
+    let ctx = Arc::new(QueryContext::for_catalog(
+        catalog,
+        env.clone(),
+        dataset_store.evm_rpc_dataset_providers().await?,
+    )?);
     let metadata_db = dataset_store.metadata_db.as_ref();
 
     // Ensure consistency before starting the dump procedure.

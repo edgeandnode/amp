@@ -274,7 +274,7 @@ fn rpc_transaction_to_row(
         tx_index: u32::try_from(tx_index)
             .map_err(|e| ToRowError::Overflow("tx_index", e.into()))?,
         tx_hash: tx.inner.tx_hash().0,
-        to: tx.to().map(|addr| addr.0 .0.to_vec()).unwrap_or_default(),
+        to: tx.to().map(|addr| addr.0 .0).unwrap_or_default(),
         nonce: tx.nonce(),
         gas_price: tx
             .gas_price()
