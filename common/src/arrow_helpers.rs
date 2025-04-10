@@ -1,5 +1,6 @@
 use datafusion::arrow::array::{
-    Decimal128Array, Decimal128Builder, FixedSizeBinaryBuilder, TimestampNanosecondBuilder,
+    Decimal128Array, Decimal128Builder, FixedSizeBinaryBuilder, RecordBatch,
+    TimestampNanosecondBuilder,
 };
 
 use crate::{
@@ -97,5 +98,20 @@ impl TimestampArrayBuilder {
 
     pub fn finish(&mut self) -> TimestampArrayType {
         self.0.finish()
+    }
+}
+
+pub trait RecordBatchExt {
+    fn get_slice_memory_size(&self) -> i64;
+}
+
+impl RecordBatchExt for RecordBatch {
+    fn get_slice_memory_size(&self) -> i64 {
+        let mut size = 0;
+        for col in self.columns() {
+            size += col.get_array_memory_size();
+        }
+
+        size as i64
     }
 }
