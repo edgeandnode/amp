@@ -1,11 +1,11 @@
 import { Effect, String } from "effect";
-import { Api } from "./Api.js";
-import { Model } from "./index.js";
+import * as Api from "./Api.js";
+import * as Model from "./Model.js";
 
 export class SchemaGenerator extends Effect.Service<SchemaGenerator>()("Nozzle/SchemaGenerator", {
-  dependencies: [Api.Default],
+  dependencies: [Api.Registry.Default],
   effect: Effect.gen(function* () {
-    const api = yield* Api;
+    const api = yield* Api.Registry;
 
     const fromTable = (schema: Model.TableSchema, name: string) => {
       const output: Array<string> = [];
@@ -32,7 +32,7 @@ export class SchemaGenerator extends Effect.Service<SchemaGenerator>()("Nozzle/S
     })
 
     const fromSql = (sql: string, name = 'Table') => Effect.gen(function* () {
-      const schema = yield* api.registry.schema({
+      const schema = yield* api.schema({
         payload: { sql_query: sql },
       });
 
