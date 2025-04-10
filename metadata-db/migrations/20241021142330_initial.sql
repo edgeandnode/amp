@@ -30,20 +30,6 @@ CREATE UNIQUE INDEX unique_active_per_dataset_version_table ON locations (datase
 WHERE
     active;
 
-CREATE TABLE IF NOT EXISTS file_metadata (
-    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    location_id BIGINT REFERENCES locations(id) ON DELETE CASCADE NOT NULL,
-    file_name TEXT NOT NULL,
-    -- Should we break this out into a separate table, separate columns, or keep it as JSONB?
-    nozzle_metadata JSONB NOT NULL
-);
-
-CREATE UNIQUE INDEX unique_file_name_per_location_id
-ON file_metadata (location_id, file_name);
-
-CREATE UNIQUE INDEX unique_range_boundaries_per_dataset_version_table
-ON file_metadata (location_id, (nozzle_metadata->>'range_start'), (nozzle_metadata->>'range_end'));
-
 CREATE TYPE NOZZLE_TIMESTAMP AS (
     secs    BIGINT,
     nanos   INTEGER
@@ -60,17 +46,29 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE TABLE IF NOT EXISTS file_metadata_v2 (
+CREATE TABLE IF NOT EXISTS file_metadata (
     id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     location_id     BIGINT REFERENCES locations(id) ON DELETE CASCADE NOT NULL,
+    -- The name of the file
     file_name       TEXT NOT NULL,
+    -- The starting block number for the file
     range_start     BIGINT NOT NULL,
+    -- The ending block number for the file
     range_end       BIGINT NOT NULL,
+    -- File size in bytes - for building ObjectMetadata
     file_size       BIGINT NOT NULL,
+    -- Total size of the data in the file in bytes (as RecordBatches)
     data_size       BIGINT NOT NULL,
-    etag            TEXT NOT NULL,
+    -- The size of the parquet metadata in bytes - we store this to eliminate 
+    -- a round trip to read the final 8 bytes of the file when performing a scan operation
+    size_hint       BIGINT NOT NULL,
+    -- The e_tag of the file - for building ObjectMetadata
+    e_tag           TEXT NOT NULL,
+    -- The current version of the file - for building ObjectMetadata
     version         TEXT NOT NULL,
+    -- The time the file was created
     created_at      NOZZLE_TIMESTAMP DEFAULT (as_nozzle_ts(now() AT TIME ZONE 'utc')) NOT NULL,
+    -- The time the file was last modified - for building ObjectMetadata
     last_modified   NOZZLE_TIMESTAMP
 );
 
@@ -84,12 +82,12 @@ END;
 $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER set_last_modified
-BEFORE INSERT OR UPDATE ON file_metadata_v2
+BEFORE INSERT OR UPDATE ON file_metadata
 FOR EACH ROW
     EXECUTE PROCEDURE default_last_modified();
 
 CREATE UNIQUE INDEX unique_file_name_per_location_id_v2
-ON file_metadata_v2 (location_id, file_name);
+ON file_metadata (location_id, file_name);
 
 CREATE UNIQUE INDEX unique_range_boundaries_per_dataset_version_table_v2
-ON file_metadata_v2 (location_id, range_start, range_end);
+ON file_metadata (location_id, range_start, range_end);
