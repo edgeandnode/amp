@@ -1,4 +1,4 @@
-use std::{any::Any, future::IntoFuture, str::FromStr, thread};
+use std::{any::Any, str::FromStr};
 
 use alloy::{
     eips::BlockNumberOrTag,
@@ -11,6 +11,9 @@ use alloy::{
     },
     transports::RpcError,
 };
+use async_trait::async_trait;
+use async_udf::{async_func::AsyncScalarFunctionArgs, functions::AsyncScalarUDFImpl};
+use datafusion::{arrow::array::ArrayRef, common::config::ConfigOptions};
 use datafusion::{
     arrow::{
         array::{
@@ -21,7 +24,7 @@ use datafusion::{
     },
     common::{internal_err, plan_err},
     error::DataFusionError,
-    logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility},
+    logical_expr::{ColumnarValue, Signature, Volatility},
 };
 use itertools::izip;
 
@@ -65,7 +68,8 @@ impl EthCall {
     }
 }
 
-impl ScalarUDFImpl for EthCall {
+#[async_trait]
+impl AsyncScalarUDFImpl for EthCall {
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -82,67 +86,80 @@ impl ScalarUDFImpl for EthCall {
         Ok(DataType::Struct(self.fields.clone()))
     }
 
-    fn invoke_with_args(
+    async fn invoke_async_with_args(
         &self,
-        args: ScalarFunctionArgs,
-    ) -> datafusion::error::Result<ColumnarValue> {
+        args: AsyncScalarFunctionArgs,
+        _option: &ConfigOptions,
+    ) -> datafusion::error::Result<ArrayRef> {
         let name = self.name().to_string();
         let client = self.client.clone();
         let fields = self.fields.clone();
-        // Dedicated thread required to spawn nested tokio runtime.
-        thread::spawn(move || {
-            // Decode the arguments.
-            let args: Vec<_> = ColumnarValue::values_to_arrays(&args.args)?;
-            let [from, to, gas, gas_price, value, input_data, block] = args.as_slice() else {
-                return internal_err!("{}: expected 7 arguments, but got {}", name, args.len());
-            };
-            let from = from
-                .as_any()
-                .downcast_ref::<FixedSizeBinaryArray>()
-                .unwrap();
-            let to = to.as_any().downcast_ref::<FixedSizeBinaryArray>().unwrap();
-            let gas = gas.as_any().downcast_ref::<UInt64Array>().unwrap();
-            let gas_price = gas_price
-                .as_any()
-                .downcast_ref::<Decimal128Array>()
-                .unwrap();
-            let value = value.as_any().downcast_ref::<Decimal128Array>().unwrap();
-            let input_data = input_data.as_any().downcast_ref::<BinaryArray>().unwrap();
-            let block = block.as_any().downcast_ref::<StringArray>().unwrap();
+        // Decode the arguments.
+        let args: Vec<_> = ColumnarValue::values_to_arrays(&args.args)?;
+        let [from, to, gas, gas_price, value, input_data, block] = args.as_slice() else {
+            return internal_err!("{}: expected 7 arguments, but got {}", name, args.len());
+        };
+        let from = from
+            .as_any()
+            .downcast_ref::<FixedSizeBinaryArray>()
+            .unwrap();
+        let to = to.as_any().downcast_ref::<FixedSizeBinaryArray>().unwrap();
+        let gas = gas.as_any().downcast_ref::<UInt64Array>().unwrap();
+        let gas_price = gas_price
+            .as_any()
+            .downcast_ref::<Decimal128Array>()
+            .unwrap();
+        let value = value.as_any().downcast_ref::<Decimal128Array>().unwrap();
+        let input_data = input_data.as_any().downcast_ref::<BinaryArray>().unwrap();
+        let block = block.as_any().downcast_ref::<StringArray>().unwrap();
 
-            // Make the eth_call requests.
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()?;
-            let mut result_builder = StructBuilder::from_fields(fields, from.len());
-            for (from, to, gas, gas_price, value, input_data, block) in
-                izip!(from, to, gas, gas_price, value, input_data, block)
-            {
-                let Some(to) = to else {
-                    return plan_err!("from address is NULL");
-                };
-                let Some(block) = block else {
-                    return plan_err!("block is NULL");
-                };
-                let block = match u64::from_str(block) {
-                    Ok(block) => BlockNumberOrTag::Number(block),
-                    Err(_) => match BlockNumberOrTag::from_str(block) {
-                        Ok(block) => block,
-                        Err(_) => {
-                            return plan_err!("block is not a valid integer, \"0x\" prefixed hex integer, or tag");
-                        }
-                    },
-                };
-                let result = eth_call_retry(&rt, &client, block, &TransactionRequest {
+        // Make the eth_call requests.
+        let mut result_builder = StructBuilder::from_fields(fields, from.len());
+        for (from, to, gas, gas_price, value, input_data, block) in
+            izip!(from, to, gas, gas_price, value, input_data, block)
+        {
+            let Some(to) = to else {
+                return plan_err!("from address is NULL");
+            };
+            let Some(block) = block else {
+                return plan_err!("block is NULL");
+            };
+            let block = match u64::from_str(block) {
+                Ok(block) => BlockNumberOrTag::Number(block),
+                Err(_) => match BlockNumberOrTag::from_str(block) {
+                    Ok(block) => block,
+                    Err(_) => {
+                        return plan_err!(
+                            "block is not a valid integer, \"0x\" prefixed hex integer, or tag"
+                        );
+                    }
+                },
+            };
+            let result = eth_call_retry(
+                &client,
+                block,
+                &TransactionRequest {
                     // `eth_call` only requires the following fields
                     // (https://ethereum.org/en/developers/docs/apis/json-rpc/#eth_call)
                     from: match from {
-                        Some(from) => Some(Address::new(from.try_into().map_err(|_| DataFusionError::Execution(format!("invalid from address: {}", hex::encode(from))))?)),
+                        Some(from) => Some(Address::new(from.try_into().map_err(|_| {
+                            DataFusionError::Execution(format!(
+                                "invalid from address: {}",
+                                hex::encode(from)
+                            ))
+                        })?)),
                         None => None,
                     },
-                    to: Some(TxKind::Call(Address::new(to.try_into().map_err(|_| DataFusionError::Execution(format!("invalid to address: {}", hex::encode(to))))?))),
+                    to: Some(TxKind::Call(Address::new(to.try_into().map_err(|_| {
+                        DataFusionError::Execution(format!(
+                            "invalid to address: {}",
+                            hex::encode(to)
+                        ))
+                    })?))),
                     gas_price: match gas_price {
-                        Some(gas_price) => Some(gas_price.try_into().map_err(|_| DataFusionError::Execution(format!("invalid gas price: {}", gas_price)))?),
+                        Some(gas_price) => Some(gas_price.try_into().map_err(|_| {
+                            DataFusionError::Execution(format!("invalid gas price: {}", gas_price))
+                        })?),
                         None => None,
                     },
                     max_fee_per_gas: None,
@@ -150,7 +167,9 @@ impl ScalarUDFImpl for EthCall {
                     max_fee_per_blob_gas: None,
                     gas,
                     value: match value {
-                        Some(value) => Some(value.try_into().map_err(|_| DataFusionError::Execution(format!("invalid value: {}", value)))?),
+                        Some(value) => Some(value.try_into().map_err(|_| {
+                            DataFusionError::Execution(format!("invalid value: {}", value))
+                        })?),
                         None => None,
                     },
                     input: TransactionInput {
@@ -159,61 +178,82 @@ impl ScalarUDFImpl for EthCall {
                     },
                     // `eth_call` does not require any other fields.
                     ..Default::default()
-                });
-                // Build the response row.
-                match result  {
-                    Ok(bytes) => {
-                        result_builder.field_builder::<BinaryBuilder>(0).unwrap().append_value(bytes.to_vec());
-                        result_builder.field_builder::<StringBuilder>(1).unwrap().append_null();
-                        result_builder.append(true);
-                    }
-                    Err(EthCallRetryError::RpcError(resp)) => {
-                        match resp.data {
-                            Some(data) => {
-                                match hex::decode(data.get().trim_start_matches('"').trim_end_matches('"')) {
-                                    Ok(data) => {
-                                        result_builder.field_builder::<BinaryBuilder>(0).unwrap().append_value(data)
-                                    }
-                                    Err(_) => {
-                                        result_builder.field_builder::<BinaryBuilder>(0).unwrap().append_null();
-                                    }
+                },
+            )
+            .await;
+            // Build the response row.
+            match result {
+                Ok(bytes) => {
+                    result_builder
+                        .field_builder::<BinaryBuilder>(0)
+                        .unwrap()
+                        .append_value(bytes.to_vec());
+                    result_builder
+                        .field_builder::<StringBuilder>(1)
+                        .unwrap()
+                        .append_null();
+                    result_builder.append(true);
+                }
+                Err(EthCallRetryError::RpcError(resp)) => {
+                    match resp.data {
+                        Some(data) => {
+                            match hex::decode(
+                                data.get().trim_start_matches('"').trim_end_matches('"'),
+                            ) {
+                                Ok(data) => result_builder
+                                    .field_builder::<BinaryBuilder>(0)
+                                    .unwrap()
+                                    .append_value(data),
+                                Err(_) => {
+                                    result_builder
+                                        .field_builder::<BinaryBuilder>(0)
+                                        .unwrap()
+                                        .append_null();
                                 }
                             }
-                            None => {
-                                result_builder.field_builder::<BinaryBuilder>(0).unwrap().append_null()
-                            }
                         }
-                        if !resp.message.is_empty() {
-                            result_builder.field_builder::<StringBuilder>(1).unwrap().append_value(resp.message)
-                        } else {
-                            result_builder.field_builder::<StringBuilder>(1).unwrap().append_null()
-                        }
-                        result_builder.append(true);
+                        None => result_builder
+                            .field_builder::<BinaryBuilder>(0)
+                            .unwrap()
+                            .append_null(),
                     }
-                    Err(EthCallRetryError::RetriesFailed) => {
-                        result_builder.field_builder::<BinaryBuilder>(0).unwrap().append_null();
-                        result_builder.field_builder::<StringBuilder>(1).unwrap().append_value(format!("unexpected rpc error"));
-                        result_builder.append(true);
-                    },
+                    if !resp.message.is_empty() {
+                        result_builder
+                            .field_builder::<StringBuilder>(1)
+                            .unwrap()
+                            .append_value(resp.message)
+                    } else {
+                        result_builder
+                            .field_builder::<StringBuilder>(1)
+                            .unwrap()
+                            .append_null()
+                    }
+                    result_builder.append(true);
+                }
+                Err(EthCallRetryError::RetriesFailed) => {
+                    result_builder
+                        .field_builder::<BinaryBuilder>(0)
+                        .unwrap()
+                        .append_null();
+                    result_builder
+                        .field_builder::<StringBuilder>(1)
+                        .unwrap()
+                        .append_value(format!("unexpected rpc error"));
+                    result_builder.append(true);
                 }
             }
-            Ok(ColumnarValue::Array(ArrayBuilder::finish(
-                &mut result_builder,
-            )))
-        })
-        .join()
-        .unwrap()
+        }
+        Ok(ArrayBuilder::finish(&mut result_builder))
     }
 }
 
-fn eth_call_retry(
-    rt: &tokio::runtime::Runtime,
+async fn eth_call_retry(
     client: &alloy::providers::ReqwestProvider,
     block: BlockNumberOrTag,
     req: &TransactionRequest,
 ) -> Result<Bytes, EthCallRetryError> {
     for _ in 0..3 {
-        let result = rt.block_on(client.call(req).block(block.into()).into_future());
+        let result = client.call(req).block(block.into()).await;
         match result {
             Ok(bytes) => {
                 return Ok(bytes);
