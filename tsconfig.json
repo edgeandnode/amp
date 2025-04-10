@@ -3,7 +3,6 @@
   "include": [],
   "references": [
     { "path": "typescript/nozzle" },
-    { "path": "typescript/cli" },
     { "path": "typescript/example" }
   ]
 }

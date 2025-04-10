@@ -1,8 +1,10 @@
 import { Args, Command, Options } from "@effect/cli";
 import { Path, FileSystem } from "@effect/platform";
 import { Console, Effect, Match, Option, Predicate, Schema } from "effect";
-import { ManifestBuilder, Model, SchemaGenerator } from "@nozzle/nozzle";
 import { importFile, readJson } from "../common.js";
+import * as ManifestBuilder from "../../ManifestBuilder.js";
+import * as SchemaGenerator from "../../SchemaGenerator.js";
+import * as Model from "../../Model.js";
 
 export const codegen = Command.make("codegen", {
   args: {

@@ -1,10 +1,31 @@
 {
-  "name": "@nozzle/nozzle",
+  "name": "@graphprotocol/nozzle",
   "version": "0.0.0",
   "type": "module",
+  "license": "UNLICENSED",
+  "description": "Blockchain datasets",
+  "homepage": "https://thegraph.com",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/edgeandnode/nozzle.git",
+    "directory": "typescript/nozzle"
+  },
+  "bugs": {
+    "url": "https://github.com/edgeandnode/nozzle/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "directory": "dist",
+    "provenance": true
+  },
+  "bin": "./src/cli/main.ts",
+  "scripts": {
+    "build": "tsc -b tsconfig.build.json && build-utils pack-v2 && bun ./scripts/build.ts"
+  },
   "dependencies": {
     "@effect/cli": "^0.59.5",
     "@effect/platform": "^0.80.5",
+    "@effect/platform-node": "^0.76.9",
     "@effect/schema": "^0.75.5",
     "effect": "^3.14.5"
   }
