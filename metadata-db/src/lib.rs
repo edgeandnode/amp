@@ -407,6 +407,43 @@ impl MetadataDb {
             .fetch(&self.pool)
     }
 
+    pub async fn insert_file_metadata_v2(
+        &self,
+        location_id: i64,
+        file_name: String,
+        range_start: i64,
+        range_end: i64,
+        file_size: i64,
+        data_size: i64,
+        metadata_hint: i64,
+        etag: Option<String>,
+        version: Option<String>,
+        secs: i64,
+        nanos: i32,
+    ) -> Result<(), Error> {
+        let sql = "
+        INSERT INTO file_metadata_v2 (location_id, file_name, range_start, range_end, file_size, data_size, metadata_hint, etag, version, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, ROW($10, $11))
+        ";
+
+        sqlx::query(sql)
+            .bind(location_id)
+            .bind(file_name)
+            .bind(range_start)
+            .bind(range_end)
+            .bind(file_size)
+            .bind(data_size)
+            .bind(metadata_hint)
+            .bind(etag)
+            .bind(version)
+            .bind(secs)
+            .bind(nanos)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
+
     pub async fn insert_file_metadata(
         &self,
         location_id: i64,
@@ -443,3 +480,29 @@ async fn lock_locations(
         .await?;
     Ok(())
 }
+// id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+// location_id BIGINT REFERENCES locations(id) ON DELETE CASCADE NOT NULL,
+// file_name TEXT NOT NULL,
+// file_size BIGINT NOT NULL,
+// data_size BIGINT NOT NULL,
+// metadata_hint BIGINT NOT NULL,
+// etag TEXT NOT NULL,
+// version TEXT NOT NULL,
+// created_at TIMESTAMP DEFAULT (now() AT TIME ZONE 'utc') NOT NULL,
+// last_modified TIMESTAMP DEFAULT (now() AT TIME ZONE 'utc') NOT NULL,
+// range_start BIGINT NOT NULL,
+// range_end BIGINT NOT NULL,
+// object_metadata JSONB NOT NULL,
+// nozzle_metadata JSONB NOT NULL
+// pub struct FileMetadata {
+//     id: i64,
+//     location_id: i64,
+//     file_name: String,
+//     file_size: i64,
+//     data_size: i64,
+//     metadata_hint: i64,
+//     etag: Option<String>,
+//     version: Option<String>,
+//     created_at: String,
+//     last_modified: String,
+// }
