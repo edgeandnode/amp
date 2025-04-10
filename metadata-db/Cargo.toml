@@ -5,6 +5,7 @@ version.workspace = true
 
 [dependencies]
 sqlx.workspace = true
+object_store.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
 url.workspace = true
@@ -14,3 +15,4 @@ serde.workspace = true
 serde_json.workspace = true
 futures.workspace = true
 tokio.workspace = true
+chrono = "0.4.40"

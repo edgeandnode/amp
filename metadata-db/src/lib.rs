@@ -1,7 +1,11 @@
 use std::time::Duration;
 
-use futures::stream::{BoxStream, Stream};
+use futures::{
+    stream::{BoxStream, Stream},
+    StreamExt, TryStream, TryStreamExt,
+};
 use log::error;
+use object_store::{path::Path, ObjectMeta};
 use sqlx::{
     migrate::{MigrateError, Migrator},
     postgres::{PgListener, PgNotification},
@@ -379,7 +383,6 @@ impl MetadataDb {
             .fetch(&self.pool)
     }
 
-    /// Produces a stream of all scanned block ranges for a given tbl catalogued by the MetadataDb
     pub fn stream_ranges<'a>(
         &'a self,
         tbl: TableId<'a>,
@@ -390,8 +393,7 @@ impl MetadataDb {
             table,
         } = tbl;
         let sql = "
-            SELECT CAST(fm.nozzle_metadata->>'range_start' AS BIGINT)
-                 , CAST(fm.nozzle_metadata->>'range_end' AS BIGINT)
+            SELECT fm.range_start, fm.range_end
               FROM file_metadata fm
         INNER JOIN locations l 
                 ON fm.location_id = l.id 
@@ -407,24 +409,178 @@ impl MetadataDb {
             .fetch(&self.pool)
     }
 
-    pub async fn insert_file_metadata_v2(
+    /// Produces a stream of object metadata for a given table catalogued by the MetadataDb
+    pub fn stream_object_meta<'a>(
+        &'a self,
+        tbl: TableId<'a>,
+    ) -> impl TryStream<Item = Result<object_store::ObjectMeta, sqlx::Error>> + 'a {
+        let TableId {
+            dataset,
+            dataset_version: _,
+            table,
+        } = tbl;
+        let sql = "
+            SELECT l.url, fm.file_name, fm.file_size, fm.e_tag, fm.version, fm.last_modified
+              FROM file_metadata fm
+        INNER JOIN locations l 
+                ON fm.location_id = l.id 
+             WHERE l.dataset = $1
+                   AND l.tbl = $2
+                   AND l.active
+          ORDER BY 1 ASC
+        ";
+
+        sqlx::query_as(sql)
+            .bind(dataset)
+            .bind(table)
+            .fetch(&self.pool)
+            .try_filter_map(
+                |(url, file_name, file_size, etag, version, last_modified): (
+                    String,
+                    String,
+                    i64,
+                    String,
+                    String,
+                    NozzleTimestamp,
+                )| async move {
+                    // Unwrap: we know the URL is valid because it was inserted by us.
+                    // Unwrap: we know the file name is valid because it was inserted by us.
+                    let url = Url::parse(&url).unwrap().join(&file_name).unwrap();
+                    let location = Path::from_url_path(url.path()).unwrap();
+                    let size = file_size as usize;
+                    let last_modified = last_modified.into();
+                    let e_tag = if etag.is_empty() { None } else { Some(etag) };
+                    let version = if version.is_empty() {
+                        None
+                    } else {
+                        Some(version)
+                    };
+                    Ok(object_store::ObjectMeta {
+                        location,
+                        last_modified,
+                        size,
+                        e_tag,
+                        version,
+                    })
+                    .map(Some)
+                },
+            )
+    }
+
+    /// Produces a stream of nozzle metadata for a given table catalogued by the MetadataDb
+    /// 
+    /// Stream items are tuples of:
+    /// - ObjectMeta
+    /// - Range start and end
+    /// - Data size
+    /// - Size hint
+    pub fn stream_nozzle_metadata<'a>(
+        &'a self,
+        tbl: TableId<'a>,
+    ) -> BoxStream<'a, Result<(ObjectMeta, (i64, i64), i64, i64), sqlx::Error>> {
+        let TableId { dataset, table, .. } = tbl;
+        let sql = "
+            SELECT l.url
+                 , fm.file_name
+                 , fm.file_size
+                 , fm.e_tag
+                 , fm.version
+                 , fm.last_modified
+                 , fm.range_start
+                 , fm.range_end
+                 , fm.data_size
+                 , fm.size_hint
+              FROM file_metadata fm
+        INNER JOIN locations l 
+                ON fm.location_id = l.id
+             WHERE l.dataset = $1
+                   AND l.tbl = $2
+                   AND l.active";
+
+        sqlx::query_as::<
+            _,
+            (
+                String,
+                String,
+                i64,
+                String,
+                String,
+                NozzleTimestamp,
+                i64,
+                i64,
+                i64,
+                i64,
+            ),
+        >(sql)
+        .bind(dataset)
+        .bind(table)
+        .fetch(&self.pool)
+        .map_ok(
+            |(
+                url,
+                file_name,
+                file_size,
+                e_tag,
+                version,
+                laast_modified,
+                range_start,
+                range_end,
+                data_size,
+                size_hint,
+            )| {
+                // Unwrap: we know the URL is valid because it was inserted by us.
+                // Unwrap: we know the file name is valid because it was inserted by us.
+                let url = Url::parse(&url).unwrap().join(&file_name).unwrap();
+                let location = Path::from_url_path(url.path()).unwrap();
+                let size = file_size as usize;
+                let last_modified = laast_modified.into();
+                let e_tag = if e_tag.is_empty() { None } else { Some(e_tag) };
+                let version = if version.is_empty() {
+                    None
+                } else {
+                    Some(version)
+                };
+                (
+                    ObjectMeta {
+                        location,
+                        last_modified,
+                        size,
+                        e_tag,
+                        version,
+                    },
+                    (range_start, range_end),
+                    data_size,
+                    size_hint,
+                )
+            },
+        )
+        .boxed()
+    }
+
+    /// Inserts a new file metadata entry into the database.
+    pub async fn insert_nozzle_metadata(
         &self,
         location_id: i64,
         file_name: String,
         range_start: i64,
         range_end: i64,
-        file_size: i64,
+        object_meta: ObjectMeta,
         data_size: i64,
-        metadata_hint: i64,
-        etag: Option<String>,
-        version: Option<String>,
-        secs: i64,
-        nanos: i32,
+        size_hint: i64,
+        created_at: (i64, i32),
     ) -> Result<(), Error> {
         let sql = "
-        INSERT INTO file_metadata_v2 (location_id, file_name, range_start, range_end, file_size, data_size, metadata_hint, etag, version, created_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, ROW($10, $11))
+        INSERT INTO file_metadata (
+            location_id, file_name, range_start, range_end, file_size, data_size, size_hint,
+            e_tag, version, created_at, last_modified
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL)
         ";
+
+        let created_at = NozzleTimestamp::from(created_at);
+        let file_size = object_meta.size as i64;
+        let e_tag = object_meta.e_tag;
+        let version = object_meta.version;
 
         sqlx::query(sql)
             .bind(location_id)
@@ -433,36 +589,40 @@ impl MetadataDb {
             .bind(range_end)
             .bind(file_size)
             .bind(data_size)
-            .bind(metadata_hint)
-            .bind(etag)
-            .bind(version)
-            .bind(secs)
-            .bind(nanos)
+            .bind(size_hint)
+            .bind(e_tag.unwrap_or_default())
+            .bind(version.unwrap_or_default())
+            .bind(created_at)
             .execute(&self.pool)
             .await?;
 
         Ok(())
     }
+}
 
-    pub async fn insert_file_metadata(
-        &self,
-        location_id: i64,
-        file_name: String,
-        nozzle_metadata: serde_json::Value,
-    ) -> Result<(), Error> {
-        let sql = "
-        INSERT INTO file_metadata (location_id, file_name, nozzle_metadata)
-        VALUES ($1, $2, $3)
-        ";
+#[derive(Debug, sqlx::Type)]
+#[sqlx(type_name = "NOZZLE_TIMESTAMP")]
+pub struct NozzleTimestamp {
+    pub secs: i64,
+    pub nanos: i32,
+}
 
-        sqlx::query(sql)
-            .bind(location_id)
-            .bind(file_name)
-            .bind(nozzle_metadata)
-            .execute(&self.pool)
-            .await?;
+impl From<(i64, i32)> for NozzleTimestamp {
+    fn from((secs, nanos): (i64, i32)) -> Self {
+        NozzleTimestamp { secs, nanos }
+    }
+}
 
-        Ok(())
+impl From<NozzleTimestamp> for (i64, i32) {
+    fn from(ts: NozzleTimestamp) -> Self {
+        (ts.secs, ts.nanos)
+    }
+}
+
+impl From<NozzleTimestamp> for chrono::DateTime<chrono::Utc> {
+    fn from(ts: NozzleTimestamp) -> Self {
+        let timestamp_nanos = ts.secs * 1_000_000_000 + ts.nanos as i64;
+        Self::from_timestamp_nanos(timestamp_nanos)
     }
 }
 
@@ -480,29 +640,3 @@ async fn lock_locations(
         .await?;
     Ok(())
 }
-// id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-// location_id BIGINT REFERENCES locations(id) ON DELETE CASCADE NOT NULL,
-// file_name TEXT NOT NULL,
-// file_size BIGINT NOT NULL,
-// data_size BIGINT NOT NULL,
-// metadata_hint BIGINT NOT NULL,
-// etag TEXT NOT NULL,
-// version TEXT NOT NULL,
-// created_at TIMESTAMP DEFAULT (now() AT TIME ZONE 'utc') NOT NULL,
-// last_modified TIMESTAMP DEFAULT (now() AT TIME ZONE 'utc') NOT NULL,
-// range_start BIGINT NOT NULL,
-// range_end BIGINT NOT NULL,
-// object_metadata JSONB NOT NULL,
-// nozzle_metadata JSONB NOT NULL
-// pub struct FileMetadata {
-//     id: i64,
-//     location_id: i64,
-//     file_name: String,
-//     file_size: i64,
-//     data_size: i64,
-//     metadata_hint: i64,
-//     etag: Option<String>,
-//     version: Option<String>,
-//     created_at: String,
-//     last_modified: String,
-// }
