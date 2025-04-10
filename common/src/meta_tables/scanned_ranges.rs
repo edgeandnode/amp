@@ -26,9 +26,12 @@ use crate::{multirange::MultiRange, BoxError, QueryContext, Timestamp};
 use futures::{StreamExt, TryStreamExt};
 
 use metadata_db::{MetadataDb, TableId};
+use object_store::ObjectMeta;
 use serde::{Deserialize, Serialize};
 
 pub const METADATA_KEY: &'static str = "nozzle_metadata";
+
+pub type NozzleMetadata = (ScannedRange, ObjectMeta, usize);
 
 pub async fn ranges_for_table(
     ctx: &QueryContext,
