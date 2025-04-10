@@ -35,8 +35,6 @@ CREATE TABLE IF NOT EXISTS file_metadata (
     location_id BIGINT REFERENCES locations(id) ON DELETE CASCADE NOT NULL,
     file_name TEXT NOT NULL,
     -- Should we break this out into a separate table, separate columns, or keep it as JSONB?
-    object_metadata JSONB,
-    -- Should we break this out into a separate table, separate columns, or keep it as JSONB?
     nozzle_metadata JSONB NOT NULL
 );
 
@@ -70,11 +68,10 @@ CREATE TABLE IF NOT EXISTS file_metadata_v2 (
     range_end       BIGINT NOT NULL,
     file_size       BIGINT NOT NULL,
     data_size       BIGINT NOT NULL,
-    metadata_hint   BIGINT NOT NULL,
-    etag            TEXT,
-    version         TEXT,
+    etag            TEXT NOT NULL,
+    version         TEXT NOT NULL,
     created_at      NOZZLE_TIMESTAMP DEFAULT (as_nozzle_ts(now() AT TIME ZONE 'utc')) NOT NULL,
-    last_modified   NOZZLE_TIMESTAMP NOT NULL
+    last_modified   NOZZLE_TIMESTAMP
 );
 
 CREATE FUNCTION default_last_modified() RETURNS TRIGGER AS $$
@@ -87,7 +84,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER set_last_modified
-AFTER INSERT OR UPDATE ON file_metadata_v2
+BEFORE INSERT OR UPDATE ON file_metadata_v2
 FOR EACH ROW
     EXECUTE PROCEDURE default_last_modified();
 
