@@ -1,10 +1,17 @@
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use crate::{
     temp_metadata_db::test_metadata_db,
     test_support::{check_blocks, check_provider_file, SnapshotContext},
 };
-use common::tracing;
+use common::{
+    meta_tables::scanned_ranges::ScannedRange,
+    parquet::arrow::async_reader::{AsyncFileReader, ParquetObjectReader},
+    tracing,
+};
+use futures::StreamExt;
+use metadata_db::TableId;
+use object_store::local::LocalFileSystem;
 
 static KEEP_TEMP_DIRS: LazyLock<bool> = LazyLock::new(|| std::env::var("KEEP_TEMP_DIRS").is_ok());
 
@@ -16,7 +23,7 @@ async fn evm_rpc_single() {
 
     let metadata_db = test_metadata_db(*KEEP_TEMP_DIRS).await;
     let blessed = SnapshotContext::blessed(&dataset_name).await.unwrap();
-
+    let store = Arc::new(LocalFileSystem::new());
     // Check the dataset directly against the RPC provider with `check_blocks`.
     check_blocks(dataset_name, 15_000_000, 15_000_000)
         .await
@@ -32,10 +39,40 @@ async fn evm_rpc_single() {
     )
     .await
     .expect("temp dump failed");
+
     temp_dump
         .assert_eq(&blessed, Some(&*metadata_db))
         .await
         .unwrap();
+
+    let tbl = TableId {
+        dataset: &dataset_name,
+        dataset_version: None,
+        table: "blocks",
+    };
+    let mut object_meta_stream = metadata_db.stream_nozzle_metadata(tbl);
+
+    while let Some(Ok((object_meta, (range_start, range_end), _, size_hint))) =
+        object_meta_stream.next().await
+    {
+        let mut reader = ParquetObjectReader::new(store.clone(), object_meta)
+            .with_footer_size_hint(size_hint as usize);
+        let metadata = reader.get_metadata().await.unwrap();
+        let kv = metadata.file_metadata().key_value_metadata().unwrap();
+        let nozzle_metadata: ScannedRange = serde_json::from_str(
+            kv.into_iter()
+                .find(|kv| kv.key == "nozzle_metadata")
+                .expect("nozzle_metadata not found")
+                .value
+                .clone()
+                .expect("nozzle_metadata value not found")
+                .as_str(),
+        )
+        .expect("failed to deserialize nozzle_metadata");
+
+        assert_eq!(nozzle_metadata.range_start, range_start as u64);
+        assert_eq!(nozzle_metadata.range_end, range_end as u64);
+    }
 }
 
 #[tokio::test]

@@ -10,6 +10,7 @@ name = "tests"
 name = "tests"
 
 [dependencies]
+serde_json.workspace = true
 pgtemp = "0.6.0"
 clap.workspace = true
 common = { path = "../common" }
