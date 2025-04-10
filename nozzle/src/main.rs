@@ -22,7 +22,7 @@ struct Args {
 #[derive(Debug, clap::Subcommand)]
 enum Command {
     Dump {
-        /// The name of the dataset to dump. This will be looked up in the dataset definiton directory.
+        /// The name of the dataset to dump. This will be looked up in the dataset definition directory.
         /// Will also be used as a subdirectory in the output path, `<data_dir>/<dataset>`.
         ///
         /// Also accepts a comma-separated list of datasets, which will be dumped in the provided order.
@@ -35,14 +35,14 @@ enum Command {
         #[arg(long, env = "DUMP_IGNORE_DEPS")]
         ignore_deps: bool,
 
-        /// The block number to start from, inclusive. If ommited, defaults to `0`. Note that `dump` is
+        /// The block number to start from, inclusive. If omitted, defaults to `0`. Note that `dump` is
         /// smart about keeping track of what blocks have already been dumped, so you only need to set
         /// this if you really don't want the data before this block.
         #[arg(long, short, default_value = "0", env = "DUMP_START_BLOCK")]
         start: u64,
 
         /// The block number to end at, inclusive. If starts with "+" then relative to `start`. If
-        /// ommited, defaults to a recent block.
+        /// omitted, defaults to a recent block.
         #[arg(long, short, env = "DUMP_END_BLOCK")]
         end_block: Option<String>,
 
