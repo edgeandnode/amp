@@ -4,7 +4,7 @@ use core::fmt;
 use std::{
     collections::{BTreeMap, BTreeSet},
     str::FromStr,
-    sync::Arc,
+    sync::{Arc, RwLock},
 };
 
 use common::{
@@ -17,11 +17,13 @@ use common::{
 };
 use datafusion::{
     catalog::resolve_table_references,
+    common::HashMap,
     execution::runtime_env::RuntimeEnv,
     sql::{parser, TableReference},
 };
-use futures::{future::BoxFuture, FutureExt as _, StreamExt, TryFutureExt as _};
+use futures::{future::BoxFuture, FutureExt as _, TryFutureExt as _};
 use metadata_db::MetadataDb;
+use object_store::ObjectMeta;
 use serde::Deserialize;
 use sql_datasets::SqlDataset;
 use thiserror::Error;
@@ -178,9 +180,12 @@ impl fmt::Display for DatasetError {
     }
 }
 
+#[derive(Clone)]
 pub struct DatasetStore {
     config: Arc<Config>,
     pub metadata_db: Option<MetadataDb>,
+    // Cache maps dataset name to provider.
+    evm_rpc_provider_cache: Arc<RwLock<HashMap<String, alloy::providers::ReqwestProvider>>>,
 }
 
 impl DatasetStore {
@@ -188,6 +193,7 @@ impl DatasetStore {
         Arc::new(Self {
             config,
             metadata_db,
+            evm_rpc_provider_cache: Default::default(),
         })
     }
 
@@ -396,7 +402,24 @@ impl DatasetStore {
         Ok((kind, raw))
     }
 
-    pub async fn evm_rpc_dataset_providers(&self) -> Result<Vec<(String, Url)>, Error> {
+    pub async fn evm_rpc_dataset_providers(
+        &self,
+    ) -> Result<Vec<(String, alloy::providers::ReqwestProvider)>, Error> {
+        let mut result = Vec::new();
+        let dataset_defs = self.dataset_defs_store().list_all_shallow().await?;
+        for dataset_def in dataset_defs {
+            if let Some(provider) = self.provider_for_dataset(dataset_def).await? {
+                result.push(provider);
+            }
+        }
+        Ok(result)
+    }
+
+    /// Returns cached dataset name and provider, otherwise loads the provider and caches it.
+    async fn provider_for_dataset(
+        &self,
+        dataset_def: ObjectMeta,
+    ) -> Result<Option<(String, alloy::providers::ReqwestProvider)>, Error> {
         #[derive(Deserialize)]
         struct DatasetDef {
             #[serde(flatten)]
@@ -407,41 +430,57 @@ impl DatasetStore {
         struct EvmRpcProvider {
             url: Url,
         }
-        let mut result = Vec::new();
-        let mut dataset_defs = self.config.dataset_defs_store.list("");
-        while let Some(dataset_def) = dataset_defs.next().await {
-            let dataset_def = dataset_def?;
-            let location = dataset_def.location;
-            let dataset_def = self
-                .dataset_defs_store()
-                .get_string(location.clone())
-                .await?;
-            let def: DatasetDef = match location.extension() {
-                Some("toml") => toml::from_str(&dataset_def)?,
-                Some("json") => serde_json::from_str(&dataset_def)?,
-                _ => continue,
-            };
-            if def.common.kind != "evm-rpc" {
-                continue;
-            }
-            if let Some(provider_location) = def.provider {
-                let provider = self
-                    .providers_store()
-                    .get_string(provider_location.clone())
-                    .await?;
-                let provider: EvmRpcProvider = if provider_location.ends_with(".toml") {
-                    toml::from_str(&provider)?
-                } else if provider_location.ends_with(".json") {
-                    serde_json::from_str(&provider)?
-                } else {
-                    return Err(Error::Unknown(
-                        format!("unknown provider format: {provider_location}").into(),
-                    ));
-                };
-                result.push((def.common.name, provider.url));
-            }
+
+        // Parse the dataset definition.
+        let location = dataset_def.location;
+        let dataset_def = self
+            .dataset_defs_store()
+            .get_string(location.clone())
+            .await?;
+        let def: DatasetDef = match location.extension() {
+            Some("toml") => toml::from_str(&dataset_def)?,
+            Some("json") => serde_json::from_str(&dataset_def)?,
+            _ => return Ok(None),
+        };
+        if def.common.kind != "evm-rpc" {
+            return Ok(None);
         }
-        Ok(result)
+
+        // Check if we already have the provider cached.
+        if let Some(provider) = self
+            .evm_rpc_provider_cache
+            .read()
+            .unwrap()
+            .get(&def.common.name)
+        {
+            return Ok(Some((def.common.name, provider.clone())));
+        }
+
+        // Load the provider from the dataset definition.
+        if let Some(provider_location) = def.provider {
+            let provider = self
+                .providers_store()
+                .get_string(provider_location.clone())
+                .await?;
+            let provider: EvmRpcProvider = if provider_location.ends_with(".toml") {
+                toml::from_str(&provider)?
+            } else if provider_location.ends_with(".json") {
+                serde_json::from_str(&provider)?
+            } else {
+                return Err(Error::Unknown(
+                    format!("unknown provider format: {provider_location}").into(),
+                ));
+            };
+            // Cache the provider.
+            let provider = alloy::providers::ProviderBuilder::new().on_http(provider.url);
+            self.evm_rpc_provider_cache
+                .write()
+                .unwrap()
+                .insert(def.common.name.clone(), provider.clone());
+            return Ok(Some((def.common.name.clone(), provider)));
+        }
+
+        Ok(None)
     }
 
     /// Creates a `QueryContext` for a SQL query, this will infer and load any dependencies. The
