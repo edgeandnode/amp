@@ -2,8 +2,11 @@ use std::sync::Arc;
 
 use datafusion::{
     arrow::{
-        array::{ArrayRef, BooleanArray, Int32Array, StringArray, StructArray},
-        datatypes::{i256, DataType, Field, DECIMAL128_MAX_PRECISION, DECIMAL256_MAX_PRECISION},
+        array::{
+            ArrayRef, BooleanArray, Int32Array, ListBuilder, StringArray, StringBuilder,
+            StructArray,
+        },
+        datatypes::{DECIMAL128_MAX_PRECISION, DECIMAL256_MAX_PRECISION, DataType, Field, i256},
     },
     scalar::ScalarValue,
 };
@@ -102,5 +105,20 @@ fn obj_param() {
 
     isolate
         .invoke::<()>("test.js", TEST_JS, "obj_param", &[&value])
+        .unwrap();
+}
+
+#[test]
+fn list_param() {
+    let mut isolate = Isolate::new();
+    let string_builder = StringBuilder::with_capacity(0, 0);
+    let mut builder = ListBuilder::new(string_builder);
+    builder.values().append_value("1");
+    builder.values().append_value("2");
+    builder.values().append_value("3");
+    builder.append(true);
+    let list = ScalarValue::List(Arc::new(builder.finish()));
+    isolate
+        .invoke::<()>("test.js", TEST_JS, "list_param", &[&list])
         .unwrap();
 }

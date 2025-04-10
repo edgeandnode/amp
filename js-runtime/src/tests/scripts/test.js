@@ -88,3 +88,10 @@ function obj_param(obj) {
 	assert_eq(obj.b, "perf");
 	assert_eq(obj.c, true);
 }
+
+function list_param(list) {
+	assert_eq(list.length, 3);
+	assert_eq(list[0], "1");
+	assert_eq(list[1], "2");
+	assert_eq(list[2], "3");
+}

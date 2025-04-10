@@ -1,5 +1,5 @@
 use datafusion::{
-    arrow::{array::Array as _, datatypes::i256},
+    arrow::{array::Array, datatypes::i256},
     scalar::ScalarValue,
 };
 use num_traits::cast::ToPrimitive;
@@ -224,6 +224,19 @@ impl<T: ToV8> ToV8 for Option<T> {
     }
 }
 
+impl<T: ToV8> ToV8 for &[T] {
+    fn to_v8<'s>(
+        &self,
+        scope: &mut v8::HandleScope<'s>,
+    ) -> Result<v8::Local<'s, v8::Value>, BoxError> {
+        let elems = self
+            .iter()
+            .map(|e| e.to_v8(scope).into())
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(v8::Array::new_with_elements(scope, &elems).into())
+    }
+}
+
 impl ToV8 for ScalarValue {
     fn to_v8<'s>(
         &self,
@@ -267,6 +280,27 @@ impl ToV8 for ScalarValue {
                 Ok(obj.into())
             }
 
+            ScalarValue::FixedSizeList(l) => {
+                // ScalarValue FixedSizeList should always have a single element
+                assert_eq!(l.len(), 1);
+                let array = l.value(0);
+                single_array_to_v8(&array, scope)
+            }
+
+            ScalarValue::List(l) => {
+                // ScalarValue List should always have a single element
+                assert_eq!(l.len(), 1);
+                let array = l.value(0);
+                single_array_to_v8(&array, scope)
+            }
+
+            ScalarValue::LargeList(l) => {
+                // ScalarValue LargeList should always have a single element
+                assert_eq!(l.len(), 1);
+                let array = l.value(0);
+                single_array_to_v8(&array, scope)
+            }
+
             // Fractional decimals
             ScalarValue::Decimal128(_, _, _) | ScalarValue::Decimal256(_, _, _) => {
                 Err(BoxError::from(format!(
@@ -276,9 +310,6 @@ impl ToV8 for ScalarValue {
 
             // TODOs
             ScalarValue::Float16(_)
-            | ScalarValue::FixedSizeList(_)
-            | ScalarValue::List(_)
-            | ScalarValue::LargeList(_)
             | ScalarValue::Map(_)
             | ScalarValue::Date32(_)
             | ScalarValue::Date64(_)
@@ -304,4 +335,16 @@ impl ToV8 for ScalarValue {
             ))),
         }
     }
+}
+
+fn single_array_to_v8<'s>(
+    array: &dyn Array,
+    scope: &mut v8::HandleScope<'s>,
+) -> Result<v8::Local<'s, v8::Value>, BoxError> {
+    let mut sv_v8 = vec![];
+    for i in 0..array.len() {
+        let sv = ScalarValue::try_from_array(array, i)?;
+        sv_v8.push(sv.to_v8(scope)?);
+    }
+    Ok(v8::Array::new_with_elements(scope, &sv_v8).into())
 }
