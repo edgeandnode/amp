@@ -34,9 +34,9 @@ pub struct EthCall {
 }
 
 impl EthCall {
-    pub fn new(table_name: &str, client: alloy::providers::ReqwestProvider) -> Self {
+    pub fn new(dataset_name: &str, client: alloy::providers::ReqwestProvider) -> Self {
         EthCall {
-            name: format!("{table_name}.eth_call"),
+            name: format!("{dataset_name}.eth_call"),
             client,
             signature: Signature::exact(
                 vec![
@@ -134,6 +134,8 @@ impl ScalarUDFImpl for EthCall {
                     },
                 };
                 let result = eth_call_retry(&rt, &client, block, &TransactionRequest {
+                    // `eth_call` only requires the following fields
+                    // (https://ethereum.org/en/developers/docs/apis/json-rpc/#eth_call)
                     from: match from {
                         Some(from) => Some(Address::new(from.try_into().map_err(|_| DataFusionError::Execution(format!("invalid from address: {}", hex::encode(from))))?)),
                         None => None,
@@ -155,13 +157,8 @@ impl ScalarUDFImpl for EthCall {
                         input: input_data.map(|i| alloy::primitives::Bytes::copy_from_slice(i)),
                         data: None,
                     },
-                    nonce: None,
-                    chain_id: None,
-                    access_list: None,
-                    transaction_type: None,
-                    blob_versioned_hashes: None,
-                    sidecar: None,
-                    authorization_list: None,
+                    // `eth_call` does not require any other fields.
+                    ..Default::default()
                 });
                 // Build the response row.
                 match result  {
