@@ -16,6 +16,7 @@
   "publishConfig": {
     "access": "public",
     "directory": "dist",
+    "linkDirectory": false,
     "provenance": true
   },
   "bin": "./src/cli/main.ts",

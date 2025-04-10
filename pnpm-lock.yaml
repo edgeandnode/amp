@@ -22,7 +22,7 @@ importers:
     dependencies:
       '@graphprotocol/nozzle':
         specifier: workspace:*
-        version: link:../nozzle/dist
+        version: link:../nozzle
       effect:
         specifier: ^3.14.5
         version: 3.14.5
