@@ -1,4 +1,4 @@
-import { defineDataset } from "@graphprotocol/nozzle";
+import { defineDataset } from "nozzleo";
 
 const event = (event: string) => {
   return `

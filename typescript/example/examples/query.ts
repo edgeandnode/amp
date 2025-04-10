@@ -1,4 +1,4 @@
-import { Api } from "@graphprotocol/nozzle";
+import { Api } from "nozzleo";
 import { Effect, Stream, Schema, Pretty } from "effect";
 import { Erc20Transfers } from "./schema.js";
 

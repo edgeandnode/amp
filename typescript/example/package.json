@@ -1,5 +1,5 @@
 {
-  "name": "@graphprotocol/nozzle-example",
+  "name": "example",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -8,7 +8,7 @@
     "deploy": "nozzle deploy"
   },
   "dependencies": {
-    "@graphprotocol/nozzle": "workspace:*",
-    "effect": "^3.14.5"
+    "effect": "^3.14.5",
+    "nozzleo": "workspace:*"
   }
 }
