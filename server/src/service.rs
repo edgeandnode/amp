@@ -1,3 +1,8 @@
+use axum::{
+    http::StatusCode,
+    response::{IntoResponse, Response as AxumResponse},
+    Json,
+};
 use common::{
     arrow::{self, ipc::writer::IpcDataGenerator},
     catalog::collect_scanned_tables,
@@ -30,7 +35,7 @@ use tonic::{Request, Response, Status};
 type TonicStream<T> = Pin<Box<dyn Stream<Item = Result<T, Status>> + Send + 'static>>;
 
 #[derive(Error, Debug)]
-enum Error {
+pub enum Error {
     #[error("ProtocolBuffers decoding error: {0}")]
     PbDecodeError(String),
 
@@ -60,6 +65,36 @@ fn datafusion_error_to_status(outer: &Error, e: &DataFusionError) -> Status {
     match e {
         DataFusionError::ResourcesExhausted(_) => Status::resource_exhausted(outer.to_string()),
         _ => Status::internal(outer.to_string()),
+    }
+}
+
+impl IntoResponse for Error {
+    fn into_response(self) -> AxumResponse {
+        let error_message = self.to_string();
+        let status = match self {
+            Error::CoreError(
+                CoreError::InvalidPlan(_)
+                | CoreError::SqlParseError(_)
+                | CoreError::PlanEncodingError(_),
+            ) => StatusCode::BAD_REQUEST,
+            Error::CoreError(
+                CoreError::DatasetError(_)
+                | CoreError::ConfigError(_)
+                | CoreError::PlanningError(_)
+                | CoreError::ExecutionError(_)
+                | CoreError::MetaTableError(_),
+            ) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::ExecutionError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::DatasetStoreError(e) if e.is_not_found() => StatusCode::NOT_FOUND,
+            Error::DatasetStoreError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::PbDecodeError(_) => StatusCode::BAD_REQUEST,
+            Error::UnsupportedFlightDescriptorType(_) => StatusCode::BAD_REQUEST,
+            Error::UnsupportedFlightDescriptorCommand(_) => StatusCode::BAD_REQUEST,
+        };
+        let body = serde_json::json!({
+            "error": error_message,
+        });
+        (status, Json(body)).into_response()
     }
 }
 
@@ -111,22 +146,19 @@ impl Service {
         })
     }
 
-    pub async fn execute_query(&self, sql: &str) -> Result<SendableRecordBatchStream, Status> {
-        let query = parse_sql(sql).map_err(|err| Status::from(Error::from(err)))?;
+    pub async fn execute_query(&self, sql: &str) -> Result<SendableRecordBatchStream, Error> {
+        let query = parse_sql(sql).map_err(|err| Error::from(err))?;
         let ctx = self
             .dataset_store
             .clone()
             .ctx_for_sql(&query, self.env.clone())
             .await
-            .map_err(|err| Status::from(Error::DatasetStoreError(err)))?;
-        let plan = ctx
-            .plan_sql(query)
-            .await
-            .map_err(|err| Status::from(Error::from(err)))?;
+            .map_err(|err| Error::DatasetStoreError(err))?;
+        let plan = ctx.plan_sql(query).await.map_err(|err| Error::from(err))?;
         let stream = ctx
             .execute_plan(plan)
             .await
-            .map_err(|err| Status::from(Error::from(err)))?;
+            .map_err(|err| Error::from(err))?;
         Ok(stream)
     }
 }
