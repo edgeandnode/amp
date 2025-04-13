@@ -96,6 +96,7 @@ impl Operator {
                         table.clone(),
                         url,
                         Some(id),
+                        Some(&metadata_db),
                     )?);
                 }
 

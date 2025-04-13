@@ -1,13 +1,36 @@
 use std::{collections::BTreeMap, sync::Arc};
 
 use datafusion::{
-    arrow::datatypes::SchemaRef,
-    logical_expr::{col, SortExpr},
-    parquet::arrow::async_reader::{AsyncFileReader, ParquetObjectReader},
+    arrow::{compute::SortOptions, datatypes::SchemaRef},
+    catalog::Session,
+    common::{
+        plan_err, project_schema,
+        stats::{ColumnStatistics, Precision, Statistics},
+        ToDFSchema,
+    },
+    datasource::{
+        file_format::{parquet::ParquetFormat, FileFormat},
+        listing::PartitionedFile,
+        physical_plan::FileScanConfig,
+        TableProvider, TableType,
+    },
+    error::{DataFusionError, Result as DataFusionResult},
+    execution::{object_store::ObjectStoreUrl, SessionState},
+    logical_expr::{col, utils::conjunction, SortExpr},
+    parquet::{
+        arrow::async_reader::{AsyncFileReader, ParquetObjectReader},
+        file::metadata,
+    },
+    physical_expr::{create_physical_expr, expressions::Column, LexOrdering, PhysicalSortExpr},
+    physical_plan::{empty::EmptyExec, expressions, ExecutionPlan},
+    prelude::Expr,
     sql::TableReference,
 };
-use futures::{stream, StreamExt, TryStreamExt};
-use metadata_db::{LocationId, MetadataDb, TableId};
+use futures::{
+    stream::{self, BoxStream},
+    StreamExt, TryStreamExt,
+};
+use metadata_db::{FileMetadata, LocationId, MetadataDb, TableId};
 use object_store::{path::Path, ObjectMeta, ObjectStore};
 use url::Url;
 
@@ -15,7 +38,7 @@ use super::logical::Table;
 use crate::{
     meta_tables::scanned_ranges::{self, ScannedRange},
     store::{infer_object_store, Store},
-    BoxError, Dataset,
+    BoxError, Dataset, BLOCK_NUM, BLOCK_NUM_INDEX,
 };
 
 pub struct Catalog {
@@ -97,6 +120,7 @@ impl PhysicalDataset {
                                 table.clone(),
                                 url,
                                 Some(location_id),
+                                Some(db),
                             )?,
                             None => {
                                 if read_only {
@@ -159,8 +183,15 @@ pub struct PhysicalTable {
     // Absolute URL to the data location, path section of the URL and the corresponding object store.
     url: Url,
     path: Path,
+
+    // The underlying file format.
+    format: Arc<ParquetFormat>,
+    // The object store for this table.
     object_store: Arc<dyn ObjectStore>,
+    // Optional MetadataDb location ID.
     location_id: Option<LocationId>,
+    // Optional MetadataDb for this table.
+    metadata_db: Option<Arc<MetadataDb>>,
 }
 
 impl PhysicalTable {
@@ -169,6 +200,7 @@ impl PhysicalTable {
         table: Table,
         url: Url,
         location_id: Option<LocationId>,
+        metadata_db: Option<&MetadataDb>,
     ) -> Result<Self, BoxError> {
         validate_name(&table.name)?;
 
@@ -176,13 +208,19 @@ impl PhysicalTable {
         let path = Path::from_url_path(url.path()).unwrap();
         let (object_store, _) = infer_object_store(&url)?;
 
+        let metadata_db = metadata_db.map(|db| Arc::new(db.clone()));
+
+        let format = Arc::new(ParquetFormat::default());
+
         Ok(Self {
             table,
             table_ref,
             url,
             path,
+            format,
             object_store,
             location_id,
+            metadata_db,
         })
     }
 
@@ -204,13 +242,18 @@ impl PhysicalTable {
         let table_ref = TableReference::partial(dataset_name, table.name.as_str());
         let path = Path::from_url_path(url.path()).unwrap();
 
+        let format = Arc::new(ParquetFormat::default());
+        let object_store = data_store.object_store();
+
         Ok(PhysicalTable {
             table: table.clone(),
             table_ref,
             url,
             path,
-            object_store: data_store.object_store(),
+            format,
+            object_store,
             location_id: None,
+            metadata_db: None,
         })
     }
 
@@ -264,6 +307,17 @@ impl PhysicalTable {
             .collect()
     }
 
+    pub fn sort_exprs(&self) -> Vec<Vec<PhysicalSortExpr>> {
+        let col = Column::new(BLOCK_NUM, BLOCK_NUM_INDEX);
+        let sort_options = SortOptions {
+            descending: false,
+            nulls_first: false,
+        };
+        let sort_expr = PhysicalSortExpr::new(Arc::new(col), sort_options);
+        let sort_exprs = vec![vec![sort_expr]];
+        sort_exprs
+    }
+
     pub fn network(&self) -> Option<&str> {
         self.table.network.as_ref().map(|n| n.as_str())
     }
@@ -297,13 +351,18 @@ impl PhysicalTable {
 
         let path = Path::from_url_path(url.path()).unwrap();
         let table_ref = TableReference::partial(dataset_name, table.name.as_str());
+
+        let metadata_db = Some(Arc::new(db.clone()));
+
         let physical_table = Self {
             table: table.clone(),
             table_ref,
             url,
             path,
+            format: Arc::new(ParquetFormat::default()),
             object_store: data_store.object_store(),
             location_id: Some(location_id),
+            metadata_db,
         };
         Ok(physical_table)
     }
@@ -335,15 +394,15 @@ impl PhysicalTable {
         Ok(files)
     }
 
-    // TODO: Break this into smaller functions
-    // TODO: Buffer the stream and sort the ranges after
     pub async fn ranges(&self) -> Result<Vec<(u64, u64)>, BoxError> {
         let mut ranges = vec![];
         let mut file_list = self.object_store.list(Some(self.path()));
 
         while let Some(object_meta_result) = file_list.next().await {
-            let mut reader =
-                ParquetObjectReader::new(self.object_store.clone(), object_meta_result?);
+            let meta = object_meta_result?;
+            let location = &meta.location.to_string();
+
+            let mut reader = ParquetObjectReader::new(self.object_store.clone(), meta);
 
             let parquet_metadata = reader.get_metadata().await?;
 
@@ -352,7 +411,7 @@ impl PhysicalTable {
                 .key_value_metadata()
                 .ok_or(crate::ArrowError::ParquetError(format!(
                     "Unable to fetch Key Value metadata for file {}",
-                    self.path
+                    location
                 )))?;
 
             let scanned_range_key_value_pair = key_value_metadata
@@ -400,6 +459,293 @@ impl PhysicalTable {
         }
         Ok(())
     }
+}
+
+#[async_trait::async_trait]
+impl TableProvider for PhysicalTable {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+    fn schema(&self) -> SchemaRef {
+        self.table.schema.clone()
+    }
+    fn table_type(&self) -> TableType {
+        TableType::Base
+    }
+    async fn scan(
+        &self,
+        state: &dyn Session,
+        projection: Option<&Vec<usize>>,
+        filters: &[Expr],
+        limit: Option<usize>,
+    ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
+        let session_state = state.as_any().downcast_ref::<SessionState>().unwrap();
+
+        let statistic_file_limit = if filters.is_empty() { limit } else { None };
+
+        let (mut partitioned_file_lists, statistics) = self
+            .list_files_for_scan(session_state, filters, statistic_file_limit)
+            .await?;
+
+        // if no files need to be read, return an `EmptyExec`
+        if partitioned_file_lists.is_empty() {
+            let projected_schema = project_schema(&self.schema(), projection)?;
+            return Ok(Arc::new(EmptyExec::new(projected_schema)));
+        }
+
+        let mut output_ordering = vec![];
+
+        for exprs in self.order_exprs() {
+            let mut sort_exprs = LexOrdering::default();
+            for sort in exprs {
+                match &sort.expr {
+                    Expr::Column(column) => match expressions::col(&column.name, &self.schema()) {
+                        Ok(expr) => {
+                            sort_exprs.push(PhysicalSortExpr {
+                                expr,
+                                options: SortOptions {
+                                    descending: !sort.asc,
+                                    nulls_first: sort.nulls_first,
+                                },
+                            });
+                        }
+                        Err(_) => break,
+                    },
+                    expr => {
+                        return plan_err!(
+                            "Expected single column references in output_ordering, got {expr}"
+                        )
+                    }
+                }
+            }
+            if !sort_exprs.is_empty() {
+                output_ordering.push(sort_exprs);
+            }
+        }
+        match state
+            .config_options()
+            .execution
+            .split_file_groups_by_statistics
+            .then(|| {
+                output_ordering.first().map(|output_ordering| {
+                    FileScanConfig::split_groups_by_statistics(
+                        &self.schema(),
+                        &partitioned_file_lists,
+                        output_ordering,
+                    )
+                })
+            })
+            .flatten()
+        {
+            Some(Err(e)) => log::debug!("failed to split file groups by statistics: {e}"),
+            Some(Ok(new_groups)) => {
+                if new_groups.len() <= 10 {
+                    partitioned_file_lists = new_groups;
+                } else {
+                    log::debug!("attempted to split file groups by statistics, but there were more file groups than target_partitions; falling back to unordered")
+                }
+            }
+            None => {} // no ordering required
+        };
+
+        let filters = match conjunction(filters.to_vec()) {
+            Some(expr) => {
+                let table_df_schema = self.schema().as_ref().clone().to_dfschema()?;
+                let filters =
+                    create_physical_expr(&expr, &table_df_schema, state.execution_props())?;
+                Some(filters)
+            }
+            None => None,
+        };
+
+        let file_schema = self.schema();
+
+        let object_store_url = ObjectStoreUrl::parse(self.url().as_str())?;
+
+        self.format
+            .create_physical_plan(
+                session_state,
+                FileScanConfig::new(object_store_url, file_schema)
+                    .with_file_groups(partitioned_file_lists)
+                    .with_statistics(statistics)
+                    .with_projection(projection.cloned())
+                    .with_limit(limit)
+                    .with_output_ordering(output_ordering),
+                filters.as_ref(),
+            )
+            .await
+    }
+}
+
+impl PhysicalTable {
+    async fn list_files_for_scan<'a>(
+        &'a self,
+        _ctx: &'a SessionState,
+        _filters: &'a [Expr],
+        _limit: Option<usize>,
+    ) -> DataFusionResult<(Vec<Vec<PartitionedFile>>, Statistics)> {
+        let mut files = vec![];
+        let mut stats = Statistics::new_unknown(&self.schema());
+        if let Some(metadata_db) = &self.metadata_db {
+            let tbl = self.table_id();
+            metadata_db
+                .stream_nozzle_metadata(tbl)
+                .map_err(|e| DataFusionError::External(Box::new(e)))
+                .try_fold(
+                    (&mut files, &mut stats),
+                    |(files, table_stats),
+                     FileMetadata {
+                         object_meta,
+                         range: (range_start, range_end),
+                         row_count: num_rows,
+                         data_size,
+                         size_hint: metadata_size_hint,
+                     }| async move {
+                        let block_num_stats = ColumnStatistics {
+                            null_count: Precision::Exact(0),
+                            max_value: Precision::Exact(range_end.into()),
+                            min_value: Precision::Exact(range_start.into()),
+                            ..Default::default()
+                        };
+
+                        let mut file_stats = Statistics::new_unknown(&self.schema().clone());
+
+                        file_stats.column_statistics.insert(0, block_num_stats);
+                        file_stats.num_rows = Precision::Exact(num_rows as usize);
+                        file_stats.total_byte_size = Precision::Exact(data_size as usize);
+
+                        let mut partitioned_file = PartitionedFile::from(object_meta)
+                            .with_metadata_size_hint(metadata_size_hint as usize);
+
+                        update_table_stats(table_stats, &file_stats, &[0])?;
+
+                        partitioned_file.statistics = Some(file_stats);
+
+                        files.push(partitioned_file);
+
+                        Ok((files, table_stats))
+                    },
+                )
+                .await?;
+        } else {
+            let mut parquet_metadata_stream = self.stream_parquet_metadata();
+
+            while let Some((parquet_metadata, meta)) = parquet_metadata_stream.try_next().await? {
+                let num_rows = parquet_metadata.file_metadata().num_rows();
+                let scanned_ranges = ScannedRange::try_from((parquet_metadata, &meta))?;
+                let (range_start, range_end) =
+                    (scanned_ranges.range_start, scanned_ranges.range_end);
+
+                let mut file = PartitionedFile::from(meta);
+
+                let mut file_stats = Statistics::new_unknown(&self.schema());
+
+                let block_num_stats = ColumnStatistics {
+                    null_count: Precision::Exact(0),
+                    max_value: Precision::Exact(range_end.into()),
+                    min_value: Precision::Exact(range_start.into()),
+                    ..Default::default()
+                };
+
+                file_stats.column_statistics.insert(0, block_num_stats);
+                file_stats.num_rows = Precision::Exact(num_rows as usize);
+
+                update_table_stats(&mut stats, &file_stats, &[0])?;
+
+                file.statistics = Some(file_stats);
+                files.push(file);
+            }
+        };
+        let split_files = split_files(files, 10);
+        Ok((split_files, stats))
+    }
+
+    fn stream_object_meta<'a>(&'a self) -> BoxStream<'a, DataFusionResult<ObjectMeta>> {
+        self.object_store
+            .list(Some(&self.path))
+            .map_err(|e| DataFusionError::ObjectStore(e))
+            .boxed()
+    }
+
+    fn stream_object_readers<'a>(
+        &'a self,
+    ) -> BoxStream<'a, DataFusionResult<(ParquetObjectReader, ObjectMeta)>> {
+        let meta_stream = self.stream_object_meta();
+        let store = self.object_store.clone();
+
+        meta_stream
+            .map(move |meta| {
+                let meta = meta?;
+                let reader = ParquetObjectReader::new(store.clone(), meta.clone());
+                Ok((reader, meta))
+            })
+            .boxed()
+    }
+
+    fn stream_parquet_metadata<'a>(
+        &'a self,
+    ) -> BoxStream<'a, DataFusionResult<(Arc<metadata::ParquetMetaData>, ObjectMeta)>> {
+        self.stream_object_readers()
+            .try_filter_map(|(mut reader, meta)| async move {
+                let metadata = reader.get_metadata().await?;
+                Ok(Some((metadata, meta)))
+            })
+            .boxed()
+    }
+}
+
+fn split_files(mut files: Vec<PartitionedFile>, n: usize) -> Vec<Vec<PartitionedFile>> {
+    if files.is_empty() {
+        return vec![];
+    }
+    files.sort_by(|a, b| a.path().cmp(b.path()));
+
+    let chunk_size = files.len().div_ceil(n);
+
+    let mut chunks = Vec::with_capacity(n);
+
+    let mut current_chunk = Vec::with_capacity(chunk_size);
+
+    for file in files.drain(..) {
+        current_chunk.push(file);
+        if current_chunk.len() == chunk_size {
+            let full_chunk = std::mem::replace(&mut current_chunk, Vec::with_capacity(chunk_size));
+            chunks.push(full_chunk);
+        }
+    }
+
+    if !current_chunk.is_empty() {
+        chunks.push(current_chunk)
+    }
+
+    chunks
+}
+
+fn update_table_stats(
+    table_stats: &mut Statistics,
+    file_stats: &Statistics,
+    columns_to_update: &[usize],
+) -> DataFusionResult<()> {
+    for index in columns_to_update {
+        if let (Some(table_stats), Some(file_stats)) = (
+            table_stats.column_statistics.get_mut(*index),
+            file_stats.column_statistics.get(*index),
+        ) {
+            table_stats.max_value = table_stats.max_value.max(&file_stats.max_value);
+            table_stats.min_value = table_stats.min_value.min(&file_stats.min_value);
+            table_stats.null_count = table_stats.null_count.add(&file_stats.null_count);
+            table_stats.distinct_count = table_stats.distinct_count.add(&file_stats.distinct_count);
+            table_stats.sum_value = table_stats.sum_value.add(&file_stats.sum_value);
+        } else {
+            return Err(DataFusionError::Execution(
+                format!("Column statistics not found for index: {index}").into(),
+            ));
+        }
+    }
+    table_stats.num_rows = table_stats.num_rows.add(&file_stats.num_rows);
+    table_stats.total_byte_size = table_stats.total_byte_size.add(&file_stats.total_byte_size);
+
+    Ok(())
 }
 
 fn validate_name(name: &str) -> Result<(), BoxError> {

@@ -1600,6 +1600,7 @@ name = "common"
 version = "0.1.0"
 dependencies = [
  "alloy",
+ "async-trait",
  "atty",
  "bytes",
  "cargo_metadata",

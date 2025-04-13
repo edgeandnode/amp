@@ -41,6 +41,7 @@ pub type BoxError = Box<dyn std::error::Error + Sync + Send + 'static>;
 
 /// The block number column name.
 pub const BLOCK_NUM: &str = "block_num";
+pub const BLOCK_NUM_INDEX: usize = 0;
 
 pub type BlockNum = u64;
 pub type Bytes32 = [u8; 32];

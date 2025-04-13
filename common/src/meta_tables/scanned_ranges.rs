@@ -19,10 +19,11 @@
 //!
 //! See also: scanned-ranges-consistency
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Arc};
 
 use crate::{multirange::MultiRange, BoxError, QueryContext, Timestamp};
 
+use datafusion::parquet::file::metadata::ParquetMetaData;
 use futures::{StreamExt, TryStreamExt};
 
 use metadata_db::{MetadataDb, TableId};
@@ -31,7 +32,7 @@ use serde::{Deserialize, Serialize};
 
 pub const METADATA_KEY: &'static str = "nozzle_metadata";
 
-pub type NozzleMetadata = (ScannedRange, ObjectMeta, usize);
+pub type NozzleMetadata = (ScannedRange, ObjectMeta, usize, i64);
 
 pub async fn ranges_for_table(
     ctx: &QueryContext,
@@ -126,4 +127,42 @@ pub struct ScannedRange {
     pub range_end: u64,
     pub filename: String,
     pub created_at: Timestamp,
+}
+
+impl TryFrom<(Arc<ParquetMetaData>, &ObjectMeta)> for ScannedRange {
+    type Error = datafusion::error::DataFusionError;
+
+    fn try_from(
+        (parquet_metadata, object_meta): (Arc<ParquetMetaData>, &ObjectMeta),
+    ) -> Result<Self, Self::Error> {
+        let file_metadata = parquet_metadata.file_metadata();
+
+        let kv_metadata =
+            file_metadata
+                .key_value_metadata()
+                .ok_or(crate::ArrowError::ParquetError(format!(
+                    "No key value metadata found in parquet file: {}",
+                    object_meta.location
+                )))?;
+
+        let scanned_range_key_value_pair = kv_metadata
+            .into_iter()
+            .find(|key_value| key_value.key.as_str() == METADATA_KEY)
+            .ok_or(crate::ArrowError::ParquetError(format!(
+                "Missing key: {} in file metadata for file {}",
+                METADATA_KEY, object_meta.location
+            )))?;
+
+        let scanned_range = scanned_range_key_value_pair
+            .value
+            .as_ref()
+            .ok_or(crate::ArrowError::ParseError(format!(
+                "Unable to parse ScannedRange from key value metadata for file {}",
+                object_meta.location
+            )))
+            .map(|scanned_range_json| serde_json::from_str::<ScannedRange>(scanned_range_json))?
+            .map_err(|e| Self::Error::External(Box::new(e)))?;
+
+        Ok(scanned_range)
+    }
 }

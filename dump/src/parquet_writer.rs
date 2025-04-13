@@ -106,7 +106,7 @@ impl DatasetWriter {
 }
 
 pub async fn insert_scanned_range(
-    (scanned_range, object_meta, size_hint): NozzleMetadata,
+    (scanned_range, object_meta, size_hint, row_count): NozzleMetadata,
     metadata_db: Arc<MetadataDb>,
     location_id: i64,
     data_size: i64,
@@ -123,6 +123,7 @@ pub async fn insert_scanned_range(
             file_name.clone(),
             range_start,
             range_end,
+            row_count,
             object_meta,
             data_size,
             size_hint as i64,
@@ -355,7 +356,7 @@ impl ParquetFileWriter {
     pub async fn close(
         mut self,
         end: BlockNum,
-    ) -> Result<(ScannedRange, ObjectMeta, usize), BoxError> {
+    ) -> Result<(ScannedRange, ObjectMeta, usize, i64), BoxError> {
         if end < self.start {
             return Err(
                 format!("end block {} must be after start block {}", end, self.start).into(),
@@ -384,13 +385,16 @@ impl ParquetFileWriter {
 
         self.writer.append_key_value_metadata(kv_metadata);
 
-        self.writer.close().await?;
+        let meta = self.writer.close().await?;
 
         let location = Path::from_url_path(self.file_url.path())?;
+
         let (object_meta, size_hint) =
             get_object_metadata_and_size_hint(self.table.object_store(), location).await?;
 
-        Ok((scanned_range, object_meta, size_hint))
+        let row_count = meta.num_rows;
+
+        Ok((scanned_range, object_meta, size_hint, row_count))
     }
 
     pub fn bytes_written(&self) -> u64 {
@@ -400,7 +404,7 @@ impl ParquetFileWriter {
 
 /// Reads the last 8 bytes of the file to get the size hint for the parquet metadata.
 /// Returns the object metadata and the size hint.
-/// 
+///
 /// The size hint is the length of the metadata in bytes and can be used to eliminate a
 /// round trip to the object store.
 async fn get_object_metadata_and_size_hint(

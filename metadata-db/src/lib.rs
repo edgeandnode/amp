@@ -50,7 +50,7 @@ pub enum Error {
 static MIGRATOR: Migrator = sqlx::migrate!();
 
 /// Connection pool to the metadata DB. Clones will refer to the same instance.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct MetadataDb {
     pool: Pool<Postgres>,
     url: String,
@@ -477,7 +477,7 @@ impl MetadataDb {
     pub fn stream_nozzle_metadata<'a>(
         &'a self,
         tbl: TableId<'a>,
-    ) -> BoxStream<'a, Result<(ObjectMeta, (i64, i64), i64, i64), sqlx::Error>> {
+    ) -> BoxStream<'a, Result<FileMetadata, sqlx::Error>> {
         let TableId { dataset, table, .. } = tbl;
         let sql = "
             SELECT l.url
@@ -488,6 +488,7 @@ impl MetadataDb {
                  , fm.last_modified
                  , fm.range_start
                  , fm.range_end
+                 , fm.row_count
                  , fm.data_size
                  , fm.size_hint
               FROM file_metadata fm
@@ -497,64 +498,12 @@ impl MetadataDb {
                    AND l.tbl = $2
                    AND l.active";
 
-        sqlx::query_as::<
-            _,
-            (
-                String,
-                String,
-                i64,
-                String,
-                String,
-                NozzleTimestamp,
-                i64,
-                i64,
-                i64,
-                i64,
-            ),
-        >(sql)
-        .bind(dataset)
-        .bind(table)
-        .fetch(&self.pool)
-        .map_ok(
-            |(
-                url,
-                file_name,
-                file_size,
-                e_tag,
-                version,
-                laast_modified,
-                range_start,
-                range_end,
-                data_size,
-                size_hint,
-            )| {
-                // Unwrap: we know the URL is valid because it was inserted by us.
-                // Unwrap: we know the file name is valid because it was inserted by us.
-                let url = Url::parse(&url).unwrap().join(&file_name).unwrap();
-                let location = Path::from_url_path(url.path()).unwrap();
-                let size = file_size as usize;
-                let last_modified = laast_modified.into();
-                let e_tag = if e_tag.is_empty() { None } else { Some(e_tag) };
-                let version = if version.is_empty() {
-                    None
-                } else {
-                    Some(version)
-                };
-                (
-                    ObjectMeta {
-                        location,
-                        last_modified,
-                        size,
-                        e_tag,
-                        version,
-                    },
-                    (range_start, range_end),
-                    data_size,
-                    size_hint,
-                )
-            },
-        )
-        .boxed()
+        sqlx::query_as::<_, FileMetadataBuilder>(sql)
+            .bind(dataset)
+            .bind(table)
+            .fetch(&self.pool)
+            .map_ok(|builder| builder.build())
+            .boxed()
     }
 
     /// Inserts a new file metadata entry into the database.
@@ -564,6 +513,7 @@ impl MetadataDb {
         file_name: String,
         range_start: i64,
         range_end: i64,
+        row_count: i64,
         object_meta: ObjectMeta,
         data_size: i64,
         size_hint: i64,
@@ -571,10 +521,10 @@ impl MetadataDb {
     ) -> Result<(), Error> {
         let sql = "
         INSERT INTO file_metadata (
-            location_id, file_name, range_start, range_end, file_size, data_size, size_hint,
+            location_id, file_name, range_start, range_end, row_count, file_size, data_size, size_hint,
             e_tag, version, created_at, last_modified
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NULL)
         ";
 
         let created_at = NozzleTimestamp::from(created_at);
@@ -587,6 +537,7 @@ impl MetadataDb {
             .bind(file_name)
             .bind(range_start)
             .bind(range_end)
+            .bind(row_count)
             .bind(file_size)
             .bind(data_size)
             .bind(size_hint)
@@ -600,7 +551,75 @@ impl MetadataDb {
     }
 }
 
-#[derive(Debug, sqlx::Type)]
+#[derive(Clone, Debug, sqlx::FromRow)]
+struct FileMetadataBuilder {
+    url: String,
+    file_name: String,
+    file_size: i64,
+    e_tag: String,
+    version: String,
+    last_modified: NozzleTimestamp,
+    range_start: i64,
+    range_end: i64,
+    row_count: i64,
+    data_size: i64,
+    size_hint: i64,
+}
+
+impl FileMetadataBuilder {
+    fn build(self) -> FileMetadata {
+        // Unwrap: we know the URL is valid because it was inserted by us.
+        // Unwrap: we know the file name is valid because it was inserted by us.
+        let url = Url::parse(&self.url)
+            .unwrap()
+            .join(&self.file_name)
+            .unwrap();
+        let location = Path::from_url_path(url.path()).unwrap();
+        let size = self.file_size as usize;
+        let last_modified = self.last_modified.into();
+        let e_tag = if self.e_tag.is_empty() {
+            None
+        } else {
+            Some(self.e_tag)
+        };
+        let version = if self.version.is_empty() {
+            None
+        } else {
+            Some(self.version)
+        };
+
+        FileMetadata {
+            object_meta: ObjectMeta {
+                location,
+                last_modified,
+                size,
+                e_tag,
+                version,
+            },
+            range: (self.range_start, self.range_end),
+            row_count: self.row_count,
+            data_size: self.data_size,
+            size_hint: self.size_hint,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct FileMetadata {
+    pub object_meta: ObjectMeta,
+    pub range: (i64, i64),
+    pub row_count: i64,
+    pub data_size: i64,
+    pub size_hint: i64,
+}
+
+impl From<FileMetadataBuilder> for FileMetadata {
+    fn from(builder: FileMetadataBuilder) -> Self {
+        builder.build()
+    }
+}
+
+#[derive(Clone, Debug, sqlx::Type)]
 #[sqlx(type_name = "NOZZLE_TIMESTAMP")]
 pub struct NozzleTimestamp {
     pub secs: i64,

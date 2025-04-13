@@ -10,7 +10,7 @@ use common::{
     tracing,
 };
 use futures::StreamExt;
-use metadata_db::TableId;
+use metadata_db::{FileMetadata, TableId};
 use object_store::local::LocalFileSystem;
 
 static KEEP_TEMP_DIRS: LazyLock<bool> = LazyLock::new(|| std::env::var("KEEP_TEMP_DIRS").is_ok());
@@ -52,8 +52,12 @@ async fn evm_rpc_single() {
     };
     let mut object_meta_stream = metadata_db.stream_nozzle_metadata(tbl);
 
-    while let Some(Ok((object_meta, (range_start, range_end), _, size_hint))) =
-        object_meta_stream.next().await
+    while let Some(Ok(FileMetadata {
+        object_meta,
+        range: (range_start, range_end),
+        size_hint,
+        ..
+    })) = object_meta_stream.next().await
     {
         let mut reader = ParquetObjectReader::new(store.clone(), object_meta)
             .with_footer_size_hint(size_hint as usize);

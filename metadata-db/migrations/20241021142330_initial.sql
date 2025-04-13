@@ -55,6 +55,8 @@ CREATE TABLE IF NOT EXISTS file_metadata (
     range_start     BIGINT NOT NULL,
     -- The ending block number for the file
     range_end       BIGINT NOT NULL,
+    -- The row count of the file
+    row_count       BIGINT NOT NULL,
     -- File size in bytes - for building ObjectMetadata
     file_size       BIGINT NOT NULL,
     -- Total size of the data in the file in bytes (as RecordBatches)
