@@ -37,12 +37,14 @@ enum Command {
 
         /// The block number to start from, inclusive. If omitted, defaults to `0`. Note that `dump` is
         /// smart about keeping track of what blocks have already been dumped, so you only need to set
-        /// this if you really don't want the data before this block.
+        /// this if you really don't want the data before this block. If starts with "-" then relative
+        /// to the latest block for the dataset.
         #[arg(long, short, default_value = "0", env = "DUMP_START_BLOCK")]
         start: i64,
 
         /// The block number to end at, inclusive. If starts with "+" then relative to `start`. If
-        /// omitted, defaults to a recent block.
+        /// omitted, defaults to a recent block. If starts with "-" then relative to the latest block
+        /// for this dataset.
         #[arg(long, short, env = "DUMP_END_BLOCK")]
         end_block: Option<String>,
 
