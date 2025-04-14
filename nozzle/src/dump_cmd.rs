@@ -106,7 +106,7 @@ fn resolve_end_block(start_block: i64, end_block: String) -> Result<i64, BoxErro
             .trim_start_matches('+')
             .parse::<u64>()
             .map_err(|e| format!("invalid relative end block: {e}"))?;
-        if start_block < 0 && relative_block as i64 + start_block > 0 {
+        if start_block < 0 && relative_block as i64 + start_block >= 0 {
             return Err(
                 "invalid range: end block exceeds the bound specified by start block".into(),
             );
