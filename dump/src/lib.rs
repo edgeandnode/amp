@@ -503,3 +503,6 @@ async fn validate_block_range(
 
     Ok((start_block as BlockNum, end_block))
 }
+
+#[cfg(test)]
+mod tests;
