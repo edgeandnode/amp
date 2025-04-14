@@ -1,3 +1,5 @@
+import { createClient } from "@connectrpc/connect";
+import { createGrpcTransport } from "@connectrpc/connect-node";
 import {
   FetchHttpClient,
   HttpApi,
@@ -8,6 +10,7 @@ import {
 } from "@effect/platform";
 import { Config, Effect, Schema } from "effect";
 import * as Model from "./Model.js";
+import * as Proto from "./Proto.js";
 
 export class RegstistryApiGroup extends HttpApiGroup.make("registry", { topLevel: true }).add(
   HttpApiEndpoint.post("schema")`/output_schema`
@@ -75,5 +78,17 @@ export class JsonLines extends Effect.Service<JsonLines>()("Nozzle/Api/JsonLines
     });
 
     return jsonl;
+  }),
+}) {}
+
+export class ArrowFlight extends Effect.Service<ArrowFlight>()("Nozzle/Api/ArrowFlight", {
+  dependencies: [FetchHttpClient.layer],
+  effect: Effect.gen(function* () {
+    const url = yield* Config.string("NOZZLE_ARROW_FLIGHT_URL").pipe(Effect.orDie);
+    const transport = createGrpcTransport({
+      baseUrl: url,
+    });
+
+    return createClient(Proto.Flight.FlightService, transport);
   }),
 }) {}

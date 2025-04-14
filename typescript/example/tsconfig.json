@@ -1,8 +1,7 @@
 {
   "extends": "../tsconfig.base.json",
   "references": [
-    { "path": "../nozzle/tsconfig.src.json" },
-    { "path": "../cli/tsconfig.src.json" }
+    { "path": "../nozzle/tsconfig.src.json" }
   ],
   "include": ["examples", "nozzle.config.ts"],
   "compilerOptions": {

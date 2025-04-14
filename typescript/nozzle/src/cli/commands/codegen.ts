@@ -46,7 +46,7 @@ export const codegen = Command.make("codegen", {
   })).pipe(
     Effect.orDie,
     Effect.flatMap(Option.match({
-      onNone: () => Effect.die("No manifest or config file provided"),
+      onNone: () => Effect.dieMessage("No manifest or config file provided"),
       onSome: Effect.succeed,
     })),
   );
