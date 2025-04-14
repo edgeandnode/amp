@@ -86,7 +86,10 @@ pub async fn datasets_handler(
         .dataset_store
         .all_datasets()
         .await
-        .map_err(Error::DatasetStoreError)?;
+        .map_err(Error::DatasetStoreError)?
+        .into_iter()
+        .map(|d| d.dataset)
+        .collect();
 
     Ok(Json(DatasetsResponse { datasets }))
 }

@@ -21,16 +21,12 @@ pub async fn dump_check(
     start: u64,
     end_block: u64,
 ) -> Result<(), BoxError> {
-    let dataset = dataset_store.load_dataset(&dataset_name).await?;
+    let dataset = dataset_store.load_dataset(&dataset_name).await?.dataset;
     let client = dataset_store.load_client(&dataset_name).await?;
     let total_blocks = end_block - start + 1;
     let catalog =
         Catalog::for_dataset(dataset.clone(), config.data_store.clone(), metadata_db).await?;
-    let ctx = Arc::new(QueryContext::for_catalog(
-        catalog,
-        env.clone(),
-        dataset_store.evm_rpc_dataset_providers().await?,
-    )?);
+    let ctx = Arc::new(QueryContext::for_catalog(catalog, env.clone())?);
 
     let jobs = {
         let mut jobs = vec![];

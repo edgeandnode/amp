@@ -5,7 +5,6 @@ use arrow::array::RecordBatch;
 use arrow::compute::concat_batches;
 use arrow::datatypes::SchemaRef;
 use arrow::util::pretty::pretty_format_batches;
-use async_udf::functions::AsyncScalarUDF;
 use async_udf::physical_optimizer::AsyncFuncRule;
 use bytes::Bytes;
 use datafusion::common::tree_node::{Transformed, TreeNode as _, TreeNodeRewriter};
@@ -13,7 +12,8 @@ use datafusion::common::{not_impl_err, DFSchema};
 use datafusion::datasource::{DefaultTableSource, MemTable, TableProvider, TableType};
 use datafusion::execution::SessionStateBuilder;
 use datafusion::logical_expr::{
-    CreateCatalogSchema, Extension, LogicalPlanBuilder, ScalarUDF, SortExpr, TableScan,
+    AggregateUDF, CreateCatalogSchema, Extension, LogicalPlanBuilder, ScalarUDF, SortExpr,
+    TableScan,
 };
 use datafusion::sql::parser;
 use datafusion::{
@@ -38,7 +38,7 @@ use thiserror::Error;
 use url::Url;
 
 use crate::catalog::physical::{Catalog, PhysicalTable};
-use crate::evm::udfs::{EthCall, EvmDecode, EvmTopic};
+use crate::evm::udfs::{EvmDecode, EvmTopic};
 use crate::{arrow, attestation, BoxError, Table};
 
 #[derive(Error, Debug)]
@@ -69,6 +69,14 @@ pub enum Error {
     ConfigError(DataFusionError),
 }
 
+#[derive(Clone, Debug)]
+pub struct ResolvedTables {
+    pub tables: Vec<ResolvedTable>,
+    /// UDFs specific to the datasets corresponding to the resolved tables.
+    pub udfs: Vec<ScalarUDF>,
+}
+
+#[derive(Clone, Debug)]
 pub struct ResolvedTable {
     pub catalog_schema: String,
     pub table: Table,
@@ -88,19 +96,14 @@ impl ResolvedTable {
 /// A context for planning SQL queries.
 pub struct PlanningContext {
     session_config: SessionConfig,
-    catalog: Vec<ResolvedTable>,
-    evm_rpc_dataset_providers: Vec<(String, alloy::providers::ReqwestProvider)>,
+    catalog: ResolvedTables,
 }
 
 impl PlanningContext {
-    pub fn new(
-        catalog: Vec<ResolvedTable>,
-        evm_rpc_dataset_providers: Vec<(String, alloy::providers::ReqwestProvider)>,
-    ) -> Self {
+    pub fn new(catalog: ResolvedTables) -> Self {
         Self {
             session_config: SessionConfig::from_env().unwrap(),
             catalog,
-            evm_rpc_dataset_providers,
         }
     }
 
@@ -135,13 +138,25 @@ impl PlanningContext {
             .with_physical_optimizer_rule(Arc::new(AsyncFuncRule))
             .build();
         let ctx = SessionContext::new_with_state(state);
-        create_empty_tables(&ctx, self.catalog.iter()).await?;
-        register_udfs(&ctx, self.evm_rpc_dataset_providers.clone());
+        create_empty_tables(&ctx, self.catalog.tables.iter()).await?;
+        self.register_udfs(&ctx);
         Ok(ctx)
     }
 
+    fn register_udfs(&self, ctx: &SessionContext) {
+        for udf in udfs() {
+            ctx.register_udf(udf);
+        }
+        for udaf in udafs() {
+            ctx.register_udaf(udaf);
+        }
+        for udf in self.catalog.udfs.iter() {
+            ctx.register_udf(udf.clone());
+        }
+    }
+
     pub fn catalog(&self) -> &[ResolvedTable] {
-        &self.catalog
+        &self.catalog.tables
     }
 }
 
@@ -150,22 +165,10 @@ pub struct QueryContext {
     env: Arc<RuntimeEnv>,
     session_config: SessionConfig,
     catalog: Catalog,
-    evm_rpc_dataset_providers: Vec<(String, alloy::providers::ReqwestProvider)>,
 }
 
 impl QueryContext {
-    pub fn empty(
-        env: Arc<RuntimeEnv>,
-        evm_rpc_dataset_providers: Vec<(String, alloy::providers::ReqwestProvider)>,
-    ) -> Result<Self, Error> {
-        Self::for_catalog(Catalog::empty(), env, evm_rpc_dataset_providers)
-    }
-
-    pub fn for_catalog(
-        catalog: Catalog,
-        env: Arc<RuntimeEnv>,
-        evm_rpc_dataset_providers: Vec<(String, alloy::providers::ReqwestProvider)>,
-    ) -> Result<Self, Error> {
+    pub fn for_catalog(catalog: Catalog, env: Arc<RuntimeEnv>) -> Result<Self, Error> {
         // This contains various tuning options for the query engine.
         // Using `from_env` allows tinkering without re-compiling.
         let mut session_config = SessionConfig::from_env().map_err(Error::ConfigError)?;
@@ -193,7 +196,6 @@ impl QueryContext {
             env,
             session_config,
             catalog,
-            evm_rpc_dataset_providers,
         };
 
         Ok(this)
@@ -224,7 +226,6 @@ impl QueryContext {
         let ctx = self.datafusion_ctx().await?;
         let plan = logical_plan_from_bytes_with_extension_codec(bytes, &ctx, &EmptyTableCodec)
             .map_err(Error::PlanEncodingError)?;
-        verify_plan(&plan)?;
         Ok(plan)
     }
 
@@ -263,9 +264,21 @@ impl QueryContext {
             create_physical_tables(&ctx, ds.tables()).await?;
         }
 
-        register_udfs(&ctx, self.evm_rpc_dataset_providers.clone());
+        self.register_udfs(&ctx);
 
         Ok(ctx)
+    }
+
+    fn register_udfs(&self, ctx: &SessionContext) {
+        for udf in udfs() {
+            ctx.register_udf(udf);
+        }
+        for udaf in udafs() {
+            ctx.register_udaf(udaf);
+        }
+        for udf in self.catalog.udfs() {
+            ctx.register_udf(udf.clone());
+        }
     }
 
     pub async fn print_schema(&self) -> Result<Vec<(PhysicalTable, String)>, Error> {
@@ -438,16 +451,18 @@ async fn create_catalog_schema(ctx: &SessionContext, schema_name: String) -> Res
     Ok(())
 }
 
-fn udfs(
-    evm_rpc_dataset_providers: Vec<(String, alloy::providers::ReqwestProvider)>,
-) -> Vec<ScalarUDF> {
-    let mut udfs = vec![EvmDecode::new().into(), EvmTopic::new().into()];
-    for (dataset_name, provider) in evm_rpc_dataset_providers {
-        let udf =
-            AsyncScalarUDF::new(Arc::new(EthCall::new(&dataset_name, provider))).into_scalar_udf();
-        udfs.push(Arc::into_inner(udf).unwrap());
-    }
-    udfs
+fn udfs() -> Vec<ScalarUDF> {
+    vec![
+        // Remove after updating to datafusion 42, when
+        // https://github.com/apache/datafusion/pull/11959 will have been merged and released.
+        datafusion::functions::core::get_field().as_ref().clone(),
+        EvmDecode::new().into(),
+        EvmTopic::new().into(),
+    ]
+}
+
+fn udafs() -> Vec<AggregateUDF> {
+    vec![attestation::AttestationHasherUDF::new().into()]
 }
 
 pub fn parse_sql(sql: &str) -> Result<parser::Statement, Error> {
@@ -529,19 +544,6 @@ async fn all_tables(ctx: &SessionContext) -> BTreeMap<TableReference, Arc<dyn Ta
     }
 
     tables
-}
-
-fn register_udfs(
-    ctx: &SessionContext,
-    evm_rpc_dataset_providers: Vec<(String, alloy::providers::ReqwestProvider)>,
-) {
-    // Remove after updating to datafusion 42, when
-    // https://github.com/apache/datafusion/pull/11959 will have been merged and released.
-    ctx.register_udf(datafusion::functions::core::get_field().as_ref().clone());
-    for udf in udfs(evm_rpc_dataset_providers) {
-        ctx.register_udf(udf);
-    }
-    ctx.register_udaf(attestation::AttestationHasherUDF::new().into());
 }
 
 #[derive(Debug)]

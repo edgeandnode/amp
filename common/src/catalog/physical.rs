@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use datafusion::{
     arrow::datatypes::SchemaRef,
-    logical_expr::{col, SortExpr},
+    logical_expr::{col, ScalarUDF, SortExpr},
     parquet::arrow::async_reader::{AsyncFileReader, ParquetObjectReader},
     sql::TableReference,
 };
@@ -20,19 +20,31 @@ use crate::{
 
 pub struct Catalog {
     datasets: Vec<PhysicalDataset>,
+    /// User-defined functions (UDFs) specific to this catalog.
+    udfs: Vec<ScalarUDF>,
 }
 
 impl Catalog {
     pub fn empty() -> Self {
-        Catalog { datasets: vec![] }
+        Catalog {
+            datasets: vec![],
+            udfs: vec![],
+        }
     }
 
     pub fn new(datasets: Vec<PhysicalDataset>) -> Self {
-        Catalog { datasets }
+        Catalog {
+            datasets,
+            udfs: vec![],
+        }
     }
 
-    pub fn add(&mut self, dataset: PhysicalDataset) {
+    pub fn add_dataset(&mut self, dataset: PhysicalDataset) {
         self.datasets.push(dataset);
+    }
+
+    pub fn add_udf(&mut self, udf: ScalarUDF) {
+        self.udfs.push(udf);
     }
 
     /// Will include meta tables.
@@ -42,12 +54,18 @@ impl Catalog {
         metadata_db: Option<&MetadataDb>,
     ) -> Result<Self, BoxError> {
         let mut this = Self::empty();
-        this.add(PhysicalDataset::from_dataset_at(dataset, data_store, metadata_db, true).await?);
+        this.add_dataset(
+            PhysicalDataset::from_dataset_at(dataset, data_store, metadata_db, true).await?,
+        );
         Ok(this)
     }
 
     pub fn datasets(&self) -> &[PhysicalDataset] {
         &self.datasets
+    }
+
+    pub fn udfs(&self) -> &[ScalarUDF] {
+        &self.udfs
     }
 
     pub fn all_tables(&self) -> impl Iterator<Item = &PhysicalTable> {

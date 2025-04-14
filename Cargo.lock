@@ -2342,6 +2342,7 @@ name = "dataset-store"
 version = "0.1.0"
 dependencies = [
  "alloy",
+ "async-udf",
  "common",
  "datafusion",
  "evm-rpc-datasets",

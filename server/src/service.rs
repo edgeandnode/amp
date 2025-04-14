@@ -240,7 +240,6 @@ impl Service {
                         .clone()
                         .planning_ctx_for_sql(&query)
                         .await?;
-                    query_ctx.sql_to_remote_plan(query).await?
                 } else {
                     return Err(Error::UnsupportedFlightDescriptorCommand(msg.type_url));
                 }
@@ -286,13 +285,12 @@ impl Service {
 
     async fn do_get(&self, ticket: arrow_flight::Ticket) -> Result<TonicStream<FlightData>, Error> {
         //  DataFusion requires a context for initially deserializing a logical plan. That context is used a
-        // `FunctionRegistry` for UDFs. So using a `QueryContext::empty` works as that includes UDFs.
-        let evm_rpc_dataset_providers = self
-            .dataset_store
-            .evm_rpc_dataset_providers()
-            .await
-            .map_err(|e| DatasetError::from(("failed to get evm rpc dataset providers", e)))?;
-        let ctx = QueryContext::empty(self.env.clone(), evm_rpc_dataset_providers.clone())?;
+        // `FunctionRegistry` for UDFs. That context must include all UDFs that may be used in the
+        // query.
+        let ctx = QueryContext::for_catalog(
+            self.dataset_store.initial_catalog().await?,
+            self.env.clone(),
+        )?;
         let plan = ctx.plan_from_bytes(&ticket.ticket).await?;
 
         // The deserialized plan references empty tables, so we need to load the actual tables from the catalog.
@@ -302,8 +300,7 @@ impl Service {
             .clone()
             .load_catalog_for_table_refs(table_refs.iter())
             .await?;
-        let query_ctx =
-            QueryContext::for_catalog(catalog, self.env.clone(), evm_rpc_dataset_providers)?;
+        let query_ctx = QueryContext::for_catalog(catalog, self.env.clone())?;
         let stream = query_ctx.execute_remote_plan(plan).await?;
 
         Ok(FlightDataEncoderBuilder::new()

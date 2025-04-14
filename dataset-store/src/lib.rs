@@ -7,23 +7,25 @@ use std::{
     sync::{Arc, RwLock},
 };
 
+use async_udf::functions::AsyncScalarUDF;
 use common::{
     catalog::physical::{Catalog, PhysicalDataset},
     config::Config,
+    evm::udfs::EthCall,
     manifest::{Manifest, TableInput},
-    query_context::{self, parse_sql, PlanningContext, ResolvedTable},
+    query_context::{self, parse_sql, PlanningContext, ResolvedTable, ResolvedTables},
     store::StoreError,
-    BlockNum, BlockStreamer, BoxError, Dataset, QueryContext, Store,
+    BlockNum, BlockStreamer, BoxError, Dataset, DatasetWithProvider, QueryContext, Store,
 };
 use datafusion::{
     catalog::resolve_table_references,
     common::HashMap,
     execution::runtime_env::RuntimeEnv,
+    logical_expr::ScalarUDF,
     sql::{parser, TableReference},
 };
 use futures::{future::BoxFuture, FutureExt as _, TryFutureExt as _};
 use metadata_db::MetadataDb;
-use object_store::ObjectMeta;
 use serde::Deserialize;
 use sql_datasets::SqlDataset;
 use thiserror::Error;
@@ -184,8 +186,8 @@ impl fmt::Display for DatasetError {
 pub struct DatasetStore {
     config: Arc<Config>,
     pub metadata_db: Option<MetadataDb>,
-    // Cache maps dataset name to provider.
-    evm_rpc_provider_cache: Arc<RwLock<HashMap<String, alloy::providers::ReqwestProvider>>>,
+    // Cache maps dataset name to eth_call UDF.
+    eth_call_cache: Arc<RwLock<HashMap<String, ScalarUDF>>>,
 }
 
 impl DatasetStore {
@@ -193,18 +195,21 @@ impl DatasetStore {
         Arc::new(Self {
             config,
             metadata_db,
-            evm_rpc_provider_cache: Default::default(),
+            eth_call_cache: Default::default(),
         })
     }
 
-    pub async fn load_dataset(self: &Arc<Self>, dataset: &str) -> Result<Dataset, DatasetError> {
+    pub async fn load_dataset(
+        self: &Arc<Self>,
+        dataset: &str,
+    ) -> Result<DatasetWithProvider, DatasetError> {
         self.clone()
             .load_dataset_inner(dataset)
             .await
             .map_err(|e| (dataset, e).into())
     }
 
-    pub async fn all_datasets(self: &Arc<Self>) -> Result<Vec<Dataset>, DatasetError> {
+    pub async fn all_datasets(self: &Arc<Self>) -> Result<Vec<DatasetWithProvider>, DatasetError> {
         let all_objs = self
             .dataset_defs_store()
             .list_all_shallow()
@@ -264,7 +269,10 @@ impl DatasetStore {
         Ok(SqlDataset { dataset, queries })
     }
 
-    async fn load_dataset_inner(self: Arc<Self>, dataset_name: &str) -> Result<Dataset, Error> {
+    async fn load_dataset_inner(
+        self: Arc<Self>,
+        dataset_name: &str,
+    ) -> Result<DatasetWithProvider, Error> {
         let (kind, raw_dataset) = self.kind_and_dataset(dataset_name).await?;
 
         let dataset = match kind {
@@ -282,14 +290,20 @@ impl DatasetStore {
             }
             DatasetKind::Sql => {
                 let dataset_toml: toml::Value = toml::from_str(&raw_dataset)?;
-                self.sql_dataset(dataset_toml).await?.dataset
+                DatasetWithProvider {
+                    dataset: self.sql_dataset(dataset_toml).await?.dataset,
+                    provider: None,
+                }
             }
             DatasetKind::Manifest => {
                 let filename = format!("{}.json", dataset_name);
                 let raw_manifest = self.dataset_defs_store().get_string(filename).await?;
                 let manifest: Manifest =
                     serde_json::from_str(&raw_manifest).map_err(Error::ManifestError)?;
-                Dataset::from(manifest)
+                DatasetWithProvider {
+                    dataset: Dataset::from(manifest.clone()),
+                    provider: None,
+                }
             }
         };
 
@@ -402,62 +416,27 @@ impl DatasetStore {
         Ok((kind, raw))
     }
 
-    pub async fn evm_rpc_dataset_providers(
+    /// Returns cached eth_call scalar UDF, otherwise loads the UDF and caches it.
+    async fn eth_call_for_dataset(
         &self,
-    ) -> Result<Vec<(String, alloy::providers::ReqwestProvider)>, Error> {
-        let mut result = Vec::new();
-        let dataset_defs = self.dataset_defs_store().list_all_shallow().await?;
-        for dataset_def in dataset_defs {
-            if let Some(provider) = self.provider_for_dataset(dataset_def).await? {
-                result.push(provider);
-            }
-        }
-        Ok(result)
-    }
-
-    /// Returns cached dataset name and provider, otherwise loads the provider and caches it.
-    async fn provider_for_dataset(
-        &self,
-        dataset_def: ObjectMeta,
-    ) -> Result<Option<(String, alloy::providers::ReqwestProvider)>, Error> {
-        #[derive(Deserialize)]
-        struct DatasetDef {
-            #[serde(flatten)]
-            common: DatasetDefsCommon,
-            provider: Option<String>,
-        }
+        DatasetWithProvider { dataset, provider }: &DatasetWithProvider,
+    ) -> Result<Option<ScalarUDF>, Error> {
         #[derive(Deserialize)]
         struct EvmRpcProvider {
             url: Url,
         }
 
-        // Parse the dataset definition.
-        let location = dataset_def.location;
-        let dataset_def = self
-            .dataset_defs_store()
-            .get_string(location.clone())
-            .await?;
-        let def: DatasetDef = match location.extension() {
-            Some("toml") => toml::from_str(&dataset_def)?,
-            Some("json") => serde_json::from_str(&dataset_def)?,
-            _ => return Ok(None),
-        };
-        if def.common.kind != "evm-rpc" {
+        if dataset.kind != "evm-rpc" {
             return Ok(None);
         }
 
         // Check if we already have the provider cached.
-        if let Some(provider) = self
-            .evm_rpc_provider_cache
-            .read()
-            .unwrap()
-            .get(&def.common.name)
-        {
-            return Ok(Some((def.common.name, provider.clone())));
+        if let Some(udf) = self.eth_call_cache.read().unwrap().get(&dataset.name) {
+            return Ok(Some(udf.clone()));
         }
 
         // Load the provider from the dataset definition.
-        if let Some(provider_location) = def.provider {
+        if let Some(provider_location) = provider {
             let provider = self
                 .providers_store()
                 .get_string(provider_location.clone())
@@ -473,11 +452,14 @@ impl DatasetStore {
             };
             // Cache the provider.
             let provider = alloy::providers::ProviderBuilder::new().on_http(provider.url);
-            self.evm_rpc_provider_cache
+            let udf = AsyncScalarUDF::new(Arc::new(EthCall::new(&dataset.name, provider)))
+                .into_scalar_udf();
+            let udf = Arc::into_inner(udf).unwrap();
+            self.eth_call_cache
                 .write()
                 .unwrap()
-                .insert(def.common.name.clone(), provider.clone());
-            return Ok(Some((def.common.name, provider)));
+                .insert(dataset.name.clone(), udf.clone());
+            return Ok(Some(udf));
         }
 
         Ok(None)
@@ -496,13 +478,8 @@ impl DatasetStore {
         env: Arc<RuntimeEnv>,
     ) -> Result<QueryContext, DatasetError> {
         let (tables, _) = resolve_table_references(query, true).map_err(DatasetError::unknown)?;
-        let evm_rpc_dataset_providers = self
-            .evm_rpc_dataset_providers()
-            .await
-            .map_err(DatasetError::unknown)?;
         let catalog = self.load_catalog_for_table_refs(tables.iter()).await?;
-        QueryContext::for_catalog(catalog, env.clone(), evm_rpc_dataset_providers)
-            .map_err(DatasetError::unknown)
+        QueryContext::for_catalog(catalog, env.clone()).map_err(DatasetError::unknown)
     }
 
     /// Looks up the datasets for the given table references and loads them into a catalog.
@@ -517,14 +494,38 @@ impl DatasetStore {
 
             // We currently assume all datasets live in the same `data_store`.
             let physical_dataset = PhysicalDataset::from_dataset_at(
-                dataset,
+                dataset.dataset.clone(),
                 self.config.data_store.clone(),
                 self.metadata_db.as_ref(),
                 true,
             )
             .await
-            .map_err(|e| (dataset_name, Error::Unknown(e)))?;
-            catalog.add(physical_dataset);
+            .map_err(|e| (dataset_name.clone(), Error::Unknown(e)))?;
+            catalog.add_dataset(physical_dataset);
+
+            // Create the `eth_call` UDF for the dataset.
+            let udf = self
+                .eth_call_for_dataset(&dataset)
+                .await
+                .map_err(|e| (dataset_name.clone(), e))?;
+            if let Some(udf) = udf {
+                catalog.add_udf(udf);
+            }
+        }
+        Ok(catalog)
+    }
+
+    /// Initial catalog including UDFs for all datasets.
+    pub async fn initial_catalog(self: &Arc<Self>) -> Result<Catalog, DatasetError> {
+        let mut catalog = Catalog::empty();
+        for dataset in self.all_datasets().await? {
+            let udf = self
+                .eth_call_for_dataset(&dataset)
+                .await
+                .map_err(|e| (dataset.dataset.name.clone(), e))?;
+            if let Some(udf) = udf {
+                catalog.add_udf(udf);
+            }
         }
         Ok(catalog)
     }
@@ -536,31 +537,36 @@ impl DatasetStore {
         query: &parser::Statement,
     ) -> Result<PlanningContext, DatasetError> {
         let (tables, _) = resolve_table_references(query, true).map_err(DatasetError::unknown)?;
-        let evm_rpc_dataset_providers = self
-            .evm_rpc_dataset_providers()
-            .await
-            .map_err(DatasetError::unknown)?;
         let resolved_tables = self.load_resolved_tables(tables.iter()).await?;
-        Ok(PlanningContext::new(
-            resolved_tables,
-            evm_rpc_dataset_providers,
-        ))
+        Ok(PlanningContext::new(resolved_tables))
     }
 
-    /// Looks up the datasets for the given table references and creates resolved tables.
+    /// Looks up the datasets for the given table references and creates resolved tables. Create
+    /// UDFs specific to the referenced datasets.
     async fn load_resolved_tables(
         self: Arc<Self>,
         table_refs: impl Iterator<Item = &TableReference>,
-    ) -> Result<Vec<ResolvedTable>, DatasetError> {
+    ) -> Result<ResolvedTables, DatasetError> {
         let dataset_names = datasets_from_table_refs(table_refs)?;
         let mut resolved_tables = Vec::new();
+        let mut udfs = Vec::new();
         for dataset_name in dataset_names {
             let dataset = self.load_dataset(&dataset_name).await?;
-            for table in dataset.tables {
+            let udf = self
+                .eth_call_for_dataset(&dataset)
+                .await
+                .map_err(|e| (dataset_name.clone(), e))?;
+            if let Some(udf) = udf {
+                udfs.push(udf);
+            }
+            for table in dataset.dataset.tables {
                 resolved_tables.push(ResolvedTable::new(dataset_name.clone(), table));
             }
         }
-        Ok(resolved_tables)
+        Ok(ResolvedTables {
+            tables: resolved_tables,
+            udfs,
+        })
     }
 
     /// Each `.sql` file in the directory with the same name as the dataset will be loaded as a table.

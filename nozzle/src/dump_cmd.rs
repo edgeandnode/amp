@@ -48,7 +48,7 @@ pub async fn dump(
 
     let mut physical_datasets = vec![];
     for dataset_name in datasets {
-        let dataset = dataset_store.load_dataset(&dataset_name).await?;
+        let dataset = dataset_store.load_dataset(&dataset_name).await?.dataset;
         physical_datasets.push(
             PhysicalDataset::from_dataset_at(
                 dataset,
@@ -129,7 +129,7 @@ async fn datasets_and_dependencies(
 ) -> Result<Vec<String>, BoxError> {
     let mut deps: BTreeMap<String, Vec<String>> = Default::default();
     while !datasets.is_empty() {
-        let dataset = store.load_dataset(&datasets.pop().unwrap()).await?;
+        let dataset = store.load_dataset(&datasets.pop().unwrap()).await?.dataset;
         let sql_dataset = match dataset.kind.as_str() {
             sql_datasets::DATASET_KIND => store.load_sql_dataset(&dataset.name).await?,
             manifest::DATASET_KIND => store.load_manifest_dataset(&dataset.name).await?,
