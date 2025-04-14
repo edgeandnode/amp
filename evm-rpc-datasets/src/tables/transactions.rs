@@ -30,7 +30,7 @@ fn schema() -> Schema {
     let timestamp = Field::new("timestamp", common::timestamp_type(), false);
     let tx_index = Field::new("tx_index", DataType::UInt32, false);
     let tx_hash = Field::new("tx_hash", BYTES32_TYPE, false);
-    let to = Field::new("to", DataType::Binary, false);
+    let to = Field::new("to", ADDRESS_TYPE, false);
     let nonce = Field::new("nonce", DataType::UInt64, false);
     let gas_price = Field::new("gas_price", EVM_CURRENCY_TYPE, true);
     let gas_limit = Field::new("gas_limit", DataType::UInt64, false);
@@ -82,7 +82,7 @@ pub(crate) struct Transaction {
     pub(crate) tx_index: u32,
     pub(crate) tx_hash: Bytes32,
 
-    pub(crate) to: Vec<u8>,
+    pub(crate) to: Address,
     pub(crate) nonce: u64,
 
     pub(crate) gas_price: Option<EvmCurrency>,
@@ -116,7 +116,7 @@ pub(crate) struct TransactionRowsBuilder {
     timestamp: TimestampArrayBuilder,
     tx_index: UInt32Builder,
     tx_hash: Bytes32ArrayBuilder,
-    to: BinaryBuilder,
+    to: EvmAddressArrayBuilder,
     nonce: UInt64Builder,
     gas_price: EvmCurrencyArrayBuilder,
     gas_limit: UInt64Builder,
@@ -142,7 +142,7 @@ impl TransactionRowsBuilder {
             timestamp: TimestampArrayBuilder::with_capacity(capacity),
             tx_index: UInt32Builder::with_capacity(capacity),
             tx_hash: Bytes32ArrayBuilder::with_capacity(capacity),
-            to: BinaryBuilder::with_capacity(capacity, 0),
+            to: EvmAddressArrayBuilder::with_capacity(capacity),
             nonce: UInt64Builder::with_capacity(capacity),
             gas_price: EvmCurrencyArrayBuilder::with_capacity(capacity),
             gas_limit: UInt64Builder::with_capacity(capacity),
@@ -191,7 +191,7 @@ impl TransactionRowsBuilder {
         self.timestamp.append_value(*timestamp);
         self.tx_index.append_value(*tx_index);
         self.tx_hash.append_value(*tx_hash);
-        self.to.append_value(to);
+        self.to.append_value(*to);
         self.nonce.append_value(*nonce);
         self.gas_price.append_option(*gas_price);
         self.gas_limit.append_value(*gas_limit);
@@ -218,7 +218,7 @@ impl TransactionRowsBuilder {
             mut timestamp,
             mut tx_index,
             tx_hash,
-            mut to,
+            to,
             mut nonce,
             gas_price,
             mut gas_limit,

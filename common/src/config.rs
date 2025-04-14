@@ -17,6 +17,7 @@ use serde::Deserialize;
 
 use crate::{BoxError, Store};
 
+#[derive(Debug)]
 pub struct Config {
     pub data_store: Arc<Store>,
     pub providers_store: Arc<Store>,

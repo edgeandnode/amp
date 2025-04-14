@@ -5,13 +5,13 @@ use axum::{
     Router,
 };
 use common::{config::Config, BoxError};
+use dataset_store::DatasetStore;
 use handlers::{datasets_handler, output_schema_handler};
 use metadata_db::MetadataDb;
 use std::{net::SocketAddr, sync::Arc};
 
 pub struct ServiceState {
-    config: Arc<Config>,
-    metadata_db: Option<MetadataDb>,
+    dataset_store: Arc<DatasetStore>,
 }
 
 pub async fn serve(
@@ -20,8 +20,7 @@ pub async fn serve(
     metadata_db: Option<MetadataDb>,
 ) -> Result<(), BoxError> {
     let state = Arc::new(ServiceState {
-        config,
-        metadata_db,
+        dataset_store: DatasetStore::new(config, metadata_db),
     });
 
     // Build the application with routes

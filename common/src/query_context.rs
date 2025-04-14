@@ -5,12 +5,15 @@ use arrow::array::RecordBatch;
 use arrow::compute::concat_batches;
 use arrow::datatypes::SchemaRef;
 use arrow::util::pretty::pretty_format_batches;
+use async_udf::physical_optimizer::AsyncFuncRule;
 use bytes::Bytes;
 use datafusion::common::tree_node::{Transformed, TreeNode as _, TreeNodeRewriter};
 use datafusion::common::{not_impl_err, DFSchema};
 use datafusion::datasource::{DefaultTableSource, MemTable, TableProvider, TableType};
+use datafusion::execution::SessionStateBuilder;
 use datafusion::logical_expr::{
-    CreateCatalogSchema, Extension, LogicalPlanBuilder, ScalarUDF, SortExpr, TableScan,
+    AggregateUDF, CreateCatalogSchema, Extension, LogicalPlanBuilder, ScalarUDF, SortExpr,
+    TableScan,
 };
 use datafusion::sql::parser;
 use datafusion::{
@@ -66,6 +69,14 @@ pub enum Error {
     ConfigError(DataFusionError),
 }
 
+#[derive(Clone, Debug)]
+pub struct ResolvedTables {
+    pub tables: Vec<ResolvedTable>,
+    /// UDFs specific to the datasets corresponding to the resolved tables.
+    pub udfs: Vec<ScalarUDF>,
+}
+
+#[derive(Clone, Debug)]
 pub struct ResolvedTable {
     pub catalog_schema: String,
     pub table: Table,
@@ -85,11 +96,11 @@ impl ResolvedTable {
 /// A context for planning SQL queries.
 pub struct PlanningContext {
     session_config: SessionConfig,
-    catalog: Vec<ResolvedTable>,
+    catalog: ResolvedTables,
 }
 
 impl PlanningContext {
-    pub fn new(catalog: Vec<ResolvedTable>) -> Self {
+    pub fn new(catalog: ResolvedTables) -> Self {
         Self {
             session_config: SessionConfig::from_env().unwrap(),
             catalog,
@@ -120,14 +131,32 @@ impl PlanningContext {
     }
 
     async fn datafusion_ctx(&self) -> Result<SessionContext, Error> {
-        let ctx = SessionContext::new_with_config(self.session_config.clone());
-        create_empty_tables(&ctx, self.catalog.iter()).await?;
-        register_udfs(&ctx);
+        let state = SessionStateBuilder::new()
+            .with_config(self.session_config.clone())
+            .with_runtime_env(Default::default())
+            .with_default_features()
+            .with_physical_optimizer_rule(Arc::new(AsyncFuncRule))
+            .build();
+        let ctx = SessionContext::new_with_state(state);
+        create_empty_tables(&ctx, self.catalog.tables.iter()).await?;
+        self.register_udfs(&ctx);
         Ok(ctx)
     }
 
+    fn register_udfs(&self, ctx: &SessionContext) {
+        for udf in udfs() {
+            ctx.register_udf(udf);
+        }
+        for udaf in udafs() {
+            ctx.register_udaf(udaf);
+        }
+        for udf in self.catalog.udfs.iter() {
+            ctx.register_udf(udf.clone());
+        }
+    }
+
     pub fn catalog(&self) -> &[ResolvedTable] {
-        &self.catalog
+        &self.catalog.tables
     }
 }
 
@@ -139,10 +168,6 @@ pub struct QueryContext {
 }
 
 impl QueryContext {
-    pub fn empty(env: Arc<RuntimeEnv>) -> Result<Self, Error> {
-        Self::for_catalog(Catalog::empty(), env)
-    }
-
     pub fn for_catalog(catalog: Catalog, env: Arc<RuntimeEnv>) -> Result<Self, Error> {
         // This contains various tuning options for the query engine.
         // Using `from_env` allows tinkering without re-compiling.
@@ -228,15 +253,33 @@ impl QueryContext {
     /// sessions created by this function, and they will behave the same as if they had been run
     /// against a persistent `SessionContext`
     async fn datafusion_ctx(&self) -> Result<SessionContext, Error> {
-        let ctx = SessionContext::new_with_config_rt(self.session_config.clone(), self.env.clone());
+        let state = SessionStateBuilder::new()
+            .with_config(self.session_config.clone())
+            .with_runtime_env(self.env.clone())
+            .with_default_features()
+            .with_physical_optimizer_rule(Arc::new(AsyncFuncRule))
+            .build();
+        let ctx = SessionContext::new_with_state(state);
 
         for ds in self.catalog.datasets() {
             create_physical_tables(&ctx, ds.tables()).await?;
         }
 
-        register_udfs(&ctx);
+        self.register_udfs(&ctx);
 
         Ok(ctx)
+    }
+
+    fn register_udfs(&self, ctx: &SessionContext) {
+        for udf in udfs() {
+            ctx.register_udf(udf);
+        }
+        for udaf in udafs() {
+            ctx.register_udaf(udaf);
+        }
+        for udf in self.catalog.udfs() {
+            ctx.register_udf(udf.clone());
+        }
     }
 
     pub async fn print_schema(&self) -> Result<Vec<(PhysicalTable, String)>, Error> {
@@ -413,6 +456,10 @@ fn udfs() -> Vec<ScalarUDF> {
     vec![EvmDecode::new().into(), EvmTopic::new().into()]
 }
 
+fn udafs() -> Vec<AggregateUDF> {
+    vec![attestation::AttestationHasherUDF::new().into()]
+}
+
 pub fn parse_sql(sql: &str) -> Result<parser::Statement, Error> {
     let mut statements =
         parser::DFParser::parse_sql(sql).map_err(|e| Error::SqlParseError(e.into()))?;
@@ -492,17 +539,6 @@ async fn all_tables(ctx: &SessionContext) -> BTreeMap<TableReference, Arc<dyn Ta
     }
 
     tables
-}
-
-fn register_udfs(ctx: &SessionContext) {
-    // Remove after updating to datafusion 42, when
-    // https://github.com/apache/datafusion/pull/11959 will have been merged and released.
-    ctx.register_udf(datafusion::functions::core::get_field().as_ref().clone());
-
-    for udf in udfs() {
-        ctx.register_udf(udf);
-    }
-    ctx.register_udaf(attestation::AttestationHasherUDF::new().into());
 }
 
 #[derive(Debug)]
