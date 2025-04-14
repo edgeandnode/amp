@@ -1,7 +1,10 @@
 #!/usr/bin/env bun
 
-import { Effect } from "effect";
+// TODO: Switch to `node` shebang.
+
+import { Effect, Layer } from "effect";
 import { Command } from "@effect/cli";
+import { PlatformConfigProvider } from "@effect/platform";
 import { NodeContext, NodeRuntime } from "@effect/platform-node";
 
 import { deploy } from "./commands/deploy.js";
@@ -18,8 +21,13 @@ const cli = Command.run(nozzle, {
   version: "v0.0.1",
 });
 
+const layer = Layer.provideMerge(
+  PlatformConfigProvider.layerDotEnvAdd(".env"),
+  NodeContext.layer,
+);
+
 const runnable = Effect.suspend(() => cli(process.argv)).pipe(
-  Effect.provide(NodeContext.layer),
+  Effect.provide(layer),
 );
 
 runnable.pipe(NodeRuntime.runMain);

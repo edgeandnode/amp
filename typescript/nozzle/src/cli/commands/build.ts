@@ -1,8 +1,9 @@
 import { Console, Effect, Match, Option, Predicate, Schema } from "effect";
 import { Args, Command, Options } from "@effect/cli";
 import { Path, FileSystem } from "@effect/platform";
-import { ManifestBuilder, Model } from "@nozzle/nozzle";
 import { importFile } from "../common.js";
+import * as ManifestBuilder from "../../ManifestBuilder.js";
+import * as Model from "../../Model.js";
 
 export const build = Command.make("build", {
   args: {

@@ -1,4 +1,4 @@
-import { defineDataset } from "@nozzle/nozzle";
+import { defineDataset } from "nozzl";
 
 const event = (event: string) => {
   return `

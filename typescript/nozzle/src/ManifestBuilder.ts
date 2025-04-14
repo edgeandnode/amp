@@ -1,14 +1,14 @@
 import { Effect } from "effect";
-import { Api } from "./Api.js";
+import * as Api from "./Api.js";
 import * as Model from "./Model.js";
 
 export class ManifestBuilder extends Effect.Service<ManifestBuilder>()("Nozzle/ManifestBuilder", {
-  dependencies: [Api.Default],
+  dependencies: [Api.Registry.Default],
   effect: Effect.gen(function* () {
-    const client = yield* Api;
+    const client = yield* Api.Registry;
     const build = (manifest: Model.DatasetDefinition) => Effect.gen(function* () {
       const tables = yield* Effect.forEach(Object.entries(manifest.tables), ([name, table]) => Effect.gen(function* () {
-        const schema = yield* client.registry.schema({
+        const schema = yield* client.schema({
           payload: { sql_query: table.sql },
         });
 

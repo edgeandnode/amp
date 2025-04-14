@@ -1,10 +1,26 @@
 {
-  "name": "@nozzle/nozzle",
-  "version": "0.0.0",
+  "name": "nozzl",
+  "version": "0.0.2",
   "type": "module",
+  "license": "UNLICENSED",
+  "description": "Nothing to see here yet",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com"
+  },
+  "publishConfig": {
+    "access": "public",
+    "directory": "dist",
+    "linkDirectory": false
+  },
+  "bin": "./src/cli/main.ts",
+  "scripts": {
+    "build": "tsc -b tsconfig.build.json && build-utils pack-v2 && bun ./scripts/build.ts"
+  },
   "dependencies": {
     "@effect/cli": "^0.59.5",
     "@effect/platform": "^0.80.5",
+    "@effect/platform-node": "^0.76.9",
     "@effect/schema": "^0.75.5",
     "effect": "^3.14.5"
   }

@@ -5,6 +5,7 @@
 .history
 .envrc
 .direnv
+.env
 /.vscode
 /local
 /target

@@ -8,11 +8,26 @@ importers:
 
   .:
     devDependencies:
+      '@effect/build-utils':
+        specifier: ^0.7.9
+        version: 0.7.9
+      '@types/node':
+        specifier: ^22.14.0
+        version: 22.14.0
       typescript:
         specifier: ^5.3.3
         version: 5.8.2
 
-  typescript/cli:
+  typescript/example:
+    dependencies:
+      effect:
+        specifier: ^3.14.5
+        version: 3.14.5
+      nozzl:
+        specifier: workspace:*
+        version: link:../nozzle
+
+  typescript/nozzle:
     dependencies:
       '@effect/cli':
         specifier: ^0.59.5
@@ -26,45 +41,17 @@ importers:
       '@effect/schema':
         specifier: ^0.75.5
         version: 0.75.5(effect@3.14.5)
-      '@nozzle/nozzle':
-        specifier: workspace:*
-        version: link:../nozzle
       effect:
         specifier: ^3.14.5
         version: 3.14.5
-    devDependencies:
-      '@types/node':
-        specifier: ^22.14.0
-        version: 22.14.0
-
-  typescript/example:
-    dependencies:
-      '@nozzle/cli':
-        specifier: workspace:*
-        version: link:../cli
-      '@nozzle/nozzle':
-        specifier: workspace:*
-        version: link:../nozzle
-      effect:
-        specifier: ^3.14.5
-        version: 3.14.5
-
-  typescript/nozzle:
-    dependencies:
-      '@effect/cli':
-        specifier: ^0.59.5
-        version: 0.59.5(@effect/platform@0.80.5(effect@3.14.5))(@effect/printer-ansi@0.40.12(@effect/typeclass@0.31.12(effect@3.14.5))(effect@3.14.5))(@effect/printer@0.40.12(@effect/typeclass@0.31.12(effect@3.14.5))(effect@3.14.5))(effect@3.14.5)
-      '@effect/platform':
-        specifier: ^0.80.5
-        version: 0.80.5(effect@3.14.5)
-      '@effect/schema':
-        specifier: ^0.75.5
-        version: 0.75.5(effect@3.14.5)
-      effect:
-        specifier: ^3.14.5
-        version: 3.14.5
+    publishDirectory: dist
 
 packages:
+
+  '@effect/build-utils@0.7.9':
+    resolution: {integrity: sha512-I9tuSvKOnhF2NNsCzHulsUvEwJBQKqiZ1RtbJA+DfxqXZ9J1QSh4txnfnDC2D2bygMYuWqMJWg7TvAWun7cs6w==}
+    engines: {node: '>=16.17.1'}
+    hasBin: true
 
   '@effect/cli@0.59.5':
     resolution: {integrity: sha512-hchBggI/Zl9CYg1ZtNiazSLU2OXZVeyWpbr7vHn/HZYjtllqCV2ujU5WxnrnpMHQ/Mkz23/NX+mOEd90wzSDMA==}
@@ -393,6 +380,8 @@ packages:
     hasBin: true
 
 snapshots:
+
+  '@effect/build-utils@0.7.9': {}
 
   '@effect/cli@0.59.5(@effect/platform@0.80.5(effect@3.14.5))(@effect/printer-ansi@0.40.12(@effect/typeclass@0.31.12(effect@3.14.5))(effect@3.14.5))(@effect/printer@0.40.12(@effect/typeclass@0.31.12(effect@3.14.5))(effect@3.14.5))(effect@3.14.5)':
     dependencies:
