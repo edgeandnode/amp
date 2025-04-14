@@ -8,11 +8,11 @@ async fn test_validate_block_range() {
     #[derive(Clone)]
     struct MockStreamer;
     impl BlockStreamer for MockStreamer {
-        fn block_stream(self, start: BlockNum, end: BlockNum, tx: Sender<DatasetRows>) -> impl Future<Output=Result<(), BoxError>> + Send {
+        fn block_stream(self, _: BlockNum, _: BlockNum, _: Sender<DatasetRows>) -> impl Future<Output=Result<(), BoxError>> + Send {
             async move { Ok(()) }
         }
 
-        fn latest_block(&mut self, finalized: bool) -> impl Future<Output=Result<BlockNum, BoxError>> + Send {
+        fn latest_block(&mut self, _: bool) -> impl Future<Output=Result<BlockNum, BoxError>> + Send {
             async move { Ok(100) }
         }
     }
