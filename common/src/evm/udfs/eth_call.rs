@@ -17,10 +17,10 @@ use datafusion::{arrow::array::ArrayRef, common::config::ConfigOptions};
 use datafusion::{
     arrow::{
         array::{
-            Array, ArrayBuilder, BinaryArray, BinaryBuilder, Decimal128Array, FixedSizeBinaryArray,
-            StringArray, StringBuilder, StructBuilder, UInt64Array,
+            Array, ArrayBuilder, BinaryArray, BinaryBuilder, FixedSizeBinaryArray, StringArray,
+            StringBuilder, StructBuilder,
         },
-        datatypes::{DataType, Field, Fields, DECIMAL128_MAX_PRECISION},
+        datatypes::{DataType, Field, Fields},
     },
     common::{internal_err, plan_err},
     error::DataFusionError,
@@ -47,12 +47,6 @@ impl EthCall {
                     DataType::FixedSizeBinary(20),
                     // to
                     DataType::FixedSizeBinary(20),
-                    // gas (optional)
-                    DataType::UInt64,
-                    // gas price (optional)
-                    DataType::Decimal128(DECIMAL128_MAX_PRECISION, 0),
-                    // value (optional)
-                    DataType::Decimal128(DECIMAL128_MAX_PRECISION, 0),
                     // input data (optional)
                     DataType::Binary,
                     // block
@@ -96,28 +90,20 @@ impl AsyncScalarUDFImpl for EthCall {
         let fields = self.fields.clone();
         // Decode the arguments.
         let args: Vec<_> = ColumnarValue::values_to_arrays(&args.args)?;
-        let [from, to, gas, gas_price, value, input_data, block] = args.as_slice() else {
-            return internal_err!("{}: expected 7 arguments, but got {}", name, args.len());
+        let [from, to, input_data, block] = args.as_slice() else {
+            return internal_err!("{}: expected 4 arguments, but got {}", name, args.len());
         };
         let from = from
             .as_any()
             .downcast_ref::<FixedSizeBinaryArray>()
             .unwrap();
         let to = to.as_any().downcast_ref::<FixedSizeBinaryArray>().unwrap();
-        let gas = gas.as_any().downcast_ref::<UInt64Array>().unwrap();
-        let gas_price = gas_price
-            .as_any()
-            .downcast_ref::<Decimal128Array>()
-            .unwrap();
-        let value = value.as_any().downcast_ref::<Decimal128Array>().unwrap();
         let input_data = input_data.as_any().downcast_ref::<BinaryArray>().unwrap();
         let block = block.as_any().downcast_ref::<StringArray>().unwrap();
 
         // Make the eth_call requests.
         let mut result_builder = StructBuilder::from_fields(fields, from.len());
-        for (from, to, gas, gas_price, value, input_data, block) in
-            izip!(from, to, gas, gas_price, value, input_data, block)
-        {
+        for (from, to, input_data, block) in izip!(from, to, input_data, block) {
             let Some(to) = to else {
                 return plan_err!("from address is NULL");
             };
@@ -156,22 +142,9 @@ impl AsyncScalarUDFImpl for EthCall {
                             hex::encode(to)
                         ))
                     })?))),
-                    gas_price: match gas_price {
-                        Some(gas_price) => Some(gas_price.try_into().map_err(|_| {
-                            DataFusionError::Execution(format!("invalid gas price: {}", gas_price))
-                        })?),
-                        None => None,
-                    },
-                    max_fee_per_gas: None,
-                    max_priority_fee_per_gas: None,
-                    max_fee_per_blob_gas: None,
-                    gas,
-                    value: match value {
-                        Some(value) => Some(value.try_into().map_err(|_| {
-                            DataFusionError::Execution(format!("invalid value: {}", value))
-                        })?),
-                        None => None,
-                    },
+                    gas: None,
+                    gas_price: None,
+                    value: None,
                     input: TransactionInput {
                         input: input_data.map(|i| alloy::primitives::Bytes::copy_from_slice(i)),
                         data: None,

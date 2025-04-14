@@ -24,9 +24,6 @@ when the event is emitted. The topic hash is the keccak256 hash of the event sig
 (Binary, Utf8) ${dataset}.eth_call(
     FixedSizeBinary(20) from, # optional
     FixedSizeBinary(20) to,
-    BIGINT UNSIGNED gas, # optional
-    Decimal(38, 0) gas_price, #optional
-    Decimal(38, 0) value, # optional
     Binary input_data, # optional
     Utf8 block, # block number or tag (e.g. "1", "32", "latest")
 )
@@ -38,9 +35,6 @@ This function executes an `eth_call` JSON-RPC against the provider of the specif
 SELECT example_evm_rpc.eth_call(
     from,
     to,
-    CAST(300000000 AS BIGINT UNSIGNED),
-    CAST(0 AS DECIMAL(38, 0)),
-    value,
     input,
     CAST(block_num as STRING))
 FROM example_evm_rpc.transactions
