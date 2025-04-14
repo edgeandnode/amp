@@ -21,7 +21,7 @@ use common::parquet::basic::ZstdLevel;
 use common::query_context::Error as CoreError;
 use common::query_context::QueryContext;
 use common::BlockNum;
-use common::BlockStreamer;
+use common::BlockStreamer as _;
 use common::BoxError;
 use datafusion::execution::runtime_env::RuntimeEnv;
 use dataset_store::sql_datasets::is_incremental;
