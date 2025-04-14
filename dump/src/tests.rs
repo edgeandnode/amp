@@ -1,32 +1,8 @@
-use crate::validate_block_range;
-use common::{BlockNum, BlockStreamer, BoxError, DatasetRows};
-use std::future::Future;
-use tokio::sync::mpsc::Sender;
+use crate::resolve_relative_block_range;
+use common::{BlockNum, BoxError};
 
-#[tokio::test]
-async fn test_validate_block_range() {
-    #[derive(Clone)]
-    struct MockStreamer;
-    impl BlockStreamer for MockStreamer {
-        fn block_stream(
-            self,
-            _: BlockNum,
-            _: BlockNum,
-            _: Sender<DatasetRows>,
-        ) -> impl Future<Output = Result<(), BoxError>> + Send {
-            async move { Ok(()) }
-        }
-
-        fn latest_block(
-            &mut self,
-            _: bool,
-        ) -> impl Future<Output = Result<BlockNum, BoxError>> + Send {
-            async move { Ok(100) }
-        }
-    }
-
-    let mut test_streamer = MockStreamer;
-
+#[test]
+fn test_validate_block_range() {
     let test_cases: Vec<(i64, Option<i64>, Result<(BlockNum, BlockNum), BoxError>)> = vec![
         (50, None, Ok((50, 100))),
         (-80, None, Ok((20, 100))),
@@ -36,7 +12,7 @@ async fn test_validate_block_range() {
     ];
 
     for (start_block, end_block, expected) in test_cases {
-        match validate_block_range(&mut test_streamer, start_block, end_block).await {
+        match resolve_relative_block_range(start_block, end_block, 100) {
             Ok(result) => assert_eq!(expected.unwrap(), result),
             Err(_) => assert!(expected.is_err()),
         }

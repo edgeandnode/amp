@@ -117,8 +117,8 @@ pub async fn dump_dataset(
                 &env,
                 scanned_ranges_by_table,
                 parquet_opts,
-                start as u64,
-                end_block.map(|x| x as u64),
+                start,
+                end_block,
             )
             .await?;
         }
@@ -142,7 +142,13 @@ async fn dump_raw_dataset(
 ) -> Result<(), BoxError> {
     let mut client = dataset_store.load_client(dataset_name).await?;
 
-    let (start, end) = validate_block_range(&mut client, start, end).await?;
+    let (start, end) = match (start, end) {
+        (start, Some(end)) if end > 0 => (start as BlockNum, end as BlockNum),
+        _ => {
+            let latest_block = client.latest_block(true).await?;
+            resolve_relative_block_range(start, end, latest_block)?
+        }
+    };
 
     // This is the intersection of the `__scanned_ranges` for all tables. That is, a range is only
     // considered scanned if it is scanned for all tables.
@@ -204,8 +210,8 @@ async fn dump_sql_dataset(
     env: &Arc<RuntimeEnv>,
     scanned_ranges_by_table: BTreeMap<String, MultiRange>,
     parquet_opts: &ParquetWriterProperties,
-    start: BlockNum,
-    end: Option<BlockNum>,
+    start: i64,
+    end: Option<i64>,
 ) -> Result<(), BoxError> {
     let physical_dataset = &dst_ctx.catalog().datasets()[0].clone();
     let mut join_handles = vec![];
@@ -221,11 +227,13 @@ async fn dump_sql_dataset(
         let dataset_name = dataset_name.clone();
 
         let handle = tokio::spawn(async move {
-            let end = match end {
-                Some(end) => end,
-                None => {
+            let (start, end) = match (start, end) {
+                (start, Some(end)) if end > 0 => (start as BlockNum, end as BlockNum),
+                _ => {
                     match max_end_block(&query, dataset_store.clone(), env.clone()).await? {
-                        Some(end) => end,
+                        Some(max_end_block) => {
+                            resolve_relative_block_range(start, end, max_end_block)?
+                        }
                         None => {
                             // If the dependencies have synced nothing, we have nothing to do.
                             warn!("no blocks to dump for {table}, dependencies are empty");
@@ -459,10 +467,10 @@ async fn consistency_check(
     Ok(())
 }
 
-async fn validate_block_range(
-    client: &mut impl BlockStreamer,
+fn resolve_relative_block_range(
     start: i64,
     end: Option<i64>,
+    latest_block: BlockNum,
 ) -> Result<(BlockNum, BlockNum), BoxError> {
     if start >= 0 {
         if let Some(end) = end {
@@ -471,8 +479,6 @@ async fn validate_block_range(
             }
         }
     }
-
-    let latest_block = client.latest_block(true).await?;
 
     let start_block = if start >= 0 {
         start
