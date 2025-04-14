@@ -226,6 +226,7 @@ impl QueryContext {
         let ctx = self.datafusion_ctx().await?;
         let plan = logical_plan_from_bytes_with_extension_codec(bytes, &ctx, &EmptyTableCodec)
             .map_err(Error::PlanEncodingError)?;
+        verify_plan(&plan)?;
         Ok(plan)
     }
 
@@ -452,13 +453,7 @@ async fn create_catalog_schema(ctx: &SessionContext, schema_name: String) -> Res
 }
 
 fn udfs() -> Vec<ScalarUDF> {
-    vec![
-        // Remove after updating to datafusion 42, when
-        // https://github.com/apache/datafusion/pull/11959 will have been merged and released.
-        datafusion::functions::core::get_field().as_ref().clone(),
-        EvmDecode::new().into(),
-        EvmTopic::new().into(),
-    ]
+    vec![EvmDecode::new().into(), EvmTopic::new().into()]
 }
 
 fn udafs() -> Vec<AggregateUDF> {
