@@ -240,6 +240,7 @@ impl Service {
                         .clone()
                         .planning_ctx_for_sql(&query)
                         .await?;
+                    query_ctx.sql_to_remote_plan(query).await?
                 } else {
                     return Err(Error::UnsupportedFlightDescriptorCommand(msg.type_url));
                 }
