@@ -51,8 +51,8 @@ pub async fn dump_dataset(
     n_jobs: u16,
     partition_size: u64,
     parquet_opts: &ParquetWriterProperties,
-    start: u64,
-    end_block: Option<u64>,
+    start: i64,
+    end_block: Option<i64>,
 ) -> Result<(), BoxError> {
     use common::meta_tables::scanned_ranges::scanned_ranges_by_table;
 
@@ -137,14 +137,17 @@ async fn dump_raw_dataset(
     scanned_ranges_by_table: BTreeMap<String, MultiRange>,
     partition_size: u64,
     parquet_opts: &ParquetWriterProperties,
-    start: BlockNum,
-    end: Option<BlockNum>,
+    start: i64,
+    end: Option<i64>,
 ) -> Result<(), BoxError> {
     let mut client = dataset_store.load_client(dataset_name).await?;
 
-    let end = match end {
-        Some(end) => end,
-        None => client.latest_block(true).await?,
+    let (start, end) = match (start, end) {
+        (start, Some(end)) if end > 0 => (start as BlockNum, end as BlockNum),
+        _ => {
+            let latest_block = client.latest_block(true).await?;
+            resolve_relative_block_range(start, end, latest_block)?
+        }
     };
 
     // This is the intersection of the `__scanned_ranges` for all tables. That is, a range is only
@@ -207,8 +210,8 @@ async fn dump_sql_dataset(
     env: &Arc<RuntimeEnv>,
     scanned_ranges_by_table: BTreeMap<String, MultiRange>,
     parquet_opts: &ParquetWriterProperties,
-    start: BlockNum,
-    end: Option<BlockNum>,
+    start: i64,
+    end: Option<i64>,
 ) -> Result<(), BoxError> {
     let physical_dataset = &dst_ctx.catalog().datasets()[0].clone();
     let mut join_handles = vec![];
@@ -224,11 +227,13 @@ async fn dump_sql_dataset(
         let dataset_name = dataset_name.clone();
 
         let handle = tokio::spawn(async move {
-            let end = match end {
-                Some(end) => end,
-                None => {
+            let (start, end) = match (start, end) {
+                (start, Some(end)) if end > 0 => (start as BlockNum, end as BlockNum),
+                _ => {
                     match max_end_block(&query, dataset_store.clone(), env.clone()).await? {
-                        Some(end) => end,
+                        Some(max_end_block) => {
+                            resolve_relative_block_range(start, end, max_end_block)?
+                        }
                         None => {
                             // If the dependencies have synced nothing, we have nothing to do.
                             warn!("no blocks to dump for {table}, dependencies are empty");
@@ -461,3 +466,52 @@ async fn consistency_check(
     }
     Ok(())
 }
+
+fn resolve_relative_block_range(
+    start: i64,
+    end: Option<i64>,
+    latest_block: BlockNum,
+) -> Result<(BlockNum, BlockNum), BoxError> {
+    if start >= 0 {
+        if let Some(end) = end {
+            if end > 0 {
+                return Ok((start as BlockNum, end as BlockNum));
+            }
+        }
+    }
+
+    let start_block = if start >= 0 {
+        start
+    } else {
+        latest_block as i64 + start // Using + because start is negative
+    };
+
+    if start_block < 0 {
+        return Err(format!("start block {start_block} is invalid").into());
+    }
+
+    let end_block = match end {
+        // Absolute block number
+        Some(e) if e > 0 => e as BlockNum,
+
+        // Relative to latest block
+        Some(e) => {
+            let end = latest_block as i64 + e; // Using + because e is negative
+            if end < start_block {
+                return Err(format!(
+                    "end_block {end} must be greater than or equal to start_block {start_block}"
+                )
+                .into());
+            }
+            end as BlockNum
+        }
+
+        // Default to latest block
+        None => latest_block,
+    };
+
+    Ok((start_block as BlockNum, end_block))
+}
+
+#[cfg(test)]
+mod tests;
