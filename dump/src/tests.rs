@@ -1,18 +1,26 @@
+use crate::validate_block_range;
+use common::{BlockNum, BlockStreamer, BoxError, DatasetRows};
 use std::future::Future;
 use tokio::sync::mpsc::Sender;
-use common::{BlockNum, BlockStreamer, BoxError, DatasetRows};
-use crate::validate_block_range;
 
 #[tokio::test]
 async fn test_validate_block_range() {
     #[derive(Clone)]
     struct MockStreamer;
     impl BlockStreamer for MockStreamer {
-        fn block_stream(self, _: BlockNum, _: BlockNum, _: Sender<DatasetRows>) -> impl Future<Output=Result<(), BoxError>> + Send {
+        fn block_stream(
+            self,
+            _: BlockNum,
+            _: BlockNum,
+            _: Sender<DatasetRows>,
+        ) -> impl Future<Output = Result<(), BoxError>> + Send {
             async move { Ok(()) }
         }
 
-        fn latest_block(&mut self, _: bool) -> impl Future<Output=Result<BlockNum, BoxError>> + Send {
+        fn latest_block(
+            &mut self,
+            _: bool,
+        ) -> impl Future<Output = Result<BlockNum, BoxError>> + Send {
             async move { Ok(100) }
         }
     }

@@ -16,13 +16,13 @@ use common::catalog::physical::PhysicalTable;
 use common::config::Config;
 use common::meta_tables::scanned_ranges;
 use common::multirange::MultiRange;
-use common::{parquet, BlockStreamer};
 use common::parquet::basic::ZstdLevel;
 use common::query_context::Error as CoreError;
 use common::query_context::QueryContext;
 use common::BlockNum;
 use common::BlockStreamer as _;
 use common::BoxError;
+use common::{parquet, BlockStreamer};
 use datafusion::execution::runtime_env::RuntimeEnv;
 use dataset_store::sql_datasets::is_incremental;
 use dataset_store::sql_datasets::max_end_block;
@@ -492,10 +492,13 @@ async fn validate_block_range(
         Some(e) => {
             let end = latest_block as i64 + e; // Using + because e is negative
             if end < start_block {
-                return Err(format!("end_block {end} must be greater than or equal to start_block {start_block}").into());
+                return Err(format!(
+                    "end_block {end} must be greater than or equal to start_block {start_block}"
+                )
+                .into());
             }
             end as BlockNum
-        },
+        }
 
         // Default to latest block
         None => latest_block,
