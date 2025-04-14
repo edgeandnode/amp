@@ -39,7 +39,7 @@ enum Command {
         /// smart about keeping track of what blocks have already been dumped, so you only need to set
         /// this if you really don't want the data before this block.
         #[arg(long, short, default_value = "0", env = "DUMP_START_BLOCK")]
-        start: u64,
+        start: i64,
 
         /// The block number to end at, inclusive. If starts with "+" then relative to `start`. If
         /// omitted, defaults to a recent block.

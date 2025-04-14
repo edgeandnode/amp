@@ -16,7 +16,7 @@ use common::catalog::physical::PhysicalTable;
 use common::config::Config;
 use common::meta_tables::scanned_ranges;
 use common::multirange::MultiRange;
-use common::parquet;
+use common::{parquet, BlockStreamer};
 use common::parquet::basic::ZstdLevel;
 use common::query_context::Error as CoreError;
 use common::query_context::QueryContext;
@@ -51,8 +51,8 @@ pub async fn dump_dataset(
     n_jobs: u16,
     partition_size: u64,
     parquet_opts: &ParquetWriterProperties,
-    start: u64,
-    end_block: Option<u64>,
+    start: i64,
+    end_block: Option<i64>,
 ) -> Result<(), BoxError> {
     use common::meta_tables::scanned_ranges::scanned_ranges_by_table;
 
@@ -117,8 +117,8 @@ pub async fn dump_dataset(
                 &env,
                 scanned_ranges_by_table,
                 parquet_opts,
-                start,
-                end_block,
+                start as u64,
+                end_block.map(|x| x as u64),
             )
             .await?;
         }
@@ -137,15 +137,12 @@ async fn dump_raw_dataset(
     scanned_ranges_by_table: BTreeMap<String, MultiRange>,
     partition_size: u64,
     parquet_opts: &ParquetWriterProperties,
-    start: BlockNum,
-    end: Option<BlockNum>,
+    start: i64,
+    end: Option<i64>,
 ) -> Result<(), BoxError> {
     let mut client = dataset_store.load_client(dataset_name).await?;
 
-    let end = match end {
-        Some(end) => end,
-        None => client.latest_block(true).await?,
-    };
+    let (start, end) = validate_block_range(&mut client, start, end).await?;
 
     // This is the intersection of the `__scanned_ranges` for all tables. That is, a range is only
     // considered scanned if it is scanned for all tables.
@@ -460,4 +457,49 @@ async fn consistency_check(
         }
     }
     Ok(())
+}
+
+async fn validate_block_range(
+    client: &mut impl BlockStreamer,
+    start: i64,
+    end: Option<i64>,
+) -> Result<(BlockNum, BlockNum), BoxError> {
+    if start >= 0 {
+        if let Some(end) = end {
+            if end > 0 {
+                return Ok((start as BlockNum, end as BlockNum));
+            }
+        }
+    }
+
+    let latest_block = client.latest_block(true).await?;
+
+    let start_block = if start >= 0 {
+        start
+    } else {
+        latest_block as i64 + start // Using + because start is negative
+    };
+
+    if start_block < 0 {
+        return Err(format!("start block {start_block} is invalid").into());
+    }
+
+    let end_block = match end {
+        // Absolute block number
+        Some(e) if e > 0 => e as BlockNum,
+
+        // Relative to latest block
+        Some(e) => {
+            let end = latest_block as i64 + e; // Using + because e is negative
+            if end < start_block {
+                return Err(format!("end_block {end} must be greater than or equal to start_block {start_block}").into());
+            }
+            end as BlockNum
+        },
+
+        // Default to latest block
+        None => latest_block,
+    };
+
+    Ok((start_block as BlockNum, end_block))
 }
