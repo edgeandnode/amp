@@ -278,8 +278,8 @@ async fn redump_dataset(
         n_jobs,
         partition_size,
         &parquet_opts,
-        start,
-        Some(end),
+        start as i64,
+        Some(end as i64),
     )
     .await?;
 
