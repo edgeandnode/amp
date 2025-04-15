@@ -143,7 +143,7 @@ async fn dump_raw_dataset(
     let mut client = dataset_store.load_client(dataset_name).await?;
 
     let (start, end) = match (start, end) {
-        (start, Some(end)) if end > 0 => (start as BlockNum, end as BlockNum),
+        (start, Some(end)) if start >= 0 && end > 0 => (start as BlockNum, end as BlockNum),
         _ => {
             let latest_block = client.latest_block(true).await?;
             resolve_relative_block_range(start, end, latest_block)?
@@ -228,7 +228,7 @@ async fn dump_sql_dataset(
 
         let handle = tokio::spawn(async move {
             let (start, end) = match (start, end) {
-                (start, Some(end)) if end > 0 => (start as BlockNum, end as BlockNum),
+                (start, Some(end)) if start >= 0 && end > 0 => (start as BlockNum, end as BlockNum),
                 _ => {
                     match max_end_block(&query, dataset_store.clone(), env.clone()).await? {
                         Some(max_end_block) => {
