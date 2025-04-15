@@ -255,24 +255,30 @@ async fn dump_sql_dataset(
             let plan = src_ctx.plan_sql(query.clone()).await?;
             let is_incr = is_incremental(&plan)?;
 
+            const PARTITION_SIZE: u64 = 100_000;
             if is_incr {
                 let ranges_to_scan = scanned_ranges_by_table[&table].complement(start, end);
                 for (start, end) in ranges_to_scan.ranges {
-                    info!(
-                        "dumping {} between blocks {start} and {end}",
-                        physical_table.table_ref()
-                    );
+                    let mut start = start;
+                    while start <= end {
+                        let batch_end = std::cmp::min(start + PARTITION_SIZE - 1, end);
+                        info!(
+                            "dumping {} between blocks {start} and {batch_end}",
+                            physical_table.table_ref()
+                        );
 
-                    dump_sql_query(
-                        &dataset_store,
-                        &query,
-                        &env,
-                        start,
-                        end,
-                        physical_table,
-                        &parquet_opts,
-                    )
-                    .await?;
+                        dump_sql_query(
+                            &dataset_store,
+                            &query,
+                            &env,
+                            start,
+                            batch_end,
+                            physical_table,
+                            &parquet_opts,
+                        )
+                        .await?;
+                        start = batch_end + 1;
+                    }
                 }
             } else {
                 let Some(metadata_db) = dataset_store.metadata_db.as_ref() else {
