@@ -26,7 +26,7 @@ pub async fn dump(
     n_jobs: u16,
     partition_size_mb: u64,
     disable_compression: bool,
-    run_every_mins: Option<u64>,
+    run_every_secs: Option<u64>,
 ) -> Result<(), BoxError> {
     let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
     let partition_size = partition_size_mb * 1024 * 1024;
@@ -37,7 +37,7 @@ pub async fn dump(
     };
     let parquet_opts = dump::parquet_opts(compression, true);
     let end_block = end_block.map(|e| resolve_end_block(start, e)).transpose()?;
-    let run_every = run_every_mins.map(|s| tokio::time::interval(Duration::from_secs(s * 60)));
+    let run_every = run_every_secs.map(|s| tokio::time::interval(Duration::from_secs(s)));
 
     if !ignore_deps {
         datasets = datasets_and_dependencies(&dataset_store, datasets).await?;

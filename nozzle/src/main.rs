@@ -64,9 +64,9 @@ enum Command {
         #[arg(long, env = "DUMP_DISABLE_COMPRESSION")]
         disable_compression: bool,
 
-        /// How often to run the dump job in minutes. By default will run once and exit.
-        #[arg(long, env = "DUMP_RUN_EVERY_MINS")]
-        run_every_mins: Option<u64>,
+        /// How often to run the dump job in seconds. By default will run once and exit.
+        #[arg(long, env = "DUMP_RUN_EVERY_SECS")]
+        run_every_secs: Option<u64>,
     },
     Server {
         /// Disable admin API
@@ -113,7 +113,7 @@ async fn main_inner() -> Result<(), BoxError> {
             disable_compression,
             dataset: datasets,
             ignore_deps,
-            run_every_mins,
+            run_every_secs,
         } => {
             dump_cmd::dump(
                 config,
@@ -125,7 +125,7 @@ async fn main_inner() -> Result<(), BoxError> {
                 n_jobs,
                 partition_size_mb,
                 disable_compression,
-                run_every_mins,
+                run_every_secs,
             )
             .await
         }
