@@ -7,6 +7,7 @@ use handlers::deploy_handler;
 use metadata_db::MetadataDb;
 use scheduler::Scheduler;
 use std::{net::SocketAddr, sync::Arc};
+use tokio::sync::broadcast;
 
 #[derive(Clone)]
 pub struct ServiceState {
@@ -14,7 +15,11 @@ pub struct ServiceState {
     pub scheduler: Scheduler,
 }
 
-pub async fn serve(at: SocketAddr, config: Arc<Config>) -> Result<(), BoxError> {
+pub async fn serve(
+    at: SocketAddr,
+    config: Arc<Config>,
+    shutdown: broadcast::Receiver<()>,
+) -> Result<(), BoxError> {
     let scheduler = if let Some(url) = &config.metadata_db_url {
         let metadata_db = MetadataDb::connect(url).await?;
         Scheduler::new(config.clone(), metadata_db)
@@ -28,7 +33,7 @@ pub async fn serve(at: SocketAddr, config: Arc<Config>) -> Result<(), BoxError> 
         .route("/deploy", post(deploy_handler))
         .with_state(state);
 
-    http_common::serve_at(at, app).await?;
+    http_common::serve_at(at, app, shutdown).await?;
 
     Ok(())
 }

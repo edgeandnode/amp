@@ -7,6 +7,7 @@ use clap::Parser as _;
 use common::{config::Config, tracing, BoxError};
 use dump::worker::Worker;
 use metadata_db::MetadataDb;
+use tokio::{signal, sync::broadcast};
 
 #[global_allocator]
 static ALLOC: snmalloc_rs::SnMalloc = snmalloc_rs::SnMalloc;
@@ -129,7 +130,9 @@ async fn main_inner() -> Result<(), BoxError> {
             )
             .await
         }
-        Command::Server { no_admin } => server::run(config, metadata_db, no_admin).await,
+        Command::Server { no_admin } => {
+            server::run(config, metadata_db, no_admin, ctrl_c_shutdown()).await
+        }
         Command::Worker { node_id } => {
             let Some(metadata_db_url) = &config.metadata_db_url else {
                 return Err("metadata db not configured".into());
@@ -140,4 +143,38 @@ async fn main_inner() -> Result<(), BoxError> {
             worker.run().await.map_err(Into::into)
         }
     }
+}
+
+/// Graceful shutdown as recommended by axum:
+/// https://github.com/tokio-rs/axum/blob/9c9cbb5c5f72452825388d63db4f1e36c0d9b3aa/examples/graceful-shutdown/src/main.rs
+fn ctrl_c_shutdown() -> broadcast::Receiver<()> {
+    let ctrl_c = async {
+        signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("failed to install signal handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    let (tx, rx) = broadcast::channel(1);
+    tokio::spawn(async move {
+        tokio::select! {
+            _ = ctrl_c => {},
+            _ = terminate => {},
+        }
+        log::info!("gracefully shutting down");
+        if let Err(e) = tx.send(()) {
+            log::error!("failed to send shutdown signal: {e}");
+        }
+    });
+    rx
 }

@@ -7,6 +7,7 @@ use axum::serve::ListenerExt as _;
 use common::BoxError;
 use serde_json::json;
 use tokio::net::TcpListener;
+use tokio::sync::broadcast;
 
 pub type BoxRequestError = Box<dyn RequestError>;
 
@@ -32,10 +33,18 @@ impl<E: RequestError> From<E> for BoxRequestError {
     }
 }
 
-pub async fn serve_at(addr: SocketAddr, router: axum::Router) -> Result<(), BoxError> {
+pub async fn serve_at(
+    addr: SocketAddr,
+    router: axum::Router,
+    mut shutdown: broadcast::Receiver<()>,
+) -> Result<(), BoxError> {
     let listener = TcpListener::bind(addr)
         .await?
         .tap_io(|tcp_stream| tcp_stream.set_nodelay(true).unwrap());
-    axum::serve(listener, router).await?;
+    axum::serve(listener, router)
+        .with_graceful_shutdown(async move {
+            shutdown.recv().await.ok();
+        })
+        .await?;
     Ok(())
 }

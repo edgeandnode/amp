@@ -57,6 +57,7 @@ tokio = { version = "1.36.0", features = [
     "test-util",
     "rt-multi-thread",
     "parking_lot",
+    "signal",
 ] }
 url =  { version = "2.5.0", features = ["serde"] }
 sqlx = { version = "0.8.3", features = [

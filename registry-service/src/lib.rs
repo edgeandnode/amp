@@ -9,6 +9,7 @@ use dataset_store::DatasetStore;
 use handlers::{datasets_handler, output_schema_handler};
 use metadata_db::MetadataDb;
 use std::{net::SocketAddr, sync::Arc};
+use tokio::sync::broadcast;
 
 pub struct ServiceState {
     dataset_store: Arc<DatasetStore>,
@@ -18,6 +19,7 @@ pub async fn serve(
     at: SocketAddr,
     config: Arc<Config>,
     metadata_db: Option<MetadataDb>,
+    shutdown: broadcast::Receiver<()>,
 ) -> Result<(), BoxError> {
     let state = Arc::new(ServiceState {
         dataset_store: DatasetStore::new(config, metadata_db),
@@ -29,7 +31,7 @@ pub async fn serve(
         .route("/datasets", get(datasets_handler))
         .with_state(state);
 
-    http_common::serve_at(at, app).await?;
+    http_common::serve_at(at, app, shutdown).await?;
 
     Ok(())
 }
