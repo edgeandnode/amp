@@ -120,7 +120,7 @@ pub async fn dump_dataset(
                 parquet_opts,
                 start,
                 end_block,
-                input_batch_size_blocks
+                input_batch_size_blocks,
             )
             .await?;
         }
