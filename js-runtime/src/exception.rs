@@ -1,5 +1,30 @@
 use thiserror::Error;
 
+// If this function is called but no exception has been caught by `s`, it will panic.
+pub(crate) fn catch<'s, 't, S>(s: &mut v8::TryCatch<'s, S>) -> ExceptionMessage
+where
+    v8::TryCatch<'s, S>: AsMut<v8::HandleScope<'t, ()>>,
+    v8::TryCatch<'s, S>: AsMut<v8::HandleScope<'t>>,
+    't: 's,
+{
+    assert!(s.has_caught());
+
+    // Unwrap: an exception has been caught
+    let exception = s.exception().unwrap().to_rust_string_lossy(s.as_mut());
+    let position = s.message().map(|m| exception_position(s.as_mut(), m));
+
+    let stack = s.stack_trace().and_then(|val| {
+        val.to_string(s.as_mut())
+            .map(|val| val.to_rust_string_lossy(s.as_mut()))
+    });
+
+    ExceptionMessage {
+        exception,
+        position,
+        stack,
+    }
+}
+
 #[derive(Debug, Error)]
 pub struct ExceptionMessage {
     // Stringified exception object

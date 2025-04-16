@@ -1,7 +1,7 @@
 use std::sync::Once;
 
 mod convert;
-mod exception;
+pub mod exception;
 pub mod isolate;
 
 #[cfg(test)]

@@ -1,10 +1,19 @@
+mod v8_value;
+
+use std::collections::BTreeMap;
+
 use datafusion::{
-    arrow::{array::Array, datatypes::i256},
+    arrow::{
+        array::Array,
+        datatypes::{i256, Field},
+    },
+    common::scalar::ScalarStructBuilder,
     scalar::ScalarValue,
 };
 use num_traits::cast::ToPrimitive;
+use v8_value::V8Value;
 
-use crate::BoxError;
+use crate::{exception::catch, BoxError};
 
 pub trait FromV8: Sized {
     /// Converts a V8 value to a Rust value.
@@ -176,7 +185,7 @@ impl ToV8 for i128 {
         let lo = (magnitude & 0xFFFF_FFFF_FFFF_FFFF) as u64;
         let hi = (magnitude >> 64) as u64;
 
-        // Drop leading zero if hi == 0
+        // Drop leading zeros if hi == 0
         let words = if hi == 0 { vec![lo] } else { vec![lo, hi] };
 
         // Unwrap: No known reason for this to fail
@@ -347,4 +356,93 @@ fn single_array_to_v8<'s>(
         sv_v8.push(sv.to_v8(scope)?);
     }
     Ok(v8::Array::new_with_elements(scope, &sv_v8).into())
+}
+
+impl FromV8 for ScalarValue {
+    fn from_v8<'s>(
+        scope: &mut v8::HandleScope<'s>,
+        value: v8::Local<'s, v8::Value>,
+    ) -> Result<Self, BoxError> {
+        let v8_value = V8Value::new(scope, value)
+            .map_err(|e| format!("unsupported return value from JS: {}", e))?;
+        scalar_value_from_v8(scope, v8_value)
+    }
+}
+
+fn scalar_value_from_v8<'s>(
+    scope: &mut v8::HandleScope<'s>,
+    v8_value: V8Value<'s>,
+) -> Result<ScalarValue, BoxError> {
+    match v8_value {
+        V8Value::Undefined | V8Value::Null => Ok(ScalarValue::Null),
+        V8Value::Boolean(b) => Ok(ScalarValue::Boolean(Some(b))),
+        V8Value::Int32(i) => Ok(ScalarValue::Int32(Some(i))),
+        V8Value::Uint32(i) => Ok(ScalarValue::UInt32(Some(i))),
+        V8Value::Number(n) => Ok(ScalarValue::Float64(Some(n))),
+        V8Value::String(s) => Ok(ScalarValue::Utf8(Some(s))),
+
+        // BigInt is converted to `Decimal256` if it fits. On overflow it is null.
+        V8Value::BigInt(i) => {
+            let mut words = vec![0u64; i.word_count()];
+            let (sign, words) = i.to_words_array(&mut words);
+
+            if words.len() > 4 {
+                return Ok(ScalarValue::Null);
+            }
+
+            let mut value = i256::ZERO;
+            for (index, &word) in words.iter().enumerate() {
+                value = value | (i256::from_i128(word as i128) << (index * 64) as u8);
+            }
+
+            if value.is_negative() {
+                // the magnitude should be positive, a negative value here is an overflow
+                return Ok(ScalarValue::Null);
+            }
+
+            if sign {
+                value = -value;
+            }
+
+            Ok(ScalarValue::Decimal256(Some(value), 76, 0))
+        }
+
+        // Objects are converted to `Struct`.
+        V8Value::Object(o) => {
+            let v8_values = {
+                let s = &mut v8::TryCatch::new(scope);
+
+                let res = o
+                    .get_own_property_names(s, Default::default())
+                    .and_then(|props| {
+                        let mut v8_values: BTreeMap<String, V8Value> = BTreeMap::new();
+                        for index in 0..props.length() {
+                            let key = props.get_index(s, index)?.to_string(s)?;
+                            let value = o.get(s, key.into())?;
+
+                            // Ignore properties of unsupported types
+                            match V8Value::new(s, value) {
+                                Ok(v8_val) => v8_values.insert(key.to_rust_string_lossy(s), v8_val),
+                                Err(_unsupported) => continue,
+                            };
+                        }
+                        Some(v8_values)
+                    });
+
+                res.ok_or_else(|| catch(s))?
+            };
+
+            let mut builder = ScalarStructBuilder::new();
+            for (key, value) in v8_values {
+                // Recurse
+                let value = scalar_value_from_v8(scope, value)?;
+                let field = Field::new(key, value.data_type(), true);
+                builder = builder.with_scalar(field, value);
+            }
+
+            Ok(builder.build()?)
+        }
+        V8Value::Array(local) => todo!(),
+        V8Value::TypedArray(local) => todo!(),
+    }
 }
