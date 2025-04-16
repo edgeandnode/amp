@@ -1,4 +1,4 @@
-use datafusion::arrow::datatypes::SchemaRef;
+use datafusion::{arrow::datatypes::SchemaRef, logical_expr::TableSource};
 
 use crate::BLOCK_NUM;
 
@@ -43,5 +43,14 @@ impl Table {
         // - Have a consistency check that the data really is sorted.
         // - Do we want to address and leverage https://github.com/apache/arrow-datafusion/issues/4177?
         vec![BLOCK_NUM.to_string(), "timestamp".to_string()]
+    }
+}
+
+impl TableSource for Table {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+    fn schema(&self) -> SchemaRef {
+        self.schema.clone()
     }
 }

@@ -2,10 +2,11 @@ use std::time::Duration;
 
 use futures::{
     stream::{BoxStream, Stream},
-    StreamExt, TryStream, TryStreamExt,
+    StreamExt, TryStreamExt,
 };
 use log::error;
 use object_store::{path::Path, ObjectMeta};
+use serde::{Deserialize, Serialize};
 use sqlx::{
     migrate::{MigrateError, Migrator},
     postgres::{PgListener, PgNotification},
@@ -413,7 +414,7 @@ impl MetadataDb {
     pub fn stream_object_meta<'a>(
         &'a self,
         tbl: TableId<'a>,
-    ) -> impl TryStream<Item = Result<object_store::ObjectMeta, sqlx::Error>> + 'a {
+    ) -> BoxStream<'a, Result<(String, object_store::ObjectMeta), sqlx::Error>> {
         let TableId {
             dataset,
             dataset_version: _,
@@ -455,16 +456,20 @@ impl MetadataDb {
                     } else {
                         Some(version)
                     };
-                    Ok(object_store::ObjectMeta {
-                        location,
-                        last_modified,
-                        size,
-                        e_tag,
-                        version,
-                    })
+                    Ok((
+                        file_name,
+                        object_store::ObjectMeta {
+                            location,
+                            last_modified,
+                            size,
+                            e_tag,
+                            version,
+                        },
+                    ))
                     .map(Some)
                 },
             )
+            .boxed()
     }
 
     /// Produces a stream of nozzle metadata for a given table catalogued by the MetadataDb
@@ -561,9 +566,9 @@ struct FileMetadataBuilder {
     last_modified: NozzleTimestamp,
     range_start: i64,
     range_end: i64,
-    row_count: i64,
-    data_size: i64,
-    size_hint: i64,
+    row_count: Option<i64>,
+    data_size: Option<i64>,
+    size_hint: Option<i64>,
 }
 
 impl FileMetadataBuilder {
@@ -608,9 +613,61 @@ impl FileMetadataBuilder {
 pub struct FileMetadata {
     pub object_meta: ObjectMeta,
     pub range: (i64, i64),
-    pub row_count: i64,
-    pub data_size: i64,
-    pub size_hint: i64,
+    pub row_count: Option<i64>,
+    pub data_size: Option<i64>,
+    pub size_hint: Option<i64>,
+}
+
+#[derive(Debug, Deserialize, Serialize, sqlx::Decode, sqlx::Encode, sqlx::FromRow)]
+pub struct Block<const N: usize>
+where
+    for<'d> [u8; N]: Deserialize<'d> + Serialize,
+{
+    pub number: i64,
+    pub timestamp: NozzleTimestamp,
+    pub hash: [u8; N],
+}
+
+impl sqlx::Type<sqlx::Postgres> for Block<32> {
+    fn type_info() -> <Postgres as sqlx::Database>::TypeInfo {
+        sqlx::postgres::PgTypeInfo::with_name("BLOCK_32")
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, sqlx::Decode, sqlx::Encode, sqlx::FromRow)]
+pub struct Network {
+    kind: String,
+    #[sqlx(default)]
+    caip2: Option<String>,
+}
+
+impl sqlx::Type<sqlx::Postgres> for Network {
+    fn type_info() -> <Postgres as sqlx::Database>::TypeInfo {
+        sqlx::postgres::PgTypeInfo::with_name("NETWORK")
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, sqlx::Decode, sqlx::Encode, sqlx::FromRow)]
+pub struct BlockRange<const N: usize>
+where
+    for<'d> [u8; N]: Deserialize<'d> + Serialize,
+    Block<N>: sqlx::Type<sqlx::Postgres>,
+{
+    pub start: Block<N>,
+    pub end: Block<N>,
+    pub network: Network,
+}
+
+#[derive(Debug, Deserialize, Serialize, sqlx::FromRow)]
+pub struct FileMetaRow {}
+
+#[derive(Debug, Deserialize, Serialize, sqlx::FromRow)]
+pub struct ObjectMetaRow {
+    pub location: String,
+    pub last_modified: NozzleTimestamp,
+    pub size: i64,
+    pub e_tag: Option<String>,
+    pub version: Option<String>,
 }
 
 impl From<FileMetadataBuilder> for FileMetadata {
@@ -619,7 +676,7 @@ impl From<FileMetadataBuilder> for FileMetadata {
     }
 }
 
-#[derive(Clone, Debug, sqlx::Type)]
+#[derive(Clone, Debug, Deserialize, Serialize, sqlx::Type)]
 #[sqlx(type_name = "NOZZLE_TIMESTAMP")]
 pub struct NozzleTimestamp {
     pub secs: i64,
