@@ -5962,6 +5962,7 @@ dependencies = [
 name = "tests"
 version = "0.1.0"
 dependencies = [
+ "arrow-flight",
  "clap",
  "common",
  "dataset-store",
@@ -5973,6 +5974,7 @@ dependencies = [
  "hex",
  "log",
  "metadata-db",
+ "nozzle",
  "object_store",
  "pgtemp",
  "pretty_assertions",

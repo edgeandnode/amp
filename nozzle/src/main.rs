@@ -1,5 +1,4 @@
 mod dump_cmd;
-mod server;
 
 use std::sync::Arc;
 
@@ -131,7 +130,7 @@ async fn main_inner() -> Result<(), BoxError> {
             .await
         }
         Command::Server { no_admin } => {
-            server::run(config, metadata_db, no_admin, ctrl_c_shutdown()).await
+            nozzle::server::run(config, metadata_db, no_admin, ctrl_c_shutdown()).await
         }
         Command::Worker { node_id } => {
             let Some(metadata_db_url) = &config.metadata_db_url else {
