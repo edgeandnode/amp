@@ -257,7 +257,7 @@ async fn evm_decode_sql_query() {
                 SELECT evm_decode(l.topic1, l.topic2, l.topic3, l.data, 'Transfer(address indexed from, address indexed to, uint256 value)')
                 FROM eth_rpc.logs l
                 WHERE l.topic0 = evm_topic('Transfer(address indexed from, address indexed to, uint256 value)')
-                AND l.topic3 is null
+                AND l.topic3 IS NULL
                 LIMIT 1
             "
             .to_string(),
