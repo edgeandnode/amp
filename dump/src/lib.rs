@@ -228,7 +228,9 @@ async fn dump_sql_dataset(
 
         let handle = tokio::spawn(async move {
             let (start, end) = match (start, end) {
-                (start, Some(end)) if start >= 0 && end >= 0 => (start as BlockNum, end as BlockNum),
+                (start, Some(end)) if start >= 0 && end >= 0 => {
+                    (start as BlockNum, end as BlockNum)
+                }
                 _ => {
                     match max_end_block(&query, dataset_store.clone(), env.clone()).await? {
                         Some(max_end_block) => {
