@@ -3,7 +3,7 @@ use figment::{
     Figment,
 };
 use fs_err as fs;
-use std::{path::PathBuf, sync::Arc};
+use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
 use datafusion::{
     error::DataFusionError,
@@ -25,6 +25,16 @@ pub struct Config {
     pub metadata_db_url: Option<String>,
     pub max_mem_mb: usize,
     pub spill_location: Vec<PathBuf>,
+    /// Addresses to bind the server to. Used during testing.
+    pub addrs: Addrs,
+}
+
+#[derive(Debug)]
+pub struct Addrs {
+    pub flight_addr: SocketAddr,
+    pub jsonl_addr: SocketAddr,
+    pub registry_service_addr: SocketAddr,
+    pub admin_api_addr: SocketAddr,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -47,6 +57,7 @@ impl Config {
         file: impl Into<PathBuf>,
         env_override: bool,
         literal_override: Option<FigmentJson>,
+        addrs: Addrs,
     ) -> Result<Self, BoxError> {
         let config_path: PathBuf = fs::canonicalize(file.into())?;
         let contents = fs::read_to_string(&config_path)?;
@@ -75,6 +86,7 @@ impl Config {
             metadata_db_url: config_file.metadata_db_url,
             max_mem_mb: config_file.max_mem_mb,
             spill_location: config_file.spill_location,
+            addrs,
         })
     }
 
@@ -91,6 +103,7 @@ impl Config {
             metadata_db_url: None,
             max_mem_mb: 0,
             spill_location: vec![],
+            addrs: Default::default(),
         }
     }
 
@@ -131,5 +144,16 @@ impl Config {
         };
 
         runtime_config.build()
+    }
+}
+
+impl Default for Addrs {
+    fn default() -> Self {
+        Self {
+            flight_addr: ([0, 0, 0, 0], 1602).into(),
+            jsonl_addr: ([0, 0, 0, 0], 1603).into(),
+            registry_service_addr: ([0, 0, 0, 0], 1611).into(),
+            admin_api_addr: ([0, 0, 0, 0], 1610).into(),
+        }
     }
 }

@@ -3,7 +3,10 @@ mod dump_cmd;
 use std::sync::Arc;
 
 use clap::Parser as _;
-use common::{config::Config, tracing, BoxError};
+use common::{
+    config::{Addrs, Config},
+    tracing, BoxError,
+};
 use dump::worker::Worker;
 use metadata_db::MetadataDb;
 use tokio::{signal, sync::broadcast};
@@ -97,7 +100,8 @@ async fn main_inner() -> Result<(), BoxError> {
     let args = Args::parse();
 
     let config = Arc::new(
-        Config::load(args.config, true, None).map_err(|e| format!("failed to load config: {e}"))?,
+        Config::load(args.config, true, None, Addrs::default())
+            .map_err(|e| format!("failed to load config: {e}"))?,
     );
     let metadata_db = match &config.metadata_db_url {
         Some(url) => Some(MetadataDb::connect(url).await?),
@@ -130,7 +134,9 @@ async fn main_inner() -> Result<(), BoxError> {
             .await
         }
         Command::Server { no_admin } => {
-            nozzle::server::run(config, metadata_db, no_admin, ctrl_c_shutdown()).await
+            let (_, server) =
+                nozzle::server::run(config, metadata_db, no_admin, ctrl_c_shutdown()).await?;
+            server.await
         }
         Command::Worker { node_id } => {
             let Some(metadata_db_url) = &config.metadata_db_url else {

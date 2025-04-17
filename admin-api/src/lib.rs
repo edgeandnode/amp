@@ -2,11 +2,11 @@ mod handlers;
 mod scheduler;
 
 use axum::{routing::post, Router};
-use common::{config::Config, BoxError};
+use common::{config::Config, BoxResult};
 use handlers::deploy_handler;
 use metadata_db::MetadataDb;
 use scheduler::Scheduler;
-use std::{net::SocketAddr, sync::Arc};
+use std::{future::Future, net::SocketAddr, sync::Arc};
 use tokio::sync::broadcast;
 
 #[derive(Clone)]
@@ -19,7 +19,7 @@ pub async fn serve(
     at: SocketAddr,
     config: Arc<Config>,
     shutdown: broadcast::Receiver<()>,
-) -> Result<(), BoxError> {
+) -> BoxResult<(SocketAddr, impl Future<Output = BoxResult<()>>)> {
     let scheduler = if let Some(url) = &config.metadata_db_url {
         let metadata_db = MetadataDb::connect(url).await?;
         Scheduler::new(config.clone(), metadata_db)
@@ -33,7 +33,5 @@ pub async fn serve(
         .route("/deploy", post(deploy_handler))
         .with_state(state);
 
-    http_common::serve_at(at, app, shutdown).await?;
-
-    Ok(())
+    http_common::serve_at(at, app, shutdown).await
 }

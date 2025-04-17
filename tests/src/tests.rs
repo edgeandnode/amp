@@ -1,4 +1,4 @@
-use std::sync::{LazyLock, Mutex};
+use std::sync::LazyLock;
 
 use crate::{
     temp_metadata_db::test_metadata_db,
@@ -19,10 +19,6 @@ use common::{
 use futures::StreamExt;
 
 static KEEP_TEMP_DIRS: LazyLock<bool> = LazyLock::new(|| std::env::var("KEEP_TEMP_DIRS").is_ok());
-
-// Since the server requires specific ports to be open, we cannot run multiple server instances in
-// parallel.
-static SINGLE_SERVER_LOCK: Mutex<()> = Mutex::new(());
 
 #[tokio::test]
 async fn evm_rpc_single_dump() {
@@ -112,16 +108,16 @@ async fn simplest_possible_sql_query() {
     tracing::register_logger();
 
     // Start the nozzle server.
-    let _guard = SINGLE_SERVER_LOCK.lock().unwrap();
     let config = load_test_config(None).unwrap();
     let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel(1);
+    let (bound, server) = nozzle::server::run(config, None, false, shutdown_rx)
+        .await
+        .unwrap();
     tokio::spawn(async move {
-        nozzle::server::run(config, None, false, shutdown_rx)
-            .await
-            .unwrap();
+        server.await.unwrap();
     });
 
-    let client = FlightServiceClient::connect("grpc://localhost:1602")
+    let client = FlightServiceClient::connect(format!("grpc://{}", bound.flight_addr))
         .await
         .unwrap();
     let mut client = FlightSqlServiceClient::new_from_inner(client);
@@ -156,17 +152,16 @@ async fn eth_call_sql_query() {
     tracing::register_logger();
 
     // Start the nozzle server.
-    let _guard = SINGLE_SERVER_LOCK.lock().unwrap();
     let config = load_test_config(None).unwrap();
     let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel(1);
+    let (bound, server) = nozzle::server::run(config, None, false, shutdown_rx)
+        .await
+        .unwrap();
     tokio::spawn(async move {
-        nozzle::server::run(config, None, false, shutdown_rx)
-            .await
-            .unwrap();
+        server.await.unwrap();
     });
 
-    // Wait for the server to be ready.
-    let client = FlightServiceClient::connect("grpc://localhost:1602")
+    let client = FlightServiceClient::connect(format!("grpc://{}", bound.flight_addr))
         .await
         .unwrap();
     let mut client = FlightSqlServiceClient::new_from_inner(client);
@@ -232,17 +227,16 @@ async fn evm_decode_sql_query() {
     tracing::register_logger();
 
     // Start the nozzle server.
-    let _guard = SINGLE_SERVER_LOCK.lock().unwrap();
     let config = load_test_config(None).unwrap();
     let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel(1);
+    let (bound, server) = nozzle::server::run(config, None, false, shutdown_rx)
+        .await
+        .unwrap();
     tokio::spawn(async move {
-        nozzle::server::run(config, None, false, shutdown_rx)
-            .await
-            .unwrap();
+        server.await.unwrap();
     });
 
-    // Wait for the server to be ready.
-    let client = FlightServiceClient::connect("grpc://localhost:1602")
+    let client = FlightServiceClient::connect(format!("grpc://{}", bound.flight_addr))
         .await
         .unwrap();
     let mut client = FlightSqlServiceClient::new_from_inner(client);
@@ -320,16 +314,16 @@ async fn evm_topic_sql_query() {
     tracing::register_logger();
 
     // Start the nozzle server.
-    let _guard = SINGLE_SERVER_LOCK.lock().unwrap();
     let config = load_test_config(None).unwrap();
     let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel(1);
+    let (bound, server) = nozzle::server::run(config, None, false, shutdown_rx)
+        .await
+        .unwrap();
     tokio::spawn(async move {
-        nozzle::server::run(config, None, false, shutdown_rx)
-            .await
-            .unwrap();
+        server.await.unwrap();
     });
 
-    let client = FlightServiceClient::connect("grpc://localhost:1602")
+    let client = FlightServiceClient::connect(format!("grpc://{}", bound.flight_addr))
         .await
         .unwrap();
     let mut client = FlightSqlServiceClient::new_from_inner(client);
@@ -377,16 +371,16 @@ async fn attestation_hash_sql_query() {
     tracing::register_logger();
 
     // Start the nozzle server.
-    let _guard = SINGLE_SERVER_LOCK.lock().unwrap();
     let config = load_test_config(None).unwrap();
     let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel(1);
+    let (bound, server) = nozzle::server::run(config, None, false, shutdown_rx)
+        .await
+        .unwrap();
     tokio::spawn(async move {
-        nozzle::server::run(config, None, false, shutdown_rx)
-            .await
-            .unwrap();
+        server.await.unwrap();
     });
 
-    let client = FlightServiceClient::connect("grpc://localhost:1602")
+    let client = FlightServiceClient::connect(format!("grpc://{}", bound.flight_addr))
         .await
         .unwrap();
     let mut client = FlightSqlServiceClient::new_from_inner(client);

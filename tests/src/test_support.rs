@@ -8,7 +8,7 @@ use common::{
         json::writer::JsonArray,
     },
     catalog::physical::{Catalog, PhysicalDataset},
-    config::{Config, FigmentJson},
+    config::{Addrs, Config, FigmentJson},
     multirange::MultiRange,
     parquet::basic::{Compression, ZstdLevel},
     query_context::parse_sql,
@@ -44,7 +44,12 @@ pub fn load_test_config(literal_override: Option<FigmentJson>) -> Result<Arc<Con
     let path = path.expect(
         "Couldn't find a test config file, `cargo test` must be run from the workspace root or the tests crate root"
     );
-    Ok(Arc::new(Config::load(path, false, literal_override)?))
+    Ok(Arc::new(Config::load(
+        path,
+        false,
+        literal_override,
+        dynamic_addrs(),
+    )?))
 }
 
 pub async fn bless(dataset_name: &str, start: u64, end: u64) -> Result<(), BoxError> {
@@ -359,4 +364,13 @@ fn record_batch_to_json(record_batch: RecordBatch) -> String {
     writer.finish().unwrap();
 
     String::from_utf8(writer.into_inner()).unwrap()
+}
+
+fn dynamic_addrs() -> Addrs {
+    Addrs {
+        flight_addr: ([0, 0, 0, 0], 0).into(),
+        jsonl_addr: ([0, 0, 0, 0], 0).into(),
+        registry_service_addr: ([0, 0, 0, 0], 0).into(),
+        admin_api_addr: ([0, 0, 0, 0], 0).into(),
+    }
 }
