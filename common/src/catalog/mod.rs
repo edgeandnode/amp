@@ -7,6 +7,7 @@ use datafusion::{
     logical_expr::{LogicalPlan, TableScan},
     sql::TableReference,
 };
+use metadata_db::MetadataDb;
 use physical::Catalog;
 
 use crate::{config::Config, BoxError, Dataset, QueryContext, Table};
@@ -49,15 +50,21 @@ pub async fn schema_to_markdown(
     tables: Vec<Table>,
     dataset_kind: String,
 ) -> Result<String, BoxError> {
-    let dataset = Dataset {
+    let dataset = Arc::new(Dataset {
         kind: dataset_kind,
         name: "dataset".to_string(),
         tables,
-    };
+    });
     let config = Config::in_memory();
 
     let env = Arc::new(config.make_runtime_env()?);
-    let catalog = Catalog::for_dataset(dataset, config.data_store, None).await?;
+    let metadata_provider = None::<MetadataDb>;
+    let read_only = true;
+
+    let catalog =
+        Catalog::for_logical_dataset(dataset, config.data_store, metadata_provider, read_only)
+            .await?;
+
     let context = QueryContext::for_catalog(catalog, env).unwrap();
 
     let mut markdown = String::new();

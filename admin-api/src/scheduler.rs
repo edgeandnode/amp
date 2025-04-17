@@ -37,18 +37,17 @@ impl Scheduler {
         match self {
             Self::Full(scheduler) => scheduler.schedule_dataset_dump(manifest).await,
             Self::Ephemeral(config) => {
-                let dataset_store = DatasetStore::new(config.clone(), None);
+                let dataset_store = DatasetStore::new(config.clone(), None::<MetadataDb>);
                 let dataset = {
                     let dataset = dataset_store.load_dataset(&manifest.name).await?;
                     PhysicalDataset::from_dataset_at(
-                        dataset,
+                        &dataset,
                         config.data_store.clone(),
-                        None,
+                        None::<MetadataDb>,
                         false,
                     )
                     .await?
                 };
-
                 let join_handle = tokio::spawn(async move {
                     dump::dump_dataset(
                         &dataset,
@@ -109,14 +108,15 @@ impl FullScheduler {
         };
 
         let dataset: Dataset = dataset.into();
+        let metadata_db = Arc::new(self.metadata_db.clone());
 
         let mut locations = Vec::new();
         for table in dataset.tables() {
-            let physical_table = PhysicalTable::next_revision(
+            let physical_table = PhysicalTable::try_next_revision(
                 &table,
                 &self.config.data_store,
                 &dataset.name,
-                &self.metadata_db,
+                metadata_db.clone(),
             )
             .await?;
             locations.push(physical_table.location_id().unwrap());

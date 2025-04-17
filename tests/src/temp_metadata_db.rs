@@ -45,6 +45,12 @@ impl Deref for TempMetadataDb {
     }
 }
 
+impl AsRef<MetadataDb> for TempMetadataDb {
+    fn as_ref(&self) -> &MetadataDb {
+        &self.metadata_db
+    }
+}
+
 /// Temp metadata db for sharing among tests. It is shared with the reasoning that this helps us
 /// catch more bugs, even if it is less deterministic.
 static TEST_METADATA_DB: OnceCell<TempMetadataDb> = OnceCell::const_new();

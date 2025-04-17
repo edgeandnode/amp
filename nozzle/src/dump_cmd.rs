@@ -53,7 +53,7 @@ pub async fn dump(
             PhysicalDataset::from_dataset_at(
                 dataset,
                 config.data_store.clone(),
-                metadata_db.as_ref(),
+                metadata_db.clone(),
                 false,
             )
             .await?,

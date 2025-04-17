@@ -10,6 +10,7 @@ use common::multirange::MultiRange;
 use common::parquet::errors::ParquetError;
 use common::parquet::format::KeyValue;
 use common::{parquet, BlockNum, BoxError, QueryContext, TableRows, Timestamp};
+use datafusion::datasource::TableProvider;
 use futures::TryStreamExt;
 use log::debug;
 use metadata_db::MetadataDb;
@@ -39,12 +40,12 @@ impl DatasetWriter {
         scanned_ranges_by_table: BTreeMap<String, MultiRange>,
     ) -> Result<Self, BoxError> {
         let mut writers = BTreeMap::new();
-        for table in dataset_ctx.catalog().all_tables() {
+        for table in dataset_ctx.catalog().all_tables_blocking()? {
             // Unwrap: `scanned_ranges_by_table` contains an entry for each table.
             let table_name = table.table_name();
             let scanned_ranges = scanned_ranges_by_table.get(table_name).unwrap().clone();
             let writer = TableWriter::new(
-                table.clone(),
+                table.as_ref(),
                 opts.clone(),
                 partition_size,
                 scanned_ranges,
@@ -151,7 +152,7 @@ struct TableWriter {
 
 impl TableWriter {
     pub fn new(
-        table: PhysicalTable,
+        table: &PhysicalTable,
         opts: ParquetWriterProperties,
         partition_size: u64,
         scanned_ranges: MultiRange,
@@ -166,7 +167,7 @@ impl TableWriter {
         };
 
         let mut this = TableWriter {
-            table,
+            table: table.clone(),
             opts,
             ranges_to_write,
             partition_size,
@@ -252,7 +253,7 @@ impl TableWriter {
             let end = self.current_range.unwrap().1;
             self.current_range = Some((block_num, end));
             self.current_file = Some(ParquetFileWriter::new(
-                self.table.clone(),
+                &self.table,
                 self.opts.clone(),
                 block_num,
             )?);
@@ -271,7 +272,7 @@ impl TableWriter {
         self.current_range = self.ranges_to_write.pop();
         self.current_file = match self.current_range {
             Some((start, _)) => Some(ParquetFileWriter::new(
-                self.table.clone(),
+                &self.table,
                 self.opts.clone(),
                 start,
             )?),
@@ -322,7 +323,7 @@ pub struct ParquetFileWriter {
 
 impl ParquetFileWriter {
     pub fn new(
-        table: PhysicalTable,
+        table: &PhysicalTable,
         opts: ParquetWriterProperties,
         start: BlockNum,
     ) -> Result<ParquetFileWriter, BoxError> {
@@ -331,14 +332,14 @@ impl ParquetFileWriter {
             let padded_start = format!("{:09}", start);
             format!("{padded_start}.parquet")
         };
-        let file_url = table.url().join(&filename)?;
+        let file_url = table.url().expect("").join(&filename)?;
         let file_path = Path::from_url_path(file_url.path())?;
-        let object_writer = BufWriter::new(table.object_store(), file_path);
+        let object_writer = BufWriter::new(table.object_store()?, file_path);
         let writer = AsyncArrowWriter::try_new(object_writer, table.schema(), Some(opts))?;
         Ok(ParquetFileWriter {
             writer,
             start,
-            table,
+            table: table.clone(),
             file_url,
             filename,
             bytes_written: 0,
@@ -390,7 +391,7 @@ impl ParquetFileWriter {
         let location = Path::from_url_path(self.file_url.path())?;
 
         let (object_meta, size_hint) =
-            get_object_metadata_and_size_hint(self.table.object_store(), location).await?;
+            get_object_metadata_and_size_hint(self.table.object_store()?, location).await?;
 
         let row_count = meta.num_rows;
 

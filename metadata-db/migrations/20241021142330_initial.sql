@@ -49,28 +49,16 @@ $$ LANGUAGE plpgsql;
 CREATE TABLE IF NOT EXISTS file_metadata (
     id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     location_id     BIGINT REFERENCES locations(id) ON DELETE CASCADE NOT NULL,
-    -- The name of the file
     file_name       TEXT NOT NULL,
-    -- The starting block number for the file
     range_start     BIGINT NOT NULL,
-    -- The ending block number for the file
     range_end       BIGINT NOT NULL,
-    -- The row count of the file
     row_count       BIGINT NOT NULL,
-    -- File size in bytes - for building ObjectMetadata
     file_size       BIGINT NOT NULL,
-    -- Total size of the data in the file in bytes (as RecordBatches)
     data_size       BIGINT NOT NULL,
-    -- The size of the parquet metadata in bytes - we store this to eliminate 
-    -- a round trip to read the final 8 bytes of the file when performing a scan operation
     size_hint       BIGINT NOT NULL,
-    -- The e_tag of the file - for building ObjectMetadata
     e_tag           TEXT NOT NULL,
-    -- The current version of the file - for building ObjectMetadata
     version         TEXT NOT NULL,
-    -- The time the file was created
     created_at      NOZZLE_TIMESTAMP DEFAULT (as_nozzle_ts(now() AT TIME ZONE 'utc')) NOT NULL,
-    -- The time the file was last modified - for building ObjectMetadata
     last_modified   NOZZLE_TIMESTAMP
 );
 

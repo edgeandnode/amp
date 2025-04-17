@@ -57,17 +57,22 @@ pub async fn dump_dataset(
 ) -> Result<(), BoxError> {
     use common::meta_tables::scanned_ranges::scanned_ranges_by_table;
 
-    let catalog = Catalog::new(vec![dataset.clone()]);
+    let store = config.data_store.clone();
+    let metadata_provider = if let Some(ref url) = config.metadata_db_url {
+        Some(Arc::new(MetadataDb::connect(url).await?))
+    } else {
+        None
+    };
     let env = Arc::new(config.make_runtime_env()?);
-    let ctx = Arc::new(QueryContext::for_catalog(catalog, env.clone())?);
-    let metadata_db = dataset_store.metadata_db.as_ref();
+    let catalog = Catalog::for_physical_dataset(dataset, store, metadata_provider.clone()).await?;
 
+    let ctx = Arc::new(QueryContext::for_catalog(catalog, env.clone())?);
     // Ensure consistency before starting the dump procedure.
-    consistency_check(dataset, &ctx, metadata_db).await?;
+    consistency_check(dataset, &ctx, metadata_provider).await?;
 
     // Query the scanned ranges, we might already have some ranges if this is not the first dump run
     // for this dataset.
-    let scanned_ranges_by_table = scanned_ranges_by_table(&ctx, metadata_db).await?;
+    let scanned_ranges_by_table = scanned_ranges_by_table(&ctx).await?;
     for (table_name, multirange) in &scanned_ranges_by_table {
         if multirange.total_len() == 0 {
             continue;
@@ -169,7 +174,7 @@ async fn run_block_stream_jobs(
     // Split them across the target number of jobs as to balance the number of blocks per job.
     let multiranges = ranges.split_and_partition(n_jobs as u64, 2000);
 
-    let metadata_db = dataset_store.metadata_db.as_ref().cloned().map(Arc::new);
+    let metadata_db = dataset_store.metadata_db.clone();
     let jobs = multiranges.into_iter().enumerate().map(|(i, multirange)| {
         Arc::new(Job {
             dataset_ctx: ctx.clone(),
@@ -211,9 +216,16 @@ async fn dump_sql_dataset(
     start: BlockNum,
     end: Option<BlockNum>,
 ) -> Result<(), BoxError> {
-    let physical_dataset = &dst_ctx.catalog().datasets()[0].clone();
+    let physical_dataset = &dst_ctx
+        .catalog()
+        .all_datasets()
+        .await?
+        .into_iter()
+        .next()
+        .unwrap();
 
     for (table, query) in &dataset.queries {
+        info!("dumping table {table} with query {query}");
         let end = match end {
             Some(end) => end,
             None => {
@@ -229,8 +241,11 @@ async fn dump_sql_dataset(
         };
 
         let physical_table = {
-            let mut tables = physical_dataset.tables();
-            tables.find(|t| t.table_name() == table).unwrap()
+            let tables = physical_dataset.tables();
+            tables
+                .into_iter()
+                .find(|t| t.table_name() == table)
+                .unwrap()
         };
 
         let src_ctx = dataset_store
@@ -254,7 +269,7 @@ async fn dump_sql_dataset(
                     env,
                     start,
                     end,
-                    physical_table,
+                    &physical_table,
                     parquet_opts,
                 )
                 .await?;
@@ -263,17 +278,17 @@ async fn dump_sql_dataset(
             let Some(metadata_db) = dataset_store.metadata_db.as_ref() else {
                 return Err("metadata_db is required for entire materialization".into());
             };
-            let physical_table = PhysicalTable::next_revision(
-                physical_table.table(),
+            let physical_table = PhysicalTable::try_next_revision(
+                &physical_table.logical_table(),
                 &data_store,
                 dataset.name(),
-                metadata_db,
+                metadata_db.clone(),
             )
             .await?;
             info!(
                 "dumping entire {} to {}",
                 physical_table.table_ref(),
-                physical_table.url()
+                physical_table.url().expect("url is required"),
             );
             dump_sql_query(
                 dataset_store,
@@ -304,9 +319,9 @@ async fn dump_sql_query(
     use dataset_store::sql_datasets::execute_query_for_range;
 
     let store = dataset_store.clone();
-    let metadata_db = store.metadata_db.as_ref().cloned().map(Arc::new);
+    let metadata_db = store.metadata_db.clone();
     let mut stream = execute_query_for_range(query.clone(), store, env.clone(), start, end).await?;
-    let mut writer = ParquetFileWriter::new(physical_table.clone(), parquet_opts.clone(), start)?;
+    let mut writer = ParquetFileWriter::new(physical_table, parquet_opts.clone(), start)?;
     let table_name = physical_table.table_name();
 
     let mut data_size: i64 = 0;
@@ -385,10 +400,10 @@ enum ConsistencyCheckError {
 ///
 /// Check: `__scanned_ranges` does not contain overlapping ranges.
 /// On fail: Return a `CorruptedDataset` error.
-async fn consistency_check(
+async fn consistency_check<T: AsRef<MetadataDb>>(
     physical_dataset: &PhysicalDataset,
     ctx: &QueryContext,
-    metadata_db: Option<&MetadataDb>,
+    metadata_db: Option<T>,
 ) -> Result<(), ConsistencyCheckError> {
     // See also: scanned-ranges-consistency
 
@@ -397,21 +412,20 @@ async fn consistency_check(
 
     for table in physical_dataset.tables() {
         let dataset_name = table.catalog_schema().to_string();
+        let table_ref = table.table_ref();
         let tbl = table.table_id();
         // Check that `__scanned_ranges` does not contain overlapping ranges.
         {
-            let ranges = ranges_for_table(ctx, metadata_db, tbl)
-                .await
-                .map_err(|err| {
-                    ConsistencyCheckError::CorruptedDataset(tbl.dataset.to_string(), err.into())
-                })?;
+            let ranges = ranges_for_table(ctx, tbl).await.map_err(|err| {
+                ConsistencyCheckError::CorruptedDataset(tbl.dataset.to_string(), err.into())
+            })?;
             if let Err(e) = MultiRange::from_ranges(ranges) {
                 return Err(CorruptedDataset(dataset_name, e.into()));
             }
         }
 
         let registered_files = {
-            let f = filenames_for_table(&ctx, metadata_db, tbl)
+            let f = filenames_for_table(&ctx, metadata_db.as_ref(), tbl)
                 .await
                 .map_err(|err| {
                     ConsistencyCheckError::CorruptedDataset(tbl.dataset.to_string(), err.into())
@@ -419,14 +433,36 @@ async fn consistency_check(
             BTreeSet::from_iter(f.into_iter())
         };
 
-        let store = table.object_store();
-        let path = table.path();
+        let store = table.object_store().map_err(|e| {
+            ConsistencyCheckError::CorruptedDataset(
+                format!("Could not get object store for table: {table_ref}").into(),
+                e.into(),
+            )
+        })?;
+
+        let path = table.path().map_err(|e| {
+            ConsistencyCheckError::CorruptedDataset(
+                format!("Could not get path for table: {table_ref}").into(),
+                e.into(),
+            )
+        })?;
 
         // Collect all stored files whose filename matches `is_dump_file`.
         let stored_files: BTreeMap<String, ObjectMeta> = table
-            .parquet_files(true)
+            .parquet_files()
+            .map_err(|e| {
+                ConsistencyCheckError::CorruptedDataset(
+                    format!("Could not stream file meta for table: {table_ref}"),
+                    e.into(),
+                )
+            })?
             .await
-            .map_err(|e| ConsistencyCheckError::ObjectStoreError(e))?;
+            .map_err(|e| {
+                ConsistencyCheckError::CorruptedDataset(
+                    format!("Could not stream file meta for table: {table_ref}"),
+                    e.into(),
+                )
+            })?;
 
         for (filename, object_meta) in &stored_files {
             if !registered_files.contains(filename) {

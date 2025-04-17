@@ -24,8 +24,13 @@ pub async fn dump_check(
     let dataset = dataset_store.load_dataset(&dataset_name).await?;
     let client = dataset_store.load_client(&dataset_name).await?;
     let total_blocks = end_block - start + 1;
-    let catalog =
-        Catalog::for_dataset(dataset.clone(), config.data_store.clone(), metadata_db).await?;
+    let catalog = Catalog::for_logical_dataset(
+        dataset.clone(),
+        config.data_store.clone(),
+        metadata_db,
+        false,
+    )
+    .await?;
     let ctx = Arc::new(QueryContext::for_catalog(catalog, env.clone())?);
 
     let jobs = {

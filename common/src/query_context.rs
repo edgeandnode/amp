@@ -30,7 +30,6 @@ use datafusion_proto::bytes::{
 };
 use datafusion_proto::logical_plan::LogicalExtensionCodec;
 use futures::{StreamExt as _, TryStreamExt};
-use log::trace;
 use thiserror::Error;
 use url::Url;
 
@@ -135,7 +134,7 @@ impl PlanningContext {
 pub struct QueryContext {
     env: Arc<RuntimeEnv>,
     session_config: SessionConfig,
-    catalog: Catalog,
+    catalog: Arc<Catalog>,
 }
 
 impl QueryContext {
@@ -147,7 +146,6 @@ impl QueryContext {
         // This contains various tuning options for the query engine.
         // Using `from_env` allows tinkering without re-compiling.
         let mut session_config = SessionConfig::from_env().map_err(Error::ConfigError)?;
-
         let opts = session_config.options_mut();
         if std::env::var_os("DATAFUSION_OPTIMIZER_PREFER_EXISTING_SORT").is_none() {
             // Set `prefer_existing_sort` by default. This has a caveat that it only works for
@@ -170,7 +168,7 @@ impl QueryContext {
         let this = Self {
             env,
             session_config,
-            catalog,
+            catalog: Arc::new(catalog),
         };
 
         Ok(this)
@@ -188,8 +186,6 @@ impl QueryContext {
 
     /// Security: This function can receive arbitrary SQL, it will check and restrict the `query`.
     pub async fn execute_sql(&self, query: &str) -> Result<SendableRecordBatchStream, Error> {
-        trace!("executing SQL query: {}", query);
-
         let statement = parse_sql(query)?;
         let ctx = self.datafusion_ctx().await?;
         let plan = sql_to_plan(&ctx, statement).await?;
@@ -230,18 +226,22 @@ impl QueryContext {
     async fn datafusion_ctx(&self) -> Result<SessionContext, Error> {
         let ctx = SessionContext::new_with_config_rt(self.session_config.clone(), self.env.clone());
 
-        for ds in self.catalog.datasets() {
-            create_physical_tables(&ctx, ds.tables()).await?;
-        }
+        let catalog = self.catalog.clone();
 
-        register_udfs(&ctx);
+        ctx.register_catalog("datafusion", catalog);
 
         Ok(ctx)
     }
 
-    pub async fn print_schema(&self) -> Result<Vec<(PhysicalTable, String)>, Error> {
+    pub async fn print_schema(&self) -> Result<Vec<(Arc<PhysicalTable>, String)>, Error> {
         let mut output = vec![];
-        for table in self.catalog.all_tables() {
+        let all_tables = self
+            .catalog
+            .all_tables()
+            .await
+            .map_err(|e| Error::DatasetError(e.into()))?;
+
+        for table in all_tables {
             let mut record_stream = self
                 .execute_sql(format!("describe {}", table.table_ref()).as_str())
                 .await?;
@@ -327,9 +327,10 @@ async fn create_empty_tables(
     Ok(())
 }
 
+#[allow(unused)]
 async fn create_physical_tables(
     ctx: &SessionContext,
-    tables: impl Iterator<Item = &PhysicalTable>,
+    tables: impl Iterator<Item = Arc<PhysicalTable>>,
 ) -> Result<(), Error> {
     for table in tables {
         // The catalog schema needs to be explicitly created or table creation will fail.
@@ -337,7 +338,7 @@ async fn create_physical_tables(
             .await
             .map_err(|e| Error::DatasetError(e.into()))?;
 
-        create_physical_table(ctx, table)
+        create_physical_table(ctx, table.as_ref())
             .await
             .map_err(|e| Error::DatasetError(e.into()))?;
     }
@@ -348,14 +349,21 @@ async fn create_physical_table(
     ctx: &SessionContext,
     table: &PhysicalTable,
 ) -> Result<(), DataFusionError> {
-    let table_ref = table.table_ref().clone();
+    let object_store = table.object_store()?.clone();
+    let table_ref = table.table_ref().as_ref().clone();
     let schema = table.schema().to_dfschema_ref()?;
+    let url = table.url().ok_or(DataFusionError::Internal(format!(
+        "table {} has no URL",
+        table.table_ref()
+    )))?;
 
     // This may overwrite a previously registered store, but that should not make a difference.
     // The only segment of the `table.url()` that matters here is the schema and bucket name.
-    ctx.register_object_store(table.url(), table.object_store());
+    ctx.register_object_store(&url, object_store);
 
-    let cmd = create_external_table_cmd(table_ref, schema, &table.url(), table.order_exprs());
+    let url = table.url().expect("url is not empty");
+
+    let cmd = create_external_table_cmd(table_ref, schema, &url, table.order_exprs());
     ctx.execute_logical_plan(cmd).await?;
 
     Ok(())

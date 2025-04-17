@@ -8,7 +8,7 @@ use std::{
 };
 
 use common::{
-    catalog::physical::{Catalog, PhysicalDataset},
+    catalog::physical::Catalog,
     config::Config,
     manifest::{Manifest, TableInput},
     query_context::{self, parse_sql, PlanningContext, ResolvedTable},
@@ -16,7 +16,7 @@ use common::{
     BlockNum, BlockStreamer, BoxError, Dataset, QueryContext, Store,
 };
 use datafusion::{
-    catalog::resolve_table_references,
+    catalog::{resolve_table_references, CatalogProvider},
     execution::runtime_env::RuntimeEnv,
     sql::{parser, TableReference},
 };
@@ -179,11 +179,16 @@ impl fmt::Display for DatasetError {
 
 pub struct DatasetStore {
     config: Arc<Config>,
-    pub metadata_db: Option<MetadataDb>,
+    pub metadata_db: Option<Arc<MetadataDb>>,
 }
 
 impl DatasetStore {
     pub fn new(config: Arc<Config>, metadata_db: Option<MetadataDb>) -> Arc<Self> {
+        let metadata_db = match metadata_db {
+            Some(db) => Some(Arc::new(db)),
+            None => None,
+        };
+
         Arc::new(Self {
             config,
             metadata_db,
@@ -405,20 +410,19 @@ impl DatasetStore {
         table_refs: impl Iterator<Item = &'a TableReference>,
     ) -> Result<Catalog, DatasetError> {
         let dataset_names = datasets_from_table_refs(table_refs)?;
-        let mut catalog = Catalog::empty();
-        for dataset_name in dataset_names {
-            let dataset = self.load_dataset(&dataset_name).await?;
+        let store = self.config.data_store.clone();
+        let metadata_provider = self.metadata_db.clone();
+        let catalog = Catalog::from_store(store).with_metadata_provider(metadata_provider);
 
-            // We currently assume all datasets live in the same `data_store`.
-            let physical_dataset = PhysicalDataset::from_dataset_at(
-                dataset,
-                self.config.data_store.clone(),
-                self.metadata_db.as_ref(),
-                true,
-            )
-            .await
-            .map_err(|e| (dataset_name, Error::Unknown(e)))?;
-            catalog.add(physical_dataset);
+        for ref name in dataset_names {
+            let dataset = self.load_dataset(name).await?;
+            let (name, dataset) = catalog
+                .build_dataset(dataset, false)
+                .await
+                .map_err(|e| DatasetError::unknown(e))?;
+            catalog
+                .register_schema(&name, dataset)
+                .map_err(|e| DatasetError::unknown(DatasetError::unknown(e)))?;
         }
         Ok(catalog)
     }

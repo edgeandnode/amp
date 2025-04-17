@@ -1,21 +1,22 @@
-use std::{any::Any, borrow::Cow, path::PathBuf, sync::Arc};
+use std::{any::Any, borrow::Cow, collections::BTreeMap, path::PathBuf, sync::Arc};
 
 use datafusion::{
-    arrow::{compute::SortOptions, datatypes::SchemaRef},
+    arrow::{compute::SortOptions, datatypes::SchemaRef, error::ArrowError},
     catalog::{Session, TableProvider},
     common::{
-        project_schema, stats::Precision, ColumnStatistics, Constraints, Statistics, ToDFSchema,
+        project_schema, stats::Precision, Column as LogicalColumn, ColumnStatistics, Constraints,
+        Statistics, ToDFSchema,
     },
     datasource::{
         file_format::{parquet::ParquetFormat, FileFormat},
-        listing::{ListingTableUrl, PartitionedFile},
+        listing::{ListingTable, ListingTableUrl, PartitionedFile},
         physical_plan::FileScanConfig,
         TableType,
     },
     error::{DataFusionError, Result as DataFusionResult},
     execution::{object_store::ObjectStoreUrl, SessionState},
     logical_expr::{
-        utils::conjunction, Expr as LogicalExpr, LogicalPlan, TableProviderFilterPushDown,
+        utils::conjunction, Expr as LogicalExpr, LogicalPlan, SortExpr, TableProviderFilterPushDown,
     },
     parquet::{
         arrow::async_reader::{AsyncFileReader, ParquetObjectReader},
@@ -28,7 +29,7 @@ use datafusion::{
 use futures::{
     future::BoxFuture,
     stream::{self, BoxStream},
-    FutureExt, StreamExt, TryFuture, TryFutureExt, TryStreamExt,
+    FutureExt, StreamExt, TryStreamExt,
 };
 use metadata_db::{FileMetadata as NozzleFileMetadata, LocationId, MetadataDb, TableId};
 use object_store::{
@@ -38,175 +39,44 @@ use object_store::{
 use url::Url;
 
 use crate::{
-    catalog::Table as LogicalTable,
+    catalog::logical::Table as LogicalTable,
     meta_tables::scanned_ranges::{ScannedRange, METADATA_KEY},
-    BoxError, Dataset, Store, BLOCK_NUM, BLOCK_NUM_INDEX,
+    BoxError, Store, BLOCK_NUM,
 };
-
-pub struct Catalog {
-    datasets: Vec<PhysicalDataset>,
-}
-
-impl Catalog {
-    pub fn empty() -> Self {
-        Catalog { datasets: vec![] }
-    }
-
-    pub fn new(datasets: Vec<PhysicalDataset>) -> Self {
-        Catalog { datasets }
-    }
-
-    pub fn add(&mut self, dataset: PhysicalDataset) {
-        self.datasets.push(dataset);
-    }
-
-    /// Will include meta tables.
-    pub async fn for_dataset(
-        dataset: Dataset,
-        data_store: Arc<Store>,
-        metadata_db: Option<&MetadataDb>,
-    ) -> Result<Self, BoxError> {
-        let mut this = Self::empty();
-        this.add(PhysicalDataset::from_dataset_at(dataset, data_store, metadata_db, true).await?);
-        Ok(this)
-    }
-
-    pub fn datasets(&self) -> &[PhysicalDataset] {
-        &self.datasets
-    }
-
-    pub fn all_tables(&self) -> impl Iterator<Item = &PhysicalTable> {
-        self.datasets.iter().flat_map(|dataset| dataset.tables())
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct PhysicalDataset {
-    dataset: Dataset,
-    tables: Vec<PhysicalTable>,
-}
-
-impl PhysicalDataset {
-    pub fn new(dataset: Dataset, tables: Vec<PhysicalTable>) -> Self {
-        Self { dataset, tables }
-    }
-
-    /// The tables are assumed to live in the subpath:
-    /// `<url>/<dataset_name>/<table_name>`
-    pub async fn from_dataset_at(
-        dataset: Dataset,
-        data_store: Arc<Store>,
-        metadata_db: Option<&MetadataDb>,
-        read_only: bool,
-    ) -> Result<Self, BoxError> {
-        let dataset_name = dataset.name.clone();
-        validate_name(&dataset_name)?;
-
-        let mut physical_tables = vec![];
-        for table in dataset.tables() {
-            match metadata_db {
-                Some(db) => {
-                    // If an active location exists for this table, this `PhysicalTable` will point to that location.
-                    // Otherwise, a new location will be registered in the metadata DB. The location will be active.
-                    let table = {
-                        let table_id = TableId {
-                            dataset: &dataset_name,
-                            dataset_version: None,
-                            table: &table.name,
-                        };
-
-                        let active_location = db.get_active_location(table_id).await?;
-                        match active_location {
-                            Some((url, location_id)) => PhysicalTable::new(
-                                &dataset_name,
-                                table.clone(),
-                                url,
-                                Some(location_id),
-                                Some(db),
-                            )?,
-                            None => {
-                                if read_only {
-                                    return Err(format!(
-                                        "table {}.{} has no active location",
-                                        dataset_name, table.name
-                                    )
-                                    .into());
-                                }
-                                PhysicalTable::next_revision(&table, &data_store, &dataset_name, db)
-                                    .await?
-                            }
-                        }
-                    };
-                    physical_tables.push(table);
-                }
-                None => {
-                    physical_tables.push(PhysicalTable::static_location(
-                        data_store.clone(),
-                        &dataset_name,
-                        &table,
-                    )?);
-                }
-            }
-        }
-
-        Ok(PhysicalDataset {
-            dataset,
-            tables: physical_tables,
-        })
-    }
-
-    /// All tables in the catalog, except meta tables.
-    pub fn tables(&self) -> impl Iterator<Item = &PhysicalTable> {
-        self.tables.iter().filter(|table| !table.is_meta())
-    }
-
-    pub fn meta_tables(&self) -> impl Iterator<Item = &PhysicalTable> {
-        self.tables.iter().filter(|table| table.is_meta())
-    }
-
-    pub fn name(&self) -> &str {
-        &self.dataset.name
-    }
-
-    pub fn kind(&self) -> &str {
-        &self.dataset.kind
-    }
-
-    pub async fn location_ids(&self) -> Vec<LocationId> {
-        stream::iter(&self.tables)
-            .filter_map(|t| async move { t.location_id().await })
-            .collect()
-            .await
-    }
-}
 
 /// A table in the Nozzle catalog.
 ///
 /// ## Variants
-/// - [Local](NozzleTable::Local): A table that is backed by files generated by Nozzle dump.
-/// - [Optimized](NozzleTable::Optimized): A table that is backed by files generated by Nozzle dump,
+/// - [Local](PhysicalTable::Local): A table that is backed by files generated by Nozzle dump.
+/// - [Optimized](PhysicalTable::Optimized): A table that is backed by files generated by Nozzle dump,
 ///  optimized with an external Metadata provider.
-/// - [Other](NozzleTable::Other): A table that is not backed by an object store but may be present
+/// - [Other](PhysicalTable::Other): A table that is not backed by an object store but may be present
 /// in a Nozzle dataset.
 #[derive(Clone, Debug)]
 pub enum PhysicalTable {
-    /// A [`DumpTable`] that is backed by files generated by Nozzle dump.
+    /// A [`DumpListingTable`] that is backed by files generated by Nozzle dump.
     Local {
-        /// The [`DumpTable`] that is backed by files generated by Nozzle dump.
-        dump: Arc<DumpTable>,
+        /// The [`DumpListingTable`] that is backed by files generated by Nozzle dump.
+        dump: Arc<DumpListingTable>,
+        /// The [`ObjectStore`] that is used to access the files.
         object_store: Arc<dyn ObjectStore>,
     },
-    /// A [`DumpTable`] that is backed by files generated by Nozzle dump,
+    /// A [`DumpListingTable`] that is backed by files generated by Nozzle dump,
     /// This table is optimized with an external Metadata provider
     Optimized {
-        /// The [`DumpTable`] that is backed by files generated by Nozzle dump.
-        dump: Arc<DumpTable>,
+        /// The [`DumpListingTable`] that is backed by files generated by Nozzle dump.
+        dump: Arc<DumpListingTable>,
+        /// The [`ObjectStore`] that is used to access the files.
+        object_store: Arc<dyn ObjectStore>,
         /// The [`MetadataDb`] that is used to optimize the table.
         metadata_provider: Arc<MetadataDb>,
+        /// The location ID of the table in the metadata provider.
+        location_id: LocationId,
     },
     /// For memory tables, streaming tables, or other tables that are
     /// not backed by an object store but may be present in a nozzle
-    /// dataset.
+    /// dataset. These may be used for cached statistics or metadata
+    /// providers for dump tables.
     Other {
         /// The table provider that is not backed by an object store.
         table_provider: Arc<dyn TableProvider>,
@@ -217,12 +87,141 @@ pub enum PhysicalTable {
     },
 }
 
+/// Methods for creating a [`PhysicalTable`]
 impl PhysicalTable {
+    pub fn try_at_active_location(
+        dataset_name: &str,
+        logical_table: &LogicalTable,
+        url: Url,
+        location_id: LocationId,
+        object_store: Arc<dyn ObjectStore>,
+        metadata_provider: impl AsRef<MetadataDb>,
+    ) -> Result<Self, BoxError> {
+        let metadata_provider = Arc::new(metadata_provider.as_ref().clone());
+        let dataset_version = url
+            .path_segments()
+            .ok_or(PathError::InvalidPath {
+                path: PathBuf::from(url.path()),
+            })
+            .map(|mut s| {
+                s.nth_back(2)
+                    .filter(|segment| *segment != dataset_name)
+                    .map(ToString::to_string)
+            })?;
+        let dump = DumpListingTable::new(dataset_name, dataset_version, logical_table, url)?;
+
+        let table = Self::Optimized {
+            dump: Arc::new(dump),
+            object_store: object_store.clone(),
+            metadata_provider: metadata_provider.clone(),
+            location_id,
+        };
+
+        Ok(table)
+    }
+
+    pub async fn try_next_revision(
+        logical_table: &LogicalTable,
+        data_store: &Store,
+        dataset_name: &str,
+        metadata_provider: impl AsRef<MetadataDb>,
+    ) -> Result<Self, BoxError> {
+        let metadata_provider = Arc::new(metadata_provider.as_ref().clone());
+
+        let table_id = TableId {
+            dataset: dataset_name,
+            dataset_version: None,
+            table: &logical_table.name,
+        };
+
+        let path = make_location_path(table_id);
+        let url = data_store.url().join(&path)?;
+        let location_id = metadata_provider
+            .register_location(table_id, data_store.bucket(), &path, &url, false)
+            .await?;
+        metadata_provider
+            .set_active_location(table_id, &url.as_str())
+            .await?;
+
+        let object_store = data_store.object_store();
+
+        Self::try_at_active_location(
+            dataset_name,
+            logical_table,
+            url,
+            location_id,
+            object_store,
+            metadata_provider,
+        )
+    }
+
+    pub(super) fn try_at_static_location(
+        store: Arc<Store>,
+        dataset_name: &str,
+        logical_table: LogicalTable,
+    ) -> Result<Self, BoxError> {
+        validate_name(&logical_table.name)?;
+        let dataset_version = None;
+        let table_id = TableId {
+            dataset: dataset_name,
+            dataset_version,
+            table: &logical_table.name,
+        };
+        let input = format!("{}/{}/", dataset_name, table_id.table);
+        let url = store.url().join(&input)?;
+
+        let dump = DumpListingTable::new(dataset_name, None, &logical_table, url)?;
+
+        let table = Self::Local {
+            dump: Arc::new(dump),
+            object_store: store.object_store(),
+        };
+
+        Ok(table)
+    }
+}
+
+impl PhysicalTable {
+    pub fn logical_table(&self) -> LogicalTable {
+        use PhysicalTable::*;
+        match self {
+            Local { dump, .. } | Optimized { dump, .. } => dump.logical_table(),
+            Other { logical_table, .. } => logical_table.as_ref().clone(),
+        }
+    }
     pub fn table_ref(&self) -> Arc<TableReference> {
         use PhysicalTable::*;
         match self {
             Local { dump, .. } | Optimized { dump, .. } => dump.table_ref(),
             Other { table_ref, .. } => table_ref.clone(),
+        }
+    }
+
+    pub fn catalog_schema(&self) -> String {
+        use PhysicalTable::*;
+        match self {
+            Local { dump, .. } | Optimized { dump, .. } => dump.dataset.clone(),
+            Other { table_ref, .. } => table_ref.schema().unwrap().to_string(),
+        }
+    }
+
+    pub fn network(&self) -> Option<String> {
+        use PhysicalTable::*;
+        match self {
+            Local { dump, .. } | Optimized { dump, .. } => dump.network.clone(),
+            Other { logical_table, .. } => logical_table.network.clone(),
+        }
+    }
+
+    pub fn table_id(&self) -> TableId<'_> {
+        use PhysicalTable::*;
+        match self {
+            Local { dump, .. } | Optimized { dump, .. } => dump.table_id(),
+            Other { table_ref, .. } => TableId {
+                dataset: table_ref.schema().unwrap(),
+                dataset_version: None,
+                table: table_ref.table(),
+            },
         }
     }
 
@@ -234,6 +233,60 @@ impl PhysicalTable {
         }
     }
 
+    pub fn url(&self) -> Option<Url> {
+        use PhysicalTable::*;
+        match self {
+            Local { dump, .. } | Optimized { dump, .. } => Some(dump.url().clone()),
+            Other { table_provider, .. } => table_provider
+                .as_any()
+                .downcast_ref::<ListingTable>()
+                .map(|t| {
+                    t.table_paths()
+                        .first()
+                        .map(|url| Url::parse(url.as_str()).ok())
+                        .unwrap()
+                })
+                .flatten(),
+        }
+    }
+
+    pub fn path(&self) -> DataFusionResult<Path> {
+        use PhysicalTable::*;
+        match self {
+            Local { dump, .. } | Optimized { dump, .. } => Ok(dump.path().clone()),
+            Other {
+                table_provider,
+                table_ref,
+                ..
+            } => {
+                let listing_table = table_provider
+                    .as_any()
+                    .downcast_ref::<ListingTable>()
+                    .ok_or(DataFusionError::Internal(format!(
+                        "Failed to downcast to ListingTable for table: {table_ref:?}"
+                    )))?;
+                let path = listing_table
+                    .table_paths()
+                    .first()
+                    .ok_or(DataFusionError::Internal(format!(
+                        "ListingTable {table_ref} "
+                    )))?;
+
+                Ok(Path::from_url_path(path)?)
+            }
+        }
+    }
+
+    pub fn object_store(&self) -> DataFusionResult<Arc<dyn ObjectStore>> {
+        use PhysicalTable::*;
+        match self {
+            Local { object_store, .. } | Optimized { object_store, .. } => Ok(object_store.clone()),
+            Other { .. } => Err(DataFusionError::Internal(
+                "PhysicalTable::object_store: Other table not supported".to_string(),
+            )),
+        }
+    }
+
     pub fn is_meta(&self) -> bool {
         use PhysicalTable::*;
         match self {
@@ -242,34 +295,102 @@ impl PhysicalTable {
         }
     }
 
-    pub async fn location_id(&self) -> Option<LocationId> {
+    pub fn location_id(&self) -> Option<LocationId> {
         use PhysicalTable::*;
         match self {
-            Optimized {
-                dump,
-                metadata_provider,
-            } => {
-                metadata_provider
-                    .get_active_location(dump.table_id())
-                    .map(|result| {
-                        result
-                            .expect("Inconsistent State in the MetadataDb. Multiple active locations for the same table.")
-                            .map(|(_, location_id)| location_id)
-                    })
-                    .await
-            }
+            Optimized { location_id, .. } => Some(*location_id),
             _ => None,
         }
     }
-}
 
-/// Streaming methods for the [`NozzleTable`].
-impl PhysicalTable {
-    pub fn physical_sort_exprs<'a>(&self) -> BoxStream<'a, BoxStream<'a, PhysicalSortExpr>> {
+    pub fn order_exprs(&self) -> Vec<Vec<SortExpr>> {
         use PhysicalTable::*;
         match self {
-            Local { dump, .. } | Optimized { dump, .. } => dump.physical_sort_exprs(),
-            _ => stream::empty().map(|_: ()| stream::empty().boxed()).boxed(),
+            Local { dump, .. } | Optimized { dump, .. } => {
+                let physical_order_exprs = dump.order_exprs.clone();
+
+                physical_order_exprs
+                    .iter()
+                    .map(|sort_exprs| {
+                        sort_exprs
+                            .iter()
+                            .map(
+                                |PhysicalSortExpr {
+                                     expr,
+                                     options:
+                                         SortOptions {
+                                             descending,
+                                             nulls_first,
+                                         },
+                                 }| {
+                                    let expr = expr
+                                        .as_any()
+                                        .downcast_ref::<Column>()
+                                        .cloned()
+                                        .map(|col| {
+                                            LogicalExpr::Column(LogicalColumn::new(
+                                                Some(self.table_ref().as_ref().clone()),
+                                                col.name(),
+                                            ))
+                                        })
+                                        .expect("PhysicalSortExpr::expr should be a Column");
+
+                                    SortExpr::new(expr, !*descending, *nulls_first)
+                                },
+                            )
+                            .collect()
+                    })
+                    .collect()
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn physical_sort_exprs(&self) -> Vec<Vec<PhysicalSortExpr>> {
+        use PhysicalTable::*;
+        match self {
+            Local { dump, .. } | Optimized { dump, .. } => dump.order_exprs.clone(),
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn ranges<'a>(
+        &'a self,
+    ) -> DataFusionResult<BoxFuture<'a, DataFusionResult<Vec<(u64, u64)>>>> {
+        Ok(self.stream_scanned_ranges()?.try_collect().boxed())
+    }
+
+    pub fn parquet_files<'a>(
+        &'a self,
+    ) -> DataFusionResult<BoxFuture<'a, DataFusionResult<BTreeMap<String, ObjectMeta>>>> {
+        Ok(self
+            .stream_files()?
+            .try_collect::<BTreeMap<String, ObjectMeta>>()
+            .boxed())
+    }
+}
+
+/// Streaming methods for the [`PhysicalTable`].
+impl PhysicalTable {
+    fn stream_scanned_ranges<'a>(
+        &'a self,
+    ) -> DataFusionResult<BoxStream<'a, DataFusionResult<(u64, u64)>>> {
+        use PhysicalTable::*;
+        match self {
+            Local { dump, object_store } => Ok(dump.ranges_stream(object_store)),
+            Optimized {
+                dump,
+                metadata_provider,
+                ..
+            } => {
+                let tbl = dump.table_id();
+                Ok(metadata_provider
+                    .stream_ranges(tbl)
+                    .map_err(|e| DataFusionError::External(Box::new(e)))
+                    .map_ok(|(start, end)| (start as u64, end as u64))
+                    .boxed())
+            }
+            Other { .. } => unimplemented!("stream_scanned_ranges not implemented for Other table"),
         }
     }
 
@@ -282,6 +403,7 @@ impl PhysicalTable {
             Optimized {
                 dump,
                 metadata_provider,
+                ..
             } => {
                 let tbl = dump.table_id();
                 Ok(metadata_provider
@@ -289,27 +411,20 @@ impl PhysicalTable {
                     .map_err(|e| DataFusionError::External(Box::new(e)))
                     .boxed())
             }
-            Other { table_ref, .. } => Err(DataFusionError::Internal(format!(
-                "NozzleTable::stream_files: {} not a Dump Table",
-                table_ref
-            ))),
+            _ => unimplemented!(),
         }
     }
 
-    fn stream_object_readers<'a>(
+    pub fn stream_object_readers<'a>(
         &'a self,
     ) -> DataFusionResult<BoxStream<'a, DataFusionResult<(ParquetObjectReader, ObjectMeta)>>> {
         use PhysicalTable::*;
         match self {
-            Local { dump, object_store } => Ok(dump.stream_object_readers(object_store).boxed()),
-
+            Local { dump, object_store } => Ok(dump.object_reader_stream(object_store).boxed()),
             Optimized { .. } => Err(DataFusionError::Internal(
-                "NozzleTable::stream_object_readers: Optimized table not supported".to_string(),
+                "PhysicalTable::stream_object_readers: Optimized table not supported".to_string(),
             )),
-
-            Other { .. } => Err(DataFusionError::Internal(
-                "NozzleTable::stream_object_readers: Other table not supported".to_string(),
-            )),
+            _ => unimplemented!(),
         }
     }
 
@@ -320,7 +435,7 @@ impl PhysicalTable {
         match self {
             Local {
                 dump, object_store, ..
-            } => Ok(dump.stream_nozzle_metadata(object_store)),
+            } => Ok(dump.nozzle_metadata_stream(object_store)),
             Optimized {
                 dump,
                 metadata_provider,
@@ -330,7 +445,7 @@ impl PhysicalTable {
                 .map_err(|e| DataFusionError::External(Box::new(e)))
                 .boxed()),
             Other { .. } => Err(DataFusionError::Internal(
-                "NozzleTable::stream_nozzle_metadata: Other table not supported".to_string(),
+                "PhysicalTable::stream_nozzle_metadata: Other table not supported".to_string(),
             )),
         }
     }
@@ -380,7 +495,7 @@ impl PhysicalTable {
             let mut partitioned_file = PartitionedFile::from(object_meta);
             partitioned_file.metadata_size_hint = size_hint.map(|s| s as usize);
 
-            update_table_stats(&mut table_stats, &file_stats, &[block_num_idx]);
+            update_table_stats(&mut table_stats, &file_stats, &[block_num_idx])?;
 
             files.push(partitioned_file);
         }
@@ -391,6 +506,53 @@ impl PhysicalTable {
     }
 }
 
+impl TryFrom<Arc<dyn TableProvider>> for PhysicalTable {
+    type Error = DataFusionError;
+    fn try_from(dyn_table: Arc<dyn TableProvider>) -> Result<Self, Self::Error> {
+        if let Some(table) = dyn_table.as_ref().as_any().downcast_ref::<PhysicalTable>() {
+            return Ok(table.clone());
+        } else {
+            return Err(DataFusionError::Internal(format!(
+                "Failed to downcast to Table for table: {:?}",
+                dyn_table.type_id()
+            )));
+        }
+    }
+}
+
+impl
+    TryFrom<(
+        Arc<dyn TableProvider>,
+        Option<Arc<LogicalTable>>,
+        Option<Arc<TableReference>>,
+    )> for PhysicalTable
+{
+    type Error = DataFusionError;
+    fn try_from(
+        (table_provider, logical_table, table_ref): (
+            Arc<dyn TableProvider>,
+            Option<Arc<LogicalTable>>,
+            Option<Arc<TableReference>>,
+        ),
+    ) -> Result<Self, Self::Error> {
+        if let Ok(table) = PhysicalTable::try_from(table_provider.clone()) {
+            return Ok(table);
+        } else if let (Some(logical_table), Some(table_ref)) = (logical_table, table_ref) {
+            return Ok(PhysicalTable::Other {
+                table_provider,
+                logical_table,
+                table_ref,
+            });
+        } else {
+            return Err(DataFusionError::Internal(format!(
+                "Failed to downcast to Table for table: {:?}",
+                table_provider.type_id()
+            )));
+        }
+    }
+}
+
+#[async_trait::async_trait]
 impl TableProvider for PhysicalTable {
     fn as_any(&self) -> &dyn Any {
         self
@@ -414,32 +576,28 @@ impl TableProvider for PhysicalTable {
 
     // Not using `async_trait` here as this is a wrapper for the
     // `scan` method of the underlying table provider.
-    fn scan<'this, 'state, 'projection, 'filters, 'async_trait>(
-        &'this self,
-        state: &'state dyn Session,
-        projection: Option<&'projection Vec<usize>>,
-        filters: &'filters [LogicalExpr],
+    async fn scan(
+        &self,
+        state: &dyn Session,
+        projection: Option<&Vec<usize>>,
+        filters: &[LogicalExpr],
         limit: Option<usize>,
-    ) -> BoxFuture<'async_trait, DataFusionResult<Arc<dyn ExecutionPlan>>>
-    where
-        'this: 'async_trait,
-        'state: 'async_trait,
-        'projection: 'async_trait,
-        'filters: 'async_trait,
-        Self: 'async_trait,
-    {
+    ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
         use PhysicalTable::*;
         match self {
-            Other { table_provider, .. } => table_provider.scan(state, projection, filters, limit),
-            Local { dump, .. } | Optimized { dump, .. } => dump
-                .scan(
+            Other { table_provider, .. } => {
+                table_provider.scan(state, projection, filters, limit).await
+            }
+            Local { dump, .. } | Optimized { dump, .. } => {
+                dump.scan(
                     state,
                     projection,
                     filters,
                     limit,
                     self.list_files_for_scan(filters, limit).boxed(),
                 )
-                .boxed(),
+                .await
+            }
         }
     }
 
@@ -500,7 +658,7 @@ impl TableProvider for PhysicalTable {
 }
 
 #[derive(Clone, Debug)]
-pub struct DumpTable {
+pub struct DumpListingTable {
     name: String,
     dataset: String,
     dataset_version: Option<String>,
@@ -514,7 +672,60 @@ pub struct DumpTable {
     order_exprs: Vec<Vec<PhysicalSortExpr>>,
 }
 
-impl DumpTable {
+impl DumpListingTable {
+    pub fn new(
+        dataset_name: impl Into<String>,
+        dataset_version: Option<String>,
+        logical_table: &LogicalTable,
+        url: Url,
+    ) -> Result<Self, BoxError> {
+        let dataset = dataset_name.into();
+        let name = logical_table.name.clone();
+        let network = logical_table.network.clone();
+        let path = Path::from_url_path(url.path())?;
+
+        let format = Arc::new(ParquetFormat::default());
+        let schema = logical_table.schema.clone();
+        let sort_exprs =
+            logical_table
+                .sorted_by()
+                .into_iter()
+                .try_fold(vec![], |mut acc, name| {
+                    let index = schema.index_of(&name)?;
+                    let col = Column::new(&name, index);
+                    let sort_options = SortOptions {
+                        descending: false,
+                        nulls_first: false,
+                    };
+                    let sort_expr = PhysicalSortExpr::new(Arc::new(col), sort_options);
+                    acc.push(sort_expr);
+                    Ok::<_, ArrowError>(acc)
+                })?;
+
+        let order_exprs = vec![sort_exprs];
+
+        Ok(Self {
+            name,
+            dataset,
+            dataset_version,
+            network,
+            url,
+            path,
+            format,
+            schema,
+            order_exprs,
+        })
+    }
+
+    fn logical_table(&self) -> LogicalTable {
+        LogicalTable {
+            name: self.name.clone(),
+            schema: self.schema.clone(),
+            network: self.network.clone(),
+        }
+    }
+
+    /// Returns the name of the table.
     fn table_name(&self) -> &str {
         &self.name
     }
@@ -525,15 +736,12 @@ impl DumpTable {
     /// - schema is the dataset name with version if it exists
     /// - table is the table name
     ///
-    /// \<dataset>\[@<dataset_version>].\<table>
+    /// \<dataset>.\<table>
     ///
     /// TODO: The dataset_version should be a partition specifier, not a schema
     /// identifier.
     fn table_ref(&self) -> Arc<TableReference> {
-        let schema = match self.dataset_version {
-            Some(ref version) => format!("{}@{version}", self.dataset),
-            None => self.dataset.clone(),
-        };
+        let schema = self.dataset.as_str();
         let table = self.name.as_str();
         Arc::new(TableReference::partial(schema, table))
     }
@@ -558,66 +766,27 @@ impl DumpTable {
         Some(self.path())
     }
 
-    fn listing_table_url(&self) -> DataFusionResult<ListingTableUrl> {
+    pub fn listing_table_url(&self) -> DataFusionResult<ListingTableUrl> {
         ListingTableUrl::parse(self.url())
     }
 
-    fn object_store_url(&self) -> DataFusionResult<ObjectStoreUrl> {
-        ObjectStoreUrl::parse(self.url.as_str())
+    pub fn object_store_url(&self) -> DataFusionResult<ObjectStoreUrl> {
+        let object_store_url = self.url().as_str().split("/").take(1).collect::<String>() + "//";
+        ObjectStoreUrl::parse(object_store_url)
     }
 
-    fn object_store(&self, session_state: &SessionState) -> DataFusionResult<Arc<dyn ObjectStore>> {
+    pub fn object_store(
+        &self,
+        session_state: &SessionState,
+    ) -> DataFusionResult<Arc<dyn ObjectStore>> {
         let url = self.object_store_url()?;
         let object_store = session_state.runtime_env().object_store(url)?;
         Ok(object_store)
     }
+}
 
-    fn try_from_static_location(
-        store: Arc<Store>,
-        dataset: &str,
-        logical_table: LogicalTable,
-    ) -> Result<Self, BoxError> {
-        validate_name(&logical_table.name)?;
-        let name = logical_table.name.to_string();
-        let dataset = dataset.to_string();
-        let dataset_version = None;
-
-        let network = logical_table.network.to_owned();
-
-        let input = format!("{}/{}/", dataset, logical_table.name);
-        let url = store.url().join(&input)?;
-        let path = Path::from_url_path(url.path())?;
-
-        let schema = logical_table.schema.clone();
-        let order_exprs = vec![logical_table
-            .sorted_by()
-            .into_iter()
-            .map(|name| {
-                let index = schema.index_of(&name).expect("Column not found in schema");
-                let col = Column::new(&name, index);
-                let sort_options = SortOptions {
-                    descending: false,
-                    nulls_first: false,
-                };
-                PhysicalSortExpr::new(Arc::new(col), sort_options)
-            })
-            .collect()];
-
-        let format = Arc::new(ParquetFormat::default());
-
-        Ok(DumpTable {
-            name,
-            dataset,
-            dataset_version,
-            network,
-            url,
-            path,
-            schema,
-            format,
-            order_exprs,
-        })
-    }
-
+/// Streaming methods for the [`DumpListingTable`]
+impl DumpListingTable {
     fn stream_files<'a>(
         &'a self,
         object_store: &'a dyn ObjectStore,
@@ -626,7 +795,6 @@ impl DumpTable {
             .list(self.prefix())
             .map(|entry| {
                 let meta = entry?;
-
                 let file_name = meta
                     .location
                     .filename()
@@ -640,7 +808,7 @@ impl DumpTable {
             .boxed()
     }
 
-    fn stream_object_readers<'a>(
+    fn object_reader_stream<'a>(
         &'a self,
         store: &'a Arc<dyn ObjectStore>,
     ) -> BoxStream<'a, DataFusionResult<(ParquetObjectReader, ObjectMeta)>> {
@@ -654,11 +822,11 @@ impl DumpTable {
             .boxed()
     }
 
-    fn stream_parquet_metadata<'a>(
+    fn parquet_metadata_stream<'a>(
         &'a self,
         object_store: &'a Arc<dyn ObjectStore>,
     ) -> BoxStream<'a, DataFusionResult<(Arc<ParquetMetaData>, ObjectMeta)>> {
-        self.stream_object_readers(object_store)
+        self.object_reader_stream(object_store)
             .try_filter_map(|(mut reader, meta)| async move {
                 let metadata = reader.get_metadata().await?;
                 Ok(Some((metadata, meta)))
@@ -666,11 +834,28 @@ impl DumpTable {
             .boxed()
     }
 
-    fn stream_nozzle_metadata<'a>(
+    fn ranges_stream<'a>(
+        &'a self,
+        object_store: &'a Arc<dyn ObjectStore>,
+    ) -> BoxStream<'a, DataFusionResult<(u64, u64)>> {
+        self.nozzle_metadata_stream(object_store)
+            .map(|res| {
+                let nozzle_metadata = res?;
+                let range = (
+                    nozzle_metadata.range.0 as u64,
+                    nozzle_metadata.range.1 as u64,
+                );
+
+                Ok(range)
+            })
+            .boxed()
+    }
+
+    fn nozzle_metadata_stream<'a>(
         &'a self,
         object_store: &'a Arc<dyn ObjectStore>,
     ) -> BoxStream<'a, DataFusionResult<NozzleFileMetadata>> {
-        self.stream_parquet_metadata(object_store)
+        self.parquet_metadata_stream(object_store)
             .map(|res| {
                 let (parquet_meta, object_meta) = res?;
                 let file_metadata = parquet_meta.file_metadata();
@@ -722,23 +907,6 @@ impl DumpTable {
                 Ok(file_metadata)
             })
             .boxed()
-    }
-
-    fn physical_sort_exprs<'a>(&self) -> BoxStream<'a, BoxStream<'a, PhysicalSortExpr>> {
-        stream::iter(self.order_exprs.clone())
-            .map(|exprs| stream::iter(exprs).boxed())
-            .boxed()
-    }
-
-    fn sort_exprs(&self) -> Vec<Vec<PhysicalSortExpr>> {
-        let col = Column::new(BLOCK_NUM, BLOCK_NUM_INDEX);
-        let sort_options = SortOptions {
-            descending: false,
-            nulls_first: false,
-        };
-        let sort_expr = PhysicalSortExpr::new(Arc::new(col), sort_options);
-        let sort_exprs = vec![vec![sort_expr]];
-        sort_exprs
     }
 
     async fn scan<'a>(
@@ -808,8 +976,7 @@ impl DumpTable {
         };
 
         let file_schema = self.schema.clone();
-
-        let object_store_url = ObjectStoreUrl::parse(self.url().as_str())?;
+        let object_store_url = self.object_store_url()?;
 
         self.format
             .create_physical_plan(
@@ -826,7 +993,7 @@ impl DumpTable {
     }
 }
 
-fn validate_name(name: &str) -> Result<(), BoxError> {
+pub(super) fn validate_name(name: &str) -> Result<(), BoxError> {
     if let Some(c) = name
         .chars()
         .find(|&c| !(c.is_ascii_lowercase() || c == '_' || c.is_numeric()))
@@ -896,9 +1063,8 @@ fn update_table_stats(
 }
 
 // The path format is: `<dataset>/[<version>/]<table>/<UUIDv7>/`
-fn make_location_path(table_id: TableId<'_>) -> String {
+pub fn make_location_path(table_id: TableId<'_>) -> String {
     let mut path = String::new();
-
     // Add dataset
     path.push_str(table_id.dataset);
     path.push('/');

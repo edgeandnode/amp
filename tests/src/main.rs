@@ -35,6 +35,7 @@ async fn main() {
             start_block,
             end_block,
         } => {
+            warn!("blessing dataset {dataset} from {start_block} to {end_block}");
             bless(&dataset, start_block, end_block).await.unwrap();
             warn!("wrote new blessed dataset for {dataset}");
         }

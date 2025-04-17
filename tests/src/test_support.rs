@@ -49,7 +49,7 @@ pub fn load_test_config(literal_override: Option<FigmentJson>) -> Result<Arc<Con
 
 pub async fn bless(dataset_name: &str, start: u64, end: u64) -> Result<(), BoxError> {
     let config = load_test_config(None)?;
-    redump(config, dataset_name, start, end, None).await?;
+    redump(config, dataset_name, start, end, None::<MetadataDb>).await?;
     Ok(())
 }
 
@@ -65,7 +65,13 @@ impl SnapshotContext {
         let config = load_test_config(None)?;
         let dataset_store = DatasetStore::new(config.clone(), None);
         let dataset = dataset_store.load_dataset(dataset).await?;
-        let catalog = Catalog::for_dataset(dataset, config.data_store.clone(), None).await?;
+        let catalog = Catalog::for_logical_dataset(
+            dataset,
+            config.data_store.clone(),
+            None::<MetadataDb>,
+            false,
+        )
+        .await?;
         let ctx = QueryContext::for_catalog(catalog, Arc::new(config.make_runtime_env()?))?;
         Ok(Self {
             ctx,
@@ -78,7 +84,7 @@ impl SnapshotContext {
         dataset_name: &str,
         start: u64,
         end: u64,
-        metadata_db: Option<&MetadataDb>,
+        metadata_db: Option<impl AsRef<MetadataDb>>,
         keep_temp_dir: bool,
     ) -> Result<SnapshotContext, BoxError> {
         use figment::providers::Json;
@@ -94,10 +100,21 @@ impl SnapshotContext {
 
         let config = load_test_config(config_override)?;
 
-        let physical_dataset =
-            redump(config.clone(), dataset_name, start, end, metadata_db).await?;
+        let metadata_db = metadata_db.map(|db| Arc::new(db.as_ref().clone()));
 
-        let catalog = Catalog::new(vec![physical_dataset]);
+        let physical_dataset = redump(
+            config.clone(),
+            dataset_name,
+            start,
+            end,
+            metadata_db.clone(),
+        )
+        .await?;
+
+        let store = config.data_store.clone();
+
+        let catalog = Catalog::for_physical_dataset(physical_dataset, store, metadata_db).await?;
+
         let ctx = QueryContext::for_catalog(catalog, Arc::new(config.make_runtime_env()?))?;
 
         Ok(SnapshotContext {
@@ -106,19 +123,14 @@ impl SnapshotContext {
         })
     }
 
-    async fn check_scanned_range_eq(
-        &self,
-        other: &SnapshotContext,
-        metadata_db: Option<&MetadataDb>,
-    ) -> Result<(), BoxError> {
+    async fn check_scanned_range_eq(&self, other: &SnapshotContext) -> Result<(), BoxError> {
         use common::meta_tables::scanned_ranges::{ranges_for_table, scanned_ranges_by_table};
+        let other_scanned_ranges = scanned_ranges_by_table(&other.ctx).await?;
 
-        let other_scanned_ranges = scanned_ranges_by_table(&other.ctx, None).await?;
-
-        for table in self.ctx.catalog().all_tables() {
+        for table in self.ctx.catalog().all_tables().await? {
             let table_name = table.table_name().to_string();
             let tbl = table.table_id();
-            let ranges = ranges_for_table(&self.ctx, metadata_db, tbl).await?;
+            let ranges = ranges_for_table(&self.ctx, tbl).await?;
             let expected_range = MultiRange::from_ranges(ranges)?;
             let actual_range = &other_scanned_ranges[&table_name];
             let table_qualified = table.table_ref().to_string();
@@ -133,14 +145,10 @@ impl SnapshotContext {
     }
 
     /// Typically used to check a fresh snapshot against a blessed one.
-    pub async fn assert_eq(
-        &self,
-        other: &SnapshotContext,
-        metadata_db: Option<&MetadataDb>,
-    ) -> Result<(), BoxError> {
-        self.check_scanned_range_eq(other, metadata_db).await?;
+    pub async fn assert_eq(&self, other: &SnapshotContext) -> Result<(), BoxError> {
+        self.check_scanned_range_eq(other).await?;
 
-        for table in self.ctx.catalog().all_tables() {
+        for table in self.ctx.catalog().all_tables().await? {
             let query = parse_sql(&format!(
                 "select * from {} order by block_num",
                 table.table_ref()
@@ -167,9 +175,10 @@ async fn redump(
     dataset_name: &str,
     start: u64,
     end: u64,
-    metadata_db: Option<&MetadataDb>,
+    metadata_db: Option<impl AsRef<MetadataDb>>,
 ) -> Result<PhysicalDataset, BoxError> {
-    let dataset_store = DatasetStore::new(config.clone(), metadata_db.cloned());
+    let metadata_db = metadata_db.map(|db| db.as_ref().clone());
+    let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
     let partition_size = 1024 * 1024; // 100 kB
     let compression = Compression::ZSTD(ZstdLevel::try_new(1).unwrap());
 
@@ -202,7 +211,7 @@ async fn redump(
 
 pub async fn check_blocks(dataset_name: &str, start: u64, end: u64) -> Result<(), BoxError> {
     let config = load_test_config(None)?;
-    let dataset_store = DatasetStore::new(config.clone(), None);
+    let dataset_store = DatasetStore::new(config.clone(), None::<MetadataDb>);
     let env = Arc::new(config.make_runtime_env()?);
 
     dump_check::dump_check(

@@ -125,7 +125,6 @@ pub async fn execute_query_for_range(
     let (tables, _) =
         resolve_table_references(&query, true).map_err(|e| CoreError::SqlParseError(e.into()))?;
     let ctx = dataset_store.clone().ctx_for_sql(&query, env).await?;
-    let metadata_db = dataset_store.metadata_db.as_ref();
 
     // Validate dependency scanned ranges
     {
@@ -137,7 +136,7 @@ pub async fn execute_query_for_range(
                 dataset_version: None,
                 table: table.table(),
             };
-            let ranges = scanned_ranges::ranges_for_table(&ctx, metadata_db, tbl).await?;
+            let ranges = scanned_ranges::ranges_for_table(&ctx, tbl).await?;
             let ranges = MultiRange::from_ranges(ranges)?;
             let synced = ranges.intersection(&needed_range) == needed_range;
             if !synced {
@@ -169,7 +168,6 @@ pub async fn max_end_block(
     }
 
     let ctx = dataset_store.clone().ctx_for_sql(&query, env).await?;
-    let metadata_db = &dataset_store.metadata_db;
 
     let synced_block_for_table = move |ctx, table: TableReference| async move {
         let tbl = TableId {
@@ -178,7 +176,7 @@ pub async fn max_end_block(
             dataset_version: None,
             table: table.table(),
         };
-        let ranges = scanned_ranges::ranges_for_table(ctx, metadata_db.as_ref(), tbl).await?;
+        let ranges = scanned_ranges::ranges_for_table(ctx, tbl).await?;
         let ranges = MultiRange::from_ranges(ranges)?;
 
         // Take the end block of the earliest contiguous range as the "synced block"

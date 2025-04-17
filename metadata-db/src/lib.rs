@@ -556,6 +556,12 @@ impl MetadataDb {
     }
 }
 
+impl AsRef<MetadataDb> for MetadataDb {
+    fn as_ref(&self) -> &MetadataDb {
+        self
+    }
+}
+
 #[derive(Clone, Debug, sqlx::FromRow)]
 struct FileMetadataBuilder {
     url: String,

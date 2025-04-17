@@ -1,7 +1,7 @@
 use std::sync::{Arc, LazyLock};
 
 use crate::{
-    temp_metadata_db::test_metadata_db,
+    temp_metadata_db::{test_metadata_db, TempMetadataDb},
     test_support::{check_blocks, check_provider_file, SnapshotContext},
 };
 use common::{
@@ -10,6 +10,7 @@ use common::{
     tracing,
 };
 use futures::StreamExt;
+use log::info;
 use metadata_db::{FileMetadata, TableId};
 use object_store::local::LocalFileSystem;
 
@@ -28,7 +29,7 @@ async fn evm_rpc_single() {
     check_blocks(dataset_name, 15_000_000, 15_000_000)
         .await
         .expect("blessed data differed from provider");
-
+    info!("Finished checking blocks against RPC provider, now checking against blessed files");
     // Now dump the dataset to a temporary directory and check it again against the blessed files.
     let temp_dump = SnapshotContext::temp_dump(
         &dataset_name,
@@ -40,10 +41,7 @@ async fn evm_rpc_single() {
     .await
     .expect("temp dump failed");
 
-    temp_dump
-        .assert_eq(&blessed, Some(&*metadata_db))
-        .await
-        .unwrap();
+    temp_dump.assert_eq(&blessed).await.unwrap();
 
     let tbl = TableId {
         dataset: &dataset_name,
@@ -59,8 +57,10 @@ async fn evm_rpc_single() {
         ..
     })) = object_meta_stream.next().await
     {
-        let mut reader = ParquetObjectReader::new(store.clone(), object_meta)
-            .with_footer_size_hint(size_hint as usize);
+        let mut reader = ParquetObjectReader::new(store.clone(), object_meta);
+        if let Some(size_hint) = size_hint {
+            reader = reader.with_footer_size_hint(size_hint as usize);
+        }
         let metadata = reader.get_metadata().await.unwrap();
         let kv = metadata.file_metadata().key_value_metadata().unwrap();
         let nozzle_metadata: ScannedRange = serde_json::from_str(
@@ -93,9 +93,14 @@ async fn eth_firehose_single() {
         .expect("blessed data differed from provider");
 
     // Now dump the dataset to a temporary directory and check it again against the blessed files.
-    let temp_dump =
-        SnapshotContext::temp_dump(&dataset_name, 15_000_000, 15_000_000, None, *KEEP_TEMP_DIRS)
-            .await
-            .expect("temp dump failed");
-    temp_dump.assert_eq(&blessed, None).await.unwrap();
+    let temp_dump = SnapshotContext::temp_dump(
+        &dataset_name,
+        15_000_000,
+        15_000_000,
+        None::<TempMetadataDb>,
+        *KEEP_TEMP_DIRS,
+    )
+    .await
+    .expect("temp dump failed");
+    temp_dump.assert_eq(&blessed).await.unwrap();
 }

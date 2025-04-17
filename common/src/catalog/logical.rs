@@ -16,6 +16,12 @@ impl Dataset {
     }
 }
 
+impl AsRef<Dataset> for Dataset {
+    fn as_ref(&self) -> &Dataset {
+        self
+    }
+}
+
 #[derive(Clone, Hash, PartialEq, Eq, Debug)]
 pub struct Table {
     /// Bare table name.

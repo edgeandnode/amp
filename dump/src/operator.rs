@@ -62,6 +62,7 @@ impl Operator {
 
         match operator_desc {
             OperatorDesc::DumpDataset { dataset } => {
+                let store = config.data_store.clone();
                 let dataset_store = DatasetStore::new(config.clone(), Some(metadata_db.clone()));
                 let dataset = dataset_store.load_dataset(&dataset).await?;
 
@@ -91,12 +92,15 @@ impl Operator {
                 for table in dataset.tables() {
                     // Unwrap: We checked consistency above.
                     let (id, url) = output_locations_by_name.remove(&table.name).unwrap();
-                    physical_tables.push(PhysicalTable::new(
+                    let object_store = store.object_store();
+
+                    physical_tables.push(PhysicalTable::try_at_active_location(
                         &dataset.name,
-                        table.clone(),
+                        table,
                         url,
-                        Some(id),
-                        Some(&metadata_db),
+                        id,
+                        object_store,
+                        &metadata_db,
                     )?);
                 }
 
