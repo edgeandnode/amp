@@ -55,6 +55,7 @@ impl Scheduler {
                         &dataset_store.clone(),
                         &config.clone(),
                         1,
+                        100_000,
                         dump::default_partition_size(),
                         &dump::default_parquet_opts(),
                         0,
