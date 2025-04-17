@@ -23,7 +23,7 @@ export class RegistryApi extends HttpApi.make("registry").add(RegstistryApiGroup
 export class Registry extends Effect.Service<Registry>()("Nozzle/Api/Registry", {
   dependencies: [FetchHttpClient.layer],
   effect: Effect.gen(function* () {
-    const url = yield* Config.string("NOZZLE_REGISTRY_URL");
+    const url = yield* Config.string("NOZZLE_REGISTRY_URL").pipe(Effect.orDie);
     const registry = yield* HttpApiClient.make(RegistryApi, {
       baseUrl: url,
     });
@@ -46,7 +46,7 @@ export class AdminApi extends HttpApi.make("admin").add(AdminApiGroup) {}
 export class Admin extends Effect.Service<Admin>()("Nozzle/Api/Admin", {
   dependencies: [FetchHttpClient.layer],
   effect: Effect.gen(function* () {
-    const url = yield* Config.string("NOZZLE_ADMIN_URL");
+    const url = yield* Config.string("NOZZLE_ADMIN_URL").pipe(Effect.orDie);
     const admin = yield* HttpApiClient.make(AdminApi, {
       baseUrl: url,
     });
@@ -69,7 +69,7 @@ export class JsonLinesApi extends HttpApi.make("jsonl").add(JsonLinesApiGroup) {
 export class JsonLines extends Effect.Service<JsonLines>()("Nozzle/Api/JsonLines", {
   dependencies: [FetchHttpClient.layer],
   effect: Effect.gen(function* () {
-    const url = yield* Config.string("NOZZLE_JSONL_URL");
+    const url = yield* Config.string("NOZZLE_JSONL_URL").pipe(Effect.orDie);
     const jsonl = yield* HttpApiClient.make(JsonLinesApi, {
       baseUrl: url,
     });
