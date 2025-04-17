@@ -15,3 +15,5 @@ futures.workspace = true
 prost.workspace = true
 thiserror.workspace = true
 tonic.workspace = true
+axum.workspace = true
+serde_json.workspace = true
