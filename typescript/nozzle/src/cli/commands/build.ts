@@ -1,56 +1,49 @@
-import { Console, Effect, Match, Option, Predicate, Schema } from "effect";
-import { Args, Command, Options } from "@effect/cli";
+import { Console, Effect, Option, Schema } from "effect";
+import { Command, Options } from "@effect/cli";
 import { Path, FileSystem } from "@effect/platform";
-import { importFile } from "../common.js";
 import * as ManifestBuilder from "../../ManifestBuilder.js";
+import * as ConfigLoader from "../../ConfigLoader.js";
 import * as Model from "../../Model.js";
 
 export const build = Command.make("build", {
   args: {
+    config: Options.text("config").pipe(
+      Options.optional,
+      Options.withAlias("c"),
+      Options.withDescription("The dataset definition config file to build to a manifest")
+    ),
     output: Options.text("output").pipe(
       Options.optional,
+      Options.withAlias("o"),
       Options.withDescription("The output file to write the manifest to")
-    ),
-    input: Args.text({ name: "file" }).pipe(
-      Args.optional,
-      Args.withDescription("The dataset definition file to build")
     ),
   },
 }, ({ args }) => Effect.gen(function* () {
   const path = yield* Path.Path;
   const fs = yield* FileSystem.FileSystem;
+  const config = yield* ConfigLoader.ConfigLoader;
   const builder = yield* ManifestBuilder.ManifestBuilder;
-  const file = yield* Option.match(args.input, {
-    onNone: () => {
-      const candidates = [
-        path.resolve("nozzle.config.ts"),
-        path.resolve("nozzle.config.js"),
-      ]
 
-      const effects = candidates.map((path) => fs.exists(path).pipe(Effect.filterOrFail(Predicate.isTruthy), Effect.as(path)))
-      return Effect.firstSuccessOf(effects).pipe(Effect.option);
-    },
-    onSome: (dataset) => Effect.succeed(Option.some(path.resolve(dataset))),
-  }).pipe(Effect.flatten, Effect.mapError((e) => new Error(`Failed to find dataset definition file`, { cause: e })));
+  const definition = yield* Option.match(args.config, {
+    onSome: (file) => config.load(file).pipe(Effect.map(Option.some)),
+    onNone: () => config.find(),
+  }).pipe(Effect.flatten, Effect.orDie);
 
-  const dataset = yield* Match.value(path.extname(file)).pipe(
-    Match.when(Match.is(".js"), () => importFile(file)),
-    Match.when(Match.is(".ts"), () => importFile(file)),
-    Match.orElse(() => Effect.fail(new Error(`Expected a dataset definition file (.js or .ts).`)))
-  ).pipe(Effect.flatMap(Schema.decodeUnknown(Model.DatasetDefinition)))
-
-  const json = yield* builder.build(dataset).pipe(
+  const json = yield* builder.build(definition).pipe(
     Effect.flatMap(Schema.encode(Model.DatasetManifest)),
     Effect.map((manifest) => JSON.stringify(manifest, null, 2)),
+    Effect.orDie,
   );
 
   yield* Option.match(args.output, {
     onNone: () => Console.log(json),
     onSome: (output) => fs.writeFileString(path.resolve(output), json).pipe(
       Effect.tap(() => Effect.log(`Manifest written to ${output}`)),
+      Effect.orDie,
     ),
   });
 })).pipe(
   Command.withDescription("Build a manifest from a dataset definition"),
   Command.provide(ManifestBuilder.ManifestBuilder.Default),
+  Command.provide(ConfigLoader.ConfigLoader.Default),
 );
