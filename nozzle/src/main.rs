@@ -63,6 +63,10 @@ enum Command {
         #[arg(long, default_value = "4096", env = "DUMP_PARTITION_SIZE_MB")]
         partition_size_mb: u64,
 
+        /// The maximum number of blocks to be dumped per SQL query at once. Defaults to 100_000.
+        #[arg(long, default_value = "100000", env = "DUMP_INPUT_BATCH_SIZE_BLOCKS")]
+        input_batch_size_blocks: u64,
+
         /// Whether to disable compression when writing parquet files. Defaults to false.
         #[arg(long, env = "DUMP_DISABLE_COMPRESSION")]
         disable_compression: bool,
@@ -114,6 +118,7 @@ async fn main_inner() -> Result<(), BoxError> {
             end_block,
             n_jobs,
             partition_size_mb,
+            input_batch_size_blocks,
             disable_compression,
             dataset: datasets,
             ignore_deps,
@@ -128,6 +133,7 @@ async fn main_inner() -> Result<(), BoxError> {
                 end_block,
                 n_jobs,
                 partition_size_mb,
+                input_batch_size_blocks,
                 disable_compression,
                 run_every_mins,
             )

@@ -25,6 +25,7 @@ pub async fn dump(
     end_block: Option<String>,
     n_jobs: u16,
     partition_size_mb: u64,
+    input_batch_size_blocks: u64,
     disable_compression: bool,
     run_every_mins: Option<u64>,
 ) -> Result<(), BoxError> {
@@ -69,6 +70,7 @@ pub async fn dump(
                     &config,
                     n_jobs,
                     partition_size,
+                    input_batch_size_blocks,
                     &parquet_opts,
                     start,
                     end_block,
@@ -86,6 +88,7 @@ pub async fn dump(
                     &config,
                     n_jobs,
                     partition_size,
+                    input_batch_size_blocks,
                     &parquet_opts,
                     start,
                     end_block,
@@ -119,9 +122,6 @@ fn resolve_end_block(start_block: i64, end_block: String) -> Result<i64, BoxErro
     };
     if start_block > 0 && end_block > 0 && end_block < start_block {
         return Err("end_block must be greater than or equal to start_block".into());
-    }
-    if end_block == 0 {
-        return Err("end_block must be greater than 0".into());
     }
     Ok(end_block)
 }
@@ -222,7 +222,7 @@ mod tests {
             ),
             (10, "+5", Ok(15)),
             (100, "90", Err(BoxError::from(""))),
-            (0, "0", Err(BoxError::from(""))),
+            (0, "0", Ok(0)),
             (0, "0x", Err(BoxError::from(""))),
             (0, "xxx", Err(BoxError::from(""))),
             (100, "+1000x", Err(BoxError::from(""))),

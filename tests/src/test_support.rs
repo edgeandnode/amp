@@ -263,6 +263,7 @@ async fn redump_dataset(
     metadata_db: Option<&MetadataDb>,
 ) -> Result<PhysicalDataset, BoxError> {
     let partition_size = 1024 * 1024; // 100 kB
+    let input_batch_block_size = 100_000;
     let compression = Compression::ZSTD(ZstdLevel::try_new(1).unwrap());
 
     // Disable bloom filters, as they bloat the test files and are not tested themselves.
@@ -282,6 +283,7 @@ async fn redump_dataset(
         config,
         n_jobs,
         partition_size,
+        input_batch_block_size,
         &parquet_opts,
         start as i64,
         Some(end as i64),

@@ -50,6 +50,7 @@ pub async fn dump_dataset(
     config: &Config,
     n_jobs: u16,
     partition_size: u64,
+    input_batch_size_blocks: u64,
     parquet_opts: &ParquetWriterProperties,
     start: i64,
     end_block: Option<i64>,
@@ -119,6 +120,7 @@ pub async fn dump_dataset(
                 parquet_opts,
                 start,
                 end_block,
+                input_batch_size_blocks,
             )
             .await?;
         }
@@ -143,7 +145,7 @@ async fn dump_raw_dataset(
     let mut client = dataset_store.load_client(dataset_name).await?;
 
     let (start, end) = match (start, end) {
-        (start, Some(end)) if end > 0 => (start as BlockNum, end as BlockNum),
+        (start, Some(end)) if start >= 0 && end >= 0 => (start as BlockNum, end as BlockNum),
         _ => {
             let latest_block = client.latest_block(true).await?;
             resolve_relative_block_range(start, end, latest_block)?
@@ -212,6 +214,7 @@ async fn dump_sql_dataset(
     parquet_opts: &ParquetWriterProperties,
     start: i64,
     end: Option<i64>,
+    input_batch_size_blocks: u64,
 ) -> Result<(), BoxError> {
     let physical_dataset = &dst_ctx.catalog().datasets()[0].clone();
     let mut join_handles = vec![];
@@ -228,7 +231,9 @@ async fn dump_sql_dataset(
 
         let handle = tokio::spawn(async move {
             let (start, end) = match (start, end) {
-                (start, Some(end)) if end > 0 => (start as BlockNum, end as BlockNum),
+                (start, Some(end)) if start >= 0 && end >= 0 => {
+                    (start as BlockNum, end as BlockNum)
+                }
                 _ => {
                     match max_end_block(&query, dataset_store.clone(), env.clone()).await? {
                         Some(max_end_block) => {
@@ -258,21 +263,26 @@ async fn dump_sql_dataset(
             if is_incr {
                 let ranges_to_scan = scanned_ranges_by_table[&table].complement(start, end);
                 for (start, end) in ranges_to_scan.ranges {
-                    info!(
-                        "dumping {} between blocks {start} and {end}",
-                        physical_table.table_ref()
-                    );
+                    let mut start = start;
+                    while start <= end {
+                        let batch_end = std::cmp::min(start + input_batch_size_blocks - 1, end);
+                        info!(
+                            "dumping {} between blocks {start} and {batch_end}",
+                            physical_table.table_ref()
+                        );
 
-                    dump_sql_query(
-                        &dataset_store,
-                        &query,
-                        &env,
-                        start,
-                        end,
-                        physical_table,
-                        &parquet_opts,
-                    )
-                    .await?;
+                        dump_sql_query(
+                            &dataset_store,
+                            &query,
+                            &env,
+                            start,
+                            batch_end,
+                            physical_table,
+                            &parquet_opts,
+                        )
+                        .await?;
+                        start = batch_end + 1;
+                    }
                 }
             } else {
                 let Some(metadata_db) = dataset_store.metadata_db.as_ref() else {
