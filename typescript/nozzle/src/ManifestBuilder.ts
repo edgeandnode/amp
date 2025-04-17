@@ -1,6 +1,11 @@
-import { Effect } from "effect";
+import { Data, Effect } from "effect";
 import * as Api from "./Api.js";
 import * as Model from "./Model.js";
+
+export class ManifestBuilderError extends Data.TaggedError("ManifestBuilderError")<{
+  readonly cause?: unknown;
+  readonly message?: string;
+}> {}
 
 export class ManifestBuilder extends Effect.Service<ManifestBuilder>()("Nozzle/ManifestBuilder", {
   dependencies: [Api.Registry.Default],
@@ -10,7 +15,10 @@ export class ManifestBuilder extends Effect.Service<ManifestBuilder>()("Nozzle/M
       const tables = yield* Effect.forEach(Object.entries(manifest.tables), ([name, table]) => Effect.gen(function* () {
         const schema = yield* client.schema({
           payload: { sql_query: table.sql },
-        });
+        }).pipe(Effect.mapError((cause) => new ManifestBuilderError({
+          cause,
+          message: `Failed to build table ${name} in manifest ${manifest.name}`,
+        })));
 
         const input = new Model.TableInput({ sql: table.sql });
         const output = new Model.Table({

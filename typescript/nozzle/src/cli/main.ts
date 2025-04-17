@@ -1,6 +1,4 @@
-#!/usr/bin/env bun
-
-// TODO: Switch to `node` shebang.
+#!/usr/bin/env node
 
 import { Effect, Layer } from "effect";
 import { Command } from "@effect/cli";
