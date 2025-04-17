@@ -137,8 +137,9 @@ async fn simplest_possible_sql_query() {
             .as_any()
             .downcast_ref::<PrimitiveArray<Int64Type>>()
             .unwrap();
-        assert_eq!(column.len(), 1);
-        results.push(column.value(0));
+        for i in 0..column.len() {
+            results.push(column.value(i));
+        }
     }
 
     assert_eq!(results, vec![1]);
@@ -167,8 +168,7 @@ async fn eth_call_sql_query() {
     let mut client = FlightSqlServiceClient::new_from_inner(client);
 
     // Execute an SQL query and collect the results.
-    let mut data_results: Vec<u8> = Vec::new();
-    let mut message_results = String::new();
+    let mut results: Vec<(String, String)> = Vec::new();
     let mut info = client
         .execute(
             "
@@ -190,7 +190,6 @@ async fn eth_call_sql_query() {
         assert_eq!(batch.num_columns(), 1);
         let column = batch.column(0);
         let column = column.as_any().downcast_ref::<StructArray>().unwrap();
-        assert_eq!(column.len(), 1);
         let data = column
             .column(0)
             .as_any()
@@ -201,22 +200,17 @@ async fn eth_call_sql_query() {
             .as_any()
             .downcast_ref::<StringArray>()
             .unwrap();
-        assert_eq!(data.len(), 1);
-        assert_eq!(message.len(), 1);
-        data_results.extend(data.value(0));
-        message_results.push_str(message.value(0));
+        for i in 0..column.len() {
+            results.push((hex::encode(data.value(i)), message.value(i).to_string()));
+        }
     }
 
-    assert_eq!(
-        data_results,
-        vec![
-            8, 195, 121, 160, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 85, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        ]
-    );
-    assert_eq!(message_results, "execution reverted: U");
+    assert_eq!(results, vec![
+        (
+           "08c379a0000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000015500000000000000000000000000000000000000000000000000000000000000".to_string(),
+           "execution reverted: U".to_string(),
+        ),
+    ]);
 
     shutdown_tx.send(()).unwrap();
 }
@@ -242,9 +236,7 @@ async fn evm_decode_sql_query() {
     let mut client = FlightSqlServiceClient::new_from_inner(client);
 
     // Execute an SQL query and collect the results.
-    let mut from_results: Vec<u8> = Vec::new();
-    let mut to_results: Vec<u8> = Vec::new();
-    let mut value_results = String::new();
+    let mut results: Vec<(String, String, String)> = Vec::new();
     let mut info = client
         .execute(
             "
@@ -268,7 +260,6 @@ async fn evm_decode_sql_query() {
         assert_eq!(batch.num_columns(), 1);
         let column = batch.column(0);
         let column = column.as_any().downcast_ref::<StructArray>().unwrap();
-        assert_eq!(column.len(), 1);
         let from = column
             .column(0)
             .as_any()
@@ -284,26 +275,23 @@ async fn evm_decode_sql_query() {
             .as_any()
             .downcast_ref::<StringArray>()
             .unwrap();
-        from_results.extend(from.value(0));
-        to_results.extend(to.value(0));
-        value_results.push_str(value.value(0));
+        for i in 0..column.len() {
+            results.push((
+                hex::encode(from.value(i)),
+                hex::encode(to.value(i)),
+                value.value(i).to_string(),
+            ));
+        }
     }
 
     assert_eq!(
-        from_results,
-        vec![
-            6, 114, 158, 178, 66, 77, 164, 120, 152, 249, 53, 38, 123, 212, 166, 41, 64, 222, 81,
-            5,
-        ]
+        results,
+        vec![(
+            "06729eb2424da47898f935267bd4a62940de5105".to_string(),
+            "beefbabeea323f07c59926295205d3b7a17e8638".to_string(),
+            "6818627949560085517".to_string(),
+        )],
     );
-    assert_eq!(
-        to_results,
-        vec![
-            190, 239, 186, 190, 234, 50, 63, 7, 197, 153, 38, 41, 82, 5, 211, 183, 161, 126, 134,
-            56,
-        ]
-    );
-    assert_eq!(value_results, "6818627949560085517");
 
     shutdown_tx.send(()).unwrap();
 }
@@ -328,7 +316,7 @@ async fn evm_topic_sql_query() {
         .unwrap();
     let mut client = FlightSqlServiceClient::new_from_inner(client);
 
-    let mut results: Vec<u8> = Vec::new();
+    let mut results: Vec<String> = Vec::new();
 
     // Execute an SQL query and collect the results.
     let mut info = client
@@ -345,21 +333,20 @@ async fn evm_topic_sql_query() {
         .unwrap();
     while let Some(batch) = batches.next().await {
         let batch = batch.unwrap();
+        assert_eq!(batch.num_columns(), 1);
         let column = batch.column(0);
         let column = column
             .as_any()
             .downcast_ref::<FixedSizeBinaryArray>()
             .unwrap();
-        assert_eq!(column.len(), 1);
-        results.extend(column.value(0));
+        for i in 0..column.len() {
+            results.push(hex::encode(column.value(i)));
+        }
     }
 
     assert_eq!(
         results,
-        vec![
-            221, 242, 82, 173, 27, 226, 200, 155, 105, 194, 176, 104, 252, 55, 141, 170, 149, 43,
-            167, 241, 99, 196, 161, 22, 40, 245, 90, 77, 245, 35, 179, 239
-        ]
+        vec!["ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"],
     );
 
     shutdown_tx.send(()).unwrap();
@@ -385,7 +372,7 @@ async fn attestation_hash_sql_query() {
         .unwrap();
     let mut client = FlightSqlServiceClient::new_from_inner(client);
 
-    let mut results: Vec<u8> = Vec::new();
+    let mut results: Vec<String> = Vec::new();
 
     // Execute an SQL query and collect the results.
     let mut info = client
@@ -401,16 +388,15 @@ async fn attestation_hash_sql_query() {
         .unwrap();
     while let Some(batch) = batches.next().await {
         let batch = batch.unwrap();
+        assert_eq!(batch.num_columns(), 1);
         let column = batch.column(0);
         let column = column.as_any().downcast_ref::<BinaryArray>().unwrap();
-        assert_eq!(column.len(), 1);
-        results.extend(column.value(0));
+        for i in 0..column.len() {
+            results.push(hex::encode(column.value(i)));
+        }
     }
 
-    assert_eq!(
-        results,
-        vec![140, 57, 239, 34, 141, 226, 46, 189, 238, 68, 151, 25, 53, 26, 118, 101]
-    );
+    assert_eq!(results, vec!["8c39ef228de22ebdee449719351a7665"]);
 
     shutdown_tx.send(()).unwrap();
 }
