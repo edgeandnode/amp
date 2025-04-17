@@ -5,9 +5,10 @@ use std::{
 };
 
 use arrow_flight::flight_service_server::FlightServiceServer;
+use axum::response::IntoResponse;
 use common::{arrow, config::Config, BoxError, BoxResult};
 use futures::{
-    stream::FuturesUnordered, FutureExt, StreamExt as _, TryFutureExt, TryStreamExt as _,
+    stream::FuturesUnordered, FutureExt, StreamExt as _, TryFutureExt as _, TryStreamExt as _,
 };
 use metadata_db::MetadataDb;
 use server::service::Service;
@@ -162,7 +163,7 @@ async fn handle_jsonl_request(
     }
     let stream = match service.execute_query(&request).await {
         Ok(stream) => stream,
-        Err(err) => return axum::response::Response::new(error_payload(err.message()).into()),
+        Err(err) => return err.into_response(),
     };
     let stream = stream
         .map(|result| -> Result<String, BoxError> {
