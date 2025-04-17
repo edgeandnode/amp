@@ -6,7 +6,6 @@ use common::manifest::TableSchema;
 use common::query_context::parse_sql;
 use common::query_context::Error as QueryContextError;
 use common::Dataset;
-use dataset_store::DatasetStore;
 use http_common::{BoxRequestError, RequestError};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -59,10 +58,10 @@ pub async fn output_schema_handler(
 ) -> Result<Json<OutputSchemaResponse>, BoxRequestError> {
     use Error::*;
 
-    let dataset_store = DatasetStore::new(state.config.clone(), state.metadata_db.clone());
-
     let stmt = parse_sql(&payload.sql_query).map_err(SqlParseError)?;
-    let ctx = dataset_store
+    let ctx = state
+        .dataset_store
+        .clone()
         .planning_ctx_for_sql(&stmt)
         .await
         .map_err(DatasetStoreError)?;
@@ -83,11 +82,14 @@ pub struct DatasetsResponse {
 pub async fn datasets_handler(
     State(state): State<Arc<ServiceState>>,
 ) -> Result<Json<DatasetsResponse>, BoxRequestError> {
-    let dataset_store = DatasetStore::new(state.config.clone(), state.metadata_db.clone());
-    let datasets = dataset_store
+    let datasets = state
+        .dataset_store
         .all_datasets()
         .await
-        .map_err(Error::DatasetStoreError)?;
+        .map_err(Error::DatasetStoreError)?
+        .into_iter()
+        .map(|d| d.dataset)
+        .collect();
 
     Ok(Json(DatasetsResponse { datasets }))
 }

@@ -90,6 +90,7 @@ dependencies = [
  "alloy-core",
  "alloy-eips",
  "alloy-genesis",
+ "alloy-json-rpc",
  "alloy-network",
  "alloy-provider",
  "alloy-rpc-client",
@@ -1049,6 +1050,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-udf"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "datafusion",
+ "futures",
+ "log",
+]
+
+[[package]]
 name = "atoi"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1600,6 +1611,8 @@ name = "common"
 version = "0.1.0"
 dependencies = [
  "alloy",
+ "async-trait",
+ "async-udf",
  "atty",
  "bytes",
  "cargo_metadata",
@@ -2328,6 +2341,8 @@ dependencies = [
 name = "dataset-store"
 version = "0.1.0"
 dependencies = [
+ "alloy",
+ "async-udf",
  "common",
  "datafusion",
  "evm-rpc-datasets",
@@ -2342,6 +2357,7 @@ dependencies = [
  "tokio",
  "toml",
  "tracing",
+ "url",
 ]
 
 [[package]]
@@ -6525,6 +6541,7 @@ dependencies = [
  "form_urlencoded",
  "idna",
  "percent-encoding",
+ "serde",
 ]
 
 [[package]]

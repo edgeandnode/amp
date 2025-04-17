@@ -64,7 +64,7 @@ impl SnapshotContext {
     pub async fn blessed(dataset: &str) -> Result<Self, BoxError> {
         let config = load_test_config(None)?;
         let dataset_store = DatasetStore::new(config.clone(), None);
-        let dataset = dataset_store.load_dataset(dataset).await?;
+        let dataset = dataset_store.load_dataset(dataset).await?.dataset;
         let catalog = Catalog::for_dataset(dataset, config.data_store.clone(), None).await?;
         let ctx = QueryContext::for_catalog(catalog, Arc::new(config.make_runtime_env()?))?;
         Ok(Self {
@@ -109,7 +109,7 @@ impl SnapshotContext {
         let mut physical_datasets: Vec<PhysicalDataset> = vec![physical_dataset];
         let dataset_store = DatasetStore::new(config.clone(), None);
         for dep in dependencies {
-            let dep = dataset_store.load_dataset(dep).await?;
+            let dep = dataset_store.load_dataset(dep).await?.dataset;
             let dep = PhysicalDataset::from_dataset_at(dep, config.data_store.clone(), None, true)
                 .await?;
             physical_datasets.push(dep);
@@ -267,7 +267,7 @@ async fn redump_dataset(
     clear_dataset(config, dataset_name).await?;
 
     let dataset = {
-        let dataset = dataset_store.load_dataset(dataset_name).await?;
+        let dataset = dataset_store.load_dataset(dataset_name).await?.dataset;
         PhysicalDataset::from_dataset_at(dataset, config.data_store.clone(), metadata_db, false)
             .await?
     };
