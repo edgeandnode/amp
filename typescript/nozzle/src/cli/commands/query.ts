@@ -14,9 +14,9 @@ export const query = Command.make("query", {
   }
 }, ({ args }) => Effect.gen(function* () {
   const flight = yield* ArrowFlight.ArrowFlight;
-  const table = yield* flight.table(args.query)
-
-  yield* Console.log(table.toString())
+  const table = yield* flight.table(args.query);
+  // TODO: Why in the world is this necessary?
+  yield* Console.table([...table].map((row) => ({ ...row })));
 })).pipe(
   Command.withDescription("Run a Nozzle SQL query"),
   Command.provide(ArrowFlight.ArrowFlight.Default),
