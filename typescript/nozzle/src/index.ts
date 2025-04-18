@@ -3,6 +3,7 @@ import * as Model from "./Model.js";
 
 export * as Model from "./Model.js";
 export * as Api from "./Api.js";
+export * as JsonLines from "./JsonLines.js";
 export * as ConfigLoader from "./ConfigLoader.js";
 export * as ManifestLoader from "./ManifestLoader.js";
 export * as ManifestBuilder from "./ManifestBuilder.js";
