@@ -58,29 +58,6 @@ export class Admin extends Effect.Service<Admin>()("Nozzle/Api/Admin", {
   }),
 }) {}
 
-export class JsonLinesApiGroup extends HttpApiGroup.make("jsonl", { topLevel: true }).add(
-  HttpApiEndpoint.post("query")`/`
-    .setPayload(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }))
-    .addSuccess(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }))
-    .addError(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }), { status: 404 })
-    .addError(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }), { status: 422 })
-    .addError(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }), { status: 500 }),
-) {}
-
-export class JsonLinesApi extends HttpApi.make("jsonl").add(JsonLinesApiGroup) {}
-
-export class JsonLines extends Effect.Service<JsonLines>()("Nozzle/Api/JsonLines", {
-  dependencies: [FetchHttpClient.layer],
-  effect: Effect.gen(function* () {
-    const url = yield* Config.string("NOZZLE_JSONL_URL").pipe(Effect.orDie);
-    const jsonl = yield* HttpApiClient.make(JsonLinesApi, {
-      baseUrl: url,
-    });
-
-    return jsonl;
-  }),
-}) {}
-
 export class ArrowFlight extends Effect.Service<ArrowFlight>()("Nozzle/Api/ArrowFlight", {
   dependencies: [FetchHttpClient.layer],
   effect: Effect.gen(function* () {
