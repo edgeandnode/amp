@@ -26,6 +26,7 @@
     "@effect/platform": "^0.80.5",
     "@effect/platform-node": "^0.76.9",
     "@effect/schema": "^0.75.5",
+    "apache-arrow": "^19.0.1",
     "effect": "^3.14.5",
     "jiti": "^2.4.2"
   },
