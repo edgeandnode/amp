@@ -1,4 +1,4 @@
-use std::{any::Any, borrow::Cow, collections::BTreeMap, path::PathBuf, sync::Arc};
+use std::{any::Any, borrow::Cow, cmp::Ordering, collections::BTreeMap, path::PathBuf, sync::Arc};
 
 use datafusion::{
     arrow::{compute::SortOptions, datatypes::SchemaRef, error::ArrowError},
@@ -456,8 +456,10 @@ impl PhysicalTable {
         _limit: Option<usize>,
     ) -> DataFusionResult<(Vec<Vec<PartitionedFile>>, Statistics)> {
         use Precision::*;
+        // Key: range_start
+        // Value: (range_end, PartitionedFile)
+        let mut files: BTreeMap<BlockRange, PartitionedFile> = BTreeMap::new();
 
-        let mut files = vec![];
         let mut table_stats = Statistics::new_unknown(self.schema().as_ref());
         let mut stream = self.stream_nozzle_metadata()?;
 
@@ -471,6 +473,28 @@ impl PhysicalTable {
             size_hint,
         }) = stream.try_next().await?
         {
+            // Check if the new file is contained by an existing file
+            if files
+                .keys()
+                .any(|BlockRange(start, end)| range_start >= *start && range_end <= *end)
+            {
+                continue;
+            }
+
+            // Drop files that are contained by the new file
+            let drop = files
+                .keys()
+                .cloned()
+                .filter(|BlockRange(start, end)| {
+                    (range_start == *start && range_end > *end)
+                        || (range_start > *start && range_end <= *end)
+                })
+                .collect::<Vec<_>>();
+
+            for idx in drop {
+                files.remove(&idx);
+            }
+
             let block_num_stats = ColumnStatistics {
                 null_count: Exact(0),
                 max_value: Inexact(range_end.into()),
@@ -491,16 +515,18 @@ impl PhysicalTable {
             if let Some(total_size_bytes) = data_size {
                 file_stats.total_byte_size = Exact(total_size_bytes as usize);
             }
-
-            let mut partitioned_file = PartitionedFile::from(object_meta);
-            partitioned_file.metadata_size_hint = size_hint.map(|s| s as usize);
-
-            update_table_stats(&mut table_stats, &file_stats, &[block_num_idx])?;
-
-            files.push(partitioned_file);
+            let partitioned_file = PartitionedFile {
+                object_meta,
+                statistics: Some(file_stats.clone()),
+                metadata_size_hint: size_hint.map(|s| s as usize),
+                partition_values: Vec::new(),
+                range: None,
+                extensions: None,
+            };
+            files.insert((range_start, range_end).into(), partitioned_file.clone());
         }
 
-        let split_files = split_files(files, 10);
+        let split_files = split_files(&mut table_stats, &[block_num_idx], files, 10)?;
 
         Ok((split_files, table_stats))
     }
@@ -552,7 +578,6 @@ impl
     }
 }
 
-#[async_trait::async_trait]
 impl TableProvider for PhysicalTable {
     fn as_any(&self) -> &dyn Any {
         self
@@ -576,28 +601,32 @@ impl TableProvider for PhysicalTable {
 
     // Not using `async_trait` here as this is a wrapper for the
     // `scan` method of the underlying table provider.
-    async fn scan(
-        &self,
-        state: &dyn Session,
-        projection: Option<&Vec<usize>>,
-        filters: &[LogicalExpr],
+    fn scan<'table, 'state, 'projection, 'filters, 'async_trait>(
+        &'table self,
+        state: &'state dyn Session,
+        projection: Option<&'projection Vec<usize>>,
+        filters: &'filters [LogicalExpr],
         limit: Option<usize>,
-    ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
+    ) -> BoxFuture<'async_trait, DataFusionResult<Arc<dyn ExecutionPlan>>>
+    where
+        'table: 'async_trait,
+        'state: 'async_trait,
+        'projection: 'async_trait,
+        'filters: 'async_trait,
+        Self: 'async_trait,
+    {
         use PhysicalTable::*;
         match self {
-            Other { table_provider, .. } => {
-                table_provider.scan(state, projection, filters, limit).await
-            }
-            Local { dump, .. } | Optimized { dump, .. } => {
-                dump.scan(
+            Other { table_provider, .. } => table_provider.scan(state, projection, filters, limit),
+            Local { dump, .. } | Optimized { dump, .. } => dump
+                .scan(
                     state,
                     projection,
                     filters,
                     limit,
                     self.list_files_for_scan(filters, limit).boxed(),
                 )
-                .await
-            }
+                .boxed(),
         }
     }
 
@@ -909,14 +938,14 @@ impl DumpListingTable {
             .boxed()
     }
 
-    async fn scan<'a>(
+    async fn scan(
         &self,
         state: &dyn Session,
         projection: Option<&Vec<usize>>,
         filters: &[LogicalExpr],
         limit: Option<usize>,
         files_and_stats_fut: BoxFuture<
-            'a,
+            '_,
             DataFusionResult<(Vec<Vec<PartitionedFile>>, Statistics)>,
         >,
     ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
@@ -967,7 +996,7 @@ impl DumpListingTable {
 
         let filters = match conjunction(filters.to_vec()) {
             Some(expr) => {
-                let table_df_schema = self.schema.as_ref().clone().to_dfschema()?;
+                let table_df_schema = self.schema.clone().to_dfschema()?;
                 let filters =
                     create_physical_expr(&expr, &table_df_schema, state.execution_props())?;
                 Some(filters)
@@ -993,6 +1022,34 @@ impl DumpListingTable {
     }
 }
 
+#[derive(Clone, Debug, Ord, Eq)]
+struct BlockRange(pub i64, pub i64);
+impl From<(i64, i64)> for BlockRange {
+    fn from((start, end): (i64, i64)) -> Self {
+        BlockRange(start, end)
+    }
+}
+
+impl PartialEq for BlockRange {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0 && self.1 == other.1
+    }
+}
+
+impl PartialOrd for BlockRange {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        if self.0 == other.0 && self.1 == other.1 {
+            Some(Ordering::Equal)
+        } else if self.0 == other.0 {
+            self.1.partial_cmp(&other.1)
+        } else if self.0 < other.0 {
+            Some(Ordering::Less)
+        } else {
+            Some(Ordering::Greater)
+        }
+    }
+}
+
 pub(super) fn validate_name(name: &str) -> Result<(), BoxError> {
     if let Some(c) = name
         .chars()
@@ -1008,11 +1065,15 @@ pub(super) fn validate_name(name: &str) -> Result<(), BoxError> {
     Ok(())
 }
 
-fn split_files(mut files: Vec<PartitionedFile>, n: usize) -> Vec<Vec<PartitionedFile>> {
+fn split_files(
+    table_stats: &mut Statistics,
+    columns_to_update: &[usize],
+    mut files: BTreeMap<BlockRange, PartitionedFile>,
+    n: usize,
+) -> DataFusionResult<Vec<Vec<PartitionedFile>>> {
     if files.is_empty() {
-        return vec![];
+        return Ok(vec![]);
     }
-    files.sort_by(|a, b| a.path().cmp(b.path()));
 
     let chunk_size = files.len().div_ceil(n);
 
@@ -1020,7 +1081,8 @@ fn split_files(mut files: Vec<PartitionedFile>, n: usize) -> Vec<Vec<Partitioned
 
     let mut current_chunk = Vec::with_capacity(chunk_size);
 
-    for file in files.drain(..) {
+    while let Some((_, file)) = files.pop_first() {
+        update_table_stats(table_stats, file.statistics.as_ref(), columns_to_update)?;
         current_chunk.push(file);
         if current_chunk.len() == chunk_size {
             let full_chunk = std::mem::replace(&mut current_chunk, Vec::with_capacity(chunk_size));
@@ -1032,18 +1094,20 @@ fn split_files(mut files: Vec<PartitionedFile>, n: usize) -> Vec<Vec<Partitioned
         chunks.push(current_chunk)
     }
 
-    chunks
+    Ok(chunks)
 }
 
 fn update_table_stats(
     table_stats: &mut Statistics,
-    file_stats: &Statistics,
+    file_stats: Option<&Statistics>,
     columns_to_update: &[usize],
 ) -> DataFusionResult<()> {
     for index in columns_to_update {
         if let (Some(table_stats), Some(file_stats)) = (
             table_stats.column_statistics.get_mut(*index),
-            file_stats.column_statistics.get(*index),
+            file_stats
+                .map(|f| f.column_statistics.get(*index))
+                .flatten(),
         ) {
             table_stats.max_value = table_stats.max_value.max(&file_stats.max_value);
             table_stats.min_value = table_stats.min_value.min(&file_stats.min_value);
@@ -1056,8 +1120,10 @@ fn update_table_stats(
             ));
         }
     }
-    table_stats.num_rows = table_stats.num_rows.add(&file_stats.num_rows);
-    table_stats.total_byte_size = table_stats.total_byte_size.add(&file_stats.total_byte_size);
+    if let Some(file_stats) = file_stats {
+        table_stats.num_rows = table_stats.num_rows.add(&file_stats.num_rows);
+        table_stats.total_byte_size = table_stats.total_byte_size.add(&file_stats.total_byte_size);
+    }
 
     Ok(())
 }
