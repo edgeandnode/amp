@@ -1,5 +1,3 @@
-import { createClient } from "@connectrpc/connect";
-import { createGrpcTransport } from "@connectrpc/connect-node";
 import {
   FetchHttpClient,
   HttpApi,
@@ -10,7 +8,6 @@ import {
 } from "@effect/platform";
 import { Config, Effect, Schema } from "effect";
 import * as Model from "./Model.js";
-import * as Proto from "./Proto.js";
 
 export class RegstistryApiGroup extends HttpApiGroup.make("registry", { topLevel: true }).add(
   HttpApiEndpoint.post("schema")`/output_schema`

@@ -1,5 +1,5 @@
 import { Args, Command } from "@effect/cli";
-import { Console, Effect } from "effect";
+import { Console, Effect, Schema } from "effect";
 import * as ArrowFlight from "../../ArrowFlight.js";
 
 export const query = Command.make("query", {
@@ -15,8 +15,8 @@ export const query = Command.make("query", {
 }, ({ args }) => Effect.gen(function* () {
   const flight = yield* ArrowFlight.ArrowFlight;
   const table = yield* flight.table(args.query);
-  // TODO: Why in the world is this necessary?
-  yield* Console.table([...table].map((row) => ({ ...row })));
+  const encode = Schema.encodeUnknownSync(ArrowFlight.generateSchema(table.schema));
+  yield* Console.table([...table].map((_) => encode(_)));
 })).pipe(
   Command.withDescription("Run a Nozzle SQL query"),
   Command.provide(ArrowFlight.ArrowFlight.Default),
