@@ -57,15 +57,3 @@ export class Admin extends Effect.Service<Admin>()("Nozzle/Api/Admin", {
     return admin;
   }),
 }) {}
-
-export class ArrowFlight extends Effect.Service<ArrowFlight>()("Nozzle/Api/ArrowFlight", {
-  dependencies: [FetchHttpClient.layer],
-  effect: Effect.gen(function* () {
-    const url = yield* Config.string("NOZZLE_ARROW_FLIGHT_URL").pipe(Effect.orDie);
-    const transport = createGrpcTransport({
-      baseUrl: url,
-    });
-
-    return createClient(Proto.Flight.FlightService, transport);
-  }),
-}) {}

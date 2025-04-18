@@ -55,7 +55,7 @@ export class ConfigLoader extends Effect.Service<ConfigLoader>()("Nozzle/ConfigL
         Match.when((_) => /\.(ts|mts|cts)$/.test(_), () => loadTypeScript(resolved)),
         Match.when((_) => /\.(js|mjs|cjs)$/.test(_), () => loadJavaScript(resolved)),
         Match.when((_) => /\.(json)$/.test(_), () => loadJson(resolved)),
-        Match.orElse((_) => Effect.fail(new ConfigLoaderError({ message: `Unsupported file extension ${_}` }))),
+        Match.orElse((_) => new ConfigLoaderError({ message: `Unsupported file extension ${_}` })),
       )
     });
 
