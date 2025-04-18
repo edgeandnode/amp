@@ -39,7 +39,7 @@ impl Scheduler {
             Self::Ephemeral(config) => {
                 let dataset_store = DatasetStore::new(config.clone(), None::<MetadataDb>);
                 let dataset = {
-                    let dataset = dataset_store.load_dataset(&manifest.name).await?;
+                    let dataset = dataset_store.load_dataset(&manifest.name).await?.dataset;
                     PhysicalDataset::from_dataset_at(
                         &dataset,
                         config.data_store.clone(),

@@ -1,3 +1,5 @@
+import { createClient } from "@connectrpc/connect";
+import { createGrpcTransport } from "@connectrpc/connect-node";
 import {
   FetchHttpClient,
   HttpApi,
@@ -8,6 +10,7 @@ import {
 } from "@effect/platform";
 import { Config, Effect, Schema } from "effect";
 import * as Model from "./Model.js";
+import * as Proto from "./Proto.js";
 
 export class RegstistryApiGroup extends HttpApiGroup.make("registry", { topLevel: true }).add(
   HttpApiEndpoint.post("schema")`/output_schema`
@@ -23,7 +26,7 @@ export class RegistryApi extends HttpApi.make("registry").add(RegstistryApiGroup
 export class Registry extends Effect.Service<Registry>()("Nozzle/Api/Registry", {
   dependencies: [FetchHttpClient.layer],
   effect: Effect.gen(function* () {
-    const url = yield* Config.string("NOZZLE_REGISTRY_URL");
+    const url = yield* Config.string("NOZZLE_REGISTRY_URL").pipe(Effect.orDie);
     const registry = yield* HttpApiClient.make(RegistryApi, {
       baseUrl: url,
     });
@@ -46,7 +49,7 @@ export class AdminApi extends HttpApi.make("admin").add(AdminApiGroup) {}
 export class Admin extends Effect.Service<Admin>()("Nozzle/Api/Admin", {
   dependencies: [FetchHttpClient.layer],
   effect: Effect.gen(function* () {
-    const url = yield* Config.string("NOZZLE_ADMIN_URL");
+    const url = yield* Config.string("NOZZLE_ADMIN_URL").pipe(Effect.orDie);
     const admin = yield* HttpApiClient.make(AdminApi, {
       baseUrl: url,
     });
@@ -55,25 +58,14 @@ export class Admin extends Effect.Service<Admin>()("Nozzle/Api/Admin", {
   }),
 }) {}
 
-export class JsonLinesApiGroup extends HttpApiGroup.make("jsonl", { topLevel: true }).add(
-  HttpApiEndpoint.post("query")`/`
-    .setPayload(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }))
-    .addSuccess(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }))
-    .addError(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }), { status: 404 })
-    .addError(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }), { status: 422 })
-    .addError(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }), { status: 500 }),
-) {}
-
-export class JsonLinesApi extends HttpApi.make("jsonl").add(JsonLinesApiGroup) {}
-
-export class JsonLines extends Effect.Service<JsonLines>()("Nozzle/Api/JsonLines", {
+export class ArrowFlight extends Effect.Service<ArrowFlight>()("Nozzle/Api/ArrowFlight", {
   dependencies: [FetchHttpClient.layer],
   effect: Effect.gen(function* () {
-    const url = yield* Config.string("NOZZLE_JSONL_URL");
-    const jsonl = yield* HttpApiClient.make(JsonLinesApi, {
+    const url = yield* Config.string("NOZZLE_ARROW_FLIGHT_URL").pipe(Effect.orDie);
+    const transport = createGrpcTransport({
       baseUrl: url,
     });
 
-    return jsonl;
+    return createClient(Proto.Flight.FlightService, transport);
   }),
 }) {}

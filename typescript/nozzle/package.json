@@ -13,15 +13,24 @@
     "directory": "dist",
     "linkDirectory": false
   },
-  "bin": "./src/cli/main.ts",
+  "bin": "./bin.ts",
   "scripts": {
-    "build": "tsc -b tsconfig.build.json && build-utils pack-v2 && bun ./scripts/build.ts"
+    "build": "tsc -b tsconfig.build.json && build-utils pack-v2 && bun ./scripts/build.ts",
+    "nozzl": "bun ./src/cli/main.ts"
   },
   "dependencies": {
+    "@bufbuild/protobuf": "^2.2.5",
+    "@connectrpc/connect": "^2.0.2",
+    "@connectrpc/connect-node": "^2.0.2",
     "@effect/cli": "^0.59.5",
     "@effect/platform": "^0.80.5",
     "@effect/platform-node": "^0.76.9",
     "@effect/schema": "^0.75.5",
-    "effect": "^3.14.5"
+    "effect": "^3.14.5",
+    "jiti": "^2.4.2"
+  },
+  "devDependencies": {
+    "@bufbuild/buf": "^1.52.1",
+    "@bufbuild/protoc-gen-es": "^2.2.5"
   }
 }

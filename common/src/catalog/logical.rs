@@ -11,6 +11,12 @@ pub struct Dataset {
     pub tables: Vec<Table>,
 }
 
+#[derive(Clone, Debug)]
+pub struct DatasetWithProvider {
+    pub dataset: Dataset,
+    pub provider: Option<String>,
+}
+
 impl Dataset {
     pub fn tables(&self) -> &[Table] {
         &self.tables

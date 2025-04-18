@@ -64,7 +64,7 @@ impl SnapshotContext {
     pub async fn blessed(dataset: &str) -> Result<Self, BoxError> {
         let config = load_test_config(None)?;
         let dataset_store = DatasetStore::new(config.clone(), None);
-        let dataset = dataset_store.load_dataset(dataset).await?;
+        let dataset = dataset_store.load_dataset(dataset).await?.dataset;
         let catalog = Catalog::for_logical_dataset(
             dataset,
             config.data_store.clone(),
@@ -116,7 +116,7 @@ impl SnapshotContext {
         let dataset_store = DatasetStore::new(config.clone(), None);
         let store = config.data_store.clone();
         for dep in dependencies {
-            let dep = dataset_store.load_dataset(dep).await?;
+            let dep = dataset_store.load_dataset(dep).await?.dataset;
             let dep = PhysicalDataset::from_dataset_at(dep, store.clone(), None::<MetadataDb>, true)
                 .await?;
             physical_datasets.push(dep);
@@ -265,7 +265,7 @@ async fn redump_dataset(
     clear_dataset(config, dataset_name).await?;
 
     let dataset = {
-        let dataset = dataset_store.load_dataset(dataset_name).await?;
+        let dataset = dataset_store.load_dataset(dataset_name).await?.dataset;
         PhysicalDataset::from_dataset_at(dataset, config.data_store.clone(), metadata_db, false)
             .await?
     };

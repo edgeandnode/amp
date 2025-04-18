@@ -37,6 +37,10 @@ use datafusion::{
 use itertools::izip;
 use log::trace;
 
+pub use eth_call::EthCall;
+
+mod eth_call;
+
 type Unsigned = alloy::primitives::Uint<256, 4>;
 
 const DEC128_PREC: u8 = DECIMAL128_MAX_PRECISION;

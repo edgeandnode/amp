@@ -38,7 +38,7 @@ Auto-generated file. See `schema_to_markdown` in `common/src/catalog/mod.rs`.
 | timestamp                | Timestamp                             | NO          |
 | tx_index                 | UInt32                                | NO          |
 | tx_hash                  | Binary32                              | NO          |
-| to                       | Binary                                | NO          |
+| to                       | Binary20                              | NO          |
 | nonce                    | UInt64                                | NO          |
 | gas_price                | UInt126                               | YES         |
 | gas_limit                | UInt64                                | NO          |

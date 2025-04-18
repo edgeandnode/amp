@@ -63,7 +63,7 @@ impl Job {
         match job_desc {
             JobDesc::DumpDataset { dataset } => {
                 let dataset_store = DatasetStore::new(config.clone(), Some(metadata_db.clone()));
-                let dataset = dataset_store.load_dataset(&dataset).await?;
+                let dataset = dataset_store.load_dataset(&dataset).await?.dataset;
                 let store = config.data_store.clone();
 
                 // Consistency check: All tables must be present in the job's output.

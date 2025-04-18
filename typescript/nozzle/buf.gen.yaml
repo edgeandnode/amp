@@ -1,0 +1,12 @@
+version: v2
+
+plugins:
+  - local: protoc-gen-es
+    opt: 
+      - target=ts
+      - import_extension=js
+    out: src/proto
+
+inputs:
+  - git_repo: https://github.com/apache/arrow
+    subdir: format

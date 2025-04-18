@@ -1,3 +1,8 @@
+use axum::{
+    http::StatusCode,
+    response::{IntoResponse, Response as AxumResponse},
+    Json,
+};
 use common::{
     arrow::{self, ipc::writer::IpcDataGenerator},
     catalog::collect_scanned_tables,
@@ -30,7 +35,7 @@ use tonic::{Request, Response, Status};
 type TonicStream<T> = Pin<Box<dyn Stream<Item = Result<T, Status>> + Send + 'static>>;
 
 #[derive(Error, Debug)]
-enum Error {
+pub enum Error {
     #[error("ProtocolBuffers decoding error: {0}")]
     PbDecodeError(String),
 
@@ -60,6 +65,36 @@ fn datafusion_error_to_status(outer: &Error, e: &DataFusionError) -> Status {
     match e {
         DataFusionError::ResourcesExhausted(_) => Status::resource_exhausted(outer.to_string()),
         _ => Status::internal(outer.to_string()),
+    }
+}
+
+impl IntoResponse for Error {
+    fn into_response(self) -> AxumResponse {
+        let error_message = self.to_string();
+        let status = match self {
+            Error::CoreError(
+                CoreError::InvalidPlan(_)
+                | CoreError::SqlParseError(_)
+                | CoreError::PlanEncodingError(_),
+            ) => StatusCode::BAD_REQUEST,
+            Error::CoreError(
+                CoreError::DatasetError(_)
+                | CoreError::ConfigError(_)
+                | CoreError::PlanningError(_)
+                | CoreError::ExecutionError(_)
+                | CoreError::MetaTableError(_),
+            ) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::ExecutionError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::DatasetStoreError(e) if e.is_not_found() => StatusCode::NOT_FOUND,
+            Error::DatasetStoreError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::PbDecodeError(_) => StatusCode::BAD_REQUEST,
+            Error::UnsupportedFlightDescriptorType(_) => StatusCode::BAD_REQUEST,
+            Error::UnsupportedFlightDescriptorCommand(_) => StatusCode::BAD_REQUEST,
+        };
+        let body = serde_json::json!({
+            "error": error_message,
+        });
+        (status, Json(body)).into_response()
     }
 }
 
@@ -95,9 +130,8 @@ impl From<Error> for Status {
 
 #[derive(Clone)]
 pub struct Service {
-    config: Arc<Config>,
-    metadata_db: Option<MetadataDb>,
     env: Arc<RuntimeEnv>,
+    dataset_store: Arc<DatasetStore>,
 }
 
 impl Service {
@@ -107,27 +141,24 @@ impl Service {
     ) -> Result<Self, DataFusionError> {
         let env = Arc::new(config.make_runtime_env()?);
         Ok(Self {
-            config,
-            metadata_db,
             env,
+            dataset_store: DatasetStore::new(config, metadata_db),
         })
     }
 
-    pub async fn execute_query(&self, sql: &str) -> Result<SendableRecordBatchStream, Status> {
-        let query = parse_sql(sql).map_err(|err| Status::from(Error::from(err)))?;
-        let dataset_store = DatasetStore::new(self.config.clone(), self.metadata_db.clone());
-        let ctx = dataset_store
+    pub async fn execute_query(&self, sql: &str) -> Result<SendableRecordBatchStream, Error> {
+        let query = parse_sql(sql).map_err(|err| Error::from(err))?;
+        let ctx = self
+            .dataset_store
+            .clone()
             .ctx_for_sql(&query, self.env.clone())
             .await
-            .map_err(|err| Status::from(Error::DatasetStoreError(err)))?;
-        let plan = ctx
-            .plan_sql(query)
-            .await
-            .map_err(|err| Status::from(Error::from(err)))?;
+            .map_err(|err| Error::DatasetStoreError(err))?;
+        let plan = ctx.plan_sql(query).await.map_err(|err| Error::from(err))?;
         let stream = ctx
             .execute_plan(plan)
             .await
-            .map_err(|err| Status::from(Error::from(err)))?;
+            .map_err(|err| Error::from(err))?;
         Ok(stream)
     }
 }
@@ -236,9 +267,11 @@ impl Service {
                     // - Use that context to plan the SQL query.
                     // - Serialize the plan to bytes using datafusion-protobufs.
                     let query = parse_sql(&sql_query.query)?;
-                    let dataset_store =
-                        DatasetStore::new(self.config.clone(), self.metadata_db.clone());
-                    let query_ctx = dataset_store.planning_ctx_for_sql(&query).await?;
+                    let query_ctx = self
+                        .dataset_store
+                        .clone()
+                        .planning_ctx_for_sql(&query)
+                        .await?;
                     query_ctx.sql_to_remote_plan(query).await?
                 } else {
                     return Err(Error::UnsupportedFlightDescriptorCommand(msg.type_url));
@@ -285,14 +318,19 @@ impl Service {
 
     async fn do_get(&self, ticket: arrow_flight::Ticket) -> Result<TonicStream<FlightData>, Error> {
         //  DataFusion requires a context for initially deserializing a logical plan. That context is used a
-        // `FunctionRegistry` for UDFs. So using a `QueryContext::empty` works as that includes UDFs.
-        let ctx = QueryContext::empty(self.env.clone())?;
+        // `FunctionRegistry` for UDFs. That context must include all UDFs that may be used in the
+        // query.
+        let ctx = QueryContext::for_catalog(
+            self.dataset_store.initial_catalog().await?,
+            self.env.clone(),
+        )?;
         let plan = ctx.plan_from_bytes(&ticket.ticket).await?;
 
         // The deserialized plan references empty tables, so we need to load the actual tables from the catalog.
         let table_refs = collect_scanned_tables(&plan);
-        let dataset_store = DatasetStore::new(self.config.clone(), self.metadata_db.clone());
-        let catalog = dataset_store
+        let catalog = self
+            .dataset_store
+            .clone()
             .load_catalog_for_table_refs(table_refs.iter())
             .await?;
         let query_ctx = QueryContext::for_catalog(catalog, self.env.clone())?;

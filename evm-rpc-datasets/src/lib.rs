@@ -3,7 +3,7 @@ mod tables;
 
 use alloy::transports::http::reqwest::Url;
 pub use client::JsonRpcClient;
-use common::{store::StoreError, BoxError, Dataset, Store};
+use common::{store::StoreError, BoxError, Dataset, DatasetWithProvider, Store};
 use serde::Deserialize;
 use serde_with::serde_as;
 
@@ -34,12 +34,15 @@ pub(crate) struct EvmRpcProvider {
     pub url: Url,
 }
 
-pub fn dataset(dataset_cfg: toml::Value) -> Result<Dataset, Error> {
+pub fn dataset(dataset_cfg: toml::Value) -> Result<DatasetWithProvider, Error> {
     let def: DatasetDef = dataset_cfg.try_into()?;
-    Ok(Dataset {
-        kind: def.kind,
-        name: def.name,
-        tables: tables::all(&def.network),
+    Ok(DatasetWithProvider {
+        dataset: Dataset {
+            kind: def.kind,
+            name: def.name,
+            tables: tables::all(&def.network),
+        },
+        provider: Some(def.provider),
     })
 }
 
