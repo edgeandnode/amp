@@ -121,10 +121,10 @@ impl DumpListingTable {
     ///
     /// TODO: The dataset_version should be a partition specifier, not a schema
     /// identifier.
-    pub(super) fn table_ref(&self) -> Arc<TableReference> {
+    pub(super) fn table_ref(&self) -> TableReference {
         let schema = self.dataset.as_str();
         let table = self.name.as_str();
-        Arc::new(TableReference::partial(schema, table))
+        TableReference::partial(schema, table)
     }
 
     pub(super) fn table_id<'a>(&'a self) -> TableId<'a> {

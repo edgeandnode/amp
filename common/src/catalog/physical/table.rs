@@ -179,24 +179,24 @@ impl PhysicalTable {
             // Other { logical_table, .. } => logical_table.as_ref().clone(),
         }
     }
-    pub fn table_ref(&self) -> Arc<TableReference> {
+    pub fn table_ref(&self) -> TableReference {
         use PhysicalTable::*;
         match self {
             Local { dump, .. } | Optimized { dump, .. } => dump.table_ref(),
         }
     }
 
-    pub fn catalog_schema(&self) -> String {
+    pub fn catalog_schema(&self) -> &str {
         use PhysicalTable::*;
         match self {
-            Local { dump, .. } | Optimized { dump, .. } => dump.dataset.clone(),
+            Local { dump, .. } | Optimized { dump, .. } => &dump.dataset,
         }
     }
 
-    pub fn network(&self) -> Option<String> {
+    pub fn network(&self) -> Option<&str> {
         use PhysicalTable::*;
         match self {
-            Local { dump, .. } | Optimized { dump, .. } => dump.network.clone(),
+            Local { dump, .. } | Optimized { dump, .. } => dump.network.as_deref(),
         }
     }
 
@@ -214,17 +214,17 @@ impl PhysicalTable {
         }
     }
 
-    pub fn url(&self) -> Option<Url> {
+    pub fn url(&self) -> Option<&Url> {
         use PhysicalTable::*;
         match self {
-            Local { dump, .. } | Optimized { dump, .. } => Some(dump.url().clone()),
+            Local { dump, .. } | Optimized { dump, .. } => Some(dump.url()),
         }
     }
 
-    pub fn path(&self) -> DataFusionResult<Path> {
+    pub fn path(&self) -> DataFusionResult<&Path> {
         use PhysicalTable::*;
         match self {
-            Local { dump, .. } | Optimized { dump, .. } => Ok(dump.path().clone()),
+            Local { dump, .. } | Optimized { dump, .. } => Ok(dump.path()),
         }
     }
 
@@ -253,42 +253,39 @@ impl PhysicalTable {
     pub fn order_exprs(&self) -> Vec<Vec<SortExpr>> {
         use PhysicalTable::*;
         match self {
-            Local { dump, .. } | Optimized { dump, .. } => {
-                let physical_order_exprs = dump.order_exprs.clone();
+            Local { dump, .. } | Optimized { dump, .. } => dump
+                .order_exprs
+                .iter()
+                .map(|sort_exprs| {
+                    sort_exprs
+                        .iter()
+                        .map(
+                            |PhysicalSortExpr {
+                                 expr,
+                                 options:
+                                     SortOptions {
+                                         descending,
+                                         nulls_first,
+                                     },
+                             }| {
+                                let expr = expr
+                                    .as_any()
+                                    .downcast_ref::<Column>()
+                                    .cloned()
+                                    .map(|col| {
+                                        LogicalExpr::Column(LogicalColumn::new(
+                                            Some(self.table_ref()),
+                                            col.name(),
+                                        ))
+                                    })
+                                    .expect("PhysicalSortExpr::expr should be a Column");
 
-                physical_order_exprs
-                    .iter()
-                    .map(|sort_exprs| {
-                        sort_exprs
-                            .iter()
-                            .map(
-                                |PhysicalSortExpr {
-                                     expr,
-                                     options:
-                                         SortOptions {
-                                             descending,
-                                             nulls_first,
-                                         },
-                                 }| {
-                                    let expr = expr
-                                        .as_any()
-                                        .downcast_ref::<Column>()
-                                        .cloned()
-                                        .map(|col| {
-                                            LogicalExpr::Column(LogicalColumn::new(
-                                                Some(self.table_ref().as_ref().clone()),
-                                                col.name(),
-                                            ))
-                                        })
-                                        .expect("PhysicalSortExpr::expr should be a Column");
-
-                                    SortExpr::new(expr, !*descending, *nulls_first)
-                                },
-                            )
-                            .collect()
-                    })
-                    .collect()
-            }
+                                SortExpr::new(expr, !*descending, *nulls_first)
+                            },
+                        )
+                        .collect()
+                })
+                .collect(),
         }
     }
 
@@ -454,13 +451,13 @@ impl PhysicalTable {
             }
             let partitioned_file = PartitionedFile {
                 object_meta,
-                statistics: Some(file_stats.clone()),
+                statistics: Some(file_stats),
                 metadata_size_hint: size_hint.map(|s| s as usize),
                 partition_values: Vec::new(),
                 range: None,
                 extensions: None,
             };
-            files.insert((range_start, range_end).into(), partitioned_file.clone());
+            files.insert((range_start, range_end).into(), partitioned_file);
         }
 
         let split_files = split_files(&mut table_stats, &[block_num_idx], files, 10)?;
