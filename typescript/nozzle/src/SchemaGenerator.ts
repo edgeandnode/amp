@@ -44,7 +44,7 @@ export class SchemaGenerator extends Effect.Service<SchemaGenerator>()("Nozzle/S
 
     return { fromSql, fromTable, fromManifest };
   }),
-}) {} 
+}) {}
 
 const convertType = (type: string) => {
   if (typeof type === "string") {
