@@ -21,10 +21,11 @@ pub async fn dump(
     metadata_db: Option<MetadataDb>,
     mut datasets: Vec<String>,
     ignore_deps: bool,
-    start: u64,
+    start: i64,
     end_block: Option<String>,
     n_jobs: u16,
     partition_size_mb: u64,
+    input_batch_size_blocks: u64,
     disable_compression: bool,
     run_every_mins: Option<u64>,
 ) -> Result<(), BoxError> {
@@ -69,6 +70,7 @@ pub async fn dump(
                     &config,
                     n_jobs,
                     partition_size,
+                    input_batch_size_blocks,
                     &parquet_opts,
                     start,
                     end_block,
@@ -86,6 +88,7 @@ pub async fn dump(
                     &config,
                     n_jobs,
                     partition_size,
+                    input_batch_size_blocks,
                     &parquet_opts,
                     start,
                     end_block,
@@ -98,25 +101,28 @@ pub async fn dump(
     Ok(())
 }
 
+
 // if end_block starts with "+" then it is a relative block number
 // otherwise, it's an absolute block number and should be after start_block
-fn resolve_end_block(start_block: u64, end_block: String) -> Result<u64, BoxError> {
+fn resolve_end_block(start_block: i64, end_block: String) -> Result<i64, BoxError> {
     let end_block = if end_block.starts_with('+') {
         let relative_block = end_block
             .trim_start_matches('+')
             .parse::<u64>()
             .map_err(|e| format!("invalid relative end block: {e}"))?;
-        start_block + relative_block
+        if start_block < 0 && relative_block as i64 + start_block >= 0 {
+            return Err(
+                "invalid range: end block exceeds the bound specified by start block".into(),
+            );
+        }
+        start_block + relative_block as i64
     } else {
         end_block
-            .parse::<u64>()
+            .parse::<i64>()
             .map_err(|e| format!("invalid end block: {e}"))?
     };
-    if end_block < start_block {
+    if start_block > 0 && end_block > 0 && end_block < start_block {
         return Err("end_block must be greater than or equal to start_block".into());
-    }
-    if end_block == 0 {
-        return Err("end_block must be greater than 0".into());
     }
     Ok(end_block)
 }
@@ -211,17 +217,22 @@ mod tests {
             (10, "20", Ok(20)),
             (0, "1", Ok(1)),
             (
-                18446744073709551614,
-                "18446744073709551615",
-                Ok(18_446_744_073_709_551_615u64),
+                9223372036854775806,
+                "9223372036854775807",
+                Ok(9_223_372_036_854_775_807i64),
             ),
             (10, "+5", Ok(15)),
             (100, "90", Err(BoxError::from(""))),
-            (0, "0", Err(BoxError::from(""))),
+            (0, "0", Ok(0)),
             (0, "0x", Err(BoxError::from(""))),
             (0, "xxx", Err(BoxError::from(""))),
             (100, "+1000x", Err(BoxError::from(""))),
             (100, "+1x", Err(BoxError::from(""))),
+            (-100, "+99", Ok(-1)),
+            (-100, "+100", Err(BoxError::from(""))),
+            (-100, "-100", Ok(-100)),
+            (-100, "50", Ok(50)),
+            (100, "-100", Ok(-100)),
         ];
 
         for (start_block, end_block, expected) in test_cases {

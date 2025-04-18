@@ -21,12 +21,12 @@ use url::Url;
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
 
 /// A worker is considered active if it has sent a heartbeat in this period. The scheduler will
-/// schedule new operators only on active workers.
+/// schedule new jobs only on active workers.
 const ACTIVE_INTERVAL_SECS: i32 = 5;
 
 /// Row ids, always non-negative.
 pub type LocationId = i64;
-pub type OperatorDatabaseId = i64;
+pub type JobDatabaseId = i64;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -261,21 +261,20 @@ impl MetadataDb {
     }
 
     #[instrument(skip(self), err)]
-    pub async fn schedule_operator(
+    pub async fn schedule_job(
         &self,
         node_id: &str,
-        operator_desc: &str,
+        job_desc: &str,
         locations: &[LocationId],
-    ) -> Result<OperatorDatabaseId, Error> {
-        // Use a transaction, such that the operator will only be scheduled if the locations are
+    ) -> Result<JobDatabaseId, Error> {
+        // Use a transaction, such that the job will only be scheduled if the locations are
         // successfully locked.
         let mut tx = self.pool.begin().await?;
 
-        let query =
-            "INSERT INTO operators (node_id, descriptor) VALUES ($1, $2::jsonb) RETURNING id";
-        let id: OperatorDatabaseId = sqlx::query_scalar(query)
+        let query = "INSERT INTO jobs (node_id, descriptor) VALUES ($1, $2::jsonb) RETURNING id";
+        let id: JobDatabaseId = sqlx::query_scalar(query)
             .bind(node_id)
-            .bind(operator_desc)
+            .bind(job_desc)
             .fetch_one(&self.pool)
             .await?;
 
@@ -286,21 +285,18 @@ impl MetadataDb {
         Ok(id)
     }
 
-    pub async fn scheduled_operators(
-        &self,
-        node_id: &str,
-    ) -> Result<Vec<OperatorDatabaseId>, Error> {
-        let query = "SELECT id FROM operators WHERE node_id = $1";
+    pub async fn scheduled_jobs(&self, node_id: &str) -> Result<Vec<JobDatabaseId>, Error> {
+        let query = "SELECT id FROM jobs WHERE node_id = $1";
         Ok(sqlx::query_scalar(query)
             .bind(node_id)
             .fetch_all(&self.pool)
             .await?)
     }
 
-    pub async fn operator_desc(&self, operator_id: OperatorDatabaseId) -> Result<String, Error> {
-        let query = "SELECT descriptor::text FROM operators WHERE id = $1";
+    pub async fn job_desc(&self, job_id: JobDatabaseId) -> Result<String, Error> {
+        let query = "SELECT descriptor::text FROM jobs WHERE id = $1";
         Ok(sqlx::query_scalar(query)
-            .bind(operator_id)
+            .bind(job_id)
             .fetch_one(&self.pool)
             .await?)
     }
@@ -308,11 +304,11 @@ impl MetadataDb {
     /// Returns tuples of `(location_id, table_name, url)`.
     pub async fn output_locations(
         &self,
-        operator_id: OperatorDatabaseId,
+        job_id: JobDatabaseId,
     ) -> Result<Vec<(LocationId, String, Url)>, Error> {
         let query = "SELECT id, tbl, url FROM locations WHERE writer = $1";
         let tuples: Vec<(LocationId, String, String)> = sqlx::query_as(query)
-            .bind(operator_id)
+            .bind(job_id)
             .fetch_all(&self.pool)
             .await?;
 
@@ -711,12 +707,12 @@ impl From<NozzleTimestamp> for chrono::DateTime<chrono::Utc> {
 #[instrument(skip(executor), err)]
 async fn lock_locations(
     executor: impl Executor<'_, Database = Postgres>,
-    operator_id: OperatorDatabaseId,
+    job_id: JobDatabaseId,
     locations: &[LocationId],
 ) -> Result<(), Error> {
     let query = "UPDATE locations SET writer = $1 WHERE id = ANY($2)";
     sqlx::query(query)
-        .bind(operator_id)
+        .bind(job_id)
         .bind(locations)
         .execute(executor)
         .await?;

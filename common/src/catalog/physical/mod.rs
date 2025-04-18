@@ -45,6 +45,30 @@ impl Catalog {
         }
     }
 
+    pub async fn for_physical_dataset_collection<T: AsRef<PhysicalDataset>, U: AsRef<MetadataDb>, V: IntoIterator<Item = T>>(
+        collection: V,
+        store: Arc<Store>,
+        metadata_provider: Option<U>,
+    ) -> DataFusionResult<Self> {
+        let store = Some(store);
+        let metadata_provider = metadata_provider.map(|mp| Arc::new((*mp.as_ref()).clone()));
+        let datasets = Arc::new(RwLock::new(HashMap::new()));
+
+        let catalog = Catalog {
+            datasets,
+            store,
+            metadata_provider,
+        };
+
+        for dataset in collection.into_iter() {
+            let name = dataset.as_ref().name();
+            let dataset = Arc::new((*dataset.as_ref()).clone());
+            catalog.register_schema(name, dataset)?;
+        }
+
+        Ok(catalog)
+    }
+
     pub async fn for_physical_dataset<T: AsRef<PhysicalDataset>, U: AsRef<MetadataDb>>(
         dataset: T,
         store: Arc<Store>,

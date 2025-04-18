@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, fmt, pin::pin, sync::Arc};
 use common::{config::Config, BoxError};
 use futures::{TryFutureExt as _, TryStreamExt};
 use log::{debug, error};
-use metadata_db::{MetadataDb, OperatorDatabaseId};
+use metadata_db::{JobDatabaseId, MetadataDb};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::{
@@ -12,19 +12,19 @@ use tokio::{
 };
 use tracing::{info, instrument};
 
-use crate::operator::Operator;
+use crate::job::Job;
 
 pub const WORKER_ACTIONS_PG_CHANNEL: &str = "worker_actions";
 
-/// These actions coordinate the operator state and the write lock on the output table locations.
+/// These actions coordinate the jobs state and the write lock on the output table locations.
 ///
 /// Start action:
-/// - Fetch the operator descriptor and output locations from the `metadata_db`.
-/// - Start the operator.
+/// - Fetch the jobs descriptor and output locations from the `metadata_db`.
+/// - Start the jobs.
 ///
 /// Stop action (currently unimplemented):
-/// - Stop the operator.
-/// - Release the locations by deleting the row from the `operators` table.
+/// - Stop the jobs.
+/// - Release the locations by deleting the row from the `jobs` table.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum Action {
     Start,
@@ -34,7 +34,7 @@ pub enum Action {
 #[derive(Serialize, Deserialize)]
 pub struct WorkerAction {
     pub node_id: String,
-    pub operator_id: OperatorDatabaseId,
+    pub job_id: JobDatabaseId,
     pub action: Action,
 }
 
@@ -49,9 +49,9 @@ pub struct Worker {
     metadata_db: MetadataDb,
     node_id: String,
 
-    // To prevent start/stop race conditions, actions for a same operator are processed sequentially.
-    // Each operator has a dedicated handler task.
-    action_queue: BTreeMap<OperatorDatabaseId, UnboundedSender<WorkerAction>>,
+    // To prevent start/stop race conditions, actions for a same jobs are processed sequentially.
+    // Each jobs has a dedicated handler task.
+    action_queue: BTreeMap<JobDatabaseId, UnboundedSender<WorkerAction>>,
 }
 
 #[derive(Error, Debug)]
@@ -68,8 +68,8 @@ pub enum WorkerError {
     #[error("database error: {0}")]
     DbError(#[from] metadata_db::Error),
 
-    #[error("error loading operator: {0}")]
-    OperatorLoadError(BoxError),
+    #[error("error loading job: {0}")]
+    JobLoadError(BoxError),
 }
 
 impl Worker {
@@ -119,14 +119,13 @@ impl Worker {
                 }
             });
 
-        // Spawn scheduled operators.
-        let scheduled_operators = self.metadata_db.scheduled_operators(&self.node_id).await?;
-        for operator_id in scheduled_operators {
-            let operator =
-                Operator::load(operator_id, self.config.clone(), self.metadata_db.clone())
-                    .await
-                    .map_err(OperatorLoadError)?;
-            spawn_operator(self.config.clone(), self.metadata_db.clone(), operator);
+        // Spawn scheduled jobs.
+        let scheduled_jobs = self.metadata_db.scheduled_jobs(&self.node_id).await?;
+        for job_id in scheduled_jobs {
+            let job = Job::load(job_id, self.config.clone(), self.metadata_db.clone())
+                .await
+                .map_err(JobLoadError)?;
+            spawn_job(self.config.clone(), self.metadata_db.clone(), job);
         }
 
         let scheduler_loop = async move {
@@ -148,48 +147,43 @@ impl Worker {
         if action.node_id != self.node_id {
             return Ok(());
         }
-        let operator_task = self
-            .action_queue
-            .entry(action.operator_id)
-            .or_insert_with(|| {
-                let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-                let operator_handler = OperatorHandler::new(
-                    self.config.clone(),
-                    self.metadata_db.clone(),
-                    self.node_id.clone(),
-                    action.operator_id,
-                    rx,
-                );
-                tokio::spawn(operator_handler.run());
-                tx
-            });
-        operator_task
-            .send(action)
-            .map_err(|_| WorkerError::HandlerPanic)
+        let job_task = self.action_queue.entry(action.job_id).or_insert_with(|| {
+            let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+            let job_handler = JobHandler::new(
+                self.config.clone(),
+                self.metadata_db.clone(),
+                self.node_id.clone(),
+                action.job_id,
+                rx,
+            );
+            tokio::spawn(job_handler.run());
+            tx
+        });
+        job_task.send(action).map_err(|_| WorkerError::HandlerPanic)
     }
 }
 
-struct OperatorHandler {
+struct JobHandler {
     config: Arc<Config>,
     metadata_db: MetadataDb,
     node_id: String,
-    operator_id: OperatorDatabaseId,
+    job_id: JobDatabaseId,
     recv: UnboundedReceiver<WorkerAction>,
 }
 
-impl OperatorHandler {
+impl JobHandler {
     fn new(
         config: Arc<Config>,
         metadata_db: MetadataDb,
         node_id: String,
-        operator_id: OperatorDatabaseId,
+        job_id: JobDatabaseId,
         recv: UnboundedReceiver<WorkerAction>,
     ) -> Self {
         Self {
             config,
             metadata_db,
             node_id,
-            operator_id,
+            job_id,
             recv,
         }
     }
@@ -197,7 +191,7 @@ impl OperatorHandler {
     async fn run(mut self) {
         while let Some(action) = self.recv.recv().await {
             assert!(action.node_id == self.node_id);
-            assert!(action.operator_id == self.operator_id);
+            assert!(action.job_id == self.job_id);
 
             if let Err(e) = self.handle_action(action.action).await {
                 error!("error handling action `{:?}`: {}", action, e);
@@ -206,8 +200,8 @@ impl OperatorHandler {
 
         // Only happens if the `Worker` is dropped.
         debug!(
-            "Dropping operator handler for node {} and operator {}",
-            self.node_id, self.operator_id
+            "Dropping job handler for node {} and job {}",
+            self.node_id, self.job_id
         );
     }
 
@@ -217,14 +211,10 @@ impl OperatorHandler {
 
         match action {
             Action::Start => {
-                let operator = Operator::load(
-                    self.operator_id,
-                    self.config.clone(),
-                    self.metadata_db.clone(),
-                )
-                .await
-                .map_err(OperatorLoadError)?;
-                spawn_operator(self.config.clone(), self.metadata_db.clone(), operator);
+                let job = Job::load(self.job_id, self.config.clone(), self.metadata_db.clone())
+                    .await
+                    .map_err(JobLoadError)?;
+                spawn_job(self.config.clone(), self.metadata_db.clone(), job);
             }
 
             Action::Stop => {
@@ -236,19 +226,15 @@ impl OperatorHandler {
     }
 }
 
-fn spawn_operator(
-    config: Arc<Config>,
-    metadata_db: MetadataDb,
-    operator: Operator,
-) -> JoinHandle<()> {
+fn spawn_job(config: Arc<Config>, metadata_db: MetadataDb, job: Job) -> JoinHandle<()> {
     tokio::spawn(async move {
-        let operator_desc = operator.to_string();
-        match operator.run(config, metadata_db).await {
+        let job_desc = job.to_string();
+        match job.run(config, metadata_db).await {
             Ok(()) => {
-                info!("operator {} finished running", operator_desc);
+                info!("job {} finished running", job_desc);
             }
             Err(e) => {
-                error!("error running operator {}: {}", operator_desc, e);
+                error!("error running job {}: {}", job_desc, e);
             }
         }
     })

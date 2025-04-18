@@ -22,7 +22,7 @@ struct Args {
 #[derive(Debug, clap::Subcommand)]
 enum Command {
     Dump {
-        /// The name of the dataset to dump. This will be looked up in the dataset definiton directory.
+        /// The name of the dataset to dump. This will be looked up in the dataset definition directory.
         /// Will also be used as a subdirectory in the output path, `<data_dir>/<dataset>`.
         ///
         /// Also accepts a comma-separated list of datasets, which will be dumped in the provided order.
@@ -35,14 +35,16 @@ enum Command {
         #[arg(long, env = "DUMP_IGNORE_DEPS")]
         ignore_deps: bool,
 
-        /// The block number to start from, inclusive. If ommited, defaults to `0`. Note that `dump` is
+        /// The block number to start from, inclusive. If omitted, defaults to `0`. Note that `dump` is
         /// smart about keeping track of what blocks have already been dumped, so you only need to set
-        /// this if you really don't want the data before this block.
+        /// this if you really don't want the data before this block. If starts with "-" then relative
+        /// to the latest block for the dataset.
         #[arg(long, short, default_value = "0", env = "DUMP_START_BLOCK")]
-        start: u64,
+        start: i64,
 
         /// The block number to end at, inclusive. If starts with "+" then relative to `start`. If
-        /// ommited, defaults to a recent block.
+        /// omitted, defaults to a recent block. If starts with "-" then relative to the latest block
+        /// for this dataset.
         #[arg(long, short, env = "DUMP_END_BLOCK")]
         end_block: Option<String>,
 
@@ -57,6 +59,10 @@ enum Command {
         /// but will correlate with this value. Defaults to 4 GB.
         #[arg(long, default_value = "4096", env = "DUMP_PARTITION_SIZE_MB")]
         partition_size_mb: u64,
+
+        /// The maximum number of blocks to be dumped per SQL query at once. Defaults to 100_000.
+        #[arg(long, default_value = "100000", env = "DUMP_INPUT_BATCH_SIZE_BLOCKS")]
+        input_batch_size_blocks: u64,
 
         /// Whether to disable compression when writing parquet files. Defaults to false.
         #[arg(long, env = "DUMP_DISABLE_COMPRESSION")]
@@ -108,6 +114,7 @@ async fn main_inner() -> Result<(), BoxError> {
             end_block,
             n_jobs,
             partition_size_mb,
+            input_batch_size_blocks,
             disable_compression,
             dataset: datasets,
             ignore_deps,
@@ -122,6 +129,7 @@ async fn main_inner() -> Result<(), BoxError> {
                 end_block,
                 n_jobs,
                 partition_size_mb,
+                input_batch_size_blocks,
                 disable_compression,
                 run_every_mins,
             )

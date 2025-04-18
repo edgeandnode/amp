@@ -1,18 +1,10 @@
-use std::sync::{Arc, LazyLock};
+use std::sync::LazyLock;
 
 use crate::{
     temp_metadata_db::{test_metadata_db, TempMetadataDb},
     test_support::{check_blocks, check_provider_file, SnapshotContext},
 };
-use common::{
-    meta_tables::scanned_ranges::ScannedRange,
-    parquet::arrow::async_reader::{AsyncFileReader, ParquetObjectReader},
-    tracing,
-};
-use futures::StreamExt;
-use log::info;
-use metadata_db::{FileMetadata, TableId};
-use object_store::local::LocalFileSystem;
+use common::tracing;
 
 static KEEP_TEMP_DIRS: LazyLock<bool> = LazyLock::new(|| std::env::var("KEEP_TEMP_DIRS").is_ok());
 
@@ -24,59 +16,28 @@ async fn evm_rpc_single() {
 
     let metadata_db = test_metadata_db(*KEEP_TEMP_DIRS).await;
     let blessed = SnapshotContext::blessed(&dataset_name).await.unwrap();
-    let store = Arc::new(LocalFileSystem::new());
+
     // Check the dataset directly against the RPC provider with `check_blocks`.
     check_blocks(dataset_name, 15_000_000, 15_000_000)
         .await
         .expect("blessed data differed from provider");
-    info!("Finished checking blocks against RPC provider, now checking against blessed files");
+
     // Now dump the dataset to a temporary directory and check it again against the blessed files.
     let temp_dump = SnapshotContext::temp_dump(
         &dataset_name,
+        vec![],
         15_000_000,
         15_000_000,
+        1,
         Some(metadata_db),
         *KEEP_TEMP_DIRS,
     )
     .await
     .expect("temp dump failed");
-
-    temp_dump.assert_eq(&blessed).await.unwrap();
-
-    let tbl = TableId {
-        dataset: &dataset_name,
-        dataset_version: None,
-        table: "blocks",
-    };
-    let mut object_meta_stream = metadata_db.stream_nozzle_metadata(tbl);
-
-    while let Some(Ok(FileMetadata {
-        object_meta,
-        range: (range_start, range_end),
-        size_hint,
-        ..
-    })) = object_meta_stream.next().await
-    {
-        let mut reader = ParquetObjectReader::new(store.clone(), object_meta);
-        if let Some(size_hint) = size_hint {
-            reader = reader.with_footer_size_hint(size_hint as usize);
-        }
-        let metadata = reader.get_metadata().await.unwrap();
-        let kv = metadata.file_metadata().key_value_metadata().unwrap();
-        let nozzle_metadata: ScannedRange = serde_json::from_str(
-            kv.into_iter()
-                .find(|kv| kv.key == "nozzle_metadata")
-                .expect("nozzle_metadata not found")
-                .value
-                .clone()
-                .expect("nozzle_metadata value not found")
-                .as_str(),
-        )
-        .expect("failed to deserialize nozzle_metadata");
-
-        assert_eq!(nozzle_metadata.range_start, range_start as u64);
-        assert_eq!(nozzle_metadata.range_end, range_end as u64);
-    }
+    temp_dump
+        .assert_eq(&blessed)
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
@@ -95,12 +56,36 @@ async fn eth_firehose_single() {
     // Now dump the dataset to a temporary directory and check it again against the blessed files.
     let temp_dump = SnapshotContext::temp_dump(
         &dataset_name,
+        vec![],
         15_000_000,
         15_000_000,
+        1,
         None::<TempMetadataDb>,
         *KEEP_TEMP_DIRS,
     )
     .await
     .expect("temp dump failed");
     temp_dump.assert_eq(&blessed).await.unwrap();
+}
+
+#[tokio::test]
+async fn sql_over_eth_firehose_dump() {
+    let dataset_name = "sql_over_eth_firehose";
+    tracing::register_logger();
+
+    let blessed = SnapshotContext::blessed(&dataset_name).await.unwrap();
+
+    // Now dump the dataset to a temporary directory and check blessed files against it.
+    let temp_dump = SnapshotContext::temp_dump(
+        &dataset_name,
+        vec!["eth_firehose"],
+        15_000_000,
+        15_000_000,
+        2,
+        None::<TempMetadataDb>,
+        *KEEP_TEMP_DIRS,
+    )
+    .await
+    .expect("temp dump failed");
+    blessed.assert_eq(&temp_dump).await.unwrap();
 }

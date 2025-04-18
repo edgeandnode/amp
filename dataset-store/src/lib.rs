@@ -202,6 +202,26 @@ impl DatasetStore {
             .map_err(|e| (dataset, e).into())
     }
 
+    pub async fn all_datasets(self: &Arc<Self>) -> Result<Vec<Dataset>, DatasetError> {
+        let all_objs = self
+            .dataset_defs_store()
+            .list_all_shallow()
+            .await
+            .map_err(|e| DatasetError::no_context(e.into()))?;
+
+        let mut datasets = Vec::new();
+        for obj in all_objs {
+            // Unwrap: We listed files.
+            let path = std::path::Path::new(obj.location.filename().unwrap());
+            let stem = path.file_stem().and_then(|s| s.to_str());
+            if stem.is_none() {
+                continue;
+            }
+            datasets.push(self.load_dataset(stem.unwrap()).await?);
+        }
+        Ok(datasets)
+    }
+
     pub async fn load_sql_dataset(
         self: &Arc<Self>,
         dataset: &str,

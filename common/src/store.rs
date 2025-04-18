@@ -1,4 +1,4 @@
-use std::{path::PathBuf, sync::Arc};
+use std::{future::Future, path::PathBuf, sync::Arc};
 
 use bytes::Bytes;
 use fs_err as fs;
@@ -101,13 +101,11 @@ impl Store {
     }
 
     pub async fn get_bytes(&self, location: impl Into<Path>) -> Result<Bytes, StoreError> {
-        Ok(self.store.get(&location.into()).await?.bytes().await?)
+        self.store.get_bytes(location).await
     }
 
     pub async fn get_string(&self, location: impl Into<Path>) -> Result<String, StoreError> {
-        let path = location.into();
-        let bytes = self.get_bytes(path.clone()).await?;
-        String::from_utf8(bytes.to_vec()).map_err(|_| StoreError::NotUtf8(path.to_string()))
+        self.store.get_string(location).await
     }
 
     pub async fn put_string(&self, location: impl Into<Path>, s: String) -> Result<(), StoreError> {
@@ -120,6 +118,10 @@ impl Store {
             .list(Some(&prefix.into()))
             .map_err(|e| e.into())
             .boxed()
+    }
+
+    pub async fn list_all_shallow(&self) -> Result<Vec<ObjectMeta>, StoreError> {
+        Ok(self.store.list_with_delimiter(None).await?.objects)
     }
 
     pub fn bucket(&self) -> Option<&str> {
@@ -198,4 +200,35 @@ fn infer_url(mut data_location: String, base: Option<&std::path::Path>) -> Resul
         }
     };
     Ok(url)
+}
+
+pub trait ObjectStoreExt {
+    fn get_bytes(
+        &self,
+        location: impl Into<Path>,
+    ) -> impl Future<Output = Result<Bytes, StoreError>>;
+    fn get_string(
+        &self,
+        location: impl Into<Path>,
+    ) -> impl Future<Output = Result<String, StoreError>>;
+}
+
+impl<T: ObjectStore> ObjectStoreExt for T {
+    fn get_bytes(
+        &self,
+        location: impl Into<Path>,
+    ) -> impl Future<Output = Result<Bytes, StoreError>> {
+        async move { Ok(self.get(&location.into()).await?.bytes().await?) }
+    }
+
+    fn get_string(
+        &self,
+        location: impl Into<Path>,
+    ) -> impl Future<Output = Result<String, StoreError>> {
+        async move {
+            let path = location.into();
+            let bytes = self.get_bytes(path.clone()).await?;
+            String::from_utf8(bytes.to_vec()).map_err(|_| StoreError::NotUtf8(path.to_string()))
+        }
+    }
 }

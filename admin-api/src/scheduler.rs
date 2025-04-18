@@ -6,7 +6,7 @@ use common::{
 };
 use dataset_store::DatasetStore;
 use dump::{
-    operator::OperatorDesc,
+    job::JobDesc,
     worker::{Action, WorkerAction, WORKER_ACTIONS_PG_CHANNEL},
 };
 use metadata_db::MetadataDb;
@@ -54,6 +54,7 @@ impl Scheduler {
                         &dataset_store.clone(),
                         &config.clone(),
                         1,
+                        100_000,
                         dump::default_partition_size(),
                         &dump::default_parquet_opts(),
                         0,
@@ -94,11 +95,11 @@ impl FullScheduler {
 
     /// Schedule a dump for a new copy of a dataset.
     pub async fn schedule_dataset_dump(&self, dataset: Manifest) -> Result<(), BoxError> {
-        // Scheduling procedure for a new `DumpDataset` operator:
+        // Scheduling procedure for a new `DumpDataset` job:
         // 1. Choose a responsive node.
         // 2. Create a new location for each table.
-        // 3. Register the operator in the metadata db.
-        // 4. Send a `Start` command through `worker_actions` for that operator.
+        // 3. Register the job in the metadata db.
+        // 4. Send a `Start` command through `worker_actions` for that job.
         //
         // The worker node should then receive the notification and start the dump run.
 
@@ -122,18 +123,18 @@ impl FullScheduler {
             locations.push(physical_table.location_id().unwrap());
         }
 
-        let operator_desc = serde_json::to_string(&OperatorDesc::DumpDataset {
+        let job_desc = serde_json::to_string(&JobDesc::DumpDataset {
             dataset: dataset.name,
         })?;
 
-        let operator_id = self
+        let job_id = self
             .metadata_db
-            .schedule_operator(&node_id, &operator_desc, &locations)
+            .schedule_job(&node_id, &job_desc, &locations)
             .await?;
 
         let action = WorkerAction {
             node_id: node_id.to_string(),
-            operator_id,
+            job_id,
             action: Action::Start,
         };
         self.metadata_db

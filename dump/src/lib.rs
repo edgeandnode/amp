@@ -1,6 +1,6 @@
-mod job;
+pub mod job;
+mod job_partition;
 mod metrics; // unused for now
-pub mod operator;
 mod parquet_writer;
 pub mod worker;
 
@@ -33,7 +33,7 @@ use dataset_store::DatasetStore;
 use futures::future::try_join_all;
 use futures::TryFutureExt as _;
 use futures::TryStreamExt;
-use job::Job;
+use job_partition::JobPartition;
 use log::info;
 use log::warn;
 use metadata_db::MetadataDb;
@@ -51,24 +51,20 @@ pub async fn dump_dataset(
     config: &Config,
     n_jobs: u16,
     partition_size: u64,
+    input_batch_size_blocks: u64,
     parquet_opts: &ParquetWriterProperties,
-    start: u64,
-    end_block: Option<u64>,
+    start: i64,
+    end_block: Option<i64>,
 ) -> Result<(), BoxError> {
     use common::meta_tables::scanned_ranges::scanned_ranges_by_table;
-
     let store = config.data_store.clone();
-    let metadata_provider = if let Some(ref url) = config.metadata_db_url {
-        Some(Arc::new(MetadataDb::connect(url).await?))
-    } else {
-        None
-    };
     let env = Arc::new(config.make_runtime_env()?);
-    let catalog = Catalog::for_physical_dataset(dataset, store, metadata_provider.clone()).await?;
-
+    let metadata_db = dataset_store.metadata_db.as_ref();
+    let catalog = Catalog::for_physical_dataset(dataset, store, metadata_db).await?;
     let ctx = Arc::new(QueryContext::for_catalog(catalog, env.clone())?);
+
     // Ensure consistency before starting the dump procedure.
-    consistency_check(dataset, &ctx, metadata_provider).await?;
+    consistency_check(dataset, &ctx, metadata_db).await?;
 
     // Query the scanned ranges, we might already have some ranges if this is not the first dump run
     // for this dataset.
@@ -89,16 +85,16 @@ pub async fn dump_dataset(
     let kind = DatasetKind::from_str(dataset.kind())?;
     match kind {
         DatasetKind::EvmRpc | DatasetKind::Firehose | DatasetKind::Substreams => {
-            run_block_stream_jobs(
+            dump_raw_dataset(
                 n_jobs,
                 ctx,
-                &dataset.name(),
+                dataset.name(),
                 dataset_store,
                 scanned_ranges_by_table,
                 partition_size,
                 parquet_opts,
-                start,
-                end_block,
+                start as BlockNum,
+                end_block.map(|b| b as BlockNum),
             )
             .await?;
         }
@@ -125,6 +121,7 @@ pub async fn dump_dataset(
                 parquet_opts,
                 start,
                 end_block,
+                input_batch_size_blocks,
             )
             .await?;
         }
@@ -135,7 +132,7 @@ pub async fn dump_dataset(
     Ok(())
 }
 
-async fn run_block_stream_jobs(
+async fn dump_raw_dataset(
     n_jobs: u16,
     ctx: Arc<QueryContext>,
     dataset_name: &str,
@@ -176,12 +173,12 @@ async fn run_block_stream_jobs(
 
     let metadata_db = dataset_store.metadata_db.clone();
     let jobs = multiranges.into_iter().enumerate().map(|(i, multirange)| {
-        Arc::new(Job {
+        Arc::new(JobPartition {
             dataset_ctx: ctx.clone(),
             metadata_db: metadata_db.clone(),
             block_streamer: client.clone(),
             multirange,
-            job_id: i as u32,
+            id: i as u32,
             partition_size,
             parquet_opts: parquet_opts.clone(),
             scanned_ranges_by_table: scanned_ranges_by_table.clone(),
@@ -191,7 +188,7 @@ async fn run_block_stream_jobs(
     // Spawn the jobs so they run in parallel, terminating early if any job fails.
     let mut join_handles = vec![];
     for job in jobs {
-        let handle = tokio::spawn(job::run(job));
+        let handle = tokio::spawn(job.run());
 
         // Stagger the start of each job by 1 second in an attempt to avoid client rate limits.
         tokio::time::sleep(Duration::from_secs(1)).await;
@@ -213,95 +210,114 @@ async fn dump_sql_dataset(
     env: &Arc<RuntimeEnv>,
     scanned_ranges_by_table: BTreeMap<String, MultiRange>,
     parquet_opts: &ParquetWriterProperties,
-    start: BlockNum,
-    end: Option<BlockNum>,
+    start: i64,
+    end: Option<i64>,
+    input_batch_size_blocks: u64,
 ) -> Result<(), BoxError> {
-    let physical_dataset = &dst_ctx
-        .catalog()
-        .all_datasets()
-        .await?
-        .into_iter()
-        .next()
-        .unwrap();
+    let physical_dataset = dst_ctx.catalog().all_datasets().await?[0].clone();
+    let mut join_handles = vec![];
+    let dataset_name = dataset.name().to_string();
 
-    for (table, query) in &dataset.queries {
-        info!("dumping table {table} with query {query}");
-        let end = match end {
-            Some(end) => end,
-            None => {
-                match max_end_block(&query, dataset_store.clone(), env.clone()).await? {
-                    Some(end) => end,
-                    None => {
-                        // If the dependencies have synced nothing, we have nothing to do.
-                        warn!("no blocks to dump for {table}, dependencies are empty");
-                        continue;
+    for (table, query) in dataset.queries {
+        let dataset_store = dataset_store.clone();
+        let env = env.clone();
+        let data_store = data_store.clone();
+        let physical_dataset = physical_dataset.clone();
+        let scanned_ranges_by_table = scanned_ranges_by_table.clone();
+        let parquet_opts = parquet_opts.clone();
+        let dataset_name = dataset_name.clone();
+
+        let handle = tokio::spawn(async move {
+            let (start, end) = match (start, end) {
+                (start, Some(end)) if start >= 0 && end >= 0 => {
+                    (start as BlockNum, end as BlockNum)
+                }
+                _ => {
+                    match max_end_block(&query, dataset_store.clone(), env.clone()).await? {
+                        Some(max_end_block) => {
+                            resolve_relative_block_range(start, end, max_end_block)?
+                        }
+                        None => {
+                            // If the dependencies have synced nothing, we have nothing to do.
+                            warn!("no blocks to dump for {table}, dependencies are empty");
+                            return Ok::<(), BoxError>(());
+                        }
                     }
                 }
-            }
-        };
+            };
 
-        let physical_table = {
-            let tables = physical_dataset.tables();
-            tables
-                .into_iter()
-                .find(|t| t.table_name() == table)
-                .unwrap()
-        };
+            let physical_table = {
+                let tables = physical_dataset.tables();
+                tables.into_iter().find(|t| t.table_name() == table).unwrap()
+            };
 
-        let src_ctx = dataset_store
-            .clone()
-            .ctx_for_sql(&query, env.clone())
-            .await?;
-        let plan = src_ctx.plan_sql(query.clone()).await?;
-        let is_incr = is_incremental(&plan)?;
+            let src_ctx = dataset_store
+                .clone()
+                .ctx_for_sql(&query, env.clone())
+                .await?;
+            let plan = src_ctx.plan_sql(query.clone()).await?;
+            let is_incr = is_incremental(&plan)?;
 
-        if is_incr {
-            let ranges_to_scan = scanned_ranges_by_table[table].complement(start, end);
-            for (start, end) in ranges_to_scan.ranges {
+            if is_incr {
+                let ranges_to_scan = scanned_ranges_by_table[&table].complement(start, end);
+                for (start, end) in ranges_to_scan.ranges {
+                    let mut start = start;
+                    while start <= end {
+                        let batch_end = std::cmp::min(start + input_batch_size_blocks - 1, end);
+                        info!(
+                            "dumping {} between blocks {start} and {batch_end}",
+                            physical_table.table_ref()
+                        );
+
+                        dump_sql_query(
+                            &dataset_store,
+                            &query,
+                            &env,
+                            start,
+                            batch_end,
+                            &physical_table,
+                            &parquet_opts,
+                        )
+                        .await?;
+                        start = batch_end + 1;
+                    }
+                }
+            } else {
+                let Some(metadata_db) = dataset_store.metadata_db.as_ref() else {
+                    return Err("metadata_db is required for entire materialization".into());
+                };
+                let physical_table = PhysicalTable::try_next_revision(
+                    &physical_table.logical_table(),
+                    &data_store,
+                    &dataset_name,
+                    metadata_db.clone(),
+                )
+                .await?;
                 info!(
-                    "dumping {} between blocks {start} and {end}",
-                    physical_table.table_ref()
+                    "dumping entire {} to {}",
+                    physical_table.table_ref(),
+                    // Unwrap: we know this is a physical table with a URL
+                    physical_table.url().unwrap()
                 );
-
                 dump_sql_query(
-                    dataset_store,
+                    &dataset_store,
                     &query,
-                    env,
+                    &env,
                     start,
                     end,
                     &physical_table,
-                    parquet_opts,
+                    &parquet_opts,
                 )
                 .await?;
             }
-        } else {
-            let Some(metadata_db) = dataset_store.metadata_db.as_ref() else {
-                return Err("metadata_db is required for entire materialization".into());
-            };
-            let physical_table = PhysicalTable::try_next_revision(
-                &physical_table.logical_table(),
-                &data_store,
-                dataset.name(),
-                metadata_db.clone(),
-            )
-            .await?;
-            info!(
-                "dumping entire {} to {}",
-                physical_table.table_ref(),
-                physical_table.url().expect("url is required"),
-            );
-            dump_sql_query(
-                dataset_store,
-                &query,
-                env,
-                start,
-                end,
-                &physical_table,
-                parquet_opts,
-            )
-            .await?;
-        }
+
+            Ok::<(), BoxError>(())
+        });
+
+        join_handles.push(async { handle.err_into().await.and_then(|x| x) });
     }
+
+    try_join_all(join_handles).await?;
 
     Ok(())
 }
@@ -485,3 +501,52 @@ async fn consistency_check<T: AsRef<MetadataDb>>(
     }
     Ok(())
 }
+
+fn resolve_relative_block_range(
+    start: i64,
+    end: Option<i64>,
+    latest_block: BlockNum,
+) -> Result<(BlockNum, BlockNum), BoxError> {
+    if start >= 0 {
+        if let Some(end) = end {
+            if end > 0 {
+                return Ok((start as BlockNum, end as BlockNum));
+            }
+        }
+    }
+
+    let start_block = if start >= 0 {
+        start
+    } else {
+        latest_block as i64 + start // Using + because start is negative
+    };
+
+    if start_block < 0 {
+        return Err(format!("start block {start_block} is invalid").into());
+    }
+
+    let end_block = match end {
+        // Absolute block number
+        Some(e) if e > 0 => e as BlockNum,
+
+        // Relative to latest block
+        Some(e) => {
+            let end = latest_block as i64 + e; // Using + because e is negative
+            if end < start_block {
+                return Err(format!(
+                    "end_block {end} must be greater than or equal to start_block {start_block}"
+                )
+                .into());
+            }
+            end as BlockNum
+        }
+
+        // Default to latest block
+        None => latest_block,
+    };
+
+    Ok((start_block as BlockNum, end_block))
+}
+
+#[cfg(test)]
+mod tests;
