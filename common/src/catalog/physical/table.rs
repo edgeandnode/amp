@@ -6,10 +6,7 @@ use datafusion::{
     common::{
         stats::Precision, Column as LogicalColumn, ColumnStatistics, Constraints, Statistics,
     },
-    datasource::{
-        listing::{ListingTable, PartitionedFile},
-        TableType,
-    },
+    datasource::{listing::PartitionedFile, TableType},
     error::{DataFusionError, Result as DataFusionResult},
     logical_expr::{Expr as LogicalExpr, LogicalPlan, SortExpr, TableProviderFilterPushDown},
     parquet::arrow::async_reader::ParquetObjectReader,
@@ -64,18 +61,18 @@ pub enum PhysicalTable {
         /// The location ID of the table in the metadata provider.
         location_id: LocationId,
     },
-    /// For memory tables, streaming tables, or other tables that are
-    /// not backed by an object store but may be present in a nozzle
-    /// dataset. These may be used for cached statistics or metadata
-    /// providers for dump tables.
-    Other {
-        /// The table provider that is not backed by an object store.
-        table_provider: Arc<dyn TableProvider>,
-        /// The logical table that is not backed by an object store.
-        logical_table: Arc<LogicalTable>,
-        /// The table reference for the table that is not backed by an object store.
-        table_ref: Arc<TableReference>,
-    },
+    // /// For memory tables, streaming tables, or other tables that are
+    // /// not backed by an object store but may be present in a nozzle
+    // /// dataset. These may be used for cached statistics or metadata
+    // /// providers for dump tables.
+    // Other {
+    //     /// The table provider that is not backed by an object store.
+    //     table_provider: Arc<dyn TableProvider>,
+    //     /// The logical table that is not backed by an object store.
+    //     logical_table: Arc<LogicalTable>,
+    //     /// The table reference for the table that is not backed by an object store.
+    //     table_ref: Arc<TableReference>,
+    // },
 }
 
 /// Methods for creating a [`PhysicalTable`]
@@ -177,14 +174,13 @@ impl PhysicalTable {
         use PhysicalTable::*;
         match self {
             Local { dump, .. } | Optimized { dump, .. } => dump.logical_table(),
-            Other { logical_table, .. } => logical_table.as_ref().clone(),
+            // Other { logical_table, .. } => logical_table.as_ref().clone(),
         }
     }
     pub fn table_ref(&self) -> Arc<TableReference> {
         use PhysicalTable::*;
         match self {
             Local { dump, .. } | Optimized { dump, .. } => dump.table_ref(),
-            Other { table_ref, .. } => table_ref.clone(),
         }
     }
 
@@ -192,7 +188,6 @@ impl PhysicalTable {
         use PhysicalTable::*;
         match self {
             Local { dump, .. } | Optimized { dump, .. } => dump.dataset.clone(),
-            Other { table_ref, .. } => table_ref.schema().unwrap().to_string(),
         }
     }
 
@@ -200,7 +195,6 @@ impl PhysicalTable {
         use PhysicalTable::*;
         match self {
             Local { dump, .. } | Optimized { dump, .. } => dump.network.clone(),
-            Other { logical_table, .. } => logical_table.network.clone(),
         }
     }
 
@@ -208,11 +202,6 @@ impl PhysicalTable {
         use PhysicalTable::*;
         match self {
             Local { dump, .. } | Optimized { dump, .. } => dump.table_id(),
-            Other { table_ref, .. } => TableId {
-                dataset: table_ref.schema().unwrap(),
-                dataset_version: None,
-                table: table_ref.table(),
-            },
         }
     }
 
@@ -220,7 +209,6 @@ impl PhysicalTable {
         use PhysicalTable::*;
         match self {
             Local { dump, .. } | Optimized { dump, .. } => dump.table_name(),
-            Other { table_ref, .. } => table_ref.table(),
         }
     }
 
@@ -228,16 +216,6 @@ impl PhysicalTable {
         use PhysicalTable::*;
         match self {
             Local { dump, .. } | Optimized { dump, .. } => Some(dump.url().clone()),
-            Other { table_provider, .. } => table_provider
-                .as_any()
-                .downcast_ref::<ListingTable>()
-                .and_then(|t| {
-                    t.table_paths()
-                        .first()
-                        .map(|url| Url::parse(url.as_str()).ok())
-                        // Unwrap: we know that the path is valid because it is a from a ListingTable
-                        .unwrap()
-                }),
         }
     }
 
@@ -245,26 +223,6 @@ impl PhysicalTable {
         use PhysicalTable::*;
         match self {
             Local { dump, .. } | Optimized { dump, .. } => Ok(dump.path().clone()),
-            Other {
-                table_provider,
-                table_ref,
-                ..
-            } => {
-                let listing_table = table_provider
-                    .as_any()
-                    .downcast_ref::<ListingTable>()
-                    .ok_or(DataFusionError::Internal(format!(
-                        "Failed to downcast to ListingTable for table: {table_ref:?}"
-                    )))?;
-                let path = listing_table
-                    .table_paths()
-                    .first()
-                    .ok_or(DataFusionError::Internal(format!(
-                        "ListingTable {table_ref} "
-                    )))?;
-
-                Ok(Path::from_url_path(path)?)
-            }
         }
     }
 
@@ -272,9 +230,6 @@ impl PhysicalTable {
         use PhysicalTable::*;
         match self {
             Local { object_store, .. } | Optimized { object_store, .. } => Ok(object_store.clone()),
-            Other { .. } => Err(DataFusionError::Internal(
-                "PhysicalTable::object_store: Other table not supported".to_string(),
-            )),
         }
     }
 
@@ -282,7 +237,6 @@ impl PhysicalTable {
         use PhysicalTable::*;
         match self {
             Local { .. } | Optimized { .. } => false,
-            Other { logical_table, .. } => logical_table.is_meta(),
         }
     }
 
@@ -333,7 +287,6 @@ impl PhysicalTable {
                     })
                     .collect()
             }
-            _ => unreachable!(),
         }
     }
 
@@ -341,7 +294,6 @@ impl PhysicalTable {
         use PhysicalTable::*;
         match self {
             Local { dump, .. } | Optimized { dump, .. } => dump.order_exprs.clone(),
-            _ => unreachable!(),
         }
     }
 
@@ -379,7 +331,6 @@ impl PhysicalTable {
                     .map_ok(|(start, end)| (start as u64, end as u64))
                     .boxed())
             }
-            Other { .. } => unimplemented!("stream_scanned_ranges not implemented for Other table"),
         }
     }
 
@@ -400,7 +351,6 @@ impl PhysicalTable {
                     .map_err(|e| DataFusionError::External(Box::new(e)))
                     .boxed())
             }
-            _ => unimplemented!(),
         }
     }
 
@@ -413,7 +363,6 @@ impl PhysicalTable {
             Optimized { .. } => Err(DataFusionError::Internal(
                 "PhysicalTable::stream_object_readers: Optimized table not supported".to_string(),
             )),
-            _ => unimplemented!(),
         }
     }
 
@@ -433,9 +382,6 @@ impl PhysicalTable {
                 .stream_nozzle_metadata(dump.table_id())
                 .map_err(|e| DataFusionError::External(Box::new(e)))
                 .boxed()),
-            Other { .. } => Err(DataFusionError::Internal(
-                "PhysicalTable::stream_nozzle_metadata: Other table not supported".to_string(),
-            )),
         }
     }
 
@@ -535,38 +481,6 @@ impl TryFrom<Arc<dyn TableProvider>> for PhysicalTable {
     }
 }
 
-impl
-    TryFrom<(
-        Arc<dyn TableProvider>,
-        Option<Arc<LogicalTable>>,
-        Option<Arc<TableReference>>,
-    )> for PhysicalTable
-{
-    type Error = DataFusionError;
-    fn try_from(
-        (table_provider, logical_table, table_ref): (
-            Arc<dyn TableProvider>,
-            Option<Arc<LogicalTable>>,
-            Option<Arc<TableReference>>,
-        ),
-    ) -> Result<Self, Self::Error> {
-        if let Ok(table) = PhysicalTable::try_from(table_provider.clone()) {
-            Ok(table)
-        } else if let (Some(logical_table), Some(table_ref)) = (logical_table, table_ref) {
-            Ok(PhysicalTable::Other {
-                table_provider,
-                logical_table,
-                table_ref,
-            })
-        } else {
-            Err(DataFusionError::Internal(format!(
-                "Failed to downcast to Table for table: {:?}",
-                table_provider.type_id()
-            )))
-        }
-    }
-}
-
 impl TableProvider for PhysicalTable {
     fn as_any(&self) -> &dyn Any {
         self
@@ -576,16 +490,11 @@ impl TableProvider for PhysicalTable {
         use PhysicalTable::*;
         match self {
             Local { dump, .. } | Optimized { dump, .. } => dump.schema.clone(),
-            Other { table_provider, .. } => table_provider.schema(),
         }
     }
 
     fn table_type(&self) -> TableType {
-        use PhysicalTable::*;
-        match self {
-            Other { table_provider, .. } => table_provider.table_type(),
-            _ => TableType::Base,
-        }
+        TableType::Base
     }
 
     // Not using `async_trait` here as this is a wrapper for the
@@ -606,7 +515,6 @@ impl TableProvider for PhysicalTable {
     {
         use PhysicalTable::*;
         match self {
-            Other { table_provider, .. } => table_provider.scan(state, projection, filters, limit),
             Local { dump, .. } | Optimized { dump, .. } => dump
                 .scan(
                     state,
@@ -620,44 +528,23 @@ impl TableProvider for PhysicalTable {
     }
 
     fn get_table_definition(&self) -> Option<&str> {
-        use PhysicalTable::*;
-        match self {
-            Other { table_provider, .. } => table_provider.get_table_definition(),
-            _ => None,
-        }
+        None
     }
 
     fn constraints(&self) -> Option<&Constraints> {
-        use PhysicalTable::*;
-        match self {
-            Other { table_provider, .. } => table_provider.constraints(),
-            _ => None,
-        }
+        None
     }
 
     fn get_column_default(&self, _column: &str) -> Option<&LogicalExpr> {
-        use PhysicalTable::*;
-        match self {
-            Other { table_provider, .. } => table_provider.get_column_default(_column),
-            _ => None,
-        }
+        None
     }
 
     fn get_logical_plan(&self) -> Option<Cow<LogicalPlan>> {
-        use PhysicalTable::*;
-        match self {
-            Other { table_provider, .. } => table_provider.get_logical_plan(),
-            _ => None,
-        }
+        None
     }
 
     fn statistics(&self) -> Option<Statistics> {
-        use PhysicalTable::*;
-        match self {
-            Local { .. } => None,
-            Optimized { .. } => None,
-            Other { table_provider, .. } => table_provider.statistics(),
-        }
+        None
     }
 
     fn supports_filters_pushdown(
@@ -670,7 +557,6 @@ impl TableProvider for PhysicalTable {
                 TableProviderFilterPushDown::Unsupported;
                 filters.len()
             ]),
-            Other { table_provider, .. } => table_provider.supports_filters_pushdown(filters),
         }
     }
 }
