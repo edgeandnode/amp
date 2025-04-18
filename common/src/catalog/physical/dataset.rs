@@ -12,7 +12,7 @@ use metadata_db::{LocationId, MetadataDb, TableId};
 
 use crate::{BoxError, Store};
 
-use super::{table::validate_name, LogicalDataset, PhysicalTable};
+use super::{dump::validate_name, LogicalDataset, PhysicalTable};
 
 #[derive(Clone, Debug)]
 pub struct PhysicalDataset {

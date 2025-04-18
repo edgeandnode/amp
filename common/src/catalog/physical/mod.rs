@@ -1,4 +1,5 @@
 mod dataset;
+mod dump;
 mod table;
 
 use datafusion::{
@@ -6,11 +7,11 @@ use datafusion::{
     common::{exec_err, HashMap},
     error::{DataFusionError, Result as DataFusionResult},
 };
+use dump::validate_name;
 use std::{
     any::Any,
     sync::{Arc, RwLock},
 };
-use table::validate_name;
 
 pub use dataset::PhysicalDataset;
 use metadata_db::MetadataDb;
