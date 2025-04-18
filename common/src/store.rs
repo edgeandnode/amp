@@ -136,7 +136,7 @@ impl std::fmt::Display for Store {
 /// Returns a tuple of (object_store, bucket).
 /// `bucket` is `None` for local filesystem stores.
 pub fn infer_object_store(url: &Url) -> Result<(Arc<dyn ObjectStore>, Option<String>), BoxError> {
-    let (object_store_scheme, _) = ObjectStoreScheme::parse(&url)?;
+    let (object_store_scheme, _) = ObjectStoreScheme::parse(url)?;
 
     match object_store_scheme {
         ObjectStoreScheme::GoogleCloudStorage => {

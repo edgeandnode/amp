@@ -3,7 +3,7 @@ mod dump;
 mod table;
 
 use datafusion::{
-    catalog::{CatalogProvider, SchemaProvider, TableProvider},
+    catalog::{CatalogProvider, SchemaProvider},
     common::{exec_err, HashMap},
     error::{DataFusionError, Result as DataFusionResult},
 };
@@ -61,7 +61,7 @@ impl Catalog {
 
         let name = schema.name();
 
-        validate_name(&name)?;
+        validate_name(name)?;
 
         catalog.register_schema(name, schema.clone())?;
 
@@ -176,22 +176,6 @@ impl Catalog {
             .collect())
     }
 
-    pub async fn all_table_providers(&self) -> DataFusionResult<Vec<Arc<dyn TableProvider>>> {
-        let datasets = self.datasets.read().map_err(|e| {
-            DataFusionError::Execution(format!("Failed to acquire read lock on datasets: {}", e))
-        })?;
-        let mut tables = Vec::new();
-        for (_, dataset) in datasets.iter() {
-            let table_names = dataset.table_names();
-            for ref name in table_names {
-                // Unwrap: We know the table exists because we just got the name from the dataset
-                let table = dataset.table(name).await?.unwrap();
-                tables.push(table.clone());
-            }
-        }
-        Ok(tables)
-    }
-
     pub async fn all_tables(&self) -> DataFusionResult<Vec<Arc<PhysicalTable>>> {
         let datasets = self.datasets.read().map_err(|e| {
             DataFusionError::Execution(format!("Failed to acquire read lock on datasets: {}", e))
@@ -292,10 +276,10 @@ impl CatalogProvider for Catalog {
                 .insert(name.to_string(), dataset.clone())
                 .map(|dataset| dataset as Arc<dyn SchemaProvider>))
         } else {
-            return Err(DataFusionError::Plan(format!(
+            Err(DataFusionError::Plan(format!(
                 "Schema {} is not a PhysicalDataset",
                 name
-            )));
+            )))
         }
     }
 

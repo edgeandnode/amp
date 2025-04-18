@@ -131,7 +131,7 @@ impl TryFrom<(Arc<ParquetMetaData>, &ObjectMeta)> for ScannedRange {
                 )))?;
 
         let scanned_range_key_value_pair = kv_metadata
-            .into_iter()
+            .iter()
             .find(|key_value| key_value.key.as_str() == METADATA_KEY)
             .ok_or(crate::ArrowError::ParquetError(format!(
                 "Missing key: {} in file metadata for file {}",

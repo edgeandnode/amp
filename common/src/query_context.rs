@@ -326,7 +326,6 @@ async fn create_empty_tables(
     Ok(())
 }
 
-
 async fn create_catalog_schema(ctx: &SessionContext, schema_name: String) -> Result<(), Error> {
     let command = DdlStatement::CreateCatalogSchema(CreateCatalogSchema {
         schema_name,

@@ -42,7 +42,7 @@ impl MultiRange {
             let mut end = start;
 
             // Continue extending the range end as long as consecutive elements are encountered.
-            while iter.peek().map_or(false, |&next| *next == end + 1) {
+            while iter.peek().is_some_and(|&next| *next == end + 1) {
                 end = *iter.next().unwrap();
             }
 

@@ -76,7 +76,7 @@ impl PhysicalDataset {
                         )?
                     } else if !read_only {
                         PhysicalTable::try_next_revision(
-                            &logical_table,
+                            logical_table,
                             &data_store,
                             &dataset_name,
                             metadata_provider,
@@ -214,13 +214,13 @@ impl SchemaProvider for PhysicalDataset {
                 .write()
                 .map_err(|e| DataFusionError::Execution(e.to_string()))?;
             tables.insert(name.clone(), table.clone());
-            return Ok(Some(table));
+            Ok(Some(table))
         } else {
-            return Err(DataFusionError::Plan(format!(
+            Err(DataFusionError::Plan(format!(
                 "Table {} is not a valid table. Expected a Table, found {:?}",
                 name,
                 table.as_ref().type_id()
-            )));
+            )))
         }
     }
 

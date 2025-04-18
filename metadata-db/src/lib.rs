@@ -456,7 +456,7 @@ impl MetadataDb {
                     } else {
                         Some(version)
                     };
-                    Ok((
+                    Ok(Some((
                         file_name,
                         object_store::ObjectMeta {
                             location,
@@ -465,8 +465,7 @@ impl MetadataDb {
                             e_tag,
                             version,
                         },
-                    ))
-                    .map(Some)
+                    )))
                 },
             )
             .boxed()
@@ -514,14 +513,15 @@ impl MetadataDb {
     /// Inserts a new file metadata entry into the database.
     pub async fn insert_nozzle_metadata(
         &self,
+        FileMetadata {
+            object_meta,
+            range: (range_start, range_end),
+            row_count,
+            data_size,
+            size_hint,
+        }: FileMetadata,
         location_id: i64,
         file_name: String,
-        range_start: i64,
-        range_end: i64,
-        row_count: i64,
-        object_meta: ObjectMeta,
-        data_size: i64,
-        size_hint: i64,
         created_at: (i64, i32),
     ) -> Result<(), Error> {
         let sql = "

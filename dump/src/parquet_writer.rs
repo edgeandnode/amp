@@ -13,7 +13,7 @@ use common::{parquet, BlockNum, BoxError, QueryContext, TableRows, Timestamp};
 use datafusion::datasource::TableProvider;
 use futures::TryStreamExt;
 use log::debug;
-use metadata_db::MetadataDb;
+use metadata_db::{MetadataDb, FileMetadata as NozzleFileMetadata};
 use object_store::buffered::BufWriter;
 use object_store::path::Path;
 use object_store::{GetOptions, GetRange, GetResult, GetResultPayload, ObjectMeta, ObjectStore};
@@ -120,14 +120,15 @@ pub async fn insert_scanned_range(
 
     metadata_db
         .insert_nozzle_metadata(
+            NozzleFileMetadata {
+                object_meta,
+                range: (range_start, range_end),
+                data_size: Some(data_size),
+                size_hint: Some(size_hint as i64),
+                row_count: Some(row_count),
+            },
             location_id,
-            file_name.clone(),
-            range_start,
-            range_end,
-            row_count,
-            object_meta,
-            data_size,
-            size_hint as i64,
+            file_name,
             (secs, nanos),
         )
         .await?;

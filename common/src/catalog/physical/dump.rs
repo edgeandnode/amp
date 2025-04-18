@@ -130,7 +130,7 @@ impl DumpListingTable {
     pub(super) fn table_id<'a>(&'a self) -> TableId<'a> {
         TableId::<'a> {
             dataset: &self.dataset,
-            dataset_version: self.dataset_version.as_ref().map(String::as_str),
+            dataset_version: self.dataset_version.as_deref(),
             table: &self.name,
         }
     }
@@ -250,7 +250,7 @@ impl DumpListingTable {
                         )))?;
 
                 let nozzle_metadata_key_value_pair = kv_metadata
-                    .into_iter()
+                    .iter()
                     .find(|KeyValue { key, .. }| key == METADATA_KEY)
                     .ok_or(crate::ArrowError::ParquetError(format!(
                         "Missing key: {} in file metadata for file {}",
@@ -374,7 +374,7 @@ impl DumpListingTable {
     }
 }
 
-#[derive(Clone, Debug, Ord, Eq)]
+#[derive(Clone, Debug)]
 pub(super) struct BlockRange(pub i64, pub i64);
 impl From<(i64, i64)> for BlockRange {
     fn from((start, end): (i64, i64)) -> Self {
@@ -388,6 +388,8 @@ impl PartialEq for BlockRange {
     }
 }
 
+impl Eq for BlockRange {}
+
 impl PartialOrd for BlockRange {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         if self.0 == other.0 && self.1 == other.1 {
@@ -398,6 +400,20 @@ impl PartialOrd for BlockRange {
             Some(Ordering::Less)
         } else {
             Some(Ordering::Greater)
+        }
+    }
+}
+
+impl Ord for BlockRange {
+    fn cmp(&self, other: &Self) -> Ordering {
+        if self.0 == other.0 && self.1 == other.1 {
+            Ordering::Equal
+        } else if self.0 == other.0 {
+            self.1.cmp(&other.1)
+        } else if self.0 < other.0 {
+            Ordering::Less
+        } else {
+            Ordering::Greater
         }
     }
 }
@@ -457,9 +473,7 @@ fn update_table_stats(
     for index in columns_to_update {
         if let (Some(table_stats), Some(file_stats)) = (
             table_stats.column_statistics.get_mut(*index),
-            file_stats
-                .map(|f| f.column_statistics.get(*index))
-                .flatten(),
+            file_stats.and_then(|f| f.column_statistics.get(*index)),
         ) {
             table_stats.max_value = table_stats.max_value.max(&file_stats.max_value);
             table_stats.min_value = table_stats.min_value.min(&file_stats.min_value);
@@ -467,9 +481,9 @@ fn update_table_stats(
             table_stats.distinct_count = table_stats.distinct_count.add(&file_stats.distinct_count);
             table_stats.sum_value = table_stats.sum_value.add(&file_stats.sum_value);
         } else {
-            return Err(DataFusionError::Execution(
-                format!("Column statistics not found for index: {index}").into(),
-            ));
+            return Err(DataFusionError::Execution(format!(
+                "Column statistics not found for index: {index}"
+            )));
         }
     }
     if let Some(file_stats) = file_stats {
