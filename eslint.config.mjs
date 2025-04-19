@@ -1,56 +1,40 @@
-import { fixupPluginRules } from "@eslint/compat"
-import { FlatCompat } from "@eslint/eslintrc"
-import js from "@eslint/js"
-import tsParser from "@typescript-eslint/parser"
-import codegen from "eslint-plugin-codegen"
-import _import from "eslint-plugin-import"
+import * as effectEslint from "@effect/eslint-plugin"
+import eslint from "@eslint/js"
+import * as tsResolver from "eslint-import-resolver-typescript"
+import importPlugin from "eslint-plugin-import-x"
 import simpleImportSort from "eslint-plugin-simple-import-sort"
 import sortDestructureKeys from "eslint-plugin-sort-destructure-keys"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
+import tseslint from "typescript-eslint"
 
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
-const compat = new FlatCompat({
-  baseDirectory: __dirname,
-  recommendedConfig: js.configs.recommended,
-  allConfig: js.configs.all
-})
-
-export default [
+export default tseslint.config(
   {
     ignores: ["**/dist", "**/build", "**/docs", "**/*.md"]
   },
-  ...compat.extends(
-    "eslint:recommended",
-    "plugin:@typescript-eslint/eslint-recommended",
-    "plugin:@typescript-eslint/recommended",
-    "plugin:@effect/recommended"
-  ),
+  eslint.configs.recommended,
+  tseslint.configs.strict,
+  importPlugin.flatConfigs.recommended,
+  importPlugin.flatConfigs.typescript,
+  effectEslint.configs.dprint,
   {
     plugins: {
-      import: fixupPluginRules(_import),
-      "sort-destructure-keys": sortDestructureKeys,
       "simple-import-sort": simpleImportSort,
-      codegen
+      "sort-destructure-keys": sortDestructureKeys
     },
     languageOptions: {
-      parser: tsParser,
+      parser: tseslint.parser,
       ecmaVersion: 2018,
       sourceType: "module"
     },
     settings: {
-      "import/parsers": {
-        "@typescript-eslint/parser": [".ts", ".tsx"]
-      },
-      "import/resolver": {
-        typescript: {
+      "import-x/resolver": {
+        name: "tsResolver",
+        resolver: tsResolver,
+        options: {
           alwaysTryTypes: true
         }
       }
     },
     rules: {
-      "codegen/codegen": "error",
       "no-fallthrough": "off",
       "no-irregular-whitespace": "off",
       "object-shorthand": "error",
@@ -67,11 +51,13 @@ export default [
       "require-yield": "off",
       "prefer-rest-params": "off",
       "prefer-spread": "off",
-      "import/first": "error",
-      "import/newline-after-import": "error",
-      "import/no-duplicates": "error",
-      "import/no-unresolved": "off",
-      "import/order": "off",
+      "import-x/export": "off",
+      "import-x/first": "error",
+      "import-x/newline-after-import": "error",
+      "import-x/no-duplicates": "error",
+      "import-x/no-named-as-default-member": "off",
+      "import-x/no-unresolved": "off",
+      "import-x/order": "off",
       "simple-import-sort/imports": "off",
       "sort-destructure-keys/sort-destructure-keys": "error",
       "deprecation/deprecation": "off",
@@ -82,12 +68,22 @@ export default [
           readonly: "generic"
         }
       ],
-      "@typescript-eslint/member-delimiter-style": 0,
-      "@typescript-eslint/no-non-null-assertion": "off",
+      "@typescript-eslint/ban-ts-comment": "off",
       "@typescript-eslint/ban-types": "off",
+      "@typescript-eslint/camelcase": "off",
+      "@typescript-eslint/explicit-module-boundary-types": "off",
+      "@typescript-eslint/consistent-type-imports": "warn",
+      "@typescript-eslint/explicit-function-return-type": "off",
+      "@typescript-eslint/interface-name-prefix": "off",
+      "@typescript-eslint/member-delimiter-style": 0,
+      "@typescript-eslint/no-array-constructor": "off",
       "@typescript-eslint/no-explicit-any": "off",
       "@typescript-eslint/no-empty-interface": "off",
-      "@typescript-eslint/consistent-type-imports": "warn",
+      "@typescript-eslint/no-empty-object-type": "off",
+      "@typescript-eslint/no-invalid-void-type": "off",
+      "@typescript-eslint/no-namespace": "off",
+      "@typescript-eslint/no-non-null-assertion": "off",
+      "@typescript-eslint/no-unsafe-function-type": "off",
       "@typescript-eslint/no-unused-vars": [
         "error",
         {
@@ -95,14 +91,9 @@ export default [
           varsIgnorePattern: "^_"
         }
       ],
-      "@typescript-eslint/ban-ts-comment": "off",
-      "@typescript-eslint/camelcase": "off",
-      "@typescript-eslint/explicit-function-return-type": "off",
-      "@typescript-eslint/explicit-module-boundary-types": "off",
-      "@typescript-eslint/interface-name-prefix": "off",
-      "@typescript-eslint/no-array-constructor": "off",
       "@typescript-eslint/no-use-before-define": "off",
-      "@typescript-eslint/no-namespace": "off",
+      "@typescript-eslint/prefer-for-of": "off",
+      "@typescript-eslint/unified-signatures": "off",
       "@effect/dprint": [
         "error",
         {
@@ -120,9 +111,6 @@ export default [
     }
   },
   {
-    files: ["typescript/*/src/**/*", "typescript/*/test/**/*"],
-    rules: {
-      "no-console": "error"
-    }
+    files: ["typescript/*/src/**/*", "typescript/*/scripts/**/*", "typescript/*/test/**/*"],
   }
-]
+)

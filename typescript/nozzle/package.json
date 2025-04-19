@@ -14,25 +14,34 @@
     "linkDirectory": false
   },
   "bin": "./bin.ts",
+  "main": "./src/index.ts",
+  "module": "./src/index.ts",
   "scripts": {
     "build": "tsc -b tsconfig.build.json && bun ./scripts/build.ts",
     "nozzl": "bun ./src/cli/main.ts"
   },
   "dependencies": {
-    "@bufbuild/protobuf": "^2.2.5",
-    "@connectrpc/connect": "^2.0.2",
     "@connectrpc/connect-node": "^2.0.2",
     "@effect/cli": "^0.59.11",
-    "@effect/platform": "^0.80.11",
     "@effect/platform-node": "^0.76.21",
-    "apache-arrow": "^19.0.1",
-    "effect": "^3.14.11",
     "jiti": "^2.4.2"
+  },
+  "peerDependencies": {
+    "@bufbuild/protobuf": "^2.2.5",
+    "@connectrpc/connect": "^2.0.2",
+    "@effect/platform": "^0.80.11",
+    "apache-arrow": "^19.0.1",
+    "effect": "^3.14.11"
   },
   "devDependencies": {
     "@bufbuild/buf": "^1.52.1",
     "@bufbuild/protoc-gen-es": "^2.2.5",
+    "@connectrpc/connect": "^2.0.2",
+    "@effect/platform": "^0.80.11",
+    "@effect/platform-node": "^0.76.21",
     "@types/node": "^22.14.1",
+    "apache-arrow": "^19.0.1",
+    "effect": "^3.14.11",
     "glob": "^11.0.1"
   }
 }
