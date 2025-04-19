@@ -1,3 +1,4 @@
+import { NodeContext, NodeRuntime } from "@effect/platform-node"
 import { FileSystem } from "@effect/platform/FileSystem"
 import * as Array from "effect/Array"
 import * as Effect from "effect/Effect"
@@ -8,7 +9,6 @@ import * as String from "effect/String"
 import { FsUtils, FsUtilsLive } from "./lib/FsUtils.js"
 import type { PackageJson } from "./lib/Package.js"
 import { PackageContext, PackageContextLive } from "./lib/Package.js"
-import { NodeContext, NodeRuntime } from "@effect/platform-node"
 
 const program = Effect.gen(function*() {
   const fsUtils = yield* FsUtils
@@ -18,12 +18,12 @@ const program = Effect.gen(function*() {
   const modules = yield* fsUtils.glob("*.ts", {
     nodir: true,
     cwd: "src",
-    ignore: ["index.ts"],
+    ignore: ["index.ts"]
   }).pipe(
     Effect.map(Array.map(String.replace(/\.ts$/, ""))),
     Effect.map(Array.sort(Order.string)),
-    Effect.withSpan("Pack-v2/discoverModules"),
-  );
+    Effect.withSpan("Pack-v2/discoverModules")
+  )
 
   const buildPackageJson = Effect.sync(() => {
     const out: Record<string, any> = {
@@ -33,7 +33,7 @@ const program = Effect.gen(function*() {
       type: ctx.type,
       license: ctx.license,
       repository: ctx.repository,
-      sideEffects: ctx.sideEffects,
+      sideEffects: ctx.sideEffects
     }
 
     const addOptional = (key: keyof PackageJson) => {
@@ -56,21 +56,21 @@ const program = Effect.gen(function*() {
       "./package.json": "./package.json",
       ".": {
         types: "./dist/index.d.ts",
-        default: "./dist/index.js",
+        default: "./dist/index.js"
       }
     }
 
     if (Array.length(modules) > 0) {
       out.exports = {
         ...out.exports,
-        ...Record.fromEntries(modules.map(_ => {
+        ...Record.fromEntries(modules.map((_) => {
           const conditions = {
             types: `./dist/${_}.d.ts`,
-            default: `./dist/${_}.js`,
+            default: `./dist/${_}.js`
           }
 
           return [`./${_}`, conditions]
-        })),
+        }))
       }
     }
 
@@ -78,9 +78,9 @@ const program = Effect.gen(function*() {
   })
 
   const writePackageJson = buildPackageJson.pipe(
-    Effect.map(_ => JSON.stringify(_, null, 2)),
-    Effect.flatMap(_ => fs.writeFileString("dist/package.json", _)),
-    Effect.withSpan("Pack-v2/buildPackageJson"),
+    Effect.map((_) => JSON.stringify(_, null, 2)),
+    Effect.flatMap((_) => fs.writeFileString("dist/package.json", _)),
+    Effect.withSpan("Pack-v2/buildPackageJson")
   )
 
   const mkDist = fsUtils.rmAndMkdir("dist")
@@ -92,9 +92,9 @@ const program = Effect.gen(function*() {
 
   const copySources = Effect.all([
     copyDist,
-    copySrc,
+    copySrc
   ], { concurrency: "inherit", discard: true }).pipe(
-    Effect.withSpan("Pack-v2/copySources"),
+    Effect.withSpan("Pack-v2/copySources")
   )
 
   yield* mkDist
@@ -102,14 +102,14 @@ const program = Effect.gen(function*() {
     writePackageJson,
     copyReadme,
     copyLicense,
-    copySources,
+    copySources
   ], { concurrency: "inherit", discard: true }).pipe(
-    Effect.withConcurrency(10),
+    Effect.withConcurrency(10)
   )
-});
+})
 
 NodeRuntime.runMain(program.pipe(Effect.provide(Layer.mergeAll(
   FsUtilsLive,
   PackageContextLive,
-  NodeContext.layer,
-))));
+  NodeContext.layer
+))))
