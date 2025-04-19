@@ -1,5 +1,6 @@
+import { createGrpcTransport } from "@connectrpc/connect-node"
 import { Args, Command, Options } from "@effect/cli"
-import { Console, Effect, Match, Option, Schema, Stream } from "effect"
+import { Config, Console, Effect, Match, Option, Schema, Stream } from "effect"
 import * as ArrowFlight from "../../ArrowFlight.js"
 
 export const query = Command.make("query", {
@@ -54,5 +55,8 @@ export const query = Command.make("query", {
     )
   })).pipe(
     Command.withDescription("Perform a Nozzle SQL query"),
-    Command.provide(ArrowFlight.ArrowFlight.Default)
+    Command.provide(ArrowFlight.layerEffect(Effect.gen(function*() {
+      const url = yield* Config.string("NOZZLE_ARROW_FLIGHT_URL").pipe(Effect.orDie)
+      return createGrpcTransport({ baseUrl: url })
+    })))
   )

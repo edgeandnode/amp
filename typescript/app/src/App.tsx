@@ -1,34 +1,33 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
-import './App.css'
+import { createConnectTransport } from "@connectrpc/connect-web"
+import { Effect, Schema } from "effect"
+import { ArrowFlight } from "nozzl"
+import { useEffect, useState } from "react"
+
+const program = Effect.gen(function*() {
+  const flight = yield* ArrowFlight.ArrowFlight
+  const table = yield* flight.table("SELECT * FROM transfers_eth_mainnet.erc20_transfers LIMIT 100")
+  const schema = ArrowFlight.generateSchema(table.schema)
+  const result = yield* Schema.encodeUnknown(Schema.Array(schema))([...table])
+  return result
+})
+
+// TODO: Type resolution issue here.
+const transport = createConnectTransport({ baseUrl: "/nozzle" }) as any
+const runnable = program.pipe(Effect.provide(ArrowFlight.layer(transport)))
 
 function App() {
-  const [count, setCount] = useState(0)
+  const [rows, setRows] = useState<ReadonlyArray<any>>([])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    Effect.runPromise(runnable, { signal: controller.signal }).then((_) => setRows(_))
+    return () => controller.abort()
+  }, [setRows])
 
   return (
-    <>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.tsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
+    <ul>
+      {rows.map((row) => <li key={row.id}>{JSON.stringify(row)}</li>)}
+    </ul>
   )
 }
 

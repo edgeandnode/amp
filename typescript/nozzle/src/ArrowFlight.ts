@@ -2,16 +2,16 @@ import { create, toBinary } from "@bufbuild/protobuf"
 import { anyPack, AnySchema } from "@bufbuild/protobuf/wkt"
 import type { Transport } from "@connectrpc/connect"
 import { createClient } from "@connectrpc/connect"
-import { createConnectTransport, createGrpcTransport } from "@connectrpc/connect-node"
-import { FetchHttpClient } from "@effect/platform"
 import type { DataType, Field as ArrowField, Schema as ArrowSchema, TypeMap } from "apache-arrow"
 import { RecordBatchReader, Table, Type } from "apache-arrow"
-import { Chunk, Config, Data, DateTime, Effect, Layer, Option, Schema, Stream, type Types } from "effect"
+import { Chunk, Context, Data, DateTime, Effect, Layer, Option, Schema, Stream, type Types } from "effect"
 import * as Proto from "./Proto.js"
 
 export class ArrowFlightError extends Data.TaggedError("ArrowFlightError")<{
   cause: unknown
 }> {}
+
+export class ArrowFlight extends Context.Tag("Nozzle/Api/ArrowFlight")<ArrowFlight, ReturnType<typeof make>>() {}
 
 const make = (transport: Transport) => {
   const client = createClient(Proto.Flight.FlightService, transport)
@@ -36,7 +36,7 @@ const make = (transport: Transport) => {
       }))
 
       const request = yield* Effect.async<AsyncIterable<Proto.Flight.FlightData>>((resume, signal) => {
-        resume(Effect.succeed(client.doGet(ticket, { signal })))
+        resume(Effect.sync(() => client.doGet(ticket, { signal })))
       })
 
       const reader = yield* Effect.tryPromise({
@@ -77,32 +77,11 @@ const make = (transport: Transport) => {
   return { client, stream, table }
 }
 
-export class ArrowFlight extends Effect.Service<ArrowFlight>()("Nozzle/Api/ArrowFlight", {
-  dependencies: [FetchHttpClient.layer],
-  effect: Effect.gen(function*() {
-    const url = yield* Config.string("NOZZLE_ARROW_FLIGHT_URL").pipe(Effect.orDie)
-    return createGrpcTransport({
-      baseUrl: url
-    })
-  }).pipe(Effect.map(make))
-}) {}
+export { Transport }
 
-export const makeLayer = (transport: Transport) => Layer.sync(ArrowFlight, () => ArrowFlight.make(make(transport)))
-
-export const makeLayerEffect = <E, R>(transport: Effect.Effect<Transport, E, R>) =>
-  transport.pipe(
-    Effect.map(make),
-    Effect.map(ArrowFlight.make),
-    Layer.effect(ArrowFlight)
-  )
-
-export const layerConnect = makeLayerEffect(Effect.gen(function*() {
-  const url = yield* Config.string("NOZZLE_ARROW_FLIGHT_URL").pipe(Effect.orDie)
-  return createConnectTransport({
-    baseUrl: url,
-    httpVersion: "2"
-  })
-}))
+export const layer = (transport: Transport) => Layer.sync(ArrowFlight, () => make(transport))
+export const layerEffect = <E, R>(transport: Effect.Effect<Transport, E, R>) =>
+  transport.pipe(Effect.map((transport) => make(transport)), Layer.effect(ArrowFlight))
 
 export const generateSchema = <T extends TypeMap>(schema: ArrowSchema<T>): Schema.Schema.AnyNoContext => {
   return Schema.Struct(generateFields(schema.fields)) as any
