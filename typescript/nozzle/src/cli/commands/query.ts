@@ -11,7 +11,7 @@ export const query = Command.make("query", {
       Options.optional,
       Options.withDescription("The number of rows to return")
     ),
-    format: Options.choice("format", ["table", "json", "pretty"]).pipe(
+    format: Options.choice("format", ["table", "json", "jsonl", "pretty"]).pipe(
       Options.withDefault("table"),
       Options.withDescription("The format to output the results in")
     )
@@ -28,16 +28,22 @@ export const query = Command.make("query", {
 
     const schema = ArrowFlight.generateSchema(table.schema)
     yield* Match.value(args.format).pipe(
+      Match.when("table", () =>
+        Effect.succeed([...table]).pipe(
+          Effect.flatMap(Schema.encodeUnknown(Schema.Array(schema))),
+          Effect.flatMap(Console.table)
+        )),
       Match.when("json", () =>
         Effect.succeed([...table]).pipe(
           Effect.flatMap(Schema.encodeUnknown(Schema.Array(schema))),
           Effect.map((_) => JSON.stringify(_, null, 2)),
           Effect.flatMap(Console.log)
         )),
-      Match.when("table", () =>
-        Effect.succeed([...table]).pipe(
-          Effect.flatMap(Schema.encodeUnknown(Schema.Array(schema))),
-          Effect.flatMap(Console.table)
+      Match.when("jsonl", () =>
+        Stream.fromIterable([...table]).pipe(
+          Stream.mapEffect(Schema.encodeUnknown(schema)),
+          Stream.map((_) => JSON.stringify(_)),
+          Stream.runForEach(Console.log)
         )),
       Match.when("pretty", () =>
         Stream.fromIterable([...table]).pipe(
