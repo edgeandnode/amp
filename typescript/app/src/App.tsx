@@ -1,5 +1,5 @@
 import { createConnectTransport } from "@connectrpc/connect-web"
-import { Effect, Schema } from "effect"
+import { Effect, Exit, Schema } from "effect"
 import { ArrowFlight } from "nozzl"
 import { useEffect, useState } from "react"
 
@@ -20,13 +20,19 @@ function App() {
 
   useEffect(() => {
     const controller = new AbortController()
-    Effect.runPromise(runnable, { signal: controller.signal }).then((_) => setRows(_))
+    Effect.runPromiseExit(runnable, { signal: controller.signal }).then((exit) => {
+      if (Exit.isSuccess(exit)) {
+        setRows(exit.value)
+      } else if (!Exit.isInterrupted(exit)) {
+        console.error(exit.cause)
+      }
+    })
     return () => controller.abort()
   }, [setRows])
 
   return (
     <ul>
-      {rows.map((row) => <li key={row.id}>{JSON.stringify(row)}</li>)}
+      {rows.map((row, id) => <li key={id}>{JSON.stringify(row)}</li>)}
     </ul>
   )
 }
