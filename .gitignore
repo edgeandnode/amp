@@ -6,7 +6,6 @@
 .envrc
 .direnv
 .env
-/.vscode
 /local
 /target
 /tests/config/providers/firehose_eth_mainnet.toml

@@ -1,13 +1,6 @@
-import {
-  FetchHttpClient,
-  HttpApi,
-  HttpApiClient,
-  HttpApiEndpoint,
-  HttpApiGroup,
-  HttpApiSchema,
-} from "@effect/platform";
-import { Config, Effect, Schema } from "effect";
-import * as Model from "./Model.js";
+import { FetchHttpClient, HttpApi, HttpApiClient, HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "@effect/platform"
+import { Config, Effect, Schema } from "effect"
+import * as Model from "./Model.js"
 
 export class RegstistryApiGroup extends HttpApiGroup.make("registry", { topLevel: true }).add(
   HttpApiEndpoint.post("schema")`/output_schema`
@@ -15,21 +8,21 @@ export class RegstistryApiGroup extends HttpApiGroup.make("registry", { topLevel
     .addSuccess(Schema.Struct({ schema: Model.TableSchema }))
     .addError(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }), { status: 404 })
     .addError(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }), { status: 422 })
-    .addError(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }), { status: 500 }),
+    .addError(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }), { status: 500 })
 ) {}
 
 export class RegistryApi extends HttpApi.make("registry").add(RegstistryApiGroup) {}
 
 export class Registry extends Effect.Service<Registry>()("Nozzle/Api/Registry", {
   dependencies: [FetchHttpClient.layer],
-  effect: Effect.gen(function* () {
-    const url = yield* Config.string("NOZZLE_REGISTRY_URL").pipe(Effect.orDie);
+  effect: Effect.gen(function*() {
+    const url = yield* Config.string("NOZZLE_REGISTRY_URL").pipe(Effect.orDie)
     const registry = yield* HttpApiClient.make(RegistryApi, {
-      baseUrl: url,
-    });
+      baseUrl: url
+    })
 
-    return registry;
-  }),
+    return registry
+  })
 }) {}
 
 export class AdminApiGroup extends HttpApiGroup.make("admin", { topLevel: true }).add(
@@ -38,19 +31,19 @@ export class AdminApiGroup extends HttpApiGroup.make("admin", { topLevel: true }
     .addSuccess(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }))
     .addError(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }), { status: 404 })
     .addError(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }), { status: 422 })
-    .addError(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }), { status: 500 }),
+    .addError(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }), { status: 500 })
 ) {}
 
 export class AdminApi extends HttpApi.make("admin").add(AdminApiGroup) {}
 
 export class Admin extends Effect.Service<Admin>()("Nozzle/Api/Admin", {
   dependencies: [FetchHttpClient.layer],
-  effect: Effect.gen(function* () {
-    const url = yield* Config.string("NOZZLE_ADMIN_URL").pipe(Effect.orDie);
+  effect: Effect.gen(function*() {
+    const url = yield* Config.string("NOZZLE_ADMIN_URL").pipe(Effect.orDie)
     const admin = yield* HttpApiClient.make(AdminApi, {
-      baseUrl: url,
-    });
+      baseUrl: url
+    })
 
-    return admin;
-  }),
+    return admin
+  })
 }) {}
