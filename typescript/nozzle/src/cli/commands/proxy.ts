@@ -1,6 +1,6 @@
 import { connectNodeAdapter, createGrpcTransport } from "@connectrpc/connect-node"
 import { Args, Command } from "@effect/cli"
-import { Config, Effect, Layer } from "effect"
+import { Config, Effect } from "effect"
 import { createServer, type Server } from "node:http"
 import * as ArrowFlight from "../../ArrowFlight.js"
 import * as Proto from "../../Proto.js"
@@ -53,5 +53,3 @@ export const proxy = Command.make("proxy", {
       return createGrpcTransport({ baseUrl: url })
     })))
   )
-
-Layer.launch
