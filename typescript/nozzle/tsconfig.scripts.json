@@ -1,0 +1,10 @@
+{
+  "extends": "../tsconfig.base.json",
+  "include": ["scripts"],
+  "compilerOptions": {
+    "types": ["node"],
+    "outDir": "build/scripts",
+    "tsBuildInfoFile": ".tsbuildinfo/scripts.tsbuildinfo",
+    "rootDir": "scripts"
+  }
+}
