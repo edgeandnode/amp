@@ -10,6 +10,8 @@
   },
   "dependencies": {
     "@connectrpc/connect-web": "^2.0.2",
+    "@tanstack/react-query": "^5.74.4",
+    "@tanstack/react-query-devtools": "^5.74.4",
     "effect": "^3.14.11",
     "nozzl": "workspace:*",
     "react": "^19.0.0",
