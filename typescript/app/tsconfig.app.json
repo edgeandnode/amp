@@ -30,15 +30,6 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
-    "noUncheckedSideEffectImports": true,
-    "baseUrl": ".",
-    "paths": {
-      "nozzl": [
-        "../nozzle/src/index.js"
-      ],
-      "nozzl/*": [
-        "../nozzle/src/*.js"
-      ]
-    }
+    "noUncheckedSideEffectImports": true
   }
 }

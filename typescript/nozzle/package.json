@@ -13,21 +13,46 @@
     "directory": "dist",
     "linkDirectory": false
   },
-  "bin": "./bin.ts",
+  "bin": {
+    "nozzl": "./src/cli/main.ts"
+  },
   "main": "./src/index.ts",
   "module": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./Api": {
+      "types": "./src/Api.ts",
+      "default": "./src/Api.ts"
+    },
+    "./ArrowFlight": {
+      "types": "./src/ArrowFlight.ts",
+      "default": "./src/ArrowFlight.ts"
+    },
+    "./JsonLines": {
+      "types": "./src/JsonLines.ts",
+      "default": "./src/JsonLines.ts"
+    },
+    "./Model": {
+      "types": "./src/Model.ts",
+      "default": "./src/Model.ts"
+    }
+  },
   "scripts": {
-    "build": "tsc -b tsconfig.build.json && bun ./scripts/build.ts",
+    "build": "nozzl-utils build",
     "nozzl": "bun ./src/cli/main.ts"
   },
   "dependencies": {
-    "@connectrpc/connect-node": "^2.0.2",
     "@effect/cli": "^0.59.11",
     "@effect/platform-node": "^0.76.21",
     "jiti": "^2.4.2"
   },
   "peerDependencies": {
     "@bufbuild/protobuf": "^2.2.5",
+    "@connectrpc/connect-node": "^2.0.2",
     "@connectrpc/connect": "^2.0.2",
     "@effect/platform": "^0.80.11",
     "apache-arrow": "^19.0.1",
@@ -39,9 +64,9 @@
     "@connectrpc/connect": "^2.0.2",
     "@effect/platform": "^0.80.11",
     "@effect/platform-node": "^0.76.21",
+    "@nozzl/utils": "workspace:*",
     "@types/node": "^22.14.1",
     "apache-arrow": "^19.0.1",
-    "effect": "^3.14.11",
-    "glob": "^11.0.1"
+    "effect": "^3.14.11"
   }
 }

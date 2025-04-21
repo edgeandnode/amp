@@ -30,15 +30,14 @@
     "noImplicitThis": true,
     "noUncheckedIndexedAccess": false,
     "strictNullChecks": true,
-    "baseUrl": ".",
     "target": "ES2022",
     "module": "NodeNext",
     "incremental": true,
     "removeComments": false,
-    "plugins": [{ "name": "@effect/language-service" }],
-    "paths": {
-      "nozzl": ["./nozzle/src/index.js"],
-      "nozzl/*": ["./nozzle/src/*.js"]
-    }
+    "plugins": [
+      {
+        "name": "@effect/language-service"
+      }
+    ]
   }
 }

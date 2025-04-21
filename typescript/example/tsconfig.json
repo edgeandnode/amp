@@ -1,11 +1,17 @@
 {
   "extends": "../tsconfig.base.json",
-  "references": [
-    { "path": "../nozzle/tsconfig.src.json" }
+  "include": [
+    "examples",
+    "nozzle.config.ts"
   ],
-  "include": ["examples", "nozzle.config.ts"],
+  "references": [
+    {
+      "path": "../nozzle/tsconfig.src.json"
+    }
+  ],
   "compilerOptions": {
     "noEmit": true,
-    "rootDir": "."
+    "rootDir": ".",
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.tsbuildinfo"
   }
 }
