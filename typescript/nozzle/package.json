@@ -17,11 +17,28 @@
     "nozzl": "./src/cli/main.ts"
   },
   "main": "./src/index.ts",
+  "module": "./src/index.ts",
   "types": "./src/index.ts",
   "exports": {
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./Api": {
+      "types": "./src/Api.ts",
+      "default": "./src/Api.ts"
+    },
+    "./ArrowFlight": {
+      "types": "./src/ArrowFlight.ts",
+      "default": "./src/ArrowFlight.ts"
+    },
+    "./JsonLines": {
+      "types": "./src/JsonLines.ts",
+      "default": "./src/JsonLines.ts"
+    },
+    "./Model": {
+      "types": "./src/Model.ts",
+      "default": "./src/Model.ts"
     }
   },
   "scripts": {
