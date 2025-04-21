@@ -14,6 +14,7 @@ export * as FlightSql from "./proto/FlightSql_pb.js"
 
 export class ArrowFlightError extends Data.TaggedError("ArrowFlightError")<{
   cause: unknown
+  message?: string
 }> {}
 
 export class ArrowFlight extends Context.Tag("Nozzle/ArrowFlight")<ArrowFlight, ReturnType<typeof make>>() {}
@@ -36,7 +37,11 @@ const make = (transport: Transport) => {
 
       const info = yield* Effect.tryPromise({
         try: (_) => client.getFlightInfo(descriptor, { signal: _ }),
-        catch: (cause) => new ArrowFlightError({ cause })
+        catch: (cause) =>
+          new ArrowFlightError({
+            cause,
+            ...(cause instanceof Error && cause.message ? { message: cause.message } : {})
+          })
       })
 
       const ticket = yield* Option.fromNullable(info.endpoint[0]?.ticket).pipe(Option.match({
@@ -49,7 +54,11 @@ const make = (transport: Transport) => {
       })
 
       const reader = yield* Effect.tryPromise({
-        catch: (cause) => new ArrowFlightError({ cause }),
+        catch: (cause) =>
+          new ArrowFlightError({
+            cause,
+            ...(cause instanceof Error && cause.message ? { message: cause.message } : {})
+          }),
         try: () =>
           RecordBatchReader.from({
             async *[Symbol.asyncIterator]() {
@@ -75,7 +84,14 @@ const make = (transport: Transport) => {
           } as AsyncIterable<ArrayBuffer>)
       })
 
-      return Stream.fromAsyncIterable(reader, (cause) => new ArrowFlightError({ cause }))
+      return Stream.fromAsyncIterable(
+        reader,
+        (cause) =>
+          cause instanceof ArrowFlightError ? cause : new ArrowFlightError({
+            cause,
+            ...(cause instanceof Error && cause.message ? { message: cause.message } : {})
+          })
+      )
     }).pipe(Stream.unwrap)
 
   const table: {
