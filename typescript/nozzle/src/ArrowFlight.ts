@@ -2,7 +2,8 @@ import { create, toBinary } from "@bufbuild/protobuf"
 import { anyPack, AnySchema } from "@bufbuild/protobuf/wkt"
 import type { Transport } from "@connectrpc/connect"
 import { createClient } from "@connectrpc/connect"
-import type { DataType, Field as ArrowField, Schema as ArrowSchema, TypeMap } from "apache-arrow"
+import { Template } from "@effect/platform"
+import type { DataType, Field as ArrowField, RecordBatch, Schema as ArrowSchema, TypeMap } from "apache-arrow"
 import { RecordBatchReader, Table, Type } from "apache-arrow"
 import { Chunk, Context, Data, DateTime, Effect, Layer, Option, Schema, Stream, type Types } from "effect"
 import * as Flight from "./proto/Flight_pb.js"
@@ -19,8 +20,12 @@ export class ArrowFlight extends Context.Tag("Nozzle/ArrowFlight")<ArrowFlight, 
 
 const make = (transport: Transport) => {
   const client = createClient(Flight.FlightService, transport)
-  const stream = (query: string) =>
+  const stream: {
+    (sql: TemplateStringsArray): Stream.Stream<RecordBatch, ArrowFlightError>
+    (sql: string): Stream.Stream<RecordBatch, ArrowFlightError>
+  } = (sql) =>
     Effect.gen(function*() {
+      const query = typeof sql === "string" ? sql : yield* Template.make(sql)
       const cmd = create(FlightSql.CommandStatementQuerySchema, { query })
       // TODO: Why is it necessary to pack the command into an Any?
       const any = anyPack(FlightSql.CommandStatementQuerySchema, cmd)
@@ -73,10 +78,13 @@ const make = (transport: Transport) => {
       return Stream.fromAsyncIterable(reader, (cause) => new ArrowFlightError({ cause }))
     }).pipe(Stream.unwrap)
 
-  const table = (query: string) =>
-    Stream.runCollect(stream(query)).pipe(
+  const table: {
+    (sql: TemplateStringsArray): Effect.Effect<Table, ArrowFlightError>
+    (sql: string): Effect.Effect<Table, ArrowFlightError>
+  } = (sql: any) =>
+    Stream.runCollect(stream(sql)).pipe(
       Effect.map((batches) => new Table(Chunk.toArray(batches)))
-    )
+    ) as any
 
   return { client, stream, table }
 }

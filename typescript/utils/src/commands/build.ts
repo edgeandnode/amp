@@ -21,20 +21,19 @@ export const build = Command.make("build", {
     )
 
     yield* utils.existsOrFail(args.project)
-    yield* utils.rmAndMkdir("build")
-
-    // TODO: Output errors instead of swallowing them here.
-    yield* Effect.log("Building package")
     if ((yield* Cmd.make("tsc", "-b", args.project).pipe(Cmd.exitCode)) !== 0) {
+      // TODO: Output errors instead of swallowing them here.
       yield* Effect.dieMessage("Failed to build package")
     }
 
-    yield* utils.rmAndMkdir("dist")
-    yield* utils.copyIfExists("CHANGELOG.md", "dist/CHANGELOG.md")
-    yield* utils.copyIfExists("README.md", "dist/README.md")
-    yield* utils.copyIfExists("LICENSE", "dist/LICENSE")
-    yield* utils.rmAndCopy("src", "dist/src")
-    yield* utils.rmAndCopy("build/dist", "dist/dist")
+    yield* Effect.all([
+      utils.rmAndMkdir("dist"),
+      utils.copyIfExists("CHANGELOG.md", "dist/CHANGELOG.md"),
+      utils.copyIfExists("README.md", "dist/README.md"),
+      utils.copyIfExists("LICENSE", "dist/LICENSE"),
+      utils.rmAndCopy("src", "dist/src"),
+      utils.rmAndCopy("build/dist", "dist/dist")
+    ], { concurrency: "unbounded" })
 
     const json = Struct.evolve(pkg, {
       main: replaceJs,
@@ -68,18 +67,16 @@ export const build = Command.make("build", {
       })
     })
 
-    if (json.bin !== undefined) {
-      for (const script of Object.values(json.bin)) {
+    yield* Effect.forEach(Object.values(json.bin ?? {}), (script) =>
+      Effect.gen(function*() {
         const lines = yield* fs.readFileString(path.join("dist", script))
         if (lines.startsWith("#!/usr/bin/env bun")) {
           const replaced = lines.replace("#!/usr/bin/env bun", "#!/usr/bin/env node")
           yield* fs.writeFileString(path.join("dist", script), replaced)
         }
-      }
-    }
+      }), { concurrency: "unbounded" })
 
     yield* utils.writeJson("dist/package.json", json)
-    yield* Effect.log("Build successful")
   })).pipe(
     Command.withDescription("Prepare a package for publishing"),
     Command.provide(Utils.Utils.Default)
