@@ -7,7 +7,7 @@ export class JsonLinesError extends Data.TaggedError("JsonLinesError")<{
   readonly cause: HttpClientError.HttpClientError | Ndjson.NdjsonError | ParseResult.ParseError
 }> {}
 
-export class JsonLines extends Effect.Service<JsonLines>()("Nozzle/Api/JsonLines", {
+export class JsonLines extends Effect.Service<JsonLines>()("Nozzle/JsonLines", {
   dependencies: [FetchHttpClient.layer],
   effect: Effect.gen(function*() {
     const url = yield* Config.string("NOZZLE_JSONL_URL").pipe(Effect.orDie)

@@ -3,7 +3,6 @@ import { Args, Command } from "@effect/cli"
 import { Config, Effect } from "effect"
 import { createServer, type Server } from "node:http"
 import * as ArrowFlight from "../../ArrowFlight.js"
-import * as Proto from "../../Proto.js"
 
 export const proxy = Command.make("proxy", {
   args: {
@@ -17,7 +16,7 @@ export const proxy = Command.make("proxy", {
     const flight = yield* ArrowFlight.ArrowFlight
     const adapter = connectNodeAdapter({
       routes: (router) => {
-        router.service(Proto.Flight.FlightService, {
+        router.service(ArrowFlight.Flight.FlightService, {
           doGet: (request) => flight.client.doGet(request),
           doPut: (request) => flight.client.doPut(request),
           doAction: (request) => flight.client.doAction(request),

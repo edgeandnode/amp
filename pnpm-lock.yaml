@@ -118,6 +118,9 @@ importers:
       '@effect/platform':
         specifier: ^0.80.11
         version: 0.80.11(effect@3.14.11)
+      '@nozzl/utils':
+        specifier: workspace:*
+        version: link:../utils
       '@types/node':
         specifier: ^22.14.1
         version: 22.14.1
@@ -131,6 +134,25 @@ importers:
         specifier: ^11.0.1
         version: 11.0.1
     publishDirectory: dist
+
+  typescript/utils:
+    dependencies:
+      '@effect/cli':
+        specifier: ^0.59.11
+        version: 0.59.11(@effect/platform@0.80.11(effect@3.14.11))(@effect/printer-ansi@0.40.12(@effect/typeclass@0.31.12(effect@3.14.11))(effect@3.14.11))(@effect/printer@0.40.12(@effect/typeclass@0.31.12(effect@3.14.11))(effect@3.14.11))(effect@3.14.11)
+      '@effect/platform':
+        specifier: ^0.80.11
+        version: 0.80.11(effect@3.14.11)
+      '@effect/platform-node':
+        specifier: ^0.76.21
+        version: 0.76.21(@effect/cluster@0.29.5(@effect/platform@0.80.11(effect@3.14.11))(@effect/rpc@0.55.3(@effect/platform@0.80.11(effect@3.14.11))(effect@3.14.11))(@effect/sql@0.33.2(@effect/experimental@0.44.2(@effect/platform@0.80.11(effect@3.14.11))(effect@3.14.11))(@effect/platform@0.80.11(effect@3.14.11))(effect@3.14.11))(effect@3.14.11))(@effect/platform@0.80.11(effect@3.14.11))(@effect/rpc@0.55.3(@effect/platform@0.80.11(effect@3.14.11))(effect@3.14.11))(@effect/sql@0.33.2(@effect/experimental@0.44.2(@effect/platform@0.80.11(effect@3.14.11))(effect@3.14.11))(@effect/platform@0.80.11(effect@3.14.11))(effect@3.14.11))(effect@3.14.11)
+      effect:
+        specifier: ^3.14.11
+        version: 3.14.11
+    devDependencies:
+      '@types/node':
+        specifier: ^22.14.1
+        version: 22.14.1
 
 packages:
 

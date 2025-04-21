@@ -5,23 +5,27 @@ import { createClient } from "@connectrpc/connect"
 import type { DataType, Field as ArrowField, Schema as ArrowSchema, TypeMap } from "apache-arrow"
 import { RecordBatchReader, Table, Type } from "apache-arrow"
 import { Chunk, Context, Data, DateTime, Effect, Layer, Option, Schema, Stream, type Types } from "effect"
-import * as Proto from "./Proto.js"
+import * as Flight from "./proto/Flight_pb.js"
+import * as FlightSql from "./proto/FlightSql_pb.js"
+
+export * as Flight from "./proto/Flight_pb.js"
+export * as FlightSql from "./proto/FlightSql_pb.js"
 
 export class ArrowFlightError extends Data.TaggedError("ArrowFlightError")<{
   cause: unknown
 }> {}
 
-export class ArrowFlight extends Context.Tag("Nozzle/Api/ArrowFlight")<ArrowFlight, ReturnType<typeof make>>() {}
+export class ArrowFlight extends Context.Tag("Nozzle/ArrowFlight")<ArrowFlight, ReturnType<typeof make>>() {}
 
 const make = (transport: Transport) => {
-  const client = createClient(Proto.Flight.FlightService, transport)
+  const client = createClient(Flight.FlightService, transport)
   const stream = (query: string) =>
     Effect.gen(function*() {
-      const cmd = create(Proto.FlightSql.CommandStatementQuerySchema, { query })
+      const cmd = create(FlightSql.CommandStatementQuerySchema, { query })
       // TODO: Why is it necessary to pack the command into an Any?
-      const any = anyPack(Proto.FlightSql.CommandStatementQuerySchema, cmd)
-      const descriptor = create(Proto.Flight.FlightDescriptorSchema, {
-        type: Proto.Flight.FlightDescriptor_DescriptorType.CMD,
+      const any = anyPack(FlightSql.CommandStatementQuerySchema, cmd)
+      const descriptor = create(Flight.FlightDescriptorSchema, {
+        type: Flight.FlightDescriptor_DescriptorType.CMD,
         cmd: toBinary(AnySchema, any)
       })
 
@@ -35,7 +39,7 @@ const make = (transport: Transport) => {
         onSome: (ticket) => Effect.succeed(ticket)
       }))
 
-      const request = yield* Effect.async<AsyncIterable<Proto.Flight.FlightData>>((resume, signal) => {
+      const request = yield* Effect.async<AsyncIterable<Flight.FlightData>>((resume, signal) => {
         resume(Effect.sync(() => client.doGet(ticket, { signal })))
       })
 
@@ -76,8 +80,6 @@ const make = (transport: Transport) => {
 
   return { client, stream, table }
 }
-
-export { Transport }
 
 export const layer = (transport: Transport) => Layer.sync(ArrowFlight, () => make(transport))
 export const layerEffect = <E, R>(transport: Effect.Effect<Transport, E, R>) =>
