@@ -1,6 +1,7 @@
 import { Command, Options } from "@effect/cli"
-import { Command as Cmd } from "@effect/platform"
+import { Command as Cmd, FileSystem } from "@effect/platform"
 import { Effect, Schema, Struct } from "effect"
+import * as path from "path"
 import * as Model from "../lib/Model.js"
 import * as Utils from "../lib/Utils.js"
 
@@ -14,6 +15,7 @@ export const build = Command.make("build", {
 }, ({ args }) =>
   Effect.gen(function*() {
     const utils = yield* Utils.Utils
+    const fs = yield* FileSystem.FileSystem
     const pkg = yield* utils.readJson("./package.json").pipe(
       Effect.flatMap(Schema.decodeUnknown(Model.PackageJson))
     )
@@ -65,6 +67,16 @@ export const build = Command.make("build", {
         return result
       })
     })
+
+    if (json.bin !== undefined) {
+      for (const script of Object.values(json.bin)) {
+        const lines = yield* fs.readFileString(path.join("dist", script))
+        if (lines.startsWith("#!/usr/bin/env bun")) {
+          const replaced = lines.replace("#!/usr/bin/env bun", "#!/usr/bin/env node")
+          yield* fs.writeFileString(path.join("dist", script), replaced)
+        }
+      }
+    }
 
     yield* utils.writeJson("dist/package.json", json)
     yield* Effect.log("Build successful")
