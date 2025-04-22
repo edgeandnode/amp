@@ -6,6 +6,7 @@
 .envrc
 .direnv
 .env
+.nozzle
 /local
 /target
 /tests/config/providers/firehose_eth_mainnet.toml
