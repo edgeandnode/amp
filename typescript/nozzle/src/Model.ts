@@ -1,13 +1,13 @@
-import { Schema } from "effect";
+import { Schema } from "effect"
 
 export class Dependency extends Schema.Class<Dependency>("Dependency")({
   owner: Schema.String,
   name: Schema.String,
-  version: Schema.String,
+  version: Schema.String
 }) {}
 
 export class TableDefinition extends Schema.Class<TableDefinition>("TableDefinition")({
-  sql: Schema.String,
+  sql: Schema.String
 }) {}
 
 export class DatasetDefinition extends Schema.Class<DatasetDefinition>("DatasetDefinition")({
@@ -17,12 +17,12 @@ export class DatasetDefinition extends Schema.Class<DatasetDefinition>("DatasetD
   repository: Schema.String.pipe(Schema.optional),
   dependencies: Schema.Record({
     key: Schema.String,
-    value: Dependency,
+    value: Dependency
   }),
   tables: Schema.Record({
     key: Schema.String,
-    value: TableDefinition,
-  }),
+    value: TableDefinition
+  })
 }) {}
 
 export class ArrowSchema extends Schema.Class<ArrowSchema>("ArrowSchema")({
@@ -30,22 +30,22 @@ export class ArrowSchema extends Schema.Class<ArrowSchema>("ArrowSchema")({
     Schema.Struct({
       name: Schema.String,
       type: Schema.Any,
-      nullable: Schema.Boolean,
-    }),
-  ),
+      nullable: Schema.Boolean
+    })
+  )
 }) {}
 
 export class TableSchema extends Schema.Class<TableSchema>("TableSchema")({
-  arrow: ArrowSchema,
+  arrow: ArrowSchema
 }) {}
 
 export class TableInput extends Schema.Class<TableInput>("TableInput")({
-  sql: Schema.String,
+  sql: Schema.String
 }) {}
 
 export class Table extends Schema.Class<Table>("Table")({
   input: TableInput,
-  schema: TableSchema,
+  schema: TableSchema
 }) {}
 
 export class DatasetManifest extends Schema.Class<DatasetManifest>("DatasetManifest")({
@@ -54,10 +54,10 @@ export class DatasetManifest extends Schema.Class<DatasetManifest>("DatasetManif
   version: Schema.String,
   dependencies: Schema.Record({
     key: Schema.String,
-    value: Dependency,
+    value: Dependency
   }),
   tables: Schema.Record({
     key: Schema.String,
-    value: Table,
-  }),
+    value: Table
+  })
 }) {}

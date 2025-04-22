@@ -2,7 +2,17 @@
   "extends": "./typescript/tsconfig.base.json",
   "include": [],
   "references": [
-    { "path": "typescript/nozzle" },
-    { "path": "typescript/example" }
+    {
+      "path": "typescript/nozzle"
+    },
+    {
+      "path": "typescript/example"
+    },
+    {
+      "path": "typescript/app"
+    },
+    {
+      "path": "typescript/utils"
+    }
   ]
 }

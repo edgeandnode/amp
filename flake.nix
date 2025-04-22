@@ -28,6 +28,7 @@
       devShells = forAllSystems ({ pkgs }: {
         default = pkgs.mkShell {
           packages = (with pkgs; [
+            bun
             # Includes cargo, clippy, cargo-fmt, rustdoc, rustfmt, and other tools.
             rustToolchain
             protobuf

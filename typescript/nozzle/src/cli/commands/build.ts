@@ -1,9 +1,9 @@
-import { Console, Effect, Option, Schema } from "effect";
-import { Command, Options } from "@effect/cli";
-import { Path, FileSystem } from "@effect/platform";
-import * as ManifestBuilder from "../../ManifestBuilder.js";
-import * as ConfigLoader from "../../ConfigLoader.js";
-import * as Model from "../../Model.js";
+import { Command, Options } from "@effect/cli"
+import { FileSystem, Path } from "@effect/platform"
+import { Console, Effect, Option, Schema } from "effect"
+import * as ConfigLoader from "../../ConfigLoader.js"
+import * as ManifestBuilder from "../../ManifestBuilder.js"
+import * as Model from "../../Model.js"
 
 export const build = Command.make("build", {
   args: {
@@ -16,34 +16,36 @@ export const build = Command.make("build", {
       Options.optional,
       Options.withAlias("o"),
       Options.withDescription("The output file to write the manifest to")
-    ),
-  },
-}, ({ args }) => Effect.gen(function* () {
-  const path = yield* Path.Path;
-  const fs = yield* FileSystem.FileSystem;
-  const config = yield* ConfigLoader.ConfigLoader;
-  const builder = yield* ManifestBuilder.ManifestBuilder;
+    )
+  }
+}, ({ args }) =>
+  Effect.gen(function*() {
+    const path = yield* Path.Path
+    const fs = yield* FileSystem.FileSystem
+    const config = yield* ConfigLoader.ConfigLoader
+    const builder = yield* ManifestBuilder.ManifestBuilder
 
-  const definition = yield* Option.match(args.config, {
-    onSome: (file) => config.load(file).pipe(Effect.map(Option.some)),
-    onNone: () => config.find(),
-  }).pipe(Effect.flatten, Effect.orDie);
+    const definition = yield* Option.match(args.config, {
+      onSome: (file) => config.load(file).pipe(Effect.map(Option.some)),
+      onNone: () => config.find()
+    }).pipe(Effect.flatten, Effect.orDie)
 
-  const json = yield* builder.build(definition).pipe(
-    Effect.flatMap(Schema.encode(Model.DatasetManifest)),
-    Effect.map((manifest) => JSON.stringify(manifest, null, 2)),
-    Effect.orDie,
-  );
+    const json = yield* builder.build(definition).pipe(
+      Effect.flatMap(Schema.encode(Model.DatasetManifest)),
+      Effect.map((manifest) => JSON.stringify(manifest, null, 2)),
+      Effect.orDie
+    )
 
-  yield* Option.match(args.output, {
-    onNone: () => Console.log(json),
-    onSome: (output) => fs.writeFileString(path.resolve(output), json).pipe(
-      Effect.tap(() => Effect.log(`Manifest written to ${output}`)),
-      Effect.orDie,
-    ),
-  });
-})).pipe(
-  Command.withDescription("Build a manifest from a dataset definition"),
-  Command.provide(ManifestBuilder.ManifestBuilder.Default),
-  Command.provide(ConfigLoader.ConfigLoader.Default),
-);
+    yield* Option.match(args.output, {
+      onNone: () => Console.log(json),
+      onSome: (output) =>
+        fs.writeFileString(path.resolve(output), json).pipe(
+          Effect.tap(() => Effect.log(`Manifest written to ${output}`)),
+          Effect.orDie
+        )
+    })
+  })).pipe(
+    Command.withDescription("Build a manifest from a dataset definition"),
+    Command.provide(ManifestBuilder.ManifestBuilder.Default),
+    Command.provide(ConfigLoader.ConfigLoader.Default)
+  )
