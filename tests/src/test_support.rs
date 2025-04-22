@@ -1,5 +1,11 @@
-use std::{io::ErrorKind, sync::Arc};
+use std::{
+    io::{ErrorKind, Write},
+    sync::Arc,
+};
 
+use arrow_flight::{
+    flight_service_client::FlightServiceClient, sql::client::FlightSqlServiceClient,
+};
 use common::{
     arrow::{
         self,
@@ -26,13 +32,14 @@ use fs_err as fs;
 use tempfile::TempDir;
 
 /// Assume the `cargo test` command is run either from the workspace root or from the crate root.
-const TEST_CONFIG_PATHS: [&str; 2] = ["tests/config/config.toml", "config/config.toml"];
+const TEST_CONFIG_BASE_DIRS: [&str; 2] = ["tests/config", "config"];
 
 pub fn load_test_config(literal_override: Option<FigmentJson>) -> Result<Arc<Config>, BoxError> {
     let mut path = None;
-    for p in TEST_CONFIG_PATHS.iter() {
+    for dir in TEST_CONFIG_BASE_DIRS.iter() {
+        let p = format!("{}/config.toml", dir);
         if matches!(
-            fs::metadata(p).map_err(|e| e.kind()),
+            fs::metadata(&p).map_err(|e| e.kind()),
             Err(ErrorKind::NotFound)
         ) {
             continue;
@@ -294,15 +301,16 @@ async fn redump_dataset(
 }
 
 pub async fn check_provider_file(filename: &str) {
-    let path = format!("config/providers/{}", filename);
-    if matches!(
-        fs::metadata(&path).map_err(|e| e.kind()),
-        Err(ErrorKind::NotFound)
-    ) {
+    if TEST_CONFIG_BASE_DIRS.iter().all(|dir| {
+        matches!(
+            fs::metadata(format!("{dir}/providers/{filename}")).map_err(|e| e.kind()),
+            Err(ErrorKind::NotFound)
+        )
+    }) {
         panic!(
-                "Provider file '{path}' does not exist. To run this test, copy 'COPY_ME_{filename}' as '{filename}', \
-                 filling in the required endpoints and credentials.",
-            );
+            "Provider file '{filename}' does not exist. To run this test, copy 'COPY_ME_{filename}' as '{filename}', \
+             filling in the required endpoints and credentials.",
+        );
     }
 }
 
@@ -375,4 +383,72 @@ fn dynamic_addrs() -> Addrs {
         registry_service_addr: ([0, 0, 0, 0], 0).into(),
         admin_api_addr: ([0, 0, 0, 0], 0).into(),
     }
+}
+
+pub const SQL_TEST_QUERIES: &[(&str, &str)] = &[
+    ("SELECT 1", "select_1.json"),
+    (
+        "SELECT eth_rpc.eth_call(from, to, input, CAST(block_num as STRING))
+         FROM eth_rpc.transactions
+         WHERE tx_index = 2",
+        "eth_call.json"
+    ),
+    (
+        "SELECT evm_decode(l.topic1, l.topic2, l.topic3, l.data, 'Transfer(address indexed from, address indexed to, uint256 value)')
+         FROM eth_rpc.logs l
+         WHERE l.topic0 = evm_topic('Transfer(address indexed from, address indexed to, uint256 value)')
+         AND l.topic3 IS NULL
+         LIMIT 1",
+        "evm_decode.json"
+    ),
+    ("SELECT evm_topic('Transfer(address indexed from, address indexed to, uint256 value)')", "evm_topic.json"),
+    ("SELECT attestation_hash(input) FROM eth_rpc.transactions", "attestation_hash.json"),
+];
+
+pub async fn bless_sql_snapshots() -> Result<(), BoxError> {
+    for (query, filename) in SQL_TEST_QUERIES.iter() {
+        let jsonl = run_query_on_fresh_server(query).await?;
+        let path = sql_snapshot_path(filename);
+        let mut file = fs::File::create(&path)?;
+        file.write_all(&jsonl)?;
+    }
+    Ok(())
+}
+
+pub fn sql_snapshot_path(filename: &str) -> String {
+    let crate_path = env!("CARGO_MANIFEST_DIR");
+    format!("{crate_path}/sql-snapshots/{filename}")
+}
+
+/// Start a nozzle server, execute the given query, convert the result to JSONL, shut down the
+/// server and return the JSONL string in binary format.
+pub async fn run_query_on_fresh_server(query: &str) -> Result<Vec<u8>, BoxError> {
+    check_provider_file("rpc_eth_mainnet.toml").await;
+
+    // Start the nozzle server.
+    let config = load_test_config(None).unwrap();
+    let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel(1);
+    let (bound, server) = nozzle::server::run(config, None, false, shutdown_rx).await?;
+    tokio::spawn(async move {
+        server.await.unwrap();
+    });
+
+    let client = FlightServiceClient::connect(format!("grpc://{}", bound.flight_addr)).await?;
+    let mut client = FlightSqlServiceClient::new_from_inner(client);
+
+    // Execute the SQL query and collect the results.
+    let mut info = client.execute(query.to_string(), None).await?;
+    let mut batches = client
+        .do_get(info.endpoint[0].ticket.take().unwrap())
+        .await?;
+    let mut buf: Vec<u8> = Default::default();
+    let mut writer = arrow::json::writer::LineDelimitedWriter::new(&mut buf);
+    while let Some(batch) = batches.next().await {
+        let batch = batch?;
+        writer.write(&batch)?;
+    }
+
+    shutdown_tx.send(()).unwrap();
+
+    Ok(buf)
 }
