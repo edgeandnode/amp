@@ -77,7 +77,9 @@ impl AsyncFuncExec {
 impl DisplayAs for AsyncFuncExec {
     fn fmt_as(&self, t: DisplayFormatType, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match t {
-            DisplayFormatType::Default | DisplayFormatType::Verbose => {
+            DisplayFormatType::Default
+            | DisplayFormatType::Verbose
+            | DisplayFormatType::TreeRender => {
                 let expr: Vec<String> = self
                     .async_exprs
                     .iter()

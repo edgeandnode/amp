@@ -288,7 +288,7 @@ fn statement_to_table(statement: &Statement, network: &str) -> Option<Table> {
                                 SqlDataType::Timestamp(_, _) => timestamp_type(),
                                 SqlDataType::Decimal(_) => ArrowDataType::Float64,
                                 SqlDataType::Real => ArrowDataType::Float32,
-                                SqlDataType::Double => ArrowDataType::Float64,
+                                SqlDataType::Double(_) => ArrowDataType::Float64,
                                 SqlDataType::Boolean => ArrowDataType::Boolean,
                                 SqlDataType::Binary(_) => ArrowDataType::Binary,
                                 _ => ArrowDataType::Utf8,
