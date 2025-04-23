@@ -1,15 +1,20 @@
-use std::sync::LazyLock;
+use std::{fs, sync::LazyLock};
+
+use common::tracing;
+use pretty_assertions::assert_str_eq;
 
 use crate::{
     temp_metadata_db::test_metadata_db,
-    test_support::{check_blocks, check_provider_file, SnapshotContext},
+    test_support::{
+        check_blocks, check_provider_file, run_query_on_fresh_server, sql_snapshot_path,
+        SnapshotContext, SQL_TEST_QUERIES,
+    },
 };
-use common::tracing;
 
 static KEEP_TEMP_DIRS: LazyLock<bool> = LazyLock::new(|| std::env::var("KEEP_TEMP_DIRS").is_ok());
 
 #[tokio::test]
-async fn evm_rpc_single() {
+async fn evm_rpc_single_dump() {
     let dataset_name = "eth_rpc";
     check_provider_file("rpc_eth_mainnet.toml").await;
     tracing::register_logger();
@@ -41,7 +46,7 @@ async fn evm_rpc_single() {
 }
 
 #[tokio::test]
-async fn eth_firehose_single() {
+async fn eth_firehose_single_dump() {
     let dataset_name = "eth_firehose";
     check_provider_file("firehose_eth_mainnet.toml").await;
     tracing::register_logger();
@@ -88,4 +93,17 @@ async fn sql_over_eth_firehose_dump() {
     .await
     .expect("temp dump failed");
     blessed.assert_eq(&temp_dump, None).await.unwrap();
+}
+
+#[tokio::test]
+async fn sql_snapshot_queries() {
+    for (query, file) in SQL_TEST_QUERIES {
+        let jsonl = String::from_utf8(run_query_on_fresh_server(query).await.unwrap()).unwrap();
+        let snapshot = String::from_utf8(fs::read(sql_snapshot_path(file)).unwrap()).unwrap();
+        assert_str_eq!(
+            jsonl,
+            snapshot,
+            "SQL query \"{query}\" did not match the snapshot {file}. If this is intentional, run `cargo run -p tests -- bless-sql-snapshots -f {file}`"
+        );
+    }
 }

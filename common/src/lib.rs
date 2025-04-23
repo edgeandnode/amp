@@ -38,6 +38,7 @@ use datafusion::arrow::{
 use tokio::sync::mpsc;
 
 pub type BoxError = Box<dyn std::error::Error + Sync + Send + 'static>;
+pub type BoxResult<T> = Result<T, BoxError>;
 
 /// The block number column name.
 pub const BLOCK_NUM: &str = "block_num";

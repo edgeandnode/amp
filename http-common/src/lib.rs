@@ -1,12 +1,14 @@
 use std::fmt::Display;
+use std::future::Future;
 use std::net::SocketAddr;
 
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use axum::serve::ListenerExt as _;
-use common::BoxError;
+use axum::serve::{Listener, ListenerExt as _};
+use common::BoxResult;
 use serde_json::json;
 use tokio::net::TcpListener;
+use tokio::sync::broadcast;
 
 pub type BoxRequestError = Box<dyn RequestError>;
 
@@ -32,10 +34,22 @@ impl<E: RequestError> From<E> for BoxRequestError {
     }
 }
 
-pub async fn serve_at(addr: SocketAddr, router: axum::Router) -> Result<(), BoxError> {
+pub async fn serve_at(
+    addr: SocketAddr,
+    router: axum::Router,
+    mut shutdown: broadcast::Receiver<()>,
+) -> BoxResult<(SocketAddr, impl Future<Output = BoxResult<()>>)> {
     let listener = TcpListener::bind(addr)
         .await?
         .tap_io(|tcp_stream| tcp_stream.set_nodelay(true).unwrap());
-    axum::serve(listener, router).await?;
-    Ok(())
+    let addr = listener.local_addr()?;
+    let server = async move {
+        axum::serve(listener, router)
+            .with_graceful_shutdown(async move {
+                shutdown.recv().await.ok();
+            })
+            .await
+            .map_err(Into::into)
+    };
+    Ok((addr, server))
 }

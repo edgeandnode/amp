@@ -17,6 +17,7 @@ dataset-store = { path = "../dataset-store" }
 dump = { path = "../dump" }
 dump-check = { path = "../dump-check" }
 metadata-db = { path = "../metadata-db" }
+nozzle = { path = "../nozzle" }
 figment.workspace = true
 fs-err.workspace = true
 futures.workspace = true
@@ -26,3 +27,4 @@ object_store.workspace = true
 pretty_assertions.workspace = true
 tempfile.workspace = true
 tokio.workspace = true
+arrow-flight.workspace = true
