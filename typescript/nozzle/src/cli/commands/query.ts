@@ -1,6 +1,7 @@
 import { createGrpcTransport } from "@connectrpc/connect-node"
 import { Args, Command, Options } from "@effect/cli"
 import { Config, Console, Effect, Match, Option, Schema, Stream } from "effect"
+import * as Arrow from "../../Arrow.js"
 import * as ArrowFlight from "../../ArrowFlight.js"
 
 export const query = Command.make("query", {
@@ -27,7 +28,7 @@ export const query = Command.make("query", {
       })
     ))
 
-    const schema = ArrowFlight.generateSchema(table.schema)
+    const schema = Arrow.generateSchema(table.schema)
     yield* Match.value(args.format).pipe(
       Match.when("table", () =>
         Effect.succeed([...table]).pipe(

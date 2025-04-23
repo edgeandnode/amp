@@ -1,12 +1,12 @@
 import { createConnectTransport } from "@connectrpc/connect-web"
 import { Effect, Exit, Schema } from "effect"
-import { ArrowFlight } from "nozzl"
+import { Arrow, ArrowFlight } from "nozzl"
 import { useEffect, useState } from "react"
 
 const program = Effect.gen(function*() {
   const flight = yield* ArrowFlight.ArrowFlight
   const table = yield* flight.table`SELECT * FROM transfers_eth_mainnet.erc20_transfers LIMIT 100`
-  const schema = ArrowFlight.generateSchema(table.schema)
+  const schema = Arrow.generateSchema(table.schema)
   const result = yield* Schema.encodeUnknown(Schema.Array(schema))([...table])
   return result
 })
