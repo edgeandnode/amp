@@ -16,6 +16,12 @@ export const query = Command.make("query", {
     format: Options.choice("format", ["table", "json", "jsonl", "pretty"]).pipe(
       Options.withDefault("table"),
       Options.withDescription("The format to output the results in")
+    ),
+    flight: Options.text("flight-url").pipe(
+      Options.withFallbackConfig(
+        Config.string("NOZZLE_ARROW_FLIGHT_URL").pipe(Config.withDefault("http://localhost:1602"))
+      ),
+      Options.withDescription("The Arrow Flight URL to use for the query")
     )
   }
 }, ({ args }) =>
@@ -54,10 +60,8 @@ export const query = Command.make("query", {
         )),
       Match.exhaustive
     )
-  })).pipe(
-    Command.withDescription("Perform a Nozzle SQL query"),
-    Command.provide(ArrowFlight.layerEffect(Effect.gen(function*() {
-      const url = yield* Config.string("NOZZLE_ARROW_FLIGHT_URL").pipe(Effect.orDie)
-      return createGrpcTransport({ baseUrl: url })
-    })))
+  }).pipe(
+    Effect.provide(ArrowFlight.layer(createGrpcTransport({ baseUrl: args.flight })))
+  )).pipe(
+    Command.withDescription("Perform a Nozzle SQL query")
   )

@@ -1,5 +1,6 @@
 import { Command, Options } from "@effect/cli"
-import { Console, Effect, Option, Unify } from "effect"
+import { Config, Console, Effect, Layer, Option, Unify } from "effect"
+import * as Api from "../../Api.js"
 import * as ConfigLoader from "../../ConfigLoader.js"
 import * as ManifestBuilder from "../../ManifestBuilder.js"
 import * as ManifestLoader from "../../ManifestLoader.js"
@@ -21,6 +22,12 @@ export const codegen = Command.make("codegen", {
       Options.optional,
       Options.withAlias("q"),
       Options.withDescription("The query to generate code for")
+    ),
+    registry: Options.text("registry-url").pipe(
+      Options.withFallbackConfig(
+        Config.string("NOZZLE_REGISTRY_URL").pipe(Config.withDefault("http://localhost:1611"))
+      ),
+      Options.withDescription("The url of the Nozzle registry server")
     )
   }
 }, ({ args }) =>
@@ -56,10 +63,13 @@ export const codegen = Command.make("codegen", {
 
     const result = yield* generator.fromManifest(manifest).pipe(Effect.orDie)
     yield* Console.log(result)
-  })).pipe(
-    Command.withDescription("Generate schema definition code for a dataset"),
-    Command.provide(SchemaGenerator.SchemaGenerator.Default),
-    Command.provide(ManifestBuilder.ManifestBuilder.Default),
-    Command.provide(ManifestLoader.ManifestLoader.Default),
-    Command.provide(ConfigLoader.ConfigLoader.Default)
+  }).pipe(Effect.provide(layer.pipe(Layer.provide(Api.layerRegistry(args.registry)))))).pipe(
+    Command.withDescription("Generate schema definition code for a dataset")
   )
+
+const layer = Layer.mergeAll(
+  SchemaGenerator.SchemaGenerator.Default,
+  ManifestBuilder.ManifestBuilder.Default,
+  ManifestLoader.ManifestLoader.Default,
+  ConfigLoader.ConfigLoader.Default
+)

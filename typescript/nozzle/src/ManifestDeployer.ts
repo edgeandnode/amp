@@ -3,7 +3,6 @@ import * as Api from "./Api.js"
 import type * as Model from "./Model.js"
 
 export class ManifestDeployer extends Effect.Service<ManifestDeployer>()("Nozzle/ManifestDeployer", {
-  dependencies: [Api.Admin.Default],
   effect: Effect.gen(function*() {
     const client = yield* Api.Admin
     const deploy = (manifest: Model.DatasetManifest) =>
