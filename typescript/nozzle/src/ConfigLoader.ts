@@ -8,7 +8,6 @@ export class ConfigLoaderError extends Data.TaggedError("ConfigLoaderError")<{
 }> {}
 
 export class ConfigLoader extends Effect.Service<ConfigLoader>()("Nozzle/ConfigLoader", {
-  dependencies: [],
   effect: Effect.gen(function*() {
     const path = yield* Path.Path
     const fs = yield* FileSystem.FileSystem

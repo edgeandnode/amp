@@ -3,7 +3,6 @@ import * as Api from "./Api.js"
 import type * as Model from "./Model.js"
 
 export class SchemaGenerator extends Effect.Service<SchemaGenerator>()("Nozzle/SchemaGenerator", {
-  dependencies: [Api.Registry.Default],
   effect: Effect.gen(function*() {
     const api = yield* Api.Registry
 

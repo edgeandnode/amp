@@ -8,7 +8,6 @@ export class ManifestBuilderError extends Data.TaggedError("ManifestBuilderError
 }> {}
 
 export class ManifestBuilder extends Effect.Service<ManifestBuilder>()("Nozzle/ManifestBuilder", {
-  dependencies: [Api.Registry.Default],
   effect: Effect.gen(function*() {
     const client = yield* Api.Registry
     const build = (manifest: Model.DatasetDefinition) =>

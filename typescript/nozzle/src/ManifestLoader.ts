@@ -8,7 +8,6 @@ export class ManifestLoaderError extends Data.TaggedError("ManifestLoaderError")
 }> {}
 
 export class ManifestLoader extends Effect.Service<ManifestLoader>()("Nozzle/ManifestLoader", {
-  dependencies: [],
   effect: Effect.gen(function*() {
     const path = yield* Path.Path
     const fs = yield* FileSystem.FileSystem

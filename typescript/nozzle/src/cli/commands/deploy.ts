@@ -1,5 +1,6 @@
 import { Command, Options } from "@effect/cli"
-import { Effect, Option, Unify } from "effect"
+import { Config, Effect, Layer, Option, Unify } from "effect"
+import * as Api from "../../Api.js"
 import * as ConfigLoader from "../../ConfigLoader.js"
 import * as ManifestBuilder from "../../ManifestBuilder.js"
 import * as ManifestDeployer from "../../ManifestDeployer.js"
@@ -16,6 +17,16 @@ export const deploy = Command.make("deploy", {
       Options.optional,
       Options.withAlias("m"),
       Options.withDescription("The dataset manifest file to deploy")
+    ),
+    admin: Options.text("admin-url").pipe(
+      Options.withFallbackConfig(Config.string("NOZZLE_ADMIN_URL").pipe(Config.withDefault("http://localhost:1610"))),
+      Options.withDescription("The url of the Nozzle admin server")
+    ),
+    registry: Options.text("registry-url").pipe(
+      Options.withFallbackConfig(
+        Config.string("NOZZLE_REGISTRY_URL").pipe(Config.withDefault("http://localhost:1611"))
+      ),
+      Options.withDescription("The url of the Nozzle registry server")
     )
   }
 }, ({ args }) =>
@@ -45,10 +56,20 @@ export const deploy = Command.make("deploy", {
 
     const result = yield* deployer.deploy(manifest)
     yield* Effect.log(result)
-  })).pipe(
-    Command.withDescription("Deploy a dataset definition or manifest to Nozzle"),
-    Command.provide(ManifestDeployer.ManifestDeployer.Default),
-    Command.provide(ManifestBuilder.ManifestBuilder.Default),
-    Command.provide(ManifestLoader.ManifestLoader.Default),
-    Command.provide(ConfigLoader.ConfigLoader.Default)
+  }).pipe(
+    Effect.provide(
+      layer.pipe(Layer.provide(Layer.mergeAll(
+        Api.layerAdmin(args.admin),
+        Api.layerRegistry(args.registry)
+      )))
+    )
+  )).pipe(
+    Command.withDescription("Deploy a dataset definition or manifest to Nozzle")
   )
+
+const layer = Layer.mergeAll(
+  ManifestDeployer.ManifestDeployer.Default,
+  ManifestBuilder.ManifestBuilder.Default,
+  ManifestLoader.ManifestLoader.Default,
+  ConfigLoader.ConfigLoader.Default
+)

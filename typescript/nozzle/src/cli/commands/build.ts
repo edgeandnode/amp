@@ -1,9 +1,15 @@
 import { Command, Options } from "@effect/cli"
 import { FileSystem, Path } from "@effect/platform"
-import { Console, Effect, Option, Schema } from "effect"
+import { Config, Console, Effect, Layer, Option, Schema } from "effect"
+import * as Api from "../../Api.js"
 import * as ConfigLoader from "../../ConfigLoader.js"
 import * as ManifestBuilder from "../../ManifestBuilder.js"
 import * as Model from "../../Model.js"
+
+const layer = Layer.mergeAll(
+  ManifestBuilder.ManifestBuilder.Default,
+  ConfigLoader.ConfigLoader.Default
+)
 
 export const build = Command.make("build", {
   args: {
@@ -16,6 +22,12 @@ export const build = Command.make("build", {
       Options.optional,
       Options.withAlias("o"),
       Options.withDescription("The output file to write the manifest to")
+    ),
+    registry: Options.text("registry-url").pipe(
+      Options.withFallbackConfig(
+        Config.string("NOZZLE_REGISTRY_URL").pipe(Config.withDefault("http://localhost:1611"))
+      ),
+      Options.withDescription("The url of the Nozzle registry server")
     )
   }
 }, ({ args }) =>
@@ -44,8 +56,8 @@ export const build = Command.make("build", {
           Effect.orDie
         )
     })
-  })).pipe(
-    Command.withDescription("Build a manifest from a dataset definition"),
-    Command.provide(ManifestBuilder.ManifestBuilder.Default),
-    Command.provide(ConfigLoader.ConfigLoader.Default)
+  }).pipe(Effect.provide(layer.pipe(
+    Layer.provide(Api.layerRegistry(args.registry))
+  )))).pipe(
+    Command.withDescription("Build a manifest from a dataset definition")
   )

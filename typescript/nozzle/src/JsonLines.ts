@@ -1,5 +1,5 @@
 import { FetchHttpClient, HttpBody, HttpClient, HttpClientResponse, Ndjson, Template } from "@effect/platform"
-import { Config, Data, Effect, Predicate, Schema, Stream } from "effect"
+import { Config, Data, Effect, Layer, Predicate, Schema, Stream } from "effect"
 
 export class JsonLinesError extends Data.TaggedError("JsonLinesError")<{
   readonly cause: unknown
@@ -8,10 +8,8 @@ export class JsonLinesError extends Data.TaggedError("JsonLinesError")<{
 
 const ErrorResponse = Schema.Struct({ error: Schema.String })
 
-export class JsonLines extends Effect.Service<JsonLines>()("Nozzle/JsonLines", {
-  dependencies: [FetchHttpClient.layer],
-  effect: Effect.gen(function*() {
-    const url = yield* Config.string("NOZZLE_JSONL_URL").pipe(Effect.orDie)
+const make = (url: string) =>
+  Effect.gen(function*() {
     const client = yield* HttpClient.HttpClient
 
     const stream: {
@@ -52,4 +50,10 @@ export class JsonLines extends Effect.Service<JsonLines>()("Nozzle/JsonLines", {
 
     return { stream }
   })
+
+export class JsonLines extends Effect.Service<JsonLines>()("Nozzle/JsonLines", {
+  dependencies: [FetchHttpClient.layer],
+  effect: Config.string("NOZZLE_JSONL_URL").pipe(Effect.flatMap(make), Effect.orDie)
 }) {}
+
+export const layerJsonLines = (url: string) => make(url).pipe(Effect.map(JsonLines.make), Layer.effect(JsonLines))

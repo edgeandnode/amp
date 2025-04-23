@@ -1,5 +1,5 @@
 import { FetchHttpClient, HttpApi, HttpApiClient, HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "@effect/platform"
-import { Config, Effect, Schema } from "effect"
+import { Config, Effect, Layer, Schema } from "effect"
 import * as Model from "./Model.js"
 
 export class RegstistryApiGroup extends HttpApiGroup.make("registry", { topLevel: true }).add(
@@ -13,17 +13,18 @@ export class RegstistryApiGroup extends HttpApiGroup.make("registry", { topLevel
 
 export class RegistryApi extends HttpApi.make("registry").add(RegstistryApiGroup) {}
 
+const makeRegistry = (url: string) =>
+  HttpApiClient.make(RegistryApi, {
+    baseUrl: url
+  })
+
 export class Registry extends Effect.Service<Registry>()("Nozzle/Api/Registry", {
   dependencies: [FetchHttpClient.layer],
-  effect: Effect.gen(function*() {
-    const url = yield* Config.string("NOZZLE_REGISTRY_URL").pipe(Effect.orDie)
-    const registry = yield* HttpApiClient.make(RegistryApi, {
-      baseUrl: url
-    })
-
-    return registry
-  })
+  effect: Config.string("NOZZLE_REGISTRY_URL").pipe(Effect.flatMap(makeRegistry), Effect.orDie)
 }) {}
+
+export const layerRegistry = (url: string) =>
+  makeRegistry(url).pipe(Effect.map(Registry.make), Layer.effect(Registry), Layer.provide(FetchHttpClient.layer))
 
 export class AdminApiGroup extends HttpApiGroup.make("admin", { topLevel: true }).add(
   HttpApiEndpoint.post("deploy")`/deploy`
@@ -36,14 +37,15 @@ export class AdminApiGroup extends HttpApiGroup.make("admin", { topLevel: true }
 
 export class AdminApi extends HttpApi.make("admin").add(AdminApiGroup) {}
 
+export const makeAdmin = (url: string) =>
+  HttpApiClient.make(AdminApi, {
+    baseUrl: url
+  })
+
 export class Admin extends Effect.Service<Admin>()("Nozzle/Api/Admin", {
   dependencies: [FetchHttpClient.layer],
-  effect: Effect.gen(function*() {
-    const url = yield* Config.string("NOZZLE_ADMIN_URL").pipe(Effect.orDie)
-    const admin = yield* HttpApiClient.make(AdminApi, {
-      baseUrl: url
-    })
-
-    return admin
-  })
+  effect: Config.string("NOZZLE_ADMIN_URL").pipe(Effect.flatMap(makeAdmin), Effect.orDie)
 }) {}
+
+export const layerAdmin = (url: string) =>
+  makeAdmin(url).pipe(Effect.map(Admin.make), Layer.effect(Admin), Layer.provide(FetchHttpClient.layer))
