@@ -24,7 +24,11 @@ enum Command {
         end_block: u64,
     },
     /// Update the snapshots of some SQL queries that we do tests against.
-    BlessSqlSnapshots,
+    BlessSqlSnapshots {
+        /// Only bless this file. Otherwise, bless all files.
+        #[clap(short)]
+        file: Option<String>,
+    },
 }
 
 #[tokio::main]
@@ -40,8 +44,8 @@ async fn main() {
             bless(&dataset, start_block, end_block).await.unwrap();
             warn!("wrote new blessed dataset for {dataset}");
         }
-        Command::BlessSqlSnapshots => {
-            bless_sql_snapshots().await.unwrap();
+        Command::BlessSqlSnapshots { file } => {
+            bless_sql_snapshots(file).await.unwrap();
             warn!("wrote new blessed sql snapshots");
         }
     }

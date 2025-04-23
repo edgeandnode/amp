@@ -405,8 +405,12 @@ pub const SQL_TEST_QUERIES: &[(&str, &str)] = &[
     ("SELECT attestation_hash(input) FROM eth_rpc.transactions", "attestation_hash.json"),
 ];
 
-pub async fn bless_sql_snapshots() -> Result<(), BoxError> {
-    for (query, filename) in SQL_TEST_QUERIES.iter() {
+pub async fn bless_sql_snapshots(filename: Option<String>) -> Result<(), BoxError> {
+    let queries = SQL_TEST_QUERIES.iter().filter(|(_, f)| match filename {
+        Some(ref filename) => f == filename,
+        None => true,
+    });
+    for (query, filename) in queries {
         let jsonl = run_query_on_fresh_server(query).await?;
         let path = sql_snapshot_path(filename);
         let mut file = fs::File::create(&path)?;

@@ -1,6 +1,7 @@
 use std::{fs, sync::LazyLock};
 
 use common::tracing;
+use pretty_assertions::assert_str_eq;
 
 use crate::{
     temp_metadata_db::test_metadata_db,
@@ -97,10 +98,12 @@ async fn sql_over_eth_firehose_dump() {
 #[tokio::test]
 async fn sql_snapshot_queries() {
     for (query, file) in SQL_TEST_QUERIES {
-        let jsonl = run_query_on_fresh_server(query).await.unwrap();
-        let snapshot = fs::read(sql_snapshot_path(file)).unwrap();
-        if jsonl != snapshot {
-            panic!("SQL query {query}\ndid not match the snapshot {file}");
-        }
+        let jsonl = String::from_utf8(run_query_on_fresh_server(query).await.unwrap()).unwrap();
+        let snapshot = String::from_utf8(fs::read(sql_snapshot_path(file)).unwrap()).unwrap();
+        assert_str_eq!(
+            jsonl,
+            snapshot,
+            "SQL query \"{query}\" did not match the snapshot {file}. If this is intentional, run `cargo run -p tests -- bless-sql-snapshots -f {file}`"
+        );
     }
 }
