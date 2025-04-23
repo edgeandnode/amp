@@ -174,21 +174,40 @@ impl QueryContext {
         let mut session_config = SessionConfig::from_env().map_err(Error::ConfigError)?;
 
         let opts = session_config.options_mut();
+
+        // Rationale for DataFusion settings:
+        //
+        // `collect_statistics`, `prefer_existing_sort` and `split_file_groups_by_statistics` all
+        // work together to take advantage of our files being time-partitioned and each file having
+        // the rows written in sorted order.
+        //
+        // `pushdown_filters` should be helpful for very selective queries, which is something we
+        // want to optimize for.
+
+        // Set `prefer_existing_sort` by default.
         if std::env::var_os("DATAFUSION_OPTIMIZER_PREFER_EXISTING_SORT").is_none() {
-            // Set `prefer_existing_sort` by default. This has a caveat that it only works for
-            // datasets with less files than the number of threads the query is executed with.
-            // The ideal optimization would probably be https://github.com/apache/datafusion/issues/10316.
             opts.optimizer.prefer_existing_sort = true;
         }
 
+        // Set `split_file_groups_by_statistics` by default.
+        //
+        // See https://github.com/apache/datafusion/issues/10336 for upstream default tracking.
+        if std::env::var_os("DATAFUSION_EXECUTION_SPLIT_FILE_GROUPS_BY_STATISTICS").is_none() {
+            opts.execution.split_file_groups_by_statistics = true;
+        }
+
+        // Set `parquet.pushdown_filters` by default.
+        //
+        // See https://github.com/apache/datafusion/issues/3463 for upstream default tracking.
         if std::env::var_os("DATAFUSION_EXECUTION_PARQUET_PUSHDOWN_FILTERS").is_none() {
-            // Set `parquet.pushdown_filters` by default.
             opts.execution.parquet.pushdown_filters = true;
         }
 
         if std::env::var_os("DATAFUSION_EXECUTION_COLLECT_STATISTICS").is_none() {
             // Set `collect_statistics` by default, so DataFusion eagerly reads and caches the
             // Parquet metadata statistics used for various optimizations.
+            //
+            // This is also a requirement for `split_file_groups_by_statistics` to work.
             opts.execution.collect_statistics = true;
         }
 
