@@ -16,7 +16,11 @@ export class ArrowFlightError extends Data.TaggedError("ArrowFlightError")<{
   cause: unknown
 }> {}
 
-export class ArrowFlight extends Context.Tag("Nozzle/ArrowFlight")<ArrowFlight, ReturnType<typeof make>>() {}
+export class ArrowFlight extends Context.Tag("Nozzle/ArrowFlight")<ArrowFlight, ReturnType<typeof make>>() {
+  static withTransport(transport: Transport) {
+    return Layer.sync(ArrowFlight, () => make(transport))
+  }
+}
 
 const make = (transport: Transport) => {
   const client = createClient(Flight.FlightService, transport)
@@ -88,7 +92,3 @@ const make = (transport: Transport) => {
 
   return { client, stream, table }
 }
-
-export const layer = (transport: Transport) => Layer.sync(ArrowFlight, () => make(transport))
-export const layerEffect = <E, R>(transport: Effect.Effect<Transport, E, R>) =>
-  transport.pipe(Effect.map((transport) => make(transport)), Layer.effect(ArrowFlight))

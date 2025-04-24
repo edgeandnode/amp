@@ -24,8 +24,8 @@ export const query = Command.make("query", {
       Options.withDescription("The Arrow Flight URL to use for the query"),
     ),
   },
-}, ({ args }) =>
-  Effect.gen(function*() {
+}, ({ args }) => {
+  const command = Effect.gen(function*() {
     const flight = yield* ArrowFlight.ArrowFlight
     const table = yield* flight.table(args.query).pipe(Effect.map((table) =>
       Option.match(args.limit, {
@@ -60,8 +60,10 @@ export const query = Command.make("query", {
         )),
       Match.exhaustive,
     )
-  }).pipe(
-    Effect.provide(ArrowFlight.layer(createGrpcTransport({ baseUrl: args.flight }))),
-  )).pipe(
-    Command.withDescription("Perform a Nozzle SQL query"),
-  )
+  })
+
+  const layer = ArrowFlight.ArrowFlight.withTransport(createGrpcTransport({ baseUrl: args.flight }))
+  return command.pipe(Effect.provide(layer))
+}).pipe(
+  Command.withDescription("Perform a Nozzle SQL query"),
+)

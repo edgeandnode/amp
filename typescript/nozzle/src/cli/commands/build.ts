@@ -6,11 +6,6 @@ import * as ConfigLoader from "../../ConfigLoader.js"
 import * as ManifestBuilder from "../../ManifestBuilder.js"
 import * as Model from "../../Model.js"
 
-const layer = Layer.mergeAll(
-  ManifestBuilder.ManifestBuilder.Default,
-  ConfigLoader.ConfigLoader.Default,
-)
-
 export const build = Command.make("build", {
   args: {
     config: Options.text("config").pipe(
@@ -30,8 +25,8 @@ export const build = Command.make("build", {
       Options.withDescription("The url of the Nozzle registry server"),
     ),
   },
-}, ({ args }) =>
-  Effect.gen(function*() {
+}, ({ args }) => {
+  const command = Effect.gen(function*() {
     const path = yield* Path.Path
     const fs = yield* FileSystem.FileSystem
     const config = yield* ConfigLoader.ConfigLoader
@@ -56,8 +51,14 @@ export const build = Command.make("build", {
           Effect.orDie,
         ),
     })
-  }).pipe(Effect.provide(layer.pipe(
-    Layer.provide(Api.layerRegistry(args.registry)),
-  )))).pipe(
-    Command.withDescription("Build a manifest from a dataset definition"),
-  )
+  })
+
+  const layer = Layer.mergeAll(
+    ManifestBuilder.ManifestBuilder.Default,
+    ConfigLoader.ConfigLoader.Default,
+  ).pipe(Layer.provide(Api.Registry.withUrl(args.registry)))
+
+  return command.pipe(Effect.provide(layer))
+}).pipe(
+  Command.withDescription("Build a manifest from a dataset definition"),
+)
