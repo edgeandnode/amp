@@ -1,4 +1,4 @@
-import * as CLI from "@effect/cli"
+import * as Cli from "@effect/cli"
 import { Command, FileSystem } from "@effect/platform"
 import { Config, Console, Effect, Layer, Option, PubSub, Unify } from "effect"
 import * as Viem from "viem"
@@ -9,40 +9,40 @@ import { ManifestBuilder } from "../../ManifestBuilder.js"
 import { ManifestDeployer } from "../../ManifestDeployer.js"
 import { ManifestLoader } from "../../ManifestLoader.js"
 
-export const dev = CLI.Command.make(
+export const dev = Cli.Command.make(
   "dev",
   {
     args: {
-      config: CLI.Options.text("config").pipe(
-        CLI.Options.optional,
-        CLI.Options.withAlias("c"),
-        CLI.Options.withDescription(
+      config: Cli.Options.text("config").pipe(
+        Cli.Options.optional,
+        Cli.Options.withAlias("c"),
+        Cli.Options.withDescription(
           "The dataset definition config file to build to a manifest",
         ),
       ),
-      admin: CLI.Options.text("admin-url").pipe(
-        CLI.Options.withFallbackConfig(
+      admin: Cli.Options.text("admin-url").pipe(
+        Cli.Options.withFallbackConfig(
           Config.string("NOZZLE_ADMIN_URL").pipe(Config.withDefault("http://localhost:1610")),
         ),
-        CLI.Options.withDescription("The url of the Nozzle admin server"),
+        Cli.Options.withDescription("The url of the Nozzle admin server"),
       ),
-      registry: CLI.Options.text("registry-url").pipe(
-        CLI.Options.withFallbackConfig(
+      registry: Cli.Options.text("registry-url").pipe(
+        Cli.Options.withFallbackConfig(
           Config.string("NOZZLE_REGISTRY_URL").pipe(Config.withDefault("http://localhost:1611")),
         ),
-        CLI.Options.withDescription("The url of the Nozzle registry server"),
+        Cli.Options.withDescription("The url of the Nozzle registry server"),
       ),
-      nozzle: CLI.Options.text("nozzle").pipe(
-        CLI.Options.withDefault("nozzle"),
-        CLI.Options.withAlias("n"),
-        CLI.Options.withDescription(
+      nozzle: Cli.Options.text("nozzle").pipe(
+        Cli.Options.withDefault("nozzle"),
+        Cli.Options.withAlias("n"),
+        Cli.Options.withDescription(
           "The path of the nozzle executable",
         ),
       ),
-      path: CLI.Options.text("path").pipe(
-        CLI.Options.withDefault(".nozzle"),
-        CLI.Options.withAlias("p"),
-        CLI.Options.withDescription(
+      path: Cli.Options.text("path").pipe(
+        Cli.Options.withDefault(".nozzle"),
+        Cli.Options.withAlias("p"),
+        Cli.Options.withDescription(
           "The path of the nozzle server configuration and data",
         ),
       ),
@@ -123,7 +123,7 @@ export const dev = CLI.Command.make(
         ),
       ),
 ).pipe(
-  CLI.Command.withDescription("Run a dev server"),
+  Cli.Command.withDescription("Run a dev server"),
 )
 
 const layer = Layer.mergeAll(
