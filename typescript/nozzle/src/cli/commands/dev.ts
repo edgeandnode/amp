@@ -1,6 +1,6 @@
 import * as Cli from "@effect/cli"
 import { Command, FileSystem } from "@effect/platform"
-import { Config, Console, Effect, Layer, Option, PubSub, Unify } from "effect"
+import { Config, Effect, Layer, Option, Stream, Unify } from "effect"
 import * as Viem from "viem"
 import * as Chains from "viem/chains"
 import * as Api from "../../Api.js"
@@ -65,21 +65,15 @@ export const dev = Cli.Command.make(
         transport: Viem.http("http://localhost:8545"),
         pollingInterval: 1_000,
       }).extend(Viem.publicActions)
-      const chainHead = yield* PubSub.sliding<bigint>(1)
-      yield* watchChainHead(rpc, chainHead).pipe(
-        Effect.tapError(Console.error),
-        Effect.fork,
-      )
 
-      yield* Effect.gen(function*() {
-        const blocks = yield* PubSub.subscribe(chainHead)
-        while (true) {
-          const block = yield* blocks.take
-          yield* runDump(args.nozzle, args.path, manifest.name, block)
-        }
-      }).pipe(Effect.scoped)
+      const chainHead = yield* watchChainHead(rpc)
+      yield* Stream.fromPubSub(chainHead).pipe(
+        Stream.flattenTake,
+        Stream.runForEach((block) => runDump(args.nozzle, args.path, manifest.name, block)),
+      )
     })
       .pipe(
+        Effect.scoped,
         Effect.provide(
           layer
             .pipe(Layer.provide(Layer.mergeAll(
@@ -172,26 +166,25 @@ const loadManifest = Effect.fn(function*(config: Option.Option<string>) {
   )
 })
 
-const watchChainHead = (
-  rpc: Viem.PublicClient,
-  chainHead: PubSub.PubSub<bigint>,
-) =>
-  Effect.try({
-    try: () => {
-      let lastBlock = Option.none<bigint>()
-      rpc.watchBlockNumber({
-        onBlockNumber: (block) => {
-          if (Option.some(block) === lastBlock) return
-          lastBlock = Option.some(block)
-          Effect.runSync(chainHead.publish(block))
-        },
-        onError(err) {
-          console.error(err.message)
-        },
-      })
-    },
-    catch: (err) => new Error(`Failed to watch chain head: ${err}`),
-  })
+const watchChainHead = (rpc: Viem.PublicClient) =>
+  Stream.asyncPush<bigint, Error>((emit) =>
+    Effect.acquireRelease(
+      Effect.sync(() => {
+        // watchBlockNumber initially returns 0 until the chain progresses,
+        // so we avoid notifying consumers on repeated values.
+        let prevBlock = Option.none<bigint>()
+        return rpc.watchBlockNumber({
+          onBlockNumber: (block) => {
+            if (prevBlock === Option.some(block)) return
+            prevBlock = Option.some(block)
+            emit.single(block)
+          },
+          onError: (err) => console.error(err.message),
+        })
+      }),
+      (unwatch) => Effect.sync(() => unwatch()),
+    )
+  ).pipe(Stream.toPubSub({ capacity: 1, strategy: "sliding" }))
 
 const runDump = (
   nozzlePath: string,
