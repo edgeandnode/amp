@@ -11,25 +11,25 @@ export const codegen = Command.make("codegen", {
     config: Options.text("config").pipe(
       Options.optional,
       Options.withAlias("c"),
-      Options.withDescription("The dataset definition config file to generate code for")
+      Options.withDescription("The dataset definition config file to generate code for"),
     ),
     manifest: Options.text("manifest").pipe(
       Options.optional,
       Options.withAlias("m"),
-      Options.withDescription("The dataset manifest file to generate code for")
+      Options.withDescription("The dataset manifest file to generate code for"),
     ),
     query: Options.text("query").pipe(
       Options.optional,
       Options.withAlias("q"),
-      Options.withDescription("The query to generate code for")
+      Options.withDescription("The query to generate code for"),
     ),
     registry: Options.text("registry-url").pipe(
       Options.withFallbackConfig(
-        Config.string("NOZZLE_REGISTRY_URL").pipe(Config.withDefault("http://localhost:1611"))
+        Config.string("NOZZLE_REGISTRY_URL").pipe(Config.withDefault("http://localhost:1611")),
       ),
-      Options.withDescription("The url of the Nozzle registry server")
-    )
-  }
+      Options.withDescription("The url of the Nozzle registry server"),
+    ),
+  },
 }, ({ args }) =>
   Effect.gen(function*() {
     const generator = yield* SchemaGenerator.SchemaGenerator
@@ -50,26 +50,26 @@ export const codegen = Command.make("codegen", {
           onNone: () =>
             config.find().pipe(Effect.flatMap(Unify.unify(Option.match({
               onSome: (definition) => builder.build(definition).pipe(Effect.map(Option.some)),
-              onNone: () => loader.load("nozzle.json").pipe(Effect.map(Option.some))
-            }))))
-        }))
+              onNone: () => loader.load("nozzle.json").pipe(Effect.map(Option.some)),
+            })))),
+        })),
     })).pipe(
       Effect.orDie,
       Effect.flatMap(Option.match({
         onNone: () => Effect.dieMessage("No manifest or config file provided"),
-        onSome: Effect.succeed
-      }))
+        onSome: Effect.succeed,
+      })),
     )
 
     const result = yield* generator.fromManifest(manifest).pipe(Effect.orDie)
     yield* Console.log(result)
   }).pipe(Effect.provide(layer.pipe(Layer.provide(Api.layerRegistry(args.registry)))))).pipe(
-    Command.withDescription("Generate schema definition code for a dataset")
+    Command.withDescription("Generate schema definition code for a dataset"),
   )
 
 const layer = Layer.mergeAll(
   SchemaGenerator.SchemaGenerator.Default,
   ManifestBuilder.ManifestBuilder.Default,
   ManifestLoader.ManifestLoader.Default,
-  ConfigLoader.ConfigLoader.Default
+  ConfigLoader.ConfigLoader.Default,
 )

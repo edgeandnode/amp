@@ -6,7 +6,7 @@ import * as Arrow from "../src/Arrow.js"
 import * as ArrowFlight from "../src/ArrowFlight.js"
 
 const transport = Config.string("NOZZLE_ARROW_FLIGHT_URL").pipe(
-  Effect.map((url) => createGrpcTransport({ baseUrl: url }))
+  Effect.map((url) => createGrpcTransport({ baseUrl: url })),
 )
 
 const rows = (table: Table) => [...table].map((row) => Object.fromEntries(Object.entries(row)))
@@ -21,7 +21,7 @@ it.layer(ArrowFlight.layerEffect(transport))((it) => {
 
       expect(rows(table)).toStrictEqual([
         { a: 1n, b: 2n, c: 3n, d: 4n },
-        { a: 5n, b: 6n, c: 7n, d: 8n }
+        { a: 5n, b: 6n, c: 7n, d: 8n },
       ])
     }))
 
@@ -80,8 +80,8 @@ it.layer(ArrowFlight.layerEffect(transport))((it) => {
           timestamp_micros_col: Schema.Number,
           timestamp_nanos_col: Schema.Number,
           time32_seconds_col: Schema.Number,
-          time64_micros_col: Schema.BigInt
-        }).ast
+          time64_micros_col: Schema.BigInt,
+        }).ast,
       )
 
       yield* Schema.validate(schema)(data)

@@ -14,28 +14,28 @@ export class ConfigLoader extends Effect.Service<ConfigLoader>()("Nozzle/ConfigL
 
     const jiti = yield* Effect.tryPromise({
       try: () => import("jiti").then(({ createJiti }) => createJiti(import.meta.url)),
-      catch: (cause) => new ConfigLoaderError({ cause })
+      catch: (cause) => new ConfigLoaderError({ cause }),
     }).pipe(Effect.cached)
 
     const loadTypeScript = Effect.fnUntraced(function*(file: string) {
       return yield* jiti.pipe(Effect.flatMap((jiti) =>
         Effect.tryPromise({
           try: () => jiti.import(file, { default: true }),
-          catch: (cause) => cause
+          catch: (cause) => cause,
         })
       )).pipe(
         Effect.flatMap(Schema.decodeUnknown(Model.DatasetDefinition)),
-        Effect.mapError((cause) => new ConfigLoaderError({ cause, message: `Failed to load config file ${file}` }))
+        Effect.mapError((cause) => new ConfigLoaderError({ cause, message: `Failed to load config file ${file}` })),
       )
     })
 
     const loadJavaScript = Effect.fnUntraced(function*(file: string) {
       return yield* Effect.tryPromise({
         try: () => import(file).then((module) => module.default),
-        catch: (cause) => cause
+        catch: (cause) => cause,
       }).pipe(
         Effect.flatMap(Schema.decodeUnknown(Model.DatasetDefinition)),
-        Effect.mapError((cause) => new ConfigLoaderError({ cause, message: `Failed to load config file ${file}` }))
+        Effect.mapError((cause) => new ConfigLoaderError({ cause, message: `Failed to load config file ${file}` })),
       )
     })
 
@@ -44,11 +44,11 @@ export class ConfigLoader extends Effect.Service<ConfigLoader>()("Nozzle/ConfigL
         Effect.flatMap((content) =>
           Effect.try({
             try: () => JSON.parse(content),
-            catch: (cause) => cause
+            catch: (cause) => cause,
           })
         ),
         Effect.flatMap(Schema.decodeUnknown(Model.DatasetDefinition)),
-        Effect.mapError((cause) => new ConfigLoaderError({ cause, message: `Failed to load config file ${file}` }))
+        Effect.mapError((cause) => new ConfigLoaderError({ cause, message: `Failed to load config file ${file}` })),
       )
     })
 
@@ -58,7 +58,7 @@ export class ConfigLoader extends Effect.Service<ConfigLoader>()("Nozzle/ConfigL
         Match.when((_) => /\.(ts|mts|cts)$/.test(_), () => loadTypeScript(resolved)),
         Match.when((_) => /\.(js|mjs|cjs)$/.test(_), () => loadJavaScript(resolved)),
         Match.when((_) => /\.(json)$/.test(_), () => loadJson(resolved)),
-        Match.orElse((_) => new ConfigLoaderError({ message: `Unsupported file extension ${_}` }))
+        Match.orElse((_) => new ConfigLoaderError({ message: `Unsupported file extension ${_}` })),
       )
     })
 
@@ -70,16 +70,16 @@ export class ConfigLoader extends Effect.Service<ConfigLoader>()("Nozzle/ConfigL
         path.resolve(cwd, `nozzle.config.js`),
         path.resolve(cwd, `nozzle.config.mjs`),
         path.resolve(cwd, `nozzle.config.cjs`),
-        path.resolve(cwd, `nozzle.config.json`)
+        path.resolve(cwd, `nozzle.config.json`),
       ]
 
       const match = yield* Effect.findFirst(candidates, (_) => fs.exists(_).pipe(Effect.orElseSucceed(() => false)))
       return yield* Option.match(match, {
         onNone: () => Effect.succeed(Option.none<Model.DatasetDefinition>()),
-        onSome: (file) => load(file).pipe(Effect.map(Option.some))
+        onSome: (file) => load(file).pipe(Effect.map(Option.some)),
       })
     })
 
     return { load, find }
-  })
+  }),
 }) {}

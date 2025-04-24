@@ -31,17 +31,17 @@ const make = (transport: Transport) => {
       const any = anyPack(FlightSql.CommandStatementQuerySchema, cmd)
       const descriptor = create(Flight.FlightDescriptorSchema, {
         type: Flight.FlightDescriptor_DescriptorType.CMD,
-        cmd: toBinary(AnySchema, any)
+        cmd: toBinary(AnySchema, any),
       })
 
       const info = yield* Effect.tryPromise({
         try: (_) => client.getFlightInfo(descriptor, { signal: _ }),
-        catch: (cause) => new ArrowFlightError({ cause })
+        catch: (cause) => new ArrowFlightError({ cause }),
       })
 
       const ticket = yield* Option.fromNullable(info.endpoint[0]?.ticket).pipe(Option.match({
         onNone: () => new ArrowFlightError({ cause: new Error("No flight ticket found") }),
-        onSome: (ticket) => Effect.succeed(ticket)
+        onSome: (ticket) => Effect.succeed(ticket),
       }))
 
       const request = yield* Effect.async<AsyncIterable<Flight.FlightData>>((resume, signal) => {
@@ -71,8 +71,8 @@ const make = (transport: Transport) => {
 
                 yield buf
               }
-            }
-          } as AsyncIterable<ArrayBuffer>)
+            },
+          } as AsyncIterable<ArrayBuffer>),
       })
 
       return Stream.fromAsyncIterable(reader, (cause) => new ArrowFlightError({ cause }))
@@ -83,7 +83,7 @@ const make = (transport: Transport) => {
     (sql: string): Effect.Effect<Table, ArrowFlightError>
   } = (sql: any) =>
     Stream.runCollect(stream(sql)).pipe(
-      Effect.map((batches) => new Table(Chunk.toArray(batches)))
+      Effect.map((batches) => new Table(Chunk.toArray(batches))),
     ) as any
 
   return { client, stream, table }

@@ -17,38 +17,38 @@ const make = (url: string) =>
         cause.response.text.pipe(
           Effect.map(JSON.parse),
           Effect.flatMap(Schema.decodeUnknown(ErrorResponse)),
-          Effect.flatMap(({ error: message }) => new JsonLinesError({ cause, message }))
+          Effect.flatMap(({ error: message }) => new JsonLinesError({ cause, message })),
         )
-      )
+      ),
     )
 
     const client = yield* HttpClient.HttpClient.pipe(
       Effect.map(HttpClient.filterStatusOk),
       Effect.map(HttpClient.transformResponse(Effect.catchTag("ResponseError", handleError))),
       Effect.map(
-        HttpClient.mapRequest(HttpClientRequest.setHeader("Accept-Encoding", "deflate"))
-      )
+        HttpClient.mapRequest(HttpClientRequest.setHeader("Accept-Encoding", "deflate")),
+      ),
     )
 
     const stream: {
       <A, I, R>(
-        schema: Schema.Schema<A, I, R>
+        schema: Schema.Schema<A, I, R>,
       ): (sql: TemplateStringsArray) => Stream.Stream<A, JsonLinesError, R>
       <A, I, R>(
-        schema: Schema.Schema<A, I, R>
+        schema: Schema.Schema<A, I, R>,
       ): (sql: string) => Stream.Stream<A, JsonLinesError, R>
     } = (schema) => (sql) => {
       return Stream.unwrap(Effect.gen(function*() {
         const query = typeof sql === "string" ? sql : yield* Template.make(sql)
         const response = yield* client.post(url, {
-          body: HttpBody.text(query)
+          body: HttpBody.text(query),
         })
 
         return response.stream
       })).pipe(
         Stream.pipeThroughChannel(Ndjson.unpack({ ignoreEmptyLines: true })),
         Stream.mapEffect(Schema.decodeUnknown(schema)),
-        Stream.mapError((cause) => Predicate.isTagged("JsonLinesError")(cause) ? cause : new JsonLinesError({ cause }))
+        Stream.mapError((cause) => Predicate.isTagged("JsonLinesError")(cause) ? cause : new JsonLinesError({ cause })),
       )
     }
 
@@ -57,7 +57,7 @@ const make = (url: string) =>
 
 export class JsonLines extends Effect.Service<JsonLines>()("Nozzle/JsonLines", {
   dependencies: [FetchHttpClient.layer],
-  effect: Config.string("NOZZLE_JSONL_URL").pipe(Effect.flatMap(make), Effect.orDie)
+  effect: Config.string("NOZZLE_JSONL_URL").pipe(Effect.flatMap(make), Effect.orDie),
 }) {}
 
 export const layerJsonLines = (url: string) =>

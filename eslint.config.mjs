@@ -8,7 +8,7 @@ import tseslint from "typescript-eslint"
 
 export default tseslint.config(
   {
-    ignores: ["**/dist", "**/build", "**/docs", "**/*.md"]
+    ignores: ["**/dist", "**/build", "**/docs", "**/*.md"],
   },
   eslint.configs.recommended,
   tseslint.configs.strict,
@@ -18,21 +18,21 @@ export default tseslint.config(
   {
     plugins: {
       "simple-import-sort": simpleImportSort,
-      "sort-destructure-keys": sortDestructureKeys
+      "sort-destructure-keys": sortDestructureKeys,
     },
     languageOptions: {
       parser: tseslint.parser,
       ecmaVersion: 2018,
-      sourceType: "module"
+      sourceType: "module",
     },
     settings: {
       "import-x/resolver": {
         name: "tsResolver",
         resolver: tsResolver,
         options: {
-          alwaysTryTypes: true
-        }
-      }
+          alwaysTryTypes: true,
+        },
+      },
     },
     rules: {
       "no-fallthrough": "off",
@@ -44,8 +44,8 @@ export default tseslint.config(
         "error",
         {
           selector: "CallExpression[callee.property.name='push'] > SpreadElement.arguments",
-          message: "Do not use spread arguments in Array.push"
-        }
+          message: "Do not use spread arguments in Array.push",
+        },
       ],
       "no-unused-vars": "off",
       "require-yield": "off",
@@ -65,8 +65,8 @@ export default tseslint.config(
         "warn",
         {
           default: "generic",
-          readonly: "generic"
-        }
+          readonly: "generic",
+        },
       ],
       "@typescript-eslint/ban-ts-comment": "off",
       "@typescript-eslint/ban-types": "off",
@@ -88,8 +88,8 @@ export default tseslint.config(
         "error",
         {
           argsIgnorePattern: "^_",
-          varsIgnorePattern: "^_"
-        }
+          varsIgnorePattern: "^_",
+        },
       ],
       "@typescript-eslint/no-use-before-define": "off",
       "@typescript-eslint/prefer-for-of": "off",
@@ -102,15 +102,15 @@ export default tseslint.config(
             lineWidth: 120,
             semiColons: "asi",
             quoteStyle: "alwaysDouble",
-            trailingCommas: "never",
+            trailingCommas: "onlyMultiLine",
             operatorPosition: "maintain",
-            "arrowFunction.useParentheses": "force"
-          }
-        }
-      ]
-    }
+            "arrowFunction.useParentheses": "force",
+          },
+        },
+      ],
+    },
   },
   {
     files: ["typescript/*/src/**/*", "typescript/*/scripts/**/*", "typescript/*/test/**/*"],
-  }
+  },
 )

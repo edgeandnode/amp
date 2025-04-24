@@ -17,15 +17,15 @@ export default defineDataset(() => ({
     mainnet: {
       owner: "graphprotocol",
       name: "mainnet",
-      version: "0.1.0"
-    }
+      version: "0.1.0",
+    },
   },
   tables: {
     erc20_transfers: {
       sql: `
         SELECT t.block_num, t.timestamp, t.event['from'] as from, t.event['to'] as to, t.event['value'] as value
         FROM (${transfer}) as t
-      `
-    }
-  }
+      `,
+    },
+  },
 }))

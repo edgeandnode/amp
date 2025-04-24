@@ -15,18 +15,18 @@ export class ManifestBuilder extends Effect.Service<ManifestBuilder>()("Nozzle/M
         const tables = yield* Effect.forEach(Object.entries(manifest.tables), ([name, table]) =>
           Effect.gen(function*() {
             const schema = yield* client.schema({
-              payload: { sql_query: table.sql }
+              payload: { sql_query: table.sql },
             }).pipe(Effect.mapError((cause) =>
               new ManifestBuilderError({
                 cause,
-                message: `Failed to build table ${name} in manifest ${manifest.name}`
+                message: `Failed to build table ${name} in manifest ${manifest.name}`,
               })
             ))
 
             const input = new Model.TableInput({ sql: table.sql })
             const output = new Model.Table({
               input,
-              schema: schema.schema
+              schema: schema.schema,
             })
 
             return [name, output] as const
@@ -37,10 +37,10 @@ export class ManifestBuilder extends Effect.Service<ManifestBuilder>()("Nozzle/M
           name: manifest.name,
           version: manifest.version,
           tables: Object.fromEntries(tables),
-          dependencies: manifest.dependencies
+          dependencies: manifest.dependencies,
         })
       })
 
     return { build }
-  })
+  }),
 }) {}

@@ -10,13 +10,13 @@ export class ManifestDeployer extends Effect.Service<ManifestDeployer>()("Nozzle
         const result = yield* client.deploy({
           payload: {
             dataset_name: manifest.name,
-            manifest
-          }
+            manifest,
+          },
         })
 
         return result
       })
 
     return { deploy }
-  })
+  }),
 }) {}
