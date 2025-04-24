@@ -1,17 +1,19 @@
 import { createGrpcTransport } from "@connectrpc/connect-node"
 import { expect, it } from "@effect/vitest"
 import { type Table } from "apache-arrow"
-import { Array, Config, Effect, Schema } from "effect"
+import { Array, Config, Effect, Layer, Schema } from "effect"
 import * as Arrow from "../src/Arrow.js"
 import * as ArrowFlight from "../src/ArrowFlight.js"
 
-const transport = Config.string("NOZZLE_ARROW_FLIGHT_URL").pipe(
+const flight = Config.string("NOZZLE_ARROW_FLIGHT_URL").pipe(
   Effect.map((url) => createGrpcTransport({ baseUrl: url })),
+  Effect.map(ArrowFlight.ArrowFlight.withTransport),
+  Layer.unwrapEffect,
 )
 
 const rows = (table: Table) => [...table].map((row) => Object.fromEntries(Object.entries(row)))
 
-it.layer(ArrowFlight.layerEffect(transport))((it) => {
+it.layer(flight)((it) => {
   it.effect("should respond to a sql query", () =>
     Effect.gen(function*() {
       const flight = yield* ArrowFlight.ArrowFlight

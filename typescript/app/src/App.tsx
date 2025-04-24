@@ -13,7 +13,7 @@ const program = Effect.gen(function*() {
 
 // TODO: Type resolution issue here.
 const transport = createConnectTransport({ baseUrl: "/nozzle" }) as any
-const runnable = program.pipe(Effect.provide(ArrowFlight.layer(transport)))
+const runnable = program.pipe(Effect.provide(ArrowFlight.ArrowFlight.withTransport(transport)))
 
 function App() {
   const [rows, setRows] = useState<ReadonlyArray<any>>([])

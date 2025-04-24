@@ -30,13 +30,12 @@ export const codegen = Command.make("codegen", {
       Options.withDescription("The url of the Nozzle registry server"),
     ),
   },
-}, ({ args }) =>
-  Effect.gen(function*() {
+}, ({ args }) => {
+  const command = Effect.gen(function*() {
     const generator = yield* SchemaGenerator.SchemaGenerator
     if (Option.isSome(args.query)) {
       const result = yield* generator.fromSql(args.query.value).pipe(Effect.orDie)
-      yield* Console.log(result)
-      return
+      return yield* Console.log(result)
     }
 
     const loader = yield* ManifestLoader.ManifestLoader
@@ -63,13 +62,16 @@ export const codegen = Command.make("codegen", {
 
     const result = yield* generator.fromManifest(manifest).pipe(Effect.orDie)
     yield* Console.log(result)
-  }).pipe(Effect.provide(layer.pipe(Layer.provide(Api.layerRegistry(args.registry)))))).pipe(
-    Command.withDescription("Generate schema definition code for a dataset"),
-  )
+  })
 
-const layer = Layer.mergeAll(
-  SchemaGenerator.SchemaGenerator.Default,
-  ManifestBuilder.ManifestBuilder.Default,
-  ManifestLoader.ManifestLoader.Default,
-  ConfigLoader.ConfigLoader.Default,
+  const layer = Layer.mergeAll(
+    SchemaGenerator.SchemaGenerator.Default,
+    ManifestBuilder.ManifestBuilder.Default,
+    ManifestLoader.ManifestLoader.Default,
+    ConfigLoader.ConfigLoader.Default,
+  ).pipe(Layer.provide(Api.Registry.withUrl(args.registry)))
+
+  return command.pipe(Effect.provide(layer))
+}).pipe(
+  Command.withDescription("Generate schema definition code for a dataset"),
 )

@@ -13,18 +13,15 @@ export class RegstistryApiGroup extends HttpApiGroup.make("registry", { topLevel
 
 export class RegistryApi extends HttpApi.make("registry").add(RegstistryApiGroup) {}
 
-const makeRegistry = (url: string) =>
-  HttpApiClient.make(RegistryApi, {
-    baseUrl: url,
-  })
-
+const makeRegistry = (url: string) => HttpApiClient.make(RegistryApi, { baseUrl: url })
 export class Registry extends Effect.Service<Registry>()("Nozzle/Api/Registry", {
   dependencies: [FetchHttpClient.layer],
   effect: Config.string("NOZZLE_REGISTRY_URL").pipe(Effect.flatMap(makeRegistry), Effect.orDie),
-}) {}
-
-export const layerRegistry = (url: string) =>
-  makeRegistry(url).pipe(Effect.map(Registry.make), Layer.effect(Registry), Layer.provide(FetchHttpClient.layer))
+}) {
+  static withUrl(url: string) {
+    return makeRegistry(url).pipe(Effect.map(this.make), Layer.effect(this), Layer.provide(FetchHttpClient.layer))
+  }
+}
 
 export class AdminApiGroup extends HttpApiGroup.make("admin", { topLevel: true }).add(
   HttpApiEndpoint.post("deploy")`/deploy`
@@ -37,15 +34,12 @@ export class AdminApiGroup extends HttpApiGroup.make("admin", { topLevel: true }
 
 export class AdminApi extends HttpApi.make("admin").add(AdminApiGroup) {}
 
-export const makeAdmin = (url: string) =>
-  HttpApiClient.make(AdminApi, {
-    baseUrl: url,
-  })
-
+const makeAdmin = (url: string) => HttpApiClient.make(AdminApi, { baseUrl: url })
 export class Admin extends Effect.Service<Admin>()("Nozzle/Api/Admin", {
   dependencies: [FetchHttpClient.layer],
   effect: Config.string("NOZZLE_ADMIN_URL").pipe(Effect.flatMap(makeAdmin), Effect.orDie),
-}) {}
-
-export const layerAdmin = (url: string) =>
-  makeAdmin(url).pipe(Effect.map(Admin.make), Layer.effect(Admin), Layer.provide(FetchHttpClient.layer))
+}) {
+  static withUrl(url: string) {
+    return makeAdmin(url).pipe(Effect.map(this.make), Layer.effect(this), Layer.provide(FetchHttpClient.layer))
+  }
+}

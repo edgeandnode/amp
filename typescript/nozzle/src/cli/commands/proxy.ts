@@ -23,8 +23,8 @@ export const proxy = Command.make("proxy", {
       Options.withDescription("The Arrow Flight URL to use for the proxy"),
     ),
   },
-}, ({ args }) =>
-  Effect.gen(function*() {
+}, ({ args }) => {
+  const command = Effect.gen(function*() {
     const flight = yield* ArrowFlight.ArrowFlight
     const adapter = connectNodeAdapter({
       routes: (router) => {
@@ -57,9 +57,10 @@ export const proxy = Command.make("proxy", {
       )
 
     yield* Effect.acquireRelease(acquire, release).pipe(Effect.zip(Effect.never))
-  }).pipe(
-    Effect.scoped,
-    Effect.provide(ArrowFlight.layer(createGrpcTransport({ baseUrl: args.flight }))),
-  )).pipe(
-    Command.withDescription("Launches a Connect proxy for the Arrow Flight server"),
-  )
+  })
+
+  const layer = ArrowFlight.ArrowFlight.withTransport(createGrpcTransport({ baseUrl: args.flight }))
+  return command.pipe(Effect.scoped, Effect.provide(layer))
+}).pipe(
+  Command.withDescription("Launches a Connect proxy for the Arrow Flight server"),
+)

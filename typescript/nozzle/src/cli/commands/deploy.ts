@@ -31,8 +31,8 @@ export const deploy = Command.make("deploy", {
       Options.withDescription("The url of the Nozzle registry server"),
     ),
   },
-}, ({ args }) =>
-  Effect.gen(function*() {
+}, ({ args }) => {
+  const command = Effect.gen(function*() {
     const deployer = yield* ManifestDeployer.ManifestDeployer
     const loader = yield* ManifestLoader.ManifestLoader
     const config = yield* ConfigLoader.ConfigLoader
@@ -58,20 +58,19 @@ export const deploy = Command.make("deploy", {
 
     const result = yield* deployer.deploy(manifest)
     yield* Effect.log(result)
-  }).pipe(
-    Effect.provide(
-      layer.pipe(Layer.provide(Layer.mergeAll(
-        Api.layerAdmin(args.admin),
-        Api.layerRegistry(args.registry),
-      ))),
-    ),
-  )).pipe(
-    Command.withDescription("Deploy a dataset definition or manifest to Nozzle"),
-  )
+  })
 
-const layer = Layer.mergeAll(
-  ManifestDeployer.ManifestDeployer.Default,
-  ManifestBuilder.ManifestBuilder.Default,
-  ManifestLoader.ManifestLoader.Default,
-  ConfigLoader.ConfigLoader.Default,
+  const layer = Layer.mergeAll(
+    ManifestDeployer.ManifestDeployer.Default,
+    ManifestBuilder.ManifestBuilder.Default,
+    ManifestLoader.ManifestLoader.Default,
+    ConfigLoader.ConfigLoader.Default,
+  ).pipe(Layer.provide(Layer.mergeAll(
+    Api.Admin.withUrl(args.admin),
+    Api.Registry.withUrl(args.registry),
+  )))
+
+  return command.pipe(Effect.provide(layer))
+}).pipe(
+  Command.withDescription("Deploy a dataset definition or manifest to Nozzle"),
 )
