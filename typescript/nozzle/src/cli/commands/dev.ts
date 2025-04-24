@@ -1,10 +1,9 @@
 import * as Cli from "@effect/cli"
 import { Command, FileSystem } from "@effect/platform"
 import { Config, Effect, Layer, Option, Stream, Unify } from "effect"
-import * as Viem from "viem"
-import * as Chains from "viem/chains"
 import * as Api from "../../Api.js"
 import { ConfigLoader } from "../../ConfigLoader.js"
+import * as EvmRpc from "../../EvmRpc.js"
 import { ManifestBuilder } from "../../ManifestBuilder.js"
 import { ManifestDeployer } from "../../ManifestDeployer.js"
 import { ManifestLoader } from "../../ManifestLoader.js"
@@ -31,6 +30,12 @@ export const dev = Cli.Command.make(
           Config.string("NOZZLE_REGISTRY_URL").pipe(Config.withDefault("http://localhost:1611")),
         ),
         Cli.Options.withDescription("The url of the Nozzle registry server"),
+      ),
+      rpc: Cli.Options.text("rpc-url").pipe(
+        Cli.Options.withFallbackConfig(
+          Config.string("NOZZLE_RPC_URL").pipe(Config.withDefault("http://localhost:8545")),
+        ),
+        Cli.Options.withDescription("The url of the chain RPC server"),
       ),
       nozzle: Cli.Options.text("nozzle").pipe(
         Cli.Options.withDefault("nozzle"),
@@ -59,14 +64,8 @@ export const dev = Cli.Command.make(
       const result = yield* manifestDeployer.deploy(manifest)
       yield* Effect.log(result)
 
-      const rpc = Viem.createTestClient({
-        mode: "anvil",
-        chain: Chains.foundry,
-        transport: Viem.http("http://localhost:8545"),
-        pollingInterval: 1_000,
-      }).extend(Viem.publicActions)
-
-      const chainHead = yield* watchChainHead(rpc)
+      const rpc = yield* EvmRpc.EvmRpc
+      const chainHead = yield* rpc.watchChainHead()
       yield* Stream.fromPubSub(chainHead).pipe(
         Stream.flattenTake,
         Stream.runForEach((block) => runDump(args.nozzle, args.path, manifest.name, block)),
@@ -74,24 +73,23 @@ export const dev = Cli.Command.make(
     })
       .pipe(
         Effect.scoped,
-        Effect.provide(
-          layer
-            .pipe(Layer.provide(Layer.mergeAll(
-              Api.layerAdmin(args.admin),
-              Api.layerRegistry(args.registry),
-            ))),
-        ),
+        Effect.provide(layer(args.admin, args.registry, args.rpc)),
       ),
 ).pipe(
   Cli.Command.withDescription("Run a dev server"),
 )
 
-const layer = Layer.mergeAll(
-  ManifestBuilder.Default,
-  ManifestLoader.Default,
-  ManifestDeployer.Default,
-  ConfigLoader.Default,
-)
+const layer = (admin: string, registry: string, rpc: string) =>
+  Layer.mergeAll(
+    ManifestBuilder.Default,
+    ManifestLoader.Default,
+    ManifestDeployer.Default,
+    ConfigLoader.Default,
+    EvmRpc.layer(rpc),
+  ).pipe(Layer.provide(Layer.mergeAll(
+    Api.layerAdmin(admin),
+    Api.layerRegistry(registry),
+  )))
 
 const initConfigDir = Effect.fn(function*(fs: FileSystem.FileSystem, path: string) {
   yield* fs.makeDirectory(path, { recursive: true })
@@ -165,26 +163,6 @@ const loadManifest = Effect.fn(function*(config: Option.Option<string>) {
     ),
   )
 })
-
-const watchChainHead = (rpc: Viem.PublicClient) =>
-  Stream.asyncPush<bigint, Error>((emit) =>
-    Effect.acquireRelease(
-      Effect.sync(() => {
-        // watchBlockNumber initially returns 0 until the chain progresses,
-        // so we avoid notifying consumers on repeated values.
-        let prevBlock = Option.none<bigint>()
-        return rpc.watchBlockNumber({
-          onBlockNumber: (block) => {
-            if (prevBlock === Option.some(block)) return
-            prevBlock = Option.some(block)
-            emit.single(block)
-          },
-          onError: (err) => console.error(err.message),
-        })
-      }),
-      (unwatch) => Effect.sync(() => unwatch()),
-    )
-  ).pipe(Stream.toPubSub({ capacity: 1, strategy: "sliding" }))
 
 const runDump = (
   nozzlePath: string,
