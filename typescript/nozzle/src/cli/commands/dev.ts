@@ -8,93 +8,85 @@ import { ManifestBuilder } from "../../ManifestBuilder.js"
 import { ManifestDeployer } from "../../ManifestDeployer.js"
 import { ManifestLoader } from "../../ManifestLoader.js"
 
-export const dev = Cli.Command.make(
-  "dev",
-  {
-    args: {
-      config: Cli.Options.text("config").pipe(
-        Cli.Options.optional,
-        Cli.Options.withAlias("c"),
-        Cli.Options.withDescription(
-          "The dataset definition config file to build to a manifest",
-        ),
+export const dev = Cli.Command.make("dev", {
+  args: {
+    config: Cli.Options.text("config").pipe(
+      Cli.Options.optional,
+      Cli.Options.withAlias("c"),
+      Cli.Options.withDescription(
+        "The dataset definition config file to build to a manifest",
       ),
-      admin: Cli.Options.text("admin-url").pipe(
-        Cli.Options.withFallbackConfig(
-          Config.string("NOZZLE_ADMIN_URL").pipe(Config.withDefault("http://localhost:1610")),
-        ),
-        Cli.Options.withDescription("The url of the Nozzle admin server"),
+    ),
+    admin: Cli.Options.text("admin-url").pipe(
+      Cli.Options.withFallbackConfig(
+        Config.string("NOZZLE_ADMIN_URL").pipe(Config.withDefault("http://localhost:1610")),
       ),
-      registry: Cli.Options.text("registry-url").pipe(
-        Cli.Options.withFallbackConfig(
-          Config.string("NOZZLE_REGISTRY_URL").pipe(Config.withDefault("http://localhost:1611")),
-        ),
-        Cli.Options.withDescription("The url of the Nozzle registry server"),
+      Cli.Options.withDescription("The url of the Nozzle admin server"),
+    ),
+    registry: Cli.Options.text("registry-url").pipe(
+      Cli.Options.withFallbackConfig(
+        Config.string("NOZZLE_REGISTRY_URL").pipe(Config.withDefault("http://localhost:1611")),
       ),
-      rpc: Cli.Options.text("rpc-url").pipe(
-        Cli.Options.withFallbackConfig(
-          Config.string("NOZZLE_RPC_URL").pipe(Config.withDefault("http://localhost:8545")),
-        ),
-        Cli.Options.withDescription("The url of the chain RPC server"),
+      Cli.Options.withDescription("The url of the Nozzle registry server"),
+    ),
+    rpc: Cli.Options.text("rpc-url").pipe(
+      Cli.Options.withFallbackConfig(
+        Config.string("NOZZLE_RPC_URL").pipe(Config.withDefault("http://localhost:8545")),
       ),
-      nozzle: Cli.Options.text("nozzle").pipe(
-        Cli.Options.withDefault("nozzle"),
-        Cli.Options.withAlias("n"),
-        Cli.Options.withDescription(
-          "The path of the nozzle executable",
-        ),
+      Cli.Options.withDescription("The url of the chain RPC server"),
+    ),
+    nozzle: Cli.Options.text("nozzle").pipe(
+      Cli.Options.withDefault("nozzle"),
+      Cli.Options.withAlias("n"),
+      Cli.Options.withDescription(
+        "The path of the nozzle executable",
       ),
-      path: Cli.Options.text("path").pipe(
-        Cli.Options.withDefault(".nozzle"),
-        Cli.Options.withAlias("p"),
-        Cli.Options.withDescription(
-          "The path of the nozzle server configuration and data",
-        ),
+    ),
+    path: Cli.Options.text("path").pipe(
+      Cli.Options.withDefault(".nozzle"),
+      Cli.Options.withAlias("p"),
+      Cli.Options.withDescription(
+        "The path of the nozzle server configuration and data",
       ),
-    },
+    ),
   },
-  ({ args }) =>
-    Effect.gen(function*() {
-      const fs = yield* FileSystem.FileSystem
-      yield* initConfigDir(fs, args.path)
-      const server = yield* runServer(args.nozzle, args.path).pipe(Effect.fork)
+}, ({ args }) => {
+  const command = Effect.gen(function*() {
+    yield* initConfigDir(args.path)
+    const server = yield* runServer(args.nozzle, args.path).pipe(Effect.fork)
 
-      const manifestDeployer = yield* ManifestDeployer
-      const manifest = yield* loadManifest(args.config)
-      const result = yield* manifestDeployer.deploy(manifest)
-      yield* Effect.log(result)
+    const manifestDeployer = yield* ManifestDeployer
+    const manifest = yield* loadManifest(args.config)
+    const result = yield* manifestDeployer.deploy(manifest)
+    yield* Effect.log(result)
 
-      const rpc = yield* EvmRpc.EvmRpc
-      const chainHead = yield* rpc.watchChainHead()
-      const dump = yield* Stream.fromPubSub(chainHead).pipe(
-        Stream.flattenTake,
-        Stream.runForEach((block) => runDump(args.nozzle, args.path, manifest.name, block)),
-        Effect.fork,
-      )
+    const rpc = yield* EvmRpc.EvmRpc
+    const dump = yield* rpc.watchChainHead.pipe(
+      Stream.runForEach((block) => runDump(args.nozzle, args.path, manifest.name, block)),
+      Effect.fork,
+    )
 
-      yield* Fiber.joinAll([server, dump])
-    })
-      .pipe(
-        Effect.scoped,
-        Effect.provide(layer(args.admin, args.registry, args.rpc)),
-      ),
-).pipe(
-  Cli.Command.withDescription("Run a dev server"),
-)
+    yield* Fiber.joinAll([server, dump])
+  })
 
-const layer = (admin: string, registry: string, rpc: string) =>
-  Layer.mergeAll(
+  const layer = Layer.mergeAll(
     ManifestBuilder.Default,
     ManifestLoader.Default,
     ManifestDeployer.Default,
     ConfigLoader.Default,
-    EvmRpc.layer(rpc),
+    EvmRpc.EvmRpc.withUrl(args.rpc),
   ).pipe(Layer.provide(Layer.mergeAll(
-    Api.layerAdmin(admin),
-    Api.layerRegistry(registry),
+    Api.Admin.withUrl(args.admin),
+    Api.Registry.withUrl(args.registry),
   )))
 
-const initConfigDir = Effect.fn(function*(fs: FileSystem.FileSystem, path: string) {
+  return command.pipe(Effect.scoped, Effect.provide(layer))
+}).pipe(
+  Cli.Command.withDescription("Run a dev server"),
+)
+
+const initConfigDir = Effect.fn(function*(path: string) {
+  const fs = yield* FileSystem.FileSystem
   yield* fs.makeDirectory(path, { recursive: true })
   yield* fs.remove(`${path}/data`, { recursive: true }).pipe(Effect.ignore)
   yield* fs.makeDirectory(`${path}/data`, { recursive: true })
