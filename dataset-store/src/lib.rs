@@ -18,10 +18,10 @@ use common::{
     BlockNum, BlockStreamer, BoxError, Dataset, DatasetWithProvider, QueryContext, Store,
 };
 use datafusion::{
-    catalog::resolve_table_references,
     common::HashMap,
     execution::runtime_env::RuntimeEnv,
     logical_expr::ScalarUDF,
+    sql::resolve::resolve_table_references,
     sql::{parser, TableReference},
 };
 use futures::{future::BoxFuture, FutureExt as _, TryFutureExt as _};

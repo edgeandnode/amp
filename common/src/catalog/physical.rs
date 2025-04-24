@@ -360,10 +360,11 @@ impl PhysicalTable {
         let mut file_list = self.object_store.list(Some(self.path()));
 
         while let Some(object_meta_result) = file_list.next().await {
-            let mut reader =
-                ParquetObjectReader::new(self.object_store.clone(), object_meta_result?);
+            let meta = object_meta_result?;
+            let mut reader = ParquetObjectReader::new(self.object_store.clone(), meta.location)
+                .with_file_size(meta.size);
 
-            let parquet_metadata = reader.get_metadata().await?;
+            let parquet_metadata = reader.get_metadata(None).await?;
 
             let key_value_metadata = parquet_metadata
                 .file_metadata()

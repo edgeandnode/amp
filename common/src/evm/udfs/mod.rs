@@ -29,7 +29,8 @@ use datafusion::{
     error::DataFusionError,
     logical_expr::{
         simplify::{ExprSimplifyResult, SimplifyInfo},
-        ColumnarValue, ReturnInfo, ReturnTypeArgs, ScalarUDFImpl, Signature, Volatility,
+        ColumnarValue, ReturnInfo, ReturnTypeArgs, ScalarFunctionArgs, ScalarUDFImpl, Signature,
+        Volatility,
     },
     prelude::Expr,
     scalar::ScalarValue,
@@ -562,7 +563,11 @@ impl ScalarUDFImpl for EvmDecode {
         unreachable!("DataFusion will never call this")
     }
 
-    fn invoke(&self, args: &[ColumnarValue]) -> datafusion::error::Result<ColumnarValue> {
+    fn invoke_with_args(
+        &self,
+        args: ScalarFunctionArgs,
+    ) -> datafusion::error::Result<ColumnarValue> {
+        let args = args.args;
         if args.len() != 5 {
             return internal_err!(
                 "{}: expected 5 arguments, but got {}",
@@ -638,6 +643,8 @@ pub struct EvmTopic {
 }
 
 impl EvmTopic {
+    const RETURN_TYPE: DataType = DataType::FixedSizeBinary(32);
+
     pub fn new() -> Self {
         let signature = Signature::exact(vec![DataType::Utf8], Volatility::Immutable);
         Self { signature }
@@ -665,10 +672,14 @@ impl ScalarUDFImpl for EvmTopic {
                 arg_types.len()
             );
         }
-        Ok(DataType::FixedSizeBinary(32))
+        Ok(Self::RETURN_TYPE)
     }
 
-    fn invoke(&self, args: &[ColumnarValue]) -> datafusion::error::Result<ColumnarValue> {
+    fn invoke_with_args(
+        &self,
+        args: ScalarFunctionArgs,
+    ) -> datafusion::error::Result<ColumnarValue> {
+        let args = args.args;
         let signature = match &args[0] {
             ColumnarValue::Scalar(scalar) => scalar,
             v => {
@@ -851,7 +862,12 @@ mod tests {
             SIG.to_string(),
         )))];
 
-        let result = evm_topic.invoke_batch(&args, 1).unwrap();
+        let args = ScalarFunctionArgs {
+            args,
+            number_rows: 1,
+            return_type: &EvmTopic::RETURN_TYPE,
+        };
+        let result = evm_topic.invoke_with_args(args).unwrap();
         let ColumnarValue::Scalar(result) = result else {
             panic!("expected ScalarValue, got {:?}", result);
         };
@@ -902,7 +918,17 @@ mod tests {
             ColumnarValue::Scalar(ScalarValue::Utf8(Some(SIG.to_string()))),
         ];
 
-        let result = evm_decode.invoke_batch(&args, CSV.len()).unwrap();
+        let args = ScalarFunctionArgs {
+            args,
+            number_rows: CSV.len(),
+            return_type: &DataType::Struct(
+                Event::try_from(&ScalarValue::new_utf8(SIG))
+                    .unwrap()
+                    .fields()
+                    .unwrap(),
+            ),
+        };
+        let result = evm_decode.invoke_with_args(args).unwrap();
         let ColumnarValue::Array(result) = result else {
             panic!("expected Array, got {:?}", result);
         };

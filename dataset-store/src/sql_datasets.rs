@@ -4,12 +4,12 @@ use std::{
 };
 
 use datafusion::{
-    catalog::resolve_table_references,
     common::tree_node::{Transformed, TreeNode, TreeNodeRecursion},
     datasource::TableType,
     error::DataFusionError,
     execution::{runtime_env::RuntimeEnv, SendableRecordBatchStream},
     logical_expr::{col, lit, Filter, LogicalPlan, Sort, TableScan},
+    sql::resolve::resolve_table_references,
     sql::{parser, TableReference},
 };
 
