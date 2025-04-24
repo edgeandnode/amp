@@ -54,38 +54,8 @@ export const dev = Cli.Command.make(
       yield* initConfigDir(fs, args.path)
       yield* runServer(args.nozzle, args.path).pipe(Effect.fork)
 
-      const configLoader = yield* ConfigLoader
-      const manifestBuilder = yield* ManifestBuilder
-      const manifestLoader = yield* ManifestLoader
       const manifestDeployer = yield* ManifestDeployer
-      const manifest = yield* Unify.unify(
-        Option.match(args.config, {
-          onSome: (file) =>
-            configLoader
-              .load(file)
-              .pipe(Effect.flatMap(manifestBuilder.build), Effect.map(Option.some)),
-          onNone: () =>
-            configLoader.find().pipe(
-              Effect.flatMap(
-                Unify.unify(
-                  Option.match({
-                    onSome: (definition) => manifestBuilder.build(definition).pipe(Effect.map(Option.some)),
-                    onNone: () => manifestLoader.load("nozzle.json").pipe(Effect.map(Option.some)),
-                  }),
-                ),
-              ),
-            ),
-        }),
-      ).pipe(
-        Effect.orDie,
-        Effect.flatMap(
-          Option.match({
-            onNone: () => Effect.dieMessage("No manifest or config file provided"),
-            onSome: Effect.succeed,
-          }),
-        ),
-      )
-
+      const manifest = yield* loadManifest(args.config)
       const result = yield* manifestDeployer.deploy(manifest)
       yield* Effect.log(result)
 
@@ -168,6 +138,39 @@ const runServer = (nozzlePath: string, configRoot: string) =>
     Command.exitCode,
     Effect.flatMap((exitCode) => Effect.fail(new Error(`nozzle server exit (${exitCode})`))),
   )
+
+const loadManifest = Effect.fn(function*(config: Option.Option<string>) {
+  const configLoader = yield* ConfigLoader
+  const manifestBuilder = yield* ManifestBuilder
+  const manifestLoader = yield* ManifestLoader
+  return yield* Unify.unify(
+    Option.match(config, {
+      onSome: (file) =>
+        configLoader
+          .load(file)
+          .pipe(Effect.flatMap(manifestBuilder.build), Effect.map(Option.some)),
+      onNone: () =>
+        configLoader.find().pipe(
+          Effect.flatMap(
+            Unify.unify(
+              Option.match({
+                onSome: (definition) => manifestBuilder.build(definition).pipe(Effect.map(Option.some)),
+                onNone: () => manifestLoader.load("nozzle.json").pipe(Effect.map(Option.some)),
+              }),
+            ),
+          ),
+        ),
+    }),
+  ).pipe(
+    Effect.orDie,
+    Effect.flatMap(
+      Option.match({
+        onNone: () => Effect.dieMessage("No manifest or config file provided"),
+        onSome: Effect.succeed,
+      }),
+    ),
+  )
+})
 
 const watchChainHead = (
   rpc: Viem.PublicClient,
