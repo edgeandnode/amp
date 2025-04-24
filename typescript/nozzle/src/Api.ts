@@ -8,19 +8,19 @@ export class RegstistryApiGroup extends HttpApiGroup.make("registry", { topLevel
     .addSuccess(Schema.Struct({ schema: Model.TableSchema }))
     .addError(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }), { status: 404 })
     .addError(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }), { status: 422 })
-    .addError(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }), { status: 500 })
+    .addError(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }), { status: 500 }),
 ) {}
 
 export class RegistryApi extends HttpApi.make("registry").add(RegstistryApiGroup) {}
 
 const makeRegistry = (url: string) =>
   HttpApiClient.make(RegistryApi, {
-    baseUrl: url
+    baseUrl: url,
   })
 
 export class Registry extends Effect.Service<Registry>()("Nozzle/Api/Registry", {
   dependencies: [FetchHttpClient.layer],
-  effect: Config.string("NOZZLE_REGISTRY_URL").pipe(Effect.flatMap(makeRegistry), Effect.orDie)
+  effect: Config.string("NOZZLE_REGISTRY_URL").pipe(Effect.flatMap(makeRegistry), Effect.orDie),
 }) {}
 
 export const layerRegistry = (url: string) =>
@@ -32,19 +32,19 @@ export class AdminApiGroup extends HttpApiGroup.make("admin", { topLevel: true }
     .addSuccess(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }))
     .addError(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }), { status: 404 })
     .addError(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }), { status: 422 })
-    .addError(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }), { status: 500 })
+    .addError(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }), { status: 500 }),
 ) {}
 
 export class AdminApi extends HttpApi.make("admin").add(AdminApiGroup) {}
 
 export const makeAdmin = (url: string) =>
   HttpApiClient.make(AdminApi, {
-    baseUrl: url
+    baseUrl: url,
   })
 
 export class Admin extends Effect.Service<Admin>()("Nozzle/Api/Admin", {
   dependencies: [FetchHttpClient.layer],
-  effect: Config.string("NOZZLE_ADMIN_URL").pipe(Effect.flatMap(makeAdmin), Effect.orDie)
+  effect: Config.string("NOZZLE_ADMIN_URL").pipe(Effect.flatMap(makeAdmin), Effect.orDie),
 }) {}
 
 export const layerAdmin = (url: string) =>

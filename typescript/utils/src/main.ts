@@ -9,21 +9,21 @@ import { build } from "./commands/build.js"
 
 const nozzle = Command.make("nozzle-utils").pipe(
   Command.withDescription("The Nozzle Command Line Interface"),
-  Command.withSubcommands([build])
+  Command.withSubcommands([build]),
 )
 
 const cli = Command.run(nozzle, {
   name: "Nozzle Utils",
-  version: "v0.0.1"
+  version: "v0.0.1",
 })
 
 const layer = Layer.provideMerge(
   PlatformConfigProvider.layerDotEnvAdd(".env"),
-  NodeContext.layer
+  NodeContext.layer,
 )
 
 const runnable = Effect.suspend(() => cli(process.argv)).pipe(
-  Effect.provide(layer)
+  Effect.provide(layer),
 )
 
 runnable.pipe(NodeRuntime.runMain)

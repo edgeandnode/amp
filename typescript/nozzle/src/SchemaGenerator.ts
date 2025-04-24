@@ -34,7 +34,7 @@ export class SchemaGenerator extends Effect.Service<SchemaGenerator>()("Nozzle/S
     const fromSql = (sql: string, name = "Table") =>
       Effect.gen(function*() {
         const schema = yield* api.schema({
-          payload: { sql_query: sql }
+          payload: { sql_query: sql },
         })
 
         const output: Array<string> = []
@@ -44,7 +44,7 @@ export class SchemaGenerator extends Effect.Service<SchemaGenerator>()("Nozzle/S
       })
 
     return { fromSql, fromTable, fromManifest }
-  })
+  }),
 }) {}
 
 const convertType = (type: string) => {

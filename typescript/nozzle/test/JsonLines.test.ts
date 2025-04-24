@@ -14,7 +14,7 @@ it.layer(JsonLines.JsonLines.Default)((it) => {
       const result = yield* stream.pipe(Stream.runCollect).pipe(Effect.map(Chunk.toArray))
       expect(result).toStrictEqual([
         { a: 1, b: 2, c: 3, d: 4 },
-        { a: 5, b: 6, c: 7, d: 8 }
+        { a: 5, b: 6, c: 7, d: 8 },
       ])
     }))
 

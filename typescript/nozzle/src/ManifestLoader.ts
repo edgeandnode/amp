@@ -17,14 +17,14 @@ export class ManifestLoader extends Effect.Service<ManifestLoader>()("Nozzle/Man
         Effect.flatMap((content) =>
           Effect.try({
             try: () => JSON.parse(content),
-            catch: (cause) => cause
+            catch: (cause) => cause,
           })
         ),
         Effect.flatMap(Schema.decodeUnknown(Model.DatasetManifest)),
-        Effect.mapError((cause) => new ManifestLoaderError({ cause, message: `Failed to load manifest file ${file}` }))
+        Effect.mapError((cause) => new ManifestLoaderError({ cause, message: `Failed to load manifest file ${file}` })),
       )
     })
 
     return { load }
-  })
+  }),
 }) {}

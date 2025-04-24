@@ -5,7 +5,7 @@ export default defineConfig({
     include: ["test/**/*.test.ts"],
     env: {
       NOZZLE_JSONL_URL: "http://localhost:1603",
-      NOZZLE_ARROW_FLIGHT_URL: "http://localhost:1602"
-    }
-  }
+      NOZZLE_ARROW_FLIGHT_URL: "http://localhost:1602",
+    },
+  },
 })

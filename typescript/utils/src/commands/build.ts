@@ -9,15 +9,15 @@ export const build = Command.make("build", {
   args: {
     project: Options.text("project").pipe(
       Options.withDefault("tsconfig.build.json"),
-      Options.withDescription("The project file to use for building")
-    )
-  }
+      Options.withDescription("The project file to use for building"),
+    ),
+  },
 }, ({ args }) =>
   Effect.gen(function*() {
     const utils = yield* Utils.Utils
     const fs = yield* FileSystem.FileSystem
     const pkg = yield* utils.readJson("./package.json").pipe(
-      Effect.flatMap(Schema.decodeUnknown(Model.PackageJson))
+      Effect.flatMap(Schema.decodeUnknown(Model.PackageJson)),
     )
 
     yield* utils.existsOrFail(args.project)
@@ -32,7 +32,7 @@ export const build = Command.make("build", {
       utils.copyIfExists("README.md", "dist/README.md"),
       utils.copyIfExists("LICENSE", "dist/LICENSE"),
       utils.rmAndCopy("src", "dist/src"),
-      utils.rmAndCopy("build/dist", "dist/dist")
+      utils.rmAndCopy("build/dist", "dist/dist"),
     ], { concurrency: "unbounded" })
 
     const json = Struct.evolve(pkg, {
@@ -52,19 +52,19 @@ export const build = Command.make("build", {
           if (typeof value === "string") {
             result[key] = {
               types: replaceDts(value),
-              default: replaceJs(value)
+              default: replaceJs(value),
             }
           } else {
             result[key] = Struct.evolve(value, {
               types: replaceDts,
               browser: replaceJs,
-              default: replaceJs
+              default: replaceJs,
             })
           }
         }
 
         return result
-      })
+      }),
     })
 
     yield* Effect.forEach(Object.values(json.bin ?? {}), (script) =>
@@ -79,7 +79,7 @@ export const build = Command.make("build", {
     yield* utils.writeJson("dist/package.json", json)
   })).pipe(
     Command.withDescription("Prepare a package for publishing"),
-    Command.provide(Utils.Utils.Default)
+    Command.provide(Utils.Utils.Default),
   )
 
 const replaceOptional = <T>(f: (value: T) => T) => (value: T | undefined): T | undefined =>

@@ -9,8 +9,8 @@ export default defineConfig({
       "/nozzle": {
         target: "http://localhost:8080",
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/nozzle/, "")
-      }
-    }
-  }
+        rewrite: (path) => path.replace(/^\/nozzle/, ""),
+      },
+    },
+  },
 })
