@@ -1,6 +1,6 @@
 import * as Cli from "@effect/cli"
 import { Command, FileSystem } from "@effect/platform"
-import { Config, Effect, Layer, Option, Stream, Unify } from "effect"
+import { Config, Effect, Fiber, Layer, Option, Stream, Unify } from "effect"
 import * as Api from "../../Api.js"
 import { ConfigLoader } from "../../ConfigLoader.js"
 import * as EvmRpc from "../../EvmRpc.js"
@@ -57,7 +57,7 @@ export const dev = Cli.Command.make(
     Effect.gen(function*() {
       const fs = yield* FileSystem.FileSystem
       yield* initConfigDir(fs, args.path)
-      yield* runServer(args.nozzle, args.path).pipe(Effect.fork)
+      const server = yield* runServer(args.nozzle, args.path).pipe(Effect.fork)
 
       const manifestDeployer = yield* ManifestDeployer
       const manifest = yield* loadManifest(args.config)
@@ -66,10 +66,13 @@ export const dev = Cli.Command.make(
 
       const rpc = yield* EvmRpc.EvmRpc
       const chainHead = yield* rpc.watchChainHead()
-      yield* Stream.fromPubSub(chainHead).pipe(
+      const dump = yield* Stream.fromPubSub(chainHead).pipe(
         Stream.flattenTake,
         Stream.runForEach((block) => runDump(args.nozzle, args.path, manifest.name, block)),
+        Effect.fork,
       )
+
+      yield* Fiber.joinAll([server, dump])
     })
       .pipe(
         Effect.scoped,
