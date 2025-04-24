@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { Command } from "@effect/cli"
+import { Command, ValidationError } from "@effect/cli"
 import { PlatformConfigProvider } from "@effect/platform"
 import { NodeContext, NodeRuntime } from "@effect/platform-node"
 import { Effect, Layer } from "effect"
@@ -29,6 +29,6 @@ const layer = Layer.provideMerge(
 
 const runnable = Effect.suspend(() => cli(process.argv)).pipe(
   Effect.provide(layer),
-)
+).pipe(Effect.catchIf(ValidationError.isValidationError, () => Effect.void))
 
 runnable.pipe(NodeRuntime.runMain)
