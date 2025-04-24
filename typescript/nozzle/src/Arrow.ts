@@ -103,7 +103,7 @@ const generateType = (type: DataType): Schema.Schema.AnyNoContext => {
   }
 
   if (DataType.isDecimal(type)) {
-    return Schema.Never as any // TODO: Decimals appear to be currently broken in apache-arrow
+    return Schema.Any as any // TODO: Decimals appear to be currently broken in apache-arrow
   }
 
   throw new Error(`Unsupported type ${type.typeId}`)
