@@ -1,5 +1,14 @@
-import { FetchHttpClient, HttpBody, HttpClient, HttpClientResponse, Ndjson, Template } from "@effect/platform"
-import { Config, Data, Effect, Layer, Predicate, Schema, Stream } from "effect"
+import type { HttpClientError } from "@effect/platform"
+import {
+  FetchHttpClient,
+  HttpBody,
+  HttpClient,
+  HttpClientRequest,
+  HttpClientResponse,
+  Ndjson,
+  Template
+} from "@effect/platform"
+import { Config, Data, Effect, Layer, Match, Predicate, Schema, Stream } from "effect"
 
 export class JsonLinesError extends Data.TaggedError("JsonLinesError")<{
   readonly cause: unknown
@@ -10,7 +19,24 @@ const ErrorResponse = Schema.Struct({ error: Schema.String })
 
 const make = (url: string) =>
   Effect.gen(function*() {
-    const client = yield* HttpClient.HttpClient
+    const handleError = Match.type<HttpClientError.ResponseError>().pipe(
+      Match.when((cause) => cause.response.status !== 400, (cause) => Effect.fail(cause)),
+      Match.orElse((cause) =>
+        cause.response.text.pipe(
+          Effect.map(JSON.parse),
+          Effect.flatMap(Schema.decodeUnknown(ErrorResponse)),
+          Effect.flatMap(({ error: message }) => new JsonLinesError({ cause, message }))
+        )
+      )
+    )
+
+    const client = yield* HttpClient.HttpClient.pipe(
+      Effect.map(HttpClient.filterStatusOk),
+      Effect.map(HttpClient.transformResponse(Effect.catchTag("ResponseError", handleError))),
+      Effect.map(
+        HttpClient.mapRequest(HttpClientRequest.setHeader("Accept-Encoding", "deflate"))
+      )
+    )
 
     const stream: {
       <A, I, R>(
@@ -24,21 +50,7 @@ const make = (url: string) =>
         const query = typeof sql === "string" ? sql : yield* Template.make(sql)
         const response = yield* client.post(url, {
           body: HttpBody.text(query)
-        }).pipe(
-          Effect.flatMap(HttpClientResponse.filterStatusOk),
-          Effect.catchTag("ResponseError", (cause) =>
-            Effect.gen(function*() {
-              if (cause.response.status !== 400) {
-                return yield* cause
-              }
-
-              return yield* cause.response.text.pipe(
-                Effect.map(JSON.parse),
-                Effect.flatMap(Schema.decodeUnknown(ErrorResponse)),
-                Effect.flatMap(({ error: message }) => new JsonLinesError({ cause, message }))
-              )
-            }))
-        )
+        })
 
         return response.stream
       })).pipe(
