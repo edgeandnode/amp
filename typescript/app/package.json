@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@connectrpc/connect-web": "^2.0.2",
-    "effect": "^3.14.11",
+    "effect": "^3.14.14",
     "nozzl": "workspace:*",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
@@ -21,6 +21,6 @@
     "@vitejs/plugin-react": "^4.4.1",
     "globals": "^16.0.0",
     "typescript": "^5.8.3",
-    "vite": "^6.3.1"
+    "vite": "^6.3.3"
   }
 }

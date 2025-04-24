@@ -1,13 +1,5 @@
 import type { HttpClientError } from "@effect/platform"
-import {
-  FetchHttpClient,
-  HttpBody,
-  HttpClient,
-  HttpClientRequest,
-  HttpClientResponse,
-  Ndjson,
-  Template
-} from "@effect/platform"
+import { FetchHttpClient, HttpBody, HttpClient, HttpClientRequest, Ndjson, Template } from "@effect/platform"
 import { Config, Data, Effect, Layer, Match, Predicate, Schema, Stream } from "effect"
 
 export class JsonLinesError extends Data.TaggedError("JsonLinesError")<{
@@ -68,4 +60,5 @@ export class JsonLines extends Effect.Service<JsonLines>()("Nozzle/JsonLines", {
   effect: Config.string("NOZZLE_JSONL_URL").pipe(Effect.flatMap(make), Effect.orDie)
 }) {}
 
-export const layerJsonLines = (url: string) => make(url).pipe(Effect.map(JsonLines.make), Layer.effect(JsonLines))
+export const layerJsonLines = (url: string) =>
+  make(url).pipe(Effect.map(JsonLines.make), Layer.effect(JsonLines), Layer.provide(FetchHttpClient.layer))
