@@ -52,11 +52,7 @@ export const dev = Cli.Command.make(
     Effect.gen(function*() {
       const fs = yield* FileSystem.FileSystem
       yield* initConfigDir(fs, args.path)
-      yield* runServer(args.nozzle, args.path).pipe(
-        Effect.tapError(Console.error),
-        Effect.ignore,
-        Effect.fork,
-      )
+      yield* runServer(args.nozzle, args.path).pipe(Effect.fork)
 
       const configLoader = yield* ConfigLoader
       const manifestBuilder = yield* ManifestBuilder
@@ -170,7 +166,7 @@ const runServer = (nozzlePath: string, configRoot: string) =>
     Command.stdout("inherit"),
     Command.stderr("inherit"),
     Command.exitCode,
-    Effect.map((exitCode) => Effect.fail(new Error(`nozzle server exit (${exitCode})`))),
+    Effect.flatMap((exitCode) => Effect.fail(new Error(`nozzle server exit (${exitCode})`))),
   )
 
 const watchChainHead = (
@@ -185,6 +181,9 @@ const watchChainHead = (
           if (Option.some(block) === lastBlock) return
           lastBlock = Option.some(block)
           Effect.runSync(chainHead.publish(block))
+        },
+        onError(err) {
+          console.error(err.message)
         },
       })
     },
