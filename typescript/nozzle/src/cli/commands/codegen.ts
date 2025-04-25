@@ -1,5 +1,5 @@
 import { Command, Options } from "@effect/cli"
-import { Config, Console, Effect, Layer, Option, Unify } from "effect"
+import { Config, Console, Effect, Layer, Option } from "effect"
 import * as Api from "../../Api.js"
 import * as ConfigLoader from "../../ConfigLoader.js"
 import * as ManifestBuilder from "../../ManifestBuilder.js"
@@ -40,27 +40,7 @@ export const codegen = Command.make("codegen", {
         return yield* Console.log(result)
       }
 
-      const loader = yield* ManifestLoader.ManifestLoader
-      const config = yield* ConfigLoader.ConfigLoader
-      const builder = yield* ManifestBuilder.ManifestBuilder
-      const manifest = yield* Unify.unify(Option.match(args.manifest, {
-        onSome: (file) => loader.load(file).pipe(Effect.map(Option.some)),
-        onNone: () =>
-          Unify.unify(Option.match(args.config, {
-            onSome: (file) => config.load(file).pipe(Effect.flatMap(builder.build), Effect.map(Option.some)),
-            onNone: () =>
-              config.find().pipe(Effect.flatMap(Unify.unify(Option.match({
-                onSome: (definition) => builder.build(definition).pipe(Effect.map(Option.some)),
-                onNone: () => loader.load("nozzle.json").pipe(Effect.map(Option.some)),
-              })))),
-          })),
-      })).pipe(
-        Effect.flatMap(Option.match({
-          onNone: () => Effect.dieMessage("No manifest or config file provided"),
-          onSome: Effect.succeed,
-        })),
-      )
-
+      const manifest = yield* ConfigLoader.loadManifestOrConfig(args.manifest, args.config)
       const result = yield* generator.fromManifest(manifest)
       yield* Console.log(result)
     })

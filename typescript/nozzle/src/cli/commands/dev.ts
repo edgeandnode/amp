@@ -1,12 +1,11 @@
 import { Command, Options } from "@effect/cli"
 import { Command as Cmd, FileSystem } from "@effect/platform"
-import { Config, Effect, Fiber, Layer, Option, Stream, Unify } from "effect"
+import { Config, Effect, Fiber, Layer, Option, Stream } from "effect"
 import * as Api from "../../Api.js"
 import * as ConfigLoader from "../../ConfigLoader.js"
 import * as EvmRpc from "../../EvmRpc.js"
 import * as ManifestBuilder from "../../ManifestBuilder.js"
 import * as ManifestDeployer from "../../ManifestDeployer.js"
-import * as ManifestLoader from "../../ManifestLoader.js"
 
 export const dev = Command.make("dev", {
   args: {
@@ -54,6 +53,16 @@ export const dev = Command.make("dev", {
   Command.withDescription("Run a dev server"),
   Command.withHandler(({ args }) =>
     Effect.gen(function*() {
+      const configLoader = yield* ConfigLoader.ConfigLoader
+      const configPath = yield* args.config.pipe(
+        Option.map(Effect.succeed),
+        Option.getOrElse(() =>
+          configLoader.find().pipe(Effect.map(Option.getOrThrowWith(() =>
+            new ConfigLoader.ConfigLoaderError({ message: "Failed to load dataset definition file" })
+          )))
+        ),
+      )
+
       yield* initConfigDir(args.path)
       const server = yield* runServer(args.nozzle, args.path).pipe(Effect.fork)
 
@@ -61,12 +70,14 @@ export const dev = Command.make("dev", {
       const rpc = yield* EvmRpc.EvmRpc
       const dataset = yield* Effect.gen(function*() {
         yield* Effect.sleep(200)
-        const manifest = yield* loadManifest(args.config)
+        const manifest = yield* buildManifest(configPath)
         const result = yield* manifestDeployer.deploy(manifest)
         yield* Effect.log(result)
 
         yield* rpc.watchChainHead.pipe(
-          Stream.runForEach((block) => runDump(args.nozzle, args.path, manifest.name, block)),
+          Stream.runForEach((block) =>
+            runDump(args.nozzle, args.path, manifest.name, block)
+          ),
         )
       }).pipe(Effect.fork)
 
@@ -75,10 +86,9 @@ export const dev = Command.make("dev", {
   ),
   Command.provide(({ args }) =>
     Layer.mergeAll(
-      ManifestBuilder.ManifestBuilder.Default,
-      ManifestLoader.ManifestLoader.Default,
-      ManifestDeployer.ManifestDeployer.Default,
       ConfigLoader.ConfigLoader.Default,
+      ManifestBuilder.ManifestBuilder.Default,
+      ManifestDeployer.ManifestDeployer.Default,
       EvmRpc.EvmRpc.withUrl(args.rpc),
     ).pipe(Layer.provide(Layer.mergeAll(
       Api.Admin.withUrl(args.admin),
@@ -128,36 +138,11 @@ const runServer = (nozzlePath: string, configRoot: string) =>
     Effect.flatMap((exitCode) => Effect.fail(new Error(`nozzle server exit (${exitCode})`))),
   )
 
-const loadManifest = Effect.fn(function*(config: Option.Option<string>) {
+const buildManifest = Effect.fn(function*(configPath: string) {
   const configLoader = yield* ConfigLoader.ConfigLoader
   const manifestBuilder = yield* ManifestBuilder.ManifestBuilder
-  const manifestLoader = yield* ManifestLoader.ManifestLoader
-  return yield* Unify.unify(
-    Option.match(config, {
-      onSome: (file) =>
-        configLoader
-          .load(file)
-          .pipe(Effect.flatMap(manifestBuilder.build), Effect.map(Option.some)),
-      onNone: () =>
-        configLoader.find().pipe(
-          Effect.flatMap(
-            Unify.unify(
-              Option.match({
-                onSome: (definition) => manifestBuilder.build(definition).pipe(Effect.map(Option.some)),
-                onNone: () => manifestLoader.load("nozzle.json").pipe(Effect.map(Option.some)),
-              }),
-            ),
-          ),
-        ),
-    }),
-  ).pipe(
-    Effect.flatMap(
-      Option.match({
-        onNone: () => Effect.dieMessage("No manifest or config file provided"),
-        onSome: Effect.succeed,
-      }),
-    ),
-  )
+  const definition = yield* configLoader.load(configPath)
+  return yield* manifestBuilder.build(definition)
 })
 
 const runDump = (

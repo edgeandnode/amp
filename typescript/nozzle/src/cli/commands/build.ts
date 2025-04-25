@@ -34,17 +34,21 @@ export const build = Command.make("build", {
       const config = yield* ConfigLoader.ConfigLoader
       const builder = yield* ManifestBuilder.ManifestBuilder
 
-      const definition = yield* Option.match(args.config, {
-        onSome: (file) => config.load(file).pipe(Effect.map(Option.some)),
-        onNone: () => config.find(),
-      }).pipe(Effect.flatMap(Option.match({
-        onNone: () => Effect.die("Failed to load dataset definition file"),
-        onSome: (definition) => Effect.succeed(definition),
-      })))
+      const definition = yield* args.config.pipe(
+        Option.map(Effect.succeed),
+        Option.getOrElse(() =>
+          config.find().pipe(Effect.map(Option.getOrThrowWith(() =>
+            new ConfigLoader.ConfigLoaderError({ message: "Failed to load dataset definition file" })
+          )))
+        ),
+        Effect.andThen(config.load),
+      )
 
       const json = yield* builder.build(definition).pipe(
         Effect.flatMap(Schema.encode(Model.DatasetManifest)),
-        Effect.map((manifest) => JSON.stringify(manifest, null, 2)),
+        Effect.map((manifest) =>
+          JSON.stringify(manifest, null, 2)
+        ),
         Effect.catchTags({
           ParseError: (cause) => Effect.die(cause),
         }),
