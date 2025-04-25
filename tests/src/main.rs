@@ -1,6 +1,6 @@
 use clap::Parser;
-use log::warn;
 use tests::test_support::{bless, bless_sql_snapshots};
+use tracing::warn;
 
 /// CLI for test support.
 #[derive(Parser, Debug)]

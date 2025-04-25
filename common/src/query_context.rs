@@ -33,8 +33,8 @@ use datafusion_proto::bytes::{
 };
 use datafusion_proto::logical_plan::LogicalExtensionCodec;
 use futures::{StreamExt as _, TryStreamExt};
-use log::trace;
 use thiserror::Error;
+use tracing::trace;
 use url::Url;
 
 use crate::catalog::physical::{Catalog, PhysicalTable};

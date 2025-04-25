@@ -13,7 +13,7 @@ datafusion.workspace = true
 dataset-store = { path = "../dataset-store" }
 dump = { path = "../dump" }
 futures.workspace = true
-log.workspace = true
+tracing.workspace = true
 server = { path = "../server" }
 snmalloc-rs.workspace = true
 tokio.workspace = true

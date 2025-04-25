@@ -9,7 +9,7 @@ chrono = "0.4.38"
 common = { path = "../common" }
 firehose-datasets = { path = "../firehose-datasets" }
 futures.workspace = true
-log.workspace = true
+tracing.workspace = true
 prost-reflect = "0.14.2"
 prost.workspace = true
 reqwest = "0.12"
