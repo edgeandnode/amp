@@ -1,0 +1,282 @@
+use std::{any::Any, str::FromStr, sync::Arc};
+
+use crate::{
+    arrow::{
+        array::{Array, BinaryArray, StructBuilder},
+        datatypes::{DataType, Field, Fields},
+    },
+    evm::udfs::FieldBuilder,
+};
+use alloy::{
+    dyn_abi::{DynSolType, FunctionExt, JsonAbiExt, Specifier as _},
+    json_abi::Function as AlloyFunction,
+};
+use datafusion::{
+    arrow::array::ArrayBuilder,
+    common::{internal_err, plan_err},
+    error::DataFusionError,
+    logical_expr::{
+        simplify::{ExprSimplifyResult, SimplifyInfo},
+        ColumnarValue, ReturnInfo, ReturnTypeArgs, ScalarUDFImpl, Signature, Volatility,
+    },
+    prelude::Expr,
+    scalar::ScalarValue,
+};
+use itertools::izip;
+
+use super::arrow_type;
+
+struct FunctionCall {
+    alloy_function: AlloyFunction,
+    input_names: Vec<String>,
+    input_types: Vec<DynSolType>,
+    output_names: Vec<String>,
+    output_types: Vec<DynSolType>,
+}
+
+impl FunctionCall {
+    fn new(alloy_function: AlloyFunction) -> Result<Self, DataFusionError> {
+        let mut input_names = Vec::with_capacity(alloy_function.inputs.len());
+        let mut input_types = Vec::with_capacity(alloy_function.inputs.len());
+        let mut output_names = Vec::with_capacity(alloy_function.outputs.len());
+        let mut output_types = Vec::with_capacity(alloy_function.outputs.len());
+
+        for param in &alloy_function.inputs {
+            let ty = param.resolve().unwrap();
+            if param.name.is_empty() {
+                return plan_err!(
+                    "function {} has unnamed input parameter",
+                    alloy_function.name
+                );
+            }
+            input_types.push(ty);
+            input_names.push(param.name.clone());
+        }
+
+        for param in &alloy_function.outputs {
+            let ty = param.resolve().unwrap();
+            if param.name.is_empty() {
+                return plan_err!(
+                    "function {} has unnamed output parameter",
+                    alloy_function.name
+                );
+            }
+            output_types.push(ty);
+            output_names.push(param.name.clone());
+        }
+
+        Ok(Self {
+            alloy_function,
+            input_names,
+            input_types,
+            output_names,
+            output_types,
+        })
+    }
+}
+
+impl FromStr for FunctionCall {
+    type Err = DataFusionError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let alloy_event =
+            AlloyFunction::parse(s).or_else(|e| plan_err!("parse function signature: {}", e))?;
+        Self::new(alloy_event)
+    }
+}
+
+impl TryFrom<&ScalarValue> for FunctionCall {
+    type Error = DataFusionError;
+
+    fn try_from(value: &ScalarValue) -> Result<Self, Self::Error> {
+        let s = match value {
+            ScalarValue::Utf8(Some(s)) => s,
+            v => return plan_err!("expected Utf8, got {}", v.data_type()),
+        };
+        s.parse()
+    }
+}
+
+/// `evm_decode_params` and `evm_decode_results` UDFs for decoding function input and output data.
+#[derive(Debug)]
+pub struct EvmDecodeFunctionData {
+    signature: Signature,
+    decode: Decode,
+}
+
+impl EvmDecodeFunctionData {
+    pub fn evm_decode_params() -> Self {
+        Self::new(Decode::Params)
+    }
+
+    pub fn evm_decode_results() -> Self {
+        Self::new(Decode::Results)
+    }
+
+    fn new(decode: Decode) -> Self {
+        let signature = Signature::exact(
+            vec![DataType::Binary, DataType::Utf8],
+            Volatility::Immutable,
+        );
+        Self { signature, decode }
+    }
+}
+
+impl ScalarUDFImpl for EvmDecodeFunctionData {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn name(&self) -> &str {
+        match self.decode {
+            Decode::Params => "evm_decode_params",
+            Decode::Results => "evm_decode_results",
+        }
+    }
+
+    fn signature(&self) -> &Signature {
+        &self.signature
+    }
+
+    fn return_type(&self, _: &[DataType]) -> datafusion::error::Result<DataType> {
+        unreachable!("DataFusion will never call this")
+    }
+
+    fn invoke_with_args(
+        &self,
+        args: datafusion::logical_expr::ScalarFunctionArgs,
+    ) -> datafusion::error::Result<ColumnarValue> {
+        let args = args.args;
+        if args.len() != 2 {
+            return internal_err!(
+                "{}: expected 2 arguments, but got {}",
+                self.name(),
+                args.len()
+            );
+        }
+        let signature = match &args[1] {
+            ColumnarValue::Scalar(scalar) => scalar,
+            v => {
+                return plan_err!(
+                    "{}: expected scalar argument for the signature but got {}",
+                    self.name(),
+                    v.data_type()
+                )
+            }
+        };
+
+        let args: Vec<_> = ColumnarValue::values_to_arrays(&args[..1])?;
+        let data = args[0].as_any().downcast_ref::<BinaryArray>().unwrap();
+        let call = FunctionCall::try_from(signature).map_err(|e| e.context(self.name()))?;
+        let ary = self
+            .decode(data, &call)
+            .map_err(|e| e.context(self.name()))?;
+        Ok(ColumnarValue::Array(ary))
+    }
+
+    fn return_type_from_args(&self, args: ReturnTypeArgs) -> datafusion::error::Result<ReturnInfo> {
+        let args = args.scalar_arguments;
+        if args.len() != 2 {
+            return internal_err!(
+                "{}: expected 2 arguments, but got {}",
+                self.name(),
+                args.len()
+            );
+        }
+        let signature = args[1];
+        let signature = match signature {
+            Some(scalar) => scalar,
+            _ => {
+                return plan_err!(
+                    "{}: expected a string literal for the signature",
+                    self.name()
+                )
+            }
+        };
+        let call = FunctionCall::try_from(signature).map_err(|e| e.context(self.name()))?;
+        let fields = self.fields(&call).map_err(|e| e.context(self.name()))?;
+        Ok(ReturnInfo::new_nullable(DataType::Struct(fields)))
+    }
+
+    fn aliases(&self) -> &[String] {
+        &[]
+    }
+
+    fn simplify(
+        &self,
+        args: Vec<Expr>,
+        _info: &dyn SimplifyInfo,
+    ) -> datafusion::error::Result<ExprSimplifyResult> {
+        Ok(ExprSimplifyResult::Original(args))
+    }
+}
+
+impl EvmDecodeFunctionData {
+    /// Decode the given data using the function signature.
+    fn decode(
+        &self,
+        data: &BinaryArray,
+        call: &FunctionCall,
+    ) -> Result<Arc<dyn Array>, DataFusionError> {
+        let types = match self.decode {
+            Decode::Params => &call.input_types,
+            Decode::Results => &call.output_types,
+        };
+        let fields = self.fields(call)?;
+        let mut builder = StructBuilder::from_fields(fields, 0);
+        for data in data {
+            match data {
+                Some(data) => {
+                    let decoded = match self.decode {
+                        Decode::Params => call.alloy_function.abi_decode_input(data, true),
+                        Decode::Results => call.alloy_function.abi_decode_output(data, true),
+                    };
+                    match decoded {
+                        Ok(decoded) => {
+                            for (field, (param, ty)) in izip!(decoded, types).enumerate() {
+                                FieldBuilder::new(&mut builder, ty, field).append_value(param)?;
+                            }
+                            builder.append(true);
+                        }
+                        Err(_) => {
+                            for (field, ty) in types.iter().enumerate() {
+                                FieldBuilder::new(&mut builder, ty, field).append_null_value()?;
+                            }
+                            builder.append(false);
+                        }
+                    }
+                }
+                None => {
+                    for (field, ty) in types.iter().enumerate() {
+                        FieldBuilder::new(&mut builder, ty, field).append_null_value()?;
+                    }
+                    builder.append(false);
+                }
+            }
+        }
+
+        Ok(ArrayBuilder::finish(&mut builder))
+    }
+
+    /// Return `Fields` for the given param names and types.
+    fn fields(&self, call: &FunctionCall) -> Result<Fields, DataFusionError> {
+        let (names, types) = match self.decode {
+            Decode::Params => (&call.input_names, &call.input_types),
+            Decode::Results => (&call.output_names, &call.output_types),
+        };
+        let mut fields = Vec::new();
+        for (name, ty) in names.iter().zip(types.iter()) {
+            let name = name.clone();
+            let df = arrow_type(ty)?;
+            let field = Field::new(name, df, true);
+            fields.push(field);
+        }
+        Ok(Fields::from(fields))
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Decode {
+    Params,
+    Results,
+}

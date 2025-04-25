@@ -105,7 +105,7 @@ impl AsyncScalarUDFImpl for EthCall {
         let mut result_builder = StructBuilder::from_fields(fields, from.len());
         for (from, to, input_data, block) in izip!(from, to, input_data, block) {
             let Some(to) = to else {
-                return plan_err!("from address is NULL");
+                return plan_err!("to address is NULL");
             };
             let Some(block) = block else {
                 return plan_err!("block is NULL");

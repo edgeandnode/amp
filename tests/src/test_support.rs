@@ -403,6 +403,20 @@ pub const SQL_TEST_QUERIES: &[(&str, &str)] = &[
     ),
     ("SELECT evm_topic('Transfer(address indexed from, address indexed to, uint256 value)')", "evm_topic.json"),
     ("SELECT attestation_hash(input) FROM eth_rpc.transactions", "attestation_hash.json"),
+    (
+        "SELECT evm_decode_params(input, 'function transfer(address _to, uint256 _value) public returns (bool success)')
+         FROM eth_rpc.transactions
+         ORDER BY tx_index
+         LIMIT 3",
+        "evm_decode_params.json"
+    ),
+    (
+        "SELECT evm_decode_results(input, 'function transfer(address _to, uint256 _value) public returns (bool success)')
+         FROM eth_firehose.calls
+         ORDER BY tx_index
+         LIMIT 3",
+        "evm_decode_results.json"
+    ),
 ];
 
 pub async fn bless_sql_snapshots(filename: Option<String>) -> Result<(), BoxError> {

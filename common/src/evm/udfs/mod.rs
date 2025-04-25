@@ -39,8 +39,10 @@ use itertools::izip;
 use log::trace;
 
 pub use eth_call::EthCall;
+pub use evm_decode_function_data::EvmDecodeFunctionData;
 
 mod eth_call;
+mod evm_decode_function_data;
 
 type Unsigned = alloy::primitives::Uint<256, 4>;
 
@@ -601,7 +603,7 @@ impl ScalarUDFImpl for EvmDecode {
         let args = args.scalar_arguments;
         if args.len() != 5 {
             return internal_err!(
-                "{}: expected at 5 arguments, but got {}",
+                "{}: expected 5 arguments, but got {}",
                 self.name(),
                 args.len()
             );
