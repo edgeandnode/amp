@@ -29,6 +29,16 @@ const layer = Layer.provideMerge(
 
 const runnable = Effect.suspend(() => cli(process.argv)).pipe(
   Effect.provide(layer),
-).pipe(Effect.catchIf(ValidationError.isValidationError, () => Effect.void))
+).pipe(
+  Effect.catchIf(ValidationError.isValidationError, () => Effect.void),
+  Effect.catchTags({
+    ArrowFlightError: (cause) => Effect.logError(cause.message),
+    ManifestBuilderError: (cause) => Effect.logError(cause.message),
+    ManifestDeployerError: (cause) => Effect.logError(cause.message),
+    ConfigLoaderError: (cause) => Effect.logError(cause.message),
+    ManifestLoaderError: (cause) => Effect.logError(cause.message),
+    SchemaGeneratorError: (cause) => Effect.logError(cause.message),
+  }),
+)
 
 runnable.pipe(NodeRuntime.runMain)

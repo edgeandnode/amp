@@ -3,8 +3,9 @@ import * as Api from "./Api.js"
 import * as Model from "./Model.js"
 
 export class ManifestBuilderError extends Data.TaggedError("ManifestBuilderError")<{
-  readonly cause?: unknown
-  readonly message?: string
+  readonly cause: unknown
+  readonly message: string
+  readonly table: string
 }> {}
 
 export class ManifestBuilder extends Effect.Service<ManifestBuilder>()("Nozzle/ManifestBuilder", {
@@ -14,14 +15,9 @@ export class ManifestBuilder extends Effect.Service<ManifestBuilder>()("Nozzle/M
       Effect.gen(function*() {
         const tables = yield* Effect.forEach(Object.entries(manifest.tables), ([name, table]) =>
           Effect.gen(function*() {
-            const schema = yield* client.schema({
-              payload: { sql_query: table.sql },
-            }).pipe(Effect.mapError((cause) =>
-              new ManifestBuilderError({
-                cause,
-                message: `Failed to build table ${name} in manifest ${manifest.name}`,
-              })
-            ))
+            const schema = yield* client.schema(table.sql).pipe(Effect.catchTags({
+              RegistryError: (cause) => new ManifestBuilderError({ cause, message: cause.message, table: name }),
+            }))
 
             const input = new Model.TableInput({ sql: table.sql })
             const output = new Model.Table({

@@ -4,10 +4,14 @@ import { Config, Data, Effect, Layer, Match, Predicate, Schema, Stream } from "e
 
 export class JsonLinesError extends Data.TaggedError("JsonLinesError")<{
   readonly cause: unknown
-  readonly message?: string
+  readonly message: string
 }> {}
 
-const ErrorResponse = Schema.Struct({ error: Schema.String })
+export class JsonLinesErrorResponse extends Schema.Class<JsonLinesErrorResponse>("JsonLinesErrorResponse")({
+  error: Schema.String,
+}) {
+  readonly _tag = "JsonLinesErrorResponse" as const
+}
 
 const make = (url: string) =>
   Effect.gen(function*() {
@@ -16,8 +20,8 @@ const make = (url: string) =>
       Match.orElse((cause) =>
         cause.response.text.pipe(
           Effect.map(JSON.parse),
-          Effect.flatMap(Schema.decodeUnknown(ErrorResponse)),
-          Effect.flatMap(({ error: message }) => new JsonLinesError({ cause, message })),
+          Effect.flatMap(Schema.decodeUnknown(JsonLinesErrorResponse)),
+          Effect.flatMap(({ error }) => new JsonLinesError({ cause, message: error })),
         )
       ),
     )
@@ -48,7 +52,11 @@ const make = (url: string) =>
       })).pipe(
         Stream.pipeThroughChannel(Ndjson.unpack({ ignoreEmptyLines: true })),
         Stream.mapEffect(Schema.decodeUnknown(schema)),
-        Stream.mapError((cause) => Predicate.isTagged("JsonLinesError")(cause) ? cause : new JsonLinesError({ cause })),
+        Stream.mapError((cause) =>
+          Predicate.isTagged("JsonLinesError")(cause)
+            ? cause
+            : new JsonLinesError({ cause, message: "Malformed response" })
+        ),
       )
     }
 

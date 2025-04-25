@@ -149,7 +149,6 @@ const loadManifest = Effect.fn(function*(config: Option.Option<string>) {
         ),
     }),
   ).pipe(
-    Effect.orDie,
     Effect.flatMap(
       Option.match({
         onNone: () => Effect.dieMessage("No manifest or config file provided"),

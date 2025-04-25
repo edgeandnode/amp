@@ -49,7 +49,6 @@ export const deploy = Command.make("deploy", {
             })))),
         })),
     })).pipe(
-      Effect.orDie,
       Effect.flatMap(Option.match({
         onNone: () => Effect.dieMessage("No manifest or config file provided"),
         onSome: Effect.succeed,

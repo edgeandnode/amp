@@ -34,7 +34,7 @@ export const codegen = Command.make("codegen", {
   const command = Effect.gen(function*() {
     const generator = yield* SchemaGenerator.SchemaGenerator
     if (Option.isSome(args.query)) {
-      const result = yield* generator.fromSql(args.query.value).pipe(Effect.orDie)
+      const result = yield* generator.fromSql(args.query.value)
       return yield* Console.log(result)
     }
 
@@ -53,14 +53,13 @@ export const codegen = Command.make("codegen", {
             })))),
         })),
     })).pipe(
-      Effect.orDie,
       Effect.flatMap(Option.match({
         onNone: () => Effect.dieMessage("No manifest or config file provided"),
         onSome: Effect.succeed,
       })),
     )
 
-    const result = yield* generator.fromManifest(manifest).pipe(Effect.orDie)
+    const result = yield* generator.fromManifest(manifest)
     yield* Console.log(result)
   })
 
