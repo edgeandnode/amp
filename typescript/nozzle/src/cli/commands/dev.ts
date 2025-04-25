@@ -1,88 +1,88 @@
-import * as Cli from "@effect/cli"
-import { Command, FileSystem } from "@effect/platform"
+import { Command, Options } from "@effect/cli"
+import { Command as Cmd, FileSystem } from "@effect/platform"
 import { Config, Effect, Fiber, Layer, Option, Stream, Unify } from "effect"
 import * as Api from "../../Api.js"
-import { ConfigLoader } from "../../ConfigLoader.js"
+import * as ConfigLoader from "../../ConfigLoader.js"
 import * as EvmRpc from "../../EvmRpc.js"
-import { ManifestBuilder } from "../../ManifestBuilder.js"
-import { ManifestDeployer } from "../../ManifestDeployer.js"
-import { ManifestLoader } from "../../ManifestLoader.js"
+import * as ManifestBuilder from "../../ManifestBuilder.js"
+import * as ManifestDeployer from "../../ManifestDeployer.js"
+import * as ManifestLoader from "../../ManifestLoader.js"
 
-export const dev = Cli.Command.make("dev", {
+export const dev = Command.make("dev", {
   args: {
-    config: Cli.Options.text("config").pipe(
-      Cli.Options.optional,
-      Cli.Options.withAlias("c"),
-      Cli.Options.withDescription(
+    config: Options.text("config").pipe(
+      Options.optional,
+      Options.withAlias("c"),
+      Options.withDescription(
         "The dataset definition config file to build to a manifest",
       ),
     ),
-    admin: Cli.Options.text("admin-url").pipe(
-      Cli.Options.withFallbackConfig(
+    admin: Options.text("admin-url").pipe(
+      Options.withFallbackConfig(
         Config.string("NOZZLE_ADMIN_URL").pipe(Config.withDefault("http://localhost:1610")),
       ),
-      Cli.Options.withDescription("The url of the Nozzle admin server"),
+      Options.withDescription("The url of the Nozzle admin server"),
     ),
-    registry: Cli.Options.text("registry-url").pipe(
-      Cli.Options.withFallbackConfig(
+    registry: Options.text("registry-url").pipe(
+      Options.withFallbackConfig(
         Config.string("NOZZLE_REGISTRY_URL").pipe(Config.withDefault("http://localhost:1611")),
       ),
-      Cli.Options.withDescription("The url of the Nozzle registry server"),
+      Options.withDescription("The url of the Nozzle registry server"),
     ),
-    rpc: Cli.Options.text("rpc-url").pipe(
-      Cli.Options.withFallbackConfig(
+    rpc: Options.text("rpc-url").pipe(
+      Options.withFallbackConfig(
         Config.string("NOZZLE_RPC_URL").pipe(Config.withDefault("http://localhost:8545")),
       ),
-      Cli.Options.withDescription("The url of the chain RPC server"),
+      Options.withDescription("The url of the chain RPC server"),
     ),
-    nozzle: Cli.Options.text("nozzle").pipe(
-      Cli.Options.withDefault("nozzle"),
-      Cli.Options.withAlias("n"),
-      Cli.Options.withDescription(
+    nozzle: Options.text("nozzle").pipe(
+      Options.withDefault("nozzle"),
+      Options.withAlias("n"),
+      Options.withDescription(
         "The path of the nozzle executable",
       ),
     ),
-    path: Cli.Options.text("path").pipe(
-      Cli.Options.withDefault(".nozzle"),
-      Cli.Options.withAlias("p"),
-      Cli.Options.withDescription(
+    path: Options.text("path").pipe(
+      Options.withDefault(".nozzle"),
+      Options.withAlias("p"),
+      Options.withDescription(
         "The path of the nozzle server configuration and data",
       ),
     ),
   },
-}, ({ args }) => {
-  const command = Effect.gen(function*() {
-    yield* initConfigDir(args.path)
-    const server = yield* runServer(args.nozzle, args.path).pipe(Effect.fork)
-
-    const manifestDeployer = yield* ManifestDeployer
-    const manifest = yield* loadManifest(args.config)
-    const result = yield* manifestDeployer.deploy(manifest)
-    yield* Effect.log(result)
-
-    const rpc = yield* EvmRpc.EvmRpc
-    const dump = yield* rpc.watchChainHead.pipe(
-      Stream.runForEach((block) => runDump(args.nozzle, args.path, manifest.name, block)),
-      Effect.fork,
-    )
-
-    yield* Fiber.joinAll([server, dump])
-  })
-
-  const layer = Layer.mergeAll(
-    ManifestBuilder.Default,
-    ManifestLoader.Default,
-    ManifestDeployer.Default,
-    ConfigLoader.Default,
-    EvmRpc.EvmRpc.withUrl(args.rpc),
-  ).pipe(Layer.provide(Layer.mergeAll(
-    Api.Admin.withUrl(args.admin),
-    Api.Registry.withUrl(args.registry),
-  )))
-
-  return command.pipe(Effect.scoped, Effect.provide(layer))
 }).pipe(
-  Cli.Command.withDescription("Run a dev server"),
+  Command.withDescription("Run a dev server"),
+  Command.withHandler(({ args }) =>
+    Effect.gen(function*() {
+      yield* initConfigDir(args.path)
+      const server = yield* runServer(args.nozzle, args.path).pipe(Effect.fork)
+
+      const manifestDeployer = yield* ManifestDeployer.ManifestDeployer
+      const manifest = yield* loadManifest(args.config)
+      const result = yield* manifestDeployer.deploy(manifest)
+      yield* Effect.log(result)
+
+      const rpc = yield* EvmRpc.EvmRpc
+      const dump = yield* rpc.watchChainHead.pipe(
+        Stream.runForEach((block) => runDump(args.nozzle, args.path, manifest.name, block)),
+        Effect.fork,
+      )
+
+      yield* Fiber.joinAll([server, dump])
+    }).pipe(Effect.scoped)
+  ),
+  Command.provide(({ args }) =>
+    Layer.mergeAll(
+      ManifestBuilder.ManifestBuilder.Default,
+      ManifestLoader.ManifestLoader.Default,
+      ManifestDeployer.ManifestDeployer.Default,
+      ConfigLoader.ConfigLoader.Default,
+      EvmRpc.EvmRpc.withUrl(args.rpc),
+    ).pipe(Layer.provide(Layer.mergeAll(
+      Api.Admin.withUrl(args.admin),
+      Api.Registry.withUrl(args.registry),
+    )))
+  ),
 )
 
 const initConfigDir = Effect.fn(function*(path: string) {
@@ -118,18 +118,18 @@ const initConfigDir = Effect.fn(function*(path: string) {
 })
 
 const runServer = (nozzlePath: string, configRoot: string) =>
-  Command.make(nozzlePath, "server").pipe(
-    Command.env({ NOZZLE_CONFIG: `${configRoot}/config.toml` }),
-    Command.stdout("inherit"),
-    Command.stderr("inherit"),
-    Command.exitCode,
+  Cmd.make(nozzlePath, "server").pipe(
+    Cmd.env({ NOZZLE_CONFIG: `${configRoot}/config.toml` }),
+    Cmd.stdout("inherit"),
+    Cmd.stderr("inherit"),
+    Cmd.exitCode,
     Effect.flatMap((exitCode) => Effect.fail(new Error(`nozzle server exit (${exitCode})`))),
   )
 
 const loadManifest = Effect.fn(function*(config: Option.Option<string>) {
-  const configLoader = yield* ConfigLoader
-  const manifestBuilder = yield* ManifestBuilder
-  const manifestLoader = yield* ManifestLoader
+  const configLoader = yield* ConfigLoader.ConfigLoader
+  const manifestBuilder = yield* ManifestBuilder.ManifestBuilder
+  const manifestLoader = yield* ManifestLoader.ManifestLoader
   return yield* Unify.unify(
     Option.match(config, {
       onSome: (file) =>
@@ -164,16 +164,16 @@ const runDump = (
   dataset: string,
   endBlock: bigint,
 ) =>
-  Command.make(
+  Cmd.make(
     nozzlePath,
     "dump",
     `--dataset=${dataset}`,
     `--end-block=${endBlock.toString()}`,
   ).pipe(
-    Command.env({ NOZZLE_CONFIG: `${configRoot}/config.toml` }),
-    Command.stdout("inherit"),
-    Command.stderr("inherit"),
-    Command.exitCode,
+    Cmd.env({ NOZZLE_CONFIG: `${configRoot}/config.toml` }),
+    Cmd.stdout("inherit"),
+    Cmd.stderr("inherit"),
+    Cmd.exitCode,
     Effect.andThen((exitCode) =>
       exitCode === 0
         ? Effect.void
