@@ -28,7 +28,6 @@ export const query = Command.make("query", {
   Command.withDescription("Perform a Nozzle SQL query"),
   Command.withHandler(({ args }) =>
     Effect.gen(function*() {
-      yield* Effect.logInfo("Querying Nozzle")
       const flight = yield* ArrowFlight.ArrowFlight
       const table = yield* flight.table(args.query).pipe(Effect.map((table) =>
         Option.match(args.limit, {
