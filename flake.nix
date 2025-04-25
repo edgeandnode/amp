@@ -1,15 +1,17 @@
 {
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
-    rust-overlay.url = "github:oxalica/rust-overlay";
+    rust.url = "github:oxalica/rust-overlay";
+    foundry.url = "github:shazow/foundry.nix/stable";
   };
-  outputs = { self, nixpkgs, rust-overlay }:
+  outputs = { self, nixpkgs, rust, foundry, ... }:
     let
       overlays = [
-        (import rust-overlay)
+        (import rust)
         (self: super: {
           rustToolchain = super.rust-bin.stable.latest.default;
         })
+        foundry.overlay
       ];
 
       allSystems = [
@@ -28,11 +30,13 @@
       devShells = forAllSystems ({ pkgs }: {
         default = pkgs.mkShell {
           packages = (with pkgs; [
-            bun
             # Includes cargo, clippy, cargo-fmt, rustdoc, rustfmt, and other tools.
             rustToolchain
+            foundry-bin
+            solc
+            bun
             protobuf
-            poetry
+            uv
             cmake
           ]) ++ pkgs.lib.optionals pkgs.stdenv.isDarwin (with pkgs; [
             libiconv
