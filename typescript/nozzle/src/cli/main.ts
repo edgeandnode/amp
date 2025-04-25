@@ -15,7 +15,7 @@ import { query } from "./commands/query.js"
 const levels = LogLevel.allLevels.map((value) => String.toLowerCase(value.label)) as Array<Lowercase<LogLevel.Literal>>
 const nozzle = Command.make("nozzle", {
   args: {
-    logs: Options.choice("log-level", levels).pipe(
+    logs: Options.choice("logs", levels).pipe(
       Options.withFallbackConfig(Config.string("NOZZLE_LOG_LEVEL").pipe(Config.withDefault("info"))),
       Options.withDescription("The log level to use"),
       Options.map((value) => LogLevel.fromLiteral(String.capitalize(value) as LogLevel.Literal)),
