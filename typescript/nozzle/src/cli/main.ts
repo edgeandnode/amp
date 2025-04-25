@@ -3,7 +3,7 @@
 import { Command, Options, ValidationError } from "@effect/cli"
 import { PlatformConfigProvider } from "@effect/platform"
 import { NodeContext, NodeRuntime } from "@effect/platform-node"
-import { Config, Effect, Layer, Logger, LogLevel, String } from "effect"
+import { Cause, Config, Console, Effect, Layer, Logger, LogLevel, String } from "effect"
 
 import { build } from "./commands/build.js"
 import { codegen } from "./commands/codegen.js"
@@ -39,15 +39,13 @@ const layer = Layer.provideMerge(
 
 const runnable = Effect.suspend(() => cli(process.argv)).pipe(
   Effect.provide(layer),
-  Effect.catchIf(ValidationError.isValidationError, () => Effect.void),
-  Effect.catchTags({
-    ArrowFlightError: (cause) => Effect.logError(cause.message),
-    ManifestBuilderError: (cause) => Effect.logError(cause.message),
-    ManifestDeployerError: (cause) => Effect.logError(cause.message),
-    ConfigLoaderError: (cause) => Effect.logError(cause.message),
-    ManifestLoaderError: (cause) => Effect.logError(cause.message),
-    SchemaGeneratorError: (cause) => Effect.logError(cause.message),
+  Effect.tapErrorCause((cause) => {
+    if (ValidationError.isValidationError(Cause.squash(cause))) {
+      return Effect.void
+    }
+
+    return Console.error(Cause.pretty(cause, { renderErrorCause: true }))
   }),
 )
 
-runnable.pipe(NodeRuntime.runMain)
+runnable.pipe(NodeRuntime.runMain({ disableErrorReporting: true }))
