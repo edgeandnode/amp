@@ -23,44 +23,43 @@ export const proxy = Command.make("proxy", {
       Options.withDescription("The Arrow Flight URL to use for the proxy"),
     ),
   },
-}, ({ args }) => {
-  const command = Effect.gen(function*() {
-    const flight = yield* ArrowFlight.ArrowFlight
-    const adapter = connectNodeAdapter({
-      routes: (router) => {
-        router.service(ArrowFlight.Flight.FlightService, {
-          doGet: (request) => flight.client.doGet(request),
-          doPut: (request) => flight.client.doPut(request),
-          doAction: (request) => flight.client.doAction(request),
-          doExchange: (request) => flight.client.doExchange(request),
-          getSchema: (request) => flight.client.getSchema(request),
-          getFlightInfo: (request) => flight.client.getFlightInfo(request),
-          listActions: (request) => flight.client.listActions(request),
-          listFlights: (request) => flight.client.listFlights(request),
-          pollFlightInfo: (request) => flight.client.pollFlightInfo(request),
-        })
-      },
-    })
-
-    const acquire = Effect.async<Server>((resume) => {
-      const server = createServer(adapter)
-      server.listen(args.port, () => resume(Effect.succeed(server)))
-    }).pipe(
-      Effect.tap(() => Effect.log(`Proxy server listening on port ${args.port}`)),
-    )
-
-    const release = (server: Server) =>
-      Effect.async((resume) => {
-        server.close(() => resume(Effect.void))
-      }).pipe(
-        Effect.tap(() => Effect.log(`Proxy server closed on port ${args.port}`)),
-      )
-
-    yield* Effect.acquireRelease(acquire, release).pipe(Effect.zip(Effect.never))
-  })
-
-  const layer = ArrowFlight.ArrowFlight.withTransport(createGrpcTransport({ baseUrl: args.flight }))
-  return command.pipe(Effect.scoped, Effect.provide(layer))
 }).pipe(
   Command.withDescription("Launches a Connect proxy for the Arrow Flight server"),
+  Command.withHandler(({ args }) =>
+    Effect.gen(function*() {
+      const flight = yield* ArrowFlight.ArrowFlight
+      const adapter = connectNodeAdapter({
+        routes: (router) => {
+          router.service(ArrowFlight.Flight.FlightService, {
+            doGet: (request) => flight.client.doGet(request),
+            doPut: (request) => flight.client.doPut(request),
+            doAction: (request) => flight.client.doAction(request),
+            doExchange: (request) => flight.client.doExchange(request),
+            getSchema: (request) => flight.client.getSchema(request),
+            getFlightInfo: (request) => flight.client.getFlightInfo(request),
+            listActions: (request) => flight.client.listActions(request),
+            listFlights: (request) => flight.client.listFlights(request),
+            pollFlightInfo: (request) => flight.client.pollFlightInfo(request),
+          })
+        },
+      })
+
+      const acquire = Effect.async<Server>((resume) => {
+        const server = createServer(adapter)
+        server.listen(args.port, () => resume(Effect.succeed(server)))
+      }).pipe(
+        Effect.tap(() => Effect.log(`Proxy server listening on port ${args.port}`)),
+      )
+
+      const release = (server: Server) =>
+        Effect.async((resume) => {
+          server.close(() => resume(Effect.void))
+        }).pipe(
+          Effect.tap(() => Effect.log(`Proxy server closed on port ${args.port}`)),
+        )
+
+      yield* Effect.acquireRelease(acquire, release).pipe(Effect.zip(Effect.never))
+    }).pipe(Effect.scoped)
+  ),
+  Command.provide(({ args }) => ArrowFlight.ArrowFlight.withTransport(createGrpcTransport({ baseUrl: args.flight }))),
 )
