@@ -9,7 +9,7 @@
     "test": "vitest"
   },
   "devDependencies": {
-    "@effect/eslint-plugin": "^0.3.1",
+    "@effect/eslint-plugin": "^0.3.2",
     "@effect/language-service": "^0.8.1",
     "@eslint/js": "^9.25.1",
     "eslint": "^9.25.1",

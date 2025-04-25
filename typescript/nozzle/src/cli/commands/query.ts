@@ -59,7 +59,9 @@ export const query = Command.make("query", {
           Stream.runForEach(Console.log),
         )),
       Match.exhaustive,
-    )
+    ).pipe(Effect.catchTags({
+      ParseError: (cause) => Effect.die(cause),
+    }))
   })
 
   const layer = ArrowFlight.ArrowFlight.withTransport(createGrpcTransport({ baseUrl: args.flight }))

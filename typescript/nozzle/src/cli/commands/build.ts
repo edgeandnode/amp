@@ -35,12 +35,17 @@ export const build = Command.make("build", {
     const definition = yield* Option.match(args.config, {
       onSome: (file) => config.load(file).pipe(Effect.map(Option.some)),
       onNone: () => config.find(),
-    }).pipe(Effect.flatten, Effect.orDie)
+    }).pipe(Effect.flatMap(Option.match({
+      onNone: () => Effect.die("Failed to load dataset definition file"),
+      onSome: (definition) => Effect.succeed(definition),
+    })))
 
     const json = yield* builder.build(definition).pipe(
       Effect.flatMap(Schema.encode(Model.DatasetManifest)),
       Effect.map((manifest) => JSON.stringify(manifest, null, 2)),
-      Effect.orDie,
+      Effect.catchTags({
+        ParseError: (cause) => Effect.die(cause),
+      }),
     )
 
     yield* Option.match(args.output, {
@@ -48,7 +53,6 @@ export const build = Command.make("build", {
       onSome: (output) =>
         fs.writeFileString(path.resolve(output), json).pipe(
           Effect.tap(() => Effect.log(`Manifest written to ${output}`)),
-          Effect.orDie,
         ),
     })
   })

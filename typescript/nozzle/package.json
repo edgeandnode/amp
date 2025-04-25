@@ -52,7 +52,7 @@
     "@effect/platform-node": "^0.76.21",
     "@effect/vitest": "^0.20.14",
     "@nozzl/utils": "workspace:*",
-    "@types/node": "^22.14.1",
+    "@types/node": "^22.15.2",
     "apache-arrow": "^19.0.1",
     "effect": "^3.14.14",
     "vitest": "^3.1.2"

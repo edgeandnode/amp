@@ -1,6 +1,11 @@
-import { Effect, String } from "effect"
+import { Data, Effect, String } from "effect"
 import * as Api from "./Api.js"
 import type * as Model from "./Model.js"
+
+export class SchemaGeneratorError extends Data.TaggedError("SchemaGeneratorError")<{
+  cause: unknown
+  message: string
+}> {}
 
 export class SchemaGenerator extends Effect.Service<SchemaGenerator>()("Nozzle/SchemaGenerator", {
   effect: Effect.gen(function*() {
@@ -33,9 +38,9 @@ export class SchemaGenerator extends Effect.Service<SchemaGenerator>()("Nozzle/S
 
     const fromSql = (sql: string, name = "Table") =>
       Effect.gen(function*() {
-        const schema = yield* api.schema({
-          payload: { sql_query: sql },
-        })
+        const schema = yield* api.schema(sql).pipe(
+          Effect.mapError((cause) => new SchemaGeneratorError({ cause, message: cause.message })),
+        )
 
         const output: Array<string> = []
         output.push(`import { Schema } from "effect";\n\n`)

@@ -3,8 +3,9 @@ import { Data, Effect, Schema } from "effect"
 import * as Model from "./Model.js"
 
 export class ManifestLoaderError extends Data.TaggedError("ManifestLoaderError")<{
-  readonly cause?: unknown
-  readonly message?: string
+  readonly cause: unknown
+  readonly message: string
+  readonly file: string
 }> {}
 
 export class ManifestLoader extends Effect.Service<ManifestLoader>()("Nozzle/ManifestLoader", {
@@ -13,7 +14,9 @@ export class ManifestLoader extends Effect.Service<ManifestLoader>()("Nozzle/Man
     const fs = yield* FileSystem.FileSystem
 
     const load = Effect.fnUntraced(function*(file: string) {
-      return yield* fs.readFileString(path.resolve(file)).pipe(
+      const resolved = path.resolve(file)
+
+      return yield* fs.readFileString(resolved).pipe(
         Effect.flatMap((content) =>
           Effect.try({
             try: () => JSON.parse(content),
@@ -21,7 +24,9 @@ export class ManifestLoader extends Effect.Service<ManifestLoader>()("Nozzle/Man
           })
         ),
         Effect.flatMap(Schema.decodeUnknown(Model.DatasetManifest)),
-        Effect.mapError((cause) => new ManifestLoaderError({ cause, message: `Failed to load manifest file ${file}` })),
+        Effect.mapError((cause) =>
+          new ManifestLoaderError({ cause, file: resolved, message: "Failed to load manifest file" })
+        ),
       )
     })
 
