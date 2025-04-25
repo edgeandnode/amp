@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      nozzl:
+        specifier: workspace:*
+        version: link:typescript/nozzle
       viem:
         specifier: ^2.28.0
         version: 2.28.0(typescript@5.8.3)

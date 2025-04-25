@@ -1,7 +1,7 @@
 import { create, toBinary } from "@bufbuild/protobuf"
 import { anyPack, AnySchema } from "@bufbuild/protobuf/wkt"
 import type { Transport } from "@connectrpc/connect"
-import { createClient } from "@connectrpc/connect"
+import { ConnectError, createClient } from "@connectrpc/connect"
 import { Template } from "@effect/platform"
 import type { RecordBatch } from "apache-arrow"
 import { RecordBatchReader, Table } from "apache-arrow"
@@ -13,7 +13,8 @@ export * as Flight from "./proto/Flight_pb.js"
 export * as FlightSql from "./proto/FlightSql_pb.js"
 
 export class ArrowFlightError extends Data.TaggedError("ArrowFlightError")<{
-  cause: unknown
+  cause?: unknown
+  message: string
 }> {}
 
 export class ArrowFlight extends Context.Tag("Nozzle/ArrowFlight")<ArrowFlight, ReturnType<typeof make>>() {
@@ -40,11 +41,17 @@ const make = (transport: Transport) => {
 
       const info = yield* Effect.tryPromise({
         try: (_) => client.getFlightInfo(descriptor, { signal: _ }),
-        catch: (cause) => new ArrowFlightError({ cause }),
+        catch: (cause) => {
+          if (cause instanceof ConnectError) {
+            return new ArrowFlightError({ cause, message: cause.message })
+          }
+
+          return new ArrowFlightError({ cause, message: "Failed to get flight info" })
+        },
       })
 
       const ticket = yield* Option.fromNullable(info.endpoint[0]?.ticket).pipe(Option.match({
-        onNone: () => new ArrowFlightError({ cause: new Error("No flight ticket found") }),
+        onNone: () => new ArrowFlightError({ message: "No flight ticket found" }),
         onSome: (ticket) => Effect.succeed(ticket),
       }))
 
@@ -53,7 +60,13 @@ const make = (transport: Transport) => {
       })
 
       const reader = yield* Effect.tryPromise({
-        catch: (cause) => new ArrowFlightError({ cause }),
+        catch: (cause) => {
+          if (cause instanceof ConnectError) {
+            return new ArrowFlightError({ cause, message: cause.message })
+          }
+
+          return new ArrowFlightError({ cause, message: "Failed to create reader" })
+        },
         try: () =>
           RecordBatchReader.from({
             async *[Symbol.asyncIterator]() {
@@ -79,7 +92,8 @@ const make = (transport: Transport) => {
           } as AsyncIterable<ArrayBuffer>),
       })
 
-      return Stream.fromAsyncIterable(reader, (cause) => new ArrowFlightError({ cause }))
+      return Stream.fromAsyncIterable(reader, (cause) =>
+        new ArrowFlightError({ cause, message: "Failed to read record batches" }))
     }).pipe(Stream.unwrap)
 
   const table: {
