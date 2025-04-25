@@ -32,15 +32,17 @@ const make = (url: string) =>
           ),
           (unwatch) => Effect.sync(unwatch),
         )
-      ).pipe(
-        Stream.changes,
-        Stream.toPubSub({ capacity: 1, strategy: "sliding" }),
-      ),
+      ).pipe(Effect.succeed),
       idleTimeToLive: "10 seconds",
     })
 
     const watchChainHead = RcRef.get(blocks).pipe(
-      Effect.map((_) => Stream.fromPubSub(_).pipe(Stream.flattenTake)),
+      Effect.map((stream) =>
+        stream.pipe(
+          Stream.changes,
+          Stream.buffer({ capacity: 1, strategy: "sliding" }),
+        )
+      ),
       Effect.retry({
         while: Predicate.isTagged("EvmRpcError"),
         schedule: Schedule.exponential("1 second").pipe(
