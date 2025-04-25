@@ -79,3 +79,18 @@ jobs:
           sudo apt-get install -y protobuf-compiler
       - name: Cargo check (release)
         run: cargo check --release
+
+  typescript:
+    name: TypeScript
+    runs-on: namespace-profile-default
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - name: Install pnpm
+        uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4
+      - name: Install dependencies
+        run: pnpm install
+      - name: Check formatting
+        run: pnpm lint
+      - name: Check types
+        run: pnpm check
