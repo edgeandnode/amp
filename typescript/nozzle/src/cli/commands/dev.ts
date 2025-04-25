@@ -58,17 +58,19 @@ export const dev = Command.make("dev", {
       const server = yield* runServer(args.nozzle, args.path).pipe(Effect.fork)
 
       const manifestDeployer = yield* ManifestDeployer.ManifestDeployer
-      const manifest = yield* loadManifest(args.config)
-      const result = yield* manifestDeployer.deploy(manifest)
-      yield* Effect.log(result)
-
       const rpc = yield* EvmRpc.EvmRpc
-      const dump = yield* rpc.watchChainHead.pipe(
-        Stream.runForEach((block) => runDump(args.nozzle, args.path, manifest.name, block)),
-        Effect.fork,
-      )
+      const dataset = yield* Effect.gen(function*() {
+        yield* Effect.sleep(200)
+        const manifest = yield* loadManifest(args.config)
+        const result = yield* manifestDeployer.deploy(manifest)
+        yield* Effect.log(result)
 
-      yield* Fiber.joinAll([server, dump])
+        yield* rpc.watchChainHead.pipe(
+          Stream.runForEach((block) => runDump(args.nozzle, args.path, manifest.name, block)),
+        )
+      }).pipe(Effect.fork)
+
+      yield* Fiber.joinAll([server, dataset])
     }).pipe(Effect.scoped)
   ),
   Command.provide(({ args }) =>
