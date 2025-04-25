@@ -7,7 +7,7 @@ version.workspace = true
 common = { path = "../common" }
 futures.workspace = true
 hex.workspace = true
-log.workspace = true
+tracing.workspace = true
 prost.workspace = true
 serde.workspace = true
 thiserror.workspace = true

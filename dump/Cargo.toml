@@ -9,7 +9,7 @@ common = { path = "../common" }
 datafusion.workspace = true
 dataset-store = { path = "../dataset-store" }
 futures.workspace = true
-log.workspace = true
+tracing.workspace = true
 object_store.workspace = true
 prometheus.workspace = true
 thiserror.workspace = true
@@ -18,4 +18,3 @@ url.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true
 serde.workspace = true
-tracing.workspace = true
