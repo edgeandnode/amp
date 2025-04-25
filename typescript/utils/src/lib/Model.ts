@@ -5,7 +5,6 @@ export class PackageJson extends Schema.Class<PackageJson>("PackageJson")({
   version: Schema.String,
   description: Schema.String,
   type: Schema.Literal("module"),
-  private: Schema.optionalWith(Schema.Boolean, { default: () => true }),
   license: Schema.optionalWith(Schema.String, { default: () => "UNLICENSED" }),
   keywords: Schema.optionalWith(Schema.Array(Schema.String), { default: () => [] }),
   tags: Schema.optionalWith(Schema.Array(Schema.String), { default: () => [] }),
