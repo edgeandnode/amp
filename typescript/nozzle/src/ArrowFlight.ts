@@ -1,7 +1,7 @@
 import { create, toBinary } from "@bufbuild/protobuf"
 import { anyPack, AnySchema } from "@bufbuild/protobuf/wkt"
 import type { Transport } from "@connectrpc/connect"
-import { ConnectError, createClient } from "@connectrpc/connect"
+import { createClient } from "@connectrpc/connect"
 import { Template } from "@effect/platform"
 import type { RecordBatch } from "apache-arrow"
 import { RecordBatchReader, Table } from "apache-arrow"
