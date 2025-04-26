@@ -44,8 +44,24 @@ const runnable = Effect.suspend(() => cli(process.argv)).pipe(
       return Effect.void
     }
 
-    return Console.error(Cause.pretty(cause, { renderErrorCause: true }))
+    return Console.error(prettyCause(cause))
   }),
 )
 
 runnable.pipe(NodeRuntime.runMain({ disableErrorReporting: true }))
+
+const prettyCause = <E>(cause: Cause.Cause<E>): string => {
+  if (Cause.isInterruptedOnly(cause)) {
+    return "All fibers interrupted without errors."
+  }
+
+  return Cause.prettyErrors<E>(cause).map((error) => {
+    const output = (error.stack ?? "").split("\n")[0] ?? ""
+    return error.cause ? `${output}\n\n${renderCause(error.cause as Cause.PrettyError, "└──")}` : output
+  }).join("\n\n")
+}
+
+const renderCause = (cause: Cause.PrettyError, prefix: string): string => {
+  const output = `${prefix}[cause]: ${(cause.stack ?? "").split("\n")[0] ?? ""}`
+  return cause.cause ? `${output}\n\n${renderCause(cause.cause as Cause.PrettyError, `${prefix}──`)}` : output
+}
