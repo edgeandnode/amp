@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { Command, Options, ValidationError } from "@effect/cli"
-import { PlatformConfigProvider } from "@effect/platform"
+import { Error as PlatformError, PlatformConfigProvider } from "@effect/platform"
 import { NodeContext, NodeRuntime } from "@effect/platform-node"
 import { Cause, Config, Console, Effect, Layer, Logger, LogLevel, String } from "effect"
 
@@ -40,8 +40,17 @@ const layer = Layer.provideMerge(
 const runnable = Effect.suspend(() => cli(process.argv)).pipe(
   Effect.provide(layer),
   Effect.tapErrorCause((cause) => {
-    if (ValidationError.isValidationError(Cause.squash(cause))) {
+    const squashed = Cause.squash(cause)
+    // Command validation errors are already printed by @effect/cli.
+    if (ValidationError.isValidationError(squashed)) {
       return Effect.void
+    }
+
+    // TODO: This is a temporary hack to handle @effect/platform errors whilst those are not using `Data.TaggedError`.
+    if (PlatformError.isPlatformError(squashed)) {
+      const error = new Error(squashed.message)
+      error.cause = (squashed as any).cause
+      return Console.error(prettyCause(Cause.fail(error)))
     }
 
     return Console.error(prettyCause(cause))
