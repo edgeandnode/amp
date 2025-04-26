@@ -16,7 +16,8 @@ export class ManifestBuilder extends Effect.Service<ManifestBuilder>()("Nozzle/M
         const tables = yield* Effect.forEach(Object.entries(manifest.tables), ([name, table]) =>
           Effect.gen(function*() {
             const schema = yield* client.schema(table.sql).pipe(Effect.catchTags({
-              RegistryError: (cause) => new ManifestBuilderError({ cause, message: cause.message, table: name }),
+              RegistryError: (cause) =>
+                new ManifestBuilderError({ cause, message: "Failed to get schema", table: name }),
             }))
 
             const input = new Model.TableInput({ sql: table.sql })

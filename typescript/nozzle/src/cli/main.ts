@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { Command, Options, ValidationError } from "@effect/cli"
-import { PlatformConfigProvider } from "@effect/platform"
+import { Error as PlatformError, PlatformConfigProvider } from "@effect/platform"
 import { NodeContext, NodeRuntime } from "@effect/platform-node"
 import { Cause, Config, Console, Effect, Layer, Logger, LogLevel, String } from "effect"
 
@@ -40,12 +40,37 @@ const layer = Layer.provideMerge(
 const runnable = Effect.suspend(() => cli(process.argv)).pipe(
   Effect.provide(layer),
   Effect.tapErrorCause((cause) => {
-    if (ValidationError.isValidationError(Cause.squash(cause))) {
+    const squashed = Cause.squash(cause)
+    // Command validation errors are already printed by @effect/cli.
+    if (ValidationError.isValidationError(squashed)) {
       return Effect.void
     }
 
-    return Console.error(Cause.pretty(cause, { renderErrorCause: true }))
+    // TODO: This is a temporary hack to handle @effect/platform errors whilst those are not using `Data.TaggedError`.
+    if (PlatformError.isPlatformError(squashed)) {
+      const error = new Error(squashed.message)
+      error.cause = (squashed as any).cause
+      return Console.error(prettyCause(Cause.fail(error)))
+    }
+
+    return Console.error(prettyCause(cause))
   }),
 )
 
 runnable.pipe(NodeRuntime.runMain({ disableErrorReporting: true }))
+
+const prettyCause = <E>(cause: Cause.Cause<E>): string => {
+  if (Cause.isInterruptedOnly(cause)) {
+    return "All fibers interrupted without errors."
+  }
+
+  return Cause.prettyErrors<E>(cause).map((error) => {
+    const output = (error.stack ?? "").split("\n")[0] ?? ""
+    return error.cause ? `${output}\n\n${renderCause(error.cause as Cause.PrettyError, "└──")}` : output
+  }).join("\n\n")
+}
+
+const renderCause = (cause: Cause.PrettyError, prefix: string): string => {
+  const output = `${prefix}[cause]: ${(cause.stack ?? "").split("\n")[0] ?? ""}`
+  return cause.cause ? `${output}\n\n${renderCause(cause.cause as Cause.PrettyError, `${prefix}──`)}` : output
+}
