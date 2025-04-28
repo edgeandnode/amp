@@ -239,7 +239,6 @@ impl QueryContext {
         let statement = parse_sql(query)?;
         let ctx = self.datafusion_ctx().await?;
         let plan = sql_to_plan(&ctx, statement).await?;
-        debug!("logical plan: {}", plan.to_string().replace('\n', "\\n"));
 
         execute_plan(&ctx, plan).await
     }
@@ -506,12 +505,13 @@ async fn execute_plan(
     use datafusion::physical_plan::execute_stream;
 
     verify_plan(&plan)?;
+    debug!("logical plan: {}", plan.to_string().replace('\n', "\\n"));
+
     let physical_plan = ctx
         .state()
         .create_physical_plan(&plan)
         .await
         .map_err(Error::PlanningError)?;
-
     debug!("physical plan: {}", print_physical_plan(&*physical_plan));
 
     execute_stream(physical_plan, ctx.task_ctx()).map_err(Error::PlanningError)
