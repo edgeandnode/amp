@@ -102,6 +102,14 @@ async fn main() {
 
 async fn main_inner() -> Result<(), BoxError> {
     tracing_helpers::register_logger();
+
+    // Log version info
+    info!(
+        "built on {}, git describe {}",
+        env!("VERGEN_BUILD_DATE"),
+        env!("VERGEN_GIT_DESCRIBE"),
+    );
+
     let args = Args::parse();
 
     let config = Arc::new(
