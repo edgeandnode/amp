@@ -25,44 +25,48 @@ export const build = Command.make("build", {
       Options.withDescription("The url of the Nozzle registry server"),
     ),
   },
-}, ({ args }) => {
-  const command = Effect.gen(function*() {
-    const path = yield* Path.Path
-    const fs = yield* FileSystem.FileSystem
-    const config = yield* ConfigLoader.ConfigLoader
-    const builder = yield* ManifestBuilder.ManifestBuilder
-
-    const definition = yield* Option.match(args.config, {
-      onSome: (file) => config.load(file).pipe(Effect.map(Option.some)),
-      onNone: () => config.find(),
-    }).pipe(Effect.flatMap(Option.match({
-      onNone: () => Effect.die("Failed to load dataset definition file"),
-      onSome: (definition) => Effect.succeed(definition),
-    })))
-
-    const json = yield* builder.build(definition).pipe(
-      Effect.flatMap(Schema.encode(Model.DatasetManifest)),
-      Effect.map((manifest) => JSON.stringify(manifest, null, 2)),
-      Effect.catchTags({
-        ParseError: (cause) => Effect.die(cause),
-      }),
-    )
-
-    yield* Option.match(args.output, {
-      onNone: () => Console.log(json),
-      onSome: (output) =>
-        fs.writeFileString(path.resolve(output), json).pipe(
-          Effect.tap(() => Effect.log(`Manifest written to ${output}`)),
-        ),
-    })
-  })
-
-  const layer = Layer.mergeAll(
-    ManifestBuilder.ManifestBuilder.Default,
-    ConfigLoader.ConfigLoader.Default,
-  ).pipe(Layer.provide(Api.Registry.withUrl(args.registry)))
-
-  return command.pipe(Effect.provide(layer))
 }).pipe(
   Command.withDescription("Build a manifest from a dataset definition"),
+  Command.withHandler(({ args }) =>
+    Effect.gen(function*() {
+      const path = yield* Path.Path
+      const fs = yield* FileSystem.FileSystem
+      const config = yield* ConfigLoader.ConfigLoader
+      const builder = yield* ManifestBuilder.ManifestBuilder
+
+      const definition = yield* args.config.pipe(
+        Option.map(Effect.succeed),
+        Option.getOrElse(() =>
+          config.find().pipe(Effect.map(Option.getOrThrowWith(() =>
+            new ConfigLoader.ConfigLoaderError({ message: "Failed to load dataset definition file" })
+          )))
+        ),
+        Effect.andThen(config.load),
+      )
+
+      const json = yield* builder.build(definition).pipe(
+        Effect.flatMap(Schema.encode(Model.DatasetManifest)),
+        Effect.map((manifest) =>
+          JSON.stringify(manifest, null, 2)
+        ),
+        Effect.catchTags({
+          ParseError: (cause) => Effect.die(cause),
+        }),
+      )
+
+      yield* Option.match(args.output, {
+        onNone: () => Console.log(json),
+        onSome: (output) =>
+          fs.writeFileString(path.resolve(output), json).pipe(
+            Effect.tap(() => Effect.log(`Manifest written to ${output}`)),
+          ),
+      })
+    })
+  ),
+  Command.provide(({ args }) =>
+    Layer.mergeAll(
+      ManifestBuilder.ManifestBuilder.Default,
+      ConfigLoader.ConfigLoader.Default,
+    ).pipe(Layer.provide(Api.Registry.withUrl(args.registry)))
+  ),
 )

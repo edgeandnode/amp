@@ -1056,7 +1056,6 @@ dependencies = [
  "async-trait",
  "datafusion",
  "futures",
- "log",
 ]
 
 [[package]]
@@ -1604,7 +1603,6 @@ dependencies = [
  "fs-err",
  "futures",
  "itertools 0.13.0",
- "log",
  "metadata-db",
  "object_store",
  "rand 0.9.0",
@@ -1615,6 +1613,7 @@ dependencies = [
  "thiserror 2.0.11",
  "tokio",
  "toml",
+ "tracing",
  "tracing-subscriber",
  "url",
  "uuid",
@@ -2603,7 +2602,6 @@ dependencies = [
  "datafusion",
  "dataset-store",
  "futures",
- "log",
  "metadata-db",
  "object_store",
  "prometheus",
@@ -2629,11 +2627,11 @@ dependencies = [
  "human_bytes",
  "indicatif",
  "lazy_static",
- "log",
  "metadata-db",
  "prometheus",
  "prometheus_exporter",
  "tokio",
+ "tracing",
  "tracing-subscriber",
 ]
 
@@ -2746,12 +2744,12 @@ dependencies = [
  "common",
  "fs-err",
  "futures",
- "log",
  "serde",
  "serde_with",
  "thiserror 2.0.11",
  "tokio",
  "toml",
+ "tracing",
 ]
 
 [[package]]
@@ -2804,7 +2802,6 @@ dependencies = [
  "fs-err",
  "futures",
  "hex",
- "log",
  "prost",
  "prost-build",
  "serde",
@@ -2814,6 +2811,7 @@ dependencies = [
  "toml",
  "tonic",
  "tonic-build",
+ "tracing",
  "url",
 ]
 
@@ -3945,7 +3943,6 @@ name = "metadata-db"
 version = "0.1.0"
 dependencies = [
  "futures",
- "log",
  "serde",
  "serde_json",
  "sqlx",
@@ -4020,7 +4017,6 @@ dependencies = [
  "dump",
  "futures",
  "http-common",
- "log",
  "metadata-db",
  "registry-service",
  "server",
@@ -4028,6 +4024,7 @@ dependencies = [
  "tokio",
  "tonic",
  "tower-http",
+ "tracing",
 ]
 
 [[package]]
@@ -5978,7 +5975,6 @@ dependencies = [
  "firehose-datasets",
  "fs-err",
  "futures",
- "log",
  "object_store",
  "prost",
  "prost-build",
@@ -5990,6 +5986,7 @@ dependencies = [
  "toml",
  "tonic",
  "tonic-build",
+ "tracing",
  "url",
 ]
 
@@ -6107,7 +6104,6 @@ dependencies = [
  "fs-err",
  "futures",
  "hex",
- "log",
  "metadata-db",
  "nozzle",
  "object_store",
@@ -6115,6 +6111,7 @@ dependencies = [
  "pretty_assertions",
  "tempfile",
  "tokio",
+ "tracing",
 ]
 
 [[package]]

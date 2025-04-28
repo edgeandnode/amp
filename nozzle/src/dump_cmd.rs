@@ -13,8 +13,8 @@ use common::{
 };
 use datafusion::{parquet, sql::resolve::resolve_table_references};
 use dataset_store::{sql_datasets, DatasetStore};
-use log::info;
 use metadata_db::MetadataDb;
+use tracing::info;
 
 pub async fn dump(
     config: Arc<Config>,

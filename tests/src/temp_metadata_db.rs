@@ -1,9 +1,9 @@
 use std::ops::Deref;
 
-use log::info;
 use metadata_db::MetadataDb;
 use pgtemp::{PgTempDB, PgTempDBBuilder};
 use tokio::sync::OnceCell;
+use tracing::info;
 
 pub struct TempMetadataDb {
     metadata_db: MetadataDb,

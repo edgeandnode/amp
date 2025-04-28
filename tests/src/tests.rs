@@ -1,6 +1,6 @@
 use std::{fs, sync::LazyLock};
 
-use common::tracing;
+use common::tracing_helpers;
 use pretty_assertions::assert_str_eq;
 
 use crate::{
@@ -17,7 +17,7 @@ static KEEP_TEMP_DIRS: LazyLock<bool> = LazyLock::new(|| std::env::var("KEEP_TEM
 async fn evm_rpc_single_dump() {
     let dataset_name = "eth_rpc";
     check_provider_file("rpc_eth_mainnet.toml").await;
-    tracing::register_logger();
+    tracing_helpers::register_logger();
 
     let metadata_db = test_metadata_db(*KEEP_TEMP_DIRS).await;
     let blessed = SnapshotContext::blessed(&dataset_name).await.unwrap();
@@ -49,7 +49,7 @@ async fn evm_rpc_single_dump() {
 async fn eth_firehose_single_dump() {
     let dataset_name = "eth_firehose";
     check_provider_file("firehose_eth_mainnet.toml").await;
-    tracing::register_logger();
+    tracing_helpers::register_logger();
 
     let blessed = SnapshotContext::blessed(&dataset_name).await.unwrap();
 
@@ -76,7 +76,7 @@ async fn eth_firehose_single_dump() {
 #[tokio::test]
 async fn sql_over_eth_firehose_dump() {
     let dataset_name = "sql_over_eth_firehose";
-    tracing::register_logger();
+    tracing_helpers::register_logger();
 
     let blessed = SnapshotContext::blessed(&dataset_name).await.unwrap();
 

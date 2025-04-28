@@ -8,12 +8,12 @@ use common::multirange::MultiRange;
 use common::parquet::errors::ParquetError;
 use common::parquet::format::KeyValue;
 use common::{parquet, BlockNum, BoxError, QueryContext, TableRows, Timestamp};
-use log::debug;
 use metadata_db::MetadataDb;
 use object_store::buffered::BufWriter;
 use object_store::path::Path;
 use parquet::arrow::AsyncArrowWriter;
 use parquet::file::properties::WriterProperties as ParquetWriterProperties;
+use tracing::debug;
 use url::Url;
 
 pub struct DatasetWriter {

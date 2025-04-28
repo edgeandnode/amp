@@ -1,5 +1,5 @@
 import { Command, Options } from "@effect/cli"
-import { Config, Effect, Layer, Option, Unify } from "effect"
+import { Config, Effect, Layer } from "effect"
 import * as Api from "../../Api.js"
 import * as ConfigLoader from "../../ConfigLoader.js"
 import * as ManifestBuilder from "../../ManifestBuilder.js"
@@ -31,45 +31,25 @@ export const deploy = Command.make("deploy", {
       Options.withDescription("The url of the Nozzle registry server"),
     ),
   },
-}, ({ args }) => {
-  const command = Effect.gen(function*() {
-    const deployer = yield* ManifestDeployer.ManifestDeployer
-    const loader = yield* ManifestLoader.ManifestLoader
-    const config = yield* ConfigLoader.ConfigLoader
-    const builder = yield* ManifestBuilder.ManifestBuilder
-    const manifest = yield* Unify.unify(Option.match(args.manifest, {
-      onSome: (file) => loader.load(file).pipe(Effect.map(Option.some)),
-      onNone: () =>
-        Unify.unify(Option.match(args.config, {
-          onSome: (file) => config.load(file).pipe(Effect.flatMap(builder.build), Effect.map(Option.some)),
-          onNone: () =>
-            config.find().pipe(Effect.flatMap(Unify.unify(Option.match({
-              onSome: (definition) => builder.build(definition).pipe(Effect.map(Option.some)),
-              onNone: () => loader.load("nozzle.json").pipe(Effect.map(Option.some)),
-            })))),
-        })),
-    })).pipe(
-      Effect.flatMap(Option.match({
-        onNone: () => Effect.dieMessage("No manifest or config file provided"),
-        onSome: Effect.succeed,
-      })),
-    )
-
-    const result = yield* deployer.deploy(manifest)
-    yield* Effect.log(result)
-  })
-
-  const layer = Layer.mergeAll(
-    ManifestDeployer.ManifestDeployer.Default,
-    ManifestBuilder.ManifestBuilder.Default,
-    ManifestLoader.ManifestLoader.Default,
-    ConfigLoader.ConfigLoader.Default,
-  ).pipe(Layer.provide(Layer.mergeAll(
-    Api.Admin.withUrl(args.admin),
-    Api.Registry.withUrl(args.registry),
-  )))
-
-  return command.pipe(Effect.provide(layer))
 }).pipe(
   Command.withDescription("Deploy a dataset definition or manifest to Nozzle"),
+  Command.withHandler(({ args }) =>
+    Effect.gen(function*() {
+      const deployer = yield* ManifestDeployer.ManifestDeployer
+      const manifest = yield* ConfigLoader.loadManifestOrConfig(args.manifest, args.config)
+      const result = yield* deployer.deploy(manifest)
+      yield* Effect.log(result)
+    })
+  ),
+  Command.provide(({ args }) =>
+    Layer.mergeAll(
+      ManifestDeployer.ManifestDeployer.Default,
+      ManifestBuilder.ManifestBuilder.Default,
+      ManifestLoader.ManifestLoader.Default,
+      ConfigLoader.ConfigLoader.Default,
+    ).pipe(Layer.provide(Layer.mergeAll(
+      Api.Admin.withUrl(args.admin),
+      Api.Registry.withUrl(args.registry),
+    )))
+  ),
 )

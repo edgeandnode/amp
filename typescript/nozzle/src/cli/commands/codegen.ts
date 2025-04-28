@@ -1,5 +1,5 @@
 import { Command, Options } from "@effect/cli"
-import { Config, Console, Effect, Layer, Option, Unify } from "effect"
+import { Config, Console, Effect, Layer, Option } from "effect"
 import * as Api from "../../Api.js"
 import * as ConfigLoader from "../../ConfigLoader.js"
 import * as ManifestBuilder from "../../ManifestBuilder.js"
@@ -30,47 +30,27 @@ export const codegen = Command.make("codegen", {
       Options.withDescription("The url of the Nozzle registry server"),
     ),
   },
-}, ({ args }) => {
-  const command = Effect.gen(function*() {
-    const generator = yield* SchemaGenerator.SchemaGenerator
-    if (Option.isSome(args.query)) {
-      const result = yield* generator.fromSql(args.query.value)
-      return yield* Console.log(result)
-    }
-
-    const loader = yield* ManifestLoader.ManifestLoader
-    const config = yield* ConfigLoader.ConfigLoader
-    const builder = yield* ManifestBuilder.ManifestBuilder
-    const manifest = yield* Unify.unify(Option.match(args.manifest, {
-      onSome: (file) => loader.load(file).pipe(Effect.map(Option.some)),
-      onNone: () =>
-        Unify.unify(Option.match(args.config, {
-          onSome: (file) => config.load(file).pipe(Effect.flatMap(builder.build), Effect.map(Option.some)),
-          onNone: () =>
-            config.find().pipe(Effect.flatMap(Unify.unify(Option.match({
-              onSome: (definition) => builder.build(definition).pipe(Effect.map(Option.some)),
-              onNone: () => loader.load("nozzle.json").pipe(Effect.map(Option.some)),
-            })))),
-        })),
-    })).pipe(
-      Effect.flatMap(Option.match({
-        onNone: () => Effect.dieMessage("No manifest or config file provided"),
-        onSome: Effect.succeed,
-      })),
-    )
-
-    const result = yield* generator.fromManifest(manifest)
-    yield* Console.log(result)
-  })
-
-  const layer = Layer.mergeAll(
-    SchemaGenerator.SchemaGenerator.Default,
-    ManifestBuilder.ManifestBuilder.Default,
-    ManifestLoader.ManifestLoader.Default,
-    ConfigLoader.ConfigLoader.Default,
-  ).pipe(Layer.provide(Api.Registry.withUrl(args.registry)))
-
-  return command.pipe(Effect.provide(layer))
 }).pipe(
   Command.withDescription("Generate schema definition code for a dataset"),
+  Command.withHandler(({ args }) =>
+    Effect.gen(function*() {
+      const generator = yield* SchemaGenerator.SchemaGenerator
+      if (Option.isSome(args.query)) {
+        const result = yield* generator.fromSql(args.query.value)
+        return yield* Console.log(result)
+      }
+
+      const manifest = yield* ConfigLoader.loadManifestOrConfig(args.manifest, args.config)
+      const result = yield* generator.fromManifest(manifest)
+      yield* Console.log(result)
+    })
+  ),
+  Command.provide(({ args }) =>
+    Layer.mergeAll(
+      SchemaGenerator.SchemaGenerator.Default,
+      ManifestBuilder.ManifestBuilder.Default,
+      ManifestLoader.ManifestLoader.Default,
+      ConfigLoader.ConfigLoader.Default,
+    ).pipe(Layer.provide(Api.Registry.withUrl(args.registry)))
+  ),
 )

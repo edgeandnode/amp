@@ -10,7 +10,6 @@ use datafusion::physical_plan::{
     PlanProperties,
 };
 use futures::stream::StreamExt;
-use log::trace;
 use std::any::Any;
 use std::sync::Arc;
 
@@ -124,14 +123,6 @@ impl ExecutionPlan for AsyncFuncExec {
         partition: usize,
         context: Arc<TaskContext>,
     ) -> Result<SendableRecordBatchStream> {
-        trace!(
-            "Start AsyncFuncExpr::execute for partition {} of context session_id {} and task_id {:?}",
-            partition,
-            context.session_id(),
-            context.task_id()
-        );
-        // TODO figure out how to record metrics
-
         // first execute the input stream
         let input_stream = self.input.execute(partition, context.clone())?;
 

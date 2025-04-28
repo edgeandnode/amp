@@ -14,7 +14,7 @@ pub(crate) async fn ui(blocks: u64) {
 async fn log_ui(blocks: u64) {
     while METRICS.blocks_read.get() < blocks as f64 {
         tokio::time::sleep(std::time::Duration::from_secs(10)).await;
-        log::info!(
+        tracing::info!(
             "Progress: {:.2}%, Read {} blocks, {} arrow data",
             METRICS.blocks_read.get() / blocks as f64 * 100.0,
             METRICS.blocks_read.get(),

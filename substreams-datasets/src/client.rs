@@ -186,7 +186,7 @@ impl BlockStreamer for Client {
                     }
                     Err(err) => {
                         // Log and retry.
-                        log::debug!("error reading substreams stream, retrying in {} seconds, error message: {}", RETRY_BACKOFF.as_secs(), err);
+                        tracing::debug!("error reading substreams stream, retrying in {} seconds, error message: {}", RETRY_BACKOFF.as_secs(), err);
                         tokio::time::sleep(RETRY_BACKOFF).await;
                         continue 'retry;
                     }

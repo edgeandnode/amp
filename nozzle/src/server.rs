@@ -30,12 +30,12 @@ pub async fn run(
     shutdown: broadcast::Receiver<()>,
 ) -> Result<(BoundAddrs, impl Future<Output = BoxResult<()>>), BoxError> {
     if config.max_mem_mb == 0 {
-        log::info!("Memory limit is unlimited");
+        tracing::info!("Memory limit is unlimited");
     } else {
-        log::info!("Memory limit is {} MB", config.max_mem_mb);
+        tracing::info!("Memory limit is {} MB", config.max_mem_mb);
     }
 
-    log::info!(
+    tracing::info!(
         "Spill to disk allowed: {}",
         !config.spill_location.is_empty()
     );
@@ -64,21 +64,21 @@ pub async fn run(
             },
         )
         .map_err(|e| {
-            log::error!("Flight server error: {}", e);
+            tracing::error!("Flight server error: {}", e);
             e.into()
         })
         .boxed();
-    log::info!("Serving Arrow Flight RPC at {}", flight_addr);
+    tracing::info!("Serving Arrow Flight RPC at {}", flight_addr);
 
     let (jsonl_addr, jsonl_server) =
         run_jsonl_server(service, config.addrs.jsonl_addr, shutdown.resubscribe()).await?;
     let jsonl_server = jsonl_server
         .map_err(|e| {
-            log::error!("JSON lines server error: {}", e);
+            tracing::error!("JSON lines server error: {}", e);
             e
         })
         .boxed();
-    log::info!("Serving JSON lines at {}", jsonl_addr);
+    tracing::info!("Serving JSON lines at {}", jsonl_addr);
 
     let (registry_service_addr, registry_service) = registry_service::serve(
         config.addrs.registry_service_addr,
@@ -89,11 +89,11 @@ pub async fn run(
     .await?;
     let registry_service = registry_service
         .map_err(|e| {
-            log::error!("Registry service error: {}", e);
+            tracing::error!("Registry service error: {}", e);
             e
         })
         .boxed();
-    log::info!("Registry service running at {}", registry_service_addr);
+    tracing::info!("Registry service running at {}", registry_service_addr);
 
     let (admin_api_addr, admin_api) = match no_admin {
         true => (config.addrs.admin_api_addr, std::future::pending().boxed()),
@@ -102,11 +102,11 @@ pub async fn run(
                 admin_api::serve(config.addrs.admin_api_addr, config, shutdown).await?;
             let admin_api = admin_api
                 .map_err(|e| {
-                    log::error!("Admin API error: {}", e);
+                    tracing::error!("Admin API error: {}", e);
                     e
                 })
                 .boxed();
-            log::info!("Admin API running at {}", admin_api_addr);
+            tracing::info!("Admin API running at {}", admin_api_addr);
             (admin_api_addr, admin_api)
         }
     };
@@ -119,7 +119,7 @@ pub async fn run(
                 .collect();
         while let Some(result) = services.next().await {
             if result.is_err() {
-                log::error!("Shutting down due to unexpected error");
+                tracing::error!("Shutting down due to unexpected error");
             }
             result?
         }
