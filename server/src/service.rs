@@ -161,6 +161,85 @@ impl Service {
             .map_err(|err| Error::from(err))?;
         Ok(stream)
     }
+
+    pub async fn execute_query_stream(
+        &self,
+        sql: &str,
+    ) -> Result<SendableRecordBatchStream, Error> {
+        use futures::channel::mpsc;
+
+        let initial_sql = format!("{} where block_num < 3", sql);
+        let query = parse_sql(&initial_sql).map_err(|err| Error::from(err))?;
+        let ctx = self
+            .dataset_store
+            .clone()
+            .ctx_for_sql(&query, self.env.clone())
+            .await
+            .map_err(|err| Error::DatasetStoreError(err))?;
+        let plan = ctx.plan_sql(query).await.map_err(|err| Error::from(err))?;
+        //println!("is incremental: {:?}", is_incremental(&plan));
+        let mut stream = ctx
+            .execute_plan(plan)
+            .await
+            .map_err(|err| Error::from(err))?;
+        let schema = stream.schema().clone();
+
+        let (tx, rx) = mpsc::unbounded();
+
+        while let Some(batch) = stream.next().await {
+            match batch {
+                Ok(batch) => {
+                    if tx.unbounded_send(Ok(batch)).is_err() {
+                        return Err(Error::ExecutionError(DataFusionError::Execution(
+                            "???".to_string(),
+                        )));
+                    }
+                }
+                Err(e) => {
+                    let _ = tx.unbounded_send(Err(e));
+                    return Err(Error::ExecutionError(DataFusionError::Execution(
+                        "???".to_string(),
+                    )));
+                }
+            }
+        }
+
+        let sql = sql.to_string();
+        let service = self.clone();
+
+        tokio::spawn(async move {
+            //loop {
+            for i in (3..10).step_by(2) {
+                let query = format!("{} where block_num >= {} and block_num < {}", sql, i, i + 2);
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                match service.execute_query(&query).await {
+                    Ok(mut stream) => {
+                        while let Some(batch) = stream.next().await {
+                            match batch {
+                                Ok(batch) => {
+                                    if tx.unbounded_send(Ok(batch)).is_err() {
+                                        return;
+                                    }
+                                }
+                                Err(e) => {
+                                    let _ = tx.unbounded_send(Err(e));
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let _ = tx.unbounded_send(Err(DataFusionError::Execution(e.to_string())));
+                        return;
+                    }
+                }
+            }
+        });
+
+        let adapter = datafusion::physical_plan::stream::RecordBatchStreamAdapter::new(schema, rx);
+
+        Ok(Box::pin(adapter) as SendableRecordBatchStream)
+    }
 }
 
 #[async_trait::async_trait]
