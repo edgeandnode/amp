@@ -5,11 +5,12 @@ use std::sync::Arc;
 use clap::Parser as _;
 use common::{
     config::{Addrs, Config},
-    tracing, BoxError,
+    tracing_helpers, BoxError,
 };
 use dump::worker::Worker;
 use metadata_db::MetadataDb;
 use tokio::{signal, sync::broadcast};
+use tracing::{error, info};
 
 #[global_allocator]
 static ALLOC: snmalloc_rs::SnMalloc = snmalloc_rs::SnMalloc;
@@ -100,7 +101,15 @@ async fn main() {
 }
 
 async fn main_inner() -> Result<(), BoxError> {
-    tracing::register_logger();
+    tracing_helpers::register_logger();
+
+    // Log version info
+    info!(
+        "built on {}, git describe {}",
+        env!("VERGEN_BUILD_DATE"),
+        env!("VERGEN_GIT_DESCRIBE"),
+    );
+
     let args = Args::parse();
 
     let config = Arc::new(
@@ -182,9 +191,9 @@ fn ctrl_c_shutdown() -> broadcast::Receiver<()> {
             _ = ctrl_c => {},
             _ = terminate => {},
         }
-        log::info!("gracefully shutting down");
+        info!("gracefully shutting down");
         if let Err(e) = tx.send(()) {
-            log::error!("failed to send shutdown signal: {e}");
+            error!("failed to send shutdown signal: {e}");
         }
     });
     rx

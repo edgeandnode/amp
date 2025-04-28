@@ -235,11 +235,11 @@ async fn eth_call_retry(
                 return Err(EthCallRetryError::RpcError(resp));
             }
             other => {
-                log::info!("unexpected RPC error: {other:?}, retrying");
+                tracing::info!("unexpected RPC error: {other:?}, retrying");
             }
         }
     }
-    log::info!("RPC error: retries failed for request {req:?}");
+    tracing::info!("RPC error: retries failed for request {req:?}");
     Err(EthCallRetryError::RetriesFailed)
 }
 

@@ -36,7 +36,7 @@ use datafusion::{
     scalar::ScalarValue,
 };
 use itertools::izip;
-use log::trace;
+use tracing::trace;
 
 pub use eth_call::EthCall;
 pub use evm_decode_function_data::EvmDecodeFunctionData;

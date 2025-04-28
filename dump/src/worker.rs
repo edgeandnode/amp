@@ -2,7 +2,6 @@ use std::{collections::BTreeMap, fmt, pin::pin, sync::Arc};
 
 use common::{config::Config, BoxError};
 use futures::{TryFutureExt as _, TryStreamExt};
-use log::{debug, error};
 use metadata_db::{JobDatabaseId, MetadataDb};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -10,6 +9,7 @@ use tokio::{
     sync::mpsc::{UnboundedReceiver, UnboundedSender},
     task::JoinHandle,
 };
+use tracing::{debug, error};
 use tracing::{info, instrument};
 
 use crate::job::Job;

@@ -1,7 +1,6 @@
 use std::time::Duration;
 
 use futures::stream::{BoxStream, Stream};
-use log::error;
 use sqlx::{
     migrate::{MigrateError, Migrator},
     postgres::{PgListener, PgNotification},
@@ -9,6 +8,7 @@ use sqlx::{
 };
 use thiserror::Error;
 use tokio::time::MissedTickBehavior;
+use tracing::error;
 use tracing::instrument;
 use url::Url;
 

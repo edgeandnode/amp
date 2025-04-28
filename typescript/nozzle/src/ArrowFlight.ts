@@ -1,7 +1,7 @@
 import { create, toBinary } from "@bufbuild/protobuf"
 import { anyPack, AnySchema } from "@bufbuild/protobuf/wkt"
 import type { Transport } from "@connectrpc/connect"
-import { ConnectError, createClient } from "@connectrpc/connect"
+import { createClient } from "@connectrpc/connect"
 import { Template } from "@effect/platform"
 import type { RecordBatch } from "apache-arrow"
 import { RecordBatchReader, Table } from "apache-arrow"
@@ -41,13 +41,7 @@ const make = (transport: Transport) => {
 
       const info = yield* Effect.tryPromise({
         try: (_) => client.getFlightInfo(descriptor, { signal: _ }),
-        catch: (cause) => {
-          if (cause instanceof ConnectError) {
-            return new ArrowFlightError({ cause, message: cause.message })
-          }
-
-          return new ArrowFlightError({ cause, message: "Failed to get flight info" })
-        },
+        catch: (cause) => new ArrowFlightError({ cause, message: "Failed to get flight info" }),
       })
 
       const ticket = yield* Option.fromNullable(info.endpoint[0]?.ticket).pipe(Option.match({
@@ -60,13 +54,7 @@ const make = (transport: Transport) => {
       })
 
       const reader = yield* Effect.tryPromise({
-        catch: (cause) => {
-          if (cause instanceof ConnectError) {
-            return new ArrowFlightError({ cause, message: cause.message })
-          }
-
-          return new ArrowFlightError({ cause, message: "Failed to create reader" })
-        },
+        catch: (cause) => new ArrowFlightError({ cause, message: "Failed to get flight data" }),
         try: () =>
           RecordBatchReader.from({
             async *[Symbol.asyncIterator]() {

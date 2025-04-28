@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
 
 import { Command, Options, ValidationError } from "@effect/cli"
-import { PlatformConfigProvider } from "@effect/platform"
+import { Error as PlatformError, PlatformConfigProvider } from "@effect/platform"
 import { NodeContext, NodeRuntime } from "@effect/platform-node"
-import { Config, Effect, Layer, Logger, LogLevel, String } from "effect"
+import { Cause, Config, Console, Effect, Layer, Logger, LogLevel, String } from "effect"
 
 import { build } from "./commands/build.js"
 import { codegen } from "./commands/codegen.js"
@@ -39,16 +39,38 @@ const layer = Layer.provideMerge(
 
 const runnable = Effect.suspend(() => cli(process.argv)).pipe(
   Effect.provide(layer),
-  Effect.catchIf(ValidationError.isValidationError, () => Effect.void),
-  Effect.catchTags({
-    SystemError: (error) => Effect.logError(error.message),
-    ArrowFlightError: (cause) => Effect.logError(cause.message),
-    ManifestBuilderError: (cause) => Effect.logError(cause.message),
-    ManifestDeployerError: (cause) => Effect.logError(cause.message),
-    ConfigLoaderError: (cause) => Effect.logError(cause.message),
-    ManifestLoaderError: (cause) => Effect.logError(cause.message),
-    SchemaGeneratorError: (cause) => Effect.logError(cause.message),
+  Effect.tapErrorCause((cause) => {
+    const squashed = Cause.squash(cause)
+    // Command validation errors are already printed by @effect/cli.
+    if (ValidationError.isValidationError(squashed)) {
+      return Effect.void
+    }
+
+    // TODO: This is a temporary hack to handle @effect/platform errors whilst those are not using `Data.TaggedError`.
+    if (PlatformError.isPlatformError(squashed)) {
+      const error = new Error(squashed.message)
+      error.cause = (squashed as any).cause
+      return Console.error(prettyCause(Cause.fail(error)))
+    }
+
+    return Console.error(prettyCause(cause))
   }),
 )
 
-runnable.pipe(NodeRuntime.runMain)
+runnable.pipe(NodeRuntime.runMain({ disableErrorReporting: true }))
+
+const prettyCause = <E>(cause: Cause.Cause<E>): string => {
+  if (Cause.isInterruptedOnly(cause)) {
+    return "All fibers interrupted without errors."
+  }
+
+  return Cause.prettyErrors<E>(cause).map((error) => {
+    const output = (error.stack ?? "").split("\n")[0] ?? ""
+    return error.cause ? `${output}\n\n${renderCause(error.cause as Cause.PrettyError, "└──")}` : output
+  }).join("\n\n")
+}
+
+const renderCause = (cause: Cause.PrettyError, prefix: string): string => {
+  const output = `${prefix}[cause]: ${(cause.stack ?? "").split("\n")[0] ?? ""}`
+  return cause.cause ? `${output}\n\n${renderCause(cause.cause as Cause.PrettyError, `${prefix}──`)}` : output
+}

@@ -33,8 +33,6 @@ use futures::future::try_join_all;
 use futures::TryFutureExt as _;
 use futures::TryStreamExt;
 use job_partition::JobPartition;
-use log::info;
-use log::warn;
 use metadata_db::MetadataDb;
 use object_store::ObjectMeta;
 use parquet::basic::Compression;
@@ -42,7 +40,9 @@ use parquet::file::properties::WriterProperties as ParquetWriterProperties;
 use parquet_writer::insert_scanned_range;
 use parquet_writer::ParquetFileWriter;
 use thiserror::Error;
+use tracing::info;
 use tracing::instrument;
+use tracing::warn;
 
 pub async fn dump_dataset(
     dataset: &PhysicalDataset,

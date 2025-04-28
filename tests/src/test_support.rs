@@ -23,9 +23,9 @@ use common::{
 use dataset_store::DatasetStore;
 use figment::providers::Format as _;
 use futures::{stream::TryStreamExt, StreamExt as _};
-use log::info;
 use metadata_db::MetadataDb;
 use object_store::path::Path;
+use tracing::info;
 
 use dump::{dump_dataset, parquet_opts};
 use fs_err as fs;

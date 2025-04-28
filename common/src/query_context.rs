@@ -15,6 +15,7 @@ use datafusion::logical_expr::{
     AggregateUDF, CreateCatalogSchema, Extension, LogicalPlanBuilder, ScalarUDF, SortExpr,
     TableScan,
 };
+use datafusion::physical_plan::{displayable, ExecutionPlan};
 use datafusion::sql::parser;
 use datafusion::{
     common::{Constraints, DFSchemaRef, ToDFSchema as _},
@@ -33,8 +34,8 @@ use datafusion_proto::bytes::{
 };
 use datafusion_proto::logical_plan::LogicalExtensionCodec;
 use futures::{StreamExt as _, TryStreamExt};
-use log::trace;
 use thiserror::Error;
+use tracing::{debug, instrument};
 use url::Url;
 
 use crate::catalog::physical::{Catalog, PhysicalTable};
@@ -231,12 +232,14 @@ impl QueryContext {
     }
 
     /// Security: This function can receive arbitrary SQL, it will check and restrict the `query`.
+    #[instrument(skip_all, err)]
     pub async fn execute_sql(&self, query: &str) -> Result<SendableRecordBatchStream, Error> {
-        trace!("executing SQL query: {}", query);
+        debug!("query: {}", query);
 
         let statement = parse_sql(query)?;
         let ctx = self.datafusion_ctx().await?;
         let plan = sql_to_plan(&ctx, statement).await?;
+
         execute_plan(&ctx, plan).await
     }
 
@@ -507,13 +510,24 @@ async fn execute_plan(
     use datafusion::physical_plan::execute_stream;
 
     verify_plan(&plan)?;
+    debug!("logical plan: {}", plan.to_string().replace('\n', "\\n"));
+
     let physical_plan = ctx
         .state()
         .create_physical_plan(&plan)
         .await
         .map_err(Error::PlanningError)?;
+    debug!("physical plan: {}", print_physical_plan(&*physical_plan));
 
     execute_stream(physical_plan, ctx.task_ctx()).map_err(Error::PlanningError)
+}
+
+/// Prints the physical plan to a single line, for logging.
+fn print_physical_plan(plan: &dyn ExecutionPlan) -> String {
+    displayable(plan)
+        .indent(false)
+        .to_string()
+        .replace('\n', "\\n")
 }
 
 /// Replaces placeholder table providers coming from a deserialized plan with the actual providers

@@ -148,7 +148,7 @@ fn rpc_to_rows(
                 mem::take(&mut receipt_with_bloom.receipt.logs)
             }
             _ => {
-                log::warn!("unexpected receipt type");
+                tracing::warn!("unexpected receipt type");
                 vec![]
             }
         };
@@ -263,7 +263,7 @@ fn rpc_transaction_to_row(
         TxEnvelope::Eip4844(signed) => signed.signature(),
         TxEnvelope::Eip7702(signed) => signed.signature(),
         _ => {
-            log::warn!("unexpected tx type");
+            tracing::warn!("unexpected tx type");
             return Ok(None);
         }
     };

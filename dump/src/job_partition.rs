@@ -1,10 +1,10 @@
 use common::multirange::MultiRange;
 use common::parquet::file::properties::WriterProperties as ParquetWriterProperties;
 use common::{BlockStreamer, BoxError, QueryContext};
-use log::info;
 use metadata_db::MetadataDb;
 use std::collections::BTreeMap;
 use std::{sync::Arc, time::Instant};
+use tracing::info;
 
 use crate::parquet_writer::DatasetWriter;
 
@@ -82,7 +82,7 @@ impl<S: BlockStreamer> JobPartition<S> {
 
         // The extraction task stopped sending blocks, so it must have terminated. Here we wait for it to
         // finish and check for any errors and panics.
-        log::debug!("Waiting for job partition #{} to finish", self.id);
+        tracing::debug!("Waiting for job partition #{} to finish", self.id);
         extractor_join_handle.await??;
 
         // Close the last part file for each table, checking for any errors.

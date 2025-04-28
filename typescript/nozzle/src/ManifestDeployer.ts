@@ -14,7 +14,8 @@ export class ManifestDeployer extends Effect.Service<ManifestDeployer>()("Nozzle
     const deploy = (manifest: Model.DatasetManifest) =>
       Effect.gen(function*() {
         const result = yield* client.deploy(manifest).pipe(Effect.catchTags({
-          AdminError: (cause) => new ManifestDeployerError({ cause, manifest: manifest.name, message: cause.message }),
+          AdminError: (cause) =>
+            new ManifestDeployerError({ cause, manifest: manifest.name, message: "Failed to deploy manifest" }),
         }))
 
         return result

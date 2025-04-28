@@ -14,7 +14,6 @@ use common::BoxError;
 use common::DatasetRows;
 use futures::StreamExt as _;
 use futures::{Stream, TryStreamExt as _};
-use log::debug;
 use pbfirehose::stream_client::StreamClient;
 use pbfirehose::ForkStep;
 use pbfirehose::Response as StreamResponse;
@@ -27,6 +26,7 @@ use tonic::service::Interceptor;
 use tonic::transport::ClientTlsConfig;
 use tonic::transport::Endpoint;
 use tonic::transport::Uri;
+use tracing::debug;
 
 /// This client only handles final blocks.
 // See also: only-final-blocks
