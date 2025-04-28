@@ -192,7 +192,7 @@ async fn handle_jsonl_stream_request(
     fn error_payload(message: impl std::fmt::Display) -> String {
         format!(r#"{{"error": "{}"}}"#, message)
     }
-    let stream = match service.execute_query_stream(&request).await {
+    let stream = match service.execute_stream_query(&request).await {
         Ok(stream) => stream,
         Err(err) => return err.into_response(),
     };
