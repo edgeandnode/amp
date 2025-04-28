@@ -238,7 +238,8 @@ impl EvmDecodeFunctionData {
                             }
                             builder.append(true);
                         }
-                        Err(_) => {
+                        Err(e) => {
+                            log::trace!("failed to decode {}: {e}", call.alloy_function.name);
                             for (field, ty) in types.iter().enumerate() {
                                 FieldBuilder::new(&mut builder, ty, field).append_null_value()?;
                             }
