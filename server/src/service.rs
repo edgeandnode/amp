@@ -29,7 +29,6 @@ use arrow_flight::{
     HandshakeResponse, PutResult, Ticket,
 };
 use bytes::{BufMut, Bytes, BytesMut};
-use datafusion::functions_table::range;
 use prost::Message as _;
 use tonic::{Request, Response, Status};
 
