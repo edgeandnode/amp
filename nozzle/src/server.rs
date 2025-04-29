@@ -8,8 +8,7 @@ use arrow_flight::flight_service_server::FlightServiceServer;
 use axum::response::IntoResponse;
 use common::{arrow, config::Config, BoxError, BoxResult};
 use futures::{
-    stream, stream::FuturesUnordered, FutureExt, StreamExt as _, TryFutureExt as _,
-    TryStreamExt as _,
+    stream::FuturesUnordered, FutureExt, StreamExt as _, TryFutureExt as _, TryStreamExt as _,
 };
 use metadata_db::MetadataDb;
 use server::service::Service;

@@ -29,6 +29,7 @@ use arrow_flight::{
     HandshakeResponse, PutResult, Ticket,
 };
 use bytes::{BufMut, Bytes, BytesMut};
+use dataset_store::sql_datasets::is_incremental;
 use prost::Message as _;
 use tonic::{Request, Response, Status};
 
@@ -53,6 +54,9 @@ pub enum Error {
 
     #[error(transparent)]
     CoreError(#[from] CoreError),
+
+    #[error("not incremental query: {0}")]
+    NotIncrementalQuery(String),
 }
 
 impl From<prost::DecodeError> for Error {
@@ -90,6 +94,7 @@ impl IntoResponse for Error {
             Error::PbDecodeError(_) => StatusCode::BAD_REQUEST,
             Error::UnsupportedFlightDescriptorType(_) => StatusCode::BAD_REQUEST,
             Error::UnsupportedFlightDescriptorCommand(_) => StatusCode::BAD_REQUEST,
+            Error::NotIncrementalQuery(_) => StatusCode::BAD_REQUEST,
         };
         let body = serde_json::json!({
             "error": error_message,
@@ -124,6 +129,8 @@ impl From<Error> for Status {
             ) => datafusion_error_to_status(&e, df),
 
             Error::ExecutionError(df) => datafusion_error_to_status(&e, df),
+
+            Error::NotIncrementalQuery(_) => Status::invalid_argument(e.to_string()),
         }
     }
 }
@@ -177,7 +184,11 @@ impl Service {
             .await
             .map_err(|err| Error::DatasetStoreError(err))?;
         let plan = ctx.plan_sql(query).await.map_err(|err| Error::from(err))?;
-        //println!("is incremental: {:?}", is_incremental(&plan));
+
+        if let Ok(false) = is_incremental(&plan) {
+            return Err(Error::NotIncrementalQuery(initial_sql));
+        }
+
         let mut stream = ctx
             .execute_plan(plan)
             .await
@@ -191,14 +202,14 @@ impl Service {
                 Ok(batch) => {
                     if tx.unbounded_send(Ok(batch)).is_err() {
                         return Err(Error::ExecutionError(DataFusionError::Execution(
-                            "???".to_string(),
+                            "???".to_string(), // TODO: need meaningful error here
                         )));
                     }
                 }
                 Err(e) => {
                     let _ = tx.unbounded_send(Err(e));
                     return Err(Error::ExecutionError(DataFusionError::Execution(
-                        "???".to_string(),
+                        "???".to_string(), // TODO: need meaningful error here
                     )));
                 }
             }
