@@ -1,6 +1,6 @@
 import { Command, HelpDoc, Options, ValidationError } from "@effect/cli"
 import { FileSystem } from "@effect/platform"
-import { Config, Effect, Either, Fiber, Layer, Option, Schema, Stream } from "effect"
+import { Config, Effect, Fiber, Layer, Option, Schema, Stream } from "effect"
 import * as Api from "../../Api.js"
 import * as ConfigLoader from "../../ConfigLoader.js"
 import * as EvmRpc from "../../EvmRpc.js"
@@ -47,40 +47,56 @@ export const dev = Command.make("dev", {
   Command.withDescription("Run a dev server"),
   Command.withHandler(({ args }) =>
     Effect.gen(function*() {
+      // TODO: Refactor all the workers into actors.
+
+      const nozzle = yield* Nozzle.Nozzle
+      const server = yield* nozzle.start.pipe(Effect.flatMap(Effect.fork))
+
       const fs = yield* FileSystem.FileSystem
       const configLoader = yield* ConfigLoader.ConfigLoader
-      const manifestDeployer = yield* ManifestDeployer.ManifestDeployer
       const manifestBuilder = yield* ManifestBuilder.ManifestBuilder
-
-      // TODO: Create a proper ConfigObserver service.
-      const config = yield* fs.watch(args.config).pipe(
-        Stream.filter((event) => (event._tag === "Update")),
+      const manifest = Stream.concat(
+        Stream.make({}),
+        fs.watch(args.config).pipe(
+          Stream.filter((event) => (event._tag === "Update")),
+        ),
+      ).pipe(
         Stream.flatMap((_) => configLoader.load(args.config)),
         Stream.changesWith(Schema.equivalence(Model.DatasetDefinition)),
         Stream.buffer({ capacity: 1, strategy: "sliding" }),
         Stream.flatMap((definition) => manifestBuilder.build(definition)),
         Stream.changesWith(Schema.equivalence(Model.DatasetManifest)),
-        Stream.flatMap((manifest) => manifestDeployer.deploy(manifest)),
-        Stream.either,
-        Stream.runForEach(Either.match({
-          onLeft: (error) => Effect.logError(error),
-          onRight: (message) => Effect.log(message),
+        Stream.map((manifest) => ({ _tag: "manifest", manifest })),
+      )
+
+      const rpc = yield* EvmRpc.EvmRpc
+      const chainHead = rpc.watchChainHead.pipe(
+        Stream.changes,
+        Stream.buffer({ capacity: 1, strategy: "sliding" }),
+        Stream.map((block) => ({ _tag: "chainHead", block })),
+      )
+
+      const manifestDeployer = yield* ManifestDeployer.ManifestDeployer
+      let datasetName = "anvil_rpc"
+      const dataset = yield* Stream.merge(manifest, chainHead).pipe(
+        Stream.runForEach(Effect.fn(function*(msg) {
+          switch (msg._tag) {
+            case "manifest": {
+              const manifest = (msg as { manifest: Model.DatasetManifest }).manifest
+              datasetName = manifest.name
+              yield* manifestDeployer.deploy(manifest)
+              return
+            }
+            case "chainHead": {
+              yield* nozzle.dump(datasetName, msg.block)
+              return
+            }
+          }
         })),
         Effect.fork,
       )
 
-      // TODO: Refactor all the workers into actors.
-      const rpc = yield* EvmRpc.EvmRpc
-      const nozzle = yield* Nozzle.Nozzle
-      const server = yield* nozzle.start.pipe(Effect.flatMap(Effect.fork))
-      const dump = yield* rpc.watchChainHead.pipe(
-        Stream.changes,
-        Stream.buffer({ capacity: 1, strategy: "sliding" }),
-        Stream.runForEach((block) => nozzle.dump("anvil_rpc", block)),
-        Effect.fork,
-      )
-
-      yield* Fiber.joinAll([config, server, dump])
+      yield* Fiber.joinAll([server, dataset])
     }).pipe(Effect.scoped)
   ),
   Command.provide(({ args }) =>
