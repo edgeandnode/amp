@@ -209,11 +209,18 @@ impl Service {
         tokio::spawn(async move {
             match &ds_store.metadata_db {
                 Some(mdb) => {
-                    for i in (4..10).step_by(2) {
-                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                    let mut i = 4;
+                    loop {
+                        // TODO: check sigterm, sigkill, etc.
+                        tokio::select! {
+                            _ = tokio::signal::ctrl_c() => return,
+                            _ = tokio::time::sleep(std::time::Duration::from_secs(1)) => {},
+                        }
+                        //tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                         mdb.notify("qwe", &i.to_string()).await.unwrap();
+                        i += 2;
                     }
-                },
+                }
                 _ => return,
             }
         });
@@ -227,32 +234,42 @@ impl Service {
             match &ds_store.metadata_db {
                 Some(mdb) => {
                     let mut notifications = mdb.listen("qwe").await.unwrap();
-                    while let Some(Ok(notification)) = notifications.next().await {
-                        let start = notification.payload().parse::<u64>().unwrap();
-                        let query = format!("{} where block_num >= {} and block_num < {}", sql, start, start + 2);
-                        match service.execute_query(&query).await {
-                            Ok(mut stream) => {
-                                while let Some(batch) = stream.next().await {
-                                    match batch {
-                                        Ok(batch) => {
-                                            if tx.unbounded_send(Ok(batch)).is_err() {
+                    loop {
+                        tokio::select! {
+                            _ = tokio::signal::ctrl_c() => return,
+                            notification = notifications.next() => {
+                                match notification {
+                                    Some(Ok(notification)) => {
+                                        let start = notification.payload().parse::<u64>().unwrap();
+                                        let query = format!("{} where block_num >= {} and block_num < {}", sql, start, start + 2);
+                                        match service.execute_query(&query).await {
+                                            Ok(mut stream) => {
+                                                while let Some(batch) = stream.next().await {
+                                                    match batch {
+                                                        Ok(batch) => {
+                                                            if tx.unbounded_send(Ok(batch)).is_err() {
+                                                                return;
+                                                            }
+                                                        }
+                                                        Err(e) => {
+                                                            let _ = tx.unbounded_send(Err(e));
+                                                            return;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            Err(e) => {
+                                                let _ = tx.unbounded_send(Err(DataFusionError::Execution(e.to_string())));
                                                 return;
                                             }
                                         }
-                                        Err(e) => {
-                                            let _ = tx.unbounded_send(Err(e));
-                                            return;
-                                        }
-                                    }
+                                    },
+                                    _ => return,
                                 }
-                            }
-                            Err(e) => {
-                                let _ = tx.unbounded_send(Err(DataFusionError::Execution(e.to_string())));
-                                return;
-                            }
+                            },
                         }
                     }
-                },
+                }
                 _ => return,
             }
         });
