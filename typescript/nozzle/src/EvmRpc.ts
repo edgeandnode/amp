@@ -53,5 +53,5 @@ const make = (url: string) =>
       Stream.unwrapScoped,
     )
 
-    return { watchChainHead }
+    return { url, watchChainHead }
   })
