@@ -303,15 +303,15 @@ fn order_by_block_num(plan: LogicalPlan) -> LogicalPlan {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-    use datafusion::arrow::datatypes::{DataType, Field, Schema};
-    use datafusion::logical_expr::LogicalPlan;
-    use url::Url;
     use super::is_incremental;
     use common::catalog::physical::{Catalog, PhysicalDataset, PhysicalTable};
     use common::config::Config;
     use common::query_context::parse_sql;
     use common::{Dataset, QueryContext, Table};
+    use datafusion::arrow::datatypes::{DataType, Field, Schema};
+    use datafusion::logical_expr::LogicalPlan;
+    use std::sync::Arc;
+    use url::Url;
 
     async fn get_plan(sql: &str) -> LogicalPlan {
         let schema = Arc::new(Schema::new(vec![
@@ -319,27 +319,24 @@ mod tests {
             Field::new("timestamp", DataType::Date32, false),
         ]));
 
-        let datasets = vec![
-            PhysicalDataset::new(
-                Dataset {
-                    kind: "firehose".to_string(),
-                    name: "eth_firehose".to_string(),
-                    tables: vec![],
+        let datasets = vec![PhysicalDataset::new(
+            Dataset {
+                kind: "firehose".to_string(),
+                name: "eth_firehose".to_string(),
+                tables: vec![],
+            },
+            vec![PhysicalTable::new(
+                "eth_firehose",
+                Table {
+                    name: "blocks".to_string(),
+                    schema: schema,
+                    network: None,
                 },
-                vec![
-                    PhysicalTable::new(
-                        "eth_firehose",
-                        Table {
-                            name: "blocks".to_string(),
-                            schema: schema,
-                            network: None,
-                        },
-                        Url::parse("s3://bucket/blocks").unwrap(),
-                        None,
-                    ).unwrap(),
-                ]
-            ),
-        ];
+                Url::parse("s3://bucket/blocks").unwrap(),
+                None,
+            )
+            .unwrap()],
+        )];
         let catalog = Catalog::new(datasets);
         let config = Config::in_memory();
         let env = Arc::new(config.make_runtime_env().unwrap());
@@ -371,9 +368,7 @@ mod tests {
 
     #[tokio::test]
     async fn not_incremental_queries() {
-        let queries = vec![
-            "SELECT MAX(block_num) FROM eth_firehose.blocks",
-        ];
+        let queries = vec!["SELECT MAX(block_num) FROM eth_firehose.blocks"];
         assert_incremental_for_all_is(queries, false).await;
     }
 }
