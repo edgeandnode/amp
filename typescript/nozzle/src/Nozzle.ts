@@ -47,7 +47,10 @@ const make = (executable: string) =>
     yield* fs.writeFileString(`${dir}/datasets/anvil_rpc.toml`, dataset)
 
     const run = (cmd: string, ...args: Array<string>) =>
-      Cmd.make(executable, cmd, ...args).pipe(Cmd.env({ NOZZLE_CONFIG: `${dir}/config.toml` }))
+      Cmd.make(executable, cmd, ...args).pipe(Cmd.env({
+        NOZZLE_CONFIG: `${dir}/config.toml`,
+        NOZZLE_LOG: "info",
+      }))
 
     const start = run("server").pipe(
       Cmd.stdout("inherit"),
@@ -55,7 +58,7 @@ const make = (executable: string) =>
       Cmd.start,
       Effect.mapError((cause) => new NozzleError({ cause, message: "Server failed to start" })),
       // TODO: Remove this and instead wait for a signal (e.g. from stdout) from the process.
-      Effect.zipLeft(Effect.sleep("1 second")),
+      Effect.zipLeft(Effect.sleep("200 millis")),
       Effect.flatMap((process) =>
         Effect.gen(function*() {
           const ready = Effect.all([
