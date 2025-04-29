@@ -68,15 +68,13 @@ const make = (executable: string) =>
           )
 
           const exit = process.exitCode.pipe(
-            Effect.mapError((cause) => new NozzleError({ cause, message: `Server crashed` })),
-            Effect.filterOrFail(
-              (code) => code === 0,
-              (code) => new NozzleError({ message: `Server crashed with exit code ${code}` }),
-            ),
+            Effect.mapError((cause) => new NozzleError({ cause, message: "Server crashed" })),
+            // Whether the server exited with a non-zero exit code or not, if the process ever ends, it's an error.
+            Effect.zip(Effect.fail(new NozzleError({ message: "Server exited unexpectedly" }))),
             Effect.asVoid,
           )
 
-          return yield* ready.pipe(Effect.as(exit))
+          return yield* ready.pipe(Effect.raceFirst(exit), Effect.as(exit))
         })
       ),
     )
