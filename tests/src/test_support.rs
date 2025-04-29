@@ -1,7 +1,4 @@
-use std::{
-    io::{ErrorKind, Write},
-    sync::Arc,
-};
+use std::{io::ErrorKind, sync::Arc};
 
 use arrow_flight::{
     flight_service_client::FlightServiceClient, sql::client::FlightSqlServiceClient,
@@ -385,62 +382,9 @@ fn dynamic_addrs() -> Addrs {
     }
 }
 
-pub const SQL_TEST_QUERIES: &[(&str, &str)] = &[
-    ("SELECT 1", "select_1.json"),
-    (
-        "SELECT eth_rpc.eth_call(from, to, input, CAST(block_num as STRING))
-         FROM eth_rpc.transactions
-         WHERE tx_index = 2",
-        "eth_call.json"
-    ),
-    (
-        "SELECT evm_decode(l.topic1, l.topic2, l.topic3, l.data, 'Transfer(address indexed from, address indexed to, uint256 value)')
-         FROM eth_rpc.logs l
-         WHERE l.topic0 = evm_topic('Transfer(address indexed from, address indexed to, uint256 value)')
-         AND l.topic3 IS NULL
-         LIMIT 1",
-        "evm_decode.json"
-    ),
-    ("SELECT evm_topic('Transfer(address indexed from, address indexed to, uint256 value)')", "evm_topic.json"),
-    ("SELECT attestation_hash(input) FROM eth_rpc.transactions", "attestation_hash.json"),
-    (
-        "SELECT evm_decode_params(input, 'function transfer(address _to, uint256 _value) public returns (bool success)')
-         FROM eth_rpc.transactions
-         ORDER BY tx_index
-         LIMIT 3",
-        "evm_decode_params.json"
-    ),
-    (
-        "SELECT evm_decode_results(input, 'function transfer(address _to, uint256 _value) public returns (bool success)')
-         FROM eth_firehose.calls
-         ORDER BY tx_index
-         LIMIT 3",
-        "evm_decode_results.json"
-    ),
-];
-
-pub async fn bless_sql_snapshots(filename: Option<String>) -> Result<(), BoxError> {
-    let queries = SQL_TEST_QUERIES.iter().filter(|(_, f)| match filename {
-        Some(ref filename) => f == filename,
-        None => true,
-    });
-    for (query, filename) in queries {
-        let jsonl = run_query_on_fresh_server(query).await?;
-        let path = sql_snapshot_path(filename);
-        let mut file = fs::File::create(&path)?;
-        file.write_all(&jsonl)?;
-    }
-    Ok(())
-}
-
-pub fn sql_snapshot_path(filename: &str) -> String {
-    let crate_path = env!("CARGO_MANIFEST_DIR");
-    format!("{crate_path}/sql-snapshots/{filename}")
-}
-
 /// Start a nozzle server, execute the given query, convert the result to JSONL, shut down the
 /// server and return the JSONL string in binary format.
-pub async fn run_query_on_fresh_server(query: &str) -> Result<Vec<u8>, BoxError> {
+pub async fn run_query_on_fresh_server(query: &str) -> Result<serde_json::Value, BoxError> {
     check_provider_file("rpc_eth_mainnet.toml").await;
 
     // Start the nozzle server.
@@ -460,7 +404,7 @@ pub async fn run_query_on_fresh_server(query: &str) -> Result<Vec<u8>, BoxError>
         .do_get(info.endpoint[0].ticket.take().unwrap())
         .await?;
     let mut buf: Vec<u8> = Default::default();
-    let mut writer = arrow::json::writer::LineDelimitedWriter::new(&mut buf);
+    let mut writer = arrow::json::writer::ArrayWriter::new(&mut buf);
     while let Some(batch) = batches.next().await {
         let batch = batch?;
         writer.write(&batch)?;
@@ -468,5 +412,25 @@ pub async fn run_query_on_fresh_server(query: &str) -> Result<Vec<u8>, BoxError>
 
     shutdown_tx.send(()).unwrap();
 
-    Ok(buf)
+    writer.finish()?;
+    serde_json::from_slice(&buf).map_err(Into::into)
+}
+
+pub fn load_sql_tests() -> Result<Vec<SqlTest>, BoxError> {
+    let crate_path = env!("CARGO_MANIFEST_DIR");
+    let path = format!("{crate_path}/sql-tests.yaml");
+    let content = fs::read(&path)
+        .map_err(|e| BoxError::from(format!("Failed to read sql-tests.yaml: {e}")))?;
+    serde_yaml::from_slice(&content)
+        .map_err(|e| BoxError::from(format!("Failed to parse sql-tests.yaml: {e}")))
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct SqlTest {
+    /// Test name.
+    pub name: String,
+    /// SQL query to execute.
+    pub query: String,
+    /// JSON-encoded results.
+    pub results: String,
 }
