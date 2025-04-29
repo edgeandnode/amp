@@ -362,6 +362,10 @@ pub fn default_partition_size() -> u64 {
     4096 * 1024 * 1024 // 4 GB
 }
 
+pub fn default_input_batch_size_blocks() -> u64 {
+    100_000
+}
+
 pub fn default_parquet_opts() -> ParquetWriterProperties {
     parquet_opts(Compression::ZSTD(ZstdLevel::try_new(1).unwrap()), true)
 }

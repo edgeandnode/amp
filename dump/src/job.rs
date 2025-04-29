@@ -14,7 +14,9 @@ use metadata_db::{JobDatabaseId, MetadataDb};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, instrument};
 
-use crate::{default_parquet_opts, default_partition_size, dump_dataset};
+use crate::{
+    default_input_batch_size_blocks, default_parquet_opts, default_partition_size, dump_dataset,
+};
 
 /// This is currently very simple, but the job abstraction is expected to become a central one.
 ///
@@ -122,8 +124,8 @@ impl Job {
                     &dataset_store.clone(),
                     &config.clone(),
                     1,
-                    100_000,
                     default_partition_size(),
+                    default_input_batch_size_blocks(),
                     &default_parquet_opts(),
                     0,
                     None,
