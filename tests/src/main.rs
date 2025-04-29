@@ -1,5 +1,5 @@
 use clap::Parser;
-use tests::test_support::{bless, bless_sql_snapshots};
+use tests::test_support::bless;
 use tracing::warn;
 
 /// CLI for test support.
@@ -23,12 +23,6 @@ enum Command {
         /// End block number.
         end_block: u64,
     },
-    /// Update the snapshots of some SQL queries that we do tests against.
-    BlessSqlSnapshots {
-        /// Only bless this file. Otherwise, bless all files.
-        #[clap(short)]
-        file: Option<String>,
-    },
 }
 
 #[tokio::main]
@@ -43,10 +37,6 @@ async fn main() {
         } => {
             bless(&dataset, start_block, end_block).await.unwrap();
             warn!("wrote new blessed dataset for {dataset}");
-        }
-        Command::BlessSqlSnapshots { file } => {
-            bless_sql_snapshots(file).await.unwrap();
-            warn!("wrote new blessed sql snapshots");
         }
     }
 }
