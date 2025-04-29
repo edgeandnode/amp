@@ -58,7 +58,7 @@ const make = (executable: string) =>
       Cmd.start,
       Effect.mapError((cause) => new NozzleError({ cause, message: "Server failed to start" })),
       // TODO: Remove this and instead wait for a signal (e.g. from stdout) from the process.
-      Effect.zipLeft(Effect.sleep(200)),
+      Effect.zipLeft(Effect.sleep("200 millis")),
       Effect.flatMap((process) =>
         Effect.gen(function*() {
           const ready = Effect.all([
