@@ -19,7 +19,7 @@ export class ArrowFlightError extends Data.TaggedError("ArrowFlightError")<{
 
 export class ArrowFlight extends Context.Tag("Nozzle/ArrowFlight")<ArrowFlight, ReturnType<typeof make>>() {
   static withTransport(transport: Transport) {
-    return Layer.sync(ArrowFlight, () => make(transport))
+    return Layer.sync(this, () => make(transport))
   }
 }
 

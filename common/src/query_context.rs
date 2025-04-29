@@ -39,7 +39,7 @@ use tracing::{debug, instrument};
 use url::Url;
 
 use crate::catalog::physical::{Catalog, PhysicalTable};
-use crate::evm::udfs::{EvmDecode, EvmTopic};
+use crate::evm::udfs::{EvmDecode, EvmDecodeFunctionData, EvmTopic};
 use crate::{arrow, attestation, BoxError, Table};
 
 #[derive(Error, Debug)]
@@ -475,7 +475,12 @@ async fn create_catalog_schema(ctx: &SessionContext, schema_name: String) -> Res
 }
 
 fn udfs() -> Vec<ScalarUDF> {
-    vec![EvmDecode::new().into(), EvmTopic::new().into()]
+    vec![
+        EvmDecode::new().into(),
+        EvmTopic::new().into(),
+        EvmDecodeFunctionData::evm_decode_params().into(),
+        EvmDecodeFunctionData::evm_decode_results().into(),
+    ]
 }
 
 fn udafs() -> Vec<AggregateUDF> {

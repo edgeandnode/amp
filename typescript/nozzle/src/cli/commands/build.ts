@@ -2,8 +2,7 @@ import { Command, Options } from "@effect/cli"
 import { FileSystem, Path } from "@effect/platform"
 import { Config, Console, Effect, Layer, Option, Schema } from "effect"
 import * as Api from "../../Api.js"
-import * as ConfigLoader from "../../ConfigLoader.js"
-import * as ManifestBuilder from "../../ManifestBuilder.js"
+import * as ManifestContext from "../../ManifestContext.js"
 import * as Model from "../../Model.js"
 
 export const build = Command.make("build", {
@@ -29,44 +28,25 @@ export const build = Command.make("build", {
   Command.withDescription("Build a manifest from a dataset definition"),
   Command.withHandler(({ args }) =>
     Effect.gen(function*() {
-      const path = yield* Path.Path
       const fs = yield* FileSystem.FileSystem
-      const config = yield* ConfigLoader.ConfigLoader
-      const builder = yield* ManifestBuilder.ManifestBuilder
-
-      const definition = yield* args.config.pipe(
-        Option.map(Effect.succeed),
-        Option.getOrElse(() =>
-          config.find().pipe(Effect.map(Option.getOrThrowWith(() =>
-            new ConfigLoader.ConfigLoaderError({ message: "Failed to load dataset definition file" })
-          )))
-        ),
-        Effect.andThen(config.load),
-      )
-
-      const json = yield* builder.build(definition).pipe(
+      const path = yield* Path.Path
+      const json = yield* ManifestContext.ManifestContext.pipe(
         Effect.flatMap(Schema.encode(Model.DatasetManifest)),
-        Effect.map((manifest) =>
-          JSON.stringify(manifest, null, 2)
-        ),
-        Effect.catchTags({
-          ParseError: (cause) => Effect.die(cause),
-        }),
+        Effect.map((manifest) => JSON.stringify(manifest, null, 2)),
       )
 
       yield* Option.match(args.output, {
         onNone: () => Console.log(json),
         onSome: (output) =>
           fs.writeFileString(path.resolve(output), json).pipe(
-            Effect.tap(() => Effect.log(`Manifest written to ${output}`)),
+            Effect.tap(() => Console.log(`Manifest written to ${output}`)),
           ),
       })
     })
   ),
   Command.provide(({ args }) =>
-    Layer.mergeAll(
-      ManifestBuilder.ManifestBuilder.Default,
-      ConfigLoader.ConfigLoader.Default,
-    ).pipe(Layer.provide(Api.Registry.withUrl(args.registry)))
+    ManifestContext.layerFromConfigFile(args.config).pipe(
+      Layer.provide(Api.Registry.withUrl(args.registry)),
+    )
   ),
 )
