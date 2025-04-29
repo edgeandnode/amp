@@ -300,3 +300,80 @@ fn order_by_block_num(plan: LogicalPlan) -> LogicalPlan {
     };
     LogicalPlan::Sort(sort)
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use datafusion::arrow::datatypes::{DataType, Field, Schema};
+    use datafusion::logical_expr::LogicalPlan;
+    use url::Url;
+    use super::is_incremental;
+    use common::catalog::physical::{Catalog, PhysicalDataset, PhysicalTable};
+    use common::config::Config;
+    use common::query_context::parse_sql;
+    use common::{Dataset, QueryContext, Table};
+
+    async fn get_plan(sql: &str) -> LogicalPlan {
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("block_num", DataType::UInt64, false),
+            Field::new("timestamp", DataType::Date32, false),
+        ]));
+
+        let datasets = vec![
+            PhysicalDataset::new(
+                Dataset {
+                    kind: "firehose".to_string(),
+                    name: "eth_firehose".to_string(),
+                    tables: vec![],
+                },
+                vec![
+                    PhysicalTable::new(
+                        "eth_firehose",
+                        Table {
+                            name: "blocks".to_string(),
+                            schema: schema,
+                            network: None,
+                        },
+                        Url::parse("s3://bucket/blocks").unwrap(),
+                        None,
+                    ).unwrap(),
+                ]
+            ),
+        ];
+        let catalog = Catalog::new(datasets);
+        let config = Config::in_memory();
+        let env = Arc::new(config.make_runtime_env().unwrap());
+        let qc = QueryContext::for_catalog(catalog, env).unwrap();
+
+        let stmt = parse_sql(sql).unwrap();
+        let plan = qc.plan_sql(stmt).await.unwrap();
+
+        plan
+    }
+
+    async fn assert_incremental_for_all_is(sql_queries: Vec<&str>, expected: bool) {
+        for sql in sql_queries {
+            let plan = get_plan(sql).await;
+            assert_eq!(is_incremental(&plan).unwrap(), expected);
+        }
+    }
+
+    #[tokio::test]
+    async fn incremental_queries() {
+        let queries = vec![
+            "SELECT * FROM eth_firehose.blocks",
+            "SELECT * FROM (select block_num from eth_firehose.blocks) as t",
+            "SELECT * FROM eth_firehose.blocks WHERE block_num < 10",
+            "SELECT * FROM (SELECT block_num FROM eth_firehose.blocks WHERE block_num < 10) t WHERE block_num > 10",
+        ];
+        assert_incremental_for_all_is(queries, true).await;
+    }
+
+    #[tokio::test]
+    async fn not_incremental_queries() {
+        let queries = vec![
+            "SELECT MAX(block_num) FROM eth_firehose.blocks",
+        ];
+        assert_incremental_for_all_is(queries, false).await;
+    }
+}
