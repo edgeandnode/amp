@@ -1,10 +1,8 @@
 import { Command, Options } from "@effect/cli"
-import { Config, Effect, Layer } from "effect"
+import { Config, Console, Effect, Layer } from "effect"
 import * as Api from "../../Api.js"
-import * as ConfigLoader from "../../ConfigLoader.js"
-import * as ManifestBuilder from "../../ManifestBuilder.js"
+import * as ManifestContext from "../../ManifestContext.js"
 import * as ManifestDeployer from "../../ManifestDeployer.js"
-import * as ManifestLoader from "../../ManifestLoader.js"
 
 export const deploy = Command.make("deploy", {
   args: {
@@ -33,23 +31,19 @@ export const deploy = Command.make("deploy", {
   },
 }).pipe(
   Command.withDescription("Deploy a dataset definition or manifest to Nozzle"),
-  Command.withHandler(({ args }) =>
+  Command.withHandler(() =>
     Effect.gen(function*() {
+      const manifest = yield* ManifestContext.ManifestContext
       const deployer = yield* ManifestDeployer.ManifestDeployer
-      const manifest = yield* ConfigLoader.loadManifestOrConfig(args.manifest, args.config)
       const result = yield* deployer.deploy(manifest)
-      yield* Effect.log(result)
+      yield* Console.log(result)
     })
   ),
   Command.provide(({ args }) =>
-    Layer.mergeAll(
-      ManifestDeployer.ManifestDeployer.Default,
-      ManifestBuilder.ManifestBuilder.Default,
-      ManifestLoader.ManifestLoader.Default,
-      ConfigLoader.ConfigLoader.Default,
-    ).pipe(Layer.provide(Layer.mergeAll(
-      Api.Admin.withUrl(args.admin),
-      Api.Registry.withUrl(args.registry),
-    )))
+    ManifestContext.layerFromFile({ manifest: args.manifest, config: args.config }).pipe(
+      Layer.merge(ManifestDeployer.ManifestDeployer.Default),
+      Layer.provide(Api.Admin.withUrl(args.admin)),
+      Layer.provide(Api.Registry.withUrl(args.registry)),
+    )
   ),
 )

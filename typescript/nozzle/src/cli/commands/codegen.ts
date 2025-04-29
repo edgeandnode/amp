@@ -1,9 +1,7 @@
 import { Command, Options } from "@effect/cli"
 import { Config, Console, Effect, Layer, Option } from "effect"
 import * as Api from "../../Api.js"
-import * as ConfigLoader from "../../ConfigLoader.js"
-import * as ManifestBuilder from "../../ManifestBuilder.js"
-import * as ManifestLoader from "../../ManifestLoader.js"
+import * as ManifestContext from "../../ManifestContext.js"
 import * as SchemaGenerator from "../../SchemaGenerator.js"
 
 export const codegen = Command.make("codegen", {
@@ -40,17 +38,18 @@ export const codegen = Command.make("codegen", {
         return yield* Console.log(result)
       }
 
-      const manifest = yield* ConfigLoader.loadManifestOrConfig(args.manifest, args.config)
+      const manifest = yield* Effect.serviceOptional(ManifestContext.ManifestContext).pipe(Effect.orDie)
       const result = yield* generator.fromManifest(manifest)
       yield* Console.log(result)
     })
   ),
   Command.provide(({ args }) =>
-    Layer.mergeAll(
-      SchemaGenerator.SchemaGenerator.Default,
-      ManifestBuilder.ManifestBuilder.Default,
-      ManifestLoader.ManifestLoader.Default,
-      ConfigLoader.ConfigLoader.Default,
-    ).pipe(Layer.provide(Api.Registry.withUrl(args.registry)))
+    Option.match(args.query, {
+      onSome: () => Layer.empty,
+      onNone: () => ManifestContext.layerFromFile({ config: args.config, manifest: args.manifest }),
+    }).pipe(
+      Layer.merge(SchemaGenerator.SchemaGenerator.Default),
+      Layer.provide(Api.Registry.withUrl(args.registry)),
+    )
   ),
 )
