@@ -1,7 +1,5 @@
 import { FileSystem, Path } from "@effect/platform"
-import { Data, Effect, Match, Option, Schema, Unify } from "effect"
-import { ManifestBuilder } from "./ManifestBuilder.js"
-import { ManifestLoader } from "./ManifestLoader.js"
+import { Data, Effect, Match, Schema } from "effect"
 import * as Model from "./Model.js"
 
 export class ConfigLoaderError extends Data.TaggedError("ConfigLoaderError")<{
@@ -20,12 +18,10 @@ export class ConfigLoader extends Effect.Service<ConfigLoader>()("Nozzle/ConfigL
     }).pipe(Effect.cached)
 
     const loadTypeScript = Effect.fnUntraced(function*(file: string) {
-      return yield* jiti.pipe(Effect.flatMap((jiti) =>
-        Effect.tryPromise({
-          try: () => jiti.import(file, { default: true }),
-          catch: (cause) => cause,
-        })
-      )).pipe(
+      return yield* Effect.tryMap(jiti, {
+        try: (jiti) => jiti.import(file, { default: true }),
+        catch: (cause) => cause,
+      }).pipe(
         Effect.flatMap(Schema.decodeUnknown(Model.DatasetDefinition)),
         Effect.mapError((cause) => new ConfigLoaderError({ cause, message: `Failed to load config file ${file}` })),
       )
@@ -42,13 +38,10 @@ export class ConfigLoader extends Effect.Service<ConfigLoader>()("Nozzle/ConfigL
     })
 
     const loadJson = Effect.fnUntraced(function*(file: string) {
-      return yield* fs.readFileString(file).pipe(
-        Effect.flatMap((content) =>
-          Effect.try({
-            try: () => JSON.parse(content),
-            catch: (cause) => cause,
-          })
-        ),
+      return yield* Effect.tryMap(fs.readFileString(file), {
+        try: (content) => JSON.parse(content),
+        catch: (cause) => cause,
+      }).pipe(
         Effect.flatMap(Schema.decodeUnknown(Model.DatasetDefinition)),
         Effect.mapError((cause) => new ConfigLoaderError({ cause, message: `Failed to load config file ${file}` })),
       )
@@ -80,34 +73,3 @@ export class ConfigLoader extends Effect.Service<ConfigLoader>()("Nozzle/ConfigL
     return { load, find }
   }),
 }) {}
-
-export const loadManifestOrConfig = Effect.fn(
-  function*(manifestPath: Option.Option<string>, configPath: Option.Option<string>) {
-    const config = yield* ConfigLoader
-    const loader = yield* ManifestLoader
-    const builder = yield* ManifestBuilder
-    return yield* Unify.unify(Option.match(manifestPath, {
-      onSome: (path) => loader.load(path).pipe(Effect.map(Option.some)),
-      onNone: () =>
-        Unify.unify(Option.match(configPath, {
-          onSome: (path) => config.load(path).pipe(Effect.flatMap(builder.build), Effect.map(Option.some)),
-          onNone: () =>
-            config.find().pipe(
-              Effect.flatMap(Unify.unify(Option.match({
-                onSome: (path) =>
-                  Effect.gen(function*() {
-                    const definition = yield* config.load(path)
-                    return yield* builder.build(definition)
-                  }).pipe(Effect.map(Option.some)),
-                onNone: () => loader.load("nozzle.json").pipe(Effect.map(Option.some)),
-              }))),
-            ),
-        })),
-    })).pipe(
-      Effect.flatMap(Option.match({
-        onNone: () => Effect.dieMessage("No manifest or config file provided"),
-        onSome: Effect.succeed,
-      })),
-    )
-  },
-)
