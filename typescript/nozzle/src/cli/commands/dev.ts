@@ -1,6 +1,6 @@
 import { Command, HelpDoc, Options, ValidationError } from "@effect/cli"
 import { FileSystem } from "@effect/platform"
-import { Config, Effect, Fiber, Layer, Option, Schema, Stream } from "effect"
+import { Config, Data, Effect, Fiber, Layer, Option, Predicate, Ref, Schema, Stream, Unify } from "effect"
 import * as Api from "../../Api.js"
 import * as ConfigLoader from "../../ConfigLoader.js"
 import * as EvmRpc from "../../EvmRpc.js"
@@ -48,50 +48,53 @@ export const dev = Command.make("dev", {
   Command.withHandler(({ args }) =>
     Effect.gen(function*() {
       // TODO: Refactor all the workers into actors.
-
       const nozzle = yield* Nozzle.Nozzle
       const server = yield* nozzle.start.pipe(Effect.flatMap(Effect.fork))
 
       const fs = yield* FileSystem.FileSystem
       const configLoader = yield* ConfigLoader.ConfigLoader
       const manifestBuilder = yield* ManifestBuilder.ManifestBuilder
-      const manifest = Stream.concat(
-        Stream.make({}),
-        fs.watch(args.config).pipe(
-          Stream.filter((event) => (event._tag === "Update")),
-        ),
-      ).pipe(
-        Stream.flatMap((_) => configLoader.load(args.config)),
+
+      const load = configLoader.load(args.config)
+      const updates = fs.watch(args.config).pipe(
+        Stream.filter(Predicate.isTagged("Updated")),
+        Stream.flatMap(() => load),
+      )
+
+      const ref = yield* Ref.make("anvil_rpc")
+      const manifest = Stream.concat(Stream.fromEffect(load), updates).pipe(
         Stream.changesWith(Schema.equivalence(Model.DatasetDefinition)),
         Stream.buffer({ capacity: 1, strategy: "sliding" }),
         Stream.flatMap((definition) => manifestBuilder.build(definition)),
         Stream.changesWith(Schema.equivalence(Model.DatasetManifest)),
-        Stream.map((manifest) => ({ _tag: "manifest", manifest })),
+        Stream.map((manifest) => new Manifest({ manifest })),
       )
 
       const rpc = yield* EvmRpc.EvmRpc
-      const chainHead = rpc.watchChainHead.pipe(
+      const blocks = rpc.watchChainHead.pipe(
         Stream.changes,
         Stream.buffer({ capacity: 1, strategy: "sliding" }),
-        Stream.map((block) => ({ _tag: "chainHead", block })),
+        Stream.map((block) => new Block({ block })),
       )
 
       const manifestDeployer = yield* ManifestDeployer.ManifestDeployer
-      let datasetName = "anvil_rpc"
-      const dataset = yield* Stream.merge(manifest, chainHead).pipe(
-        Stream.runForEach(Effect.fn(function*(msg) {
-          switch (msg._tag) {
-            case "manifest": {
-              const manifest = (msg as { manifest: Model.DatasetManifest }).manifest
-              datasetName = manifest.name
-              yield* manifestDeployer.deploy(manifest)
-              return
-            }
-            case "chainHead": {
-              yield* nozzle.dump(datasetName, msg.block)
-              return
-            }
+      const dataset = yield* Stream.merge(manifest, blocks).pipe(
+        Stream.runForEach(Unify.unify((msg) => {
+          if (Block.is(msg)) {
+            return Ref.get(ref).pipe(
+              Effect.flatMap((dataset) => nozzle.dump(dataset, msg.block)),
+              Effect.asVoid,
+            )
           }
+
+          if (Manifest.is(msg)) {
+            return Ref.set(ref, msg.manifest.name).pipe(
+              Effect.zipRight(manifestDeployer.deploy(msg.manifest)),
+              Effect.asVoid,
+            )
+          }
+
+          return Effect.void
         })),
         Effect.fork,
       )
@@ -113,3 +116,15 @@ export const dev = Command.make("dev", {
     )
   ),
 )
+
+class Manifest extends Data.TaggedClass("Manifest")<{
+  manifest: Model.DatasetManifest
+}> {
+  static is = Predicate.isTagged("Manifest") as Predicate.Refinement<unknown, Manifest>
+}
+
+class Block extends Data.TaggedClass("Block")<{
+  block: bigint
+}> {
+  static is = Predicate.isTagged("Block") as Predicate.Refinement<unknown, Block>
+}
