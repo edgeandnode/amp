@@ -13,12 +13,12 @@ export class ConfigLoader extends Effect.Service<ConfigLoader>()("Nozzle/ConfigL
     const fs = yield* FileSystem.FileSystem
 
     const jiti = yield* Effect.tryPromise({
-      try: () => import("jiti").then(({ createJiti }) => createJiti(import.meta.url)),
+      try: () => import("jiti").then(({ createJiti }) => createJiti(import.meta.url, { moduleCache: false })),
       catch: (cause) => new ConfigLoaderError({ cause }),
     }).pipe(Effect.cached)
 
     const loadTypeScript = Effect.fnUntraced(function*(file: string) {
-      return yield* Effect.tryMap(jiti, {
+      return yield* Effect.tryMapPromise(jiti, {
         try: (jiti) => jiti.import(file, { default: true }),
         catch: (cause) => cause,
       }).pipe(
