@@ -1,6 +1,6 @@
 import { Command, HelpDoc, Options, ValidationError } from "@effect/cli"
 import { FileSystem } from "@effect/platform"
-import { Config, Data, Effect, Fiber, Layer, Option, Predicate, Ref, Schema, Stream, Unify } from "effect"
+import { Config, Data, Effect, Either, Fiber, Layer, Option, Predicate, Ref, Schema, Stream, Unify } from "effect"
 import * as Api from "../../Api.js"
 import * as ConfigLoader from "../../ConfigLoader.js"
 import * as EvmRpc from "../../EvmRpc.js"
@@ -79,23 +79,29 @@ export const dev = Command.make("dev", {
 
       const manifestDeployer = yield* ManifestDeployer.ManifestDeployer
       const dataset = yield* Stream.merge(manifest, blocks).pipe(
-        Stream.runForEach(Unify.unify((msg) => {
-          if (Block.is(msg)) {
-            return Ref.get(ref).pipe(
-              Effect.flatMap((dataset) => nozzle.dump(dataset, msg.block)),
-              Effect.asVoid,
-            )
-          }
+        Stream.either,
+        Stream.runForEach((msg) =>
+          Either.match(msg, {
+            onLeft: (error) => Effect.logError(error),
+            onRight: Unify.unify((msg) => {
+              if (Block.is(msg)) {
+                return Ref.get(ref).pipe(
+                  Effect.flatMap((dataset) => nozzle.dump(dataset, msg.block)),
+                  Effect.asVoid,
+                )
+              }
 
-          if (Manifest.is(msg)) {
-            return Ref.set(ref, msg.manifest.name).pipe(
-              Effect.zipRight(manifestDeployer.deploy(msg.manifest)),
-              Effect.asVoid,
-            )
-          }
+              if (Manifest.is(msg)) {
+                return Ref.set(ref, msg.manifest.name).pipe(
+                  Effect.zipRight(manifestDeployer.deploy(msg.manifest)),
+                  Effect.asVoid,
+                )
+              }
 
-          return Effect.void
-        })),
+              return Effect.void
+            }),
+          })
+        ),
         Effect.fork,
       )
 
