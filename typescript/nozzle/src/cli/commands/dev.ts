@@ -1,6 +1,6 @@
 import { Command, HelpDoc, Options, ValidationError } from "@effect/cli"
 import { FileSystem } from "@effect/platform"
-import { Config, Effect, Either, Fiber, Layer, Option, Schema, Stream } from "effect"
+import { Config, Data, Effect, Either, Fiber, Layer, Option, Predicate, Ref, Schema, Stream, Unify } from "effect"
 import * as Api from "../../Api.js"
 import * as ConfigLoader from "../../ConfigLoader.js"
 import * as EvmRpc from "../../EvmRpc.js"
@@ -47,40 +47,65 @@ export const dev = Command.make("dev", {
   Command.withDescription("Run a dev server"),
   Command.withHandler(({ args }) =>
     Effect.gen(function*() {
+      // TODO: Refactor all the workers into actors.
+      const nozzle = yield* Nozzle.Nozzle
+      const server = yield* nozzle.start.pipe(Effect.flatMap(Effect.fork))
+
       const fs = yield* FileSystem.FileSystem
       const configLoader = yield* ConfigLoader.ConfigLoader
-      const manifestDeployer = yield* ManifestDeployer.ManifestDeployer
       const manifestBuilder = yield* ManifestBuilder.ManifestBuilder
 
-      // TODO: Create a proper ConfigObserver service.
-      const config = yield* fs.watch(args.config).pipe(
-        Stream.filter((event) => (event._tag === "Update")),
-        Stream.flatMap((_) => configLoader.load(args.config)),
+      const load = configLoader.load(args.config)
+      const updates = fs.watch(args.config).pipe(
+        Stream.filter(Predicate.isTagged("Update")),
+        Stream.flatMap(() => load),
+      )
+
+      const ref = yield* Ref.make("anvil_rpc")
+      const manifest = Stream.concat(Stream.fromEffect(load), updates).pipe(
         Stream.changesWith(Schema.equivalence(Model.DatasetDefinition)),
         Stream.buffer({ capacity: 1, strategy: "sliding" }),
         Stream.flatMap((definition) => manifestBuilder.build(definition)),
         Stream.changesWith(Schema.equivalence(Model.DatasetManifest)),
-        Stream.flatMap((manifest) => manifestDeployer.deploy(manifest)),
-        Stream.either,
-        Stream.runForEach(Either.match({
-          onLeft: (error) => Effect.logError(error),
-          onRight: (message) => Effect.log(message),
-        })),
-        Effect.fork,
+        Stream.map((manifest) => new Manifest({ manifest })),
       )
 
-      // TODO: Refactor all the workers into actors.
       const rpc = yield* EvmRpc.EvmRpc
-      const nozzle = yield* Nozzle.Nozzle
-      const server = yield* nozzle.start.pipe(Effect.flatMap(Effect.fork))
-      const dump = yield* rpc.watchChainHead.pipe(
+      const blocks = rpc.watchChainHead.pipe(
         Stream.changes,
         Stream.buffer({ capacity: 1, strategy: "sliding" }),
-        Stream.runForEach((block) => nozzle.dump("anvil_rpc", block)),
+        Stream.map((block) => new Block({ block })),
+      )
+
+      const manifestDeployer = yield* ManifestDeployer.ManifestDeployer
+      const dataset = yield* Stream.merge(manifest, blocks).pipe(
+        Stream.either,
+        Stream.runForEach((msg) =>
+          Either.match(msg, {
+            onLeft: (error) => Effect.logError(error),
+            onRight: Unify.unify((msg) => {
+              if (Block.is(msg)) {
+                return Ref.get(ref).pipe(
+                  Effect.flatMap((dataset) => nozzle.dump(dataset, msg.block)),
+                  Effect.asVoid,
+                )
+              }
+
+              if (Manifest.is(msg)) {
+                return Ref.set(ref, msg.manifest.name).pipe(
+                  Effect.zipRight(manifestDeployer.deploy(msg.manifest)),
+                  Effect.asVoid,
+                )
+              }
+
+              return Effect.void
+            }),
+          })
+        ),
         Effect.fork,
       )
 
-      yield* Fiber.joinAll([config, server, dump])
+      yield* Fiber.joinAll([server, dataset])
     }).pipe(Effect.scoped)
   ),
   Command.provide(({ args }) =>
@@ -97,3 +122,15 @@ export const dev = Command.make("dev", {
     )
   ),
 )
+
+class Manifest extends Data.TaggedClass("Manifest")<{
+  manifest: Model.DatasetManifest
+}> {
+  static is = Predicate.isTagged("Manifest") as Predicate.Refinement<unknown, Manifest>
+}
+
+class Block extends Data.TaggedClass("Block")<{
+  block: bigint
+}> {
+  static is = Predicate.isTagged("Block") as Predicate.Refinement<unknown, Block>
+}
