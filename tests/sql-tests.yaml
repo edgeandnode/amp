@@ -1,0 +1,90 @@
+- name: select_1
+  query: SELECT 1
+  results: |
+    [
+      {"Int64(1)": 1}
+    ]
+
+- name: evm_topic
+  query: SELECT evm_topic('Transfer(address indexed from, address indexed to, uint256 value)') AS topic
+  results: |
+    [
+      {
+        "topic": "ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+      }
+    ]
+
+- name: evm_decode
+  query: |
+    SELECT evm_decode(l.topic1, l.topic2, l.topic3, l.data, 'Transfer(address indexed from, address indexed to, uint256 value)') AS decoded
+    FROM eth_rpc.logs l
+    WHERE l.topic0 = evm_topic('Transfer(address indexed from, address indexed to, uint256 value)')
+    AND l.topic3 IS NULL
+    LIMIT 1
+  results: |
+    [
+      {
+        "decoded": {
+          "from": "06729eb2424da47898f935267bd4a62940de5105",
+          "to": "beefbabeea323f07c59926295205d3b7a17e8638",
+          "value": "6818627949560085517"
+        }
+      }
+    ]
+
+- name: attestation_hash
+  query: SELECT attestation_hash(input) FROM eth_rpc.transactions
+  results: |
+    [
+      {"attestation_hash(eth_rpc.transactions.input)": "8c39ef228de22ebdee449719351a7665"}
+    ]
+
+- name: eth_call
+  query: |
+    SELECT eth_rpc.eth_call(from, to, input, CAST(block_num as STRING)) AS call
+    FROM eth_rpc.transactions
+    WHERE tx_index = 2
+  results: |
+    [
+      {
+        "call": {
+          "data": "08c379a0000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000015500000000000000000000000000000000000000000000000000000000000000",
+          "message": "execution reverted: U"
+        }
+      }
+    ]
+
+- name: evm_decode_params
+  query: |
+    SELECT evm_decode_params(input, 'function transfer(address _to, uint256 _value) public returns (bool success)') AS params
+    FROM eth_rpc.transactions
+    ORDER BY tx_index
+    LIMIT 3
+  results: |
+    [
+      {},
+      {},
+      {
+        "params": {
+          "_to": "0000000000000000000000000000000000000000",
+          "_value": "1758718155579198402973689091687910530826030172363623369788248802939084235783"
+        }
+      }
+    ]
+
+- name: evm_decode_results
+  query: |
+    SELECT evm_decode_results(input, 'function transfer(address _to, uint256 _value) public returns (bool success)') AS results
+    FROM eth_firehose.calls
+    ORDER BY tx_index
+    LIMIT 3
+  results: |
+    [
+      {},
+      {},
+      {
+        "results": {
+          "success": true
+        }
+      }
+    ]
