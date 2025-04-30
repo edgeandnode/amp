@@ -19,6 +19,7 @@ const make = (executable: string) =>
     const rpc = yield* EvmRpc.EvmRpc
     const fs = yield* FileSystem.FileSystem
     const dir = yield* fs.makeTempDirectoryScoped()
+    yield* Effect.log(`Nozzle server dir: ${dir}`)
 
     const config = String.stripMargin(`
       |data_dir = "data"

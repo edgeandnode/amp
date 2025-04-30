@@ -3,7 +3,7 @@
 import { Command, Options, ValidationError } from "@effect/cli"
 import { Error as PlatformError, PlatformConfigProvider } from "@effect/platform"
 import { NodeContext, NodeRuntime } from "@effect/platform-node"
-import { Array, Cause, Config, Console, Effect, Layer, Logger, LogLevel, String } from "effect"
+import { Cause, Config, Console, Effect, Layer, Logger, LogLevel, String } from "effect"
 
 import { build } from "./commands/build.js"
 import { codegen } from "./commands/codegen.js"
@@ -64,12 +64,10 @@ const prettyCause = <E>(cause: Cause.Cause<E>): string => {
     return "All fibers interrupted without errors."
   }
 
-  const stack = Array.flatten(
-    Cause.prettyErrors<E>(cause).map((error) => {
-      const output = (error.stack ?? "").split("\n")[0] ?? ""
-      return error.cause ? [output, ...renderCause(error.cause as Cause.PrettyError)] : [output]
-    }),
-  )
+  const stack = Cause.prettyErrors<E>(cause).flatMap((error) => {
+    const output = (error.stack ?? "").split("\n")[0] ?? ""
+    return error.cause ? [output, ...renderCause(error.cause as Cause.PrettyError)] : [output]
+  })
 
   if (stack.length <= 1) {
     return stack[0] ?? ""
