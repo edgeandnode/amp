@@ -1,0 +1,3 @@
+[submodule "typescript/example/contracts/lib/forge-std"]
+	path = typescript/example/contracts/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
