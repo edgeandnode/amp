@@ -12,7 +12,7 @@ export class TableDefinition extends Schema.Class<TableDefinition>("TableDefinit
 
 export class DatasetDefinition extends Schema.Class<DatasetDefinition>("DatasetDefinition")({
   name: Schema.String,
-  version: Schema.String,
+  version: Schema.String.pipe(Schema.pattern(/^\d+\.\d+\.\d+$/)),
   readme: Schema.String.pipe(Schema.optional),
   repository: Schema.String.pipe(Schema.optional),
   dependencies: Schema.Record({

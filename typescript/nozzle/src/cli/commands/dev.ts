@@ -1,6 +1,5 @@
 import { Command, HelpDoc, Options, ValidationError } from "@effect/cli"
-import { FileSystem } from "@effect/platform"
-import { Config, Data, Effect, Either, Fiber, Layer, Option, Predicate, Ref, Schema, Stream, Unify } from "effect"
+import { Config, Data, Effect, Either, Equal, Fiber, Layer, Option, Predicate, Schema, Stream } from "effect"
 import * as Api from "../../Api.js"
 import * as ConfigLoader from "../../ConfigLoader.js"
 import * as EvmRpc from "../../EvmRpc.js"
@@ -47,65 +46,57 @@ export const dev = Command.make("dev", {
   Command.withDescription("Run a dev server"),
   Command.withHandler(({ args }) =>
     Effect.gen(function*() {
-      // TODO: Refactor all the workers into actors.
       const nozzle = yield* Nozzle.Nozzle
       const server = yield* nozzle.start.pipe(Effect.flatMap(Effect.fork))
 
-      const fs = yield* FileSystem.FileSystem
-      const configLoader = yield* ConfigLoader.ConfigLoader
-      const manifestBuilder = yield* ManifestBuilder.ManifestBuilder
+      const config = yield* ConfigLoader.ConfigLoader
+      const deployer = yield* ManifestDeployer.ManifestDeployer
+      const builder = yield* ManifestBuilder.ManifestBuilder
+      const manifest = config.watch(args.config).pipe(
+        Stream.mapEffect((either) =>
+          Effect.gen(function*() {
+            if (Either.isLeft(either)) {
+              return yield* Effect.fail(either.left)
+            }
 
-      const load = configLoader.load(args.config)
-      const updates = fs.watch(args.config).pipe(
-        Stream.filter(Predicate.isTagged("Update")),
-        Stream.flatMap(() => load),
-      )
-
-      const ref = yield* Ref.make("anvil_rpc")
-      const manifest = Stream.concat(Stream.fromEffect(load), updates).pipe(
-        Stream.changesWith(Schema.equivalence(Model.DatasetDefinition)),
+            return yield* builder.build(either.right)
+          }).pipe(Effect.either)
+        ),
+        Stream.changesWith(Either.getEquivalence({
+          right: Schema.equivalence(Model.DatasetManifest),
+          left: Equal.equals,
+        })),
         Stream.buffer({ capacity: 1, strategy: "sliding" }),
-        Stream.flatMap((definition) => manifestBuilder.build(definition)),
-        Stream.changesWith(Schema.equivalence(Model.DatasetManifest)),
-        Stream.map((manifest) => new Manifest({ manifest })),
+        Stream.map(Either.map((manifest) => new Manifest({ manifest }))),
+        Stream.tap(Either.match({
+          onLeft: (error) => Effect.logError(error),
+          onRight: () => Effect.void,
+        })),
+        Stream.filterMap(Either.getRight),
       )
 
       const rpc = yield* EvmRpc.EvmRpc
-      const blocks = rpc.watchChainHead.pipe(
-        Stream.changes,
-        Stream.buffer({ capacity: 1, strategy: "sliding" }),
+      const blocks = rpc.blocks.pipe(
         Stream.map((block) => new Block({ block })),
       )
 
-      const manifestDeployer = yield* ManifestDeployer.ManifestDeployer
-      const dataset = yield* Stream.merge(manifest, blocks).pipe(
-        Stream.either,
-        Stream.runForEach((msg) =>
-          Either.match(msg, {
-            onLeft: (error) => Effect.logError(error),
-            onRight: Unify.unify((msg) => {
-              if (Block.is(msg)) {
-                return Ref.get(ref).pipe(
-                  Effect.flatMap((dataset) => nozzle.dump(dataset, msg.block)),
-                  Effect.asVoid,
-                )
-              }
+      const handle = Effect.fnUntraced(function*(dataset: string, value: Manifest | Block) {
+        if (Manifest.is(value)) {
+          yield* deployer.deploy(value.manifest)
+        } else {
+          yield* nozzle.dump(dataset, value.block)
+        }
 
-              if (Manifest.is(msg)) {
-                return Ref.set(ref, msg.manifest.name).pipe(
-                  Effect.zipRight(manifestDeployer.deploy(msg.manifest)),
-                  Effect.asVoid,
-                )
-              }
+        return Manifest.is(value) ? value.manifest.name : dataset
+      })
 
-              return Effect.void
-            }),
-          })
-        ),
+      const dump = yield* Stream.merge(blocks, manifest).pipe(
+        Stream.runFoldEffect("anvil_rpc", handle),
+        Effect.asVoid,
         Effect.fork,
       )
 
-      yield* Fiber.joinAll([server, dataset])
+      yield* Fiber.joinAll([dump, server])
     }).pipe(Effect.scoped)
   ),
   Command.provide(({ args }) =>
@@ -124,13 +115,13 @@ export const dev = Command.make("dev", {
 )
 
 class Manifest extends Data.TaggedClass("Manifest")<{
-  manifest: Model.DatasetManifest
+  readonly manifest: Model.DatasetManifest
 }> {
-  static is = Predicate.isTagged("Manifest") as Predicate.Refinement<unknown, Manifest>
+  static is = Predicate.isTagged("Manifest") as (value: unknown) => value is Manifest
 }
 
 class Block extends Data.TaggedClass("Block")<{
-  block: bigint
+  readonly block: bigint
 }> {
-  static is = Predicate.isTagged("Block") as Predicate.Refinement<unknown, Block>
+  static is = Predicate.isTagged("Block") as (value: unknown) => value is Block
 }
