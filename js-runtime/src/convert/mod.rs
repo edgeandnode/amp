@@ -442,7 +442,11 @@ fn scalar_value_from_v8<'s>(
 
             Ok(builder.build()?)
         }
-        V8Value::Array(local) => todo!(),
-        V8Value::TypedArray(local) => todo!(),
+        V8Value::Array(_) => Err(BoxError::from(format!(
+            "Array is not yet supported in JS functions",
+        ))),
+        V8Value::TypedArray(_) => Err(BoxError::from(
+            "TypedArray is not yet supported in JS functions",
+        )),
     }
 }

@@ -6,7 +6,7 @@ use datafusion::{
             ArrayRef, BooleanArray, Int32Array, ListBuilder, StringArray, StringBuilder,
             StructArray,
         },
-        datatypes::{DECIMAL128_MAX_PRECISION, DECIMAL256_MAX_PRECISION, DataType, Field, i256},
+        datatypes::{i256, DataType, Field, DECIMAL128_MAX_PRECISION, DECIMAL256_MAX_PRECISION},
     },
     scalar::ScalarValue,
 };
@@ -121,4 +121,90 @@ fn list_param() {
     isolate
         .invoke::<()>("test.js", TEST_JS, "list_param", &[&list])
         .unwrap();
+}
+
+#[test]
+fn return_types() {
+    let mut isolate = Isolate::new();
+    let ret: ScalarValue = isolate
+        .invoke("test.js", TEST_JS, "return_types", &[])
+        .unwrap();
+
+    let arrow_struct = match ret {
+        ScalarValue::Struct(s) => s,
+        _ => panic!("Expected a struct"),
+    };
+
+    assert_eq!(
+        ScalarValue::try_from_array(arrow_struct.column(0), 0).unwrap(),
+        ScalarValue::Boolean(Some(true))
+    );
+    assert_eq!(
+        ScalarValue::try_from_array(arrow_struct.column(1), 0).unwrap(),
+        ScalarValue::Decimal256(
+            Some(i256::from_i128(i128::MAX)),
+            DECIMAL256_MAX_PRECISION,
+            0
+        )
+    );
+    assert_eq!(
+        ScalarValue::try_from_array(arrow_struct.column(2), 0).unwrap(),
+        ScalarValue::Decimal256(Some(i256::MAX), DECIMAL256_MAX_PRECISION, 0)
+    );
+    assert_eq!(
+        ScalarValue::try_from_array(arrow_struct.column(3), 0).unwrap(),
+        ScalarValue::Float64(Some(32.5))
+    );
+    assert_eq!(
+        ScalarValue::try_from_array(arrow_struct.column(4), 0).unwrap(),
+        ScalarValue::Float64(Some(64.5))
+    );
+    assert_eq!(
+        ScalarValue::try_from_array(arrow_struct.column(5), 0).unwrap(),
+        ScalarValue::Int32(Some(-32768))
+    );
+    assert_eq!(
+        ScalarValue::try_from_array(arrow_struct.column(6), 0).unwrap(),
+        ScalarValue::Int32(Some(-2147483648))
+    );
+    assert_eq!(
+        ScalarValue::try_from_array(arrow_struct.column(7), 0).unwrap(),
+        ScalarValue::Decimal256(
+            Some(i256::from(-9223372036854775808i64)),
+            DECIMAL256_MAX_PRECISION,
+            0
+        )
+    );
+    assert_eq!(
+        ScalarValue::try_from_array(arrow_struct.column(8), 0).unwrap(),
+        ScalarValue::Int32(Some(-128))
+    );
+    assert_eq!(
+        ScalarValue::try_from_array(arrow_struct.column(9), 0).unwrap(),
+        ScalarValue::Null
+    );
+    assert_eq!(
+        ScalarValue::try_from_array(arrow_struct.column(10), 0).unwrap(),
+        ScalarValue::Utf8(Some("data 🇧🇷🇵🇹".to_string()))
+    );
+    assert_eq!(
+        ScalarValue::try_from_array(arrow_struct.column(11), 0).unwrap(),
+        ScalarValue::Int32(Some(65535))
+    );
+    assert_eq!(
+        ScalarValue::try_from_array(arrow_struct.column(12), 0).unwrap(),
+        ScalarValue::UInt64(Some(4294967295))
+    );
+    assert_eq!(
+        ScalarValue::try_from_array(arrow_struct.column(13), 0).unwrap(),
+        ScalarValue::Decimal256(
+            Some(i256::from_i128(18446744073709551615)),
+            DECIMAL256_MAX_PRECISION,
+            0
+        )
+    );
+    assert_eq!(
+        ScalarValue::try_from_array(arrow_struct.column(14), 0).unwrap(),
+        ScalarValue::UInt32(Some(255))
+    );
 }

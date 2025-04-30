@@ -54,10 +54,42 @@ function param_types(
 	);
 }
 
+// Returns an object symmetric to the parameters to `param_types`, on field for each parameter, and
+// values the same as the expected values in `param_types`
+function return_types() {
+	return {
+		nul: null,
+		bool: true,
+		f32: 32.5,
+		f64: 64.5,
+		i8: -128,
+		i16: -32768,
+		u8: 255,
+		u16: 65535,
+		u32: 4294967295,
+		u64: BigInt("18446744073709551615"),
+		i32: -2147483648,
+		i64: BigInt("-9223372036854775808"),
+		str: "data 🇧🇷🇵🇹",
+
+		// TypedArray not yet supported
+		// bytes: uint8ArrayFromHex("c944e90c64b2c07662a292be6244bdf05cda44a7"),
+
+		decimal128: BigInt("170141183460469231731687303715884105727"),
+		decimal256: BigInt("57896044618658097711785492504343953926634992332820282019728792003956564819967"),
+	};
+}
+
 function uint8ArrayToHex(uint8Array) {
 	return Array.from(uint8Array)
 		.map((byte) => byte.toString(16).padStart(2, "0"))
 		.join("");
+}
+
+function uint8ArrayFromHex(hex) {
+	return new Uint8Array(
+		hex.match(/.{1,2}/g).map((byte) => parseInt(byte, 16))
+	);
 }
 
 function format(value) {

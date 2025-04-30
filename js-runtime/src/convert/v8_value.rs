@@ -13,7 +13,11 @@ pub enum V8Value<'s> {
     String(String),
     BigInt(Local<'s, BigInt>),
     Object(Local<'s, Object>),
+
+    #[allow(dead_code)]
     Array(Local<'s, Array>),
+
+    #[allow(dead_code)]
     TypedArray(Local<'s, TypedArray>),
 }
 
