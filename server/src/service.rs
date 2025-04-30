@@ -274,7 +274,7 @@ impl Service {
 
         // async listen
         let sql = sql.to_string();
-        let service = self.clone();
+        // let service = self.clone();
         let ds_store = self.dataset_store.clone();
         let env = self.env.clone();
 
