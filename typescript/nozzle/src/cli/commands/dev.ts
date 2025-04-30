@@ -57,7 +57,7 @@ export const dev = Command.make("dev", {
 
       const load = configLoader.load(args.config)
       const updates = fs.watch(args.config).pipe(
-        Stream.filter(Predicate.isTagged("Updated")),
+        Stream.filter(Predicate.isTagged("Update")),
         Stream.flatMap(() => load),
       )
 
