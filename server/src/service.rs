@@ -32,6 +32,7 @@ use bytes::{BufMut, Bytes, BytesMut};
 use dataset_store::sql_datasets::is_incremental;
 use prost::Message as _;
 use tonic::{Request, Response, Status};
+use common::multirange::MultiRange;
 
 type TonicStream<T> = Pin<Box<dyn Stream<Item = Result<T, Status>> + Send + 'static>>;
 
@@ -175,42 +176,61 @@ impl Service {
     ) -> Result<SendableRecordBatchStream, Error> {
         use futures::channel::mpsc;
 
-        let initial_sql = format!("{} where block_num < 3", sql);
-        let query = parse_sql(&initial_sql).map_err(|err| Error::from(err))?;
+        let query = parse_sql(&sql).map_err(|err| Error::from(err))?;
         let ctx = self
             .dataset_store
             .clone()
             .ctx_for_sql(&query, self.env.clone())
             .await
             .map_err(|err| Error::DatasetStoreError(err))?;
-        let plan = ctx.plan_sql(query).await.map_err(|err| Error::from(err))?;
+        let plan = ctx.plan_sql(query.clone()).await.map_err(|err| Error::from(err))?;
+        let mut synced_ranges = dataset_store::sql_datasets::synced_blocks_for_query(
+            &query,
+            self.dataset_store.clone(),
+            self.env.clone(),
+        )
+        .await.map_err(|_| Error::ExecutionError(DataFusionError::Execution(
+            "???".to_string(), // TODO: need meaningful error here
+        )))?;
 
         if let Ok(false) = is_incremental(&plan) {
-            return Err(Error::NotIncrementalQuery(initial_sql));
+            return Err(Error::NotIncrementalQuery(sql.to_string()));
         }
-
-        let mut stream = ctx
-            .execute_plan(plan)
-            .await
-            .map_err(|err| Error::from(err))?;
-        let schema = stream.schema().clone();
 
         let (tx, rx) = mpsc::unbounded();
 
-        while let Some(batch) = stream.next().await {
-            match batch {
-                Ok(batch) => {
-                    if tx.unbounded_send(Ok(batch)).is_err() {
+        let schema = plan.schema().clone().as_ref().clone().into();
+        synced_ranges = MultiRange::from_values(&[0, 1]).unwrap(); // TODO: remove after tests
+
+        // initial ranges
+        for (start, end) in &synced_ranges.ranges {
+            let mut stream = dataset_store::sql_datasets::execute_query_for_range(
+                query.clone(),
+                self.dataset_store.clone(),
+                self.env.clone(),
+                *start,
+                *end,
+            ).await
+            .map_err(|_| Error::ExecutionError(DataFusionError::Execution(
+                "???".to_string(), // TODO: need meaningful error here
+            )))?;
+            // let schema = stream.schema().clone();
+
+            while let Some(batch) = stream.next().await {
+                match batch {
+                    Ok(batch) => {
+                        if tx.unbounded_send(Ok(batch)).is_err() {
+                            return Err(Error::ExecutionError(DataFusionError::Execution(
+                                "???".to_string(), // TODO: need meaningful error here
+                            )));
+                        }
+                    }
+                    Err(e) => {
+                        let _ = tx.unbounded_send(Err(e));
                         return Err(Error::ExecutionError(DataFusionError::Execution(
                             "???".to_string(), // TODO: need meaningful error here
                         )));
                     }
-                }
-                Err(e) => {
-                    let _ = tx.unbounded_send(Err(e));
-                    return Err(Error::ExecutionError(DataFusionError::Execution(
-                        "???".to_string(), // TODO: need meaningful error here
-                    )));
                 }
             }
         }
@@ -220,16 +240,23 @@ impl Service {
         tokio::spawn(async move {
             match &ds_store.metadata_db {
                 Some(mdb) => {
-                    let mut i = 4;
+                    let mut i: u64 = 0;
                     loop {
                         // TODO: check sigterm, sigkill, etc.
+                        // TODO: doesn't stop if client stops (because waiting for the whole server to stop)
                         tokio::select! {
                             _ = tokio::signal::ctrl_c() => return,
                             _ = tokio::time::sleep(std::time::Duration::from_secs(1)) => {},
                         }
                         //tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                        mdb.notify("qwe", &i.to_string()).await.unwrap();
-                        i += 2;
+                        let msg = serde_json::to_string(&(i, i + 2)).unwrap();
+                        mdb.notify("qwe", &msg).await.unwrap();
+                        i += 3;
+
+                        // stop
+                        if i > 10 {
+                            return;
+                        }
                     }
                 }
                 _ => return,
@@ -240,6 +267,7 @@ impl Service {
         let sql = sql.to_string();
         let service = self.clone();
         let ds_store = self.dataset_store.clone();
+        let env = self.env.clone();
 
         tokio::spawn(async move {
             match &ds_store.metadata_db {
@@ -251,29 +279,36 @@ impl Service {
                             notification = notifications.next() => {
                                 match notification {
                                     Some(Ok(notification)) => {
-                                        let start = notification.payload().parse::<u64>().unwrap();
-                                        let query = format!("{} where block_num >= {} and block_num < {}", sql, start, start + 2);
-                                        match service.execute_query(&query).await {
-                                            Ok(mut stream) => {
-                                                while let Some(batch) = stream.next().await {
-                                                    match batch {
-                                                        Ok(batch) => {
-                                                            if tx.unbounded_send(Ok(batch)).is_err() {
-                                                                return;
-                                                            }
-                                                        }
-                                                        Err(e) => {
-                                                            let _ = tx.unbounded_send(Err(e));
+                                        let (start, end) = serde_json::from_str::<(u64, u64)>(&notification.payload()).unwrap();
+                                        let compliment = synced_ranges.complement(start, end);
+                                        println!("COMPLIMENT: {:?}", compliment);
+
+                                        let query = parse_sql(&sql).map_err(|err| Error::from(err)).unwrap();
+                                        for (start, end) in &compliment.ranges {
+                                            let mut stream = dataset_store::sql_datasets::execute_query_for_range(
+                                                query.clone(),
+                                                ds_store.clone(),
+                                                env.clone(),
+                                                *start,
+                                                *end,
+                                            ).await.unwrap();
+
+                                            while let Some(batch) = stream.next().await {
+                                                match batch {
+                                                    Ok(batch) => {
+                                                        if tx.unbounded_send(Ok(batch)).is_err() {
                                                             return;
                                                         }
                                                     }
+                                                    Err(e) => {
+                                                        let _ = tx.unbounded_send(Err(e));
+                                                        return;
+                                                    }
                                                 }
                                             }
-                                            Err(e) => {
-                                                let _ = tx.unbounded_send(Err(DataFusionError::Execution(e.to_string())));
-                                                return;
-                                            }
                                         }
+
+                                        synced_ranges.append(compliment).unwrap();
                                     },
                                     _ => return,
                                 }

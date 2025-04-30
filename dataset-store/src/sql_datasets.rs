@@ -154,6 +154,49 @@ pub async fn execute_query_for_range(
     Ok(ctx.execute_plan(plan).await?)
 }
 
+/// All blocks that have been synced for all tables in the query.
+#[instrument(skip_all, err)]
+pub async fn synced_blocks_for_query(
+    query: &parser::Statement,
+    dataset_store: Arc<DatasetStore>,
+    env: Arc<RuntimeEnv>,
+) -> Result<MultiRange, BoxError> {
+    let (tables, _) =
+        resolve_table_references(&query, true).map_err(|e| CoreError::SqlParseError(e.into()))?;
+
+    if tables.is_empty() {
+        return Ok(MultiRange::empty());
+    }
+
+    let ctx = dataset_store.clone().ctx_for_sql(&query, env).await?;
+    let metadata_db = &dataset_store.metadata_db;
+
+    let synced_blocks_for_table = move |ctx, table: TableReference| async move {
+        let tbl = TableId {
+            // Unwrap: table references are of the partial form: [dataset].[table_name]
+            dataset: table.schema().unwrap(),
+            dataset_version: None,
+            table: table.table(),
+        };
+        let ranges = scanned_ranges::ranges_for_table(ctx, metadata_db.as_ref(), tbl).await?;
+        let ranges = MultiRange::from_ranges(ranges)?;
+
+        // Take the end block of the earliest contiguous range as the "synced block"
+        Ok::<_, BoxError>(ranges)
+    };
+
+    let mut tables = tables.into_iter();
+
+    // Unwrap: `tables` is not empty.
+    let mut ranges = synced_blocks_for_table(&ctx, tables.next().unwrap()).await?;
+    for table in tables {
+        let next_ranges = synced_blocks_for_table(&ctx, table).await?;
+        ranges = ranges.intersection(&next_ranges);
+    }
+
+    Ok(ranges)
+}
+
 /// The most recent block that has been synced for all tables in the query.
 #[instrument(skip_all, err)]
 pub async fn max_end_block(
