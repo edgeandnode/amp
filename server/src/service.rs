@@ -174,6 +174,8 @@ impl Service {
         &self,
         sql: &str,
     ) -> Result<SendableRecordBatchStream, Error> {
+        // TODO: querying a sql datasets stops, when dump command happens
+
         use futures::channel::mpsc;
 
         let query = parse_sql(&sql).map_err(|err| Error::from(err))?;
@@ -203,7 +205,9 @@ impl Service {
             &query,
             self.dataset_store.clone(),
             self.env.clone(),
-        ).await.unwrap();
+        )
+        .await
+        .unwrap();
 
         if let Ok(false) = is_incremental(&plan) {
             return Err(Error::NotIncrementalQuery(sql.to_string()));
@@ -299,13 +303,13 @@ impl Service {
                                             ds_store.clone(),
                                             env.clone(),
                                         ).await.unwrap();
-                                        
+
                                         let (start, end) = match (end_block, end) {
                                             (Some(end_block), Some(end)) => (end_block + 1, end),
                                             (None, Some(end)) => (0, end),
                                             (_, None) => continue,
                                         };
-                                        
+
                                         //let (start, end) = serde_json::from_str::<(u64, u64)>(&notification.payload()).unwrap();
                                         //let compliment = synced_ranges.complement(start, end);
                                         //println!("COMPLIMENT: {:?}", compliment);
