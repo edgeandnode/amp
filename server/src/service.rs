@@ -29,10 +29,10 @@ use arrow_flight::{
     HandshakeResponse, PutResult, Ticket,
 };
 use bytes::{BufMut, Bytes, BytesMut};
+use common::multirange::MultiRange;
 use dataset_store::sql_datasets::is_incremental;
 use prost::Message as _;
 use tonic::{Request, Response, Status};
-use common::multirange::MultiRange;
 
 type TonicStream<T> = Pin<Box<dyn Stream<Item = Result<T, Status>> + Send + 'static>>;
 
@@ -183,15 +183,21 @@ impl Service {
             .ctx_for_sql(&query, self.env.clone())
             .await
             .map_err(|err| Error::DatasetStoreError(err))?;
-        let plan = ctx.plan_sql(query.clone()).await.map_err(|err| Error::from(err))?;
+        let plan = ctx
+            .plan_sql(query.clone())
+            .await
+            .map_err(|err| Error::from(err))?;
         let mut synced_ranges = dataset_store::sql_datasets::synced_blocks_for_query(
             &query,
             self.dataset_store.clone(),
             self.env.clone(),
         )
-        .await.map_err(|_| Error::ExecutionError(DataFusionError::Execution(
-            "???".to_string(), // TODO: need meaningful error here
-        )))?;
+        .await
+        .map_err(|_| {
+            Error::ExecutionError(DataFusionError::Execution(
+                "???".to_string(), // TODO: need meaningful error here
+            ))
+        })?;
 
         if let Ok(false) = is_incremental(&plan) {
             return Err(Error::NotIncrementalQuery(sql.to_string()));
@@ -210,10 +216,13 @@ impl Service {
                 self.env.clone(),
                 *start,
                 *end,
-            ).await
-            .map_err(|_| Error::ExecutionError(DataFusionError::Execution(
-                "???".to_string(), // TODO: need meaningful error here
-            )))?;
+            )
+            .await
+            .map_err(|_| {
+                Error::ExecutionError(DataFusionError::Execution(
+                    "???".to_string(), // TODO: need meaningful error here
+                ))
+            })?;
             // let schema = stream.schema().clone();
 
             while let Some(batch) = stream.next().await {
