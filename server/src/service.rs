@@ -187,17 +187,18 @@ impl Service {
             .plan_sql(query.clone())
             .await
             .map_err(|err| Error::from(err))?;
-        let mut synced_ranges = dataset_store::sql_datasets::synced_blocks_for_query(
-            &query,
-            self.dataset_store.clone(),
-            self.env.clone(),
-        )
-        .await
-        .map_err(|_| {
-            Error::ExecutionError(DataFusionError::Execution(
-                "???".to_string(), // TODO: need meaningful error here
-            ))
-        })?;
+        // let mut synced_ranges = dataset_store::sql_datasets::synced_blocks_for_query(
+        //     &query,
+        //     self.dataset_store.clone(),
+        //     self.env.clone(),
+        // )
+        // .await
+        // .map_err(|_| {
+        //     Error::ExecutionError(DataFusionError::Execution(
+        //         "???".to_string(), // TODO: need meaningful error here
+        //     ))
+        // })?;
+        let mut synced_ranges = MultiRange::from_values(&[0, 1]).unwrap(); // TODO: remove after tests
 
         if let Ok(false) = is_incremental(&plan) {
             return Err(Error::NotIncrementalQuery(sql.to_string()));
@@ -206,7 +207,6 @@ impl Service {
         let (tx, rx) = mpsc::unbounded();
 
         let schema = plan.schema().clone().as_ref().clone().into();
-        synced_ranges = MultiRange::from_values(&[0, 1]).unwrap(); // TODO: remove after tests
 
         // initial ranges
         for (start, end) in &synced_ranges.ranges {
