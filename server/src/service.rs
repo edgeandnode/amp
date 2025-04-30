@@ -29,7 +29,6 @@ use arrow_flight::{
     HandshakeResponse, PutResult, Ticket,
 };
 use bytes::{BufMut, Bytes, BytesMut};
-use common::multirange::MultiRange;
 use dataset_store::sql_datasets::is_incremental;
 use prost::Message as _;
 use tonic::{Request, Response, Status};
@@ -297,7 +296,7 @@ impl Service {
                             _ = tokio::signal::ctrl_c() => return,
                             notification = notifications.next() => {
                                 match notification {
-                                    Some(Ok(notification)) => {
+                                    Some(Ok(_)) => {
                                         let end = dataset_store::sql_datasets::max_end_block(
                                             &query,
                                             ds_store.clone(),
