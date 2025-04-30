@@ -127,6 +127,9 @@ pub async fn dump_dataset(
     }
 
     info!("dump of dataset {} completed successfully", dataset.name());
+    if let Some(mdb) = dataset_store.metadata_db.as_ref() {
+        mdb.notify("qwe", "").await?;
+    }
 
     Ok(())
 }
