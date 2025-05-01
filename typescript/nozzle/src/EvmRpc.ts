@@ -1,4 +1,4 @@
-import { Context, Data, Effect, Layer, Predicate, RcRef, Schedule, Stream } from "effect"
+import { Context, Data, Effect, Layer, PubSub, RcRef, Schedule, Stream } from "effect"
 import * as Viem from "viem"
 import * as Chains from "viem/chains"
 
@@ -25,33 +25,35 @@ const make = (url: string) =>
         Effect.acquireRelease(
           Effect.sync(() =>
             rpc.watchBlockNumber({
-              // TODO: this callback is only called when block numbers are monotonically increasing
               onBlockNumber: (block) => emit.single(block),
               onError: (error) => emit.fail(new EvmRpcError({ cause: error })),
+              emitMissed: false,
+              emitOnBegin: true,
             })
           ),
           (unwatch) => Effect.sync(unwatch),
         )
-      ).pipe(Effect.succeed),
+      ).pipe(
+        Stream.changes,
+        Stream.retry(
+          Schedule.exponential("1 second").pipe(
+            Schedule.jittered,
+            Schedule.union(Schedule.spaced("10 seconds")),
+            Schedule.upTo("1 minute"),
+            Schedule.tapInput(() => Effect.log("Retrying...")),
+          ),
+        ),
+        Stream.toPubSub({ capacity: 1, strategy: "sliding" }),
+      ),
       idleTimeToLive: "10 seconds",
     })
 
     const watchChainHead = RcRef.get(blocks).pipe(
-      Effect.map((stream) =>
-        stream.pipe(
-          Stream.changes,
-          Stream.buffer({ capacity: 1, strategy: "sliding" }),
-        )
-      ),
-      Effect.retry({
-        while: Predicate.isTagged("EvmRpcError"),
-        schedule: Schedule.exponential("1 second").pipe(
-          Schedule.jittered,
-          Schedule.union(Schedule.spaced("10 seconds")),
-        ),
-      }),
+      Effect.flatMap(PubSub.subscribe),
+      Effect.map(Stream.fromQueue),
+      Effect.map(Stream.flattenTake),
       Stream.unwrapScoped,
     )
 
-    return { url, watchChainHead }
+    return { url, blocks: watchChainHead }
   })

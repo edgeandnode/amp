@@ -9,9 +9,10 @@ const event = (event: string) => {
 }
 
 const transfer = event("Transfer(address indexed from, address indexed to, uint256 value)")
+const count = event("Count(uint256 count)")
 
 export default defineDataset(() => ({
-  name: "transfers_eth_mainnet",
+  name: "example",
   version: "0.1.0",
   dependencies: {
     mainnet: {
@@ -21,7 +22,12 @@ export default defineDataset(() => ({
     },
   },
   tables: {
-    erc20_transfers: {
+    counts: {
+      sql: `
+        SELECT t.block_num, t.timestamp, t.event['count'] as count
+        FROM (${count}) as t`,
+    },
+    transfers: {
       sql: `
         SELECT t.block_num, t.timestamp, t.event['from'] as from, t.event['to'] as to, t.event['value'] as value
         FROM (${transfer}) as t

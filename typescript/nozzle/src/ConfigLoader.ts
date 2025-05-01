@@ -1,5 +1,5 @@
 import { FileSystem, Path } from "@effect/platform"
-import { Data, Effect, Match, Schema } from "effect"
+import { Data, Effect, Either, Equal, Match, Predicate, Schema, Stream } from "effect"
 import * as Model from "./Model.js"
 
 export class ConfigLoaderError extends Data.TaggedError("ConfigLoaderError")<{
@@ -70,6 +70,24 @@ export class ConfigLoader extends Effect.Service<ConfigLoader>()("Nozzle/ConfigL
       return yield* Effect.findFirst(candidates, (_) => fs.exists(_).pipe(Effect.orElseSucceed(() => false)))
     })
 
-    return { load, find }
+    const watch = (file: string) => {
+      const resolved = path.resolve(file)
+      const updates = fs.watch(resolved).pipe(
+        Stream.orDie,
+        Stream.filter(Predicate.isTagged("Update") as (value: unknown) => value is FileSystem.WatchEvent.Update),
+        Stream.mapEffect(() => load(resolved).pipe(Effect.either)),
+      )
+
+      return Stream.fromEffect(load(resolved).pipe(Effect.either)).pipe(
+        Stream.concat(updates),
+        Stream.changesWith(Either.getEquivalence({
+          right: Schema.equivalence(Model.DatasetDefinition),
+          left: Equal.equals,
+        })),
+        Stream.buffer({ capacity: 1, strategy: "sliding" }),
+      )
+    }
+
+    return { load, find, watch }
   }),
 }) {}

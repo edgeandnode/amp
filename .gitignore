@@ -12,8 +12,12 @@
 /tests/config/providers/firehose_eth_mainnet.toml
 /tests/config/providers/rpc_eth_mainnet.toml
 uv.lock
+cache/
+out/
+broadcast/
 node_modules/
 dist/
 build/
 *.tsbuildinfo
 .idea
+.vscode/
