@@ -1,4 +1,5 @@
 import { Command, HelpDoc, Options, ValidationError } from "@effect/cli"
+import { Path } from "@effect/platform"
 import { Config, Data, Effect, Either, Equal, Fiber, Layer, Option, Predicate, Schema, Stream } from "effect"
 import * as Api from "../../Api.js"
 import * as ConfigLoader from "../../ConfigLoader.js"
@@ -13,10 +14,31 @@ export const dev = Command.make("dev", {
     config: Options.file("config").pipe(
       Options.optional,
       Options.withAlias("c"),
-      Options.withDescription(
-        "The dataset definition config file to build to a manifest",
-      ),
-      Options.mapEffect(Option.match({
+      Options.withDescription("The dataset definition config file to build to a manifest"),
+    ),
+    rpc: Options.text("rpc-url").pipe(
+      Options.withFallbackConfig(Config.string("NOZZLE_RPC_URL").pipe(Config.withDefault("http://localhost:8545"))),
+      Options.withDescription("The url of the chain RPC server"),
+      Options.withSchema(Schema.URL),
+    ),
+    directory: Options.directory("directory", { exists: "no" }).pipe(
+      Options.withDefault(".nozzle"),
+      Options.withAlias("d"),
+      Options.withDescription("The directory to run the dev server in"),
+      Options.mapEffect((dir) => Effect.map(Path.Path, (path) => path.resolve(dir))),
+    ),
+    nozzle: Options.text("nozzle").pipe(
+      Options.withDefault("nozzle"),
+      Options.withAlias("n"),
+      Options.withDescription("The path of the nozzle executable"),
+    ),
+  },
+}).pipe(
+  Command.withDescription("Run a dev server"),
+  Command.withHandler(({ args }) =>
+    Effect.gen(function*() {
+      const config = yield* ConfigLoader.ConfigLoader
+      const file = yield* Option.match(args.config, {
         onSome: (file) => Effect.succeed(file),
         onNone: () =>
           ConfigLoader.ConfigLoader.pipe(
@@ -25,40 +47,16 @@ export const dev = Command.make("dev", {
               onSome: (file) => Effect.succeed(file),
               onNone: () => Effect.fail(ValidationError.invalidArgument(HelpDoc.p("No config file provided"))),
             })),
-          ).pipe(Effect.provide(ConfigLoader.ConfigLoader.Default)),
-      })),
-    ),
-    rpc: Options.text("rpc-url").pipe(
-      Options.withFallbackConfig(
-        Config.string("NOZZLE_RPC_URL").pipe(Config.withDefault("http://localhost:8545")),
-      ),
-      Options.withDescription("The url of the chain RPC server"),
-      Options.withSchema(Schema.URL),
-    ),
-    directory: Options.directory("directory", { exists: "no" }).pipe(
-      Options.withDefault(".nozzle"),
-      Options.withAlias("d"),
-      Options.withDescription("The directory to run the dev server in"),
-    ),
-    nozzle: Options.text("nozzle").pipe(
-      Options.withDefault("nozzle"),
-      Options.withAlias("n"),
-      Options.withDescription(
-        "The path of the nozzle executable",
-      ),
-    ),
-  },
-}).pipe(
-  Command.withDescription("Run a dev server"),
-  Command.withHandler(({ args }) =>
-    Effect.gen(function*() {
+          ),
+      })
+
       const nozzle = yield* Nozzle.Nozzle
       const server = yield* nozzle.start.pipe(Effect.flatMap(Effect.fork))
 
-      const config = yield* ConfigLoader.ConfigLoader
       const deployer = yield* ManifestDeployer.ManifestDeployer
       const builder = yield* ManifestBuilder.ManifestBuilder
-      const manifest = config.watch(args.config).pipe(
+      const manifest = config.watch(file).pipe(
+        Stream.buffer({ capacity: 1, strategy: "sliding" }),
         Stream.mapEffect((either) =>
           Effect.gen(function*() {
             if (Either.isLeft(either)) {
@@ -72,7 +70,6 @@ export const dev = Command.make("dev", {
           right: Schema.equivalence(Model.DatasetManifest),
           left: Equal.equals,
         })),
-        Stream.buffer({ capacity: 1, strategy: "sliding" }),
         Stream.map(Either.map((manifest) => new Manifest({ manifest }))),
         Stream.tap(Either.match({
           onLeft: (error) => Effect.logError(error),
@@ -110,7 +107,7 @@ export const dev = Command.make("dev", {
       executable: args.nozzle,
       directory: args.directory,
     }).pipe(
-      Layer.provideMerge(EvmRpc.EvmRpc.withUrl(args.rpc)),
+      Layer.provideMerge(EvmRpc.EvmRpc.withUrl(`${args.rpc}`)),
     ).pipe(
       Layer.merge(ConfigLoader.ConfigLoader.Default),
       Layer.merge(ManifestBuilder.ManifestBuilder.Default.pipe(

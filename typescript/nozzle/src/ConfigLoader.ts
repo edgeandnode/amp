@@ -73,18 +73,21 @@ export class ConfigLoader extends Effect.Service<ConfigLoader>()("Nozzle/ConfigL
     const watch = (file: string) => {
       const resolved = path.resolve(file)
       const updates = fs.watch(resolved).pipe(
-        Stream.orDie,
-        Stream.filter(Predicate.isTagged("Update") as (value: unknown) => value is FileSystem.WatchEvent.Update),
-        Stream.mapEffect(() => load(resolved).pipe(Effect.either)),
+        Stream.mapError((cause) => new ConfigLoaderError({ cause, message: "Failed to watch config file" })),
+        Stream.filter(Predicate.isTagged("Update")),
       )
 
-      return Stream.fromEffect(load(resolved).pipe(Effect.either)).pipe(
-        Stream.concat(updates),
-        Stream.changesWith(Either.getEquivalence({
-          right: Schema.equivalence(Model.DatasetDefinition),
-          left: Equal.equals,
-        })),
+      const recursive: Stream.Stream<Model.DatasetDefinition, ConfigLoaderError, never> = updates.pipe(
         Stream.buffer({ capacity: 1, strategy: "sliding" }),
+        Stream.mapEffect(() => load(resolved)),
+        Stream.catchAll(() => recursive),
+      )
+
+      return Stream.concat(Stream.void, updates).pipe(
+        Stream.buffer({ capacity: 1, strategy: "sliding" }),
+        Stream.mapEffect(() => load(resolved)),
+        Stream.catchAll(() => recursive),
+        Stream.changesWith(Schema.equivalence(Model.DatasetDefinition)),
       )
     }
 

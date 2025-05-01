@@ -67,5 +67,7 @@ export const query = Command.make("query", {
       }))
     })
   ),
-  Command.provide(({ args }) => ArrowFlight.ArrowFlight.withTransport(createGrpcTransport({ baseUrl: args.flight }))),
+  Command.provide(({ args }) =>
+    ArrowFlight.ArrowFlight.withTransport(createGrpcTransport({ baseUrl: `${args.flight}` }))
+  ),
 )

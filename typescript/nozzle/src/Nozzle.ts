@@ -1,5 +1,5 @@
-import { Command as Cmd, FileSystem, Path, Socket } from "@effect/platform"
-import { Context, Data, Effect, FiberRef, Layer, Logger, Schedule, String } from "effect"
+import { Command as Cmd, FileSystem, Socket } from "@effect/platform"
+import { Context, Data, Effect, FiberRef, Layer, Schedule, String } from "effect"
 import * as Net from "node:net"
 import * as EvmRpc from "./EvmRpc.js"
 
