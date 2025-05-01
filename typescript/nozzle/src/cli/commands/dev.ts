@@ -10,7 +10,7 @@ import * as Nozzle from "../../Nozzle.js"
 
 export const dev = Command.make("dev", {
   args: {
-    config: Options.text("config").pipe(
+    config: Options.file("config").pipe(
       Options.optional,
       Options.withAlias("c"),
       Options.withDescription(
@@ -33,6 +33,12 @@ export const dev = Command.make("dev", {
         Config.string("NOZZLE_RPC_URL").pipe(Config.withDefault("http://localhost:8545")),
       ),
       Options.withDescription("The url of the chain RPC server"),
+      Options.withSchema(Schema.URL),
+    ),
+    directory: Options.directory("directory", { exists: "no" }).pipe(
+      Options.withDefault(".nozzle"),
+      Options.withAlias("d"),
+      Options.withDescription("The directory to run the dev server in"),
     ),
     nozzle: Options.text("nozzle").pipe(
       Options.withDefault("nozzle"),
@@ -100,7 +106,10 @@ export const dev = Command.make("dev", {
     }).pipe(Effect.scoped)
   ),
   Command.provide(({ args }) =>
-    Nozzle.Nozzle.withExecutable(args.nozzle).pipe(
+    Nozzle.Nozzle.layer({
+      executable: args.nozzle,
+      directory: ".nozzle",
+    }).pipe(
       Layer.provideMerge(EvmRpc.EvmRpc.withUrl(args.rpc)),
     ).pipe(
       Layer.merge(ConfigLoader.ConfigLoader.Default),

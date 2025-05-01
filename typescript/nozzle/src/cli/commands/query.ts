@@ -22,6 +22,7 @@ export const query = Command.make("query", {
         Config.string("NOZZLE_ARROW_FLIGHT_URL").pipe(Config.withDefault("http://localhost:1602")),
       ),
       Options.withDescription("The Arrow Flight URL to use for the query"),
+      Options.withSchema(Schema.URL),
     ),
   },
 }).pipe(
