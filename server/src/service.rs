@@ -200,7 +200,7 @@ impl Service {
         //     ))
         // })?;
         // let mut synced_ranges = MultiRange::from_values(&[0, 1]).unwrap(); // TODO: remove after tests
-        let mut end_block = dataset_store::sql_datasets::max_end_block(
+        let mut current_end_block = dataset_store::sql_datasets::max_end_block(
             &query,
             self.dataset_store.clone(),
             self.env.clone(),
@@ -218,7 +218,7 @@ impl Service {
 
         // initial ranges
         //for (start, end) in &synced_ranges.ranges {
-        if let Some(end) = end_block {
+        if let Some(end) = current_end_block {
             let mut stream = dataset_store::sql_datasets::execute_query_for_range(
                 query.clone(),
                 self.dataset_store.clone(),
@@ -303,10 +303,10 @@ impl Service {
                                             env.clone(),
                                         ).await.unwrap();
 
-                                        let (start, end) = match (end_block, end) {
-                                            (Some(end_block), Some(end)) => (end_block + 1, end),
+                                        let (start, end) = match (current_end_block, end) {
+                                            (Some(start), Some(end)) if end > start => (start + 1, end),
                                             (None, Some(end)) => (0, end),
-                                            (_, None) => continue,
+                                            (_, _) => continue,
                                         };
 
                                         //let (start, end) = serde_json::from_str::<(u64, u64)>(&notification.payload()).unwrap();
@@ -338,7 +338,7 @@ impl Service {
                                             }
                                         //}
 
-                                        end_block = Some(end);
+                                        current_end_block = Some(end);
                                     },
                                     _ => return,
                                 }
