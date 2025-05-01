@@ -405,6 +405,7 @@ mod tests {
             "SELECT * FROM (select block_num from eth_firehose.blocks) as t",
             "SELECT * FROM eth_firehose.blocks WHERE block_num < 10",
             "SELECT * FROM (SELECT block_num FROM eth_firehose.blocks WHERE block_num < 10) t WHERE block_num > 10",
+            "SELECT block_num FROM eth_firehose.blocks WHERE block_num < 10 UNION ALL SELECT block_num FROM eth_firehose.blocks WHERE block_num > 10",
         ];
         assert_incremental_for_all_is(queries, true).await;
     }
