@@ -3,7 +3,7 @@ import { defineDataset } from "nozzl"
 const event = (event: string) => {
   return `
     SELECT block_num, timestamp, address, evm_decode(topic1, topic2, topic3, data, '${event}') as event
-    FROM anvil_rpc.logs
+    FROM anvil.logs
     WHERE topic0 = evm_topic('${event}')
   `
 }
