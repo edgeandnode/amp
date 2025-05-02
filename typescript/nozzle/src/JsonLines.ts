@@ -1,6 +1,5 @@
-import type { HttpClientError } from "@effect/platform"
 import { FetchHttpClient, HttpBody, HttpClient, HttpClientRequest, Ndjson, Template } from "@effect/platform"
-import { Config, Data, Effect, Layer, Match, Predicate, Schema, Stream } from "effect"
+import { Config, Data, Effect, Layer, Predicate, Schema, Stream } from "effect"
 
 export class JsonLinesError extends Data.TaggedError("JsonLinesError")<{
   readonly cause: unknown
@@ -15,20 +14,17 @@ export class JsonLinesErrorResponse extends Schema.Class<JsonLinesErrorResponse>
 
 const make = (url: string) =>
   Effect.gen(function*() {
-    const handleError = Match.type<HttpClientError.ResponseError>().pipe(
-      Match.when((cause) => cause.response.status !== 400, (cause) => Effect.fail(cause)),
-      Match.orElse((cause) =>
-        cause.response.text.pipe(
-          Effect.map(JSON.parse),
-          Effect.flatMap(Schema.decodeUnknown(JsonLinesErrorResponse)),
-          Effect.flatMap(({ error }) => new JsonLinesError({ cause, message: error })),
-        )
-      ),
-    )
-
     const client = yield* HttpClient.HttpClient.pipe(
       Effect.map(HttpClient.filterStatusOk),
-      Effect.map(HttpClient.transformResponse(Effect.catchTag("ResponseError", handleError))),
+      Effect.map(HttpClient.transformResponse(Effect.catchTag("ResponseError", (cause) =>
+        cause.response.text.pipe(
+          Effect.tryMap({
+            try: (_) => JSON.parse(_),
+            catch: () => new JsonLinesError({ cause, message: "Malformed response" }),
+          }),
+          Effect.flatMap(Schema.decodeUnknown(JsonLinesErrorResponse)),
+          Effect.flatMap(({ error }) => new JsonLinesError({ cause, message: error })),
+        )))),
       Effect.map(
         HttpClient.mapRequest(HttpClientRequest.setHeader("Accept-Encoding", "deflate")),
       ),
