@@ -38,6 +38,7 @@
             protobuf
             uv
             cmake
+            nodejs-slim_23
           ]) ++ pkgs.lib.optionals pkgs.stdenv.isDarwin (with pkgs; [
             libiconv
             # Required to compile `dump`.
