@@ -49,9 +49,7 @@ export const dev = Command.make("dev", {
       })
 
       const nozzle = yield* Nozzle.Nozzle
-      const server = yield* nozzle.start.pipe(Effect.flatMap(Effect.fork))
 
-      const deployer = yield* ManifestDeployer.ManifestDeployer
       const manifest = config.watch(file, {
         onError: (cause) => Effect.logError(cause),
       }).pipe(Stream.map((manifest) => new Manifest({ manifest })))
@@ -59,23 +57,20 @@ export const dev = Command.make("dev", {
       const rpc = yield* EvmRpc.EvmRpc
       const blocks = rpc.blocks.pipe(Stream.map((block) => new Block({ block })))
 
-      const handle = Effect.fnUntraced(function*(dataset: string, value: Manifest | Block) {
-        if (Manifest.is(value)) {
-          yield* deployer.deploy(value.manifest)
-        } else {
-          yield* nozzle.dump(dataset, value.block)
-        }
-
-        return Manifest.is(value) ? value.manifest.name : dataset
-      })
-
+      // TODO: Move this all to the nozzle actor.
       const dump = yield* Stream.merge(blocks, manifest).pipe(
-        Stream.runFoldEffect("anvil_rpc", handle),
+        Stream.runForEach(Effect.fnUntraced(function*(message) {
+          if (Manifest.is(message)) {
+            yield* nozzle.deploy(message.manifest)
+          } else {
+            yield* nozzle.dump(message.block)
+          }
+        })),
         Effect.asVoid,
         Effect.fork,
       )
 
-      yield* Fiber.joinAll([dump, server])
+      yield* Effect.race(nozzle.join, Fiber.join(dump))
     }).pipe(Effect.scoped)
   ),
   Command.provide(({ args }) =>
@@ -84,12 +79,12 @@ export const dev = Command.make("dev", {
       directory: args.directory,
     }).pipe(
       Layer.provideMerge(EvmRpc.EvmRpc.withUrl(`${args.rpc}`)),
+      Layer.provide(ManifestDeployer.ManifestDeployer.Default.pipe(
+        Layer.provide(Api.Admin.withUrl("http://localhost:1610")),
+      )),
     ).pipe(
       Layer.merge(ConfigLoader.ConfigLoader.Default.pipe(
         Layer.provide(Api.Registry.withUrl("http://localhost:1611")),
-      )),
-      Layer.merge(ManifestDeployer.ManifestDeployer.Default.pipe(
-        Layer.provide(Api.Admin.withUrl("http://localhost:1610")),
       )),
     )
   ),
