@@ -186,18 +186,7 @@ impl Service {
             .plan_sql(query.clone())
             .await
             .map_err(|err| Error::from(err))?;
-        // let mut synced_ranges = dataset_store::sql_datasets::synced_blocks_for_query(
-        //     &query,
-        //     self.dataset_store.clone(),
-        //     self.env.clone(),
-        // )
-        // .await
-        // .map_err(|_| {
-        //     Error::ExecutionError(DataFusionError::Execution(
-        //         "???".to_string(), // TODO: need meaningful error here
-        //     ))
-        // })?;
-        // let mut synced_ranges = MultiRange::from_values(&[0, 1]).unwrap(); // TODO: remove after tests
+
         let mut current_end_block = dataset_store::sql_datasets::max_end_block(
             &query,
             self.dataset_store.clone(),
@@ -214,8 +203,7 @@ impl Service {
 
         let schema = plan.schema().clone().as_ref().clone().into();
 
-        // initial ranges
-        //for (start, end) in &synced_ranges.ranges {
+        // initial range
         if let Some(end) = current_end_block {
             let mut stream = dataset_store::sql_datasets::execute_query_for_range(
                 query.clone(),
@@ -251,40 +239,11 @@ impl Service {
             }
         }
 
-        // async notify
-        // let ds_store = self.dataset_store.clone();
-        // tokio::spawn(async move {
-        //     match &ds_store.metadata_db {
-        //         Some(mdb) => {
-        //             let mut i: u64 = 0;
-        //             loop {
-        //                 // TODO: check sigterm, sigkill, etc.
-        //                 // TODO: doesn't stop if client stops (because waiting for the whole server to stop)
-        //                 tokio::select! {
-        //                     _ = tokio::signal::ctrl_c() => return,
-        //                     _ = tokio::time::sleep(std::time::Duration::from_secs(1)) => {},
-        //                 }
-        //                 //tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        //                 let msg = serde_json::to_string(&(i, i + 2)).unwrap();
-        //                 mdb.notify("qwe", &msg).await.unwrap();
-        //                 i += 3;
-        //
-        //                 // stop
-        //                 if i > 10 {
-        //                     return;
-        //                 }
-        //             }
-        //         }
-        //         _ => return,
-        //     }
-        // });
-
-        // async listen
         let sql = sql.to_string();
-        // let service = self.clone();
         let ds_store = self.dataset_store.clone();
         let env = self.env.clone();
 
+        // async listen
         tokio::spawn(async move {
             match &ds_store.metadata_db {
                 Some(mdb) => {
