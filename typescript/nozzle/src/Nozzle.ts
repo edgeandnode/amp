@@ -86,12 +86,6 @@ const make = ({
                 return [void 0, ctx.state] as const
               }
 
-              // TODO: Recreating the data directory here should not be necessary.
-              yield* fs.remove(`${directory}/data`, { recursive: true }).pipe(
-                Effect.flatMap(() => fs.makeDirectory(`${directory}/data`)),
-                Effect.mapError((cause) => new NozzleError({ cause, message: "Failed to recreate data directory" })),
-              )
-
               // This effect starts the server in the background.
               const process = yield* cmd("server").pipe(
                 Cmd.stdout("inherit"),
@@ -186,10 +180,11 @@ const make = ({
         Effect.gen(function*() {
           const state = yield* actor.get
           if (state.dataset !== "anvil") {
-            // TODO: This wipes the previous version of the dataset but that should not be necessary.
-            yield* fs.remove(`${directory}/data/${state.dataset}`, { recursive: true }).pipe(
-              Effect.mapError((cause) => new NozzleError({ cause, message: "Failed to wipe data directory" })),
-            )
+            // TODO: Wiping the dataset and data directory here should not be necessary.
+            yield* Effect.all([
+              fs.remove(`${directory}/datasets/${state.dataset}.json`),
+              fs.remove(`${directory}/data/${state.dataset}`, { recursive: true }),
+            ]).pipe(Effect.ignore)
           }
 
           yield* actor.send(new Deploy({ manifest }))
