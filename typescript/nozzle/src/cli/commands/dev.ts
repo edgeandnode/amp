@@ -108,7 +108,7 @@ export const dev = Command.make("dev", {
   Command.provide(({ args }) =>
     Nozzle.Nozzle.layer({
       executable: args.nozzle,
-      directory: ".nozzle",
+      directory: args.directory,
     }).pipe(
       Layer.provideMerge(EvmRpc.EvmRpc.withUrl(args.rpc)),
     ).pipe(
