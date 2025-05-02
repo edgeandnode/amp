@@ -12,4 +12,6 @@ const program = Effect.gen(function*() {
   yield* Stream.runForEach(stream, (value) => Console.log(pretty(value)))
 })
 
-Effect.runPromise(program.pipe(Effect.provide(JsonLines.JsonLines.Default)))
+Effect.runPromise(program.pipe(
+  Effect.provide(JsonLines.layerJsonLines("http://localhost:1603")),
+))
