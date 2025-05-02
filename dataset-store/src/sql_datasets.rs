@@ -154,6 +154,19 @@ pub async fn execute_query_for_range(
     Ok(ctx.execute_plan(plan).await?)
 }
 
+// All datasets that have been queried
+#[instrument(skip_all, err)]
+pub async fn queried_datasets(query: &parser::Statement) -> Result<Vec<String>, BoxError> {
+    let (tables, _) =
+        resolve_table_references(&query, true).map_err(|e| CoreError::SqlParseError(e.into()))?;
+
+    let ds = tables
+        .into_iter()
+        .filter_map(|t| t.schema().map(|s| s.to_string()))
+        .collect::<Vec<_>>();
+    Ok(ds)
+}
+
 /// All blocks that have been synced for all tables in the query.
 #[instrument(skip_all, err)]
 pub async fn synced_blocks_for_query(
@@ -346,7 +359,8 @@ fn order_by_block_num(plan: LogicalPlan) -> LogicalPlan {
 
 #[cfg(test)]
 mod tests {
-    use super::is_incremental;
+    use super::{is_incremental, queried_datasets};
+    use crate::DatasetStore;
     use common::catalog::physical::{Catalog, PhysicalDataset, PhysicalTable};
     use common::config::Config;
     use common::query_context::parse_sql;
@@ -356,7 +370,7 @@ mod tests {
     use std::sync::Arc;
     use url::Url;
 
-    async fn get_plan(sql: &str) -> LogicalPlan {
+    async fn create_test_query_context() -> QueryContext {
         let schema = Arc::new(Schema::new(vec![
             Field::new("block_num", DataType::UInt64, false),
             Field::new("timestamp", DataType::Date32, false),
@@ -381,9 +395,16 @@ mod tests {
             .unwrap()],
         )];
         let catalog = Catalog::new(datasets);
-        let config = Config::in_memory();
+        let config = Arc::new(Config::in_memory());
+        let dataset_store = DatasetStore::new(config.clone(), None);
         let env = Arc::new(config.make_runtime_env().unwrap());
-        let qc = QueryContext::for_catalog(catalog, env).unwrap();
+        let qc = QueryContext::for_catalog(catalog, env.clone()).unwrap();
+
+        qc
+    }
+
+    async fn get_plan(sql: &str) -> LogicalPlan {
+        let qc = create_test_query_context().await;
 
         let stmt = parse_sql(sql).unwrap();
         let plan = qc.plan_sql(stmt).await.unwrap();
@@ -414,5 +435,17 @@ mod tests {
     async fn not_incremental_queries() {
         let queries = vec!["SELECT MAX(block_num) FROM eth_firehose.blocks"];
         assert_incremental_for_all_is(queries, false).await;
+    }
+
+    #[tokio::test]
+    async fn extract_datasets_from_query() {
+        let sql = "SELECT * FROM eth_firehose.blocks AS b INNER JOIN sql_ds.even_blocks AS e ON b.block_num = e.block_num";
+        let stmt = parse_sql(sql).unwrap();
+
+        let datasets = queried_datasets(&stmt).await.unwrap();
+        assert_eq!(
+            datasets,
+            vec!["eth_firehose".to_string(), "sql_ds".to_string()]
+        );
     }
 }

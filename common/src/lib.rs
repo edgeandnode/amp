@@ -1,6 +1,7 @@
 pub mod arrow_helpers;
 pub mod attestation;
 pub mod catalog;
+pub mod cdc_helpers;
 pub mod config;
 pub mod evm;
 pub mod manifest;

@@ -173,8 +173,6 @@ impl Service {
         &self,
         sql: &str,
     ) -> Result<SendableRecordBatchStream, Error> {
-        // TODO: querying a sql datasets stops, when dump command happens
-
         use futures::channel::mpsc;
 
         let query = parse_sql(&sql).map_err(|err| Error::from(err))?;
@@ -290,7 +288,19 @@ impl Service {
         tokio::spawn(async move {
             match &ds_store.metadata_db {
                 Some(mdb) => {
-                    let mut notifications = mdb.listen("qwe").await.unwrap();
+                    let query = parse_sql(&sql).map_err(|err| Error::from(err)).unwrap();
+                    let datasets = dataset_store::sql_datasets::queried_datasets(&query)
+                        .await
+                        .unwrap();
+
+                    let mut notifications = Vec::new();
+                    for dataset_name in datasets {
+                        let channel = common::cdc_helpers::cdc_pg_channel(&dataset_name);
+                        let stream = mdb.listen(&channel).await.unwrap();
+                        notifications.push(stream);
+                    }
+                    let mut notifications = futures::stream::select_all(notifications);
+
                     loop {
                         tokio::select! {
                             _ = tokio::signal::ctrl_c() => return,
@@ -313,7 +323,7 @@ impl Service {
                                         //let compliment = synced_ranges.complement(start, end);
                                         //println!("COMPLIMENT: {:?}", compliment);
 
-                                        let query = parse_sql(&sql).map_err(|err| Error::from(err)).unwrap();
+
                                         // for (start, end) in &compliment.ranges {
                                             let mut stream = dataset_store::sql_datasets::execute_query_for_range(
                                                 query.clone(),

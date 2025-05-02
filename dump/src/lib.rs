@@ -127,8 +127,11 @@ pub async fn dump_dataset(
     }
 
     info!("dump of dataset {} completed successfully", dataset.name());
+
+    // Notify CDC that the dataset has been changed
     if let Some(mdb) = dataset_store.metadata_db.as_ref() {
-        mdb.notify("qwe", "").await?;
+        let cdc_channel = common::cdc_helpers::cdc_pg_channel(dataset.name());
+        mdb.notify(&cdc_channel, "").await?;
     }
 
     Ok(())
