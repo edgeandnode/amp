@@ -76,7 +76,9 @@ function return_types() {
 		// bytes: uint8ArrayFromHex("c944e90c64b2c07662a292be6244bdf05cda44a7"),
 
 		decimal128: BigInt("170141183460469231731687303715884105727"),
-		decimal256: BigInt("57896044618658097711785492504343953926634992332820282019728792003956564819967"),
+		decimal256: BigInt(
+			"57896044618658097711785492504343953926634992332820282019728792003956564819967",
+		),
 	};
 }
 
@@ -88,7 +90,7 @@ function uint8ArrayToHex(uint8Array) {
 
 function uint8ArrayFromHex(hex) {
 	return new Uint8Array(
-		hex.match(/.{1,2}/g).map((byte) => parseInt(byte, 16))
+		hex.match(/.{1,2}/g).map((byte) => Number.parseInt(byte, 16)),
 	);
 }
 

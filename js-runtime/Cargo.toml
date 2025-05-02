@@ -9,6 +9,9 @@ datafusion.workspace = true
 thiserror.workspace = true
 blake3.workspace = true
 num-traits = "0.2.19"
+deadpool = "0.12.2"
+num_cpus = "1.16.0"
+tokio.workspace = true
 
 [dev-dependencies]
 hex = "0.4.3"

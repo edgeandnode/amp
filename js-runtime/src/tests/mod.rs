@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{iter, sync::Arc};
 
 use datafusion::{
     arrow::{
@@ -19,7 +19,7 @@ pub const TEST_JS: &str = include_str!("scripts/test.js");
 fn no_params_no_ret() {
     let mut isolate = Isolate::new();
     let ret: i32 = isolate
-        .invoke("test.js", TEST_JS, "no_params_no_ret", &[])
+        .invoke("test.js", TEST_JS, "no_params_no_ret", iter::empty())
         .unwrap();
 
     assert_eq!(ret, 36);
@@ -29,7 +29,7 @@ fn no_params_no_ret() {
 fn throws() {
     let mut isolate = Isolate::new();
     let err = isolate
-        .invoke::<()>("test.js", TEST_JS, "throws", &[])
+        .invoke::<()>("test.js", TEST_JS, "throws", iter::empty())
         .unwrap_err();
 
     assert_eq!(
@@ -80,7 +80,7 @@ fn param_types() {
     ];
 
     isolate
-        .invoke::<()>("test.js", TEST_JS, "param_types", params.as_slice())
+        .invoke::<()>("test.js", TEST_JS, "param_types", params.into_iter())
         .unwrap();
 }
 
@@ -102,9 +102,9 @@ fn obj_param() {
         ),
     ]);
     let value = ScalarValue::Struct(Arc::new(struct_array));
-
+    let params = iter::once(&value as &dyn ToV8);
     isolate
-        .invoke::<()>("test.js", TEST_JS, "obj_param", &[&value])
+        .invoke::<()>("test.js", TEST_JS, "obj_param", params)
         .unwrap();
 }
 
@@ -118,8 +118,9 @@ fn list_param() {
     builder.values().append_value("3");
     builder.append(true);
     let list = ScalarValue::List(Arc::new(builder.finish()));
+    let params = iter::once(&list as &dyn ToV8);
     isolate
-        .invoke::<()>("test.js", TEST_JS, "list_param", &[&list])
+        .invoke::<()>("test.js", TEST_JS, "list_param", params)
         .unwrap();
 }
 
@@ -127,7 +128,7 @@ fn list_param() {
 fn return_types() {
     let mut isolate = Isolate::new();
     let ret: ScalarValue = isolate
-        .invoke("test.js", TEST_JS, "return_types", &[])
+        .invoke("test.js", TEST_JS, "return_types", iter::empty())
         .unwrap();
 
     let arrow_struct = match ret {
@@ -193,7 +194,7 @@ fn return_types() {
     );
     assert_eq!(
         ScalarValue::try_from_array(arrow_struct.column(12), 0).unwrap(),
-        ScalarValue::UInt64(Some(4294967295))
+        ScalarValue::UInt32(Some(4294967295))
     );
     assert_eq!(
         ScalarValue::try_from_array(arrow_struct.column(13), 0).unwrap(),
@@ -205,6 +206,6 @@ fn return_types() {
     );
     assert_eq!(
         ScalarValue::try_from_array(arrow_struct.column(14), 0).unwrap(),
-        ScalarValue::UInt32(Some(255))
+        ScalarValue::Int32(Some(255))
     );
 }

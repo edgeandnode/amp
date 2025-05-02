@@ -15,7 +15,7 @@ use v8_value::V8Value;
 
 use crate::{exception::catch, BoxError};
 
-pub trait FromV8: Sized {
+pub trait FromV8: Sized + Send {
     /// Converts a V8 value to a Rust value.
     fn from_v8<'s>(
         scope: &mut v8::HandleScope<'s>,
@@ -23,7 +23,7 @@ pub trait FromV8: Sized {
     ) -> Result<Self, BoxError>;
 }
 
-pub trait ToV8 {
+pub trait ToV8: Send {
     fn to_v8<'s>(
         &self,
         scope: &mut v8::HandleScope<'s>,
@@ -233,7 +233,7 @@ impl<T: ToV8> ToV8 for Option<T> {
     }
 }
 
-impl<T: ToV8> ToV8 for &[T] {
+impl<T: ToV8 + Sync> ToV8 for &[T] {
     fn to_v8<'s>(
         &self,
         scope: &mut v8::HandleScope<'s>,

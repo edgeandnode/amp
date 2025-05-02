@@ -28,8 +28,15 @@ pub enum Error {
 
     #[error("error converting param at idx {0}: {1}")]
     ConvertParam(usize, BoxError),
+
+    #[error("JS invocation panicked: {0}")]
+    Panic(String),
+
+    #[error("isolate pool error: {0}")]
+    PoolError(#[from] deadpool::unmanaged::PoolError),
 }
 
+#[derive(Debug)]
 pub struct Isolate {
     isolate: v8::OwnedIsolate,
 
@@ -90,12 +97,12 @@ impl Isolate {
     /// Invoke a function in a fresh context (aka JS realm).
     ///
     /// `filename` is only used for display in stack traces.
-    pub fn invoke<R: FromV8>(
+    pub fn invoke<'a, R: FromV8>(
         &mut self,
         filename: &str,
         script: &str,
         function: &str,
-        params: &[&dyn ToV8],
+        params: impl Iterator<Item = &'a dyn ToV8>,
     ) -> Result<R, Error> {
         let script = self.compile_script(filename, script)?;
 
@@ -117,7 +124,6 @@ impl Isolate {
         let undefined = v8::undefined(s);
 
         let params = params
-            .iter()
             .enumerate()
             .map(|(i, p)| p.to_v8(s).map_err(|e| Error::ConvertParam(i, e)))
             .collect::<Result<Vec<_>, _>>()?;
