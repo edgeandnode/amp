@@ -360,7 +360,6 @@ fn order_by_block_num(plan: LogicalPlan) -> LogicalPlan {
 #[cfg(test)]
 mod tests {
     use super::{is_incremental, queried_datasets};
-    use crate::DatasetStore;
     use common::catalog::physical::{Catalog, PhysicalDataset, PhysicalTable};
     use common::config::Config;
     use common::query_context::parse_sql;
@@ -386,7 +385,7 @@ mod tests {
                 "eth_firehose",
                 Table {
                     name: "blocks".to_string(),
-                    schema: schema,
+                    schema,
                     network: None,
                 },
                 Url::parse("s3://bucket/blocks").unwrap(),
@@ -396,7 +395,7 @@ mod tests {
         )];
         let catalog = Catalog::new(datasets);
         let config = Arc::new(Config::in_memory());
-        let dataset_store = DatasetStore::new(config.clone(), None);
+        //let dataset_store = DatasetStore::new(config.clone(), None);
         let env = Arc::new(config.make_runtime_env().unwrap());
         let qc = QueryContext::for_catalog(catalog, env.clone()).unwrap();
 
