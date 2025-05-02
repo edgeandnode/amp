@@ -1,3 +1,0 @@
-{}
-{}
-{"evm_decode_results(eth_firehose.calls.input,Utf8(\"function transfer(address _to, uint256 _value) public returns (bool success)\"))":{"success":true}}
