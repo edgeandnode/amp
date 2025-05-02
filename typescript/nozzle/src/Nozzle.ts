@@ -186,10 +186,10 @@ const make = ({
         Effect.gen(function*() {
           const state = yield* actor.get
           if (state.dataset !== "anvil") {
-            // TODO: This should not be necessary, but whenever we are deploying a dataset, we need to wipe the server.
-            yield* actor.send(new Stop())
-            yield* actor.send(new Start())
-            yield* actor.send(new Dump({ block: state.block }))
+            // TODO: This wipes the previous version of the dataset but that should not be necessary.
+            yield* fs.remove(`${directory}/data/${state.dataset}`, { recursive: true }).pipe(
+              Effect.mapError((cause) => new NozzleError({ cause, message: "Failed to wipe data directory" })),
+            )
           }
 
           yield* actor.send(new Deploy({ manifest }))
