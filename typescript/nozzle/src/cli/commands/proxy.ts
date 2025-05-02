@@ -1,15 +1,15 @@
 import { connectNodeAdapter, createGrpcTransport } from "@connectrpc/connect-node"
-import { Args, Command, Options } from "@effect/cli"
+import { Command, Options } from "@effect/cli"
 import { Config, Effect, Schema } from "effect"
 import { createServer, type Server } from "node:http"
 import * as ArrowFlight from "../../ArrowFlight.js"
 
 export const proxy = Command.make("proxy", {
   args: {
-    port: Args.integer({ name: "port" }).pipe(
-      Args.withDefault(8080),
-      Args.withDescription("The port to listen on"),
-      Args.withSchema(Schema.Int.pipe(Schema.between(1, 65535))),
+    port: Options.integer("port").pipe(
+      Options.between(1, 65535),
+      Options.withDefault(8080),
+      Options.withDescription("The port to listen on"),
     ),
     admin: Options.text("admin-url").pipe(
       Options.withFallbackConfig(

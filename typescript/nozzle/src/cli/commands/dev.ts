@@ -1,12 +1,11 @@
-import { Command, HelpDoc, Options, ValidationError } from "@effect/cli"
+import { Command, Options } from "@effect/cli"
 import { Path } from "@effect/platform"
-import { Config, Data, Effect, Either, Equal, Fiber, Layer, Option, Predicate, Schema, Stream } from "effect"
+import { Config, Data, Effect, Fiber, Layer, Option, Predicate, Schema, Stream } from "effect"
 import * as Api from "../../Api.js"
 import * as ConfigLoader from "../../ConfigLoader.js"
 import * as EvmRpc from "../../EvmRpc.js"
-import * as ManifestBuilder from "../../ManifestBuilder.js"
 import * as ManifestDeployer from "../../ManifestDeployer.js"
-import * as Model from "../../Model.js"
+import type * as Model from "../../Model.js"
 import * as Nozzle from "../../Nozzle.js"
 
 export const dev = Command.make("dev", {
@@ -41,11 +40,10 @@ export const dev = Command.make("dev", {
       const file = yield* Option.match(args.config, {
         onSome: (file) => Effect.succeed(file),
         onNone: () =>
-          ConfigLoader.ConfigLoader.pipe(
-            Effect.flatMap((loader) => loader.find()),
+          config.find().pipe(
             Effect.flatMap(Option.match({
               onSome: (file) => Effect.succeed(file),
-              onNone: () => Effect.fail(ValidationError.invalidArgument(HelpDoc.p("No config file provided"))),
+              onNone: () => Effect.dieMessage("No config file provided"),
             })),
           ),
       })
@@ -54,34 +52,12 @@ export const dev = Command.make("dev", {
       const server = yield* nozzle.start.pipe(Effect.flatMap(Effect.fork))
 
       const deployer = yield* ManifestDeployer.ManifestDeployer
-      const builder = yield* ManifestBuilder.ManifestBuilder
-      const manifest = config.watch(file).pipe(
-        Stream.buffer({ capacity: 1, strategy: "sliding" }),
-        Stream.mapEffect((either) =>
-          Effect.gen(function*() {
-            if (Either.isLeft(either)) {
-              return yield* Effect.fail(either.left)
-            }
-
-            return yield* builder.build(either.right)
-          }).pipe(Effect.either)
-        ),
-        Stream.changesWith(Either.getEquivalence({
-          right: Schema.equivalence(Model.DatasetManifest),
-          left: Equal.equals,
-        })),
-        Stream.map(Either.map((manifest) => new Manifest({ manifest }))),
-        Stream.tap(Either.match({
-          onLeft: (error) => Effect.logError(error),
-          onRight: () => Effect.void,
-        })),
-        Stream.filterMap(Either.getRight),
-      )
+      const manifest = config.watch(file, {
+        onError: (cause) => Effect.logError(cause),
+      }).pipe(Stream.map((manifest) => new Manifest({ manifest })))
 
       const rpc = yield* EvmRpc.EvmRpc
-      const blocks = rpc.blocks.pipe(
-        Stream.map((block) => new Block({ block })),
-      )
+      const blocks = rpc.blocks.pipe(Stream.map((block) => new Block({ block })))
 
       const handle = Effect.fnUntraced(function*(dataset: string, value: Manifest | Block) {
         if (Manifest.is(value)) {
@@ -109,8 +85,7 @@ export const dev = Command.make("dev", {
     }).pipe(
       Layer.provideMerge(EvmRpc.EvmRpc.withUrl(`${args.rpc}`)),
     ).pipe(
-      Layer.merge(ConfigLoader.ConfigLoader.Default),
-      Layer.merge(ManifestBuilder.ManifestBuilder.Default.pipe(
+      Layer.merge(ConfigLoader.ConfigLoader.Default.pipe(
         Layer.provide(Api.Registry.withUrl("http://localhost:1611")),
       )),
       Layer.merge(ManifestDeployer.ManifestDeployer.Default.pipe(
