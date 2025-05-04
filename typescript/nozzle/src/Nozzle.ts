@@ -167,7 +167,10 @@ const make = ({
     )
 
     const actor = yield* Machine.boot(machine)
-    yield* actor.send(new Start())
+    yield* actor.send(new Start()).pipe(
+      // Ensure the server is stopped when the scope is closed.
+      Effect.zip(Effect.addFinalizer(() => actor.send(new Stop()).pipe(Effect.ignore))),
+    )
 
     return {
       join: actor.join.pipe(Effect.mapError((cause) => cause.cause as NozzleError)),
