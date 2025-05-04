@@ -48,8 +48,6 @@ export const dev = Command.make("dev", {
           ),
       })
 
-      const nozzle = yield* Nozzle.Nozzle
-
       const manifest = config.watch(file, {
         onError: (cause) => Effect.logError(cause),
       }).pipe(Stream.map((manifest) => new Manifest({ manifest })))
@@ -58,6 +56,7 @@ export const dev = Command.make("dev", {
       const blocks = rpc.blocks.pipe(Stream.map((block) => new Block({ block })))
 
       // TODO: Move this all to the nozzle actor.
+      const nozzle = yield* Nozzle.Nozzle
       const dump = yield* Stream.merge(blocks, manifest).pipe(
         Stream.runForEach(Effect.fnUntraced(function*(message) {
           if (Manifest.is(message)) {
@@ -66,12 +65,11 @@ export const dev = Command.make("dev", {
             yield* nozzle.dump(message.block)
           }
         })),
-        Effect.asVoid,
         Effect.fork,
       )
 
-      yield* Effect.race(nozzle.join, Fiber.join(dump))
-    }).pipe(Effect.scoped)
+      yield* Effect.raceFirst(Fiber.join(dump), nozzle.join)
+    })
   ),
   Command.provide(({ args }) =>
     Nozzle.Nozzle.layer({
