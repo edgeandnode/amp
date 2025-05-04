@@ -1,6 +1,7 @@
 import { Machine } from "@effect/experimental"
-import { Command as Cmd, CommandExecutor, FileSystem, Socket } from "@effect/platform"
-import { Context, Data, Effect, Layer, Option, Request, Schedule, Scope, String } from "effect"
+import type { CommandExecutor } from "@effect/platform"
+import { Command as Cmd, FileSystem, Socket } from "@effect/platform"
+import { Context, Data, Effect, Layer, Option, Request, Schedule, String } from "effect"
 import * as Net from "node:net"
 import * as EvmRpc from "./EvmRpc.js"
 import * as ManifestDeployer from "./ManifestDeployer.js"
@@ -33,10 +34,9 @@ const make = ({
     const fs = yield* FileSystem.FileSystem
     const deployer = yield* ManifestDeployer.ManifestDeployer
 
-    yield* Effect.acquireRelease(
-      fs.makeDirectory(directory, { recursive: true }),
-      () => fs.remove(directory, { recursive: true }).pipe(Effect.ignore),
-    )
+    const create = fs.makeDirectory(directory, { recursive: true })
+    const remove = fs.remove(directory, { recursive: true }).pipe(Effect.ignore)
+    yield* Effect.acquireRelease(create, () => remove).pipe(Effect.orDie)
 
     const config = String.stripMargin(`|
       |data_dir = "data"
@@ -57,12 +57,12 @@ const make = ({
       |url = "${rpc.url}"
     |`).trimStart()
 
-    yield* fs.makeDirectory(`${directory}/data`)
-    yield* fs.makeDirectory(`${directory}/datasets`)
-    yield* fs.makeDirectory(`${directory}/providers`)
-    yield* fs.writeFileString(`${directory}/config.toml`, config)
-    yield* fs.writeFileString(`${directory}/providers/anvil.toml`, provider)
-    yield* fs.writeFileString(`${directory}/datasets/anvil.toml`, dataset)
+    yield* fs.makeDirectory(`${directory}/data`).pipe(Effect.orDie)
+    yield* fs.makeDirectory(`${directory}/datasets`).pipe(Effect.orDie)
+    yield* fs.makeDirectory(`${directory}/providers`).pipe(Effect.orDie)
+    yield* fs.writeFileString(`${directory}/config.toml`, config).pipe(Effect.orDie)
+    yield* fs.writeFileString(`${directory}/providers/anvil.toml`, provider).pipe(Effect.orDie)
+    yield* fs.writeFileString(`${directory}/datasets/anvil.toml`, dataset).pipe(Effect.orDie)
 
     const cmd = (cmd: string, ...args: Array<string>) =>
       Cmd.make(executable, cmd, ...args).pipe(Cmd.env({
@@ -72,7 +72,6 @@ const make = ({
 
     const machine = Machine.make(
       Effect.gen(function*() {
-        const scope = yield* Effect.scope
         const state = {
           server: Option.none<CommandExecutor.Process>(),
           dataset: "anvil",
@@ -80,6 +79,12 @@ const make = ({
         }
 
         return Machine.procedures.make(state).pipe(
+          Machine.procedures.addPrivate<Exit>()("Exit", (ctx) =>
+            // Check if the server was stopped intentionally or not.
+            Option.match(ctx.state.server, {
+              onNone: () => Effect.succeed([void 0, ctx.state]),
+              onSome: () => Effect.die(new NozzleError({ message: "Server exited unexpectedly" })),
+            })),
           Machine.procedures.add<Start>()("Start", (ctx) =>
             Effect.gen(function*() {
               if (Option.isSome(ctx.state.server)) {
@@ -103,26 +108,28 @@ const make = ({
                   waitForPort(1610),
                   waitForPort(1611),
                 ], { concurrency: "unbounded" }).pipe(
+                  Effect.timeout("10 seconds"),
                   Effect.mapError((cause) => new NozzleError({ cause, message: "Server failed to start" })),
                 ),
               ))
 
-              // This effect waits for the server to exit.
+              // Whether the server exited with a non-zero exit code or not, at this point it's an error.
               const exit = process.exitCode.pipe(
                 Effect.mapError((cause) => new NozzleError({ cause, message: "Server crashed" })),
-                // Whether the server exited with a non-zero exit code or not, if the process ever ends, it's an error.
-                Effect.zip(Effect.fail(new NozzleError({ message: "Server exited unexpectedly" }))),
+                Effect.flatMap((code) =>
+                  Effect.fail(new NozzleError({ message: `Server exited unexpectedly with code ${code}` }))
+                ),
                 Effect.asVoid,
               )
 
               // Wait for the server to either be up and running with all ports open or exit (crash).
               yield* Effect.raceFirst(healthy, exit)
 
-              // Once the server is healthy, we fork the running process and monitor it for an unexpected exit.
-              yield* Effect.fork(exit)
+              // Continue monitoring the server in the background.
+              yield* ctx.fork(process.exitCode.pipe(Effect.ignore, Effect.zipRight(ctx.send(new Exit()))))
 
               return [void 0, { ...ctx.state, server: Option.some(process) }] as const
-            }).pipe(Scope.extend(scope), Effect.tapErrorCause((cause) => Effect.log("Error", cause)))),
+            })),
           Machine.procedures.add<Stop>()("Stop", (ctx) =>
             Effect.gen(function*() {
               if (Option.isNone(ctx.state.server)) {
@@ -145,11 +152,7 @@ const make = ({
             })),
           Machine.procedures.add<Dump>()("Dump", (ctx) =>
             Effect.gen(function*() {
-              yield* cmd(
-                "dump",
-                `--dataset=${ctx.state.dataset}`,
-                `--end-block=${ctx.request.block}`,
-              ).pipe(
+              yield* cmd("dump", `--dataset=${ctx.state.dataset}`, `--end-block=${ctx.request.block}`).pipe(
                 Cmd.stdout("inherit"),
                 Cmd.stderr("inherit"),
                 Cmd.exitCode,
@@ -160,19 +163,17 @@ const make = ({
               return [void 0, { ...ctx.state, block: ctx.request.block }] as const
             })),
         )
-      }).pipe(
-        // TODO: There's a bug in the type system here. As a workaround, we are referencing all required tags here.
-        Effect.zipLeft(Effect.all([
-          CommandExecutor.CommandExecutor,
-        ])),
-      ),
+      }),
     )
 
     const actor = yield* Machine.boot(machine)
-    yield* actor.send(new Start())
+    yield* actor.send(new Start()).pipe(
+      // Ensure the server is stopped when the scope is closed.
+      Effect.zip(Effect.addFinalizer(() => actor.send(new Stop()).pipe(Effect.ignore))),
+    )
 
     return {
-      join: actor.join,
+      join: actor.join.pipe(Effect.mapError((cause) => cause.cause as NozzleError)),
       start: actor.send(new Start()),
       stop: actor.send(new Stop()),
       dump: (block: bigint) => actor.send(new Dump({ block })),
@@ -190,9 +191,7 @@ const make = ({
           yield* actor.send(new Deploy({ manifest }))
         }),
     }
-  }).pipe(
-    Effect.mapError((cause) => new NozzleError({ cause, message: "Failed to start Nozzle" })),
-  )
+  })
 
 const waitForPort = (port: number) =>
   Effect.async<Net.Socket, Socket.SocketError, never>((resume, signal) => {
@@ -205,13 +204,13 @@ const waitForPort = (port: number) =>
       connection.removeAllListeners()
       resume(Effect.fail(new Socket.SocketGenericError({ reason: "Open", cause })))
     })
-    return Effect.sync(() => connection.destroy()).pipe(Effect.asVoid)
   }).pipe(
     Effect.retry({
-      schedule: Schedule.spaced("1 second"),
+      schedule: Schedule.spaced("100 millis"),
       while: (cause) => Socket.isSocketError(cause) && cause.reason === "Open",
     }),
-    Effect.tap((connection) => connection.destroy()),
+    Effect.tap((connection) => Effect.try(() => connection.destroy()).pipe(Effect.ignore)),
+    Effect.asVoid,
   )
 
 interface DeployPayload {
@@ -222,6 +221,7 @@ interface DumpPayload {
   block: bigint
 }
 
+class Exit extends Request.TaggedClass("Exit")<void, never, {}> {}
 class Start extends Request.TaggedClass("Start")<void, NozzleError, {}> {}
 class Stop extends Request.TaggedClass("Stop")<void, NozzleError, {}> {}
 class Deploy extends Request.TaggedClass("Deploy")<void, NozzleError, DeployPayload> {}

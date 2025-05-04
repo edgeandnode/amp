@@ -17,7 +17,8 @@ export class ConfigLoader extends Effect.Service<ConfigLoader>()("Nozzle/ConfigL
     const builder = yield* ManifestBuilder.ManifestBuilder
 
     const jiti = yield* Effect.tryPromise({
-      try: () => import("jiti").then(({ createJiti }) => createJiti(import.meta.url, { moduleCache: false })),
+      try: () =>
+        import("jiti").then(({ createJiti }) => createJiti(import.meta.url, { moduleCache: false, tryNative: false })),
       catch: (cause) => new ConfigLoaderError({ cause }),
     }).pipe(Effect.cached)
 
