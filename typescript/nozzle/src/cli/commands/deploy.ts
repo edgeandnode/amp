@@ -1,17 +1,17 @@
 import { Command, Options } from "@effect/cli"
-import { Config, Console, Effect, Layer } from "effect"
+import { Config, Console, Effect, Layer, Schema } from "effect"
 import * as Api from "../../Api.js"
 import * as ManifestContext from "../../ManifestContext.js"
 import * as ManifestDeployer from "../../ManifestDeployer.js"
 
 export const deploy = Command.make("deploy", {
   args: {
-    config: Options.text("config").pipe(
+    config: Options.file("config").pipe(
       Options.optional,
       Options.withAlias("c"),
       Options.withDescription("The dataset definition config file to deploy"),
     ),
-    manifest: Options.text("manifest").pipe(
+    manifest: Options.file("manifest").pipe(
       Options.optional,
       Options.withAlias("m"),
       Options.withDescription("The dataset manifest file to deploy"),
@@ -21,12 +21,14 @@ export const deploy = Command.make("deploy", {
         Config.string("NOZZLE_ADMIN_URL").pipe(Config.withDefault("http://localhost:1610")),
       ),
       Options.withDescription("The url of the Nozzle admin server"),
+      Options.withSchema(Schema.URL),
     ),
     registry: Options.text("registry-url").pipe(
       Options.withFallbackConfig(
         Config.string("NOZZLE_REGISTRY_URL").pipe(Config.withDefault("http://localhost:1611")),
       ),
       Options.withDescription("The url of the Nozzle registry server"),
+      Options.withSchema(Schema.URL),
     ),
   },
 }).pipe(
@@ -42,8 +44,8 @@ export const deploy = Command.make("deploy", {
   Command.provide(({ args }) =>
     ManifestContext.layerFromFile({ manifest: args.manifest, config: args.config }).pipe(
       Layer.merge(ManifestDeployer.ManifestDeployer.Default),
-      Layer.provide(Api.Admin.withUrl(args.admin)),
-      Layer.provide(Api.Registry.withUrl(args.registry)),
+      Layer.provide(Api.Admin.withUrl(`${args.admin}`)),
+      Layer.provide(Api.Registry.withUrl(`${args.registry}`)),
     )
   ),
 )

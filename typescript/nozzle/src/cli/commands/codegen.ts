@@ -1,17 +1,17 @@
 import { Command, Options } from "@effect/cli"
-import { Config, Console, Effect, Layer, Option } from "effect"
+import { Config, Console, Effect, Layer, Option, Schema } from "effect"
 import * as Api from "../../Api.js"
 import * as ManifestContext from "../../ManifestContext.js"
 import * as SchemaGenerator from "../../SchemaGenerator.js"
 
 export const codegen = Command.make("codegen", {
   args: {
-    config: Options.text("config").pipe(
+    config: Options.file("config", { exists: "yes" }).pipe(
       Options.optional,
       Options.withAlias("c"),
       Options.withDescription("The dataset definition config file to generate code for"),
     ),
-    manifest: Options.text("manifest").pipe(
+    manifest: Options.file("manifest", { exists: "yes" }).pipe(
       Options.optional,
       Options.withAlias("m"),
       Options.withDescription("The dataset manifest file to generate code for"),
@@ -26,6 +26,7 @@ export const codegen = Command.make("codegen", {
         Config.string("NOZZLE_REGISTRY_URL").pipe(Config.withDefault("http://localhost:1611")),
       ),
       Options.withDescription("The url of the Nozzle registry server"),
+      Options.withSchema(Schema.URL),
     ),
   },
 }).pipe(
@@ -49,7 +50,7 @@ export const codegen = Command.make("codegen", {
       onNone: () => ManifestContext.layerFromFile({ config: args.config, manifest: args.manifest }),
     }).pipe(
       Layer.merge(SchemaGenerator.SchemaGenerator.Default),
-      Layer.provide(Api.Registry.withUrl(args.registry)),
+      Layer.provide(Api.Registry.withUrl(`${args.registry}`)),
     )
   ),
 )

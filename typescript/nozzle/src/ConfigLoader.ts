@@ -1,5 +1,7 @@
 import { FileSystem, Path } from "@effect/platform"
-import { Data, Effect, Either, Equal, Match, Predicate, Schema, Stream } from "effect"
+import type { Cause } from "effect"
+import { Data, Effect, Either, Function, Match, Predicate, Schema, Stream } from "effect"
+import * as ManifestBuilder from "./ManifestBuilder.js"
 import * as Model from "./Model.js"
 
 export class ConfigLoaderError extends Data.TaggedError("ConfigLoaderError")<{
@@ -8,12 +10,15 @@ export class ConfigLoaderError extends Data.TaggedError("ConfigLoaderError")<{
 }> {}
 
 export class ConfigLoader extends Effect.Service<ConfigLoader>()("Nozzle/ConfigLoader", {
+  dependencies: [ManifestBuilder.ManifestBuilder.Default],
   effect: Effect.gen(function*() {
     const path = yield* Path.Path
     const fs = yield* FileSystem.FileSystem
+    const builder = yield* ManifestBuilder.ManifestBuilder
 
     const jiti = yield* Effect.tryPromise({
-      try: () => import("jiti").then(({ createJiti }) => createJiti(import.meta.url, { moduleCache: false })),
+      try: () =>
+        import("jiti").then(({ createJiti }) => createJiti(import.meta.url, { moduleCache: false, tryNative: false })),
       catch: (cause) => new ConfigLoaderError({ cause }),
     }).pipe(Effect.cached)
 
@@ -57,6 +62,13 @@ export class ConfigLoader extends Effect.Service<ConfigLoader>()("Nozzle/ConfigL
       )
     })
 
+    const build = Effect.fnUntraced(function*(file: string) {
+      const config = yield* load(file)
+      return yield* builder.build(config).pipe(
+        Effect.mapError((cause) => new ConfigLoaderError({ cause, message: `Failed to build config file ${file}` })),
+      )
+    })
+
     const find = Effect.fnUntraced(function*(cwd: string = ".") {
       const candidates = [
         path.resolve(cwd, `nozzle.config.ts`),
@@ -70,24 +82,34 @@ export class ConfigLoader extends Effect.Service<ConfigLoader>()("Nozzle/ConfigL
       return yield* Effect.findFirst(candidates, (_) => fs.exists(_).pipe(Effect.orElseSucceed(() => false)))
     })
 
-    const watch = (file: string) => {
+    const watch = <E, R>(file: string, options?: {
+      onError?: (cause: Cause.Cause<ConfigLoaderError>) => Effect.Effect<void, E, R>
+    }): Stream.Stream<Model.DatasetManifest, ConfigLoaderError | E, R> => {
       const resolved = path.resolve(file)
       const updates = fs.watch(resolved).pipe(
-        Stream.orDie,
-        Stream.filter(Predicate.isTagged("Update") as (value: unknown) => value is FileSystem.WatchEvent.Update),
-        Stream.mapEffect(() => load(resolved).pipe(Effect.either)),
+        Stream.mapError((cause) => new ConfigLoaderError({ cause, message: "Failed to watch config file" })),
+        Stream.filter(Predicate.isTagged("Update")),
       )
 
-      return Stream.fromEffect(load(resolved).pipe(Effect.either)).pipe(
-        Stream.concat(updates),
-        Stream.changesWith(Either.getEquivalence({
-          right: Schema.equivalence(Model.DatasetDefinition),
-          left: Equal.equals,
-        })),
+      const open = load(resolved).pipe(Effect.tapErrorCause(options?.onError ?? (() => Effect.void)), Effect.either)
+      const build = (config: Model.DatasetDefinition) =>
+        builder.build(config).pipe(
+          Effect.mapError((cause) => new ConfigLoaderError({ cause, message: `Failed to build config file ${file}` })),
+          Effect.tapErrorCause(options?.onError ?? (() => Effect.void)),
+        ).pipe(Effect.either)
+
+      return Stream.concat(Stream.void, updates).pipe(
         Stream.buffer({ capacity: 1, strategy: "sliding" }),
-      )
+        Stream.as(open),
+        Stream.mapEffect(Function.identity),
+        Stream.filterMap(Either.getRight),
+        Stream.changesWith(Schema.equivalence(Model.DatasetDefinition)),
+        Stream.mapEffect((config) => build(config)),
+        Stream.filterMap(Either.getRight),
+        Stream.changesWith(Schema.equivalence(Model.DatasetManifest)),
+      ) as any
     }
 
-    return { load, find, watch }
+    return { load, find, watch, build }
   }),
 }) {}

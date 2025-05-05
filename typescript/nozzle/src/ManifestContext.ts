@@ -1,7 +1,6 @@
 import { FileSystem, Path } from "@effect/platform"
 import { Context, Data, Effect, Layer, Option, Schema } from "effect"
 import * as ConfigLoader from "./ConfigLoader.js"
-import * as ManifestBuilder from "./ManifestBuilder.js"
 import * as Model from "./Model.js"
 
 export class ManifestContextError extends Data.TaggedError("ManifestContextError")<{
@@ -31,10 +30,8 @@ const fromManifest = (file: string) =>
 
 const fromConfigFile = (file: string) =>
   Effect.gen(function*() {
-    const configLoader = yield* ConfigLoader.ConfigLoader
-    const manifestBuilder = yield* ManifestBuilder.ManifestBuilder
-    const config = yield* configLoader.load(file)
-    return yield* manifestBuilder.build(config)
+    const loader = yield* ConfigLoader.ConfigLoader
+    return yield* loader.build(file)
   }).pipe(
     Effect.mapError((cause) => new ManifestContextError({ cause, file, message: "Failed to load config file" })),
   )
@@ -72,7 +69,6 @@ export const layer = Effect.gen(function*() {
 }).pipe(
   Layer.effect(ManifestContext),
   Layer.provide(ConfigLoader.ConfigLoader.Default),
-  Layer.provide(ManifestBuilder.ManifestBuilder.Default),
 )
 
 export const layerFromManifestFile = (file: Option.Option<string>) =>
@@ -98,7 +94,6 @@ export const layerFromConfigFile = (file: Option.Option<string>) =>
       }),
   }).pipe(
     Layer.effect(ManifestContext),
-    Layer.provide(ManifestBuilder.ManifestBuilder.Default),
     Layer.provide(ConfigLoader.ConfigLoader.Default),
   )
 
@@ -109,5 +104,4 @@ export const layerFromFile = (options: {
   fromFile(options).pipe(
     Layer.effect(ManifestContext),
     Layer.provide(ConfigLoader.ConfigLoader.Default),
-    Layer.provide(ManifestBuilder.ManifestBuilder.Default),
   )

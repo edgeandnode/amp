@@ -1,15 +1,17 @@
 import { Console, Effect, Pretty, Stream } from "effect"
 import { JsonLines } from "nozzl"
-import { Erc20Transfers } from "./schema.js"
+import { Counts } from "./schema.js"
 
-const pretty = Pretty.make(Erc20Transfers)
+const pretty = Pretty.make(Counts)
 
 const program = Effect.gen(function*() {
   const jsonl = yield* JsonLines.JsonLines
-  const stream = jsonl.stream(Erc20Transfers)`
-    SELECT * FROM transfers_eth_mainnet.erc20_transfers LIMIT 100
+  const stream = jsonl.stream(Counts)`
+    SELECT * FROM example.counts LIMIT 100
   `
   yield* Stream.runForEach(stream, (value) => Console.log(pretty(value)))
 })
 
-Effect.runPromise(program.pipe(Effect.provide(JsonLines.JsonLines.Default)))
+Effect.runPromise(program.pipe(
+  Effect.provide(JsonLines.layerJsonLines("http://localhost:1603")),
+))

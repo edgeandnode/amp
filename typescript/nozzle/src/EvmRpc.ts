@@ -40,7 +40,7 @@ const make = (url: string) =>
             Schedule.jittered,
             Schedule.union(Schedule.spaced("10 seconds")),
             Schedule.upTo("1 minute"),
-            Schedule.tapInput(() => Effect.log("Retrying...")),
+            Schedule.tapInput(() => Effect.log("Failed to connect to chain. Retrying ...")),
           ),
         ),
         Stream.toPubSub({ capacity: 1, strategy: "sliding" }),

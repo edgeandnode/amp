@@ -1,7 +1,7 @@
 {
   "private": true,
   "type": "module",
-  "packageManager": "pnpm@9.15.4+sha512.b2dc20e2fc72b3e18848459b37359a32064663e5627a51e4c74b2c29dd8e8e0491483c3abb40789cfd578bf362fb6ba8261b05f0387d76792ed6e23ea3b1b6a0",
+  "packageManager": "pnpm@10.10.0+sha512.d615db246fe70f25dcfea6d8d73dee782ce23e2245e3c4f6f888249fb568149318637dca73c2c5c8ef2a4ca0d5657fb9567188bfab47f566d1ee6ce987815c39",
   "scripts": {
     "check": "tsc -b tsconfig.json",
     "lint": "eslint \"typescript/**/*.{ts,tsx,json}\"",
@@ -10,20 +10,20 @@
   },
   "devDependencies": {
     "@effect/eslint-plugin": "^0.3.2",
-    "@effect/language-service": "^0.8.1",
+    "@effect/language-service": "^0.9.1",
     "@eslint/js": "^9.25.1",
     "eslint": "^9.25.1",
     "eslint-import-resolver-typescript": "^4.3.4",
-    "eslint-plugin-import-x": "^4.10.6",
+    "eslint-plugin-import-x": "^4.11.0",
     "eslint-plugin-simple-import-sort": "^12.1.1",
     "eslint-plugin-sort-destructure-keys": "^2.0.0",
     "prettier": "^3.5.3",
     "typescript": "^5.8.3",
-    "typescript-eslint": "^8.31.0"
+    "typescript-eslint": "^8.31.1"
   },
   "dependencies": {
-    "viem": "^2.28.0",
-    "vitest": "^3.1.2",
-    "nozzl": "workspace:*"
+    "nozzl": "workspace:*",
+    "viem": "^2.28.2",
+    "vitest": "^3.1.2"
   }
 }
