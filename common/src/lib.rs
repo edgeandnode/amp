@@ -1,7 +1,6 @@
 pub mod arrow_helpers;
 pub mod attestation;
 pub mod catalog;
-pub mod cdc_helpers;
 pub mod config;
 pub mod evm;
 pub mod manifest;
@@ -9,6 +8,7 @@ pub mod meta_tables;
 pub mod multirange;
 pub mod query_context;
 pub mod store;
+pub mod stream_helpers;
 pub mod tracing_helpers;
 
 #[cfg(test)]

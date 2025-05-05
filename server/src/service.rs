@@ -55,8 +55,8 @@ pub enum Error {
     #[error(transparent)]
     CoreError(#[from] CoreError),
 
-    #[error("not incremental query: {0}")]
-    NotIncrementalQuery(String),
+    #[error("unsupported streaming query: {0}")]
+    UnsupportedStreamingQuery(String),
 }
 
 impl From<prost::DecodeError> for Error {
@@ -94,7 +94,7 @@ impl IntoResponse for Error {
             Error::PbDecodeError(_) => StatusCode::BAD_REQUEST,
             Error::UnsupportedFlightDescriptorType(_) => StatusCode::BAD_REQUEST,
             Error::UnsupportedFlightDescriptorCommand(_) => StatusCode::BAD_REQUEST,
-            Error::NotIncrementalQuery(_) => StatusCode::BAD_REQUEST,
+            Error::UnsupportedStreamingQuery(_) => StatusCode::BAD_REQUEST,
         };
         let body = serde_json::json!({
             "error": error_message,
@@ -130,7 +130,7 @@ impl From<Error> for Status {
 
             Error::ExecutionError(df) => datafusion_error_to_status(&e, df),
 
-            Error::NotIncrementalQuery(_) => Status::invalid_argument(e.to_string()),
+            Error::UnsupportedStreamingQuery(_) => Status::invalid_argument(e.to_string()),
         }
     }
 }
@@ -176,6 +176,7 @@ impl Service {
         use futures::channel::mpsc;
 
         let query = parse_sql(&sql).map_err(|err| Error::from(err))?;
+
         let ctx = self
             .dataset_store
             .clone()
@@ -193,10 +194,13 @@ impl Service {
             self.env.clone(),
         )
         .await
-        .unwrap();
+        .map_err(|e| Error::CoreError(CoreError::DatasetError(e)))?;
 
-        if let Ok(false) = is_incremental(&plan) {
-            return Err(Error::NotIncrementalQuery(sql.to_string()));
+        let is_incr =
+            is_incremental(&plan).map_err(|_| Error::UnsupportedStreamingQuery(sql.to_string()))?;
+
+        if !is_incr || !common::stream_helpers::is_streaming(&query) {
+            return Err(Error::UnsupportedStreamingQuery(sql.to_string()));
         }
 
         let (tx, rx) = mpsc::unbounded();
@@ -218,7 +222,6 @@ impl Service {
                     "???".to_string(), // TODO: need meaningful error here
                 ))
             })?;
-            // let schema = stream.schema().clone();
 
             while let Some(batch) = stream.next().await {
                 match batch {
@@ -254,7 +257,7 @@ impl Service {
 
                     let mut notifications = Vec::new();
                     for dataset_name in datasets {
-                        let channel = common::cdc_helpers::cdc_pg_channel(&dataset_name);
+                        let channel = common::stream_helpers::cdc_pg_channel(&dataset_name);
                         let stream = mdb.listen(&channel).await.unwrap();
                         notifications.push(stream);
                     }
