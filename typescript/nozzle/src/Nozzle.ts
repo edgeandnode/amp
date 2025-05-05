@@ -26,7 +26,7 @@ export class Nozzle extends Context.Tag("Nozzle/Nozzle")<Nozzle, Effect.Effect.S
 const make = ({
   directory,
   executable,
-  logging = "info",
+  logging = "warn",
 }: NozzleConfig) =>
   Effect.gen(function*() {
     const rpc = yield* EvmRpc.EvmRpc
