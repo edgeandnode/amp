@@ -56,35 +56,38 @@
 
 - name: evm_decode_params
   query: |
-    SELECT evm_decode_params(input, 'function transfer(address _to, uint256 _value) public returns (bool success)') AS params
+    SELECT evm_decode_params(input, 'function approve(address _spender, uint256 _value)') AS params
     FROM eth_rpc.transactions
-    ORDER BY tx_index
-    LIMIT 3
+    WHERE block_num = 15000000 AND tx_index = 333
   results: |
     [
-      {},
-      {},
       {
         "params": {
-          "_to": "0000000000000000000000000000000000000000",
-          "_value": "1758718155579198402973689091687910530826030172363623369788248802939084235783"
+          "_spender": "abea9132b05a70803a4e85094fd0e1800777fbef",
+          "_value": "115792089237316195423570985008687907853269984665640564039457584007913129639935"
         }
       }
     ]
 
+- name: evm_decode_params_selector_mismatch
+  query: |
+    SELECT evm_decode_params(input, 'function approve(address _spender, uint256 _value)') AS params
+    FROM eth_rpc.transactions
+    WHERE block_num = 15000000 AND tx_index = 334
+  results: |
+    [{}]
+
 - name: evm_decode_results
   query: |
-    SELECT evm_decode_results(input, 'function transfer(address _to, uint256 _value) public returns (bool success)') AS results
+    SELECT evm_decode_results(return_data, 'function claim(uint256[] calldata tokenIds) public returns(uint256 prevId)') AS results
     FROM eth_firehose.calls
-    ORDER BY tx_index
-    LIMIT 3
+    WHERE block_num = 15000000 AND tx_index = 341
+    LIMIT 1
   results: |
     [
-      {},
-      {},
       {
         "results": {
-          "success": true
+          "prevId": "635"
         }
       }
     ]

@@ -228,7 +228,23 @@ impl EvmDecodeFunctionData {
             match data {
                 Some(data) => {
                     let decoded = match self.decode {
-                        Decode::Params => call.alloy_function.abi_decode_input(data, true),
+                        Decode::Params => {
+                            let selector = &data[..4];
+                            if selector != call.alloy_function.selector() {
+                                tracing::trace!(
+                                    function_name=%call.alloy_function.name,
+                                    decode=?self.decode,
+                                    "failed to decode function data due to selector mismatch"
+                                );
+                                for (field, ty) in types.iter().enumerate() {
+                                    FieldBuilder::new(&mut builder, ty, field)
+                                        .append_null_value()?;
+                                }
+                                builder.append(false);
+                                continue;
+                            }
+                            call.alloy_function.abi_decode_input(&data[4..], true)
+                        }
                         Decode::Results => call.alloy_function.abi_decode_output(data, true),
                     };
                     match decoded {
@@ -281,7 +297,7 @@ impl EvmDecodeFunctionData {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Decode {
     Params,
     Results,
