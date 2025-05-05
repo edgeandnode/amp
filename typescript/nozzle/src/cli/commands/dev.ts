@@ -7,6 +7,7 @@ import * as EvmRpc from "../../EvmRpc.js"
 import * as ManifestDeployer from "../../ManifestDeployer.js"
 import type * as Model from "../../Model.js"
 import * as Nozzle from "../../Nozzle.js"
+import * as Utils from "../../Utils.js"
 
 export const dev = Command.make("dev", {
   args: {
@@ -49,7 +50,7 @@ export const dev = Command.make("dev", {
       })
 
       const manifest = config.watch(file, {
-        onError: (cause) => Effect.logError(cause),
+        onError: (cause) => Effect.logError("Failed to load config", Utils.prettyCause(cause)),
       }).pipe(Stream.map((manifest) => new Manifest({ manifest })))
 
       const rpc = yield* EvmRpc.EvmRpc
@@ -60,9 +61,13 @@ export const dev = Command.make("dev", {
       const dump = yield* Stream.merge(blocks, manifest).pipe(
         Stream.runForEach(Effect.fnUntraced(function*(message) {
           if (Manifest.is(message)) {
-            yield* nozzle.deploy(message.manifest)
+            yield* nozzle.deploy(message.manifest).pipe(
+              Effect.catchAllCause((cause) => Effect.logError("Failed to deploy manifest", Utils.prettyCause(cause))),
+            )
           } else {
-            yield* nozzle.dump(message.block)
+            yield* nozzle.dump(message.block).pipe(
+              Effect.catchAllCause((cause) => Effect.logError("Failed to dump block", Utils.prettyCause(cause))),
+            )
           }
         })),
         Effect.fork,

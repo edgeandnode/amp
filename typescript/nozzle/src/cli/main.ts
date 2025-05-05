@@ -4,6 +4,7 @@ import { Command, Options, ValidationError } from "@effect/cli"
 import { Error as PlatformError, PlatformConfigProvider } from "@effect/platform"
 import { NodeContext, NodeRuntime } from "@effect/platform-node"
 import { Cause, Config, Console, Effect, Layer, Logger, LogLevel, String } from "effect"
+import * as Utils from "../Utils.js"
 
 import { build } from "./commands/build.js"
 import { codegen } from "./commands/codegen.js"
@@ -50,40 +51,11 @@ const runnable = Effect.suspend(() => cli(process.argv)).pipe(
     if (PlatformError.isPlatformError(squashed)) {
       const error = new Error(squashed.message)
       error.cause = (squashed as any).cause
-      return Console.error(prettyCause(Cause.fail(error)))
+      return Console.error(Utils.prettyCause(Cause.fail(error)))
     }
 
-    return Console.error(prettyCause(cause))
+    return Console.error(Utils.prettyCause(cause))
   }),
 )
 
 runnable.pipe(NodeRuntime.runMain({ disableErrorReporting: true }))
-
-const prettyCause = <E>(cause: Cause.Cause<E>): string => {
-  if (Cause.isInterruptedOnly(cause)) {
-    return "All fibers interrupted without errors."
-  }
-
-  const stack = Cause.prettyErrors<E>(cause).flatMap((error) => {
-    const output = (error.stack ?? "").split("\n")[0] ?? ""
-    return error.cause ? [output, ...renderCause(error.cause as Cause.PrettyError)] : [output]
-  })
-
-  if (stack.length <= 1) {
-    return stack[0] ?? ""
-  }
-
-  return stack.map((line, index, array) => {
-    if (index === 0) {
-      return `┌ ${line}`
-    }
-
-    const prefix = `${index === array.length - 1 ? "└" : "├"}${"──".repeat(index)}`
-    return `│\n${prefix} ${line}`
-  }).join("\n")
-}
-
-const renderCause = (cause: Cause.PrettyError): Array<string> => {
-  const output = `${(cause.stack ?? "").split("\n")[0] ?? ""}`
-  return cause.cause ? [output, ...renderCause(cause.cause as Cause.PrettyError)] : [output]
-}
