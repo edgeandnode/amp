@@ -36,6 +36,7 @@ const make = ({
 
     const create = fs.makeDirectory(directory, { recursive: true })
     const remove = fs.remove(directory, { recursive: true }).pipe(Effect.ignore)
+    yield* remove
     yield* Effect.acquireRelease(create, () => remove).pipe(Effect.orDie)
 
     const config = String.stripMargin(`|
