@@ -34,10 +34,10 @@ const make = ({
     const fs = yield* FileSystem.FileSystem
     const deployer = yield* ManifestDeployer.ManifestDeployer
 
-    const create = fs.makeDirectory(directory, { recursive: true })
-    const remove = fs.remove(directory, { recursive: true }).pipe(Effect.ignore)
-    yield* remove
-    yield* Effect.acquireRelease(create, () => remove).pipe(Effect.orDie)
+    // Avoid cleanup if the directory already existed before.
+    if (!(yield* fs.exists(directory).pipe(Effect.orDie))) {
+      yield* Effect.addFinalizer(() => fs.remove(directory, { recursive: true }).pipe(Effect.ignore))
+    }
 
     const config = String.stripMargin(`|
       |data_dir = "data"
@@ -58,9 +58,9 @@ const make = ({
       |url = "${rpc.url}"
     |`).trimStart()
 
-    yield* fs.makeDirectory(`${directory}/data`).pipe(Effect.orDie)
-    yield* fs.makeDirectory(`${directory}/datasets`).pipe(Effect.orDie)
-    yield* fs.makeDirectory(`${directory}/providers`).pipe(Effect.orDie)
+    yield* fs.makeDirectory(`${directory}/data`, { recursive: true }).pipe(Effect.orDie)
+    yield* fs.makeDirectory(`${directory}/datasets`, { recursive: true }).pipe(Effect.orDie)
+    yield* fs.makeDirectory(`${directory}/providers`, { recursive: true }).pipe(Effect.orDie)
     yield* fs.writeFileString(`${directory}/config.toml`, config).pipe(Effect.orDie)
     yield* fs.writeFileString(`${directory}/providers/anvil.toml`, provider).pipe(Effect.orDie)
     yield* fs.writeFileString(`${directory}/datasets/anvil.toml`, dataset).pipe(Effect.orDie)
