@@ -54,7 +54,10 @@ export const dev = Command.make("dev", {
       }).pipe(Stream.map((manifest) => new Manifest({ manifest })))
 
       const rpc = yield* EvmRpc.EvmRpc
-      const blocks = rpc.blocks.pipe(Stream.map((block) => new Block({ block })))
+      const blocks = rpc.blocks.pipe(
+        Stream.filter((block) => block.number !== null),
+        Stream.map((block) => new Block({ block: block.number! })),
+      )
 
       // TODO: Move this all to the nozzle actor.
       const nozzle = yield* Nozzle.Nozzle
