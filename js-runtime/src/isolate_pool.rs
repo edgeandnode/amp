@@ -14,14 +14,14 @@ use crate::{
 use deadpool::unmanaged::{Object, Pool};
 use tokio::sync::{mpsc, oneshot};
 
-/// Request to invoke a JavaScript function.
+/// Request to invoke a JavaScript function. Potentially in batch.
 struct JsInvoke<R> {
     /// `filename` is only used for display in stack traces.
     filename: Arc<str>,
     script: Arc<str>,
     function: Arc<str>,
-    params: Vec<Box<dyn ToV8>>,
-    res_tx: oneshot::Sender<Result<R, Error>>,
+    params_batches: Vec<Vec<Box<dyn ToV8>>>,
+    res_tx: oneshot::Sender<Result<Vec<R>, Error>>,
 }
 
 impl<R> JsInvoke<R> {
@@ -29,15 +29,15 @@ impl<R> JsInvoke<R> {
         filename: Arc<str>,
         script: Arc<str>,
         function: Arc<str>,
-        params: Vec<Box<dyn ToV8>>,
-    ) -> (Self, oneshot::Receiver<Result<R, Error>>) {
+        params_batches: Vec<Vec<Box<dyn ToV8>>>,
+    ) -> (Self, oneshot::Receiver<Result<Vec<R>, Error>>) {
         let (res_tx, res_rx) = oneshot::channel();
         (
             Self {
                 filename,
                 script,
                 function,
-                params,
+                params_batches,
                 res_tx,
             },
             res_rx,
@@ -55,17 +55,20 @@ impl<R: FromV8> DynJsInvoke for JsInvoke<R> {
             filename,
             script,
             function,
-            params,
+            params_batches,
             res_tx,
         } = *self;
 
         // Catch panics during execution.
         let result = std::panic::catch_unwind(AssertUnwindSafe(move || {
-            isolate.invoke(
+            isolate.invoke_batch(
                 filename.as_ref(),
                 script.as_ref(),
                 function.as_ref(),
-                params.iter().map(|p| p.as_ref()),
+                params_batches
+                    .iter()
+                    .map(|p| p.iter().map(|p| p.as_ref()))
+                    .collect(),
             )
         }))
         .map_err(|panic| {
@@ -95,13 +98,13 @@ impl IsolateThreadPool {
     }
 
     /// Invoke a JavaScript function on the first available isolate.
-    pub async fn invoke<'a, R: FromV8 + 'static>(
+    pub async fn invoke_batch<'a, R: FromV8 + 'static>(
         &self,
         filename: &str,
         script: &str,
         function: &str,
-        params: impl Iterator<Item = impl ToV8 + 'static>,
-    ) -> Result<R, Error> {
+        params: Vec<Vec<Box<dyn ToV8>>>,
+    ) -> Result<Vec<R>, Error> {
         let status = self.pool.status();
         if status.size < status.max_size {
             // Add a new isolate to the pool if it is not full.
@@ -109,7 +112,6 @@ impl IsolateThreadPool {
             let _ = self.pool.try_add(IsolateThread::spawn());
         }
 
-        let params = params.map(|p| Box::new(p) as Box<dyn ToV8>).collect();
         let (invoke, res_rx) =
             JsInvoke::<R>::new(filename.into(), script.into(), function.into(), params);
 

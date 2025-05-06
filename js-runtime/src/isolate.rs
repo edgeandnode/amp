@@ -104,6 +104,27 @@ impl Isolate {
         function: &str,
         params: impl Iterator<Item = &'a dyn ToV8>,
     ) -> Result<R, Error> {
+        // Reduce to a batch invocation with a single batch.
+        let params_batches = vec![params];
+        Ok(self
+            .invoke_batch::<R>(filename, script, function, params_batches)?
+            .into_iter()
+            .next()
+            .unwrap())
+    }
+
+    // Call the same function multiple times with different params. This is faster as it will amortize
+    // the cost of initializing the context and will benefit from warm V8 JIT caches.
+    //
+    // The outputs may not be the same as doing the same call using `invoke`, as global variables will
+    // be retained across invocations.
+    pub fn invoke_batch<'a, R: FromV8>(
+        &mut self,
+        filename: &str,
+        script: &str,
+        function: &str,
+        params_batches: Vec<impl Iterator<Item = &'a dyn ToV8>>,
+    ) -> Result<Vec<R>, Error> {
         let script = self.compile_script(filename, script)?;
 
         // Enter a fresh context.
@@ -121,20 +142,31 @@ impl Isolate {
 
         // Call function
         let func = get_function(s, function)?;
-        let undefined = v8::undefined(s);
-
-        let params = params
-            .enumerate()
-            .map(|(i, p)| p.to_v8(s).map_err(|e| Error::ConvertParam(i, e)))
-            .collect::<Result<Vec<_>, _>>()?;
-
-        let ret_val = match func.open(s).call(s, undefined.into(), &params) {
-            Some(ret_val) => ret_val,
-            None => return Err(catch(s).into()),
-        };
-
-        R::from_v8(s, ret_val).map_err(Error::ConvertReturnValue)
+        params_batches
+            .into_iter()
+            .map(|params| call_function(s, func, params))
+            .collect()
     }
+}
+
+fn call_function<'a, 't, 's, R: FromV8>(
+    s: &mut v8::TryCatch<'t, v8::HandleScope<'s>>,
+    func: v8::Local<'s, v8::Function>,
+    params: impl Iterator<Item = &'a dyn ToV8>,
+) -> Result<R, Error> {
+    let receiver = v8::undefined(s);
+
+    let params = params
+        .enumerate()
+        .map(|(i, p)| p.to_v8(s).map_err(|e| Error::ConvertParam(i, e)))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let ret_val = match func.open(s).call(s, receiver.into(), &params) {
+        Some(ret_val) => ret_val,
+        None => return Err(catch(s).into()),
+    };
+
+    R::from_v8(s, ret_val).map_err(Error::ConvertReturnValue)
 }
 
 /// Global context must define a `Module` that contains a `run` function
