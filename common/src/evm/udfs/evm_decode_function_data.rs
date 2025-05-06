@@ -17,7 +17,7 @@ use datafusion::{
     error::DataFusionError,
     logical_expr::{
         simplify::{ExprSimplifyResult, SimplifyInfo},
-        ColumnarValue, ReturnInfo, ReturnTypeArgs, ScalarUDFImpl, Signature, Volatility,
+        ColumnarValue, ScalarUDFImpl, Signature, Volatility,
     },
     prelude::Expr,
     scalar::ScalarValue,
@@ -174,7 +174,10 @@ impl ScalarUDFImpl for EvmDecodeFunctionData {
         Ok(ColumnarValue::Array(ary))
     }
 
-    fn return_type_from_args(&self, args: ReturnTypeArgs) -> datafusion::error::Result<ReturnInfo> {
+    fn return_field_from_args(
+        &self,
+        args: datafusion::logical_expr::ReturnFieldArgs,
+    ) -> datafusion::error::Result<Field> {
         let args = args.scalar_arguments;
         if args.len() != 2 {
             return internal_err!(
@@ -195,7 +198,7 @@ impl ScalarUDFImpl for EvmDecodeFunctionData {
         };
         let call = FunctionCall::try_from(signature).map_err(|e| e.context(self.name()))?;
         let fields = self.fields(&call).map_err(|e| e.context(self.name()))?;
-        Ok(ReturnInfo::new_nullable(DataType::Struct(fields)))
+        Ok(Field::new_struct(self.name(), fields, true))
     }
 
     fn aliases(&self) -> &[String] {
