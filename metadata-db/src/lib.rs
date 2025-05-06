@@ -3,7 +3,7 @@ use std::time::Duration;
 use futures::stream::{BoxStream, Stream};
 use sqlx::{
     migrate::{MigrateError, Migrator},
-    postgres::{PgListener, PgNotification},
+    postgres::{PgListener, PgNotification, PgPoolOptions},
     Connection as _, Executor, PgConnection, Pool, Postgres,
 };
 use thiserror::Error;
@@ -65,7 +65,11 @@ impl MetadataDb {
     /// Sets up a connection pool to the metadata DB. Runs migrations if necessary.
     #[instrument(skip_all, err)]
     pub async fn connect(url: &str) -> Result<MetadataDb, Error> {
-        let pool = Pool::connect(url).await.map_err(Error::ConnectionError)?;
+        let pool = PgPoolOptions::new()
+            .acquire_timeout(Duration::from_secs(5))
+            .connect(url)
+            .await
+            .map_err(Error::ConnectionError)?;
         let db = MetadataDb {
             pool,
             url: url.to_string(),
@@ -361,7 +365,7 @@ impl MetadataDb {
               FROM file_metadata sr
         INNER JOIN locations l
                 ON sr.location_id = l.id
-             WHERE l.dataset = $1 
+             WHERE l.dataset = $1
                    AND l.dataset_version = $2
                    AND l.tbl = $3
                    AND l.active
@@ -388,9 +392,9 @@ impl MetadataDb {
         let sql = "
             SELECT CAST(sr.metadata->>'range_start' AS BIGINT)
                  , CAST(sr.metadata->>'range_end' AS BIGINT)
-              FROM file_metadata sr 
-        INNER JOIN locations l 
-                ON sr.location_id = l.id 
+              FROM file_metadata sr
+        INNER JOIN locations l
+                ON sr.location_id = l.id
              WHERE l.dataset = $1
                    AND l.tbl = $2
                    AND l.active
