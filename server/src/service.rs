@@ -49,13 +49,16 @@ pub enum Error {
     UnsupportedFlightDescriptorCommand(String),
 
     #[error("query execution error: {0}")]
-    ExecutionError(DataFusionError),
+    DataFusionExecutionError(DataFusionError),
 
     #[error("error looking up datasets: {0}")]
     DatasetStoreError(#[from] DatasetError),
 
     #[error(transparent)]
     CoreError(#[from] CoreError),
+
+    #[error("query execution error: {0}")]
+    ExecutionError(String),
 }
 
 impl From<prost::DecodeError> for Error {
@@ -87,6 +90,7 @@ impl IntoResponse for Error {
                 | CoreError::ExecutionError(_)
                 | CoreError::MetaTableError(_),
             ) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::DataFusionExecutionError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::ExecutionError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::DatasetStoreError(e) if e.is_not_found() => StatusCode::NOT_FOUND,
             Error::DatasetStoreError(_) => StatusCode::INTERNAL_SERVER_ERROR,
@@ -126,7 +130,8 @@ impl From<Error> for Status {
                 | CoreError::MetaTableError(df),
             ) => datafusion_error_to_status(&e, df),
 
-            Error::ExecutionError(df) => datafusion_error_to_status(&e, df),
+            Error::DataFusionExecutionError(df) => datafusion_error_to_status(&e, df),
+            Error::ExecutionError(_) => Status::internal(e.to_string()),
         }
     }
 }
@@ -173,13 +178,13 @@ impl Service {
         Ok(stream)
     }
 
-    pub async fn execute_plan(&self, ctx: &QueryContext, stmt: Statement, plan: LogicalPlan) -> Result<SendableRecordBatchStream, Error> {
+    pub async fn execute_plan(&self, ctx: &QueryContext, plan: LogicalPlan, is_streaming: bool) -> Result<SendableRecordBatchStream, Error> {
+        let stmt = Statement::Statement(Box::new(datafusion::sql::unparser::plan_to_sql(&plan).map_err(|e| Error::DataFusionExecutionError(e))?));
+
         use futures::channel::mpsc;
 
-        let is_incr = is_incremental(&plan).unwrap_or(false);
-
-        // If not incremental or streaming is not requested, execute just once
-        if !is_incr || !common::stream_helpers::is_streaming(&stmt) {
+        // If not streaming
+        if !is_streaming {
             return Self::execute_once(&ctx, plan).await;
         }
 
@@ -206,33 +211,18 @@ impl Service {
                 end,
             )
                 .await
-                .map_err(|_| {
-                    Error::ExecutionError(DataFusionError::Execution(
-                        "???".to_string(), // TODO: need meaningful error here
-                    ))
+                .map_err(|e| {
+                    Error::ExecutionError(format!("failed to execute query for a range: {}", e))
                 })?;
 
             while let Some(batch) = stream.next().await {
-                match batch {
-                    Ok(batch) => {
-                        if tx.unbounded_send(Ok(batch)).is_err() {
-                            return Err(Error::ExecutionError(DataFusionError::Execution(
-                                "???".to_string(), // TODO: need meaningful error here
-                            )));
-                        }
-                    }
-                    Err(e) => {
-                        let _ = tx.unbounded_send(Err(e));
-                        return Err(Error::ExecutionError(DataFusionError::Execution(
-                            "???".to_string(), // TODO: need meaningful error here
-                        )));
-                    }
+                let send_result = tx.unbounded_send(batch);
+                if send_result.is_err() {
+                    return Err(Error::ExecutionError("failed to return a next batch".to_string()));
                 }
             }
         }
 
-        //let sql = sql.to_string();
-        //let stmt = stmt.clone();
         let ds_store = self.dataset_store.clone();
         let env = self.env.clone();
 
@@ -326,7 +316,9 @@ impl Service {
             .await
             .map_err(|err| Error::from(err))?;
 
-        self.execute_plan(&ctx, query, plan).await
+        let is_streaming = is_incremental(&plan).unwrap_or(false) && common::stream_helpers::is_streaming(&query);
+
+        self.execute_plan(&ctx, plan, is_streaming).await
     }
 }
 
@@ -507,7 +499,7 @@ impl Service {
             .with_schema(stream.schema())
             .build(
                 stream
-                    .map_err(Error::ExecutionError)
+                    .map_err(Error::DataFusionExecutionError)
                     .map_err(Status::from)
                     .err_into(),
             )
