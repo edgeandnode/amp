@@ -170,7 +170,10 @@ impl Service {
         Ok(stream)
     }
 
-    async fn execute_once(ctx: &QueryContext, plan: LogicalPlan) -> Result<SendableRecordBatchStream, Error> {
+    async fn execute_once(
+        ctx: &QueryContext,
+        plan: LogicalPlan,
+    ) -> Result<SendableRecordBatchStream, Error> {
         let stream = ctx
             .execute_plan(plan)
             .await
@@ -178,8 +181,16 @@ impl Service {
         Ok(stream)
     }
 
-    pub async fn execute_plan(&self, ctx: &QueryContext, plan: LogicalPlan, is_streaming: bool) -> Result<SendableRecordBatchStream, Error> {
-        let stmt = Statement::Statement(Box::new(datafusion::sql::unparser::plan_to_sql(&plan).map_err(|e| Error::DataFusionExecutionError(e))?));
+    pub async fn execute_plan(
+        &self,
+        ctx: &QueryContext,
+        plan: LogicalPlan,
+        is_streaming: bool,
+    ) -> Result<SendableRecordBatchStream, Error> {
+        let stmt = Statement::Statement(Box::new(
+            datafusion::sql::unparser::plan_to_sql(&plan)
+                .map_err(|e| Error::DataFusionExecutionError(e))?,
+        ));
 
         use futures::channel::mpsc;
 
@@ -194,8 +205,8 @@ impl Service {
             self.dataset_store.clone(),
             self.env.clone(),
         )
-            .await
-            .map_err(|e| Error::CoreError(CoreError::DatasetError(e)))?;
+        .await
+        .map_err(|e| Error::CoreError(CoreError::DatasetError(e)))?;
 
         let (tx, rx) = mpsc::unbounded();
 
@@ -210,15 +221,17 @@ impl Service {
                 0,
                 end,
             )
-                .await
-                .map_err(|e| {
-                    Error::ExecutionError(format!("failed to execute query for a range: {}", e))
-                })?;
+            .await
+            .map_err(|e| {
+                Error::ExecutionError(format!("failed to execute query for a range: {}", e))
+            })?;
 
             while let Some(batch) = stream.next().await {
                 let send_result = tx.unbounded_send(batch);
                 if send_result.is_err() {
-                    return Err(Error::ExecutionError("failed to return a next batch".to_string()));
+                    return Err(Error::ExecutionError(
+                        "failed to return a next batch".to_string(),
+                    ));
                 }
             }
         }
@@ -316,7 +329,8 @@ impl Service {
             .await
             .map_err(|err| Error::from(err))?;
 
-        let is_streaming = is_incremental(&plan).unwrap_or(false) && common::stream_helpers::is_streaming(&query);
+        let is_streaming =
+            is_incremental(&plan).unwrap_or(false) && common::stream_helpers::is_streaming(&query);
 
         self.execute_plan(&ctx, plan, is_streaming).await
     }
