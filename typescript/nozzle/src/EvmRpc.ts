@@ -1,4 +1,4 @@
-import { Context, Data, Effect, Layer, Option, PubSub, RcRef, Schedule, Stream } from "effect"
+import { Context, Data, Effect, Layer, Option, Queue, RcRef, Schedule, Stream } from "effect"
 import * as Viem from "viem"
 import * as Chains from "viem/chains"
 
@@ -44,42 +44,28 @@ const make = (url: string) =>
         return Effect.succeed([Option.some(current), blocks])
       }),
       Stream.flatMap((_) => _),
+      Stream.changesWith((a, b) => a.hash === b.hash),
       Stream.retry(
         Schedule.exponential("1 second").pipe(
           Schedule.jittered,
           Schedule.union(Schedule.spaced("10 seconds")),
-          Schedule.upTo("1 minute"),
           Schedule.tapInput(() => Effect.logWarning("Failed to connect to chain. Retrying ...")),
         ),
-      ),
-      Stream.changesWith((a, b) => a.hash === b.hash),
-      Stream.mapAccumEffect(
-        Option.none<Viem.Block>(),
-        Effect.fnUntraced(function*(previous, current) {
-          // TODO: Implement recovery for this.
-          if (Option.isSome(previous)) {
-            if (previous.value.hash !== current.parentHash) {
-              yield* new EvmRpcError({ message: "Chain reorg detected" })
-            }
-          }
-
-          return [Option.some(current), current]
-        }),
       ),
     )
 
     const blocks = yield* RcRef.make({
-      acquire: Stream.toPubSub(stream, { capacity: "unbounded", replay: 1 }),
+      acquire: Stream.broadcastDynamic(stream, 4096),
       idleTimeToLive: "10 seconds",
     })
 
-    const watchChainHead = RcRef.get(blocks).pipe(
-      Effect.flatMap(PubSub.subscribe),
-      Effect.map(Stream.fromQueue),
-      Effect.map(Stream.flattenTake),
-      Stream.unwrapScoped,
-      Stream.buffer({ capacity: 1, strategy: "sliding" }),
-    )
-
-    return { url, blocks: watchChainHead }
+    return {
+      url,
+      blocks: RcRef.get(blocks).pipe(Effect.flatMap(Effect.fnUntraced(function*(stream) {
+        const queue = yield* Queue.bounded<Stream.Stream.Success<typeof stream>>(4096)
+        // TODO: Refactor this to use `Stream.fromQueue` / `Stream.toQueue` once `flattenTake` behavior is fixed.
+        yield* stream.pipe(Stream.runForEach((block) => Queue.offer(queue, block)), Effect.forkScoped)
+        return Stream.fromQueue(queue, { shutdown: true })
+      }))).pipe(Stream.unwrapScoped),
+    }
   })

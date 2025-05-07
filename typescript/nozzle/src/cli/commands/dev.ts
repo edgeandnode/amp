@@ -1,11 +1,11 @@
 import { Command, Options } from "@effect/cli"
 import { Path } from "@effect/platform"
-import { Config, Data, Effect, Fiber, Layer, Option, Predicate, Schema, Stream } from "effect"
+import { Chunk, Config, Effect, Fiber, Layer, Option, Schema, Stream } from "effect"
+import type * as Viem from "viem"
 import * as Api from "../../Api.js"
 import * as ConfigLoader from "../../ConfigLoader.js"
 import * as EvmRpc from "../../EvmRpc.js"
 import * as ManifestDeployer from "../../ManifestDeployer.js"
-import type * as Model from "../../Model.js"
 import * as Nozzle from "../../Nozzle.js"
 import * as Utils from "../../Utils.js"
 
@@ -49,35 +49,37 @@ export const dev = Command.make("dev", {
           ),
       })
 
-      const manifest = config.watch(file, {
-        onError: (cause) => Effect.logError("Failed to load config", Utils.prettyCause(cause)),
-      }).pipe(Stream.map((manifest) => new Manifest({ manifest })))
+      const nozzle = yield* Nozzle.Nozzle
+      const deploy = yield* config.watch(file, {
+        onError: Utils.logCauseWith("Failed to load config"),
+      }).pipe(
+        Stream.buffer({ capacity: 1, strategy: "sliding" }),
+        Stream.runForEach((manifest) =>
+          nozzle.deploy(manifest).pipe(Effect.catchAllCause(Utils.logCauseWith("Failed to deploy manifest")))
+        ),
+        Effect.orDie,
+        Effect.forkScoped,
+      )
 
       const rpc = yield* EvmRpc.EvmRpc
-      const blocks = rpc.blocks.pipe(
-        Stream.filter((block) => block.number !== null),
-        Stream.map((block) => new Block({ block: block.number! })),
-      )
-
-      // TODO: Move this all to the nozzle actor.
-      const nozzle = yield* Nozzle.Nozzle
-      const dump = yield* Stream.merge(blocks, manifest).pipe(
-        Stream.runForEach(Effect.fnUntraced(function*(message) {
-          if (Manifest.is(message)) {
-            yield* nozzle.deploy(message.manifest).pipe(
-              Effect.catchAllCause((cause) => Effect.logError("Failed to deploy manifest", Utils.prettyCause(cause))),
-            )
-          } else {
-            yield* nozzle.dump(message.block).pipe(
-              Effect.catchAllCause((cause) => Effect.logError("Failed to dump block", Utils.prettyCause(cause))),
-            )
+      const dump = yield* rpc.blocks.pipe(Stream.chunks).pipe(
+        Stream.mapAccumEffect(Option.none<Viem.Hash>(), (state, chunk) => {
+          const last = Chunk.last(chunk)
+          if (Option.isNone(last)) {
+            return Effect.succeed([state, void 0])
           }
-        })),
-        Effect.fork,
+
+          // Reset nozzle if there's no previous block hash or if a reorg is detected.
+          const reset = Option.isNone(state) || hasReorg(state.value, chunk)
+          return nozzle.dump(last.value.number, reset).pipe(Effect.as([Option.some(last.value.hash), void 0] as const))
+        }),
+        Stream.runDrain,
+        Effect.orDie,
+        Effect.forkScoped,
       )
 
-      yield* Effect.raceFirst(Fiber.join(dump), nozzle.join)
-    })
+      yield* Effect.raceFirst(Fiber.joinAll([dump, deploy]), nozzle.join)
+    }).pipe(Effect.scoped)
   ),
   Command.provide(({ args }) =>
     Nozzle.Nozzle.layer({
@@ -96,14 +98,14 @@ export const dev = Command.make("dev", {
   ),
 )
 
-class Manifest extends Data.TaggedClass("Manifest")<{
-  readonly manifest: Model.DatasetManifest
-}> {
-  static is = Predicate.isTagged("Manifest") as (value: unknown) => value is Manifest
-}
+const hasReorg = (parent: Viem.Hash, chunk: Chunk.Chunk<Viem.Block<bigint, false, "latest">>) => {
+  let previous = parent
+  for (const block of chunk) {
+    if (block.parentHash !== previous) {
+      return true
+    }
+    previous = block.hash
+  }
 
-class Block extends Data.TaggedClass("Block")<{
-  readonly block: bigint
-}> {
-  static is = Predicate.isTagged("Block") as (value: unknown) => value is Block
+  return false
 }
