@@ -10,15 +10,47 @@ export class TableDefinition extends Schema.Class<TableDefinition>("TableDefinit
   sql: Schema.String,
 }) {}
 
+export const DatasetName = Schema.Lowercase.pipe(
+  Schema.annotations({
+    title: "Name",
+    description: "the name of the dataset",
+    examples: ["uniswap"],
+  }),
+)
+
+export const DatasetVersion = Schema.String.pipe(
+  Schema.pattern(/^\d+\.\d+\.\d+$/),
+  Schema.annotations({
+    title: "Version",
+    description: "a semantic version number (e.g. \"4.1.3\")",
+    examples: ["1.0.0", "1.0.1", "1.1.0"],
+  }),
+)
+
+export const DatasetRepository = Schema.URL.pipe(
+  Schema.annotations({
+    title: "Repository",
+    description: "the address of the repository",
+    examples: [new URL("https://github.com/foo/bar")],
+  }),
+)
+
+export const DatasetReadme = Schema.String.pipe(
+  Schema.annotations({
+    title: "Readme",
+    description: "the documentation of the dataset",
+  }),
+)
+
 export class DatasetDefinition extends Schema.Class<DatasetDefinition>("DatasetDefinition")({
-  name: Schema.String,
-  version: Schema.String.pipe(Schema.pattern(/^\d+\.\d+\.\d+$/)),
-  readme: Schema.String.pipe(Schema.optional),
-  repository: Schema.String.pipe(Schema.optional),
+  name: DatasetName,
+  version: DatasetVersion,
+  readme: DatasetReadme.pipe(Schema.optional),
+  repository: DatasetRepository.pipe(Schema.optional),
   dependencies: Schema.Record({
     key: Schema.String,
     value: Dependency,
-  }),
+  }).pipe(Schema.optional),
   tables: Schema.Record({
     key: Schema.String,
     value: TableDefinition,
@@ -50,12 +82,12 @@ export class Table extends Schema.Class<Table>("Table")({
 
 export class DatasetManifest extends Schema.Class<DatasetManifest>("DatasetManifest")({
   kind: Schema.Literal("manifest"),
-  name: Schema.String,
-  version: Schema.String,
+  name: DatasetName,
+  version: DatasetVersion,
   dependencies: Schema.Record({
     key: Schema.String,
     value: Dependency,
-  }),
+  }).pipe(Schema.optional),
   tables: Schema.Record({
     key: Schema.String,
     value: Table,

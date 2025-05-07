@@ -1,1 +1,0 @@
-{"evm_decode(l.topic1,l.topic2,l.topic3,l.data,Utf8(\"Transfer(address indexed from, address indexed to, uint256 value)\"))":{"from":"06729eb2424da47898f935267bd4a62940de5105","to":"beefbabeea323f07c59926295205d3b7a17e8638","value":"6818627949560085517"}}

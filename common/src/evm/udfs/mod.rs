@@ -29,8 +29,7 @@ use datafusion::{
     error::DataFusionError,
     logical_expr::{
         simplify::{ExprSimplifyResult, SimplifyInfo},
-        ColumnarValue, ReturnInfo, ReturnTypeArgs, ScalarFunctionArgs, ScalarUDFImpl, Signature,
-        Volatility,
+        ColumnarValue, ReturnFieldArgs, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility,
     },
     prelude::Expr,
     scalar::ScalarValue,
@@ -599,7 +598,7 @@ impl ScalarUDFImpl for EvmDecode {
         Ok(ColumnarValue::Array(ary))
     }
 
-    fn return_type_from_args(&self, args: ReturnTypeArgs) -> datafusion::error::Result<ReturnInfo> {
+    fn return_field_from_args(&self, args: ReturnFieldArgs) -> datafusion::error::Result<Field> {
         let args = args.scalar_arguments;
         if args.len() != 5 {
             return internal_err!(
@@ -621,9 +620,9 @@ impl ScalarUDFImpl for EvmDecode {
         let event = Event::try_from(signature).map_err(|e| e.context(self.name()))?;
         let fields = event.fields()?;
         if fields.is_empty() {
-            return Ok(ReturnInfo::new_nullable(DataType::Null));
+            return Ok(Field::new(self.name(), DataType::Null, true));
         }
-        Ok(ReturnInfo::new_non_nullable(DataType::Struct(fields)))
+        Ok(Field::new_struct(self.name(), fields, false))
     }
 
     fn aliases(&self) -> &[String] {
@@ -864,10 +863,14 @@ mod tests {
             SIG.to_string(),
         )))];
 
+        let arg_fields = vec![Field::new("signature", DataType::Utf8, false)];
+        let return_field = Field::new(evm_topic.name(), EvmTopic::RETURN_TYPE, false);
+
         let args = ScalarFunctionArgs {
             args,
+            arg_fields: arg_fields.iter().by_ref().collect(),
             number_rows: 1,
-            return_type: &EvmTopic::RETURN_TYPE,
+            return_field: &return_field,
         };
         let result = evm_topic.invoke_with_args(args).unwrap();
         let ColumnarValue::Scalar(result) = result else {
@@ -920,14 +923,25 @@ mod tests {
             ColumnarValue::Scalar(ScalarValue::Utf8(Some(SIG.to_string()))),
         ];
 
+        let arg_fields = vec![
+            Field::new("topic1", DataType::FixedSizeBinary(32), true),
+            Field::new("topic2", DataType::FixedSizeBinary(32), true),
+            Field::new("topic3", DataType::FixedSizeBinary(32), true),
+            Field::new("data", DataType::Binary, true),
+            Field::new("signature", DataType::Utf8, false),
+        ];
+
         let args = ScalarFunctionArgs {
             args,
+            arg_fields: arg_fields.iter().by_ref().collect(),
             number_rows: CSV.len(),
-            return_type: &DataType::Struct(
+            return_field: &Field::new_struct(
+                evm_decode.name(),
                 Event::try_from(&ScalarValue::new_utf8(SIG))
                     .unwrap()
                     .fields()
                     .unwrap(),
+                false,
             ),
         };
         let result = evm_decode.invoke_with_args(args).unwrap();
