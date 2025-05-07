@@ -33,12 +33,10 @@ const make = ({
     const fs = yield* FileSystem.FileSystem
     const deployer = yield* ManifestDeployer.ManifestDeployer
 
-    // Avoid cleanup if the directory already existed before.
-    if (!(yield* fs.exists(directory).pipe(Effect.orDie))) {
-      yield* Effect.addFinalizer(() => fs.remove(directory, { recursive: true }).pipe(Effect.ignore)).pipe(
-        Effect.uninterruptible,
-      )
-    }
+    yield* fs.makeDirectory(directory).pipe(
+      Effect.zipRight(Effect.addFinalizer(() => fs.remove(directory, { recursive: true }).pipe(Effect.ignore))),
+      Effect.orDie,
+    )
 
     const config = String.stripMargin(`|
       |data_dir = "data"
@@ -60,9 +58,9 @@ const make = ({
     |`).trimStart()
 
     yield* Effect.all([
-      fs.makeDirectory(`${directory}/data`, { recursive: true }),
-      fs.makeDirectory(`${directory}/datasets`, { recursive: true }),
-      fs.makeDirectory(`${directory}/providers`, { recursive: true }),
+      fs.makeDirectory(`${directory}/data`),
+      fs.makeDirectory(`${directory}/datasets`),
+      fs.makeDirectory(`${directory}/providers`),
     ]).pipe(Effect.orDie)
 
     yield* Effect.all([
@@ -144,7 +142,7 @@ const make = ({
             // TODO: Resetting globally should be exposed via the control plane.
             if (ctx.request.reset) {
               yield* fs.remove(`${directory}/data`, { recursive: true }).pipe(Effect.ignore)
-              yield* fs.makeDirectory(`${directory}/data`, { recursive: true }).pipe(Effect.ignore)
+              yield* fs.makeDirectory(`${directory}/data`).pipe(Effect.ignore)
             }
 
             yield* cmd("dump", `--dataset=${ctx.state}`, `--end-block=${ctx.request.block}`).pipe(
