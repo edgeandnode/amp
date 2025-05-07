@@ -123,12 +123,12 @@ const make = ({
       Machine.procedures.make("anvil").pipe(
         Machine.procedures.add<Deploy>()("Deploy", (ctx) =>
           Effect.gen(function*() {
+            yield* Effect.logDebug(`Deploying manifest "${ctx.request.manifest.name}"`)
+
             if (ctx.state !== "anvil") {
-              // TODO: Wiping the dataset and data directory here should not be necessary.
-              yield* Effect.all([
-                fs.remove(`${directory}/datasets/${ctx.state}.json`),
-                fs.remove(`${directory}/data/${ctx.state}`, { recursive: true }),
-              ]).pipe(Effect.ignore)
+              // TODO: Resetting a specific dataset should be exposed via the control plane.
+              yield* fs.remove(`${directory}/datasets/${ctx.state}.json`).pipe(Effect.ignore)
+              yield* fs.remove(`${directory}/data/${ctx.state}`, { recursive: true }).pipe(Effect.ignore)
             }
 
             yield* deployer.deploy(ctx.request.manifest).pipe(
@@ -139,6 +139,14 @@ const make = ({
           })),
         Machine.procedures.add<Dump>()("Dump", (ctx) =>
           Effect.gen(function*() {
+            yield* Effect.logDebug(`Dumping data for dataset "${ctx.state}" up to block ${ctx.request.block}`)
+
+            // TODO: Resetting globally should be exposed via the control plane.
+            if (ctx.request.reset) {
+              yield* fs.remove(`${directory}/data`, { recursive: true }).pipe(Effect.ignore)
+              yield* fs.makeDirectory(`${directory}/data`, { recursive: true }).pipe(Effect.ignore)
+            }
+
             yield* cmd("dump", `--dataset=${ctx.state}`, `--end-block=${ctx.request.block}`).pipe(
               Cmd.stdout("inherit"),
               Cmd.stderr("inherit"),
@@ -154,7 +162,7 @@ const make = ({
 
     const actor = yield* Machine.boot(machine)
     const join = Effect.raceFirst(actor.join, Fiber.join(server))
-    const dump = (block: bigint) => actor.send(new Dump({ block }))
+    const dump = (block: bigint, reset = false) => actor.send(new Dump({ block, reset }))
     const deploy = (manifest: Model.DatasetManifest) => actor.send(new Deploy({ manifest }))
 
     return {
@@ -190,6 +198,7 @@ interface DeployPayload {
 
 interface DumpPayload {
   block: bigint
+  reset: boolean
 }
 
 class Deploy extends Request.TaggedClass("Deploy")<void, NozzleError, DeployPayload> {}
