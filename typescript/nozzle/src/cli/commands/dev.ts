@@ -7,7 +7,6 @@ import * as ConfigLoader from "../../ConfigLoader.js"
 import * as EvmRpc from "../../EvmRpc.js"
 import * as ManifestDeployer from "../../ManifestDeployer.js"
 import * as Nozzle from "../../Nozzle.js"
-import type { NozzleError } from "../../Nozzle.js"
 import * as Utils from "../../Utils.js"
 
 export const dev = Command.make("dev", {
@@ -67,27 +66,14 @@ export const dev = Command.make("dev", {
         Stream.mapAccumEffect(Option.none<Viem.Hash>(), (state, chunk) => {
           const last = Chunk.last(chunk)
           if (Option.isNone(last)) {
-            return Effect.succeed([state, Chunk.empty<Effect.Effect<void, NozzleError, never>>()])
+            return Effect.succeed([state, void 0])
           }
 
-          if (Option.isNone(state)) {
-            return Effect.logDebug(`Resetting data for block ${last.value.number} after restart`).pipe(
-              Effect.as([Option.some(last.value.hash), Chunk.of(nozzle.dump(last.value.number, true))]),
-            )
-          }
-
-          if (hasReorg(state.value, chunk)) {
-            return Effect.logDebug(`Resetting data for block ${last.value.number} after block reorg`).pipe(
-              Effect.as([Option.some(last.value.hash), Chunk.of(nozzle.dump(last.value.number, true))]),
-            )
-          }
-
-          return Effect.logDebug(`Dumping data for block ${last.value.number}`).pipe(
-            Effect.as([Option.some(last.value.hash), Chunk.of(nozzle.dump(last.value.number, false))]),
-          )
+          // Reset nozzle if there's no previous block hash or if a reorg is detected.
+          const reset = Option.isNone(state) || hasReorg(state.value, chunk)
+          return nozzle.dump(last.value.number, reset).pipe(Effect.as([Option.some(last.value.hash), void 0] as const))
         }),
-        Stream.flattenChunks,
-        Stream.runForEach((_) => _),
+        Stream.runDrain,
         Effect.orDie,
         Effect.forkScoped,
       )

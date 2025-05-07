@@ -123,7 +123,7 @@ const make = ({
       Machine.procedures.make("anvil").pipe(
         Machine.procedures.add<Deploy>()("Deploy", (ctx) =>
           Effect.gen(function*() {
-            yield* Effect.logDebug(`Deploying manifest ${ctx.request.manifest.name}`)
+            yield* Effect.logDebug(`Deploying manifest "${ctx.request.manifest.name}"`)
 
             if (ctx.state !== "anvil") {
               // TODO: Resetting a specific dataset should be exposed via the control plane.
@@ -139,7 +139,7 @@ const make = ({
           })),
         Machine.procedures.add<Dump>()("Dump", (ctx) =>
           Effect.gen(function*() {
-            yield* Effect.logDebug(`Dumping data for dataset ${ctx.state} up to block ${ctx.request.block}`)
+            yield* Effect.logDebug(`Dumping data for dataset "${ctx.state}" up to block ${ctx.request.block}`)
 
             // TODO: Resetting globally should be exposed via the control plane.
             if (ctx.request.reset) {
