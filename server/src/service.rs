@@ -13,6 +13,8 @@ use datafusion::{
     common::DFSchema,
     error::DataFusionError,
     execution::{runtime_env::RuntimeEnv, SendableRecordBatchStream},
+    logical_expr::LogicalPlan,
+    sql::parser::Statement,
 };
 use dataset_store::{DatasetError, DatasetStore};
 use futures::{Stream, StreamExt as _, TryStreamExt};
@@ -54,9 +56,6 @@ pub enum Error {
 
     #[error(transparent)]
     CoreError(#[from] CoreError),
-
-    #[error("unsupported streaming query: {0}")]
-    UnsupportedStreamingQuery(String),
 }
 
 impl From<prost::DecodeError> for Error {
@@ -94,7 +93,6 @@ impl IntoResponse for Error {
             Error::PbDecodeError(_) => StatusCode::BAD_REQUEST,
             Error::UnsupportedFlightDescriptorType(_) => StatusCode::BAD_REQUEST,
             Error::UnsupportedFlightDescriptorCommand(_) => StatusCode::BAD_REQUEST,
-            Error::UnsupportedStreamingQuery(_) => StatusCode::BAD_REQUEST,
         };
         let body = serde_json::json!({
             "error": error_message,
@@ -129,8 +127,6 @@ impl From<Error> for Status {
             ) => datafusion_error_to_status(&e, df),
 
             Error::ExecutionError(df) => datafusion_error_to_status(&e, df),
-
-            Error::UnsupportedStreamingQuery(_) => Status::invalid_argument(e.to_string()),
         }
     }
 }
@@ -169,39 +165,32 @@ impl Service {
         Ok(stream)
     }
 
-    pub async fn execute_stream_query(
-        &self,
-        sql: &str,
-    ) -> Result<SendableRecordBatchStream, Error> {
-        use futures::channel::mpsc;
-
-        let query = parse_sql(&sql).map_err(|err| Error::from(err))?;
-
-        let ctx = self
-            .dataset_store
-            .clone()
-            .ctx_for_sql(&query, self.env.clone())
-            .await
-            .map_err(|err| Error::DatasetStoreError(err))?;
-        let plan = ctx
-            .plan_sql(query.clone())
+    async fn execute_once(ctx: &QueryContext, plan: LogicalPlan) -> Result<SendableRecordBatchStream, Error> {
+        let stream = ctx
+            .execute_plan(plan)
             .await
             .map_err(|err| Error::from(err))?;
+        Ok(stream)
+    }
 
+    pub async fn execute_plan(&self, ctx: &QueryContext, stmt: Statement, plan: LogicalPlan) -> Result<SendableRecordBatchStream, Error> {
+        use futures::channel::mpsc;
+
+        let is_incr = is_incremental(&plan).unwrap_or(false);
+
+        // If not incremental or streaming is not requested, execute just once
+        if !is_incr || !common::stream_helpers::is_streaming(&stmt) {
+            return Self::execute_once(&ctx, plan).await;
+        }
+
+        // Start infinite stream
         let mut current_end_block = dataset_store::sql_datasets::max_end_block(
-            &query,
+            &stmt,
             self.dataset_store.clone(),
             self.env.clone(),
         )
-        .await
-        .map_err(|e| Error::CoreError(CoreError::DatasetError(e)))?;
-
-        let is_incr =
-            is_incremental(&plan).map_err(|_| Error::UnsupportedStreamingQuery(sql.to_string()))?;
-
-        if !is_incr || !common::stream_helpers::is_streaming(&query) {
-            return Err(Error::UnsupportedStreamingQuery(sql.to_string()));
-        }
+            .await
+            .map_err(|e| Error::CoreError(CoreError::DatasetError(e)))?;
 
         let (tx, rx) = mpsc::unbounded();
 
@@ -210,18 +199,18 @@ impl Service {
         // initial range
         if let Some(end) = current_end_block {
             let mut stream = dataset_store::sql_datasets::execute_query_for_range(
-                query.clone(),
+                stmt.clone(),
                 self.dataset_store.clone(),
                 self.env.clone(),
                 0,
                 end,
             )
-            .await
-            .map_err(|_| {
-                Error::ExecutionError(DataFusionError::Execution(
-                    "???".to_string(), // TODO: need meaningful error here
-                ))
-            })?;
+                .await
+                .map_err(|_| {
+                    Error::ExecutionError(DataFusionError::Execution(
+                        "???".to_string(), // TODO: need meaningful error here
+                    ))
+                })?;
 
             while let Some(batch) = stream.next().await {
                 match batch {
@@ -242,7 +231,8 @@ impl Service {
             }
         }
 
-        let sql = sql.to_string();
+        //let sql = sql.to_string();
+        //let stmt = stmt.clone();
         let ds_store = self.dataset_store.clone();
         let env = self.env.clone();
 
@@ -250,8 +240,7 @@ impl Service {
         tokio::spawn(async move {
             match &ds_store.metadata_db {
                 Some(mdb) => {
-                    let query = parse_sql(&sql).map_err(|err| Error::from(err)).unwrap();
-                    let datasets = dataset_store::sql_datasets::queried_datasets(&query)
+                    let datasets = dataset_store::sql_datasets::queried_datasets(&stmt)
                         .await
                         .unwrap();
 
@@ -270,7 +259,7 @@ impl Service {
                                 match notification {
                                     Some(Ok(_)) => {
                                         let end = dataset_store::sql_datasets::max_end_block(
-                                            &query,
+                                            &stmt,
                                             ds_store.clone(),
                                             env.clone(),
                                         ).await.unwrap();
@@ -281,34 +270,27 @@ impl Service {
                                             (_, _) => continue,
                                         };
 
-                                        //let (start, end) = serde_json::from_str::<(u64, u64)>(&notification.payload()).unwrap();
-                                        //let compliment = synced_ranges.complement(start, end);
-                                        //println!("COMPLIMENT: {:?}", compliment);
+                                        let mut stream = dataset_store::sql_datasets::execute_query_for_range(
+                                            stmt.clone(),
+                                            ds_store.clone(),
+                                            env.clone(),
+                                            start,
+                                            end,
+                                        ).await.unwrap();
 
-
-                                        // for (start, end) in &compliment.ranges {
-                                            let mut stream = dataset_store::sql_datasets::execute_query_for_range(
-                                                query.clone(),
-                                                ds_store.clone(),
-                                                env.clone(),
-                                                start,
-                                                end,
-                                            ).await.unwrap();
-
-                                            while let Some(batch) = stream.next().await {
-                                                match batch {
-                                                    Ok(batch) => {
-                                                        if tx.unbounded_send(Ok(batch)).is_err() {
-                                                            return;
-                                                        }
-                                                    }
-                                                    Err(e) => {
-                                                        let _ = tx.unbounded_send(Err(e));
+                                        while let Some(batch) = stream.next().await {
+                                            match batch {
+                                                Ok(batch) => {
+                                                    if tx.unbounded_send(Ok(batch)).is_err() {
                                                         return;
                                                     }
                                                 }
+                                                Err(e) => {
+                                                    let _ = tx.unbounded_send(Err(e));
+                                                    return;
+                                                }
                                             }
-                                        //}
+                                        }
 
                                         current_end_block = Some(end);
                                     },
@@ -325,6 +307,26 @@ impl Service {
         let adapter = datafusion::physical_plan::stream::RecordBatchStreamAdapter::new(schema, rx);
 
         Ok(Box::pin(adapter) as SendableRecordBatchStream)
+    }
+
+    pub async fn execute_stream_query(
+        &self,
+        sql: &str,
+    ) -> Result<SendableRecordBatchStream, Error> {
+        let query = parse_sql(&sql).map_err(|err| Error::from(err))?;
+
+        let ctx = self
+            .dataset_store
+            .clone()
+            .ctx_for_sql(&query, self.env.clone())
+            .await
+            .map_err(|err| Error::DatasetStoreError(err))?;
+        let plan = ctx
+            .plan_sql(query.clone())
+            .await
+            .map_err(|err| Error::from(err))?;
+
+        self.execute_plan(&ctx, query, plan).await
     }
 }
 
