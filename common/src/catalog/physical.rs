@@ -18,6 +18,7 @@ use crate::{
     BoxError, Dataset,
 };
 
+#[derive(Debug, Clone)]
 pub struct Catalog {
     datasets: Vec<PhysicalDataset>,
     /// User-defined functions (UDFs) specific to this catalog.

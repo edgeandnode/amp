@@ -108,11 +108,6 @@ impl Store {
         self.store.get_string(location).await
     }
 
-    pub async fn put_string(&self, location: impl Into<Path>, s: String) -> Result<(), StoreError> {
-        self.store.put(&location.into(), s.into()).await?;
-        Ok(())
-    }
-
     pub fn list(&self, prefix: impl Into<Path>) -> BoxStream<'_, Result<ObjectMeta, StoreError>> {
         self.store
             .list(Some(&prefix.into()))
