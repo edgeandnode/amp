@@ -1,6 +1,6 @@
 import { FileSystem, Path } from "@effect/platform"
 import type { Cause } from "effect"
-import { Data, Effect, Either, Function, Match, Predicate, Schema, Stream } from "effect"
+import { Data, Effect, Either, Match, Predicate, Schema, Stream } from "effect"
 import * as ManifestBuilder from "./ManifestBuilder.js"
 import * as Model from "./Model.js"
 
@@ -86,28 +86,29 @@ export class ConfigLoader extends Effect.Service<ConfigLoader>()("Nozzle/ConfigL
       onError?: (cause: Cause.Cause<ConfigLoaderError>) => Effect.Effect<void, E, R>
     }): Stream.Stream<Model.DatasetManifest, ConfigLoaderError | E, R> => {
       const resolved = path.resolve(file)
+      const open = load(resolved).pipe(Effect.tapErrorCause(options?.onError ?? (() => Effect.void)), Effect.either)
+
       const updates = fs.watch(resolved).pipe(
+        Stream.buffer({ capacity: 1, strategy: "sliding" }),
         Stream.mapError((cause) => new ConfigLoaderError({ cause, message: "Failed to watch config file" })),
         Stream.filter(Predicate.isTagged("Update")),
+        Stream.mapEffect(() => open),
       )
 
-      const open = load(resolved).pipe(Effect.tapErrorCause(options?.onError ?? (() => Effect.void)), Effect.either)
       const build = (config: Model.DatasetDefinition) =>
         builder.build(config).pipe(
           Effect.mapError((cause) => new ConfigLoaderError({ cause, message: `Failed to build config file ${file}` })),
           Effect.tapErrorCause(options?.onError ?? (() => Effect.void)),
         ).pipe(Effect.either)
 
-      return Stream.concat(Stream.void, updates).pipe(
-        Stream.buffer({ capacity: 1, strategy: "sliding" }),
-        Stream.as(open),
-        Stream.mapEffect(Function.identity),
+      return Stream.fromEffect(open).pipe(
+        Stream.concat(updates),
         Stream.filterMap(Either.getRight),
         Stream.changesWith(Schema.equivalence(Model.DatasetDefinition)),
         Stream.mapEffect((config) => build(config)),
         Stream.filterMap(Either.getRight),
         Stream.changesWith(Schema.equivalence(Model.DatasetManifest)),
-      ) as any
+      )
     }
 
     return { load, find, watch, build }
