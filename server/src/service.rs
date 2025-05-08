@@ -155,19 +155,23 @@ impl Service {
     }
 
     pub async fn execute_query(&self, sql: &str) -> Result<SendableRecordBatchStream, Error> {
-        let query = parse_sql(sql).map_err(|err| Error::from(err))?;
+        let query = parse_sql(&sql).map_err(|err| Error::from(err))?;
+
         let ctx = self
             .dataset_store
             .clone()
             .ctx_for_sql(&query, self.env.clone())
             .await
             .map_err(|err| Error::DatasetStoreError(err))?;
-        let plan = ctx.plan_sql(query).await.map_err(|err| Error::from(err))?;
-        let stream = ctx
-            .execute_plan(plan)
+        let plan = ctx
+            .plan_sql(query.clone())
             .await
             .map_err(|err| Error::from(err))?;
-        Ok(stream)
+
+        let is_streaming =
+            is_incremental(&plan).unwrap_or(false) && common::stream_helpers::is_streaming(&query);
+
+        self.execute_plan(&ctx, plan, is_streaming).await
     }
 
     async fn execute_once(
@@ -310,29 +314,6 @@ impl Service {
         let adapter = datafusion::physical_plan::stream::RecordBatchStreamAdapter::new(schema, rx);
 
         Ok(Box::pin(adapter) as SendableRecordBatchStream)
-    }
-
-    pub async fn execute_stream_query(
-        &self,
-        sql: &str,
-    ) -> Result<SendableRecordBatchStream, Error> {
-        let query = parse_sql(&sql).map_err(|err| Error::from(err))?;
-
-        let ctx = self
-            .dataset_store
-            .clone()
-            .ctx_for_sql(&query, self.env.clone())
-            .await
-            .map_err(|err| Error::DatasetStoreError(err))?;
-        let plan = ctx
-            .plan_sql(query.clone())
-            .await
-            .map_err(|err| Error::from(err))?;
-
-        let is_streaming =
-            is_incremental(&plan).unwrap_or(false) && common::stream_helpers::is_streaming(&query);
-
-        self.execute_plan(&ctx, plan, is_streaming).await
     }
 }
 
@@ -510,7 +491,9 @@ impl Service {
         let query_ctx = QueryContext::for_catalog(catalog, self.env.clone())?;
         //let stream = query_ctx.execute_remote_plan(plan).await?;
         let plan = query_ctx.rewrite_remote_plan(plan).await?;
-        let stream = self.execute_plan(&query_ctx, plan, remote_plan.is_streaming).await?;
+        let stream = self
+            .execute_plan(&query_ctx, plan, remote_plan.is_streaming)
+            .await?;
 
         Ok(FlightDataEncoderBuilder::new()
             .with_schema(stream.schema())

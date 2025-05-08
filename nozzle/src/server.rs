@@ -143,10 +143,6 @@ async fn run_jsonl_server(
 ) -> BoxResult<(SocketAddr, impl Future<Output = BoxResult<()>>)> {
     let app = axum::Router::new()
         .route(
-            "/stream",
-            axum::routing::post(handle_jsonl_stream_request).with_state(service.clone()),
-        )
-        .route(
             "/",
             axum::routing::post(handle_jsonl_request).with_state(service),
         )
@@ -166,32 +162,6 @@ async fn handle_jsonl_request(
         format!(r#"{{"error": "{}"}}"#, message)
     }
     let stream = match service.execute_query(&request).await {
-        Ok(stream) => stream,
-        Err(err) => return err.into_response(),
-    };
-    let stream = stream
-        .map(|result| -> Result<String, BoxError> {
-            let batch = result.map_err(error_payload)?;
-            let mut buf: Vec<u8> = Default::default();
-            let mut writer = arrow::json::writer::LineDelimitedWriter::new(&mut buf);
-            writer.write(&batch)?;
-            Ok(String::from_utf8(buf).unwrap())
-        })
-        .map_err(error_payload);
-    axum::response::Response::builder()
-        .header("content-type", "application/x-ndjson")
-        .body(axum::body::Body::from_stream(stream))
-        .unwrap()
-}
-
-async fn handle_jsonl_stream_request(
-    axum::extract::State(service): axum::extract::State<Service>,
-    request: String,
-) -> axum::response::Response {
-    fn error_payload(message: impl std::fmt::Display) -> String {
-        format!(r#"{{"error": "{}"}}"#, message)
-    }
-    let stream = match service.execute_stream_query(&request).await {
         Ok(stream) => stream,
         Err(err) => return err.into_response(),
     };

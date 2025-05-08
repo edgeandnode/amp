@@ -41,8 +41,8 @@ use url::Url;
 
 use crate::catalog::physical::{Catalog, PhysicalTable};
 use crate::evm::udfs::{EvmDecode, EvmDecodeFunctionData, EvmTopic};
-use crate::{arrow, attestation, BoxError, Table};
 use crate::stream_helpers::is_streaming;
+use crate::{arrow, attestation, BoxError, Table};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -111,9 +111,12 @@ pub struct RemotePlan {
 
 pub fn remote_plan_from_bytes(bytes: &Bytes) -> Result<RemotePlan, Error> {
     let (remote_plan, _) = bincode::decode_from_slice::<RemotePlan, _>(bytes, config::standard())
-        .map_err(|e| Error::PlanEncodingError(
-            DataFusionError::Plan(format!("Failed to serialize remote plan: {}", e))
-        ))?;
+        .map_err(|e| {
+        Error::PlanEncodingError(DataFusionError::Plan(format!(
+            "Failed to serialize remote plan: {}",
+            e
+        )))
+    })?;
     Ok(remote_plan)
 }
 
@@ -151,10 +154,12 @@ impl PlanningContext {
             is_streaming,
         };
         let serialized_plan = Bytes::from(
-            bincode::encode_to_vec(remote_plan, config::standard())
-                .map_err(|e| Error::PlanEncodingError(
-                    DataFusionError::Plan(format!("Failed to serialize remote plan: {}", e))
-                ))?
+            bincode::encode_to_vec(remote_plan, config::standard()).map_err(|e| {
+                Error::PlanEncodingError(DataFusionError::Plan(format!(
+                    "Failed to serialize remote plan: {}",
+                    e
+                )))
+            })?,
         );
 
         Ok((serialized_plan, schema))
