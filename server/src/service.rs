@@ -489,7 +489,6 @@ impl Service {
             .load_catalog_for_table_refs(table_refs.iter())
             .await?;
         let query_ctx = QueryContext::for_catalog(catalog, self.env.clone())?;
-        //let stream = query_ctx.execute_remote_plan(plan).await?;
         let plan = query_ctx.prepare_remote_plan(plan).await?;
         let stream = self
             .execute_plan(&query_ctx, plan, remote_plan.is_streaming)
