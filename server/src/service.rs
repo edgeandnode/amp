@@ -155,7 +155,7 @@ impl Service {
     }
 
     pub async fn execute_query(&self, sql: &str) -> Result<SendableRecordBatchStream, Error> {
-        let query = parse_sql(&sql).map_err(|err| Error::from(err))?;
+        let query = parse_sql(sql).map_err(|err| Error::from(err))?;
 
         let ctx = self
             .dataset_store
