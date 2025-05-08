@@ -286,7 +286,9 @@ impl QueryContext {
         Ok(plan)
     }
 
-    pub async fn rewrite_remote_plan(&self, plan: LogicalPlan) -> Result<LogicalPlan, Error> {
+    /// A remote plan has empty tables, so this will attach the actual table providers from our
+    /// catalog to the plan before executing it.
+    pub async fn prepare_remote_plan(&self, plan: LogicalPlan) -> Result<LogicalPlan, Error> {
         let ctx = self.datafusion_ctx().await?;
         let all_tables = all_tables(&ctx).await;
         let mut rewriter = AttachTablesToPlan {
@@ -298,25 +300,6 @@ impl QueryContext {
             .data;
 
         Ok(plan)
-    }
-
-    /// A remote plan has empty tables, so this will attach the actual table providers from our
-    /// catalog to the plan before executing it.
-    pub async fn execute_remote_plan(
-        &self,
-        plan: LogicalPlan,
-    ) -> Result<SendableRecordBatchStream, Error> {
-        let ctx = self.datafusion_ctx().await?;
-        let all_tables = all_tables(&ctx).await;
-        let mut rewriter = AttachTablesToPlan {
-            providers: all_tables,
-        };
-        let plan = plan
-            .rewrite(&mut rewriter)
-            .map_err(Error::PlanningError)?
-            .data;
-
-        execute_plan(&ctx, plan).await
     }
 
     /// Because `DatasetContext` is read-only, planning and execution can be done on ephemeral
