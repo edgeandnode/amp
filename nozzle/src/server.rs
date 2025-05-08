@@ -39,7 +39,7 @@ pub async fn run(
         !config.spill_location.is_empty()
     );
 
-    let service = Service::new(config.clone(), metadata_db.clone())?;
+    let service = Service::new(config.clone(), metadata_db.clone()).await?;
 
     let flight_tcp_listener = TcpListener::bind(config.addrs.flight_addr)?;
     let flight_addr = flight_tcp_listener.local_addr()?;
