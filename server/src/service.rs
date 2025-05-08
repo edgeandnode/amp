@@ -162,7 +162,10 @@ impl Service {
             .ctx_for_sql(&query, self.env.clone())
             .await
             .map_err(|err| Error::DatasetStoreError(err))?;
-        let plan = ctx.plan_sql(query.clone()).await.map_err(|err| Error::from(err))?;
+        let plan = ctx
+            .plan_sql(query.clone())
+            .await
+            .map_err(|err| Error::from(err))?;
         let is_streaming =
             is_incremental(&plan).unwrap_or(false) && common::stream_helpers::is_streaming(&query);
 
