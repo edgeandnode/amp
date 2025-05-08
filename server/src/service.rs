@@ -497,7 +497,8 @@ impl Service {
             self.dataset_store.initial_catalog().await?,
             self.env.clone(),
         )?;
-        let plan = ctx.plan_from_bytes(&ticket.ticket).await?;
+        let remote_plan = common::query_context::remote_plan_from_bytes(&ticket.ticket)?;
+        let plan = ctx.plan_from_bytes(&remote_plan.serialized_plan).await?;
 
         // The deserialized plan references empty tables, so we need to load the actual tables from the catalog.
         let table_refs = collect_scanned_tables(&plan);
@@ -507,7 +508,9 @@ impl Service {
             .load_catalog_for_table_refs(table_refs.iter())
             .await?;
         let query_ctx = QueryContext::for_catalog(catalog, self.env.clone())?;
-        let stream = query_ctx.execute_remote_plan(plan).await?;
+        //let stream = query_ctx.execute_remote_plan(plan).await?;
+        let plan = query_ctx.rewrite_remote_plan(plan).await?;
+        let stream = self.execute_plan(&query_ctx, plan, remote_plan.is_streaming).await?;
 
         Ok(FlightDataEncoderBuilder::new()
             .with_schema(stream.schema())
