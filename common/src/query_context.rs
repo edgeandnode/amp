@@ -6,7 +6,6 @@ use arrow::compute::concat_batches;
 use arrow::datatypes::SchemaRef;
 use arrow::util::pretty::pretty_format_batches;
 use async_udf::physical_optimizer::AsyncFuncRule;
-use bincode::{config, Decode, Encode};
 use bytes::Bytes;
 use datafusion::common::tree_node::{Transformed, TreeNode as _, TreeNodeRewriter};
 use datafusion::common::{not_impl_err, DFSchema};
@@ -35,6 +34,7 @@ use datafusion_proto::bytes::{
 };
 use datafusion_proto::logical_plan::LogicalExtensionCodec;
 use futures::{StreamExt as _, TryStreamExt};
+use serde::{Serialize, Deserialize};
 use thiserror::Error;
 use tracing::{debug, instrument};
 use url::Url;
@@ -103,14 +103,14 @@ pub struct PlanningContext {
 }
 
 // Serialized plan with additional options
-#[derive(Encode, Decode)]
+#[derive(Serialize, Deserialize)]
 pub struct RemotePlan {
     pub serialized_plan: Vec<u8>,
     pub is_streaming: bool,
 }
 
 pub fn remote_plan_from_bytes(bytes: &Bytes) -> Result<RemotePlan, Error> {
-    let (remote_plan, _) = bincode::decode_from_slice::<RemotePlan, _>(bytes, config::standard())
+    let remote_plan: RemotePlan = bincode::deserialize(bytes)
         .map_err(|e| {
         Error::PlanEncodingError(DataFusionError::Plan(format!(
             "Failed to serialize remote plan: {}",
@@ -154,7 +154,7 @@ impl PlanningContext {
             is_streaming,
         };
         let serialized_plan = Bytes::from(
-            bincode::encode_to_vec(remote_plan, config::standard()).map_err(|e| {
+            bincode::serialize(&remote_plan).map_err(|e| {
                 Error::PlanEncodingError(DataFusionError::Plan(format!(
                     "Failed to serialize remote plan: {}",
                     e
