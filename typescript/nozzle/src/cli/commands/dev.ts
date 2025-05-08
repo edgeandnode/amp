@@ -54,27 +54,29 @@ export const dev = Command.make("dev", {
         onError: Utils.logCauseWith("Failed to load config"),
       }).pipe(
         Stream.buffer({ capacity: 1, strategy: "sliding" }),
-        Stream.runForEach((manifest) =>
+        Stream.tap((manifest) =>
           nozzle.deploy(manifest).pipe(Effect.catchAllCause(Utils.logCauseWith("Failed to deploy manifest")))
         ),
-        Effect.orDie,
+        Stream.orDie,
+        Stream.runDrain,
         Effect.forkScoped,
       )
 
       const rpc = yield* EvmRpc.EvmRpc
-      const dump = yield* rpc.blocks.pipe(Stream.chunks).pipe(
+      const dump = yield* rpc.blocks.pipe(
+        Stream.chunks,
+        Stream.filter(Chunk.isNonEmpty),
         Stream.mapAccumEffect(Option.none<Viem.Hash>(), (state, chunk) => {
-          const last = Chunk.last(chunk)
-          if (Option.isNone(last)) {
-            return Effect.succeed([state, void 0])
-          }
-
           // Reset nozzle if there's no previous block hash or if a reorg is detected.
           const reset = Option.isNone(state) || hasReorg(state.value, chunk)
-          return nozzle.dump(last.value.number, reset).pipe(Effect.as([Option.some(last.value.hash), void 0] as const))
+          const last = Chunk.lastNonEmpty(chunk)
+          return nozzle.dump(last.number, reset).pipe(
+            Effect.catchAllCause(Utils.logCauseWith("Failed to dump block")),
+            Effect.as([Option.some(last.hash), void 0] as const),
+          )
         }),
+        Stream.orDie,
         Stream.runDrain,
-        Effect.orDie,
         Effect.forkScoped,
       )
 

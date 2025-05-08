@@ -10,7 +10,7 @@
   },
   "devDependencies": {
     "@effect/eslint-plugin": "^0.3.2",
-    "@effect/language-service": "^0.9.1",
+    "@effect/language-service": "^0.10.0",
     "@eslint/js": "^9.25.1",
     "eslint": "^9.25.1",
     "eslint-import-resolver-typescript": "^4.3.4",
