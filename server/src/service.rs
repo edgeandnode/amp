@@ -156,18 +156,13 @@ impl Service {
 
     pub async fn execute_query(&self, sql: &str) -> Result<SendableRecordBatchStream, Error> {
         let query = parse_sql(sql).map_err(|err| Error::from(err))?;
-
         let ctx = self
             .dataset_store
             .clone()
             .ctx_for_sql(&query, self.env.clone())
             .await
             .map_err(|err| Error::DatasetStoreError(err))?;
-        let plan = ctx
-            .plan_sql(query.clone())
-            .await
-            .map_err(|err| Error::from(err))?;
-
+        let plan = ctx.plan_sql(query.clone()).await.map_err(|err| Error::from(err))?;
         let is_streaming =
             is_incremental(&plan).unwrap_or(false) && common::stream_helpers::is_streaming(&query);
 

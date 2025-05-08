@@ -352,7 +352,6 @@ mod tests {
         )];
         let catalog = Catalog::new(datasets);
         let config = Arc::new(Config::in_memory());
-        //let dataset_store = DatasetStore::new(config.clone(), None);
         let env = Arc::new(config.make_runtime_env().unwrap());
         let qc = QueryContext::for_catalog(catalog, env.clone()).unwrap();
 
