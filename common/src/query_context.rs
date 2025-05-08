@@ -34,7 +34,7 @@ use datafusion_proto::bytes::{
 };
 use datafusion_proto::logical_plan::LogicalExtensionCodec;
 use futures::{StreamExt as _, TryStreamExt};
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::{debug, instrument};
 use url::Url;
@@ -110,8 +110,7 @@ pub struct RemotePlan {
 }
 
 pub fn remote_plan_from_bytes(bytes: &Bytes) -> Result<RemotePlan, Error> {
-    let remote_plan: RemotePlan = bincode::deserialize(bytes)
-        .map_err(|e| {
+    let remote_plan: RemotePlan = bincode::deserialize(bytes).map_err(|e| {
         Error::PlanEncodingError(DataFusionError::Plan(format!(
             "Failed to serialize remote plan: {}",
             e
@@ -153,14 +152,12 @@ impl PlanningContext {
             serialized_plan: serialized_plan.to_vec(),
             is_streaming,
         };
-        let serialized_plan = Bytes::from(
-            bincode::serialize(&remote_plan).map_err(|e| {
-                Error::PlanEncodingError(DataFusionError::Plan(format!(
-                    "Failed to serialize remote plan: {}",
-                    e
-                )))
-            })?,
-        );
+        let serialized_plan = Bytes::from(bincode::serialize(&remote_plan).map_err(|e| {
+            Error::PlanEncodingError(DataFusionError::Plan(format!(
+                "Failed to serialize remote plan: {}",
+                e
+            )))
+        })?);
 
         Ok((serialized_plan, schema))
     }
