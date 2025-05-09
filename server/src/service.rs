@@ -173,7 +173,7 @@ impl Service {
             .await
             .map_err(|err| Error::from(err))?;
         let is_incr =
-            is_incremental(&plan).map_err(|e| Error::StreamingExecutionError(e.to_string()))?;
+            is_incremental(&plan).map_err(|e| Error::InvalidQuery(e.to_string()))?;
         let is_streaming = common::stream_helpers::is_streaming(&query);
         if is_streaming && !is_incr {
             return Err(Error::InvalidQuery(
