@@ -28,6 +28,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y protobuf-compiler
+
+      - uses: actions-rust-lang/setup-rust-toolchain@9d7e65c320fdb52dcd45ffaa68deb6c02c8754d9 # v1
+        with:
+          cache: false
+          rustflags: ''
+
       - name: Unit tests
         run: cargo test --verbose --workspace --exclude tests -- --nocapture
 
@@ -41,6 +47,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y protobuf-compiler postgresql
+
+      - uses: actions-rust-lang/setup-rust-toolchain@9d7e65c320fdb52dcd45ffaa68deb6c02c8754d9 # v1
+        with:
+          cache: false
+          rustflags: ''
+
       - name: Add PostgreSQL binaries to PATH
         run: |
           echo "/usr/lib/postgresql/$(pg_lsclusters | awk 'NR==2 {print $1}')/bin" >> $GITHUB_PATH
@@ -55,6 +67,7 @@ jobs:
           FIREHOSE_ETH_MAINNET_URL: ${{ secrets.FIREHOSE_ETH_MAINNET_URL }}
           FIREHOSE_ETH_MAINNET_TOKEN: ${{ secrets.FIREHOSE_ETH_MAINNET_TOKEN }}
           RPC_ETH_MAINNET_URL: ${{ secrets.RPC_ETH_MAINNET_URL }}
+
       - name: Integration tests
         run: cargo test --verbose -p tests -- --nocapture
 
@@ -64,6 +77,13 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+
+      - uses: actions-rust-lang/setup-rust-toolchain@9d7e65c320fdb52dcd45ffaa68deb6c02c8754d9 # v1
+        with:
+          components: rustfmt
+          cache: false
+          rustflags: ''
+
       - name: Check formatting
         run: cargo fmt --all -- --check
 
@@ -77,6 +97,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y protobuf-compiler
+
+      - uses: actions-rust-lang/setup-rust-toolchain@9d7e65c320fdb52dcd45ffaa68deb6c02c8754d9 # v1
+        with:
+          cache: false
+          rustflags: ''
+
       - name: Cargo check (release)
         run: cargo check --release
 
