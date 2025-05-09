@@ -5,6 +5,8 @@ pub fn cdc_pg_channel(dataset_name: &str) -> String {
     format!("cdc:{}", dataset_name)
 }
 
+// Returns true if the query is a streaming query, ending with "SETTINGS stream = true"
+// E.g. "SELECT * FROM eth_firehose.blocks SETTINGS stream = true"
 pub fn is_streaming(stmt: &Statement) -> bool {
     match stmt {
         Statement::Statement(box_stmt) => match box_stmt.as_ref() {
