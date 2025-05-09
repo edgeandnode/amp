@@ -8,7 +8,6 @@ use common::{
     catalog::{collect_scanned_tables, physical::Catalog},
     config::Config,
     query_context::{parse_sql, Error as CoreError, QueryContext},
-    BoxError,
 };
 use datafusion::{
     common::DFSchema,
