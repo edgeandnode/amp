@@ -8,6 +8,7 @@ use common::{
     catalog::{collect_scanned_tables, physical::Catalog},
     config::Config,
     query_context::{parse_sql, Error as CoreError, QueryContext},
+    BoxError,
 };
 use datafusion::{
     common::DFSchema,
@@ -49,7 +50,7 @@ pub enum Error {
     UnsupportedFlightDescriptorCommand(String),
 
     #[error("query execution error: {0}")]
-    DataFusionExecutionError(DataFusionError),
+    ExecutionError(DataFusionError),
 
     #[error("error looking up datasets: {0}")]
     DatasetStoreError(#[from] DatasetError),
@@ -57,8 +58,11 @@ pub enum Error {
     #[error(transparent)]
     CoreError(#[from] CoreError),
 
-    #[error("query execution error: {0}")]
-    ExecutionError(String),
+    #[error("invalid query: {0}")]
+    InvalidQuery(String),
+
+    #[error("streaming query execution error: {0}")]
+    StreamingExecutionError(String),
 }
 
 impl From<prost::DecodeError> for Error {
@@ -90,13 +94,14 @@ impl IntoResponse for Error {
                 | CoreError::ExecutionError(_)
                 | CoreError::MetaTableError(_),
             ) => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::DataFusionExecutionError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::ExecutionError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::StreamingExecutionError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::DatasetStoreError(e) if e.is_not_found() => StatusCode::NOT_FOUND,
             Error::DatasetStoreError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::PbDecodeError(_) => StatusCode::BAD_REQUEST,
             Error::UnsupportedFlightDescriptorType(_) => StatusCode::BAD_REQUEST,
             Error::UnsupportedFlightDescriptorCommand(_) => StatusCode::BAD_REQUEST,
+            Error::InvalidQuery(_) => StatusCode::BAD_REQUEST,
         };
         let body = serde_json::json!({
             "error": error_message,
@@ -130,8 +135,9 @@ impl From<Error> for Status {
                 | CoreError::MetaTableError(df),
             ) => datafusion_error_to_status(&e, df),
 
-            Error::DataFusionExecutionError(df) => datafusion_error_to_status(&e, df),
-            Error::ExecutionError(_) => Status::internal(e.to_string()),
+            Error::ExecutionError(df) => datafusion_error_to_status(&e, df),
+            Error::StreamingExecutionError(_) => Status::internal(e.to_string()),
+            Error::InvalidQuery(_) => Status::invalid_argument(e.to_string()),
         }
     }
 }
@@ -145,7 +151,7 @@ pub struct Service {
 
 impl Service {
     pub async fn new(config: Arc<Config>, metadata_db: Option<MetadataDb>) -> Result<Self, Error> {
-        let env = Arc::new(config.make_runtime_env().map_err(Error::DataFusionExecutionError)?);
+        let env = Arc::new(config.make_runtime_env().map_err(Error::ExecutionError)?);
         let dataset_store = DatasetStore::new(config.clone(), metadata_db);
         let initial_catalog = dataset_store.initial_catalog().await?;
         Ok(Self {
@@ -167,8 +173,14 @@ impl Service {
             .plan_sql(query.clone())
             .await
             .map_err(|err| Error::from(err))?;
-        let is_streaming =
-            is_incremental(&plan).unwrap_or(false) && common::stream_helpers::is_streaming(&query);
+        let is_incr =
+            is_incremental(&plan).map_err(|e| Error::StreamingExecutionError(e.to_string()))?;
+        let is_streaming = common::stream_helpers::is_streaming(&query);
+        if is_streaming && !is_incr {
+            return Err(Error::InvalidQuery(
+                "not incremental queries are not supported for streaming".to_string(),
+            ));
+        }
 
         self.execute_plan(&ctx, plan, is_streaming).await
     }
@@ -191,8 +203,7 @@ impl Service {
         is_streaming: bool,
     ) -> Result<SendableRecordBatchStream, Error> {
         let stmt = Statement::Statement(Box::new(
-            datafusion::sql::unparser::plan_to_sql(&plan)
-                .map_err(|e| Error::DataFusionExecutionError(e))?,
+            datafusion::sql::unparser::plan_to_sql(&plan).map_err(|e| Error::ExecutionError(e))?,
         ));
 
         use futures::channel::mpsc;
@@ -226,13 +237,16 @@ impl Service {
             )
             .await
             .map_err(|e| {
-                Error::ExecutionError(format!("failed to execute query for a range: {}", e))
+                Error::StreamingExecutionError(format!(
+                    "failed to execute query for a range: {}",
+                    e
+                ))
             })?;
 
             while let Some(batch) = stream.next().await {
                 let send_result = tx.unbounded_send(batch);
                 if send_result.is_err() {
-                    return Err(Error::ExecutionError(
+                    return Err(Error::StreamingExecutionError(
                         "failed to return a next batch".to_string(),
                     ));
                 }
@@ -262,7 +276,9 @@ impl Service {
                         &stmt,
                         ds_store.clone(),
                         env.clone(),
-                    ).await.unwrap();
+                    )
+                    .await
+                    .unwrap();
 
                     let (start, end) = match (current_end_block, end) {
                         (Some(start), Some(end)) if end > start => (start + 1, end),
@@ -276,7 +292,9 @@ impl Service {
                         env.clone(),
                         start,
                         end,
-                    ).await.unwrap();
+                    )
+                    .await
+                    .unwrap();
 
                     while let Some(batch) = stream.next().await {
                         match batch {
@@ -460,10 +478,7 @@ impl Service {
         //  DataFusion requires a context for initially deserializing a logical plan. That context is used a
         // `FunctionRegistry` for UDFs. That context must include all UDFs that may be used in the
         // query.
-        let ctx = QueryContext::for_catalog(
-            self.initial_catalog.clone(),
-            self.env.clone(),
-        )?;
+        let ctx = QueryContext::for_catalog(self.initial_catalog.clone(), self.env.clone())?;
         let remote_plan = common::query_context::remote_plan_from_bytes(&ticket.ticket)?;
         let plan = ctx.plan_from_bytes(&remote_plan.serialized_plan).await?;
 
@@ -484,7 +499,7 @@ impl Service {
             .with_schema(stream.schema())
             .build(
                 stream
-                    .map_err(Error::DataFusionExecutionError)
+                    .map_err(Error::ExecutionError)
                     .map_err(Status::from)
                     .err_into(),
             )
