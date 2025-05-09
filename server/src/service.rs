@@ -243,69 +243,56 @@ impl Service {
 
         // async listen
         tokio::spawn(async move {
-            match &ds_store.metadata_db {
-                Some(mdb) => {
-                    let datasets = dataset_store::sql_datasets::queried_datasets(&stmt)
-                        .await
-                        .unwrap();
+            if let Some(mdb) = &ds_store.metadata_db {
+                let datasets = dataset_store::sql_datasets::queried_datasets(&stmt)
+                    .await
+                    .unwrap();
 
-                    let mut notifications = Vec::new();
-                    for dataset_name in datasets {
-                        let channel = common::stream_helpers::cdc_pg_channel(&dataset_name);
-                        let stream = mdb.listen(&channel).await.unwrap();
-                        notifications.push(stream);
-                    }
-                    let mut notifications = futures::stream::select_all(notifications);
+                let mut notifications = Vec::new();
+                for dataset_name in datasets {
+                    let channel = common::stream_helpers::cdc_pg_channel(&dataset_name);
+                    let stream = mdb.listen(&channel).await.unwrap();
+                    notifications.push(stream);
+                }
+                let mut notifications = futures::stream::select_all(notifications);
 
-                    loop {
-                        tokio::select! {
-                            _ = tokio::signal::ctrl_c() => return,
-                            notification = notifications.next() => {
-                                match notification {
-                                    Some(Ok(_)) => {
-                                        let end = dataset_store::sql_datasets::max_end_block(
-                                            &stmt,
-                                            ds_store.clone(),
-                                            env.clone(),
-                                        ).await.unwrap();
+                while let Some(Ok(_)) = notifications.next().await {
+                    let end = dataset_store::sql_datasets::max_end_block(
+                        &stmt,
+                        ds_store.clone(),
+                        env.clone(),
+                    ).await.unwrap();
 
-                                        let (start, end) = match (current_end_block, end) {
-                                            (Some(start), Some(end)) if end > start => (start + 1, end),
-                                            (None, Some(end)) => (0, end),
-                                            (_, _) => continue,
-                                        };
+                    let (start, end) = match (current_end_block, end) {
+                        (Some(start), Some(end)) if end > start => (start + 1, end),
+                        (None, Some(end)) => (0, end),
+                        (_, _) => continue,
+                    };
 
-                                        let mut stream = dataset_store::sql_datasets::execute_query_for_range(
-                                            stmt.clone(),
-                                            ds_store.clone(),
-                                            env.clone(),
-                                            start,
-                                            end,
-                                        ).await.unwrap();
+                    let mut stream = dataset_store::sql_datasets::execute_query_for_range(
+                        stmt.clone(),
+                        ds_store.clone(),
+                        env.clone(),
+                        start,
+                        end,
+                    ).await.unwrap();
 
-                                        while let Some(batch) = stream.next().await {
-                                            match batch {
-                                                Ok(batch) => {
-                                                    if tx.unbounded_send(Ok(batch)).is_err() {
-                                                        return;
-                                                    }
-                                                }
-                                                Err(e) => {
-                                                    let _ = tx.unbounded_send(Err(e));
-                                                    return;
-                                                }
-                                            }
-                                        }
-
-                                        current_end_block = Some(end);
-                                    },
-                                    _ => return,
+                    while let Some(batch) = stream.next().await {
+                        match batch {
+                            Ok(batch) => {
+                                if tx.unbounded_send(Ok(batch)).is_err() {
+                                    return;
                                 }
-                            },
+                            }
+                            Err(e) => {
+                                let _ = tx.unbounded_send(Err(e));
+                                return;
+                            }
                         }
                     }
-                }
-                _ => return,
+
+                    current_end_block = Some(end);
+                }                
             }
         });
 
