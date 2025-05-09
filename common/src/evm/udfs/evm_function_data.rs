@@ -5,26 +5,27 @@ use crate::{
         array::{Array, BinaryArray, StructBuilder},
         datatypes::{DataType, Field, Fields},
     },
-    evm::udfs::FieldBuilder,
+    evm::udfs::{array_to_sol_value, num_rows, scalar_to_sol_value, FieldBuilder},
+    plan,
 };
 use alloy::{
     dyn_abi::{DynSolType, FunctionExt, JsonAbiExt, Specifier as _},
     json_abi::Function as AlloyFunction,
 };
 use datafusion::{
-    arrow::array::ArrayBuilder,
-    common::{internal_err, plan_err},
+    arrow::array::{ArrayBuilder, BinaryBuilder},
+    common::plan_err,
     error::DataFusionError,
     logical_expr::{
         simplify::{ExprSimplifyResult, SimplifyInfo},
-        ColumnarValue, ScalarUDFImpl, Signature, Volatility,
+        ColumnarValue, ReturnFieldArgs, ScalarUDFImpl, Signature, Volatility,
     },
     prelude::Expr,
     scalar::ScalarValue,
 };
 use itertools::izip;
 
-use super::arrow_type;
+use super::sol_to_arrow_type;
 
 struct FunctionCall {
     alloy_function: AlloyFunction,
@@ -148,7 +149,7 @@ impl ScalarUDFImpl for EvmDecodeFunctionData {
     ) -> datafusion::error::Result<ColumnarValue> {
         let args = args.args;
         if args.len() != 2 {
-            return internal_err!(
+            return plan_err!(
                 "{}: expected 2 arguments, but got {}",
                 self.name(),
                 args.len()
@@ -174,13 +175,10 @@ impl ScalarUDFImpl for EvmDecodeFunctionData {
         Ok(ColumnarValue::Array(ary))
     }
 
-    fn return_field_from_args(
-        &self,
-        args: datafusion::logical_expr::ReturnFieldArgs,
-    ) -> datafusion::error::Result<Field> {
+    fn return_field_from_args(&self, args: ReturnFieldArgs) -> datafusion::error::Result<Field> {
         let args = args.scalar_arguments;
         if args.len() != 2 {
-            return internal_err!(
+            return plan_err!(
                 "{}: expected 2 arguments, but got {}",
                 self.name(),
                 args.len()
@@ -292,11 +290,100 @@ impl EvmDecodeFunctionData {
         let mut fields = Vec::new();
         for (name, ty) in names.iter().zip(types.iter()) {
             let name = name.clone();
-            let df = arrow_type(ty)?;
+            let df = sol_to_arrow_type(ty)?;
             let field = Field::new(name, df, true);
             fields.push(field);
         }
         Ok(Fields::from(fields))
+    }
+}
+
+#[derive(Debug)]
+pub struct EvmEncodeParams {
+    signature: Signature,
+}
+
+impl EvmEncodeParams {
+    pub fn new() -> Self {
+        let signature = Signature::variadic_any(Volatility::Immutable);
+        Self { signature }
+    }
+}
+
+impl ScalarUDFImpl for EvmEncodeParams {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn name(&self) -> &str {
+        "evm_encode_params"
+    }
+
+    fn signature(&self) -> &Signature {
+        &self.signature
+    }
+
+    fn return_type(&self, _: &[DataType]) -> datafusion::error::Result<DataType> {
+        Ok(DataType::Binary)
+    }
+
+    fn invoke_with_args(
+        &self,
+        args: datafusion::logical_expr::ScalarFunctionArgs,
+    ) -> datafusion::error::Result<ColumnarValue> {
+        let args = args.args;
+        if args.len() < 1 {
+            return plan_err!(
+                "{}: expected at least 1 argument (Solidity function signature), but got {}",
+                self.name(),
+                args.len()
+            );
+        }
+        let signature = match &args[args.len() - 1] {
+            ColumnarValue::Scalar(scalar) => scalar,
+            v => {
+                return plan_err!(
+                    "{}: expected scalar argument for the Solidity function signature but got {}",
+                    self.name(),
+                    v.data_type()
+                )
+            }
+        };
+
+        let call = FunctionCall::try_from(signature).map_err(|e| e.context(self.name()))?;
+        let args = &args[..args.len() - 1];
+
+        if args.len() != call.input_types.len() {
+            return plan_err!(
+                "{}: expected {} arguments for the function signature but got {}",
+                self.name(),
+                call.input_types.len(),
+                args.len()
+            );
+        }
+
+        let mut builder = BinaryBuilder::new();
+        for i in 0..num_rows(args) {
+            let mut sol_values = Vec::new();
+            for (arg, sol_ty) in args.iter().zip(call.input_types.iter()) {
+                let sol_value = match arg {
+                    ColumnarValue::Scalar(scalar) => scalar_to_sol_value(scalar.clone(), &sol_ty)?,
+                    ColumnarValue::Array(ary) => array_to_sol_value(ary, &sol_ty, i)?,
+                };
+                sol_values.push(sol_value);
+            }
+            let encoded = call
+                .alloy_function
+                .abi_encode_input(&sol_values)
+                .map_err(|e| plan!("failed to encode function call params: {}", e))?;
+            builder.append_value(encoded);
+        }
+
+        Ok(ColumnarValue::Array(ArrayBuilder::finish(&mut builder)))
+    }
+
+    fn aliases(&self) -> &[String] {
+        &[]
     }
 }
 
