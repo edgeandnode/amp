@@ -5,7 +5,7 @@ use axum::{
 };
 use common::{
     arrow::{self, ipc::writer::IpcDataGenerator},
-    catalog::collect_scanned_tables,
+    catalog::{collect_scanned_tables, physical::Catalog},
     config::Config,
     query_context::{parse_sql, Error as CoreError, QueryContext},
 };
@@ -140,17 +140,18 @@ impl From<Error> for Status {
 pub struct Service {
     env: Arc<RuntimeEnv>,
     dataset_store: Arc<DatasetStore>,
+    initial_catalog: Catalog,
 }
 
 impl Service {
-    pub fn new(
-        config: Arc<Config>,
-        metadata_db: Option<MetadataDb>,
-    ) -> Result<Self, DataFusionError> {
-        let env = Arc::new(config.make_runtime_env()?);
+    pub async fn new(config: Arc<Config>, metadata_db: Option<MetadataDb>) -> Result<Self, Error> {
+        let env = Arc::new(config.make_runtime_env().map_err(Error::ExecutionError)?);
+        let dataset_store = DatasetStore::new(config.clone(), metadata_db);
+        let initial_catalog = dataset_store.initial_catalog().await?;
         Ok(Self {
             env,
-            dataset_store: DatasetStore::new(config, metadata_db),
+            dataset_store,
+            initial_catalog,
         })
     }
 
@@ -292,7 +293,7 @@ impl Service {
                     }
 
                     current_end_block = Some(end);
-                }                
+                }
             }
         });
 
@@ -460,7 +461,7 @@ impl Service {
         // `FunctionRegistry` for UDFs. That context must include all UDFs that may be used in the
         // query.
         let ctx = QueryContext::for_catalog(
-            self.dataset_store.initial_catalog().await?,
+            self.initial_catalog.clone(),
             self.env.clone(),
         )?;
         let remote_plan = common::query_context::remote_plan_from_bytes(&ticket.ticket)?;

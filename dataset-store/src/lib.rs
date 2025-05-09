@@ -186,8 +186,10 @@ impl fmt::Display for DatasetError {
 pub struct DatasetStore {
     config: Arc<Config>,
     pub metadata_db: Option<MetadataDb>,
-    // Cache maps dataset name to eth_call UDF.
+    // This cache maps dataset name to eth_call UDF.
     eth_call_cache: Arc<RwLock<HashMap<String, ScalarUDF>>>,
+    // This cache maps dataset name to the dataset definition.
+    dataset_cache: Arc<RwLock<HashMap<String, DatasetWithProvider>>>,
 }
 
 impl DatasetStore {
@@ -196,6 +198,7 @@ impl DatasetStore {
             config,
             metadata_db,
             eth_call_cache: Default::default(),
+            dataset_cache: Default::default(),
         })
     }
 
@@ -273,6 +276,10 @@ impl DatasetStore {
         self: Arc<Self>,
         dataset_name: &str,
     ) -> Result<DatasetWithProvider, Error> {
+        if let Some(dataset) = self.dataset_cache.read().unwrap().get(dataset_name) {
+            return Ok(dataset.clone());
+        }
+
         let (kind, raw_dataset) = self.kind_and_dataset(dataset_name).await?;
 
         let dataset = match kind {
@@ -291,7 +298,7 @@ impl DatasetStore {
             DatasetKind::Sql => {
                 let dataset_toml: toml::Value = toml::from_str(&raw_dataset)?;
                 DatasetWithProvider {
-                    dataset: self.sql_dataset(dataset_toml).await?.dataset,
+                    dataset: self.clone().sql_dataset(dataset_toml).await?.dataset,
                     provider: None,
                 }
             }
@@ -306,6 +313,12 @@ impl DatasetStore {
                 }
             }
         };
+
+        // Cache the dataset.
+        self.dataset_cache
+            .write()
+            .unwrap()
+            .insert(dataset_name.to_string(), dataset.clone());
 
         Ok(dataset)
     }
