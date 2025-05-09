@@ -1,4 +1,5 @@
 use std::mem;
+use std::sync::Arc;
 use std::time::Duration;
 
 use alloy::consensus::Transaction as _;
@@ -40,12 +41,19 @@ pub enum ToRowError {
 pub struct JsonRpcClient {
     client: alloy::providers::ReqwestProvider,
     network: String,
+    limiter: Arc<tokio::sync::Semaphore>,
 }
 
 impl JsonRpcClient {
-    pub fn new(url: Url, network: String) -> Result<Self, BoxError> {
+    pub fn new(url: Url, network: String, request_limit: u16) -> Result<Self, BoxError> {
+        assert!(request_limit >= 1);
         let client = alloy::providers::ProviderBuilder::new().on_http(url);
-        Ok(Self { client, network })
+        let limiter = tokio::sync::Semaphore::new(request_limit as usize).into();
+        Ok(Self {
+            client,
+            network,
+            limiter,
+        })
     }
 
     async fn block_stream(
@@ -55,6 +63,7 @@ impl JsonRpcClient {
         tx: mpsc::Sender<DatasetRows>,
     ) -> Result<(), BoxError> {
         for block_num in start_block..=end_block {
+            let client_permit = self.limiter.acquire().await;
             let block = self
                 .client
                 .get_block_by_number(
@@ -70,6 +79,7 @@ impl JsonRpcClient {
                     .map(|hash| self.client.get_transaction_receipt(hash)),
             )
             .await?;
+            drop(client_permit);
 
             let rows = rpc_to_rows(block, receipts, &self.network)?;
 
@@ -104,6 +114,7 @@ impl BlockStreamer for JsonRpcClient {
             false => BlockNumberOrTag::Latest,
         };
         let kind = BlockTransactionsKind::Hashes;
+        let _permit = self.limiter.acquire();
         let block = self.client.get_block_by_number(number, kind).await?;
         Ok(block.map(|b| b.header.number).unwrap_or(0))
     }

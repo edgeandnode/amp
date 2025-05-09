@@ -25,6 +25,7 @@ pub(crate) struct DatasetDef {
     pub name: String,
     pub provider: String,
     pub network: String,
+    pub concurrent_request_limit: Option<u16>,
 }
 
 #[serde_as]
@@ -53,7 +54,9 @@ pub async fn client(
     let def: DatasetDef = dataset_cfg.try_into()?;
     let provider_string = provider_store.get_string(def.provider.as_str()).await?;
     let provider: EvmRpcProvider = toml::from_str(&provider_string)?;
-    let client = JsonRpcClient::new(provider.url, def.network).map_err(Error::Client)?;
+    let request_limit = u16::max(1, def.concurrent_request_limit.unwrap_or(1024));
+    let client =
+        JsonRpcClient::new(provider.url, def.network, request_limit).map_err(Error::Client)?;
     Ok(client)
 }
 
