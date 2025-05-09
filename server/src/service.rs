@@ -172,6 +172,7 @@ impl Service {
             .plan_sql(query.clone())
             .await
             .map_err(|err| Error::from(err))?;
+        // is_incremental returns an error if query contains EXPLAIN, DML, etc.
         let is_incr =
             is_incremental(&plan).map_err(|e| Error::InvalidQuery(e.to_string()))?;
         let is_streaming = common::stream_helpers::is_streaming(&query);
