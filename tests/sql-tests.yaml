@@ -200,3 +200,27 @@
     SELECT evm_decode_params(decode('26121ff0', 'hex'), 'function f()') AS decoded
   results: |
     [{"decoded": {}}]
+
+- name: evm_encode_decimal_256_with_scale
+  query: |
+    SELECT evm_encode_type(CAST(635 AS DECIMAL(39, 1)), 'uint256') AS uint256
+  failure: |
+    Unsupported type Decimal256(39, 1) for Solidity type uint256
+
+- name: evm_encode_decimal_128_with_scale
+  query: |
+    SELECT evm_encode_type(CAST(635 AS DECIMAL(38, 1)), 'uint128') AS uint128
+  failure: |
+    Unsupported type Decimal128(38, 1) for Solidity type uint128
+
+- name: evm_encode_decimal_256_with_trailing_zeros
+  query: |
+    SELECT evm_encode_type(CAST(635000 AS DECIMAL(39, 0)), 'uint256') AS uint256
+  results: |
+    [{"uint256":"000000000000000000000000000000000000000000000000000000000009b078"}]
+
+- name: evm_encode_decimal_128_with_trailing_zeros
+  query: |
+    SELECT evm_encode_type(CAST(635000 AS DECIMAL(38, 0)), 'uint128') AS uint128
+  results: |
+    [{"uint128":"000000000000000000000000000000000000000000000000000000000009b078"}]

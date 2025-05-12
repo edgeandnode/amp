@@ -739,16 +739,20 @@ fn scalar_to_sol_value(
         ScalarValue::UInt16(Some(u)) => uint_to_sol_value(u.try_into().unwrap(), sol_type),
         ScalarValue::UInt32(Some(u)) => uint_to_sol_value(u.try_into().unwrap(), sol_type),
         ScalarValue::UInt64(Some(u)) => uint_to_sol_value(u.try_into().unwrap(), sol_type),
-        ScalarValue::Decimal128(Some(d), _, _) if matches!(sol_type, DynSolType::Int(_)) => {
+        ScalarValue::Decimal128(Some(d), _, scale)
+            if scale <= 0 && matches!(sol_type, DynSolType::Int(_)) =>
+        {
             int_to_sol_value(d.try_into().unwrap(), sol_type)
         }
-        ScalarValue::Decimal128(Some(d), _, _) => {
+        ScalarValue::Decimal128(Some(d), _, scale) if scale <= 0 => {
             uint_to_sol_value(d.try_into().unwrap(), sol_type)
         }
-        ScalarValue::Decimal256(Some(d), _, _) if matches!(sol_type, DynSolType::Int(_)) => {
+        ScalarValue::Decimal256(Some(d), _, scale)
+            if scale <= 0 && matches!(sol_type, DynSolType::Int(_)) =>
+        {
             int_to_sol_value(I256::from_le_bytes(d.to_le_bytes()), sol_type)
         }
-        ScalarValue::Decimal256(Some(d), _, _) => {
+        ScalarValue::Decimal256(Some(d), _, scale) if scale <= 0 => {
             uint_to_sol_value(U256::from_le_bytes(d.to_le_bytes()), sol_type)
         }
         ScalarValue::Utf8(Some(s))
@@ -874,7 +878,7 @@ fn array_to_sol_value(
                 .value(idx);
             uint_to_sol_value(value.try_into().unwrap(), sol_type)
         }
-        DataType::Decimal128(_, _) if matches!(sol_type, DynSolType::Int(_)) => {
+        DataType::Decimal128(_, scale) if *scale <= 0 && matches!(sol_type, DynSolType::Int(_)) => {
             let value = ary
                 .as_any()
                 .downcast_ref::<Decimal128Array>()
@@ -882,7 +886,7 @@ fn array_to_sol_value(
                 .value(idx);
             int_to_sol_value(value.try_into().unwrap(), sol_type)
         }
-        DataType::Decimal128(_, _) => {
+        DataType::Decimal128(_, scale) if *scale <= 0 => {
             let value = ary
                 .as_any()
                 .downcast_ref::<Decimal128Array>()
@@ -890,7 +894,7 @@ fn array_to_sol_value(
                 .value(idx);
             uint_to_sol_value(value.try_into().unwrap(), sol_type)
         }
-        DataType::Decimal256(_, _) if matches!(sol_type, DynSolType::Int(_)) => {
+        DataType::Decimal256(_, scale) if *scale <= 0 && matches!(sol_type, DynSolType::Int(_)) => {
             let value = ary
                 .as_any()
                 .downcast_ref::<Decimal256Array>()
@@ -898,7 +902,7 @@ fn array_to_sol_value(
                 .value(idx);
             int_to_sol_value(I256::from_le_bytes(value.to_le_bytes()), sol_type)
         }
-        DataType::Decimal256(_, _) => {
+        DataType::Decimal256(_, scale) if *scale <= 0 => {
             let value = ary
                 .as_any()
                 .downcast_ref::<Decimal256Array>()
