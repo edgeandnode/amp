@@ -16,13 +16,14 @@ use parquet::file::properties::WriterProperties as ParquetWriterProperties;
 use tracing::debug;
 use url::Url;
 
-pub struct DatasetWriter {
+/// Only used for raw datasets.
+pub struct RawDatasetWriter {
     writers: BTreeMap<String, TableWriter>,
 
     metadata_db: Option<Arc<MetadataDb>>,
 }
 
-impl DatasetWriter {
+impl RawDatasetWriter {
     /// Expects `dataset_ctx` to contain a single dataset and `scanned_ranges_by_table` to contain
     /// one entry per table in that dataset.
     pub fn new(
@@ -50,7 +51,7 @@ impl DatasetWriter {
             )?;
             writers.insert(table_name.to_string(), writer);
         }
-        Ok(DatasetWriter {
+        Ok(RawDatasetWriter {
             writers,
             metadata_db,
         })
