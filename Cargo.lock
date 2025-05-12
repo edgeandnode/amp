@@ -1827,6 +1827,7 @@ dependencies = [
  "fs-err",
  "futures",
  "itertools 0.14.0",
+ "js-runtime",
  "metadata-db",
  "object_store",
  "rand 0.9.1",

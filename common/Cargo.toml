@@ -29,6 +29,7 @@ semver.workspace = true
 async-udf = { path = "../async-udf" }
 async-trait.workspace = true
 bincode.workspace = true
+js-runtime = { path = "../js-runtime" }
 
 [dev-dependencies]
 rand = "0.9.0"

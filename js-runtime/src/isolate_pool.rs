@@ -20,7 +20,7 @@ struct JsInvoke<R> {
     filename: Arc<str>,
     script: Arc<str>,
     function: Arc<str>,
-    params_batches: Vec<Vec<Box<dyn ToV8>>>,
+    params_batch: Vec<Vec<Box<dyn ToV8>>>,
     res_tx: oneshot::Sender<Result<Vec<R>, Error>>,
 }
 
@@ -29,7 +29,7 @@ impl<R> JsInvoke<R> {
         filename: Arc<str>,
         script: Arc<str>,
         function: Arc<str>,
-        params_batches: Vec<Vec<Box<dyn ToV8>>>,
+        params_batch: Vec<Vec<Box<dyn ToV8>>>,
     ) -> (Self, oneshot::Receiver<Result<Vec<R>, Error>>) {
         let (res_tx, res_rx) = oneshot::channel();
         (
@@ -37,7 +37,7 @@ impl<R> JsInvoke<R> {
                 filename,
                 script,
                 function,
-                params_batches,
+                params_batch,
                 res_tx,
             },
             res_rx,
@@ -55,7 +55,7 @@ impl<R: FromV8> DynJsInvoke for JsInvoke<R> {
             filename,
             script,
             function,
-            params_batches,
+            params_batch,
             res_tx,
         } = *self;
 
@@ -65,7 +65,7 @@ impl<R: FromV8> DynJsInvoke for JsInvoke<R> {
                 filename.as_ref(),
                 script.as_ref(),
                 function.as_ref(),
-                params_batches
+                params_batch
                     .iter()
                     .map(|p| p.iter().map(|p| p.as_ref()))
                     .collect(),
@@ -85,12 +85,13 @@ impl<R: FromV8> DynJsInvoke for JsInvoke<R> {
     }
 }
 
-/// A pool of V8 isolates, each running in its own thread.
-pub struct IsolateThreadPool {
+/// Handle to a pool of V8 isolates, each running in its own thread.
+#[derive(Debug, Clone)]
+pub struct IsolatePool {
     pool: Pool<IsolateThread>,
 }
 
-impl IsolateThreadPool {
+impl IsolatePool {
     pub fn new() -> Self {
         let size = num_cpus::get();
         let pool = Pool::new(size);
