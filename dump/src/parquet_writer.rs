@@ -185,12 +185,19 @@ impl TableWriter {
         }
 
         let bytes_written = self.current_file.as_ref().unwrap().bytes_written();
+        let rows_written = self.current_file.as_ref().unwrap().rows_written();
 
-        // Check if we need to create a new part file for the table.
+        // Check if we need to create a new part file before writing this batch of rows.
+        // Two conditions can trigger this:
+        // 1. The size of the current row group already exceeds the configured max `partition_size`.
+        // 2. The row count would exceed the maximum row group size. So each file will have exactly
+        //    one row group.
         //
         // TODO: Try switching to `ArrowWriter::memory_size()` once
         // https://github.com/apache/arrow-rs/pull/5967 is merged and released.
-        if bytes_written >= self.partition_size {
+        if bytes_written >= self.partition_size
+            || rows_written + table_rows.rows.num_rows() > self.opts.max_row_group_size()
+        {
             // `scanned_range` would be `Some` if we have had just created a new a file above, so no
             // bytes would have been written yet.
             assert!(scanned_range.is_none());
@@ -285,6 +292,9 @@ pub struct ParquetFileWriter {
     // Sum of `get_slice_memory_size` for all data written. Does not correspond to the actual size of
     // the written file, particularly because this is uncompressed.
     bytes_written: u64,
+
+    // The number of rows written to the file.
+    rows_written: usize,
 }
 
 impl ParquetFileWriter {
@@ -301,7 +311,7 @@ impl ParquetFileWriter {
         let file_url = table.url().join(&filename)?;
         let file_path = Path::from_url_path(file_url.path())?;
         let object_writer = BufWriter::new(table.object_store(), file_path);
-        let writer = AsyncArrowWriter::try_new(object_writer, table.schema(), Some(opts))?;
+        let writer = AsyncArrowWriter::try_new(object_writer, table.schema(), Some(opts.clone()))?;
         Ok(ParquetFileWriter {
             writer,
             start,
@@ -309,10 +319,13 @@ impl ParquetFileWriter {
             file_url,
             filename,
             bytes_written: 0,
+            rows_written: 0,
         })
     }
 
     pub async fn write(&mut self, batch: &RecordBatch) -> Result<(), ParquetError> {
+        self.rows_written += batch.num_rows();
+
         // Calculate the size of the batch in bytes. `get_slice_memory_size` is the most precise way.
         self.bytes_written += batch
             .columns()
@@ -359,5 +372,9 @@ impl ParquetFileWriter {
 
     pub fn bytes_written(&self) -> u64 {
         self.bytes_written
+    }
+
+    pub fn rows_written(&self) -> usize {
+        self.rows_written
     }
 }
