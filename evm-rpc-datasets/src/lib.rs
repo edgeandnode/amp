@@ -32,6 +32,14 @@ pub(crate) struct DatasetDef {
 pub(crate) struct EvmRpcProvider {
     #[serde_as(as = "serde_with::DisplayFromStr")]
     pub url: Url,
+
+    /// Maximum number of json-rpc requests to batch together.
+    #[serde(default = "default_max_batch_size")]
+    pub max_batch_size: usize,
+}
+
+fn default_max_batch_size() -> usize {
+    100
 }
 
 pub fn dataset(dataset_cfg: toml::Value) -> Result<DatasetWithProvider, Error> {
@@ -53,7 +61,8 @@ pub async fn client(
     let def: DatasetDef = dataset_cfg.try_into()?;
     let provider_string = provider_store.get_string(def.provider.as_str()).await?;
     let provider: EvmRpcProvider = toml::from_str(&provider_string)?;
-    let client = JsonRpcClient::new(provider.url, def.network).map_err(Error::Client)?;
+    let client = JsonRpcClient::new(provider.url, def.network, provider.max_batch_size)
+        .map_err(Error::Client)?;
     Ok(client)
 }
 

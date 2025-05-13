@@ -4,8 +4,12 @@ use std::time::Duration;
 use alloy::consensus::Transaction as _;
 use alloy::consensus::TxEnvelope;
 use alloy::eips::BlockNumberOrTag;
+use alloy::hex;
 use alloy::hex::ToHexExt;
 use alloy::providers::Provider as _;
+use alloy::rpc::client::BatchRequest;
+use alloy::rpc::json_rpc::RpcParam;
+use alloy::rpc::json_rpc::RpcReturn;
 use alloy::rpc::types::BlockTransactionsKind;
 use alloy::rpc::types::Header;
 use alloy::rpc::types::Log as RpcLog;
@@ -24,6 +28,7 @@ use common::Timestamp;
 use futures::future::try_join_all;
 use thiserror::Error;
 use tokio::sync::mpsc;
+use tracing::{error, info};
 
 use crate::tables::transactions::Transaction;
 use crate::tables::transactions::TransactionRowsBuilder;
@@ -36,16 +41,93 @@ pub enum ToRowError {
     Overflow(&'static str, BoxError),
 }
 
+pub struct BatchingRpcWrapper {
+    client: alloy::providers::ReqwestProvider,
+    max_batch_size: usize,
+    retry_factor: f32,
+}
+
+impl BatchingRpcWrapper {
+    pub fn new(
+        client: alloy::providers::ReqwestProvider,
+        max_batch_size: usize,
+        retry_factor: f32,
+    ) -> Self {
+        Self {
+            client,
+            max_batch_size,
+            retry_factor,
+        }
+    }
+
+    pub async fn execute<T: RpcReturn, P: RpcParam>(
+        &self,
+        calls: Vec<(&'static str, P)>,
+    ) -> Result<Vec<T>, BoxError> {
+        let mut batch_size = self.max_batch_size;
+        let mut results = Vec::new();
+        let mut remaining_calls = calls;
+
+        while !remaining_calls.is_empty() {
+            let chunk: Vec<_> = remaining_calls
+                .drain(..batch_size.min(remaining_calls.len()))
+                .collect();
+            let mut batch = BatchRequest::new(self.client.client());
+            let mut waiters = Vec::new();
+
+            for (method, params) in chunk.iter() {
+                waiters.push(batch.add_call(*method, &params)?);
+            }
+
+            let batch_then_waiters = async move {
+                batch.send().await?;
+                let responses = try_join_all(waiters).await?;
+                Ok::<_, BoxError>(responses)
+            };
+
+            match batch_then_waiters.await {
+                Ok(responses) => {
+                    results.extend(responses);
+
+                    // Attempt to increase batch size on success
+                    batch_size = ((batch_size as f32 * self.retry_factor).ceil() as usize).max(1);
+                    batch_size = batch_size.min(self.max_batch_size);
+                }
+                Err(_) if batch_size > 1 => {
+                    // Log the error and reduce batch size
+                    info!(
+                        "Batch failed with size {}. Reducing batch size and retrying.",
+                        batch_size
+                    );
+                    tokio::time::sleep(Duration::from_millis(500)).await; // Avoid spamming
+                    batch_size = ((batch_size as f32 / self.retry_factor).ceil() as usize).max(1);
+                    remaining_calls.splice(0..0, chunk); // Reinsert failed chunk
+                }
+                Err(e) => {
+                    return Err(e.into());
+                }
+            }
+        }
+
+        Ok(results)
+    }
+}
+
 #[derive(Clone)]
 pub struct JsonRpcClient {
     client: alloy::providers::ReqwestProvider,
     network: String,
+    max_batch_size: usize,
 }
 
 impl JsonRpcClient {
-    pub fn new(url: Url, network: String) -> Result<Self, BoxError> {
+    pub fn new(url: Url, network: String, max_batch_size: usize) -> Result<Self, BoxError> {
         let client = alloy::providers::ProviderBuilder::new().on_http(url);
-        Ok(Self { client, network })
+        Ok(Self {
+            client,
+            network,
+            max_batch_size,
+        })
     }
 
     async fn block_stream(
@@ -54,22 +136,31 @@ impl JsonRpcClient {
         end_block: u64,
         tx: mpsc::Sender<DatasetRows>,
     ) -> Result<(), BoxError> {
-        for block_num in start_block..=end_block {
-            let block = self
-                .client
-                .get_block_by_number(
-                    BlockNumberOrTag::Number(block_num),
-                    BlockTransactionsKind::Full,
-                )
-                .await?
-                .ok_or_else(|| format!("block {} not found", block_num))?;
-            let receipts = try_join_all(
-                block
-                    .transactions
-                    .hashes()
-                    .map(|hash| self.client.get_transaction_receipt(hash)),
-            )
-            .await?;
+        info!("Fetching blocks {} to {}", start_block, end_block);
+        let batching_client =
+            BatchingRpcWrapper::new(self.client.clone(), self.max_batch_size, 1.1);
+
+        let block_calls: Vec<_> = (start_block..=end_block)
+            .map(|block_num| ("eth_getBlockByNumber", (block_num, true)))
+            .collect();
+
+        let blocks: Vec<alloy::rpc::types::Block> = batching_client.execute(block_calls).await?;
+
+        for block in blocks {
+            let transaction_hashes = block.transactions.hashes();
+
+            // Fetch receipts in batch
+            let receipt_calls: Vec<_> = transaction_hashes
+                .map(|hash| {
+                    (
+                        "eth_getTransactionReceipt",
+                        [format!("0x{}", hex::encode(hash))],
+                    )
+                })
+                .collect();
+
+            let receipts: Vec<Option<TransactionReceipt>> =
+                batching_client.execute(receipt_calls).await?;
 
             let rows = rpc_to_rows(block, receipts, &self.network)?;
 
