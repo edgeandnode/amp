@@ -34,6 +34,10 @@ jobs:
           cache: false
           rustflags: ''
 
+      - name: Add PostgreSQL binaries to PATH
+        run: |
+          echo "/usr/lib/postgresql/$(pg_lsclusters | awk 'NR==2 {print $1}')/bin" >> $GITHUB_PATH
+
       - name: Unit tests
         run: cargo test --verbose --workspace --exclude tests -- --nocapture
 
