@@ -201,8 +201,8 @@ impl PhysicalTable {
         Ok(physical_table)
     }
 
-    /// Restore the latest revision of a table from the data store and
-    /// register it in the metadata database, returning a new [`PhysicalTable`].
+    /// Attempts to restore the latest revision of a table from the data store.
+    /// If the table is not found, it returns `None`.
     pub async fn restore_latset_revision(
         table: &Table,
         data_store: Arc<Store>,
@@ -270,6 +270,11 @@ impl PhysicalTable {
         Ok(physical_table)
     }
 
+    /// Attempt to restore the latest revision of a table from a provided map of revisions
+    /// and register it in the metadata database.
+    /// If no revisions are found, it returns `None`.
+    ///
+    /// Revisions are expected to be sorted in ascending order by their revision uuid.
     async fn restore_latest(
         revisions: BTreeMap<String, (Path, Url, String)>,
         table: &Table,
@@ -422,8 +427,6 @@ impl PhysicalTable {
         Ok(files)
     }
 
-    // TODO: Break this into smaller functions
-    // TODO: Buffer the stream and sort the ranges after
     pub async fn ranges(&self) -> Result<Vec<(u64, u64)>, BoxError> {
         let mut ranges = vec![];
         println!("Listing ranges for table: {}", self.table_name());
