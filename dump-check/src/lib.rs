@@ -3,18 +3,20 @@ pub mod metrics;
 
 use std::sync::Arc;
 
-use common::{catalog::physical::Catalog, config::Config, BoxError, QueryContext};
+use common::{
+    catalog::physical::{Catalog, PhysicalDataset, PhysicalTable},
+    BoxError, QueryContext,
+};
 use datafusion::execution::runtime_env::RuntimeEnv;
 use dataset_store::DatasetStore;
 use futures::future::try_join_all;
 use job::Job;
-use metadata_db::MetadataDb;
+use metadata_db::{MetadataDb, TableId};
 
 pub async fn dump_check(
     dataset_name: &str,
     dataset_store: &Arc<DatasetStore>,
-    config: &Config,
-    metadata_db: Option<&MetadataDb>,
+    metadata_db: Arc<MetadataDb>,
     env: &Arc<RuntimeEnv>,
     batch_size: u64,
     n_jobs: u8,
@@ -24,8 +26,27 @@ pub async fn dump_check(
     let dataset = dataset_store.load_dataset(&dataset_name).await?.dataset;
     let client = dataset_store.load_client(&dataset_name).await?;
     let total_blocks = end_block - start + 1;
-    let catalog =
-        Catalog::for_dataset(dataset.clone(), config.data_store.clone(), metadata_db).await?;
+    let mut tables = Vec::with_capacity(dataset.tables.len());
+    for table in dataset.tables() {
+        let table_id = TableId {
+            dataset: dataset_name,
+            dataset_version: None,
+            table: &table.name,
+        };
+        let (url, location_id) = metadata_db
+            .get_active_location(table_id)
+            .await?
+            .ok_or(format!("No active location for {table_id:?}"))?;
+        let table = PhysicalTable::new(
+            dataset_name,
+            table.clone(),
+            url,
+            location_id,
+            metadata_db.clone(),
+        )?;
+        tables.push(table);
+    }
+    let catalog = Catalog::new(vec![PhysicalDataset::new(dataset.clone(), tables)]);
     let ctx = Arc::new(QueryContext::for_catalog(catalog, env.clone())?);
 
     let jobs = {
