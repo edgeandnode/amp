@@ -303,27 +303,6 @@ impl QueryContext {
         Ok(plan)
     }
 
-    /// Ads block_num filter expression to a plan and returns a new plan
-    pub async fn add_range_to_plan(
-        &self,
-        plan: LogicalPlan,
-        start: BlockNum,
-        end: BlockNum,
-    ) -> Result<LogicalPlan, Error> {
-        use datafusion::logical_expr::{col, lit};
-
-        let mut builder = LogicalPlanBuilder::from(plan);
-        let filter_expr = col("block_num")
-            .gt_eq(lit(start))
-            .and(col("block_num").lt_eq(lit(end)));
-        builder = builder
-            .filter(filter_expr)
-            .map_err(|e| Error::PlanningError(e))?;
-        let plan = builder.build().map_err(|e| Error::PlanEncodingError(e))?;
-
-        Ok(plan)
-    }
-
     /// Because `DatasetContext` is read-only, planning and execution can be done on ephemeral
     /// sessions created by this function, and they will behave the same as if they had been run
     /// against a persistent `SessionContext`

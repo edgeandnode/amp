@@ -223,7 +223,7 @@ impl Service {
 
         // initial range
         if let Some(end) = current_end_block {
-            let plan = ctx.add_range_to_plan(plan.clone(), 0, end).await?;
+            let plan = dataset_store::sql_datasets::add_range_to_plan(plan.clone(), 0, end).await?;
             let mut stream = Self::execute_once(&ctx, plan).await?;
 
             while let Some(batch) = stream.next().await {
@@ -268,8 +268,7 @@ impl Service {
                     (_, _) => continue,
                 };
 
-                let plan = ctx
-                    .add_range_to_plan(plan.clone(), start, end)
+                let plan = dataset_store::sql_datasets::add_range_to_plan(plan.clone(), start, end)
                     .await
                     .unwrap();
                 let mut stream = Self::execute_once(&ctx, plan).await.unwrap();

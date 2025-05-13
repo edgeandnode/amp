@@ -3,6 +3,15 @@ use std::{
     sync::Arc,
 };
 
+use crate::DatasetStore;
+use common::query_context::Error;
+use common::{
+    meta_tables::scanned_ranges,
+    multirange::MultiRange,
+    query_context::{parse_sql, Error as CoreError},
+    BlockNum, BoxError, Dataset, QueryContext, Table, BLOCK_NUM,
+};
+use datafusion::logical_expr::LogicalPlanBuilder;
 use datafusion::{
     common::tree_node::{Transformed, TreeNode, TreeNodeRecursion},
     datasource::TableType,
@@ -12,20 +21,11 @@ use datafusion::{
     sql::resolve::resolve_table_references,
     sql::{parser, TableReference},
 };
-
-use common::{
-    meta_tables::scanned_ranges,
-    multirange::MultiRange,
-    query_context::{parse_sql, Error as CoreError},
-    BlockNum, BoxError, Dataset, QueryContext, Table, BLOCK_NUM,
-};
 use futures::StreamExt as _;
 use metadata_db::{MetadataDb, TableId};
 use object_store::ObjectMeta;
 use serde::Deserialize;
 use tracing::instrument;
-
-use crate::DatasetStore;
 
 pub struct SqlDataset {
     pub dataset: Dataset,
@@ -275,6 +275,26 @@ pub async fn max_end_block_for_plan(
     Ok(end)
 }
 
+/// Ads block_num filter expression to a plan and returns a new plan
+pub async fn add_range_to_plan(
+    plan: LogicalPlan,
+    start: BlockNum,
+    end: BlockNum,
+) -> Result<LogicalPlan, Error> {
+    use datafusion::logical_expr::{col, lit};
+
+    let mut builder = LogicalPlanBuilder::from(plan);
+    let filter_expr = col("block_num")
+        .gt_eq(lit(start))
+        .and(col("block_num").lt_eq(lit(end)));
+    builder = builder
+        .filter(filter_expr)
+        .map_err(|e| Error::PlanningError(e))?;
+    let plan = builder.build().map_err(|e| Error::PlanEncodingError(e))?;
+
+    Ok(plan)
+}
+
 /// The most recent block that has been synced for all tables in the query.
 #[instrument(skip_all, err)]
 pub async fn max_end_block(
@@ -424,7 +444,7 @@ fn order_by_block_num(plan: LogicalPlan) -> LogicalPlan {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_incremental, queried_datasets};
+    use super::{add_range_to_plan, is_incremental, queried_datasets};
     use common::catalog::physical::{Catalog, PhysicalDataset, PhysicalTable};
     use common::config::Config;
     use common::query_context::parse_sql;
@@ -530,5 +550,18 @@ mod tests {
             datasets,
             vec!["eth_firehose".to_string(), "sql_ds".to_string()]
         );
+    }
+
+    #[tokio::test]
+    async fn test_add_range_to_plan() {
+        let plan = get_plan("select * from eth_firehose.blocks").await;
+        let modified_plan = add_range_to_plan(plan, 10, 20).await.unwrap();
+
+        use datafusion::logical_expr::{col, lit, Filter};
+        let expected_filter_expr = col("block_num")
+            .gt_eq(lit(10))
+            .and(col("block_num").lt_eq(lit(20)));
+
+        matches!(modified_plan, LogicalPlan::Filter(Filter { predicate, .. }) if predicate == expected_filter_expr);
     }
 }
