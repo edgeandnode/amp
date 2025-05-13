@@ -186,8 +186,8 @@ fn collect_table_refs(plan: &LogicalPlan, refs: &mut HashSet<TableReference>) {
         LogicalPlan::Filter(filter) => {
             collect_table_refs(&filter.input, refs);
         }
-        LogicalPlan::Aggregate(Aggregate) => {
-            collect_table_refs(&Aggregate.input, refs);
+        LogicalPlan::Aggregate(agg) => {
+            collect_table_refs(&agg.input, refs);
         }
         LogicalPlan::Sort(sort) => {
             collect_table_refs(&sort.input, refs);
