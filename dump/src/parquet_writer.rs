@@ -185,16 +185,10 @@ impl TableWriter {
         }
 
         let bytes_written = self.current_file.as_ref().unwrap().in_progress_size();
-        let rows_written = self.current_file.as_ref().unwrap().rows_written();
 
-        // Check if we need to create a new part file before writing this batch of rows.
-        // Two conditions can trigger this:
-        // 1. The size of the current row group already exceeds the configured max `partition_size`.
-        // 2. The row count would exceed the maximum row group size. So each file will have exactly
-        //    one row group.
-        if bytes_written >= self.partition_size as usize
-            || rows_written + table_rows.rows.num_rows() > self.opts.max_row_group_size()
-        {
+        // Check if we need to create a new part file before writing this batch of rows, because the
+        // size of the current row group already exceeds the configured max `partition_size`.
+        if bytes_written >= self.partition_size as usize {
             // `scanned_range` would be `Some` if we have had just created a new a file above, so no
             // bytes would have been written yet.
             assert!(scanned_range.is_none());
@@ -357,9 +351,5 @@ impl ParquetFileWriter {
     // Anticipated encoded (but uncompressed) size of the in progress row group.
     pub fn in_progress_size(&self) -> usize {
         self.writer.in_progress_size()
-    }
-
-    pub fn rows_written(&self) -> usize {
-        self.rows_written
     }
 }
