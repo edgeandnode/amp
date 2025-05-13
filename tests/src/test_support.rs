@@ -432,5 +432,13 @@ pub struct SqlTest {
     /// SQL query to execute.
     pub query: String,
     /// JSON-encoded results.
-    pub results: String,
+    #[serde(flatten)]
+    pub result: SqlTestResult,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(untagged)]
+pub enum SqlTestResult {
+    Success { results: String },
+    Failure { failure: String },
 }

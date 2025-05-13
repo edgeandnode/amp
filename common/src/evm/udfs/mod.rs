@@ -18,11 +18,15 @@ use crate::{
 use alloy::{
     dyn_abi::{DynSolType, DynSolValue, DynToken, Specifier as _},
     json_abi::Event as AlloyEvent,
-    primitives::{ruint::FromUintError, BigIntConversionError, Signed, B256},
+    primitives::{ruint::FromUintError, Address, BigIntConversionError, Signed, B256, I256, U256},
 };
 use datafusion::{
     arrow::{
-        array::{ArrayBuilder, NullBuilder},
+        array::{
+            ArrayBuilder, BooleanArray, Decimal128Array, Decimal256Array, FixedSizeBinaryArray,
+            Int16Array, Int32Array, Int64Array, Int8Array, NullBuilder, StringArray, UInt16Array,
+            UInt32Array, UInt64Array, UInt8Array,
+        },
         error::ArrowError,
     },
     common::{internal_err, plan_err},
@@ -38,10 +42,12 @@ use itertools::izip;
 use tracing::trace;
 
 pub use eth_call::EthCall;
-pub use evm_decode_function_data::EvmDecodeFunctionData;
+pub use evm_encode_type::EvmEncodeType;
+pub use evm_function_data::{EvmDecodeFunctionData, EvmEncodeParams};
 
 mod eth_call;
-mod evm_decode_function_data;
+mod evm_encode_type;
+mod evm_function_data;
 
 type Unsigned = alloy::primitives::Uint<256, 4>;
 
@@ -72,7 +78,19 @@ macro_rules! internal {
     }}
 }
 
-fn arrow_type(ty: &DynSolType) -> Result<DataType, DataFusionError> {
+// Convenience to report a plan error. Same as DataFusion's
+// `plan_err!`, but the error is not wrapped in an `Err`.
+#[macro_export]
+macro_rules! plan {
+    ($msg:expr) => {{
+        datafusion::error::DataFusionError::Plan(format!("{}", $msg))
+    }};
+    ($fmt:expr, $($arg:tt)*) => {{
+        datafusion::error::DataFusionError::Plan(format!($fmt, $($arg)*))
+    }}
+}
+
+fn sol_to_arrow_type(ty: &DynSolType) -> Result<DataType, DataFusionError> {
     use DataType as F;
     use DynSolType as S;
     let df = match ty {
@@ -161,7 +179,7 @@ impl<'a> FieldBuilder<'a> {
     }
 
     fn append_null_value(&'a mut self) -> Result<(), DataFusionError> {
-        let ty = arrow_type(self.ty)?;
+        let ty = sol_to_arrow_type(self.ty)?;
         match ty {
             DataType::Boolean => self.field::<BooleanBuilder>()?.append_null(),
             DataType::Int8 => self.field::<Int8Builder>()?.append_null(),
@@ -300,7 +318,8 @@ impl<'a> FieldBuilder<'a> {
             Bytes(b) => self.field::<BinaryBuilder>()?.append_value(b),
             String(s) => self.field::<StringBuilder>()?.append_value(s),
             Function(_) | Tuple(_) | Array(_) | FixedArray(_) => {
-                return plan_err!("cannot convert function to arrow scalar")
+                let type_name = value.sol_type_name().unwrap_or_default();
+                return plan_err!("cannot convert {type_name} to arrow scalar");
             }
         };
         Ok(())
@@ -371,7 +390,7 @@ impl Event {
         let types = self.topic_types.iter().chain(body_types);
         for (name, ty) in names.zip(types) {
             let name = name.clone();
-            let df = arrow_type(ty)?;
+            let df = sol_to_arrow_type(ty)?;
             let field = Field::new(name, df, true);
             fields.push(field);
         }
@@ -698,6 +717,341 @@ impl ScalarUDFImpl for EvmTopic {
         let value = ColumnarValue::Scalar(ScalarValue::FixedSizeBinary(32, Some(topic0.to_vec())));
         Ok(value)
     }
+}
+
+fn scalar_to_sol_value(
+    arrow_value: ScalarValue,
+    sol_type: &DynSolType,
+) -> Result<DynSolValue, DataFusionError> {
+    match arrow_value {
+        ScalarValue::Boolean(Some(b)) => {
+            if sol_type == &DynSolType::Bool {
+                Ok(DynSolValue::Bool(b))
+            } else {
+                plan_err!("cannot convert boolean to solidity type {}", sol_type)
+            }
+        }
+        ScalarValue::Int8(Some(i)) => int_to_sol_value(i.try_into().unwrap(), sol_type),
+        ScalarValue::Int16(Some(i)) => int_to_sol_value(i.try_into().unwrap(), sol_type),
+        ScalarValue::Int32(Some(i)) => int_to_sol_value(i.try_into().unwrap(), sol_type),
+        ScalarValue::Int64(Some(i)) => int_to_sol_value(i.try_into().unwrap(), sol_type),
+        ScalarValue::UInt8(Some(u)) => uint_to_sol_value(u.try_into().unwrap(), sol_type),
+        ScalarValue::UInt16(Some(u)) => uint_to_sol_value(u.try_into().unwrap(), sol_type),
+        ScalarValue::UInt32(Some(u)) => uint_to_sol_value(u.try_into().unwrap(), sol_type),
+        ScalarValue::UInt64(Some(u)) => uint_to_sol_value(u.try_into().unwrap(), sol_type),
+        ScalarValue::Decimal128(Some(d), _, scale)
+            if scale <= 0 && matches!(sol_type, DynSolType::Int(_)) =>
+        {
+            int_to_sol_value(d.try_into().unwrap(), sol_type)
+        }
+        ScalarValue::Decimal128(Some(d), _, scale) if scale <= 0 => {
+            uint_to_sol_value(d.try_into().unwrap(), sol_type)
+        }
+        ScalarValue::Decimal256(Some(d), _, scale)
+            if scale <= 0 && matches!(sol_type, DynSolType::Int(_)) =>
+        {
+            int_to_sol_value(I256::from_le_bytes(d.to_le_bytes()), sol_type)
+        }
+        ScalarValue::Decimal256(Some(d), _, scale) if scale <= 0 => {
+            uint_to_sol_value(U256::from_le_bytes(d.to_le_bytes()), sol_type)
+        }
+        ScalarValue::Utf8(Some(s))
+        | ScalarValue::Utf8View(Some(s))
+        | ScalarValue::LargeUtf8(Some(s)) => {
+            if sol_type == &DynSolType::String {
+                Ok(DynSolValue::String(s))
+            } else {
+                plan_err!("cannot convert string to solidity type {}", sol_type)
+            }
+        }
+        ScalarValue::Binary(Some(b))
+        | ScalarValue::BinaryView(Some(b))
+        | ScalarValue::LargeBinary(Some(b)) => {
+            if sol_type == &DynSolType::Bytes {
+                Ok(DynSolValue::Bytes(b))
+            } else {
+                plan_err!("cannot convert bytes to solidity type {}", sol_type)
+            }
+        }
+        ScalarValue::FixedSizeBinary(_, Some(items)) if items.len() <= 32 => match sol_type {
+            DynSolType::FixedBytes(len) if *len == items.len() => {
+                let mut word = [0; 32];
+                word[..items.len()].copy_from_slice(&items);
+                Ok(DynSolValue::FixedBytes(
+                    alloy::primitives::FixedBytes(word),
+                    items.len(),
+                ))
+            }
+            DynSolType::Address if items.len() == 20 => {
+                Ok(DynSolValue::Address(Address::from_slice(&items)))
+            }
+            _ => plan_err!(
+                "cannot convert fixed size binary to solidity type {}",
+                sol_type
+            ),
+        },
+        _ => {
+            return plan_err!(
+                "Unsupported type {} for Solidity type {}",
+                arrow_value.data_type(),
+                sol_type
+            )
+        }
+    }
+}
+
+fn array_to_sol_value(
+    ary: &Arc<dyn Array>,
+    sol_type: &DynSolType,
+    idx: usize,
+) -> Result<DynSolValue, DataFusionError> {
+    match ary.data_type() {
+        DataType::Boolean => {
+            if sol_type == &DynSolType::Bool {
+                let value = ary
+                    .as_any()
+                    .downcast_ref::<BooleanArray>()
+                    .unwrap()
+                    .value(idx);
+                Ok(DynSolValue::Bool(value))
+            } else {
+                plan_err!("cannot convert boolean to solidity type {}", sol_type)
+            }
+        }
+        DataType::Int8 => {
+            let value = ary.as_any().downcast_ref::<Int8Array>().unwrap().value(idx);
+            int_to_sol_value(value.try_into().unwrap(), sol_type)
+        }
+        DataType::Int16 => {
+            let value = ary
+                .as_any()
+                .downcast_ref::<Int16Array>()
+                .unwrap()
+                .value(idx);
+            int_to_sol_value(value.try_into().unwrap(), sol_type)
+        }
+        DataType::Int32 => {
+            let value = ary
+                .as_any()
+                .downcast_ref::<Int32Array>()
+                .unwrap()
+                .value(idx);
+            int_to_sol_value(value.try_into().unwrap(), sol_type)
+        }
+        DataType::Int64 => {
+            let value = ary
+                .as_any()
+                .downcast_ref::<Int64Array>()
+                .unwrap()
+                .value(idx);
+            int_to_sol_value(value.try_into().unwrap(), sol_type)
+        }
+        DataType::UInt8 => {
+            let value = ary
+                .as_any()
+                .downcast_ref::<UInt8Array>()
+                .unwrap()
+                .value(idx);
+            uint_to_sol_value(value.try_into().unwrap(), sol_type)
+        }
+        DataType::UInt16 => {
+            let value = ary
+                .as_any()
+                .downcast_ref::<UInt16Array>()
+                .unwrap()
+                .value(idx);
+            uint_to_sol_value(value.try_into().unwrap(), sol_type)
+        }
+        DataType::UInt32 => {
+            let value = ary
+                .as_any()
+                .downcast_ref::<UInt32Array>()
+                .unwrap()
+                .value(idx);
+            uint_to_sol_value(value.try_into().unwrap(), sol_type)
+        }
+        DataType::UInt64 => {
+            let value = ary
+                .as_any()
+                .downcast_ref::<UInt64Array>()
+                .unwrap()
+                .value(idx);
+            uint_to_sol_value(value.try_into().unwrap(), sol_type)
+        }
+        DataType::Decimal128(_, scale) if *scale <= 0 && matches!(sol_type, DynSolType::Int(_)) => {
+            let value = ary
+                .as_any()
+                .downcast_ref::<Decimal128Array>()
+                .unwrap()
+                .value(idx);
+            int_to_sol_value(value.try_into().unwrap(), sol_type)
+        }
+        DataType::Decimal128(_, scale) if *scale <= 0 => {
+            let value = ary
+                .as_any()
+                .downcast_ref::<Decimal128Array>()
+                .unwrap()
+                .value(idx);
+            uint_to_sol_value(value.try_into().unwrap(), sol_type)
+        }
+        DataType::Decimal256(_, scale) if *scale <= 0 && matches!(sol_type, DynSolType::Int(_)) => {
+            let value = ary
+                .as_any()
+                .downcast_ref::<Decimal256Array>()
+                .unwrap()
+                .value(idx);
+            int_to_sol_value(I256::from_le_bytes(value.to_le_bytes()), sol_type)
+        }
+        DataType::Decimal256(_, scale) if *scale <= 0 => {
+            let value = ary
+                .as_any()
+                .downcast_ref::<Decimal256Array>()
+                .unwrap()
+                .value(idx);
+            uint_to_sol_value(U256::from_le_bytes(value.to_le_bytes()), sol_type)
+        }
+        DataType::Binary => {
+            if sol_type == &DynSolType::Bytes {
+                let value = ary
+                    .as_any()
+                    .downcast_ref::<BinaryArray>()
+                    .unwrap()
+                    .value(idx);
+                Ok(DynSolValue::Bytes(value.to_vec()))
+            } else {
+                plan_err!("cannot convert bytes to solidity type {}", sol_type)
+            }
+        }
+        DataType::FixedSizeBinary(_) => match sol_type {
+            DynSolType::FixedBytes(len) => {
+                let value = ary
+                    .as_any()
+                    .downcast_ref::<FixedSizeBinaryArray>()
+                    .unwrap()
+                    .value(idx);
+                if value.len() == *len {
+                    let mut word = [0; 32];
+                    word[..value.len()].copy_from_slice(value);
+                    Ok(DynSolValue::FixedBytes(
+                        alloy::primitives::FixedBytes(word),
+                        value.len(),
+                    ))
+                } else {
+                    plan_err!(
+                            "cannot convert fixed size binary of size {} to Solidity fixed bytes of size {}",
+                            value.len(),
+                            len
+                        )
+                }
+            }
+            DynSolType::Address => {
+                let value = ary
+                    .as_any()
+                    .downcast_ref::<FixedSizeBinaryArray>()
+                    .unwrap()
+                    .value(idx);
+                if value.len() == 20 {
+                    Ok(DynSolValue::Address(Address::from_slice(value)))
+                } else {
+                    plan_err!("cannot convert fixed size binary of size {} to Solidity address, expected 20 bytes", value.len())
+                }
+            }
+            _ => {
+                return plan_err!(
+                    "cannot convert fixed size binary to solidity type {}",
+                    sol_type
+                )
+            }
+        },
+        DataType::Utf8 => {
+            if sol_type == &DynSolType::String {
+                let value = ary
+                    .as_any()
+                    .downcast_ref::<StringArray>()
+                    .unwrap()
+                    .value(idx);
+                Ok(DynSolValue::String(value.to_string()))
+            } else {
+                plan_err!("cannot convert string to solidity type {}", sol_type)
+            }
+        }
+        _ => {
+            return plan_err!(
+                "Unsupported type {} for Solidity type {}",
+                ary.data_type(),
+                sol_type
+            )
+        }
+    }
+}
+
+fn int_to_sol_value(s: I256, sol_type: &DynSolType) -> Result<DynSolValue, DataFusionError> {
+    let sz = match sol_type {
+        DynSolType::Int(sz) => *sz,
+        _ => return plan_err!("expected int type, got {}", sol_type),
+    };
+    if sz == 256 {
+        // In this case, the value can definitely fit.
+        return Ok(DynSolValue::Int(s, sz));
+    }
+    let sz_u64 = u64::try_from(sz).unwrap();
+    let min = I256::try_from(2)
+        .unwrap()
+        .checked_pow((sz_u64 - 1).try_into().unwrap())
+        .unwrap()
+        .checked_neg()
+        .unwrap();
+    let max = I256::try_from(2)
+        .unwrap()
+        .checked_pow((sz_u64 - 1).try_into().unwrap())
+        .unwrap()
+        .checked_sub(1.try_into().unwrap())
+        .unwrap();
+    if s < min || s > max {
+        return plan_err!(
+            "cannot convert int to solidity int{}: {} not in [{}, {}]",
+            sz_u64,
+            s,
+            min,
+            max
+        );
+    }
+    Ok(DynSolValue::Int(s, sz))
+}
+
+fn uint_to_sol_value(s: U256, sol_type: &DynSolType) -> Result<DynSolValue, DataFusionError> {
+    let sz = match sol_type {
+        DynSolType::Uint(sz) => *sz,
+        _ => return plan_err!("expected uint type, got {}", sol_type),
+    };
+    if sz == 256 {
+        // In this case, the value can definitely fit.
+        return Ok(DynSolValue::Uint(s, sz));
+    }
+    let sz_u64 = u64::try_from(sz).unwrap();
+    let limit = U256::try_from(2)
+        .unwrap()
+        .checked_pow(sz_u64.try_into().unwrap())
+        .unwrap();
+    if s >= limit {
+        return plan_err!(
+            "cannot convert uint to solidity uint{}: {} not in [0, {})",
+            sz_u64,
+            s,
+            limit
+        );
+    }
+    Ok(DynSolValue::Uint(s, sz))
+}
+
+fn num_rows(args: &[ColumnarValue]) -> usize {
+    for arg in args {
+        match arg {
+            ColumnarValue::Array(array) => return array.len(),
+            ColumnarValue::Scalar(_) => {}
+        }
+    }
+    1
 }
 
 #[cfg(test)]
