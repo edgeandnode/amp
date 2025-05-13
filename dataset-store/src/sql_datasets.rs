@@ -3,7 +3,6 @@ use std::{
     sync::Arc,
 };
 
-use crate::DatasetStore;
 use common::query_context::Error;
 use common::{
     meta_tables::scanned_ranges,
@@ -26,6 +25,8 @@ use metadata_db::{MetadataDb, TableId};
 use object_store::ObjectMeta;
 use serde::Deserialize;
 use tracing::instrument;
+
+use crate::DatasetStore;
 
 pub struct SqlDataset {
     pub dataset: Dataset,
