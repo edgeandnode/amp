@@ -44,7 +44,7 @@ use crate::evm::udfs::{
     EvmDecode, EvmDecodeFunctionData, EvmEncodeParams, EvmEncodeType, EvmTopic,
 };
 use crate::stream_helpers::is_streaming;
-use crate::{arrow, attestation, BlockNum, BoxError, Table};
+use crate::{arrow, attestation, BoxError, Table};
 
 #[derive(Error, Debug)]
 pub enum Error {
