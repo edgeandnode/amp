@@ -9,7 +9,7 @@ use std::{
 
 use async_udf::functions::AsyncScalarUDF;
 use common::{
-    catalog::physical::{Catalog, PhysicalDataset},
+    catalog::physical::{Catalog, PhysicalDataset, PhysicalTable},
     config::Config,
     evm::udfs::EthCall,
     manifest::{Manifest, TableInput},
@@ -185,13 +185,13 @@ impl fmt::Display for DatasetError {
 #[derive(Clone)]
 pub struct DatasetStore {
     config: Arc<Config>,
-    pub metadata_db: Option<MetadataDb>,
+    pub metadata_db: Arc<MetadataDb>,
     // Cache maps dataset name to eth_call UDF.
     eth_call_cache: Arc<RwLock<HashMap<String, ScalarUDF>>>,
 }
 
 impl DatasetStore {
-    pub fn new(config: Arc<Config>, metadata_db: Option<MetadataDb>) -> Arc<Self> {
+    pub fn new(config: Arc<Config>, metadata_db: Arc<MetadataDb>) -> Arc<Self> {
         Arc::new(Self {
             config,
             metadata_db,
@@ -491,16 +491,19 @@ impl DatasetStore {
         let mut catalog = Catalog::empty();
         for dataset_name in dataset_names {
             let dataset = self.load_dataset(&dataset_name).await?;
-
-            // We currently assume all datasets live in the same `data_store`.
-            let physical_dataset = PhysicalDataset::from_dataset_at(
-                dataset.dataset.clone(),
-                self.config.data_store.clone(),
-                self.metadata_db.as_ref(),
-                true,
-            )
-            .await
-            .map_err(|e| (dataset_name.clone(), Error::Unknown(e)))?;
+            let mut tables = Vec::with_capacity(dataset.dataset.tables.len());
+            for table in dataset.dataset.tables() {
+                let physical_table = PhysicalTable::get_or_restore_active_revision(
+                    table,
+                    &dataset_name,
+                    self.config.data_store.clone(),
+                    self.metadata_db.clone(),
+                )
+                .await
+                .map_err(DatasetError::unknown)?;
+                tables.push(physical_table);
+            }
+            let physical_dataset = PhysicalDataset::new(dataset.dataset.clone(), tables);
             catalog.add_dataset(physical_dataset);
 
             // Create the `eth_call` UDF for the dataset.
