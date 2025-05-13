@@ -274,6 +274,28 @@ impl MultiRange {
 
         partitions
     }
+
+    /// Split every individual range so that no resulting range is longer than `max_len`.
+    ///
+    /// * `max_len` must be > 0.
+    /// * The output keeps all ordering/-adjacency/-non-overlap invariants.
+    pub fn split_with_max(self, max_len: u64) -> Vec<(u64, u64)> {
+        assert!(max_len > 0, "max_len must be positive");
+
+        let mut out = Vec::with_capacity(self.ranges.len());
+
+        for (start, end) in self.ranges.into_iter() {
+            let mut cur_start = start;
+            while cur_start <= end {
+                let len = std::cmp::min(max_len, end - cur_start + 1);
+                let cur_end = cur_start + len - 1;
+                out.push((cur_start, cur_end));
+                cur_start = cur_end + 1;
+            }
+        }
+
+        out
+    }
 }
 
 impl fmt::Display for MultiRange {
@@ -287,4 +309,25 @@ impl fmt::Display for MultiRange {
 
         write!(f, "{}", ranges)
     }
+}
+
+#[test]
+fn test_split_with_max() {
+    // Case 1: shorter than max_len
+    let mr = MultiRange::from_ranges(vec![(1, 5)]).unwrap();
+    assert_eq!(mr.clone().split_with_max(10), mr.ranges);
+
+    // Case 2: exactly equal to max_len
+    let mr = MultiRange::from_ranges(vec![(1, 5)]).unwrap();
+    assert_eq!(mr.clone().split_with_max(5), mr.ranges);
+
+    // Case 3: needs to split one range
+    let mr = MultiRange::from_ranges(vec![(1, 10)]).unwrap();
+    let expected = vec![(1, 4), (5, 8), (9, 10)];
+    assert_eq!(mr.split_with_max(4), expected);
+
+    // Case 4: multiple ranges with only one needing split
+    let mr = MultiRange::from_ranges(vec![(1, 10), (15, 18)]).unwrap();
+    let expected = vec![(1, 4), (5, 8), (9, 10), (15, 18)];
+    assert_eq!(mr.split_with_max(4), expected);
 }

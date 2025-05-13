@@ -16,6 +16,8 @@ use parquet::file::properties::WriterProperties as ParquetWriterProperties;
 use tracing::debug;
 use url::Url;
 
+const MAX_PARTITION_BLOCK_RANGE: u64 = 1_000_000;
+
 /// Only used for raw datasets.
 pub struct RawDatasetWriter {
     writers: BTreeMap<String, TableWriter>,
@@ -135,7 +137,10 @@ impl TableWriter {
         metadata_db: Option<Arc<MetadataDb>>,
     ) -> Result<TableWriter, BoxError> {
         let ranges_to_write = {
-            let mut ranges = scanned_ranges.complement(start, end).ranges;
+            // Limit maximum range size to 1_000_000 blocks.
+            let mut ranges = scanned_ranges
+                .complement(start, end)
+                .split_with_max(MAX_PARTITION_BLOCK_RANGE);
             ranges.reverse();
             ranges
         };
