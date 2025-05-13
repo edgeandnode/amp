@@ -1,4 +1,9 @@
-import { Cause } from "effect"
+import { Cause, Effect, Function } from "effect"
+
+export const logCauseWith: {
+  <E>(cause: Cause.Cause<E>, message: string): Effect.Effect<void>
+  (message: string): <E>(cause: Cause.Cause<E>) => Effect.Effect<void>
+} = Function.dual(2, (cause: Cause.Cause<any>, message: string) => Effect.logError(message, prettyCause(cause)))
 
 export const prettyCause = <E>(cause: Cause.Cause<E>): string => {
   if (Cause.isInterruptedOnly(cause)) {
