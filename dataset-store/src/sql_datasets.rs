@@ -17,7 +17,7 @@ use common::{
     meta_tables::scanned_ranges,
     multirange::MultiRange,
     query_context::{parse_sql, Error as CoreError},
-    BlockNum, BoxError, Dataset, Table, BLOCK_NUM,
+    BlockNum, BoxError, Dataset, QueryContext, Table, BLOCK_NUM,
 };
 use futures::StreamExt as _;
 use metadata_db::TableId;
@@ -126,18 +126,20 @@ pub async fn execute_query_for_range(
         resolve_table_references(&query, true).map_err(|e| CoreError::SqlParseError(e.into()))?;
     let ctx = dataset_store.clone().ctx_for_sql(&query, env).await?;
     let metadata_db = dataset_store.metadata_db.as_ref();
-
     // Validate dependency scanned ranges
     {
         let needed_range = MultiRange::from_ranges(vec![(start, end)]).unwrap();
         for table in tables {
             let tbl = TableId {
-                // Unwrap: table references are of the partial form: [dataset].[table_name]
                 dataset: table.schema().unwrap(),
                 dataset_version: None,
                 table: table.table(),
             };
-            let ranges = scanned_ranges::ranges_for_table(&ctx, metadata_db, tbl).await?;
+            let thing = metadata_db.get_active_location(tbl).await?;
+            let location_id = thing
+                .ok_or(format!("table {tbl:?} not found in metadata db"))?
+                .1;
+            let ranges = scanned_ranges::ranges_for_table(location_id, metadata_db).await?;
             let ranges = MultiRange::from_ranges(ranges)?;
             let synced = ranges.intersection(&needed_range) == needed_range;
             if !synced {
@@ -168,17 +170,13 @@ pub async fn max_end_block(
         return Ok(None);
     }
 
-    let ctx = dataset_store.clone().ctx_for_sql(&query, env).await?;
+    let ctx = Arc::new(dataset_store.clone().ctx_for_sql(&query, env).await?);
     let metadata_db = &dataset_store.metadata_db;
 
-    let synced_block_for_table = move |ctx, table: TableReference| async move {
-        let tbl = TableId {
-            // Unwrap: table references are of the partial form: [dataset].[table_name]
-            dataset: table.schema().unwrap(),
-            dataset_version: None,
-            table: table.table(),
-        };
-        let ranges = scanned_ranges::ranges_for_table(ctx, metadata_db.as_ref(), tbl).await?;
+    let synced_block_for_table = move |ctx: Arc<QueryContext>, table: TableReference| async move {
+        let table = ctx.get_table(&table).expect("table not found");
+        let location_id = table.location_id();
+        let ranges = scanned_ranges::ranges_for_table(location_id, metadata_db.as_ref()).await?;
         let ranges = MultiRange::from_ranges(ranges)?;
 
         // Take the end block of the earliest contiguous range as the "synced block"
@@ -188,9 +186,9 @@ pub async fn max_end_block(
     let mut tables = tables.into_iter();
 
     // Unwrap: `tables` is not empty.
-    let mut end = synced_block_for_table(&ctx, tables.next().unwrap()).await?;
+    let mut end = synced_block_for_table(ctx.clone(), tables.next().unwrap()).await?;
     for table in tables {
-        let next_end = synced_block_for_table(&ctx, table).await?;
+        let next_end = synced_block_for_table(ctx.clone(), table).await?;
         end = end.min(next_end);
     }
 
