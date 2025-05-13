@@ -48,11 +48,10 @@ pub fn collect_scanned_tables(plan: &LogicalPlan) -> BTreeSet<TableReference> {
 pub async fn schema_to_markdown(
     tables: Vec<Table>,
     dataset_kind: String,
-    dataset_name: &str,
 ) -> Result<String, BoxError> {
     let dataset = Dataset {
         kind: dataset_kind,
-        name: dataset_name.to_string(),
+        name: "dataset".to_string(),
         tables,
     };
     let config = Config::in_memory().await;
