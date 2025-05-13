@@ -227,8 +227,6 @@ impl TableWriter {
         let rows = &table_rows.rows;
         self.current_file.as_mut().unwrap().write(rows).await?;
 
-        println!("{:?}", self.table.location_id());
-
         Ok(scanned_range)
     }
 

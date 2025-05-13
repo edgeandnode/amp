@@ -249,8 +249,6 @@ pub async fn max_end_block_for_plan(
         return Ok(None);
     }
 
-    // let metadata_db = metadata_db.as_ref();
-
     let synced_block_for_table = |ctx, table: TableReference| async move {
         let tbl = TableId {
             // Unwrap: table references are of the partial form: [dataset].[table_name]
@@ -266,7 +264,6 @@ pub async fn max_end_block_for_plan(
     };
 
     let mut tables = tables.into_iter();
-    // let ctx_ref = ctx.as_ref();
 
     // Unwrap: `tables` is not empty.
     let mut end = synced_block_for_table(ctx, tables.next().unwrap()).await?;
