@@ -14,7 +14,6 @@ use datafusion::{
     error::DataFusionError,
     execution::{runtime_env::RuntimeEnv, SendableRecordBatchStream},
     logical_expr::LogicalPlan,
-    sql::parser::Statement,
 };
 use dataset_store::{DatasetError, DatasetStore};
 use futures::{Stream, StreamExt as _, TryStreamExt};
@@ -181,7 +180,8 @@ impl Service {
             ));
         }
 
-        self.execute_plan(&ctx, plan, is_streaming).await
+        let ctx = Arc::new(ctx);
+        self.execute_plan(ctx, plan, is_streaming).await
     }
 
     async fn execute_once(
@@ -197,29 +197,25 @@ impl Service {
 
     pub async fn execute_plan(
         &self,
-        ctx: &QueryContext,
+        ctx: Arc<QueryContext>,
         plan: LogicalPlan,
         is_streaming: bool,
     ) -> Result<SendableRecordBatchStream, Error> {
-        let stmt = Statement::Statement(Box::new(
-            datafusion::sql::unparser::plan_to_sql(&plan).map_err(|e| Error::ExecutionError(e))?,
-        ));
-
         use futures::channel::mpsc;
 
-        // If not streaming
-        if !is_streaming {
+        // If not streaming or metadata db is not available, execute once
+        if !is_streaming || self.dataset_store.metadata_db.is_none() {
             return Self::execute_once(&ctx, plan).await;
         }
 
+        // Should not be none
+        let metadata_db_ref = self.dataset_store.metadata_db.as_ref().unwrap();
+
         // Start infinite stream
-        let mut current_end_block = dataset_store::sql_datasets::max_end_block(
-            &stmt,
-            self.dataset_store.clone(),
-            self.env.clone(),
-        )
-        .await
-        .map_err(|e| Error::CoreError(CoreError::DatasetError(e)))?;
+        let mut current_end_block =
+            dataset_store::sql_datasets::max_end_block_for_plan(&plan, &ctx, metadata_db_ref)
+                .await
+                .map_err(|e| Error::CoreError(CoreError::DatasetError(e)))?;
 
         let (tx, rx) = mpsc::unbounded();
 
@@ -227,20 +223,8 @@ impl Service {
 
         // initial range
         if let Some(end) = current_end_block {
-            let mut stream = dataset_store::sql_datasets::execute_query_for_range(
-                stmt.clone(),
-                self.dataset_store.clone(),
-                self.env.clone(),
-                0,
-                end,
-            )
-            .await
-            .map_err(|e| {
-                Error::StreamingExecutionError(format!(
-                    "failed to execute query for a range: {}",
-                    e
-                ))
-            })?;
+            let plan = ctx.add_range_to_plan(plan.clone(), 0, end).await?;
+            let mut stream = Self::execute_once(&ctx, plan).await?;
 
             while let Some(batch) = stream.next().await {
                 let send_result = tx.unbounded_send(batch);
@@ -252,65 +236,59 @@ impl Service {
             }
         }
 
-        let ds_store = self.dataset_store.clone();
-        let env = self.env.clone();
+        let ctx = ctx.clone();
+        let metadata_db = self.dataset_store.metadata_db.as_ref().unwrap().clone();
 
         // async listen
         tokio::spawn(async move {
-            if let Some(mdb) = &ds_store.metadata_db {
-                let datasets = dataset_store::sql_datasets::queried_datasets(&stmt)
+            let datasets = dataset_store::sql_datasets::queried_datasets(&plan)
+                .await
+                .unwrap();
+
+            let mut notifications = Vec::new();
+            for dataset_name in datasets {
+                let channel = common::stream_helpers::cdc_pg_channel(&dataset_name);
+                let stream = metadata_db.listen(&channel).await.unwrap();
+                notifications.push(stream);
+            }
+            let mut notifications = futures::stream::select_all(notifications);
+
+            while let Some(Ok(_)) = notifications.next().await {
+                let end = dataset_store::sql_datasets::max_end_block_for_plan(
+                    &plan,
+                    ctx.as_ref(),
+                    &metadata_db,
+                )
+                .await
+                .unwrap();
+
+                let (start, end) = match (current_end_block, end) {
+                    (Some(start), Some(end)) if end > start => (start + 1, end),
+                    (None, Some(end)) => (0, end),
+                    (_, _) => continue,
+                };
+
+                let plan = ctx
+                    .add_range_to_plan(plan.clone(), start, end)
                     .await
                     .unwrap();
+                let mut stream = Self::execute_once(&ctx, plan).await.unwrap();
 
-                let mut notifications = Vec::new();
-                for dataset_name in datasets {
-                    let channel = common::stream_helpers::cdc_pg_channel(&dataset_name);
-                    let stream = mdb.listen(&channel).await.unwrap();
-                    notifications.push(stream);
-                }
-                let mut notifications = futures::stream::select_all(notifications);
-
-                while let Some(Ok(_)) = notifications.next().await {
-                    let end = dataset_store::sql_datasets::max_end_block(
-                        &stmt,
-                        ds_store.clone(),
-                        env.clone(),
-                    )
-                    .await
-                    .unwrap();
-
-                    let (start, end) = match (current_end_block, end) {
-                        (Some(start), Some(end)) if end > start => (start + 1, end),
-                        (None, Some(end)) => (0, end),
-                        (_, _) => continue,
-                    };
-
-                    let mut stream = dataset_store::sql_datasets::execute_query_for_range(
-                        stmt.clone(),
-                        ds_store.clone(),
-                        env.clone(),
-                        start,
-                        end,
-                    )
-                    .await
-                    .unwrap();
-
-                    while let Some(batch) = stream.next().await {
-                        match batch {
-                            Ok(batch) => {
-                                if tx.unbounded_send(Ok(batch)).is_err() {
-                                    return;
-                                }
-                            }
-                            Err(e) => {
-                                let _ = tx.unbounded_send(Err(e));
+                while let Some(batch) = stream.next().await {
+                    match batch {
+                        Ok(batch) => {
+                            if tx.unbounded_send(Ok(batch)).is_err() {
                                 return;
                             }
                         }
+                        Err(e) => {
+                            let _ = tx.unbounded_send(Err(e));
+                            return;
+                        }
                     }
-
-                    current_end_block = Some(end);
                 }
+
+                current_end_block = Some(end);
             }
         });
 
@@ -490,8 +468,10 @@ impl Service {
             .await?;
         let query_ctx = QueryContext::for_catalog(catalog, self.env.clone())?;
         let plan = query_ctx.prepare_remote_plan(plan).await?;
+
+        let query_ctx = Arc::new(query_ctx);
         let stream = self
-            .execute_plan(&query_ctx, plan, remote_plan.is_streaming)
+            .execute_plan(query_ctx, plan, remote_plan.is_streaming)
             .await?;
 
         Ok(FlightDataEncoderBuilder::new()

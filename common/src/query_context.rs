@@ -42,7 +42,7 @@ use url::Url;
 use crate::catalog::physical::{Catalog, PhysicalTable};
 use crate::evm::udfs::{EvmDecode, EvmDecodeFunctionData, EvmTopic};
 use crate::stream_helpers::is_streaming;
-use crate::{arrow, attestation, BoxError, Table};
+use crate::{arrow, attestation, BlockNum, BoxError, Table};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -297,6 +297,27 @@ impl QueryContext {
             .rewrite(&mut rewriter)
             .map_err(Error::PlanningError)?
             .data;
+
+        Ok(plan)
+    }
+
+    /// Ads block_num filter expression to a plan and returns a new plan
+    pub async fn add_range_to_plan(
+        &self,
+        plan: LogicalPlan,
+        start: BlockNum,
+        end: BlockNum,
+    ) -> Result<LogicalPlan, Error> {
+        use datafusion::logical_expr::{col, lit};
+
+        let mut builder = LogicalPlanBuilder::from(plan);
+        let filter_expr = col("block_num")
+            .gt_eq(lit(start))
+            .and(col("block_num").lt_eq(lit(end)));
+        builder = builder
+            .filter(filter_expr)
+            .map_err(|e| Error::PlanningError(e))?;
+        let plan = builder.build().map_err(|e| Error::PlanEncodingError(e))?;
 
         Ok(plan)
     }

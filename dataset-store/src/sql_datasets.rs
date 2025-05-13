@@ -1,8 +1,3 @@
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    sync::Arc,
-};
-
 use datafusion::{
     common::tree_node::{Transformed, TreeNode, TreeNodeRecursion},
     datasource::TableType,
@@ -12,20 +7,24 @@ use datafusion::{
     sql::resolve::resolve_table_references,
     sql::{parser, TableReference},
 };
+use std::collections::HashSet;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
+use crate::DatasetStore;
 use common::{
     meta_tables::scanned_ranges,
     multirange::MultiRange,
     query_context::{parse_sql, Error as CoreError},
-    BlockNum, BoxError, Dataset, Table, BLOCK_NUM,
+    BlockNum, BoxError, Dataset, QueryContext, Table, BLOCK_NUM,
 };
 use futures::StreamExt as _;
-use metadata_db::TableId;
+use metadata_db::{MetadataDb, TableId};
 use object_store::ObjectMeta;
 use serde::Deserialize;
 use tracing::instrument;
-
-use crate::DatasetStore;
 
 pub struct SqlDataset {
     pub dataset: Dataset,
@@ -156,15 +155,126 @@ pub async fn execute_query_for_range(
 
 // All datasets that have been queried
 #[instrument(skip_all, err)]
-pub async fn queried_datasets(query: &parser::Statement) -> Result<Vec<String>, BoxError> {
-    let (tables, _) =
-        resolve_table_references(&query, true).map_err(|e| CoreError::SqlParseError(e.into()))?;
+pub async fn queried_datasets(plan: &LogicalPlan) -> Result<Vec<String>, BoxError> {
+    let tables = extract_table_references_from_plan(&plan);
 
     let ds = tables
         .into_iter()
         .filter_map(|t| t.schema().map(|s| s.to_string()))
         .collect::<Vec<_>>();
     Ok(ds)
+}
+
+fn extract_table_references_from_plan(plan: &LogicalPlan) -> Vec<TableReference> {
+    let mut refs = HashSet::new();
+    collect_table_refs(plan, &mut refs);
+    refs.into_iter().collect()
+}
+
+fn collect_table_refs(plan: &LogicalPlan, refs: &mut HashSet<TableReference>) {
+    match plan {
+        LogicalPlan::TableScan(scan) => {
+            refs.insert(scan.table_name.clone());
+        }
+        LogicalPlan::Join(join) => {
+            collect_table_refs(&join.left, refs);
+            collect_table_refs(&join.right, refs);
+        }
+        LogicalPlan::Projection(projection) => {
+            collect_table_refs(&projection.input, refs);
+        }
+        LogicalPlan::Filter(filter) => {
+            collect_table_refs(&filter.input, refs);
+        }
+        LogicalPlan::Aggregate(Aggregate) => {
+            collect_table_refs(&Aggregate.input, refs);
+        }
+        LogicalPlan::Sort(sort) => {
+            collect_table_refs(&sort.input, refs);
+        }
+        LogicalPlan::Limit(limit) => {
+            collect_table_refs(&limit.input, refs);
+        }
+        LogicalPlan::Subquery(subquery) => collect_table_refs(&subquery.subquery, refs),
+        LogicalPlan::Union(union) => {
+            for input in &union.inputs {
+                collect_table_refs(input, refs);
+            }
+        }
+        LogicalPlan::SubqueryAlias(alias) => {
+            collect_table_refs(&alias.input, refs);
+        }
+        LogicalPlan::Window(window) => {
+            collect_table_refs(&window.input, refs);
+        }
+        LogicalPlan::Repartition(repartition) => {
+            collect_table_refs(&repartition.input, refs);
+        }
+        LogicalPlan::Distinct(distinct) => {
+            collect_table_refs(&distinct.input(), refs);
+        }
+        LogicalPlan::Unnest(unnest) => {
+            collect_table_refs(&unnest.input, refs);
+        }
+        LogicalPlan::RecursiveQuery(recursive) => {
+            collect_table_refs(&recursive.static_term, refs);
+            collect_table_refs(&recursive.recursive_term, refs);
+        }
+
+        LogicalPlan::Explain(_) => {}
+        LogicalPlan::Analyze(_) => {}
+        LogicalPlan::Dml(_) => {}
+        LogicalPlan::Ddl(_) => {}
+        LogicalPlan::Copy(_) => {}
+        LogicalPlan::DescribeTable(_) => {}
+
+        LogicalPlan::EmptyRelation(_) => {}
+        LogicalPlan::Statement(_) => {}
+        LogicalPlan::Values(_) => {}
+        LogicalPlan::Extension(_) => {}
+    }
+}
+
+/// The most recent block that has been synced for all tables in the plan.
+#[instrument(skip_all, err)]
+pub async fn max_end_block_for_plan(
+    plan: &LogicalPlan,
+    ctx: &QueryContext,
+    metadata_db: &MetadataDb,
+) -> Result<Option<BlockNum>, BoxError> {
+    let tables = extract_table_references_from_plan(&plan);
+
+    if tables.is_empty() {
+        return Ok(None);
+    }
+
+    // let metadata_db = metadata_db.as_ref();
+
+    let synced_block_for_table = |ctx, table: TableReference| async move {
+        let tbl = TableId {
+            // Unwrap: table references are of the partial form: [dataset].[table_name]
+            dataset: table.schema().unwrap(),
+            dataset_version: None,
+            table: table.table(),
+        };
+        let ranges = scanned_ranges::ranges_for_table(ctx, Some(metadata_db), tbl).await?;
+        let ranges = MultiRange::from_ranges(ranges)?;
+
+        // Take the end block of the earliest contiguous range as the "synced block"
+        Ok::<_, BoxError>(ranges.first().map(|r| r.1))
+    };
+
+    let mut tables = tables.into_iter();
+    // let ctx_ref = ctx.as_ref();
+
+    // Unwrap: `tables` is not empty.
+    let mut end = synced_block_for_table(ctx, tables.next().unwrap()).await?;
+    for table in tables {
+        let next_end = synced_block_for_table(ctx, table).await?;
+        end = end.min(next_end);
+    }
+
+    Ok(end)
 }
 
 /// The most recent block that has been synced for all tables in the query.
@@ -332,24 +442,44 @@ mod tests {
             Field::new("timestamp", DataType::Date32, false),
         ]));
 
-        let datasets = vec![PhysicalDataset::new(
-            Dataset {
-                kind: "firehose".to_string(),
-                name: "eth_firehose".to_string(),
-                tables: vec![],
-            },
-            vec![PhysicalTable::new(
-                "eth_firehose",
-                Table {
-                    name: "blocks".to_string(),
-                    schema,
-                    network: None,
+        let datasets = vec![
+            PhysicalDataset::new(
+                Dataset {
+                    kind: "firehose".to_string(),
+                    name: "eth_firehose".to_string(),
+                    tables: vec![],
                 },
-                Url::parse("s3://bucket/blocks").unwrap(),
-                None,
-            )
-            .unwrap()],
-        )];
+                vec![PhysicalTable::new(
+                    "eth_firehose",
+                    Table {
+                        name: "blocks".to_string(),
+                        schema: schema.clone(),
+                        network: None,
+                    },
+                    Url::parse("s3://bucket/blocks").unwrap(),
+                    None,
+                )
+                .unwrap()],
+            ),
+            PhysicalDataset::new(
+                Dataset {
+                    kind: "sql".to_string(),
+                    name: "sql_ds".to_string(),
+                    tables: vec![],
+                },
+                vec![PhysicalTable::new(
+                    "sql_ds",
+                    Table {
+                        name: "even_blocks".to_string(),
+                        schema: schema.clone(),
+                        network: None,
+                    },
+                    Url::parse("s3://bucket/blocks").unwrap(),
+                    None,
+                )
+                .unwrap()],
+            ),
+        ];
         let catalog = Catalog::new(datasets);
         let config = Arc::new(Config::in_memory());
         let env = Arc::new(config.make_runtime_env().unwrap());
@@ -393,11 +523,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn extract_datasets_from_query() {
-        let sql = "SELECT * FROM eth_firehose.blocks AS b INNER JOIN sql_ds.even_blocks AS e ON b.block_num = e.block_num";
-        let stmt = parse_sql(sql).unwrap();
+    async fn extract_datasets_from_plan() {
+        let plan = get_plan("SELECT * FROM eth_firehose.blocks AS b INNER JOIN sql_ds.even_blocks AS e ON b.block_num = e.block_num").await;
 
-        let datasets = queried_datasets(&stmt).await.unwrap();
+        let mut datasets = queried_datasets(&plan).await.unwrap();
+        datasets.sort(); // For consistent test results
         assert_eq!(
             datasets,
             vec!["eth_firehose".to_string(), "sql_ds".to_string()]
