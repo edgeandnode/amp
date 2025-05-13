@@ -9,7 +9,6 @@ use datafusion::{
 use futures::{stream, TryStreamExt};
 use metadata_db::{LocationId, MetadataDb, TableId};
 use object_store::{path::Path, ObjectMeta, ObjectStore};
-use tracing::instrument;
 use url::Url;
 use uuid::Uuid;
 
@@ -521,38 +520,6 @@ pub async fn list_revisions(
             Some((revision, (full_path, full_url, full_prefix)))
         })
         .collect())
-}
-
-#[instrument(skip_all)]
-pub async fn try_restore_location(
-    table_id: &TableId<'_>,
-    metadata_db: &MetadataDb,
-    url: &Url,
-    path: &Path,
-    prefix: &str,
-    data_store: &Store,
-) -> Result<LocationId, BoxError> {
-    let location_id = metadata_db
-        .register_location(*table_id, data_store.bucket(), prefix, &url, false)
-        .await?;
-
-    metadata_db
-        .set_active_location(*table_id, url.as_str())
-        .await?;
-
-    let object_store = data_store.object_store();
-    let mut file_stream = object_store.list(Some(&path));
-
-    while let Some(object_meta) = file_stream.try_next().await? {
-        let (file_name, nozzle_meta) =
-            nozzle_meta_from_object_meta(&object_meta, object_store.clone()).await?;
-        let nozzle_meta_json = serde_json::to_value(nozzle_meta)?;
-        metadata_db
-            .insert_scanned_range(location_id, file_name, nozzle_meta_json)
-            .await?;
-    }
-
-    Ok(location_id)
 }
 
 async fn nozzle_meta_from_object_meta(
