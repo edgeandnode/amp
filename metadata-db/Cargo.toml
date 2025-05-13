@@ -4,6 +4,7 @@ edition.workspace = true
 version.workspace = true
 
 [dependencies]
+pgtemp = "0.6.0"
 sqlx.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
