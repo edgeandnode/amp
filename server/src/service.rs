@@ -135,10 +135,7 @@ pub struct Service {
 }
 
 impl Service {
-    pub fn new(
-        config: Arc<Config>,
-        metadata_db: Option<MetadataDb>,
-    ) -> Result<Self, DataFusionError> {
+    pub fn new(config: Arc<Config>, metadata_db: Arc<MetadataDb>) -> Result<Self, DataFusionError> {
         let env = Arc::new(config.make_runtime_env()?);
         Ok(Self {
             env,
