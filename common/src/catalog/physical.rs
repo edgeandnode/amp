@@ -429,7 +429,6 @@ impl PhysicalTable {
 
     pub async fn ranges(&self) -> Result<Vec<(u64, u64)>, BoxError> {
         let mut ranges = vec![];
-        println!("Listing ranges for table: {}", self.table_name());
         let mut range_stream = self.metadata_db.stream_ranges(self.location_id());
 
         while let Some(range) = range_stream.try_next().await? {

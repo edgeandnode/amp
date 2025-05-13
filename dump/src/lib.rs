@@ -284,7 +284,6 @@ async fn dump_sql_dataset(
                     }
                 }
             } else {
-                info!("poop poop fuck {table}");
                 let physical_table = PhysicalTable::next_revision(
                     physical_table.table(),
                     &data_store,
@@ -464,7 +463,6 @@ async fn consistency_check(
         // Check for files in `__scanned_ranges` that do not exist in the store.
         for filename in registered_files {
             if !stored_files.contains_key(&filename) {
-                println!("{stored_files:?}");
                 let err =
                     format!("file `{path}/{filename}` is registered in `scanned_ranges` but is not in the data store")
                         .into();

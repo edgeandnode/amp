@@ -169,9 +169,7 @@ impl SnapshotContext {
 
     /// Typically used to check a fresh snapshot against a blessed one.
     pub async fn assert_eq(&self, other: &SnapshotContext) -> Result<(), BoxError> {
-        println!("Checking scanned_range equality...");
         self.check_scanned_range_eq(other).await?;
-        println!("Checking table equality...");
 
         for table in self.ctx.catalog().all_tables() {
             let query = parse_sql(&format!(
