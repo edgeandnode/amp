@@ -16,13 +16,16 @@ use parquet::file::properties::WriterProperties as ParquetWriterProperties;
 use tracing::debug;
 use url::Url;
 
-pub struct DatasetWriter {
+const MAX_PARTITION_BLOCK_RANGE: u64 = 1_000_000;
+
+/// Only used for raw datasets.
+pub struct RawDatasetWriter {
     writers: BTreeMap<String, TableWriter>,
 
     metadata_db: Arc<MetadataDb>,
 }
 
-impl DatasetWriter {
+impl RawDatasetWriter {
     /// Expects `dataset_ctx` to contain a single dataset and `scanned_ranges_by_table` to contain
     /// one entry per table in that dataset.
     pub fn new(
@@ -50,7 +53,7 @@ impl DatasetWriter {
             )?;
             writers.insert(table_name.to_string(), writer);
         }
-        Ok(DatasetWriter {
+        Ok(RawDatasetWriter {
             writers,
             metadata_db,
         })
@@ -125,7 +128,10 @@ impl TableWriter {
         metadata_db: Arc<MetadataDb>,
     ) -> Result<TableWriter, BoxError> {
         let ranges_to_write = {
-            let mut ranges = scanned_ranges.complement(start, end).ranges;
+            // Limit maximum range size to 1_000_000 blocks.
+            let mut ranges = scanned_ranges
+                .complement(start, end)
+                .split_with_max(MAX_PARTITION_BLOCK_RANGE);
             ranges.reverse();
             ranges
         };
@@ -174,13 +180,11 @@ impl TableWriter {
             return Ok(scanned_range);
         }
 
-        let bytes_written = self.current_file.as_ref().unwrap().bytes_written();
+        let bytes_written = self.current_file.as_ref().unwrap().in_progress_size();
 
-        // Check if we need to create a new part file for the table.
-        //
-        // TODO: Try switching to `ArrowWriter::memory_size()` once
-        // https://github.com/apache/arrow-rs/pull/5967 is merged and released.
-        if bytes_written >= self.partition_size {
+        // Check if we need to create a new part file before writing this batch of rows, because the
+        // size of the current row group already exceeds the configured max `partition_size`.
+        if bytes_written >= self.partition_size as usize {
             // `scanned_range` would be `Some` if we have had just created a new a file above, so no
             // bytes would have been written yet.
             assert!(scanned_range.is_none());
@@ -261,10 +265,6 @@ pub struct ParquetFileWriter {
 
     // The first block number in the range that this writer is responsible for.
     start: BlockNum,
-
-    // Sum of `get_slice_memory_size` for all data written. Does not correspond to the actual size of
-    // the written file, particularly because this is uncompressed.
-    bytes_written: u64,
 }
 
 impl ParquetFileWriter {
@@ -281,25 +281,17 @@ impl ParquetFileWriter {
         let file_url = table.url().join(&filename)?;
         let file_path = Path::from_url_path(file_url.path())?;
         let object_writer = BufWriter::new(table.object_store(), file_path);
-        let writer = AsyncArrowWriter::try_new(object_writer, table.schema(), Some(opts))?;
+        let writer = AsyncArrowWriter::try_new(object_writer, table.schema(), Some(opts.clone()))?;
         Ok(ParquetFileWriter {
             writer,
             start,
             table,
             file_url,
             filename,
-            bytes_written: 0,
         })
     }
 
     pub async fn write(&mut self, batch: &RecordBatch) -> Result<(), ParquetError> {
-        // Calculate the size of the batch in bytes. `get_slice_memory_size` is the most precise way.
-        self.bytes_written += batch
-            .columns()
-            .iter()
-            .map(|c| c.to_data().get_slice_memory_size().unwrap())
-            .sum::<usize>() as u64;
-
         self.writer.write(batch).await
     }
 
@@ -337,7 +329,8 @@ impl ParquetFileWriter {
         Ok(scanned_range)
     }
 
-    pub fn bytes_written(&self) -> u64 {
-        self.bytes_written
+    // Anticipated encoded (but uncompressed) size of the in progress row group.
+    pub fn in_progress_size(&self) -> usize {
+        self.writer.in_progress_size()
     }
 }
