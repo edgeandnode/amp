@@ -63,11 +63,11 @@ pub async fn dump_dataset(
     let metadata_db = dataset_store.metadata_db.as_ref();
 
     // Ensure consistency before starting the dump procedure.
-    consistency_check(dataset, &ctx, metadata_db).await?;
+    consistency_check(dataset, metadata_db).await?;
 
     // Query the scanned ranges, we might already have some ranges if this is not the first dump run
     // for this dataset.
-    let scanned_ranges_by_table = scanned_ranges_by_table(&ctx, metadata_db).await?;
+    let scanned_ranges_by_table = scanned_ranges_by_table(&ctx).await?;
     for (table_name, multirange) in &scanned_ranges_by_table {
         if multirange.total_len() == 0 {
             continue;
@@ -173,11 +173,10 @@ async fn dump_raw_dataset(
     // Split them across the target number of jobs as to balance the number of blocks per job.
     let multiranges = ranges.split_and_partition(n_jobs as u64, 2000);
 
-    let metadata_db = dataset_store.metadata_db.as_ref().cloned().map(Arc::new);
     let jobs = multiranges.into_iter().enumerate().map(|(i, multirange)| {
         Arc::new(JobPartition {
             dataset_ctx: ctx.clone(),
-            metadata_db: metadata_db.clone(),
+            metadata_db: dataset_store.metadata_db.clone(),
             block_streamer: client.clone(),
             multirange,
             id: i as u32,
@@ -285,14 +284,12 @@ async fn dump_sql_dataset(
                     }
                 }
             } else {
-                let Some(metadata_db) = dataset_store.metadata_db.as_ref() else {
-                    return Err("metadata_db is required for entire materialization".into());
-                };
+                info!("poop poop fuck {table}");
                 let physical_table = PhysicalTable::next_revision(
                     physical_table.table(),
                     &data_store,
                     &dataset_name,
-                    metadata_db,
+                    dataset_store.metadata_db.clone(),
                 )
                 .await?;
                 info!(
@@ -336,26 +333,19 @@ async fn dump_sql_query(
     use dataset_store::sql_datasets::execute_query_for_range;
 
     let store = dataset_store.clone();
-    let metadata_db = store.metadata_db.as_ref().cloned().map(Arc::new);
     let mut stream = execute_query_for_range(query.clone(), store, env.clone(), start, end).await?;
     let mut writer = ParquetFileWriter::new(physical_table.clone(), parquet_opts.clone(), start)?;
-    let table_name = physical_table.table_name();
 
     while let Some(batch) = stream.try_next().await? {
         writer.write(&batch).await?;
     }
     let scanned_range = writer.close(end).await?;
-    match (metadata_db, physical_table.location_id()) {
-        (Some(metadata_db), Some(location_id)) => {
-            insert_scanned_range(scanned_range, metadata_db, location_id).await
-        }
-        (None, None) => Ok(()),
-        _ => panic!(
-            "inconsistent metadata state for {}, location id: {:?}",
-            table_name,
-            physical_table.location_id()
-        ),
-    }
+    insert_scanned_range(
+        scanned_range,
+        dataset_store.metadata_db.clone(),
+        physical_table.location_id(),
+    )
+    .await
 }
 
 pub fn default_partition_size() -> u64 {
@@ -418,8 +408,7 @@ enum ConsistencyCheckError {
 /// On fail: Return a `CorruptedDataset` error.
 async fn consistency_check(
     physical_dataset: &PhysicalDataset,
-    ctx: &QueryContext,
-    metadata_db: Option<&MetadataDb>,
+    metadata_db: &MetadataDb,
 ) -> Result<(), ConsistencyCheckError> {
     // See also: scanned-ranges-consistency
 
@@ -429,12 +418,16 @@ async fn consistency_check(
     for table in physical_dataset.tables() {
         let dataset_name = table.catalog_schema().to_string();
         let tbl = table.table_id();
+        let location_id = table.location_id();
         // Check that `__scanned_ranges` does not contain overlapping ranges.
         {
-            let ranges = ranges_for_table(ctx, metadata_db, tbl)
+            let ranges = ranges_for_table(location_id, metadata_db)
                 .await
                 .map_err(|err| {
-                    ConsistencyCheckError::CorruptedDataset(tbl.dataset.to_string(), err.into())
+                    ConsistencyCheckError::CorruptedDataset(
+                        table.catalog_schema().to_string(),
+                        err.into(),
+                    )
                 })?;
             if let Err(e) = MultiRange::from_ranges(ranges) {
                 return Err(CorruptedDataset(dataset_name, e.into()));
@@ -442,7 +435,7 @@ async fn consistency_check(
         }
 
         let registered_files = {
-            let f = filenames_for_table(&ctx, metadata_db, tbl)
+            let f = filenames_for_table(metadata_db, location_id)
                 .await
                 .map_err(|err| {
                     ConsistencyCheckError::CorruptedDataset(tbl.dataset.to_string(), err.into())
@@ -471,8 +464,9 @@ async fn consistency_check(
         // Check for files in `__scanned_ranges` that do not exist in the store.
         for filename in registered_files {
             if !stored_files.contains_key(&filename) {
+                println!("{stored_files:?}");
                 let err =
-                    format!("file `{path}/{filename}` is registered in `__scanned_ranges` but is not in the data store")
+                    format!("file `{path}/{filename}` is registered in `scanned_ranges` but is not in the data store")
                         .into();
                 return Err(ConsistencyCheckError::CorruptedDataset(dataset_name, err));
             }

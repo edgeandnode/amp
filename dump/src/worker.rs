@@ -122,7 +122,7 @@ impl Worker {
         // Spawn scheduled jobs.
         let scheduled_jobs = self.metadata_db.scheduled_jobs(&self.node_id).await?;
         for job_id in scheduled_jobs {
-            let job = Job::load(job_id, self.config.clone(), self.metadata_db.clone())
+            let job = Job::load(job_id, self.config.clone(), self.metadata_db.clone().into())
                 .await
                 .map_err(JobLoadError)?;
             spawn_job(self.config.clone(), self.metadata_db.clone(), job);
@@ -211,9 +211,13 @@ impl JobHandler {
 
         match action {
             Action::Start => {
-                let job = Job::load(self.job_id, self.config.clone(), self.metadata_db.clone())
-                    .await
-                    .map_err(JobLoadError)?;
+                let job = Job::load(
+                    self.job_id,
+                    self.config.clone(),
+                    self.metadata_db.clone().into(),
+                )
+                .await
+                .map_err(JobLoadError)?;
                 spawn_job(self.config.clone(), self.metadata_db.clone(), job);
             }
 
@@ -229,7 +233,7 @@ impl JobHandler {
 fn spawn_job(config: Arc<Config>, metadata_db: MetadataDb, job: Job) -> JoinHandle<()> {
     tokio::spawn(async move {
         let job_desc = job.to_string();
-        match job.run(config, metadata_db).await {
+        match job.run(config, metadata_db.into()).await {
             Ok(()) => {
                 info!("job {} finished running", job_desc);
             }

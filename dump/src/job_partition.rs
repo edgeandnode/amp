@@ -23,7 +23,7 @@ pub struct JobPartition<T: BlockStreamer> {
 
     pub scanned_ranges_by_table: BTreeMap<String, MultiRange>,
 
-    pub metadata_db: Option<Arc<MetadataDb>>,
+    pub metadata_db: Arc<MetadataDb>,
 }
 
 impl<S: BlockStreamer> JobPartition<S> {
