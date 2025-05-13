@@ -79,7 +79,7 @@
 
 - name: evm_decode_results
   query: |
-    SELECT evm_decode_results(return_data, 'function claim(uint256[] calldata tokenIds) public returns(uint256 prevId)') AS results
+    SELECT evm_decode_results(return_data, 'function claim(uint256[] calldata tokenIds, uint8 garbage) public returns(uint256 prevId)') AS results
     FROM eth_firehose.calls
     WHERE block_num = 15000000 AND tx_index = 341
     LIMIT 1
@@ -91,3 +91,136 @@
         }
       }
     ]
+
+- name: evm_decode_params
+  query: |
+    SELECT evm_encode_params(to, CAST(123123123 AS DECIMAL(41, 0)), input, 'function example(address _to, uint256 _value, bytes _input) public returns (bool success)') AS encoded
+    FROM eth_rpc.transactions
+    WHERE block_num = 15000000 AND tx_index = 2
+  results: |
+    [
+      {
+        "encoded": "af32b01f000000000000000000000000beefbabeea323f07c59926295205d3b7a17e8638000000000000000000000000000000000000000000000000000000000756b5b30000000000000000000000000000000000000000000000000000000000000060000000000000000000000000000000000000000000000000000000000000008f000000020000000000000000000000000000000000000000000000000000000003e366320000000000000000000000000000000000000000000000005ea06407f0408000aaaebe6fe48e54f431b0c390cfaf0b017d09d42dc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2000bb800000000000000000000000000000000000000000000000000210fa439a7fc040000000000000000000000000000000000"
+      }
+    ]
+
+- name: evm_encode_then_decode_params
+  query: |
+    SELECT evm_decode_params(encoded, 'function transfer(address _to, uint256 _value) public returns (bool success)') AS decoded
+    FROM (
+        SELECT to, evm_encode_params(to, CAST(100 AS DECIMAL(39, 0)), 'function transfer(address _to, uint256 _value) public returns (bool success)') AS encoded
+        FROM eth_rpc.transactions
+        WHERE block_num = 15000000 AND tx_index = 2
+    )
+  results: |
+    [
+      {
+        "decoded": {
+          "_to": "beefbabeea323f07c59926295205d3b7a17e8638",
+          "_value": "100"
+        }
+      }
+    ]
+
+- name: evm_encode_type_scalars
+  query: |
+    SELECT
+      evm_encode_type(CAST(635 AS DECIMAL(39, 0)), 'uint256') AS uint256,
+      evm_encode_type(CAST(-635 AS DECIMAL(39, 0)), 'int256') AS int256,
+      evm_encode_type(CAST(-635 AS DECIMAL(38, 0)), 'int128') AS int128,
+      evm_encode_type('hello world', 'string') AS str,
+      evm_encode_type(CAST(100 AS TINYINT), 'int8') AS int8
+  results: |
+    [
+      {
+        "uint256": "000000000000000000000000000000000000000000000000000000000000027b",
+        "int256": "fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffd85",
+        "int128": "fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffd85",
+        "str": "0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000b68656c6c6f20776f726c64000000000000000000000000000000000000000000",
+        "int8": "0000000000000000000000000000000000000000000000000000000000000064"
+      }
+    ]
+
+- name: evm_encode_transaction_values
+  query: |
+    SELECT evm_encode_type(value, 'uint256') AS value
+    FROM eth_rpc.transactions
+    WHERE block_num = 15000000
+    LIMIT 20
+  results: |
+    [
+      {"value": "000000000000000000000000000000000000000000000000003e606b18c24f0f"},
+      {"value": "00000000000000000000000000000000000000000000000000316c27e1c17a8c"},
+      {"value": "0000000000000000000000000000000000000000000000000000000000e4e1c0"},
+      {"value": "0000000000000000000000000000000000000000000000000000000000e4e1c0"},
+      {"value": "0000000000000000000000000000000000000000000000000000000000e4e1c0"},
+      {"value": "0000000000000000000000000000000000000000000000000000000000000000"},
+      {"value": "0000000000000000000000000000000000000000000000000000000000e4e1c0"},
+      {"value": "0000000000000000000000000000000000000000000000000000000000000506"},
+      {"value": "000000000000000000000000000000000000000000000000000000000000fa05"},
+      {"value": "0000000000000000000000000000000000000000000000000000000000000000"},
+      {"value": "000000000000000000000000000000000000000000000000136dcc951d8c0000"},
+      {"value": "000000000000000000000000000000000000000000000000134a45a2adcb0000"},
+      {"value": "000000000000000000000000000000000000000000000000136dcc951d8c0000"},
+      {"value": "000000000000000000000000000000000000000000000000134a45a2adcb0000"},
+      {"value": "0000000000000000000000000000000000000000000000000000000000000000"},
+      {"value": "000000000000000000000000000000000000000000000000134a45a2adcb0000"},
+      {"value": "000000000000000000000000000000000000000000000000001c6bf526340000"},
+      {"value": "000000000000000000000000000000000000000000000000136dcc951d8c0000"},
+      {"value": "000000000000000000000000000000000000000000000000136dcc951d8c0000"},
+      {"value": "0000000000000000000000000000000000000000000000000075e76692293000"}
+    ]
+
+- name: evm_encode_type_mismatch_int_to_uint
+  query: |
+    SELECT evm_encode_type(CAST(-2 AS TINYINT), 'uint8')
+  failure: |
+    expected int type, got uint8
+
+- name: evm_encode_type_mismatch_int_to_string
+  query: |
+    SELECT evm_encode_type(CAST(-2 AS TINYINT), 'string')
+  failure: |
+    expected int type, got string
+
+- name: evm_encode_type_mismatch_string_to_uint
+  query: |
+    SELECT evm_encode_type('str', 'uint256')
+  failure: |
+    cannot convert string to solidity type uint256
+
+- name: evm_encode_params_empty
+  query: |
+    SELECT evm_encode_params('function f()') AS encoded
+  results: |
+    [{"encoded": "26121ff0"}]
+
+- name: evm_decode_params_empty
+  query: |
+    SELECT evm_decode_params(decode('26121ff0', 'hex'), 'function f()') AS decoded
+  results: |
+    [{"decoded": {}}]
+
+- name: evm_encode_decimal_256_with_scale
+  query: |
+    SELECT evm_encode_type(CAST(635 AS DECIMAL(39, 1)), 'uint256') AS uint256
+  failure: |
+    Unsupported type Decimal256(39, 1) for Solidity type uint256
+
+- name: evm_encode_decimal_128_with_scale
+  query: |
+    SELECT evm_encode_type(CAST(635 AS DECIMAL(38, 1)), 'uint128') AS uint128
+  failure: |
+    Unsupported type Decimal128(38, 1) for Solidity type uint128
+
+- name: evm_encode_decimal_256_with_trailing_zeros
+  query: |
+    SELECT evm_encode_type(CAST(635000 AS DECIMAL(39, 0)), 'uint256') AS uint256
+  results: |
+    [{"uint256":"000000000000000000000000000000000000000000000000000000000009b078"}]
+
+- name: evm_encode_decimal_128_with_trailing_zeros
+  query: |
+    SELECT evm_encode_type(CAST(635000 AS DECIMAL(38, 0)), 'uint128') AS uint128
+  results: |
+    [{"uint128":"000000000000000000000000000000000000000000000000000000000009b078"}]

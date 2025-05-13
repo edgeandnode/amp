@@ -40,7 +40,9 @@ use tracing::{debug, instrument};
 use url::Url;
 
 use crate::catalog::physical::{Catalog, PhysicalTable};
-use crate::evm::udfs::{EvmDecode, EvmDecodeFunctionData, EvmTopic};
+use crate::evm::udfs::{
+    EvmDecode, EvmDecodeFunctionData, EvmEncodeParams, EvmEncodeType, EvmTopic,
+};
 use crate::{arrow, attestation, BoxError, Table};
 
 #[derive(Error, Debug)]
@@ -493,6 +495,8 @@ fn udfs() -> Vec<ScalarUDF> {
         EvmTopic::new().into(),
         EvmDecodeFunctionData::evm_decode_params().into(),
         EvmDecodeFunctionData::evm_decode_results().into(),
+        EvmEncodeParams::new().into(),
+        EvmEncodeType::new().into(),
     ]
 }
 
