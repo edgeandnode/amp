@@ -70,7 +70,6 @@ impl MetadataDb {
     pub async fn connect(url: &str) -> Result<MetadataDb, Error> {
         let pool = PgPoolOptions::new()
             .acquire_timeout(Duration::from_secs(5))
-            .max_connections(10_000)
             .connect(url)
             .await
             .map_err(Error::ConnectionError)?;
@@ -87,7 +86,6 @@ impl MetadataDb {
     pub fn connect_lazy(url: &str) -> Result<MetadataDb, Error> {
         let pool = PgPoolOptions::new()
             .acquire_timeout(Duration::from_secs(5))
-            .max_connections(10_000)
             .connect_lazy(url)
             .map_err(Error::ConnectionError)?;
         let db = MetadataDb {
