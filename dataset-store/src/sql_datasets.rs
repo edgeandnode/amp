@@ -131,14 +131,14 @@ pub async fn execute_query_for_range(
         let needed_range = MultiRange::from_ranges(vec![(start, end)]).unwrap();
         for table in tables {
             let tbl = TableId {
+                // Unwrap: table references are of the partial form: [dataset].[table_name]
                 dataset: table.schema().unwrap(),
                 dataset_version: None,
                 table: table.table(),
             };
-            let thing = metadata_db.get_active_location(tbl).await?;
-            let location_id = thing
-                .ok_or(format!("table {tbl:?} not found in metadata db"))?
-                .1;
+            let Some((_, location_id)) = metadata_db.get_active_location(tbl).await? else {
+                return Err(format!("table {}.{} not found", tbl.dataset, tbl.table).into());
+            };
             let ranges = scanned_ranges::ranges_for_table(location_id, metadata_db).await?;
             let ranges = MultiRange::from_ranges(ranges)?;
             let synced = ranges.intersection(&needed_range) == needed_range;
