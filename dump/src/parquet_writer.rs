@@ -284,9 +284,6 @@ pub struct ParquetFileWriter {
 
     // The first block number in the range that this writer is responsible for.
     start: BlockNum,
-
-    // The number of rows written to the file.
-    rows_written: usize,
 }
 
 impl ParquetFileWriter {
@@ -310,12 +307,10 @@ impl ParquetFileWriter {
             table,
             file_url,
             filename,
-            rows_written: 0,
         })
     }
 
     pub async fn write(&mut self, batch: &RecordBatch) -> Result<(), ParquetError> {
-        self.rows_written += batch.num_rows();
         self.writer.write(batch).await
     }
 
