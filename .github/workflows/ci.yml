@@ -27,7 +27,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y protobuf-compiler
+          sudo apt-get install -y protobuf-compiler postgresql
 
       - uses: actions-rust-lang/setup-rust-toolchain@9d7e65c320fdb52dcd45ffaa68deb6c02c8754d9 # v1
         with:
