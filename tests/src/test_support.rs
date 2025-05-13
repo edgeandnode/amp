@@ -91,7 +91,7 @@ impl SnapshotContext {
                         "Failed to restore blessed table {dataset_name}.{}. This is likely due to \
                         the dataset or table being deleted. \n\
                         Bless the dataset again with by running \
-                        `cargo run -p tests -- bless {dataset_name} 15000000 15000000`",
+                        `cargo run -p tests -- bless {dataset_name} <start_block> <end_block>`",
                         table.name
                     )
                     .as_str(),
