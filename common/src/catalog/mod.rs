@@ -7,7 +7,7 @@ use datafusion::{
     logical_expr::{LogicalPlan, TableScan},
     sql::TableReference,
 };
-use physical::Catalog;
+use physical::{Catalog, PhysicalDataset, PhysicalTable};
 
 use crate::{config::Config, BoxError, Dataset, QueryContext, Table};
 
@@ -48,16 +48,24 @@ pub fn collect_scanned_tables(plan: &LogicalPlan) -> BTreeSet<TableReference> {
 pub async fn schema_to_markdown(
     tables: Vec<Table>,
     dataset_kind: String,
+    dataset_name: &str,
 ) -> Result<String, BoxError> {
     let dataset = Dataset {
         kind: dataset_kind,
-        name: "dataset".to_string(),
+        name: dataset_name.to_string(),
         tables,
     };
-    let config = Config::in_memory();
+    let config = Config::in_memory().await;
 
     let env = Arc::new(config.make_runtime_env()?);
-    let catalog = Catalog::for_dataset(dataset, config.data_store, None).await?;
+    let tables = dataset.tables().iter().cloned().try_fold(
+        Vec::with_capacity(dataset.tables.len()),
+        |mut acc, table| {
+            acc.push(PhysicalTable::empty(table, &config)?);
+            Ok::<Vec<PhysicalTable>, BoxError>(acc)
+        },
+    )?;
+    let catalog = Catalog::new(vec![PhysicalDataset::new(dataset, tables)]);
     let context = QueryContext::for_catalog(catalog, env).unwrap();
 
     let mut markdown = String::new();
