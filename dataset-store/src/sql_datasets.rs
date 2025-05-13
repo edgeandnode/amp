@@ -1,3 +1,8 @@
+use std::{
+    collections::{BTreeMap, BTreeSet, HashSet},
+    sync::Arc,
+};
+
 use datafusion::{
     common::tree_node::{Transformed, TreeNode, TreeNodeRecursion},
     datasource::TableType,
@@ -6,10 +11,6 @@ use datafusion::{
     logical_expr::{col, lit, Filter, LogicalPlan, Sort, TableScan},
     sql::resolve::resolve_table_references,
     sql::{parser, TableReference},
-};
-use std::{
-    collections::{BTreeMap, BTreeSet, HashSet},
-    sync::Arc,
 };
 
 use common::{
