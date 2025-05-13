@@ -7,13 +7,11 @@ use datafusion::{
     sql::resolve::resolve_table_references,
     sql::{parser, TableReference},
 };
-use std::collections::HashSet;
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashSet},
     sync::Arc,
 };
 
-use crate::DatasetStore;
 use common::{
     meta_tables::scanned_ranges,
     multirange::MultiRange,
@@ -25,6 +23,8 @@ use metadata_db::{MetadataDb, TableId};
 use object_store::ObjectMeta;
 use serde::Deserialize;
 use tracing::instrument;
+
+use crate::DatasetStore;
 
 pub struct SqlDataset {
     pub dataset: Dataset,
