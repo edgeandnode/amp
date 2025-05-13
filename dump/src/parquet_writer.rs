@@ -19,7 +19,7 @@ use url::Url;
 pub struct DatasetWriter {
     writers: BTreeMap<String, TableWriter>,
 
-    metadata_db: Option<Arc<MetadataDb>>,
+    metadata_db: Arc<MetadataDb>,
 }
 
 impl DatasetWriter {
@@ -27,7 +27,7 @@ impl DatasetWriter {
     /// one entry per table in that dataset.
     pub fn new(
         dataset_ctx: Arc<QueryContext>,
-        metadata_db: Option<Arc<MetadataDb>>,
+        metadata_db: Arc<MetadataDb>,
         opts: ParquetWriterProperties,
         start: BlockNum,
         end: BlockNum,
@@ -74,20 +74,11 @@ impl DatasetWriter {
         for (_, writer) in self.writers {
             let location_id = writer.table.location_id();
             let metadata_db = self.metadata_db.clone();
-            let table_ref = writer.table.table_ref().to_string();
 
             let scanned_range = writer.close().await?;
 
-            match (location_id, metadata_db) {
-                (Some(location_id), Some(metadata_db)) => {
-                    if let Some(scanned_range) = scanned_range {
-                        insert_scanned_range(scanned_range, metadata_db, location_id).await?
-                    }
-                }
-                (None, None) => {}
-                _ => {
-                    panic!("inconsistent metadata state for {}", table_ref)
-                }
+            if let Some(scanned_range) = scanned_range {
+                insert_scanned_range(scanned_range, metadata_db, location_id).await?
             }
         }
 
@@ -120,7 +111,7 @@ struct TableWriter {
     current_range: Option<(u64, u64)>,
     current_file: Option<ParquetFileWriter>,
 
-    metadata_db: Option<Arc<MetadataDb>>,
+    metadata_db: Arc<MetadataDb>,
 }
 
 impl TableWriter {
@@ -131,7 +122,7 @@ impl TableWriter {
         scanned_ranges: MultiRange,
         start: BlockNum,
         end: BlockNum,
-        metadata_db: Option<Arc<MetadataDb>>,
+        metadata_db: Arc<MetadataDb>,
     ) -> Result<TableWriter, BoxError> {
         let ranges_to_write = {
             let mut ranges = scanned_ranges.complement(start, end).ranges;
@@ -200,19 +191,9 @@ impl TableWriter {
             scanned_range = Some(file_to_close.close(end).await?);
             let metadata_db = self.metadata_db.clone();
             let location_id = self.table.location_id();
-            let table_ref = self.table.table_ref();
 
-            match (metadata_db, location_id) {
-                (Some(metadata_db), Some(location_id)) => {
-                    // Unwrap: scanned_range must be Some here
-                    insert_scanned_range(scanned_range.clone().unwrap(), metadata_db, location_id)
-                        .await?
-                }
-                (None, None) => {}
-                _ => {
-                    panic!("inconsistent metadata state for {}", table_ref)
-                }
-            }
+            // Unwrap: scanned_range must be Some here
+            insert_scanned_range(scanned_range.clone().unwrap(), metadata_db, location_id).await?;
 
             // The current range was partially written, so we need to split it.
             let end = self.current_range.unwrap().1;

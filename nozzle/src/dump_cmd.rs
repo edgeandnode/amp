@@ -5,7 +5,7 @@ use std::{
 };
 
 use common::{
-    catalog::physical::PhysicalDataset,
+    catalog::physical::{PhysicalDataset, PhysicalTable},
     config::Config,
     manifest,
     parquet::basic::{Compression, ZstdLevel},
@@ -18,7 +18,7 @@ use tracing::info;
 
 pub async fn dump(
     config: Arc<Config>,
-    metadata_db: Option<MetadataDb>,
+    metadata_db: Arc<MetadataDb>,
     mut datasets: Vec<String>,
     ignore_deps: bool,
     start: i64,
@@ -29,6 +29,7 @@ pub async fn dump(
     disable_compression: bool,
     run_every_mins: Option<u64>,
 ) -> Result<(), BoxError> {
+    let data_store = config.data_store.clone();
     let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
     let partition_size = partition_size_mb * 1024 * 1024;
     let compression = if disable_compression {
@@ -50,15 +51,30 @@ pub async fn dump(
     let mut physical_datasets = vec![];
     for dataset_name in datasets {
         let dataset = dataset_store.load_dataset(&dataset_name).await?.dataset;
-        physical_datasets.push(
-            PhysicalDataset::from_dataset_at(
-                dataset,
-                config.data_store.clone(),
-                metadata_db.as_ref(),
-                false,
+        let mut tables = Vec::with_capacity(dataset.tables.len());
+        for table in dataset.tables() {
+            if let Some(physical_table) = PhysicalTable::get_or_restore_active_revision(
+                table,
+                &dataset_name,
+                data_store.clone(),
+                metadata_db.clone(),
             )
-            .await?,
-        );
+            .await?
+            {
+                tables.push(physical_table);
+            } else {
+                tables.push(
+                    PhysicalTable::next_revision(
+                        table,
+                        data_store.as_ref(),
+                        &dataset_name,
+                        metadata_db.clone(),
+                    )
+                    .await?,
+                );
+            }
+        }
+        physical_datasets.push(PhysicalDataset::new(dataset, tables));
     }
 
     match run_every {

@@ -25,95 +25,48 @@ use crate::{multirange::MultiRange, BoxError, QueryContext, Timestamp};
 
 use futures::{StreamExt, TryStreamExt};
 
-use metadata_db::{MetadataDb, TableId};
+use metadata_db::MetadataDb;
 use serde::{Deserialize, Serialize};
 
 pub const METADATA_KEY: &'static str = "nozzle_metadata";
 
 pub async fn ranges_for_table(
-    ctx: &QueryContext,
-    metadata_db: Option<&MetadataDb>,
-    tbl: TableId<'_>,
+    location_id: i64,
+    metadata_db: &MetadataDb,
 ) -> Result<Vec<(u64, u64)>, BoxError> {
-    match metadata_db {
-        // If MetadataDb is provided, then stream the ranges directly from it (nice)
-        Some(metadata_db) => {
-            let mut ranges = Vec::new();
-            let mut ranges_stream = metadata_db.stream_ranges(tbl);
-
-            while let Some(range) = ranges_stream.next().await {
-                let (range_start, range_end) = range?;
-
-                ranges.push((range_start as u64, range_end as u64));
-            }
-
-            Ok(ranges)
-        }
-        // Otherwise read the metadata from all of the parquet files (painful)
-        _ => Ok(ctx
-            .catalog()
-            .all_tables()
-            .find(|physical_table| physical_table.table_id() == tbl)
-            // TODO: method to select a table from the catalog by TableId, returning a Result<PhysicalTable>
-            // to avoid this whole iteration + combinator + unwrap pattern.
-            // Unwrap: the caller has already confirmed the existence of the physical table with this TableId
-            .unwrap()
-            .ranges()
-            .await?),
-    }
+    metadata_db
+        .stream_ranges(location_id)
+        .map(|res| {
+            let (start, end) = res?;
+            Ok((start as u64, end as u64))
+        })
+        .try_collect::<Vec<_>>()
+        .await
 }
 
 pub async fn scanned_ranges_by_table(
     ctx: &QueryContext,
-    metadata_db: Option<&MetadataDb>,
 ) -> Result<BTreeMap<String, MultiRange>, BoxError> {
     let mut multirange_by_table = BTreeMap::default();
 
     for table in ctx.catalog().all_tables() {
-        let tbl = TableId {
-            // Unwrap: all tables in ctx.catalog().all_tables() are of the form: [dataset].[table_name]
-            // we can access the dataset from the partial table reference's schema.
-            dataset: table.table_ref().schema().unwrap(),
-            dataset_version: None,
-            table: table.table_name(),
-        };
-
-        let ranges = ranges_for_table(ctx, metadata_db, tbl).await?;
+        let ranges = ranges_for_table(table.location_id(), &table.metadata_db).await?;
         let multi_range = MultiRange::from_ranges(ranges)?;
-        multirange_by_table.insert(tbl.table.to_string(), multi_range);
+        multirange_by_table.insert(table.table_name().to_string(), multi_range);
     }
 
     Ok(multirange_by_table)
 }
 
 pub async fn filenames_for_table(
-    ctx: &QueryContext,
-    metadata_db: Option<&MetadataDb>,
-    tbl: TableId<'_>,
+    metadata_db: &MetadataDb,
+    location_id: i64,
 ) -> Result<Vec<String>, BoxError> {
-    match metadata_db {
-        // If MetadataDb is provided, then stream the file names directly from it (nice)
-        Some(metadata_db) => {
-            let file_names = metadata_db
-                .stream_file_names(tbl)
-                .try_collect::<Vec<_>>()
-                .await?;
-            Ok(file_names)
-        }
-        // Otherwise read the metadata from all of the parquet files (painful)
-        _ => Ok(ctx
-            .catalog()
-            .all_tables()
-            .find(|physical_table| physical_table.table_id() == tbl)
-            // TODO: method to select a table from the catalog by TableId, returning a Result<PhysicalTable>
-            // to avoid this whole iteration + combinator + unwrap pattern.
-            // Unwrap: the caller has already confirmed the existence of the physical table with this TableId
-            .unwrap()
-            .parquet_files(true)
-            .await?
-            .into_keys()
-            .collect()),
-    }
+    let file_names = metadata_db
+        .stream_file_names(location_id)
+        .try_collect::<Vec<_>>()
+        .await?;
+    Ok(file_names)
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

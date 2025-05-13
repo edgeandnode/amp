@@ -1,9 +1,18 @@
-use std::ops::Deref;
+use std::{ops::Deref, sync::LazyLock};
 
-use metadata_db::MetadataDb;
+use crate::MetadataDb;
 use pgtemp::{PgTempDB, PgTempDBBuilder};
 use tokio::sync::OnceCell;
 use tracing::info;
+
+pub static ALLOW_TEMP_DB: LazyLock<bool> = LazyLock::new(|| {
+    std::env::var("ALLOW_TEMP_DB")
+        .map(|v| v.to_lowercase() == "true" || v == "1")
+        .unwrap_or(true)
+});
+
+pub static KEEP_TEMP_DIRS: LazyLock<bool> =
+    LazyLock::new(|| std::env::var("KEEP_TEMP_DIRS").is_ok());
 
 pub struct TempMetadataDb {
     metadata_db: MetadataDb,
@@ -34,6 +43,10 @@ impl TempMetadataDb {
             metadata_db,
             _temp_db: pg_temp,
         }
+    }
+
+    pub fn url(&self) -> &str {
+        self.metadata_db.url.as_str()
     }
 }
 
