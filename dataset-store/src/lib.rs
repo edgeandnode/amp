@@ -513,7 +513,17 @@ impl DatasetStore {
                     self.metadata_db.clone(),
                 )
                 .await
-                .map_err(DatasetError::unknown)?;
+                .map_err(DatasetError::unknown)?
+                .ok_or(DatasetError::unknown(format!(
+                    "No table files found for table {}.{} in {:?}",
+                    dataset_name,
+                    table.name,
+                    self.config
+                        .data_store
+                        .url()
+                        .join(&format!("{}/{}/", dataset_name, table.name))
+                        .unwrap()
+                )))?;
                 tables.push(physical_table);
             }
             let physical_dataset = PhysicalDataset::new(dataset.dataset.clone(), tables);

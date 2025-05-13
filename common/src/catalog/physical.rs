@@ -208,7 +208,7 @@ impl PhysicalTable {
         data_store: Arc<Store>,
         dataset_name: &str,
         metadata_db: Arc<MetadataDb>,
-    ) -> Result<Self, BoxError> {
+    ) -> Result<Option<Self>, BoxError> {
         let table_id = TableId {
             dataset: dataset_name,
             dataset_version: None,
@@ -236,7 +236,7 @@ impl PhysicalTable {
         dataset_name: &str,
         data_store: Arc<Store>,
         metadata_db: Arc<MetadataDb>,
-    ) -> Result<Self, BoxError> {
+    ) -> Result<Option<Self>, BoxError> {
         let table_id = TableId {
             dataset: dataset_name,
             dataset_version: None,
@@ -248,7 +248,7 @@ impl PhysicalTable {
                 let table_ref = TableReference::partial(dataset_name, table.name.as_str());
                 let path = Path::from_url_path(url.path()).unwrap();
                 let (object_store, _) = infer_object_store(&url)?;
-                Self {
+                Some(Self {
                     table: table.clone(),
                     table_ref,
                     url,
@@ -256,7 +256,7 @@ impl PhysicalTable {
                     object_store,
                     location_id,
                     metadata_db: metadata_db.clone(),
-                }
+                })
             } else {
                 PhysicalTable::restore_latset_revision(
                     table,
@@ -276,13 +276,14 @@ impl PhysicalTable {
         table_id: &TableId<'_>,
         data_store: Arc<Store>,
         metadata_db: Arc<MetadataDb>,
-    ) -> Result<Self, BoxError> {
-        let (path, url, prefix) = revisions
-            .values()
-            .last()
-            .ok_or_else(|| format!("No revisions found for table {}", table.name))?;
-
-        Self::restore(table, table_id, prefix, path, url, data_store, metadata_db).await
+    ) -> Result<Option<Self>, BoxError> {
+        if let Some((path, url, prefix)) = revisions.values().last() {
+            Self::restore(table, table_id, prefix, path, url, data_store, metadata_db)
+                .await
+                .map(Some)
+        } else {
+            Ok(None)
+        }
     }
 
     /// Restore a location from the data store and register it in the metadata database.
