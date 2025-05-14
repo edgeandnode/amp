@@ -142,10 +142,6 @@ impl Config {
             .await
             .map_err(Into::into)
     }
-
-    pub fn metadata_db_lazy(&self) -> Result<MetadataDb, BoxError> {
-        MetadataDb::connect_lazy(&self.metadata_db_url).map_err(Into::into)
-    }
 }
 
 impl Default for Addrs {
