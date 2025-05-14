@@ -3,20 +3,18 @@ use std::{
     sync::Arc,
 };
 
-use common::query_context::Error;
 use common::{
     meta_tables::scanned_ranges,
     multirange::MultiRange,
     query_context::{parse_sql, Error as CoreError},
     BlockNum, BoxError, Dataset, QueryContext, Table, BLOCK_NUM,
 };
-use datafusion::logical_expr::LogicalPlanBuilder;
 use datafusion::{
     common::tree_node::{Transformed, TreeNode, TreeNodeRecursion},
     datasource::TableType,
     error::DataFusionError,
     execution::{runtime_env::RuntimeEnv, SendableRecordBatchStream},
-    logical_expr::{col, lit, Filter, LogicalPlan, Sort, TableScan},
+    logical_expr::{col, lit, Filter, LogicalPlan, LogicalPlanBuilder, Sort, TableScan},
     sql::resolve::resolve_table_references,
     sql::{parser, TableReference},
 };
@@ -281,7 +279,7 @@ pub async fn add_range_to_plan(
     plan: LogicalPlan,
     start: BlockNum,
     end: BlockNum,
-) -> Result<LogicalPlan, Error> {
+) -> Result<LogicalPlan, BoxError> {
     use datafusion::logical_expr::{col, lit};
 
     let mut builder = LogicalPlanBuilder::from(plan);
@@ -289,9 +287,8 @@ pub async fn add_range_to_plan(
         .gt_eq(lit(start))
         .and(col("block_num").lt_eq(lit(end)));
     builder = builder
-        .filter(filter_expr)
-        .map_err(|e| Error::PlanningError(e))?;
-    let plan = builder.build().map_err(|e| Error::PlanEncodingError(e))?;
+        .filter(filter_expr)?;
+    let plan = builder.build()?;
 
     Ok(plan)
 }
