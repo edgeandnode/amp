@@ -286,8 +286,7 @@ pub async fn add_range_to_plan(
     let filter_expr = col("block_num")
         .gt_eq(lit(start))
         .and(col("block_num").lt_eq(lit(end)));
-    builder = builder
-        .filter(filter_expr)?;
+    builder = builder.filter(filter_expr)?;
     let plan = builder.build()?;
 
     Ok(plan)
