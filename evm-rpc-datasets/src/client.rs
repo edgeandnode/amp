@@ -22,7 +22,7 @@ use common::{
 use futures::future::try_join_all;
 use thiserror::Error;
 use tokio::sync::mpsc;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use crate::tables::transactions::{Transaction, TransactionRowsBuilder};
 
@@ -35,22 +35,23 @@ pub enum ToRowError {
 }
 pub struct BatchingRpcWrapper {
     client: alloy::providers::ReqwestProvider,
-    max_batch_size: usize,
-    retry_factor: f32,
+    batch_size: usize,
+    retries: usize,
     limiter: Arc<tokio::sync::Semaphore>,
 }
 
 impl BatchingRpcWrapper {
     pub fn new(
         client: alloy::providers::ReqwestProvider,
-        max_batch_size: usize,
-        retry_factor: f32,
+        batch_size: usize,
+        retries: usize,
         limiter: Arc<tokio::sync::Semaphore>,
     ) -> Self {
+        assert!(batch_size > 0, "max_batch_size must be > 0");
         Self {
             client,
-            max_batch_size,
-            retry_factor,
+            batch_size,
+            retries,
             limiter,
         }
     }
@@ -59,13 +60,13 @@ impl BatchingRpcWrapper {
         &self,
         calls: Vec<(&'static str, P)>,
     ) -> Result<Vec<T>, BoxError> {
-        let mut batch_size = self.max_batch_size;
         let mut results = Vec::new();
         let mut remaining_calls = calls;
+        let mut remaining_attempts = self.retries;
 
         while !remaining_calls.is_empty() {
             let chunk: Vec<_> = remaining_calls
-                .drain(..batch_size.min(remaining_calls.len()))
+                .drain(..self.batch_size.min(remaining_calls.len()))
                 .collect();
 
             // Acquire semaphore permit for the batch, which will be one request
@@ -87,20 +88,15 @@ impl BatchingRpcWrapper {
             match batch_then_waiters.await {
                 Ok(responses) => {
                     results.extend(responses);
-
-                    // Attempt to increase batch size on success
-                    batch_size = ((batch_size as f32 * self.retry_factor).ceil() as usize).max(1);
-                    batch_size = batch_size.min(self.max_batch_size);
                 }
-                Err(_) if batch_size > 1 => {
-                    // Log the error and reduce batch size
-                    info!(
-                        "Batch failed with size {}. Reducing batch size and retrying.",
-                        batch_size
+                Err(e) if remaining_attempts > 0 && self.batch_size > 1 => {
+                    warn!(
+                        "Batch failed. Error({:?}) Batch size {}.",
+                        e, self.batch_size
                     );
                     tokio::time::sleep(Duration::from_millis(500)).await; // Avoid spamming
-                    batch_size = ((batch_size as f32 / self.retry_factor).ceil() as usize).max(1);
                     remaining_calls.splice(0..0, chunk); // Reinsert failed chunk
+                    remaining_attempts -= 1;
                 }
                 Err(e) => {
                     return Err(e.into());
@@ -149,7 +145,7 @@ impl JsonRpcClient {
         let batching_client = BatchingRpcWrapper::new(
             self.client.clone(),
             self.max_batch_size,
-            1.1,
+            10,
             self.limiter.clone(),
         );
 
