@@ -251,7 +251,7 @@ pub async fn max_end_block_for_plan(
         return Ok(None);
     }
 
-    let synced_block_for_table = |ctx, table: TableReference| async move {
+    let synced_block_for_table = |_, table: TableReference| async move {
         let tbl = TableId {
             // Unwrap: table references are of the partial form: [dataset].[table_name]
             dataset: table.schema().unwrap(),
