@@ -49,7 +49,6 @@ impl RawDatasetWriter {
                 scanned_ranges,
                 start,
                 end,
-                metadata_db.clone(),
             )?;
             writers.insert(table_name.to_string(), writer);
         }
@@ -67,7 +66,12 @@ impl RawDatasetWriter {
         let table_name = table_rows.table.name.as_str();
 
         let writer = self.writers.get_mut(table_name).unwrap();
-        let _scanned_range = writer.write(&table_rows).await?;
+        let scanned_range = writer.write(&table_rows).await?;
+        if let Some(scanned_range) = scanned_range {
+            let location_id = writer.table.location_id();
+            let metadata_db = self.metadata_db.clone();
+            insert_scanned_range(scanned_range, metadata_db, location_id).await?;
+        }
 
         Ok(())
     }
@@ -113,8 +117,6 @@ struct TableWriter {
 
     current_range: Option<(u64, u64)>,
     current_file: Option<ParquetFileWriter>,
-
-    metadata_db: Arc<MetadataDb>,
 }
 
 impl TableWriter {
@@ -125,7 +127,6 @@ impl TableWriter {
         scanned_ranges: MultiRange,
         start: BlockNum,
         end: BlockNum,
-        metadata_db: Arc<MetadataDb>,
     ) -> Result<TableWriter, BoxError> {
         let ranges_to_write = {
             // Limit maximum range size to 1_000_000 blocks.
@@ -143,7 +144,6 @@ impl TableWriter {
             partition_size,
             current_range: None,
             current_file: None,
-            metadata_db,
         };
         this.next_range()?;
         Ok(this)
@@ -193,11 +193,6 @@ impl TableWriter {
             let end = block_num - 1;
             let file_to_close = self.current_file.take().unwrap();
             scanned_range = Some(file_to_close.close(end).await?);
-            let metadata_db = self.metadata_db.clone();
-            let location_id = self.table.location_id();
-
-            // Unwrap: scanned_range must be Some here
-            insert_scanned_range(scanned_range.clone().unwrap(), metadata_db, location_id).await?;
 
             // The current range was partially written, so we need to split it.
             let end = self.current_range.unwrap().1;
