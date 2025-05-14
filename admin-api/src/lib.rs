@@ -35,6 +35,7 @@ pub async fn serve(
             "/datasets",
             get(datasets::get_all::handler).post(datasets::deploy::handler),
         )
+        .route("/datasets/{id}", get(datasets::get_by_id::handler))
         .with_state(Ctx {
             config,
             metadata_db,
