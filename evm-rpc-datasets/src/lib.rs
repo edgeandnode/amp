@@ -35,11 +35,11 @@ pub(crate) struct EvmRpcProvider {
     pub url: Url,
 
     /// Maximum number of json-rpc requests to batch together.
-    #[serde(default = "default_max_batch_size")]
-    pub max_batch_size: usize,
+    #[serde(default = "default_rpc_batch_size")]
+    pub rpc_batch_size: usize,
 }
 
-fn default_max_batch_size() -> usize {
+fn default_rpc_batch_size() -> usize {
     100
 }
 
@@ -67,7 +67,7 @@ pub async fn client(
         provider.url,
         def.network,
         request_limit,
-        provider.max_batch_size,
+        provider.rpc_batch_size,
     )
     .map_err(Error::Client)?;
     Ok(client)

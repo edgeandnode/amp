@@ -47,7 +47,7 @@ impl BatchingRpcWrapper {
         retries: usize,
         limiter: Arc<tokio::sync::Semaphore>,
     ) -> Self {
-        assert!(batch_size > 0, "max_batch_size must be > 0");
+        assert!(batch_size > 0, "batch_size must be > 0");
         Self {
             client,
             batch_size,
@@ -56,6 +56,8 @@ impl BatchingRpcWrapper {
         }
     }
 
+    /// Execute a batch of RPC calls with retries on failure.
+    /// calls: Vec<(&'static str, P)> - a vector of tuples containing the method name and parameters.
     pub async fn execute<T: RpcReturn, P: RpcParam>(
         &self,
         calls: Vec<(&'static str, P)>,
@@ -91,8 +93,8 @@ impl BatchingRpcWrapper {
                 }
                 Err(e) if remaining_attempts > 0 && self.batch_size > 1 => {
                     warn!(
-                        "Batch failed. Error({:?}) Batch size {}.",
-                        e, self.batch_size
+                        "Batch failed. Error({:?}) Batch size {}. Retries left: {}",
+                        e, self.batch_size, remaining_attempts
                     );
                     tokio::time::sleep(Duration::from_millis(500)).await; // Avoid spamming
                     remaining_calls.splice(0..0, chunk); // Reinsert failed chunk
@@ -113,7 +115,7 @@ pub struct JsonRpcClient {
     client: alloy::providers::ReqwestProvider,
     network: String,
     limiter: Arc<tokio::sync::Semaphore>,
-    max_batch_size: usize,
+    batch_size: usize,
 }
 
 impl JsonRpcClient {
@@ -121,7 +123,7 @@ impl JsonRpcClient {
         url: Url,
         network: String,
         request_limit: u16,
-        max_batch_size: usize,
+        batch_size: usize,
     ) -> Result<Self, BoxError> {
         assert!(request_limit >= 1);
         let client = alloy::providers::ProviderBuilder::new().on_http(url);
@@ -130,21 +132,63 @@ impl JsonRpcClient {
             client,
             network,
             limiter,
-            max_batch_size,
+            batch_size,
         })
     }
 
-    async fn block_stream(
+    /// Fetch blocks from start_block to end_block. One method is called at a time.
+    /// This is used when batch_size is set to 1 in the provider config.
+    async fn unbatched_block_stream(
         self,
         start_block: u64,
         end_block: u64,
         tx: mpsc::Sender<DatasetRows>,
     ) -> Result<(), BoxError> {
-        info!("Fetching blocks {} to {}", start_block, end_block);
+        info!(
+            "Fetching blocks (not batched) {} to {}",
+            start_block, end_block
+        );
+        for block_num in start_block..=end_block {
+            let client_permit = self.limiter.acquire().await;
+            let block = self
+                .client
+                .get_block_by_number(
+                    BlockNumberOrTag::Number(block_num),
+                    BlockTransactionsKind::Full,
+                )
+                .await?
+                .ok_or_else(|| format!("block {} not found", block_num))?;
+            let receipts = try_join_all(
+                block
+                    .transactions
+                    .hashes()
+                    .map(|hash| self.client.get_transaction_receipt(hash)),
+            )
+            .await?;
+            drop(client_permit);
 
+            let rows = rpc_to_rows(block, receipts, &self.network)?;
+
+            // Send the block and check if the receiver has gone away.
+            if tx.send(rows).await.is_err() {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    /// Fetch blocks in batches to avoid overwhelming the RPC server.
+    /// This is used when rpc_batch_size is set > 1 in the provider config.
+    async fn batched_block_stream(
+        self,
+        start_block: u64,
+        end_block: u64,
+        tx: mpsc::Sender<DatasetRows>,
+    ) -> Result<(), BoxError> {
+        info!("Fetching blocks (batched) {} to {}", start_block, end_block);
         let batching_client = BatchingRpcWrapper::new(
             self.client.clone(),
-            self.max_batch_size,
+            self.batch_size,
             10,
             self.limiter.clone(),
         );
@@ -195,7 +239,11 @@ impl BlockStreamer for JsonRpcClient {
         end: BlockNum,
         tx: mpsc::Sender<common::DatasetRows>,
     ) -> Result<(), BoxError> {
-        self.block_stream(start, end, tx).await
+        if self.batch_size > 1 {
+            self.batched_block_stream(start, end, tx).await
+        } else {
+            self.unbatched_block_stream(start, end, tx).await
+        }
     }
 
     async fn latest_block(&mut self, finalized: bool) -> Result<BlockNum, BoxError> {
