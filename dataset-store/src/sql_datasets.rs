@@ -466,13 +466,13 @@ mod tests {
     use common::{Dataset, QueryContext, Table};
     use datafusion::arrow::datatypes::{DataType, Field, Schema};
     use datafusion::logical_expr::LogicalPlan;
-    use metadata_db::{test_metadata_db, MetadataDb};
+    use metadata_db::{test_metadata_db, MetadataDb, KEEP_TEMP_DIRS};
     use std::ops::Deref;
     use std::sync::Arc;
     use url::Url;
 
     async fn create_test_metadata_db() -> Arc<MetadataDb> {
-        Arc::new(test_metadata_db(true).await.deref().clone())
+        Arc::new(test_metadata_db(*KEEP_TEMP_DIRS).await.deref().clone())
     }
 
     async fn create_test_query_context(metadata_db: &Arc<MetadataDb>) -> QueryContext {
