@@ -204,12 +204,12 @@ impl Service {
         use futures::channel::mpsc;
 
         // If not streaming or metadata db is not available, execute once
-        if !is_streaming || self.dataset_store.metadata_db.is_none() {
+        if !is_streaming {
             return Self::execute_once(&ctx, plan).await;
         }
 
         // Should not be none
-        let metadata_db_ref = self.dataset_store.metadata_db.as_ref().unwrap();
+        let metadata_db_ref = self.dataset_store.metadata_db.as_ref();
 
         // Start infinite stream
         let mut current_end_block =
@@ -239,7 +239,7 @@ impl Service {
         }
 
         let ctx = ctx.clone();
-        let metadata_db = self.dataset_store.metadata_db.as_ref().unwrap().clone();
+        let metadata_db = self.dataset_store.metadata_db.as_ref().clone();
 
         // async listen
         tokio::spawn(async move {

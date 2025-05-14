@@ -258,7 +258,10 @@ pub async fn max_end_block_for_plan(
             dataset_version: None,
             table: table.table(),
         };
-        let ranges = scanned_ranges::ranges_for_table(ctx, Some(metadata_db), tbl).await?;
+        let Some((_, location_id)) = metadata_db.get_active_location(tbl).await? else {
+            return Err(format!("table {}.{} not found", tbl.dataset, tbl.table).into());
+        };
+        let ranges = scanned_ranges::ranges_for_table(location_id, metadata_db).await?;
         let ranges = MultiRange::from_ranges(ranges)?;
 
         // Take the end block of the earliest contiguous range as the "synced block"
@@ -447,6 +450,8 @@ mod tests {
     use common::{Dataset, QueryContext, Table};
     use datafusion::arrow::datatypes::{DataType, Field, Schema};
     use datafusion::logical_expr::LogicalPlan;
+    use metadata_db::test_metadata_db;
+    use std::ops::Deref;
     use std::sync::Arc;
     use url::Url;
 
@@ -455,6 +460,7 @@ mod tests {
             Field::new("block_num", DataType::UInt64, false),
             Field::new("timestamp", DataType::Date32, false),
         ]));
+        let metadata_db = Arc::new(test_metadata_db(false).await.deref().clone());
 
         let datasets = vec![
             PhysicalDataset::new(
@@ -471,7 +477,8 @@ mod tests {
                         network: None,
                     },
                     Url::parse("s3://bucket/blocks").unwrap(),
-                    None,
+                    1,
+                    metadata_db.clone(),
                 )
                 .unwrap()],
             ),
@@ -489,13 +496,14 @@ mod tests {
                         network: None,
                     },
                     Url::parse("s3://bucket/blocks").unwrap(),
-                    None,
+                    2,
+                    metadata_db.clone(),
                 )
                 .unwrap()],
             ),
         ];
         let catalog = Catalog::new(datasets);
-        let config = Arc::new(Config::in_memory());
+        let config = Arc::new(Config::in_memory().await);
         let env = Arc::new(config.make_runtime_env().unwrap());
         let qc = QueryContext::for_catalog(catalog, env.clone()).unwrap();
 
