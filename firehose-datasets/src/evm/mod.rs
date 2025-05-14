@@ -22,12 +22,7 @@ pub fn dataset(dataset_cfg: toml::Value) -> Result<DatasetWithProvider, Error> {
 async fn print_schema_to_readme() {
     fs_err::write(
         "src/evm/README.md",
-        common::catalog::schema_to_markdown(
-            tables::all("test_network"),
-            crate::DATASET_KIND.to_string(),
-        )
-        .await
-        .unwrap(),
+        common::catalog::schema_to_markdown(tables::all("test_network")).await,
     )
     .unwrap();
 }
