@@ -40,9 +40,7 @@ use parquet::file::properties::WriterProperties as ParquetWriterProperties;
 use parquet_writer::insert_scanned_range;
 use parquet_writer::ParquetFileWriter;
 use thiserror::Error;
-use tracing::instrument;
-use tracing::warn;
-use tracing::{debug, info};
+use tracing::{debug, info, instrument, warn};
 
 pub async fn dump_dataset(
     dataset: &PhysicalDataset,
