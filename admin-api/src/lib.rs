@@ -4,7 +4,6 @@ mod scheduler;
 use axum::{routing::post, Router};
 use common::{config::Config, BoxResult};
 use handlers::deploy_handler;
-use metadata_db::MetadataDb;
 use scheduler::Scheduler;
 use std::{future::Future, net::SocketAddr, sync::Arc};
 use tokio::sync::broadcast;
@@ -20,12 +19,8 @@ pub async fn serve(
     config: Arc<Config>,
     shutdown: broadcast::Receiver<()>,
 ) -> BoxResult<(SocketAddr, impl Future<Output = BoxResult<()>>)> {
-    let scheduler = if let Some(url) = &config.metadata_db_url {
-        let metadata_db = MetadataDb::connect(url).await?;
-        Scheduler::new(config.clone(), metadata_db)
-    } else {
-        Scheduler::Ephemeral(config.clone())
-    };
+    let metadata_db = config.metadata_db().await?;
+    let scheduler = Scheduler::new(config.clone(), metadata_db.clone());
     let state = ServiceState { config, scheduler };
 
     // Build the application with the /deploy route

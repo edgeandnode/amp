@@ -24,7 +24,7 @@ pub struct BoundAddrs {
 
 pub async fn run(
     config: Arc<Config>,
-    metadata_db: Option<MetadataDb>,
+    metadata_db: Arc<MetadataDb>,
     no_admin: bool,
     shutdown: broadcast::Receiver<()>,
 ) -> Result<(BoundAddrs, impl Future<Output = BoxResult<()>>), BoxError> {

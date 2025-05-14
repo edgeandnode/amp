@@ -1,4 +1,5 @@
 use clap::Parser;
+use common::tracing_helpers;
 use tests::test_support::bless;
 use tracing::warn;
 
@@ -28,6 +29,7 @@ enum Command {
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
+    tracing_helpers::register_logger();
 
     match args.command {
         Command::Bless {

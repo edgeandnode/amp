@@ -3975,6 +3975,7 @@ name = "metadata-db"
 version = "0.1.0"
 dependencies = [
  "futures",
+ "pgtemp",
  "serde",
  "serde_json",
  "sqlx",

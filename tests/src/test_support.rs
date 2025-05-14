@@ -10,7 +10,7 @@ use common::{
         datatypes::DataType,
         json::writer::JsonArray,
     },
-    catalog::physical::{Catalog, PhysicalDataset},
+    catalog::physical::{Catalog, PhysicalDataset, PhysicalTable},
     config::{Addrs, Config, FigmentJson},
     multirange::MultiRange,
     parquet::basic::{Compression, ZstdLevel},
@@ -22,7 +22,7 @@ use figment::providers::Format as _;
 use futures::{stream::TryStreamExt, StreamExt as _};
 use metadata_db::MetadataDb;
 use object_store::path::Path;
-use tracing::info;
+use tracing::{info, instrument};
 
 use dump::{dump_dataset, parquet_opts};
 use fs_err as fs;
@@ -31,7 +31,9 @@ use tempfile::TempDir;
 /// Assume the `cargo test` command is run either from the workspace root or from the crate root.
 const TEST_CONFIG_BASE_DIRS: [&str; 2] = ["tests/config", "config"];
 
-pub fn load_test_config(literal_override: Option<FigmentJson>) -> Result<Arc<Config>, BoxError> {
+pub async fn load_test_config(
+    literal_override: Option<FigmentJson>,
+) -> Result<Arc<Config>, BoxError> {
     let mut path = None;
     for dir in TEST_CONFIG_BASE_DIRS.iter() {
         let p = format!("{}/config.toml", dir);
@@ -48,22 +50,19 @@ pub fn load_test_config(literal_override: Option<FigmentJson>) -> Result<Arc<Con
     let path = path.expect(
         "Couldn't find a test config file, `cargo test` must be run from the workspace root or the tests crate root"
     );
-    Ok(Arc::new(Config::load(
-        path,
-        false,
-        literal_override,
-        dynamic_addrs(),
-    )?))
+    Ok(Arc::new(
+        Config::load(path, false, literal_override, dynamic_addrs()).await?,
+    ))
 }
 
 pub async fn bless(dataset_name: &str, start: u64, end: u64) -> Result<(), BoxError> {
-    let config = load_test_config(None)?;
-    redump(config, dataset_name, vec![], start, end, 1, None).await?;
+    let config = load_test_config(None).await?;
+    redump(config, dataset_name, vec![], start, end, 1).await?;
     Ok(())
 }
 
 pub struct SnapshotContext {
-    ctx: QueryContext,
+    pub(crate) ctx: QueryContext,
 
     /// For a dataset dumped to a temporary directory. The directory is deleted on drop.
     _temp_dir: Option<TempDir>,
@@ -71,11 +70,38 @@ pub struct SnapshotContext {
 
 impl SnapshotContext {
     pub async fn blessed(dataset: &str) -> Result<Self, BoxError> {
-        let config = load_test_config(None)?;
-        let dataset_store = DatasetStore::new(config.clone(), None);
+        let config = load_test_config(None).await?;
+        let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
+        let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
         let dataset = dataset_store.load_dataset(dataset).await?.dataset;
-        let catalog = Catalog::for_dataset(dataset, config.data_store.clone(), None).await?;
-        let ctx = QueryContext::for_catalog(catalog, Arc::new(config.make_runtime_env()?))?;
+        let dataset_name = &dataset.name;
+        let data_store = config.data_store.clone();
+        let mut tables = Vec::new();
+        for table in dataset.tables() {
+            tables.push(
+                PhysicalTable::restore_latset_revision(
+                    table,
+                    data_store.clone(),
+                    dataset_name,
+                    metadata_db.clone(),
+                )
+                .await?
+                .expect(
+                    format!(
+                        "Failed to restore blessed table {dataset_name}.{}. This is likely due to \
+                        the dataset or table being deleted. \n\
+                        Bless the dataset again with by running \
+                        `cargo run -p tests -- bless {dataset_name} <start_block> <end_block>`",
+                        table.name
+                    )
+                    .as_str(),
+                ),
+            );
+        }
+        let dataset: PhysicalDataset = PhysicalDataset::new(dataset, tables);
+        let catalog = Catalog::new(vec![dataset]);
+        let ctx: QueryContext =
+            QueryContext::for_catalog(catalog, Arc::new(config.make_runtime_env()?))?;
         Ok(Self {
             ctx,
             _temp_dir: None,
@@ -89,7 +115,6 @@ impl SnapshotContext {
         start: u64,
         end: u64,
         n_jobs: u16,
-        metadata_db: Option<&MetadataDb>,
         keep_temp_dir: bool,
     ) -> Result<SnapshotContext, BoxError> {
         use figment::providers::Json;
@@ -103,28 +128,16 @@ impl SnapshotContext {
             path.display()
         )));
 
-        let config = load_test_config(config_override)?;
-
-        let physical_dataset = redump(
+        let config = load_test_config(config_override).await?;
+        let catalog = redump(
             config.clone(),
             dataset_name,
-            dependencies.clone(),
+            dependencies,
             start,
             end,
             n_jobs,
-            metadata_db,
         )
         .await?;
-        let mut physical_datasets: Vec<PhysicalDataset> = vec![physical_dataset];
-        let dataset_store = DatasetStore::new(config.clone(), None);
-        for dep in dependencies {
-            let dep = dataset_store.load_dataset(dep).await?.dataset;
-            let dep = PhysicalDataset::from_dataset_at(dep, config.data_store.clone(), None, true)
-                .await?;
-            physical_datasets.push(dep);
-        }
-
-        let catalog = Catalog::new(physical_datasets);
         let ctx = QueryContext::for_catalog(catalog, Arc::new(config.make_runtime_env()?))?;
 
         Ok(SnapshotContext {
@@ -133,21 +146,16 @@ impl SnapshotContext {
         })
     }
 
-    async fn check_scanned_range_eq(
-        &self,
-        other: &SnapshotContext,
-        metadata_db: Option<&MetadataDb>,
-    ) -> Result<(), BoxError> {
-        use common::meta_tables::scanned_ranges::{ranges_for_table, scanned_ranges_by_table};
+    async fn check_scanned_range_eq(&self, blessed: &SnapshotContext) -> Result<(), BoxError> {
+        use common::meta_tables::scanned_ranges::scanned_ranges_by_table;
 
-        let other_scanned_ranges = scanned_ranges_by_table(&other.ctx, None).await?;
+        let blessed_scanned_ranges = scanned_ranges_by_table(&blessed.ctx).await?;
 
         for table in self.ctx.catalog().all_tables() {
             let table_name = table.table_name().to_string();
-            let tbl = table.table_id();
-            let ranges = ranges_for_table(&self.ctx, metadata_db, tbl).await?;
+            let ranges = table.ranges().await?;
             let expected_range = MultiRange::from_ranges(ranges)?;
-            let actual_range = &other_scanned_ranges[&table_name];
+            let actual_range = &blessed_scanned_ranges[&table_name];
             let table_qualified = table.table_ref().to_string();
             assert_eq!(
                 expected_range, *actual_range,
@@ -160,12 +168,8 @@ impl SnapshotContext {
     }
 
     /// Typically used to check a fresh snapshot against a blessed one.
-    pub async fn assert_eq(
-        &self,
-        other: &SnapshotContext,
-        metadata_db: Option<&MetadataDb>,
-    ) -> Result<(), BoxError> {
-        self.check_scanned_range_eq(other, metadata_db).await?;
+    pub async fn assert_eq(&self, other: &SnapshotContext) -> Result<(), BoxError> {
+        self.check_scanned_range_eq(other).await?;
 
         for table in self.ctx.catalog().all_tables() {
             let query = parse_sql(&format!(
@@ -188,6 +192,7 @@ impl SnapshotContext {
     }
 }
 
+#[instrument(skip_all)]
 /// Clears the dataset directory, if it exists, before dumping.
 async fn redump(
     config: Arc<Config>,
@@ -196,47 +201,33 @@ async fn redump(
     start: u64,
     end: u64,
     n_jobs: u16,
-    metadata_db: Option<&MetadataDb>,
-) -> Result<PhysicalDataset, BoxError> {
-    let dataset_store = DatasetStore::new(config.clone(), metadata_db.cloned());
-
+) -> Result<Catalog, BoxError> {
+    let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
+    let dataset_store = DatasetStore::new(config.clone(), metadata_db);
+    let mut datasets = Vec::new();
     // First dump dependencies, then main dataset
     for dataset_name in dependencies {
-        let _ = redump_dataset(
-            dataset_name,
-            &*config,
-            &dataset_store,
-            start,
-            end,
-            n_jobs,
-            metadata_db,
-        )
-        .await?;
+        datasets.push(
+            redump_dataset(dataset_name, &*config, &dataset_store, start, end, n_jobs).await?,
+        );
     }
-    let dataset = redump_dataset(
-        dataset_name,
-        &*config,
-        &dataset_store,
-        start,
-        end,
-        n_jobs,
-        metadata_db,
-    )
-    .await?;
 
-    Ok(dataset)
+    datasets
+        .push(redump_dataset(dataset_name, &*config, &dataset_store, start, end, n_jobs).await?);
+    let catalog = Catalog::new(datasets);
+    Ok(catalog)
 }
 
 pub async fn check_blocks(dataset_name: &str, start: u64, end: u64) -> Result<(), BoxError> {
-    let config = load_test_config(None)?;
-    let dataset_store = DatasetStore::new(config.clone(), None);
+    let config = load_test_config(None).await?;
+    let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
+    let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
     let env = Arc::new(config.make_runtime_env()?);
 
     dump_check::dump_check(
         dataset_name,
         &dataset_store,
-        &config,
-        None,
+        metadata_db,
         &env,
         1000,
         1,
@@ -257,6 +248,7 @@ async fn clear_dataset(config: &Config, dataset_name: &str) -> Result<(), BoxErr
     Ok(())
 }
 
+#[instrument(skip_all)]
 async fn redump_dataset(
     dataset_name: &str,
     config: &Config,
@@ -264,7 +256,6 @@ async fn redump_dataset(
     start: u64,
     end: u64,
     n_jobs: u16,
-    metadata_db: Option<&MetadataDb>,
 ) -> Result<PhysicalDataset, BoxError> {
     let partition_size = 1024 * 1024; // 100 kB
     let input_batch_block_size = 100_000;
@@ -274,11 +265,18 @@ async fn redump_dataset(
     let parquet_opts = parquet_opts(compression, false);
 
     clear_dataset(config, dataset_name).await?;
-
+    let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
+    let data_store = config.data_store.clone();
     let dataset = {
         let dataset = dataset_store.load_dataset(dataset_name).await?.dataset;
-        PhysicalDataset::from_dataset_at(dataset, config.data_store.clone(), metadata_db, false)
-            .await?
+        let mut tables = Vec::new();
+        for table in dataset.tables() {
+            let physical_table =
+                PhysicalTable::next_revision(table, &data_store, dataset_name, metadata_db.clone())
+                    .await?;
+            tables.push(physical_table);
+        }
+        PhysicalDataset::new(dataset, tables)
     };
 
     dump_dataset(
@@ -388,9 +386,10 @@ pub async fn run_query_on_fresh_server(query: &str) -> Result<serde_json::Value,
     check_provider_file("rpc_eth_mainnet.toml").await;
 
     // Start the nozzle server.
-    let config = load_test_config(None).unwrap();
+    let config = load_test_config(None).await.unwrap();
+    let metadata_db = config.metadata_db().await?.into();
     let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel(1);
-    let (bound, server) = nozzle::server::run(config, None, false, shutdown_rx).await?;
+    let (bound, server) = nozzle::server::run(config, metadata_db, false, shutdown_rx).await?;
     tokio::spawn(async move {
         server.await.unwrap();
     });

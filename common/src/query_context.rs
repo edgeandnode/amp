@@ -35,6 +35,7 @@ use datafusion_proto::bytes::{
 };
 use datafusion_proto::logical_plan::LogicalExtensionCodec;
 use futures::{StreamExt as _, TryStreamExt};
+use metadata_db::TableId;
 use thiserror::Error;
 use tracing::{debug, instrument};
 use url::Url;
@@ -383,6 +384,18 @@ impl QueryContext {
             .await
             .map_err(Error::ExecutionError)?;
         Ok(concat_batches(&schema, &batch_stream).unwrap())
+    }
+
+    pub fn get_table(&self, table_ref: &TableReference) -> Option<&PhysicalTable> {
+        let table_id = TableId {
+            dataset: table_ref.schema().unwrap(),
+            dataset_version: None,
+            table: table_ref.table(),
+        };
+
+        self.catalog
+            .all_tables()
+            .find(|table| table.table_id() == table_id)
     }
 }
 

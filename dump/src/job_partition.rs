@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use std::{sync::Arc, time::Instant};
 use tracing::info;
 
-use crate::parquet_writer::DatasetWriter;
+use crate::parquet_writer::RawDatasetWriter;
 
 pub struct JobPartition<T: BlockStreamer> {
     pub dataset_ctx: Arc<QueryContext>,
@@ -23,7 +23,7 @@ pub struct JobPartition<T: BlockStreamer> {
 
     pub scanned_ranges_by_table: BTreeMap<String, MultiRange>,
 
-    pub metadata_db: Option<Arc<MetadataDb>>,
+    pub metadata_db: Arc<MetadataDb>,
 }
 
 impl<S: BlockStreamer> JobPartition<S> {
@@ -64,7 +64,7 @@ impl<S: BlockStreamer> JobPartition<S> {
             (rx, tokio::spawn(extractor_task))
         };
 
-        let mut writer = DatasetWriter::new(
+        let mut writer = RawDatasetWriter::new(
             self.dataset_ctx.clone(),
             self.metadata_db.clone(),
             self.parquet_opts.clone(),

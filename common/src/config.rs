@@ -13,6 +13,7 @@ use datafusion::{
         runtime_env::{RuntimeEnv, RuntimeEnvBuilder},
     },
 };
+use metadata_db::{test_metadata_db, MetadataDb, ALLOW_TEMP_DB, KEEP_TEMP_DIRS};
 use serde::Deserialize;
 
 use crate::{BoxError, Store};
@@ -22,7 +23,7 @@ pub struct Config {
     pub data_store: Arc<Store>,
     pub providers_store: Arc<Store>,
     pub dataset_defs_store: Arc<Store>,
-    pub metadata_db_url: Option<String>,
+    pub metadata_db_url: String,
     pub max_mem_mb: usize,
     pub spill_location: Vec<PathBuf>,
     /// Addresses to bind the server to. Used during testing.
@@ -53,7 +54,7 @@ impl Config {
     ///
     /// `env_override` allows env vars prefixed with `NOZZLE_CONFIG_` to override config values.
     ///
-    pub fn load(
+    pub async fn load(
         file: impl Into<PathBuf>,
         env_override: bool,
         literal_override: Option<FigmentJson>,
@@ -79,11 +80,19 @@ impl Config {
         let providers_store = Store::new(config_file.providers_dir, base)?;
         let dataset_defs_store = Store::new(config_file.dataset_defs_dir, base)?;
 
+        let metadata_db_url = match (config_file.metadata_db_url, *ALLOW_TEMP_DB) {
+            (Some(url), _) => url,
+            (None, true) => test_metadata_db(*KEEP_TEMP_DIRS).await.url().to_string(),
+            (None, false) => {
+                return Err("No metadata db url provided and allow_use_temp_db is false".into())
+            }
+        };
+
         Ok(Self {
             data_store: Arc::new(data_store),
             providers_store: Arc::new(providers_store),
             dataset_defs_store: Arc::new(dataset_defs_store),
-            metadata_db_url: config_file.metadata_db_url,
+            metadata_db_url,
             max_mem_mb: config_file.max_mem_mb,
             spill_location: config_file.spill_location,
             addrs,
@@ -91,16 +100,18 @@ impl Config {
     }
 
     /// For testing purposes only.
-    pub fn in_memory() -> Self {
+    pub async fn in_memory() -> Self {
         let data_store = Arc::new(Store::in_memory());
         let providers_store = Arc::new(Store::in_memory());
         let dataset_defs_store = Arc::new(Store::in_memory());
+
+        let metadata_db_url = test_metadata_db(*KEEP_TEMP_DIRS).await.url().to_string();
 
         Self {
             data_store,
             providers_store,
             dataset_defs_store,
-            metadata_db_url: None,
+            metadata_db_url,
             max_mem_mb: 0,
             spill_location: vec![],
             addrs: Default::default(),
@@ -144,6 +155,16 @@ impl Config {
         };
 
         runtime_config.build()
+    }
+
+    pub async fn metadata_db(&self) -> Result<MetadataDb, BoxError> {
+        MetadataDb::connect(&self.metadata_db_url)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub fn metadata_db_lazy(&self) -> Result<MetadataDb, BoxError> {
+        MetadataDb::connect_lazy(&self.metadata_db_url).map_err(Into::into)
     }
 }
 

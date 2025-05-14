@@ -8,7 +8,6 @@ use common::{
     tracing_helpers, BoxError,
 };
 use dump::worker::Worker;
-use metadata_db::MetadataDb;
 use tokio::{signal, sync::broadcast};
 use tracing::{error, info};
 
@@ -111,15 +110,8 @@ async fn main_inner() -> Result<(), BoxError> {
     );
 
     let args = Args::parse();
-
-    let config = Arc::new(
-        Config::load(args.config, true, None, Addrs::default())
-            .map_err(|e| format!("failed to load config: {e}"))?,
-    );
-    let metadata_db = match &config.metadata_db_url {
-        Some(url) => Some(MetadataDb::connect(url).await?),
-        None => None,
-    };
+    let config = Arc::new(Config::load(args.config, true, None, Addrs::default()).await?);
+    let metadata_db = config.metadata_db().await?.into();
 
     match args.command {
         Command::Dump {
@@ -154,12 +146,7 @@ async fn main_inner() -> Result<(), BoxError> {
             server.await
         }
         Command::Worker { node_id } => {
-            let Some(metadata_db_url) = &config.metadata_db_url else {
-                return Err("metadata db not configured".into());
-            };
-            let metadata_db = MetadataDb::connect(metadata_db_url).await?;
-
-            let worker = Worker::new(config.clone(), metadata_db, node_id);
+            let worker = Worker::new(config.clone(), metadata_db.as_ref().clone(), node_id);
             worker.run().await.map_err(Into::into)
         }
     }

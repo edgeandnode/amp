@@ -6,13 +6,15 @@ use datafusion::{
     parquet::arrow::async_reader::{AsyncFileReader, ParquetObjectReader},
     sql::TableReference,
 };
-use futures::{stream, StreamExt, TryStreamExt};
+use futures::{stream, TryStreamExt};
 use metadata_db::{LocationId, MetadataDb, TableId};
 use object_store::{path::Path, ObjectMeta, ObjectStore};
 use url::Url;
+use uuid::Uuid;
 
 use super::logical::Table;
 use crate::{
+    config::Config,
     meta_tables::scanned_ranges::{self, ScannedRange},
     store::{infer_object_store, Store},
     BoxError, Dataset,
@@ -48,19 +50,6 @@ impl Catalog {
         self.udfs.push(udf);
     }
 
-    /// Will include meta tables.
-    pub async fn for_dataset(
-        dataset: Dataset,
-        data_store: Arc<Store>,
-        metadata_db: Option<&MetadataDb>,
-    ) -> Result<Self, BoxError> {
-        let mut this = Self::empty();
-        this.add_dataset(
-            PhysicalDataset::from_dataset_at(dataset, data_store, metadata_db, true).await?,
-        );
-        Ok(this)
-    }
-
     pub fn datasets(&self) -> &[PhysicalDataset] {
         &self.datasets
     }
@@ -85,69 +74,6 @@ impl PhysicalDataset {
         Self { dataset, tables }
     }
 
-    /// The tables are assumed to live in the subpath:
-    /// `<url>/<dataset_name>/<table_name>`
-    pub async fn from_dataset_at(
-        dataset: Dataset,
-        data_store: Arc<Store>,
-        metadata_db: Option<&MetadataDb>,
-        read_only: bool,
-    ) -> Result<Self, BoxError> {
-        let dataset_name = dataset.name.clone();
-        validate_name(&dataset_name)?;
-
-        let mut physical_tables = vec![];
-        for table in dataset.tables() {
-            match metadata_db {
-                Some(db) => {
-                    // If an active location exists for this table, this `PhysicalTable` will point to that location.
-                    // Otherwise, a new location will be registered in the metadata DB. The location will be active.
-                    let table = {
-                        let table_id = TableId {
-                            dataset: &dataset_name,
-                            dataset_version: None,
-                            table: &table.name,
-                        };
-
-                        let active_location = db.get_active_location(table_id).await?;
-                        match active_location {
-                            Some((url, location_id)) => PhysicalTable::new(
-                                &dataset_name,
-                                table.clone(),
-                                url,
-                                Some(location_id),
-                            )?,
-                            None => {
-                                if read_only {
-                                    return Err(format!(
-                                        "table {}.{} has no active location",
-                                        dataset_name, table.name
-                                    )
-                                    .into());
-                                }
-                                PhysicalTable::next_revision(&table, &data_store, &dataset_name, db)
-                                    .await?
-                            }
-                        }
-                    };
-                    physical_tables.push(table);
-                }
-                None => {
-                    physical_tables.push(PhysicalTable::static_location(
-                        data_store.clone(),
-                        &dataset_name,
-                        &table,
-                    )?);
-                }
-            }
-        }
-
-        Ok(PhysicalDataset {
-            dataset,
-            tables: physical_tables,
-        })
-    }
-
     /// All tables in the catalog, except meta tables.
     pub fn tables(&self) -> impl Iterator<Item = &PhysicalTable> {
         self.tables.iter().filter(|table| !table.is_meta())
@@ -166,28 +92,62 @@ impl PhysicalDataset {
     }
 
     pub fn location_ids(&self) -> Vec<LocationId> {
-        self.tables.iter().filter_map(|t| t.location_id()).collect()
+        self.tables.iter().map(|t| t.location_id()).collect()
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct PhysicalTable {
+    /// Logical table representation.
     table: Table,
+    /// Qualified table reference in the format `dataset_name.table_name`.
     table_ref: TableReference,
 
-    // Absolute URL to the data location, path section of the URL and the corresponding object store.
+    /// Absolute URL to the data location, path section of the URL and the corresponding object store.
     url: Url,
+    /// Path to the data location in the object store.
     path: Path,
+    /// Object store to use for this table.
     object_store: Arc<dyn ObjectStore>,
-    location_id: Option<LocationId>,
+
+    /// Location ID in the metadata database.
+    location_id: LocationId,
+    /// Metadata database to use for this table.
+    pub metadata_db: Arc<MetadataDb>,
 }
 
 impl PhysicalTable {
+    /// Create an empty table for the given table and config.
+    /// For testing purposes (for now). Used to create a table without a location
+    /// for DESCRIBE, EXPLAIN queries.
+    pub fn empty(table: Table, config: &Config) -> Result<Self, BoxError> {
+        let data_store = config.data_store.clone();
+        let metadata_db = config.metadata_db_lazy()?.into();
+        let table_ref = TableReference::partial("dataset", table.name.as_str());
+        let url = data_store.url().to_owned();
+        let path = Path::from_url_path(url.path()).unwrap();
+        let object_store = data_store.object_store();
+        let location_id = 0;
+
+        let table = Self {
+            table,
+            table_ref,
+            url,
+            path,
+            object_store,
+            location_id,
+            metadata_db,
+        };
+        Ok(table)
+    }
+
+    /// Create a new physical table with the given dataset name, table, URL, and object store.
     pub fn new(
         dataset_name: &str,
         table: Table,
         url: Url,
-        location_id: Option<LocationId>,
+        location_id: LocationId,
+        metadata_db: Arc<MetadataDb>,
     ) -> Result<Self, BoxError> {
         validate_name(&table.name)?;
 
@@ -202,37 +162,182 @@ impl PhysicalTable {
             path,
             object_store,
             location_id,
+            metadata_db,
         })
     }
 
-    /// The static location is always `<base>/<dataset_name>/<table_name>/`.
-    ///
-    /// This is used in a few situations where no metadata DB is available:
-    /// - When using `dump` as a simple CLI tool without a Postgres for metadata.
-    /// - For snapshot testing.
-    fn static_location(
-        data_store: Arc<Store>,
-        dataset_name: &str,
+    /// Create a new physical table with the given dataset name, table, URL, and object store.
+    /// This is used for creating a new location (revision) for a new or  existing table in
+    /// the metadata database.
+    pub async fn next_revision(
         table: &Table,
+        data_store: &Store,
+        dataset_name: &str,
+        metadata_db: Arc<MetadataDb>,
     ) -> Result<Self, BoxError> {
-        validate_name(&table.name)?;
+        let table_id = TableId {
+            dataset: dataset_name,
+            dataset_version: None,
+            table: &table.name,
+        };
 
-        let path = format!("{}/{}/", dataset_name, table.name);
+        let path = make_location_path(table_id);
         let url = data_store.url().join(&path)?;
+        let location_id = metadata_db
+            .register_location(table_id, data_store.bucket(), &path, &url, false)
+            .await?;
 
-        let table_ref = TableReference::partial(dataset_name, table.name.as_str());
         let path = Path::from_url_path(url.path()).unwrap();
-
-        Ok(PhysicalTable {
+        let table_ref = TableReference::partial(dataset_name, table.name.as_str());
+        let physical_table = Self {
             table: table.clone(),
             table_ref,
             url,
             path,
             object_store: data_store.object_store(),
-            location_id: None,
-        })
+            location_id,
+            metadata_db,
+        };
+        Ok(physical_table)
     }
 
+    /// Attempts to restore the latest revision of a table from the data store.
+    /// If the table is not found, it returns `None`.
+    pub async fn restore_latset_revision(
+        table: &Table,
+        data_store: Arc<Store>,
+        dataset_name: &str,
+        metadata_db: Arc<MetadataDb>,
+    ) -> Result<Option<Self>, BoxError> {
+        let table_id = TableId {
+            dataset: dataset_name,
+            dataset_version: None,
+            table: &table.name,
+        };
+
+        let prefix = format!("{}/{}/", &dataset_name, table.name);
+        let url = data_store.url().join(&prefix)?;
+        let path = Path::from_url_path(url.path()).unwrap();
+        let revisions = list_revisions(&data_store, &prefix, &path).await?;
+        Self::restore_latest(
+            revisions,
+            table,
+            &table_id,
+            data_store.clone(),
+            metadata_db.clone(),
+        )
+        .await
+    }
+
+    /// Attempt to get the active revision of a table. If it doesn't exist, restore the latest revision
+    /// and register it in the metadata database.
+    pub async fn get_or_restore_active_revision(
+        table: &Table,
+        dataset_name: &str,
+        data_store: Arc<Store>,
+        metadata_db: Arc<MetadataDb>,
+    ) -> Result<Option<Self>, BoxError> {
+        let table_id = TableId {
+            dataset: dataset_name,
+            dataset_version: None,
+            table: &table.name,
+        };
+
+        let physical_table =
+            if let Some((url, location_id)) = metadata_db.get_active_location(table_id).await? {
+                let table_ref = TableReference::partial(dataset_name, table.name.as_str());
+                let path = Path::from_url_path(url.path()).unwrap();
+                let (object_store, _) = infer_object_store(&url)?;
+                Some(Self {
+                    table: table.clone(),
+                    table_ref,
+                    url,
+                    path,
+                    object_store,
+                    location_id,
+                    metadata_db: metadata_db.clone(),
+                })
+            } else {
+                PhysicalTable::restore_latset_revision(
+                    table,
+                    data_store.clone(),
+                    dataset_name,
+                    metadata_db.clone(),
+                )
+                .await?
+            };
+
+        Ok(physical_table)
+    }
+
+    /// Attempt to restore the latest revision of a table from a provided map of revisions
+    /// and register it in the metadata database.
+    /// If no revisions are found, it returns `None`.
+    ///
+    /// Revisions are expected to be sorted in ascending order by their revision uuid.
+    async fn restore_latest(
+        revisions: BTreeMap<String, (Path, Url, String)>,
+        table: &Table,
+        table_id: &TableId<'_>,
+        data_store: Arc<Store>,
+        metadata_db: Arc<MetadataDb>,
+    ) -> Result<Option<Self>, BoxError> {
+        if let Some((path, url, prefix)) = revisions.values().last() {
+            Self::restore(table, table_id, prefix, path, url, data_store, metadata_db)
+                .await
+                .map(Some)
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Restore a location from the data store and register it in the metadata database.
+    async fn restore(
+        table: &Table,
+        table_id: &TableId<'_>,
+        prefix: &str,
+        path: &Path,
+        url: &Url,
+        data_store: Arc<Store>,
+        metadata_db: Arc<MetadataDb>,
+    ) -> Result<Self, BoxError> {
+        let table_ref = TableReference::partial(table_id.dataset, table.name.as_str());
+        let metadata_db: Arc<MetadataDb> = metadata_db.clone().into();
+        let location_id = metadata_db
+            .register_location(*table_id, data_store.bucket(), prefix, url, false)
+            .await?;
+
+        metadata_db
+            .set_active_location(*table_id, url.as_str())
+            .await?;
+
+        let object_store = data_store.object_store();
+        let mut file_stream = object_store.list(Some(&path));
+
+        while let Some(object_meta) = file_stream.try_next().await? {
+            let (file_name, nozzle_meta) =
+                nozzle_meta_from_object_meta(&object_meta, object_store.clone()).await?;
+            let nozzle_meta_json = serde_json::to_value(nozzle_meta)?;
+            metadata_db
+                .insert_scanned_range(location_id, file_name, nozzle_meta_json)
+                .await?;
+        }
+
+        let physical_table = Self {
+            table: table.clone(),
+            table_ref,
+            url: url.clone(),
+            path: path.clone(),
+            object_store,
+            location_id,
+            metadata_db,
+        };
+
+        Ok(physical_table)
+    }
+}
+
+impl PhysicalTable {
     pub fn table_name(&self) -> &str {
         &self.table.name
     }
@@ -258,7 +363,7 @@ impl PhysicalTable {
         self.table.schema.clone()
     }
 
-    pub fn location_id(&self) -> Option<LocationId> {
+    pub fn location_id(&self) -> LocationId {
         self.location_id
     }
 
@@ -295,38 +400,6 @@ impl PhysicalTable {
         &self.table
     }
 
-    pub async fn next_revision(
-        table: &Table,
-        data_store: &Store,
-        dataset_name: &str,
-        db: &MetadataDb,
-    ) -> Result<Self, BoxError> {
-        let table_id = TableId {
-            dataset: dataset_name,
-            dataset_version: None,
-            table: &table.name,
-        };
-
-        let path = make_location_path(table_id);
-        let url = data_store.url().join(&path)?;
-        let location_id = db
-            .register_location(table_id, data_store.bucket(), &path, &url, false)
-            .await?;
-        db.set_active_location(table_id, &url.as_str()).await?;
-
-        let path = Path::from_url_path(url.path()).unwrap();
-        let table_ref = TableReference::partial(dataset_name, table.name.as_str());
-        let physical_table = Self {
-            table: table.clone(),
-            table_ref,
-            url,
-            path,
-            object_store: data_store.object_store(),
-            location_id: Some(location_id),
-        };
-        Ok(physical_table)
-    }
-
     /// Return all parquet files for this table. If `dump_only` is `true`,
     /// only files of the form `<number>.parquet` will be returned. The
     /// result is a map from filename to object metadata.
@@ -354,49 +427,14 @@ impl PhysicalTable {
         Ok(files)
     }
 
-    // TODO: Break this into smaller functions
-    // TODO: Buffer the stream and sort the ranges after
     pub async fn ranges(&self) -> Result<Vec<(u64, u64)>, BoxError> {
         let mut ranges = vec![];
-        let mut file_list = self.object_store.list(Some(self.path()));
+        let mut range_stream = self.metadata_db.stream_ranges(self.location_id());
 
-        while let Some(object_meta_result) = file_list.next().await {
-            let meta = object_meta_result?;
-            let mut reader = ParquetObjectReader::new(self.object_store.clone(), meta.location)
-                .with_file_size(meta.size);
-
-            let parquet_metadata = reader.get_metadata(None).await?;
-
-            let key_value_metadata = parquet_metadata
-                .file_metadata()
-                .key_value_metadata()
-                .ok_or(crate::ArrowError::ParquetError(format!(
-                    "Unable to fetch Key Value metadata for file {}",
-                    self.path
-                )))?;
-
-            let scanned_range_key_value_pair = key_value_metadata
-                .into_iter()
-                .find(|key_value| key_value.key.as_str() == scanned_ranges::METADATA_KEY)
-                .ok_or(crate::ArrowError::ParquetError(format!(
-                    "Missing key: {} in file metadata for file {}",
-                    scanned_ranges::METADATA_KEY,
-                    self.path
-                )))?;
-
-            let range = scanned_range_key_value_pair
-                .value
-                .as_ref()
-                .ok_or(crate::ArrowError::ParseError(format!(
-                    "Unable to parse ScannedRange from key value metadata for file {}",
-                    self.path
-                )))
-                .map(|scanned_range_json| serde_json::from_str::<ScannedRange>(scanned_range_json))?
-                .map(|scanned_range| (scanned_range.range_start, scanned_range.range_end))?;
-
+        while let Some(range) = range_stream.try_next().await? {
+            let range = (range.0 as u64, range.1 as u64);
             ranges.push(range);
         }
-
         Ok(ranges)
     }
 
@@ -438,7 +476,7 @@ fn validate_name(name: &str) -> Result<(), BoxError> {
 }
 
 // The path format is: `<dataset>/[<version>/]<table>/<UUIDv7>/`
-fn make_location_path(table_id: TableId<'_>) -> String {
+pub fn make_location_path(table_id: TableId<'_>) -> String {
     let mut path = String::new();
 
     // Add dataset
@@ -461,4 +499,70 @@ fn make_location_path(table_id: TableId<'_>) -> String {
     path.push('/');
 
     path
+}
+
+pub async fn list_revisions(
+    store: &Store,
+    prefix: &str,
+    path: &Path,
+) -> Result<BTreeMap<String, (Path, Url, String)>, BoxError> {
+    let object_store = store.object_store();
+    Ok(object_store
+        .list_with_delimiter(Some(path))
+        .await?
+        .common_prefixes
+        .into_iter()
+        .filter_map(|path| {
+            let revision = Uuid::parse_str(path.parts().last()?.as_ref())
+                .as_ref()
+                .map(Uuid::to_string)
+                .ok()?;
+            let full_prefix = format!("{prefix}{revision}/");
+            let full_url = store.url().join(&full_prefix).ok()?;
+            let full_path = Path::from_url_path(full_url.path()).ok()?;
+            Some((revision, (full_path, full_url, full_prefix)))
+        })
+        .collect())
+}
+
+async fn nozzle_meta_from_object_meta(
+    object_meta: &ObjectMeta,
+    object_store: Arc<dyn ObjectStore>,
+) -> Result<(String, ScannedRange), BoxError> {
+    let mut reader = ParquetObjectReader::new(object_store.clone(), object_meta.location.clone())
+        .with_file_size(object_meta.size);
+    let parquet_metadata = reader.get_metadata(None).await?;
+    let file_metadata = parquet_metadata.file_metadata();
+    let key_value_metadata =
+        file_metadata
+            .key_value_metadata()
+            .ok_or(crate::ArrowError::ParquetError(format!(
+                "Unable to fetch Key Value metadata for file {}",
+                &object_meta.location
+            )))?;
+    let scanned_range_key_value_pair = key_value_metadata
+        .into_iter()
+        .find(|key_value| key_value.key.as_str() == scanned_ranges::METADATA_KEY)
+        .ok_or(crate::ArrowError::ParquetError(format!(
+            "Missing key: {} in file metadata for file {}",
+            scanned_ranges::METADATA_KEY,
+            &object_meta.location
+        )))?;
+    let scanned_range_json =
+        scanned_range_key_value_pair
+            .value
+            .as_ref()
+            .ok_or(crate::ArrowError::ParquetError(format!(
+                "Unable to parse ScannedRange from empty value in metadata for file {}",
+                &object_meta.location
+            )))?;
+    let scanned_range: ScannedRange = serde_json::from_str(scanned_range_json).map_err(|e| {
+        crate::ArrowError::ParseError(format!(
+            "Unable to parse ScannedRange from key value metadata for file {}: {}",
+            &object_meta.location, e
+        ))
+    })?;
+    // Unwrap: We know this is a path with valid file name because we just opened it
+    let file_name = object_meta.location.filename().unwrap().to_string();
+    Ok((file_name, scanned_range))
 }

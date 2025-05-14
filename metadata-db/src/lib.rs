@@ -1,3 +1,4 @@
+mod temp_metadata_db;
 use std::time::Duration;
 
 use futures::stream::{BoxStream, Stream};
@@ -11,6 +12,8 @@ use tokio::time::MissedTickBehavior;
 use tracing::error;
 use tracing::instrument;
 use url::Url;
+
+pub use temp_metadata_db::{test_metadata_db, ALLOW_TEMP_DB, KEEP_TEMP_DIRS};
 
 /// Frequency on which to send a heartbeat.
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
@@ -46,10 +49,10 @@ pub enum Error {
 static MIGRATOR: Migrator = sqlx::migrate!();
 
 /// Connection pool to the metadata DB. Clones will refer to the same instance.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct MetadataDb {
     pool: Pool<Postgres>,
-    url: String,
+    pub(crate) url: String,
 }
 
 /// Tables are identified by the triple: `(dataset, dataset_version, table)`. For each table, there
@@ -78,6 +81,21 @@ impl MetadataDb {
         Ok(db)
     }
 
+    /// Lazily sets up a connection pool to the metadata DB. Does not run migrations.
+    #[instrument(skip_all, err)]
+    pub fn connect_lazy(url: &str) -> Result<MetadataDb, Error> {
+        let pool = PgPoolOptions::new()
+            .acquire_timeout(Duration::from_secs(5))
+            .connect_lazy(url)
+            .map_err(Error::ConnectionError)?;
+        let db = MetadataDb {
+            pool,
+            url: url.to_string(),
+        };
+
+        Ok(db)
+    }
+
     /// sqlx does the right things:
     /// - Locks the DB before running migrations.
     /// - Never runs the same migration twice.
@@ -103,14 +121,15 @@ impl MetadataDb {
     ) -> Result<LocationId, sqlx::Error> {
         // An empty `dataset_version` is represented as an empty string in the DB.
         let dataset_version = table.dataset_version.unwrap_or("");
+        let mut tx = self.pool.begin().await?;
 
         let query = "
-        INSERT INTO locations (dataset, dataset_version, tbl, bucket, path, url, active)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
-        RETURNING id;
+            INSERT INTO locations (dataset, dataset_version, tbl, bucket, path, url, active)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            ON CONFLICT DO NOTHING;
         ";
 
-        let location_id: LocationId = sqlx::query_scalar(query)
+        sqlx::query(query)
             .bind(table.dataset)
             .bind(dataset_version)
             .bind(table.table)
@@ -118,7 +137,38 @@ impl MetadataDb {
             .bind(path)
             .bind(url.to_string())
             .bind(active)
-            .fetch_one(&self.pool)
+            .execute(&mut *tx)
+            .await?;
+
+        let query = "
+            SELECT id
+            FROM locations
+            WHERE dataset = $1 AND dataset_version = $2 AND tbl = $3 AND url = $4
+        ";
+
+        let location_id: LocationId = sqlx::query_scalar(query)
+            .bind(table.dataset)
+            .bind(dataset_version)
+            .bind(table.table)
+            .bind(url.to_string())
+            .fetch_one(&mut *tx)
+            .await?;
+
+        tx.commit().await?;
+        Ok(location_id)
+    }
+
+    pub async fn url_to_location_id(&self, url: &Url) -> Result<Option<LocationId>, Error> {
+        let query = "
+            SELECT id
+            FROM locations
+            WHERE url = $1
+            LIMIT 1
+        ";
+
+        let location_id: Option<LocationId> = sqlx::query_scalar(query)
+            .bind(url.to_string())
+            .fetch_optional(&self.pool)
             .await?;
 
         Ok(location_id)
@@ -353,58 +403,33 @@ impl MetadataDb {
     /// Produces a stream of all names of files for a given tbl catalogued by the MetadataDb
     pub fn stream_file_names<'a>(
         &'a self,
-        tbl: TableId<'a>,
+        location_id: i64,
     ) -> BoxStream<'a, Result<String, sqlx::Error>> {
-        let TableId {
-            dataset,
-            dataset_version,
-            table,
-        } = tbl;
         let sql = "
             SELECT sr.file_name
               FROM file_metadata sr
-        INNER JOIN locations l
-                ON sr.location_id = l.id
-             WHERE l.dataset = $1
-                   AND l.dataset_version = $2
-                   AND l.tbl = $3
-                   AND l.active
+             WHERE sr.location_id = $1
           ORDER BY 1 ASC
         ";
 
-        sqlx::query_scalar(sql)
-            .bind(dataset)
-            .bind(dataset_version.unwrap_or_default())
-            .bind(table.to_string())
-            .fetch(&self.pool)
+        sqlx::query_scalar(sql).bind(location_id).fetch(&self.pool)
     }
 
+    #[instrument(skip(self))]
     /// Produces a stream of all scanned block ranges for a given tbl catalogued by the MetadataDb
     pub fn stream_ranges<'a>(
         &'a self,
-        tbl: TableId<'a>,
+        location_id: i64,
     ) -> BoxStream<'a, Result<(i64, i64), sqlx::Error>> {
-        let TableId {
-            dataset,
-            dataset_version: _,
-            table,
-        } = tbl;
         let sql = "
             SELECT CAST(sr.metadata->>'range_start' AS BIGINT)
                  , CAST(sr.metadata->>'range_end' AS BIGINT)
               FROM file_metadata sr
-        INNER JOIN locations l
-                ON sr.location_id = l.id
-             WHERE l.dataset = $1
-                   AND l.tbl = $2
-                   AND l.active
+             WHERE sr.location_id = $1
           ORDER BY 1 ASC
         ";
 
-        sqlx::query_as(sql)
-            .bind(dataset)
-            .bind(table.to_string())
-            .fetch(&self.pool)
+        sqlx::query_as(sql).bind(location_id).fetch(&self.pool)
     }
 
     pub async fn insert_scanned_range(
@@ -416,6 +441,7 @@ impl MetadataDb {
         let sql = "
         INSERT INTO file_metadata (location_id, file_name, metadata)
         VALUES ($1, $2, $3)
+        ON CONFLICT DO NOTHING
         ";
 
         sqlx::query(sql)

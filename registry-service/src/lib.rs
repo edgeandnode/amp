@@ -18,7 +18,7 @@ pub struct ServiceState {
 pub async fn serve(
     at: SocketAddr,
     config: Arc<Config>,
-    metadata_db: Option<MetadataDb>,
+    metadata_db: Arc<MetadataDb>,
     shutdown: broadcast::Receiver<()>,
 ) -> BoxResult<(SocketAddr, impl Future<Output = BoxResult<()>>)> {
     let state = Arc::new(ServiceState {

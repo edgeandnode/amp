@@ -55,7 +55,7 @@ impl Job {
     pub async fn load(
         job_id: JobDatabaseId,
         config: Arc<Config>,
-        metadata_db: MetadataDb,
+        metadata_db: Arc<MetadataDb>,
     ) -> Result<Job, BoxError> {
         let raw_desc = metadata_db.job_desc(job_id).await?;
         let job_desc: JobDesc = serde_json::from_str(&raw_desc)
@@ -64,7 +64,7 @@ impl Job {
 
         match job_desc {
             JobDesc::DumpDataset { dataset } => {
-                let dataset_store = DatasetStore::new(config.clone(), Some(metadata_db.clone()));
+                let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
                 let dataset = dataset_store.load_dataset(&dataset).await?.dataset;
 
                 // Consistency check: All tables must be present in the job's output.
@@ -97,7 +97,8 @@ impl Job {
                         &dataset.name,
                         table.clone(),
                         url,
-                        Some(id),
+                        id,
+                        metadata_db.clone(),
                     )?);
                 }
 
@@ -108,7 +109,11 @@ impl Job {
         }
     }
 
-    pub async fn run(&self, config: Arc<Config>, metadata_db: MetadataDb) -> Result<(), BoxError> {
+    pub async fn run(
+        &self,
+        config: Arc<Config>,
+        metadata_db: Arc<MetadataDb>,
+    ) -> Result<(), BoxError> {
         match self {
             Job::DumpDataset { dataset } => {
                 debug!(
@@ -117,7 +122,7 @@ impl Job {
                     dataset.location_ids()
                 );
 
-                let dataset_store = DatasetStore::new(config.clone(), Some(metadata_db.clone()));
+                let dataset_store = DatasetStore::new(config.clone(), metadata_db);
 
                 dump_dataset(
                     &dataset,

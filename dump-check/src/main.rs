@@ -55,12 +55,8 @@ async fn main() -> Result<(), BoxError> {
         n_jobs,
     } = args;
 
-    let config = Arc::new(Config::load(config_path, true, None, Addrs::default())?);
-    let metadata_db = if let Some(url) = &config.metadata_db_url {
-        Some(MetadataDb::connect(url).await?)
-    } else {
-        None
-    };
+    let config = Arc::new(Config::load(config_path, true, None, Addrs::default()).await?);
+    let metadata_db: Arc<MetadataDb> = MetadataDb::connect(&config.metadata_db_url).await?.into();
     let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
 
     if end_block == 0 {
@@ -82,8 +78,7 @@ async fn main() -> Result<(), BoxError> {
     dump_check::dump_check(
         &dataset_name,
         &dataset_store,
-        &config,
-        metadata_db.as_ref(),
+        metadata_db,
         &env,
         batch_size,
         n_jobs,

@@ -148,7 +148,7 @@ pub struct Service {
 }
 
 impl Service {
-    pub async fn new(config: Arc<Config>, metadata_db: Option<MetadataDb>) -> Result<Self, Error> {
+    pub async fn new(config: Arc<Config>, metadata_db: Arc<MetadataDb>) -> Result<Self, Error> {
         let env = Arc::new(config.make_runtime_env().map_err(Error::ExecutionError)?);
         let dataset_store = DatasetStore::new(config.clone(), metadata_db);
         let initial_catalog = dataset_store.initial_catalog().await?;
