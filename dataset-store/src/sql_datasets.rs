@@ -20,7 +20,7 @@ use common::{
     BlockNum, BoxError, Dataset, QueryContext, Table, BLOCK_NUM,
 };
 use futures::StreamExt as _;
-use metadata_db::{MetadataDb, TableId};
+use metadata_db::{LocationId, MetadataDb, TableId};
 use object_store::ObjectMeta;
 use serde::Deserialize;
 use tracing::instrument;
@@ -166,6 +166,22 @@ pub async fn queried_datasets(plan: &LogicalPlan) -> Result<Vec<String>, BoxErro
         .filter_map(|t| t.schema().map(|s| s.to_string()))
         .collect::<Vec<_>>();
     Ok(ds)
+}
+
+// All physical tables locations that have been queried
+#[instrument(skip_all, err)]
+pub async fn queried_physical_tables(
+    plan: &LogicalPlan,
+    qc: &QueryContext,
+) -> Result<Vec<LocationId>, BoxError> {
+    let tables = extract_table_references_from_plan(&plan);
+
+    let locations: Vec<_> = tables
+        .into_iter()
+        .filter_map(|t| qc.get_table(&t).map(|t| t.location_id()))
+        .collect();
+
+    Ok(locations)
 }
 
 fn extract_table_references_from_plan(plan: &LogicalPlan) -> Vec<TableReference> {
@@ -443,24 +459,27 @@ fn order_by_block_num(plan: LogicalPlan) -> LogicalPlan {
 
 #[cfg(test)]
 mod tests {
-    use super::{add_range_to_plan, is_incremental, queried_datasets};
+    use super::{add_range_to_plan, is_incremental, queried_physical_tables};
     use common::catalog::physical::{Catalog, PhysicalDataset, PhysicalTable};
     use common::config::Config;
     use common::query_context::parse_sql;
     use common::{Dataset, QueryContext, Table};
     use datafusion::arrow::datatypes::{DataType, Field, Schema};
     use datafusion::logical_expr::LogicalPlan;
-    use metadata_db::test_metadata_db;
+    use metadata_db::{test_metadata_db, MetadataDb};
     use std::ops::Deref;
     use std::sync::Arc;
     use url::Url;
 
-    async fn create_test_query_context() -> QueryContext {
+    async fn create_test_metadata_db() -> Arc<MetadataDb> {
+        Arc::new(test_metadata_db(true).await.deref().clone())
+    }
+
+    async fn create_test_query_context(metadata_db: &Arc<MetadataDb>) -> QueryContext {
         let schema = Arc::new(Schema::new(vec![
             Field::new("block_num", DataType::UInt64, false),
             Field::new("timestamp", DataType::Date32, false),
         ]));
-        let metadata_db = Arc::new(test_metadata_db(false).await.deref().clone());
 
         let datasets = vec![
             PhysicalDataset::new(
@@ -510,18 +529,20 @@ mod tests {
         qc
     }
 
-    async fn get_plan(sql: &str) -> LogicalPlan {
-        let qc = create_test_query_context().await;
-
+    async fn get_plan(sql: &str, qc: &QueryContext) -> LogicalPlan {
         let stmt = parse_sql(sql).unwrap();
         let plan = qc.plan_sql(stmt).await.unwrap();
 
         plan
     }
 
-    async fn assert_incremental_for_all_is(sql_queries: Vec<&str>, expected: bool) {
+    async fn assert_incremental_for_all_is(
+        sql_queries: Vec<&str>,
+        expected: bool,
+        qc: &QueryContext,
+    ) {
         for sql in sql_queries {
-            let plan = get_plan(sql).await;
+            let plan = get_plan(sql, qc).await;
             assert_eq!(is_incremental(&plan).unwrap(), expected);
         }
     }
@@ -535,30 +556,35 @@ mod tests {
             "SELECT * FROM (SELECT block_num FROM eth_firehose.blocks WHERE block_num < 10) t WHERE block_num > 10",
             "SELECT block_num FROM eth_firehose.blocks WHERE block_num < 10 UNION ALL SELECT block_num FROM eth_firehose.blocks WHERE block_num > 10",
         ];
-        assert_incremental_for_all_is(queries, true).await;
+        let metadata_db = create_test_metadata_db().await;
+        let qc = create_test_query_context(&metadata_db).await;
+        assert_incremental_for_all_is(queries, true, &qc).await;
     }
 
     #[tokio::test]
     async fn not_incremental_queries() {
         let queries = vec!["SELECT MAX(block_num) FROM eth_firehose.blocks"];
-        assert_incremental_for_all_is(queries, false).await;
+        let metadata_db = create_test_metadata_db().await;
+        let qc = create_test_query_context(&metadata_db).await;
+        assert_incremental_for_all_is(queries, false, &qc).await;
     }
 
     #[tokio::test]
-    async fn extract_datasets_from_plan() {
-        let plan = get_plan("SELECT * FROM eth_firehose.blocks AS b INNER JOIN sql_ds.even_blocks AS e ON b.block_num = e.block_num").await;
+    async fn extract_physical_tables_from_plan() {
+        let metadata_db = create_test_metadata_db().await;
+        let qc = create_test_query_context(&metadata_db).await;
+        let plan = get_plan("SELECT * FROM eth_firehose.blocks AS b INNER JOIN sql_ds.even_blocks AS e ON b.block_num = e.block_num", &qc).await;
 
-        let mut datasets = queried_datasets(&plan).await.unwrap();
-        datasets.sort(); // For consistent test results
-        assert_eq!(
-            datasets,
-            vec!["eth_firehose".to_string(), "sql_ds".to_string()]
-        );
+        let mut locations = queried_physical_tables(&plan, &qc).await.unwrap();
+        locations.sort();
+        assert_eq!(locations, vec![1, 2])
     }
 
     #[tokio::test]
     async fn test_add_range_to_plan() {
-        let plan = get_plan("select * from eth_firehose.blocks").await;
+        let metadata_db = create_test_metadata_db().await;
+        let qc = create_test_query_context(&metadata_db).await;
+        let plan = get_plan("select * from eth_firehose.blocks", &qc).await;
         let modified_plan = add_range_to_plan(plan, 10, 20).await.unwrap();
 
         use datafusion::logical_expr::{col, lit, Filter};

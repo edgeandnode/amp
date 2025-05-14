@@ -13,7 +13,7 @@ use object_store::buffered::BufWriter;
 use object_store::path::Path;
 use parquet::arrow::AsyncArrowWriter;
 use parquet::file::properties::WriterProperties as ParquetWriterProperties;
-use tracing::debug;
+use tracing::{debug, info};
 use url::Url;
 
 const MAX_PARTITION_BLOCK_RANGE: u64 = 1_000_000;
@@ -67,10 +67,16 @@ impl RawDatasetWriter {
 
         let writer = self.writers.get_mut(table_name).unwrap();
         let scanned_range = writer.write(&table_rows).await?;
+
+        // Notify CDC that the dataset has been changed
+        let location_id = writer.table.location_id();
+        let metadata_db = &self.metadata_db;
+        let cdc_channel = common::stream_helpers::cdc_pg_channel(location_id);
+        debug!("notified CDC channel {}", cdc_channel);
+        metadata_db.notify(&cdc_channel, "").await?;
+
         if let Some(scanned_range) = scanned_range {
-            let location_id = writer.table.location_id();
-            let metadata_db = self.metadata_db.clone();
-            insert_scanned_range(scanned_range, metadata_db, location_id).await?;
+            insert_scanned_range(scanned_range, metadata_db.clone(), location_id).await?;
         }
 
         Ok(())

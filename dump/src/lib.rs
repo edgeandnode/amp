@@ -40,9 +40,9 @@ use parquet::file::properties::WriterProperties as ParquetWriterProperties;
 use parquet_writer::insert_scanned_range;
 use parquet_writer::ParquetFileWriter;
 use thiserror::Error;
-use tracing::info;
 use tracing::instrument;
 use tracing::warn;
+use tracing::{debug, info};
 
 pub async fn dump_dataset(
     dataset: &PhysicalDataset,
@@ -127,10 +127,6 @@ pub async fn dump_dataset(
     }
 
     info!("dump of dataset {} completed successfully", dataset.name());
-
-    // Notify CDC that the dataset has been changed
-    let cdc_channel = common::stream_helpers::cdc_pg_channel(dataset.name());
-    dataset_store.metadata_db.notify(&cdc_channel, "").await?;
 
     Ok(())
 }
@@ -342,6 +338,14 @@ async fn dump_sql_query(
     while let Some(batch) = stream.try_next().await? {
         writer.write(&batch).await?;
     }
+
+    // Notify CDC that the dataset has been changed
+    let location_id = physical_table.location_id();
+    let metadata_db = &dataset_store.metadata_db;
+    let cdc_channel = common::stream_helpers::cdc_pg_channel(location_id);
+    debug!("notified CDC channel {}", cdc_channel);
+    metadata_db.notify(&cdc_channel, "").await?;
+
     let scanned_range = writer.close(end).await?;
     insert_scanned_range(
         scanned_range,

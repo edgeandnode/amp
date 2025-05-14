@@ -1,8 +1,9 @@
 use datafusion::logical_expr::sqlparser::ast::Value;
 use datafusion::sql::parser::Statement;
+use metadata_db::LocationId;
 
-pub fn cdc_pg_channel(dataset_name: &str) -> String {
-    format!("cdc:{}", dataset_name)
+pub fn cdc_pg_channel(location_id: LocationId) -> String {
+    format!("cdc:{}", location_id)
 }
 
 // Returns true if the query is a streaming query, ending with "SETTINGS stream = true"
@@ -38,8 +39,8 @@ mod tests {
 
     #[test]
     fn test_cdc_pg_channel() {
-        let channel = cdc_pg_channel("test");
-        assert_eq!(channel, "cdc:test");
+        let channel = cdc_pg_channel(12345);
+        assert_eq!(channel, "cdc:12345");
     }
 
     #[test]

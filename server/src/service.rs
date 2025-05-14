@@ -243,13 +243,13 @@ impl Service {
 
         // async listen
         tokio::spawn(async move {
-            let datasets = dataset_store::sql_datasets::queried_datasets(&plan)
+            let locations = dataset_store::sql_datasets::queried_physical_tables(&plan, &ctx)
                 .await
                 .unwrap();
 
             let mut notifications = Vec::new();
-            for dataset_name in datasets {
-                let channel = common::stream_helpers::cdc_pg_channel(&dataset_name);
+            for location in locations {
+                let channel = common::stream_helpers::cdc_pg_channel(location);
                 let stream = metadata_db.listen(&channel).await.unwrap();
                 notifications.push(stream);
             }
