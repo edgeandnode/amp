@@ -13,7 +13,7 @@ use object_store::buffered::BufWriter;
 use object_store::path::Path;
 use parquet::arrow::AsyncArrowWriter;
 use parquet::file::properties::WriterProperties as ParquetWriterProperties;
-use tracing::{debug, info};
+use tracing::debug;
 use url::Url;
 
 const MAX_PARTITION_BLOCK_RANGE: u64 = 1_000_000;
