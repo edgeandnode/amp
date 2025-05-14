@@ -4030,6 +4030,7 @@ dependencies = [
  "futures",
  "http-common",
  "metadata-db",
+ "pgtemp",
  "registry-service",
  "server",
  "snmalloc-rs",

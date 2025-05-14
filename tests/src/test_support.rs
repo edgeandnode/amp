@@ -389,7 +389,8 @@ pub async fn run_query_on_fresh_server(query: &str) -> Result<serde_json::Value,
     let config = load_test_config(None).await.unwrap();
     let metadata_db = config.metadata_db().await?.into();
     let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel(1);
-    let (bound, server) = nozzle::server::run(config, metadata_db, false, shutdown_rx).await?;
+    let (bound, server) =
+        nozzle::server::run(config, metadata_db, false, false, shutdown_rx).await?;
     tokio::spawn(async move {
         server.await.unwrap();
     });
