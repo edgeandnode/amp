@@ -1,18 +1,19 @@
-use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
-use common::arrow::array::RecordBatch;
-use common::catalog::physical::PhysicalTable;
-use common::meta_tables::scanned_ranges::{self, ScannedRange};
-use common::multirange::MultiRange;
-use common::parquet::errors::ParquetError;
-use common::parquet::format::KeyValue;
-use common::{parquet, BlockNum, BoxError, QueryContext, TableRows, Timestamp};
+use common::{
+    arrow::array::RecordBatch,
+    catalog::physical::PhysicalTable,
+    meta_tables::scanned_ranges::{self, ScannedRange},
+    multirange::MultiRange,
+    parquet,
+    parquet::{errors::ParquetError, format::KeyValue},
+    BlockNum, BoxError, QueryContext, TableRows, Timestamp,
+};
 use metadata_db::MetadataDb;
-use object_store::buffered::BufWriter;
-use object_store::path::Path;
-use parquet::arrow::AsyncArrowWriter;
-use parquet::file::properties::WriterProperties as ParquetWriterProperties;
+use object_store::{buffered::BufWriter, path::Path};
+use parquet::{
+    arrow::AsyncArrowWriter, file::properties::WriterProperties as ParquetWriterProperties,
+};
 use tracing::debug;
 use url::Url;
 

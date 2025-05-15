@@ -1,17 +1,6 @@
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context as _};
-use datafusion::sql::sqlparser::ast::CreateTable;
-use prost::Message as _;
-
-use crate::proto::sf::substreams::sink::database::v1::{
-    table_change, DatabaseChanges, TableChange,
-};
-use crate::proto::sf::substreams::{
-    sink::sql::v1::{service::Engine as SqlEngine, Service as SqlService},
-    v1::Package,
-};
-
 use common::{
     arrow::{
         array::*,
@@ -19,11 +8,19 @@ use common::{
     },
     timestamp_type, DatasetRows, Table, TableRows, BLOCK_NUM,
 };
-
 use datafusion::sql::sqlparser::{
-    ast::{DataType as SqlDataType, Statement},
+    ast::{CreateTable, DataType as SqlDataType, Statement},
     dialect,
     parser::Parser,
+};
+use prost::Message as _;
+
+use crate::proto::sf::substreams::{
+    sink::{
+        database::v1::{table_change, DatabaseChanges, TableChange},
+        sql::v1::{service::Engine as SqlEngine, Service as SqlService},
+    },
+    v1::Package,
 };
 
 /// transform DatabaseChanges proto message to RecordBatch based on the schemas

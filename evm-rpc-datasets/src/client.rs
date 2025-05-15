@@ -1,33 +1,25 @@
-use std::mem;
-use std::sync::Arc;
-use std::time::Duration;
+use std::{mem, sync::Arc, time::Duration};
 
-use alloy::consensus::Transaction as _;
-use alloy::consensus::TxEnvelope;
-use alloy::eips::BlockNumberOrTag;
-use alloy::hex::ToHexExt;
-use alloy::providers::Provider as _;
-use alloy::rpc::types::BlockTransactionsKind;
-use alloy::rpc::types::Header;
-use alloy::rpc::types::Log as RpcLog;
-use alloy::rpc::types::TransactionReceipt;
-use alloy::transports::http::reqwest::Url;
-use common::evm::tables::blocks::Block;
-use common::evm::tables::blocks::BlockRowsBuilder;
-use common::evm::tables::logs::Log;
-use common::evm::tables::logs::LogRowsBuilder;
-use common::BlockNum;
-use common::BlockStreamer;
-use common::BoxError;
-use common::DatasetRows;
-use common::EvmCurrency;
-use common::Timestamp;
+use alloy::{
+    consensus::{Transaction as _, TxEnvelope},
+    eips::BlockNumberOrTag,
+    hex::ToHexExt,
+    providers::Provider as _,
+    rpc::types::{BlockTransactionsKind, Header, Log as RpcLog, TransactionReceipt},
+    transports::http::reqwest::Url,
+};
+use common::{
+    evm::tables::{
+        blocks::{Block, BlockRowsBuilder},
+        logs::{Log, LogRowsBuilder},
+    },
+    BlockNum, BlockStreamer, BoxError, DatasetRows, EvmCurrency, Timestamp,
+};
 use futures::future::try_join_all;
 use thiserror::Error;
 use tokio::sync::mpsc;
 
-use crate::tables::transactions::Transaction;
-use crate::tables::transactions::TransactionRowsBuilder;
+use crate::tables::transactions::{Transaction, TransactionRowsBuilder};
 
 #[derive(Error, Debug)]
 pub enum ToRowError {

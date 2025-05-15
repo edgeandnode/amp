@@ -78,7 +78,7 @@ const make = ({
     // This effect starts the server in the background.
     const process = yield* Effect.acquireRelease(
       Effect.gen(function*() {
-        const process = yield* cmd("server").pipe(
+        const process = yield* cmd("server", "--dev").pipe(
           Cmd.stdout("inherit"),
           Cmd.stderr("inherit"),
           Cmd.start,

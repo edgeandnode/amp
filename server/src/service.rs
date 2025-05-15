@@ -1,8 +1,19 @@
+use std::{pin::Pin, sync::Arc};
+
+use arrow_flight::{
+    encode::FlightDataEncoderBuilder,
+    flight_descriptor::DescriptorType,
+    flight_service_server::FlightService,
+    sql::{Any, CommandStatementQuery},
+    ActionType, FlightData, FlightDescriptor, FlightEndpoint, FlightInfo, HandshakeRequest,
+    HandshakeResponse, PutResult, Ticket,
+};
 use axum::{
     http::StatusCode,
     response::{IntoResponse, Response as AxumResponse},
     Json,
 };
+use bytes::{BufMut, Bytes, BytesMut};
 use common::{
     arrow::{self, ipc::writer::IpcDataGenerator},
     catalog::{collect_scanned_tables, physical::Catalog},
@@ -18,20 +29,10 @@ use datafusion::{
 use dataset_store::{DatasetError, DatasetStore};
 use futures::{Stream, StreamExt as _, TryStreamExt};
 use metadata_db::MetadataDb;
-use std::{pin::Pin, sync::Arc};
-use thiserror::Error;
-
-use arrow_flight::{
-    encode::FlightDataEncoderBuilder,
-    flight_descriptor::DescriptorType,
-    flight_service_server::FlightService,
-    sql::{Any, CommandStatementQuery},
-    ActionType, FlightData, FlightDescriptor, FlightEndpoint, FlightInfo, HandshakeRequest,
-    HandshakeResponse, PutResult, Ticket,
-};
 use bytes::{BufMut, Bytes, BytesMut};
 use dataset_store::sql_datasets::is_incremental;
 use prost::Message as _;
+use thiserror::Error;
 use tonic::{Request, Response, Status};
 
 type TonicStream<T> = Pin<Box<dyn Stream<Item = Result<T, Status>> + Send + 'static>>;

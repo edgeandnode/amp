@@ -1,32 +1,24 @@
-use crate::dataset::extract_provider;
-use crate::dataset::FirehoseProvider;
-use crate::evm::pbethereum;
-use crate::proto::sf::firehose::v2 as pbfirehose;
-use crate::Error;
+use std::{str::FromStr, time::Duration};
 
-use std::str::FromStr;
-use std::time::Duration;
-
-use common::store::Store;
-use common::BlockNum;
-use common::BlockStreamer;
-use common::BoxError;
-use common::DatasetRows;
-use futures::StreamExt as _;
-use futures::{Stream, TryStreamExt as _};
-use pbfirehose::stream_client::StreamClient;
-use pbfirehose::ForkStep;
-use pbfirehose::Response as StreamResponse;
+use common::{store::Store, BlockNum, BlockStreamer, BoxError, DatasetRows};
+use futures::{Stream, StreamExt as _, TryStreamExt as _};
+use pbfirehose::{stream_client::StreamClient, ForkStep, Response as StreamResponse};
 use prost::Message as _;
 use tokio::sync::mpsc;
-use tonic::codec::CompressionEncoding;
-use tonic::metadata::{Ascii, MetadataValue};
-use tonic::service::interceptor::InterceptedService;
-use tonic::service::Interceptor;
-use tonic::transport::ClientTlsConfig;
-use tonic::transport::Endpoint;
-use tonic::transport::Uri;
+use tonic::{
+    codec::CompressionEncoding,
+    metadata::{Ascii, MetadataValue},
+    service::{interceptor::InterceptedService, Interceptor},
+    transport::{ClientTlsConfig, Endpoint, Uri},
+};
 use tracing::debug;
+
+use crate::{
+    dataset::{extract_provider, FirehoseProvider},
+    evm::pbethereum,
+    proto::sf::firehose::v2 as pbfirehose,
+    Error,
+};
 
 /// This client only handles final blocks.
 // See also: only-final-blocks

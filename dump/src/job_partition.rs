@@ -1,9 +1,10 @@
-use common::multirange::MultiRange;
-use common::parquet::file::properties::WriterProperties as ParquetWriterProperties;
-use common::{BlockStreamer, BoxError, QueryContext};
+use std::{collections::BTreeMap, sync::Arc, time::Instant};
+
+use common::{
+    multirange::MultiRange, parquet::file::properties::WriterProperties as ParquetWriterProperties,
+    BlockStreamer, BoxError, QueryContext,
+};
 use metadata_db::MetadataDb;
-use std::collections::BTreeMap;
-use std::{sync::Arc, time::Instant};
 use tracing::info;
 
 use crate::parquet_writer::RawDatasetWriter;

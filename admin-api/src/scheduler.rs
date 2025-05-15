@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use common::{
     catalog::physical::PhysicalTable, config::Config, manifest::Manifest, BoxError, Dataset,
 };
@@ -7,7 +9,6 @@ use dump::{
 };
 use metadata_db::MetadataDb;
 use rand::seq::IndexedRandom as _;
-use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct Scheduler {
@@ -43,7 +44,7 @@ impl Scheduler {
         let mut locations = Vec::new();
         for table in dataset.tables() {
             let physical_table = PhysicalTable::next_revision(
-                &table,
+                table,
                 &self.config.data_store,
                 &dataset.name,
                 self.metadata_db.clone().into(),
@@ -58,7 +59,7 @@ impl Scheduler {
 
         let job_id = self
             .metadata_db
-            .schedule_job(&node_id, &job_desc, &locations)
+            .schedule_job(node_id, &job_desc, &locations)
             .await?;
 
         let action = WorkerAction {

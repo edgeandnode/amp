@@ -4,41 +4,34 @@ mod metrics; // unused for now
 mod parquet_writer;
 pub mod worker;
 
-use std::collections::BTreeMap;
-use std::collections::BTreeSet;
-use std::str::FromStr;
-use std::sync::Arc;
-use std::time::Duration;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    str::FromStr,
+    sync::Arc,
+    time::Duration,
+};
 
-use common::catalog::physical::Catalog;
-use common::catalog::physical::PhysicalDataset;
-use common::catalog::physical::PhysicalTable;
-use common::config::Config;
-use common::meta_tables::scanned_ranges;
-use common::multirange::MultiRange;
-use common::parquet;
-use common::parquet::basic::ZstdLevel;
-use common::query_context::Error as CoreError;
-use common::query_context::QueryContext;
-use common::BlockNum;
-use common::BlockStreamer as _;
-use common::BoxError;
+use common::{
+    catalog::physical::{Catalog, PhysicalDataset, PhysicalTable},
+    config::Config,
+    meta_tables::scanned_ranges,
+    multirange::MultiRange,
+    parquet,
+    parquet::basic::ZstdLevel,
+    query_context::{Error as CoreError, QueryContext},
+    BlockNum, BlockStreamer as _, BoxError,
+};
 use datafusion::execution::runtime_env::RuntimeEnv;
-use dataset_store::sql_datasets::is_incremental;
-use dataset_store::sql_datasets::max_end_block;
-use dataset_store::sql_datasets::SqlDataset;
-use dataset_store::DatasetKind;
-use dataset_store::DatasetStore;
-use futures::future::try_join_all;
-use futures::TryFutureExt as _;
-use futures::TryStreamExt;
+use dataset_store::{
+    sql_datasets::{is_incremental, max_end_block, SqlDataset},
+    DatasetKind, DatasetStore,
+};
+use futures::{future::try_join_all, TryFutureExt as _, TryStreamExt};
 use job_partition::JobPartition;
 use metadata_db::MetadataDb;
 use object_store::ObjectMeta;
-use parquet::basic::Compression;
-use parquet::file::properties::WriterProperties as ParquetWriterProperties;
-use parquet_writer::insert_scanned_range;
-use parquet_writer::ParquetFileWriter;
+use parquet::{basic::Compression, file::properties::WriterProperties as ParquetWriterProperties};
+use parquet_writer::{insert_scanned_range, ParquetFileWriter};
 use thiserror::Error;
 use tracing::{debug, info, instrument, warn};
 

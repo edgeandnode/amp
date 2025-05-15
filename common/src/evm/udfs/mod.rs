@@ -1,20 +1,5 @@
 use std::{any::Any, str::FromStr, sync::Arc};
 
-use crate::{
-    arrow::{
-        array::{
-            Array, BinaryArray, BinaryBuilder, BooleanBuilder, Decimal128Builder,
-            Decimal256Builder, FixedSizeBinaryBuilder, Int16Builder, Int32Builder, Int64Builder,
-            Int8Builder, StringBuilder, StructBuilder, UInt16Builder, UInt32Builder, UInt64Builder,
-            UInt8Builder,
-        },
-        datatypes::{
-            i256, validate_decimal256_precision, validate_decimal_precision, DataType, Field,
-            Fields, DECIMAL128_MAX_PRECISION, DECIMAL256_MAX_PRECISION,
-        },
-    },
-    Bytes32ArrayType, BYTES32_TYPE,
-};
 use alloy::{
     dyn_abi::{DynSolType, DynSolValue, DynToken, Specifier as _},
     json_abi::Event as AlloyEvent,
@@ -38,12 +23,27 @@ use datafusion::{
     prelude::Expr,
     scalar::ScalarValue,
 };
-use itertools::izip;
-use tracing::trace;
-
 pub use eth_call::EthCall;
 pub use evm_encode_type::EvmEncodeType;
 pub use evm_function_data::{EvmDecodeFunctionData, EvmEncodeParams};
+use itertools::izip;
+use tracing::trace;
+
+use crate::{
+    arrow::{
+        array::{
+            Array, BinaryArray, BinaryBuilder, BooleanBuilder, Decimal128Builder,
+            Decimal256Builder, FixedSizeBinaryBuilder, Int16Builder, Int32Builder, Int64Builder,
+            Int8Builder, StringBuilder, StructBuilder, UInt16Builder, UInt32Builder, UInt64Builder,
+            UInt8Builder,
+        },
+        datatypes::{
+            i256, validate_decimal256_precision, validate_decimal_precision, DataType, Field,
+            Fields, DECIMAL128_MAX_PRECISION, DECIMAL256_MAX_PRECISION,
+        },
+    },
+    Bytes32ArrayType, BYTES32_TYPE,
+};
 
 mod eth_call;
 mod evm_encode_type;
@@ -1058,13 +1058,6 @@ fn num_rows(args: &[ColumnarValue]) -> usize {
 mod tests {
     use std::sync::LazyLock;
 
-    use crate::arrow::{
-        array::{
-            BinaryBuilder, Decimal256Array, FixedSizeBinaryArray, FixedSizeBinaryBuilder,
-            Int32Array, StructArray,
-        },
-        datatypes::i256,
-    };
     use alloy::{
         hex,
         hex::FromHex as _,
@@ -1073,6 +1066,13 @@ mod tests {
     use datafusion::arrow::array::StringArray;
 
     use super::*;
+    use crate::arrow::{
+        array::{
+            BinaryBuilder, Decimal256Array, FixedSizeBinaryArray, FixedSizeBinaryBuilder,
+            Int32Array, StructArray,
+        },
+        datatypes::i256,
+    };
 
     fn parse_dec256<const N: usize>(vals: [&str; N]) -> Decimal256Array {
         // It's tempting to use Decimal256Array::from_iter_values but that
