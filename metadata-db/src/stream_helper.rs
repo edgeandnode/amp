@@ -1,3 +1,8 @@
+use std::{
+    pin::Pin,
+    task::Poll::{self, Pending, Ready},
+};
+
 use futures::{
     future,
     stream::{BoxStream, StreamExt, TryStreamExt},
@@ -10,10 +15,6 @@ use object_store::{
 };
 use serde_json::Value as NozzleMetaJson;
 use sqlx::{types::chrono::NaiveDateTime, Error as SqlxError};
-use std::{
-    pin::Pin,
-    task::Poll::{self, Pending, Ready},
-};
 use url::{ParseError as UrlParseError, Url};
 
 type FileMetaItem = Result<(String, ObjectMeta, NozzleMetaJson), ObjectStoreError>;
@@ -31,7 +32,7 @@ pub(crate) type FileMetaRow = (
 
 /// A stream of records returned from the `file_metadata` table in the [`MetadataDb`].
 /// ## Assumptions and Guarantees
-/// - Sorting: The inner stream is assumed to be ordered by the following fields *_and_* 
+/// - Sorting: The inner stream is assumed to be ordered by the following fields *_and_*
 /// sort order in the `file_metadata` table:
 ///   1. `nozzle_meta->>'range_start' ASC`
 ///   2. `nozzle_meta->>'range_end' DESC`

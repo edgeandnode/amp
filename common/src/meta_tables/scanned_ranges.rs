@@ -22,7 +22,6 @@
 use std::collections::BTreeMap;
 
 use futures::{TryFutureExt, TryStreamExt};
-
 use metadata_db::MetadataDb;
 use serde::{Deserialize, Serialize};
 
