@@ -244,9 +244,9 @@ impl EvmDecodeFunctionData {
                                 builder.append(false);
                                 continue;
                             }
-                            call.alloy_function.abi_decode_input(&data[4..], true)
+                            call.alloy_function.abi_decode_input(&data[4..])
                         }
-                        Decode::Results => call.alloy_function.abi_decode_output(data, true),
+                        Decode::Results => call.alloy_function.abi_decode_output(data),
                     };
                     match decoded {
                         Ok(decoded) => {
