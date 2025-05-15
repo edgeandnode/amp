@@ -1,16 +1,20 @@
 use std::time::Duration;
 
-use super::tables::calls::Call;
-use super::{pbethereum, tables::transactions::Transaction};
-use crate::evm::tables::calls::CallRowsBuilder;
-use crate::evm::tables::transactions::TransactionRowsBuilder;
-use common::arrow::error::ArrowError;
-use common::evm::tables::blocks::Block;
-use common::evm::tables::blocks::BlockRowsBuilder;
-use common::evm::tables::logs::Log;
-use common::evm::tables::logs::LogRowsBuilder;
-use common::{BoxError, Bytes32, DatasetRows, EvmCurrency, Timestamp};
+use common::{
+    arrow::error::ArrowError,
+    evm::tables::{
+        blocks::{Block, BlockRowsBuilder},
+        logs::{Log, LogRowsBuilder},
+    },
+    BoxError, Bytes32, DatasetRows, EvmCurrency, Timestamp,
+};
 use thiserror::Error;
+
+use super::{
+    pbethereum,
+    tables::{calls::Call, transactions::Transaction},
+};
+use crate::evm::tables::{calls::CallRowsBuilder, transactions::TransactionRowsBuilder};
 
 #[derive(Error, Debug)]
 pub enum ProtobufToRowError {

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use common::{
     catalog::physical::PhysicalTable, config::Config, manifest::Manifest, BoxError, Dataset,
 };
@@ -7,7 +9,6 @@ use dump::{
 };
 use metadata_db::MetadataDb;
 use rand::seq::IndexedRandom as _;
-use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct Scheduler {

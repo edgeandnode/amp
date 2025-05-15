@@ -1,9 +1,6 @@
 use std::sync::Arc;
 
 use anyhow::Context as _;
-use prost::Message as _;
-use prost_reflect::{Cardinality, DescriptorPool, DynamicMessage, FieldDescriptor, Kind, Value};
-
 use common::{
     arrow::{
         array::*,
@@ -11,10 +8,11 @@ use common::{
     },
     DatasetRows, Table, TableRows, BLOCK_NUM,
 };
+use prost::Message as _;
+pub use prost_reflect::MessageDescriptor;
+use prost_reflect::{Cardinality, DescriptorPool, DynamicMessage, FieldDescriptor, Kind, Value};
 
 use crate::proto::{google::protobuf::FileDescriptorSet, sf::substreams::v1::Package};
-
-pub use prost_reflect::MessageDescriptor;
 
 /// transform Protobuf message to RecordBatch based on the message descriptor
 pub(crate) fn pb_to_rows(
@@ -266,11 +264,13 @@ fn parse_message_type(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::sync::Arc;
+
     use anyhow::Result;
     use common::arrow::datatypes::*;
     use prost_reflect::DescriptorPool;
-    use std::sync::Arc;
+
+    use super::*;
 
     #[test]
     fn test_message_to_rows() -> Result<()> {

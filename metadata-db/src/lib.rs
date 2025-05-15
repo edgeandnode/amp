@@ -7,13 +7,11 @@ use sqlx::{
     postgres::{PgListener, PgNotification, PgPoolOptions},
     Connection as _, Executor, PgConnection, Pool, Postgres,
 };
+pub use temp_metadata_db::{test_metadata_db, ALLOW_TEMP_DB, KEEP_TEMP_DIRS};
 use thiserror::Error;
 use tokio::time::MissedTickBehavior;
-use tracing::error;
-use tracing::instrument;
+use tracing::{error, instrument};
 use url::Url;
-
-pub use temp_metadata_db::{test_metadata_db, ALLOW_TEMP_DB, KEEP_TEMP_DIRS};
 
 /// Frequency on which to send a heartbeat.
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);

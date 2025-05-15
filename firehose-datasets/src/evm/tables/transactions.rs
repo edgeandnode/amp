@@ -1,9 +1,11 @@
 use std::sync::{Arc, LazyLock};
 
-use common::arrow::array::{ArrayRef, BinaryBuilder, Int32Builder, UInt32Builder, UInt64Builder};
-use common::arrow::datatypes::{DataType, Field, Schema, SchemaRef};
-use common::arrow::error::ArrowError;
 use common::{
+    arrow::{
+        array::{ArrayRef, BinaryBuilder, Int32Builder, UInt32Builder, UInt64Builder},
+        datatypes::{DataType, Field, Schema, SchemaRef},
+        error::ArrowError,
+    },
     Bytes32, Bytes32ArrayBuilder, EvmAddress as Address, EvmAddressArrayBuilder, EvmCurrency,
     EvmCurrencyArrayBuilder, Table, TableRows, Timestamp, TimestampArrayBuilder, BLOCK_NUM,
     BYTES32_TYPE, EVM_ADDRESS_TYPE as ADDRESS_TYPE, EVM_CURRENCY_TYPE,

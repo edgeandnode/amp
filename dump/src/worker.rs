@@ -9,8 +9,7 @@ use tokio::{
     sync::mpsc::{UnboundedReceiver, UnboundedSender},
     task::JoinHandle,
 };
-use tracing::{debug, error};
-use tracing::{info, instrument};
+use tracing::{debug, error, info, instrument};
 
 use crate::job::Job;
 

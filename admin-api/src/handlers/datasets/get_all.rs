@@ -1,7 +1,6 @@
 //! Datasets HTTP handlers
 
-use axum::http::StatusCode;
-use axum::{extract::State, Json};
+use axum::{extract::State, http::StatusCode, Json};
 use common::catalog::logical::DatasetWithProvider;
 use http_common::{BoxRequestError, RequestError};
 use metadata_db::TableId;

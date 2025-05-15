@@ -18,15 +18,14 @@ use common::{
     BoxError, QueryContext,
 };
 use dataset_store::DatasetStore;
+use dump::{dump_dataset, parquet_opts};
 use figment::providers::Format as _;
+use fs_err as fs;
 use futures::{stream::TryStreamExt, StreamExt as _};
 use metadata_db::MetadataDb;
 use object_store::path::Path;
-use tracing::{info, instrument};
-
-use dump::{dump_dataset, parquet_opts};
-use fs_err as fs;
 use tempfile::TempDir;
+use tracing::{info, instrument};
 
 /// Assume the `cargo test` command is run either from the workspace root or from the crate root.
 const TEST_CONFIG_BASE_DIRS: [&str; 2] = ["tests/config", "config"];

@@ -13,16 +13,15 @@ use alloy::{
 };
 use async_trait::async_trait;
 use async_udf::{async_func::AsyncScalarFunctionArgs, functions::AsyncScalarUDFImpl};
-use datafusion::{arrow::array::ArrayRef, common::config::ConfigOptions};
 use datafusion::{
     arrow::{
         array::{
-            Array, ArrayBuilder, BinaryArray, BinaryBuilder, FixedSizeBinaryArray, StringArray,
-            StringBuilder, StructBuilder,
+            Array, ArrayBuilder, ArrayRef, BinaryArray, BinaryBuilder, FixedSizeBinaryArray,
+            StringArray, StringBuilder, StructBuilder,
         },
         datatypes::{DataType, Field, Fields},
     },
-    common::{internal_err, plan_err},
+    common::{config::ConfigOptions, internal_err, plan_err},
     error::DataFusionError,
     logical_expr::{ColumnarValue, Signature, Volatility},
 };

@@ -1,6 +1,7 @@
-use crate::Error;
 use common::store::Store;
 use serde::Deserialize;
+
+use crate::Error;
 
 pub const DATASET_KIND: &str = "firehose";
 

@@ -1,6 +1,4 @@
-use vergen_gitcl::BuildBuilder;
-use vergen_gitcl::Emitter;
-use vergen_gitcl::GitclBuilder;
+use vergen_gitcl::{BuildBuilder, Emitter, GitclBuilder};
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 

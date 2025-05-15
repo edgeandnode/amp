@@ -1,8 +1,9 @@
 //! Service context
+use std::sync::Arc;
+
 use common::config::Config;
 use dataset_store::DatasetStore;
 use metadata_db::MetadataDb;
-use std::sync::Arc;
 
 use crate::scheduler::Scheduler;
 

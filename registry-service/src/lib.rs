@@ -1,5 +1,7 @@
 mod handlers;
 
+use std::{future::Future, net::SocketAddr, sync::Arc};
+
 use axum::{
     routing::{get, post},
     Router,
@@ -8,7 +10,6 @@ use common::{config::Config, BoxResult};
 use dataset_store::DatasetStore;
 use handlers::{datasets_handler, output_schema_handler};
 use metadata_db::MetadataDb;
-use std::{future::Future, net::SocketAddr, sync::Arc};
 use tokio::sync::broadcast;
 
 pub struct ServiceState {

@@ -1,12 +1,13 @@
 //! Nozzle Admin API
 
+use std::{future::Future, net::SocketAddr, sync::Arc};
+
 use axum::{
     routing::{get, post},
     Router,
 };
 use common::{config::Config, BoxResult};
 use dataset_store::DatasetStore;
-use std::{future::Future, net::SocketAddr, sync::Arc};
 use tokio::sync::broadcast;
 
 mod ctx;
