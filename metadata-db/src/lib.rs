@@ -435,7 +435,7 @@ impl MetadataDb {
     /// The stream is ordered by the `range_start` field of the nozzle metadata, and will always
     /// produce a stream of non-overlapping scanned ranges see: [NozzleMetaStream].
     ///
-    /// [NozzleMetaStream]: https://github.com/edgeandnode/project-nozzle/blob/c0bbd41012ddb3b5fec67cbaeca4db9ea03d6695/metadata-db/src/stream_helper.rs#L4
+    /// [NozzleMetaStream]: https://github.com/edgeandnode/project-nozzle/blob/739710536023a8693bf63dc42aa3f9679da59611/metadata-db/src/stream_helper.rs#L32-L41
     #[instrument(skip_all)]
     pub fn file_metadata_stream<'a>(
         &'a self,

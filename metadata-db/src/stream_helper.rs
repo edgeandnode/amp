@@ -31,14 +31,13 @@ pub(crate) type FileMetaRow = (
 
 /// A stream of records returned from the `file_metadata` table in the [`MetadataDb`].
 /// ## Assumptions and Guarantees
-/// - Sorting: The inner stream is assumed to be ordered by the following fields
-/// in the `file_metadata` table:
-///   1. `nozzle_meta->>'range_start' ASC` **or** `file_name ASC`
+/// - Sorting: The inner stream is assumed to be ordered by the following fields *_and_* 
+/// sort order in the `file_metadata` table:
+///   1. `nozzle_meta->>'range_start' ASC`
 ///   2. `nozzle_meta->>'range_end' DESC`
-/// - Uniqueness: The inner stream is assumed to be unique by the following fields
-/// in the `file_metadata` table:
-///   1. `range_start`
-///   2. `file_name`
+/// - Uniqueness: The inner stream is assumed to be distinct on the following fields:
+///   1. `nozzle_meta->>'range_start'`
+///   2. `nozzle_meta->>'range_end'`
 struct NozzleMetaStream<'a, T> {
     /// The inner stream that is being adapted.
     inner: BoxStream<'a, Result<T, SqlxError>>,
