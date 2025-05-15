@@ -79,21 +79,6 @@ impl MetadataDb {
         Ok(db)
     }
 
-    /// Lazily sets up a connection pool to the metadata DB. Does not run migrations.
-    #[instrument(skip_all, err)]
-    pub fn connect_lazy(url: &str) -> Result<MetadataDb, Error> {
-        let pool = PgPoolOptions::new()
-            .acquire_timeout(Duration::from_secs(5))
-            .connect_lazy(url)
-            .map_err(Error::ConnectionError)?;
-        let db = MetadataDb {
-            pool,
-            url: url.to_string(),
-        };
-
-        Ok(db)
-    }
-
     /// sqlx does the right things:
     /// - Locks the DB before running migrations.
     /// - Never runs the same migration twice.

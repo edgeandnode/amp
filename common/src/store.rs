@@ -73,18 +73,6 @@ impl Store {
         })
     }
 
-    pub fn in_memory() -> Self {
-        let url = Url::parse("memory://in_memory_store/").unwrap();
-        let store = Arc::new(object_store::memory::InMemory::new());
-        Self {
-            url,
-            prefix: "".to_string(),
-            store: Arc::new(PrefixStore::new(store.clone(), "")),
-            unprefixed: store,
-            bucket: None,
-        }
-    }
-
     pub fn url(&self) -> &Url {
         &self.url
     }
