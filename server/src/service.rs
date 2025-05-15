@@ -26,11 +26,9 @@ use datafusion::{
     execution::{runtime_env::RuntimeEnv, SendableRecordBatchStream},
     logical_expr::LogicalPlan,
 };
-use dataset_store::{DatasetError, DatasetStore};
+use dataset_store::{sql_datasets::is_incremental, DatasetError, DatasetStore};
 use futures::{Stream, StreamExt as _, TryStreamExt};
 use metadata_db::MetadataDb;
-use bytes::{BufMut, Bytes, BytesMut};
-use dataset_store::sql_datasets::is_incremental;
 use prost::Message as _;
 use thiserror::Error;
 use tonic::{Request, Response, Status};

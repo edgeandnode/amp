@@ -44,9 +44,9 @@ use crate::{
     arrow, attestation,
     catalog::physical::{Catalog, PhysicalTable},
     evm::udfs::{EvmDecode, EvmDecodeFunctionData, EvmEncodeParams, EvmEncodeType, EvmTopic},
+    stream_helpers::is_streaming,
     BoxError, Table,
 };
-use crate::stream_helpers::is_streaming;
 
 #[derive(Error, Debug)]
 pub enum Error {

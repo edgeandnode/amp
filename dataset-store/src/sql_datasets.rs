@@ -14,7 +14,7 @@ use datafusion::{
     datasource::TableType,
     error::DataFusionError,
     execution::{runtime_env::RuntimeEnv, SendableRecordBatchStream},
-    logical_expr::{col, lit, Filter, LogicalPlan, Sort, TableScan},
+    logical_expr::{col, lit, Filter, LogicalPlan, LogicalPlanBuilder, Sort, TableScan},
     sql::{parser, resolve::resolve_table_references, TableReference},
 };
 use futures::StreamExt as _;
