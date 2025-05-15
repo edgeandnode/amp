@@ -252,7 +252,7 @@ impl Service {
 
             let mut notifications = Vec::new();
             for location in locations {
-                let channel = common::stream_helpers::cdc_pg_channel(location);
+                let channel = common::stream_helpers::change_tracking_pg_channel(location);
                 let stream = metadata_db.listen(&channel).await.unwrap();
                 notifications.push(stream);
             }

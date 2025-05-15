@@ -109,7 +109,7 @@ pub async fn commit_metadata(
         .await?;
 
     // Notify CDC that the dataset has been changed
-    let cdc_channel = common::stream_helpers::cdc_pg_channel(location_id);
+    let cdc_channel = common::stream_helpers::change_tracking_pg_channel(location_id);
     debug!("notified CDC channel {}", cdc_channel);
     metadata_db.notify(&cdc_channel, "").await?;
 

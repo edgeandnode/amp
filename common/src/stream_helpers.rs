@@ -1,9 +1,8 @@
-use datafusion::logical_expr::sqlparser::ast::Value;
-use datafusion::sql::parser::Statement;
+use datafusion::{logical_expr::sqlparser::ast::Value, sql::parser::Statement};
 use metadata_db::LocationId;
 
-pub fn cdc_pg_channel(location_id: LocationId) -> String {
-    format!("cdc:{}", location_id)
+pub fn change_tracking_pg_channel(location_id: LocationId) -> String {
+    format!("change-tracking-physical-table-id:{}", location_id)
 }
 
 // Returns true if the query is a streaming query, ending with "SETTINGS stream = true"
@@ -39,8 +38,8 @@ mod tests {
 
     #[test]
     fn test_cdc_pg_channel() {
-        let channel = cdc_pg_channel(12345);
-        assert_eq!(channel, "cdc:12345");
+        let channel = change_tracking_pg_channel(12345);
+        assert_eq!(channel, "change-tracking-physical-table-id:12345");
     }
 
     #[test]

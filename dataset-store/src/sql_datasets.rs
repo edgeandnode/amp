@@ -457,17 +457,22 @@ fn order_by_block_num(plan: LogicalPlan) -> LogicalPlan {
 
 #[cfg(test)]
 mod tests {
-    use super::{add_range_to_plan, is_incremental, queried_physical_tables};
-    use common::catalog::physical::{Catalog, PhysicalDataset, PhysicalTable};
-    use common::config::Config;
-    use common::query_context::parse_sql;
-    use common::{Dataset, QueryContext, Table};
-    use datafusion::arrow::datatypes::{DataType, Field, Schema};
-    use datafusion::logical_expr::LogicalPlan;
+    use std::{ops::Deref, sync::Arc};
+
+    use common::{
+        catalog::physical::{Catalog, PhysicalDataset, PhysicalTable},
+        config::Config,
+        query_context::parse_sql,
+        Dataset, QueryContext, Table,
+    };
+    use datafusion::{
+        arrow::datatypes::{DataType, Field, Schema},
+        logical_expr::LogicalPlan,
+    };
     use metadata_db::{test_metadata_db, MetadataDb, KEEP_TEMP_DIRS};
-    use std::ops::Deref;
-    use std::sync::Arc;
     use url::Url;
+
+    use super::{add_range_to_plan, is_incremental, queried_physical_tables};
 
     async fn create_test_metadata_db() -> Arc<MetadataDb> {
         Arc::new(test_metadata_db(*KEEP_TEMP_DIRS).await.deref().clone())
