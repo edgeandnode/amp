@@ -207,7 +207,6 @@ impl Service {
             return Self::execute_once(&ctx, plan).await;
         }
 
-        // Should not be none
         let metadata_db_ref = self.dataset_store.metadata_db.as_ref();
 
         // Start infinite stream
