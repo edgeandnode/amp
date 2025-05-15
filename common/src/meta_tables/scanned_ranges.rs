@@ -23,7 +23,7 @@ use std::collections::BTreeMap;
 
 use crate::{multirange::MultiRange, BoxError, QueryContext, Timestamp};
 
-use futures::{StreamExt, TryStreamExt};
+use futures::{TryFutureExt, TryStreamExt};
 
 use metadata_db::MetadataDb;
 use serde::{Deserialize, Serialize};
@@ -36,11 +36,8 @@ pub async fn ranges_for_table(
 ) -> Result<Vec<(u64, u64)>, BoxError> {
     metadata_db
         .stream_ranges(location_id)
-        .map(|res| {
-            let (start, end) = res?;
-            Ok((start as u64, end as u64))
-        })
         .try_collect::<Vec<_>>()
+        .map_err(Into::into)
         .await
 }
 
@@ -70,7 +67,7 @@ pub async fn filenames_for_table(
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct ScannedRange {
+pub struct NozzleMeta {
     pub table: String,
     pub range_start: u64,
     pub range_end: u64,
