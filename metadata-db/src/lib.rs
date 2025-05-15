@@ -10,7 +10,9 @@ use sqlx::{
     postgres::{PgListener, PgNotification, PgPoolOptions},
     Connection as _, Executor, PgConnection, Pool, Postgres,
 };
-use stream_helper::{FileMetaRow, NozzleMetaStreamExt};
+use stream_helper::{
+    map_file_metadata_row, map_file_name_row, map_scanned_range_row, NozzleMetaStreamExt,
+};
 pub use temp_metadata_db::{test_metadata_db, ALLOW_TEMP_DB, KEEP_TEMP_DIRS};
 use thiserror::Error;
 use tokio::time::MissedTickBehavior;
@@ -404,7 +406,7 @@ impl MetadataDb {
         sqlx::query_as::<_, (String, i64)>(sql)
             .bind(location_id)
             .fetch(&self.pool)
-            .as_non_overlapping_stream()
+            .as_non_overlapping_stream(map_file_name_row)
     }
 
     /// Produces a stream of tuples for a given `location_id` catalogued by the [`MetadataDb`]
@@ -438,10 +440,10 @@ impl MetadataDb {
                  , CAST(fm.nozzle_meta->>'range_end' AS BIGINT) DESC
         ";
 
-        sqlx::query_as::<_, FileMetaRow>(sql)
+        sqlx::query_as(sql)
             .bind(location_id)
             .fetch(&self.pool)
-            .as_non_overlapping_stream()
+            .as_non_overlapping_stream(map_file_metadata_row)
     }
 
     #[instrument(skip(self))]
@@ -462,7 +464,7 @@ impl MetadataDb {
         sqlx::query_as::<_, (i64, i64)>(sql)
             .bind(location_id)
             .fetch(&self.pool)
-            .as_non_overlapping_stream()
+            .as_non_overlapping_stream(map_scanned_range_row)
     }
 
     pub async fn insert_file_metadata(
