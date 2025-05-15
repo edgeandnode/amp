@@ -9,7 +9,8 @@ use datafusion::{
     arrow::{
         array::{
             ArrayBuilder, BooleanArray, Decimal128Array, Decimal256Array, FixedSizeBinaryArray,
-            Int16Array, Int32Array, Int64Array, Int8Array, NullBuilder, StringArray, UInt16Array,
+            FixedSizeListArray, FixedSizeListBuilder, Int16Array, Int32Array, Int64Array,
+            Int8Array, ListArray, ListBuilder, NullBuilder, StringArray, StructArray, UInt16Array,
             UInt32Array, UInt64Array, UInt8Array,
         },
         error::ArrowError,
@@ -90,42 +91,6 @@ macro_rules! plan {
     }}
 }
 
-fn sol_to_arrow_type(ty: &DynSolType) -> Result<DataType, DataFusionError> {
-    use DataType as F;
-    use DynSolType as S;
-    let df = match ty {
-        S::Bool => F::Boolean,
-        S::Int(bits) => match *bits {
-            8 => F::Int8,
-            16 => F::Int16,
-            n if n <= 32 => F::Int32,
-            n if n <= 64 => F::Int64,
-            n if n <= DEC_128_MAX_BINARY_PREC => F::Decimal128(DEC128_PREC, 0),
-            n if n <= DEC_256_MAX_BINARY_PREC => F::Decimal256(DEC256_PREC, 0),
-            n if n <= 256 => F::Utf8,
-            _ => return internal_err!("unexpected number of bits for {}: {}", ty, bits),
-        },
-        S::Uint(bits) => match *bits {
-            8 => F::UInt8,
-            16 => F::UInt16,
-            n if n <= 32 => F::UInt32,
-            n if n <= 64 => F::UInt64,
-            n if n <= DEC_128_MAX_BINARY_PREC => F::Decimal128(DEC128_PREC, 0),
-            n if n <= DEC_256_MAX_BINARY_PREC => F::Decimal256(DEC256_PREC, 0),
-            n if n <= 256 => F::Utf8,
-            _ => return internal_err!("unexpected number of bits for {}: {}", ty, bits),
-        },
-        S::FixedBytes(bytes) => F::FixedSizeBinary(*bytes as i32),
-        S::Address => F::FixedSizeBinary(20),
-        S::Bytes => F::Binary,
-        S::String => F::Utf8,
-        S::Function | S::Array(_) | S::FixedArray(_, _) | S::Tuple(_) => {
-            return plan_err!("cannot convert solidity type {} to arrow data type", ty)
-        }
-    };
-    Ok(df)
-}
-
 struct AppendError(std::string::String);
 
 impl From<DataFusionError> for AppendError {
@@ -169,38 +134,10 @@ impl<'a> FieldBuilder<'a> {
         Self { builder, ty, field }
     }
 
-    fn field<T>(&'a mut self) -> Result<&'a mut T, DataFusionError>
-    where
-        T: ArrayBuilder,
-    {
-        self.builder
-            .field_builder(self.field)
-            .ok_or_else(|| internal!("failed to get field builder for field {}", self.field))
-    }
-
     fn append_null_value(&'a mut self) -> Result<(), DataFusionError> {
         let ty = sol_to_arrow_type(self.ty)?;
-        match ty {
-            DataType::Boolean => self.field::<BooleanBuilder>()?.append_null(),
-            DataType::Int8 => self.field::<Int8Builder>()?.append_null(),
-            DataType::Int16 => self.field::<Int16Builder>()?.append_null(),
-            DataType::Int32 => self.field::<Int32Builder>()?.append_null(),
-            DataType::Int64 => self.field::<Int64Builder>()?.append_null(),
-            DataType::UInt8 => self.field::<UInt8Builder>()?.append_null(),
-            DataType::UInt16 => self.field::<UInt16Builder>()?.append_null(),
-            DataType::UInt32 => self.field::<UInt32Builder>()?.append_null(),
-            DataType::UInt64 => self.field::<UInt64Builder>()?.append_null(),
-            DataType::Decimal128(DEC128_PREC, 0) => {
-                self.field::<Decimal128Builder>()?.append_null()
-            }
-            DataType::Decimal256(DEC256_PREC, 0) => {
-                self.field::<Decimal256Builder>()?.append_null()
-            }
-            DataType::Binary => self.field::<BinaryBuilder>()?.append_null(),
-            DataType::FixedSizeBinary(_) => self.field::<FixedSizeBinaryBuilder>()?.append_null(),
-            DataType::Utf8 => self.field::<StringBuilder>()?.append_null(),
-            _ => return internal_err!("unexpected data type: {}", ty),
-        };
+        let builder = &mut self.builder.field_builders_mut()[self.field];
+        append_null_value_to_builder(builder, &ty)?;
         Ok(())
     }
 
@@ -220,109 +157,8 @@ impl<'a> FieldBuilder<'a> {
     /// leaving it up to the user to cast to an appropriate numeric type if
     /// they need to perform arithmetic operations.
     fn append_value(&'a mut self, value: DynSolValue) -> Result<(), DataFusionError> {
-        fn primitive_int<'a>(
-            builder: &'a mut FieldBuilder<'a>,
-            s: Signed<256, 4>,
-            bits: usize,
-        ) -> Result<(), AppendError> {
-            match bits {
-                8 => builder
-                    .field::<Int8Builder>()?
-                    .append_value(i8::try_from(s)?),
-                16 => builder
-                    .field::<Int16Builder>()?
-                    .append_value(i16::try_from(s)?),
-                n if n <= 32 => builder
-                    .field::<Int32Builder>()?
-                    .append_value(i32::try_from(s)?),
-                n if n <= 64 => builder
-                    .field::<Int64Builder>()?
-                    .append_value(i64::try_from(s)?),
-                n if n <= DEC_128_MAX_BINARY_PREC => {
-                    let val = i128::try_from(s)?;
-                    let builder = builder.field::<Decimal128Builder>()?;
-                    validate_decimal_precision(val, DEC128_PREC)?;
-                    builder.append_value(val);
-                }
-                n if n <= DEC_256_MAX_BINARY_PREC => {
-                    let val = i256::from_le_bytes(s.to_le_bytes());
-                    let builder = builder.field::<Decimal256Builder>()?;
-                    validate_decimal256_precision(val, DEC256_PREC)?;
-                    builder.append_value(val);
-                }
-                n if n <= 256 => {
-                    builder
-                        .field::<StringBuilder>()?
-                        .append_value(s.to_string());
-                }
-                _ => unreachable!("unexpected number of bits for int: {}", bits),
-            };
-            Ok(())
-        }
-
-        fn primitive_uint<'a>(
-            builder: &'a mut FieldBuilder<'a>,
-            u: Unsigned,
-            bits: usize,
-        ) -> Result<(), AppendError> {
-            match bits {
-                8 => builder
-                    .field::<UInt8Builder>()?
-                    .append_value(u8::try_from(u)?),
-                16 => builder
-                    .field::<UInt16Builder>()?
-                    .append_value(u16::try_from(u)?),
-                n if n <= 32 => builder
-                    .field::<UInt32Builder>()?
-                    .append_value(u32::try_from(u)?),
-                n if n <= 64 => builder
-                    .field::<UInt64Builder>()?
-                    .append_value(u64::try_from(u)?),
-                n if n <= DEC_128_MAX_BINARY_PREC => {
-                    let val = i128::try_from(u)?;
-                    let builder = builder.field::<Decimal128Builder>()?;
-                    validate_decimal_precision(val, DEC128_PREC)?;
-                    builder.append_value(val);
-                }
-                n if n <= DEC_256_MAX_BINARY_PREC => {
-                    let val = i256::from_le_bytes(u.to_le_bytes());
-                    let builder = builder.field::<Decimal256Builder>()?;
-                    validate_decimal256_precision(val, DEC256_PREC)?;
-                    builder.append_value(val);
-                }
-                n if n <= 256 => {
-                    builder
-                        .field::<StringBuilder>()?
-                        .append_value(u.to_string());
-                }
-                _ => unreachable!("unexpected number of bits for uint: {}", bits),
-            };
-            Ok(())
-        }
-
-        use DynSolValue::*;
-        match value {
-            Bool(b) => self.field::<BooleanBuilder>()?.append_value(b),
-            Int(s, bits) => match bits {
-                n if n <= 256 => primitive_int(self, s, bits)
-                    .or_else(|e| internal_err!("error converting int{}: {}", bits, e))?,
-                _ => return internal_err!("unexpected number of bits for int{}", bits),
-            },
-            Uint(u, bits) => match bits {
-                n if n <= 256 => primitive_uint(self, u, bits)
-                    .or_else(|e| internal_err!("error converting uint{}: {}", bits, e))?,
-                _ => return internal_err!("unexpected number of bits for uint{}", bits),
-            },
-            FixedBytes(b, _) => self.field::<FixedSizeBinaryBuilder>()?.append_value(b)?,
-            Address(a) => self.field::<FixedSizeBinaryBuilder>()?.append_value(a)?,
-            Bytes(b) => self.field::<BinaryBuilder>()?.append_value(b),
-            String(s) => self.field::<StringBuilder>()?.append_value(s),
-            Function(_) | Tuple(_) | Array(_) | FixedArray(_) => {
-                let type_name = value.sol_type_name().unwrap_or_default();
-                return plan_err!("cannot convert {type_name} to arrow scalar");
-            }
-        };
-        Ok(())
+        let builder = &mut self.builder.field_builders_mut()[self.field];
+        append_sol_value_to_builder(builder, value)
     }
 }
 
@@ -719,6 +555,312 @@ impl ScalarUDFImpl for EvmTopic {
     }
 }
 
+fn append_sol_value_to_builder(
+    builder: &mut dyn ArrayBuilder,
+    value: DynSolValue,
+) -> Result<(), DataFusionError> {
+    fn primitive_int<'a>(
+        builder: &mut dyn ArrayBuilder,
+        s: Signed<256, 4>,
+        bits: usize,
+    ) -> Result<(), AppendError> {
+        match bits {
+            8 => builder
+                .as_any_mut()
+                .downcast_mut::<Int8Builder>()
+                .ok_or_else(|| AppendError("failed to downcast to Int8Builder".to_string()))?
+                .append_value(i8::try_from(s)?),
+            16 => builder
+                .as_any_mut()
+                .downcast_mut::<Int16Builder>()
+                .ok_or_else(|| AppendError("failed to downcast to Int16Builder".to_string()))?
+                .append_value(i16::try_from(s)?),
+            n if n <= 32 => builder
+                .as_any_mut()
+                .downcast_mut::<Int32Builder>()
+                .ok_or_else(|| AppendError("failed to downcast to Int32Builder".to_string()))?
+                .append_value(i32::try_from(s)?),
+            n if n <= 64 => builder
+                .as_any_mut()
+                .downcast_mut::<Int64Builder>()
+                .ok_or_else(|| AppendError("failed to downcast to Int64Builder".to_string()))?
+                .append_value(i64::try_from(s)?),
+            n if n <= DEC_128_MAX_BINARY_PREC => {
+                let val = i128::try_from(s)?;
+                validate_decimal_precision(val, DEC128_PREC)?;
+                let builder = builder
+                    .as_any_mut()
+                    .downcast_mut::<Decimal128Builder>()
+                    .ok_or_else(|| {
+                        AppendError("failed to downcast to Decimal128Builder".to_string())
+                    })?;
+                builder.append_value(val);
+            }
+            n if n <= DEC_256_MAX_BINARY_PREC => {
+                let val = i256::from_le_bytes(s.to_le_bytes());
+                validate_decimal256_precision(val, DEC256_PREC)?;
+                let builder = builder
+                    .as_any_mut()
+                    .downcast_mut::<Decimal256Builder>()
+                    .ok_or_else(|| {
+                        AppendError("failed to downcast to Decimal256Builder".to_string())
+                    })?;
+                builder.append_value(val);
+            }
+            n if n <= 256 => {
+                builder
+                    .as_any_mut()
+                    .downcast_mut::<StringBuilder>()
+                    .ok_or_else(|| AppendError("failed to downcast to StringBuilder".to_string()))?
+                    .append_value(s.to_string());
+            }
+            _ => unreachable!("unexpected number of bits for int: {}", bits),
+        };
+        Ok(())
+    }
+
+    fn primitive_uint<'a>(
+        builder: &mut dyn ArrayBuilder,
+        u: Unsigned,
+        bits: usize,
+    ) -> Result<(), AppendError> {
+        match bits {
+            8 => builder
+                .as_any_mut()
+                .downcast_mut::<UInt8Builder>()
+                .ok_or_else(|| AppendError("failed to downcast to UInt8Builder".to_string()))?
+                .append_value(u8::try_from(u)?),
+            16 => builder
+                .as_any_mut()
+                .downcast_mut::<UInt16Builder>()
+                .ok_or_else(|| AppendError("failed to downcast to UInt16Builder".to_string()))?
+                .append_value(u16::try_from(u)?),
+            n if n <= 32 => builder
+                .as_any_mut()
+                .downcast_mut::<UInt32Builder>()
+                .ok_or_else(|| AppendError("failed to downcast to UInt32Builder".to_string()))?
+                .append_value(u32::try_from(u)?),
+            n if n <= 64 => builder
+                .as_any_mut()
+                .downcast_mut::<UInt64Builder>()
+                .ok_or_else(|| AppendError("failed to downcast to UInt64Builder".to_string()))?
+                .append_value(u64::try_from(u)?),
+            n if n <= DEC_128_MAX_BINARY_PREC => {
+                let val = i128::try_from(u)?;
+                validate_decimal_precision(val, DEC128_PREC)?;
+                let builder = builder
+                    .as_any_mut()
+                    .downcast_mut::<Decimal128Builder>()
+                    .ok_or_else(|| {
+                        AppendError("failed to downcast to Decimal128Builder".to_string())
+                    })?;
+                builder.append_value(val);
+            }
+            n if n <= DEC_256_MAX_BINARY_PREC => {
+                let val = i256::from_le_bytes(u.to_le_bytes());
+                validate_decimal256_precision(val, DEC256_PREC)?;
+                let builder = builder
+                    .as_any_mut()
+                    .downcast_mut::<Decimal256Builder>()
+                    .ok_or_else(|| {
+                        AppendError("failed to downcast to Decimal256Builder".to_string())
+                    })?;
+                builder.append_value(val);
+            }
+            n if n <= 256 => {
+                builder
+                    .as_any_mut()
+                    .downcast_mut::<StringBuilder>()
+                    .ok_or_else(|| AppendError("failed to downcast to StringBuilder".to_string()))?
+                    .append_value(u.to_string());
+            }
+            _ => unreachable!("unexpected number of bits for uint: {}", bits),
+        };
+        Ok(())
+    }
+
+    match value {
+        DynSolValue::Bool(b) => builder
+            .as_any_mut()
+            .downcast_mut::<BooleanBuilder>()
+            .ok_or_else(|| internal!("failed to downcast to BooleanBuilder"))?
+            .append_value(b),
+        DynSolValue::Int(s, bits) => match bits {
+            n if n <= 256 => primitive_int(builder, s, bits)
+                .or_else(|e| internal_err!("error converting int{}: {}", bits, e))?,
+            _ => return internal_err!("unexpected number of bits for int{}", bits),
+        },
+        DynSolValue::Uint(u, bits) => match bits {
+            n if n <= 256 => primitive_uint(builder, u, bits)
+                .or_else(|e| internal_err!("error converting uint{}: {}", bits, e))?,
+            _ => return internal_err!("unexpected number of bits for uint{}", bits),
+        },
+        DynSolValue::FixedBytes(b, _) => builder
+            .as_any_mut()
+            .downcast_mut::<FixedSizeBinaryBuilder>()
+            .ok_or_else(|| plan!("failed to downcast to FixedSizeBinaryBuilder"))?
+            .append_value(b)?,
+        DynSolValue::Address(a) => builder
+            .as_any_mut()
+            .downcast_mut::<FixedSizeBinaryBuilder>()
+            .ok_or_else(|| plan!("failed to downcast to FixedSizeBinaryBuilder"))?
+            .append_value(a)?,
+        DynSolValue::Bytes(b) => builder
+            .as_any_mut()
+            .downcast_mut::<BinaryBuilder>()
+            .ok_or_else(|| plan!("failed to downcast to BinaryBuilder"))?
+            .append_value(b),
+        DynSolValue::String(s) => builder
+            .as_any_mut()
+            .downcast_mut::<StringBuilder>()
+            .ok_or_else(|| plan!("failed to downcast to StringBuilder"))?
+            .append_value(s),
+        DynSolValue::Array(a) => {
+            let builder = builder
+                .as_any_mut()
+                .downcast_mut::<ListBuilder<Box<dyn ArrayBuilder>>>()
+                .ok_or_else(|| plan!("failed to downcast to ListBuilder"))?;
+            for value in a {
+                append_sol_value_to_builder(builder.values(), value)?;
+            }
+            builder.append(true);
+        }
+        DynSolValue::FixedArray(a) => {
+            let builder = builder
+                .as_any_mut()
+                .downcast_mut::<FixedSizeListBuilder<Box<dyn ArrayBuilder>>>()
+                .ok_or_else(|| plan!("failed to downcast to ListBuilder"))?;
+            for value in a {
+                append_sol_value_to_builder(builder.values(), value)?;
+            }
+            builder.append(true);
+        }
+        DynSolValue::Tuple(t) => {
+            let builder = builder
+                .as_any_mut()
+                .downcast_mut::<StructBuilder>()
+                .ok_or_else(|| plan!("failed to downcast to ListBuilder"))?;
+            for (value, builder) in t.into_iter().zip(builder.field_builders_mut()) {
+                append_sol_value_to_builder(builder, value)?;
+            }
+            builder.append(true);
+        }
+        DynSolValue::Function(_) => {
+            let type_name = value.sol_type_name().unwrap_or_default();
+            return plan_err!("cannot convert {type_name} to arrow scalar");
+        }
+    };
+    Ok(())
+}
+
+fn append_null_value_to_builder(
+    builder: &mut dyn ArrayBuilder,
+    ty: &DataType,
+) -> Result<(), DataFusionError> {
+    match ty {
+        DataType::Boolean => builder
+            .as_any_mut()
+            .downcast_mut::<BooleanBuilder>()
+            .ok_or_else(|| internal!("failed to downcast to BooleanBuilder"))?
+            .append_null(),
+        DataType::Int8 => builder
+            .as_any_mut()
+            .downcast_mut::<Int8Builder>()
+            .ok_or_else(|| internal!("failed to downcast to Int8Builder"))?
+            .append_null(),
+        DataType::Int16 => builder
+            .as_any_mut()
+            .downcast_mut::<Int16Builder>()
+            .ok_or_else(|| internal!("failed to downcast to Int16Builder"))?
+            .append_null(),
+        DataType::Int32 => builder
+            .as_any_mut()
+            .downcast_mut::<Int32Builder>()
+            .ok_or_else(|| internal!("failed to downcast to Int32Builder"))?
+            .append_null(),
+        DataType::Int64 => builder
+            .as_any_mut()
+            .downcast_mut::<Int64Builder>()
+            .ok_or_else(|| internal!("failed to downcast to Int64Builder"))?
+            .append_null(),
+        DataType::UInt8 => builder
+            .as_any_mut()
+            .downcast_mut::<UInt8Builder>()
+            .ok_or_else(|| internal!("failed to downcast to UInt8Builder"))?
+            .append_null(),
+        DataType::UInt16 => builder
+            .as_any_mut()
+            .downcast_mut::<UInt16Builder>()
+            .ok_or_else(|| internal!("failed to downcast to UInt16Builder"))?
+            .append_null(),
+        DataType::UInt32 => builder
+            .as_any_mut()
+            .downcast_mut::<UInt32Builder>()
+            .ok_or_else(|| internal!("failed to downcast to UInt32Builder"))?
+            .append_null(),
+        DataType::UInt64 => builder
+            .as_any_mut()
+            .downcast_mut::<UInt64Builder>()
+            .ok_or_else(|| internal!("failed to downcast to UInt64Builder"))?
+            .append_null(),
+        DataType::Decimal128(DEC128_PREC, 0) => builder
+            .as_any_mut()
+            .downcast_mut::<Decimal128Builder>()
+            .ok_or_else(|| internal!("failed to downcast to Decimal128Builder"))?
+            .append_null(),
+        DataType::Decimal256(DEC256_PREC, 0) => builder
+            .as_any_mut()
+            .downcast_mut::<Decimal256Builder>()
+            .ok_or_else(|| internal!("failed to downcast to Decimal256Builder"))?
+            .append_null(),
+        DataType::Binary => builder
+            .as_any_mut()
+            .downcast_mut::<BinaryBuilder>()
+            .ok_or_else(|| internal!("failed to downcast to BinaryBuilder"))?
+            .append_null(),
+        DataType::FixedSizeBinary(_) => builder
+            .as_any_mut()
+            .downcast_mut::<FixedSizeBinaryBuilder>()
+            .ok_or_else(|| internal!("failed to downcast to FixedSizeBinaryBuilder"))?
+            .append_null(),
+        DataType::Utf8 => builder
+            .as_any_mut()
+            .downcast_mut::<StringBuilder>()
+            .ok_or_else(|| internal!("failed to downcast to StringBuilder"))?
+            .append_null(),
+        DataType::List(_) => builder
+            .as_any_mut()
+            .downcast_mut::<ListBuilder<Box<dyn ArrayBuilder>>>()
+            .ok_or_else(|| internal!("failed to downcast to ListBuilder"))?
+            .append_null(),
+        DataType::FixedSizeList(f, sz) => {
+            let builder = builder
+                .as_any_mut()
+                .downcast_mut::<FixedSizeListBuilder<Box<dyn ArrayBuilder>>>()
+                .ok_or_else(|| internal!("failed to downcast to FixedSizeListBuilder"))?;
+            for _ in 0..*sz {
+                append_null_value_to_builder(builder.values(), f.data_type())?;
+            }
+            builder.append(false);
+        }
+        DataType::Struct(fields) => {
+            let builder = builder
+                .as_any_mut()
+                .downcast_mut::<StructBuilder>()
+                .ok_or_else(|| internal!("failed to downcast to StructBuilder"))?;
+            for (i, field) in fields.iter().enumerate() {
+                append_null_value_to_builder(
+                    &mut builder.field_builders_mut()[i],
+                    field.data_type(),
+                )?;
+            }
+            builder.append(false);
+        }
+        _ => return internal_err!("unexpected data type: {}", ty),
+    };
+    Ok(())
+}
+
 fn scalar_to_sol_value(
     arrow_value: ScalarValue,
     sol_type: &DynSolType,
@@ -789,6 +931,62 @@ fn scalar_to_sol_value(
                 "cannot convert fixed size binary to solidity type {}",
                 sol_type
             ),
+        },
+        ScalarValue::List(items) => match sol_type {
+            DynSolType::Array(ty) => {
+                let items = items.value(0);
+                let mut sol_items = Vec::new();
+                for i in 0..items.len() {
+                    let sol_value = array_to_sol_value(&items, ty, i)?;
+                    sol_items.push(sol_value);
+                }
+                Ok(DynSolValue::Array(sol_items))
+            }
+            _ => return plan_err!("cannot convert list to solidity type {}", sol_type),
+        },
+        ScalarValue::FixedSizeList(items) => match sol_type {
+            DynSolType::FixedArray(ty, sz) => {
+                let items = items.value(0);
+                if *sz != items.len() {
+                    return plan_err!(
+                        "cannot convert fixed size list of size {} to solidity type {}",
+                        items.len(),
+                        sol_type
+                    );
+                }
+                let mut sol_items = Vec::new();
+                for i in 0..items.len() {
+                    let sol_value = array_to_sol_value(&items, ty, i)?;
+                    sol_items.push(sol_value);
+                }
+                Ok(DynSolValue::FixedArray(sol_items))
+            }
+            _ => {
+                return plan_err!(
+                    "cannot convert fixed size list of size {} to solidity type {}",
+                    items.len(),
+                    sol_type
+                )
+            }
+        },
+        ScalarValue::Struct(items) => match sol_type {
+            DynSolType::Tuple(tys) => {
+                let columns = items.columns();
+                if tys.len() != columns.len() {
+                    return plan_err!(
+                        "cannot convert struct of size {} to solidity type {}",
+                        columns.len(),
+                        sol_type
+                    );
+                }
+                let mut sol_items = Vec::new();
+                for (col, ty) in columns.iter().zip(tys) {
+                    let sol_value = array_to_sol_value(col, &ty, 0)?;
+                    sol_items.push(sol_value);
+                }
+                Ok(DynSolValue::Tuple(sol_items))
+            }
+            _ => return plan_err!("cannot convert struct to solidity type {}", sol_type),
         },
         _ => {
             return plan_err!(
@@ -975,6 +1173,67 @@ fn array_to_sol_value(
                 plan_err!("cannot convert string to solidity type {}", sol_type)
             }
         }
+        DataType::List(_) => match sol_type {
+            DynSolType::Array(ty) => {
+                let items = ary.as_any().downcast_ref::<ListArray>().unwrap().value(idx);
+                let mut sol_items = Vec::new();
+                for i in 0..items.len() {
+                    let sol_value = array_to_sol_value(&items, ty, i)?;
+                    sol_items.push(sol_value);
+                }
+                Ok(DynSolValue::Array(sol_items))
+            }
+            _ => return plan_err!("cannot convert list to solidity type {}", sol_type),
+        },
+        DataType::FixedSizeList(_, arrow_sz) => match sol_type {
+            DynSolType::FixedArray(ty, sz) => {
+                let items = ary
+                    .as_any()
+                    .downcast_ref::<FixedSizeListArray>()
+                    .unwrap()
+                    .value(idx);
+                if *sz != items.len() {
+                    return plan_err!(
+                        "cannot convert fixed size list of size {} to solidity type {}",
+                        items.len(),
+                        sol_type
+                    );
+                }
+                let mut sol_items = Vec::new();
+                for i in 0..items.len() {
+                    let sol_value = array_to_sol_value(&items, ty, i)?;
+                    sol_items.push(sol_value);
+                }
+                Ok(DynSolValue::FixedArray(sol_items))
+            }
+            _ => {
+                return plan_err!(
+                    "cannot convert fixed size list of size {} to solidity type {}",
+                    arrow_sz,
+                    sol_type
+                )
+            }
+        },
+        DataType::Struct(_) => match sol_type {
+            DynSolType::Tuple(tys) => {
+                let items = ary.as_any().downcast_ref::<StructArray>().unwrap();
+                let columns = items.columns();
+                if tys.len() != columns.len() {
+                    return plan_err!(
+                        "cannot convert struct of size {} to solidity type {}",
+                        columns.len(),
+                        sol_type
+                    );
+                }
+                let mut sol_items = Vec::new();
+                for (col, ty) in columns.iter().zip(tys) {
+                    let sol_value = array_to_sol_value(col, &ty, idx)?;
+                    sol_items.push(sol_value);
+                }
+                Ok(DynSolValue::Tuple(sol_items))
+            }
+            _ => return plan_err!("cannot convert struct to solidity type {}", sol_type),
+        },
         _ => {
             return plan_err!(
                 "Unsupported type {} for Solidity type {}",
@@ -983,6 +1242,55 @@ fn array_to_sol_value(
             )
         }
     }
+}
+
+fn sol_to_arrow_type(ty: &DynSolType) -> Result<DataType, DataFusionError> {
+    let df = match ty {
+        DynSolType::Bool => DataType::Boolean,
+        DynSolType::Int(bits) => match *bits {
+            8 => DataType::Int8,
+            16 => DataType::Int16,
+            n if n <= 32 => DataType::Int32,
+            n if n <= 64 => DataType::Int64,
+            n if n <= DEC_128_MAX_BINARY_PREC => DataType::Decimal128(DEC128_PREC, 0),
+            n if n <= DEC_256_MAX_BINARY_PREC => DataType::Decimal256(DEC256_PREC, 0),
+            n if n <= 256 => DataType::Utf8,
+            _ => return internal_err!("unexpected number of bits for {}: {}", ty, bits),
+        },
+        DynSolType::Uint(bits) => match *bits {
+            8 => DataType::UInt8,
+            16 => DataType::UInt16,
+            n if n <= 32 => DataType::UInt32,
+            n if n <= 64 => DataType::UInt64,
+            n if n <= DEC_128_MAX_BINARY_PREC => DataType::Decimal128(DEC128_PREC, 0),
+            n if n <= DEC_256_MAX_BINARY_PREC => DataType::Decimal256(DEC256_PREC, 0),
+            n if n <= 256 => DataType::Utf8,
+            _ => return internal_err!("unexpected number of bits for {}: {}", ty, bits),
+        },
+        DynSolType::FixedBytes(bytes) => DataType::FixedSizeBinary(*bytes as i32),
+        DynSolType::Address => DataType::FixedSizeBinary(20),
+        DynSolType::Bytes => DataType::Binary,
+        DynSolType::String => DataType::Utf8,
+        DynSolType::Array(ty) => {
+            DataType::List(Arc::new(Field::new("item", sol_to_arrow_type(ty)?, true)))
+        }
+        DynSolType::FixedArray(ty, sz) => DataType::FixedSizeList(
+            Arc::new(Field::new("item", sol_to_arrow_type(ty)?, true)),
+            *sz as i32,
+        ),
+        DynSolType::Tuple(tys) => {
+            let mut fields = Vec::new();
+            for (i, ty) in tys.iter().enumerate() {
+                let field = Field::new(format!("c{i}"), sol_to_arrow_type(ty)?, true);
+                fields.push(field);
+            }
+            DataType::Struct(Fields::from_iter(fields))
+        }
+        DynSolType::Function => {
+            return plan_err!("cannot convert solidity type {} to arrow data type", ty)
+        }
+    };
+    Ok(df)
 }
 
 fn int_to_sol_value(s: I256, sol_type: &DynSolType) -> Result<DynSolValue, DataFusionError> {
