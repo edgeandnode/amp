@@ -16,9 +16,9 @@ providers_dir = "<config_dir/providers>"
 # Path to a directory containing dataset definition files.
 dataset_defs_dir = "<config_dir/dataset_defs>"
 
-# Connection to the metadata DB. Optional. If not set, a temporary postgres DB will be created
-# and used. To opt out of this default behavior, set `ALLOW_TEMP_DB` to `false` in the environment. 
-# Temporary DBs are persisted and not recommended for production use.
+# Connection to the metadata DB. Optional. If not set, a temporary postgres DB will be provided.
+# To opt out of this default behavior, set `ALLOW_TEMP_DB` to `false` in the environment.
+# By default, temporary DBs will be created and persisted in the OS temp directory.
 metadata_db_url = "postgres://<pg_url>"
 
 # How much memory the server can use in MB. Setting this to 0 means unlimited
