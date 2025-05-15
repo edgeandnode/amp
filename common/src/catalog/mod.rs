@@ -1,15 +1,16 @@
 use std::{collections::BTreeSet, sync::Arc};
 
 use datafusion::{
+    arrow::util::pretty::pretty_format_batches,
     common::tree_node::{TreeNode, TreeNodeRecursion, TreeNodeVisitor},
     datasource::TableType,
     error::DataFusionError,
-    logical_expr::{LogicalPlan, TableScan},
+    logical_expr::{DescribeTable, LogicalPlan, TableScan},
+    prelude::SessionContext,
     sql::TableReference,
 };
-use physical::{Catalog, PhysicalDataset, PhysicalTable};
 
-use crate::{config::Config, BoxError, Dataset, QueryContext, Table};
+use crate::Table;
 
 pub mod logical;
 pub mod physical;
@@ -45,40 +46,32 @@ pub fn collect_scanned_tables(plan: &LogicalPlan) -> BTreeSet<TableReference> {
     visitor.table_refs
 }
 
-pub async fn schema_to_markdown(
-    tables: Vec<Table>,
-    dataset_kind: String,
-) -> Result<String, BoxError> {
-    let dataset = Dataset {
-        kind: dataset_kind,
-        name: "dataset".to_string(),
-        tables,
-    };
-    let config = Config::in_memory().await;
-
-    let env = Arc::new(config.make_runtime_env()?);
-    let tables = dataset.tables().iter().cloned().try_fold(
-        Vec::with_capacity(dataset.tables.len()),
-        |mut acc, table| {
-            acc.push(PhysicalTable::empty(table, &config)?);
-            Ok::<Vec<PhysicalTable>, BoxError>(acc)
-        },
-    )?;
-    let catalog = Catalog::new(vec![PhysicalDataset::new(dataset, tables)]);
-    let context = QueryContext::for_catalog(catalog, env).unwrap();
-
+pub async fn schema_to_markdown(tables: Vec<Table>) -> String {
     let mut markdown = String::new();
     markdown.push_str("# Schema\n");
     markdown.push_str(&format!(
         "Auto-generated file. See `schema_to_markdown` in `{}`.\n",
         file!()
     ));
-    for (table, pretty_schema) in context.print_schema().await? {
-        markdown.push_str(&format!("## {}\n", table.table_name()));
+    for table in tables {
+        markdown.push_str(&format!("## {}\n", table.name));
         markdown.push_str("````\n");
-        markdown.push_str(&pretty_schema);
+        markdown.push_str(&print_schema(&table).await);
         markdown.push_str("\n````\n");
     }
 
-    Ok(markdown)
+    markdown
+}
+
+async fn print_schema(table: &Table) -> String {
+    let plan = LogicalPlan::DescribeTable(DescribeTable {
+        schema: table.schema.clone(),
+        output_schema: Arc::new(LogicalPlan::describe_schema().try_into().unwrap()),
+    });
+    let ctx = SessionContext::new();
+
+    // Unwraps: No reason for a `describe` to fail.
+    let df = ctx.execute_logical_plan(plan).await.unwrap();
+    let batches = df.collect().await.unwrap();
+    pretty_format_batches(&batches).unwrap().to_string()
 }

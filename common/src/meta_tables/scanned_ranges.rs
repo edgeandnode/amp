@@ -21,12 +21,12 @@
 
 use std::collections::BTreeMap;
 
-use crate::{multirange::MultiRange, BoxError, QueryContext, Timestamp};
-
 use futures::{TryFutureExt, TryStreamExt};
 
 use metadata_db::MetadataDb;
 use serde::{Deserialize, Serialize};
+
+use crate::{multirange::MultiRange, BoxError, QueryContext, Timestamp};
 
 pub const METADATA_KEY: &'static str = "nozzle_metadata";
 
@@ -67,7 +67,7 @@ pub async fn filenames_for_table(
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct NozzleMeta {
+pub struct ScannedRange {
     pub table: String,
     pub range_start: u64,
     pub range_end: u64,

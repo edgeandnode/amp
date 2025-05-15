@@ -14,8 +14,7 @@ use uuid::Uuid;
 
 use super::logical::Table;
 use crate::{
-    config::Config,
-    meta_tables::scanned_ranges::{NozzleMeta, METADATA_KEY},
+    meta_tables::scanned_ranges::{METADATA_KEY, ScannedRange},
     store::{infer_object_store, Store},
     BoxError, Dataset,
 };
@@ -117,30 +116,6 @@ pub struct PhysicalTable {
 }
 
 impl PhysicalTable {
-    /// Create an empty table for the given table and config.
-    /// For testing purposes (for now). Used to create a table without a location
-    /// for DESCRIBE, EXPLAIN queries.
-    pub fn empty(table: Table, config: &Config) -> Result<Self, BoxError> {
-        let data_store = config.data_store.clone();
-        let metadata_db = config.metadata_db_lazy()?.into();
-        let table_ref = TableReference::partial("dataset", table.name.as_str());
-        let url = data_store.url().to_owned();
-        let path = Path::from_url_path(url.path()).unwrap();
-        let object_store = data_store.object_store();
-        let location_id = 0;
-
-        let table = Self {
-            table,
-            table_ref,
-            url,
-            path,
-            object_store,
-            location_id,
-            metadata_db,
-        };
-        Ok(table)
-    }
-
     /// Create a new physical table with the given dataset name, table, URL, and object store.
     pub fn new(
         dataset_name: &str,
@@ -514,7 +489,7 @@ pub async fn list_revisions(
 async fn nozzle_meta_from_object_meta(
     object_meta: &ObjectMeta,
     object_store: Arc<dyn ObjectStore>,
-) -> Result<NozzleMeta, BoxError> {
+) -> Result<ScannedRange, BoxError> {
     let mut reader = ParquetObjectReader::new(object_store.clone(), object_meta.location.clone())
         .with_file_size(object_meta.size);
     let parquet_metadata = reader.get_metadata(None).await?;
@@ -541,7 +516,7 @@ async fn nozzle_meta_from_object_meta(
                 "Unable to parse ScannedRange from empty value in metadata for file {}",
                 &object_meta.location
             )))?;
-    let nozzle_meta: NozzleMeta = serde_json::from_str(scanned_range_json).map_err(|e| {
+    let nozzle_meta: ScannedRange = serde_json::from_str(scanned_range_json).map_err(|e| {
         crate::ArrowError::ParseError(format!(
             "Unable to parse ScannedRange from key value metadata for file {}: {}",
             &object_meta.location, e

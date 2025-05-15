@@ -1,14 +1,13 @@
-use std::fmt::Display;
-use std::future::Future;
-use std::net::SocketAddr;
+use std::{fmt::Display, future::Future, net::SocketAddr};
 
-use axum::http::StatusCode;
-use axum::response::IntoResponse;
-use axum::serve::{Listener, ListenerExt as _};
+use axum::{
+    http::StatusCode,
+    response::IntoResponse,
+    serve::{Listener, ListenerExt as _},
+};
 use common::BoxResult;
 use serde_json::json;
-use tokio::net::TcpListener;
-use tokio::sync::broadcast;
+use tokio::{net::TcpListener, sync::broadcast};
 
 pub type BoxRequestError = Box<dyn RequestError>;
 

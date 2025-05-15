@@ -1,12 +1,17 @@
+use std::{fmt::Display, sync::Arc};
+
+use datafusion::{
+    arrow::{
+        array::{make_array, Array, ArrayRef, MutableArrayData, RecordBatch},
+        datatypes::{Field, Schema, SchemaRef},
+    },
+    common::{internal_err, not_impl_err, Result},
+    config::ConfigOptions,
+    logical_expr::{ColumnarValue, ScalarUDF},
+    physical_expr::{PhysicalExpr, ScalarFunctionExpr},
+};
+
 use crate::functions::AsyncScalarUDF;
-use datafusion::arrow::array::{make_array, Array, ArrayRef, MutableArrayData, RecordBatch};
-use datafusion::arrow::datatypes::{Field, Schema, SchemaRef};
-use datafusion::common::{internal_err, not_impl_err, Result};
-use datafusion::config::ConfigOptions;
-use datafusion::logical_expr::{ColumnarValue, ScalarUDF};
-use datafusion::physical_expr::{PhysicalExpr, ScalarFunctionExpr};
-use std::fmt::Display;
-use std::sync::Arc;
 
 /// Wrapper for a Async function that can be used in a DataFusion query
 #[derive(Debug, Clone)]

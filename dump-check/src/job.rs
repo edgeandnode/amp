@@ -1,13 +1,16 @@
+use std::{collections::HashMap, ops::RangeInclusive, sync::Arc};
+
+use common::{
+    arrow::{
+        array::{AsArray, RecordBatch},
+        datatypes::UInt64Type,
+    },
+    query_context::QueryContext,
+    BlockStreamer, BoxError, Dataset, BLOCK_NUM,
+};
+use futures::{future::join_all, FutureExt, StreamExt as _};
+
 use crate::metrics::METRICS;
-use common::arrow::array::{AsArray, RecordBatch};
-use common::arrow::datatypes::UInt64Type;
-use common::query_context::QueryContext;
-use common::{BlockStreamer, BoxError, Dataset, BLOCK_NUM};
-use futures::future::join_all;
-use futures::{FutureExt, StreamExt as _};
-use std::collections::HashMap;
-use std::ops::RangeInclusive;
-use std::sync::Arc;
 
 pub struct Job<T: BlockStreamer> {
     #[allow(unused)]

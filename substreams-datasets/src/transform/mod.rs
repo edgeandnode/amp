@@ -3,10 +3,12 @@ pub mod entities;
 pub mod proto;
 
 use anyhow::Context as _;
-
-use crate::proto::sf::substreams::rpc::v2::BlockScopedData;
-use crate::tables::{OutputType, Tables};
 use common::{parquet::data_type::AsBytes, DatasetRows};
+
+use crate::{
+    proto::sf::substreams::rpc::v2::BlockScopedData,
+    tables::{OutputType, Tables},
+};
 
 /// transform BlockScopedData to RecordBatch based on the module output type and schemas
 pub fn transform(block: BlockScopedData, tables: &Tables) -> Result<DatasetRows, anyhow::Error> {

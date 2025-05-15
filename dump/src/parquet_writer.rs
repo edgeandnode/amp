@@ -1,19 +1,19 @@
-use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
-use common::arrow::array::RecordBatch;
-use common::catalog::physical::PhysicalTable;
-use common::meta_tables::scanned_ranges::{self, NozzleMeta};
-use common::multirange::MultiRange;
-use common::parquet::errors::ParquetError;
-use common::parquet::format::KeyValue;
-use common::{parquet, BlockNum, BoxError, QueryContext, TableRows, Timestamp};
+use common::{
+    arrow::array::RecordBatch,
+    catalog::physical::PhysicalTable,
+    meta_tables::scanned_ranges::{self, ScannedRange},
+    multirange::MultiRange,
+    parquet,
+    parquet::{errors::ParquetError, format::KeyValue},
+    BlockNum, BoxError, QueryContext, TableRows, Timestamp,
+};
 use metadata_db::MetadataDb;
-use object_store::buffered::BufWriter;
-use object_store::path::Path;
-use object_store::ObjectMeta;
-use parquet::arrow::AsyncArrowWriter;
-use parquet::file::properties::WriterProperties as ParquetWriterProperties;
+use object_store::{buffered::BufWriter, path::Path, ObjectMeta};
+use parquet::{
+    arrow::AsyncArrowWriter, file::properties::WriterProperties as ParquetWriterProperties,
+};
 use tracing::debug;
 use url::Url;
 
@@ -95,7 +95,7 @@ impl RawDatasetWriter {
 }
 
 pub async fn insert_scanned_range(
-    nozzle_meta: NozzleMeta,
+    nozzle_meta: ScannedRange,
     object_meta: ObjectMeta,
     metadata_db: Arc<MetadataDb>,
     location_id: i64,
@@ -153,7 +153,7 @@ impl TableWriter {
     pub async fn write(
         &mut self,
         table_rows: &TableRows,
-    ) -> Result<Option<(NozzleMeta, ObjectMeta)>, BoxError> {
+    ) -> Result<Option<(ScannedRange, ObjectMeta)>, BoxError> {
         assert_eq!(table_rows.table.name, self.table.table_name());
 
         let mut nozzle_meta = None;
@@ -181,7 +181,7 @@ impl TableWriter {
             return Ok(nozzle_meta);
         }
 
-        let bytes_written = self.current_file.as_ref().unwrap().in_progress_size();
+        let bytes_written = self.current_file.as_ref().unwrap().bytes_written();
 
         // Check if we need to create a new part file before writing this batch of rows, because the
         // size of the current row group already exceeds the configured max `partition_size`.
@@ -239,7 +239,7 @@ impl TableWriter {
         }
     }
 
-    async fn close(self) -> Result<Option<(NozzleMeta, ObjectMeta)>, BoxError> {
+    async fn close(self) -> Result<Option<(ScannedRange, ObjectMeta)>, BoxError> {
         // We should be closing the last range.
         assert!(self.ranges_to_write.is_empty());
 
@@ -292,7 +292,7 @@ impl ParquetFileWriter {
     }
 
     #[must_use]
-    pub async fn close(mut self, end: BlockNum) -> Result<(NozzleMeta, ObjectMeta), BoxError> {
+    pub async fn close(mut self, end: BlockNum) -> Result<(ScannedRange, ObjectMeta), BoxError> {
         if end < self.start {
             return Err(
                 format!("end block {} must be after start block {}", end, self.start).into(),
@@ -306,7 +306,7 @@ impl ParquetFileWriter {
             self.file_url, self.start, end
         );
 
-        let nozzle_meta = NozzleMeta {
+        let nozzle_meta = ScannedRange {
             table: self.table.table_name().to_string(),
             range_start: self.start,
             range_end: end,
@@ -326,8 +326,9 @@ impl ParquetFileWriter {
         Ok((nozzle_meta, object_meta))
     }
 
-    // Anticipated encoded (but uncompressed) size of the in progress row group.
-    pub fn in_progress_size(&self) -> usize {
-        self.writer.in_progress_size()
+    // This is calculate as:
+    // size of row groups flushed to storage + encoded (but uncompressed) size of the in progress row group
+    pub fn bytes_written(&self) -> usize {
+        self.writer.bytes_written() + self.writer.in_progress_size()
     }
 }

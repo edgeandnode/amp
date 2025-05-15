@@ -9,8 +9,7 @@ use tokio::{
     sync::mpsc::{UnboundedReceiver, UnboundedSender},
     task::JoinHandle,
 };
-use tracing::{debug, error};
-use tracing::{info, instrument};
+use tracing::{debug, error, info, instrument};
 
 use crate::job::Job;
 
@@ -46,7 +45,7 @@ impl fmt::Debug for WorkerAction {
 
 pub struct Worker {
     config: Arc<Config>,
-    metadata_db: MetadataDb,
+    metadata_db: Arc<MetadataDb>,
     node_id: String,
 
     // To prevent start/stop race conditions, actions for a same jobs are processed sequentially.
@@ -73,7 +72,7 @@ pub enum WorkerError {
 }
 
 impl Worker {
-    pub fn new(config: Arc<Config>, metadata_db: MetadataDb, node_id: String) -> Self {
+    pub fn new(config: Arc<Config>, metadata_db: Arc<MetadataDb>, node_id: String) -> Self {
         Self {
             config,
             metadata_db,
@@ -90,12 +89,13 @@ impl Worker {
         self.metadata_db.hello_worker(&self.node_id).await?;
 
         // Periodic heartbeat task.
-        let heartbeat_task: JoinHandle<Result<(), WorkerError>> = tokio::spawn(
-            self.metadata_db
-                .clone()
-                .heartbeat_loop(self.node_id.clone())
-                .map_err(|e| HeartbeatError(e.into())),
-        );
+        let db = self.metadata_db.clone();
+        let id = self.node_id.clone();
+        let heartbeat_task: JoinHandle<Result<(), WorkerError>> = tokio::spawn(async move {
+            db.heartbeat_loop(id)
+                .await
+                .map_err(|e| HeartbeatError(e.into()))
+        });
 
         // Start listening for actions.
         let action_stream = self
@@ -165,7 +165,7 @@ impl Worker {
 
 struct JobHandler {
     config: Arc<Config>,
-    metadata_db: MetadataDb,
+    metadata_db: Arc<MetadataDb>,
     node_id: String,
     job_id: JobDatabaseId,
     recv: UnboundedReceiver<WorkerAction>,
@@ -174,7 +174,7 @@ struct JobHandler {
 impl JobHandler {
     fn new(
         config: Arc<Config>,
-        metadata_db: MetadataDb,
+        metadata_db: Arc<MetadataDb>,
         node_id: String,
         job_id: JobDatabaseId,
         recv: UnboundedReceiver<WorkerAction>,
@@ -211,13 +211,9 @@ impl JobHandler {
 
         match action {
             Action::Start => {
-                let job = Job::load(
-                    self.job_id,
-                    self.config.clone(),
-                    self.metadata_db.clone().into(),
-                )
-                .await
-                .map_err(JobLoadError)?;
+                let job = Job::load(self.job_id, self.config.clone(), self.metadata_db.clone())
+                    .await
+                    .map_err(JobLoadError)?;
                 spawn_job(self.config.clone(), self.metadata_db.clone(), job);
             }
 
@@ -230,10 +226,10 @@ impl JobHandler {
     }
 }
 
-fn spawn_job(config: Arc<Config>, metadata_db: MetadataDb, job: Job) -> JoinHandle<()> {
+fn spawn_job(config: Arc<Config>, metadata_db: Arc<MetadataDb>, job: Job) -> JoinHandle<()> {
     tokio::spawn(async move {
         let job_desc = job.to_string();
-        match job.run(config, metadata_db.into()).await {
+        match job.run(config, metadata_db).await {
             Ok(()) => {
                 info!("job {} finished running", job_desc);
             }

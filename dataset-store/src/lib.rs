@@ -21,8 +21,7 @@ use datafusion::{
     common::HashMap,
     execution::runtime_env::RuntimeEnv,
     logical_expr::ScalarUDF,
-    sql::resolve::resolve_table_references,
-    sql::{parser, TableReference},
+    sql::{parser, resolve::resolve_table_references, TableReference},
 };
 use futures::{future::BoxFuture, FutureExt as _, TryFutureExt as _};
 use metadata_db::MetadataDb;

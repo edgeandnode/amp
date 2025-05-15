@@ -1,17 +1,21 @@
-use crate::async_func::AsyncFuncExpr;
-use datafusion::arrow::datatypes::{Fields, Schema, SchemaRef};
-use datafusion::arrow::record_batch::RecordBatch;
-use datafusion::common::Result;
-use datafusion::execution::{SendableRecordBatchStream, TaskContext};
-use datafusion::physical_expr::EquivalenceProperties;
-use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
-use datafusion::physical_plan::{
-    DisplayAs, DisplayFormatType, ExecutionPlan, ExecutionPlanProperties, Partitioning,
-    PlanProperties,
+use std::{any::Any, sync::Arc};
+
+use datafusion::{
+    arrow::{
+        datatypes::{Fields, Schema, SchemaRef},
+        record_batch::RecordBatch,
+    },
+    common::Result,
+    execution::{SendableRecordBatchStream, TaskContext},
+    physical_expr::EquivalenceProperties,
+    physical_plan::{
+        stream::RecordBatchStreamAdapter, DisplayAs, DisplayFormatType, ExecutionPlan,
+        ExecutionPlanProperties, Partitioning, PlanProperties,
+    },
 };
 use futures::stream::StreamExt;
-use std::any::Any;
-use std::sync::Arc;
+
+use crate::async_func::AsyncFuncExpr;
 
 /// This structure evaluates  a set of async expressions on a record
 /// batch producing a new record batch

@@ -1,13 +1,5 @@
 use std::{any::Any, str::FromStr, sync::Arc};
 
-use crate::{
-    arrow::{
-        array::{Array, BinaryArray, StructBuilder},
-        datatypes::{DataType, Field, Fields},
-    },
-    evm::udfs::{array_to_sol_value, num_rows, scalar_to_sol_value, FieldBuilder},
-    plan,
-};
 use alloy::{
     dyn_abi::{DynSolType, FunctionExt, JsonAbiExt, Specifier as _},
     json_abi::Function as AlloyFunction,
@@ -26,6 +18,14 @@ use datafusion::{
 use itertools::izip;
 
 use super::sol_to_arrow_type;
+use crate::{
+    arrow::{
+        array::{Array, BinaryArray, StructBuilder},
+        datatypes::{DataType, Field, Fields},
+    },
+    evm::udfs::{array_to_sol_value, num_rows, scalar_to_sol_value, FieldBuilder},
+    plan,
+};
 
 struct FunctionCall {
     alloy_function: AlloyFunction,

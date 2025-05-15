@@ -33,6 +33,14 @@ pub(crate) struct DatasetDef {
 pub(crate) struct EvmRpcProvider {
     #[serde_as(as = "serde_with::DisplayFromStr")]
     pub url: Url,
+
+    /// Maximum number of json-rpc requests to batch together.
+    #[serde(default = "default_rpc_batch_size")]
+    pub rpc_batch_size: usize,
+}
+
+fn default_rpc_batch_size() -> usize {
+    100
 }
 
 pub fn dataset(dataset_cfg: toml::Value) -> Result<DatasetWithProvider, Error> {
@@ -55,8 +63,13 @@ pub async fn client(
     let provider_string = provider_store.get_string(def.provider.as_str()).await?;
     let provider: EvmRpcProvider = toml::from_str(&provider_string)?;
     let request_limit = u16::max(1, def.concurrent_request_limit.unwrap_or(1024));
-    let client =
-        JsonRpcClient::new(provider.url, def.network, request_limit).map_err(Error::Client)?;
+    let client = JsonRpcClient::new(
+        provider.url,
+        def.network,
+        request_limit,
+        provider.rpc_batch_size,
+    )
+    .map_err(Error::Client)?;
     Ok(client)
 }
 
@@ -65,12 +78,7 @@ pub async fn client(
 async fn print_schema_to_readme() {
     fs_err::write(
         "src/README.md",
-        common::catalog::schema_to_markdown(
-            tables::all("test_network"),
-            crate::DATASET_KIND.to_string(),
-        )
-        .await
-        .unwrap(),
+        common::catalog::schema_to_markdown(tables::all("test_network")).await,
     )
     .unwrap();
 }

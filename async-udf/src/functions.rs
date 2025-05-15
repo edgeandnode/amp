@@ -1,16 +1,14 @@
-use crate::async_func::AsyncScalarFunctionArgs;
+use std::{any::Any, fmt::Debug, sync::Arc};
+
 use async_trait::async_trait;
-use datafusion::arrow::array::ArrayRef;
-use datafusion::arrow::datatypes::DataType;
-use datafusion::common::internal_err;
-use datafusion::common::Result;
-use datafusion::config::ConfigOptions;
-use datafusion::logical_expr::{
-    ColumnarValue, ScalarFunctionArgs, ScalarUDF, ScalarUDFImpl, Signature,
+use datafusion::{
+    arrow::{array::ArrayRef, datatypes::DataType},
+    common::{internal_err, Result},
+    config::ConfigOptions,
+    logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDF, ScalarUDFImpl, Signature},
 };
-use std::any::Any;
-use std::fmt::Debug;
-use std::sync::Arc;
+
+use crate::async_func::AsyncScalarFunctionArgs;
 
 /// A scalar UDF that can invoke using async methods
 ///

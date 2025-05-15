@@ -11,9 +11,8 @@ use datafusion::{
     scalar::ScalarValue,
 };
 
-use crate::plan;
-
 use super::{array_to_sol_value, num_rows, scalar_to_sol_value};
+use crate::plan;
 
 #[derive(Debug)]
 pub struct EvmEncodeType {

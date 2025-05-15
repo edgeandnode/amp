@@ -1,9 +1,10 @@
 use std::{ops::Deref, sync::LazyLock};
 
-use crate::MetadataDb;
 use pgtemp::{PgTempDB, PgTempDBBuilder};
 use tokio::sync::OnceCell;
 use tracing::info;
+
+use crate::MetadataDb;
 
 pub static ALLOW_TEMP_DB: LazyLock<bool> = LazyLock::new(|| {
     std::env::var("ALLOW_TEMP_DB")

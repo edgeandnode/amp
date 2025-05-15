@@ -1,11 +1,12 @@
-use anyhow::Context as _;
-use prost::Message as _;
 use std::{str::FromStr as _, time::Duration};
-use tokio::sync::mpsc;
 
+use anyhow::Context as _;
+use common::{BlockNum, BlockStreamer, BoxError, DatasetRows, Store, Table};
 use firehose_datasets::{client::AuthInterceptor, Error};
-
 use futures::{Stream, StreamExt as _, TryStreamExt as _};
+use pbsubstreams::{response::Message, stream_client::StreamClient, Request as StreamRequest};
+use prost::Message as _;
+use tokio::sync::mpsc;
 use tonic::{
     codec::CompressionEncoding,
     service::interceptor::InterceptedService,
@@ -13,13 +14,14 @@ use tonic::{
 };
 
 use super::tables::Tables;
-use crate::{dataset::extract_def_and_provider, proto::sf::substreams::v1::Package};
 use crate::{
-    proto::sf::substreams::rpc::v2::{self as pbsubstreams, BlockScopedData},
+    dataset::extract_def_and_provider,
+    proto::sf::substreams::{
+        rpc::v2::{self as pbsubstreams, BlockScopedData},
+        v1::Package,
+    },
     transform::transform,
 };
-use common::{BlockNum, BlockStreamer, BoxError, DatasetRows, Store, Table};
-use pbsubstreams::{response::Message, stream_client::StreamClient, Request as StreamRequest};
 
 /// This client only handles final blocks.
 // See also: only-final-blocks
