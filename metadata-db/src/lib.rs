@@ -1,7 +1,10 @@
+mod stream_helper;
 mod temp_metadata_db;
 use std::time::Duration;
 
 use futures::stream::{BoxStream, Stream};
+use object_store::ObjectMeta;
+use serde_json::Value;
 use sqlx::{
     migrate::{MigrateError, Migrator},
     postgres::{PgListener, PgNotification, PgPoolOptions},
@@ -14,6 +17,8 @@ use tracing::instrument;
 use url::Url;
 
 pub use temp_metadata_db::{test_metadata_db, ALLOW_TEMP_DB, KEEP_TEMP_DIRS};
+
+use stream_helper::{FileMetaRow, NozzleMetaStreamExt};
 
 /// Frequency on which to send a heartbeat.
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
@@ -406,13 +411,57 @@ impl MetadataDb {
         location_id: i64,
     ) -> BoxStream<'a, Result<String, sqlx::Error>> {
         let sql = "
-            SELECT sr.file_name
+            SELECT DISTINCT ON (1, 2)
+                   sr.file_name
+                 , CAST(sr.nozzle_meta->>'range_end' AS BIGINT)
               FROM file_metadata sr
              WHERE sr.location_id = $1
           ORDER BY 1 ASC
+                 , 2 ASC
         ";
 
-        sqlx::query_scalar(sql).bind(location_id).fetch(&self.pool)
+        sqlx::query_as::<_, (String, i64)>(sql)
+            .bind(location_id)
+            .fetch(&self.pool)
+            .as_non_overlapping_stream()
+    }
+
+    /// Produces a stream of tuples for a given `location_id` catalogued by the [`MetadataDb`]
+    /// whose members are:
+    /// - [`String`]: the name of the file
+    /// - [`ObjectMeta`]: the latest object metadata of the file
+    /// - [`Value`]: the latest nozzle metadata of the file as a JSON object
+    ///
+    /// The stream is ordered by the `range_start` field of the nozzle metadata, and will always
+    /// produce a stream of non-overlapping scanned ranges see: [NozzleMetaStream].
+    ///
+    /// [NozzleMetaStream]: https://github.com/edgeandnode/project-nozzle/blob/c0bbd41012ddb3b5fec67cbaeca4db9ea03d6695/metadata-db/src/stream_helper.rs#L4
+    #[instrument(skip_all)]
+    pub fn file_metadata_stream<'a>(
+        &'a self,
+        location_id: i64,
+    ) -> BoxStream<'a, Result<(String, ObjectMeta, Value), object_store::Error>> {
+        let sql = "
+            SELECT DISTINCT ON (fm.nozzle_meta->>'range_start', fm.object_last_modified)
+                   CAST(fm.nozzle_meta->>'range_end' AS BIGINT)
+                 , fm.file_name
+                 , l.url
+                 , fm.object_last_modified
+                 , fm.object_size
+                 , fm.object_e_tag
+                 , fm.object_version
+                 , fm.nozzle_meta
+              FROM file_metadata fm
+              JOIN locations l ON fm.location_id = l.id
+             WHERE fm.location_id = $1
+          ORDER BY fm.nozzle_meta->>'range_start' ASC
+                 , fm.object_last_modified DESC
+        ";
+
+        sqlx::query_as::<_, FileMetaRow>(sql)
+            .bind(location_id)
+            .fetch(&self.pool)
+            .as_non_overlapping_stream()
     }
 
     #[instrument(skip(self))]
@@ -420,34 +469,77 @@ impl MetadataDb {
     pub fn stream_ranges<'a>(
         &'a self,
         location_id: i64,
-    ) -> BoxStream<'a, Result<(i64, i64), sqlx::Error>> {
+    ) -> BoxStream<'a, Result<(u64, u64), sqlx::Error>> {
         let sql = "
-            SELECT CAST(sr.metadata->>'range_start' AS BIGINT)
-                 , CAST(sr.metadata->>'range_end' AS BIGINT)
+            SELECT DISTINCT ON (1)
+                   CAST(sr.nozzle_meta->>'range_start' AS BIGINT)
+                 , CAST(sr.nozzle_meta->>'range_end' AS BIGINT)
               FROM file_metadata sr
              WHERE sr.location_id = $1
           ORDER BY 1 ASC
         ";
 
-        sqlx::query_as(sql).bind(location_id).fetch(&self.pool)
+        sqlx::query_as::<_, (i64, i64)>(sql)
+            .bind(location_id)
+            .fetch(&self.pool)
+            .as_non_overlapping_stream()
     }
 
-    pub async fn insert_scanned_range(
+    pub async fn insert_file_metadata(
         &self,
         location_id: i64,
-        file_name: String,
-        scanned_range: serde_json::Value,
+        nozzle_meta: serde_json::Value,
+        ObjectMeta {
+            location: object_location,
+            last_modified: object_last_modified,
+            size: object_size,
+            e_tag: object_e_tag,
+            version: object_version,
+        }: ObjectMeta,
     ) -> Result<(), Error> {
+        let Some(file_name) = object_location.filename() else {
+            let sql = "SELECT dataset, tbl FROM locations WHERE id = $1;";
+            let (dataset, tbl): (String, String) = sqlx::query_as(sql)
+                .bind(location_id)
+                .fetch_one(&self.pool)
+                .await?;
+
+            return Err(Error::DbError(sqlx::Error::Encode(
+                format!(
+                    "Error registering Nozzle metadata for {dataset}.{tbl}:\n\t\
+                Unable to encode file_name from path {object_location}"
+                )
+                .into(),
+            )));
+        };
+
         let sql = "
-        INSERT INTO file_metadata (location_id, file_name, metadata)
-        VALUES ($1, $2, $3)
-        ON CONFLICT DO NOTHING
+        INSERT INTO file_metadata ( location_id
+                                  , file_name
+                                  , nozzle_meta
+                                  , object_last_modified
+                                  , object_size
+                                  , object_e_tag
+                                  , object_version )
+        VALUES ( $1, $2, $3, $4, $5, $6, $7 )
+        ON CONFLICT DO UPDATE
+            SET nozzle_meta = $3
+              , object_last_modified = $4
+              , object_size = $5
+              , object_e_tag = $6
+              , object_version = $7
+            WHERE file_metadata.location_id = $1
+            AND file_metadata.file_name = $2
         ";
 
         sqlx::query(sql)
             .bind(location_id)
             .bind(file_name)
-            .bind(scanned_range)
+            .bind(nozzle_meta)
+            .bind(object_last_modified.naive_utc())
+            .bind(object_size as i64)
+            .bind(object_e_tag)
+            .bind(object_version)
             .execute(&self.pool)
             .await?;
 

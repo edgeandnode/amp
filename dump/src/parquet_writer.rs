@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use common::arrow::array::RecordBatch;
 use common::catalog::physical::PhysicalTable;
-use common::meta_tables::scanned_ranges::{self, ScannedRange};
+use common::meta_tables::scanned_ranges::{self, NozzleMeta};
 use common::multirange::MultiRange;
 use common::parquet::errors::ParquetError;
 use common::parquet::format::KeyValue;
@@ -11,6 +11,7 @@ use common::{parquet, BlockNum, BoxError, QueryContext, TableRows, Timestamp};
 use metadata_db::MetadataDb;
 use object_store::buffered::BufWriter;
 use object_store::path::Path;
+use object_store::ObjectMeta;
 use parquet::arrow::AsyncArrowWriter;
 use parquet::file::properties::WriterProperties as ParquetWriterProperties;
 use tracing::debug;
@@ -66,11 +67,11 @@ impl RawDatasetWriter {
         let table_name = table_rows.table.name.as_str();
 
         let writer = self.writers.get_mut(table_name).unwrap();
-        let scanned_range = writer.write(&table_rows).await?;
-        if let Some(scanned_range) = scanned_range {
+        let file_meta = writer.write(&table_rows).await?;
+        if let Some((nozzle_meta, object_meta)) = file_meta {
             let location_id = writer.table.location_id();
             let metadata_db = self.metadata_db.clone();
-            insert_scanned_range(scanned_range, metadata_db, location_id).await?;
+            insert_scanned_range(nozzle_meta, object_meta, metadata_db, location_id).await?;
         }
 
         Ok(())
@@ -82,10 +83,10 @@ impl RawDatasetWriter {
             let location_id = writer.table.location_id();
             let metadata_db = self.metadata_db.clone();
 
-            let scanned_range = writer.close().await?;
+            let file_meta = writer.close().await?;
 
-            if let Some(scanned_range) = scanned_range {
-                insert_scanned_range(scanned_range, metadata_db, location_id).await?
+            if let Some((nozzle_meta, object_meta)) = file_meta {
+                insert_scanned_range(nozzle_meta, object_meta, metadata_db, location_id).await?
             }
         }
 
@@ -94,15 +95,15 @@ impl RawDatasetWriter {
 }
 
 pub async fn insert_scanned_range(
-    scanned_range: ScannedRange,
+    nozzle_meta: NozzleMeta,
+    object_meta: ObjectMeta,
     metadata_db: Arc<MetadataDb>,
     location_id: i64,
 ) -> Result<(), BoxError> {
-    let file_name = scanned_range.filename.clone();
-    let scanned_range = serde_json::to_value(scanned_range)?;
+    let nozzle_meta = serde_json::to_value(nozzle_meta)?;
 
     Ok(metadata_db
-        .insert_scanned_range(location_id, file_name, scanned_range)
+        .insert_file_metadata(location_id, nozzle_meta, object_meta)
         .await?)
 }
 
@@ -152,10 +153,10 @@ impl TableWriter {
     pub async fn write(
         &mut self,
         table_rows: &TableRows,
-    ) -> Result<Option<ScannedRange>, BoxError> {
+    ) -> Result<Option<(NozzleMeta, ObjectMeta)>, BoxError> {
         assert_eq!(table_rows.table.name, self.table.table_name());
 
-        let mut scanned_range = None;
+        let mut nozzle_meta = None;
 
         let block_num = table_rows.block_num()?;
 
@@ -164,7 +165,7 @@ impl TableWriter {
             // Unwrap: `current_range` is `Some` by `is_some_and`.
             let end = self.current_range.unwrap().1;
             // Unwrap: If `current_range` is `Some` then `current_file` is also `Some`.
-            scanned_range = Some(self.current_file.take().unwrap().close(end).await?);
+            nozzle_meta = Some(self.current_file.take().unwrap().close(end).await?);
             self.next_range()?;
         }
 
@@ -172,12 +173,12 @@ impl TableWriter {
         // and `current_file`.
         if self.is_finished() {
             // There are no more ranges to write.
-            return Ok(scanned_range);
+            return Ok(nozzle_meta);
         }
 
         // If the block stream has not yet reached the current range, then skip this block.
         if block_num < self.current_range.unwrap().0 {
-            return Ok(scanned_range);
+            return Ok(nozzle_meta);
         }
 
         let bytes_written = self.current_file.as_ref().unwrap().in_progress_size();
@@ -187,12 +188,12 @@ impl TableWriter {
         if bytes_written >= self.partition_size as usize {
             // `scanned_range` would be `Some` if we have had just created a new a file above, so no
             // bytes would have been written yet.
-            assert!(scanned_range.is_none());
+            assert!(nozzle_meta.is_none());
 
             // Close the current file at `block_num - 1`, the highest block height scanned by it.
             let end = block_num - 1;
             let file_to_close = self.current_file.take().unwrap();
-            scanned_range = Some(file_to_close.close(end).await?);
+            nozzle_meta = Some(file_to_close.close(end).await?);
 
             // The current range was partially written, so we need to split it.
             let end = self.current_range.unwrap().1;
@@ -207,7 +208,7 @@ impl TableWriter {
         let rows = &table_rows.rows;
         self.current_file.as_mut().unwrap().write(rows).await?;
 
-        Ok(scanned_range)
+        Ok(nozzle_meta)
     }
 
     fn next_range(&mut self) -> Result<(), BoxError> {
@@ -238,7 +239,7 @@ impl TableWriter {
         }
     }
 
-    async fn close(self) -> Result<Option<ScannedRange>, BoxError> {
+    async fn close(self) -> Result<Option<(NozzleMeta, ObjectMeta)>, BoxError> {
         // We should be closing the last range.
         assert!(self.ranges_to_write.is_empty());
 
@@ -291,7 +292,7 @@ impl ParquetFileWriter {
     }
 
     #[must_use]
-    pub async fn close(mut self, end: BlockNum) -> Result<ScannedRange, BoxError> {
+    pub async fn close(mut self, end: BlockNum) -> Result<(NozzleMeta, ObjectMeta), BoxError> {
         if end < self.start {
             return Err(
                 format!("end block {} must be after start block {}", end, self.start).into(),
@@ -305,7 +306,7 @@ impl ParquetFileWriter {
             self.file_url, self.start, end
         );
 
-        let scanned_range = ScannedRange {
+        let nozzle_meta = NozzleMeta {
             table: self.table.table_name().to_string(),
             range_start: self.start,
             range_end: end,
@@ -313,15 +314,16 @@ impl ParquetFileWriter {
             created_at: Timestamp::now(),
         };
 
-        let scanned_range_key = scanned_ranges::METADATA_KEY.to_string();
-        let scanned_range_value = serde_json::to_string(&scanned_range)?;
+        let nozzle_meta_key = scanned_ranges::METADATA_KEY.to_string();
+        let nozzle_meta_value = serde_json::to_string(&nozzle_meta)?;
 
-        let kv_metadata = KeyValue::new(scanned_range_key, scanned_range_value);
+        let kv_metadata = KeyValue::new(nozzle_meta_key, nozzle_meta_value);
 
         self.writer.append_key_value_metadata(kv_metadata);
         self.writer.close().await?;
-
-        Ok(scanned_range)
+        let location = Path::from_url_path(self.file_url.path())?;
+        let object_meta = self.table.object_store().head(&location).await?;
+        Ok((nozzle_meta, object_meta))
     }
 
     // Anticipated encoded (but uncompressed) size of the in progress row group.

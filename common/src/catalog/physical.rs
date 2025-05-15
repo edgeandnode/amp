@@ -15,7 +15,7 @@ use uuid::Uuid;
 use super::logical::Table;
 use crate::{
     config::Config,
-    meta_tables::scanned_ranges::{self, ScannedRange},
+    meta_tables::scanned_ranges::{NozzleMeta, METADATA_KEY},
     store::{infer_object_store, Store},
     BoxError, Dataset,
 };
@@ -315,11 +315,11 @@ impl PhysicalTable {
         let mut file_stream = object_store.list(Some(&path));
 
         while let Some(object_meta) = file_stream.try_next().await? {
-            let (file_name, nozzle_meta) =
+            let nozzle_meta =
                 nozzle_meta_from_object_meta(&object_meta, object_store.clone()).await?;
             let nozzle_meta_json = serde_json::to_value(nozzle_meta)?;
             metadata_db
-                .insert_scanned_range(location_id, file_name, nozzle_meta_json)
+                .insert_file_metadata(location_id, nozzle_meta_json, object_meta)
                 .await?;
         }
 
@@ -403,27 +403,13 @@ impl PhysicalTable {
     /// Return all parquet files for this table. If `dump_only` is `true`,
     /// only files of the form `<number>.parquet` will be returned. The
     /// result is a map from filename to object metadata.
-    pub async fn parquet_files(
-        &self,
-        dump_only: bool,
-    ) -> object_store::Result<BTreeMap<String, ObjectMeta>> {
-        // Check that this is a file written by a dump job, with name in the format:
-        // "<block_num>.parquet".
-        let is_dump_file = |filename: &str| {
-            filename.ends_with(".parquet")
-                && (!dump_only || filename.trim_end_matches(".parquet").parse::<u64>().is_ok())
-        };
-
+    pub async fn parquet_files(&self) -> Result<BTreeMap<String, ObjectMeta>, object_store::Error> {
         let files = self
-            .object_store
-            .list(Some(&self.path))
-            .try_collect::<Vec<ObjectMeta>>()
-            .await?
-            .into_iter()
-            // Unwrap: A full object path always has a filename.
-            .map(|f| (f.location.filename().unwrap().to_string(), f))
-            .filter(|(filename, _)| is_dump_file(filename))
-            .collect();
+            .metadata_db
+            .file_metadata_stream(self.location_id())
+            .map_ok(|(file_name, object_meta, ..)| (file_name, object_meta))
+            .try_collect::<BTreeMap<_, _>>()
+            .await?;
         Ok(files)
     }
 
@@ -440,7 +426,7 @@ impl PhysicalTable {
 
     /// Truncate this table by deleting all dump files making up the table
     pub async fn truncate(&self) -> Result<(), BoxError> {
-        let files = self.parquet_files(false).await?;
+        let files = self.parquet_files().await?;
         let num_files = files.len();
         let locations = Box::pin(stream::iter(files.into_values().map(|m| Ok(m.location))));
         let deleted = self
@@ -528,7 +514,7 @@ pub async fn list_revisions(
 async fn nozzle_meta_from_object_meta(
     object_meta: &ObjectMeta,
     object_store: Arc<dyn ObjectStore>,
-) -> Result<(String, ScannedRange), BoxError> {
+) -> Result<NozzleMeta, BoxError> {
     let mut reader = ParquetObjectReader::new(object_store.clone(), object_meta.location.clone())
         .with_file_size(object_meta.size);
     let parquet_metadata = reader.get_metadata(None).await?;
@@ -542,11 +528,10 @@ async fn nozzle_meta_from_object_meta(
             )))?;
     let scanned_range_key_value_pair = key_value_metadata
         .into_iter()
-        .find(|key_value| key_value.key.as_str() == scanned_ranges::METADATA_KEY)
+        .find(|key_value| key_value.key.as_str() == METADATA_KEY)
         .ok_or(crate::ArrowError::ParquetError(format!(
             "Missing key: {} in file metadata for file {}",
-            scanned_ranges::METADATA_KEY,
-            &object_meta.location
+            METADATA_KEY, &object_meta.location
         )))?;
     let scanned_range_json =
         scanned_range_key_value_pair
@@ -556,13 +541,12 @@ async fn nozzle_meta_from_object_meta(
                 "Unable to parse ScannedRange from empty value in metadata for file {}",
                 &object_meta.location
             )))?;
-    let scanned_range: ScannedRange = serde_json::from_str(scanned_range_json).map_err(|e| {
+    let nozzle_meta: NozzleMeta = serde_json::from_str(scanned_range_json).map_err(|e| {
         crate::ArrowError::ParseError(format!(
             "Unable to parse ScannedRange from key value metadata for file {}: {}",
             &object_meta.location, e
         ))
     })?;
-    // Unwrap: We know this is a path with valid file name because we just opened it
-    let file_name = object_meta.location.filename().unwrap().to_string();
-    Ok((file_name, scanned_range))
+
+    Ok(nozzle_meta)
 }

@@ -34,7 +34,6 @@ use futures::TryFutureExt as _;
 use futures::TryStreamExt;
 use job_partition::JobPartition;
 use metadata_db::MetadataDb;
-use object_store::ObjectMeta;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties as ParquetWriterProperties;
 use parquet_writer::insert_scanned_range;
@@ -338,13 +337,10 @@ async fn dump_sql_query(
     while let Some(batch) = stream.try_next().await? {
         writer.write(&batch).await?;
     }
-    let scanned_range = writer.close(end).await?;
-    insert_scanned_range(
-        scanned_range,
-        dataset_store.metadata_db.clone(),
-        physical_table.location_id(),
-    )
-    .await
+    let (nozzle_meta, object_meta) = writer.close(end).await?;
+    let location_id = physical_table.location_id();
+    let metadata_db = dataset_store.metadata_db.clone();
+    insert_scanned_range(nozzle_meta, object_meta, metadata_db, location_id).await
 }
 
 pub fn default_partition_size() -> u64 {
@@ -446,10 +442,7 @@ async fn consistency_check(
         let path = table.path();
 
         // Collect all stored files whose filename matches `is_dump_file`.
-        let stored_files: BTreeMap<String, ObjectMeta> = table
-            .parquet_files(true)
-            .await
-            .map_err(|e| ConsistencyCheckError::ObjectStoreError(e))?;
+        let stored_files = table.parquet_files().await?;
 
         for (filename, object_meta) in &stored_files {
             if !registered_files.contains(filename) {
