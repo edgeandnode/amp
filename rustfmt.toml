@@ -1,0 +1,28 @@
+# Unstable settings
+# -----------------
+# The settings below are marked as "unstable" in rustfmt, which means:
+# 1. They may change behavior or be removed in future `rustfmt` versions without warning
+# 2. They require using `rustfmt` with the nightly Rust toolchain
+# 3. They may cause formatting inconsistencies when sharing code with others
+#    who use different `rustfmt` versions or the stable toolchain
+
+# Enable unstable/nightly-only formatting features. This is required for
+# rustfmt to enable the features below.
+# See: https://rust-lang.github.io/rustfmt/?version=v1&search=#unstable_features
+unstable_features = true
+
+# Controls how imports are grouped together (at crate level)
+# See: https://rust-lang.github.io/rustfmt/?version=v1&search=#imports_granularity
+imports_granularity = "Crate"
+
+# Groups imports into three categories: std, external crates, and local imports
+# See: https://rust-lang.github.io/rustfmt/?version=v1&search=#group_imports
+group_imports = "StdExternalCrate"
+
+# Enables reordering of module declarations alphabetically
+# See: https://rust-lang.github.io/rustfmt/?version=v1&search=#reorder_modules
+reorder_modules = true
+
+# Enables formatting of code blocks in documentation comments
+# See: https://rust-lang.github.io/rustfmt/?version=v1&search=#format_code_in_doc_comments
+format_code_in_doc_comments = true

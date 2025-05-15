@@ -21,12 +21,11 @@
 
 use std::collections::BTreeMap;
 
-use crate::{multirange::MultiRange, BoxError, QueryContext, Timestamp};
-
 use futures::{StreamExt, TryStreamExt};
-
 use metadata_db::MetadataDb;
 use serde::{Deserialize, Serialize};
+
+use crate::{multirange::MultiRange, BoxError, QueryContext, Timestamp};
 
 pub const METADATA_KEY: &'static str = "nozzle_metadata";
 

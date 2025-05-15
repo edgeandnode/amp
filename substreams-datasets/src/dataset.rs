@@ -1,6 +1,5 @@
 use common::store::Store;
 use firehose_datasets::Error;
-
 use serde::Deserialize;
 
 pub const DATASET_KIND: &str = "substreams";

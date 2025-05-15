@@ -1,18 +1,19 @@
-use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
-use common::arrow::array::RecordBatch;
-use common::catalog::physical::PhysicalTable;
-use common::meta_tables::scanned_ranges::{self, ScannedRange};
-use common::multirange::MultiRange;
-use common::parquet::errors::ParquetError;
-use common::parquet::format::KeyValue;
-use common::{parquet, BlockNum, BoxError, QueryContext, TableRows, Timestamp};
+use common::{
+    arrow::array::RecordBatch,
+    catalog::physical::PhysicalTable,
+    meta_tables::scanned_ranges::{self, ScannedRange},
+    multirange::MultiRange,
+    parquet,
+    parquet::{errors::ParquetError, format::KeyValue},
+    BlockNum, BoxError, QueryContext, TableRows, Timestamp,
+};
 use metadata_db::MetadataDb;
-use object_store::buffered::BufWriter;
-use object_store::path::Path;
-use parquet::arrow::AsyncArrowWriter;
-use parquet::file::properties::WriterProperties as ParquetWriterProperties;
+use object_store::{buffered::BufWriter, path::Path};
+use parquet::{
+    arrow::AsyncArrowWriter, file::properties::WriterProperties as ParquetWriterProperties,
+};
 use tracing::debug;
 use url::Url;
 
@@ -180,7 +181,7 @@ impl TableWriter {
             return Ok(scanned_range);
         }
 
-        let bytes_written = self.current_file.as_ref().unwrap().in_progress_size();
+        let bytes_written = self.current_file.as_ref().unwrap().bytes_written();
 
         // Check if we need to create a new part file before writing this batch of rows, because the
         // size of the current row group already exceeds the configured max `partition_size`.
@@ -324,8 +325,9 @@ impl ParquetFileWriter {
         Ok(scanned_range)
     }
 
-    // Anticipated encoded (but uncompressed) size of the in progress row group.
-    pub fn in_progress_size(&self) -> usize {
-        self.writer.in_progress_size()
+    // This is calculate as:
+    // size of row groups flushed to storage + encoded (but uncompressed) size of the in progress row group
+    pub fn bytes_written(&self) -> usize {
+        self.writer.bytes_written() + self.writer.in_progress_size()
     }
 }

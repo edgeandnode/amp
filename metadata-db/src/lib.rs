@@ -7,13 +7,11 @@ use sqlx::{
     postgres::{PgListener, PgNotification, PgPoolOptions},
     Connection as _, Executor, PgConnection, Pool, Postgres,
 };
+pub use temp_metadata_db::{test_metadata_db, ALLOW_TEMP_DB, KEEP_TEMP_DIRS};
 use thiserror::Error;
 use tokio::time::MissedTickBehavior;
-use tracing::error;
-use tracing::instrument;
+use tracing::{error, instrument};
 use url::Url;
-
-pub use temp_metadata_db::{test_metadata_db, ALLOW_TEMP_DB, KEEP_TEMP_DIRS};
 
 /// Frequency on which to send a heartbeat.
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
@@ -78,21 +76,6 @@ impl MetadataDb {
             url: url.to_string(),
         };
         db.run_migrations().await?;
-        Ok(db)
-    }
-
-    /// Lazily sets up a connection pool to the metadata DB. Does not run migrations.
-    #[instrument(skip_all, err)]
-    pub fn connect_lazy(url: &str) -> Result<MetadataDb, Error> {
-        let pool = PgPoolOptions::new()
-            .acquire_timeout(Duration::from_secs(5))
-            .connect_lazy(url)
-            .map_err(Error::ConnectionError)?;
-        let db = MetadataDb {
-            pool,
-            url: url.to_string(),
-        };
-
         Ok(db)
     }
 
@@ -288,7 +271,7 @@ impl MetadataDb {
     /// Periodically updates the worker's heartbeat in a dedicated DB connection.
     ///
     /// Loops forever unless the DB returns an error.
-    pub async fn heartbeat_loop(self, node_id: String) -> Result<(), Error> {
+    pub async fn heartbeat_loop(&self, node_id: String) -> Result<(), Error> {
         let mut conn = PgConnection::connect(&self.url).await?;
         let mut interval = tokio::time::interval(HEARTBEAT_INTERVAL);
         interval.set_missed_tick_behavior(MissedTickBehavior::Delay);

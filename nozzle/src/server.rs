@@ -7,6 +7,7 @@ use std::{
 use arrow_flight::flight_service_server::FlightServiceServer;
 use axum::response::IntoResponse;
 use common::{arrow, config::Config, BoxError, BoxResult};
+use dump::worker::Worker;
 use futures::{
     stream::FuturesUnordered, FutureExt, StreamExt as _, TryFutureExt as _, TryStreamExt as _,
 };
@@ -26,6 +27,7 @@ pub async fn run(
     config: Arc<Config>,
     metadata_db: Arc<MetadataDb>,
     no_admin: bool,
+    dev: bool,
     shutdown: broadcast::Receiver<()>,
 ) -> Result<(BoundAddrs, impl Future<Output = BoxResult<()>>), BoxError> {
     if config.max_mem_mb == 0 {
@@ -38,6 +40,15 @@ pub async fn run(
         "Spill to disk allowed: {}",
         !config.spill_location.is_empty()
     );
+
+    if dev {
+        let worker = Worker::new(config.clone(), metadata_db.clone(), "worker".into());
+        tokio::spawn(async move {
+            if let Err(err) = worker.run().await {
+                tracing::error!("{err}");
+            }
+        });
+    }
 
     let start = std::time::Instant::now();
     let service = Service::new(config.clone(), metadata_db.clone()).await?;

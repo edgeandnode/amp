@@ -1,49 +1,47 @@
-use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
-use arrow::array::RecordBatch;
-use arrow::compute::concat_batches;
-use arrow::datatypes::SchemaRef;
-use arrow::util::pretty::pretty_format_batches;
+use arrow::{array::RecordBatch, compute::concat_batches, datatypes::SchemaRef};
 use async_udf::physical_optimizer::AsyncFuncRule;
 use bytes::Bytes;
-use datafusion::common::tree_node::{Transformed, TreeNode as _, TreeNodeRewriter};
-use datafusion::common::{not_impl_err, DFSchema};
-use datafusion::datasource::{DefaultTableSource, MemTable, TableProvider, TableType};
-use datafusion::execution::SessionStateBuilder;
-use datafusion::logical_expr::{
-    AggregateUDF, CreateCatalogSchema, Extension, LogicalPlanBuilder, ScalarUDF, SortExpr,
-    TableScan,
-};
-use datafusion::physical_plan::{displayable, ExecutionPlan};
-use datafusion::sql::parser;
 use datafusion::{
-    common::{Constraints, DFSchemaRef, ToDFSchema as _},
+    common::{
+        not_impl_err,
+        tree_node::{Transformed, TreeNode as _, TreeNodeRewriter},
+        Constraints, DFSchema, DFSchemaRef, ToDFSchema as _,
+    },
+    datasource::{DefaultTableSource, MemTable, TableProvider, TableType},
     error::DataFusionError,
     execution::{
         config::SessionConfig,
         context::{SQLOptions, SessionContext},
         runtime_env::RuntimeEnv,
-        SendableRecordBatchStream,
+        SendableRecordBatchStream, SessionStateBuilder,
     },
-    logical_expr::{CreateExternalTable, DdlStatement, LogicalPlan},
-    sql::TableReference,
+    logical_expr::{
+        AggregateUDF, CreateCatalogSchema, CreateExternalTable, DdlStatement, Extension,
+        LogicalPlan, LogicalPlanBuilder, ScalarUDF, SortExpr, TableScan,
+    },
+    physical_plan::{displayable, ExecutionPlan},
+    sql::{parser, TableReference},
 };
-use datafusion_proto::bytes::{
-    logical_plan_from_bytes_with_extension_codec, logical_plan_to_bytes_with_extension_codec,
+use datafusion_proto::{
+    bytes::{
+        logical_plan_from_bytes_with_extension_codec, logical_plan_to_bytes_with_extension_codec,
+    },
+    logical_plan::LogicalExtensionCodec,
 };
-use datafusion_proto::logical_plan::LogicalExtensionCodec;
-use futures::{StreamExt as _, TryStreamExt};
+use futures::TryStreamExt;
 use metadata_db::TableId;
 use thiserror::Error;
 use tracing::{debug, instrument};
 use url::Url;
 
-use crate::catalog::physical::{Catalog, PhysicalTable};
-use crate::evm::udfs::{
-    EvmDecode, EvmDecodeFunctionData, EvmEncodeParams, EvmEncodeType, EvmTopic,
+use crate::{
+    arrow, attestation,
+    catalog::physical::{Catalog, PhysicalTable},
+    evm::udfs::{EvmDecode, EvmDecodeFunctionData, EvmEncodeParams, EvmEncodeType, EvmTopic},
+    BoxError, Table,
 };
-use crate::{arrow, attestation, BoxError, Table};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -305,35 +303,6 @@ impl QueryContext {
         for udf in self.catalog.udfs() {
             ctx.register_udf(udf.clone());
         }
-    }
-
-    pub async fn print_schema(&self) -> Result<Vec<(PhysicalTable, String)>, Error> {
-        let mut output = vec![];
-        for table in self.catalog.all_tables() {
-            let mut record_stream = self
-                .execute_sql(format!("describe {}", table.table_ref()).as_str())
-                .await?;
-            let Some(Ok(batch)) = record_stream.next().await else {
-                return Err(Error::DatasetError(
-                    format!("no schema for table `{}`", table.table_ref(),).into(),
-                ));
-            };
-            let pretty_schema = pretty_format_batches(&[batch])
-                .map_err(|e| Error::DatasetError(e.into()))?
-                .to_string();
-
-            // For readability, simplify somme common type names, using whitespace to keep the character width.
-            let pretty_schema = pretty_schema.replace(
-                r#"Timestamp(Nanosecond, Some("+00:00"))"#,
-                r#"Timestamp                            "#,
-            );
-            let pretty_schema = pretty_schema.replace("Decimal128(38, 0)", "UInt126          ");
-            let pretty_schema = pretty_schema.replace("FixedSizeBinary(32)", "Binary32           ");
-            let pretty_schema = pretty_schema.replace("FixedSizeBinary(20)", "Binary20           ");
-
-            output.push((table.clone(), pretty_schema));
-        }
-        Ok(output)
     }
 
     pub async fn execute_plan(

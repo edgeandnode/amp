@@ -1,24 +1,18 @@
-use datafusion::arrow::array;
-use datafusion::arrow::array::Array;
-use datafusion::arrow::array::ArrayRef;
-use datafusion::arrow::array::AsArray as _;
-use datafusion::arrow::datatypes::DataType;
-use datafusion::arrow::datatypes::Field;
-use datafusion::arrow::datatypes::IntervalDayTime;
-use datafusion::arrow::datatypes::IntervalMonthDayNano;
-use datafusion::arrow::datatypes::IntervalUnit;
-use datafusion::arrow::datatypes::Schema;
-use datafusion::arrow::datatypes::TimeUnit;
-use datafusion::error::DataFusionError;
-use datafusion::logical_expr::function::AccumulatorArgs;
-use datafusion::logical_expr::Accumulator;
-use datafusion::logical_expr::AggregateUDFImpl;
-use datafusion::logical_expr::Signature;
-use datafusion::logical_expr::Volatility;
-use datafusion::scalar::ScalarValue;
-use stable_hash::FieldAddress;
-use stable_hash::StableHash as _;
-use stable_hash::StableHasher;
+use datafusion::{
+    arrow::{
+        array,
+        array::{Array, ArrayRef, AsArray as _},
+        datatypes::{
+            DataType, Field, IntervalDayTime, IntervalMonthDayNano, IntervalUnit, Schema, TimeUnit,
+        },
+    },
+    error::DataFusionError,
+    logical_expr::{
+        function::AccumulatorArgs, Accumulator, AggregateUDFImpl, Signature, Volatility,
+    },
+    scalar::ScalarValue,
+};
+use stable_hash::{FieldAddress, StableHash as _, StableHasher};
 
 #[derive(Debug)]
 pub struct AttestationHasherUDF(Signature);
@@ -253,26 +247,18 @@ fn hash_column(
 
 #[cfg(test)]
 mod test {
-    use std::collections::HashSet;
-    use std::sync::Arc;
+    use std::{collections::HashSet, sync::Arc};
 
     use alloy::hex::ToHexExt;
-    use datafusion::arrow::array::ArrayRef;
-    use datafusion::arrow::array::AsArray as _;
-    use datafusion::arrow::array::PrimitiveBuilder;
-    use datafusion::arrow::array::RecordBatch;
-    use datafusion::arrow::datatypes::DataType;
-    use datafusion::arrow::datatypes::Field;
-    use datafusion::arrow::datatypes::Schema;
-    use datafusion::arrow::datatypes::UInt8Type;
-    use datafusion::logical_expr::Accumulator;
-    use datafusion::scalar::ScalarValue;
-    use rand::prelude::SliceRandom as _;
-    use rand::rng;
-    use rand::rngs::StdRng;
-    use rand::Rng as _;
-    use rand::RngCore;
-    use rand::SeedableRng;
+    use datafusion::{
+        arrow::{
+            array::{ArrayRef, AsArray as _, PrimitiveBuilder, RecordBatch},
+            datatypes::{DataType, Field, Schema, UInt8Type},
+        },
+        logical_expr::Accumulator,
+        scalar::ScalarValue,
+    };
+    use rand::{prelude::SliceRandom as _, rng, rngs::StdRng, Rng as _, RngCore, SeedableRng};
 
     #[derive(Debug)]
     struct TestRecords(Vec<TestRow>);

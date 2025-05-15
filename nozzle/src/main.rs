@@ -76,6 +76,9 @@ enum Command {
         run_every_mins: Option<u64>,
     },
     Server {
+        /// Run in dev mode, which starts a worker in the same process.
+        #[arg(long, env = "SERVER_DEV")]
+        dev: bool,
         /// Disable admin API
         #[arg(long, env = "SERVER_NO_ADMIN")]
         no_admin: bool,
@@ -140,13 +143,13 @@ async fn main_inner() -> Result<(), BoxError> {
             )
             .await
         }
-        Command::Server { no_admin } => {
+        Command::Server { no_admin, dev } => {
             let (_, server) =
-                nozzle::server::run(config, metadata_db, no_admin, ctrl_c_shutdown()).await?;
+                nozzle::server::run(config, metadata_db, no_admin, dev, ctrl_c_shutdown()).await?;
             server.await
         }
         Command::Worker { node_id } => {
-            let worker = Worker::new(config.clone(), metadata_db.as_ref().clone(), node_id);
+            let worker = Worker::new(config.clone(), metadata_db, node_id);
             worker.run().await.map_err(Into::into)
         }
     }

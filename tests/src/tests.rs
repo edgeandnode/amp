@@ -1,11 +1,11 @@
 use common::tracing_helpers;
+use metadata_db::KEEP_TEMP_DIRS;
 use pretty_assertions::assert_str_eq;
 
 use crate::test_support::{
     check_blocks, check_provider_file, load_sql_tests, run_query_on_fresh_server, SnapshotContext,
     SqlTestResult,
 };
-use metadata_db::KEEP_TEMP_DIRS;
 
 #[tokio::test]
 async fn evm_rpc_single_dump() {

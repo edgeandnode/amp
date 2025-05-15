@@ -1,5 +1,7 @@
 mod ui;
 
+use std::sync::Arc;
+
 use clap::Parser;
 use common::{
     config::{Addrs, Config},
@@ -7,7 +9,6 @@ use common::{
 };
 use dataset_store::DatasetStore;
 use metadata_db::MetadataDb;
-use std::sync::Arc;
 
 /// Checks the output of `dump` against a provider.
 #[derive(Parser, Debug)]

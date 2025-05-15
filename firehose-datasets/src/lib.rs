@@ -7,12 +7,10 @@ pub mod client;
 pub mod evm;
 
 pub use client::Client;
-pub use dataset::DATASET_KIND;
-
 use common::{store::StoreError, BoxError};
+pub use dataset::DATASET_KIND;
 use thiserror::Error;
-use tonic::codegen::http::uri::InvalidUri;
-use tonic::metadata::errors::InvalidMetadataValue;
+use tonic::{codegen::http::uri::InvalidUri, metadata::errors::InvalidMetadataValue};
 
 #[derive(Error, Debug)]
 pub enum Error {

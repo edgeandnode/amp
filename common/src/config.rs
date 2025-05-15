@@ -1,8 +1,3 @@
-use figment::{
-    providers::{Env, Format as _, Toml},
-    Figment,
-};
-use fs_err as fs;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
 use datafusion::{
@@ -13,6 +8,11 @@ use datafusion::{
         runtime_env::{RuntimeEnv, RuntimeEnvBuilder},
     },
 };
+use figment::{
+    providers::{Env, Format as _, Toml},
+    Figment,
+};
+use fs_err as fs;
 use metadata_db::{test_metadata_db, MetadataDb, ALLOW_TEMP_DB, KEEP_TEMP_DIRS};
 use serde::Deserialize;
 
@@ -53,7 +53,6 @@ pub type FigmentJson = figment::providers::Data<figment::providers::Json>;
 impl Config {
     ///
     /// `env_override` allows env vars prefixed with `NOZZLE_CONFIG_` to override config values.
-    ///
     pub async fn load(
         file: impl Into<PathBuf>,
         env_override: bool,
@@ -99,25 +98,6 @@ impl Config {
         })
     }
 
-    /// For testing purposes only.
-    pub async fn in_memory() -> Self {
-        let data_store = Arc::new(Store::in_memory());
-        let providers_store = Arc::new(Store::in_memory());
-        let dataset_defs_store = Arc::new(Store::in_memory());
-
-        let metadata_db_url = test_metadata_db(*KEEP_TEMP_DIRS).await.url().to_string();
-
-        Self {
-            data_store,
-            providers_store,
-            dataset_defs_store,
-            metadata_db_url,
-            max_mem_mb: 0,
-            spill_location: vec![],
-            addrs: Default::default(),
-        }
-    }
-
     pub fn make_runtime_env(&self) -> Result<RuntimeEnv, DataFusionError> {
         use datafusion::execution::cache::{
             cache_manager::CacheManagerConfig, cache_unit::DefaultFileStatisticsCache,
@@ -161,10 +141,6 @@ impl Config {
         MetadataDb::connect(&self.metadata_db_url)
             .await
             .map_err(Into::into)
-    }
-
-    pub fn metadata_db_lazy(&self) -> Result<MetadataDb, BoxError> {
-        MetadataDb::connect_lazy(&self.metadata_db_url).map_err(Into::into)
     }
 }
 

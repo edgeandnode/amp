@@ -1,5 +1,6 @@
-use crate::resolve_relative_block_range;
 use common::{BlockNum, BoxError};
+
+use crate::resolve_relative_block_range;
 
 #[test]
 fn test_validate_block_range() {

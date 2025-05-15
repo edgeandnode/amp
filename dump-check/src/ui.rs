@@ -1,7 +1,6 @@
+use dump_check::metrics::METRICS;
 use human_bytes::human_bytes;
 use indicatif::{ProgressBar, ProgressStyle};
-
-use dump_check::metrics::METRICS;
 
 pub(crate) async fn ui(blocks: u64) {
     if atty::is(atty::Stream::Stdout) {

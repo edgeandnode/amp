@@ -1,16 +1,20 @@
-use crate::async_func::AsyncFuncExpr;
-use crate::exec::AsyncFuncExec;
-use datafusion::common::tree_node::{Transformed, TransformedResult, TreeNode, TreeNodeRecursion};
-use datafusion::common::Result;
-use datafusion::config::ConfigOptions;
-use datafusion::physical_expr::expressions::Column;
-use datafusion::physical_expr::{PhysicalExpr, ScalarFunctionExpr};
-use datafusion::physical_optimizer::PhysicalOptimizerRule;
-use datafusion::physical_plan::coalesce_batches::CoalesceBatchesExec;
-use datafusion::physical_plan::filter::FilterExec;
-use datafusion::physical_plan::projection::ProjectionExec;
-use datafusion::physical_plan::ExecutionPlan;
 use std::sync::Arc;
+
+use datafusion::{
+    common::{
+        tree_node::{Transformed, TransformedResult, TreeNode, TreeNodeRecursion},
+        Result,
+    },
+    config::ConfigOptions,
+    physical_expr::{expressions::Column, PhysicalExpr, ScalarFunctionExpr},
+    physical_optimizer::PhysicalOptimizerRule,
+    physical_plan::{
+        coalesce_batches::CoalesceBatchesExec, filter::FilterExec, projection::ProjectionExec,
+        ExecutionPlan,
+    },
+};
+
+use crate::{async_func::AsyncFuncExpr, exec::AsyncFuncExec};
 
 #[derive(Debug)]
 pub struct AsyncFuncRule;
@@ -27,7 +31,6 @@ impl PhysicalOptimizerRule for AsyncFuncRule {
     ///   ProjectionExec(["A", "B", "__async_fn_1" + 1]) <-- note here that the async function is not evaluated and instead is a new column
     ///     AsyncFunctionNode(["A", "B", llm_func('foo', "C")])
     ///       CoalesceBatchesExec(target_batch_size=8124)
-    ///
     fn optimize(
         &self,
         plan: Arc<dyn ExecutionPlan>,

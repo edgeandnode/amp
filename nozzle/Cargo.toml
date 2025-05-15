@@ -14,14 +14,15 @@ datafusion.workspace = true
 dataset-store = { path = "../dataset-store" }
 dump = { path = "../dump" }
 futures.workspace = true
+pgtemp.workspace = true
 tracing.workspace = true
 server = { path = "../server" }
 snmalloc-rs.workspace = true
 tokio.workspace = true
 tonic.workspace = true
 tower-http = { version = "0.6.2", features = [
-  "compression-br",
-  "compression-gzip",
+    "compression-br",
+    "compression-gzip",
 ] }
 admin-api = { path = "../admin-api" }
 registry-service = { path = "../registry-service" }

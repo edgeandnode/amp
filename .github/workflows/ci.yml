@@ -27,16 +27,12 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y protobuf-compiler postgresql
+          sudo apt-get install -y protobuf-compiler
 
       - uses: actions-rust-lang/setup-rust-toolchain@9d7e65c320fdb52dcd45ffaa68deb6c02c8754d9 # v1
         with:
           cache: false
           rustflags: ''
-
-      - name: Add PostgreSQL binaries to PATH
-        run: |
-          echo "/usr/lib/postgresql/$(pg_lsclusters | awk 'NR==2 {print $1}')/bin" >> $GITHUB_PATH
 
       - name: Unit tests
         run: cargo test --verbose --workspace --exclude tests -- --nocapture
@@ -82,14 +78,16 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
 
-      - uses: actions-rust-lang/setup-rust-toolchain@9d7e65c320fdb52dcd45ffaa68deb6c02c8754d9 # v1
+      - name: Setup Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@9d7e65c320fdb52dcd45ffaa68deb6c02c8754d9 # v1
         with:
+          toolchain: nightly # Required for unstable features (see `rustfmt.toml` for details)
           components: rustfmt
           cache: false
           rustflags: ''
 
       - name: Check formatting
-        run: cargo fmt --all -- --check
+        run: cargo +nightly fmt --all -- --check
 
   release-check:
     name: Build in release mode

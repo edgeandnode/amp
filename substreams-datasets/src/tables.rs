@@ -1,10 +1,10 @@
 use anyhow::{anyhow, Context as _};
+use common::Table;
 
 use crate::{
     proto::sf::substreams::v1::Package,
     transform::{self, proto::MessageDescriptor},
 };
-use common::Table;
 
 #[derive(Debug, Clone)]
 pub enum OutputType {
