@@ -41,8 +41,5 @@ CREATE TABLE IF NOT EXISTS file_metadata (
     object_version TEXT
 );
 
-CREATE UNIQUE INDEX unique_file_name_per_location_id
-ON file_metadata (location_id, file_name);
-
 CREATE UNIQUE INDEX unique_range_boundaries_per_dataset_version_table
 ON file_metadata (location_id, (nozzle_meta->>'range_start'), (nozzle_meta->>'range_end'));

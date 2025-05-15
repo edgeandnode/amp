@@ -523,13 +523,7 @@ impl MetadataDb {
                                   , object_e_tag
                                   , object_version )
         VALUES ( $1, $2, $3, $4, $5, $6, $7 )
-        ON CONFLICT (location_id, file_name) DO UPDATE
-            SET nozzle_meta = EXCLUDED.nozzle_meta
-              , object_last_modified = EXCLUDED.object_last_modified
-              , object_size = EXCLUDED.object_size
-              , object_e_tag = EXCLUDED.object_e_tag
-              , object_version = EXCLUDED.object_version
-          WHERE file_metadata.nozzle_meta->>'range_end' <= EXCLUDED.nozzle_meta->>'range_end';
+        ON CONFLICT DO NOTHING;
         ";
 
         sqlx::query(sql)
