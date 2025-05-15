@@ -1,8 +1,3 @@
-use figment::{
-    providers::{Env, Format as _, Toml},
-    Figment,
-};
-use fs_err as fs;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
 use datafusion::{
@@ -13,6 +8,11 @@ use datafusion::{
         runtime_env::{RuntimeEnv, RuntimeEnvBuilder},
     },
 };
+use figment::{
+    providers::{Env, Format as _, Toml},
+    Figment,
+};
+use fs_err as fs;
 use metadata_db::{test_metadata_db, MetadataDb, ALLOW_TEMP_DB, KEEP_TEMP_DIRS};
 use serde::Deserialize;
 
@@ -53,7 +53,6 @@ pub type FigmentJson = figment::providers::Data<figment::providers::Json>;
 impl Config {
     ///
     /// `env_override` allows env vars prefixed with `NOZZLE_CONFIG_` to override config values.
-    ///
     pub async fn load(
         file: impl Into<PathBuf>,
         env_override: bool,

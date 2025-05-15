@@ -1,7 +1,6 @@
 //! Dataset deploy handler
 
-use axum::http::StatusCode;
-use axum::{extract::State, Json};
+use axum::{extract::State, http::StatusCode, Json};
 use common::{manifest::Manifest, BoxError};
 use http_common::{BoxRequestError, RequestError};
 

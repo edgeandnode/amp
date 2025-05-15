@@ -1,14 +1,16 @@
 use std::sync::{Arc, LazyLock};
 
-use crate::arrow;
-use crate::{
-    timestamp_type, Bytes32, Bytes32ArrayBuilder, EvmAddress as Address, EvmAddressArrayBuilder,
-    Table, TableRows, Timestamp, TimestampArrayBuilder, BLOCK_NUM, BYTES32_TYPE,
-    EVM_ADDRESS_TYPE as ADDRESS_TYPE,
+use arrow::{
+    array::{ArrayRef, BinaryBuilder, UInt32Builder, UInt64Builder},
+    datatypes::{DataType, Field, Schema, SchemaRef},
+    error::ArrowError,
 };
-use arrow::array::{ArrayRef, BinaryBuilder, UInt32Builder, UInt64Builder};
-use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
-use arrow::error::ArrowError;
+
+use crate::{
+    arrow, timestamp_type, Bytes32, Bytes32ArrayBuilder, EvmAddress as Address,
+    EvmAddressArrayBuilder, Table, TableRows, Timestamp, TimestampArrayBuilder, BLOCK_NUM,
+    BYTES32_TYPE, EVM_ADDRESS_TYPE as ADDRESS_TYPE,
+};
 
 static SCHEMA: LazyLock<SchemaRef> = LazyLock::new(|| Arc::new(schema()));
 

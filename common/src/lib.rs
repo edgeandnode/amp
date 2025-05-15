@@ -13,28 +13,23 @@ pub mod tracing_helpers;
 #[cfg(test)]
 mod tests;
 
+use std::{
+    future::Future,
+    time::{Duration, SystemTime},
+};
+
+use arrow::{array::FixedSizeBinaryArray, datatypes::DataType};
 pub use arrow_helpers::*;
 pub use catalog::logical::*;
-pub use datafusion::arrow;
-pub use datafusion::parquet;
-pub use query_context::QueryContext;
-use serde::Deserialize;
-use serde::Serialize;
-pub use store::Store;
-
-use std::future::Future;
-use std::time::Duration;
-use std::time::SystemTime;
-
-use arrow::array::FixedSizeBinaryArray;
-use arrow::datatypes::DataType;
-use datafusion::arrow::array::ArrayRef;
-use datafusion::arrow::datatypes::{TimeUnit, DECIMAL128_MAX_PRECISION};
-use datafusion::arrow::error::ArrowError;
 use datafusion::arrow::{
-    array::{AsArray as _, RecordBatch},
-    datatypes::UInt64Type,
+    array::{ArrayRef, AsArray as _, RecordBatch},
+    datatypes::{TimeUnit, UInt64Type, DECIMAL128_MAX_PRECISION},
+    error::ArrowError,
 };
+pub use datafusion::{arrow, parquet};
+pub use query_context::QueryContext;
+use serde::{Deserialize, Serialize};
+pub use store::Store;
 use tokio::sync::mpsc;
 
 pub type BoxError = Box<dyn std::error::Error + Sync + Send + 'static>;
@@ -110,8 +105,7 @@ impl TableRows {
     /// - If any table is missing the block_num column.
     /// - If the block_num column values are not all the same.
     pub fn block_num(&self) -> Result<u64, BoxError> {
-        use arrow::compute::kernels::aggregate::max;
-        use arrow::compute::kernels::aggregate::min;
+        use arrow::compute::kernels::aggregate::{max, min};
 
         if self.is_empty() {
             return Err(format!("empty table: {}", self.table.name).into());
