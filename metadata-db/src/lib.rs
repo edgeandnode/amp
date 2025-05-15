@@ -455,7 +455,7 @@ impl MetadataDb {
               JOIN locations l ON fm.location_id = l.id
              WHERE fm.location_id = $1
           ORDER BY fm.nozzle_meta->>'range_start' ASC
-                 , fm.object_last_modified DESC
+                 , fm.nozzle_meta->>'range_end' DESC
         ";
 
         sqlx::query_as::<_, FileMetaRow>(sql)
@@ -471,12 +471,13 @@ impl MetadataDb {
         location_id: i64,
     ) -> BoxStream<'a, Result<(u64, u64), sqlx::Error>> {
         let sql = "
-            SELECT DISTINCT ON (1)
+            SELECT DISTINCT ON (1, 2)
                    CAST(sr.nozzle_meta->>'range_start' AS BIGINT)
                  , CAST(sr.nozzle_meta->>'range_end' AS BIGINT)
               FROM file_metadata sr
              WHERE sr.location_id = $1
           ORDER BY 1 ASC
+                 , 2 DESC
         ";
 
         sqlx::query_as::<_, (i64, i64)>(sql)
@@ -522,14 +523,13 @@ impl MetadataDb {
                                   , object_e_tag
                                   , object_version )
         VALUES ( $1, $2, $3, $4, $5, $6, $7 )
-        ON CONFLICT DO UPDATE
-            SET nozzle_meta = $3
-              , object_last_modified = $4
-              , object_size = $5
-              , object_e_tag = $6
-              , object_version = $7
-            WHERE file_metadata.location_id = $1
-            AND file_metadata.file_name = $2
+        ON CONFLICT (location_id, file_name) DO UPDATE
+            SET nozzle_meta = EXCLUDED.nozzle_meta
+              , object_last_modified = EXCLUDED.object_last_modified
+              , object_size = EXCLUDED.object_size
+              , object_e_tag = EXCLUDED.object_e_tag
+              , object_version = EXCLUDED.object_version
+          WHERE file_metadata.nozzle_meta->>'range_end' <= EXCLUDED.nozzle_meta->>'range_end';
         ";
 
         sqlx::query(sql)

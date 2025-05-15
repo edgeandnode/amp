@@ -34,8 +34,7 @@ pub(crate) type FileMetaRow = (
 /// - Sorting: The inner stream is assumed to be ordered by the following fields
 /// in the `file_metadata` table:
 ///   1. `nozzle_meta->>'range_start' ASC` **or** `file_name ASC`
-///   2. `last_modified DESC`
-///   3. `nozzle_meta->>'range_end' DESC`
+///   2. `nozzle_meta->>'range_end' DESC`
 /// - Uniqueness: The inner stream is assumed to be unique by the following fields
 /// in the `file_metadata` table:
 ///   1. `range_start`
