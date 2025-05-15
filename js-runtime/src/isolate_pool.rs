@@ -7,12 +7,13 @@
 
 use std::{panic::AssertUnwindSafe, sync::Arc, thread};
 
+use deadpool::unmanaged::{Object, Pool};
+use tokio::sync::{mpsc, oneshot};
+
 use crate::{
     convert::{FromV8, ToV8},
     isolate::{Error, Isolate},
 };
-use deadpool::unmanaged::{Object, Pool};
-use tokio::sync::{mpsc, oneshot};
 
 /// Request to invoke a JavaScript function. Potentially in batch.
 struct JsInvoke<R> {

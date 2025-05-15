@@ -1,12 +1,13 @@
-use crate::{
-    convert::{FromV8, ToV8},
-    exception::{catch, ExceptionMessage},
-    init_platform, BoxError,
-};
 use datafusion::common::HashMap;
 use v8::{
     script_compiler::{CompileOptions, NoCacheReason},
     Handle as _,
+};
+
+use crate::{
+    convert::{FromV8, ToV8},
+    exception::{catch, ExceptionMessage},
+    init_platform, BoxError,
 };
 
 #[derive(Debug, thiserror::Error)]
