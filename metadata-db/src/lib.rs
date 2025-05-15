@@ -411,13 +411,12 @@ impl MetadataDb {
         location_id: i64,
     ) -> BoxStream<'a, Result<String, sqlx::Error>> {
         let sql = "
-            SELECT DISTINCT ON (1, 2)
-                   sr.file_name
+            SELECT sr.file_name
                  , CAST(sr.nozzle_meta->>'range_end' AS BIGINT)
               FROM file_metadata sr
              WHERE sr.location_id = $1
           ORDER BY 1 ASC
-                 , 2 ASC
+                 , 2 DESC
         ";
 
         sqlx::query_as::<_, (String, i64)>(sql)
@@ -442,8 +441,7 @@ impl MetadataDb {
         location_id: i64,
     ) -> BoxStream<'a, Result<(String, ObjectMeta, Value), object_store::Error>> {
         let sql = "
-            SELECT DISTINCT ON (fm.nozzle_meta->>'range_start', fm.object_last_modified)
-                   CAST(fm.nozzle_meta->>'range_end' AS BIGINT)
+            SELECT CAST(fm.nozzle_meta->>'range_end' AS BIGINT)
                  , fm.file_name
                  , l.url
                  , fm.object_last_modified
@@ -454,8 +452,8 @@ impl MetadataDb {
               FROM file_metadata fm
               JOIN locations l ON fm.location_id = l.id
              WHERE fm.location_id = $1
-          ORDER BY fm.nozzle_meta->>'range_start' ASC
-                 , fm.nozzle_meta->>'range_end' DESC
+          ORDER BY CAST(fm.nozzle_meta->>'range_start' AS BIGINT) ASC
+                 , CAST(fm.nozzle_meta->>'range_end' AS BIGINT) DESC
         ";
 
         sqlx::query_as::<_, FileMetaRow>(sql)
@@ -471,8 +469,7 @@ impl MetadataDb {
         location_id: i64,
     ) -> BoxStream<'a, Result<(u64, u64), sqlx::Error>> {
         let sql = "
-            SELECT DISTINCT ON (1, 2)
-                   CAST(sr.nozzle_meta->>'range_start' AS BIGINT)
+            SELECT CAST(sr.nozzle_meta->>'range_start' AS BIGINT)
                  , CAST(sr.nozzle_meta->>'range_end' AS BIGINT)
               FROM file_metadata sr
              WHERE sr.location_id = $1
