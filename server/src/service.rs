@@ -27,7 +27,7 @@ use datafusion::{
     logical_expr::LogicalPlan,
 };
 use dataset_store::{sql_datasets::is_incremental, DatasetError, DatasetStore};
-use futures::{Stream, StreamExt as _, TryStreamExt};
+use futures::{SinkExt, Stream, StreamExt as _, TryStreamExt};
 use metadata_db::MetadataDb;
 use prost::Message as _;
 use thiserror::Error;
@@ -216,7 +216,7 @@ impl Service {
                 .await
                 .map_err(|e| Error::CoreError(CoreError::DatasetError(e)))?;
 
-        let (tx, rx) = mpsc::unbounded();
+        let (mut tx, rx) = mpsc::channel(1);
 
         let schema = plan.schema().clone().as_ref().clone().into();
 
@@ -227,14 +227,19 @@ impl Service {
                 .map_err(|e| Error::CoreError(CoreError::DatasetError(e)))?;
             let mut stream = Self::execute_once(&ctx, plan).await?;
 
-            while let Some(batch) = stream.next().await {
-                let send_result = tx.unbounded_send(batch);
-                if send_result.is_err() {
-                    return Err(Error::StreamingExecutionError(
-                        "failed to return a next batch".to_string(),
-                    ));
+            let mut tx = tx.clone();
+            tokio::spawn(async move {
+                while let Some(batch) = stream.next().await {
+                    let send_result = tx.send(batch).await;
+                    if send_result.is_err() {
+                        return Err(Error::StreamingExecutionError(
+                            "failed to return a next batch".to_string(),
+                        ));
+                    }
                 }
-            }
+
+                Ok(())
+            });
         }
 
         let ctx = ctx.clone();
@@ -277,12 +282,12 @@ impl Service {
                 while let Some(batch) = stream.next().await {
                     match batch {
                         Ok(batch) => {
-                            if tx.unbounded_send(Ok(batch)).is_err() {
+                            if tx.send(Ok(batch)).await.is_err() {
                                 return;
                             }
                         }
                         Err(e) => {
-                            let _ = tx.unbounded_send(Err(e));
+                            let _ = tx.send(Err(e)).await;
                             return;
                         }
                     }
