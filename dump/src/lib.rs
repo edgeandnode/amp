@@ -31,9 +31,9 @@ use job_partition::JobPartition;
 use metadata_db::MetadataDb;
 use object_store::ObjectMeta;
 use parquet::{basic::Compression, file::properties::WriterProperties as ParquetWriterProperties};
-use parquet_writer::{insert_scanned_range, ParquetFileWriter};
+use parquet_writer::{commit_metadata, ParquetFileWriter};
 use thiserror::Error;
-use tracing::{debug, info, instrument, warn};
+use tracing::{info, instrument, warn};
 
 pub async fn dump_dataset(
     dataset: &PhysicalDataset,
@@ -330,15 +330,8 @@ async fn dump_sql_query(
         writer.write(&batch).await?;
     }
 
-    // Notify CDC that the dataset has been changed
-    let location_id = physical_table.location_id();
-    let metadata_db = &dataset_store.metadata_db;
-    let cdc_channel = common::stream_helpers::cdc_pg_channel(location_id);
-    debug!("notified CDC channel {}", cdc_channel);
-    metadata_db.notify(&cdc_channel, "").await?;
-
     let scanned_range = writer.close(end).await?;
-    insert_scanned_range(
+    commit_metadata(
         scanned_range,
         dataset_store.metadata_db.clone(),
         physical_table.location_id(),
