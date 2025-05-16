@@ -60,7 +60,7 @@ impl ScalarUDFImpl for EvmEncodeType {
             ColumnarValue::Scalar(scalar) => scalar,
             v => {
                 return plan_err!(
-                    "{}: expected scalar argument for the Solidity function signature but got {}",
+                    "{}: expected scalar argument for the Solidity type but got {}",
                     self.name(),
                     v.data_type()
                 )

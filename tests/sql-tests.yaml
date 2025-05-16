@@ -226,12 +226,39 @@
       }
     ]
 
+- name: evm_encode_decode_type_scalars
+  query: |
+    SELECT
+      evm_decode_type(evm_encode_type(CAST(635 AS DECIMAL(39, 0)), 'uint256'), 'uint256') AS uint256,
+      evm_decode_type(evm_encode_type(CAST(-635 AS DECIMAL(39, 0)), 'int256'), 'int256') AS int256,
+      evm_decode_type(evm_encode_type(CAST(-635 AS DECIMAL(38, 0)), 'int128'), 'int128') AS int128,
+      evm_decode_type(evm_encode_type('hello world', 'string'), 'string') AS str,
+      evm_decode_type(evm_encode_type(CAST(100 AS TINYINT), 'int8'), 'int8') AS int8
+  results: |
+    [
+      {
+        "uint256": "635",
+        "int256": "-635",
+        "int128": -635,
+        "str": "hello world",
+        "int8": 100
+      }
+    ]
+
 - name: evm_encode_type_array_scalar
   query: |
     SELECT evm_encode_type([1, 2, 3], 'int256[]') AS arr
   results: |
     [
       {"arr":"00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000003000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000003"}
+    ]
+
+- name: evm_encode_decode_type_array_scalar
+  query: |
+    SELECT evm_decode_type(evm_encode_type([1, 2, 3], 'int256[]'), 'int256[]') AS arr
+  results: |
+    [
+      {"arr": ["1", "2", "3"]}
     ]
 
 - name: evm_encode_type_array_column
@@ -245,12 +272,31 @@
       {"arr":"00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000003000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000003"}
     ]
 
+- name: evm_encode_decode_type_array_column
+  query: |
+    SELECT evm_decode_type(evm_encode_type([tx_index+1, tx_index+2, tx_index+3], 'int256[]'), 'int256[]') AS arr
+    FROM eth_rpc.transactions
+    ORDER BY tx_index
+    LIMIT 1
+  results: |
+    [
+      {"arr": ["1", "2", "3"]}
+    ]
+
 - name: evm_encode_type_fixed_array_scalar
   query: |
     SELECT evm_encode_type(arrow_cast([1, 2, 3], 'FixedSizeList(3, Int64)'), 'int256[3]') AS arr
   results: |
     [
       {"arr":"000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000003"}
+    ]
+
+- name: evm_encode_decode_type_fixed_array_scalar
+  query: |
+    SELECT evm_decode_type(evm_encode_type(arrow_cast([1, 2, 3], 'FixedSizeList(3, Int64)'), 'int64[3]'), 'int64[3]') AS arr
+  results: |
+    [
+      {"arr": [1, 2, 3]}
     ]
 
 - name: evm_encode_type_fixed_array_column
@@ -270,6 +316,34 @@
   results: |
     [
       {"struct":"000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000037374720000000000000000000000000000000000000000000000000000000000"}
+    ]
+
+- name: evm_encode_decode_type_struct_scalar
+  query: |
+    SELECT evm_decode_type(evm_encode_type(struct(1, 2, 'str'), '(int256, int8, string)'), '(int256, int8, string)') AS struct
+  results: |
+    [
+      {
+        "struct": {
+          "c0": "1",
+          "c1": 2,
+          "c2": "str"
+        }
+      }
+    ]
+
+- name: evm_encode_decode_nested_type
+  query: |
+    SELECT evm_decode_type(evm_encode_type(struct(1, 2, ['str1', 'str2', 'str3']), '(int256, int8, string[])'), '(int256, int8, string[])') AS struct
+  results: |
+    [
+      {
+        "struct": {
+          "c0": "1",
+          "c1": 2,
+          "c2": ["str1", "str2", "str3"]
+        }
+      }
     ]
 
 - name: evm_encode_type_struct_column

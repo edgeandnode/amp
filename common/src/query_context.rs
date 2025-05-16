@@ -39,7 +39,9 @@ use url::Url;
 use crate::{
     arrow, attestation,
     catalog::physical::{Catalog, PhysicalTable},
-    evm::udfs::{EvmDecode, EvmDecodeFunctionData, EvmEncodeParams, EvmEncodeType, EvmTopic},
+    evm::udfs::{
+        EvmDecode, EvmDecodeFunctionData, EvmDecodeType, EvmEncodeParams, EvmEncodeType, EvmTopic,
+    },
     BoxError, Table,
 };
 
@@ -466,6 +468,7 @@ fn udfs() -> Vec<ScalarUDF> {
         EvmDecodeFunctionData::evm_decode_results().into(),
         EvmEncodeParams::new().into(),
         EvmEncodeType::new().into(),
+        EvmDecodeType::new().into(),
     ]
 }
 
