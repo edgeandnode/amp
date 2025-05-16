@@ -80,7 +80,6 @@ impl TryFrom<&ScalarValue> for FunctionCall {
     }
 }
 
-/// `evm_decode_params` and `evm_decode_results` UDFs for decoding function input and output data.
 #[derive(Debug)]
 pub struct EvmDecodeParams {
     signature: Signature,

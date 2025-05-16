@@ -22,7 +22,6 @@ use crate::{
     plan,
 };
 
-/// `evm_decode_params` and `evm_decode_results` UDFs for decoding function input and output data.
 #[derive(Debug)]
 pub struct EvmDecodeType {
     signature: Signature,
@@ -152,7 +151,6 @@ impl ScalarUDFImpl for EvmDecodeType {
 }
 
 impl EvmDecodeType {
-    /// Decode the given data using the function signature.
     fn decode<'a>(
         &self,
         data: impl Iterator<Item = Option<&'a [u8]>>,
@@ -169,7 +167,7 @@ impl EvmDecodeType {
                         tracing::trace!(
                             sol_ty=%sol_ty,
                             error=?e,
-                            "failed to decode function data"
+                            "failed to decode Solidity value"
                         );
                         append_null_value_to_builder(&mut builder, &ty)?;
                     }
