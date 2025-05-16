@@ -93,38 +93,6 @@ All of the function parameters and results must be named. The output of this fun
 ---
 
 ```sql
-T evm_decode_results(
-    Binary output,
-    Utf8 signature
-)
-```
-
-Decodes the Ethereum ABI-encoded results of a function. For example:
-
-```sql
-SELECT
-    evm_decode_results(
-        return_data,
-        'function claim(uint256[] calldata tokenIds, uint8 garbage) public returns(uint256 prevId)'
-    ) AS results
-FROM eth_firehose.calls
-```
-
-All of the function parameters and results must be named. The output of this function will be packed into a struct:
-
-```json
-[
-  {
-    "results": {
-      "prevId": "635"
-    }
-  }
-]
-```
-
----
-
-```sql
 T evm_encode_params(
     Any args...,
     Utf8 signature
@@ -161,7 +129,7 @@ Results:
 ---
 
 ```sql
-T evm_encode_type(
+Binary evm_encode_type(
     Any value,
     Utf8 type
 )
@@ -179,6 +147,38 @@ Returns:
 [
   {
     "uint256": "000000000000000000000000000000000000000000000000000000000000027b"
+  }
+]
+```
+
+---
+
+```sql
+T evm_decode_type(
+    Binary data,
+    Utf8 type
+)
+```
+
+Decodes the given Solidity ABI-encoded value into an SQL value.
+
+Example with nested data types, first ABI-encodes some data using `evm_encode_type`, then decodes it:
+
+```sql
+SELECT evm_decode_type(encoded, '(int256, int8, string[])') AS decoded
+    FROM (SELECT evm_encode_type(struct(1, 2, ['str1', 'str2', 'str3']), '(int256, int8, string[])') AS encoded)
+```
+
+Returns:
+
+```json
+[
+  {
+    "decoded": {
+      "c0": "1",
+      "c1": 2,
+      "c2": ["str1", "str2", "str3"]
+    }
   }
 ]
 ```
