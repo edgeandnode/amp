@@ -6,7 +6,6 @@ use std::{
 use common::{
     meta_tables::scanned_ranges,
     multirange::MultiRange,
-    plan,
     query_context::{parse_sql, Error as CoreError},
     BlockNum, BoxError, Dataset, QueryContext, Table, BLOCK_NUM,
 };
@@ -15,7 +14,7 @@ use datafusion::{
     datasource::TableType,
     error::DataFusionError,
     execution::{runtime_env::RuntimeEnv, SendableRecordBatchStream},
-    logical_expr::{col, lit, Filter, LogicalPlan, LogicalPlanBuilder, Sort, TableScan},
+    logical_expr::{col, lit, Filter, LogicalPlan, Sort, TableScan},
     sql::{parser, resolve::resolve_table_references, TableReference},
 };
 use futures::StreamExt as _;
