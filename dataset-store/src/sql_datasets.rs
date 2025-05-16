@@ -6,6 +6,7 @@ use std::{
 use common::{
     meta_tables::scanned_ranges,
     multirange::MultiRange,
+    plan,
     query_context::{parse_sql, Error as CoreError},
     BlockNum, BoxError, Dataset, QueryContext, Table, BLOCK_NUM,
 };
@@ -105,13 +106,64 @@ pub(super) async fn dataset(
     })
 }
 
+// Get synced ranges for table
+async fn get_ranges_for_table(
+    table: &TableReference,
+    metadata_db: &MetadataDb,
+) -> Result<MultiRange, BoxError> {
+    let tbl = TableId {
+        // Unwrap: table references are of the partial form: [dataset].[table_name]
+        dataset: table.schema().unwrap(),
+        dataset_version: None,
+        table: table.table(),
+    };
+    let Some((_, location_id)) = metadata_db.get_active_location(tbl).await? else {
+        return Err(format!("table {}.{} not found", tbl.dataset, tbl.table).into());
+    };
+    let ranges = scanned_ranges::ranges_for_table(location_id, metadata_db).await?;
+    let ranges = MultiRange::from_ranges(ranges)?;
+
+    Ok(ranges)
+}
+
 /// This will:
-/// - Plan the query against the configured datasets.
-/// - Validate that the query is materializable.
 /// - Validate that dependencies have synced the required block range.
 /// - Inject block range constraints into the plan.
 /// - Inject 'order by block_num' into the plan.
 /// - Execute the plan.
+#[instrument(skip_all, err)]
+pub async fn execute_plan_for_range(
+    plan: LogicalPlan,
+    ctx: &QueryContext,
+    metadata_db: &MetadataDb,
+    start: BlockNum,
+    end: BlockNum,
+) -> Result<SendableRecordBatchStream, BoxError> {
+    let tables = extract_table_references_from_plan(&plan)?;
+
+    // Validate dependency scanned ranges
+    {
+        let needed_range = MultiRange::from_ranges(vec![(start, end)]).unwrap();
+        for table in tables {
+            let ranges = get_ranges_for_table(&table, metadata_db).await?;
+            let synced = ranges.intersection(&needed_range) == needed_range;
+            if !synced {
+                return Err(format!("tried to query range {needed_range} of table {table} but it has not been synced").into());
+            }
+        }
+    }
+
+    let plan = {
+        let plan = inject_block_range_constraints(plan, start, end)?;
+        order_by_block_num(plan)
+    };
+    Ok(ctx.execute_plan(plan).await?)
+}
+
+/// This will:
+/// - Plan the query against the configured datasets.
+/// - Validate that the query is materializable.
+/// - Execute the plan for a specified range
 #[instrument(skip_all, err)]
 pub async fn execute_query_for_range(
     query: parser::Statement,
@@ -120,38 +172,11 @@ pub async fn execute_query_for_range(
     start: BlockNum,
     end: BlockNum,
 ) -> Result<SendableRecordBatchStream, BoxError> {
-    let (tables, _) =
-        resolve_table_references(&query, true).map_err(|e| CoreError::SqlParseError(e.into()))?;
     let ctx = dataset_store.clone().ctx_for_sql(&query, env).await?;
     let metadata_db = dataset_store.metadata_db.as_ref();
-    // Validate dependency scanned ranges
-    {
-        let needed_range = MultiRange::from_ranges(vec![(start, end)]).unwrap();
-        for table in tables {
-            let tbl = TableId {
-                // Unwrap: table references are of the partial form: [dataset].[table_name]
-                dataset: table.schema().unwrap(),
-                dataset_version: None,
-                table: table.table(),
-            };
-            let Some((_, location_id)) = metadata_db.get_active_location(tbl).await? else {
-                return Err(format!("table {}.{} not found", tbl.dataset, tbl.table).into());
-            };
-            let ranges = scanned_ranges::ranges_for_table(location_id, metadata_db).await?;
-            let ranges = MultiRange::from_ranges(ranges)?;
-            let synced = ranges.intersection(&needed_range) == needed_range;
-            if !synced {
-                return Err(format!("tried to query range {needed_range} of table {table} but it has not been synced").into());
-            }
-        }
-    }
-
     let plan = ctx.plan_sql(query).await?;
-    let plan = {
-        let plan = inject_block_range_constraints(plan, start, end)?;
-        order_by_block_num(plan)
-    };
-    Ok(ctx.execute_plan(plan).await?)
+
+    execute_plan_for_range(plan, &ctx, metadata_db, start, end).await
 }
 
 // All datasets that have been queried
@@ -232,17 +257,7 @@ pub async fn max_end_block_for_plan(
     }
 
     let synced_block_for_table = |_, table: TableReference| async move {
-        let tbl = TableId {
-            // Unwrap: table references are of the partial form: [dataset].[table_name]
-            dataset: table.schema().unwrap(),
-            dataset_version: None,
-            table: table.table(),
-        };
-        let Some((_, location_id)) = metadata_db.get_active_location(tbl).await? else {
-            return Err(format!("table {}.{} not found", tbl.dataset, tbl.table).into());
-        };
-        let ranges = scanned_ranges::ranges_for_table(location_id, metadata_db).await?;
-        let ranges = MultiRange::from_ranges(ranges)?;
+        let ranges = get_ranges_for_table(&table, metadata_db).await?;
 
         // Take the end block of the earliest contiguous range as the "synced block"
         Ok::<_, BoxError>(ranges.first().map(|r| r.1))
@@ -258,24 +273,6 @@ pub async fn max_end_block_for_plan(
     }
 
     Ok(end)
-}
-
-/// Ads block_num filter expression to a plan and returns a new plan
-pub async fn add_range_to_plan(
-    plan: LogicalPlan,
-    start: BlockNum,
-    end: BlockNum,
-) -> Result<LogicalPlan, BoxError> {
-    use datafusion::logical_expr::{col, lit};
-
-    let mut builder = LogicalPlanBuilder::from(plan);
-    let filter_expr = col("block_num")
-        .gt_eq(lit(start))
-        .and(col("block_num").lt_eq(lit(end)));
-    builder = builder.filter(filter_expr)?;
-    let plan = builder.build()?;
-
-    Ok(plan)
 }
 
 /// The most recent block that has been synced for all tables in the query.
@@ -440,7 +437,7 @@ mod tests {
     use url::Url;
 
     use super::{
-        add_range_to_plan, extract_table_references_from_plan, is_incremental,
+        extract_table_references_from_plan, inject_block_range_constraints, is_incremental,
         queried_physical_tables,
     };
 
@@ -560,10 +557,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_add_range_to_plan() {
+    async fn test_inject_block_range_constraints() {
         let qc = create_test_query_context().await;
         let plan = get_plan("select * from eth_firehose.blocks", &qc).await;
-        let modified_plan = add_range_to_plan(plan, 10, 20).await.unwrap();
+        let modified_plan = inject_block_range_constraints(plan, 10, 20).unwrap();
 
         use datafusion::logical_expr::{col, lit, Filter};
         let expected_filter_expr = col("block_num")

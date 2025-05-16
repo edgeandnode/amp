@@ -183,17 +183,6 @@ impl Service {
         self.execute_plan(ctx, plan, is_streaming).await
     }
 
-    async fn execute_once(
-        ctx: &QueryContext,
-        plan: LogicalPlan,
-    ) -> Result<SendableRecordBatchStream, Error> {
-        let stream = ctx
-            .execute_plan(plan)
-            .await
-            .map_err(|err| Error::from(err))?;
-        Ok(stream)
-    }
-
     pub async fn execute_plan(
         &self,
         ctx: Arc<QueryContext>,
@@ -204,7 +193,7 @@ impl Service {
 
         // If not streaming or metadata db is not available, execute once
         if !is_streaming {
-            return Self::execute_once(&ctx, plan).await;
+            return ctx.execute_plan(plan).await.map_err(|err| Error::from(err));
         }
 
         let metadata_db_ref = self.dataset_store.metadata_db.as_ref();
@@ -221,10 +210,15 @@ impl Service {
 
         // initial range
         if let Some(end) = current_end_block {
-            let plan = dataset_store::sql_datasets::add_range_to_plan(plan.clone(), 0, end)
-                .await
-                .map_err(|e| Error::CoreError(CoreError::DatasetError(e)))?;
-            let mut stream = Self::execute_once(&ctx, plan).await?;
+            let mut stream = dataset_store::sql_datasets::execute_plan_for_range(
+                plan.clone(),
+                &ctx,
+                metadata_db_ref,
+                0,
+                end,
+            )
+            .await
+            .map_err(|e| Error::CoreError(CoreError::DatasetError(e)))?;
 
             let mut tx = tx.clone();
             tokio::spawn(async move {
@@ -273,10 +267,15 @@ impl Service {
                     (_, _) => continue,
                 };
 
-                let plan = dataset_store::sql_datasets::add_range_to_plan(plan.clone(), start, end)
-                    .await
-                    .unwrap();
-                let mut stream = Self::execute_once(&ctx, plan).await.unwrap();
+                let mut stream = dataset_store::sql_datasets::execute_plan_for_range(
+                    plan.clone(),
+                    &ctx,
+                    &metadata_db,
+                    start,
+                    end,
+                )
+                .await
+                .unwrap();
 
                 while let Some(batch) = stream.next().await {
                     match batch {
