@@ -27,7 +27,7 @@ use datafusion::{
 pub use eth_call::EthCall;
 pub use evm_decode_type::EvmDecodeType;
 pub use evm_encode_type::EvmEncodeType;
-pub use evm_function_data::{EvmDecodeFunctionData, EvmEncodeParams};
+pub use evm_function_params::{EvmDecodeParams, EvmEncodeParams};
 use itertools::izip;
 use tracing::trace;
 
@@ -50,7 +50,7 @@ use crate::{
 mod eth_call;
 mod evm_decode_type;
 mod evm_encode_type;
-mod evm_function_data;
+mod evm_function_params;
 
 type Unsigned = alloy::primitives::Uint<256, 4>;
 

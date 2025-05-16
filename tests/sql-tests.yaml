@@ -162,21 +162,6 @@
   results: |
     [{}]
 
-- name: evm_decode_results
-  query: |
-    SELECT evm_decode_results(return_data, 'function claim(uint256[] calldata tokenIds, uint8 garbage) public returns(uint256 prevId)') AS results
-    FROM eth_firehose.calls
-    WHERE block_num = 15000000 AND tx_index = 341
-    LIMIT 1
-  results: |
-    [
-      {
-        "results": {
-          "prevId": "635"
-        }
-      }
-    ]
-
 - name: evm_decode_params
   query: |
     SELECT evm_encode_params(to, CAST(123123123 AS DECIMAL(41, 0)), input, 'function example(address _to, uint256 _value, bytes _input) public returns (bool success)') AS encoded

@@ -40,7 +40,7 @@ use crate::{
     arrow, attestation,
     catalog::physical::{Catalog, PhysicalTable},
     evm::udfs::{
-        EvmDecode, EvmDecodeFunctionData, EvmDecodeType, EvmEncodeParams, EvmEncodeType, EvmTopic,
+        EvmDecode, EvmDecodeParams, EvmDecodeType, EvmEncodeParams, EvmEncodeType, EvmTopic,
     },
     BoxError, Table,
 };
@@ -464,9 +464,8 @@ fn udfs() -> Vec<ScalarUDF> {
     vec![
         EvmDecode::new().into(),
         EvmTopic::new().into(),
-        EvmDecodeFunctionData::evm_decode_params().into(),
-        EvmDecodeFunctionData::evm_decode_results().into(),
         EvmEncodeParams::new().into(),
+        EvmDecodeParams::new().into(),
         EvmEncodeType::new().into(),
         EvmDecodeType::new().into(),
     ]
