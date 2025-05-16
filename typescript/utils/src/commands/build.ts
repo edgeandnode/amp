@@ -21,8 +21,13 @@ export const build = Command.make("build", {
     )
 
     yield* utils.existsOrFail(args.project)
-    if ((yield* Cmd.make("tsc", "-b", args.project).pipe(Cmd.exitCode)) !== 0) {
-      // TODO: Output errors instead of swallowing them here.
+
+    const cmd = Cmd.make("tsc", "-b", args.project).pipe(
+      Cmd.stderr("inherit"),
+      Cmd.stdout("inherit"),
+    )
+
+    if ((yield* cmd.pipe(Cmd.exitCode)) !== 0) {
       yield* Effect.dieMessage("Failed to build package")
     }
 
