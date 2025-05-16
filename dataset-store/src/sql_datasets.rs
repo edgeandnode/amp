@@ -157,7 +157,7 @@ pub async fn execute_query_for_range(
 // All datasets that have been queried
 #[instrument(skip_all, err)]
 pub async fn queried_datasets(plan: &LogicalPlan) -> Result<Vec<String>, BoxError> {
-    let tables = extract_table_references_from_plan(&plan);
+    let tables = extract_table_references_from_plan(&plan)?;
 
     let ds = tables
         .into_iter()
@@ -172,7 +172,7 @@ pub async fn queried_physical_tables(
     plan: &LogicalPlan,
     qc: &QueryContext,
 ) -> Result<Vec<LocationId>, BoxError> {
-    let tables = extract_table_references_from_plan(&plan);
+    let tables = extract_table_references_from_plan(&plan)?;
 
     let locations: Vec<_> = tables
         .into_iter()
@@ -182,73 +182,39 @@ pub async fn queried_physical_tables(
     Ok(locations)
 }
 
-fn extract_table_references_from_plan(plan: &LogicalPlan) -> Vec<TableReference> {
+fn extract_table_references_from_plan(plan: &LogicalPlan) -> Result<Vec<TableReference>, BoxError> {
+    use LogicalPlan::*;
+
+    fn unsupported(op: String) -> Option<BoxError> {
+        Some(format!("unsupported operation in query: {op}").into())
+    }
+
     let mut refs = HashSet::new();
-    collect_table_refs(plan, &mut refs);
-    refs.into_iter().collect()
-}
+    let mut err: Option<BoxError> = None;
 
-fn collect_table_refs(plan: &LogicalPlan, refs: &mut HashSet<TableReference>) {
-    match plan {
-        LogicalPlan::TableScan(scan) => {
-            refs.insert(scan.table_name.clone());
-        }
-        LogicalPlan::Join(join) => {
-            collect_table_refs(&join.left, refs);
-            collect_table_refs(&join.right, refs);
-        }
-        LogicalPlan::Projection(projection) => {
-            collect_table_refs(&projection.input, refs);
-        }
-        LogicalPlan::Filter(filter) => {
-            collect_table_refs(&filter.input, refs);
-        }
-        LogicalPlan::Aggregate(agg) => {
-            collect_table_refs(&agg.input, refs);
-        }
-        LogicalPlan::Sort(sort) => {
-            collect_table_refs(&sort.input, refs);
-        }
-        LogicalPlan::Limit(limit) => {
-            collect_table_refs(&limit.input, refs);
-        }
-        LogicalPlan::Subquery(subquery) => collect_table_refs(&subquery.subquery, refs),
-        LogicalPlan::Union(union) => {
-            for input in &union.inputs {
-                collect_table_refs(input, refs);
+    //collect_table_refs(plan, &mut refs);
+    plan.apply(|node| {
+        match node {
+            Explain(_) | Analyze(_) | Dml(_) | Ddl(_) | Copy(_) | DescribeTable(_) => {
+                err = unsupported(format!("{}", node.display()))
             }
-        }
-        LogicalPlan::SubqueryAlias(alias) => {
-            collect_table_refs(&alias.input, refs);
-        }
-        LogicalPlan::Window(window) => {
-            collect_table_refs(&window.input, refs);
-        }
-        LogicalPlan::Repartition(repartition) => {
-            collect_table_refs(&repartition.input, refs);
-        }
-        LogicalPlan::Distinct(distinct) => {
-            collect_table_refs(&distinct.input(), refs);
-        }
-        LogicalPlan::Unnest(unnest) => {
-            collect_table_refs(&unnest.input, refs);
-        }
-        LogicalPlan::RecursiveQuery(recursive) => {
-            collect_table_refs(&recursive.static_term, refs);
-            collect_table_refs(&recursive.recursive_term, refs);
+
+            TableScan(scan) => {
+                refs.insert(scan.table_name.clone());
+            }
+            _ => {}
         }
 
-        LogicalPlan::Explain(_) => {}
-        LogicalPlan::Analyze(_) => {}
-        LogicalPlan::Dml(_) => {}
-        LogicalPlan::Ddl(_) => {}
-        LogicalPlan::Copy(_) => {}
-        LogicalPlan::DescribeTable(_) => {}
+        // Stop recursion if we found a non-materializable node.
+        match err {
+            Some(_) => Ok(TreeNodeRecursion::Stop),
+            None => Ok(TreeNodeRecursion::Continue),
+        }
+    })?;
 
-        LogicalPlan::EmptyRelation(_) => {}
-        LogicalPlan::Statement(_) => {}
-        LogicalPlan::Values(_) => {}
-        LogicalPlan::Extension(_) => {}
+    match err {
+        Some(err) => Err(err),
+        None => Ok(refs.into_iter().collect()),
     }
 }
 
@@ -259,7 +225,7 @@ pub async fn max_end_block_for_plan(
     ctx: &QueryContext,
     metadata_db: &MetadataDb,
 ) -> Result<Option<BlockNum>, BoxError> {
-    let tables = extract_table_references_from_plan(&plan);
+    let tables = extract_table_references_from_plan(&plan)?;
 
     if tables.is_empty() {
         return Ok(None);
@@ -399,7 +365,7 @@ pub fn is_incremental(plan: &LogicalPlan) -> Result<bool, BoxError> {
                 err = unsupported(format!("{}", node.display()))
             }
 
-            // Definitely not supported and would be caught eleswhere.
+            // Definitely not supported and would be caught elsewhere.
             Dml(_) | Ddl(_) | Statement(_) | Copy(_) => {
                 err = unsupported(format!("{}", node.display()))
             }
@@ -468,17 +434,23 @@ mod tests {
     use datafusion::{
         arrow::datatypes::{DataType, Field, Schema},
         logical_expr::LogicalPlan,
+        sql::TableReference,
     };
     use metadata_db::{test_metadata_db, MetadataDb, KEEP_TEMP_DIRS};
     use url::Url;
 
-    use super::{add_range_to_plan, is_incremental, queried_physical_tables};
+    use super::{
+        add_range_to_plan, extract_table_references_from_plan, is_incremental,
+        queried_physical_tables,
+    };
 
     async fn create_test_metadata_db() -> Arc<MetadataDb> {
         Arc::new(test_metadata_db(*KEEP_TEMP_DIRS).await.deref().clone())
     }
 
-    async fn create_test_query_context(metadata_db: &Arc<MetadataDb>) -> QueryContext {
+    async fn create_test_query_context() -> QueryContext {
+        let metadata_db = create_test_metadata_db().await;
+
         let schema = Arc::new(Schema::new(vec![
             Field::new("block_num", DataType::UInt64, false),
             Field::new("timestamp", DataType::Date32, false),
@@ -532,6 +504,13 @@ mod tests {
         qc
     }
 
+    // async fn create_test_metadata_db_and_query_context() -> (Arc<MetadataDb>, QueryContext) {
+    //     let metadata_db = create_test_metadata_db().await;
+    //     let qc = create_test_query_context(&metadata_db).await;
+    //
+    //     (metadata_db, qc)
+    // }
+
     async fn get_plan(sql: &str, qc: &QueryContext) -> LogicalPlan {
         let stmt = parse_sql(sql).unwrap();
         let plan = qc.plan_sql(stmt).await.unwrap();
@@ -559,23 +538,20 @@ mod tests {
             "SELECT * FROM (SELECT block_num FROM eth_firehose.blocks WHERE block_num < 10) t WHERE block_num > 10",
             "SELECT block_num FROM eth_firehose.blocks WHERE block_num < 10 UNION ALL SELECT block_num FROM eth_firehose.blocks WHERE block_num > 10",
         ];
-        let metadata_db = create_test_metadata_db().await;
-        let qc = create_test_query_context(&metadata_db).await;
+        let qc = create_test_query_context().await;
         assert_incremental_for_all_is(queries, true, &qc).await;
     }
 
     #[tokio::test]
     async fn not_incremental_queries() {
         let queries = vec!["SELECT MAX(block_num) FROM eth_firehose.blocks"];
-        let metadata_db = create_test_metadata_db().await;
-        let qc = create_test_query_context(&metadata_db).await;
+        let qc = create_test_query_context().await;
         assert_incremental_for_all_is(queries, false, &qc).await;
     }
 
     #[tokio::test]
     async fn extract_physical_tables_from_plan() {
-        let metadata_db = create_test_metadata_db().await;
-        let qc = create_test_query_context(&metadata_db).await;
+        let qc = create_test_query_context().await;
         let plan = get_plan("SELECT * FROM eth_firehose.blocks AS b INNER JOIN sql_ds.even_blocks AS e ON b.block_num = e.block_num", &qc).await;
 
         let mut locations = queried_physical_tables(&plan, &qc).await.unwrap();
@@ -585,8 +561,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_add_range_to_plan() {
-        let metadata_db = create_test_metadata_db().await;
-        let qc = create_test_query_context(&metadata_db).await;
+        let qc = create_test_query_context().await;
         let plan = get_plan("select * from eth_firehose.blocks", &qc).await;
         let modified_plan = add_range_to_plan(plan, 10, 20).await.unwrap();
 
@@ -596,5 +571,61 @@ mod tests {
             .and(col("block_num").lt_eq(lit(20)));
 
         matches!(modified_plan, LogicalPlan::Filter(Filter { predicate, .. }) if predicate == expected_filter_expr);
+    }
+
+    #[tokio::test]
+    async fn test_extract_table_references_from_plan() {
+        let qc = create_test_query_context().await;
+        let test_cases = vec![
+            (
+                "select * from eth_firehose.blocks",
+                vec![
+                    TableReference::Partial { schema: "eth_firehose".into(), table: "blocks".into() },
+                ],
+            ),
+            (
+                "select block_num from eth_firehose.blocks where block_num % 2 == 1 union all select block_num from eth_firehose.blocks where block_num % 2 == 0",
+                vec![
+                    TableReference::Partial { schema: "eth_firehose".into(), table: "blocks".into() },
+                ],
+            ),
+            (
+                "select block_num from eth_firehose.blocks union all select block_num from sql_ds.even_blocks",
+                vec![
+                    TableReference::Partial { schema: "eth_firehose".into(), table: "blocks".into() },
+                    TableReference::Partial { schema: "sql_ds".into(), table: "even_blocks".into() },
+                ],
+            ),
+            (
+                "select 1",
+                vec![],
+            ),
+            (
+                "select * from (select * from (select * from sql_ds.even_blocks) as tt) as t",
+                vec![
+                    TableReference::Partial { schema: "sql_ds".into(), table: "even_blocks".into() },
+                ],
+            ),
+        ];
+
+        // expect successful result
+        for (sql, expected) in test_cases {
+            let plan = get_plan(sql, &qc).await;
+
+            let mut result = extract_table_references_from_plan(&plan).unwrap();
+            result.sort();
+            assert_eq!(result, expected);
+        }
+
+        // expect errors
+        let queries = vec![
+            "explain select * from eth_firehose.blocks",
+            "explain analyze select * from eth_firehose.blocks",
+            // ddl, dml not supported
+        ];
+        for sql in queries {
+            let plan = get_plan(sql, &qc).await;
+            assert!(extract_table_references_from_plan(&plan).is_err());
+        }
     }
 }
