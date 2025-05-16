@@ -108,9 +108,9 @@ pub async fn commit_metadata(
         .insert_scanned_range(location_id, file_name, scanned_range)
         .await?;
 
-    // Notify CDC that the dataset has been changed
+    // Notify that the dataset has been changed
     let cdc_channel = common::stream_helpers::change_tracking_pg_channel(location_id);
-    debug!("notified CDC channel {}", cdc_channel);
+    debug!("notified change tracking channel {}", cdc_channel);
     metadata_db.notify(&cdc_channel, "").await?;
 
     Ok(())
