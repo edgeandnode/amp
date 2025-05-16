@@ -463,7 +463,7 @@ impl DatasetStore {
                 ));
             };
             // Cache the provider.
-            let provider = alloy::providers::ProviderBuilder::new().on_http(provider.url);
+            let provider = alloy::providers::RootProvider::new_http(provider.url);
             let udf = AsyncScalarUDF::new(Arc::new(EthCall::new(&dataset.name, provider)))
                 .into_scalar_udf();
             let udf = Arc::into_inner(udf).unwrap();

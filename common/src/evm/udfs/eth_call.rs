@@ -3,12 +3,10 @@ use std::{any::Any, str::FromStr};
 use alloy::{
     eips::BlockNumberOrTag,
     hex,
+    network::Ethereum,
     primitives::{Address, Bytes, TxKind},
     providers::Provider,
-    rpc::{
-        json_rpc::ErrorPayload,
-        types::{TransactionInput, TransactionRequest},
-    },
+    rpc::{json_rpc::ErrorPayload, types::TransactionInput},
     transports::RpcError,
 };
 use async_trait::async_trait;
@@ -27,16 +25,18 @@ use datafusion::{
 };
 use itertools::izip;
 
+type TransactionRequest = <Ethereum as alloy::network::Network>::TransactionRequest;
+
 #[derive(Debug, Clone)]
 pub struct EthCall {
     name: String,
-    client: alloy::providers::ReqwestProvider,
+    client: alloy::providers::RootProvider,
     signature: Signature,
     fields: Fields,
 }
 
 impl EthCall {
-    pub fn new(dataset_name: &str, client: alloy::providers::ReqwestProvider) -> Self {
+    pub fn new(dataset_name: &str, client: alloy::providers::RootProvider) -> Self {
         EthCall {
             name: format!("{dataset_name}.eth_call"),
             client,
@@ -123,7 +123,7 @@ impl AsyncScalarUDFImpl for EthCall {
             let result = eth_call_retry(
                 &client,
                 block,
-                &TransactionRequest {
+                TransactionRequest {
                     // `eth_call` only requires the following fields
                     // (https://ethereum.org/en/developers/docs/apis/json-rpc/#eth_call)
                     from: match from {
@@ -220,12 +220,12 @@ impl AsyncScalarUDFImpl for EthCall {
 }
 
 async fn eth_call_retry(
-    client: &alloy::providers::ReqwestProvider,
+    client: &alloy::providers::RootProvider,
     block: BlockNumberOrTag,
-    req: &TransactionRequest,
+    req: TransactionRequest,
 ) -> Result<Bytes, EthCallRetryError> {
     for _ in 0..3 {
-        let result = client.call(req).block(block.into()).await;
+        let result = client.call(req.clone()).block(block.into()).await;
         match result {
             Ok(bytes) => {
                 return Ok(bytes);
