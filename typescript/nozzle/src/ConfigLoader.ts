@@ -114,7 +114,7 @@ export class ConfigLoader extends Effect.Service<ConfigLoader>()("Nozzle/ConfigL
         Stream.mapEffect((config) => build(config)),
         Stream.filterMap(Either.getRight),
         Stream.changesWith(Schema.equivalence(Model.DatasetManifest)),
-      )
+      ) as Stream.Stream<Model.DatasetManifest, ConfigLoaderError | E, R>
     }
 
     return { load, find, watch, build }
