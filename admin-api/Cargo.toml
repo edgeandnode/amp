@@ -22,3 +22,4 @@ common = { path = "../common" }
 dataset-store = { path = "../dataset-store" }
 metadata-db = { path = "../metadata-db" }
 dump = { path = "../dump" }
+object_store.workspace = true

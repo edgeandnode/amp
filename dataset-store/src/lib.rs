@@ -201,6 +201,7 @@ impl DatasetStore {
         })
     }
 
+    // TODO: Update to return a Result<Option<..>, Error> if the dataset is not found
     pub async fn load_dataset(
         self: &Arc<Self>,
         dataset: &str,

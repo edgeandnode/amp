@@ -27,6 +27,7 @@ dependencies = [
  "dump",
  "http-common",
  "metadata-db",
+ "object_store",
  "rand 0.9.0",
  "serde",
  "serde_json",
