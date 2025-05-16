@@ -1,9 +1,6 @@
 use std::{collections::BTreeMap, sync::Arc};
 
-use arrow::{
-    array::RecordBatch, compute::concat_batches, datatypes::SchemaRef,
-    util::pretty::pretty_format_batches,
-};
+use arrow::{array::RecordBatch, compute::concat_batches, datatypes::SchemaRef};
 use async_udf::physical_optimizer::AsyncFuncRule;
 use bincode::{config, Decode, Encode};
 use bytes::Bytes;
@@ -34,7 +31,7 @@ use datafusion_proto::{
     },
     logical_plan::LogicalExtensionCodec,
 };
-use futures::{StreamExt as _, TryStreamExt};
+use futures::TryStreamExt;
 use metadata_db::TableId;
 use thiserror::Error;
 use tracing::{debug, instrument};
@@ -336,35 +333,6 @@ impl QueryContext {
         for udf in self.catalog.udfs() {
             ctx.register_udf(udf.clone());
         }
-    }
-
-    pub async fn print_schema(&self) -> Result<Vec<(PhysicalTable, String)>, Error> {
-        let mut output = vec![];
-        for table in self.catalog.all_tables() {
-            let mut record_stream = self
-                .execute_sql(format!("describe {}", table.table_ref()).as_str())
-                .await?;
-            let Some(Ok(batch)) = record_stream.next().await else {
-                return Err(Error::DatasetError(
-                    format!("no schema for table `{}`", table.table_ref(),).into(),
-                ));
-            };
-            let pretty_schema = pretty_format_batches(&[batch])
-                .map_err(|e| Error::DatasetError(e.into()))?
-                .to_string();
-
-            // For readability, simplify somme common type names, using whitespace to keep the character width.
-            let pretty_schema = pretty_schema.replace(
-                r#"Timestamp(Nanosecond, Some("+00:00"))"#,
-                r#"Timestamp                            "#,
-            );
-            let pretty_schema = pretty_schema.replace("Decimal128(38, 0)", "UInt126          ");
-            let pretty_schema = pretty_schema.replace("FixedSizeBinary(32)", "Binary32           ");
-            let pretty_schema = pretty_schema.replace("FixedSizeBinary(20)", "Binary20           ");
-
-            output.push((table.clone(), pretty_schema));
-        }
-        Ok(output)
     }
 
     pub async fn execute_plan(

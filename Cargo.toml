@@ -24,7 +24,7 @@ edition = "2021"
 version = "0.1.0"
 
 [workspace.dependencies]
-alloy = { version = "0.6.2", features = [
+alloy = { version = "1.0.3", features = [
     "json-abi",
     "dyn-abi",
     "provider-http",

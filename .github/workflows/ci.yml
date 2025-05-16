@@ -27,16 +27,12 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y protobuf-compiler postgresql
+          sudo apt-get install -y protobuf-compiler
 
       - uses: actions-rust-lang/setup-rust-toolchain@9d7e65c320fdb52dcd45ffaa68deb6c02c8754d9 # v1
         with:
           cache: false
           rustflags: ''
-
-      - name: Add PostgreSQL binaries to PATH
-        run: |
-          echo "/usr/lib/postgresql/$(pg_lsclusters | awk 'NR==2 {print $1}')/bin" >> $GITHUB_PATH
 
       - name: Unit tests
         run: cargo test --verbose --workspace --exclude tests -- --nocapture

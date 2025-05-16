@@ -1,10 +1,11 @@
-//! Datasets HTTP handlers
+//! Dataset get all handler
 
-use axum::{extract::State, http::StatusCode, Json};
+use axum::{extract::State, Json};
 use common::catalog::logical::DatasetWithProvider;
-use http_common::{BoxRequestError, RequestError};
+use http_common::BoxRequestError;
 use metadata_db::TableId;
 
+use super::error::Error;
 use crate::ctx::Ctx;
 
 /// Handler for the `GET /datasets` endpoint
@@ -19,11 +20,10 @@ use crate::ctx::Ctx;
 /// - Returns a structured response with the collected information
 #[tracing::instrument(skip_all, err)]
 pub async fn handler(State(ctx): State<Ctx>) -> Result<Json<DatasetsResponse>, BoxRequestError> {
-    let datasets_with_provider = ctx
-        .store
-        .all_datasets()
-        .await
-        .map_err(DatasetsError::StoreError)?;
+    let datasets_with_provider = ctx.store.all_datasets().await.map_err(|err| {
+        tracing::debug!(error=?err, "failed to get all datasets");
+        Error::StoreError(err.into())
+    })?;
 
     let datasets_response = try_into_datasets_response(&ctx, datasets_with_provider).await?;
 
@@ -34,7 +34,7 @@ pub async fn handler(State(ctx): State<Ctx>) -> Result<Json<DatasetsResponse>, B
 async fn try_into_datasets_response(
     ctx: &Ctx,
     datasets: impl IntoIterator<Item = DatasetWithProvider>,
-) -> Result<DatasetsResponse, DatasetsError> {
+) -> Result<DatasetsResponse, Error> {
     let mut dataset_infos = Vec::new();
     for DatasetWithProvider { dataset, .. } in datasets {
         // Get table information for each table in the dataset
@@ -51,7 +51,10 @@ async fn try_into_datasets_response(
                 .metadata_db
                 .get_active_location(table_id)
                 .await
-                .map_err(DatasetsError::MetadataDbError)?
+                .map_err(|err| {
+                    tracing::debug!(table=%table.name, error=?err, "failed to get active location for table");
+                    Error::MetadataDbError(err)
+                })?
                 .map(|(url, _)| url.to_string());
 
             table_infos.push(TableInfo {
@@ -102,34 +105,4 @@ pub struct TableInfo {
     /// Associated network for this table
     #[serde(skip_serializing_if = "Option::is_none")]
     pub network: Option<String>,
-}
-
-/// Errors that can occur when processing dataset requests
-#[derive(Debug, thiserror::Error)]
-enum DatasetsError {
-    /// Error originating from the dataset store
-    #[error("failed to get datasets: {0}")]
-    StoreError(dataset_store::DatasetError),
-
-    /// Error originating from the metadata database
-    #[error("metadata database error: {0}")]
-    MetadataDbError(metadata_db::Error),
-}
-
-impl RequestError for DatasetsError {
-    /// Maps dataset errors to HTTP status codes
-    fn status_code(&self) -> StatusCode {
-        match self {
-            DatasetsError::StoreError(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            DatasetsError::MetadataDbError(_) => StatusCode::INTERNAL_SERVER_ERROR,
-        }
-    }
-
-    /// Provides error codes for API responses
-    fn error_code(&self) -> &'static str {
-        match self {
-            DatasetsError::StoreError(_) => "DATASET_STORE_ERROR",
-            DatasetsError::MetadataDbError(_) => "METADATA_DB_ERROR",
-        }
-    }
 }

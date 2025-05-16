@@ -7,7 +7,7 @@ import * as ArrowFlight from "../src/ArrowFlight.js"
 
 const flight = Config.string("NOZZLE_ARROW_FLIGHT_URL").pipe(
   Effect.map((url) => createGrpcTransport({ baseUrl: url })),
-  Effect.map(ArrowFlight.ArrowFlight.withTransport),
+  Effect.map((transport) => ArrowFlight.ArrowFlight.withTransport(transport)),
   Layer.unwrapEffect,
 )
 

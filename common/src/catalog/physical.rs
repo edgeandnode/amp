@@ -14,7 +14,6 @@ use uuid::Uuid;
 
 use super::logical::Table;
 use crate::{
-    config::Config,
     meta_tables::scanned_ranges::{self, ScannedRange},
     store::{infer_object_store, Store},
     BoxError, Dataset,
@@ -117,30 +116,6 @@ pub struct PhysicalTable {
 }
 
 impl PhysicalTable {
-    /// Create an empty table for the given table and config.
-    /// For testing purposes (for now). Used to create a table without a location
-    /// for DESCRIBE, EXPLAIN queries.
-    pub fn empty(table: Table, config: &Config) -> Result<Self, BoxError> {
-        let data_store = config.data_store.clone();
-        let metadata_db = config.metadata_db_lazy()?.into();
-        let table_ref = TableReference::partial("dataset", table.name.as_str());
-        let url = data_store.url().to_owned();
-        let path = Path::from_url_path(url.path()).unwrap();
-        let object_store = data_store.object_store();
-        let location_id = 0;
-
-        let table = Self {
-            table,
-            table_ref,
-            url,
-            path,
-            object_store,
-            location_id,
-            metadata_db,
-        };
-        Ok(table)
-    }
-
     /// Create a new physical table with the given dataset name, table, URL, and object store.
     pub fn new(
         dataset_name: &str,

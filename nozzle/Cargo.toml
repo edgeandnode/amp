@@ -14,7 +14,6 @@ datafusion.workspace = true
 dataset-store = { path = "../dataset-store" }
 dump = { path = "../dump" }
 futures.workspace = true
-pgtemp.workspace = true
 tracing.workspace = true
 server = { path = "../server" }
 snmalloc-rs.workspace = true

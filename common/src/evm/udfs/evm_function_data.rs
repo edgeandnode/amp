@@ -166,12 +166,30 @@ impl ScalarUDFImpl for EvmDecodeFunctionData {
             }
         };
 
-        let args: Vec<_> = ColumnarValue::values_to_arrays(&args[..1])?;
-        let data = args[0].as_any().downcast_ref::<BinaryArray>().unwrap();
         let call = FunctionCall::try_from(signature).map_err(|e| e.context(self.name()))?;
-        let ary = self
-            .decode(data, &call)
-            .map_err(|e| e.context(self.name()))?;
+        let result = match &args[0] {
+            ColumnarValue::Array(array) => self.decode(
+                array
+                    .as_any()
+                    .downcast_ref::<BinaryArray>()
+                    .ok_or_else(|| plan!("expected binary array"))?
+                    .iter(),
+                &call,
+            ),
+            ColumnarValue::Scalar(scalar_value) => match scalar_value {
+                ScalarValue::Binary(Some(data)) => {
+                    self.decode(std::iter::once(Some(data.as_slice())), &call)
+                }
+                _ => {
+                    return plan_err!(
+                        "{}: expected Binary scalar, but got {}",
+                        self.name(),
+                        scalar_value.data_type()
+                    )
+                }
+            },
+        };
+        let ary = result.map_err(|e| e.context(self.name()))?;
         Ok(ColumnarValue::Array(ary))
     }
 
@@ -214,9 +232,9 @@ impl ScalarUDFImpl for EvmDecodeFunctionData {
 
 impl EvmDecodeFunctionData {
     /// Decode the given data using the function signature.
-    fn decode(
+    fn decode<'a>(
         &self,
-        data: &BinaryArray,
+        data: impl Iterator<Item = Option<&'a [u8]>>,
         call: &FunctionCall,
     ) -> Result<Arc<dyn Array>, DataFusionError> {
         let types = match self.decode {
@@ -244,9 +262,9 @@ impl EvmDecodeFunctionData {
                                 builder.append(false);
                                 continue;
                             }
-                            call.alloy_function.abi_decode_input(&data[4..], true)
+                            call.alloy_function.abi_decode_input(&data[4..])
                         }
-                        Decode::Results => call.alloy_function.abi_decode_output(data, true),
+                        Decode::Results => call.alloy_function.abi_decode_output(data),
                     };
                     match decoded {
                         Ok(decoded) => {
