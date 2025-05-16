@@ -6,7 +6,6 @@ edition.workspace = true
 [dependencies]
 # Common async runtime and utilities
 tokio.workspace = true
-futures.workspace = true
 
 # Serialization
 serde.workspace = true
