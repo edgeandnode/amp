@@ -1,7 +1,6 @@
 import { Command, Options } from "@effect/cli"
 import { Command as Cmd, FileSystem } from "@effect/platform"
 import { Effect, Schema, Struct } from "effect"
-import { spawnSync } from "node:child_process"
 import * as path from "path"
 import * as Model from "../lib/Model.js"
 import * as Utils from "../lib/Utils.js"
@@ -23,23 +22,13 @@ export const build = Command.make("build", {
 
     yield* utils.existsOrFail(args.project)
 
-    // Invoke tsc
-    const result = spawnSync("tsc", ["-b", args.project], {
-      encoding: "utf8", // decode stdout/stderr as strings
-      stdio: "pipe", // capture stdout/stderr
-    })
+    const cmd = Cmd.make("tsc", "-b", args.project).pipe(
+      Cmd.stderr("inherit"),
+      Cmd.stdout("inherit"),
+    )
 
-    if (result.status !== 0) {
-      const stdout = result.stdout?.trim() ?? ""
-      const stderr = result.stderr?.trim() ?? ""
-
-      const errorMsg = [
-        "Failed to build package.",
-        stdout && `stdout:\n${stdout}`,
-        stderr && `stderr:\n${stderr}`,
-      ].filter(Boolean).join("\n\n")
-
-      throw new Error(errorMsg)
+    if ((yield* cmd.pipe(Cmd.exitCode)) !== 0) {
+      yield* Effect.dieMessage("Failed to build package")
     }
 
     yield* Effect.all([
