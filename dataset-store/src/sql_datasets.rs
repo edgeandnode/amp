@@ -176,18 +176,6 @@ pub async fn execute_query_for_range(
     execute_plan_for_range(plan, &ctx, metadata_db, start, end).await
 }
 
-// All datasets that have been queried
-#[instrument(skip_all, err)]
-pub async fn queried_datasets(plan: &LogicalPlan) -> Result<Vec<String>, BoxError> {
-    let tables = extract_table_references_from_plan(&plan)?;
-
-    let ds = tables
-        .into_iter()
-        .filter_map(|t| t.schema().map(|s| s.to_string()))
-        .collect::<Vec<_>>();
-    Ok(ds)
-}
-
 // All physical tables locations that have been queried
 #[instrument(skip_all, err)]
 pub async fn queried_physical_tables(
@@ -205,39 +193,20 @@ pub async fn queried_physical_tables(
 }
 
 fn extract_table_references_from_plan(plan: &LogicalPlan) -> Result<Vec<TableReference>, BoxError> {
-    use LogicalPlan::*;
-
-    fn unsupported(op: String) -> Option<BoxError> {
-        Some(format!("unsupported operation in query: {op}").into())
-    }
-
     let mut refs = HashSet::new();
-    let mut err: Option<BoxError> = None;
 
-    //collect_table_refs(plan, &mut refs);
     plan.apply(|node| {
         match node {
-            Explain(_) | Analyze(_) | Dml(_) | Ddl(_) | Copy(_) | DescribeTable(_) => {
-                err = unsupported(format!("{}", node.display()))
-            }
-
-            TableScan(scan) => {
+            LogicalPlan::TableScan(scan) => {
                 refs.insert(scan.table_name.clone());
             }
             _ => {}
         }
 
-        // Stop recursion if we found a non-materializable node.
-        match err {
-            Some(_) => Ok(TreeNodeRecursion::Stop),
-            None => Ok(TreeNodeRecursion::Continue),
-        }
+        Ok(TreeNodeRecursion::Continue)
     })?;
 
-    match err {
-        Some(err) => Err(err),
-        None => Ok(refs.into_iter().collect()),
-    }
+    Ok(refs.into_iter().collect())
 }
 
 /// The most recent block that has been synced for all tables in the plan.
