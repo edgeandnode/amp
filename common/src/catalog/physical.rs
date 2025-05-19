@@ -1,14 +1,35 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::{collections::BTreeMap, future::Future, sync::Arc};
 
 use datafusion::{
     arrow::datatypes::SchemaRef,
+    catalog::{Session, TableProvider},
+    common::{
+        error::{DataFusionError::External, Result as DataFusionResult},
+        project_schema,
+        stats::Precision,
+        Column, ColumnStatistics, Statistics,
+    },
+    datasource::{
+        create_ordering,
+        file_format::{parquet::ParquetFormat, FileFormat},
+        listing::PartitionedFile,
+        physical_plan::{FileGroup, FileScanConfig, FileScanConfigBuilder},
+        TableType,
+    },
+    execution::object_store::ObjectStoreUrl,
     logical_expr::{col, ScalarUDF, SortExpr},
-    parquet::arrow::async_reader::{AsyncFileReader, ParquetObjectReader},
+    parquet::{
+        arrow::async_reader::{AsyncFileReader, ParquetObjectReader},
+        file::metadata::ParquetMetaDataReader,
+    },
+    physical_plan::{empty::EmptyExec, ExecutionPlan},
+    prelude::Expr,
     sql::TableReference,
 };
 use futures::{future, stream, Stream, StreamExt, TryStreamExt};
-use metadata_db::{LocationId, MetadataDb, TableId};
+use metadata_db::{LocationId, MetadataDb, NumRows, SizeHint, TableId};
 use object_store::{path::Path, ObjectMeta, ObjectStore};
+use tracing::debug;
 use url::Url;
 use uuid::Uuid;
 
@@ -16,7 +37,7 @@ use super::logical::Table;
 use crate::{
     meta_tables::scanned_ranges::{self, FileMetadata, ScannedRange},
     store::{infer_object_store, Store},
-    BoxError, Dataset,
+    BoxError, Dataset, BLOCK_NUM,
 };
 
 #[derive(Debug, Clone)]
@@ -109,6 +130,9 @@ pub struct PhysicalTable {
     /// Object store to use for this table.
     object_store: Arc<dyn ObjectStore>,
 
+    /// This table's file format, Always `Parquet` for now.
+    format: Arc<dyn FileFormat>,
+
     /// Location ID in the metadata database.
     location_id: LocationId,
     /// Metadata database to use for this table.
@@ -129,6 +153,7 @@ impl PhysicalTable {
         let table_ref = TableReference::partial(dataset_name, table.name.as_str());
         let path = Path::from_url_path(url.path()).unwrap();
         let (object_store, _) = infer_object_store(&url)?;
+        let format = Arc::new(ParquetFormat::default());
 
         Ok(Self {
             table,
@@ -136,6 +161,7 @@ impl PhysicalTable {
             url,
             path,
             object_store,
+            format,
             location_id,
             metadata_db,
         })
@@ -165,12 +191,15 @@ impl PhysicalTable {
         let path = Path::from_url_path(url.path()).unwrap();
         let table_ref = TableReference::partial(dataset_name, table.name.as_str());
 
+        let format = Arc::new(ParquetFormat::default());
+
         let physical_table = Self {
             table: table.clone(),
             table_ref,
             url,
             path,
             object_store: data_store.object_store(),
+            format,
             location_id,
             metadata_db,
         };
@@ -224,12 +253,15 @@ impl PhysicalTable {
                 let table_ref = TableReference::partial(dataset_name, table.name.as_str());
                 let path = Path::from_url_path(url.path()).unwrap();
                 let (object_store, _) = infer_object_store(&url)?;
+                let format = Arc::new(ParquetFormat::default());
+
                 Some(Self {
                     table: table.clone(),
                     table_ref,
                     url,
                     path,
                     object_store,
+                    format,
                     location_id,
                     metadata_db: metadata_db.clone(),
                 })
@@ -291,9 +323,9 @@ impl PhysicalTable {
         let mut file_stream = object_store.list(Some(&path));
 
         while let Some(object_meta) = file_stream.try_next().await? {
-            let (file_name, nozzle_meta) =
+            let (file_name, nozzle_meta, num_rows, size_hint) =
                 nozzle_meta_from_object_meta(&object_meta, object_store.clone()).await?;
-            let nozzle_meta_json = serde_json::to_value(nozzle_meta)?;
+            let scanned_range = serde_json::to_value(nozzle_meta)?;
             let object_size = object_meta.size;
             let object_e_tag = object_meta.e_tag;
             let object_version = object_meta.version;
@@ -304,10 +336,14 @@ impl PhysicalTable {
                     object_size,
                     object_e_tag,
                     object_version,
-                    nozzle_meta_json,
+                    num_rows,
+                    size_hint,
+                    scanned_range,
                 )
                 .await?;
         }
+
+        let format = Arc::new(ParquetFormat::default());
 
         let physical_table = Self {
             table: table.clone(),
@@ -315,6 +351,7 @@ impl PhysicalTable {
             url: url.clone(),
             path: path.clone(),
             object_store,
+            format,
             location_id,
             metadata_db,
         };
@@ -552,14 +589,38 @@ pub async fn list_revisions(
         .collect())
 }
 
+pub async fn fetch_metadata_size_hint(
+    location: &Path,
+    size: u64,
+    object_store: Arc<dyn ObjectStore>,
+) -> Result<usize, BoxError> {
+    let tail = object_store
+        .get_range(location, size.saturating_sub(8)..size)
+        .await?;
+    let mut footer = [0; 8];
+    footer.copy_from_slice(&tail);
+
+    let tail = ParquetMetaDataReader::decode_footer_tail(&footer)?;
+    Ok(tail.metadata_length())
+}
+
 async fn nozzle_meta_from_object_meta(
     object_meta: &ObjectMeta,
     object_store: Arc<dyn ObjectStore>,
-) -> Result<(String, ScannedRange), BoxError> {
-    let mut reader = ParquetObjectReader::new(object_store.clone(), object_meta.location.clone())
-        .with_file_size(object_meta.size);
+) -> Result<(String, ScannedRange, NumRows, SizeHint), BoxError> {
+    let metadata_size_hint = fetch_metadata_size_hint(
+        &object_meta.location,
+        object_meta.size,
+        object_store.clone(),
+    )
+    .await?;
+
+    let mut reader = ParquetObjectReader::new(object_store, object_meta.location.clone())
+        .with_file_size(object_meta.size)
+        .with_footer_size_hint(metadata_size_hint);
     let parquet_metadata = reader.get_metadata(None).await?;
     let file_metadata = parquet_metadata.file_metadata();
+    let num_rows = file_metadata.num_rows();
     let key_value_metadata =
         file_metadata
             .key_value_metadata()
@@ -591,5 +652,235 @@ async fn nozzle_meta_from_object_meta(
     })?;
     // Unwrap: We know this is a path with valid file name because we just opened it
     let file_name = object_meta.location.filename().unwrap().to_string();
-    Ok((file_name, scanned_range))
+    Ok((
+        file_name,
+        scanned_range,
+        num_rows,
+        metadata_size_hint as SizeHint,
+    ))
+}
+
+#[async_trait::async_trait]
+impl TableProvider for PhysicalTable {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn schema(&self) -> SchemaRef {
+        Arc::clone(&self.table.schema)
+    }
+
+    fn table_type(&self) -> TableType {
+        TableType::Base
+    }
+
+    async fn scan(
+        &self,
+        state: &dyn Session,
+        projection: Option<&Vec<usize>>,
+        filters: &[Expr],
+        limit: Option<usize>,
+    ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
+        let limit = if filters.is_empty() { limit } else { None };
+        let (mut partitioned_file_lists, statistics) = self.list_files_for_scan(limit).await?;
+
+        let ordering = create_ordering(
+            &self.schema(),
+            vec![self
+                .table
+                .sorted_by()
+                .into_iter()
+                .map(|col| SortExpr::new(Expr::Column(Column::from_name(col)), true, false))
+                .collect::<Vec<_>>()]
+            .as_slice(),
+        )?;
+        match state
+            .config_options()
+            .execution
+            .split_file_groups_by_statistics
+            .then(|| {
+                ordering.first().map(|ordering| {
+                    FileScanConfig::split_groups_by_statistics_with_target_partitions(
+                        &self.table.schema,
+                        &partitioned_file_lists,
+                        ordering,
+                        10,
+                    )
+                })
+            })
+            .flatten()
+        {
+            Some(Err(e)) => debug!("failed to split file groups by statistics: {e}"),
+            Some(Ok(new_groups)) => {
+                if new_groups.len() <= 10 {
+                    partitioned_file_lists = new_groups;
+                } else {
+                    debug!("attempted to split file groups by statistics, but there were more file groups than target_partitions; falling back to unordered")
+                }
+            }
+            None => {} // no ordering required
+        };
+        if partitioned_file_lists.is_empty() {
+            let projected_schema = project_schema(&self.schema(), projection)?;
+            return Ok(Arc::new(EmptyExec::new(projected_schema)));
+        }
+
+        let conf = self.file_scan_config(
+            partitioned_file_lists,
+            statistics,
+            projection.cloned(),
+            limit,
+        );
+
+        self.create_physical_plan(state, conf).await
+    }
+}
+
+impl PhysicalTable {
+    pub fn stream_partition_files<'a>(
+        &'a self,
+        block_num_col_idx: Option<usize>,
+    ) -> impl Stream<Item = DataFusionResult<PartitionedFile>> + 'a {
+        self.stream_file_metadata().map_err(External).map_ok(
+            move |FileMetadata {
+                      object_meta,
+                      scanned_range:
+                          ScannedRange {
+                              range_start,
+                              range_end,
+                              ..
+                          },
+                      num_rows,
+                      size_hint,
+                      ..
+                  }| {
+                let mut statistics = Statistics::new_unknown(&self.table.schema);
+
+                if let Some(block_num_col_idx) = block_num_col_idx {
+                    let scanned_range_column_stats = ColumnStatistics::new_unknown()
+                        .with_min_value(Precision::Inexact(range_start.into()))
+                        .with_max_value(Precision::Inexact(range_end.into()))
+                        .with_null_count(Precision::Exact(0));
+                    statistics.column_statistics[block_num_col_idx] = scanned_range_column_stats;
+                }
+
+                if !num_rows.is_negative() {
+                    statistics.num_rows = Precision::Exact(num_rows as usize)
+                };
+
+                let metadata_size_hint = if size_hint.is_negative() {
+                    None
+                } else {
+                    Some(size_hint as usize)
+                };
+
+                let statistics = Some(statistics.into());
+                let partition_values = Vec::new();
+                let range = None;
+                let extensions = None;
+
+                PartitionedFile {
+                    object_meta,
+                    partition_values,
+                    range,
+                    statistics,
+                    extensions,
+                    metadata_size_hint,
+                }
+            },
+        )
+    }
+
+    async fn list_files_for_scan<'a>(
+        &self,
+        limit: Option<usize>,
+    ) -> DataFusionResult<(Vec<FileGroup>, Statistics)> {
+        let block_num_col_idx = self.table.schema.index_of(BLOCK_NUM).ok();
+        let mut file_group = FileGroup::default();
+        let mut num_rows = Precision::Absent;
+
+        let file_schema = self.schema();
+        let mut all_files = Box::pin(self.stream_partition_files(block_num_col_idx).fuse());
+
+        while let Some(partitioned_file) = all_files.try_next().await? {
+            if let Some(limit) = limit {
+                if let Precision::Exact(row_count) = num_rows {
+                    if row_count >= limit {
+                        break;
+                    }
+                }
+            }
+
+            if let Some(statistics) = &partitioned_file.statistics {
+                num_rows = if file_group.is_empty() {
+                    statistics.num_rows
+                } else {
+                    num_rows.add(&statistics.num_rows)
+                }
+            }
+
+            file_group.push(partitioned_file);
+        }
+
+        let inexact_stats = all_files.next().await.is_some();
+
+        let file_groups = file_group
+            .split_files(10)
+            .into_iter()
+            .map(|file_group| {
+                let items = file_group.iter().filter_map(|file| {
+                    let stats = file.statistics.as_ref()?;
+                    Some(stats.as_ref())
+                });
+                let statistics = Statistics::try_merge_iter(items, &file_schema)?.into();
+
+                Ok(file_group.with_statistics(Arc::new(statistics)))
+            })
+            .collect::<DataFusionResult<Vec<_>>>()?;
+
+        let summary_statistics = Statistics::try_merge_iter(
+            file_groups
+                .iter()
+                .filter_map(|file_group| file_group.file_statistics(None)),
+            &file_schema,
+        )?;
+
+        if inexact_stats {
+            summary_statistics.to_inexact();
+        }
+
+        todo!()
+    }
+
+    fn file_scan_config_builder(&self) -> FileScanConfigBuilder {
+        // Unwrap: We know this is a valid URL because we constructed it.
+        let object_store_url = ObjectStoreUrl::parse(self.url()).unwrap();
+        let file_schema = self.schema();
+        let file_source = self.format.file_source();
+        FileScanConfigBuilder::new(object_store_url, file_schema, file_source)
+    }
+
+    fn file_scan_config(
+        &self,
+        partitioned_file_lists: Vec<FileGroup>,
+        statistics: Statistics,
+        projection: Option<Vec<usize>>,
+        limit: Option<usize>,
+    ) -> FileScanConfig {
+        self.file_scan_config_builder()
+            .with_file_groups(partitioned_file_lists)
+            .with_statistics(statistics)
+            .with_projection(projection)
+            .with_limit(limit)
+            .build()
+    }
+
+    /// Take a list of files and convert it to the appropriate executor according to this file format.
+    fn create_physical_plan<'a>(
+        &'a self,
+        state: &'a dyn Session,
+        conf: FileScanConfig,
+    ) -> impl Future<Output = DataFusionResult<Arc<dyn ExecutionPlan>>> + 'a {
+        self.format.create_physical_plan(state, conf)
+    }
 }
