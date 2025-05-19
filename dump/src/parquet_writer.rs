@@ -109,9 +109,9 @@ pub async fn commit_metadata(
         .await?;
 
     // Notify that the dataset has been changed
-    let cdc_channel = common::stream_helpers::change_tracking_pg_channel(location_id);
-    debug!("notified change tracking channel {}", cdc_channel);
-    metadata_db.notify(&cdc_channel, "").await?;
+    let change_tracking_channel = common::stream_helpers::change_tracking_pg_channel(location_id);
+    debug!("notified change tracking channel {}", change_tracking_channel);
+    metadata_db.notify(&change_tracking_channel, "").await?;
 
     Ok(())
 }

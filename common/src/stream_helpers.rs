@@ -37,7 +37,7 @@ mod tests {
     use crate::query_context::parse_sql;
 
     #[test]
-    fn test_cdc_pg_channel() {
+    fn test_change_tracking_pg_channel() {
         let channel = change_tracking_pg_channel(12345);
         assert_eq!(channel, "change-tracking-physical-table-id:12345");
     }
