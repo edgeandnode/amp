@@ -22,7 +22,7 @@
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};
-use metadata_db::FileMetadataRow;
+use metadata_db::{FileId, FileMetadataRow, LocationId};
 use object_store::{path::Path, ObjectMeta};
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -42,9 +42,9 @@ pub struct ScannedRange {
 
 #[derive(Debug, Clone)]
 pub struct FileMetadata {
-    pub file_id: i64,
+    pub file_id: FileId,
     pub file_name: String,
-    pub location_id: i64,
+    pub location_id: LocationId,
     pub object_meta: ObjectMeta,
     pub scanned_range: ScannedRange,
 }
