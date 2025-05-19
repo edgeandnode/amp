@@ -71,7 +71,7 @@ impl RawDatasetWriter {
         if let Some((scanned_range, object_meta)) = scanned_range {
             let location_id = writer.table.location_id();
             let metadata_db = self.metadata_db.clone();
-            insert_scanned_range(scanned_range, object_meta, metadata_db, location_id).await?;
+            commit_metadata(scanned_range, object_meta, metadata_db, location_id).await?;
         }
 
         Ok(())
@@ -86,7 +86,7 @@ impl RawDatasetWriter {
             let scanned_range = writer.close().await?;
 
             if let Some((scanned_range, object_meta)) = scanned_range {
-                insert_scanned_range(scanned_range, object_meta, metadata_db, location_id).await?
+                commit_metadata(scanned_range, object_meta, metadata_db, location_id).await?
             }
         }
 
@@ -94,7 +94,7 @@ impl RawDatasetWriter {
     }
 }
 
-pub async fn insert_scanned_range(
+pub async fn commit_metadata(
     scanned_range: ScannedRange,
     ObjectMeta {
         size: object_size,

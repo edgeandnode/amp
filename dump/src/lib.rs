@@ -29,7 +29,7 @@ use futures::{future::try_join_all, TryFutureExt as _, TryStreamExt};
 use job_partition::JobPartition;
 use object_store::ObjectMeta;
 use parquet::{basic::Compression, file::properties::WriterProperties as ParquetWriterProperties};
-use parquet_writer::{insert_scanned_range, ParquetFileWriter};
+use parquet_writer::{commit_metadata, ParquetFileWriter};
 use thiserror::Error;
 use tracing::{info, instrument, warn};
 
@@ -217,12 +217,24 @@ async fn dump_sql_dataset(
         let dataset_name = dataset_name.clone();
 
         let handle = tokio::spawn(async move {
+            let physical_table = {
+                let mut tables = physical_dataset.tables();
+                tables.find(|t| t.table_name() == table).unwrap()
+            };
+
+            let src_ctx: Arc<QueryContext> = dataset_store
+                .clone()
+                .ctx_for_sql(&query, env.clone())
+                .await?
+                .into();
+            let plan = src_ctx.plan_sql(query.clone()).await?;
+            let is_incr = is_incremental(&plan)?;
             let (start, end) = match (start, end) {
                 (start, Some(end)) if start >= 0 && end >= 0 => {
                     (start as BlockNum, end as BlockNum)
                 }
                 _ => {
-                    match max_end_block(&query, dataset_store.clone(), env.clone()).await? {
+                    match max_end_block(&plan, src_ctx).await? {
                         Some(max_end_block) => {
                             resolve_relative_block_range(start, end, max_end_block)?
                         }
@@ -234,18 +246,6 @@ async fn dump_sql_dataset(
                     }
                 }
             };
-
-            let physical_table = {
-                let mut tables = physical_dataset.tables();
-                tables.find(|t| t.table_name() == table).unwrap()
-            };
-
-            let src_ctx = dataset_store
-                .clone()
-                .ctx_for_sql(&query, env.clone())
-                .await?;
-            let plan = src_ctx.plan_sql(query.clone()).await?;
-            let is_incr = is_incremental(&plan)?;
 
             if is_incr {
                 let ranges_to_scan = scanned_ranges_by_table[&table].complement(start, end);
@@ -327,7 +327,7 @@ async fn dump_sql_query(
         writer.write(&batch).await?;
     }
     let (scanned_range, object_meta) = writer.close(end).await?;
-    insert_scanned_range(
+    commit_metadata(
         scanned_range,
         object_meta,
         dataset_store.metadata_db.clone(),

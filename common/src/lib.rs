@@ -8,6 +8,7 @@ pub mod meta_tables;
 pub mod multirange;
 pub mod query_context;
 pub mod store;
+pub mod stream_helpers;
 pub mod tracing_helpers;
 
 #[cfg(test)]

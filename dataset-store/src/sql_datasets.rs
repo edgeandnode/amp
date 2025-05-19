@@ -1,12 +1,11 @@
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashSet},
     sync::Arc,
 };
 
 use common::{
-    multirange::MultiRange,
-    query_context::{parse_sql, Error as CoreError},
-    BlockNum, BoxError, Dataset, QueryContext, Table, BLOCK_NUM,
+    multirange::MultiRange, query_context::parse_sql, BlockNum, BoxError, Dataset, QueryContext,
+    Table, BLOCK_NUM,
 };
 use datafusion::{
     common::tree_node::{Transformed, TreeNode, TreeNodeRecursion},
@@ -14,9 +13,10 @@ use datafusion::{
     error::DataFusionError,
     execution::{runtime_env::RuntimeEnv, SendableRecordBatchStream},
     logical_expr::{col, lit, Filter, LogicalPlan, Sort, TableScan},
-    sql::{parser, resolve::resolve_table_references, TableReference},
+    sql::{parser, TableReference},
 };
 use futures::StreamExt as _;
+use metadata_db::LocationId;
 use object_store::ObjectMeta;
 use serde::Deserialize;
 use tracing::instrument;
@@ -104,23 +104,19 @@ pub(super) async fn dataset(
 }
 
 /// This will:
-/// - Plan the query against the configured datasets.
-/// - Validate that the query is materializable.
 /// - Validate that dependencies have synced the required block range.
 /// - Inject block range constraints into the plan.
 /// - Inject 'order by block_num' into the plan.
 /// - Execute the plan.
 #[instrument(skip_all, err)]
-pub async fn execute_query_for_range(
-    query: parser::Statement,
-    dataset_store: Arc<DatasetStore>,
-    env: Arc<RuntimeEnv>,
+pub async fn execute_plan_for_range(
+    plan: LogicalPlan,
+    ctx: &QueryContext,
     start: BlockNum,
     end: BlockNum,
 ) -> Result<SendableRecordBatchStream, BoxError> {
-    let (tables, _) =
-        resolve_table_references(&query, true).map_err(|e| CoreError::SqlParseError(e.into()))?;
-    let ctx = dataset_store.clone().ctx_for_sql(&query, env).await?;
+    let tables = extract_table_references_from_plan(&plan)?;
+
     // Validate dependency scanned ranges
     {
         let needed_range = MultiRange::from_ranges(vec![(start, end)]).unwrap();
@@ -137,7 +133,6 @@ pub async fn execute_query_for_range(
         }
     }
 
-    let plan = ctx.plan_sql(query).await?;
     let plan = {
         let plan = inject_block_range_constraints(plan, start, end)?;
         order_by_block_num(plan)
@@ -145,21 +140,68 @@ pub async fn execute_query_for_range(
     Ok(ctx.execute_plan(plan).await?)
 }
 
-/// The most recent block that has been synced for all tables in the query.
+/// This will:
+/// - Plan the query against the configured datasets.
+/// - Validate that the query is materializable.
+/// - Execute the plan for a specified range
 #[instrument(skip_all, err)]
-pub async fn max_end_block(
-    query: &parser::Statement,
+pub async fn execute_query_for_range(
+    query: parser::Statement,
     dataset_store: Arc<DatasetStore>,
     env: Arc<RuntimeEnv>,
+    start: BlockNum,
+    end: BlockNum,
+) -> Result<SendableRecordBatchStream, BoxError> {
+    let ctx = dataset_store.clone().ctx_for_sql(&query, env).await?;
+    let plan = ctx.plan_sql(query).await?;
+
+    execute_plan_for_range(plan, &ctx, start, end).await
+}
+
+// All physical tables locations that have been queried
+#[instrument(skip_all, err)]
+pub async fn queried_physical_tables(
+    plan: &LogicalPlan,
+    qc: &QueryContext,
+) -> Result<Vec<LocationId>, BoxError> {
+    let tables = extract_table_references_from_plan(&plan)?;
+
+    let locations: Vec<_> = tables
+        .into_iter()
+        .filter_map(|t| qc.get_table(&t).map(|t| t.location_id()))
+        .collect();
+
+    Ok(locations)
+}
+
+fn extract_table_references_from_plan(plan: &LogicalPlan) -> Result<Vec<TableReference>, BoxError> {
+    let mut refs = HashSet::new();
+
+    plan.apply(|node| {
+        match node {
+            LogicalPlan::TableScan(scan) => {
+                refs.insert(scan.table_name.clone());
+            }
+            _ => {}
+        }
+
+        Ok(TreeNodeRecursion::Continue)
+    })?;
+
+    Ok(refs.into_iter().collect())
+}
+
+/// The most recent block that has been synced for all tables in the plan.
+#[instrument(skip_all, err)]
+pub async fn max_end_block(
+    plan: &LogicalPlan,
+    ctx: Arc<QueryContext>,
 ) -> Result<Option<BlockNum>, BoxError> {
-    let (tables, _) =
-        resolve_table_references(&query, true).map_err(|e| CoreError::SqlParseError(e.into()))?;
+    let tables = extract_table_references_from_plan(&plan)?;
 
     if tables.is_empty() {
         return Ok(None);
     }
-
-    let ctx = Arc::new(dataset_store.clone().ctx_for_sql(&query, env).await?);
 
     let synced_block_for_table = move |ctx: Arc<QueryContext>, table: TableReference| async move {
         let table = ctx.get_table(&table).expect("table not found");
@@ -230,7 +272,7 @@ pub fn is_incremental(plan: &LogicalPlan) -> Result<bool, BoxError> {
                 err = unsupported(format!("{}", node.display()))
             }
 
-            // Definitely not supported and would be caught eleswhere.
+            // Definitely not supported and would be caught elsewhere.
             Dml(_) | Ddl(_) | Statement(_) | Copy(_) => {
                 err = unsupported(format!("{}", node.display()))
             }
