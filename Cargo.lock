@@ -1735,6 +1735,7 @@ dependencies = [
  "atty",
  "bytes",
  "cargo_metadata",
+ "chrono",
  "datafusion",
  "datafusion-proto",
  "figment",
