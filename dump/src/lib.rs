@@ -326,9 +326,10 @@ async fn dump_sql_query(
     while let Some(batch) = stream.try_next().await? {
         writer.write(&batch).await?;
     }
-    let scanned_range = writer.close(end).await?;
+    let (scanned_range, object_meta) = writer.close(end).await?;
     insert_scanned_range(
         scanned_range,
+        object_meta,
         dataset_store.metadata_db.clone(),
         physical_table.location_id(),
     )

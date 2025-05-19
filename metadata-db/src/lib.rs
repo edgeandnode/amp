@@ -425,21 +425,27 @@ impl MetadataDb {
         sqlx::query_as(query).bind(location_id).fetch(&self.pool)
     }
 
-    pub async fn insert_scanned_range(
+    pub async fn insert_file_metadata(
         &self,
         location_id: i64,
         file_name: String,
+        object_size: u64,
+        object_e_tag: Option<String>,
+        object_version: Option<String>,
         scanned_range: serde_json::Value,
     ) -> Result<(), Error> {
         let sql = "
-        INSERT INTO file_metadata (location_id, file_name, metadata)
-        VALUES ($1, $2, $3)
+        INSERT INTO file_metadata (location_id, file_name, object_size, object_e_tag, object_version, metadata)
+        VALUES ($1, $2, $3, $4, $5, $6)
         ON CONFLICT DO NOTHING
         ";
 
         sqlx::query(sql)
             .bind(location_id)
             .bind(file_name)
+            .bind(object_size as i64)
+            .bind(object_e_tag)
+            .bind(object_version)
             .bind(scanned_range)
             .execute(&self.pool)
             .await?;
