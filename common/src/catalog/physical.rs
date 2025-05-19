@@ -6,7 +6,11 @@ use datafusion::{
     parquet::arrow::async_reader::{AsyncFileReader, ParquetObjectReader},
     sql::TableReference,
 };
-use futures::{stream, TryStreamExt};
+use futures::{
+    future,
+    stream::{self, BoxStream},
+    StreamExt, TryStreamExt,
+};
 use metadata_db::{LocationId, MetadataDb, TableId};
 use object_store::{path::Path, ObjectMeta, ObjectStore};
 use url::Url;
@@ -14,7 +18,7 @@ use uuid::Uuid;
 
 use super::logical::Table;
 use crate::{
-    meta_tables::scanned_ranges::{self, ScannedRange},
+    meta_tables::scanned_ranges::{self, FileMetadata, ScannedRange},
     store::{infer_object_store, Store},
     BoxError, Dataset,
 };
@@ -375,6 +379,66 @@ impl PhysicalTable {
         &self.table
     }
 
+    pub fn stream_file_metadata(&self) -> BoxStream<'_, Result<FileMetadata, BoxError>> {
+        self.metadata_db
+            .stream_file_metadata(self.location_id)
+            .map(|row| row?.try_into())
+            .boxed()
+    }
+
+    pub fn stream_ranges(&self) -> BoxStream<'_, Result<(u64, u64), BoxError>> {
+        self.stream_file_metadata()
+            .map_ok(
+                |FileMetadata {
+                     scanned_range:
+                         ScannedRange {
+                             range_start,
+                             range_end,
+                             ..
+                         },
+                     ..
+                 }| { (range_start, range_end) },
+            )
+            .boxed()
+    }
+
+    pub fn stream_file_names(&self) -> BoxStream<'_, Result<String, BoxError>> {
+        self.stream_file_metadata()
+            .map_ok(|FileMetadata { file_name, .. }| file_name)
+            .boxed()
+    }
+
+    pub fn stream_parquet_files(
+        &self,
+        dump_only: bool,
+    ) -> BoxStream<'_, Result<(String, ObjectMeta), BoxError>> {
+        self.stream_file_metadata()
+            .try_filter_map(
+                move |FileMetadata {
+                          object_meta,
+                          file_name,
+                          ..
+                      }| {
+                    if !dump_only
+                        || file_name
+                            .trim_end_matches(".parquet")
+                            .parse::<u64>()
+                            .is_ok()
+                    {
+                        future::ok(Some((file_name, object_meta)))
+                    } else {
+                        future::ok(None)
+                    }
+                },
+            )
+            .boxed()
+    }
+
+    pub async fn file_names(&self) -> Result<Vec<String>, BoxError> {
+        let file_names = self.stream_file_names().try_collect().await?;
+        Ok(file_names)
+    }
+
     /// Return all parquet files for this table. If `dump_only` is `true`,
     /// only files of the form `<number>.parquet` will be returned. The
     /// result is a map from filename to object metadata.
@@ -382,34 +446,19 @@ impl PhysicalTable {
         &self,
         dump_only: bool,
     ) -> object_store::Result<BTreeMap<String, ObjectMeta>> {
-        // Check that this is a file written by a dump job, with name in the format:
-        // "<block_num>.parquet".
-        let is_dump_file = |filename: &str| {
-            filename.ends_with(".parquet")
-                && (!dump_only || filename.trim_end_matches(".parquet").parse::<u64>().is_ok())
-        };
-
-        let files = self
-            .object_store
-            .list(Some(&self.path))
-            .try_collect::<Vec<ObjectMeta>>()
-            .await?
-            .into_iter()
-            // Unwrap: A full object path always has a filename.
-            .map(|f| (f.location.filename().unwrap().to_string(), f))
-            .filter(|(filename, _)| is_dump_file(filename))
-            .collect();
-        Ok(files)
+        let parquet_files = self
+            .stream_parquet_files(dump_only)
+            .map_err(|source| object_store::Error::Generic {
+                store: "METADATA_DB",
+                source,
+            })
+            .try_collect()
+            .await?;
+        Ok(parquet_files)
     }
 
     pub async fn ranges(&self) -> Result<Vec<(u64, u64)>, BoxError> {
-        let mut ranges = vec![];
-        let mut range_stream = self.metadata_db.stream_ranges(self.location_id());
-
-        while let Some(range) = range_stream.try_next().await? {
-            let range = (range.0 as u64, range.1 as u64);
-            ranges.push(range);
-        }
+        let ranges = self.stream_ranges().try_collect().await?;
         Ok(ranges)
     }
 

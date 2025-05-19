@@ -21,52 +21,15 @@
 
 use std::collections::BTreeMap;
 
-use futures::{StreamExt, TryStreamExt};
-use metadata_db::MetadataDb;
+use chrono::{DateTime, Utc};
+use metadata_db::FileMetadataRow;
+use object_store::{path::Path, ObjectMeta};
 use serde::{Deserialize, Serialize};
+use url::Url;
 
 use crate::{multirange::MultiRange, BoxError, QueryContext, Timestamp};
 
 pub const METADATA_KEY: &'static str = "nozzle_metadata";
-
-pub async fn ranges_for_table(
-    location_id: i64,
-    metadata_db: &MetadataDb,
-) -> Result<Vec<(u64, u64)>, BoxError> {
-    metadata_db
-        .stream_ranges(location_id)
-        .map(|res| {
-            let (start, end) = res?;
-            Ok((start as u64, end as u64))
-        })
-        .try_collect::<Vec<_>>()
-        .await
-}
-
-pub async fn scanned_ranges_by_table(
-    ctx: &QueryContext,
-) -> Result<BTreeMap<String, MultiRange>, BoxError> {
-    let mut multirange_by_table = BTreeMap::default();
-
-    for table in ctx.catalog().all_tables() {
-        let ranges = ranges_for_table(table.location_id(), &table.metadata_db).await?;
-        let multi_range = MultiRange::from_ranges(ranges)?;
-        multirange_by_table.insert(table.table_name().to_string(), multi_range);
-    }
-
-    Ok(multirange_by_table)
-}
-
-pub async fn filenames_for_table(
-    metadata_db: &MetadataDb,
-    location_id: i64,
-) -> Result<Vec<String>, BoxError> {
-    let file_names = metadata_db
-        .stream_file_names(location_id)
-        .try_collect::<Vec<_>>()
-        .await?;
-    Ok(file_names)
-}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ScannedRange {
@@ -75,4 +38,69 @@ pub struct ScannedRange {
     pub range_end: u64,
     pub filename: String,
     pub created_at: Timestamp,
+}
+
+#[derive(Debug, Clone)]
+pub struct FileMetadata {
+    pub file_id: i64,
+    pub file_name: String,
+    pub location_id: i64,
+    pub object_meta: ObjectMeta,
+    pub scanned_range: ScannedRange,
+}
+
+impl TryFrom<FileMetadataRow> for FileMetadata {
+    type Error = BoxError;
+    fn try_from(
+        FileMetadataRow {
+            id: file_id,
+            location_id,
+            file_name,
+            url,
+            object_size,
+            object_e_tag: e_tag,
+            object_version: version,
+            metadata,
+        }: FileMetadataRow,
+    ) -> Result<Self, Self::Error> {
+        let url = Url::parse(&url)?.join(&file_name)?;
+        let location = Path::from_url_path(url.path())?;
+
+        let scanned_range: ScannedRange = serde_json::from_value(metadata)?;
+
+        let last_modified: DateTime<Utc> = scanned_range.created_at.try_into()?;
+
+        let size = object_size.unwrap_or_default() as u64;
+
+        let object_meta = ObjectMeta {
+            location,
+            last_modified,
+            size,
+            e_tag,
+            version,
+        };
+
+        Ok(Self {
+            file_id,
+            file_name,
+            location_id,
+            object_meta,
+            scanned_range,
+        })
+    }
+}
+
+pub async fn scanned_ranges_by_table(
+    ctx: &QueryContext,
+) -> Result<BTreeMap<String, MultiRange>, BoxError> {
+    let mut scanned_ranges = BTreeMap::new();
+
+    for table in ctx.catalog().all_tables() {
+        let key = table.table_name().to_string();
+        let ranges = table.ranges().await?;
+        let value = MultiRange::from_ranges(ranges)?;
+        scanned_ranges.insert(key, value);
+    }
+
+    Ok(scanned_ranges)
 }

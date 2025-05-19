@@ -14,7 +14,6 @@ use std::{
 use common::{
     catalog::physical::{Catalog, PhysicalDataset, PhysicalTable},
     config::Config,
-    meta_tables::scanned_ranges,
     multirange::MultiRange,
     parquet,
     parquet::basic::ZstdLevel,
@@ -28,7 +27,6 @@ use dataset_store::{
 };
 use futures::{future::try_join_all, TryFutureExt as _, TryStreamExt};
 use job_partition::JobPartition;
-use metadata_db::MetadataDb;
 use object_store::ObjectMeta;
 use parquet::{basic::Compression, file::properties::WriterProperties as ParquetWriterProperties};
 use parquet_writer::{insert_scanned_range, ParquetFileWriter};
@@ -51,10 +49,9 @@ pub async fn dump_dataset(
     let catalog = Catalog::new(vec![dataset.clone()]);
     let env = Arc::new(config.make_runtime_env()?);
     let ctx = Arc::new(QueryContext::for_catalog(catalog, env.clone())?);
-    let metadata_db = dataset_store.metadata_db.as_ref();
 
     // Ensure consistency before starting the dump procedure.
-    consistency_check(dataset, metadata_db).await?;
+    consistency_check(dataset).await?;
 
     // Query the scanned ranges, we might already have some ranges if this is not the first dump run
     // for this dataset.
@@ -398,38 +395,31 @@ enum ConsistencyCheckError {
 /// On fail: Return a `CorruptedDataset` error.
 async fn consistency_check(
     physical_dataset: &PhysicalDataset,
-    metadata_db: &MetadataDb,
 ) -> Result<(), ConsistencyCheckError> {
     // See also: scanned-ranges-consistency
 
-    use scanned_ranges::{filenames_for_table, ranges_for_table};
     use ConsistencyCheckError::CorruptedDataset;
 
     for table in physical_dataset.tables() {
         let dataset_name = table.catalog_schema().to_string();
         let tbl = table.table_id();
-        let location_id = table.location_id();
         // Check that `__scanned_ranges` does not contain overlapping ranges.
         {
-            let ranges = ranges_for_table(location_id, metadata_db)
-                .await
-                .map_err(|err| {
-                    ConsistencyCheckError::CorruptedDataset(
-                        table.catalog_schema().to_string(),
-                        err.into(),
-                    )
-                })?;
+            let ranges = table.ranges().await.map_err(|err| {
+                ConsistencyCheckError::CorruptedDataset(
+                    table.catalog_schema().to_string(),
+                    err.into(),
+                )
+            })?;
             if let Err(e) = MultiRange::from_ranges(ranges) {
                 return Err(CorruptedDataset(dataset_name, e.into()));
             }
         }
 
         let registered_files = {
-            let f = filenames_for_table(metadata_db, location_id)
-                .await
-                .map_err(|err| {
-                    ConsistencyCheckError::CorruptedDataset(tbl.dataset.to_string(), err.into())
-                })?;
+            let f = table.file_names().await.map_err(|err| {
+                ConsistencyCheckError::CorruptedDataset(tbl.dataset.to_string(), err.into())
+            })?;
             BTreeSet::from_iter(f.into_iter())
         };
 

@@ -4,7 +4,6 @@ use std::{
 };
 
 use common::{
-    meta_tables::scanned_ranges,
     multirange::MultiRange,
     query_context::{parse_sql, Error as CoreError},
     BlockNum, BoxError, Dataset, QueryContext, Table, BLOCK_NUM,
@@ -18,7 +17,6 @@ use datafusion::{
     sql::{parser, resolve::resolve_table_references, TableReference},
 };
 use futures::StreamExt as _;
-use metadata_db::TableId;
 use object_store::ObjectMeta;
 use serde::Deserialize;
 use tracing::instrument;
@@ -123,21 +121,14 @@ pub async fn execute_query_for_range(
     let (tables, _) =
         resolve_table_references(&query, true).map_err(|e| CoreError::SqlParseError(e.into()))?;
     let ctx = dataset_store.clone().ctx_for_sql(&query, env).await?;
-    let metadata_db = dataset_store.metadata_db.as_ref();
     // Validate dependency scanned ranges
     {
         let needed_range = MultiRange::from_ranges(vec![(start, end)]).unwrap();
         for table in tables {
-            let tbl = TableId {
-                // Unwrap: table references are of the partial form: [dataset].[table_name]
-                dataset: table.schema().unwrap(),
-                dataset_version: None,
-                table: table.table(),
-            };
-            let Some((_, location_id)) = metadata_db.get_active_location(tbl).await? else {
-                return Err(format!("table {}.{} not found", tbl.dataset, tbl.table).into());
-            };
-            let ranges = scanned_ranges::ranges_for_table(location_id, metadata_db).await?;
+            let physical_table = ctx
+                .get_table(&table)
+                .ok_or::<BoxError>(format!("table {} not found", table).into())?;
+            let ranges = physical_table.ranges().await?;
             let ranges = MultiRange::from_ranges(ranges)?;
             let synced = ranges.intersection(&needed_range) == needed_range;
             if !synced {
@@ -169,12 +160,10 @@ pub async fn max_end_block(
     }
 
     let ctx = Arc::new(dataset_store.clone().ctx_for_sql(&query, env).await?);
-    let metadata_db = &dataset_store.metadata_db;
 
     let synced_block_for_table = move |ctx: Arc<QueryContext>, table: TableReference| async move {
         let table = ctx.get_table(&table).expect("table not found");
-        let location_id = table.location_id();
-        let ranges = scanned_ranges::ranges_for_table(location_id, metadata_db.as_ref()).await?;
+        let ranges = table.ranges().await?;
         let ranges = MultiRange::from_ranges(ranges)?;
 
         // Take the end block of the earliest contiguous range as the "synced block"
