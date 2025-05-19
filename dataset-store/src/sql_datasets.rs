@@ -4,10 +4,8 @@ use std::{
 };
 
 use common::{
-    meta_tables::scanned_ranges,
-    multirange::MultiRange,
-    query_context::{parse_sql, Error as CoreError},
-    BlockNum, BoxError, Dataset, QueryContext, Table, BLOCK_NUM,
+    meta_tables::scanned_ranges, multirange::MultiRange, query_context::parse_sql, BlockNum,
+    BoxError, Dataset, QueryContext, Table, BLOCK_NUM,
 };
 use datafusion::{
     common::tree_node::{Transformed, TreeNode, TreeNodeRecursion},
@@ -15,7 +13,7 @@ use datafusion::{
     error::DataFusionError,
     execution::{runtime_env::RuntimeEnv, SendableRecordBatchStream},
     logical_expr::{col, lit, Filter, LogicalPlan, Sort, TableScan},
-    sql::{parser, resolve::resolve_table_references, TableReference},
+    sql::{parser, TableReference},
 };
 use futures::StreamExt as _;
 use metadata_db::{LocationId, MetadataDb, TableId};
@@ -244,7 +242,7 @@ fn extract_table_references_from_plan(plan: &LogicalPlan) -> Result<Vec<TableRef
 
 /// The most recent block that has been synced for all tables in the plan.
 #[instrument(skip_all, err)]
-pub async fn max_end_block_for_plan(
+pub async fn max_end_block(
     plan: &LogicalPlan,
     ctx: &QueryContext,
     metadata_db: &MetadataDb,
@@ -268,45 +266,6 @@ pub async fn max_end_block_for_plan(
     let mut end = synced_block_for_table(ctx, tables.next().unwrap()).await?;
     for table in tables {
         let next_end = synced_block_for_table(ctx, table).await?;
-        end = end.min(next_end);
-    }
-
-    Ok(end)
-}
-
-/// The most recent block that has been synced for all tables in the query.
-#[instrument(skip_all, err)]
-pub async fn max_end_block(
-    query: &parser::Statement,
-    dataset_store: Arc<DatasetStore>,
-    env: Arc<RuntimeEnv>,
-) -> Result<Option<BlockNum>, BoxError> {
-    let (tables, _) =
-        resolve_table_references(&query, true).map_err(|e| CoreError::SqlParseError(e.into()))?;
-
-    if tables.is_empty() {
-        return Ok(None);
-    }
-
-    let ctx = Arc::new(dataset_store.clone().ctx_for_sql(&query, env).await?);
-    let metadata_db = &dataset_store.metadata_db;
-
-    let synced_block_for_table = move |ctx: Arc<QueryContext>, table: TableReference| async move {
-        let table = ctx.get_table(&table).expect("table not found");
-        let location_id = table.location_id();
-        let ranges = scanned_ranges::ranges_for_table(location_id, metadata_db.as_ref()).await?;
-        let ranges = MultiRange::from_ranges(ranges)?;
-
-        // Take the end block of the earliest contiguous range as the "synced block"
-        Ok::<_, BoxError>(ranges.first().map(|r| r.1))
-    };
-
-    let mut tables = tables.into_iter();
-
-    // Unwrap: `tables` is not empty.
-    let mut end = synced_block_for_table(ctx.clone(), tables.next().unwrap()).await?;
-    for table in tables {
-        let next_end = synced_block_for_table(ctx.clone(), table).await?;
         end = end.min(next_end);
     }
 

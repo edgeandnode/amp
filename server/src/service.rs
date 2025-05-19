@@ -200,7 +200,7 @@ impl Service {
 
         // Start infinite stream
         let mut current_end_block =
-            dataset_store::sql_datasets::max_end_block_for_plan(&plan, &ctx, metadata_db_ref)
+            dataset_store::sql_datasets::max_end_block(&plan, &ctx, metadata_db_ref)
                 .await
                 .map_err(|e| Error::CoreError(CoreError::DatasetError(e)))?;
 
@@ -253,13 +253,10 @@ impl Service {
             let mut notifications = futures::stream::select_all(notifications);
 
             while let Some(Ok(_)) = notifications.next().await {
-                let end = dataset_store::sql_datasets::max_end_block_for_plan(
-                    &plan,
-                    ctx.as_ref(),
-                    &metadata_db,
-                )
-                .await
-                .unwrap();
+                let end =
+                    dataset_store::sql_datasets::max_end_block(&plan, ctx.as_ref(), &metadata_db)
+                        .await
+                        .unwrap();
 
                 let (start, end) = match (current_end_block, end) {
                     (Some(start), Some(end)) if end > start => (start + 1, end),

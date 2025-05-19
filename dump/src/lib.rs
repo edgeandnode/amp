@@ -220,24 +220,6 @@ async fn dump_sql_dataset(
         let dataset_name = dataset_name.clone();
 
         let handle = tokio::spawn(async move {
-            let (start, end) = match (start, end) {
-                (start, Some(end)) if start >= 0 && end >= 0 => {
-                    (start as BlockNum, end as BlockNum)
-                }
-                _ => {
-                    match max_end_block(&query, dataset_store.clone(), env.clone()).await? {
-                        Some(max_end_block) => {
-                            resolve_relative_block_range(start, end, max_end_block)?
-                        }
-                        None => {
-                            // If the dependencies have synced nothing, we have nothing to do.
-                            warn!("no blocks to dump for {table}, dependencies are empty");
-                            return Ok::<(), BoxError>(());
-                        }
-                    }
-                }
-            };
-
             let physical_table = {
                 let mut tables = physical_dataset.tables();
                 tables.find(|t| t.table_name() == table).unwrap()
@@ -249,6 +231,23 @@ async fn dump_sql_dataset(
                 .await?;
             let plan = src_ctx.plan_sql(query.clone()).await?;
             let is_incr = is_incremental(&plan)?;
+            let (start, end) = match (start, end) {
+                (start, Some(end)) if start >= 0 && end >= 0 => {
+                    (start as BlockNum, end as BlockNum)
+                }
+                _ => {
+                    match max_end_block(&plan, &src_ctx, &dataset_store.metadata_db).await? {
+                        Some(max_end_block) => {
+                            resolve_relative_block_range(start, end, max_end_block)?
+                        }
+                        None => {
+                            // If the dependencies have synced nothing, we have nothing to do.
+                            warn!("no blocks to dump for {table}, dependencies are empty");
+                            return Ok::<(), BoxError>(());
+                        }
+                    }
+                }
+            };
 
             if is_incr {
                 let ranges_to_scan = scanned_ranges_by_table[&table].complement(start, end);
