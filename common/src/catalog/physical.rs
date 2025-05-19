@@ -6,11 +6,7 @@ use datafusion::{
     parquet::arrow::async_reader::{AsyncFileReader, ParquetObjectReader},
     sql::TableReference,
 };
-use futures::{
-    future,
-    stream::{self, BoxStream},
-    StreamExt, TryStreamExt,
-};
+use futures::{future, stream, Stream, StreamExt, TryStreamExt};
 use metadata_db::{LocationId, MetadataDb, TableId};
 use object_store::{path::Path, ObjectMeta, ObjectStore};
 use url::Url;
@@ -168,6 +164,7 @@ impl PhysicalTable {
 
         let path = Path::from_url_path(url.path()).unwrap();
         let table_ref = TableReference::partial(dataset_name, table.name.as_str());
+
         let physical_table = Self {
             table: table.clone(),
             table_ref,
@@ -389,59 +386,55 @@ impl PhysicalTable {
         &self.table
     }
 
-    pub fn stream_file_metadata(&self) -> BoxStream<'_, Result<FileMetadata, BoxError>> {
+    pub fn stream_file_metadata<'a>(
+        &'a self,
+    ) -> impl Stream<Item = Result<FileMetadata, BoxError>> + 'a {
         self.metadata_db
             .stream_file_metadata(self.location_id)
             .map(|row| row?.try_into())
-            .boxed()
     }
 
-    pub fn stream_ranges(&self) -> BoxStream<'_, Result<(u64, u64), BoxError>> {
-        self.stream_file_metadata()
-            .map_ok(
-                |FileMetadata {
-                     scanned_range:
-                         ScannedRange {
-                             range_start,
-                             range_end,
-                             ..
-                         },
-                     ..
-                 }| { (range_start, range_end) },
-            )
-            .boxed()
+    pub fn stream_ranges<'a>(&'a self) -> impl Stream<Item = Result<(u64, u64), BoxError>> + 'a {
+        self.stream_file_metadata().map_ok(
+            |FileMetadata {
+                 scanned_range:
+                     ScannedRange {
+                         range_start,
+                         range_end,
+                         ..
+                     },
+                 ..
+             }| { (range_start, range_end) },
+        )
     }
 
-    pub fn stream_file_names(&self) -> BoxStream<'_, Result<String, BoxError>> {
+    pub fn stream_file_names<'a>(&'a self) -> impl Stream<Item = Result<String, BoxError>> + 'a {
         self.stream_file_metadata()
             .map_ok(|FileMetadata { file_name, .. }| file_name)
-            .boxed()
     }
 
-    pub fn stream_parquet_files(
-        &self,
+    pub fn stream_parquet_files<'a>(
+        &'a self,
         dump_only: bool,
-    ) -> BoxStream<'_, Result<(String, ObjectMeta), BoxError>> {
-        self.stream_file_metadata()
-            .try_filter_map(
-                move |FileMetadata {
-                          object_meta,
-                          file_name,
-                          ..
-                      }| {
-                    if !dump_only
-                        || file_name
-                            .trim_end_matches(".parquet")
-                            .parse::<u64>()
-                            .is_ok()
-                    {
-                        future::ok(Some((file_name, object_meta)))
-                    } else {
-                        future::ok(None)
-                    }
-                },
-            )
-            .boxed()
+    ) -> impl Stream<Item = Result<(String, ObjectMeta), BoxError>> + 'a {
+        self.stream_file_metadata().try_filter_map(
+            move |FileMetadata {
+                      object_meta,
+                      file_name,
+                      ..
+                  }| {
+                if !dump_only
+                    || file_name
+                        .trim_end_matches(".parquet")
+                        .parse::<u64>()
+                        .is_ok()
+                {
+                    future::ok(Some((file_name, object_meta)))
+                } else {
+                    future::ok(None)
+                }
+            },
+        )
     }
 
     pub async fn file_names(&self) -> Result<Vec<String>, BoxError> {
