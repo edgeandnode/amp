@@ -21,6 +21,7 @@ use std::{
 use arrow::{array::FixedSizeBinaryArray, datatypes::DataType};
 pub use arrow_helpers::*;
 pub use catalog::logical::*;
+use chrono::{DateTime, Utc};
 use datafusion::arrow::{
     array::{ArrayRef, AsArray as _, RecordBatch},
     datatypes::{TimeUnit, UInt64Type, DECIMAL128_MAX_PRECISION},
@@ -61,6 +62,22 @@ impl Timestamp {
             SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap(),
+        )
+    }
+}
+
+impl TryFrom<Timestamp> for DateTime<Utc> {
+    type Error = BoxError;
+    fn try_from(ts: Timestamp) -> Result<Self, Self::Error> {
+        let secs = ts.0.as_secs() as i64;
+        let nsecs = ts.0.subsec_nanos();
+        DateTime::<Utc>::from_timestamp(secs, nsecs).ok_or(
+            format!(
+                "failed to convert Timestamp to DateTime: (secs: {}, nsecs: {})",
+                ts.0.as_secs(),
+                ts.0.subsec_nanos()
+            )
+            .into(),
         )
     }
 }
