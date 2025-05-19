@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, sync::Arc};
 use common::{
     arrow::array::RecordBatch,
     catalog::physical::PhysicalTable,
-    meta_tables::scanned_ranges::{self, ScannedRange},
+    metadata::scanned_ranges::{self, ScannedRange},
     multirange::MultiRange,
     parquet,
     parquet::{errors::ParquetError, format::KeyValue},

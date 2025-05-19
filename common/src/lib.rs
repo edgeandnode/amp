@@ -4,7 +4,7 @@ pub mod catalog;
 pub mod config;
 pub mod evm;
 pub mod manifest;
-pub mod meta_tables;
+pub mod metadata;
 pub mod multirange;
 pub mod query_context;
 pub mod store;

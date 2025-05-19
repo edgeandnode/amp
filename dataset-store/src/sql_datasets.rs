@@ -4,8 +4,8 @@ use std::{
 };
 
 use common::{
-    meta_tables::scanned_ranges, multirange::MultiRange, query_context::parse_sql, BlockNum,
-    BoxError, Dataset, QueryContext, Table, BLOCK_NUM,
+    metadata::scanned_ranges, multirange::MultiRange, query_context::parse_sql, BlockNum, BoxError,
+    Dataset, QueryContext, Table, BLOCK_NUM,
 };
 use datafusion::{
     common::tree_node::{Transformed, TreeNode, TreeNodeRecursion},

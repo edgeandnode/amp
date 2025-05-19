@@ -152,7 +152,7 @@ impl SnapshotContext {
     }
 
     async fn check_scanned_range_eq(&self, blessed: &SnapshotContext) -> Result<(), BoxError> {
-        use common::meta_tables::scanned_ranges::scanned_ranges_by_table;
+        use common::metadata::scanned_ranges::scanned_ranges_by_table;
 
         let blessed_scanned_ranges = scanned_ranges_by_table(&blessed.ctx).await?;
 

@@ -14,7 +14,7 @@ use std::{
 use common::{
     catalog::physical::{Catalog, PhysicalDataset, PhysicalTable},
     config::Config,
-    meta_tables::scanned_ranges,
+    metadata::scanned_ranges,
     multirange::MultiRange,
     parquet,
     parquet::basic::ZstdLevel,
@@ -46,7 +46,7 @@ pub async fn dump_dataset(
     start: i64,
     end_block: Option<i64>,
 ) -> Result<(), BoxError> {
-    use common::meta_tables::scanned_ranges::scanned_ranges_by_table;
+    use common::metadata::scanned_ranges::scanned_ranges_by_table;
 
     let catalog = Catalog::new(vec![dataset.clone()]);
     let env = Arc::new(config.make_runtime_env()?);

@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 use super::logical::Table;
 use crate::{
-    meta_tables::scanned_ranges::{self, ScannedRange},
+    metadata::scanned_ranges::{self, ScannedRange},
     store::{infer_object_store, Store},
     BoxError, Dataset,
 };
