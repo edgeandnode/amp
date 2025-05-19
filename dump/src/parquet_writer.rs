@@ -1,16 +1,19 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::{collections::BTreeMap, io::Read, sync::Arc};
 
 use common::{
     arrow::array::RecordBatch,
     catalog::physical::PhysicalTable,
     meta_tables::scanned_ranges::{self, ScannedRange},
     multirange::MultiRange,
-    parquet,
-    parquet::{errors::ParquetError, format::KeyValue},
+    parquet::{
+        self, errors::ParquetError, file::metadata::ParquetMetaDataReader, format::KeyValue,
+    },
     BlockNum, BoxError, QueryContext, TableRows, Timestamp,
 };
-use metadata_db::MetadataDb;
-use object_store::{buffered::BufWriter, path::Path, ObjectMeta};
+use metadata_db::{LocationId, MetadataDb, NumRows, SizeHint};
+use object_store::{
+    buffered::BufWriter, path::Path, GetOptions, GetRange, GetResult, GetResultPayload, ObjectMeta,
+};
 use parquet::{
     arrow::AsyncArrowWriter, file::properties::WriterProperties as ParquetWriterProperties,
 };
@@ -68,10 +71,18 @@ impl RawDatasetWriter {
 
         let writer = self.writers.get_mut(table_name).unwrap();
         let scanned_range = writer.write(&table_rows).await?;
-        if let Some((scanned_range, object_meta)) = scanned_range {
+        if let Some((scanned_range, object_meta, num_rows, size_hint)) = scanned_range {
             let location_id = writer.table.location_id();
             let metadata_db = self.metadata_db.clone();
-            insert_scanned_range(scanned_range, object_meta, metadata_db, location_id).await?;
+            insert_scanned_range(
+                scanned_range,
+                object_meta,
+                num_rows,
+                size_hint,
+                metadata_db,
+                location_id,
+            )
+            .await?;
         }
 
         Ok(())
@@ -85,8 +96,17 @@ impl RawDatasetWriter {
 
             let scanned_range = writer.close().await?;
 
-            if let Some((scanned_range, object_meta)) = scanned_range {
-                insert_scanned_range(scanned_range, object_meta, metadata_db, location_id).await?
+            if let Some((scanned_range, object_meta, num_rows, metadata_size_hint)) = scanned_range
+            {
+                insert_scanned_range(
+                    scanned_range,
+                    object_meta,
+                    num_rows,
+                    metadata_size_hint,
+                    metadata_db,
+                    location_id,
+                )
+                .await?
             }
         }
 
@@ -102,8 +122,10 @@ pub async fn insert_scanned_range(
         version: object_version,
         ..
     }: ObjectMeta,
+    num_rows: NumRows,
+    metadata_size_hint: i32,
     metadata_db: Arc<MetadataDb>,
-    location_id: i64,
+    location_id: LocationId,
 ) -> Result<(), BoxError> {
     let file_name = scanned_range.filename.clone();
     let scanned_range = serde_json::to_value(scanned_range)?;
@@ -115,6 +137,8 @@ pub async fn insert_scanned_range(
             object_size,
             object_e_tag,
             object_version,
+            num_rows,
+            metadata_size_hint,
             scanned_range,
         )
         .await?)
@@ -166,7 +190,7 @@ impl TableWriter {
     pub async fn write(
         &mut self,
         table_rows: &TableRows,
-    ) -> Result<Option<(ScannedRange, ObjectMeta)>, BoxError> {
+    ) -> Result<Option<(ScannedRange, ObjectMeta, NumRows, SizeHint)>, BoxError> {
         assert_eq!(table_rows.table.name, self.table.table_name());
 
         let mut file_metadata = None;
@@ -252,7 +276,7 @@ impl TableWriter {
         }
     }
 
-    async fn close(self) -> Result<Option<(ScannedRange, ObjectMeta)>, BoxError> {
+    async fn close(self) -> Result<Option<(ScannedRange, ObjectMeta, NumRows, i32)>, BoxError> {
         // We should be closing the last range.
         assert!(self.ranges_to_write.is_empty());
 
@@ -305,7 +329,10 @@ impl ParquetFileWriter {
     }
 
     #[must_use]
-    pub async fn close(mut self, end: BlockNum) -> Result<(ScannedRange, ObjectMeta), BoxError> {
+    pub async fn close(
+        mut self,
+        end: BlockNum,
+    ) -> Result<(ScannedRange, ObjectMeta, NumRows, SizeHint), BoxError> {
         if end < self.start {
             return Err(
                 format!("end block {} must be after start block {}", end, self.start).into(),
@@ -333,12 +360,38 @@ impl ParquetFileWriter {
         let kv_metadata = KeyValue::new(scanned_range_key, scanned_range_value);
 
         self.writer.append_key_value_metadata(kv_metadata);
-        self.writer.close().await?;
+        let file_metadata = self.writer.close().await?;
 
         let location = Path::from_url_path(self.file_url.path())?;
-        let object_meta = self.table.object_store().head(&location).await?;
+        let get_range = GetRange::Suffix(8);
+        let mut options = GetOptions::default();
+        options.range = Some(get_range);
+        let GetResult {
+            payload,
+            meta: object_meta,
+            ..
+        } = self
+            .table
+            .object_store()
+            .get_opts(&location, options)
+            .await?;
+        let hint = match payload {
+            GetResultPayload::File(mut file, ..) => {
+                let mut buf = [0; 8];
+                file.read_exact(&mut buf)
+                    .map_err(|e| format!("failed to read parquet footer tail: {e}"))?;
+                ParquetMetaDataReader::decode_footer_tail(&buf)
+                    .map_err(|e| format!("failed to decode parquet footer tail: {e}"))?
+                    .metadata_length() as SizeHint
+            }
+            _ => {
+                return Err("unexpected payload type".into());
+            }
+        };
 
-        Ok((scanned_range, object_meta))
+        let num_rows = file_metadata.num_rows;
+
+        Ok((scanned_range, object_meta, num_rows, hint))
     }
 
     // This is calculate as:

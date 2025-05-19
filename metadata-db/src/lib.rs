@@ -20,10 +20,15 @@ const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
 /// schedule new jobs only on active workers.
 const ACTIVE_INTERVAL_SECS: i32 = 5;
 
-/// Row ids, always non-negative.
+// Row ids, always non-negative.
 pub type FileId = i64;
 pub type LocationId = i64;
 pub type JobDatabaseId = i64;
+
+/// Number of rows in a file, always non-negative if Some.
+pub type NumRows = i64;
+/// Length in bytes of file metadata
+pub type SizeHint = i32;
 
 #[derive(Debug, FromRow)]
 pub struct FileMetadataRow {
@@ -41,6 +46,10 @@ pub struct FileMetadataRow {
     pub object_e_tag: Option<String>,
     /// file_metadata.object_version
     pub object_version: Option<String>,
+    /// file_metadata.num_rows
+    pub num_rows: NumRows,
+    /// file_metadata.size_hint
+    pub size_hint: SizeHint,
     /// file_metadata.metadata
     pub metadata: serde_json::Value,
 }
@@ -416,6 +425,8 @@ impl MetadataDb {
              , fm.object_size
              , fm.object_e_tag
              , fm.object_version
+             , fm.num_rows
+             , fm.size_hint
              , fm.metadata
           FROM file_metadata fm
           JOIN locations l ON fm.location_id = l.id
@@ -432,11 +443,13 @@ impl MetadataDb {
         object_size: u64,
         object_e_tag: Option<String>,
         object_version: Option<String>,
+        num_rows: NumRows,
+        size_hint: SizeHint,
         scanned_range: serde_json::Value,
     ) -> Result<(), Error> {
         let sql = "
-        INSERT INTO file_metadata (location_id, file_name, object_size, object_e_tag, object_version, metadata)
-        VALUES ($1, $2, $3, $4, $5, $6)
+        INSERT INTO file_metadata (location_id, file_name, object_size, object_e_tag, object_version, num_rows, size_hint, metadata)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         ON CONFLICT DO NOTHING
         ";
 
@@ -446,6 +459,8 @@ impl MetadataDb {
             .bind(object_size as i64)
             .bind(object_e_tag)
             .bind(object_version)
+            .bind(num_rows)
+            .bind(size_hint)
             .bind(scanned_range)
             .execute(&self.pool)
             .await?;

@@ -22,7 +22,7 @@
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};
-use metadata_db::{FileId, FileMetadataRow, LocationId};
+use metadata_db::{FileId, FileMetadataRow, LocationId, NumRows, SizeHint};
 use object_store::{path::Path, ObjectMeta};
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -46,6 +46,8 @@ pub struct FileMetadata {
     pub file_name: String,
     pub location_id: LocationId,
     pub object_meta: ObjectMeta,
+    pub num_rows: NumRows,
+    pub size_hint: SizeHint,
     pub scanned_range: ScannedRange,
 }
 
@@ -60,7 +62,10 @@ impl TryFrom<FileMetadataRow> for FileMetadata {
             object_size,
             object_e_tag: e_tag,
             object_version: version,
+            num_rows,
+            size_hint,
             metadata,
+            ..
         }: FileMetadataRow,
     ) -> Result<Self, Self::Error> {
         let url = Url::parse(&url)?.join(&file_name)?;
@@ -85,6 +90,8 @@ impl TryFrom<FileMetadataRow> for FileMetadata {
             file_name,
             location_id,
             object_meta,
+            num_rows,
+            size_hint,
             scanned_range,
         })
     }
