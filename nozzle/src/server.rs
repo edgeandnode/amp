@@ -42,7 +42,11 @@ pub async fn run(
     );
 
     if dev {
-        let worker = Worker::new(config.clone(), metadata_db.clone(), "worker".into());
+        let worker = Worker::new(
+            config.clone(),
+            metadata_db.clone(),
+            "worker".parse().expect("Invalid worker ID"),
+        );
         tokio::spawn(async move {
             if let Err(err) = worker.run().await {
                 tracing::error!("{err}");
