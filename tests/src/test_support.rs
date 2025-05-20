@@ -1,4 +1,4 @@
-use std::{io::ErrorKind, sync::Arc};
+use std::{io::ErrorKind, sync::Arc, time::Duration};
 
 use arrow_flight::{
     flight_service_client::FlightServiceClient, sql::client::FlightSqlServiceClient,
@@ -22,9 +22,10 @@ use dump::{dump_dataset, parquet_opts};
 use figment::providers::Format as _;
 use fs_err as fs;
 use futures::{stream::TryStreamExt, StreamExt as _};
-use metadata_db::MetadataDb;
+use metadata_db::{MetadataDb, KEEP_TEMP_DIRS};
 use object_store::path::Path;
 use tempfile::TempDir;
+use tokio::time;
 use tracing::{info, instrument};
 
 /// Assume the `cargo test` command is run either from the workspace root or from the crate root.
@@ -191,6 +192,14 @@ impl SnapshotContext {
     }
 }
 
+pub struct DumpTestDatasetCommand {
+    pub(crate) dataset_name: String,
+    pub(crate) dependencies: Vec<String>,
+    pub(crate) start: u64,
+    pub(crate) end: u64,
+    pub(crate) n_jobs: u16,
+}
+
 #[instrument(skip_all)]
 /// Clears the dataset directory, if it exists, before dumping.
 async fn redump(
@@ -213,6 +222,52 @@ async fn redump(
 
     datasets
         .push(redump_dataset(dataset_name, &*config, &dataset_store, start, end, n_jobs).await?);
+    let catalog = Catalog::new(datasets);
+    Ok(catalog)
+}
+
+#[instrument(skip_all)]
+/// Clears the dataset directory if specified, before dumping.
+async fn dump(
+    config: Arc<Config>,
+    dataset_name: &str,
+    dependencies: Vec<&str>,
+    start: u64,
+    end: u64,
+    n_jobs: u16,
+    clear: bool,
+) -> Result<Catalog, BoxError> {
+    let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
+    let dataset_store = DatasetStore::new(config.clone(), metadata_db);
+    let mut datasets = Vec::new();
+    // First dump dependencies, then main dataset
+    for dataset_name in dependencies {
+        datasets.push(
+            dump_test_dataset(
+                dataset_name,
+                &*config,
+                &dataset_store,
+                start,
+                end,
+                n_jobs,
+                clear,
+            )
+            .await?,
+        );
+    }
+
+    datasets.push(
+        dump_test_dataset(
+            dataset_name,
+            &*config,
+            &dataset_store,
+            start,
+            end,
+            n_jobs,
+            clear,
+        )
+        .await?,
+    );
     let catalog = Catalog::new(datasets);
     Ok(catalog)
 }
@@ -273,6 +328,73 @@ async fn redump_dataset(
             let physical_table =
                 PhysicalTable::next_revision(table, &data_store, dataset_name, metadata_db.clone())
                     .await?;
+            tables.push(physical_table);
+        }
+        PhysicalDataset::new(dataset, tables)
+    };
+
+    dump_dataset(
+        &dataset,
+        dataset_store,
+        config,
+        n_jobs,
+        partition_size,
+        input_batch_block_size,
+        &parquet_opts,
+        start as i64,
+        Some(end as i64),
+    )
+    .await?;
+
+    Ok(dataset)
+}
+
+#[instrument(skip_all)]
+async fn dump_test_dataset(
+    dataset_name: &str,
+    config: &Config,
+    dataset_store: &Arc<DatasetStore>,
+    start: u64,
+    end: u64,
+    n_jobs: u16,
+    clear: bool,
+) -> Result<PhysicalDataset, BoxError> {
+    let partition_size = 1024 * 1024; // 100 kB
+    let input_batch_block_size = 100_000;
+    let compression = Compression::ZSTD(ZstdLevel::try_new(1).unwrap());
+
+    // Disable bloom filters, as they bloat the test files and are not tested themselves.
+    let parquet_opts = parquet_opts(compression, false);
+
+    if clear {
+        clear_dataset(config, dataset_name).await?;
+    }
+    let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
+    let data_store = config.data_store.clone();
+    let dataset = {
+        let dataset = dataset_store.load_dataset(dataset_name).await?.dataset;
+        let mut tables = Vec::new();
+        for table in dataset.tables() {
+            let physical_table = match PhysicalTable::get_or_restore_active_revision(
+                table,
+                dataset_name,
+                data_store.clone(),
+                metadata_db.clone(),
+            )
+            .await?
+            {
+                Some(physical_table) if !clear => physical_table,
+                _ => {
+                    PhysicalTable::next_revision(
+                        table,
+                        &data_store,
+                        dataset_name,
+                        metadata_db.clone(),
+                    )
+                    .await?
+                }
+            };
+
             tables.push(physical_table);
         }
         PhysicalDataset::new(dataset, tables)
@@ -407,6 +529,112 @@ pub async fn run_query_on_fresh_server(query: &str) -> Result<serde_json::Value,
     while let Some(batch) = batches.next().await {
         let batch = batch?;
         writer.write(&batch)?;
+    }
+
+    shutdown_tx.send(()).unwrap();
+
+    writer.finish()?;
+    serde_json::from_slice(&buf).map_err(Into::into)
+}
+
+pub async fn run_streaming_query_on_fresh_server(
+    query: &str,
+    at_least_rows: usize,
+    max_duration: Duration,
+    initial_dump: Option<DumpTestDatasetCommand>,
+    dumps_on_running_server: Vec<DumpTestDatasetCommand>,
+) -> Result<serde_json::Value, BoxError> {
+    use figment::providers::Json;
+
+    check_provider_file("firehose_eth_mainnet.toml").await;
+
+    let temp_dir = tempfile::Builder::new().keep(*KEEP_TEMP_DIRS).tempdir()?;
+    let path = temp_dir.path();
+
+    let config_override = Some(Json::string(&format!(
+        r#"{{ "data_dir": "{}" }}"#,
+        path.display()
+    )));
+
+    // Start the nozzle server.
+    let config = load_test_config(config_override).await?;
+    let metadata_db = config.clone().metadata_db().await?.into();
+    let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel(1);
+    let (bound, server) =
+        nozzle::server::run(config.clone(), metadata_db, false, false, shutdown_rx).await?;
+    tokio::spawn(async move {
+        server.await.unwrap();
+    });
+
+    if let Some(initial_dump) = initial_dump {
+        let dependencies: Vec<&str> = initial_dump
+            .dependencies
+            .iter()
+            .map(|s| s.as_str())
+            .collect();
+        let _ = dump(
+            config.clone(),
+            &initial_dump.dataset_name,
+            dependencies,
+            initial_dump.start,
+            initial_dump.end,
+            initial_dump.n_jobs,
+            true,
+        )
+        .await;
+    }
+
+    let client = FlightServiceClient::connect(format!("grpc://{}", bound.flight_addr)).await?;
+    let mut client = FlightSqlServiceClient::new_from_inner(client);
+
+    // Execute the SQL query and collect the results.
+    let mut info = client.execute(query.to_string(), None).await?;
+    let mut batches = client
+        .do_get(info.endpoint[0].ticket.take().unwrap())
+        .await?;
+    let mut buf: Vec<u8> = Default::default();
+    let mut writer = arrow::json::writer::ArrayWriter::new(&mut buf);
+    let mut rows_returned: usize = 0;
+
+    tokio::spawn(async move {
+        for dump_command in dumps_on_running_server {
+            let dependencies: Vec<&str> = dump_command
+                .dependencies
+                .iter()
+                .map(|s| s.as_str())
+                .collect();
+            let _ = dump(
+                config.clone(),
+                &dump_command.dataset_name,
+                dependencies,
+                dump_command.start,
+                dump_command.end,
+                dump_command.n_jobs,
+                false,
+            )
+            .await;
+        }
+    });
+
+    loop {
+        match time::timeout(max_duration, batches.next()).await {
+            Ok(Some(batch)) => {
+                let batch = batch?;
+                writer.write(&batch)?;
+
+                // Stop streaming if we have enough rows taken
+                rows_returned += batch.num_rows();
+                if rows_returned >= at_least_rows {
+                    break;
+                }
+            }
+            Ok(None) => {
+                break;
+            }
+            Err(_) => {
+                break;
+            }
+        }
     }
 
     shutdown_tx.send(()).unwrap();

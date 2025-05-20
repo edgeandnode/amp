@@ -1,10 +1,12 @@
+use std::time::Duration;
+
 use common::tracing_helpers;
 use metadata_db::KEEP_TEMP_DIRS;
 use pretty_assertions::assert_str_eq;
 
 use crate::test_support::{
-    check_blocks, check_provider_file, load_sql_tests, run_query_on_fresh_server, SnapshotContext,
-    SqlTestResult,
+    check_blocks, check_provider_file, load_sql_tests, run_query_on_fresh_server,
+    run_streaming_query_on_fresh_server, DumpTestDatasetCommand, SnapshotContext, SqlTestResult,
 };
 
 #[tokio::test]
@@ -119,4 +121,43 @@ async fn sql_tests() {
             }
         }
     }
+}
+
+#[tokio::test]
+async fn streaming_tests() {
+    let sql =
+        "SELECT block_num FROM eth_firehose.blocks WHERE block_num >= 8 SETTINGS stream = true";
+    let initial_dump = DumpTestDatasetCommand {
+        dataset_name: "eth_firehose".to_string(),
+        dependencies: vec![],
+        start: 0,
+        end: 5,
+        n_jobs: 1,
+    };
+    let dumps_on_running_server = vec![
+        DumpTestDatasetCommand {
+            dataset_name: "eth_firehose".to_string(),
+            dependencies: vec![],
+            start: 6,
+            end: 7,
+            n_jobs: 1,
+        },
+        DumpTestDatasetCommand {
+            dataset_name: "eth_firehose".to_string(),
+            dependencies: vec![],
+            start: 8,
+            end: 10,
+            n_jobs: 1,
+        },
+    ];
+    let results = run_streaming_query_on_fresh_server(
+        sql,
+        2,
+        Duration::from_secs(60),
+        Some(initial_dump),
+        dumps_on_running_server,
+    )
+    .await;
+
+    println!("{:?}", results);
 }
