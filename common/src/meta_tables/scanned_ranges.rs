@@ -21,7 +21,6 @@
 
 use std::collections::BTreeMap;
 
-use chrono::{DateTime, Utc};
 use metadata_db::{FileId, FileMetadataRow, LocationId};
 use object_store::{path::Path, ObjectMeta};
 use serde::{Deserialize, Serialize};
@@ -68,13 +67,11 @@ impl TryFrom<FileMetadataRow> for FileMetadata {
 
         let scanned_range: ScannedRange = serde_json::from_value(metadata)?;
 
-        let last_modified: DateTime<Utc> = scanned_range.created_at.try_into()?;
-
         let size = object_size.unwrap_or_default() as u64;
 
         let object_meta = ObjectMeta {
             location,
-            last_modified,
+            last_modified: Default::default(),
             size,
             e_tag,
             version,
