@@ -5,8 +5,7 @@ use metadata_db::KEEP_TEMP_DIRS;
 
 use crate::test_support::{
     assert_sql_test_result, check_blocks, check_provider_file, load_sql_tests,
-    run_query_on_fresh_server, DumpTestDatasetCommand, SnapshotContext,
-    StreamingExecutionOptions,
+    run_query_on_fresh_server, DumpTestDatasetCommand, SnapshotContext, StreamingExecutionOptions,
 };
 
 #[tokio::test]
