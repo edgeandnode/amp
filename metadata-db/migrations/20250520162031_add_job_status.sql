@@ -1,3 +1,5 @@
--- Add status column to jobs table. See JobStatus enum
+-- Add status and timestamps columns to jobs table. 
 ALTER TABLE jobs
-ADD COLUMN status TEXT NOT NULL DEFAULT 'SCHEDULED'; 
+ADD COLUMN status TEXT NOT NULL DEFAULT 'SCHEDULED', -- See JobStatus enum
+ADD COLUMN created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ADD COLUMN updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP; 
