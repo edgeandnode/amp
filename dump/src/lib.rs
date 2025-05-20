@@ -140,7 +140,7 @@ async fn dump_raw_dataset(
         }
     };
 
-    // Use the intersection of the block ranges for all tables, only considering ranges scored for
+    // Use the intersection of the block ranges for all tables, only considering ranges scanned for
     // all tables.
     let block_ranges = {
         let mut block_ranges = block_ranges_by_table.clone().into_iter().map(|(_, r)| r);
