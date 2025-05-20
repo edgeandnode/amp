@@ -40,7 +40,9 @@ use url::Url;
 use crate::{
     arrow, attestation,
     catalog::physical::{Catalog, PhysicalTable},
-    evm::udfs::{EvmDecode, EvmDecodeFunctionData, EvmEncodeParams, EvmEncodeType, EvmTopic},
+    evm::udfs::{
+        EvmDecode, EvmDecodeParams, EvmDecodeType, EvmEncodeParams, EvmEncodeType, EvmTopic,
+    },
     stream_helpers::is_streaming,
     BoxError, Table,
 };
@@ -492,10 +494,10 @@ fn udfs() -> Vec<ScalarUDF> {
     vec![
         EvmDecode::new().into(),
         EvmTopic::new().into(),
-        EvmDecodeFunctionData::evm_decode_params().into(),
-        EvmDecodeFunctionData::evm_decode_results().into(),
         EvmEncodeParams::new().into(),
+        EvmDecodeParams::new().into(),
         EvmEncodeType::new().into(),
+        EvmDecodeType::new().into(),
     ]
 }
 
