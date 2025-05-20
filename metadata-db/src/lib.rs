@@ -448,7 +448,7 @@ impl MetadataDb {
     }
 
     #[instrument(skip(self))]
-    /// Produces a stream of all scanned block ranges for a given tbl catalogued by the MetadataDb
+    /// Produces a stream of all block ranges for a given tbl catalogued by the MetadataDb
     pub fn stream_ranges<'a>(
         &'a self,
         location_id: i64,
@@ -464,11 +464,11 @@ impl MetadataDb {
         sqlx::query_as(sql).bind(location_id).fetch(&self.pool)
     }
 
-    pub async fn insert_scanned_range(
+    pub async fn insert_metadata(
         &self,
         location_id: i64,
         file_name: String,
-        scanned_range: serde_json::Value,
+        metadata: serde_json::Value,
     ) -> Result<(), Error> {
         let sql = "
         INSERT INTO file_metadata (location_id, file_name, metadata)
@@ -479,7 +479,7 @@ impl MetadataDb {
         sqlx::query(sql)
             .bind(location_id)
             .bind(file_name)
-            .bind(scanned_range)
+            .bind(metadata)
             .execute(&self.pool)
             .await?;
 

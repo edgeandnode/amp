@@ -12,6 +12,7 @@ use common::{
     },
     catalog::physical::{Catalog, PhysicalDataset, PhysicalTable},
     config::{Addrs, Config, FigmentJson},
+    metadata::block_ranges_by_table,
     multirange::MultiRange,
     parquet::basic::{Compression, ZstdLevel},
     query_context::parse_sql,
@@ -151,16 +152,14 @@ impl SnapshotContext {
         })
     }
 
-    async fn check_scanned_range_eq(&self, blessed: &SnapshotContext) -> Result<(), BoxError> {
-        use common::metadata::scanned_ranges::scanned_ranges_by_table;
-
-        let blessed_scanned_ranges = scanned_ranges_by_table(&blessed.ctx).await?;
+    async fn check_block_range_eq(&self, blessed: &SnapshotContext) -> Result<(), BoxError> {
+        let blessed_block_ranges = block_ranges_by_table(&blessed.ctx).await?;
 
         for table in self.ctx.catalog().all_tables() {
             let table_name = table.table_name().to_string();
             let ranges = table.ranges().await?;
             let expected_range = MultiRange::from_ranges(ranges)?;
-            let actual_range = &blessed_scanned_ranges[&table_name];
+            let actual_range = &blessed_block_ranges[&table_name];
             let table_qualified = table.table_ref().to_string();
             assert_eq!(
                 expected_range, *actual_range,
@@ -174,7 +173,7 @@ impl SnapshotContext {
 
     /// Typically used to check a fresh snapshot against a blessed one.
     pub async fn assert_eq(&self, other: &SnapshotContext) -> Result<(), BoxError> {
-        self.check_scanned_range_eq(other).await?;
+        self.check_block_range_eq(other).await?;
 
         for table in self.ctx.catalog().all_tables() {
             let query = parse_sql(&format!(

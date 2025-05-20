@@ -22,7 +22,7 @@ pub struct JobPartition<T: BlockStreamer> {
     // Lighter tables will have less parts than heavier tables.
     pub partition_size: u64,
 
-    pub scanned_ranges_by_table: BTreeMap<String, MultiRange>,
+    pub block_ranges_by_table: BTreeMap<String, MultiRange>,
 
     pub metadata_db: Arc<MetadataDb>,
 }
@@ -72,7 +72,7 @@ impl<S: BlockStreamer> JobPartition<S> {
             start,
             end,
             self.partition_size,
-            self.scanned_ranges_by_table.clone(),
+            self.block_ranges_by_table.clone(),
         )?;
 
         while let Some(dataset_rows) = extractor.recv().await {

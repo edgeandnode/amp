@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 use super::logical::Table;
 use crate::{
-    metadata::scanned_ranges::{self, ScannedRange},
+    metadata::parquet::{ParquetMeta, PARQUET_METADATA_KEY},
     store::{infer_object_store, Store},
     BoxError, Dataset,
 };
@@ -290,7 +290,7 @@ impl PhysicalTable {
                 nozzle_meta_from_object_meta(&object_meta, object_store.clone()).await?;
             let nozzle_meta_json = serde_json::to_value(nozzle_meta)?;
             metadata_db
-                .insert_scanned_range(location_id, file_name, nozzle_meta_json)
+                .insert_metadata(location_id, file_name, nozzle_meta_json)
                 .await?;
         }
 
@@ -495,7 +495,7 @@ pub async fn list_revisions(
 async fn nozzle_meta_from_object_meta(
     object_meta: &ObjectMeta,
     object_store: Arc<dyn ObjectStore>,
-) -> Result<(String, ScannedRange), BoxError> {
+) -> Result<(String, ParquetMeta), BoxError> {
     let mut reader = ParquetObjectReader::new(object_store.clone(), object_meta.location.clone())
         .with_file_size(object_meta.size);
     let parquet_metadata = reader.get_metadata(None).await?;
@@ -507,29 +507,28 @@ async fn nozzle_meta_from_object_meta(
                 "Unable to fetch Key Value metadata for file {}",
                 &object_meta.location
             )))?;
-    let scanned_range_key_value_pair = key_value_metadata
+    let parquet_meta_key_value_pair = key_value_metadata
         .into_iter()
-        .find(|key_value| key_value.key.as_str() == scanned_ranges::METADATA_KEY)
+        .find(|key_value| key_value.key.as_str() == PARQUET_METADATA_KEY)
         .ok_or(crate::ArrowError::ParquetError(format!(
             "Missing key: {} in file metadata for file {}",
-            scanned_ranges::METADATA_KEY,
-            &object_meta.location
+            PARQUET_METADATA_KEY, &object_meta.location
         )))?;
-    let scanned_range_json =
-        scanned_range_key_value_pair
+    let parquet_meta_json =
+        parquet_meta_key_value_pair
             .value
             .as_ref()
             .ok_or(crate::ArrowError::ParquetError(format!(
-                "Unable to parse ScannedRange from empty value in metadata for file {}",
+                "Unable to parse ParquetMeta from empty value in metadata for file {}",
                 &object_meta.location
             )))?;
-    let scanned_range: ScannedRange = serde_json::from_str(scanned_range_json).map_err(|e| {
+    let parquet_meta: ParquetMeta = serde_json::from_str(parquet_meta_json).map_err(|e| {
         crate::ArrowError::ParseError(format!(
-            "Unable to parse ScannedRange from key value metadata for file {}: {}",
+            "Unable to parse ParquetMeta from key value metadata for file {}: {}",
             &object_meta.location, e
         ))
     })?;
     // Unwrap: We know this is a path with valid file name because we just opened it
     let file_name = object_meta.location.filename().unwrap().to_string();
-    Ok((file_name, scanned_range))
+    Ok((file_name, parquet_meta))
 }
