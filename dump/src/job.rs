@@ -10,7 +10,7 @@ use common::{
     BoxError,
 };
 use dataset_store::DatasetStore;
-use metadata_db::{JobDatabaseId, MetadataDb};
+use metadata_db::{jobs::JobId, MetadataDb};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, instrument};
 
@@ -53,7 +53,7 @@ impl Job {
     /// Load a job from the database.
     #[instrument(skip(config, metadata_db), err)]
     pub async fn load(
-        job_id: JobDatabaseId,
+        job_id: &JobId,
         config: Arc<Config>,
         metadata_db: Arc<MetadataDb>,
     ) -> Result<Job, BoxError> {
