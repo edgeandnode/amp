@@ -24,6 +24,7 @@ use fs_err as fs;
 use futures::{stream::TryStreamExt, StreamExt as _};
 use metadata_db::{MetadataDb, KEEP_TEMP_DIRS};
 use object_store::path::Path;
+use pretty_assertions::assert_str_eq;
 use tempfile::TempDir;
 use tokio::time;
 use tracing::{info, instrument};
@@ -198,6 +199,11 @@ pub struct DumpTestDatasetCommand {
     pub(crate) start: u64,
     pub(crate) end: u64,
     pub(crate) n_jobs: u16,
+}
+
+pub struct StreamingExecutionOptions {
+    pub(crate) max_duration: Duration,
+    pub(crate) at_least_rows: usize,
 }
 
 #[instrument(skip_all)]
@@ -503,61 +509,31 @@ fn dynamic_addrs() -> Addrs {
 
 /// Start a nozzle server, execute the given query, convert the result to JSONL, shut down the
 /// server and return the JSONL string in binary format.
-pub async fn run_query_on_fresh_server(query: &str) -> Result<serde_json::Value, BoxError> {
-    check_provider_file("rpc_eth_mainnet.toml").await;
-
-    // Start the nozzle server.
-    let config = load_test_config(None).await.unwrap();
-    let metadata_db = config.metadata_db().await?.into();
-    let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel(1);
-    let (bound, server) =
-        nozzle::server::run(config, metadata_db, false, false, shutdown_rx).await?;
-    tokio::spawn(async move {
-        server.await.unwrap();
-    });
-
-    let client = FlightServiceClient::connect(format!("grpc://{}", bound.flight_addr)).await?;
-    let mut client = FlightSqlServiceClient::new_from_inner(client);
-
-    // Execute the SQL query and collect the results.
-    let mut info = client.execute(query.to_string(), None).await?;
-    let mut batches = client
-        .do_get(info.endpoint[0].ticket.take().unwrap())
-        .await?;
-    let mut buf: Vec<u8> = Default::default();
-    let mut writer = arrow::json::writer::ArrayWriter::new(&mut buf);
-    while let Some(batch) = batches.next().await {
-        let batch = batch?;
-        writer.write(&batch)?;
-    }
-
-    shutdown_tx.send(()).unwrap();
-
-    writer.finish()?;
-    serde_json::from_slice(&buf).map_err(Into::into)
-}
-
-pub async fn run_streaming_query_on_fresh_server(
+pub async fn run_query_on_fresh_server(
     query: &str,
-    at_least_rows: usize,
-    max_duration: Duration,
     initial_dump: Option<DumpTestDatasetCommand>,
     dumps_on_running_server: Vec<DumpTestDatasetCommand>,
+    streaming_options: Option<StreamingExecutionOptions>,
 ) -> Result<serde_json::Value, BoxError> {
-    use figment::providers::Json;
-
+    check_provider_file("rpc_eth_mainnet.toml").await;
     check_provider_file("firehose_eth_mainnet.toml").await;
 
-    let temp_dir = tempfile::Builder::new().keep(*KEEP_TEMP_DIRS).tempdir()?;
-    let path = temp_dir.path();
-
-    let config_override = Some(Json::string(&format!(
-        r#"{{ "data_dir": "{}" }}"#,
-        path.display()
-    )));
-
     // Start the nozzle server.
-    let config = load_test_config(config_override).await?;
+    let config = if initial_dump.is_none() && dumps_on_running_server.is_empty() {
+        load_test_config(None).await?
+    } else {
+        use figment::providers::Json;
+
+        let temp_dir = tempfile::Builder::new().keep(*KEEP_TEMP_DIRS).tempdir()?;
+        let path = temp_dir.path();
+
+        let config_override = Some(Json::string(&format!(
+            r#"{{ "data_dir": "{}" }}"#,
+            path.display()
+        )));
+
+        load_test_config(config_override).await?
+    };
     let metadata_db = config.clone().metadata_db().await?.into();
     let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel(1);
     let (bound, server) =
@@ -596,6 +572,7 @@ pub async fn run_streaming_query_on_fresh_server(
     let mut writer = arrow::json::writer::ArrayWriter::new(&mut buf);
     let mut rows_returned: usize = 0;
 
+    // Dumps on running server
     tokio::spawn(async move {
         for dump_command in dumps_on_running_server {
             let dependencies: Vec<&str> = dump_command
@@ -616,24 +593,31 @@ pub async fn run_streaming_query_on_fresh_server(
         }
     });
 
-    loop {
-        match time::timeout(max_duration, batches.next()).await {
-            Ok(Some(batch)) => {
-                let batch = batch?;
-                writer.write(&batch)?;
+    if let Some(streaming_options) = streaming_options {
+        loop {
+            match time::timeout(streaming_options.max_duration, batches.next()).await {
+                Ok(Some(batch)) => {
+                    let batch = batch?;
+                    writer.write(&batch)?;
 
-                // Stop streaming if we have enough rows taken
-                rows_returned += batch.num_rows();
-                if rows_returned >= at_least_rows {
+                    // Stop streaming if we have enough rows taken
+                    rows_returned += batch.num_rows();
+                    if rows_returned >= streaming_options.at_least_rows {
+                        break;
+                    }
+                }
+                Ok(None) => {
+                    break;
+                }
+                Err(_) => {
                     break;
                 }
             }
-            Ok(None) => {
-                break;
-            }
-            Err(_) => {
-                break;
-            }
+        }
+    } else {
+        while let Some(batch) = batches.next().await {
+            let batch = batch?;
+            writer.write(&batch)?;
         }
     }
 
@@ -643,9 +627,9 @@ pub async fn run_streaming_query_on_fresh_server(
     serde_json::from_slice(&buf).map_err(Into::into)
 }
 
-pub fn load_sql_tests() -> Result<Vec<SqlTest>, BoxError> {
+pub fn load_sql_tests(file_name: &str) -> Result<Vec<SqlTest>, BoxError> {
     let crate_path = env!("CARGO_MANIFEST_DIR");
-    let path = format!("{crate_path}/sql-tests.yaml");
+    let path = format!("{crate_path}/{file_name}");
     let content = fs::read(&path)
         .map_err(|e| BoxError::from(format!("Failed to read sql-tests.yaml: {e}")))?;
     serde_yaml::from_slice(&content)
@@ -668,4 +652,38 @@ pub struct SqlTest {
 pub enum SqlTestResult {
     Success { results: String },
     Failure { failure: String },
+}
+
+pub fn assert_sql_test_result(test: &SqlTest, results: Result<serde_json::Value, String>) -> () {
+    match &test.result {
+        SqlTestResult::Success {
+            results: expected_results,
+        } => {
+            let expected_results: serde_json::Value = serde_json::from_str(&expected_results)
+                .map_err(|e| {
+                    format!(
+                        "Failed to parse expected results for test \"{}\": {e:?}",
+                        test.name,
+                    )
+                })
+                .unwrap();
+            let results = results.unwrap();
+            assert_str_eq!(
+                    results.to_string(),
+                    expected_results.to_string(),
+                    "SQL test \"{}\" failed: SQL query \"{}\" did not return the expected results, see sql-tests.yaml",
+                    test.name, test.query,
+                );
+        }
+        SqlTestResult::Failure { failure } => {
+            let failure = failure.trim();
+            let results = results.unwrap_err();
+            if !results.to_string().contains(&failure) {
+                panic!(
+                    "SQL test \"{}\" failed: SQL query \"{}\" did not return the expected error, got \"{}\", expected \"{}\"",
+                    test.name, test.query, results, failure,
+                );
+            }
+        }
+    }
 }

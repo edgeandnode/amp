@@ -1,0 +1,8 @@
+- name: select_block_num
+  query: SELECT block_num FROM eth_firehose.blocks WHERE block_num >= 8 SETTINGS stream = true
+  results: |
+    [
+      {"block_num": 8},
+      {"block_num": 9},
+      {"block_num": 10}
+    ]
