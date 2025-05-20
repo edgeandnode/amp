@@ -534,7 +534,7 @@ pub async fn run_query_on_fresh_server(
 
         load_test_config(config_override).await?
     };
-    let metadata_db = config.clone().metadata_db().await?.into();
+    let metadata_db = config.metadata_db().await?.into();
     let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel(1);
     let (bound, server) =
         nozzle::server::run(config.clone(), metadata_db, false, false, shutdown_rx).await?;
