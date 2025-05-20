@@ -3,7 +3,7 @@
 Nozzle provides a number of "built-in" SQL functions that the user can call to manipulate
 the data they are querying.
 
----
+## `evm_decode`
 
 ```sql
 T evm_decode(
@@ -15,10 +15,10 @@ T evm_decode(
 )
 ```
 
-Decodes and EVM event log. The signature parameter is the Solidity signature of the event.
+Decodes an EVM event log. The signature parameter is the Solidity signature of the event.
 The return type of `evm_decode` is the SQL version of the return type specified in the signature.
 
----
+## `evm_topic`
 
 ```sql
 FixedSizeBinary(32) evm_topic(Utf8 signature)
@@ -27,7 +27,7 @@ FixedSizeBinary(32) evm_topic(Utf8 signature)
 Returns the topic hash of the event signature. This is the first topic that will show up in the log
 when the event is emitted. The topic hash is the keccak256 hash of the event signature.
 
----
+## `${dataset}.eth_call`
 
 ```sql
 (Binary, Utf8) ${dataset}.eth_call(
@@ -52,7 +52,7 @@ LIMIT 10
 
 Returns a tuple of the return value of the call and the error message (if any, or empty string if no error).
 
----
+## `attestation_hash`
 
 ```sql
 Binary attestation_hash(...)
@@ -61,7 +61,7 @@ Binary attestation_hash(...)
 This is an aggregate UDF which takes any number of parameters of any type. Returns a hash over all
 the input parameters (columns) over all the rows.
 
----
+## `evm_decode_params`
 
 ```sql
 T evm_decode_params(
@@ -90,7 +90,7 @@ All of the function parameters and results must be named. The output of this fun
 ]
 ```
 
----
+## `evm_encode_params`
 
 ```sql
 T evm_encode_params(
@@ -126,7 +126,7 @@ Results:
 ]
 ```
 
----
+## `evm_encode_type`
 
 ```sql
 Binary evm_encode_type(
@@ -151,7 +151,7 @@ Returns:
 ]
 ```
 
----
+## `evm_decode_type`
 
 ```sql
 T evm_decode_type(
