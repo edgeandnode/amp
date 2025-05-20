@@ -429,7 +429,7 @@ async fn consistency_check(
 
         // Collect all stored files whose filename matches `is_dump_file`.
         let stored_files: BTreeMap<String, ObjectMeta> = table
-            .parquet_files(true)
+            .parquet_files()
             .await
             .map_err(|e| ConsistencyCheckError::ObjectStoreError(e))?;
 

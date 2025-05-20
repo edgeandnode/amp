@@ -7,7 +7,6 @@ use datafusion::{
     sql::TableReference,
 };
 use futures::{
-    future,
     stream::{self, BoxStream},
     StreamExt, TryStreamExt,
 };
@@ -420,26 +419,15 @@ impl PhysicalTable {
 
     pub fn stream_parquet_files(
         &self,
-        dump_only: bool,
     ) -> BoxStream<'_, Result<(String, ObjectMeta), BoxError>> {
         self.stream_file_metadata()
-            .try_filter_map(
+            .map_ok(
                 move |FileMetadata {
                           object_meta,
                           file_name,
                           ..
-                      }| {
-                    if !dump_only
-                        || file_name
-                            .trim_end_matches(".parquet")
-                            .parse::<u64>()
-                            .is_ok()
-                    {
-                        future::ok(Some((file_name, object_meta)))
-                    } else {
-                        future::ok(None)
-                    }
-                },
+                      }| 
+                    (file_name, object_meta)
             )
             .boxed()
     }
@@ -454,10 +442,9 @@ impl PhysicalTable {
     /// result is a map from filename to object metadata.
     pub async fn parquet_files(
         &self,
-        dump_only: bool,
     ) -> object_store::Result<BTreeMap<String, ObjectMeta>> {
         let parquet_files = self
-            .stream_parquet_files(dump_only)
+            .stream_parquet_files()
             .map_err(|source| object_store::Error::Generic {
                 store: "METADATA_DB",
                 source,
@@ -474,7 +461,7 @@ impl PhysicalTable {
 
     /// Truncate this table by deleting all dump files making up the table
     pub async fn truncate(&self) -> Result<(), BoxError> {
-        let files = self.parquet_files(false).await?;
+        let files = self.parquet_files().await?;
         let num_files = files.len();
         let locations = Box::pin(stream::iter(files.into_values().map(|m| Ok(m.location))));
         let deleted = self
