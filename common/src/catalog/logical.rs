@@ -32,17 +32,8 @@ pub struct Table {
 }
 
 impl Table {
-    pub fn is_meta(&self) -> bool {
-        self.name.starts_with("__")
-    }
-
     /// Column names by which this table is naturally sorted.
     pub fn sorted_by(&self) -> Vec<String> {
-        // Don't bother with order for meta tables.
-        if self.is_meta() {
-            return vec![];
-        }
-
         // Leveraging `order_exprs` can optimize away sorting for many query plans.
         //
         // TODO:

@@ -1,13 +1,11 @@
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashSet},
     sync::Arc,
 };
 
 use common::{
-    meta_tables::scanned_ranges,
-    multirange::MultiRange,
-    query_context::{parse_sql, Error as CoreError},
-    BlockNum, BoxError, Dataset, QueryContext, Table, BLOCK_NUM,
+    meta_tables::scanned_ranges, multirange::MultiRange, query_context::parse_sql, BlockNum,
+    BoxError, Dataset, QueryContext, Table, BLOCK_NUM,
 };
 use datafusion::{
     common::tree_node::{Transformed, TreeNode, TreeNodeRecursion},
@@ -15,10 +13,10 @@ use datafusion::{
     error::DataFusionError,
     execution::{runtime_env::RuntimeEnv, SendableRecordBatchStream},
     logical_expr::{col, lit, Filter, LogicalPlan, Sort, TableScan},
-    sql::{parser, resolve::resolve_table_references, TableReference},
+    sql::{parser, TableReference},
 };
 use futures::StreamExt as _;
-use metadata_db::TableId;
+use metadata_db::{LocationId, MetadataDb, TableId};
 use object_store::ObjectMeta;
 use serde::Deserialize;
 use tracing::instrument;
@@ -105,13 +103,64 @@ pub(super) async fn dataset(
     })
 }
 
+// Get synced ranges for table
+async fn get_ranges_for_table(
+    table: &TableReference,
+    metadata_db: &MetadataDb,
+) -> Result<MultiRange, BoxError> {
+    let tbl = TableId {
+        // Unwrap: table references are of the partial form: [dataset].[table_name]
+        dataset: table.schema().unwrap(),
+        dataset_version: None,
+        table: table.table(),
+    };
+    let Some((_, location_id)) = metadata_db.get_active_location(tbl).await? else {
+        return Err(format!("table {}.{} not found", tbl.dataset, tbl.table).into());
+    };
+    let ranges = scanned_ranges::ranges_for_table(location_id, metadata_db).await?;
+    let ranges = MultiRange::from_ranges(ranges)?;
+
+    Ok(ranges)
+}
+
 /// This will:
-/// - Plan the query against the configured datasets.
-/// - Validate that the query is materializable.
 /// - Validate that dependencies have synced the required block range.
 /// - Inject block range constraints into the plan.
 /// - Inject 'order by block_num' into the plan.
 /// - Execute the plan.
+#[instrument(skip_all, err)]
+pub async fn execute_plan_for_range(
+    plan: LogicalPlan,
+    ctx: &QueryContext,
+    metadata_db: &MetadataDb,
+    start: BlockNum,
+    end: BlockNum,
+) -> Result<SendableRecordBatchStream, BoxError> {
+    let tables = extract_table_references_from_plan(&plan)?;
+
+    // Validate dependency scanned ranges
+    {
+        let needed_range = MultiRange::from_ranges(vec![(start, end)]).unwrap();
+        for table in tables {
+            let ranges = get_ranges_for_table(&table, metadata_db).await?;
+            let synced = ranges.intersection(&needed_range) == needed_range;
+            if !synced {
+                return Err(format!("tried to query range {needed_range} of table {table} but it has not been synced").into());
+            }
+        }
+    }
+
+    let plan = {
+        let plan = inject_block_range_constraints(plan, start, end)?;
+        order_by_block_num(plan)
+    };
+    Ok(ctx.execute_plan(plan).await?)
+}
+
+/// This will:
+/// - Plan the query against the configured datasets.
+/// - Validate that the query is materializable.
+/// - Execute the plan for a specified range
 #[instrument(skip_all, err)]
 pub async fn execute_query_for_range(
     query: parser::Statement,
@@ -120,62 +169,61 @@ pub async fn execute_query_for_range(
     start: BlockNum,
     end: BlockNum,
 ) -> Result<SendableRecordBatchStream, BoxError> {
-    let (tables, _) =
-        resolve_table_references(&query, true).map_err(|e| CoreError::SqlParseError(e.into()))?;
     let ctx = dataset_store.clone().ctx_for_sql(&query, env).await?;
     let metadata_db = dataset_store.metadata_db.as_ref();
-    // Validate dependency scanned ranges
-    {
-        let needed_range = MultiRange::from_ranges(vec![(start, end)]).unwrap();
-        for table in tables {
-            let tbl = TableId {
-                // Unwrap: table references are of the partial form: [dataset].[table_name]
-                dataset: table.schema().unwrap(),
-                dataset_version: None,
-                table: table.table(),
-            };
-            let Some((_, location_id)) = metadata_db.get_active_location(tbl).await? else {
-                return Err(format!("table {}.{} not found", tbl.dataset, tbl.table).into());
-            };
-            let ranges = scanned_ranges::ranges_for_table(location_id, metadata_db).await?;
-            let ranges = MultiRange::from_ranges(ranges)?;
-            let synced = ranges.intersection(&needed_range) == needed_range;
-            if !synced {
-                return Err(format!("tried to query range {needed_range} of table {table} but it has not been synced").into());
-            }
-        }
-    }
-
     let plan = ctx.plan_sql(query).await?;
-    let plan = {
-        let plan = inject_block_range_constraints(plan, start, end)?;
-        order_by_block_num(plan)
-    };
-    Ok(ctx.execute_plan(plan).await?)
+
+    execute_plan_for_range(plan, &ctx, metadata_db, start, end).await
 }
 
-/// The most recent block that has been synced for all tables in the query.
+// All physical tables locations that have been queried
+#[instrument(skip_all, err)]
+pub async fn queried_physical_tables(
+    plan: &LogicalPlan,
+    qc: &QueryContext,
+) -> Result<Vec<LocationId>, BoxError> {
+    let tables = extract_table_references_from_plan(&plan)?;
+
+    let locations: Vec<_> = tables
+        .into_iter()
+        .filter_map(|t| qc.get_table(&t).map(|t| t.location_id()))
+        .collect();
+
+    Ok(locations)
+}
+
+fn extract_table_references_from_plan(plan: &LogicalPlan) -> Result<Vec<TableReference>, BoxError> {
+    let mut refs = HashSet::new();
+
+    plan.apply(|node| {
+        match node {
+            LogicalPlan::TableScan(scan) => {
+                refs.insert(scan.table_name.clone());
+            }
+            _ => {}
+        }
+
+        Ok(TreeNodeRecursion::Continue)
+    })?;
+
+    Ok(refs.into_iter().collect())
+}
+
+/// The most recent block that has been synced for all tables in the plan.
 #[instrument(skip_all, err)]
 pub async fn max_end_block(
-    query: &parser::Statement,
-    dataset_store: Arc<DatasetStore>,
-    env: Arc<RuntimeEnv>,
+    plan: &LogicalPlan,
+    ctx: &QueryContext,
+    metadata_db: &MetadataDb,
 ) -> Result<Option<BlockNum>, BoxError> {
-    let (tables, _) =
-        resolve_table_references(&query, true).map_err(|e| CoreError::SqlParseError(e.into()))?;
+    let tables = extract_table_references_from_plan(&plan)?;
 
     if tables.is_empty() {
         return Ok(None);
     }
 
-    let ctx = Arc::new(dataset_store.clone().ctx_for_sql(&query, env).await?);
-    let metadata_db = &dataset_store.metadata_db;
-
-    let synced_block_for_table = move |ctx: Arc<QueryContext>, table: TableReference| async move {
-        let table = ctx.get_table(&table).expect("table not found");
-        let location_id = table.location_id();
-        let ranges = scanned_ranges::ranges_for_table(location_id, metadata_db.as_ref()).await?;
-        let ranges = MultiRange::from_ranges(ranges)?;
+    let synced_block_for_table = |_, table: TableReference| async move {
+        let ranges = get_ranges_for_table(&table, metadata_db).await?;
 
         // Take the end block of the earliest contiguous range as the "synced block"
         Ok::<_, BoxError>(ranges.first().map(|r| r.1))
@@ -184,9 +232,9 @@ pub async fn max_end_block(
     let mut tables = tables.into_iter();
 
     // Unwrap: `tables` is not empty.
-    let mut end = synced_block_for_table(ctx.clone(), tables.next().unwrap()).await?;
+    let mut end = synced_block_for_table(ctx, tables.next().unwrap()).await?;
     for table in tables {
-        let next_end = synced_block_for_table(ctx.clone(), table).await?;
+        let next_end = synced_block_for_table(ctx, table).await?;
         end = end.min(next_end);
     }
 
@@ -241,7 +289,7 @@ pub fn is_incremental(plan: &LogicalPlan) -> Result<bool, BoxError> {
                 err = unsupported(format!("{}", node.display()))
             }
 
-            // Definitely not supported and would be caught eleswhere.
+            // Definitely not supported and would be caught elsewhere.
             Dml(_) | Ddl(_) | Statement(_) | Copy(_) => {
                 err = unsupported(format!("{}", node.display()))
             }

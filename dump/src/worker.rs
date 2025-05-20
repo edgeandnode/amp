@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, fmt, pin::pin, sync::Arc};
 
 use common::{config::Config, BoxError};
 use futures::{TryFutureExt as _, TryStreamExt};
-use metadata_db::{JobDatabaseId, MetadataDb};
+use metadata_db::{jobs::JobId, workers::WorkerNodeId, MetadataDb};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::{
@@ -32,8 +32,8 @@ pub enum Action {
 
 #[derive(Serialize, Deserialize)]
 pub struct WorkerAction {
-    pub node_id: String,
-    pub job_id: JobDatabaseId,
+    pub node_id: WorkerNodeId,
+    pub job_id: JobId,
     pub action: Action,
 }
 
@@ -46,11 +46,11 @@ impl fmt::Debug for WorkerAction {
 pub struct Worker {
     config: Arc<Config>,
     metadata_db: Arc<MetadataDb>,
-    node_id: String,
+    node_id: WorkerNodeId,
 
     // To prevent start/stop race conditions, actions for a same jobs are processed sequentially.
     // Each jobs has a dedicated handler task.
-    action_queue: BTreeMap<JobDatabaseId, UnboundedSender<WorkerAction>>,
+    action_queue: BTreeMap<JobId, UnboundedSender<WorkerAction>>,
 }
 
 #[derive(Error, Debug)]
@@ -72,7 +72,7 @@ pub enum WorkerError {
 }
 
 impl Worker {
-    pub fn new(config: Arc<Config>, metadata_db: Arc<MetadataDb>, node_id: String) -> Self {
+    pub fn new(config: Arc<Config>, metadata_db: Arc<MetadataDb>, node_id: WorkerNodeId) -> Self {
         Self {
             config,
             metadata_db,
@@ -122,9 +122,13 @@ impl Worker {
         // Spawn scheduled jobs.
         let scheduled_jobs = self.metadata_db.scheduled_jobs(&self.node_id).await?;
         for job_id in scheduled_jobs {
-            let job = Job::load(job_id, self.config.clone(), self.metadata_db.clone().into())
-                .await
-                .map_err(JobLoadError)?;
+            let job = Job::load(
+                &job_id,
+                self.config.clone(),
+                self.metadata_db.clone().into(),
+            )
+            .await
+            .map_err(JobLoadError)?;
             spawn_job(self.config.clone(), self.metadata_db.clone(), job);
         }
 
@@ -166,8 +170,8 @@ impl Worker {
 struct JobHandler {
     config: Arc<Config>,
     metadata_db: Arc<MetadataDb>,
-    node_id: String,
-    job_id: JobDatabaseId,
+    node_id: WorkerNodeId,
+    job_id: JobId,
     recv: UnboundedReceiver<WorkerAction>,
 }
 
@@ -175,8 +179,8 @@ impl JobHandler {
     fn new(
         config: Arc<Config>,
         metadata_db: Arc<MetadataDb>,
-        node_id: String,
-        job_id: JobDatabaseId,
+        node_id: WorkerNodeId,
+        job_id: JobId,
         recv: UnboundedReceiver<WorkerAction>,
     ) -> Self {
         Self {
@@ -211,7 +215,7 @@ impl JobHandler {
 
         match action {
             Action::Start => {
-                let job = Job::load(self.job_id, self.config.clone(), self.metadata_db.clone())
+                let job = Job::load(&self.job_id, self.config.clone(), self.metadata_db.clone())
                     .await
                     .map_err(JobLoadError)?;
                 spawn_job(self.config.clone(), self.metadata_db.clone(), job);

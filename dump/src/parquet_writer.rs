@@ -68,10 +68,12 @@ impl RawDatasetWriter {
 
         let writer = self.writers.get_mut(table_name).unwrap();
         let scanned_range = writer.write(&table_rows).await?;
+
         if let Some(scanned_range) = scanned_range {
             let location_id = writer.table.location_id();
-            let metadata_db = self.metadata_db.clone();
-            insert_scanned_range(scanned_range, metadata_db, location_id).await?;
+            let metadata_db = &self.metadata_db;
+
+            commit_metadata(scanned_range, metadata_db.clone(), location_id).await?;
         }
 
         Ok(())
@@ -86,7 +88,7 @@ impl RawDatasetWriter {
             let scanned_range = writer.close().await?;
 
             if let Some(scanned_range) = scanned_range {
-                insert_scanned_range(scanned_range, metadata_db, location_id).await?
+                commit_metadata(scanned_range, metadata_db, location_id).await?
             }
         }
 
@@ -94,7 +96,7 @@ impl RawDatasetWriter {
     }
 }
 
-pub async fn insert_scanned_range(
+pub async fn commit_metadata(
     scanned_range: ScannedRange,
     metadata_db: Arc<MetadataDb>,
     location_id: i64,
@@ -102,9 +104,19 @@ pub async fn insert_scanned_range(
     let file_name = scanned_range.filename.clone();
     let scanned_range = serde_json::to_value(scanned_range)?;
 
-    Ok(metadata_db
+    metadata_db
         .insert_scanned_range(location_id, file_name, scanned_range)
-        .await?)
+        .await?;
+
+    // Notify that the dataset has been changed
+    let change_tracking_channel = common::stream_helpers::change_tracking_pg_channel(location_id);
+    debug!(
+        "notified change tracking channel {}",
+        change_tracking_channel
+    );
+    metadata_db.notify(&change_tracking_channel, "").await?;
+
+    Ok(())
 }
 
 struct TableWriter {

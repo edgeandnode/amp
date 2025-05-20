@@ -24,18 +24,25 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
-      - name: Install dependencies
+      - name: Setup dependencies
         run: |
+          # Install dependencies
           sudo apt-get update
-          sudo apt-get install -y protobuf-compiler
+          sudo apt-get install -y protobuf-compiler postgresql
+          
+          # Add PostgreSQL binaries to PATH
+          echo "/usr/lib/postgresql/$(pg_lsclusters | awk 'NR==2 {print $1}')/bin" >> $GITHUB_PATH
 
       - uses: actions-rust-lang/setup-rust-toolchain@9d7e65c320fdb52dcd45ffaa68deb6c02c8754d9 # v1
         with:
           cache: false
           rustflags: ''
 
+      - name: Setup just
+        uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v3
+
       - name: Unit tests
-        run: cargo test --verbose --workspace --exclude tests -- --nocapture
+        run: just test-unit --verbose
 
   integration-tests:
     name: Integration tests
@@ -53,6 +60,9 @@ jobs:
           cache: false
           rustflags: ''
 
+      - name: Setup just
+        uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v3
+
       - name: Add PostgreSQL binaries to PATH
         run: |
           echo "/usr/lib/postgresql/$(pg_lsclusters | awk 'NR==2 {print $1}')/bin" >> $GITHUB_PATH
@@ -69,7 +79,7 @@ jobs:
           RPC_ETH_MAINNET_URL: ${{ secrets.RPC_ETH_MAINNET_URL }}
 
       - name: Integration tests
-        run: cargo test --verbose -p tests -- --nocapture
+        run: just test-it --verbose
 
   rustfmt:
     name: Check rustfmt style
@@ -86,8 +96,11 @@ jobs:
           cache: false
           rustflags: ''
 
+      - name: Setup just
+        uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v3
+
       - name: Check formatting
-        run: cargo +nightly fmt --all -- --check
+        run: just fmt-check
 
   release-check:
     name: Build in release mode
@@ -105,8 +118,11 @@ jobs:
           cache: false
           rustflags: ''
 
+      - name: Setup just
+        uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v3
+
       - name: Cargo check (release)
-        run: cargo check --release
+        run: just check --release
 
   typescript:
     name: TypeScript

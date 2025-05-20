@@ -1,4 +1,3 @@
-mod temp_metadata_db;
 use std::time::Duration;
 
 use futures::stream::{BoxStream, Stream};
@@ -7,22 +6,30 @@ use sqlx::{
     postgres::{PgListener, PgNotification, PgPoolOptions},
     Connection as _, Executor, PgConnection, Pool, Postgres,
 };
-pub use temp_metadata_db::{test_metadata_db, ALLOW_TEMP_DB, KEEP_TEMP_DIRS};
 use thiserror::Error;
 use tokio::time::MissedTickBehavior;
 use tracing::{error, instrument};
 use url::Url;
 
+pub mod jobs;
+mod temp_metadata_db;
+pub mod workers;
+
+pub use self::temp_metadata_db::{test_metadata_db, ALLOW_TEMP_DB, KEEP_TEMP_DIRS};
+use self::{
+    jobs::{Job, JobId},
+    workers::WorkerNodeId,
+};
+
 /// Frequency on which to send a heartbeat.
-const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
+pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
 
 /// A worker is considered active if it has sent a heartbeat in this period. The scheduler will
 /// schedule new jobs only on active workers.
-const ACTIVE_INTERVAL_SECS: i32 = 5;
+pub const ACTIVE_INTERVAL_SECS: i32 = 5;
 
 /// Row ids, always non-negative.
 pub type LocationId = i64;
-pub type JobDatabaseId = i64;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -256,7 +263,7 @@ impl MetadataDb {
         Ok(())
     }
 
-    pub async fn hello_worker(&self, node_id: &str) -> Result<(), Error> {
+    pub async fn hello_worker(&self, node_id: &WorkerNodeId) -> Result<(), Error> {
         let query = "
         INSERT INTO workers (node_id, last_heartbeat)
         VALUES ($1, now() at time zone 'utc')
@@ -271,7 +278,7 @@ impl MetadataDb {
     /// Periodically updates the worker's heartbeat in a dedicated DB connection.
     ///
     /// Loops forever unless the DB returns an error.
-    pub async fn heartbeat_loop(&self, node_id: String) -> Result<(), Error> {
+    pub async fn heartbeat_loop(&self, node_id: WorkerNodeId) -> Result<(), Error> {
         let mut conn = PgConnection::connect(&self.url).await?;
         let mut interval = tokio::time::interval(HEARTBEAT_INTERVAL);
         interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -283,9 +290,16 @@ impl MetadataDb {
         }
     }
 
-    /// Returns a list of active workers. A worker is active if it has sent a sufficiently recent heartbeat.
-    pub async fn active_workers(&self) -> Result<Vec<String>, Error> {
-        let query = "SELECT node_id FROM workers WHERE last_heartbeat > (now() at time zone 'utc') - make_interval(secs => $1)";
+    /// Returns a list of active workers.
+    ///
+    /// A worker is active if it has sent a sufficiently recent heartbeat.
+    pub async fn active_workers(&self) -> Result<Vec<WorkerNodeId>, Error> {
+        let query = indoc::indoc! {r#"
+            SELECT node_id 
+            FROM workers 
+            WHERE last_heartbeat > (now() at time zone 'utc') - make_interval(secs => $1)
+        "#};
+
         Ok(sqlx::query_scalar(query)
             .bind(ACTIVE_INTERVAL_SECS)
             .fetch_all(&self.pool)
@@ -295,16 +309,21 @@ impl MetadataDb {
     #[instrument(skip(self), err)]
     pub async fn schedule_job(
         &self,
-        node_id: &str,
+        node_id: &WorkerNodeId,
         job_desc: &str,
         locations: &[LocationId],
-    ) -> Result<JobDatabaseId, Error> {
+    ) -> Result<JobId, Error> {
         // Use a transaction, such that the job will only be scheduled if the locations are
         // successfully locked.
         let mut tx = self.pool.begin().await?;
 
-        let query = "INSERT INTO jobs (node_id, descriptor) VALUES ($1, $2::jsonb) RETURNING id";
-        let id: JobDatabaseId = sqlx::query_scalar(query)
+        let query = indoc::indoc! {r#"
+            INSERT INTO jobs (node_id, descriptor)
+            VALUES ($1, $2::jsonb)
+            RETURNING id
+        "#};
+
+        let id: JobId = sqlx::query_scalar(query)
             .bind(node_id)
             .bind(job_desc)
             .fetch_one(&self.pool)
@@ -317,18 +336,45 @@ impl MetadataDb {
         Ok(id)
     }
 
-    pub async fn scheduled_jobs(&self, node_id: &str) -> Result<Vec<JobDatabaseId>, Error> {
-        let query = "SELECT id FROM jobs WHERE node_id = $1";
-        Ok(sqlx::query_scalar(query)
+    /// Given a worker `node_id`, returns all the job IDs
+    pub async fn scheduled_jobs(&self, node_id: &WorkerNodeId) -> Result<Vec<JobId>, Error> {
+        let query = indoc::indoc! {r#"
+            SELECT id FROM jobs
+            WHERE node_id = $1
+            ORDER BY id ASC
+        "#};
+
+        let ids: Vec<JobId> = sqlx::query_scalar(query)
             .bind(node_id)
             .fetch_all(&self.pool)
+            .await?;
+
+        Ok(ids)
+    }
+
+    /// Returns the job with the given ID
+    pub async fn get_job(&self, id: &JobId) -> Result<Option<Job>, Error> {
+        let query = indoc::indoc! {r#"
+            SELECT id, node_id, status, descriptor
+            FROM jobs
+            WHERE id = $1
+        "#};
+
+        Ok(sqlx::query_as(query)
+            .bind(id)
+            .fetch_optional(&self.pool)
             .await?)
     }
 
-    pub async fn job_desc(&self, job_id: JobDatabaseId) -> Result<String, Error> {
-        let query = "SELECT descriptor::text FROM jobs WHERE id = $1";
+    pub async fn job_desc(&self, id: &JobId) -> Result<String, Error> {
+        let query = indoc::indoc! {r#"
+            SELECT descriptor::text 
+            FROM jobs 
+            WHERE id = $1
+        "#};
+
         Ok(sqlx::query_scalar(query)
-            .bind(job_id)
+            .bind(id)
             .fetch_one(&self.pool)
             .await?)
     }
@@ -336,13 +382,16 @@ impl MetadataDb {
     /// Returns tuples of `(location_id, table_name, url)`.
     pub async fn output_locations(
         &self,
-        job_id: JobDatabaseId,
+        id: &JobId,
     ) -> Result<Vec<(LocationId, String, Url)>, Error> {
-        let query = "SELECT id, tbl, url FROM locations WHERE writer = $1";
-        let tuples: Vec<(LocationId, String, String)> = sqlx::query_as(query)
-            .bind(job_id)
-            .fetch_all(&self.pool)
-            .await?;
+        let query = indoc::indoc! {r#"
+            SELECT id, tbl, url 
+            FROM locations 
+            WHERE writer = $1
+        "#};
+
+        let tuples: Vec<(LocationId, String, String)> =
+            sqlx::query_as(query).bind(id).fetch_all(&self.pool).await?;
 
         let urls = tuples
             .into_iter()
@@ -441,7 +490,7 @@ impl MetadataDb {
 #[instrument(skip(executor), err)]
 async fn lock_locations(
     executor: impl Executor<'_, Database = Postgres>,
-    job_id: JobDatabaseId,
+    job_id: JobId,
     locations: &[LocationId],
 ) -> Result<(), Error> {
     let query = "UPDATE locations SET writer = $1 WHERE id = ANY($2)";

@@ -1,33 +1,36 @@
-# Default target - displays available commands and their descriptions
+# Display available commands and their descriptions (default target)
 default:
     @just --list
 
-# Format all Rust code
-#
-# Requires nightly toolchain for unstable features.
-# See `rustfmt.toml` for details.
+# Format all Rust code (cargo fmt)
 fmt:
     cargo +nightly fmt --all
 
+# Check Rust code format (cargo fmt --check)
+fmt-check:
+    cargo +nightly fmt --all -- --check
+
+# Check Rust code (cargo check)
+check *EXTRA_FLAGS:
+    cargo check {{EXTRA_FLAGS}}
+
 # Run all tests (unit and integration)
-test:
-    cargo test --workspace
+test *EXTRA_FLAGS:
+    cargo test {{EXTRA_FLAGS}} --workspace
 
 # Run unit tests
-test-unit:
-    cargo test --workspace --exclude tests -- --nocapture
+test-unit *EXTRA_FLAGS:
+    cargo test {{EXTRA_FLAGS}} --workspace --exclude tests -- --nocapture
 
 # Run integration tests
-test-it:
-    cargo test --package tests -- --nocapture
+test-it *EXTRA_FLAGS:
+    cargo test {{EXTRA_FLAGS}} --package tests -- --nocapture
 
-# Clean build artifacts and temporary files
+# Clean workspace (cargo clean)
 clean:
     cargo clean
 
-# Install Git hooks.
-#
-# See `.github/pre-commit-config.yaml` for the pre-commit configuration.
+# Install Git hooks
 install-git-hooks:
     #!/usr/bin/env bash
     set -e # Exit on error
@@ -50,8 +53,6 @@ install-git-hooks:
     pre-commit install --config .github/pre-commit-config.yaml
 
 # Remove Git hooks
-#
-# See `.github/pre-commit-config.yaml` for the pre-commit configuration.
 remove-git-hooks:
     #!/usr/bin/env bash
     set -e # Exit on error

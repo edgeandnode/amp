@@ -1,14 +1,14 @@
 use std::{mem, sync::Arc, time::Duration};
 
 use alloy::{
-    consensus::{Transaction as _, TxEnvelope},
-    eips::BlockNumberOrTag,
+    consensus::{EthereumTxEnvelope, Transaction as _},
+    eips::{BlockNumberOrTag, Typed2718},
     hex::{self, ToHexExt},
     providers::Provider as _,
     rpc::{
         client::BatchRequest,
-        json_rpc::{RpcParam, RpcReturn},
-        types::{BlockTransactionsKind, Header, Log as RpcLog, TransactionReceipt},
+        json_rpc::{RpcRecv, RpcSend},
+        types::{Header, Log as RpcLog, TransactionReceipt},
     },
     transports::http::reqwest::Url,
 };
@@ -34,7 +34,7 @@ pub enum ToRowError {
     Overflow(&'static str, BoxError),
 }
 pub struct BatchingRpcWrapper {
-    client: alloy::providers::ReqwestProvider,
+    client: alloy::providers::RootProvider,
     batch_size: usize,
     retries: usize,
     limiter: Arc<tokio::sync::Semaphore>,
@@ -42,7 +42,7 @@ pub struct BatchingRpcWrapper {
 
 impl BatchingRpcWrapper {
     pub fn new(
-        client: alloy::providers::ReqwestProvider,
+        client: alloy::providers::RootProvider,
         batch_size: usize,
         retries: usize,
         limiter: Arc<tokio::sync::Semaphore>,
@@ -57,10 +57,10 @@ impl BatchingRpcWrapper {
     }
 
     /// Execute a batch of RPC calls with retries on failure.
-    /// calls: Vec<(&'static str, P)> - a vector of tuples containing the method name and parameters.
-    pub async fn execute<T: RpcReturn, P: RpcParam>(
+    /// calls: Vec<(&'static str, Params)> - a vector of tuples containing the method name and parameters.
+    pub async fn execute<T: RpcRecv, Params: RpcSend>(
         &self,
-        calls: Vec<(&'static str, P)>,
+        calls: Vec<(&'static str, Params)>,
     ) -> Result<Vec<T>, BoxError> {
         let mut results = Vec::new();
         let mut remaining_calls = calls;
@@ -112,7 +112,7 @@ impl BatchingRpcWrapper {
 
 #[derive(Clone)]
 pub struct JsonRpcClient {
-    client: alloy::providers::ReqwestProvider,
+    client: alloy::providers::RootProvider,
     network: String,
     limiter: Arc<tokio::sync::Semaphore>,
     batch_size: usize,
@@ -126,7 +126,7 @@ impl JsonRpcClient {
         batch_size: usize,
     ) -> Result<Self, BoxError> {
         assert!(request_limit >= 1);
-        let client = alloy::providers::ProviderBuilder::new().on_http(url);
+        let client = alloy::providers::RootProvider::new_http(url);
         let limiter = tokio::sync::Semaphore::new(request_limit as usize).into();
         Ok(Self {
             client,
@@ -152,10 +152,8 @@ impl JsonRpcClient {
             let client_permit = self.limiter.acquire().await;
             let block = self
                 .client
-                .get_block_by_number(
-                    BlockNumberOrTag::Number(block_num),
-                    BlockTransactionsKind::Full,
-                )
+                .get_block_by_number(BlockNumberOrTag::Number(block_num))
+                .full()
                 .await?
                 .ok_or_else(|| format!("block {} not found", block_num))?;
             let receipts = try_join_all(
@@ -226,8 +224,8 @@ impl JsonRpcClient {
     }
 }
 
-impl AsRef<alloy::providers::ReqwestProvider> for JsonRpcClient {
-    fn as_ref(&self) -> &alloy::providers::ReqwestProvider {
+impl AsRef<alloy::providers::RootProvider> for JsonRpcClient {
+    fn as_ref(&self) -> &alloy::providers::RootProvider {
         &self.client
     }
 }
@@ -251,9 +249,8 @@ impl BlockStreamer for JsonRpcClient {
             true => BlockNumberOrTag::Finalized,
             false => BlockNumberOrTag::Latest,
         };
-        let kind = BlockTransactionsKind::Hashes;
         let _permit = self.limiter.acquire();
-        let block = self.client.get_block_by_number(number, kind).await?;
+        let block = self.client.get_block_by_number(number).await?;
         Ok(block.map(|b| b.header.number).unwrap_or(0))
     }
 }
@@ -295,10 +292,6 @@ fn rpc_to_rows(
             }
             alloy::consensus::ReceiptEnvelope::Eip7702(receipt_with_bloom) => {
                 mem::take(&mut receipt_with_bloom.receipt.logs)
-            }
-            _ => {
-                tracing::warn!("unexpected receipt type");
-                vec![]
             }
         };
         for log in receipt_logs {
@@ -405,16 +398,12 @@ fn rpc_transaction_to_row(
     receipt: TransactionReceipt,
     tx_index: usize,
 ) -> Result<Option<Transaction>, ToRowError> {
-    let sig = match &tx.inner {
-        TxEnvelope::Legacy(signed) => signed.signature(),
-        TxEnvelope::Eip2930(signed) => signed.signature(),
-        TxEnvelope::Eip1559(signed) => signed.signature(),
-        TxEnvelope::Eip4844(signed) => signed.signature(),
-        TxEnvelope::Eip7702(signed) => signed.signature(),
-        _ => {
-            tracing::warn!("unexpected tx type");
-            return Ok(None);
-        }
+    let sig = match &*tx.inner {
+        EthereumTxEnvelope::Legacy(signed) => signed.signature(),
+        EthereumTxEnvelope::Eip2930(signed) => signed.signature(),
+        EthereumTxEnvelope::Eip1559(signed) => signed.signature(),
+        EthereumTxEnvelope::Eip4844(signed) => signed.signature(),
+        EthereumTxEnvelope::Eip7702(signed) => signed.signature(),
     };
     Ok(Some(Transaction {
         block_hash: block.hash,
@@ -451,7 +440,7 @@ fn rpc_transaction_to_row(
             .map(i128::try_from)
             .transpose()
             .map_err(|e| ToRowError::Overflow("max_fee_per_blob_gas", e.into()))?,
-        from: tx.from.0 .0,
+        from: tx.as_recovered().signer().into(),
         status: receipt.status().into(),
     }))
 }

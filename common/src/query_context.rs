@@ -2,6 +2,7 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use arrow::{array::RecordBatch, compute::concat_batches, datatypes::SchemaRef};
 use async_udf::physical_optimizer::AsyncFuncRule;
+use bincode::{config, Decode, Encode};
 use bytes::Bytes;
 use datafusion::{
     common::{
@@ -42,6 +43,7 @@ use crate::{
     evm::udfs::{
         EvmDecode, EvmDecodeParams, EvmDecodeType, EvmEncodeParams, EvmEncodeType, EvmTopic,
     },
+    stream_helpers::is_streaming,
     BoxError, Table,
 };
 
@@ -103,6 +105,23 @@ pub struct PlanningContext {
     catalog: ResolvedTables,
 }
 
+// Serialized plan with additional options
+#[derive(Encode, Decode)]
+pub struct RemotePlan {
+    pub serialized_plan: Vec<u8>,
+    pub is_streaming: bool,
+}
+
+pub fn remote_plan_from_bytes(bytes: &Bytes) -> Result<RemotePlan, Error> {
+    let (remote_plan, _) = bincode::decode_from_slice(bytes, config::standard()).map_err(|e| {
+        Error::PlanEncodingError(DataFusionError::Plan(format!(
+            "Failed to serialize remote plan: {}",
+            e
+        )))
+    })?;
+    Ok(remote_plan)
+}
+
 impl PlanningContext {
     pub fn new(catalog: ResolvedTables) -> Self {
         Self {
@@ -126,11 +145,25 @@ impl PlanningContext {
         &self,
         query: parser::Statement,
     ) -> Result<(Bytes, DFSchemaRef), Error> {
+        let is_streaming = is_streaming(&query);
         let ctx = self.datafusion_ctx().await?;
         let plan = sql_to_plan(&ctx, query).await?;
         let schema = plan.schema().clone();
         let serialized_plan = logical_plan_to_bytes_with_extension_codec(&plan, &EmptyTableCodec)
             .map_err(Error::PlanEncodingError)?;
+        let remote_plan = RemotePlan {
+            serialized_plan: serialized_plan.to_vec(),
+            is_streaming,
+        };
+        let serialized_plan = Bytes::from(
+            bincode::encode_to_vec(&remote_plan, config::standard()).map_err(|e| {
+                Error::PlanEncodingError(DataFusionError::Plan(format!(
+                    "Failed to serialize remote plan: {}",
+                    e
+                )))
+            })?,
+        );
+
         Ok((serialized_plan, schema))
     }
 
@@ -257,10 +290,7 @@ impl QueryContext {
 
     /// A remote plan has empty tables, so this will attach the actual table providers from our
     /// catalog to the plan before executing it.
-    pub async fn execute_remote_plan(
-        &self,
-        plan: LogicalPlan,
-    ) -> Result<SendableRecordBatchStream, Error> {
+    pub async fn prepare_remote_plan(&self, plan: LogicalPlan) -> Result<LogicalPlan, Error> {
         let ctx = self.datafusion_ctx().await?;
         let all_tables = all_tables(&ctx).await;
         let mut rewriter = AttachTablesToPlan {
@@ -271,7 +301,7 @@ impl QueryContext {
             .map_err(Error::PlanningError)?
             .data;
 
-        execute_plan(&ctx, plan).await
+        Ok(plan)
     }
 
     /// Because `DatasetContext` is read-only, planning and execution can be done on ephemeral

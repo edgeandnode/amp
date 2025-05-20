@@ -24,9 +24,10 @@ use datafusion::{
     common::DFSchema,
     error::DataFusionError,
     execution::{runtime_env::RuntimeEnv, SendableRecordBatchStream},
+    logical_expr::LogicalPlan,
 };
-use dataset_store::{DatasetError, DatasetStore};
-use futures::{Stream, StreamExt as _, TryStreamExt};
+use dataset_store::{sql_datasets::is_incremental, DatasetError, DatasetStore};
+use futures::{SinkExt, Stream, StreamExt as _, TryStreamExt};
 use metadata_db::MetadataDb;
 use prost::Message as _;
 use thiserror::Error;
@@ -53,6 +54,12 @@ pub enum Error {
 
     #[error(transparent)]
     CoreError(#[from] CoreError),
+
+    #[error("invalid query: {0}")]
+    InvalidQuery(String),
+
+    #[error("streaming query execution error: {0}")]
+    StreamingExecutionError(String),
 }
 
 impl From<prost::DecodeError> for Error {
@@ -85,11 +92,13 @@ impl IntoResponse for Error {
                 | CoreError::MetaTableError(_),
             ) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::ExecutionError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::StreamingExecutionError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::DatasetStoreError(e) if e.is_not_found() => StatusCode::NOT_FOUND,
             Error::DatasetStoreError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::PbDecodeError(_) => StatusCode::BAD_REQUEST,
             Error::UnsupportedFlightDescriptorType(_) => StatusCode::BAD_REQUEST,
             Error::UnsupportedFlightDescriptorCommand(_) => StatusCode::BAD_REQUEST,
+            Error::InvalidQuery(_) => StatusCode::BAD_REQUEST,
         };
         let body = serde_json::json!({
             "error": error_message,
@@ -124,6 +133,8 @@ impl From<Error> for Status {
             ) => datafusion_error_to_status(&e, df),
 
             Error::ExecutionError(df) => datafusion_error_to_status(&e, df),
+            Error::StreamingExecutionError(_) => Status::internal(e.to_string()),
+            Error::InvalidQuery(_) => Status::invalid_argument(e.to_string()),
         }
     }
 }
@@ -155,12 +166,135 @@ impl Service {
             .ctx_for_sql(&query, self.env.clone())
             .await
             .map_err(|err| Error::DatasetStoreError(err))?;
-        let plan = ctx.plan_sql(query).await.map_err(|err| Error::from(err))?;
-        let stream = ctx
-            .execute_plan(plan)
+        let plan = ctx
+            .plan_sql(query.clone())
             .await
             .map_err(|err| Error::from(err))?;
-        Ok(stream)
+        // is_incremental returns an error if query contains EXPLAIN, DML, etc.
+        let is_incr = is_incremental(&plan).map_err(|e| Error::InvalidQuery(e.to_string()))?;
+        let is_streaming = common::stream_helpers::is_streaming(&query);
+        if is_streaming && !is_incr {
+            return Err(Error::InvalidQuery(
+                "not incremental queries are not supported for streaming".to_string(),
+            ));
+        }
+
+        let ctx = Arc::new(ctx);
+        self.execute_plan(ctx, plan, is_streaming).await
+    }
+
+    pub async fn execute_plan(
+        &self,
+        ctx: Arc<QueryContext>,
+        plan: LogicalPlan,
+        is_streaming: bool,
+    ) -> Result<SendableRecordBatchStream, Error> {
+        use futures::channel::mpsc;
+
+        // If not streaming or metadata db is not available, execute once
+        if !is_streaming {
+            return ctx.execute_plan(plan).await.map_err(|err| Error::from(err));
+        }
+
+        let metadata_db_ref = self.dataset_store.metadata_db.as_ref();
+
+        // Start infinite stream
+        let mut current_end_block =
+            dataset_store::sql_datasets::max_end_block(&plan, &ctx, metadata_db_ref)
+                .await
+                .map_err(|e| Error::CoreError(CoreError::DatasetError(e)))?;
+
+        let (mut tx, rx) = mpsc::channel(1);
+
+        let schema = plan.schema().clone().as_ref().clone().into();
+
+        // initial range
+        if let Some(end) = current_end_block {
+            let mut stream = dataset_store::sql_datasets::execute_plan_for_range(
+                plan.clone(),
+                &ctx,
+                metadata_db_ref,
+                0,
+                end,
+            )
+            .await
+            .map_err(|e| Error::CoreError(CoreError::DatasetError(e)))?;
+
+            let mut tx = tx.clone();
+            tokio::spawn(async move {
+                while let Some(batch) = stream.next().await {
+                    let send_result = tx.send(batch).await;
+                    if send_result.is_err() {
+                        return Err(Error::StreamingExecutionError(
+                            "failed to return a next batch".to_string(),
+                        ));
+                    }
+                }
+
+                Ok(())
+            });
+        }
+
+        let ctx = ctx.clone();
+        let metadata_db = self.dataset_store.metadata_db.as_ref().clone();
+
+        // async listen
+        tokio::spawn(async move {
+            let locations = dataset_store::sql_datasets::queried_physical_tables(&plan, &ctx)
+                .await
+                .unwrap();
+
+            let mut notifications = Vec::new();
+            for location in locations {
+                let channel = common::stream_helpers::change_tracking_pg_channel(location);
+                let stream = metadata_db.listen(&channel).await.unwrap();
+                notifications.push(stream);
+            }
+            let mut notifications = futures::stream::select_all(notifications);
+
+            while let Some(Ok(_)) = notifications.next().await {
+                let end =
+                    dataset_store::sql_datasets::max_end_block(&plan, ctx.as_ref(), &metadata_db)
+                        .await
+                        .unwrap();
+
+                let (start, end) = match (current_end_block, end) {
+                    (Some(start), Some(end)) if end > start => (start + 1, end),
+                    (None, Some(end)) => (0, end),
+                    (_, _) => continue,
+                };
+
+                let mut stream = dataset_store::sql_datasets::execute_plan_for_range(
+                    plan.clone(),
+                    &ctx,
+                    &metadata_db,
+                    start,
+                    end,
+                )
+                .await
+                .unwrap();
+
+                while let Some(batch) = stream.next().await {
+                    match batch {
+                        Ok(batch) => {
+                            if tx.send(Ok(batch)).await.is_err() {
+                                return;
+                            }
+                        }
+                        Err(e) => {
+                            let _ = tx.send(Err(e)).await;
+                            return;
+                        }
+                    }
+                }
+
+                current_end_block = Some(end);
+            }
+        });
+
+        let adapter = datafusion::physical_plan::stream::RecordBatchStreamAdapter::new(schema, rx);
+
+        Ok(Box::pin(adapter) as SendableRecordBatchStream)
     }
 }
 
@@ -322,7 +456,8 @@ impl Service {
         // `FunctionRegistry` for UDFs. That context must include all UDFs that may be used in the
         // query.
         let ctx = QueryContext::for_catalog(self.initial_catalog.clone(), self.env.clone())?;
-        let plan = ctx.plan_from_bytes(&ticket.ticket).await?;
+        let remote_plan = common::query_context::remote_plan_from_bytes(&ticket.ticket)?;
+        let plan = ctx.plan_from_bytes(&remote_plan.serialized_plan).await?;
 
         // The deserialized plan references empty tables, so we need to load the actual tables from the catalog.
         let table_refs = collect_scanned_tables(&plan);
@@ -332,7 +467,12 @@ impl Service {
             .load_catalog_for_table_refs(table_refs.iter())
             .await?;
         let query_ctx = QueryContext::for_catalog(catalog, self.env.clone())?;
-        let stream = query_ctx.execute_remote_plan(plan).await?;
+        let plan = query_ctx.prepare_remote_plan(plan).await?;
+
+        let query_ctx = Arc::new(query_ctx);
+        let stream = self
+            .execute_plan(query_ctx, plan, remote_plan.is_streaming)
+            .await?;
 
         Ok(FlightDataEncoderBuilder::new()
             .with_schema(stream.schema())

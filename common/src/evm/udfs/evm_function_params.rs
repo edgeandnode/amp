@@ -223,7 +223,7 @@ impl EvmDecodeParams {
                         builder.append(false);
                         continue;
                     }
-                    let decoded = call.alloy_function.abi_decode_input(&data[4..], true);
+                    let decoded = call.alloy_function.abi_decode_input(&data[4..]);
                     match decoded {
                         Ok(decoded) => {
                             for (field, (param, ty)) in
