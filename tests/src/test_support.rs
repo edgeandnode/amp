@@ -118,7 +118,9 @@ impl SnapshotContext {
     ) -> Result<SnapshotContext, BoxError> {
         use figment::providers::Json;
 
-        let temp_dir = tempfile::Builder::new().keep(keep_temp_dir).tempdir()?;
+        let temp_dir = tempfile::Builder::new()
+            .disable_cleanup(keep_temp_dir)
+            .tempdir()?;
         let path = temp_dir.path();
         info!("Dumping dataset to {}", path.display());
 
