@@ -115,7 +115,7 @@ async fn streaming_tests() {
 async fn streaming_tests_with_additional_dumps() {
     let initial_dumps = vec![
         DumpTestDatasetCommand {
-            dataset_name: "eth_firehose".to_string(),
+            dataset_name: "eth_firehose_stream".to_string(),
             dependencies: vec![],
             start: 15_000_000,
             end: 15_000_001,
@@ -131,14 +131,14 @@ async fn streaming_tests_with_additional_dumps() {
     ];
     let dumps_on_running_server = vec![
         DumpTestDatasetCommand {
-            dataset_name: "eth_firehose".to_string(),
+            dataset_name: "eth_firehose_stream".to_string(),
             dependencies: vec![],
             start: 15_000_002,
             end: 15_000_002,
             n_jobs: 1,
         },
         DumpTestDatasetCommand {
-            dataset_name: "eth_firehose".to_string(),
+            dataset_name: "eth_firehose_stream".to_string(),
             dependencies: vec![],
             start: 15_000_002,
             end: 15_000_004,
