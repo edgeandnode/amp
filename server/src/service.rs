@@ -172,14 +172,7 @@ impl Service {
             .plan_sql(query.clone())
             .await
             .map_err(|err| Error::from(err))?;
-        // is_incremental returns an error if query contains EXPLAIN, DML, etc.
-        let is_incr = is_incremental(&plan).map_err(|e| Error::InvalidQuery(e.to_string()))?;
         let is_streaming = common::stream_helpers::is_streaming(&query);
-        if is_streaming && !is_incr {
-            return Err(Error::InvalidQuery(
-                "not incremental queries are not supported for streaming".to_string(),
-            ));
-        }
 
         let ctx = Arc::new(ctx);
         self.execute_plan(ctx, plan, is_streaming).await
@@ -220,6 +213,14 @@ impl Service {
         is_streaming: bool,
     ) -> Result<SendableRecordBatchStream, Error> {
         use futures::channel::mpsc;
+
+        // is_incremental returns an error if query contains EXPLAIN, DML, etc.
+        let is_incr = is_incremental(&plan).map_err(|e| Error::InvalidQuery(e.to_string()))?;
+        if is_streaming && !is_incr {
+            return Err(Error::InvalidQuery(
+                "not incremental queries are not supported for streaming".to_string(),
+            ));
+        }
 
         // If not streaming or metadata db is not available, execute once
         if !is_streaming {
