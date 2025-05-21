@@ -46,7 +46,7 @@ pretty_assertions = "1.4.1"
 prometheus = "0.13"
 serde = { version = "1.0.197", features = ["derive"] }
 serde_json = "1.0.114"
-serde_yaml = "0.9.34"
+serde_yaml = "0.9.34+deprecated" # Full version required to fix renovate crate version not found error
 snmalloc-rs = "0.3.4"
 tempfile = "3.13.0"
 thiserror = "2.0"
