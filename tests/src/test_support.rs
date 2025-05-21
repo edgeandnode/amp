@@ -140,7 +140,7 @@ impl SnapshotContext {
             start,
             end,
             n_jobs,
-            true
+            true,
         )
         .await?;
         let ctx = QueryContext::for_catalog(catalog, Arc::new(config.make_runtime_env()?))?;
