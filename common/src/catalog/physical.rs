@@ -73,13 +73,9 @@ impl PhysicalDataset {
         Self { dataset, tables }
     }
 
-    /// All tables in the catalog, except meta tables.
+    /// All tables in the catalog
     pub fn tables(&self) -> impl Iterator<Item = &PhysicalTable> {
-        self.tables.iter().filter(|table| !table.is_meta())
-    }
-
-    pub fn meta_tables(&self) -> impl Iterator<Item = &PhysicalTable> {
-        self.tables.iter().filter(|table| table.is_meta())
+        self.tables.iter()
     }
 
     pub fn name(&self) -> &str {
@@ -328,10 +324,6 @@ impl PhysicalTable {
     pub fn catalog_schema(&self) -> &str {
         // Unwrap: This is always constructed with a schema.
         &self.table_ref.schema().unwrap()
-    }
-
-    pub fn is_meta(&self) -> bool {
-        self.table.is_meta()
     }
 
     pub fn schema(&self) -> SchemaRef {

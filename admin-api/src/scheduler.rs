@@ -63,7 +63,7 @@ impl Scheduler {
             .await?;
 
         let action = WorkerAction {
-            node_id: node_id.to_string(),
+            node_id: node_id.to_owned(),
             job_id,
             action: Action::Start,
         };

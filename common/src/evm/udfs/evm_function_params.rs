@@ -1,7 +1,7 @@
 use std::{any::Any, str::FromStr, sync::Arc};
 
 use alloy::{
-    dyn_abi::{DynSolType, FunctionExt, JsonAbiExt, Specifier as _},
+    dyn_abi::{DynSolType, JsonAbiExt, Specifier as _},
     json_abi::Function as AlloyFunction,
 };
 use datafusion::{
@@ -31,16 +31,12 @@ struct FunctionCall {
     alloy_function: AlloyFunction,
     input_names: Vec<String>,
     input_types: Vec<DynSolType>,
-    output_names: Vec<String>,
-    output_types: Vec<DynSolType>,
 }
 
 impl FunctionCall {
     fn new(alloy_function: AlloyFunction) -> Result<Self, DataFusionError> {
         let mut input_names = Vec::with_capacity(alloy_function.inputs.len());
         let mut input_types = Vec::with_capacity(alloy_function.inputs.len());
-        let mut output_names = Vec::with_capacity(alloy_function.outputs.len());
-        let mut output_types = Vec::with_capacity(alloy_function.outputs.len());
 
         for param in &alloy_function.inputs {
             let ty = param.resolve().unwrap();
@@ -54,24 +50,10 @@ impl FunctionCall {
             input_names.push(param.name.clone());
         }
 
-        for param in &alloy_function.outputs {
-            let ty = param.resolve().unwrap();
-            if param.name.is_empty() {
-                return plan_err!(
-                    "function {} has unnamed output parameter",
-                    alloy_function.name
-                );
-            }
-            output_types.push(ty);
-            output_names.push(param.name.clone());
-        }
-
         Ok(Self {
             alloy_function,
             input_names,
             input_types,
-            output_names,
-            output_types,
         })
     }
 }
@@ -98,41 +80,28 @@ impl TryFrom<&ScalarValue> for FunctionCall {
     }
 }
 
-/// `evm_decode_params` and `evm_decode_results` UDFs for decoding function input and output data.
 #[derive(Debug)]
-pub struct EvmDecodeFunctionData {
+pub struct EvmDecodeParams {
     signature: Signature,
-    decode: Decode,
 }
 
-impl EvmDecodeFunctionData {
-    pub fn evm_decode_params() -> Self {
-        Self::new(Decode::Params)
-    }
-
-    pub fn evm_decode_results() -> Self {
-        Self::new(Decode::Results)
-    }
-
-    fn new(decode: Decode) -> Self {
+impl EvmDecodeParams {
+    pub fn new() -> Self {
         let signature = Signature::exact(
             vec![DataType::Binary, DataType::Utf8],
             Volatility::Immutable,
         );
-        Self { signature, decode }
+        Self { signature }
     }
 }
 
-impl ScalarUDFImpl for EvmDecodeFunctionData {
+impl ScalarUDFImpl for EvmDecodeParams {
     fn as_any(&self) -> &dyn Any {
         self
     }
 
     fn name(&self) -> &str {
-        match self.decode {
-            Decode::Params => "evm_decode_params",
-            Decode::Results => "evm_decode_results",
-        }
+        "evm_decode_params"
     }
 
     fn signature(&self) -> &Signature {
@@ -230,46 +199,37 @@ impl ScalarUDFImpl for EvmDecodeFunctionData {
     }
 }
 
-impl EvmDecodeFunctionData {
+impl EvmDecodeParams {
     /// Decode the given data using the function signature.
     fn decode<'a>(
         &self,
         data: impl Iterator<Item = Option<&'a [u8]>>,
         call: &FunctionCall,
     ) -> Result<Arc<dyn Array>, DataFusionError> {
-        let types = match self.decode {
-            Decode::Params => &call.input_types,
-            Decode::Results => &call.output_types,
-        };
         let fields = self.fields(call)?;
         let mut builder = StructBuilder::from_fields(fields, 0);
         for data in data {
             match data {
                 Some(data) => {
-                    let decoded = match self.decode {
-                        Decode::Params => {
-                            let selector = &data[..4];
-                            if selector != call.alloy_function.selector() {
-                                tracing::trace!(
-                                    function_name=%call.alloy_function.name,
-                                    decode=?self.decode,
-                                    "failed to decode function data due to selector mismatch"
-                                );
-                                for (field, ty) in types.iter().enumerate() {
-                                    FieldBuilder::new(&mut builder, ty, field)
-                                        .append_null_value()?;
-                                }
-                                builder.append(false);
-                                continue;
-                            }
-                            call.alloy_function.abi_decode_input(&data[4..])
+                    let selector = &data[..4];
+                    if selector != call.alloy_function.selector() {
+                        tracing::trace!(
+                            function_name=%call.alloy_function.name,
+                            "failed to decode function params due to selector mismatch"
+                        );
+                        for (field, ty) in call.input_types.iter().enumerate() {
+                            FieldBuilder::new(&mut builder, ty, field).append_null_value()?;
                         }
-                        Decode::Results => call.alloy_function.abi_decode_output(data),
-                    };
+                        builder.append(false);
+                        continue;
+                    }
+                    let decoded = call.alloy_function.abi_decode_input(&data[4..]);
                     match decoded {
                         Ok(decoded) => {
-                            for (field, (param, ty)) in izip!(decoded, types).enumerate() {
-                                FieldBuilder::new(&mut builder, ty, field).append_value(param)?;
+                            for (field, (param, ty)) in
+                                izip!(decoded, &call.input_types).enumerate()
+                            {
+                                FieldBuilder::new(&mut builder, &ty, field).append_value(param)?;
                             }
                             builder.append(true);
                         }
@@ -277,10 +237,9 @@ impl EvmDecodeFunctionData {
                             tracing::trace!(
                                 function_name=%call.alloy_function.name,
                                 error=?e,
-                                decode=?self.decode,
-                                "failed to decode function data"
+                                "failed to decode function params"
                             );
-                            for (field, ty) in types.iter().enumerate() {
+                            for (field, ty) in call.input_types.iter().enumerate() {
                                 FieldBuilder::new(&mut builder, ty, field).append_null_value()?;
                             }
                             builder.append(false);
@@ -288,7 +247,7 @@ impl EvmDecodeFunctionData {
                     }
                 }
                 None => {
-                    for (field, ty) in types.iter().enumerate() {
+                    for (field, ty) in call.input_types.iter().enumerate() {
                         FieldBuilder::new(&mut builder, ty, field).append_null_value()?;
                     }
                     builder.append(false);
@@ -301,12 +260,8 @@ impl EvmDecodeFunctionData {
 
     /// Return `Fields` for the given param names and types.
     fn fields(&self, call: &FunctionCall) -> Result<Fields, DataFusionError> {
-        let (names, types) = match self.decode {
-            Decode::Params => (&call.input_names, &call.input_types),
-            Decode::Results => (&call.output_names, &call.output_types),
-        };
         let mut fields = Vec::new();
-        for (name, ty) in names.iter().zip(types.iter()) {
+        for (name, ty) in call.input_names.iter().zip(call.input_types.iter()) {
             let name = name.clone();
             let df = sol_to_arrow_type(ty)?;
             let field = Field::new(name, df, true);
@@ -403,10 +358,4 @@ impl ScalarUDFImpl for EvmEncodeParams {
     fn aliases(&self) -> &[String] {
         &[]
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Decode {
-    Params,
-    Results,
 }
