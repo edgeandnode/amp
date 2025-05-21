@@ -526,7 +526,9 @@ pub async fn run_query_on_fresh_server(
     } else {
         use figment::providers::Json;
 
-        let temp_dir = tempfile::Builder::new().disable_cleanup(*KEEP_TEMP_DIRS).tempdir()?;
+        let temp_dir = tempfile::Builder::new()
+            .disable_cleanup(*KEEP_TEMP_DIRS)
+            .tempdir()?;
         let path = temp_dir.path();
 
         let config_override = Some(Json::string(&format!(
@@ -597,12 +599,7 @@ pub async fn run_query_on_fresh_server(
 
     if let Some(streaming_options) = streaming_options {
         loop {
-            match time::timeout(
-                streaming_options.max_duration,
-                batches.next(),
-            )
-            .await
-            {
+            match time::timeout(streaming_options.max_duration, batches.next()).await {
                 Ok(Some(batch)) => {
                     let batch = batch?;
                     writer.write(&batch)?;
