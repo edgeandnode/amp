@@ -40,7 +40,7 @@ figment = { version = "0.10.19", features = ["toml", "env", "json"] }
 fs-err = "2.11.0"
 futures = "0.3"
 hex = "0.4.3"
-itertools = "0.13.0"
+itertools = "0.14.0"
 pgtemp = "0.6.0"
 pretty_assertions = "1.4.1"
 prometheus = "0.13"
