@@ -93,6 +93,28 @@
   streamingOptions:
     maxDuration: 10s
     atLeastRows: 4
+  initialDumps:
+    - dataset: eth_firehose_stream
+      start: 15000000
+      end: 15000001
+      nJobs: 1
+    - dataset: sql_stream_ds
+      start: 15000001
+      end: 15000001
+      nJobs: 1
+  dumpsOnRunningServer:
+    - dataset: eth_firehose_stream
+      start: 15000002
+      end: 15000002
+      nJobs: 1
+    - dataset: eth_firehose_stream
+      start: 15000002
+      end: 15000004
+      nJobs: 1
+    - dataset: sql_stream_ds
+      start: 15000002
+      end: 15000004
+      nJobs: 1
   results: |
     [
       {"src": "eth", "block_num": 15000001},
