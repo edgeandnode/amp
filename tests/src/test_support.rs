@@ -195,6 +195,7 @@ impl SnapshotContext {
     }
 }
 
+#[derive(Clone)]
 pub struct DumpTestDatasetCommand {
     pub(crate) dataset_name: String,
     pub(crate) dependencies: Vec<String>,
@@ -513,7 +514,7 @@ fn dynamic_addrs() -> Addrs {
 /// server and return the JSONL string in binary format.
 pub async fn run_query_on_fresh_server(
     query: &str,
-    initial_dump: Option<DumpTestDatasetCommand>,
+    initial_dumps: Vec<DumpTestDatasetCommand>,
     dumps_on_running_server: Vec<DumpTestDatasetCommand>,
     streaming_options: Option<StreamingExecutionOptions>,
 ) -> Result<serde_json::Value, BoxError> {
@@ -521,7 +522,7 @@ pub async fn run_query_on_fresh_server(
     check_provider_file("firehose_eth_mainnet.toml").await;
 
     // Start the nozzle server.
-    let config = if initial_dump.is_none() && dumps_on_running_server.is_empty() {
+    let config = if initial_dumps.is_empty() && dumps_on_running_server.is_empty() {
         load_test_config(None).await?
     } else {
         use figment::providers::Json;
@@ -546,7 +547,7 @@ pub async fn run_query_on_fresh_server(
         server.await.unwrap();
     });
 
-    if let Some(initial_dump) = initial_dump {
+    for initial_dump in initial_dumps {
         let dependencies: Vec<&str> = initial_dump
             .dependencies
             .iter()

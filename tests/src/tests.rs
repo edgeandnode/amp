@@ -5,7 +5,7 @@ use metadata_db::KEEP_TEMP_DIRS;
 
 use crate::test_support::{
     assert_sql_test_result, check_blocks, check_provider_file, load_sql_tests,
-    run_query_on_fresh_server, SnapshotContext, StreamingExecutionOptions,
+    run_query_on_fresh_server, DumpTestDatasetCommand, SnapshotContext, StreamingExecutionOptions,
 };
 
 #[tokio::test]
@@ -85,7 +85,7 @@ async fn sql_over_eth_firehose_dump() {
 #[tokio::test]
 async fn sql_tests() {
     for test in load_sql_tests("sql-tests.yaml").unwrap() {
-        let results = run_query_on_fresh_server(&test.query, None, vec![], None)
+        let results = run_query_on_fresh_server(&test.query, vec![], vec![], None)
             .await
             .map_err(|e| format!("{e:?}"));
         assert_sql_test_result(&test, results);
@@ -97,11 +97,70 @@ async fn streaming_tests() {
     for test in load_sql_tests("sql-streaming-tests.yaml").unwrap() {
         let results = run_query_on_fresh_server(
             &test.query,
-            None,
+            vec![],
             vec![],
             Some(StreamingExecutionOptions {
                 max_duration: Duration::from_secs(10),
                 at_least_rows: 1,
+            }),
+        )
+        .await
+        .map_err(|e| format!("{e:?}"));
+
+        assert_sql_test_result(&test, results);
+    }
+}
+
+#[tokio::test]
+async fn streaming_tests_with_additional_dumps() {
+    let initial_dumps = vec![
+        DumpTestDatasetCommand {
+            dataset_name: "eth_firehose".to_string(),
+            dependencies: vec![],
+            start: 15_000_000,
+            end: 15_000_001,
+            n_jobs: 1,
+        },
+        DumpTestDatasetCommand {
+            dataset_name: "sql_stream_ds".to_string(),
+            dependencies: vec![],
+            start: 15_000_001,
+            end: 15_000_001,
+            n_jobs: 1,
+        },
+    ];
+    let dumps_on_running_server = vec![
+        DumpTestDatasetCommand {
+            dataset_name: "eth_firehose".to_string(),
+            dependencies: vec![],
+            start: 15_000_002,
+            end: 15_000_002,
+            n_jobs: 1,
+        },
+        DumpTestDatasetCommand {
+            dataset_name: "eth_firehose".to_string(),
+            dependencies: vec![],
+            start: 15_000_002,
+            end: 15_000_004,
+            n_jobs: 1,
+        },
+        DumpTestDatasetCommand {
+            dataset_name: "sql_stream_ds".to_string(),
+            dependencies: vec![],
+            start: 15_000_002,
+            end: 15_000_004,
+            n_jobs: 1,
+        },
+    ];
+
+    for test in load_sql_tests("sql-complex-streaming-tests.yaml").unwrap() {
+        let results = run_query_on_fresh_server(
+            &test.query,
+            initial_dumps.clone(),
+            dumps_on_running_server.clone(),
+            Some(StreamingExecutionOptions {
+                max_duration: Duration::from_secs(10),
+                at_least_rows: 4,
             }),
         )
         .await
