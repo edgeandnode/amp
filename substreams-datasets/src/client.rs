@@ -1,7 +1,7 @@
 use std::{str::FromStr as _, time::Duration};
 
 use anyhow::Context as _;
-use common::{BlockNum, BlockStreamer, BoxError, DatasetRows, Store, Table};
+use common::{BlockNum, BlockStreamer, BoxError, RawDatasetRows, Store, Table};
 use firehose_datasets::{client::AuthInterceptor, Error};
 use futures::{Stream, StreamExt as _, TryStreamExt as _};
 use pbsubstreams::{response::Message, stream_client::StreamClient, Request as StreamRequest};
@@ -147,7 +147,7 @@ impl BlockStreamer for Client {
         mut self,
         start: BlockNum,
         end: BlockNum,
-        tx: mpsc::Sender<DatasetRows>,
+        tx: mpsc::Sender<RawDatasetRows>,
     ) -> Result<(), BoxError> {
         // Explicitly track the next block in case we need to restart the Firehose stream.
         let mut next_block = start;
@@ -175,9 +175,6 @@ impl BlockStreamer for Client {
                         let table_rows = transform(block, &self.tables).context(format!(
                             "error converting Blockscope to rows for block {block_num}"
                         ))?;
-                        if table_rows.is_empty() {
-                            continue;
-                        }
 
                         // Send the block and check if the receiver has gone away.
                         if tx.send(table_rows).await.is_err() {

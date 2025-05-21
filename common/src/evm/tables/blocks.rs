@@ -3,12 +3,11 @@ use std::sync::{Arc, LazyLock};
 use arrow::{
     array::{ArrayRef, BinaryBuilder, UInt64Builder},
     datatypes::{DataType, Field, Schema, SchemaRef},
-    error::ArrowError,
 };
 
 use crate::{
-    arrow, timestamp_type, Bytes32, Bytes32ArrayBuilder, EvmAddress as Address,
-    EvmAddressArrayBuilder, EvmCurrency, EvmCurrencyArrayBuilder, Table, TableRows, Timestamp,
+    arrow, timestamp_type, BoxError, Bytes32, Bytes32ArrayBuilder, EvmAddress as Address,
+    EvmAddressArrayBuilder, EvmCurrency, EvmCurrencyArrayBuilder, RawTableRows, Table, Timestamp,
     TimestampArrayBuilder, BLOCK_NUM, BYTES32_TYPE, EVM_ADDRESS_TYPE as ADDRESS_TYPE,
     EVM_CURRENCY_TYPE,
 };
@@ -180,7 +179,7 @@ impl BlockRowsBuilder {
         self.parent_beacon_root.append_option(*parent_beacon_root);
     }
 
-    pub fn build(self, network: String) -> Result<TableRows, ArrowError> {
+    pub fn build(self, network: String) -> Result<RawTableRows, BoxError> {
         let Self {
             mut block_num,
             mut timestamp,
@@ -229,7 +228,7 @@ impl BlockRowsBuilder {
             Arc::new(parent_beacon_root.finish()),
         ];
 
-        TableRows::new(table(network), columns)
+        RawTableRows::new(table(network), columns)
     }
 }
 

@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
-use anyhow::Context as _;
+use anyhow::{anyhow, Context as _};
 use common::{
     arrow::{
         array::*,
         datatypes::{DataType as ArrowDataType, Field, Schema},
     },
-    DatasetRows, Table, TableRows, BLOCK_NUM,
+    RawDatasetRows, RawTableRows, Table, BLOCK_NUM,
 };
 use prost::Message as _;
 pub use prost_reflect::MessageDescriptor;
@@ -20,7 +20,7 @@ pub(crate) fn pb_to_rows(
     value: &[u8],
     schemas: &[Table],
     block_num: u64,
-) -> Result<DatasetRows, anyhow::Error> {
+) -> Result<RawDatasetRows, anyhow::Error> {
     let dynamic_message = DynamicMessage::decode(message_descriptor.clone(), value)
         .context("failed to decode module output message")?;
 
@@ -43,14 +43,14 @@ pub(crate) fn pb_to_rows(
                 return Some(Err(err.into()));
             }
 
-            Some(Ok(TableRows {
-                rows: rows.unwrap(),
-                table: table.clone(),
-            }))
+            Some(
+                RawTableRows::new(table.clone(), rows.unwrap().columns().to_vec())
+                    .map_err(|e| anyhow!(e)),
+            )
         })
         .collect();
 
-    Ok(DatasetRows(tables?))
+    Ok(RawDatasetRows::new(tables?))
 }
 
 fn message_to_rows(

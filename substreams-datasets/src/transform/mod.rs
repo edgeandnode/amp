@@ -3,7 +3,7 @@ pub mod entities;
 pub mod proto;
 
 use anyhow::Context as _;
-use common::{parquet::data_type::AsBytes, DatasetRows};
+use common::{parquet::data_type::AsBytes, RawDatasetRows};
 
 use crate::{
     proto::sf::substreams::rpc::v2::BlockScopedData,
@@ -11,7 +11,7 @@ use crate::{
 };
 
 /// transform BlockScopedData to RecordBatch based on the module output type and schemas
-pub fn transform(block: BlockScopedData, tables: &Tables) -> Result<DatasetRows, anyhow::Error> {
+pub fn transform(block: BlockScopedData, tables: &Tables) -> Result<RawDatasetRows, anyhow::Error> {
     let block_num = block.clock.unwrap().number;
     let value = block
         .output

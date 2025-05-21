@@ -15,7 +15,8 @@ use common::{
     manifest::{Manifest, TableInput},
     query_context::{self, parse_sql, PlanningContext, ResolvedTable, ResolvedTables},
     store::StoreError,
-    BlockNum, BlockStreamer, BoxError, Dataset, DatasetWithProvider, QueryContext, Store,
+    BlockNum, BlockStreamer, BoxError, Dataset, DatasetWithProvider, QueryContext, RawDatasetRows,
+    Store,
 };
 use datafusion::{
     common::HashMap,
@@ -358,7 +359,7 @@ impl DatasetStore {
                 self,
                 start_block: BlockNum,
                 end_block: BlockNum,
-                tx: mpsc::Sender<common::DatasetRows>,
+                tx: mpsc::Sender<RawDatasetRows>,
             ) -> Result<(), BoxError> {
                 match self {
                     Self::EvmRpc(client) => client.block_stream(start_block, end_block, tx).await,
