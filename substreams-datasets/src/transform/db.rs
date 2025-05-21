@@ -6,7 +6,7 @@ use common::{
         array::*,
         datatypes::{DataType as ArrowDataType, Field, Schema, TimeUnit},
     },
-    timestamp_type, DatasetRows, Table, TableRows, BLOCK_NUM,
+    timestamp_type, RawDatasetRows, RawTableRows, Table, BLOCK_NUM,
 };
 use datafusion::sql::sqlparser::{
     ast::{CreateTable, DataType as SqlDataType, Statement},
@@ -28,7 +28,7 @@ pub(crate) fn pb_to_rows(
     value: &[u8],
     schemas: &[Table],
     block_num: u64,
-) -> Result<DatasetRows, anyhow::Error> {
+) -> Result<RawDatasetRows, anyhow::Error> {
     let changes = DatabaseChanges::decode(value).context("failed to decode dbChanges output")?;
     let tables: Result<Vec<_>, anyhow::Error> = schemas
         .iter()
@@ -54,14 +54,14 @@ pub(crate) fn pb_to_rows(
                     ))
                     .into()));
             }
-            Some(Ok(TableRows {
-                rows: rows.unwrap(),
-                table: table.clone(),
-            }))
+            Some(
+                RawTableRows::new(table.clone(), rows.unwrap().columns().to_vec())
+                    .map_err(|e| anyhow!(e)),
+            )
         })
         .collect();
 
-    Ok(DatasetRows(tables?))
+    Ok(RawDatasetRows::new(tables?))
 }
 
 fn table_changes_to_rows(

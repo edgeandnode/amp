@@ -17,7 +17,7 @@ use common::{
         blocks::{Block, BlockRowsBuilder},
         logs::{Log, LogRowsBuilder},
     },
-    BlockNum, BlockStreamer, BoxError, DatasetRows, EvmCurrency, Timestamp,
+    BlockNum, BlockStreamer, BoxError, EvmCurrency, RawDatasetRows, Timestamp,
 };
 use futures::future::try_join_all;
 use thiserror::Error;
@@ -142,7 +142,7 @@ impl JsonRpcClient {
         self,
         start_block: u64,
         end_block: u64,
-        tx: mpsc::Sender<DatasetRows>,
+        tx: mpsc::Sender<RawDatasetRows>,
     ) -> Result<(), BoxError> {
         info!(
             "Fetching blocks (not batched) {} to {}",
@@ -181,7 +181,7 @@ impl JsonRpcClient {
         self,
         start_block: u64,
         end_block: u64,
-        tx: mpsc::Sender<DatasetRows>,
+        tx: mpsc::Sender<RawDatasetRows>,
     ) -> Result<(), BoxError> {
         info!("Fetching blocks (batched) {} to {}", start_block, end_block);
         let batching_client = BatchingRpcWrapper::new(
@@ -235,7 +235,7 @@ impl BlockStreamer for JsonRpcClient {
         self,
         start: BlockNum,
         end: BlockNum,
-        tx: mpsc::Sender<common::DatasetRows>,
+        tx: mpsc::Sender<RawDatasetRows>,
     ) -> Result<(), BoxError> {
         if self.batch_size > 1 {
             self.batched_block_stream(start, end, tx).await
@@ -259,7 +259,7 @@ fn rpc_to_rows(
     block: alloy::rpc::types::Block,
     receipts: Vec<Option<TransactionReceipt>>,
     network: &str,
-) -> Result<DatasetRows, BoxError> {
+) -> Result<RawDatasetRows, BoxError> {
     let header = rpc_header_to_row(block.header)?;
     let mut logs = Vec::new();
     let mut transactions = Vec::new();
@@ -324,7 +324,11 @@ fn rpc_to_rows(
         builder.build(network.to_string())?
     };
 
-    Ok(DatasetRows(vec![header_row, logs_row, transactions_row]))
+    Ok(RawDatasetRows::new(vec![
+        header_row,
+        logs_row,
+        transactions_row,
+    ]))
 }
 
 fn rpc_header_to_row(header: Header) -> Result<Block, ToRowError> {

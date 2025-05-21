@@ -7,7 +7,7 @@ use common::{
     multirange::MultiRange,
     parquet,
     parquet::{errors::ParquetError, format::KeyValue},
-    BlockNum, BoxError, QueryContext, TableRows, Timestamp,
+    BlockNum, BoxError, QueryContext, RawTableRows, Timestamp,
 };
 use metadata_db::MetadataDb;
 use object_store::{buffered::BufWriter, path::Path};
@@ -59,11 +59,7 @@ impl RawDatasetWriter {
         })
     }
 
-    pub async fn write(&mut self, table_rows: TableRows) -> Result<(), BoxError> {
-        if table_rows.is_empty() {
-            return Ok(());
-        }
-
+    pub async fn write(&mut self, table_rows: RawTableRows) -> Result<(), BoxError> {
         let table_name = table_rows.table.name.as_str();
 
         let writer = self.writers.get_mut(table_name).unwrap();
@@ -164,16 +160,14 @@ impl TableWriter {
 
     pub async fn write(
         &mut self,
-        table_rows: &TableRows,
+        table_rows: &RawTableRows,
     ) -> Result<Option<ScannedRange>, BoxError> {
         assert_eq!(table_rows.table.name, self.table.table_name());
 
         let mut scanned_range = None;
 
-        let block_num = table_rows.block_num()?;
-
         // The block is past the current range, so we need to close the current file and start a new one.
-        if self.current_range.is_some_and(|r| r.1 < block_num) {
+        if self.current_range.is_some_and(|r| r.1 < table_rows.block) {
             // Unwrap: `current_range` is `Some` by `is_some_and`.
             let end = self.current_range.unwrap().1;
             // Unwrap: If `current_range` is `Some` then `current_file` is also `Some`.
@@ -189,7 +183,7 @@ impl TableWriter {
         }
 
         // If the block stream has not yet reached the current range, then skip this block.
-        if block_num < self.current_range.unwrap().0 {
+        if table_rows.block < self.current_range.unwrap().0 {
             return Ok(scanned_range);
         }
 
@@ -202,18 +196,18 @@ impl TableWriter {
             // bytes would have been written yet.
             assert!(scanned_range.is_none());
 
-            // Close the current file at `block_num - 1`, the highest block height scanned by it.
-            let end = block_num - 1;
+            // Close the current file at `table_rows.block - 1`, the highest block height scanned by it.
+            let end = table_rows.block - 1;
             let file_to_close = self.current_file.take().unwrap();
             scanned_range = Some(file_to_close.close(end).await?);
 
             // The current range was partially written, so we need to split it.
             let end = self.current_range.unwrap().1;
-            self.current_range = Some((block_num, end));
+            self.current_range = Some((table_rows.block, end));
             self.current_file = Some(ParquetFileWriter::new(
                 self.table.clone(),
                 self.opts.clone(),
-                block_num,
+                table_rows.block,
             )?);
         }
 

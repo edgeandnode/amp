@@ -109,17 +109,9 @@ pub async fn run_job(job: Job<impl BlockStreamer>) -> Result<(), BoxError> {
 
     while let Some(dataset_rows) = firehose.recv().await {
         METRICS.blocks_read.inc();
-        if dataset_rows.is_empty() {
-            continue;
-        }
 
-        let block_num = dataset_rows.block_num()?;
-
+        let block = dataset_rows.block();
         for table_rows in dataset_rows {
-            if table_rows.is_empty() {
-                continue;
-            }
-
             let bytes = table_rows
                 .rows
                 .columns()
@@ -138,12 +130,12 @@ pub async fn run_job(job: Job<impl BlockStreamer>) -> Result<(), BoxError> {
                 .push(table_rows.rows);
         }
 
-        if block_num % job.batch_size == 0 || block_num == job.end {
+        if block % job.batch_size == 0 || block == job.end {
             let futures = table_map.iter().map(|(table_name, batches)| {
                 validate_batches(
                     job.ctx.clone(),
                     &table_name,
-                    RangeInclusive::new(batch_start, block_num),
+                    RangeInclusive::new(batch_start, block),
                     batches,
                 )
             });
@@ -151,7 +143,7 @@ pub async fn run_job(job: Job<impl BlockStreamer>) -> Result<(), BoxError> {
                 res?;
             }
             table_map.clear();
-            batch_start = block_num + 1;
+            batch_start = block + 1;
         }
     }
     // The Firehose task stopped sending blocks, so it must have terminated. Here we check if it

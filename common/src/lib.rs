@@ -11,9 +11,6 @@ pub mod store;
 pub mod stream_helpers;
 pub mod tracing_helpers;
 
-#[cfg(test)]
-mod tests;
-
 use std::{
     future::Future,
     time::{Duration, SystemTime},
@@ -81,111 +78,68 @@ pub fn timestamp_type() -> DataType {
 /// Remember to call `.with_timezone_utc()` after creating a Timestamp array.
 pub(crate) type TimestampArrayType = arrow::array::TimestampNanosecondArray;
 
-pub struct TableRows {
+/// A non-empty record batch associated with a single block of chain data, for populating raw
+/// datasets.
+pub struct RawTableRows {
     pub table: Table,
     pub rows: RecordBatch,
+    pub block: BlockNum,
 }
 
-impl TableRows {
-    pub fn new(table: Table, columns: Vec<ArrayRef>) -> Result<Self, ArrowError> {
+impl RawTableRows {
+    pub fn new(table: Table, columns: Vec<ArrayRef>) -> Result<Self, BoxError> {
         let schema = table.schema.clone();
-        Ok(TableRows {
-            table,
-            rows: RecordBatch::try_new(schema, columns)?,
-        })
+        let rows = RecordBatch::try_new(schema, columns)?;
+        let block = Self::block(&table, &rows)?;
+        Ok(RawTableRows { table, rows, block })
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.rows.num_rows() == 0
-    }
-
-    /// Returns the block number if all rows have the same block number.
-    ///
-    /// # Errors
-    /// - If the table is empty.
-    /// - If any table is missing the block_num column.
-    /// - If the block_num column values are not all the same.
-    pub fn block_num(&self) -> Result<u64, BoxError> {
+    fn block(table: &Table, rows: &RecordBatch) -> Result<BlockNum, BoxError> {
         use arrow::compute::kernels::aggregate::{max, min};
 
-        if self.is_empty() {
-            return Err(format!("empty table: {}", self.table.name).into());
+        if rows.num_rows() == 0 {
+            return Err(format!("empty table: {}", table.name).into());
         }
 
-        let block_nums = self
-            .rows
+        let block_nums = rows
             .column_by_name(BLOCK_NUM)
-            .ok_or_else(|| format!("missing block_num column in table: {}", self.table.name))?;
+            .ok_or_else(|| format!("missing block_num column in table: {}", table.name))?;
         let block_nums = block_nums
             .as_primitive_opt::<UInt64Type>()
             .ok_or("block_num column is not uint64")?;
 
         // Unwrap: We are not empty.
-        let min = min(block_nums).unwrap();
-        let max = max(block_nums).unwrap();
+        let start = min(block_nums).unwrap();
+        let end = max(block_nums).unwrap();
 
-        if min != max {
+        if start != end {
             return Err(format!(
                 "table {} contains mismatching block_num: {} != {}",
-                self.table.name, min, max
+                table.name, start, end
             )
             .into());
         };
 
-        Ok(min)
+        Ok(start)
     }
 }
 
-pub struct DatasetRows(pub Vec<TableRows>);
+pub struct RawDatasetRows(Vec<RawTableRows>);
 
-impl DatasetRows {
-    pub fn is_empty(&self) -> bool {
-        let mut empty = true;
-        for table_rows in &self.0 {
-            if !table_rows.is_empty() {
-                empty = false;
-                break;
-            }
-        }
-        empty
+impl RawDatasetRows {
+    pub fn new(rows: Vec<RawTableRows>) -> Self {
+        assert!(!rows.is_empty());
+        assert!(rows.iter().skip(1).all(|r| &r.block == &rows[0].block));
+        Self(rows)
     }
 
-    /// Returns the block number if all tables have the same block number.
-    ///
-    /// # Errors
-    /// - If the dataset is empty.
-    /// - If any table is missing the block_num column.
-    /// - If the block_num column values are not all the same.
-    pub fn block_num(&self) -> Result<u64, BoxError> {
-        if self.is_empty() {
-            return Err("empty dataset".into());
-        }
-
-        let mut block_nums = vec![];
-        for table_rows in &self.0 {
-            if table_rows.is_empty() {
-                continue;
-            }
-            let block_num = table_rows.block_num()?;
-            block_nums.push(block_num);
-        }
-
-        // Unwrap: We are not empty.
-        let min = block_nums.iter().min().unwrap();
-        let max = block_nums.iter().max().unwrap();
-
-        if min != max {
-            return Err(
-                format!("dataset contains mismatching block_num: {} != {}", min, max).into(),
-            );
-        }
-
-        Ok(*min)
+    pub fn block(&self) -> BlockNum {
+        self.0[0].block
     }
 }
 
-impl IntoIterator for DatasetRows {
-    type Item = TableRows;
+impl IntoIterator for RawDatasetRows {
+    type Item = RawTableRows;
     type IntoIter = std::vec::IntoIter<Self::Item>;
 
     fn into_iter(self) -> Self::IntoIter {
@@ -198,7 +152,7 @@ pub trait BlockStreamer: Clone + 'static {
         self,
         start: BlockNum,
         end: BlockNum,
-        tx: mpsc::Sender<DatasetRows>,
+        tx: mpsc::Sender<RawDatasetRows>,
     ) -> impl Future<Output = Result<(), BoxError>> + Send;
 
     fn latest_block(
