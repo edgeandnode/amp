@@ -59,7 +59,7 @@ pub async fn load_test_config(
 
 pub async fn bless(dataset_name: &str, start: u64, end: u64) -> Result<(), BoxError> {
     let config = load_test_config(None).await?;
-    redump(config, dataset_name, vec![], start, end, 1).await?;
+    dump(config, dataset_name, vec![], start, end, 1, true).await?;
     Ok(())
 }
 
@@ -133,13 +133,14 @@ impl SnapshotContext {
         )));
 
         let config = load_test_config(config_override).await?;
-        let catalog = redump(
+        let catalog = dump(
             config.clone(),
             dataset_name,
             dependencies,
             start,
             end,
             n_jobs,
+            true
         )
         .await?;
         let ctx = QueryContext::for_catalog(catalog, Arc::new(config.make_runtime_env()?))?;
@@ -228,32 +229,6 @@ where
 }
 
 #[instrument(skip_all)]
-/// Clears the dataset directory, if it exists, before dumping.
-async fn redump(
-    config: Arc<Config>,
-    dataset_name: &str,
-    dependencies: Vec<&str>,
-    start: u64,
-    end: u64,
-    n_jobs: u16,
-) -> Result<Catalog, BoxError> {
-    let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
-    let dataset_store = DatasetStore::new(config.clone(), metadata_db);
-    let mut datasets = Vec::new();
-    // First dump dependencies, then main dataset
-    for dataset_name in dependencies {
-        datasets.push(
-            redump_dataset(dataset_name, &*config, &dataset_store, start, end, n_jobs).await?,
-        );
-    }
-
-    datasets
-        .push(redump_dataset(dataset_name, &*config, &dataset_store, start, end, n_jobs).await?);
-    let catalog = Catalog::new(datasets);
-    Ok(catalog)
-}
-
-#[instrument(skip_all)]
 /// Clears the dataset directory if specified, before dumping.
 async fn dump(
     config: Arc<Config>,
@@ -327,53 +302,6 @@ async fn clear_dataset(config: &Config, dataset_name: &str) -> Result<(), BoxErr
         .try_collect::<Vec<_>>()
         .await?;
     Ok(())
-}
-
-#[instrument(skip_all)]
-async fn redump_dataset(
-    dataset_name: &str,
-    config: &Config,
-    dataset_store: &Arc<DatasetStore>,
-    start: u64,
-    end: u64,
-    n_jobs: u16,
-) -> Result<PhysicalDataset, BoxError> {
-    let partition_size = 1024 * 1024; // 100 kB
-    let input_batch_block_size = 100_000;
-    let compression = Compression::ZSTD(ZstdLevel::try_new(1).unwrap());
-
-    // Disable bloom filters, as they bloat the test files and are not tested themselves.
-    let parquet_opts = parquet_opts(compression, false);
-
-    clear_dataset(config, dataset_name).await?;
-    let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
-    let data_store = config.data_store.clone();
-    let dataset = {
-        let dataset = dataset_store.load_dataset(dataset_name).await?.dataset;
-        let mut tables = Vec::new();
-        for table in dataset.tables() {
-            let physical_table =
-                PhysicalTable::next_revision(table, &data_store, dataset_name, metadata_db.clone())
-                    .await?;
-            tables.push(physical_table);
-        }
-        PhysicalDataset::new(dataset, tables)
-    };
-
-    dump_dataset(
-        &dataset,
-        dataset_store,
-        config,
-        n_jobs,
-        partition_size,
-        input_batch_block_size,
-        &parquet_opts,
-        start as i64,
-        Some(end as i64),
-    )
-    .await?;
-
-    Ok(dataset)
 }
 
 #[instrument(skip_all)]
