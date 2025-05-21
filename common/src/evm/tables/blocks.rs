@@ -1,15 +1,15 @@
 use std::sync::{Arc, LazyLock};
 
 use arrow::{
-    array::{ArrayRef, BinaryBuilder, UInt64Builder},
+    array::ArrayRef,
     datatypes::{DataType, Field, Schema, SchemaRef},
 };
+use datafusion::arrow::array::{BinaryArray, FixedSizeBinaryArray, UInt64Array};
 
 use crate::{
     arrow, timestamp_type, BoxError, Bytes32, Bytes32ArrayBuilder, EvmAddress as Address,
-    EvmAddressArrayBuilder, EvmCurrency, EvmCurrencyArrayBuilder, RawTableRows, Table, Timestamp,
-    TimestampArrayBuilder, BLOCK_NUM, BYTES32_TYPE, EVM_ADDRESS_TYPE as ADDRESS_TYPE,
-    EVM_CURRENCY_TYPE,
+    EvmCurrency, EvmCurrencyArrayBuilder, RawTableRows, Table, Timestamp, TimestampArrayBuilder,
+    BLOCK_NUM, BYTES32_TYPE, EVM_ADDRESS_TYPE as ADDRESS_TYPE, EVM_CURRENCY_TYPE,
 };
 
 static SCHEMA: LazyLock<SchemaRef> = LazyLock::new(|| Arc::new(schema()));
@@ -80,154 +80,51 @@ pub struct Block {
     pub parent_beacon_root: Option<Bytes32>,
 }
 
-pub struct BlockRowsBuilder {
-    block_num: UInt64Builder,
-    timestamp: TimestampArrayBuilder,
-    hash: Bytes32ArrayBuilder,
-    parent_hash: Bytes32ArrayBuilder,
-    ommers_hash: Bytes32ArrayBuilder,
-    miner: EvmAddressArrayBuilder,
-    state_root: Bytes32ArrayBuilder,
-    transactions_root: Bytes32ArrayBuilder,
-    receipt_root: Bytes32ArrayBuilder,
-    logs_bloom: BinaryBuilder,
-    difficulty: EvmCurrencyArrayBuilder,
-    gas_limit: UInt64Builder,
-    gas_used: UInt64Builder,
-    extra_data: BinaryBuilder,
-    mix_hash: Bytes32ArrayBuilder,
-    nonce: UInt64Builder,
-    base_fee_per_gas: EvmCurrencyArrayBuilder,
-    withdrawals_root: Bytes32ArrayBuilder,
-    blob_gas_used: UInt64Builder,
-    excess_blob_gas: UInt64Builder,
-    parent_beacon_root: Bytes32ArrayBuilder,
-}
-
-impl BlockRowsBuilder {
-    pub fn with_capacity(capacity: usize) -> Self {
-        Self {
-            block_num: UInt64Builder::with_capacity(capacity),
-            timestamp: TimestampArrayBuilder::with_capacity(capacity),
-            hash: Bytes32ArrayBuilder::with_capacity(capacity),
-            parent_hash: Bytes32ArrayBuilder::with_capacity(capacity),
-            ommers_hash: Bytes32ArrayBuilder::with_capacity(capacity),
-            miner: EvmAddressArrayBuilder::with_capacity(capacity),
-            state_root: Bytes32ArrayBuilder::with_capacity(capacity),
-            transactions_root: Bytes32ArrayBuilder::with_capacity(capacity),
-            receipt_root: Bytes32ArrayBuilder::with_capacity(capacity),
-            logs_bloom: BinaryBuilder::with_capacity(capacity, 0),
-            difficulty: EvmCurrencyArrayBuilder::with_capacity(capacity),
-            gas_limit: UInt64Builder::with_capacity(capacity),
-            gas_used: UInt64Builder::with_capacity(capacity),
-            extra_data: BinaryBuilder::with_capacity(capacity, 0),
-            mix_hash: Bytes32ArrayBuilder::with_capacity(capacity),
-            nonce: UInt64Builder::with_capacity(capacity),
-            base_fee_per_gas: EvmCurrencyArrayBuilder::with_capacity(capacity),
-            withdrawals_root: Bytes32ArrayBuilder::with_capacity(capacity),
-            blob_gas_used: UInt64Builder::with_capacity(capacity),
-            excess_blob_gas: UInt64Builder::with_capacity(capacity),
-            parent_beacon_root: Bytes32ArrayBuilder::with_capacity(capacity),
-        }
-    }
-
-    pub fn append(&mut self, row: &Block) {
-        let Block {
-            block_num,
-            timestamp,
-            hash,
-            parent_hash,
-            ommers_hash,
-            miner,
-            state_root,
-            transactions_root,
-            receipt_root,
-            logs_bloom,
-            difficulty,
-            gas_limit,
-            gas_used,
-            extra_data,
-            mix_hash,
-            nonce,
-            base_fee_per_gas,
-            withdrawals_root,
-            blob_gas_used,
-            excess_blob_gas,
-            parent_beacon_root,
-        } = row;
-
-        self.block_num.append_value(*block_num);
-        self.timestamp.append_value(*timestamp);
-        self.hash.append_value(*hash);
-        self.parent_hash.append_value(*parent_hash);
-        self.ommers_hash.append_value(*ommers_hash);
-        self.miner.append_value(*miner);
-        self.state_root.append_value(*state_root);
-        self.transactions_root.append_value(*transactions_root);
-        self.receipt_root.append_value(*receipt_root);
-        self.logs_bloom.append_value(logs_bloom);
-        self.difficulty.append_value(*difficulty);
-        self.gas_limit.append_value(*gas_limit);
-        self.gas_used.append_value(*gas_used);
-        self.extra_data.append_value(extra_data);
-        self.mix_hash.append_value(*mix_hash);
-        self.nonce.append_value(*nonce);
-        self.base_fee_per_gas.append_option(*base_fee_per_gas);
-        self.withdrawals_root.append_option(*withdrawals_root);
-        self.blob_gas_used.append_option(*blob_gas_used);
-        self.excess_blob_gas.append_option(*excess_blob_gas);
-        self.parent_beacon_root.append_option(*parent_beacon_root);
-    }
-
-    pub fn build(self, network: String) -> Result<RawTableRows, BoxError> {
-        let Self {
-            mut block_num,
-            mut timestamp,
-            hash,
-            parent_hash,
-            ommers_hash,
-            miner,
-            state_root,
-            transactions_root,
-            receipt_root,
-            mut logs_bloom,
-            difficulty,
-            mut gas_limit,
-            mut gas_used,
-            mut extra_data,
-            mix_hash,
-            mut nonce,
-            base_fee_per_gas,
-            withdrawals_root,
-            mut blob_gas_used,
-            mut excess_blob_gas,
-            parent_beacon_root,
-        } = self;
-
-        let columns = vec![
-            Arc::new(block_num.finish()) as ArrayRef,
-            Arc::new(timestamp.finish()),
-            Arc::new(hash.finish()),
-            Arc::new(parent_hash.finish()),
-            Arc::new(ommers_hash.finish()),
-            Arc::new(miner.finish()),
-            Arc::new(state_root.finish()),
-            Arc::new(transactions_root.finish()),
-            Arc::new(receipt_root.finish()),
-            Arc::new(logs_bloom.finish()),
-            Arc::new(difficulty.finish()),
-            Arc::new(gas_limit.finish()),
-            Arc::new(gas_used.finish()),
-            Arc::new(extra_data.finish()),
-            Arc::new(mix_hash.finish()),
-            Arc::new(nonce.finish()),
-            Arc::new(base_fee_per_gas.finish()),
-            Arc::new(withdrawals_root.finish()),
-            Arc::new(blob_gas_used.finish()),
-            Arc::new(excess_blob_gas.finish()),
-            Arc::new(parent_beacon_root.finish()),
+impl Block {
+    pub fn raw_table_rows(&self, network: String) -> Result<RawTableRows, BoxError> {
+        let columns: Vec<ArrayRef> = vec![
+            Arc::new(UInt64Array::from(vec![self.block_num])),
+            Arc::new({
+                let mut column = TimestampArrayBuilder::with_capacity(1);
+                column.append_value(self.timestamp);
+                column.finish()
+            }),
+            Arc::new(FixedSizeBinaryArray::from(vec![&self.hash])),
+            Arc::new(FixedSizeBinaryArray::from(vec![&self.parent_hash])),
+            Arc::new(FixedSizeBinaryArray::from(vec![&self.ommers_hash])),
+            Arc::new(FixedSizeBinaryArray::from(vec![&self.miner])),
+            Arc::new(FixedSizeBinaryArray::from(vec![&self.state_root])),
+            Arc::new(FixedSizeBinaryArray::from(vec![&self.transactions_root])),
+            Arc::new(FixedSizeBinaryArray::from(vec![&self.receipt_root])),
+            Arc::new(BinaryArray::from_vec(vec![&self.logs_bloom])),
+            Arc::new({
+                let mut column = EvmCurrencyArrayBuilder::with_capacity(1);
+                column.append_value(self.difficulty);
+                column.finish()
+            }),
+            Arc::new(UInt64Array::from(vec![self.gas_limit])),
+            Arc::new(UInt64Array::from(vec![self.gas_used])),
+            Arc::new(BinaryArray::from_vec(vec![&self.extra_data])),
+            Arc::new(FixedSizeBinaryArray::from(vec![&self.mix_hash])),
+            Arc::new(UInt64Array::from(vec![self.nonce])),
+            Arc::new({
+                let mut column = EvmCurrencyArrayBuilder::with_capacity(1);
+                column.append_option(self.base_fee_per_gas);
+                column.finish()
+            }),
+            Arc::new({
+                let mut column = Bytes32ArrayBuilder::with_capacity(1);
+                column.append_option(self.withdrawals_root);
+                column.finish()
+            }),
+            Arc::new(UInt64Array::from(vec![self.blob_gas_used])),
+            Arc::new(UInt64Array::from(vec![self.excess_blob_gas])),
+            Arc::new({
+                let mut column = Bytes32ArrayBuilder::with_capacity(1);
+                column.append_option(self.parent_beacon_root);
+                column.finish()
+            }),
         ];
-
         RawTableRows::new(table(network), columns)
     }
 }
@@ -235,11 +132,7 @@ impl BlockRowsBuilder {
 #[test]
 fn default_to_arrow() {
     let block = Block::default();
-    let rows = {
-        let mut builder = BlockRowsBuilder::with_capacity(1);
-        builder.append(&block);
-        builder.build("test_network".to_string()).unwrap()
-    };
+    let rows = block.raw_table_rows("test_network".to_string()).unwrap();
     assert_eq!(rows.rows.num_columns(), 21);
     assert_eq!(rows.rows.num_rows(), 1);
 }

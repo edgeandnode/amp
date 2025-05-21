@@ -14,7 +14,7 @@ use alloy::{
 };
 use common::{
     evm::tables::{
-        blocks::{Block, BlockRowsBuilder},
+        blocks::Block,
         logs::{Log, LogRowsBuilder},
     },
     BlockNum, BlockStreamer, BoxError, EvmCurrency, RawDatasetRows, Timestamp,
@@ -300,11 +300,7 @@ fn rpc_to_rows(
         transactions.push(rpc_transaction_to_row(&header, tx, receipt, idx)?);
     }
 
-    let header_row = {
-        let mut builder = BlockRowsBuilder::with_capacity(1);
-        builder.append(&header);
-        builder.build(network.to_string())?
-    };
+    let header_row = header.raw_table_rows(network.to_string())?;
 
     let logs_row = {
         let mut builder = LogRowsBuilder::with_capacity(logs.len());

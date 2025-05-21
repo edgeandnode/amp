@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use common::{
     evm::tables::{
-        blocks::{Block, BlockRowsBuilder},
+        blocks::Block,
         logs::{Log, LogRowsBuilder},
     },
     BoxError, Bytes32, EvmCurrency, RawDatasetRows, Timestamp,
@@ -195,13 +195,9 @@ pub fn protobufs_to_rows(
         }
     }
 
-    let header_row = {
-        let mut builder = BlockRowsBuilder::with_capacity(1);
-        builder.append(&header);
-        builder
-            .build(network.to_string())
-            .map_err(|e| ArrowError(dbg!(e).into()))?
-    };
+    let header_row = header
+        .raw_table_rows(network.to_string())
+        .map_err(|e| ArrowError(dbg!(e).into()))?;
     let transactions_rows = transactions
         .build(network.to_string())
         .map_err(|e| ArrowError(dbg!(e).into()))?;
