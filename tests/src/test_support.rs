@@ -25,6 +25,7 @@ use futures::{stream::TryStreamExt, StreamExt as _};
 use metadata_db::{MetadataDb, KEEP_TEMP_DIRS};
 use object_store::path::Path;
 use pretty_assertions::assert_str_eq;
+use serde::{Deserialize, Deserializer};
 use tempfile::TempDir;
 use tokio::time;
 use tracing::{info, instrument};
@@ -195,18 +196,35 @@ impl SnapshotContext {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone, serde::Deserialize)]
 pub struct DumpTestDatasetCommand {
+    #[serde(rename = "dataset")]
     pub(crate) dataset_name: String,
+    #[serde(default)]
     pub(crate) dependencies: Vec<String>,
     pub(crate) start: u64,
     pub(crate) end: u64,
+    #[serde(rename = "nJobs")]
     pub(crate) n_jobs: u16,
 }
 
+#[derive(Debug, Clone, serde::Deserialize)]
 pub struct StreamingExecutionOptions {
+    #[serde(rename = "maxDuration", deserialize_with = "deserialize_duration")]
     pub(crate) max_duration: Duration,
+    #[serde(rename = "atLeastRows")]
     pub(crate) at_least_rows: usize,
+}
+
+fn deserialize_duration<'de, D>(deserializer: D) -> Result<Duration, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s = String::deserialize(deserializer)?;
+
+    // Parse strings like "10s" into Duration
+    humantime::parse_duration(&s)
+        .map_err(|e| serde::de::Error::custom(format!("invalid duration: {}", e)))
 }
 
 #[instrument(skip_all)]
@@ -516,7 +534,7 @@ pub async fn run_query_on_fresh_server(
     query: &str,
     initial_dumps: Vec<DumpTestDatasetCommand>,
     dumps_on_running_server: Vec<DumpTestDatasetCommand>,
-    streaming_options: Option<StreamingExecutionOptions>,
+    streaming_options: Option<&StreamingExecutionOptions>,
 ) -> Result<serde_json::Value, BoxError> {
     check_provider_file("rpc_eth_mainnet.toml").await;
     check_provider_file("firehose_eth_mainnet.toml").await;
@@ -650,6 +668,12 @@ pub struct SqlTest {
     /// JSON-encoded results.
     #[serde(flatten)]
     pub result: SqlTestResult,
+    #[serde(default, rename = "streamingOptions")]
+    pub streaming_options: Option<StreamingExecutionOptions>,
+    #[serde(default, rename = "initialDumps")]
+    pub initial_dumps: Vec<DumpTestDatasetCommand>,
+    #[serde(default, rename = "dumpsOnRunningServer")]
+    pub dumps_on_running_server: Vec<DumpTestDatasetCommand>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]

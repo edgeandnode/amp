@@ -1,15 +1,24 @@
 - name: invalid_streaming_query1
   query: SELECT count(*) FROM eth_firehose.blocks SETTINGS stream = true
+  streamingOptions:
+    maxDuration: 10s
+    atLeastRows: 1
   failure: |
     invalid query: not incremental queries are not supported for streaming
 
 - name: invalid_streaming_query2
   query: SELECT max(block_num) as block_num FROM eth_firehose.blocks SETTINGS stream = true
+  streamingOptions:
+    maxDuration: 10s
+    atLeastRows: 1
   failure: |
     invalid query: not incremental queries are not supported for streaming
 
 - name: select_block_num
   query: SELECT block_num FROM eth_firehose.blocks WHERE block_num >= 15000000 SETTINGS stream = true
+  streamingOptions:
+    maxDuration: 10s
+    atLeastRows: 1
   results: |
     [
       {"block_num": 15000000}
@@ -17,6 +26,9 @@
 
 - name: subquery
   query: SELECT * FROM (select block_num from eth_firehose.blocks) as t SETTINGS stream = true
+  streamingOptions:
+    maxDuration: 10s
+    atLeastRows: 1
   results: |
     [
       {"block_num": 15000000}
@@ -24,12 +36,69 @@
 
 - name: empty_result
   query: SELECT * FROM eth_firehose.blocks WHERE block_num < 10 SETTINGS stream = true
+  streamingOptions:
+    maxDuration: 10s
+    atLeastRows: 1
   results: |
     []
 
 - name: union_query
   query: SELECT block_num FROM eth_firehose.blocks WHERE block_num < 10 UNION ALL SELECT block_num FROM eth_firehose.blocks WHERE block_num > 10 SETTINGS stream = true
+  streamingOptions:
+    maxDuration: 10s
+    atLeastRows: 1
   results: |
     [
       {"block_num": 15000000}
+    ]
+
+- name: select_block_num
+  query: SELECT block_num FROM eth_firehose_stream.blocks WHERE block_num >= 15000000 SETTINGS stream = true
+  streamingOptions:
+    maxDuration: 10s
+    atLeastRows: 4
+  initialDumps:
+    - dataset: eth_firehose_stream
+      start: 15000000
+      end: 15000001
+      nJobs: 1
+    - dataset: sql_stream_ds
+      start: 15000001
+      end: 15000001
+      nJobs: 1
+  dumpsOnRunningServer:
+    - dataset: eth_firehose_stream
+      start: 15000002
+      end: 15000002
+      nJobs: 1
+    - dataset: eth_firehose_stream
+      start: 15000002
+      end: 15000004
+      nJobs: 1
+    - dataset: sql_stream_ds
+      start: 15000002
+      end: 15000004
+      nJobs: 1
+  results: |
+    [
+      {"block_num": 15000000},
+      {"block_num": 15000001},
+      {"block_num": 15000002},
+      {"block_num": 15000003},
+      {"block_num": 15000004}
+    ]
+
+- name: union_all_multiple_datasets
+  query: SELECT 'eth' as src, block_num FROM eth_firehose_stream.blocks UNION ALL select 'sql' as src, block_num FROM sql_stream_ds.even_blocks SETTINGS stream = true
+  streamingOptions:
+    maxDuration: 10s
+    atLeastRows: 4
+  results: |
+    [
+      {"src": "eth", "block_num": 15000001},
+      {"src": "eth", "block_num": 15000002},
+      {"src": "sql", "block_num": 15000002},
+      {"src": "eth", "block_num": 15000003},
+      {"src": "eth", "block_num": 15000004},
+      {"src": "sql", "block_num": 15000004}
     ]
