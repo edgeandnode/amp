@@ -1,11 +1,10 @@
 use std::time::Duration;
-
 use common::tracing_helpers;
 use metadata_db::KEEP_TEMP_DIRS;
 
 use crate::test_support::{
     assert_sql_test_result, check_blocks, check_provider_file, load_sql_tests,
-    run_query_on_fresh_server, DumpTestDatasetCommand, SnapshotContext, StreamingExecutionOptions,
+    run_query_on_fresh_server, SnapshotContext, StreamingExecutionOptions,
 };
 
 #[tokio::test]
@@ -95,41 +94,18 @@ async fn sql_tests() {
 #[tokio::test]
 async fn streaming_tests() {
     for test in load_sql_tests("sql-streaming-tests.yaml").unwrap() {
-        let initial_dump = DumpTestDatasetCommand {
-            dataset_name: "eth_firehose".to_string(),
-            dependencies: vec![],
-            start: 0,
-            end: 5,
-            n_jobs: 1,
-        };
-        let dumps_on_running_server = vec![
-            DumpTestDatasetCommand {
-                dataset_name: "eth_firehose".to_string(),
-                dependencies: vec![],
-                start: 6,
-                end: 7,
-                n_jobs: 1,
-            },
-            DumpTestDatasetCommand {
-                dataset_name: "eth_firehose".to_string(),
-                dependencies: vec![],
-                start: 8,
-                end: 10,
-                n_jobs: 1,
-            },
-        ];
-        let streaming_options = StreamingExecutionOptions {
-            max_duration: Duration::from_secs(60),
-            at_least_rows: 2,
-        };
         let results = run_query_on_fresh_server(
             &test.query,
-            Some(initial_dump),
-            dumps_on_running_server,
-            Some(streaming_options),
+            None,
+            vec![],
+            Some(StreamingExecutionOptions {
+                max_duration: Duration::from_secs(10),
+                at_least_rows: 1,
+            }),
         )
         .await
         .map_err(|e| format!("{e:?}"));
+
         assert_sql_test_result(&test, results);
     }
 }

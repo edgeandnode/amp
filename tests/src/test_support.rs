@@ -595,7 +595,12 @@ pub async fn run_query_on_fresh_server(
 
     if let Some(streaming_options) = streaming_options {
         loop {
-            match time::timeout(streaming_options.max_duration, batches.next()).await {
+            match time::timeout(
+                streaming_options.max_duration,
+                batches.next(),
+            )
+            .await
+            {
                 Ok(Some(batch)) => {
                     let batch = batch?;
                     writer.write(&batch)?;
@@ -630,10 +635,10 @@ pub async fn run_query_on_fresh_server(
 pub fn load_sql_tests(file_name: &str) -> Result<Vec<SqlTest>, BoxError> {
     let crate_path = env!("CARGO_MANIFEST_DIR");
     let path = format!("{crate_path}/{file_name}");
-    let content = fs::read(&path)
-        .map_err(|e| BoxError::from(format!("Failed to read sql-tests.yaml: {e}")))?;
+    let content =
+        fs::read(&path).map_err(|e| BoxError::from(format!("Failed to read {file_name}: {e}")))?;
     serde_yaml::from_slice(&content)
-        .map_err(|e| BoxError::from(format!("Failed to parse sql-tests.yaml: {e}")))
+        .map_err(|e| BoxError::from(format!("Failed to parse {file_name}: {e}")))
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]

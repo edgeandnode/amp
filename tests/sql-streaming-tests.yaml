@@ -1,8 +1,30 @@
+- name: invalid_streaming_query1
+  query: SELECT count(*) FROM eth_firehose.blocks SETTINGS stream = true
+  failure: |
+    No field named block_num.
+
 - name: select_block_num
-  query: SELECT block_num FROM eth_firehose.blocks WHERE block_num >= 8 SETTINGS stream = true
+  query: SELECT block_num FROM eth_firehose.blocks WHERE block_num >= 15000000 SETTINGS stream = true
   results: |
     [
-      {"block_num": 8},
-      {"block_num": 9},
-      {"block_num": 10}
+      {"block_num": 15000000}
+    ]
+
+- name: subquery
+  query: SELECT * FROM (select block_num from eth_firehose.blocks) as t SETTINGS stream = true
+  results: |
+    [
+      {"block_num": 15000000}
+    ]
+
+- name: empty_result
+  query: SELECT * FROM eth_firehose.blocks WHERE block_num < 10 SETTINGS stream = true
+  results: |
+    []
+
+- name: union_query
+  query: SELECT block_num FROM eth_firehose.blocks WHERE block_num < 10 UNION ALL SELECT block_num FROM eth_firehose.blocks WHERE block_num > 10 SETTINGS stream = true
+  results: |
+    [
+      {"block_num": 15000000}
     ]
