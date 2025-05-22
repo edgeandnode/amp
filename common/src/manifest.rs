@@ -131,6 +131,9 @@ impl From<ArrowSchema> for SchemaRef {
 
 impl From<Manifest> for Dataset {
     fn from(manifest: Manifest) -> Self {
+        use crate::catalog::logical::Function as LogicalFunction;
+        use crate::catalog::logical::FunctionSource as LogicalFunctionSource;
+
         // Convert manifest tables into logical Tables
         let tables = manifest.tables();
 
@@ -138,6 +141,19 @@ impl From<Manifest> for Dataset {
             kind: DATASET_KIND.to_string(),
             name: manifest.name,
             tables,
+            functions: manifest
+                .functions
+                .into_iter()
+                .map(|(name, f)| LogicalFunction {
+                    name,
+                    input_types: f.input_types,
+                    output_type: f.output_type,
+                    source: LogicalFunctionSource {
+                        source: f.source.source,
+                        filename: f.source.filename,
+                    },
+                })
+                .collect(),
         }
     }
 }

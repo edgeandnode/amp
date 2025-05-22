@@ -1,4 +1,6 @@
-use datafusion::arrow::datatypes::SchemaRef;
+use std::sync::Arc;
+
+use datafusion::arrow::datatypes::{DataType, SchemaRef};
 use serde::Serialize;
 
 use crate::BLOCK_NUM;
@@ -9,6 +11,7 @@ pub struct Dataset {
     pub kind: String,
     pub name: String,
     pub tables: Vec<Table>,
+    pub functions: Vec<Function>,
 }
 
 #[derive(Clone, Debug)]
@@ -42,4 +45,20 @@ impl Table {
         // - Do we want to address and leverage https://github.com/apache/arrow-datafusion/issues/4177?
         vec![BLOCK_NUM.to_string(), "timestamp".to_string()]
     }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Function {
+    pub name: String,
+
+    // TODO: Support SQL type names, see https://datafusion.apache.org/user-guide/sql/data_types.html
+    pub input_types: Vec<DataType>,
+    pub output_type: DataType,
+    pub source: FunctionSource,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct FunctionSource {
+    pub source: Arc<String>,
+    pub filename: String,
 }

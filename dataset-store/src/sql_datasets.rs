@@ -98,6 +98,7 @@ pub(super) async fn dataset(
             kind: def.kind,
             name: def.name,
             tables,
+            functions: vec![],
         },
         queries,
     })
