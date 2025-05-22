@@ -18,8 +18,15 @@ pub const DATASET_KIND: &str = "manifest";
 pub struct Manifest {
     pub name: String,
     pub version: semver::Version,
+
+    #[serde(default)]
     pub dependencies: BTreeMap<String, Dependency>,
+
+    #[serde(default)]
     pub tables: BTreeMap<String, Table>,
+
+    #[serde(default)]
+    pub functions: BTreeMap<String, Function>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,6 +40,21 @@ pub struct Dependency {
 pub struct Table {
     pub input: TableInput,
     pub schema: TableSchema,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Function {
+    // TODO: Support SQL type names, see https://datafusion.apache.org/user-guide/sql/data_types.html
+    pub input_types: Vec<DataType>,
+    pub output_type: DataType,
+    pub source: FunctionSource,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FunctionSource {
+    pub source: Arc<String>,
+    pub filename: String,
 }
 
 // TODO: Tagging
