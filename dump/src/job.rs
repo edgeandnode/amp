@@ -10,7 +10,7 @@ use common::{
     BoxError,
 };
 use dataset_store::DatasetStore;
-use metadata_db::{jobs::JobId, MetadataDb};
+use metadata_db::{JobId, MetadataDb};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, instrument};
 
@@ -57,7 +57,10 @@ impl Job {
         config: Arc<Config>,
         metadata_db: Arc<MetadataDb>,
     ) -> Result<Job, BoxError> {
-        let raw_desc = metadata_db.job_desc(job_id).await?;
+        let raw_desc = metadata_db
+            .job_desc(job_id)
+            .await?
+            .ok_or_else(|| format!("job `{}` not found", job_id))?;
         let job_desc: JobDesc = serde_json::from_str(&raw_desc)
             .map_err(|e| format!("error parsing job descriptor `{}`: {}", raw_desc, e))?;
         let output_locations = metadata_db.output_locations(job_id).await?;

@@ -1,4 +1,6 @@
-use metadata_db::{jobs::JobStatus, MetadataDb};
+//! DB integration tests for the workers queue
+
+use metadata_db::{JobStatus, MetadataDb};
 use pgtemp::PgTempDB;
 
 #[tokio::test]
