@@ -230,22 +230,20 @@ impl Service {
         let metadata_db_ref = self.dataset_store.metadata_db.as_ref();
 
         // Start infinite stream
-        let initial_ranges =
+        let first_range =
             dataset_store::sql_datasets::synced_blocks_for_plan(&plan, metadata_db_ref)
                 .await
-                .map_err(|e| Error::CoreError(CoreError::DatasetError(e)))?;
-        let mut current_end_block = initial_ranges.ranges.last().map(|(_, end)| *end);
+                .map_err(|e| Error::CoreError(CoreError::DatasetError(e)))?
+                .first();
+        let mut current_end_block = first_range.map(|(_, end)| end);
 
         let (tx, rx) = mpsc::channel(1);
 
         let schema = plan.schema().clone().as_ref().clone().into();
 
         // Execute initial ranges
-        if !initial_ranges.ranges.is_empty() {
-            let mut ranges = initial_ranges.ranges.into_iter();
-
+        if let Some((start, end)) = first_range {
             // Execute the first range and return an error if a query is not valid
-            let (start, end) = ranges.next().unwrap();
             let mut stream = dataset_store::sql_datasets::execute_plan_for_range(
                 plan.clone(),
                 &ctx,
@@ -268,26 +266,6 @@ impl Service {
                 }
 
                 Ok(())
-            });
-
-            // Execute subsequent ranges
-            let plan = plan.clone();
-            let tx = tx.clone();
-            let ctx = ctx.clone();
-            let metadata_db = self.dataset_store.metadata_db.as_ref().clone();
-
-            tokio::spawn(async move {
-                for (start, end) in ranges {
-                    Self::execute_plan_for_range_and_send_results_to_stream(
-                        plan.clone(),
-                        &ctx,
-                        &metadata_db,
-                        start,
-                        end,
-                        tx.clone(),
-                    )
-                    .await;
-                }
             });
         }
 
