@@ -1,4 +1,9 @@
-use std::{io::ErrorKind, sync::Arc, time::Duration};
+use std::{
+    io::ErrorKind,
+    process::{ExitStatus, Stdio},
+    sync::Arc,
+    time::Duration,
+};
 
 use arrow_flight::{
     flight_service_client::FlightServiceClient, sql::client::FlightSqlServiceClient,
@@ -24,6 +29,7 @@ use figment::providers::Format as _;
 use fs_err as fs;
 use futures::{stream::TryStreamExt, StreamExt as _};
 use metadata_db::{MetadataDb, KEEP_TEMP_DIRS};
+use nozzle::server::BoundAddrs;
 use object_store::path::Path;
 use pretty_assertions::assert_str_eq;
 use serde::{Deserialize, Deserializer};
@@ -610,36 +616,108 @@ pub enum SqlTestResult {
     Failure { failure: String },
 }
 
-pub fn assert_sql_test_result(test: &SqlTest, results: Result<serde_json::Value, String>) -> () {
-    match &test.result {
-        SqlTestResult::Success {
-            results: expected_results,
-        } => {
-            let expected_results: serde_json::Value = serde_json::from_str(&expected_results)
-                .map_err(|e| {
-                    format!(
-                        "Failed to parse expected results for test \"{}\": {e:?}",
-                        test.name,
-                    )
-                })
-                .unwrap();
-            let results = results.unwrap();
-            assert_str_eq!(
+impl SqlTest {
+    pub fn assert_result_eq(self, results: Result<serde_json::Value, String>) {
+        match self.result {
+            SqlTestResult::Success {
+                results: expected_results,
+            } => {
+                let expected_results: serde_json::Value = serde_json::from_str(&expected_results)
+                    .map_err(|e| {
+                        format!(
+                            "Failed to parse expected results for test \"{}\": {e:?}",
+                            self.name,
+                        )
+                    })
+                    .unwrap();
+                let results = results.unwrap();
+                assert_str_eq!(
                     results.to_string(),
                     expected_results.to_string(),
                     "SQL test \"{}\" failed: SQL query \"{}\" did not return the expected results, see sql-tests.yaml",
-                    test.name, test.query,
-                );
-        }
-        SqlTestResult::Failure { failure } => {
-            let failure = failure.trim();
-            let results = results.unwrap_err();
-            if !results.to_string().contains(&failure) {
-                panic!(
-                    "SQL test \"{}\" failed: SQL query \"{}\" did not return the expected error, got \"{}\", expected \"{}\"",
-                    test.name, test.query, results, failure,
+                    self.name, self.query,
                 );
             }
+            SqlTestResult::Failure { failure } => {
+                let failure = failure.trim();
+                let results = results.unwrap_err();
+                if !results.to_string().contains(&failure) {
+                    panic!(
+                        "SQL test \"{}\" failed: SQL query \"{}\" did not return the expected error, got \"{}\", expected \"{}\"",
+                        self.name, self.query, results, failure,
+                    );
+                }
+            }
         }
+    }
+}
+
+pub struct DatasetPackage {
+    pub name: String,
+
+    // Relative to crate root
+    pub path: String,
+}
+
+impl DatasetPackage {
+    pub fn new(name: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            path: format!("datasets/{}", name),
+        }
+    }
+
+    pub async fn build(&self, bound_addrs: BoundAddrs) -> Result<(), BoxError> {
+        let status = tokio::process::Command::new("pnpm")
+            .args(&["nozzl", "build"])
+            .env(
+                "NOZZLE_REGISTRY_URL",
+                &format!("http://{}", bound_addrs.registry_service_addr),
+            )
+            .env(
+                "NOZZLE_ADMIN_URL",
+                &format!("http://{}", bound_addrs.admin_api_addr),
+            )
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .current_dir(&self.path)
+            .status()
+            .await?;
+
+        if status != ExitStatus::default() {
+            return Err(BoxError::from(format!(
+                "Failed to build dataset {}: pnpm build failed with exit code {status}",
+                self.name,
+            )));
+        }
+
+        Ok(())
+    }
+
+    pub async fn deploy(&self, bound_addrs: BoundAddrs) -> Result<(), BoxError> {
+        let status = tokio::process::Command::new("pnpm")
+            .args(&["nozzl", "deploy"])
+            .env(
+                "NOZZLE_REGISTRY_URL",
+                &format!("http://{}", bound_addrs.registry_service_addr),
+            )
+            .env(
+                "NOZZLE_ADMIN_URL",
+                &format!("http://{}", bound_addrs.admin_api_addr),
+            )
+            .current_dir(&self.path)
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .status()
+            .await?;
+
+        if status != ExitStatus::default() {
+            return Err(BoxError::from(format!(
+                "Failed to deploy dataset {}: pnpm deploy failed with exit code {status}",
+                self.name,
+            )));
+        }
+
+        Ok(())
     }
 }

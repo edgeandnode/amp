@@ -1,0 +1,1 @@
+{"kind":"manifest","name":"basic_function","version":"0.1.0","dependencies":{"mainnet":{"owner":"graphprotocol","name":"mainnet","version":"0.1.0"}},"tables":{},"functions":{"testString":{"name":"testString","source":{"source":"function testString() {\n  return \"I'm a function\"\n}\n","filename":"test_string.js"},"inputTypes":[],"outputType":"Utf8"}}}

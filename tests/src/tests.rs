@@ -1,9 +1,13 @@
-use common::tracing_helpers;
-use metadata_db::KEEP_TEMP_DIRS;
+use std::{str::FromStr as _, sync::Arc};
+
+use common::{tracing_helpers, BoxError};
+use dump::worker::Worker;
+use metadata_db::{workers::WorkerNodeId, KEEP_TEMP_DIRS};
+use tokio::sync::broadcast;
 
 use crate::test_support::{
-    assert_sql_test_result, check_blocks, check_provider_file, load_sql_tests,
-    run_query_on_fresh_server, SnapshotContext,
+    check_blocks, check_provider_file, load_sql_tests, load_test_config, run_query_on_fresh_server,
+    DatasetPackage, SnapshotContext,
 };
 
 #[tokio::test]
@@ -86,7 +90,7 @@ async fn sql_tests() {
         let results = run_query_on_fresh_server(&test.query, vec![], vec![], None)
             .await
             .map_err(|e| format!("{e:?}"));
-        assert_sql_test_result(&test, results);
+        test.assert_result_eq(results);
     }
 }
 
@@ -102,6 +106,39 @@ async fn streaming_tests() {
         .await
         .map_err(|e| format!("{e:?}"));
 
-        assert_sql_test_result(&test, results);
+        test.assert_result_eq(results);
     }
+}
+
+#[tokio::test]
+async fn basic_function() -> Result<(), BoxError> {
+    let config = load_test_config(None).await.unwrap();
+
+    let metadata_db = Arc::new(config.metadata_db().await?);
+    let (tx, rx) = broadcast::channel(1);
+    std::mem::forget(tx);
+
+    let (bound_addrs, server) =
+        nozzle::server::run(config.clone(), metadata_db.clone(), false, false, rx).await?;
+    tokio::spawn(server);
+
+    let worker = Worker::new(
+        config.clone(),
+        metadata_db,
+        WorkerNodeId::from_str("basic_function").unwrap(),
+    );
+    tokio::spawn(worker.run());
+
+    // Run `pnpm build` on the dataset.
+    let dataset = DatasetPackage::new("basic_function");
+    dataset.deploy(bound_addrs).await?;
+
+    for test in load_sql_tests("basic-function.yaml").unwrap() {
+        let results = run_query_on_fresh_server(&test.query, vec![], vec![], None)
+            .await
+            .map_err(|e| format!("{e:?}"));
+        test.assert_result_eq(results);
+    }
+
+    Ok(())
 }

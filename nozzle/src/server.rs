@@ -16,6 +16,7 @@ use server::service::Service;
 use tokio::sync::broadcast;
 use tonic::transport::{server::TcpIncoming, Server};
 
+#[derive(Debug, Clone, Copy)]
 pub struct BoundAddrs {
     pub flight_addr: SocketAddr,
     pub jsonl_addr: SocketAddr,
