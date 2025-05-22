@@ -97,3 +97,4 @@ tonic-build = "0.12.3"
 # Something like https://github.com/tokio-rs/prost/pull/785 would enable us to remove this fork.
 [patch.crates-io]
 prost = { git = "https://github.com/edgeandnode/prost", branch = "nozzle-fork-0.13.3" }
+object_store = { git = "https://github.com/isum/arrow-rs-object-store", rev = "f4e3cf4" }
