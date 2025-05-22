@@ -78,8 +78,7 @@ pub fn timestamp_type() -> DataType {
 /// Remember to call `.with_timezone_utc()` after creating a Timestamp array.
 pub(crate) type TimestampArrayType = arrow::array::TimestampNanosecondArray;
 
-/// A non-empty record batch associated with a single block of chain data, for populating raw
-/// datasets.
+/// A record batch associated with a single block of chain data, for populating raw datasets.
 pub struct RawTableRows {
     pub table: Table,
     pub rows: RecordBatch,
