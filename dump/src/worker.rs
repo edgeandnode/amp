@@ -60,7 +60,7 @@ impl Worker {
         let db = self.metadata_db.clone();
         let id = self.node_id.clone();
         let heartbeat_task: JoinHandle<Result<(), WorkerError>> = tokio::spawn(async move {
-            db.heartbeat_loop(id)
+            db.heartbeat_loop(&id)
                 .await
                 .map_err(|e| HeartbeatError(e.into()))
         });

@@ -1,8 +1,9 @@
 use sqlx::types::chrono::{DateTime, Utc};
 
-pub mod channel;
+pub mod events;
+pub mod heartbeat;
+pub mod jobs;
 mod node_id;
-pub mod queue;
 
 pub use self::node_id::WorkerNodeId;
 
@@ -22,5 +23,6 @@ pub struct Worker {
 /// In-tree integration tests
 #[cfg(test)]
 mod tests {
-    mod it_queue;
+    mod it_heartbeat;
+    mod it_jobs;
 }

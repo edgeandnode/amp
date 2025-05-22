@@ -1,4 +1,8 @@
-use metadata_db::{MetadataDb, ACTIVE_INTERVAL_SECS};
+//! DB integration tests for the workers activity tracker
+
+use std::time::Duration;
+
+use metadata_db::MetadataDb;
 use pgtemp::PgTempDB;
 
 #[tokio::test]
@@ -33,11 +37,14 @@ async fn register_worker() {
 #[tokio::test]
 async fn detect_inactive_worker() {
     //* Given
+    const ACTIVE_INTERVAL: Duration = Duration::from_secs(1);
+
     let temp_db = PgTempDB::new();
 
     let metadata_db = MetadataDb::connect(&temp_db.connection_uri())
         .await
-        .expect("Failed to connect to metadata db");
+        .expect("Failed to connect to metadata db")
+        .with_dead_worker_interval(ACTIVE_INTERVAL);
 
     // Pre-register a worker
     let worker_id = "test-worker-id".parse().expect("Invalid worker ID");
@@ -47,11 +54,8 @@ async fn detect_inactive_worker() {
         .expect("Failed to pre-register the worker");
 
     //* When
-    // Sleep for 2 ACTIVE_INTERVAL_SECS to ensure the worker is considered inactive
-    tokio::time::sleep(std::time::Duration::from_secs(
-        (2 * ACTIVE_INTERVAL_SECS) as u64,
-    ))
-    .await;
+    // Sleep for 2 ACTIVE_INTERVAL to ensure the worker is considered inactive
+    tokio::time::sleep(2 * ACTIVE_INTERVAL).await;
 
     let active_workers = metadata_db
         .active_workers()
