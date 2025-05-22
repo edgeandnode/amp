@@ -1,4 +1,4 @@
-use std::{future::Future, path::PathBuf, sync::Arc};
+use std::{future::Future, path::PathBuf, sync::Arc, time::Duration};
 
 use bytes::Bytes;
 use fs_err as fs;
@@ -10,7 +10,7 @@ use object_store::{
     local::LocalFileSystem,
     path::Path,
     prefix::PrefixStore,
-    ObjectMeta, ObjectStore, ObjectStoreScheme,
+    ObjectMeta, ObjectStore, ObjectStoreScheme, RetryConfig,
 };
 use url::Url;
 
@@ -122,10 +122,17 @@ impl std::fmt::Display for Store {
 /// `bucket` is `None` for local filesystem stores.
 pub fn infer_object_store(url: &Url) -> Result<(Arc<dyn ObjectStore>, Option<String>), BoxError> {
     let (object_store_scheme, _) = ObjectStoreScheme::parse(&url)?;
+    let retry_config = RetryConfig {
+        backoff: Default::default(),
+        max_retries: 10,
+        retry_timeout: Duration::from_secs(10 * 60),
+    };
 
     match object_store_scheme {
         ObjectStoreScheme::GoogleCloudStorage => {
-            let builder = GoogleCloudStorageBuilder::from_env().with_url(url.to_string());
+            let builder = GoogleCloudStorageBuilder::from_env()
+                .with_url(url.to_string())
+                .with_retry(retry_config);
             let bucket = builder.get_config_value(&GoogleConfigKey::Bucket);
             let store = Arc::new(builder.build()?);
             Ok((store, bucket))
