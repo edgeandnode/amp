@@ -6,7 +6,7 @@ use common::{
         array::*,
         datatypes::{DataType as ArrowDataType, Field, Schema},
     },
-    RawDatasetRows, RawTableRows, Table, BLOCK_NUM,
+    RawDatasetRows, RawTableBlock, RawTableRows, Table, BLOCK_NUM,
 };
 use prost::Message as _;
 pub use prost_reflect::MessageDescriptor;
@@ -43,8 +43,12 @@ pub(crate) fn pb_to_rows(
                 return Some(Err(err.into()));
             }
 
+            let block = RawTableBlock {
+                number: block_num,
+                network: table.network.clone().unwrap(),
+            };
             Some(
-                RawTableRows::new(table.clone(), rows.unwrap().columns().to_vec())
+                RawTableRows::new(table.clone(), block, rows.unwrap().columns().to_vec())
                     .map_err(|e| anyhow!(e)),
             )
         })

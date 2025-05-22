@@ -5,7 +5,7 @@ use common::{
         blocks::{Block, BlockRowsBuilder},
         logs::{Log, LogRowsBuilder},
     },
-    BoxError, Bytes32, EvmCurrency, RawDatasetRows, Timestamp,
+    BoxError, Bytes32, EvmCurrency, RawDatasetRows, RawTableBlock, Timestamp,
 };
 use thiserror::Error;
 
@@ -195,21 +195,25 @@ pub fn protobufs_to_rows(
         }
     }
 
+    let block = RawTableBlock {
+        number: header.block_num,
+        network: network.to_string(),
+    };
     let header_row = {
         let mut builder = BlockRowsBuilder::with_capacity(1);
         builder.append(&header);
         builder
-            .build(network.to_string())
+            .build(block.clone())
             .map_err(|e| ArrowError(dbg!(e).into()))?
     };
     let transactions_rows = transactions
-        .build(network.to_string())
+        .build(block.clone())
         .map_err(|e| ArrowError(dbg!(e).into()))?;
     let calls_rows = calls
-        .build(network.to_string())
+        .build(block.clone())
         .map_err(|e| ArrowError(dbg!(e).into()))?;
     let logs_rows = logs
-        .build(network.to_string())
+        .build(block.clone())
         .map_err(|e| ArrowError(dbg!(e).into()))?;
 
     Ok(RawDatasetRows::new(vec![

@@ -7,9 +7,9 @@ use arrow::{
 
 use crate::{
     arrow, timestamp_type, BoxError, Bytes32, Bytes32ArrayBuilder, EvmAddress as Address,
-    EvmAddressArrayBuilder, EvmCurrency, EvmCurrencyArrayBuilder, RawTableRows, Table, Timestamp,
-    TimestampArrayBuilder, BLOCK_NUM, BYTES32_TYPE, EVM_ADDRESS_TYPE as ADDRESS_TYPE,
-    EVM_CURRENCY_TYPE,
+    EvmAddressArrayBuilder, EvmCurrency, EvmCurrencyArrayBuilder, RawTableBlock, RawTableRows,
+    Table, Timestamp, TimestampArrayBuilder, BLOCK_NUM, BYTES32_TYPE,
+    EVM_ADDRESS_TYPE as ADDRESS_TYPE, EVM_CURRENCY_TYPE,
 };
 
 static SCHEMA: LazyLock<SchemaRef> = LazyLock::new(|| Arc::new(schema()));
@@ -179,7 +179,7 @@ impl BlockRowsBuilder {
         self.parent_beacon_root.append_option(*parent_beacon_root);
     }
 
-    pub fn build(self, network: String) -> Result<RawTableRows, BoxError> {
+    pub fn build(self, block: RawTableBlock) -> Result<RawTableRows, BoxError> {
         let Self {
             mut block_num,
             mut timestamp,
@@ -228,7 +228,7 @@ impl BlockRowsBuilder {
             Arc::new(parent_beacon_root.finish()),
         ];
 
-        RawTableRows::new(table(network), columns)
+        RawTableRows::new(table(block.network.clone()), block, columns)
     }
 }
 
@@ -238,7 +238,12 @@ fn default_to_arrow() {
     let rows = {
         let mut builder = BlockRowsBuilder::with_capacity(1);
         builder.append(&block);
-        builder.build("test_network".to_string()).unwrap()
+        builder
+            .build(RawTableBlock {
+                number: block.block_num,
+                network: "test_network".to_string(),
+            })
+            .unwrap()
     };
     assert_eq!(rows.rows.num_columns(), 21);
     assert_eq!(rows.rows.num_rows(), 1);

@@ -6,7 +6,7 @@ use common::{
         array::*,
         datatypes::{DataType as ArrowDataType, Field, Schema, TimeUnit},
     },
-    timestamp_type, RawDatasetRows, RawTableRows, Table, BLOCK_NUM,
+    timestamp_type, RawDatasetRows, RawTableBlock, RawTableRows, Table, BLOCK_NUM,
 };
 use datafusion::sql::sqlparser::{
     ast::{CreateTable, DataType as SqlDataType, Statement},
@@ -54,8 +54,12 @@ pub(crate) fn pb_to_rows(
                     ))
                     .into()));
             }
+            let block = RawTableBlock {
+                number: block_num,
+                network: table.network.clone().unwrap(),
+            };
             Some(
-                RawTableRows::new(table.clone(), rows.unwrap().columns().to_vec())
+                RawTableRows::new(table.clone(), block, rows.unwrap().columns().to_vec())
                     .map_err(|e| anyhow!(e)),
             )
         })

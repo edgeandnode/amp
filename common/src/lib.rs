@@ -83,44 +83,51 @@ pub(crate) type TimestampArrayType = arrow::array::TimestampNanosecondArray;
 pub struct RawTableRows {
     pub table: Table,
     pub rows: RecordBatch,
-    pub block: BlockNum,
+    pub block: RawTableBlock,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RawTableBlock {
+    pub number: BlockNum,
+    pub network: String,
 }
 
 impl RawTableRows {
-    pub fn new(table: Table, columns: Vec<ArrayRef>) -> Result<Self, BoxError> {
+    pub fn new(
+        table: Table,
+        block: RawTableBlock,
+        columns: Vec<ArrayRef>,
+    ) -> Result<Self, BoxError> {
         let schema = table.schema.clone();
         let rows = RecordBatch::try_new(schema, columns)?;
-        let block = Self::block(&table, &rows)?;
+        Self::check_invariants(&block, &rows)
+            .map_err(|err| format!("malformed table {}: {}", table.name, err))?;
         Ok(RawTableRows { table, rows, block })
     }
 
-    fn block(table: &Table, rows: &RecordBatch) -> Result<BlockNum, BoxError> {
-        use arrow::compute::kernels::aggregate::{max, min};
-
+    fn check_invariants(block: &RawTableBlock, rows: &RecordBatch) -> Result<(), BoxError> {
         if rows.num_rows() == 0 {
-            return Err(format!("empty table: {}", table.name).into());
+            return Ok(());
         }
 
         let block_nums = rows
             .column_by_name(BLOCK_NUM)
-            .ok_or_else(|| format!("missing block_num column in table: {}", table.name))?;
+            .ok_or("missing block_num column")?;
         let block_nums = block_nums
             .as_primitive_opt::<UInt64Type>()
             .ok_or("block_num column is not uint64")?;
 
-        // Unwrap: We are not empty.
-        let start = min(block_nums).unwrap();
-        let end = max(block_nums).unwrap();
-
-        if start != end {
-            return Err(format!(
-                "table {} contains mismatching block_num: {} != {}",
-                table.name, start, end
-            )
-            .into());
+        // Unwrap: `rows` is not empty.
+        let start = arrow::compute::kernels::aggregate::min(block_nums).unwrap();
+        let end = arrow::compute::kernels::aggregate::max(block_nums).unwrap();
+        if start != block.number {
+            return Err(format!("contains unexpected block_num: {}", start).into());
+        };
+        if end != block.number {
+            return Err(format!("contains unexpected block_num: {}", end).into());
         };
 
-        Ok(start)
+        Ok(())
     }
 }
 
@@ -129,12 +136,13 @@ pub struct RawDatasetRows(Vec<RawTableRows>);
 impl RawDatasetRows {
     pub fn new(rows: Vec<RawTableRows>) -> Self {
         assert!(!rows.is_empty());
-        assert!(rows.iter().skip(1).all(|r| &r.block == &rows[0].block));
+        let block_num = &rows[0].block.number;
+        assert!(rows.iter().skip(1).all(|r| &r.block.number == block_num));
         Self(rows)
     }
 
-    pub fn block(&self) -> BlockNum {
-        self.0[0].block
+    pub fn block(&self) -> &RawTableBlock {
+        &self.0[0].block
     }
 }
 

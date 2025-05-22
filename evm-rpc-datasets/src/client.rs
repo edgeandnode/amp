@@ -17,7 +17,7 @@ use common::{
         blocks::{Block, BlockRowsBuilder},
         logs::{Log, LogRowsBuilder},
     },
-    BlockNum, BlockStreamer, BoxError, EvmCurrency, RawDatasetRows, Timestamp,
+    BlockNum, BlockStreamer, BoxError, EvmCurrency, RawDatasetRows, RawTableBlock, Timestamp,
 };
 use futures::future::try_join_all;
 use thiserror::Error;
@@ -300,10 +300,15 @@ fn rpc_to_rows(
         transactions.push(rpc_transaction_to_row(&header, tx, receipt, idx)?);
     }
 
+    let block = RawTableBlock {
+        number: header.block_num,
+        network: network.to_string(),
+    };
+
     let header_row = {
         let mut builder = BlockRowsBuilder::with_capacity(1);
         builder.append(&header);
-        builder.build(network.to_string())?
+        builder.build(block.clone())?
     };
 
     let logs_row = {
@@ -311,7 +316,7 @@ fn rpc_to_rows(
         for log in logs {
             builder.append(&log);
         }
-        builder.build(network.to_string())?
+        builder.build(block.clone())?
     };
 
     let transactions_row = {
@@ -321,7 +326,7 @@ fn rpc_to_rows(
                 builder.append(&tx);
             }
         }
-        builder.build(network.to_string())?
+        builder.build(block.clone())?
     };
 
     Ok(RawDatasetRows::new(vec![
