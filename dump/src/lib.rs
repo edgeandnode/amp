@@ -14,10 +14,9 @@ use std::{
 use common::{
     catalog::physical::{Catalog, PhysicalDataset, PhysicalTable},
     config::Config,
-    meta_tables::scanned_ranges,
+    metadata::block_ranges_by_table,
     multirange::MultiRange,
-    parquet,
-    parquet::basic::ZstdLevel,
+    parquet::{self, basic::ZstdLevel},
     query_context::{Error as CoreError, QueryContext},
     BlockNum, BlockStreamer as _, BoxError,
 };
@@ -46,8 +45,6 @@ pub async fn dump_dataset(
     start: i64,
     end_block: Option<i64>,
 ) -> Result<(), BoxError> {
-    use common::meta_tables::scanned_ranges::scanned_ranges_by_table;
-
     let catalog = Catalog::new(vec![dataset.clone()]);
     let env = Arc::new(config.make_runtime_env()?);
     let ctx = Arc::new(QueryContext::for_catalog(catalog, env.clone())?);
@@ -56,10 +53,10 @@ pub async fn dump_dataset(
     // Ensure consistency before starting the dump procedure.
     consistency_check(dataset, metadata_db).await?;
 
-    // Query the scanned ranges, we might already have some ranges if this is not the first dump run
+    // Query the block ranges, we might already have some ranges if this is not the first dump run
     // for this dataset.
-    let scanned_ranges_by_table = scanned_ranges_by_table(&ctx).await?;
-    for (table_name, multirange) in &scanned_ranges_by_table {
+    let block_ranges_by_table = block_ranges_by_table(&ctx).await?;
+    for (table_name, multirange) in &block_ranges_by_table {
         if multirange.total_len() == 0 {
             continue;
         }
@@ -80,7 +77,7 @@ pub async fn dump_dataset(
                 ctx,
                 &dataset.name(),
                 dataset_store,
-                scanned_ranges_by_table,
+                block_ranges_by_table,
                 partition_size,
                 parquet_opts,
                 start,
@@ -107,7 +104,7 @@ pub async fn dump_dataset(
                 config.data_store.clone(),
                 dataset_store,
                 &env,
-                scanned_ranges_by_table,
+                block_ranges_by_table,
                 parquet_opts,
                 start,
                 end_block,
@@ -127,7 +124,7 @@ async fn dump_raw_dataset(
     ctx: Arc<QueryContext>,
     dataset_name: &str,
     dataset_store: &DatasetStore,
-    scanned_ranges_by_table: BTreeMap<String, MultiRange>,
+    block_ranges_by_table: BTreeMap<String, MultiRange>,
     partition_size: u64,
     parquet_opts: &ParquetWriterProperties,
     start: i64,
@@ -143,17 +140,17 @@ async fn dump_raw_dataset(
         }
     };
 
-    // This is the intersection of the `__scanned_ranges` for all tables. That is, a range is only
-    // considered scanned if it is scanned for all tables.
-    let scanned_ranges = {
-        let mut scanned_ranges = scanned_ranges_by_table.clone().into_iter().map(|(_, r)| r);
-        let first = scanned_ranges.next().ok_or("no tables")?;
-        let intersection = scanned_ranges.fold(first, |acc, r| acc.intersection(&r));
+    // Use the intersection of the block ranges for all tables, only considering ranges scanned for
+    // all tables.
+    let block_ranges = {
+        let mut block_ranges = block_ranges_by_table.clone().into_iter().map(|(_, r)| r);
+        let first = block_ranges.next().ok_or("no tables")?;
+        let intersection = block_ranges.fold(first, |acc, r| acc.intersection(&r));
         intersection
     };
 
     // Find the ranges of blocks that have not been scanned yet for at least one table.
-    let ranges = scanned_ranges.complement(start, end);
+    let ranges = block_ranges.complement(start, end);
     info!("dumping dataset {dataset_name} for ranges {ranges}");
 
     if ranges.total_len() == 0 {
@@ -173,7 +170,7 @@ async fn dump_raw_dataset(
             id: i as u32,
             partition_size,
             parquet_opts: parquet_opts.clone(),
-            scanned_ranges_by_table: scanned_ranges_by_table.clone(),
+            block_ranges_by_table: block_ranges_by_table.clone(),
         })
     });
 
@@ -200,7 +197,7 @@ async fn dump_sql_dataset(
     data_store: Arc<common::Store>,
     dataset_store: &Arc<DatasetStore>,
     env: &Arc<RuntimeEnv>,
-    scanned_ranges_by_table: BTreeMap<String, MultiRange>,
+    block_ranges_by_table: BTreeMap<String, MultiRange>,
     parquet_opts: &ParquetWriterProperties,
     start: i64,
     end: Option<i64>,
@@ -215,7 +212,7 @@ async fn dump_sql_dataset(
         let env = env.clone();
         let data_store = data_store.clone();
         let physical_dataset = physical_dataset.clone();
-        let scanned_ranges_by_table = scanned_ranges_by_table.clone();
+        let block_ranges_by_table = block_ranges_by_table.clone();
         let parquet_opts = parquet_opts.clone();
         let dataset_name = dataset_name.clone();
 
@@ -250,7 +247,7 @@ async fn dump_sql_dataset(
             };
 
             if is_incr {
-                let ranges_to_scan = scanned_ranges_by_table[&table].complement(start, end);
+                let ranges_to_scan = block_ranges_by_table[&table].complement(start, end);
                 for (start, end) in ranges_to_scan.ranges {
                     let mut start = start;
                     while start <= end {
@@ -329,9 +326,9 @@ async fn dump_sql_query(
         writer.write(&batch).await?;
     }
 
-    let scanned_range = writer.close(end).await?;
+    let parquet_meta = writer.close(end).await?;
     commit_metadata(
-        scanned_range,
+        parquet_meta,
         dataset_store.metadata_db.clone(),
         physical_table.location_id(),
     )
@@ -388,28 +385,28 @@ enum ConsistencyCheckError {
 ///
 /// ## List of checks
 ///
-/// Check: All files in the data store are accounted for in `__scanned_ranges`.
+/// Check: All files in the data store are accounted for in the metadata DB.
 /// On fail: Fix by deleting orphaned files to restore consistency.
 ///
-/// Check: All files in `__scanned_ranges` exist in the data store.
+/// Check: All files in the table exist in the data store.
 /// On fail: Return a `CorruptedDataset` error.
 ///
-/// Check: `__scanned_ranges` does not contain overlapping ranges.
+/// Check: metadata entries do not contain overlapping ranges.
 /// On fail: Return a `CorruptedDataset` error.
 async fn consistency_check(
     physical_dataset: &PhysicalDataset,
     metadata_db: &MetadataDb,
 ) -> Result<(), ConsistencyCheckError> {
-    // See also: scanned-ranges-consistency
+    // See also: metadata-consistency
 
-    use scanned_ranges::{filenames_for_table, ranges_for_table};
+    use common::metadata::{filenames_for_table, ranges_for_table};
     use ConsistencyCheckError::CorruptedDataset;
 
     for table in physical_dataset.tables() {
         let dataset_name = table.catalog_schema().to_string();
         let tbl = table.table_id();
         let location_id = table.location_id();
-        // Check that `__scanned_ranges` does not contain overlapping ranges.
+        // Check that bock ranges do not contain overlapping ranges.
         {
             let ranges = ranges_for_table(location_id, metadata_db)
                 .await
@@ -444,18 +441,18 @@ async fn consistency_check(
 
         for (filename, object_meta) in &stored_files {
             if !registered_files.contains(filename) {
-                // This file was written by a dump job but it is not present in `__scanned_ranges`,
+                // This file was written by a dump job but it is not present in the metadata DB,
                 // so it is an orphaned file. Delete it.
                 warn!("Deleting orphaned file: {}", object_meta.location);
                 store.delete(&object_meta.location).await?;
             }
         }
 
-        // Check for files in `__scanned_ranges` that do not exist in the store.
+        // Check for files in the metadata DB that do not exist in the store.
         for filename in registered_files {
             if !stored_files.contains_key(&filename) {
                 let err =
-                    format!("file `{path}/{filename}` is registered in `scanned_ranges` but is not in the data store")
+                    format!("file `{path}/{filename}` is registered in metadata DB but is not in the data store")
                         .into();
                 return Err(ConsistencyCheckError::CorruptedDataset(dataset_name, err));
             }

@@ -4,7 +4,7 @@ use std::{
 };
 
 use common::{
-    meta_tables::scanned_ranges, multirange::MultiRange, query_context::parse_sql, BlockNum,
+    metadata::ranges_for_table, multirange::MultiRange, query_context::parse_sql, BlockNum,
     BoxError, Dataset, QueryContext, Table, BLOCK_NUM,
 };
 use datafusion::{
@@ -117,7 +117,7 @@ async fn get_ranges_for_table(
     let Some((_, location_id)) = metadata_db.get_active_location(tbl).await? else {
         return Err(format!("table {}.{} not found", tbl.dataset, tbl.table).into());
     };
-    let ranges = scanned_ranges::ranges_for_table(location_id, metadata_db).await?;
+    let ranges = ranges_for_table(location_id, metadata_db).await?;
     let ranges = MultiRange::from_ranges(ranges)?;
 
     Ok(ranges)
@@ -138,7 +138,7 @@ pub async fn execute_plan_for_range(
 ) -> Result<SendableRecordBatchStream, BoxError> {
     let tables = extract_table_references_from_plan(&plan)?;
 
-    // Validate dependency scanned ranges
+    // Validate dependency block ranges
     {
         let needed_range = MultiRange::from_ranges(vec![(start, end)]).unwrap();
         for table in tables {

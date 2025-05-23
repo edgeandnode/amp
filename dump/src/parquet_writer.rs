@@ -3,10 +3,9 @@ use std::{collections::BTreeMap, sync::Arc};
 use common::{
     arrow::array::RecordBatch,
     catalog::physical::PhysicalTable,
-    meta_tables::scanned_ranges::{self, ScannedRange},
+    metadata::parquet::{ParquetMeta, PARQUET_METADATA_KEY},
     multirange::MultiRange,
-    parquet,
-    parquet::{errors::ParquetError, format::KeyValue},
+    parquet::{self, errors::ParquetError, format::KeyValue},
     BlockNum, BoxError, QueryContext, RawTableRows, Timestamp,
 };
 use metadata_db::MetadataDb;
@@ -27,7 +26,7 @@ pub struct RawDatasetWriter {
 }
 
 impl RawDatasetWriter {
-    /// Expects `dataset_ctx` to contain a single dataset and `scanned_ranges_by_table` to contain
+    /// Expects `dataset_ctx` to contain a single dataset and `block_ranges_by_table` to contain
     /// one entry per table in that dataset.
     pub fn new(
         dataset_ctx: Arc<QueryContext>,
@@ -36,18 +35,18 @@ impl RawDatasetWriter {
         start: BlockNum,
         end: BlockNum,
         partition_size: u64,
-        scanned_ranges_by_table: BTreeMap<String, MultiRange>,
+        block_ranges_by_table: BTreeMap<String, MultiRange>,
     ) -> Result<Self, BoxError> {
         let mut writers = BTreeMap::new();
         for table in dataset_ctx.catalog().all_tables() {
-            // Unwrap: `scanned_ranges_by_table` contains an entry for each table.
+            // Unwrap: `block_ranges_by_table` contains an entry for each table.
             let table_name = table.table_name();
-            let scanned_ranges = scanned_ranges_by_table.get(table_name).unwrap().clone();
+            let block_ranges = block_ranges_by_table.get(table_name).unwrap().clone();
             let writer = TableWriter::new(
                 table.clone(),
                 opts.clone(),
                 partition_size,
-                scanned_ranges,
+                block_ranges,
                 start,
                 end,
             )?;
@@ -65,15 +64,11 @@ impl RawDatasetWriter {
         }
 
         let table_name = table_rows.table.name.as_str();
-
         let writer = self.writers.get_mut(table_name).unwrap();
-        let scanned_range = writer.write(&table_rows).await?;
-
-        if let Some(scanned_range) = scanned_range {
+        if let Some(parquet_meta) = writer.write(&table_rows).await? {
             let location_id = writer.table.location_id();
             let metadata_db = &self.metadata_db;
-
-            commit_metadata(scanned_range, metadata_db.clone(), location_id).await?;
+            commit_metadata(parquet_meta, metadata_db.clone(), location_id).await?;
         }
 
         Ok(())
@@ -84,11 +79,8 @@ impl RawDatasetWriter {
         for (_, writer) in self.writers {
             let location_id = writer.table.location_id();
             let metadata_db = self.metadata_db.clone();
-
-            let scanned_range = writer.close().await?;
-
-            if let Some(scanned_range) = scanned_range {
-                commit_metadata(scanned_range, metadata_db, location_id).await?
+            if let Some(parquet_meta) = writer.close().await? {
+                commit_metadata(parquet_meta, metadata_db, location_id).await?
             }
         }
 
@@ -97,15 +89,14 @@ impl RawDatasetWriter {
 }
 
 pub async fn commit_metadata(
-    scanned_range: ScannedRange,
+    parquet_meta: ParquetMeta,
     metadata_db: Arc<MetadataDb>,
     location_id: i64,
 ) -> Result<(), BoxError> {
-    let file_name = scanned_range.filename.clone();
-    let scanned_range = serde_json::to_value(scanned_range)?;
-
+    let file_name = parquet_meta.filename.clone();
+    let parquet_meta = serde_json::to_value(parquet_meta)?;
     metadata_db
-        .insert_scanned_range(location_id, file_name, scanned_range)
+        .insert_metadata(location_id, file_name, parquet_meta)
         .await?;
 
     // Notify that the dataset has been changed
@@ -137,13 +128,13 @@ impl TableWriter {
         table: PhysicalTable,
         opts: ParquetWriterProperties,
         partition_size: u64,
-        scanned_ranges: MultiRange,
+        block_ranges: MultiRange,
         start: BlockNum,
         end: BlockNum,
     ) -> Result<TableWriter, BoxError> {
         let ranges_to_write = {
             // Limit maximum range size to 1_000_000 blocks.
-            let mut ranges = scanned_ranges
+            let mut ranges = block_ranges
                 .complement(start, end)
                 .split_with_max(MAX_PARTITION_BLOCK_RANGE);
             ranges.reverse();
@@ -165,10 +156,10 @@ impl TableWriter {
     pub async fn write(
         &mut self,
         table_rows: &RawTableRows,
-    ) -> Result<Option<ScannedRange>, BoxError> {
+    ) -> Result<Option<ParquetMeta>, BoxError> {
         assert_eq!(table_rows.table.name, self.table.table_name());
 
-        let mut scanned_range = None;
+        let mut parquet_meta = None;
         let block_num = table_rows.block.number;
 
         // The block is past the current range, so we need to close the current file and start a new one.
@@ -176,7 +167,7 @@ impl TableWriter {
             // Unwrap: `current_range` is `Some` by `is_some_and`.
             let end = self.current_range.unwrap().1;
             // Unwrap: If `current_range` is `Some` then `current_file` is also `Some`.
-            scanned_range = Some(self.current_file.take().unwrap().close(end).await?);
+            parquet_meta = Some(self.current_file.take().unwrap().close(end).await?);
             self.next_range()?;
         }
 
@@ -184,12 +175,12 @@ impl TableWriter {
         // and `current_file`.
         if self.is_finished() {
             // There are no more ranges to write.
-            return Ok(scanned_range);
+            return Ok(parquet_meta);
         }
 
         // If the block stream has not yet reached the current range, then skip this block.
         if block_num < self.current_range.unwrap().0 {
-            return Ok(scanned_range);
+            return Ok(parquet_meta);
         }
 
         let bytes_written = self.current_file.as_ref().unwrap().bytes_written();
@@ -197,14 +188,14 @@ impl TableWriter {
         // Check if we need to create a new part file before writing this batch of rows, because the
         // size of the current row group already exceeds the configured max `partition_size`.
         if bytes_written >= self.partition_size as usize {
-            // `scanned_range` would be `Some` if we have had just created a new a file above, so no
+            // `parquet_meta` would be `Some` if we have had just created a new a file above, so no
             // bytes would have been written yet.
-            assert!(scanned_range.is_none());
+            assert!(parquet_meta.is_none());
 
             // Close the current file at `block_num - 1`, the highest block height scanned by it.
             let end = block_num - 1;
             let file_to_close = self.current_file.take().unwrap();
-            scanned_range = Some(file_to_close.close(end).await?);
+            parquet_meta = Some(file_to_close.close(end).await?);
 
             // The current range was partially written, so we need to split it.
             let end = self.current_range.unwrap().1;
@@ -219,7 +210,7 @@ impl TableWriter {
         let rows = &table_rows.rows;
         self.current_file.as_mut().unwrap().write(rows).await?;
 
-        Ok(scanned_range)
+        Ok(parquet_meta)
     }
 
     fn next_range(&mut self) -> Result<(), BoxError> {
@@ -250,7 +241,7 @@ impl TableWriter {
         }
     }
 
-    async fn close(self) -> Result<Option<ScannedRange>, BoxError> {
+    async fn close(self) -> Result<Option<ParquetMeta>, BoxError> {
         // We should be closing the last range.
         assert!(self.ranges_to_write.is_empty());
 
@@ -303,7 +294,7 @@ impl ParquetFileWriter {
     }
 
     #[must_use]
-    pub async fn close(mut self, end: BlockNum) -> Result<ScannedRange, BoxError> {
+    pub async fn close(mut self, end: BlockNum) -> Result<ParquetMeta, BoxError> {
         if end < self.start {
             return Err(
                 format!("end block {} must be after start block {}", end, self.start).into(),
@@ -317,7 +308,7 @@ impl ParquetFileWriter {
             self.file_url, self.start, end
         );
 
-        let scanned_range = ScannedRange {
+        let marquet_meta = ParquetMeta {
             table: self.table.table_name().to_string(),
             range_start: self.start,
             range_end: end,
@@ -325,15 +316,15 @@ impl ParquetFileWriter {
             created_at: Timestamp::now(),
         };
 
-        let scanned_range_key = scanned_ranges::METADATA_KEY.to_string();
-        let scanned_range_value = serde_json::to_string(&scanned_range)?;
+        let marquet_meta_key = PARQUET_METADATA_KEY.to_string();
+        let marquet_meta_value = serde_json::to_string(&marquet_meta)?;
 
-        let kv_metadata = KeyValue::new(scanned_range_key, scanned_range_value);
+        let kv_metadata = KeyValue::new(marquet_meta_key, marquet_meta_value);
 
         self.writer.append_key_value_metadata(kv_metadata);
         self.writer.close().await?;
 
-        Ok(scanned_range)
+        Ok(marquet_meta)
     }
 
     // This is calculate as:
