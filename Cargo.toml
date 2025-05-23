@@ -83,7 +83,7 @@ datafusion-proto = { git = "https://github.com/apache/datafusion", rev = "09a7a2
 object_store = { version = "0.12", features = ["aws", "gcp", "azure"] }
 
 # Crates that should follow the version used by DataFusion and Arrow
-prost = "=0.13.3"
+prost = "=0.13.5"
 prost-build = "0.13.3"
 tonic = { version = "0.12.3", features = ["transport", "gzip", "tls-roots"] }
 tonic-build = "0.12.3"
