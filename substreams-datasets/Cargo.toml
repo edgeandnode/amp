@@ -10,7 +10,7 @@ common = { path = "../common" }
 firehose-datasets = { path = "../firehose-datasets" }
 futures.workspace = true
 tracing.workspace = true
-prost-reflect = "0.14.2"
+prost-reflect = "0.15.0"
 prost.workspace = true
 reqwest = "0.12"
 serde.workspace = true
