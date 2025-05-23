@@ -37,7 +37,7 @@ atty = "0.2.14"
 bytes = "1"
 clap = { version = "4.5.2", features = ["derive", "env"] }
 figment = { version = "0.10.19", features = ["toml", "env", "json"] }
-fs-err = "2.11.0"
+fs-err = "3.0.0"
 futures = "0.3"
 hex = "0.4.3"
 itertools = "0.14.0"
