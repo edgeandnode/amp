@@ -14,7 +14,7 @@ use figment::{
 };
 use fs_err as fs;
 use js_runtime::isolate_pool::IsolatePool;
-use metadata_db::{test_metadata_db, MetadataDb, ALLOW_TEMP_DB, KEEP_TEMP_DIRS};
+use metadata_db::{temp_metadata_db, MetadataDb, ALLOW_TEMP_DB, KEEP_TEMP_DIRS};
 use serde::Deserialize;
 
 use crate::{query_context::QueryEnv, BoxError, Store};
@@ -82,7 +82,7 @@ impl Config {
 
         let metadata_db_url = match (config_file.metadata_db_url, *ALLOW_TEMP_DB) {
             (Some(url), _) => url,
-            (None, true) => test_metadata_db(*KEEP_TEMP_DIRS).await.url().to_string(),
+            (None, true) => temp_metadata_db(*KEEP_TEMP_DIRS).await.url().to_string(),
             (None, false) => {
                 return Err("No metadata db url provided and allow_use_temp_db is false".into())
             }

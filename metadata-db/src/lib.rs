@@ -11,17 +11,17 @@ use tracing::instrument;
 use url::Url;
 
 mod conn;
-mod temp_metadata_db;
+#[cfg(feature = "temp-db")]
+mod temp;
 pub mod workers;
 
 use self::conn::{DbConn, DbConnPool};
-pub use self::{
-    temp_metadata_db::{test_metadata_db, ALLOW_TEMP_DB, KEEP_TEMP_DIRS},
-    workers::{
-        events::{JobNotifAction, JobNotifListener, JobNotification},
-        jobs::{Job, JobId, JobStatus},
-        WorkerNodeId,
-    },
+#[cfg(feature = "temp-db")]
+pub use self::temp::{temp_metadata_db, ALLOW_TEMP_DB, KEEP_TEMP_DIRS};
+pub use self::workers::{
+    events::{JobNotifAction, JobNotifListener, JobNotification},
+    jobs::{Job, JobId, JobStatus},
+    WorkerNodeId,
 };
 
 /// Frequency on which to send a heartbeat.
