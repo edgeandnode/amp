@@ -20,7 +20,7 @@
     'cargo',
     'dockerfile',
     'github-actions',
-    'regex',
+    'custom.regex',
   ],
   ignoreDeps: [
     'serde_yaml', // Ignore serde_yaml because it is marked as deprecated. No new releases will be made.
