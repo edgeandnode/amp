@@ -60,6 +60,10 @@ impl RawDatasetWriter {
     }
 
     pub async fn write(&mut self, table_rows: RawTableRows) -> Result<(), BoxError> {
+        if table_rows.is_empty() {
+            return Ok(());
+        }
+
         let table_name = table_rows.table.name.as_str();
 
         let writer = self.writers.get_mut(table_name).unwrap();

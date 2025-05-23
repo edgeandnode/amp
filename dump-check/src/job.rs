@@ -110,8 +110,16 @@ pub async fn run_job(job: Job<impl BlockStreamer>) -> Result<(), BoxError> {
     while let Some(dataset_rows) = firehose.recv().await {
         METRICS.blocks_read.inc();
 
+        if dataset_rows.is_empty() {
+            continue;
+        }
+
         let block_num = dataset_rows.block().number;
         for table_rows in dataset_rows {
+            if table_rows.is_empty() {
+                continue;
+            }
+
             let bytes = table_rows
                 .rows
                 .columns()

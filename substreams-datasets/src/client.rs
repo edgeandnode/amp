@@ -175,6 +175,9 @@ impl BlockStreamer for Client {
                         let table_rows = transform(block, &self.tables).context(format!(
                             "error converting Blockscope to rows for block {block_num}"
                         ))?;
+                        if table_rows.is_empty() {
+                            continue;
+                        }
 
                         // Send the block and check if the receiver has gone away.
                         if tx.send(table_rows).await.is_err() {

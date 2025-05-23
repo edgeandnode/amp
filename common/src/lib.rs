@@ -104,6 +104,10 @@ impl RawTableRows {
         Ok(RawTableRows { table, rows, block })
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.rows.num_rows() == 0
+    }
+
     fn check_invariants(block: &RawTableBlock, rows: &RecordBatch) -> Result<(), BoxError> {
         if rows.num_rows() == 0 {
             return Ok(());
@@ -137,6 +141,10 @@ impl RawDatasetRows {
         assert!(!rows.is_empty());
         assert!(rows.iter().skip(1).all(|r| &r.block == &rows[0].block));
         Self(rows)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.iter().all(|t| t.is_empty())
     }
 
     pub fn block(&self) -> &RawTableBlock {
