@@ -209,6 +209,29 @@ fn extract_table_references_from_plan(plan: &LogicalPlan) -> Result<Vec<TableRef
     Ok(refs.into_iter().collect())
 }
 
+/// The blocks that have been synced for all tables in the plan.
+#[instrument(skip_all, err)]
+pub async fn synced_blocks_for_plan(
+    plan: &LogicalPlan,
+    metadata_db: &MetadataDb,
+) -> Result<MultiRange, BoxError> {
+    let tables = extract_table_references_from_plan(&plan)?;
+
+    let mut ranges = MultiRange::empty();
+
+    if !tables.is_empty() {
+        let mut tables = tables.into_iter();
+
+        ranges = get_ranges_for_table(&tables.next().unwrap(), metadata_db).await?;
+        for table in tables {
+            let other_ranges = get_ranges_for_table(&table, metadata_db).await?;
+            ranges = ranges.intersection(&other_ranges);
+        }
+    }
+
+    Ok(ranges)
+}
+
 /// The most recent block that has been synced for all tables in the plan.
 #[instrument(skip_all, err)]
 pub async fn max_end_block(

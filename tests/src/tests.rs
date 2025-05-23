@@ -1,10 +1,9 @@
 use common::tracing_helpers;
 use metadata_db::KEEP_TEMP_DIRS;
-use pretty_assertions::assert_str_eq;
 
 use crate::test_support::{
-    check_blocks, check_provider_file, load_sql_tests, run_query_on_fresh_server, SnapshotContext,
-    SqlTestResult,
+    assert_sql_test_result, check_blocks, check_provider_file, load_sql_tests,
+    run_query_on_fresh_server, SnapshotContext,
 };
 
 #[tokio::test]
@@ -83,40 +82,26 @@ async fn sql_over_eth_firehose_dump() {
 
 #[tokio::test]
 async fn sql_tests() {
-    for test in load_sql_tests().unwrap() {
-        let results = run_query_on_fresh_server(&test.query)
+    for test in load_sql_tests("sql-tests.yaml").unwrap() {
+        let results = run_query_on_fresh_server(&test.query, vec![], vec![], None)
             .await
             .map_err(|e| format!("{e:?}"));
-        match test.result {
-            SqlTestResult::Success {
-                results: expected_results,
-            } => {
-                let expected_results: serde_json::Value = serde_json::from_str(&expected_results)
-                    .map_err(|e| {
-                        format!(
-                            "Failed to parse expected results for test \"{}\": {e:?}",
-                            test.name,
-                        )
-                    })
-                    .unwrap();
-                let results = results.unwrap();
-                assert_str_eq!(
-                    results.to_string(),
-                    expected_results.to_string(),
-                    "SQL test \"{}\" failed: SQL query \"{}\" did not return the expected results, see sql-tests.yaml",
-                    test.name, test.query,
-                );
-            }
-            SqlTestResult::Failure { failure } => {
-                let failure = failure.trim();
-                let results = results.unwrap_err();
-                if !results.to_string().contains(&failure) {
-                    panic!(
-                        "SQL test \"{}\" failed: SQL query \"{}\" did not return the expected error, got \"{}\", expected \"{}\"",
-                        test.name, test.query, results, failure,
-                    );
-                }
-            }
-        }
+        assert_sql_test_result(&test, results);
+    }
+}
+
+#[tokio::test]
+async fn streaming_tests() {
+    for test in load_sql_tests("sql-streaming-tests.yaml").unwrap() {
+        let results = run_query_on_fresh_server(
+            &test.query,
+            test.initial_dumps.clone(),
+            test.dumps_on_running_server.clone(),
+            test.streaming_options.as_ref(),
+        )
+        .await
+        .map_err(|e| format!("{e:?}"));
+
+        assert_sql_test_result(&test, results);
     }
 }
