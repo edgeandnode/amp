@@ -17,7 +17,7 @@ use common::{
         blocks::{Block, BlockRowsBuilder},
         logs::{Log, LogRowsBuilder},
     },
-    BlockNum, BlockStreamer, BoxError, DatasetRows, EvmCurrency, Timestamp,
+    BlockNum, BlockStreamer, BoxError, EvmCurrency, RawDatasetRows, RawTableBlock, Timestamp,
 };
 use futures::future::try_join_all;
 use thiserror::Error;
@@ -142,7 +142,7 @@ impl JsonRpcClient {
         self,
         start_block: u64,
         end_block: u64,
-        tx: mpsc::Sender<DatasetRows>,
+        tx: mpsc::Sender<RawDatasetRows>,
     ) -> Result<(), BoxError> {
         info!(
             "Fetching blocks (not batched) {} to {}",
@@ -181,7 +181,7 @@ impl JsonRpcClient {
         self,
         start_block: u64,
         end_block: u64,
-        tx: mpsc::Sender<DatasetRows>,
+        tx: mpsc::Sender<RawDatasetRows>,
     ) -> Result<(), BoxError> {
         info!("Fetching blocks (batched) {} to {}", start_block, end_block);
         let batching_client = BatchingRpcWrapper::new(
@@ -235,7 +235,7 @@ impl BlockStreamer for JsonRpcClient {
         self,
         start: BlockNum,
         end: BlockNum,
-        tx: mpsc::Sender<common::DatasetRows>,
+        tx: mpsc::Sender<RawDatasetRows>,
     ) -> Result<(), BoxError> {
         if self.batch_size > 1 {
             self.batched_block_stream(start, end, tx).await
@@ -259,7 +259,7 @@ fn rpc_to_rows(
     block: alloy::rpc::types::Block,
     receipts: Vec<Option<TransactionReceipt>>,
     network: &str,
-) -> Result<DatasetRows, BoxError> {
+) -> Result<RawDatasetRows, BoxError> {
     let header = rpc_header_to_row(block.header)?;
     let mut logs = Vec::new();
     let mut transactions = Vec::new();
@@ -300,10 +300,15 @@ fn rpc_to_rows(
         transactions.push(rpc_transaction_to_row(&header, tx, receipt, idx)?);
     }
 
+    let block = RawTableBlock {
+        number: header.block_num,
+        network: network.to_string(),
+    };
+
     let header_row = {
         let mut builder = BlockRowsBuilder::with_capacity(1);
         builder.append(&header);
-        builder.build(network.to_string())?
+        builder.build(block.clone())?
     };
 
     let logs_row = {
@@ -311,7 +316,7 @@ fn rpc_to_rows(
         for log in logs {
             builder.append(&log);
         }
-        builder.build(network.to_string())?
+        builder.build(block.clone())?
     };
 
     let transactions_row = {
@@ -321,10 +326,14 @@ fn rpc_to_rows(
                 builder.append(&tx);
             }
         }
-        builder.build(network.to_string())?
+        builder.build(block.clone())?
     };
 
-    Ok(DatasetRows(vec![header_row, logs_row, transactions_row]))
+    Ok(RawDatasetRows::new(vec![
+        header_row,
+        logs_row,
+        transactions_row,
+    ]))
 }
 
 fn rpc_header_to_row(header: Header) -> Result<Block, ToRowError> {

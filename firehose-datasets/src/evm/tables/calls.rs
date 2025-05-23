@@ -6,11 +6,11 @@ use common::{
             ArrayRef, BinaryBuilder, BooleanBuilder, Int32Builder, UInt32Builder, UInt64Builder,
         },
         datatypes::{DataType, Field, Schema, SchemaRef},
-        error::ArrowError,
     },
-    Bytes32, Bytes32ArrayBuilder, EvmAddress as Address, EvmAddressArrayBuilder, EvmCurrency,
-    EvmCurrencyArrayBuilder, Table, TableRows, Timestamp, TimestampArrayBuilder, BLOCK_NUM,
-    BYTES32_TYPE, EVM_ADDRESS_TYPE as ADDRESS_TYPE, EVM_CURRENCY_TYPE,
+    BoxError, Bytes32, Bytes32ArrayBuilder, EvmAddress as Address, EvmAddressArrayBuilder,
+    EvmCurrency, EvmCurrencyArrayBuilder, RawTableBlock, RawTableRows, Table, Timestamp,
+    TimestampArrayBuilder, BLOCK_NUM, BYTES32_TYPE, EVM_ADDRESS_TYPE as ADDRESS_TYPE,
+    EVM_CURRENCY_TYPE,
 };
 
 static SCHEMA: LazyLock<SchemaRef> = LazyLock::new(|| Arc::new(schema()));
@@ -199,7 +199,7 @@ impl CallRowsBuilder {
         self.end_ordinal.append_value(*end_ordinal);
     }
 
-    pub(crate) fn build(self, network: String) -> Result<TableRows, ArrowError> {
+    pub(crate) fn build(self, block: RawTableBlock) -> Result<RawTableRows, BoxError> {
         let Self {
             block_hash,
             mut block_num,
@@ -246,7 +246,7 @@ impl CallRowsBuilder {
             Arc::new(end_ordinal.finish()),
         ];
 
-        TableRows::new(table(network), columns)
+        RawTableRows::new(table(block.network.clone()), block, columns)
     }
 }
 
@@ -256,7 +256,12 @@ fn default_to_arrow() {
     let rows = {
         let mut builder = CallRowsBuilder::with_capacity(1);
         builder.append(&call);
-        builder.build("test_network".to_string()).unwrap()
+        builder
+            .build(RawTableBlock {
+                number: call.block_num,
+                network: "test_network".to_string(),
+            })
+            .unwrap()
     };
     assert_eq!(rows.rows.num_columns(), 20);
     assert_eq!(rows.rows.num_rows(), 1);

@@ -7,7 +7,7 @@ use common::{
     multirange::MultiRange,
     parquet,
     parquet::{errors::ParquetError, format::KeyValue},
-    BlockNum, BoxError, QueryContext, TableRows, Timestamp,
+    BlockNum, BoxError, QueryContext, RawTableRows, Timestamp,
 };
 use metadata_db::MetadataDb;
 use object_store::{buffered::BufWriter, path::Path};
@@ -59,7 +59,7 @@ impl RawDatasetWriter {
         })
     }
 
-    pub async fn write(&mut self, table_rows: TableRows) -> Result<(), BoxError> {
+    pub async fn write(&mut self, table_rows: RawTableRows) -> Result<(), BoxError> {
         if table_rows.is_empty() {
             return Ok(());
         }
@@ -164,13 +164,12 @@ impl TableWriter {
 
     pub async fn write(
         &mut self,
-        table_rows: &TableRows,
+        table_rows: &RawTableRows,
     ) -> Result<Option<ScannedRange>, BoxError> {
         assert_eq!(table_rows.table.name, self.table.table_name());
 
         let mut scanned_range = None;
-
-        let block_num = table_rows.block_num()?;
+        let block_num = table_rows.block.number;
 
         // The block is past the current range, so we need to close the current file and start a new one.
         if self.current_range.is_some_and(|r| r.1 < block_num) {
