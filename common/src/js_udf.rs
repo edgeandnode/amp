@@ -81,6 +81,12 @@ impl AsyncScalarUDFImpl for JsUdf {
             }
             js_params_batch.push(row);
         }
+
+        // This use of `invoke_batch`, while optimal for performance, may result in non-determinism
+        // as the global JS state is shared across all invocations.
+        //
+        // A way to force determinism would be to not batch. The ideal solution would be to somehow
+        // have deterministic batch sizes.
         let outputs = self
             .isolate_pool
             .invoke_batch::<ScalarValue>(
