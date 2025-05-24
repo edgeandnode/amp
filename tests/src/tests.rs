@@ -128,7 +128,7 @@ async fn basic_function() -> Result<(), BoxError> {
 
     let worker = Worker::new(
         config.clone(),
-        metadata_db,
+        metadata_db.clone(),
         WorkerNodeId::from_str("basic_function").unwrap(),
     );
     tokio::spawn(worker.run());
@@ -137,8 +137,6 @@ async fn basic_function() -> Result<(), BoxError> {
     let dataset = DatasetPackage::new("basic_function");
     dataset.deploy(bound_addrs).await?;
 
-    let config = load_test_config(None).await?;
-    let metadata_db = Arc::new(config.metadata_db().await?);
     let dataset_store = DatasetStore::new(config.clone(), metadata_db);
     let env = config.make_query_env()?;
     let ctx = dataset_store
