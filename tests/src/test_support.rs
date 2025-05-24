@@ -437,7 +437,7 @@ fn convert_binary_to_hex_strings(mut record_batch: RecordBatch) -> RecordBatch {
     RecordBatch::try_new(schema, new_columns).unwrap()
 }
 
-fn record_batch_to_json(record_batch: RecordBatch) -> String {
+pub fn record_batch_to_json(record_batch: RecordBatch) -> String {
     // JSON does not support binary data, so encode any binary fields as hex strings.
     let record_batch = convert_binary_to_hex_strings(record_batch);
 

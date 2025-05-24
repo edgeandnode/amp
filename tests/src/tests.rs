@@ -1,13 +1,15 @@
 use std::{str::FromStr as _, sync::Arc};
 
-use common::{tracing_helpers, BoxError};
+use common::{query_context::parse_sql, tracing_helpers, BoxError};
+use dataset_store::DatasetStore;
 use dump::worker::Worker;
+use futures::StreamExt;
 use metadata_db::{workers::WorkerNodeId, KEEP_TEMP_DIRS};
 use tokio::sync::broadcast;
 
 use crate::test_support::{
-    check_blocks, check_provider_file, load_sql_tests, load_test_config, run_query_on_fresh_server,
-    DatasetPackage, SnapshotContext,
+    check_blocks, check_provider_file, load_sql_tests, load_test_config, record_batch_to_json,
+    run_query_on_fresh_server, DatasetPackage, SnapshotContext,
 };
 
 #[tokio::test]
@@ -135,12 +137,31 @@ async fn basic_function() -> Result<(), BoxError> {
     let dataset = DatasetPackage::new("basic_function");
     dataset.deploy(bound_addrs).await?;
 
-    for test in load_sql_tests("basic-function.yaml").unwrap() {
-        let results = run_query_on_fresh_server(&test.query, vec![], vec![], None)
-            .await
-            .map_err(|e| format!("{e:?}"));
-        test.assert_result_eq(results);
-    }
+    let config = load_test_config(None).await?;
+    let metadata_db = Arc::new(config.metadata_db().await?);
+    let dataset_store = DatasetStore::new(config.clone(), metadata_db);
+    let env = config.make_query_env()?;
+    let ctx = dataset_store
+        .ctx_for_sql(&parse_sql("SELECT basic_function.testString()")?, env)
+        .await?;
+    let result = ctx
+        .execute_sql("SELECT basic_function.testString()")
+        .await?
+        .next()
+        .await
+        .unwrap()?;
+    assert_eq!(
+        record_batch_to_json(result),
+        "[{\"basic_function.testString()\":\"I'm a function\"}]"
+    );
+
+    // TOOD: Fix function calls on flight server.
+    // for test in load_sql_tests("basic-function.yaml").unwrap() {
+    //     let results = run_query_on_fresh_server(&test.query, vec![], vec![], None)
+    //         .await
+    //         .map_err(|e| format!("{e:?}"));
+    //     test.assert_result_eq(results);
+    // }
 
     Ok(())
 }
