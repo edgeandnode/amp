@@ -99,6 +99,11 @@ impl IsolatePool {
         Self { pool }
     }
 
+    /// Dummy pool with no threads.
+    pub fn dummy() -> Self {
+        Self { pool: Pool::new(0) }
+    }
+
     /// Invoke a JavaScript function on the first available isolate.
     pub async fn invoke_batch<'a, R: FromV8 + 'static>(
         &self,

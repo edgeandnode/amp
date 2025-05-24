@@ -2719,6 +2719,7 @@ dependencies = [
  "evm-rpc-datasets",
  "firehose-datasets",
  "futures",
+ "js-runtime",
  "metadata-db",
  "object_store",
  "serde",

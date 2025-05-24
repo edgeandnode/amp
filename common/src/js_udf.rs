@@ -19,6 +19,7 @@ pub(crate) struct JsUdf {
     script_name: Arc<str>,   // For displaying in error stack traces
     function_name: Arc<str>, // Name of the JS function to be called
     return_type: DataType,
+    signature: Signature,
 }
 
 impl JsUdf {
@@ -28,8 +29,13 @@ impl JsUdf {
         code: Arc<str>,
         script_name: Arc<str>,
         function_name: Arc<str>,
+        input_types: Vec<DataType>,
         return_type: DataType,
     ) -> Self {
+        let signature = Signature {
+            type_signature: TypeSignature::Exact(input_types),
+            volatility: Volatility::Immutable,
+        };
         Self {
             isolate_pool,
             udf_name: format!("{}.{}", dataset_name, function_name),
@@ -37,6 +43,7 @@ impl JsUdf {
             script_name,
             function_name,
             return_type,
+            signature,
         }
     }
 }
@@ -52,10 +59,7 @@ impl AsyncScalarUDFImpl for JsUdf {
     }
 
     fn signature(&self) -> &Signature {
-        &Signature {
-            type_signature: TypeSignature::VariadicAny,
-            volatility: Volatility::Immutable,
-        }
+        &self.signature
     }
 
     fn return_type(&self, _arg_types: &[DataType]) -> Result<DataType, DataFusionError> {
@@ -125,6 +129,7 @@ function int_in_int_out(i32) {
         TEST_JS.into(),
         "test.js".into(),
         "int_in_int_out".into(),
+        vec![DataType::Int32],
         DataType::Int32,
     );
     let args = vec![ColumnarValue::Scalar(ScalarValue::Int32(Some(42)))];

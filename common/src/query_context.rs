@@ -378,6 +378,7 @@ impl QueryContext {
     }
 }
 
+#[instrument(skip_all, err)]
 async fn sql_to_plan(ctx: &SessionContext, query: parser::Statement) -> Result<LogicalPlan, Error> {
     let plan = ctx
         .state()

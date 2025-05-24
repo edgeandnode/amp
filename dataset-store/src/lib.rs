@@ -14,6 +14,7 @@ use common::{
     evm::udfs::EthCall,
     manifest::{Manifest, TableInput},
     query_context::{self, parse_sql, PlanningContext, QueryEnv, ResolvedTable, ResolvedTables},
+    sql_visitors::all_function_names,
     store::StoreError,
     BlockNum, BlockStreamer, BoxError, Dataset, DatasetWithProvider, QueryContext, RawDatasetRows,
     Store,
@@ -24,6 +25,7 @@ use datafusion::{
     sql::{parser, resolve::resolve_table_references, TableReference},
 };
 use futures::{future::BoxFuture, FutureExt as _, TryFutureExt as _};
+use js_runtime::isolate_pool::IsolatePool;
 use metadata_db::MetadataDb;
 use serde::Deserialize;
 use sql_datasets::SqlDataset;
@@ -51,6 +53,9 @@ pub enum Error {
 
     #[error("unsupported table name: {0}")]
     UnsupportedName(BoxError),
+
+    #[error("unsupported function name: {0}")]
+    UnsupportedFunctionName(BoxError),
 
     #[error("EVM RPC error: {0}")]
     EvmRpcError(#[from] evm_rpc_datasets::Error),
@@ -491,8 +496,10 @@ impl DatasetStore {
         env: QueryEnv,
     ) -> Result<QueryContext, DatasetError> {
         let (tables, _) = resolve_table_references(query, true).map_err(DatasetError::unknown)?;
+        let function_names = all_function_names(query).map_err(DatasetError::unknown)?;
+
         let catalog = self
-            .load_catalog_for_table_refs(tables.iter(), &env)
+            .load_catalog_for_table_refs(tables.iter(), function_names, &env)
             .await?;
         QueryContext::for_catalog(catalog, env.clone()).map_err(DatasetError::unknown)
     }
@@ -501,9 +508,24 @@ impl DatasetStore {
     pub async fn load_catalog_for_table_refs<'a>(
         self: Arc<Self>,
         table_refs: impl Iterator<Item = &'a TableReference>,
+        function_names: Vec<Vec<String>>,
         env: &QueryEnv,
     ) -> Result<Catalog, DatasetError> {
-        let dataset_names = datasets_from_table_refs(table_refs)?;
+        let mut dataset_names = datasets_from_table_refs(table_refs)?;
+        for func_name in function_names {
+            match func_name.as_slice() {
+                // Simple name assumed to be Datafusion built-in function.
+                [_] => continue,
+                [dataset, _] => {
+                    dataset_names.insert(dataset.clone());
+                }
+                _ => {
+                    return Err(DatasetError::no_context(Error::UnsupportedFunctionName(
+                        func_name.join(".").into(),
+                    )))
+                }
+            }
+        }
         let mut catalog = Catalog::empty();
         for dataset_name in dataset_names {
             let dataset = self.load_dataset(&dataset_name).await?;
@@ -571,17 +593,37 @@ impl DatasetStore {
         query: &parser::Statement,
     ) -> Result<PlanningContext, DatasetError> {
         let (tables, _) = resolve_table_references(query, true).map_err(DatasetError::unknown)?;
-        let resolved_tables = self.load_resolved_tables(tables.iter()).await?;
+        let function_names = all_function_names(query).map_err(DatasetError::unknown)?;
+        let resolved_tables = self
+            .load_resolved_tables(tables.iter(), function_names)
+            .await?;
         Ok(PlanningContext::new(resolved_tables))
     }
 
     /// Looks up the datasets for the given table references and creates resolved tables. Create
     /// UDFs specific to the referenced datasets.
+    ///
+    /// TODO: This function is heavily duplicated with `load_catalog_for_table_refs`.
     async fn load_resolved_tables(
         self: Arc<Self>,
         table_refs: impl Iterator<Item = &TableReference>,
+        function_names: Vec<Vec<String>>,
     ) -> Result<ResolvedTables, DatasetError> {
-        let dataset_names = datasets_from_table_refs(table_refs)?;
+        let mut dataset_names = datasets_from_table_refs(table_refs)?;
+        for func_name in function_names {
+            match func_name.as_slice() {
+                // Simple name assumed to be Datafusion built-in function.
+                [_] => continue,
+                [dataset, _] => {
+                    dataset_names.insert(dataset.clone());
+                }
+                _ => {
+                    return Err(DatasetError::no_context(Error::UnsupportedFunctionName(
+                        func_name.join(".").into(),
+                    )))
+                }
+            }
+        }
         let mut resolved_tables = Vec::new();
         let mut udfs = Vec::new();
         for dataset_name in dataset_names {
@@ -593,6 +635,12 @@ impl DatasetStore {
             if let Some(udf) = udf {
                 udfs.push(udf);
             }
+
+            // Add JS UDFs
+            for udf in dataset.dataset.functions(IsolatePool::dummy()) {
+                udfs.push(udf.into());
+            }
+
             for table in dataset.dataset.tables {
                 resolved_tables.push(ResolvedTable::new(dataset_name.clone(), table));
             }

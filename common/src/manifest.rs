@@ -131,8 +131,9 @@ impl From<ArrowSchema> for SchemaRef {
 
 impl From<Manifest> for Dataset {
     fn from(manifest: Manifest) -> Self {
-        use crate::catalog::logical::Function as LogicalFunction;
-        use crate::catalog::logical::FunctionSource as LogicalFunctionSource;
+        use crate::catalog::logical::{
+            Function as LogicalFunction, FunctionSource as LogicalFunctionSource,
+        };
 
         // Convert manifest tables into logical Tables
         let tables = manifest.tables();

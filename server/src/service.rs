@@ -478,10 +478,13 @@ impl Service {
 
         // The deserialized plan references empty tables, so we need to load the actual tables from the catalog.
         let table_refs = collect_scanned_tables(&plan);
+
+        // TODO: Properly decode and then collect function names, using a trick similar to `EmptyTableCodec`.
+        let function_names = vec![];
         let catalog = self
             .dataset_store
             .clone()
-            .load_catalog_for_table_refs(table_refs.iter(), &self.env)
+            .load_catalog_for_table_refs(table_refs.iter(), function_names, &self.env)
             .await?;
         let query_ctx = QueryContext::for_catalog(catalog, self.env.clone())?;
         let plan = query_ctx.prepare_remote_plan(plan).await?;

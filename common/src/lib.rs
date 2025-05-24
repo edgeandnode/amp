@@ -8,6 +8,7 @@ pub mod manifest;
 pub mod metadata;
 pub mod multirange;
 pub mod query_context;
+pub mod sql_visitors;
 pub mod store;
 pub mod stream_helpers;
 pub mod tracing_helpers;

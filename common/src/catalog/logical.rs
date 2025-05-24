@@ -41,6 +41,7 @@ impl Dataset {
                 f.source.source.clone(),
                 f.source.filename.clone().into(),
                 f.name.clone().into(),
+                f.input_types.clone(),
                 f.output_type.clone(),
             )))
         })

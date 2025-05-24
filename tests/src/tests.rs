@@ -112,6 +112,8 @@ async fn streaming_tests() {
 
 #[tokio::test]
 async fn basic_function() -> Result<(), BoxError> {
+    tracing_helpers::register_logger();
+
     let config = load_test_config(None).await.unwrap();
 
     let metadata_db = Arc::new(config.metadata_db().await?);
