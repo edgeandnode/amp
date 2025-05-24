@@ -148,24 +148,12 @@ impl ToV8 for &[u8] {
         &self,
         scope: &mut v8::HandleScope<'s>,
     ) -> Result<v8::Local<'s, v8::Value>, BoxError> {
-        // Unwrap: The maximum length of a Uint8Array is larger than RAM
+        let boxed: Box<[u8]> = self.to_vec().into_boxed_slice();
+        let store: v8::UniqueRef<v8::BackingStore> =
+            v8::ArrayBuffer::new_backing_store_from_boxed_slice(boxed);
+        let buffer = v8::ArrayBuffer::with_backing_store(scope, &store.make_shared());
+        let array = v8::Uint8Array::new(scope, buffer, 0, self.len()).expect("creating Uint8Array");
 
-        let buffer = if self.is_empty() {
-            v8::ArrayBuffer::new(scope, 0)
-        } else {
-            let store: v8::UniqueRef<_> = v8::ArrayBuffer::new_backing_store(scope, self.len());
-            // SAFETY: raw memory copy into the v8 ArrayBuffer allocated above
-            unsafe {
-                std::ptr::copy_nonoverlapping(
-                    self.as_ptr(),
-                    store.data().unwrap().as_ptr() as *mut u8,
-                    self.len(),
-                )
-            }
-            v8::ArrayBuffer::with_backing_store(scope, &store.make_shared())
-        };
-        let array =
-            v8::Uint8Array::new(scope, buffer, 0, self.len()).expect("Failed to create UintArray8");
         Ok(array.into())
     }
 }
