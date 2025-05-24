@@ -14,7 +14,6 @@ metadata-db = { path = "../metadata-db" }
 atty = "0.2.14"
 clap.workspace = true
 common = { path = "../common" }
-datafusion.workspace = true
 dataset-store = { path = "../dataset-store" }
 futures.workspace = true
 human_bytes = { version = "0.4", default-features = false }

@@ -53,7 +53,7 @@ pub struct Function {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FunctionSource {
-    pub source: Arc<String>,
+    pub source: Arc<str>,
     pub filename: String,
 }
 

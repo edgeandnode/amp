@@ -11,10 +11,9 @@ use datafusion::{
 };
 use js_runtime::{convert::ToV8, isolate_pool::IsolatePool};
 
-use crate::Dataset;
-
 #[derive(Debug)]
-struct JsUdf {
+pub(crate) struct JsUdf {
+    udf_name: String,
     isolate_pool: IsolatePool,
     code: Arc<str>,          // JS source code
     script_name: Arc<str>,   // For displaying in error stack traces
@@ -25,6 +24,7 @@ struct JsUdf {
 impl JsUdf {
     pub fn new(
         isolate_pool: IsolatePool,
+        dataset_name: &str,
         code: Arc<str>,
         script_name: Arc<str>,
         function_name: Arc<str>,
@@ -32,6 +32,7 @@ impl JsUdf {
     ) -> Self {
         Self {
             isolate_pool,
+            udf_name: format!("{}.{}", dataset_name, function_name),
             code,
             script_name,
             function_name,
@@ -43,7 +44,7 @@ impl JsUdf {
 #[async_trait]
 impl AsyncScalarUDFImpl for JsUdf {
     fn name(&self) -> &str {
-        &self.function_name
+        &self.udf_name
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -120,6 +121,7 @@ function int_in_int_out(i32) {
     let isolate_pool = IsolatePool::new();
     let udf = JsUdf::new(
         isolate_pool,
+        "",
         TEST_JS.into(),
         "test.js".into(),
         "int_in_int_out".into(),

@@ -109,8 +109,7 @@ impl SnapshotContext {
         }
         let dataset: PhysicalDataset = PhysicalDataset::new(dataset, tables);
         let catalog = Catalog::new(vec![dataset]);
-        let ctx: QueryContext =
-            QueryContext::for_catalog(catalog, Arc::new(config.make_runtime_env()?))?;
+        let ctx: QueryContext = QueryContext::for_catalog(catalog, config.make_query_env()?)?;
         Ok(Self {
             ctx,
             _temp_dir: None,
@@ -150,7 +149,7 @@ impl SnapshotContext {
             true,
         )
         .await?;
-        let ctx = QueryContext::for_catalog(catalog, Arc::new(config.make_runtime_env()?))?;
+        let ctx = QueryContext::for_catalog(catalog, config.make_query_env()?)?;
 
         Ok(SnapshotContext {
             ctx,
@@ -283,7 +282,7 @@ pub async fn check_blocks(dataset_name: &str, start: u64, end: u64) -> Result<()
     let config = load_test_config(None).await?;
     let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
     let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
-    let env = Arc::new(config.make_runtime_env()?);
+    let env = config.make_query_env()?;
 
     dump_check::dump_check(
         dataset_name,

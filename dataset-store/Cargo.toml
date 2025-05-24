@@ -4,12 +4,12 @@ edition.workspace = true
 version.workspace = true
 
 [dependencies]
+substreams-datasets = { path = "../substreams-datasets" }
 async-udf = { path = "../async-udf" }
 metadata-db = { path = "../metadata-db" }
 common = { path = "../common" }
 evm-rpc-datasets = { path = "../evm-rpc-datasets" }
 firehose-datasets = { path = "../firehose-datasets" }
-substreams-datasets = { path = "../substreams-datasets" }
 tokio.workspace = true
 toml.workspace = true
 thiserror.workspace = true

@@ -13,14 +13,13 @@ use common::{
     config::Config,
     evm::udfs::EthCall,
     manifest::{Manifest, TableInput},
-    query_context::{self, parse_sql, PlanningContext, ResolvedTable, ResolvedTables},
+    query_context::{self, parse_sql, PlanningContext, QueryEnv, ResolvedTable, ResolvedTables},
     store::StoreError,
     BlockNum, BlockStreamer, BoxError, Dataset, DatasetWithProvider, QueryContext, RawDatasetRows,
     Store,
 };
 use datafusion::{
     common::HashMap,
-    execution::runtime_env::RuntimeEnv,
     logical_expr::ScalarUDF,
     sql::{parser, resolve::resolve_table_references, TableReference},
 };
@@ -489,10 +488,12 @@ impl DatasetStore {
     pub async fn ctx_for_sql(
         self: Arc<Self>,
         query: &parser::Statement,
-        env: Arc<RuntimeEnv>,
+        env: QueryEnv,
     ) -> Result<QueryContext, DatasetError> {
         let (tables, _) = resolve_table_references(query, true).map_err(DatasetError::unknown)?;
-        let catalog = self.load_catalog_for_table_refs(tables.iter()).await?;
+        let catalog = self
+            .load_catalog_for_table_refs(tables.iter(), &env)
+            .await?;
         QueryContext::for_catalog(catalog, env.clone()).map_err(DatasetError::unknown)
     }
 
@@ -500,6 +501,7 @@ impl DatasetStore {
     pub async fn load_catalog_for_table_refs<'a>(
         self: Arc<Self>,
         table_refs: impl Iterator<Item = &'a TableReference>,
+        env: &QueryEnv,
     ) -> Result<Catalog, DatasetError> {
         let dataset_names = datasets_from_table_refs(table_refs)?;
         let mut catalog = Catalog::empty();
@@ -537,6 +539,11 @@ impl DatasetStore {
                 .map_err(|e| (dataset_name.clone(), e))?;
             if let Some(udf) = udf {
                 catalog.add_udf(udf);
+            }
+
+            // Add JS UDFs
+            for udf in dataset.dataset.functions(env.isolate_pool.clone()) {
+                catalog.add_udf(udf.into());
             }
         }
         Ok(catalog)

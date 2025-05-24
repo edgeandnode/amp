@@ -2903,7 +2903,6 @@ dependencies = [
  "atty",
  "clap",
  "common",
- "datafusion",
  "dataset-store",
  "futures",
  "human_bytes",

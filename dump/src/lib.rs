@@ -18,10 +18,9 @@ use common::{
     metadata::block_ranges_by_table,
     multirange::MultiRange,
     parquet::{self, basic::ZstdLevel},
-    query_context::{Error as CoreError, QueryContext},
+    query_context::{Error as CoreError, QueryContext, QueryEnv},
     BlockNum, BlockStreamer as _, BoxError,
 };
-use datafusion::execution::runtime_env::RuntimeEnv;
 use dataset_store::{
     sql_datasets::{is_incremental, max_end_block, SqlDataset},
     DatasetKind, DatasetStore,
@@ -46,7 +45,7 @@ pub async fn dump_dataset(
     end_block: Option<i64>,
 ) -> Result<(), BoxError> {
     let catalog = Catalog::new(vec![dataset.clone()]);
-    let env = Arc::new(config.make_runtime_env()?);
+    let env = config.make_query_env()?;
     let ctx = Arc::new(QueryContext::for_catalog(catalog, env.clone())?);
     let metadata_db = dataset_store.metadata_db.as_ref();
 
@@ -196,7 +195,7 @@ async fn dump_sql_dataset(
     dataset: SqlDataset,
     data_store: Arc<common::Store>,
     dataset_store: &Arc<DatasetStore>,
-    env: &Arc<RuntimeEnv>,
+    env: &QueryEnv,
     block_ranges_by_table: BTreeMap<String, MultiRange>,
     parquet_opts: &ParquetWriterProperties,
     start: i64,
@@ -310,7 +309,7 @@ async fn dump_sql_dataset(
 async fn dump_sql_query(
     dataset_store: &Arc<DatasetStore>,
     query: &datafusion::sql::parser::Statement,
-    env: &Arc<RuntimeEnv>,
+    env: &QueryEnv,
     start: BlockNum,
     end: BlockNum,
     physical_table: &common::catalog::physical::PhysicalTable,
