@@ -16,15 +16,36 @@ check *EXTRA_FLAGS:
 
 # Run all tests (unit and integration)
 test *EXTRA_FLAGS:
-    cargo test {{EXTRA_FLAGS}} --workspace
+    #!/usr/bin/env bash
+    set -e # Exit on error
+
+    if command -v "cargo-nextest" &> /dev/null; then
+        cargo nextest run {{EXTRA_FLAGS}} --workspace
+    else
+        cargo test {{EXTRA_FLAGS}} --workspace
+    fi
 
 # Run unit tests
 test-unit *EXTRA_FLAGS:
-    cargo test {{EXTRA_FLAGS}} --workspace --exclude tests -- --nocapture
+    #!/usr/bin/env bash
+    set -e # Exit on error
+
+    if command -v "cargo-nextest" &> /dev/null; then
+        cargo nextest run {{EXTRA_FLAGS}} --workspace --exclude tests 
+    else
+        cargo test {{EXTRA_FLAGS}} --workspace --exclude tests -- --nocapture
+    fi
 
 # Run integration tests
 test-it *EXTRA_FLAGS:
-    cargo test {{EXTRA_FLAGS}} --package tests -- --nocapture
+    #!/usr/bin/env bash
+    set -e # Exit on error
+
+    if command -v "cargo-nextest" &> /dev/null; then
+        cargo nextest run {{EXTRA_FLAGS}} --package tests
+    else
+        cargo test {{EXTRA_FLAGS}} --package tests -- --nocapture
+    fi
 
 # Clean workspace (cargo clean)
 clean:
