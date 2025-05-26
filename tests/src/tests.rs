@@ -135,6 +135,7 @@ async fn basic_function() -> Result<(), BoxError> {
 
     // Run `pnpm build` on the dataset.
     let dataset = DatasetPackage::new("basic_function");
+    dataset.pnpm_install().await?;
     dataset.deploy(bound_addrs).await?;
 
     let dataset_store = DatasetStore::new(config.clone(), metadata_db);

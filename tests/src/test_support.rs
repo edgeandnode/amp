@@ -1,6 +1,8 @@
 use std::{
     io::ErrorKind,
+    path::PathBuf,
     process::{ExitStatus, Stdio},
+    str::FromStr as _,
     sync::Arc,
     time::Duration,
 };
@@ -35,7 +37,7 @@ use pretty_assertions::assert_str_eq;
 use serde::{Deserialize, Deserializer};
 use tempfile::TempDir;
 use tokio::time;
-use tracing::{info, instrument};
+use tracing::{debug, info, instrument};
 
 /// Assume the `cargo test` command is run either from the workspace root or from the crate root.
 const TEST_CONFIG_BASE_DIRS: [&str; 2] = ["tests/config", "config"];
@@ -655,15 +657,40 @@ pub struct DatasetPackage {
     pub name: String,
 
     // Relative to crate root
-    pub path: String,
+    pub path: PathBuf,
 }
 
 impl DatasetPackage {
     pub fn new(name: &str) -> Self {
         Self {
             name: name.to_string(),
-            path: format!("datasets/{}", name),
+            path: PathBuf::from_str(&format!("datasets/{}", name)).unwrap(),
         }
+    }
+
+    pub async fn pnpm_install(&self) -> Result<(), BoxError> {
+        let install_path = self.path.parent().unwrap();
+        debug!(
+            "Running pnpm install on `{}`",
+            install_path.to_string_lossy()
+        );
+
+        let status = tokio::process::Command::new("pnpm")
+            .args(&["install"])
+            .current_dir(install_path)
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .status()
+            .await?;
+
+        if status != ExitStatus::default() {
+            return Err(BoxError::from(format!(
+                "Failed to install dataset {}: pnpm install failed with exit code {status}",
+                self.name,
+            )));
+        }
+
+        Ok(())
     }
 
     pub async fn build(&self, bound_addrs: BoundAddrs) -> Result<(), BoxError> {
@@ -693,6 +720,7 @@ impl DatasetPackage {
         Ok(())
     }
 
+    #[instrument(skip_all, err)]
     pub async fn deploy(&self, bound_addrs: BoundAddrs) -> Result<(), BoxError> {
         let status = tokio::process::Command::new("pnpm")
             .args(&["nozzl", "deploy"])
