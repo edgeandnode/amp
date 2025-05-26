@@ -47,6 +47,8 @@ pub fn register_logger() {
             .with_env_filter(env_filter)
             .with_ansi(atty::is(atty::Stream::Stderr))
             .init();
+
+        tracing::info!("log level: {}", nozzle_log_level);
     });
 }
 
