@@ -1,3 +1,4 @@
+mod block_ranges;
 pub mod job;
 mod job_partition;
 mod metrics; // unused for now
@@ -32,7 +33,6 @@ use object_store::ObjectMeta;
 use parquet::{basic::Compression, file::properties::WriterProperties as ParquetWriterProperties};
 use parquet_writer::{commit_metadata, ParquetFileWriter};
 use thiserror::Error;
-use tracing::{info, instrument, warn};
 
 pub async fn dump_dataset(
     dataset: &PhysicalDataset,
@@ -61,7 +61,7 @@ pub async fn dump_dataset(
             continue;
         }
 
-        info!(
+        tracing::info!(
             "table `{}` has scanned {} blocks in the ranges: {}",
             table_name,
             multirange.total_len(),
@@ -87,7 +87,7 @@ pub async fn dump_dataset(
         }
         DatasetKind::Sql | DatasetKind::Manifest => {
             if n_jobs > 1 {
-                info!("n_jobs > 1 has no effect for SQL datasets");
+                tracing::info!("n_jobs > 1 has no effect for SQL datasets");
             }
 
             let dataset = match kind {
@@ -114,7 +114,7 @@ pub async fn dump_dataset(
         }
     }
 
-    info!("dump of dataset {} completed successfully", dataset.name());
+    tracing::info!("dump of dataset {} completed successfully", dataset.name());
 
     Ok(())
 }
@@ -136,7 +136,7 @@ async fn dump_raw_dataset(
         (start, Some(end)) if start >= 0 && end >= 0 => (start as BlockNum, end as BlockNum),
         _ => {
             let latest_block = client.latest_block(true).await?;
-            resolve_relative_block_range(start, end, latest_block)?
+            block_ranges::resolve_relative(start, end, latest_block)?
         }
     };
 
@@ -151,10 +151,10 @@ async fn dump_raw_dataset(
 
     // Find the ranges of blocks that have not been scanned yet for at least one table.
     let ranges = block_ranges.complement(start, end);
-    info!("dumping dataset {dataset_name} for ranges {ranges}");
+    tracing::info!("dumping dataset {dataset_name} for ranges {ranges}");
 
     if ranges.total_len() == 0 {
-        info!("no blocks to dump for {dataset_name}");
+        tracing::info!("no blocks to dump for {dataset_name}");
         return Ok(());
     }
 
@@ -190,7 +190,7 @@ async fn dump_raw_dataset(
     Ok(())
 }
 
-#[instrument(skip_all, err, fields(dataset = %dataset.name()))]
+#[tracing::instrument(skip_all, err, fields(dataset = %dataset.name()))]
 async fn dump_sql_dataset(
     dst_ctx: Arc<QueryContext>,
     dataset: SqlDataset,
@@ -235,11 +235,11 @@ async fn dump_sql_dataset(
                 _ => {
                     match max_end_block(&plan, &src_ctx, &dataset_store.metadata_db).await? {
                         Some(max_end_block) => {
-                            resolve_relative_block_range(start, end, max_end_block)?
+                            block_ranges::resolve_relative(start, end, max_end_block)?
                         }
                         None => {
                             // If the dependencies have synced nothing, we have nothing to do.
-                            warn!("no blocks to dump for {table}, dependencies are empty");
+                            tracing::warn!("no blocks to dump for {table}, dependencies are empty");
                             return Ok::<(), BoxError>(());
                         }
                     }
@@ -252,7 +252,7 @@ async fn dump_sql_dataset(
                     let mut start = start;
                     while start <= end {
                         let batch_end = std::cmp::min(start + input_batch_size_blocks - 1, end);
-                        info!(
+                        tracing::info!(
                             "dumping {} between blocks {start} and {batch_end}",
                             physical_table.table_ref()
                         );
@@ -278,7 +278,7 @@ async fn dump_sql_dataset(
                     dataset_store.metadata_db.clone(),
                 )
                 .await?;
-                info!(
+                tracing::info!(
                     "dumping entire {} to {}",
                     physical_table.table_ref(),
                     physical_table.url()
@@ -306,7 +306,7 @@ async fn dump_sql_dataset(
     Ok(())
 }
 
-#[instrument(skip_all, err)]
+#[tracing::instrument(skip_all, err)]
 async fn dump_sql_query(
     dataset_store: &Arc<DatasetStore>,
     query: &datafusion::sql::parser::Statement,
@@ -443,7 +443,7 @@ async fn consistency_check(
             if !registered_files.contains(filename) {
                 // This file was written by a dump job but it is not present in the metadata DB,
                 // so it is an orphaned file. Delete it.
-                warn!("Deleting orphaned file: {}", object_meta.location);
+                tracing::warn!("Deleting orphaned file: {}", object_meta.location);
                 store.delete(&object_meta.location).await?;
             }
         }
@@ -460,52 +460,3 @@ async fn consistency_check(
     }
     Ok(())
 }
-
-fn resolve_relative_block_range(
-    start: i64,
-    end: Option<i64>,
-    latest_block: BlockNum,
-) -> Result<(BlockNum, BlockNum), BoxError> {
-    if start >= 0 {
-        if let Some(end) = end {
-            if end > 0 {
-                return Ok((start as BlockNum, end as BlockNum));
-            }
-        }
-    }
-
-    let start_block = if start >= 0 {
-        start
-    } else {
-        latest_block as i64 + start // Using + because start is negative
-    };
-
-    if start_block < 0 {
-        return Err(format!("start block {start_block} is invalid").into());
-    }
-
-    let end_block = match end {
-        // Absolute block number
-        Some(e) if e > 0 => e as BlockNum,
-
-        // Relative to latest block
-        Some(e) => {
-            let end = latest_block as i64 + e; // Using + because e is negative
-            if end < start_block {
-                return Err(format!(
-                    "end_block {end} must be greater than or equal to start_block {start_block}"
-                )
-                .into());
-            }
-            end as BlockNum
-        }
-
-        // Default to latest block
-        None => latest_block,
-    };
-
-    Ok((start_block as BlockNum, end_block))
-}
-
-#[cfg(test)]
-mod tests;
