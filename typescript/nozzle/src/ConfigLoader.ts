@@ -4,6 +4,10 @@ import { Data, Effect, Either, Match, Predicate, Schema, Stream } from "effect"
 import * as ManifestBuilder from "./ManifestBuilder.js"
 import * as Model from "./Model.js"
 
+export interface Context {
+  file: string
+}
+
 export class ConfigLoaderError extends Data.TaggedError("ConfigLoaderError")<{
   readonly cause?: unknown
   readonly message?: string
@@ -24,9 +28,10 @@ export class ConfigLoader extends Effect.Service<ConfigLoader>()("Nozzle/ConfigL
 
     const loadTypeScript = Effect.fnUntraced(function*(file: string) {
       return yield* Effect.tryMapPromise(jiti, {
-        try: (jiti) => jiti.import(file, { default: true }),
+        try: (jiti) => jiti.import<((context: Context) => Model.DatasetDefinition)>(file, { default: true }),
         catch: (cause) => cause,
       }).pipe(
+        Effect.map((callback) => callback({ file })),
         Effect.flatMap(Schema.decodeUnknown(Model.DatasetDefinition)),
         Effect.mapError((cause) => new ConfigLoaderError({ cause, message: `Failed to load config file ${file}` })),
       )
@@ -34,9 +39,10 @@ export class ConfigLoader extends Effect.Service<ConfigLoader>()("Nozzle/ConfigL
 
     const loadJavaScript = Effect.fnUntraced(function*(file: string) {
       return yield* Effect.tryPromise({
-        try: () => import(file).then((module) => module.default),
+        try: () => import(file).then((module) => module.default as (context: Context) => Model.DatasetDefinition),
         catch: (cause) => cause,
       }).pipe(
+        Effect.map((callback) => callback({ file })),
         Effect.flatMap(Schema.decodeUnknown(Model.DatasetDefinition)),
         Effect.mapError((cause) => new ConfigLoaderError({ cause, message: `Failed to load config file ${file}` })),
       )
