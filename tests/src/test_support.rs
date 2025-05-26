@@ -668,6 +668,7 @@ impl DatasetPackage {
         }
     }
 
+    #[instrument(skip_all, err)]
     pub async fn pnpm_install(&self) -> Result<(), BoxError> {
         let install_path = self.path.parent().unwrap();
         debug!(
