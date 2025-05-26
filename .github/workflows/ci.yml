@@ -41,6 +41,12 @@ jobs:
       - name: Setup just
         uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v3
 
+      - name: Install cargo-nextest
+        uses: baptiste0928/cargo-install@91c5da15570085bcde6f4d7aed98cb82d6769fd3 # v3
+        with:
+          crate: cargo-nextest
+          version: ^0.9
+
       - name: Unit tests
         run: just test-unit --verbose
 
@@ -62,6 +68,12 @@ jobs:
 
       - name: Setup just
         uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v3
+
+      - name: Install cargo-nextest
+        uses: baptiste0928/cargo-install@91c5da15570085bcde6f4d7aed98cb82d6769fd3 # v3
+        with:
+          crate: cargo-nextest
+          version: ^0.9
 
       - name: Add PostgreSQL binaries to PATH
         run: |
