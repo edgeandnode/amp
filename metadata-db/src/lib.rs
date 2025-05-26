@@ -11,14 +11,16 @@ use tokio::time::MissedTickBehavior;
 use tracing::{error, instrument};
 use url::Url;
 
-pub mod jobs;
 mod temp_metadata_db;
 pub mod workers;
 
-pub use self::temp_metadata_db::{test_metadata_db, ALLOW_TEMP_DB, KEEP_TEMP_DIRS};
-use self::{
-    jobs::{Job, JobId},
-    workers::WorkerNodeId,
+pub use self::{
+    temp_metadata_db::{test_metadata_db, ALLOW_TEMP_DB, KEEP_TEMP_DIRS},
+    workers::{
+        channel::{JobNotifAction, JobNotifListener, JobNotification},
+        queue::{Job, JobId, JobStatus},
+        WorkerNodeId,
+    },
 };
 
 /// Frequency on which to send a heartbeat.
@@ -42,6 +44,12 @@ pub enum Error {
     #[error("Metadata db error: {0}")]
     DbError(#[from] sqlx::Error),
 
+    #[error("Error sending notification: {0}")]
+    NotificationSendError(#[from] workers::channel::JobNotifSendError),
+
+    #[error("Error receiving notification: {0}")]
+    NotificationRecvError(#[from] workers::channel::JobNotifRecvError),
+
     #[error(
         "Multiple active locations found for dataset={0}, dataset_version={1}, table={2}: {3:?}"
     )]
@@ -56,7 +64,7 @@ static MIGRATOR: Migrator = sqlx::migrate!();
 /// Connection pool to the metadata DB. Clones will refer to the same instance.
 #[derive(Clone, Debug)]
 pub struct MetadataDb {
-    pool: Pool<Postgres>,
+    pub(crate) pool: Pool<Postgres>,
     pub(crate) url: String,
 }
 
@@ -306,6 +314,15 @@ impl MetadataDb {
             .await?)
     }
 
+    /// Schedules a job on the given worker
+    ///
+    /// The job will only be scheduled if the locations are successfully locked.
+    ///
+    /// This function performs in a single transaction:
+    ///  1. Registers the job in the workers job queue
+    ///  2. Locks the locations
+    ///  3. Sends a notification to the worker
+    /// If any of these steps fail, the transaction is rolled back, and no notification is sent.
     #[instrument(skip(self), err)]
     pub async fn schedule_job(
         &self,
@@ -317,66 +334,45 @@ impl MetadataDb {
         // successfully locked.
         let mut tx = self.pool.begin().await?;
 
-        let query = indoc::indoc! {r#"
-            INSERT INTO jobs (node_id, descriptor)
-            VALUES ($1, $2::jsonb)
-            RETURNING id
-        "#};
+        let job_id = workers::queue::register_job(&mut *tx, node_id, job_desc).await?;
 
-        let id: JobId = sqlx::query_scalar(query)
-            .bind(node_id)
-            .bind(job_desc)
-            .fetch_one(&self.pool)
+        lock_locations(&mut *tx, job_id, locations).await?;
+
+        workers::channel::notify(&mut *tx, JobNotification::start(node_id.to_owned(), job_id))
             .await?;
-
-        lock_locations(&mut *tx, id, locations).await?;
 
         tx.commit().await?;
 
-        Ok(id)
+        Ok(job_id)
     }
 
     /// Given a worker `node_id`, returns all the job IDs
     pub async fn scheduled_jobs(&self, node_id: &WorkerNodeId) -> Result<Vec<JobId>, Error> {
-        let query = indoc::indoc! {r#"
-            SELECT id FROM jobs
-            WHERE node_id = $1
-            ORDER BY id ASC
-        "#};
-
-        let ids: Vec<JobId> = sqlx::query_scalar(query)
-            .bind(node_id)
-            .fetch_all(&self.pool)
-            .await?;
-
-        Ok(ids)
+        Ok(workers::queue::get_job_ids_for_node(&self.pool, node_id).await?)
     }
 
     /// Returns the job with the given ID
     pub async fn get_job(&self, id: &JobId) -> Result<Option<Job>, Error> {
-        let query = indoc::indoc! {r#"
-            SELECT id, node_id, status, descriptor
-            FROM jobs
-            WHERE id = $1
-        "#};
-
-        Ok(sqlx::query_as(query)
-            .bind(id)
-            .fetch_optional(&self.pool)
-            .await?)
+        Ok(workers::queue::get_job(&self.pool, id).await?)
     }
 
-    pub async fn job_desc(&self, id: &JobId) -> Result<String, Error> {
-        let query = indoc::indoc! {r#"
-            SELECT descriptor::text 
-            FROM jobs 
-            WHERE id = $1
-        "#};
+    /// For a given job ID, returns the job descriptor.
+    pub async fn job_desc(&self, id: &JobId) -> Result<Option<String>, Error> {
+        Ok(workers::queue::get_job_descriptor(&self.pool, id).await?)
+    }
 
-        Ok(sqlx::query_scalar(query)
-            .bind(id)
-            .fetch_one(&self.pool)
-            .await?)
+    /// Send a notification over the worker actions notification channel
+    pub async fn send_job_notification(&self, payload: JobNotification) -> Result<(), Error> {
+        workers::channel::notify(&self.pool, payload)
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Listen to the worker actions notification channel for job notifications
+    pub async fn listen_for_job_notifications(&self) -> Result<JobNotifListener, Error> {
+        workers::channel::listen_url(&self.url)
+            .await
+            .map_err(Into::into)
     }
 
     /// Returns tuples of `(location_id, table_name, url)`.

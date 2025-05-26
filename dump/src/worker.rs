@@ -1,47 +1,15 @@
-use std::{collections::BTreeMap, fmt, pin::pin, sync::Arc};
+use std::{collections::BTreeMap, pin::pin, sync::Arc};
 
 use common::{config::Config, BoxError};
-use futures::{TryFutureExt as _, TryStreamExt};
-use metadata_db::{jobs::JobId, workers::WorkerNodeId, MetadataDb};
-use serde::{Deserialize, Serialize};
+use futures::{TryFutureExt as _, TryStreamExt as _};
+use metadata_db::{JobId, JobNotifAction, JobNotification, MetadataDb, WorkerNodeId};
 use thiserror::Error;
 use tokio::{
     sync::mpsc::{UnboundedReceiver, UnboundedSender},
     task::JoinHandle,
 };
-use tracing::{debug, error, info, instrument};
 
 use crate::job::Job;
-
-pub const WORKER_ACTIONS_PG_CHANNEL: &str = "worker_actions";
-
-/// These actions coordinate the jobs state and the write lock on the output table locations.
-///
-/// Start action:
-/// - Fetch the jobs descriptor and output locations from the `metadata_db`.
-/// - Start the jobs.
-///
-/// Stop action (currently unimplemented):
-/// - Stop the jobs.
-/// - Release the locations by deleting the row from the `jobs` table.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub enum Action {
-    Start,
-    Stop,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct WorkerAction {
-    pub node_id: WorkerNodeId,
-    pub job_id: JobId,
-    pub action: Action,
-}
-
-impl fmt::Debug for WorkerAction {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", serde_json::to_string(self).unwrap())
-    }
-}
 
 pub struct Worker {
     config: Arc<Config>,
@@ -50,7 +18,7 @@ pub struct Worker {
 
     // To prevent start/stop race conditions, actions for a same jobs are processed sequentially.
     // Each jobs has a dedicated handler task.
-    action_queue: BTreeMap<JobId, UnboundedSender<WorkerAction>>,
+    action_queue: BTreeMap<JobId, UnboundedSender<JobNotification>>,
 }
 
 #[derive(Error, Debug)]
@@ -59,7 +27,7 @@ pub enum WorkerError {
     HeartbeatError(BoxError),
 
     #[error("error listening to worker actions: {0}")]
-    ListenError(sqlx::Error),
+    ListenError(BoxError),
 
     #[error("location handler panicked")]
     HandlerPanic,
@@ -100,24 +68,11 @@ impl Worker {
         // Start listening for actions.
         let action_stream = self
             .metadata_db
-            .listen(WORKER_ACTIONS_PG_CHANNEL)
+            .listen_for_job_notifications()
             .await
-            .map_err(|e| ListenError(e.into()))?
-            .map_err(|e| ListenError(e.into()))
-            .try_filter_map(|n| async move {
-                match serde_json::from_str(&n.payload()) {
-                    Ok(action) => Ok(Some(action)),
-                    Err(e) => {
-                        // Warn the operator about invalid notifications, but don't fail the worker.
-                        error!(
-                            "Invalid notification, error: `{}`, payload: `{}`",
-                            e,
-                            n.payload()
-                        );
-                        Ok(None)
-                    }
-                }
-            });
+            .map_err(|err| ListenError(err.into()))?
+            .into_stream()
+            .map_err(|err| ListenError(err.into()));
 
         // Spawn scheduled jobs.
         let scheduled_jobs = self.metadata_db.scheduled_jobs(&self.node_id).await?;
@@ -147,7 +102,7 @@ impl Worker {
         }
     }
 
-    fn handle_action(&mut self, action: WorkerAction) -> Result<(), WorkerError> {
+    fn handle_action(&mut self, action: JobNotification) -> Result<(), WorkerError> {
         if action.node_id != self.node_id {
             return Ok(());
         }
@@ -172,7 +127,7 @@ struct JobHandler {
     metadata_db: Arc<MetadataDb>,
     node_id: WorkerNodeId,
     job_id: JobId,
-    recv: UnboundedReceiver<WorkerAction>,
+    recv: UnboundedReceiver<JobNotification>,
 }
 
 impl JobHandler {
@@ -181,7 +136,7 @@ impl JobHandler {
         metadata_db: Arc<MetadataDb>,
         node_id: WorkerNodeId,
         job_id: JobId,
-        recv: UnboundedReceiver<WorkerAction>,
+        recv: UnboundedReceiver<JobNotification>,
     ) -> Self {
         Self {
             config,
@@ -198,32 +153,34 @@ impl JobHandler {
             assert!(action.job_id == self.job_id);
 
             if let Err(e) = self.handle_action(action.action).await {
-                error!("error handling action `{:?}`: {}", action, e);
+                tracing::error!("error handling action `{:?}`: {}", action, e);
             }
         }
 
         // Only happens if the `Worker` is dropped.
-        debug!(
+        tracing::debug!(
             "Dropping job handler for node {} and job {}",
-            self.node_id, self.job_id
+            self.node_id,
+            self.job_id
         );
     }
 
-    #[instrument(skip(self), err)]
-    async fn handle_action(&self, action: Action) -> Result<(), WorkerError> {
-        use WorkerError::*;
-
+    #[tracing::instrument(skip(self), err)]
+    async fn handle_action(&self, action: JobNotifAction) -> Result<(), WorkerError> {
         match action {
-            Action::Start => {
+            JobNotifAction::Start => {
                 let job = Job::load(&self.job_id, self.config.clone(), self.metadata_db.clone())
                     .await
-                    .map_err(JobLoadError)?;
+                    .map_err(WorkerError::JobLoadError)?;
                 spawn_job(self.config.clone(), self.metadata_db.clone(), job);
             }
 
-            Action::Stop => {
+            JobNotifAction::Stop => {
                 // No code path currently calls this.
                 unimplemented!()
+            }
+            _ => {
+                tracing::warn!("unhandled action: {}", action);
             }
         }
         Ok(())
@@ -235,10 +192,10 @@ fn spawn_job(config: Arc<Config>, metadata_db: Arc<MetadataDb>, job: Job) -> Joi
         let job_desc = job.to_string();
         match job.run(config, metadata_db).await {
             Ok(()) => {
-                info!("job {} finished running", job_desc);
+                tracing::info!("job {} finished running", job_desc);
             }
             Err(e) => {
-                error!("error running job {}: {}", job_desc, e);
+                tracing::error!("error running job {}: {}", job_desc, e);
             }
         }
     })
