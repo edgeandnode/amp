@@ -1,11 +1,32 @@
 import { FileSystem, Path } from "@effect/platform"
 import type { Cause } from "effect"
 import { Data, Effect, Either, Match, Predicate, Schema, Stream } from "effect"
+import * as fs from "fs"
+import * as path from "path"
 import * as ManifestBuilder from "./ManifestBuilder.js"
 import * as Model from "./Model.js"
 
-export interface Context {
-  file: string
+export class Context {
+  constructor(public definitionPath: string) {}
+
+  /// Reads a file relative to the directory of the dataset definition
+  functionSource(relativePath: string): Model.FunctionSource {
+    const baseDir = path.dirname(this.definitionPath)
+    const fullPath = path.join(baseDir, relativePath)
+
+    let source: string
+    try {
+      source = fs.readFileSync(fullPath, "utf8")
+    } catch (err: any) {
+      throw new Error(`Failed to read function source at ${fullPath}: ${err.message}`)
+    }
+
+    const func = new Model.FunctionSource({
+      source,
+      filename: path.basename(fullPath),
+    })
+    return func
+  }
 }
 
 export class ConfigLoaderError extends Data.TaggedError("ConfigLoaderError")<{
@@ -31,7 +52,7 @@ export class ConfigLoader extends Effect.Service<ConfigLoader>()("Nozzle/ConfigL
         try: (jiti) => jiti.import<((context: Context) => Model.DatasetDefinition)>(file, { default: true }),
         catch: (cause) => cause,
       }).pipe(
-        Effect.map((callback) => callback({ file })),
+        Effect.map((callback) => callback(new Context(file))),
         Effect.flatMap(Schema.decodeUnknown(Model.DatasetDefinition)),
         Effect.mapError((cause) => new ConfigLoaderError({ cause, message: `Failed to load config file ${file}` })),
       )
@@ -42,7 +63,7 @@ export class ConfigLoader extends Effect.Service<ConfigLoader>()("Nozzle/ConfigL
         try: () => import(file).then((module) => module.default as (context: Context) => Model.DatasetDefinition),
         catch: (cause) => cause,
       }).pipe(
-        Effect.map((callback) => callback({ file })),
+        Effect.map((callback) => callback(new Context(file))),
         Effect.flatMap(Schema.decodeUnknown(Model.DatasetDefinition)),
         Effect.mapError((cause) => new ConfigLoaderError({ cause, message: `Failed to load config file ${file}` })),
       )

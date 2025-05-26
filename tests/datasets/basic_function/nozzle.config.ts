@@ -1,6 +1,6 @@
-import { defineDataset, functionSource } from "nozzl"
+import { defineDataset } from "nozzl"
 
-export default defineDataset(() => ({
+export default defineDataset((ctx) => ({
   name: "basic_function",
   version: "0.1.0",
   dependencies: {
@@ -15,7 +15,7 @@ export default defineDataset(() => ({
     "testString": {
       inputTypes: [],
       outputType: "Utf8",
-      source: functionSource("test_string.js"),
+      source: ctx.functionSource("test_string.js"),
     },
   },
 }))
