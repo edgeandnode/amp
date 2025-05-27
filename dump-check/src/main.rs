@@ -8,7 +8,6 @@ use common::{
     BoxError,
 };
 use dataset_store::DatasetStore;
-use metadata_db::MetadataDb;
 
 /// Checks the output of `dump` against a provider.
 #[derive(Parser, Debug)]
@@ -57,7 +56,7 @@ async fn main() -> Result<(), BoxError> {
     } = args;
 
     let config = Arc::new(Config::load(config_path, true, None, Addrs::default()).await?);
-    let metadata_db: Arc<MetadataDb> = MetadataDb::connect(&config.metadata_db_url).await?.into();
+    let metadata_db = Arc::new(config.metadata_db());
     let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
 
     if end_block == 0 {

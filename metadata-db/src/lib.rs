@@ -1,6 +1,10 @@
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{Arc, LazyLock},
+    time::Duration,
+};
 
 use futures::stream::{BoxStream, Stream};
+use pgtemp::{PgTempDB, PgTempDBBuilder};
 use sqlx::{
     postgres::{PgListener, PgNotification},
     Executor, Postgres,
@@ -11,17 +15,13 @@ use tracing::instrument;
 use url::Url;
 
 mod conn;
-mod temp_metadata_db;
 pub mod workers;
 
 use self::conn::{DbConn, DbConnPool};
-pub use self::{
-    temp_metadata_db::{test_metadata_db, ALLOW_TEMP_DB, KEEP_TEMP_DIRS},
-    workers::{
-        events::{JobNotifAction, JobNotifListener, JobNotification},
-        jobs::{Job, JobId, JobStatus},
-        WorkerNodeId,
-    },
+pub use self::workers::{
+    events::{JobNotifAction, JobNotifListener, JobNotification},
+    jobs::{Job, JobId, JobStatus},
+    WorkerNodeId,
 };
 
 /// Frequency on which to send a heartbeat.
@@ -30,6 +30,15 @@ pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
 /// A worker is considered active if it has sent a heartbeat in this period. The scheduler will
 /// schedule new jobs only on active workers.
 pub const DEFAULT_DEAD_WORKER_INTERVAL: Duration = Duration::from_secs(5);
+
+pub static ALLOW_TEMP_DB: LazyLock<bool> = LazyLock::new(|| {
+    std::env::var("ALLOW_TEMP_DB")
+        .map(|v| v.to_lowercase() == "true" || v == "1")
+        .unwrap_or(true)
+});
+
+pub static KEEP_TEMP_DIRS: LazyLock<bool> =
+    LazyLock::new(|| std::env::var("KEEP_TEMP_DIRS").is_ok());
 
 /// Row ids, always non-negative.
 pub type LocationId = i64;
@@ -75,6 +84,8 @@ pub struct MetadataDb {
     pub(crate) pool: DbConnPool,
     pub(crate) url: Arc<str>,
     dead_worker_interval: Duration,
+    // Handle to keep the DB alive.
+    _temp_db: Option<Arc<PgTempDB>>,
 }
 
 /// Tables are identified by the triple: `(dataset, dataset_version, table)`. For each table, there
@@ -98,6 +109,31 @@ impl MetadataDb {
             pool,
             url: url.into(),
             dead_worker_interval: DEFAULT_DEAD_WORKER_INTERVAL,
+            _temp_db: None,
+        })
+    }
+
+    #[instrument(skip_all, err)]
+    pub async fn temporary(keep: bool) -> Result<Self, Error> {
+        // Set C locale
+        std::env::set_var("LANG", "C");
+
+        let builder = PgTempDBBuilder::new().persist_data(keep);
+        let temp_db = PgTempDB::from_builder(builder);
+        tracing::info!(
+            "initializing temp metadata db at: {}",
+            temp_db.data_dir().display()
+        );
+        let url = temp_db.connection_uri();
+        tracing::info!("connecting to metadata db at: {}", url);
+
+        let pool = DbConnPool::connect(&url).await?;
+        pool.run_migrations().await?;
+        Ok(Self {
+            pool,
+            url: url.into(),
+            dead_worker_interval: DEFAULT_DEAD_WORKER_INTERVAL,
+            _temp_db: Some(Arc::new(temp_db)),
         })
     }
 
@@ -107,6 +143,7 @@ impl MetadataDb {
             pool: self.pool,
             url: self.url,
             dead_worker_interval,
+            _temp_db: self._temp_db,
         }
     }
 
@@ -371,8 +408,8 @@ impl MetadataDb {
         id: &JobId,
     ) -> Result<Vec<(LocationId, String, Url)>, Error> {
         let query = indoc::indoc! {r#"
-            SELECT id, tbl, url 
-            FROM locations 
+            SELECT id, tbl, url
+            FROM locations
             WHERE writer = $1
         "#};
 

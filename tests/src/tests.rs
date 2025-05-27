@@ -118,7 +118,7 @@ async fn basic_function() -> Result<(), BoxError> {
 
     let config = load_test_config(None).await.unwrap();
 
-    let metadata_db = Arc::new(config.metadata_db().await?);
+    let metadata_db = Arc::new(config.metadata_db());
     let (tx, rx) = broadcast::channel(1);
     std::mem::forget(tx);
 

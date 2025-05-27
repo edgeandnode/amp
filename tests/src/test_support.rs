@@ -77,13 +77,15 @@ pub struct SnapshotContext {
 
     /// For a dataset dumped to a temporary directory. The directory is deleted on drop.
     _temp_dir: Option<TempDir>,
+    /// Keep any temporary metadata DB alive.
+    _metadata_db: MetadataDb,
 }
 
 impl SnapshotContext {
     pub async fn blessed(dataset: &str) -> Result<Self, BoxError> {
         let config = load_test_config(None).await?;
-        let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
-        let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
+        let metadata_db: MetadataDb = config.metadata_db();
+        let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone().into());
         let dataset = dataset_store.load_dataset(dataset).await?.dataset;
         let dataset_name = &dataset.name;
         let data_store = config.data_store.clone();
@@ -94,7 +96,7 @@ impl SnapshotContext {
                     table,
                     data_store.clone(),
                     dataset_name,
-                    metadata_db.clone(),
+                    metadata_db.clone().into(),
                 )
                 .await?
                 .expect(
@@ -115,6 +117,7 @@ impl SnapshotContext {
         Ok(Self {
             ctx,
             _temp_dir: None,
+            _metadata_db: metadata_db,
         })
     }
 
@@ -156,6 +159,7 @@ impl SnapshotContext {
         Ok(SnapshotContext {
             ctx,
             _temp_dir: Some(temp_dir),
+            _metadata_db: config.metadata_db(),
         })
     }
 
@@ -245,7 +249,7 @@ async fn dump(
     n_jobs: u16,
     clear: bool,
 ) -> Result<Catalog, BoxError> {
-    let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
+    let metadata_db: Arc<MetadataDb> = config.metadata_db().into();
     let dataset_store = DatasetStore::new(config.clone(), metadata_db);
     let mut datasets = Vec::new();
     // First dump dependencies, then main dataset
@@ -282,7 +286,7 @@ async fn dump(
 
 pub async fn check_blocks(dataset_name: &str, start: u64, end: u64) -> Result<(), BoxError> {
     let config = load_test_config(None).await?;
-    let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
+    let metadata_db: Arc<MetadataDb> = config.metadata_db().into();
     let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
     let env = config.make_query_env()?;
 
@@ -330,7 +334,7 @@ async fn dump_test_dataset(
     if clear {
         clear_dataset(config, dataset_name).await?;
     }
-    let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
+    let metadata_db: Arc<MetadataDb> = config.metadata_db().into();
     let data_store = config.data_store.clone();
     let dataset = {
         let dataset = dataset_store.load_dataset(dataset_name).await?.dataset;
@@ -491,7 +495,7 @@ pub async fn run_query_on_fresh_server(
 
         load_test_config(config_override).await?
     };
-    let metadata_db = config.metadata_db().await?.into();
+    let metadata_db = config.metadata_db().into();
     let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel(1);
     let (bound, server) =
         nozzle::server::run(config.clone(), metadata_db, false, false, shutdown_rx).await?;

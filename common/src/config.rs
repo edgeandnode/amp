@@ -14,7 +14,7 @@ use figment::{
 };
 use fs_err as fs;
 use js_runtime::isolate_pool::IsolatePool;
-use metadata_db::{test_metadata_db, MetadataDb, ALLOW_TEMP_DB, KEEP_TEMP_DIRS};
+use metadata_db::{MetadataDb, ALLOW_TEMP_DB, KEEP_TEMP_DIRS};
 use serde::Deserialize;
 
 use crate::{query_context::QueryEnv, BoxError, Store};
@@ -24,7 +24,7 @@ pub struct Config {
     pub data_store: Arc<Store>,
     pub providers_store: Arc<Store>,
     pub dataset_defs_store: Arc<Store>,
-    pub metadata_db_url: String,
+    pub metadata_db: MetadataDb,
     pub max_mem_mb: usize,
     pub spill_location: Vec<PathBuf>,
     /// Addresses to bind the server to. Used during testing.
@@ -80,9 +80,9 @@ impl Config {
         let providers_store = Store::new(config_file.providers_dir, base)?;
         let dataset_defs_store = Store::new(config_file.dataset_defs_dir, base)?;
 
-        let metadata_db_url = match (config_file.metadata_db_url, *ALLOW_TEMP_DB) {
-            (Some(url), _) => url,
-            (None, true) => test_metadata_db(*KEEP_TEMP_DIRS).await.url().to_string(),
+        let metadata_db = match (&config_file.metadata_db_url, *ALLOW_TEMP_DB) {
+            (Some(url), _) => MetadataDb::connect(url).await?,
+            (None, true) => MetadataDb::temporary(*KEEP_TEMP_DIRS).await?,
             (None, false) => {
                 return Err("No metadata db url provided and allow_use_temp_db is false".into())
             }
@@ -92,7 +92,7 @@ impl Config {
             data_store: Arc::new(data_store),
             providers_store: Arc::new(providers_store),
             dataset_defs_store: Arc::new(dataset_defs_store),
-            metadata_db_url,
+            metadata_db,
             max_mem_mb: config_file.max_mem_mb,
             spill_location: config_file.spill_location,
             addrs,
@@ -143,10 +143,8 @@ impl Config {
         });
     }
 
-    pub async fn metadata_db(&self) -> Result<MetadataDb, BoxError> {
-        MetadataDb::connect(&self.metadata_db_url)
-            .await
-            .map_err(Into::into)
+    pub fn metadata_db(&self) -> MetadataDb {
+        self.metadata_db.clone()
     }
 }
 
