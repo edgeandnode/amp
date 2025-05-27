@@ -216,9 +216,7 @@ mod test {
     use alloy::primitives::BlockHash;
     use rand::{rngs::StdRng, seq::SliceRandom, Rng as _, RngCore, SeedableRng};
 
-    use crate::metadata::range::TableRanges;
-
-    use super::BlockRange;
+    use super::{BlockRange, TableRanges};
 
     #[test]
     fn canonical_segments() {
