@@ -3,12 +3,11 @@ use std::sync::Arc;
 use async_udf::functions::AsyncScalarUDF;
 use datafusion::arrow::datatypes::{DataType, SchemaRef};
 use js_runtime::isolate_pool::IsolatePool;
-use serde::Serialize;
 
 use crate::{js_udf::JsUdf, BLOCK_NUM};
 
 /// Identifies a dataset and its data schema.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug)]
 pub struct Dataset {
     pub kind: String,
     pub name: String,
@@ -48,7 +47,7 @@ impl Dataset {
     }
 }
 
-#[derive(Clone, Hash, PartialEq, Eq, Debug, Serialize)]
+#[derive(Clone, Hash, PartialEq, Eq, Debug)]
 pub struct Table {
     /// Bare table name.
     pub name: String,
@@ -69,7 +68,7 @@ impl Table {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
 pub struct Function {
     pub name: String,
 
@@ -79,7 +78,7 @@ pub struct Function {
     pub source: FunctionSource,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
 pub struct FunctionSource {
     pub source: Arc<str>,
     pub filename: String,
