@@ -19,7 +19,7 @@ use serde::Deserialize;
 
 use crate::{query_context::QueryEnv, BoxError, Store};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Config {
     pub data_store: Arc<Store>,
     pub providers_store: Arc<Store>,
@@ -31,7 +31,7 @@ pub struct Config {
     pub addrs: Addrs,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Addrs {
     pub flight_addr: SocketAddr,
     pub jsonl_addr: SocketAddr,

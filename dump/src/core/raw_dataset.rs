@@ -81,31 +81,28 @@ use std::{
 };
 
 use common::{
-    multirange::MultiRange, parquet::file::properties::WriterProperties as ParquetWriterProperties,
-    query_context::QueryContext, BlockNum, BlockStreamer, BoxError,
+    multirange::MultiRange, query_context::QueryContext, BlockNum, BlockStreamer, BoxError,
 };
-use dataset_store::DatasetStore;
 use futures::{future::try_join_all, TryFutureExt as _};
 use metadata_db::MetadataDb;
 use tracing::instrument;
 
-use super::block_ranges;
-use crate::parquet_writer::RawDatasetWriter;
+use super::{block_ranges, Ctx};
+use crate::parquet_writer::{ParquetWriterProperties, RawDatasetWriter};
 
 /// Dumps a raw dataset
 #[instrument(skip_all, fields(dataset = %dataset_name), err)]
 pub async fn dump(
+    ctx: Ctx,
     n_jobs: u16,
-    ctx: Arc<QueryContext>,
+    query_ctx: Arc<QueryContext>,
     dataset_name: &str,
-    dataset_store: &DatasetStore,
     block_ranges_by_table: BTreeMap<String, MultiRange>,
     partition_size: u64,
     parquet_opts: &ParquetWriterProperties,
-    start: i64,
-    end: Option<i64>,
+    (start, end): (i64, Option<i64>),
 ) -> Result<(), BoxError> {
-    let mut client = dataset_store.load_client(dataset_name).await?;
+    let mut client = ctx.dataset_store.load_client(dataset_name).await?;
 
     let (start, end) = match (start, end) {
         (start, Some(end)) if start >= 0 && end >= 0 => (start as BlockNum, end as BlockNum),
@@ -138,8 +135,8 @@ pub async fn dump(
 
     let jobs = multiranges.into_iter().enumerate().map(|(i, multirange)| {
         Arc::new(DumpPartition {
-            dataset_ctx: ctx.clone(),
-            metadata_db: dataset_store.metadata_db.clone(),
+            query_ctx: query_ctx.clone(),
+            metadata_db: ctx.metadata_db.clone(),
             block_streamer: client.clone(),
             multirange,
             id: i as u32,
@@ -167,7 +164,7 @@ pub async fn dump(
 
 /// A partition of a raw dataset dump job
 struct DumpPartition<T: BlockStreamer> {
-    dataset_ctx: Arc<QueryContext>,
+    query_ctx: Arc<QueryContext>,
     block_streamer: T,
     multirange: MultiRange,
     id: u32,
@@ -226,7 +223,7 @@ impl<S: BlockStreamer> DumpPartition<S> {
         };
 
         let mut writer = RawDatasetWriter::new(
-            self.dataset_ctx.clone(),
+            self.query_ctx.clone(),
             self.metadata_db.clone(),
             self.parquet_opts.clone(),
             start,

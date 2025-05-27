@@ -238,7 +238,7 @@ pub async fn synced_blocks_for_plan(
 #[instrument(skip_all, err)]
 pub async fn max_end_block(
     plan: &LogicalPlan,
-    ctx: Arc<QueryContext>,
+    ctx: &Arc<QueryContext>,
 ) -> Result<Option<BlockNum>, BoxError> {
     let tables = extract_table_references_from_plan(&plan)?;
 

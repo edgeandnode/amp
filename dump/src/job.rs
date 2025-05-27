@@ -1,15 +1,14 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fmt,
     sync::Arc,
 };
 
-use common::{catalog::physical::PhysicalTable, config::Config, BoxError};
-use dataset_store::DatasetStore;
-use metadata_db::{JobId, MetadataDb};
+use common::{catalog::physical::PhysicalTable, BoxError};
+use metadata_db::JobId;
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
+pub use crate::core::Ctx as JobCtx;
 use crate::{
     core::dump_tables, default_input_batch_size_blocks, default_parquet_opts,
     default_partition_size,
@@ -24,49 +23,31 @@ use crate::{
 ///   to multiple tables.
 ///
 /// Currently, the "dump job" is what have implemented so that's what we have here.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub enum Job {
-    /// All tables must belong to the same dataset.
-    DumpTables { tables: Vec<PhysicalTable> },
-}
-
-impl fmt::Display for Job {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Job::DumpTables { tables } => {
-                write!(f, "DumpTables({})", tables.len())
-            }
-        }
-    }
-}
-
-/// The logical descriptor of an job, as stored in the `descriptor` column of the `jobs`
-/// metadata DB table.
-#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Serialize, Deserialize)]
-pub enum JobDesc {
-    DumpDataset { dataset: String },
+    DumpTables {
+        ctx: JobCtx,
+        /// All tables must belong to the same dataset.
+        tables: Vec<PhysicalTable>,
+    },
 }
 
 impl Job {
     /// Load a job from the database.
-    #[instrument(skip(config, metadata_db), err)]
-    pub async fn load(
-        job_id: &JobId,
-        config: Arc<Config>,
-        metadata_db: Arc<MetadataDb>,
-    ) -> Result<Job, BoxError> {
-        let raw_desc = metadata_db
+    #[instrument(skip(ctx), err)]
+    pub async fn load(ctx: JobCtx, job_id: &JobId) -> Result<Job, BoxError> {
+        let raw_desc = ctx
+            .metadata_db
             .job_desc(job_id)
             .await?
             .ok_or_else(|| format!("job `{}` not found", job_id))?;
         let job_desc: JobDesc = serde_json::from_str(&raw_desc)
             .map_err(|e| format!("error parsing job descriptor `{}`: {}", raw_desc, e))?;
-        let output_locations = metadata_db.output_locations(job_id).await?;
+        let output_locations = ctx.metadata_db.output_locations(job_id).await?;
 
         match job_desc {
             JobDesc::DumpDataset { dataset } => {
-                let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
-                let dataset = dataset_store.load_dataset(&dataset).await?.dataset;
+                let dataset = ctx.dataset_store.load_dataset(&dataset).await?.dataset;
 
                 // Consistency check: All tables must be present in the job's output.
                 let dataset_tables = dataset
@@ -99,39 +80,55 @@ impl Job {
                         table.clone(),
                         url,
                         id,
-                        metadata_db.clone(),
+                        ctx.metadata_db.clone(),
                     )?);
                 }
 
                 Ok(Job::DumpTables {
+                    ctx,
                     tables: physical_tables,
                 })
             }
         }
     }
 
-    pub async fn run(
-        &self,
-        config: Arc<Config>,
-        metadata_db: Arc<MetadataDb>,
-    ) -> Result<(), BoxError> {
+    pub async fn run(&self) -> Result<(), BoxError> {
         match self {
-            Job::DumpTables { tables } => {
-                let dataset_store = DatasetStore::new(config.clone(), metadata_db);
-
+            Job::DumpTables { ctx, tables } => {
                 dump_tables(
+                    ctx.clone(),
                     tables,
-                    &dataset_store.clone(),
-                    &config.clone(),
                     1,
                     default_partition_size(),
                     default_input_batch_size_blocks(),
                     &default_parquet_opts(),
-                    0,
-                    None,
+                    (0, None),
                 )
                 .await
             }
         }
     }
+}
+
+impl std::fmt::Display for Job {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Job::DumpTables { tables, .. } => {
+                write!(f, "DumpTables({})", tables.len())
+            }
+        }
+    }
+}
+
+impl std::fmt::Debug for Job {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(self, f)
+    }
+}
+
+/// The logical descriptor of an job, as stored in the `descriptor` column of the `jobs`
+/// metadata DB table.
+#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Serialize, Deserialize)]
+pub enum JobDesc {
+    DumpDataset { dataset: String },
 }

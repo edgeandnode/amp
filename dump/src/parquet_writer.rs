@@ -1,14 +1,12 @@
 use std::{collections::BTreeMap, sync::Arc};
 
+pub use common::parquet::file::properties::WriterProperties as ParquetWriterProperties;
 use common::{
     arrow::array::RecordBatch,
     catalog::physical::PhysicalTable,
     metadata::parquet::{ParquetMeta, PARQUET_METADATA_KEY},
     multirange::MultiRange,
-    parquet::{
-        arrow::AsyncArrowWriter, errors::ParquetError,
-        file::properties::WriterProperties as ParquetWriterProperties, format::KeyValue,
-    },
+    parquet::{arrow::AsyncArrowWriter, errors::ParquetError, format::KeyValue},
     BlockNum, BoxError, QueryContext, RawTableRows, Timestamp,
 };
 use metadata_db::MetadataDb;
@@ -65,11 +63,9 @@ impl RawDatasetWriter {
 
         let table_name = table_rows.table.name.as_str();
         let writer = self.writers.get_mut(table_name).unwrap();
-        let file_meta = writer.write(&table_rows).await?;
-        if let Some((parquet_meta, object_meta)) = file_meta {
+        if let Some((parquet_meta, object_meta)) = writer.write(&table_rows).await? {
             let location_id = writer.table.location_id();
-            let metadata_db = self.metadata_db.clone();
-            commit_metadata(parquet_meta, object_meta, metadata_db, location_id).await?;
+            commit_metadata(&self.metadata_db, parquet_meta, object_meta, location_id).await?;
         }
 
         Ok(())
@@ -79,12 +75,8 @@ impl RawDatasetWriter {
     pub async fn close(self) -> Result<(), BoxError> {
         for (_, writer) in self.writers {
             let location_id = writer.table.location_id();
-            let metadata_db = self.metadata_db.clone();
-
-            let file_meta = writer.close().await?;
-
-            if let Some((parquet_meta, object_meta)) = file_meta {
-                commit_metadata(parquet_meta, object_meta, metadata_db, location_id).await?
+            if let Some((parquet_meta, object_meta)) = writer.close().await? {
+                commit_metadata(&self.metadata_db, parquet_meta, object_meta, location_id).await?
             }
         }
 
@@ -93,6 +85,7 @@ impl RawDatasetWriter {
 }
 
 pub async fn commit_metadata(
+    metadata_db: &MetadataDb,
     parquet_meta: ParquetMeta,
     ObjectMeta {
         size: object_size,
@@ -100,7 +93,6 @@ pub async fn commit_metadata(
         version: object_version,
         ..
     }: ObjectMeta,
-    metadata_db: Arc<MetadataDb>,
     location_id: i64,
 ) -> Result<(), BoxError> {
     let file_name = parquet_meta.filename.clone();

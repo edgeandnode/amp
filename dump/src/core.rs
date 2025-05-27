@@ -9,29 +9,29 @@ use common::{
     config::Config,
     metadata::block_ranges_by_table,
     multirange::MultiRange,
-    parquet::file::properties::WriterProperties as ParquetWriterProperties,
     query_context::{Error as QueryError, QueryContext},
+    store::Store as DataStore,
     BoxError,
 };
 use dataset_store::{DatasetKind, DatasetStore};
-use metadata_db::LocationId;
+use metadata_db::{LocationId, MetadataDb};
 use object_store::ObjectMeta;
 
 mod block_ranges;
 mod raw_dataset;
 mod sql_dataset;
 
+use crate::parquet_writer::ParquetWriterProperties;
+
 /// Dumps a set of tables. All tables must belong to the same dataset.
 pub async fn dump_tables(
+    ctx: Ctx,
     tables: &[PhysicalTable],
-    dataset_store: &Arc<DatasetStore>,
-    config: &Config,
     n_jobs: u16,
     partition_size: u64,
     input_batch_size_blocks: u64,
     parquet_opts: &ParquetWriterProperties,
-    start: i64,
-    end_block: Option<i64>,
+    range: (i64, Option<i64>),
 ) -> Result<(), BoxError> {
     if tables.is_empty() {
         return Ok(());
@@ -49,7 +49,7 @@ pub async fn dump_tables(
     };
 
     let catalog = Catalog::new(tables.to_vec());
-    let env = config.make_query_env()?;
+    let env = ctx.config.make_query_env()?;
     let query_ctx = Arc::new(QueryContext::for_catalog(catalog, env.clone())?);
 
     // Ensure consistency before starting the dump procedure.
@@ -77,15 +77,14 @@ pub async fn dump_tables(
     match kind {
         DatasetKind::EvmRpc | DatasetKind::Firehose | DatasetKind::Substreams => {
             raw_dataset::dump(
+                ctx,
                 n_jobs,
                 query_ctx,
                 &dataset.name,
-                dataset_store,
                 block_ranges_by_table,
                 partition_size,
                 parquet_opts,
-                start,
-                end_block,
+                range,
             )
             .await?;
         }
@@ -95,22 +94,24 @@ pub async fn dump_tables(
             }
 
             let dataset = match kind {
-                DatasetKind::Sql => dataset_store.load_sql_dataset(&dataset.name).await?,
-                DatasetKind::Manifest => dataset_store.load_manifest_dataset(&dataset.name).await?,
+                DatasetKind::Sql => ctx.dataset_store.load_sql_dataset(&dataset.name).await?,
+                DatasetKind::Manifest => {
+                    ctx.dataset_store
+                        .load_manifest_dataset(&dataset.name)
+                        .await?
+                }
                 _ => unreachable!(),
             };
 
             sql_dataset::dump(
+                ctx,
                 query_ctx,
                 dataset,
-                config.data_store.clone(),
-                dataset_store,
                 &env,
                 block_ranges_by_table,
                 parquet_opts,
-                start,
-                end_block,
                 input_batch_size_blocks,
+                range,
             )
             .await?;
         }
@@ -119,6 +120,15 @@ pub async fn dump_tables(
     tracing::info!("dump of dataset {} completed successfully", dataset.name);
 
     Ok(())
+}
+
+/// Dataset dump context
+#[derive(Clone)]
+pub struct Ctx {
+    pub config: Arc<Config>,
+    pub metadata_db: Arc<MetadataDb>,
+    pub dataset_store: Arc<DatasetStore>,
+    pub data_store: Arc<DataStore>,
 }
 
 /// This will check and fix consistency issues when possible. When fixing is not possible, it will

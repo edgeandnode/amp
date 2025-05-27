@@ -274,7 +274,7 @@ impl Service {
             let mut notifications = futures::stream::select_all(notifications);
 
             while let Some(Ok(_)) = notifications.next().await {
-                let end = dataset_store::sql_datasets::max_end_block(&plan, ctx.clone())
+                let end = dataset_store::sql_datasets::max_end_block(&plan, &ctx)
                     .await
                     .unwrap();
 

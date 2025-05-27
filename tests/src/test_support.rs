@@ -26,7 +26,7 @@ use common::{
     BoxError, QueryContext,
 };
 use dataset_store::DatasetStore;
-use dump::{dump_tables, parquet_opts};
+use dump::{dump_tables, parquet_opts, Ctx as DumpCtx};
 use figment::providers::Format as _;
 use fs_err as fs;
 use futures::{stream::TryStreamExt, StreamExt as _};
@@ -251,7 +251,7 @@ async fn dump(
         tables.push(
             dump_test_dataset(
                 dataset_name,
-                &*config,
+                &config,
                 &dataset_store,
                 start,
                 end,
@@ -265,7 +265,7 @@ async fn dump(
     tables.push(
         dump_test_dataset(
             dataset_name,
-            &*config,
+            &config,
             &dataset_store,
             start,
             end,
@@ -315,7 +315,7 @@ async fn clear_dataset(config: &Config, dataset_name: &str) -> Result<(), BoxErr
 #[instrument(skip_all)]
 async fn dump_test_dataset(
     dataset_name: &str,
-    config: &Config,
+    config: &Arc<Config>,
     dataset_store: &Arc<DatasetStore>,
     start: u64,
     end: u64,
@@ -332,6 +332,7 @@ async fn dump_test_dataset(
     if clear {
         clear_dataset(config, dataset_name).await?;
     }
+
     let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
     let data_store = config.data_store.clone();
     let tables = {
@@ -355,15 +356,18 @@ async fn dump_test_dataset(
     };
 
     dump_tables(
+        DumpCtx {
+            config: config.clone(),
+            metadata_db: metadata_db.clone(),
+            dataset_store: dataset_store.clone(),
+            data_store: data_store.clone(),
+        },
         &tables,
-        dataset_store,
-        config,
         n_jobs,
         partition_size,
         input_batch_block_size,
         &parquet_opts,
-        start as i64,
-        Some(end as i64),
+        (start as i64, Some(end as i64)),
     )
     .await?;
 
