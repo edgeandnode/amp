@@ -4,14 +4,16 @@ use std::{
 };
 
 use common::{
-    metadata::ranges_for_table, multirange::MultiRange, query_context::parse_sql, BlockNum,
-    BoxError, Dataset, QueryContext, Table, BLOCK_NUM,
+    metadata::ranges_for_table,
+    multirange::MultiRange,
+    query_context::{parse_sql, QueryEnv},
+    BlockNum, BoxError, Dataset, QueryContext, Table, BLOCK_NUM,
 };
 use datafusion::{
     common::tree_node::{Transformed, TreeNode, TreeNodeRecursion},
     datasource::TableType,
     error::DataFusionError,
-    execution::{runtime_env::RuntimeEnv, SendableRecordBatchStream},
+    execution::SendableRecordBatchStream,
     logical_expr::{col, lit, Filter, LogicalPlan, Sort, TableScan},
     sql::{parser, TableReference},
 };
@@ -98,6 +100,7 @@ pub(super) async fn dataset(
             kind: def.kind,
             name: def.name,
             tables,
+            functions: vec![],
         },
         queries,
     })
@@ -165,7 +168,7 @@ pub async fn execute_plan_for_range(
 pub async fn execute_query_for_range(
     query: parser::Statement,
     dataset_store: Arc<DatasetStore>,
-    env: Arc<RuntimeEnv>,
+    env: QueryEnv,
     start: BlockNum,
     end: BlockNum,
 ) -> Result<SendableRecordBatchStream, BoxError> {

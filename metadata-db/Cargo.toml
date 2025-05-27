@@ -13,7 +13,7 @@ serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 futures.workspace = true
 tokio.workspace = true
-indoc = "2.0.6"
+indoc.workspace = true
 
 [dev-dependencies]
 pgtemp = "0.6.0"

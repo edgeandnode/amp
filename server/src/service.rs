@@ -18,15 +18,12 @@ use common::{
     arrow::{self, ipc::writer::IpcDataGenerator},
     catalog::{collect_scanned_tables, physical::Catalog},
     config::Config,
-    query_context::{parse_sql, Error as CoreError, QueryContext},
+    query_context::{parse_sql, Error as CoreError, QueryContext, QueryEnv},
     BlockNum,
 };
 use datafusion::{
-    arrow::array::RecordBatch,
-    common::DFSchema,
-    error::DataFusionError,
-    execution::{runtime_env::RuntimeEnv, SendableRecordBatchStream},
-    logical_expr::LogicalPlan,
+    arrow::array::RecordBatch, common::DFSchema, error::DataFusionError,
+    execution::SendableRecordBatchStream, logical_expr::LogicalPlan,
 };
 use dataset_store::{sql_datasets::is_incremental, DatasetError, DatasetStore};
 use futures::{channel::mpsc, SinkExt, Stream, StreamExt as _, TryStreamExt};
@@ -143,14 +140,14 @@ impl From<Error> for Status {
 
 #[derive(Clone)]
 pub struct Service {
-    env: Arc<RuntimeEnv>,
+    env: QueryEnv,
     dataset_store: Arc<DatasetStore>,
     initial_catalog: Catalog,
 }
 
 impl Service {
     pub async fn new(config: Arc<Config>, metadata_db: Arc<MetadataDb>) -> Result<Self, Error> {
-        let env = Arc::new(config.make_runtime_env().map_err(Error::ExecutionError)?);
+        let env = config.make_query_env().map_err(Error::ExecutionError)?;
         let dataset_store = DatasetStore::new(config.clone(), metadata_db);
         let initial_catalog = dataset_store.initial_catalog().await?;
         Ok(Self {
@@ -481,10 +478,13 @@ impl Service {
 
         // The deserialized plan references empty tables, so we need to load the actual tables from the catalog.
         let table_refs = collect_scanned_tables(&plan);
+
+        // TODO: Properly decode and then collect function names, using a trick similar to `EmptyTableCodec`.
+        let function_names = vec![];
         let catalog = self
             .dataset_store
             .clone()
-            .load_catalog_for_table_refs(table_refs.iter())
+            .load_catalog_for_table_refs(table_refs.iter(), function_names, &self.env)
             .await?;
         let query_ctx = QueryContext::for_catalog(catalog, self.env.clone())?;
         let plan = query_ctx.prepare_remote_plan(plan).await?;

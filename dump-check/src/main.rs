@@ -74,7 +74,7 @@ async fn main() -> Result<(), BoxError> {
     let total_blocks = end_block - start + 1;
     let ui_handle = tokio::spawn(ui::ui(total_blocks));
 
-    let env = Arc::new((config.make_runtime_env())?);
+    let env = config.make_query_env()?;
 
     dump_check::dump_check(
         &dataset_name,

@@ -50,6 +50,7 @@ pub fn dataset(dataset_cfg: toml::Value) -> Result<DatasetWithProvider, Error> {
             kind: def.kind,
             name: def.name,
             tables: tables::all(&def.network),
+            functions: vec![],
         },
         provider: Some(def.provider),
     })

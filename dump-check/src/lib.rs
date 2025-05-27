@@ -5,9 +5,9 @@ use std::sync::Arc;
 
 use common::{
     catalog::physical::{Catalog, PhysicalDataset, PhysicalTable},
+    query_context::QueryEnv,
     BoxError, QueryContext,
 };
-use datafusion::execution::runtime_env::RuntimeEnv;
 use dataset_store::DatasetStore;
 use futures::future::try_join_all;
 use job::Job;
@@ -17,7 +17,7 @@ pub async fn dump_check(
     dataset_name: &str,
     dataset_store: &Arc<DatasetStore>,
     metadata_db: Arc<MetadataDb>,
-    env: &Arc<RuntimeEnv>,
+    env: &QueryEnv,
     batch_size: u64,
     n_jobs: u8,
     start: u64,

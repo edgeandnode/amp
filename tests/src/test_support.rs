@@ -1,4 +1,11 @@
-use std::{io::ErrorKind, sync::Arc, time::Duration};
+use std::{
+    io::ErrorKind,
+    path::PathBuf,
+    process::{ExitStatus, Stdio},
+    str::FromStr as _,
+    sync::Arc,
+    time::Duration,
+};
 
 use arrow_flight::{
     flight_service_client::FlightServiceClient, sql::client::FlightSqlServiceClient,
@@ -24,12 +31,13 @@ use figment::providers::Format as _;
 use fs_err as fs;
 use futures::{stream::TryStreamExt, StreamExt as _};
 use metadata_db::{MetadataDb, KEEP_TEMP_DIRS};
+use nozzle::server::BoundAddrs;
 use object_store::path::Path;
 use pretty_assertions::assert_str_eq;
 use serde::{Deserialize, Deserializer};
 use tempfile::TempDir;
 use tokio::time;
-use tracing::{info, instrument};
+use tracing::{debug, info, instrument};
 
 /// Assume the `cargo test` command is run either from the workspace root or from the crate root.
 const TEST_CONFIG_BASE_DIRS: [&str; 2] = ["tests/config", "config"];
@@ -103,8 +111,7 @@ impl SnapshotContext {
         }
         let dataset: PhysicalDataset = PhysicalDataset::new(dataset, tables);
         let catalog = Catalog::new(vec![dataset]);
-        let ctx: QueryContext =
-            QueryContext::for_catalog(catalog, Arc::new(config.make_runtime_env()?))?;
+        let ctx: QueryContext = QueryContext::for_catalog(catalog, config.make_query_env()?)?;
         Ok(Self {
             ctx,
             _temp_dir: None,
@@ -144,7 +151,7 @@ impl SnapshotContext {
             true,
         )
         .await?;
-        let ctx = QueryContext::for_catalog(catalog, Arc::new(config.make_runtime_env()?))?;
+        let ctx = QueryContext::for_catalog(catalog, config.make_query_env()?)?;
 
         Ok(SnapshotContext {
             ctx,
@@ -277,7 +284,7 @@ pub async fn check_blocks(dataset_name: &str, start: u64, end: u64) -> Result<()
     let config = load_test_config(None).await?;
     let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
     let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
-    let env = Arc::new(config.make_runtime_env()?);
+    let env = config.make_query_env()?;
 
     dump_check::dump_check(
         dataset_name,
@@ -432,7 +439,7 @@ fn convert_binary_to_hex_strings(mut record_batch: RecordBatch) -> RecordBatch {
     RecordBatch::try_new(schema, new_columns).unwrap()
 }
 
-fn record_batch_to_json(record_batch: RecordBatch) -> String {
+pub fn record_batch_to_json(record_batch: RecordBatch) -> String {
     // JSON does not support binary data, so encode any binary fields as hex strings.
     let record_batch = convert_binary_to_hex_strings(record_batch);
 
@@ -610,36 +617,135 @@ pub enum SqlTestResult {
     Failure { failure: String },
 }
 
-pub fn assert_sql_test_result(test: &SqlTest, results: Result<serde_json::Value, String>) -> () {
-    match &test.result {
-        SqlTestResult::Success {
-            results: expected_results,
-        } => {
-            let expected_results: serde_json::Value = serde_json::from_str(&expected_results)
-                .map_err(|e| {
-                    format!(
-                        "Failed to parse expected results for test \"{}\": {e:?}",
-                        test.name,
-                    )
-                })
-                .unwrap();
-            let results = results.unwrap();
-            assert_str_eq!(
+impl SqlTest {
+    pub fn assert_result_eq(self, results: Result<serde_json::Value, String>) {
+        match self.result {
+            SqlTestResult::Success {
+                results: expected_results,
+            } => {
+                let expected_results: serde_json::Value = serde_json::from_str(&expected_results)
+                    .map_err(|e| {
+                        format!(
+                            "Failed to parse expected results for test \"{}\": {e:?}",
+                            self.name,
+                        )
+                    })
+                    .unwrap();
+                let results = results.unwrap();
+                assert_str_eq!(
                     results.to_string(),
                     expected_results.to_string(),
                     "SQL test \"{}\" failed: SQL query \"{}\" did not return the expected results, see sql-tests.yaml",
-                    test.name, test.query,
-                );
-        }
-        SqlTestResult::Failure { failure } => {
-            let failure = failure.trim();
-            let results = results.unwrap_err();
-            if !results.to_string().contains(&failure) {
-                panic!(
-                    "SQL test \"{}\" failed: SQL query \"{}\" did not return the expected error, got \"{}\", expected \"{}\"",
-                    test.name, test.query, results, failure,
+                    self.name, self.query,
                 );
             }
+            SqlTestResult::Failure { failure } => {
+                let failure = failure.trim();
+                let results = results.unwrap_err();
+                if !results.to_string().contains(&failure) {
+                    panic!(
+                        "SQL test \"{}\" failed: SQL query \"{}\" did not return the expected error, got \"{}\", expected \"{}\"",
+                        self.name, self.query, results, failure,
+                    );
+                }
+            }
         }
+    }
+}
+
+pub struct DatasetPackage {
+    pub name: String,
+
+    // Relative to crate root
+    pub path: PathBuf,
+}
+
+impl DatasetPackage {
+    pub fn new(name: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            path: PathBuf::from_str(&format!("datasets/{}", name)).unwrap(),
+        }
+    }
+
+    #[instrument(skip_all, err)]
+    pub async fn pnpm_install(&self) -> Result<(), BoxError> {
+        let install_path = self.path.parent().unwrap();
+        debug!(
+            "Running pnpm install on `{}`",
+            install_path.to_string_lossy()
+        );
+
+        let status = tokio::process::Command::new("pnpm")
+            .args(&["install"])
+            .current_dir(install_path)
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .status()
+            .await?;
+
+        if status != ExitStatus::default() {
+            return Err(BoxError::from(format!(
+                "Failed to install dataset {}: pnpm install failed with exit code {status}",
+                self.name,
+            )));
+        }
+
+        Ok(())
+    }
+
+    pub async fn build(&self, bound_addrs: BoundAddrs) -> Result<(), BoxError> {
+        let status = tokio::process::Command::new("pnpm")
+            .args(&["nozzl", "build"])
+            .env(
+                "NOZZLE_REGISTRY_URL",
+                &format!("http://{}", bound_addrs.registry_service_addr),
+            )
+            .env(
+                "NOZZLE_ADMIN_URL",
+                &format!("http://{}", bound_addrs.admin_api_addr),
+            )
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .current_dir(&self.path)
+            .status()
+            .await?;
+
+        if status != ExitStatus::default() {
+            return Err(BoxError::from(format!(
+                "Failed to build dataset {}: pnpm build failed with exit code {status}",
+                self.name,
+            )));
+        }
+
+        Ok(())
+    }
+
+    #[instrument(skip_all, err)]
+    pub async fn deploy(&self, bound_addrs: BoundAddrs) -> Result<(), BoxError> {
+        let status = tokio::process::Command::new("pnpm")
+            .args(&["nozzl", "deploy"])
+            .env(
+                "NOZZLE_REGISTRY_URL",
+                &format!("http://{}", bound_addrs.registry_service_addr),
+            )
+            .env(
+                "NOZZLE_ADMIN_URL",
+                &format!("http://{}", bound_addrs.admin_api_addr),
+            )
+            .current_dir(&self.path)
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .status()
+            .await?;
+
+        if status != ExitStatus::default() {
+            return Err(BoxError::from(format!(
+                "Failed to deploy dataset {}: pnpm deploy failed with exit code {status}",
+                self.name,
+            )));
+        }
+
+        Ok(())
     }
 }

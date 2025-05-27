@@ -1,9 +1,15 @@
-use common::tracing_helpers;
-use metadata_db::KEEP_TEMP_DIRS;
+use std::{str::FromStr as _, sync::Arc};
+
+use common::{query_context::parse_sql, tracing_helpers, BoxError};
+use dataset_store::DatasetStore;
+use dump::worker::Worker;
+use futures::StreamExt;
+use metadata_db::{workers::WorkerNodeId, KEEP_TEMP_DIRS};
+use tokio::sync::broadcast;
 
 use crate::test_support::{
-    assert_sql_test_result, check_blocks, check_provider_file, load_sql_tests,
-    run_query_on_fresh_server, SnapshotContext,
+    check_blocks, check_provider_file, load_sql_tests, load_test_config, record_batch_to_json,
+    run_query_on_fresh_server, DatasetPackage, SnapshotContext,
 };
 
 #[tokio::test]
@@ -86,7 +92,7 @@ async fn sql_tests() {
         let results = run_query_on_fresh_server(&test.query, vec![], vec![], None)
             .await
             .map_err(|e| format!("{e:?}"));
-        assert_sql_test_result(&test, results);
+        test.assert_result_eq(results);
     }
 }
 
@@ -102,6 +108,59 @@ async fn streaming_tests() {
         .await
         .map_err(|e| format!("{e:?}"));
 
-        assert_sql_test_result(&test, results);
+        test.assert_result_eq(results);
     }
+}
+
+#[tokio::test]
+async fn basic_function() -> Result<(), BoxError> {
+    tracing_helpers::register_logger();
+
+    let config = load_test_config(None).await.unwrap();
+
+    let metadata_db = Arc::new(config.metadata_db().await?);
+    let (tx, rx) = broadcast::channel(1);
+    std::mem::forget(tx);
+
+    let (bound_addrs, server) =
+        nozzle::server::run(config.clone(), metadata_db.clone(), false, false, rx).await?;
+    tokio::spawn(server);
+
+    let worker = Worker::new(
+        config.clone(),
+        metadata_db.clone(),
+        WorkerNodeId::from_str("basic_function").unwrap(),
+    );
+    tokio::spawn(worker.run());
+
+    // Run `pnpm build` on the dataset.
+    let dataset = DatasetPackage::new("basic_function");
+    dataset.pnpm_install().await?;
+    dataset.deploy(bound_addrs).await?;
+
+    let dataset_store = DatasetStore::new(config.clone(), metadata_db);
+    let env = config.make_query_env()?;
+    let ctx = dataset_store
+        .ctx_for_sql(&parse_sql("SELECT basic_function.testString()")?, env)
+        .await?;
+    let result = ctx
+        .execute_sql("SELECT basic_function.testString()")
+        .await?
+        .next()
+        .await
+        .unwrap()?;
+    assert_eq!(
+        record_batch_to_json(result),
+        "[{\"basic_function.testString()\":\"I'm a function\"}]"
+    );
+
+    // TOOD: Fix function calls on flight server.
+    // for test in load_sql_tests("basic-function.yaml").unwrap() {
+    //     let results = run_query_on_fresh_server(&test.query, vec![], vec![], None)
+    //         .await
+    //         .map_err(|e| format!("{e:?}"));
+    //     test.assert_result_eq(results);
+    // }
+
+    Ok(())
 }
