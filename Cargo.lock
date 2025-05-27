@@ -1826,6 +1826,7 @@ dependencies = [
  "figment",
  "fs-err",
  "futures",
+ "indoc",
  "itertools 0.14.0",
  "js-runtime",
  "metadata-db",

@@ -117,16 +117,16 @@ fn columnar_to_scalar(
 async fn js_udf_smoke_test() {
     use datafusion::arrow::datatypes::{DataType, Field, Schema};
 
-    pub const TEST_JS: &str = r#"
-function int_in_int_out(i32) {
-	if (i32 != 42) {
-		throw new Error(
-			`assert_eq failed:\n  actual:   ${format(actual)}\n  expected: ${format(expected)}`,
-		);
-	}
-    return 43;
-}
-"#;
+    pub const TEST_JS: &str = indoc::indoc! { r#"
+        function int_in_int_out(i32) {
+            if (i32 != 42) {
+                throw new Error(
+                    `assert_eq failed:\n  actual:   ${format(actual)}\n  expected: ${format(expected)}`,
+                );
+            }
+            return 43;
+        }
+"#};
 
     let isolate_pool = IsolatePool::new();
     let udf = JsUdf::new(

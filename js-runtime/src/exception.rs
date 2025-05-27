@@ -1,3 +1,4 @@
+use std::fmt;
 use thiserror::Error;
 
 // If this function is called but no exception has been caught by `s`, it will panic.
@@ -84,8 +85,6 @@ pub fn exception_position<'s>(
         source_line,
     }
 }
-
-use std::fmt;
 
 impl fmt::Display for ExceptionPosition {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
