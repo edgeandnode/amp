@@ -1,4 +1,5 @@
 use std::fmt;
+
 use thiserror::Error;
 
 // If this function is called but no exception has been caught by `s`, it will panic.
