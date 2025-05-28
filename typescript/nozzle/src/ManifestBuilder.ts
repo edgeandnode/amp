@@ -20,11 +20,22 @@ export class ManifestBuilder extends Effect.Service<ManifestBuilder>()("Nozzle/M
                 new ManifestBuilderError({ cause, message: "Failed to get schema", table: name }),
             }))
 
+            if (schema.networks.length != 1) {
+              yield* Effect.fail(
+                new ManifestBuilderError({
+                  cause: undefined,
+                  message: `Expected 1 network for SQL query, got ${schema.networks}`,
+                  table: name,
+                }),
+              )
+            }
+            const network = schema.networks[0]
+
             const input = new Model.TableInput({ sql: table.sql })
             const output = new Model.Table({
               input,
               schema: schema.schema,
-              network: table.network,
+              network,
             })
 
             return [name, output] as const

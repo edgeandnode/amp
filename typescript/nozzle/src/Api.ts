@@ -17,7 +17,7 @@ export class RegistryErrorResponse extends Schema.Class<RegistryErrorResponse>("
 export class RegstistryApiGroup extends HttpApiGroup.make("registry", { topLevel: true }).add(
   HttpApiEndpoint.post("schema")`/output_schema`
     .setPayload(Schema.Struct({ sql_query: Schema.String }))
-    .addSuccess(Schema.Struct({ schema: Model.TableSchema }))
+    .addSuccess(Schema.Struct({ schema: Model.TableSchema, networks: Schema.Array(Schema.String) }))
     .addError(RegistryErrorResponse, { status: 400 }) // SQL_PARSE_ERROR
     .addError(RegistryErrorResponse, { status: 500 }), // DATASET_STORE_ERROR & PLANNING_ERROR
 ) {}

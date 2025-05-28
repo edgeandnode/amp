@@ -23,13 +23,11 @@ export default defineDataset(() => ({
   },
   tables: {
     counts: {
-      network: "mainnet",
       sql: `
         SELECT c.address, c.block_num, c.timestamp, c.event['count'] as count
         FROM (${count}) as c`,
     },
     transfers: {
-      network: "mainnet",
       sql: `
         SELECT t.block_num, t.timestamp, t.event['from'] as from, t.event['to'] as to, t.event['value'] as value
         FROM (${transfer}) as t

@@ -7,7 +7,6 @@ export class Dependency extends Schema.Class<Dependency>("Dependency")({
 }) {}
 
 export class TableDefinition extends Schema.Class<TableDefinition>("TableDefinition")({
-  network: Schema.String,
   sql: Schema.String,
 }) {}
 
