@@ -24,6 +24,7 @@ export class ManifestBuilder extends Effect.Service<ManifestBuilder>()("Nozzle/M
             const output = new Model.Table({
               input,
               schema: schema.schema,
+              network: table.network,
             })
 
             return [name, output] as const
