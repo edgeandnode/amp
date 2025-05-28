@@ -4,7 +4,6 @@ use axum::{extract::State, http::StatusCode, Json};
 use common::{
     manifest::TableSchema,
     query_context::{parse_sql, Error as QueryContextError},
-    Dataset,
 };
 use http_common::{BoxRequestError, RequestError};
 use serde::{Deserialize, Serialize};
@@ -70,26 +69,4 @@ pub async fn output_schema_handler(
     Ok(Json(OutputSchemaResponse {
         schema: schema.into(),
     }))
-}
-
-#[derive(Debug, Serialize)]
-pub struct DatasetsResponse {
-    datasets: Vec<Dataset>,
-}
-
-/// Handler for the /datasets endpoint
-#[instrument(skip_all, err)]
-pub async fn datasets_handler(
-    State(state): State<Arc<ServiceState>>,
-) -> Result<Json<DatasetsResponse>, BoxRequestError> {
-    let datasets = state
-        .dataset_store
-        .all_datasets()
-        .await
-        .map_err(Error::DatasetStoreError)?
-        .into_iter()
-        .map(|d| d.dataset)
-        .collect();
-
-    Ok(Json(DatasetsResponse { datasets }))
 }
