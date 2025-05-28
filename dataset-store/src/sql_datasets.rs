@@ -111,7 +111,12 @@ async fn get_ranges_for_table(
     ctx: &QueryContext,
 ) -> Result<MultiRange, BoxError> {
     let Some(table) = ctx.get_table(table) else {
-        return Err(format!("table {}.{} not found", table.schema().unwrap(), table.table()).into());
+        return Err(format!(
+            "table {}.{} not found",
+            table.schema().unwrap(),
+            table.table()
+        )
+        .into());
     };
     let ranges = table.ranges().await?;
     let ranges = MultiRange::from_ranges(ranges)?;
@@ -211,7 +216,7 @@ fn extract_table_references_from_plan(plan: &LogicalPlan) -> Result<Vec<TableRef
 #[instrument(skip_all, err)]
 pub async fn synced_blocks_for_plan(
     plan: &LogicalPlan,
-    ctx: &QueryContext
+    ctx: &QueryContext,
 ) -> Result<MultiRange, BoxError> {
     let tables = extract_table_references_from_plan(&plan)?;
 

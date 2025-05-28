@@ -17,7 +17,10 @@ use uuid::Uuid;
 
 use super::logical::Table;
 use crate::{
-    metadata::{parquet::{ParquetMeta, PARQUET_METADATA_KEY}, FileMetadata},
+    metadata::{
+        parquet::{ParquetMeta, PARQUET_METADATA_KEY},
+        FileMetadata,
+    },
     store::{infer_object_store, Store},
     BoxError, Dataset,
 };
@@ -296,7 +299,14 @@ impl PhysicalTable {
             let object_e_tag = object_meta.e_tag;
             let object_version = object_meta.version;
             metadata_db
-                .insert_metadata(location_id, file_name, object_size, object_e_tag, object_version, parquet_meta_json)
+                .insert_metadata(
+                    location_id,
+                    file_name,
+                    object_size,
+                    object_e_tag,
+                    object_version,
+                    parquet_meta_json,
+                )
                 .await?;
         }
 

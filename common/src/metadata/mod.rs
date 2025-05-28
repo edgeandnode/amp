@@ -64,7 +64,15 @@ pub async fn ranges_for_table(
     metadata_db
         .stream_file_metadata(location_id)
         .map(|res| {
-            let FileMetadata { parquet_meta: parquet::ParquetMeta { range_start, range_end, .. }, .. } = res?.try_into()?;
+            let FileMetadata {
+                parquet_meta:
+                    parquet::ParquetMeta {
+                        range_start,
+                        range_end,
+                        ..
+                    },
+                ..
+            } = res?.try_into()?;
             Ok((range_start, range_end))
         })
         .try_collect::<Vec<_>>()
@@ -91,7 +99,6 @@ pub async fn filenames_for_table(
 ) -> Result<Vec<String>, BoxError> {
     let file_names = metadata_db
         .stream_file_metadata(location_id)
-
         .map(|res| {
             let FileMetadata { file_name, .. } = res?.try_into()?;
             Ok::<_, BoxError>(file_name)

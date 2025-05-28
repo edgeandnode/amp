@@ -477,9 +477,7 @@ pub async fn run_query_on_fresh_server(
     } else {
         use figment::providers::Json;
 
-        let temp_dir = tempfile::Builder::new()
-            .keep(*KEEP_TEMP_DIRS)
-            .tempdir()?;
+        let temp_dir = tempfile::Builder::new().keep(*KEEP_TEMP_DIRS).tempdir()?;
         let path = temp_dir.path();
 
         let config_override = Some(Json::string(&format!(
