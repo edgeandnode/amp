@@ -84,7 +84,7 @@ pub(super) async fn dataset(
                 )
                 .into());
             }
-            networks.pop_first().flatten().map(|n| n.to_string())
+            networks.pop_first().unwrap()
         };
         let table = Table {
             name: table_name.to_string(),

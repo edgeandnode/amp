@@ -52,7 +52,7 @@ pub struct Table {
     /// Bare table name.
     pub name: String,
     pub schema: SchemaRef,
-    pub network: Option<String>,
+    pub network: String,
 }
 
 impl Table {
