@@ -30,7 +30,9 @@ semver.workspace = true
 async-udf = { path = "../async-udf" }
 async-trait.workspace = true
 bincode.workspace = true
+js-runtime = { path = "../js-runtime" }
+indoc.workspace = true
 
 [dev-dependencies]
 rand = "0.9.0"
-cargo_metadata = "0.18.1"
+cargo_metadata = "0.19.0"

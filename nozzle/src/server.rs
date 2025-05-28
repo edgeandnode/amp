@@ -16,6 +16,7 @@ use server::service::Service;
 use tokio::sync::broadcast;
 use tonic::transport::{server::TcpIncoming, Server};
 
+#[derive(Debug, Clone, Copy)]
 pub struct BoundAddrs {
     pub flight_addr: SocketAddr,
     pub jsonl_addr: SocketAddr,
@@ -42,7 +43,11 @@ pub async fn run(
     );
 
     if dev {
-        let worker = Worker::new(config.clone(), metadata_db.clone(), "worker".into());
+        let worker = Worker::new(
+            config.clone(),
+            metadata_db.clone(),
+            "worker".parse().expect("Invalid worker ID"),
+        );
         tokio::spawn(async move {
             if let Err(err) = worker.run().await {
                 tracing::error!("{err}");

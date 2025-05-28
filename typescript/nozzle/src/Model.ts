@@ -42,6 +42,17 @@ export const DatasetReadme = Schema.String.pipe(
   }),
 )
 
+export class FunctionSource extends Schema.Class<FunctionSource>("FunctionSource")({
+  source: Schema.String,
+  filename: Schema.String,
+}) {}
+
+export class FunctionDefinition extends Schema.Class<FunctionDefinition>("FunctionDefinition")({
+  source: FunctionSource,
+  inputTypes: Schema.Array(Schema.String),
+  outputType: Schema.String,
+}) {}
+
 export class DatasetDefinition extends Schema.Class<DatasetDefinition>("DatasetDefinition")({
   name: DatasetName,
   version: DatasetVersion,
@@ -50,20 +61,26 @@ export class DatasetDefinition extends Schema.Class<DatasetDefinition>("DatasetD
   dependencies: Schema.Record({
     key: Schema.String,
     value: Dependency,
-  }).pipe(Schema.optional),
+  }),
   tables: Schema.Record({
     key: Schema.String,
     value: TableDefinition,
-  }),
+  }).pipe(Schema.optionalWith({ default: () => ({}) })),
+  functions: Schema.Record({
+    key: Schema.String,
+    value: FunctionDefinition,
+  }).pipe(Schema.optionalWith({ default: () => ({}) })),
+}) {}
+
+export class ArrowField extends Schema.Class<ArrowField>("ArrowField")({
+  name: Schema.String,
+  type: Schema.Any,
+  nullable: Schema.Boolean,
 }) {}
 
 export class ArrowSchema extends Schema.Class<ArrowSchema>("ArrowSchema")({
   fields: Schema.Array(
-    Schema.Struct({
-      name: Schema.String,
-      type: Schema.Any,
-      nullable: Schema.Boolean,
-    }),
+    ArrowField,
   ),
 }) {}
 
@@ -80,6 +97,13 @@ export class Table extends Schema.Class<Table>("Table")({
   schema: TableSchema,
 }) {}
 
+export class FunctionManifest extends Schema.Class<FunctionManifest>("FunctionManifest")({
+  name: Schema.String,
+  source: FunctionSource,
+  inputTypes: Schema.Array(Schema.String),
+  outputType: Schema.String,
+}) {}
+
 export class DatasetManifest extends Schema.Class<DatasetManifest>("DatasetManifest")({
   kind: Schema.Literal("manifest"),
   name: DatasetName,
@@ -87,9 +111,13 @@ export class DatasetManifest extends Schema.Class<DatasetManifest>("DatasetManif
   dependencies: Schema.Record({
     key: Schema.String,
     value: Dependency,
-  }).pipe(Schema.optional),
+  }),
   tables: Schema.Record({
     key: Schema.String,
     value: Table,
-  }),
+  }).pipe(Schema.optionalWith({ default: () => ({}) })),
+  functions: Schema.Record({
+    key: Schema.String,
+    value: FunctionManifest,
+  }).pipe(Schema.optionalWith({ default: () => ({}) })),
 }) {}

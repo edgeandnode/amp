@@ -1,12 +1,11 @@
 use std::time::Duration;
 
 use common::{
-    arrow::error::ArrowError,
     evm::tables::{
         blocks::{Block, BlockRowsBuilder},
         logs::{Log, LogRowsBuilder},
     },
-    BoxError, Bytes32, DatasetRows, EvmCurrency, Timestamp,
+    BoxError, Bytes32, EvmCurrency, RawDatasetRows, RawTableBlock, Timestamp,
 };
 use thiserror::Error;
 
@@ -27,13 +26,13 @@ pub enum ProtobufToRowError {
     #[error("assertion failure: {0}")]
     AssertFail(BoxError),
     #[error("error serializing to arrow: {0}")]
-    ArrowError(#[from] ArrowError),
+    ArrowError(BoxError),
 }
 
 pub fn protobufs_to_rows(
     block: pbethereum::Block,
     network: &str,
-) -> Result<DatasetRows, ProtobufToRowError> {
+) -> Result<RawDatasetRows, ProtobufToRowError> {
     use ProtobufToRowError::*;
 
     let transaction_count = block.transaction_traces.len();
@@ -196,18 +195,28 @@ pub fn protobufs_to_rows(
         }
     }
 
+    let block = RawTableBlock {
+        number: header.block_num,
+        network: network.to_string(),
+    };
     let header_row = {
         let mut builder = BlockRowsBuilder::with_capacity(1);
         builder.append(&header);
-        builder.build(network.to_string()).map_err(|e| dbg!(e))?
+        builder
+            .build(block.clone())
+            .map_err(|e| ArrowError(dbg!(e).into()))?
     };
     let transactions_rows = transactions
-        .build(network.to_string())
-        .map_err(|e| dbg!(e))?;
-    let calls_rows = calls.build(network.to_string()).map_err(|e| dbg!(e))?;
-    let logs_rows = logs.build(network.to_string()).map_err(|e| dbg!(e))?;
+        .build(block.clone())
+        .map_err(|e| ArrowError(dbg!(e).into()))?;
+    let calls_rows = calls
+        .build(block.clone())
+        .map_err(|e| ArrowError(dbg!(e).into()))?;
+    let logs_rows = logs
+        .build(block.clone())
+        .map_err(|e| ArrowError(dbg!(e).into()))?;
 
-    Ok(DatasetRows(vec![
+    Ok(RawDatasetRows::new(vec![
         header_row,
         transactions_rows,
         calls_rows,

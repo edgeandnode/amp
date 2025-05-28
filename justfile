@@ -10,16 +10,37 @@ fmt:
     cargo +nightly fmt --all
 
 # Run all tests (unit and integration)
-test:
-    cargo test --workspace
+test *EXTRA_FLAGS:
+    #!/usr/bin/env bash
+    set -e # Exit on error
+
+    if command -v "cargo-nextest" &> /dev/null; then
+        cargo nextest run {{EXTRA_FLAGS}} --workspace
+    else
+        cargo test {{EXTRA_FLAGS}} --workspace
+    fi
 
 # Run unit tests
-test-unit:
-    cargo test --workspace --exclude tests -- --nocapture
+test-unit *EXTRA_FLAGS:
+    #!/usr/bin/env bash
+    set -e # Exit on error
+
+    if command -v "cargo-nextest" &> /dev/null; then
+        cargo nextest run {{EXTRA_FLAGS}} --workspace --exclude tests 
+    else
+        cargo test {{EXTRA_FLAGS}} --workspace --exclude tests -- --nocapture
+    fi
 
 # Run integration tests
-test-it:
-    cargo test --package tests -- --nocapture
+test-it *EXTRA_FLAGS:
+    #!/usr/bin/env bash
+    set -e # Exit on error
+
+    if command -v "cargo-nextest" &> /dev/null; then
+        cargo nextest run {{EXTRA_FLAGS}} --package tests
+    else
+        cargo test {{EXTRA_FLAGS}} --package tests -- --nocapture
+    fi
 
 # Clean build artifacts and temporary files
 clean:

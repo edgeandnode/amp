@@ -18,16 +18,15 @@ use common::{
     arrow::{self, ipc::writer::IpcDataGenerator},
     catalog::{collect_scanned_tables, physical::Catalog},
     config::Config,
-    query_context::{parse_sql, Error as CoreError, QueryContext},
+    query_context::{parse_sql, Error as CoreError, QueryContext, QueryEnv},
+    BlockNum,
 };
 use datafusion::{
-    common::DFSchema,
-    error::DataFusionError,
-    execution::{runtime_env::RuntimeEnv, SendableRecordBatchStream},
-    logical_expr::LogicalPlan,
+    arrow::array::RecordBatch, common::DFSchema, error::DataFusionError,
+    execution::SendableRecordBatchStream, logical_expr::LogicalPlan,
 };
 use dataset_store::{sql_datasets::is_incremental, DatasetError, DatasetStore};
-use futures::{SinkExt, Stream, StreamExt as _, TryStreamExt};
+use futures::{channel::mpsc, SinkExt, Stream, StreamExt as _, TryStreamExt};
 use metadata_db::MetadataDb;
 use prost::Message as _;
 use thiserror::Error;
@@ -141,14 +140,14 @@ impl From<Error> for Status {
 
 #[derive(Clone)]
 pub struct Service {
-    env: Arc<RuntimeEnv>,
+    env: QueryEnv,
     dataset_store: Arc<DatasetStore>,
     initial_catalog: Catalog,
 }
 
 impl Service {
     pub async fn new(config: Arc<Config>, metadata_db: Arc<MetadataDb>) -> Result<Self, Error> {
-        let env = Arc::new(config.make_runtime_env().map_err(Error::ExecutionError)?);
+        let env = config.make_query_env().map_err(Error::ExecutionError)?;
         let dataset_store = DatasetStore::new(config.clone(), metadata_db);
         let initial_catalog = dataset_store.initial_catalog().await?;
         Ok(Self {
@@ -170,17 +169,37 @@ impl Service {
             .plan_sql(query.clone())
             .await
             .map_err(|err| Error::from(err))?;
-        // is_incremental returns an error if query contains EXPLAIN, DML, etc.
-        let is_incr = is_incremental(&plan).map_err(|e| Error::InvalidQuery(e.to_string()))?;
         let is_streaming = common::stream_helpers::is_streaming(&query);
-        if is_streaming && !is_incr {
-            return Err(Error::InvalidQuery(
-                "not incremental queries are not supported for streaming".to_string(),
-            ));
-        }
 
         let ctx = Arc::new(ctx);
         self.execute_plan(ctx, plan, is_streaming).await
+    }
+
+    async fn execute_plan_for_range_and_send_results_to_stream(
+        plan: LogicalPlan,
+        ctx: &QueryContext,
+        start: BlockNum,
+        end: BlockNum,
+        mut tx: mpsc::Sender<datafusion::error::Result<RecordBatch>>,
+    ) -> () {
+        let mut stream =
+            dataset_store::sql_datasets::execute_plan_for_range(plan, ctx, start, end)
+                .await
+                .unwrap();
+
+        while let Some(batch) = stream.next().await {
+            match batch {
+                Ok(batch) => {
+                    if tx.send(Ok(batch)).await.is_err() {
+                        return;
+                    }
+                }
+                Err(e) => {
+                    let _ = tx.send(Err(e)).await;
+                    return;
+                }
+            }
+        }
     }
 
     pub async fn execute_plan(
@@ -191,31 +210,47 @@ impl Service {
     ) -> Result<SendableRecordBatchStream, Error> {
         use futures::channel::mpsc;
 
+        // is_incremental returns an error if query contains EXPLAIN, DML, etc.
+        let is_incr = is_incremental(&plan).map_err(|e| Error::InvalidQuery(e.to_string()))?;
+        if is_streaming && !is_incr {
+            return Err(Error::InvalidQuery(
+                "not incremental queries are not supported for streaming".to_string(),
+            ));
+        }
+
         // If not streaming or metadata db is not available, execute once
         if !is_streaming {
             return ctx.execute_plan(plan).await.map_err(|err| Error::from(err));
         }
 
         // Start infinite stream
-        let mut current_end_block = dataset_store::sql_datasets::max_end_block(&plan, ctx.clone())
-            .await
-            .map_err(|e| Error::CoreError(CoreError::DatasetError(e)))?;
+        let first_range =
+            dataset_store::sql_datasets::synced_blocks_for_plan(&plan, &ctx)
+                .await
+                .map_err(|e| Error::CoreError(CoreError::DatasetError(e)))?
+                .first();
+        let mut current_end_block = first_range.map(|(_, end)| end);
 
-        let (mut tx, rx) = mpsc::channel(1);
+        let (tx, rx) = mpsc::channel(1);
 
         let schema = plan.schema().clone().as_ref().clone().into();
 
-        // initial range
-        if let Some(end) = current_end_block {
-            let mut stream =
-                dataset_store::sql_datasets::execute_plan_for_range(plan.clone(), &ctx, 0, end)
-                    .await
-                    .map_err(|e| Error::CoreError(CoreError::DatasetError(e)))?;
+        // Execute initial ranges
+        if let Some((start, end)) = first_range {
+            // Execute the first range and return an error if a query is not valid
+            let mut stream = dataset_store::sql_datasets::execute_plan_for_range(
+                plan.clone(),
+                &ctx,
+                start,
+                end,
+            )
+            .await
+            .map_err(|e| Error::CoreError(CoreError::DatasetError(e)))?;
 
-            let mut tx = tx.clone();
+            let mut tx_first_range = tx.clone();
             tokio::spawn(async move {
                 while let Some(batch) = stream.next().await {
-                    let send_result = tx.send(batch).await;
+                    let send_result = tx_first_range.send(batch).await;
                     if send_result.is_err() {
                         return Err(Error::StreamingExecutionError(
                             "failed to return a next batch".to_string(),
@@ -255,28 +290,14 @@ impl Service {
                     (_, _) => continue,
                 };
 
-                let mut stream = dataset_store::sql_datasets::execute_plan_for_range(
+                Self::execute_plan_for_range_and_send_results_to_stream(
                     plan.clone(),
                     &ctx,
                     start,
                     end,
+                    tx.clone(),
                 )
-                .await
-                .unwrap();
-
-                while let Some(batch) = stream.next().await {
-                    match batch {
-                        Ok(batch) => {
-                            if tx.send(Ok(batch)).await.is_err() {
-                                return;
-                            }
-                        }
-                        Err(e) => {
-                            let _ = tx.send(Err(e)).await;
-                            return;
-                        }
-                    }
-                }
+                .await;
 
                 current_end_block = Some(end);
             }
@@ -451,10 +472,13 @@ impl Service {
 
         // The deserialized plan references empty tables, so we need to load the actual tables from the catalog.
         let table_refs = collect_scanned_tables(&plan);
+
+        // TODO: Properly decode and then collect function names, using a trick similar to `EmptyTableCodec`.
+        let function_names = vec![];
         let catalog = self
             .dataset_store
             .clone()
-            .load_catalog_for_table_refs(table_refs.iter())
+            .load_catalog_for_table_refs(table_refs.iter(), function_names, &self.env)
             .await?;
         let query_ctx = QueryContext::for_catalog(catalog, self.env.clone())?;
         let plan = query_ctx.prepare_remote_plan(plan).await?;

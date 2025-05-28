@@ -1,0 +1,4 @@
+kind = "firehose"
+name = "eth_firehose_stream"
+provider = "firehose_eth_mainnet.toml"
+network = "mainnet"

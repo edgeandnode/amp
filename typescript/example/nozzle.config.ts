@@ -34,4 +34,7 @@ export default defineDataset(() => ({
       `,
     },
   },
+
+  // TODO: We should allow omitting this
+  functions: {},
 }))

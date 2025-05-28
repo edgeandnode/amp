@@ -1,10 +1,15 @@
-use common::tracing_helpers;
-use metadata_db::KEEP_TEMP_DIRS;
-use pretty_assertions::assert_str_eq;
+use std::{str::FromStr as _, sync::Arc};
+
+use common::{query_context::parse_sql, tracing_helpers, BoxError};
+use dataset_store::DatasetStore;
+use dump::worker::Worker;
+use futures::StreamExt;
+use metadata_db::{workers::WorkerNodeId, KEEP_TEMP_DIRS};
+use tokio::sync::broadcast;
 
 use crate::test_support::{
-    check_blocks, check_provider_file, load_sql_tests, run_query_on_fresh_server, SnapshotContext,
-    SqlTestResult,
+    check_blocks, check_provider_file, load_sql_tests, load_test_config, record_batch_to_json,
+    run_query_on_fresh_server, DatasetPackage, SnapshotContext,
 };
 
 #[tokio::test]
@@ -83,40 +88,79 @@ async fn sql_over_eth_firehose_dump() {
 
 #[tokio::test]
 async fn sql_tests() {
-    for test in load_sql_tests().unwrap() {
-        let results = run_query_on_fresh_server(&test.query)
+    for test in load_sql_tests("sql-tests.yaml").unwrap() {
+        let results = run_query_on_fresh_server(&test.query, vec![], vec![], None)
             .await
             .map_err(|e| format!("{e:?}"));
-        match test.result {
-            SqlTestResult::Success {
-                results: expected_results,
-            } => {
-                let expected_results: serde_json::Value = serde_json::from_str(&expected_results)
-                    .map_err(|e| {
-                        format!(
-                            "Failed to parse expected results for test \"{}\": {e:?}",
-                            test.name,
-                        )
-                    })
-                    .unwrap();
-                let results = results.unwrap();
-                assert_str_eq!(
-                    results.to_string(),
-                    expected_results.to_string(),
-                    "SQL test \"{}\" failed: SQL query \"{}\" did not return the expected results, see sql-tests.yaml",
-                    test.name, test.query,
-                );
-            }
-            SqlTestResult::Failure { failure } => {
-                let failure = failure.trim();
-                let results = results.unwrap_err();
-                if !results.to_string().contains(&failure) {
-                    panic!(
-                        "SQL test \"{}\" failed: SQL query \"{}\" did not return the expected error, got \"{}\", expected \"{}\"",
-                        test.name, test.query, results, failure,
-                    );
-                }
-            }
-        }
+        test.assert_result_eq(results);
     }
+}
+
+#[tokio::test]
+async fn streaming_tests() {
+    for test in load_sql_tests("sql-streaming-tests.yaml").unwrap() {
+        let results = run_query_on_fresh_server(
+            &test.query,
+            test.initial_dumps.clone(),
+            test.dumps_on_running_server.clone(),
+            test.streaming_options.as_ref(),
+        )
+        .await
+        .map_err(|e| format!("{e:?}"));
+
+        test.assert_result_eq(results);
+    }
+}
+
+#[tokio::test]
+async fn basic_function() -> Result<(), BoxError> {
+    tracing_helpers::register_logger();
+
+    let config = load_test_config(None).await.unwrap();
+
+    let metadata_db = Arc::new(config.metadata_db().await?);
+    let (tx, rx) = broadcast::channel(1);
+    std::mem::forget(tx);
+
+    let (bound_addrs, server) =
+        nozzle::server::run(config.clone(), metadata_db.clone(), false, false, rx).await?;
+    tokio::spawn(server);
+
+    let worker = Worker::new(
+        config.clone(),
+        metadata_db.clone(),
+        WorkerNodeId::from_str("basic_function").unwrap(),
+    );
+    tokio::spawn(worker.run());
+
+    // Run `pnpm build` on the dataset.
+    let dataset = DatasetPackage::new("basic_function");
+    dataset.pnpm_install().await?;
+    dataset.deploy(bound_addrs).await?;
+
+    let dataset_store = DatasetStore::new(config.clone(), metadata_db);
+    let env = config.make_query_env()?;
+    let ctx = dataset_store
+        .ctx_for_sql(&parse_sql("SELECT basic_function.testString()")?, env)
+        .await?;
+    let result = ctx
+        .execute_sql("SELECT basic_function.testString()")
+        .await?
+        .next()
+        .await
+        .unwrap()?;
+    assert_eq!(
+        record_batch_to_json(result),
+        "[{\"basic_function.testString()\":\"I'm a function\"}]"
+    );
+
+    // TOOD: Fix function calls on flight server.
+    // for test in load_sql_tests("basic-function.yaml").unwrap() {
+    //     let results = run_query_on_fresh_server(&test.query, vec![], vec![], None)
+    //         .await
+    //         .map_err(|e| format!("{e:?}"));
+    //     test.assert_result_eq(results);
+    // }
+
+    Ok(())
 }

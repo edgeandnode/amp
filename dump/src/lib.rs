@@ -1,3 +1,4 @@
+mod block_ranges;
 pub mod job;
 mod job_partition;
 mod metrics; // unused for now
@@ -14,13 +15,12 @@ use std::{
 use common::{
     catalog::physical::{Catalog, PhysicalDataset, PhysicalTable},
     config::Config,
+    metadata::block_ranges_by_table,
     multirange::MultiRange,
-    parquet,
-    parquet::basic::ZstdLevel,
-    query_context::{Error as CoreError, QueryContext},
+    parquet::{self, basic::ZstdLevel},
+    query_context::{Error as CoreError, QueryContext, QueryEnv},
     BlockNum, BlockStreamer as _, BoxError,
 };
-use datafusion::execution::runtime_env::RuntimeEnv;
 use dataset_store::{
     sql_datasets::{is_incremental, max_end_block, SqlDataset},
     DatasetKind, DatasetStore,
@@ -31,7 +31,6 @@ use object_store::ObjectMeta;
 use parquet::{basic::Compression, file::properties::WriterProperties as ParquetWriterProperties};
 use parquet_writer::{commit_metadata, ParquetFileWriter};
 use thiserror::Error;
-use tracing::{info, instrument, warn};
 
 pub async fn dump_dataset(
     dataset: &PhysicalDataset,
@@ -44,24 +43,22 @@ pub async fn dump_dataset(
     start: i64,
     end_block: Option<i64>,
 ) -> Result<(), BoxError> {
-    use common::meta_tables::scanned_ranges::scanned_ranges_by_table;
-
     let catalog = Catalog::new(vec![dataset.clone()]);
-    let env = Arc::new(config.make_runtime_env()?);
+    let env = config.make_query_env()?;
     let ctx = Arc::new(QueryContext::for_catalog(catalog, env.clone())?);
 
     // Ensure consistency before starting the dump procedure.
     consistency_check(dataset).await?;
 
-    // Query the scanned ranges, we might already have some ranges if this is not the first dump run
+    // Query the block ranges, we might already have some ranges if this is not the first dump run
     // for this dataset.
-    let scanned_ranges_by_table = scanned_ranges_by_table(&ctx).await?;
-    for (table_name, multirange) in &scanned_ranges_by_table {
+    let block_ranges_by_table = block_ranges_by_table(&ctx).await?;
+    for (table_name, multirange) in &block_ranges_by_table {
         if multirange.total_len() == 0 {
             continue;
         }
 
-        info!(
+        tracing::info!(
             "table `{}` has scanned {} blocks in the ranges: {}",
             table_name,
             multirange.total_len(),
@@ -77,7 +74,7 @@ pub async fn dump_dataset(
                 ctx,
                 &dataset.name(),
                 dataset_store,
-                scanned_ranges_by_table,
+                block_ranges_by_table,
                 partition_size,
                 parquet_opts,
                 start,
@@ -87,7 +84,7 @@ pub async fn dump_dataset(
         }
         DatasetKind::Sql | DatasetKind::Manifest => {
             if n_jobs > 1 {
-                info!("n_jobs > 1 has no effect for SQL datasets");
+                tracing::info!("n_jobs > 1 has no effect for SQL datasets");
             }
 
             let dataset = match kind {
@@ -104,7 +101,7 @@ pub async fn dump_dataset(
                 config.data_store.clone(),
                 dataset_store,
                 &env,
-                scanned_ranges_by_table,
+                block_ranges_by_table,
                 parquet_opts,
                 start,
                 end_block,
@@ -114,7 +111,7 @@ pub async fn dump_dataset(
         }
     }
 
-    info!("dump of dataset {} completed successfully", dataset.name());
+    tracing::info!("dump of dataset {} completed successfully", dataset.name());
 
     Ok(())
 }
@@ -124,7 +121,7 @@ async fn dump_raw_dataset(
     ctx: Arc<QueryContext>,
     dataset_name: &str,
     dataset_store: &DatasetStore,
-    scanned_ranges_by_table: BTreeMap<String, MultiRange>,
+    block_ranges_by_table: BTreeMap<String, MultiRange>,
     partition_size: u64,
     parquet_opts: &ParquetWriterProperties,
     start: i64,
@@ -136,25 +133,25 @@ async fn dump_raw_dataset(
         (start, Some(end)) if start >= 0 && end >= 0 => (start as BlockNum, end as BlockNum),
         _ => {
             let latest_block = client.latest_block(true).await?;
-            resolve_relative_block_range(start, end, latest_block)?
+            block_ranges::resolve_relative(start, end, latest_block)?
         }
     };
 
-    // This is the intersection of the `__scanned_ranges` for all tables. That is, a range is only
-    // considered scanned if it is scanned for all tables.
-    let scanned_ranges = {
-        let mut scanned_ranges = scanned_ranges_by_table.clone().into_iter().map(|(_, r)| r);
-        let first = scanned_ranges.next().ok_or("no tables")?;
-        let intersection = scanned_ranges.fold(first, |acc, r| acc.intersection(&r));
+    // Use the intersection of the block ranges for all tables, only considering ranges scanned for
+    // all tables.
+    let block_ranges = {
+        let mut block_ranges = block_ranges_by_table.clone().into_iter().map(|(_, r)| r);
+        let first = block_ranges.next().ok_or("no tables")?;
+        let intersection = block_ranges.fold(first, |acc, r| acc.intersection(&r));
         intersection
     };
 
     // Find the ranges of blocks that have not been scanned yet for at least one table.
-    let ranges = scanned_ranges.complement(start, end);
-    info!("dumping dataset {dataset_name} for ranges {ranges}");
+    let ranges = block_ranges.complement(start, end);
+    tracing::info!("dumping dataset {dataset_name} for ranges {ranges}");
 
     if ranges.total_len() == 0 {
-        info!("no blocks to dump for {dataset_name}");
+        tracing::info!("no blocks to dump for {dataset_name}");
         return Ok(());
     }
 
@@ -170,7 +167,7 @@ async fn dump_raw_dataset(
             id: i as u32,
             partition_size,
             parquet_opts: parquet_opts.clone(),
-            scanned_ranges_by_table: scanned_ranges_by_table.clone(),
+            block_ranges_by_table: block_ranges_by_table.clone(),
         })
     });
 
@@ -190,14 +187,14 @@ async fn dump_raw_dataset(
     Ok(())
 }
 
-#[instrument(skip_all, err, fields(dataset = %dataset.name()))]
+#[tracing::instrument(skip_all, err, fields(dataset = %dataset.name()))]
 async fn dump_sql_dataset(
     dst_ctx: Arc<QueryContext>,
     dataset: SqlDataset,
     data_store: Arc<common::Store>,
     dataset_store: &Arc<DatasetStore>,
-    env: &Arc<RuntimeEnv>,
-    scanned_ranges_by_table: BTreeMap<String, MultiRange>,
+    env: &QueryEnv,
+    block_ranges_by_table: BTreeMap<String, MultiRange>,
     parquet_opts: &ParquetWriterProperties,
     start: i64,
     end: Option<i64>,
@@ -212,7 +209,7 @@ async fn dump_sql_dataset(
         let env = env.clone();
         let data_store = data_store.clone();
         let physical_dataset = physical_dataset.clone();
-        let scanned_ranges_by_table = scanned_ranges_by_table.clone();
+        let block_ranges_by_table = block_ranges_by_table.clone();
         let parquet_opts = parquet_opts.clone();
         let dataset_name = dataset_name.clone();
 
@@ -236,11 +233,11 @@ async fn dump_sql_dataset(
                 _ => {
                     match max_end_block(&plan, src_ctx).await? {
                         Some(max_end_block) => {
-                            resolve_relative_block_range(start, end, max_end_block)?
+                            block_ranges::resolve_relative(start, end, max_end_block)?
                         }
                         None => {
                             // If the dependencies have synced nothing, we have nothing to do.
-                            warn!("no blocks to dump for {table}, dependencies are empty");
+                            tracing::warn!("no blocks to dump for {table}, dependencies are empty");
                             return Ok::<(), BoxError>(());
                         }
                     }
@@ -248,12 +245,12 @@ async fn dump_sql_dataset(
             };
 
             if is_incr {
-                let ranges_to_scan = scanned_ranges_by_table[&table].complement(start, end);
+                let ranges_to_scan = block_ranges_by_table[&table].complement(start, end);
                 for (start, end) in ranges_to_scan.ranges {
                     let mut start = start;
                     while start <= end {
                         let batch_end = std::cmp::min(start + input_batch_size_blocks - 1, end);
-                        info!(
+                        tracing::info!(
                             "dumping {} between blocks {start} and {batch_end}",
                             physical_table.table_ref()
                         );
@@ -279,7 +276,7 @@ async fn dump_sql_dataset(
                     dataset_store.metadata_db.clone(),
                 )
                 .await?;
-                info!(
+                tracing::info!(
                     "dumping entire {} to {}",
                     physical_table.table_ref(),
                     physical_table.url()
@@ -307,11 +304,11 @@ async fn dump_sql_dataset(
     Ok(())
 }
 
-#[instrument(skip_all, err)]
+#[tracing::instrument(skip_all, err)]
 async fn dump_sql_query(
     dataset_store: &Arc<DatasetStore>,
     query: &datafusion::sql::parser::Statement,
-    env: &Arc<RuntimeEnv>,
+    env: &QueryEnv,
     start: BlockNum,
     end: BlockNum,
     physical_table: &common::catalog::physical::PhysicalTable,
@@ -386,25 +383,24 @@ enum ConsistencyCheckError {
 ///
 /// ## List of checks
 ///
-/// Check: All files in the data store are accounted for in `__scanned_ranges`.
+/// Check: All files in the data store are accounted for in the metadata DB.
 /// On fail: Fix by deleting orphaned files to restore consistency.
 ///
-/// Check: All files in `__scanned_ranges` exist in the data store.
+/// Check: All files in the table exist in the data store.
 /// On fail: Return a `CorruptedDataset` error.
 ///
-/// Check: `__scanned_ranges` does not contain overlapping ranges.
+/// Check: metadata entries do not contain overlapping ranges.
 /// On fail: Return a `CorruptedDataset` error.
 async fn consistency_check(
     physical_dataset: &PhysicalDataset,
 ) -> Result<(), ConsistencyCheckError> {
-    // See also: scanned-ranges-consistency
-
+    // See also: metadata-consistency
     use ConsistencyCheckError::CorruptedDataset;
 
     for table in physical_dataset.tables() {
         let dataset_name = table.catalog_schema().to_string();
         let tbl = table.table_id();
-        // Check that `__scanned_ranges` does not contain overlapping ranges.
+        // Check that bock ranges do not contain overlapping ranges.
         {
             let ranges = table.ranges().await.map_err(|err| {
                 ConsistencyCheckError::CorruptedDataset(
@@ -435,18 +431,18 @@ async fn consistency_check(
 
         for (filename, object_meta) in &stored_files {
             if !registered_files.contains(filename) {
-                // This file was written by a dump job but it is not present in `__scanned_ranges`,
+                // This file was written by a dump job but it is not present in the metadata DB,
                 // so it is an orphaned file. Delete it.
-                warn!("Deleting orphaned file: {}", object_meta.location);
+                tracing::warn!("Deleting orphaned file: {}", object_meta.location);
                 store.delete(&object_meta.location).await?;
             }
         }
 
-        // Check for files in `__scanned_ranges` that do not exist in the store.
+        // Check for files in the metadata DB that do not exist in the store.
         for filename in registered_files {
             if !stored_files.contains_key(&filename) {
                 let err =
-                    format!("file `{path}/{filename}` is registered in `scanned_ranges` but is not in the data store")
+                    format!("file `{path}/{filename}` is registered in metadata DB but is not in the data store")
                         .into();
                 return Err(ConsistencyCheckError::CorruptedDataset(dataset_name, err));
             }
@@ -454,52 +450,3 @@ async fn consistency_check(
     }
     Ok(())
 }
-
-fn resolve_relative_block_range(
-    start: i64,
-    end: Option<i64>,
-    latest_block: BlockNum,
-) -> Result<(BlockNum, BlockNum), BoxError> {
-    if start >= 0 {
-        if let Some(end) = end {
-            if end > 0 {
-                return Ok((start as BlockNum, end as BlockNum));
-            }
-        }
-    }
-
-    let start_block = if start >= 0 {
-        start
-    } else {
-        latest_block as i64 + start // Using + because start is negative
-    };
-
-    if start_block < 0 {
-        return Err(format!("start block {start_block} is invalid").into());
-    }
-
-    let end_block = match end {
-        // Absolute block number
-        Some(e) if e > 0 => e as BlockNum,
-
-        // Relative to latest block
-        Some(e) => {
-            let end = latest_block as i64 + e; // Using + because e is negative
-            if end < start_block {
-                return Err(format!(
-                    "end_block {end} must be greater than or equal to start_block {start_block}"
-                )
-                .into());
-            }
-            end as BlockNum
-        }
-
-        // Default to latest block
-        None => latest_block,
-    };
-
-    Ok((start_block as BlockNum, end_block))
-}
-
-#[cfg(test)]
-mod tests;
