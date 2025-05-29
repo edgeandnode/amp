@@ -5,14 +5,14 @@ use common::{
     catalog::physical::PhysicalTable,
     metadata::parquet::{ParquetMeta, PARQUET_METADATA_KEY},
     multirange::MultiRange,
-    parquet::{self, errors::ParquetError, format::KeyValue},
+    parquet::{
+        arrow::AsyncArrowWriter, errors::ParquetError,
+        file::properties::WriterProperties as ParquetWriterProperties, format::KeyValue,
+    },
     BlockNum, BoxError, QueryContext, RawTableRows, Timestamp,
 };
 use metadata_db::MetadataDb;
 use object_store::{buffered::BufWriter, path::Path, ObjectMeta};
-use parquet::{
-    arrow::AsyncArrowWriter, file::properties::WriterProperties as ParquetWriterProperties,
-};
 use tracing::debug;
 use url::Url;
 
