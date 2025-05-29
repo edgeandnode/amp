@@ -105,8 +105,7 @@ pub async fn commit_metadata(
 ) -> Result<(), BoxError> {
     let file_name = parquet_meta.filename.clone();
     let parquet_meta = serde_json::to_value(parquet_meta)?;
-
-    Ok(metadata_db
+    metadata_db
         .insert_metadata(
             location_id,
             file_name,
@@ -115,7 +114,17 @@ pub async fn commit_metadata(
             object_version,
             parquet_meta,
         )
-        .await?)
+        .await?;
+
+    // Notify that the dataset has been changed
+    let change_tracking_channel = common::stream_helpers::change_tracking_pg_channel(location_id);
+    debug!(
+        "notified change tracking channel {}",
+        change_tracking_channel
+    );
+    metadata_db.notify(&change_tracking_channel, "").await?;
+
+    Ok(())
 }
 
 struct TableWriter {
