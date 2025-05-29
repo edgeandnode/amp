@@ -9,6 +9,8 @@ pub struct BlockRange {
     pub numbers: RangeInclusive<BlockNum>,
     pub network: String,
     pub hash: BlockHash,
+    /// If `prev_hash` is not present, conflicting ranges at the same numbers will be chosen based
+    /// on last-write-wins.
     pub prev_hash: Option<BlockHash>,
 }
 
@@ -156,7 +158,7 @@ impl RangeGroup {
         for (a, b) in self.0.iter().tuple_windows() {
             assert!((*a.numbers.end() + 1) == *b.numbers.start());
             assert!(a.network == b.network);
-            assert!(Some(a.hash) == b.prev_hash);
+            assert!(b.prev_hash.map(|h| h == a.hash).unwrap_or(true));
         }
     }
 
@@ -169,8 +171,13 @@ impl RangeGroup {
         if range.network != last.network {
             return false;
         }
-        let adjacent = *range.numbers.start() == (*last.numbers.end() + 1);
-        adjacent && matches!(&range.prev_hash, Some(h) if h == &last.hash)
+        if *range.numbers.start() != (*last.numbers.end() + 1) {
+            return false;
+        }
+        match &range.prev_hash {
+            None => true,
+            Some(prev_hash) => prev_hash == &last.hash,
+        }
     }
 
     fn adjacent_after(&self, range: &BlockRange) -> bool {
@@ -178,8 +185,13 @@ impl RangeGroup {
         if range.network != first.network {
             return false;
         }
-        let adjacent = (*range.numbers.end() + 1) == *first.numbers.start();
-        adjacent && matches!(&first.prev_hash, Some(h) if h == &range.hash)
+        if (*range.numbers.end() + 1) != *first.numbers.start() {
+            return false;
+        }
+        match &first.prev_hash {
+            None => true,
+            Some(prev_hash) => prev_hash == &range.hash,
+        }
     }
 
     fn insert(&mut self, range: &BlockRange) -> Result<(), ()> {
@@ -190,6 +202,19 @@ impl RangeGroup {
         if self.adjacent_after(range) {
             self.0.insert(0, range.clone());
             return Ok(());
+        }
+        if let Some(index) = self
+            .0
+            .iter()
+            .position(|r| (r.network == range.network) && (r.numbers == range.numbers))
+        {
+            if &self.0[index] == range {
+                return Ok(());
+            }
+            if self.0[index].prev_hash.is_none() && range.prev_hash.is_none() {
+                self.0[index] = range.clone();
+                return Ok(());
+            }
         }
         Err(())
     }
@@ -220,10 +245,12 @@ impl RangeGroup {
 
 #[cfg(test)]
 mod test {
-    use std::ops::Range;
+    use std::{collections::BTreeMap, ops::Range};
 
     use alloy::primitives::BlockHash;
     use rand::{rngs::StdRng, seq::SliceRandom, Rng as _, RngCore, SeedableRng};
+
+    use crate::BlockNum;
 
     use super::{BlockRange, TableRanges};
 
@@ -250,7 +277,6 @@ mod test {
         } {
             println!("insert ({:?}, {})", range.numbers, range.hash.0[31]);
             let diff = table.insert(range);
-
             for range in diff.sub {
                 let index = model.iter().position(|r| r == &range).unwrap();
                 model.remove(index);
@@ -270,6 +296,46 @@ mod test {
         assert_eq!(model, expected_model);
     }
 
+    #[test]
+    fn canonical_segments_no_prev_hash() {
+        let seed = rand::rng().next_u64();
+        println!("seed: {seed}");
+        let mut rng = StdRng::seed_from_u64(seed);
+
+        let mut ranges = gen_ranges(&mut rng);
+        for range in &mut ranges {
+            range.prev_hash = None;
+        }
+        println!(
+            "{:?}",
+            ranges
+                .iter()
+                .map(|r| format!("({:?}, {})", r.numbers, r.hash.0[31]))
+                .collect::<Vec<_>>()
+        );
+        let mut model: BTreeMap<BlockNum, BlockRange> = Default::default();
+        let mut expected: BTreeMap<BlockNum, BlockRange> = Default::default();
+        let mut table: TableRanges = Default::default();
+        for range in {
+            let mut ranges = ranges.clone();
+            ranges.shuffle(&mut rng);
+            ranges
+        } {
+            println!("insert ({:?}, {})", range.numbers, range.hash.0[31]);
+            expected.insert(*range.numbers.start(), range.clone());
+            let diff = table.insert(range);
+            for range in diff.sub {
+                model.remove(range.numbers.start());
+            }
+            for range in diff.add {
+                model.insert(*range.numbers.start(), range);
+            }
+        }
+        table.check_invariants();
+
+        assert_eq!(expected, model);
+    }
+
     fn gen_ranges(rng: &mut StdRng) -> Vec<BlockRange> {
         let hash = |number: u8, fork_index: u8| -> BlockHash {
             let mut hash: BlockHash = Default::default();
@@ -283,10 +349,7 @@ mod test {
                     numbers: (n as u64)..=(n as u64),
                     network: "test".to_string(),
                     hash: hash(n, fork_index),
-                    prev_hash: match n {
-                        0 => None,
-                        _ => Some(hash(n - 1, fork_index)),
-                    },
+                    prev_hash: Some(hash(n.checked_sub(1).unwrap_or(0), fork_index)),
                 })
                 .collect()
         };
