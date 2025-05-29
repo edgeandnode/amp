@@ -1,4 +1,4 @@
-FROM rust:latest AS build
+FROM rust:1.87.0 AS build
 
 # cmake is for snmalloc
 RUN apt-get update && apt-get install -y protobuf-compiler cmake
