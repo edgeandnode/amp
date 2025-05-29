@@ -77,13 +77,9 @@ impl Worker {
         // Spawn scheduled jobs.
         let scheduled_jobs = self.metadata_db.scheduled_jobs(&self.node_id).await?;
         for job_id in scheduled_jobs {
-            let job = Job::load(
-                &job_id,
-                self.config.clone(),
-                self.metadata_db.clone().into(),
-            )
-            .await
-            .map_err(JobLoadError)?;
+            let job = Job::load(&job_id, self.config.clone(), self.metadata_db.clone())
+                .await
+                .map_err(JobLoadError)?;
             spawn_job(self.config.clone(), self.metadata_db.clone(), job);
         }
 

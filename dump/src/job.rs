@@ -15,7 +15,8 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, instrument};
 
 use crate::{
-    default_input_batch_size_blocks, default_parquet_opts, default_partition_size, dump_dataset,
+    core::dump_dataset, default_input_batch_size_blocks, default_parquet_opts,
+    default_partition_size,
 };
 
 /// This is currently very simple, but the job abstraction is expected to become a central one.
@@ -73,7 +74,7 @@ impl Job {
                 // Consistency check: All tables must be present in the job's output.
                 let dataset_tables = dataset
                     .tables()
-                    .into_iter()
+                    .iter()
                     .map(|t| t.name.to_string())
                     .collect::<BTreeSet<_>>();
                 let job_tables = output_locations
@@ -128,7 +129,7 @@ impl Job {
                 let dataset_store = DatasetStore::new(config.clone(), metadata_db);
 
                 dump_dataset(
-                    &dataset,
+                    dataset,
                     &dataset_store.clone(),
                     &config.clone(),
                     1,
