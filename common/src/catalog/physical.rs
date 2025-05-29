@@ -435,11 +435,7 @@ impl PhysicalTable {
     pub async fn parquet_files(&self) -> Result<BTreeMap<String, ObjectMeta>, BoxError> {
         let parquet_files = self
             .stream_parquet_files()
-            .map_err(|source| object_store::Error::Generic {
-                store: "METADATA_DB",
-                source,
-            })
-            .try_collect()
+            .try_collect::<BTreeMap<String, ObjectMeta>>()
             .await?;
         Ok(parquet_files)
     }
