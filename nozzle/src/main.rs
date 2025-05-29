@@ -149,7 +149,7 @@ async fn main_inner() -> Result<(), BoxError> {
             server.await
         }
         Command::Worker { node_id } => {
-            let worker = Worker::new(config.clone(), metadata_db, node_id);
+            let worker = Worker::new(config.clone(), metadata_db, node_id.parse()?);
             worker.run().await.map_err(Into::into)
         }
     }

@@ -1,24 +1,35 @@
-mod temp_metadata_db;
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use futures::stream::{BoxStream, Stream};
 use sqlx::{
-    migrate::{MigrateError, Migrator},
-    postgres::{PgListener, PgNotification, PgPoolOptions},
-    Connection as _, Executor, FromRow, PgConnection, Pool, Postgres,
+    postgres::{PgListener, PgNotification},
+    Executor, FromRow, Postgres,
 };
-pub use temp_metadata_db::{test_metadata_db, ALLOW_TEMP_DB, KEEP_TEMP_DIRS};
 use thiserror::Error;
 use tokio::time::MissedTickBehavior;
-use tracing::{error, instrument};
+use tracing::instrument;
 use url::Url;
 
+mod conn;
+mod temp_metadata_db;
+pub mod workers;
+
+use self::conn::{DbConn, DbConnPool};
+pub use self::{
+    temp_metadata_db::{test_metadata_db, ALLOW_TEMP_DB, KEEP_TEMP_DIRS},
+    workers::{
+        events::{JobNotifAction, JobNotifListener, JobNotification},
+        jobs::{Job, JobId, JobStatus},
+        WorkerNodeId,
+    },
+};
+
 /// Frequency on which to send a heartbeat.
-const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
+pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
 
 /// A worker is considered active if it has sent a heartbeat in this period. The scheduler will
 /// schedule new jobs only on active workers.
-const ACTIVE_INTERVAL_SECS: i32 = 5;
+pub const DEFAULT_DEAD_WORKER_INTERVAL: Duration = Duration::from_secs(5);
 
 /// Row ids, always non-negative.
 pub type FileId = i64;
@@ -47,14 +58,20 @@ pub struct FileMetadataRow {
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("{0}")]
-    MigrationError(#[from] MigrateError),
-
     #[error("Error connecting to metadata db: {0}")]
     ConnectionError(sqlx::Error),
 
+    #[error("{0}")]
+    MigrationError(#[from] sqlx::migrate::MigrateError),
+
     #[error("Metadata db error: {0}")]
     DbError(#[from] sqlx::Error),
+
+    #[error("Error sending notification: {0}")]
+    NotificationSendError(#[from] workers::events::JobNotifSendError),
+
+    #[error("Error receiving notification: {0}")]
+    NotificationRecvError(#[from] workers::events::JobNotifRecvError),
 
     #[error(
         "Multiple active locations found for dataset={0}, dataset_version={1}, table={2}: {3:?}"
@@ -65,13 +82,21 @@ pub enum Error {
     UrlParseError(#[from] url::ParseError),
 }
 
-static MIGRATOR: Migrator = sqlx::migrate!();
+impl From<conn::ConnError> for Error {
+    fn from(err: conn::ConnError) -> Self {
+        match err {
+            conn::ConnError::ConnectionError(e) => Error::ConnectionError(e),
+            conn::ConnError::MigrationFailed(e) => Error::MigrationError(e),
+        }
+    }
+}
 
 /// Connection pool to the metadata DB. Clones will refer to the same instance.
 #[derive(Clone, Debug)]
 pub struct MetadataDb {
-    pool: Pool<Postgres>,
-    pub(crate) url: String,
+    pub(crate) pool: DbConnPool,
+    pub(crate) url: Arc<str>,
+    dead_worker_interval: Duration,
 }
 
 /// Tables are identified by the triple: `(dataset, dataset_version, table)`. For each table, there
@@ -84,29 +109,27 @@ pub struct TableId<'a> {
 }
 
 impl MetadataDb {
-    /// Sets up a connection pool to the metadata DB. Runs migrations if necessary.
+    /// Sets up a connection pool to the Metadata DB
+    ///
+    /// Runs migrations if necessary.
     #[instrument(skip_all, err)]
-    pub async fn connect(url: &str) -> Result<MetadataDb, Error> {
-        let pool = PgPoolOptions::new()
-            .acquire_timeout(Duration::from_secs(5))
-            .connect(url)
-            .await
-            .map_err(Error::ConnectionError)?;
-        let db = MetadataDb {
+    pub async fn connect(url: &str) -> Result<Self, Error> {
+        let pool = DbConnPool::connect(url).await?;
+        pool.run_migrations().await?;
+        Ok(Self {
             pool,
-            url: url.to_string(),
-        };
-        db.run_migrations().await?;
-        Ok(db)
+            url: url.into(),
+            dead_worker_interval: DEFAULT_DEAD_WORKER_INTERVAL,
+        })
     }
 
-    /// sqlx does the right things:
-    /// - Locks the DB before running migrations.
-    /// - Never runs the same migration twice.
-    /// - Errors on changes to old migrations.
-    #[instrument(skip(self), err)]
-    async fn run_migrations(&self) -> Result<(), Error> {
-        Ok(MIGRATOR.run(&self.pool).await?)
+    /// Configures the "dead worker" interval for the metadata DB instance
+    pub fn with_dead_worker_interval(self, dead_worker_interval: Duration) -> Self {
+        Self {
+            pool: self.pool,
+            url: self.url,
+            dead_worker_interval,
+        }
     }
 
     /// Register a materialized table into the metadata database.
@@ -172,7 +195,7 @@ impl MetadataDb {
 
         let location_id: Option<LocationId> = sqlx::query_scalar(query)
             .bind(url.to_string())
-            .fetch_optional(&self.pool)
+            .fetch_optional(&*self.pool)
             .await?;
 
         Ok(location_id)
@@ -203,7 +226,7 @@ impl MetadataDb {
             .bind(dataset)
             .bind(dataset_version)
             .bind(table)
-            .fetch_all(&self.pool)
+            .fetch_all(&*self.pool)
             .await?;
 
         let mut urls = tuples
@@ -277,92 +300,107 @@ impl MetadataDb {
         Ok(())
     }
 
-    pub async fn hello_worker(&self, node_id: &str) -> Result<(), Error> {
-        let query = "
-        INSERT INTO workers (node_id, last_heartbeat)
-        VALUES ($1, now() at time zone 'utc')
-        ON CONFLICT (node_id) DO UPDATE SET last_heartbeat = (now() at time zone 'utc')
-        ";
-
-        sqlx::query(query).bind(node_id).execute(&self.pool).await?;
-
+    pub async fn hello_worker(&self, node_id: &WorkerNodeId) -> Result<(), Error> {
+        workers::heartbeat::register_worker(&*self.pool, node_id).await?;
         Ok(())
     }
 
     /// Periodically updates the worker's heartbeat in a dedicated DB connection.
     ///
     /// Loops forever unless the DB returns an error.
-    pub async fn heartbeat_loop(&self, node_id: String) -> Result<(), Error> {
-        let mut conn = PgConnection::connect(&self.url).await?;
+    pub async fn heartbeat_loop(&self, node_id: &WorkerNodeId) -> Result<(), Error> {
+        let mut conn = DbConn::connect(&self.url).await?;
+
         let mut interval = tokio::time::interval(HEARTBEAT_INTERVAL);
         interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
         loop {
             interval.tick().await;
-            let query =
-                "UPDATE workers SET last_heartbeat = (now() at time zone 'utc') WHERE node_id = $1";
-            sqlx::query(query).bind(&node_id).execute(&mut conn).await?;
+            workers::heartbeat::update_heartbeat(&mut *conn, node_id).await?;
         }
     }
 
-    /// Returns a list of active workers. A worker is active if it has sent a sufficiently recent heartbeat.
-    pub async fn active_workers(&self) -> Result<Vec<String>, Error> {
-        let query = "SELECT node_id FROM workers WHERE last_heartbeat > (now() at time zone 'utc') - make_interval(secs => $1)";
-        Ok(sqlx::query_scalar(query)
-            .bind(ACTIVE_INTERVAL_SECS)
-            .fetch_all(&self.pool)
-            .await?)
+    /// Returns a list of active workers.
+    ///
+    /// A worker is active if it has sent a sufficiently recent heartbeat.
+    pub async fn active_workers(&self) -> Result<Vec<WorkerNodeId>, Error> {
+        Ok(workers::heartbeat::get_active_workers(&*self.pool, self.dead_worker_interval).await?)
     }
 
+    /// Schedules a job on the given worker
+    ///
+    /// The job will only be scheduled if the locations are successfully locked.
+    ///
+    /// This function performs in a single transaction:
+    ///  1. Registers the job in the workers job queue
+    ///  2. Locks the locations
+    ///  3. Sends a notification to the worker
+    /// If any of these steps fail, the transaction is rolled back, and no notification is sent.
     #[instrument(skip(self), err)]
     pub async fn schedule_job(
         &self,
-        node_id: &str,
+        node_id: &WorkerNodeId,
         job_desc: &str,
         locations: &[LocationId],
-    ) -> Result<JobDatabaseId, Error> {
+    ) -> Result<JobId, Error> {
         // Use a transaction, such that the job will only be scheduled if the locations are
         // successfully locked.
         let mut tx = self.pool.begin().await?;
 
-        let query = "INSERT INTO jobs (node_id, descriptor) VALUES ($1, $2::jsonb) RETURNING id";
-        let id: JobDatabaseId = sqlx::query_scalar(query)
-            .bind(node_id)
-            .bind(job_desc)
-            .fetch_one(&self.pool)
-            .await?;
+        let job_id = workers::jobs::register_job(&mut *tx, node_id, job_desc).await?;
 
-        lock_locations(&mut *tx, id, locations).await?;
+        lock_locations(&mut *tx, job_id, locations).await?;
+
+        workers::events::notify(&mut *tx, JobNotification::start(node_id.to_owned(), job_id))
+            .await?;
 
         tx.commit().await?;
 
-        Ok(id)
+        Ok(job_id)
     }
 
-    pub async fn scheduled_jobs(&self, node_id: &str) -> Result<Vec<JobDatabaseId>, Error> {
-        let query = "SELECT id FROM jobs WHERE node_id = $1";
-        Ok(sqlx::query_scalar(query)
-            .bind(node_id)
-            .fetch_all(&self.pool)
-            .await?)
+    /// Given a worker `node_id`, returns all the job IDs
+    pub async fn scheduled_jobs(&self, node_id: &WorkerNodeId) -> Result<Vec<JobId>, Error> {
+        Ok(workers::jobs::get_job_ids_for_node(&*self.pool, node_id).await?)
     }
 
-    pub async fn job_desc(&self, job_id: JobDatabaseId) -> Result<String, Error> {
-        let query = "SELECT descriptor::text FROM jobs WHERE id = $1";
-        Ok(sqlx::query_scalar(query)
-            .bind(job_id)
-            .fetch_one(&self.pool)
-            .await?)
+    /// Returns the job with the given ID
+    pub async fn get_job(&self, id: &JobId) -> Result<Option<Job>, Error> {
+        Ok(workers::jobs::get_job(&*self.pool, id).await?)
+    }
+
+    /// For a given job ID, returns the job descriptor.
+    pub async fn job_desc(&self, id: &JobId) -> Result<Option<String>, Error> {
+        Ok(workers::jobs::get_job_descriptor(&*self.pool, id).await?)
+    }
+
+    /// Send a notification over the worker actions notification channel
+    pub async fn send_job_notification(&self, payload: JobNotification) -> Result<(), Error> {
+        workers::events::notify(&*self.pool, payload)
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Listen to the worker actions notification channel for job notifications
+    pub async fn listen_for_job_notifications(&self) -> Result<JobNotifListener, Error> {
+        workers::events::listen_url(&*self.url)
+            .await
+            .map_err(Into::into)
     }
 
     /// Returns tuples of `(location_id, table_name, url)`.
     pub async fn output_locations(
         &self,
-        job_id: JobDatabaseId,
+        id: &JobId,
     ) -> Result<Vec<(LocationId, String, Url)>, Error> {
-        let query = "SELECT id, tbl, url FROM locations WHERE writer = $1";
+        let query = indoc::indoc! {r#"
+            SELECT id, tbl, url 
+            FROM locations 
+            WHERE writer = $1
+        "#};
+
         let tuples: Vec<(LocationId, String, String)> = sqlx::query_as(query)
-            .bind(job_id)
-            .fetch_all(&self.pool)
+            .bind(id)
+            .fetch_all(&*self.pool)
             .await?;
 
         let urls = tuples
@@ -378,12 +416,12 @@ impl MetadataDb {
         sqlx::query("SELECT pg_notify($1, $2)")
             .bind(channel_name)
             .bind(payload)
-            .execute(&self.pool)
+            .execute(&*self.pool)
             .await?;
         Ok(())
     }
 
-    /// Listens on a Postgres notification channel using LISTEN.
+    /// Listens on a PostgreSQL notification channel using LISTEN.
     ///
     /// # Error cases
     ///
@@ -422,17 +460,17 @@ impl MetadataDb {
          WHERE location_id = $1;
         ";
 
-        sqlx::query_as(query).bind(location_id).fetch(&self.pool)
+        sqlx::query_as(query).bind(location_id).fetch(&*self.pool)
     }
 
-    pub async fn insert_file_metadata(
+    pub async fn insert_metadata(
         &self,
         location_id: i64,
         file_name: String,
         object_size: u64,
         object_e_tag: Option<String>,
         object_version: Option<String>,
-        scanned_range: serde_json::Value,
+        parquet_meta: serde_json::Value,
     ) -> Result<(), Error> {
         let sql = "
         INSERT INTO file_metadata (location_id, file_name, object_size, object_e_tag, object_version, metadata)
@@ -446,8 +484,8 @@ impl MetadataDb {
             .bind(object_size as i64)
             .bind(object_e_tag)
             .bind(object_version)
-            .bind(scanned_range)
-            .execute(&self.pool)
+            .bind(parquet_meta)
+            .execute(&*self.pool)
             .await?;
 
         Ok(())
@@ -457,7 +495,7 @@ impl MetadataDb {
 #[instrument(skip(executor), err)]
 async fn lock_locations(
     executor: impl Executor<'_, Database = Postgres>,
-    job_id: JobDatabaseId,
+    job_id: JobId,
     locations: &[LocationId],
 ) -> Result<(), Error> {
     let query = "UPDATE locations SET writer = $1 WHERE id = ANY($2)";

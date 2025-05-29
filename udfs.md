@@ -3,7 +3,7 @@
 Nozzle provides a number of "built-in" SQL functions that the user can call to manipulate
 the data they are querying.
 
----
+## `evm_decode`
 
 ```sql
 T evm_decode(
@@ -15,10 +15,10 @@ T evm_decode(
 )
 ```
 
-Decodes and EVM event log. The signature parameter is the Solidity signature of the event.
+Decodes an EVM event log. The signature parameter is the Solidity signature of the event.
 The return type of `evm_decode` is the SQL version of the return type specified in the signature.
 
----
+## `evm_topic`
 
 ```sql
 FixedSizeBinary(32) evm_topic(Utf8 signature)
@@ -27,7 +27,7 @@ FixedSizeBinary(32) evm_topic(Utf8 signature)
 Returns the topic hash of the event signature. This is the first topic that will show up in the log
 when the event is emitted. The topic hash is the keccak256 hash of the event signature.
 
----
+## `${dataset}.eth_call`
 
 ```sql
 (Binary, Utf8) ${dataset}.eth_call(
@@ -52,7 +52,7 @@ LIMIT 10
 
 Returns a tuple of the return value of the call and the error message (if any, or empty string if no error).
 
----
+## `attestation_hash`
 
 ```sql
 Binary attestation_hash(...)
@@ -61,7 +61,7 @@ Binary attestation_hash(...)
 This is an aggregate UDF which takes any number of parameters of any type. Returns a hash over all
 the input parameters (columns) over all the rows.
 
----
+## `evm_decode_params`
 
 ```sql
 T evm_decode_params(
@@ -90,39 +90,7 @@ All of the function parameters and results must be named. The output of this fun
 ]
 ```
 
----
-
-```sql
-T evm_decode_results(
-    Binary output,
-    Utf8 signature
-)
-```
-
-Decodes the Ethereum ABI-encoded results of a function. For example:
-
-```sql
-SELECT
-    evm_decode_results(
-        return_data,
-        'function claim(uint256[] calldata tokenIds, uint8 garbage) public returns(uint256 prevId)'
-    ) AS results
-FROM eth_firehose.calls
-```
-
-All of the function parameters and results must be named. The output of this function will be packed into a struct:
-
-```json
-[
-  {
-    "results": {
-      "prevId": "635"
-    }
-  }
-]
-```
-
----
+## `evm_encode_params`
 
 ```sql
 T evm_encode_params(
@@ -158,10 +126,10 @@ Results:
 ]
 ```
 
----
+## `evm_encode_type`
 
 ```sql
-T evm_encode_type(
+Binary evm_encode_type(
     Any value,
     Utf8 type
 )
@@ -179,6 +147,38 @@ Returns:
 [
   {
     "uint256": "000000000000000000000000000000000000000000000000000000000000027b"
+  }
+]
+```
+
+## `evm_decode_type`
+
+```sql
+T evm_decode_type(
+    Binary data,
+    Utf8 type
+)
+```
+
+Decodes the given Solidity ABI-encoded value into an SQL value.
+
+Example with nested data types, first ABI-encodes some data using `evm_encode_type`, then decodes it:
+
+```sql
+SELECT evm_decode_type(encoded, '(int256, int8, string[])') AS decoded
+    FROM (SELECT evm_encode_type(struct(1, 2, ['str1', 'str2', 'str3']), '(int256, int8, string[])') AS encoded)
+```
+
+Returns:
+
+```json
+[
+  {
+    "decoded": {
+      "c0": "1",
+      "c1": 2,
+      "c2": ["str1", "str2", "str3"]
+    }
   }
 ]
 ```

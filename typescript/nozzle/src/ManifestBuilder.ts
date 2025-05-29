@@ -29,11 +29,24 @@ export class ManifestBuilder extends Effect.Service<ManifestBuilder>()("Nozzle/M
             return [name, output] as const
           }), { concurrency: 5 })
 
+        const functions = Object.entries(manifest.functions).map(([name, func]) => {
+          const { inputTypes, outputType, source } = func
+          const functionManifest = new Model.FunctionManifest({
+            name,
+            source,
+            inputTypes,
+            outputType,
+          })
+
+          return [name, functionManifest] as const
+        })
+
         return new Model.DatasetManifest({
           kind: "manifest",
           name: manifest.name,
           version: manifest.version,
           tables: Object.fromEntries(tables),
+          functions: Object.fromEntries(functions),
           dependencies: manifest.dependencies,
         })
       })

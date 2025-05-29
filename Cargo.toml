@@ -15,6 +15,7 @@ members = [
     "http-common",
     "registry-service",
     "async-udf",
+    "js-runtime",
 ]
 
 resolver = "2"
@@ -38,14 +39,14 @@ bytes = "1"
 chrono = "0.4.41"
 clap = { version = "4.5.2", features = ["derive", "env"] }
 figment = { version = "0.10.19", features = ["toml", "env", "json"] }
-fs-err = "2.11.0"
+fs-err = "3.0.0"
 futures = "0.3"
 hex = "0.4.3"
-itertools = "0.13.0"
+itertools = "0.14.0"
 pgtemp = "0.6.0"
 pretty_assertions = "1.4.1"
 prometheus = "0.13"
-serde = { version = "1.0.197", features = ["derive"] }
+serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.114"
 serde_yaml = "0.9.34"
 snmalloc-rs = "0.3.4"
@@ -73,6 +74,9 @@ axum = "0.8.0"
 semver = { version = "1.0.18", features = ["serde"] }
 rand = "0.9.0"
 bincode = "2.0.1"
+humantime = "2.2.0"
+blake3 = "1.8.1"
+indoc = "2.0.6"
 
 # Datafusion and Arrow crates
 arrow-flight = { version = "55", features = ["flight-sql-experimental"] }

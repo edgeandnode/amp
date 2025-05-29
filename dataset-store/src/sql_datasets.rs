@@ -4,14 +4,15 @@ use std::{
 };
 
 use common::{
-    multirange::MultiRange, query_context::parse_sql, BlockNum, BoxError, Dataset, QueryContext,
-    Table, BLOCK_NUM,
+    multirange::MultiRange,
+    query_context::{parse_sql, QueryEnv},
+    BlockNum, BoxError, Dataset, QueryContext, Table, BLOCK_NUM,
 };
 use datafusion::{
     common::tree_node::{Transformed, TreeNode, TreeNodeRecursion},
     datasource::TableType,
     error::DataFusionError,
-    execution::{runtime_env::RuntimeEnv, SendableRecordBatchStream},
+    execution::SendableRecordBatchStream,
     logical_expr::{col, lit, Filter, LogicalPlan, Sort, TableScan},
     sql::{parser, TableReference},
 };
@@ -98,9 +99,29 @@ pub(super) async fn dataset(
             kind: def.kind,
             name: def.name,
             tables,
+            functions: vec![],
         },
         queries,
     })
+}
+
+// Get synced ranges for table
+async fn get_ranges_for_table(
+    table: &TableReference,
+    ctx: &QueryContext,
+) -> Result<MultiRange, BoxError> {
+    let Some(table) = ctx.get_table(table) else {
+        return Err(format!(
+            "table {}.{} not found",
+            table.schema().unwrap(),
+            table.table()
+        )
+        .into());
+    };
+    let ranges = table.ranges().await?;
+    let ranges = MultiRange::from_ranges(ranges)?;
+
+    Ok(ranges)
 }
 
 /// This will:
@@ -117,7 +138,7 @@ pub async fn execute_plan_for_range(
 ) -> Result<SendableRecordBatchStream, BoxError> {
     let tables = extract_table_references_from_plan(&plan)?;
 
-    // Validate dependency scanned ranges
+    // Validate dependency block ranges
     {
         let needed_range = MultiRange::from_ranges(vec![(start, end)]).unwrap();
         for table in tables {
@@ -148,7 +169,7 @@ pub async fn execute_plan_for_range(
 pub async fn execute_query_for_range(
     query: parser::Statement,
     dataset_store: Arc<DatasetStore>,
-    env: Arc<RuntimeEnv>,
+    env: QueryEnv,
     start: BlockNum,
     end: BlockNum,
 ) -> Result<SendableRecordBatchStream, BoxError> {
@@ -189,6 +210,28 @@ fn extract_table_references_from_plan(plan: &LogicalPlan) -> Result<Vec<TableRef
     })?;
 
     Ok(refs.into_iter().collect())
+}
+
+/// The blocks that have been synced for all tables in the plan.
+#[instrument(skip_all, err)]
+pub async fn synced_blocks_for_plan(
+    plan: &LogicalPlan,
+    ctx: &QueryContext,
+) -> Result<MultiRange, BoxError> {
+    let tables = extract_table_references_from_plan(&plan)?;
+
+    let mut ranges = MultiRange::empty();
+
+    if !tables.is_empty() {
+        let mut tables = tables.into_iter();
+        ranges = get_ranges_for_table(&tables.next().unwrap(), ctx).await?;
+        for table in tables {
+            let other_ranges = get_ranges_for_table(&table, ctx).await?;
+            ranges = ranges.intersection(&other_ranges);
+        }
+    }
+
+    Ok(ranges)
 }
 
 /// The most recent block that has been synced for all tables in the plan.

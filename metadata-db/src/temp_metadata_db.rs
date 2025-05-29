@@ -47,7 +47,7 @@ impl TempMetadataDb {
     }
 
     pub fn url(&self) -> &str {
-        self.metadata_db.url.as_str()
+        self.metadata_db.url.as_ref()
     }
 }
 

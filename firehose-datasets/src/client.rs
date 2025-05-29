@@ -1,6 +1,6 @@
 use std::{str::FromStr, time::Duration};
 
-use common::{store::Store, BlockNum, BlockStreamer, BoxError, DatasetRows};
+use common::{store::Store, BlockNum, BlockStreamer, BoxError, RawDatasetRows};
 use futures::{Stream, StreamExt as _, TryStreamExt as _};
 use pbfirehose::{stream_client::StreamClient, ForkStep, Response as StreamResponse};
 use prost::Message as _;
@@ -169,7 +169,7 @@ impl BlockStreamer for Client {
         mut self,
         start_block: u64,
         end_block: u64,
-        tx: mpsc::Sender<DatasetRows>,
+        tx: mpsc::Sender<RawDatasetRows>,
     ) -> Result<(), BoxError> {
         use crate::evm::pb_to_rows::protobufs_to_rows;
 

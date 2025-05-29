@@ -15,6 +15,7 @@ const NOZZLE_CRATES: &[&str] = &[
     "evm_rpc_datasets",
     "firehose_datasets",
     "http_common",
+    "js_runtime",
     "metadata_db",
     "nozzle",
     "registry_service",
@@ -46,6 +47,8 @@ pub fn register_logger() {
             .with_env_filter(env_filter)
             .with_ansi(atty::is(atty::Stream::Stderr))
             .init();
+
+        tracing::info!("log level: {}", nozzle_log_level);
     });
 }
 

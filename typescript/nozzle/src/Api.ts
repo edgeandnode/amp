@@ -56,7 +56,7 @@ export class AdminError extends Data.TaggedError("AdminError")<{
 }> {}
 
 export class AdminErrorResponse extends Schema.Class<AdminErrorResponse>("AdminErrorResponse")({
-  error_code: Schema.Literal("MANIFEST_PARSE_ERROR", "SCHEDULER_ERROR", "DATASET_DEF_STORE_ERROR"),
+  error_code: Schema.Literal("MANIFEST_PARSE_ERROR", "SCHEDULER_ERROR", "DATASET_DEF_STORE_ERROR", "INVALID_MANIFEST"),
   error_message: Schema.String,
 }) {
   readonly _tag = "AdminErrorResponse" as const

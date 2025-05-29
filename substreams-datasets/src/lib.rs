@@ -27,6 +27,7 @@ pub async fn dataset(dataset_cfg: toml::Value) -> Result<DatasetWithProvider, Er
             kind: dataset_def.kind,
             name: dataset_def.name,
             tables: tables.tables,
+            functions: vec![],
         },
         provider: Some(dataset_def.provider),
     })

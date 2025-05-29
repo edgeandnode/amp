@@ -1,4 +1,11 @@
-use std::{io::ErrorKind, sync::Arc};
+use std::{
+    io::ErrorKind,
+    path::PathBuf,
+    process::{ExitStatus, Stdio},
+    str::FromStr as _,
+    sync::Arc,
+    time::Duration,
+};
 
 use arrow_flight::{
     flight_service_client::FlightServiceClient, sql::client::FlightSqlServiceClient,
@@ -12,6 +19,7 @@ use common::{
     },
     catalog::physical::{Catalog, PhysicalDataset, PhysicalTable},
     config::{Addrs, Config, FigmentJson},
+    metadata::block_ranges_by_table,
     multirange::MultiRange,
     parquet::basic::{Compression, ZstdLevel},
     query_context::parse_sql,
@@ -22,10 +30,14 @@ use dump::{dump_dataset, parquet_opts};
 use figment::providers::Format as _;
 use fs_err as fs;
 use futures::{stream::TryStreamExt, StreamExt as _};
-use metadata_db::MetadataDb;
+use metadata_db::{MetadataDb, KEEP_TEMP_DIRS};
+use nozzle::server::BoundAddrs;
 use object_store::path::Path;
+use pretty_assertions::assert_str_eq;
+use serde::{Deserialize, Deserializer};
 use tempfile::TempDir;
-use tracing::{info, instrument};
+use tokio::time;
+use tracing::{debug, info, instrument};
 
 /// Assume the `cargo test` command is run either from the workspace root or from the crate root.
 const TEST_CONFIG_BASE_DIRS: [&str; 2] = ["tests/config", "config"];
@@ -56,7 +68,7 @@ pub async fn load_test_config(
 
 pub async fn bless(dataset_name: &str, start: u64, end: u64) -> Result<(), BoxError> {
     let config = load_test_config(None).await?;
-    redump(config, dataset_name, vec![], start, end, 1).await?;
+    dump(config, dataset_name, vec![], start, end, 1, true).await?;
     Ok(())
 }
 
@@ -99,8 +111,7 @@ impl SnapshotContext {
         }
         let dataset: PhysicalDataset = PhysicalDataset::new(dataset, tables);
         let catalog = Catalog::new(vec![dataset]);
-        let ctx: QueryContext =
-            QueryContext::for_catalog(catalog, Arc::new(config.make_runtime_env()?))?;
+        let ctx: QueryContext = QueryContext::for_catalog(catalog, config.make_query_env()?)?;
         Ok(Self {
             ctx,
             _temp_dir: None,
@@ -128,16 +139,17 @@ impl SnapshotContext {
         )));
 
         let config = load_test_config(config_override).await?;
-        let catalog = redump(
+        let catalog = dump(
             config.clone(),
             dataset_name,
             dependencies,
             start,
             end,
             n_jobs,
+            true,
         )
         .await?;
-        let ctx = QueryContext::for_catalog(catalog, Arc::new(config.make_runtime_env()?))?;
+        let ctx = QueryContext::for_catalog(catalog, config.make_query_env()?)?;
 
         Ok(SnapshotContext {
             ctx,
@@ -145,16 +157,14 @@ impl SnapshotContext {
         })
     }
 
-    async fn check_scanned_range_eq(&self, blessed: &SnapshotContext) -> Result<(), BoxError> {
-        use common::meta_tables::scanned_ranges::scanned_ranges_by_table;
-
-        let blessed_scanned_ranges = scanned_ranges_by_table(&blessed.ctx).await?;
+    async fn check_block_range_eq(&self, blessed: &SnapshotContext) -> Result<(), BoxError> {
+        let blessed_block_ranges = block_ranges_by_table(&blessed.ctx).await?;
 
         for table in self.ctx.catalog().all_tables() {
             let table_name = table.table_name().to_string();
             let ranges = table.ranges().await?;
             let expected_range = MultiRange::from_ranges(ranges)?;
-            let actual_range = &blessed_scanned_ranges[&table_name];
+            let actual_range = &blessed_block_ranges[&table_name];
             let table_qualified = table.table_ref().to_string();
             assert_eq!(
                 expected_range, *actual_range,
@@ -168,7 +178,7 @@ impl SnapshotContext {
 
     /// Typically used to check a fresh snapshot against a blessed one.
     pub async fn assert_eq(&self, other: &SnapshotContext) -> Result<(), BoxError> {
-        self.check_scanned_range_eq(other).await?;
+        self.check_block_range_eq(other).await?;
 
         for table in self.ctx.catalog().all_tables() {
             let query = parse_sql(&format!(
@@ -191,15 +201,47 @@ impl SnapshotContext {
     }
 }
 
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct DumpTestDatasetCommand {
+    #[serde(rename = "dataset")]
+    pub(crate) dataset_name: String,
+    #[serde(default)]
+    pub(crate) dependencies: Vec<String>,
+    pub(crate) start: u64,
+    pub(crate) end: u64,
+    #[serde(rename = "nJobs")]
+    pub(crate) n_jobs: u16,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct StreamingExecutionOptions {
+    #[serde(rename = "maxDuration", deserialize_with = "deserialize_duration")]
+    pub(crate) max_duration: Duration,
+    #[serde(rename = "atLeastRows")]
+    pub(crate) at_least_rows: usize,
+}
+
+fn deserialize_duration<'de, D>(deserializer: D) -> Result<Duration, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s = String::deserialize(deserializer)?;
+
+    // Parse strings like "10s" into Duration
+    humantime::parse_duration(&s)
+        .map_err(|e| serde::de::Error::custom(format!("invalid duration: {}", e)))
+}
+
 #[instrument(skip_all)]
-/// Clears the dataset directory, if it exists, before dumping.
-async fn redump(
+/// Clears the dataset directory if specified, before dumping.
+async fn dump(
     config: Arc<Config>,
     dataset_name: &str,
     dependencies: Vec<&str>,
     start: u64,
     end: u64,
     n_jobs: u16,
+    clear: bool,
 ) -> Result<Catalog, BoxError> {
     let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
     let dataset_store = DatasetStore::new(config.clone(), metadata_db);
@@ -207,12 +249,31 @@ async fn redump(
     // First dump dependencies, then main dataset
     for dataset_name in dependencies {
         datasets.push(
-            redump_dataset(dataset_name, &*config, &dataset_store, start, end, n_jobs).await?,
+            dump_test_dataset(
+                dataset_name,
+                &*config,
+                &dataset_store,
+                start,
+                end,
+                n_jobs,
+                clear,
+            )
+            .await?,
         );
     }
 
-    datasets
-        .push(redump_dataset(dataset_name, &*config, &dataset_store, start, end, n_jobs).await?);
+    datasets.push(
+        dump_test_dataset(
+            dataset_name,
+            &*config,
+            &dataset_store,
+            start,
+            end,
+            n_jobs,
+            clear,
+        )
+        .await?,
+    );
     let catalog = Catalog::new(datasets);
     Ok(catalog)
 }
@@ -221,7 +282,7 @@ pub async fn check_blocks(dataset_name: &str, start: u64, end: u64) -> Result<()
     let config = load_test_config(None).await?;
     let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
     let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
-    let env = Arc::new(config.make_runtime_env()?);
+    let env = config.make_query_env()?;
 
     dump_check::dump_check(
         dataset_name,
@@ -248,13 +309,14 @@ async fn clear_dataset(config: &Config, dataset_name: &str) -> Result<(), BoxErr
 }
 
 #[instrument(skip_all)]
-async fn redump_dataset(
+async fn dump_test_dataset(
     dataset_name: &str,
     config: &Config,
     dataset_store: &Arc<DatasetStore>,
     start: u64,
     end: u64,
     n_jobs: u16,
+    clear: bool,
 ) -> Result<PhysicalDataset, BoxError> {
     let partition_size = 1024 * 1024; // 100 kB
     let input_batch_block_size = 100_000;
@@ -263,16 +325,35 @@ async fn redump_dataset(
     // Disable bloom filters, as they bloat the test files and are not tested themselves.
     let parquet_opts = parquet_opts(compression, false);
 
-    clear_dataset(config, dataset_name).await?;
+    if clear {
+        clear_dataset(config, dataset_name).await?;
+    }
     let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
     let data_store = config.data_store.clone();
     let dataset = {
         let dataset = dataset_store.load_dataset(dataset_name).await?.dataset;
         let mut tables = Vec::new();
         for table in dataset.tables() {
-            let physical_table =
-                PhysicalTable::next_revision(table, &data_store, dataset_name, metadata_db.clone())
-                    .await?;
+            let physical_table = match PhysicalTable::get_or_restore_active_revision(
+                table,
+                dataset_name,
+                data_store.clone(),
+                metadata_db.clone(),
+            )
+            .await?
+            {
+                Some(physical_table) if !clear => physical_table,
+                _ => {
+                    PhysicalTable::next_revision(
+                        table,
+                        &data_store,
+                        dataset_name,
+                        metadata_db.clone(),
+                    )
+                    .await?
+                }
+            };
+
             tables.push(physical_table);
         }
         PhysicalDataset::new(dataset, tables)
@@ -356,7 +437,7 @@ fn convert_binary_to_hex_strings(mut record_batch: RecordBatch) -> RecordBatch {
     RecordBatch::try_new(schema, new_columns).unwrap()
 }
 
-fn record_batch_to_json(record_batch: RecordBatch) -> String {
+pub fn record_batch_to_json(record_batch: RecordBatch) -> String {
     // JSON does not support binary data, so encode any binary fields as hex strings.
     let record_batch = convert_binary_to_hex_strings(record_batch);
 
@@ -381,18 +462,56 @@ fn dynamic_addrs() -> Addrs {
 
 /// Start a nozzle server, execute the given query, convert the result to JSONL, shut down the
 /// server and return the JSONL string in binary format.
-pub async fn run_query_on_fresh_server(query: &str) -> Result<serde_json::Value, BoxError> {
+pub async fn run_query_on_fresh_server(
+    query: &str,
+    initial_dumps: Vec<DumpTestDatasetCommand>,
+    dumps_on_running_server: Vec<DumpTestDatasetCommand>,
+    streaming_options: Option<&StreamingExecutionOptions>,
+) -> Result<serde_json::Value, BoxError> {
     check_provider_file("rpc_eth_mainnet.toml").await;
+    check_provider_file("firehose_eth_mainnet.toml").await;
 
     // Start the nozzle server.
-    let config = load_test_config(None).await.unwrap();
+    let config = if initial_dumps.is_empty() && dumps_on_running_server.is_empty() {
+        load_test_config(None).await?
+    } else {
+        use figment::providers::Json;
+
+        let temp_dir = tempfile::Builder::new().keep(*KEEP_TEMP_DIRS).tempdir()?;
+        let path = temp_dir.path();
+
+        let config_override = Some(Json::string(&format!(
+            r#"{{ "data_dir": "{}" }}"#,
+            path.display()
+        )));
+
+        load_test_config(config_override).await?
+    };
     let metadata_db = config.metadata_db().await?.into();
     let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel(1);
     let (bound, server) =
-        nozzle::server::run(config, metadata_db, false, false, shutdown_rx).await?;
+        nozzle::server::run(config.clone(), metadata_db, false, false, shutdown_rx).await?;
     tokio::spawn(async move {
         server.await.unwrap();
     });
+
+    for initial_dump in initial_dumps {
+        let dependencies: Vec<&str> = initial_dump
+            .dependencies
+            .iter()
+            .map(|s| s.as_str())
+            .collect();
+        let _ = dump(
+            config.clone(),
+            &initial_dump.dataset_name,
+            dependencies,
+            initial_dump.start,
+            initial_dump.end,
+            initial_dump.n_jobs,
+            true,
+        )
+        .await;
+    }
 
     let client = FlightServiceClient::connect(format!("grpc://{}", bound.flight_addr)).await?;
     let mut client = FlightSqlServiceClient::new_from_inner(client);
@@ -404,9 +523,55 @@ pub async fn run_query_on_fresh_server(query: &str) -> Result<serde_json::Value,
         .await?;
     let mut buf: Vec<u8> = Default::default();
     let mut writer = arrow::json::writer::ArrayWriter::new(&mut buf);
-    while let Some(batch) = batches.next().await {
-        let batch = batch?;
-        writer.write(&batch)?;
+    let mut rows_returned: usize = 0;
+
+    // Dumps on running server
+    tokio::spawn(async move {
+        for dump_command in dumps_on_running_server {
+            let dependencies: Vec<&str> = dump_command
+                .dependencies
+                .iter()
+                .map(|s| s.as_str())
+                .collect();
+            let _ = dump(
+                config.clone(),
+                &dump_command.dataset_name,
+                dependencies,
+                dump_command.start,
+                dump_command.end,
+                dump_command.n_jobs,
+                false,
+            )
+            .await;
+        }
+    });
+
+    if let Some(streaming_options) = streaming_options {
+        loop {
+            match time::timeout(streaming_options.max_duration, batches.next()).await {
+                Ok(Some(batch)) => {
+                    let batch = batch?;
+                    writer.write(&batch)?;
+
+                    // Stop streaming if we have enough rows taken
+                    rows_returned += batch.num_rows();
+                    if rows_returned >= streaming_options.at_least_rows {
+                        break;
+                    }
+                }
+                Ok(None) => {
+                    break;
+                }
+                Err(_) => {
+                    break;
+                }
+            }
+        }
+    } else {
+        while let Some(batch) = batches.next().await {
+            let batch = batch?;
+            writer.write(&batch)?;
+        }
     }
 
     shutdown_tx.send(()).unwrap();
@@ -415,13 +580,13 @@ pub async fn run_query_on_fresh_server(query: &str) -> Result<serde_json::Value,
     serde_json::from_slice(&buf).map_err(Into::into)
 }
 
-pub fn load_sql_tests() -> Result<Vec<SqlTest>, BoxError> {
+pub fn load_sql_tests(file_name: &str) -> Result<Vec<SqlTest>, BoxError> {
     let crate_path = env!("CARGO_MANIFEST_DIR");
-    let path = format!("{crate_path}/sql-tests.yaml");
-    let content = fs::read(&path)
-        .map_err(|e| BoxError::from(format!("Failed to read sql-tests.yaml: {e}")))?;
+    let path = format!("{crate_path}/{file_name}");
+    let content =
+        fs::read(&path).map_err(|e| BoxError::from(format!("Failed to read {file_name}: {e}")))?;
     serde_yaml::from_slice(&content)
-        .map_err(|e| BoxError::from(format!("Failed to parse sql-tests.yaml: {e}")))
+        .map_err(|e| BoxError::from(format!("Failed to parse {file_name}: {e}")))
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -433,6 +598,12 @@ pub struct SqlTest {
     /// JSON-encoded results.
     #[serde(flatten)]
     pub result: SqlTestResult,
+    #[serde(default, rename = "streamingOptions")]
+    pub streaming_options: Option<StreamingExecutionOptions>,
+    #[serde(default, rename = "initialDumps")]
+    pub initial_dumps: Vec<DumpTestDatasetCommand>,
+    #[serde(default, rename = "dumpsOnRunningServer")]
+    pub dumps_on_running_server: Vec<DumpTestDatasetCommand>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -440,4 +611,137 @@ pub struct SqlTest {
 pub enum SqlTestResult {
     Success { results: String },
     Failure { failure: String },
+}
+
+impl SqlTest {
+    pub fn assert_result_eq(self, results: Result<serde_json::Value, String>) {
+        match self.result {
+            SqlTestResult::Success {
+                results: expected_results,
+            } => {
+                let expected_results: serde_json::Value = serde_json::from_str(&expected_results)
+                    .map_err(|e| {
+                        format!(
+                            "Failed to parse expected results for test \"{}\": {e:?}",
+                            self.name,
+                        )
+                    })
+                    .unwrap();
+                let results = results.unwrap();
+                assert_str_eq!(
+                    results.to_string(),
+                    expected_results.to_string(),
+                    "SQL test \"{}\" failed: SQL query \"{}\" did not return the expected results, see sql-tests.yaml",
+                    self.name, self.query,
+                );
+            }
+            SqlTestResult::Failure { failure } => {
+                let failure = failure.trim();
+                let results = results.unwrap_err();
+                if !results.to_string().contains(&failure) {
+                    panic!(
+                        "SQL test \"{}\" failed: SQL query \"{}\" did not return the expected error, got \"{}\", expected \"{}\"",
+                        self.name, self.query, results, failure,
+                    );
+                }
+            }
+        }
+    }
+}
+
+pub struct DatasetPackage {
+    pub name: String,
+
+    // Relative to crate root
+    pub path: PathBuf,
+}
+
+impl DatasetPackage {
+    pub fn new(name: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            path: PathBuf::from_str(&format!("datasets/{}", name)).unwrap(),
+        }
+    }
+
+    #[instrument(skip_all, err)]
+    pub async fn pnpm_install(&self) -> Result<(), BoxError> {
+        let install_path = self.path.parent().unwrap();
+        debug!(
+            "Running pnpm install on `{}`",
+            install_path.to_string_lossy()
+        );
+
+        let status = tokio::process::Command::new("pnpm")
+            .args(&["install"])
+            .current_dir(install_path)
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .status()
+            .await?;
+
+        if status != ExitStatus::default() {
+            return Err(BoxError::from(format!(
+                "Failed to install dataset {}: pnpm install failed with exit code {status}",
+                self.name,
+            )));
+        }
+
+        Ok(())
+    }
+
+    pub async fn build(&self, bound_addrs: BoundAddrs) -> Result<(), BoxError> {
+        let status = tokio::process::Command::new("pnpm")
+            .args(&["nozzl", "build"])
+            .env(
+                "NOZZLE_REGISTRY_URL",
+                &format!("http://{}", bound_addrs.registry_service_addr),
+            )
+            .env(
+                "NOZZLE_ADMIN_URL",
+                &format!("http://{}", bound_addrs.admin_api_addr),
+            )
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .current_dir(&self.path)
+            .status()
+            .await?;
+
+        if status != ExitStatus::default() {
+            return Err(BoxError::from(format!(
+                "Failed to build dataset {}: pnpm build failed with exit code {status}",
+                self.name,
+            )));
+        }
+
+        Ok(())
+    }
+
+    #[instrument(skip_all, err)]
+    pub async fn deploy(&self, bound_addrs: BoundAddrs) -> Result<(), BoxError> {
+        let status = tokio::process::Command::new("pnpm")
+            .args(&["nozzl", "deploy"])
+            .env(
+                "NOZZLE_REGISTRY_URL",
+                &format!("http://{}", bound_addrs.registry_service_addr),
+            )
+            .env(
+                "NOZZLE_ADMIN_URL",
+                &format!("http://{}", bound_addrs.admin_api_addr),
+            )
+            .current_dir(&self.path)
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .status()
+            .await?;
+
+        if status != ExitStatus::default() {
+            return Err(BoxError::from(format!(
+                "Failed to deploy dataset {}: pnpm deploy failed with exit code {status}",
+                self.name,
+            )));
+        }
+
+        Ok(())
+    }
 }

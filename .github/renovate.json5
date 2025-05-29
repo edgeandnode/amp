@@ -16,6 +16,15 @@
     automerge: true,
     automergeType: 'branch',
   },
+  enabledManagers: [
+    'cargo',
+    'dockerfile',
+    'github-actions',
+    'custom.regex',
+  ],
+  ignoreDeps: [
+    'serde_yaml', // Ignore serde_yaml because it is marked as deprecated. No new releases will be made.
+  ], 
   customManagers: [
     {
       customType: 'regex',

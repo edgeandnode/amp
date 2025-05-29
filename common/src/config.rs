@@ -5,7 +5,7 @@ use datafusion::{
     execution::{
         disk_manager::DiskManagerConfig,
         memory_pool::{FairSpillPool, GreedyMemoryPool, MemoryPool},
-        runtime_env::{RuntimeEnv, RuntimeEnvBuilder},
+        runtime_env::RuntimeEnvBuilder,
     },
 };
 use figment::{
@@ -13,10 +13,11 @@ use figment::{
     Figment,
 };
 use fs_err as fs;
+use js_runtime::isolate_pool::IsolatePool;
 use metadata_db::{test_metadata_db, MetadataDb, ALLOW_TEMP_DB, KEEP_TEMP_DIRS};
 use serde::Deserialize;
 
-use crate::{BoxError, Store};
+use crate::{query_context::QueryEnv, BoxError, Store};
 
 #[derive(Debug)]
 pub struct Config {
@@ -98,7 +99,7 @@ impl Config {
         })
     }
 
-    pub fn make_runtime_env(&self) -> Result<RuntimeEnv, DataFusionError> {
+    pub fn make_query_env(&self) -> Result<QueryEnv, DataFusionError> {
         use datafusion::execution::cache::{
             cache_manager::CacheManagerConfig, cache_unit::DefaultFileStatisticsCache,
         };
@@ -134,7 +135,12 @@ impl Config {
             ..Default::default()
         };
 
-        runtime_config.build()
+        let runtime_env = runtime_config.build()?;
+        let isolate_pool = IsolatePool::new();
+        return Ok(QueryEnv {
+            df_env: Arc::new(runtime_env),
+            isolate_pool,
+        });
     }
 
     pub async fn metadata_db(&self) -> Result<MetadataDb, BoxError> {

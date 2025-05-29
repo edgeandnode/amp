@@ -3,10 +3,7 @@ use std::sync::Arc;
 use common::{
     catalog::physical::PhysicalTable, config::Config, manifest::Manifest, BoxError, Dataset,
 };
-use dump::{
-    job::JobDesc,
-    worker::{Action, WorkerAction, WORKER_ACTIONS_PG_CHANNEL},
-};
+use dump::job::JobDesc;
 use metadata_db::MetadataDb;
 use rand::seq::IndexedRandom as _;
 
@@ -57,21 +54,8 @@ impl Scheduler {
             dataset: dataset.name,
         })?;
 
-        let job_id = self
-            .metadata_db
-            .schedule_job(node_id, &job_desc, &locations)
-            .await?;
-
-        let action = WorkerAction {
-            node_id: node_id.to_string(),
-            job_id,
-            action: Action::Start,
-        };
         self.metadata_db
-            .notify(
-                WORKER_ACTIONS_PG_CHANNEL,
-                &serde_json::to_string(&action).unwrap(),
-            )
+            .schedule_job(node_id, &job_desc, &locations)
             .await?;
 
         Ok(())

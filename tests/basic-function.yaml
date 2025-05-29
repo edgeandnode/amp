@@ -1,0 +1,6 @@
+- name: select_basic_function
+  query: SELECT basic_function.testString()
+  results: |
+    [
+      {"col_name": "I'm a function"}
+    ]

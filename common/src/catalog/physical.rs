@@ -17,7 +17,10 @@ use uuid::Uuid;
 
 use super::logical::Table;
 use crate::{
-    meta_tables::scanned_ranges::{self, FileMetadata, ScannedRange},
+    metadata::{
+        parquet::{ParquetMeta, PARQUET_METADATA_KEY},
+        FileMetadata,
+    },
     store::{infer_object_store, Store},
     BoxError, Dataset,
 };
@@ -76,13 +79,9 @@ impl PhysicalDataset {
         Self { dataset, tables }
     }
 
-    /// All tables in the catalog, except meta tables.
+    /// All tables in the catalog
     pub fn tables(&self) -> impl Iterator<Item = &PhysicalTable> {
-        self.tables.iter().filter(|table| !table.is_meta())
-    }
-
-    pub fn meta_tables(&self) -> impl Iterator<Item = &PhysicalTable> {
-        self.tables.iter().filter(|table| table.is_meta())
+        self.tables.iter()
     }
 
     pub fn name(&self) -> &str {
@@ -295,18 +294,18 @@ impl PhysicalTable {
         while let Some(object_meta) = file_stream.try_next().await? {
             let (file_name, nozzle_meta) =
                 nozzle_meta_from_object_meta(&object_meta, object_store.clone()).await?;
-            let nozzle_meta_json = serde_json::to_value(nozzle_meta)?;
+            let parquet_meta_json = serde_json::to_value(nozzle_meta)?;
             let object_size = object_meta.size;
             let object_e_tag = object_meta.e_tag;
             let object_version = object_meta.version;
             metadata_db
-                .insert_file_metadata(
+                .insert_metadata(
                     location_id,
                     file_name,
                     object_size,
                     object_e_tag,
                     object_version,
-                    nozzle_meta_json,
+                    parquet_meta_json,
                 )
                 .await?;
         }
@@ -341,10 +340,6 @@ impl PhysicalTable {
     pub fn catalog_schema(&self) -> &str {
         // Unwrap: This is always constructed with a schema.
         &self.table_ref.schema().unwrap()
-    }
-
-    pub fn is_meta(&self) -> bool {
-        self.table.is_meta()
     }
 
     pub fn schema(&self) -> SchemaRef {
@@ -399,8 +394,8 @@ impl PhysicalTable {
         self.stream_file_metadata()
             .map_ok(
                 |FileMetadata {
-                     scanned_range:
-                         ScannedRange {
+                     parquet_meta:
+                         ParquetMeta {
                              range_start,
                              range_end,
                              ..
@@ -544,7 +539,7 @@ pub async fn list_revisions(
 async fn nozzle_meta_from_object_meta(
     object_meta: &ObjectMeta,
     object_store: Arc<dyn ObjectStore>,
-) -> Result<(String, ScannedRange), BoxError> {
+) -> Result<(String, ParquetMeta), BoxError> {
     let mut reader = ParquetObjectReader::new(object_store.clone(), object_meta.location.clone())
         .with_file_size(object_meta.size);
     let parquet_metadata = reader.get_metadata(None).await?;
@@ -556,29 +551,28 @@ async fn nozzle_meta_from_object_meta(
                 "Unable to fetch Key Value metadata for file {}",
                 &object_meta.location
             )))?;
-    let scanned_range_key_value_pair = key_value_metadata
+    let parquet_meta_key_value_pair = key_value_metadata
         .into_iter()
-        .find(|key_value| key_value.key.as_str() == scanned_ranges::METADATA_KEY)
+        .find(|key_value| key_value.key.as_str() == PARQUET_METADATA_KEY)
         .ok_or(crate::ArrowError::ParquetError(format!(
             "Missing key: {} in file metadata for file {}",
-            scanned_ranges::METADATA_KEY,
-            &object_meta.location
+            PARQUET_METADATA_KEY, &object_meta.location
         )))?;
-    let scanned_range_json =
-        scanned_range_key_value_pair
+    let parquet_meta_json =
+        parquet_meta_key_value_pair
             .value
             .as_ref()
             .ok_or(crate::ArrowError::ParquetError(format!(
-                "Unable to parse ScannedRange from empty value in metadata for file {}",
+                "Unable to parse ParquetMeta from empty value in metadata for file {}",
                 &object_meta.location
             )))?;
-    let scanned_range: ScannedRange = serde_json::from_str(scanned_range_json).map_err(|e| {
+    let parquet_meta: ParquetMeta = serde_json::from_str(parquet_meta_json).map_err(|e| {
         crate::ArrowError::ParseError(format!(
-            "Unable to parse ScannedRange from key value metadata for file {}: {}",
+            "Unable to parse ParquetMeta from key value metadata for file {}: {}",
             &object_meta.location, e
         ))
     })?;
     // Unwrap: We know this is a path with valid file name because we just opened it
     let file_name = object_meta.location.filename().unwrap().to_string();
-    Ok((file_name, scanned_range))
+    Ok((file_name, parquet_meta))
 }

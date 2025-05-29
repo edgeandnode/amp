@@ -32,6 +32,7 @@ use datafusion_proto::{
     logical_plan::LogicalExtensionCodec,
 };
 use futures::TryStreamExt;
+use js_runtime::isolate_pool::IsolatePool;
 use metadata_db::TableId;
 use thiserror::Error;
 use tracing::{debug, instrument};
@@ -40,7 +41,9 @@ use url::Url;
 use crate::{
     arrow, attestation,
     catalog::physical::{Catalog, PhysicalTable},
-    evm::udfs::{EvmDecode, EvmDecodeFunctionData, EvmEncodeParams, EvmEncodeType, EvmTopic},
+    evm::udfs::{
+        EvmDecode, EvmDecodeParams, EvmDecodeType, EvmEncodeParams, EvmEncodeType, EvmTopic,
+    },
     stream_helpers::is_streaming,
     BoxError, Table,
 };
@@ -195,15 +198,22 @@ impl PlanningContext {
     }
 }
 
+/// Handle to the environment resources used by the query engine.
+#[derive(Clone, Debug)]
+pub struct QueryEnv {
+    pub df_env: Arc<RuntimeEnv>,
+    pub isolate_pool: IsolatePool,
+}
+
 /// A context for executing queries against a catalog.
 pub struct QueryContext {
-    env: Arc<RuntimeEnv>,
+    env: QueryEnv,
     session_config: SessionConfig,
     catalog: Catalog,
 }
 
 impl QueryContext {
-    pub fn for_catalog(catalog: Catalog, env: Arc<RuntimeEnv>) -> Result<Self, Error> {
+    pub fn for_catalog(catalog: Catalog, env: QueryEnv) -> Result<Self, Error> {
         // This contains various tuning options for the query engine.
         // Using `from_env` allows tinkering without re-compiling.
         let mut session_config = SessionConfig::from_env().map_err(Error::ConfigError)?;
@@ -308,7 +318,7 @@ impl QueryContext {
     async fn datafusion_ctx(&self) -> Result<SessionContext, Error> {
         let state = SessionStateBuilder::new()
             .with_config(self.session_config.clone())
-            .with_runtime_env(self.env.clone())
+            .with_runtime_env(self.env.df_env.clone())
             .with_default_features()
             .with_physical_optimizer_rule(Arc::new(AsyncFuncRule))
             .build();
@@ -368,6 +378,7 @@ impl QueryContext {
     }
 }
 
+#[instrument(skip_all, err)]
 async fn sql_to_plan(ctx: &SessionContext, query: parser::Statement) -> Result<LogicalPlan, Error> {
     let plan = ctx
         .state()
@@ -492,10 +503,10 @@ fn udfs() -> Vec<ScalarUDF> {
     vec![
         EvmDecode::new().into(),
         EvmTopic::new().into(),
-        EvmDecodeFunctionData::evm_decode_params().into(),
-        EvmDecodeFunctionData::evm_decode_results().into(),
         EvmEncodeParams::new().into(),
+        EvmDecodeParams::new().into(),
         EvmEncodeType::new().into(),
+        EvmDecodeType::new().into(),
     ]
 }
 
