@@ -5,7 +5,7 @@ use std::{
 };
 
 use common::{
-    catalog::physical::{Catalog, PhysicalDataset},
+    catalog::physical::{Catalog, PhysicalDataset, PhysicalTable},
     config::Config,
     metadata::block_ranges_by_table,
     multirange::MultiRange,
@@ -14,6 +14,7 @@ use common::{
     BoxError,
 };
 use dataset_store::{DatasetKind, DatasetStore};
+use metadata_db::LocationId;
 use object_store::ObjectMeta;
 
 mod block_ranges;
@@ -32,12 +33,14 @@ pub async fn dump_dataset(
     start: i64,
     end_block: Option<i64>,
 ) -> Result<(), BoxError> {
-    let catalog = Catalog::new(vec![dataset.clone()]);
+    let catalog = Catalog::new(dataset.tables().cloned().collect());
     let env = config.make_query_env()?;
     let query_ctx = Arc::new(QueryContext::for_catalog(catalog, env.clone())?);
 
     // Ensure consistency before starting the dump procedure.
-    consistency_check(dataset).await?;
+    for table in dataset.tables() {
+        consistency_check(table).await?;
+    }
 
     // Query the block ranges, we might already have some ranges if this is not the first dump run
     // for this dataset.
@@ -118,61 +121,56 @@ pub async fn dump_dataset(
 ///
 /// Check: metadata entries do not contain overlapping ranges.
 /// On fail: Return a `CorruptedDataset` error.
-async fn consistency_check(
-    physical_dataset: &PhysicalDataset,
-) -> Result<(), ConsistencyCheckError> {
+async fn consistency_check(table: &PhysicalTable) -> Result<(), ConsistencyCheckError> {
     // See also: metadata-consistency
 
-    for table in physical_dataset.tables() {
-        let dataset_name = table.catalog_schema().to_string();
-        let tbl = table.table_id();
-        // Check that bock ranges do not contain overlapping ranges.
-        {
-            let ranges = table.ranges().await.map_err(|err| {
-                ConsistencyCheckError::CorruptedDataset(table.catalog_schema().to_string(), err)
-            })?;
-            if let Err(e) = MultiRange::from_ranges(ranges) {
-                return Err(ConsistencyCheckError::CorruptedDataset(
-                    dataset_name,
-                    e.into(),
-                ));
-            }
-        }
+    let location_id = table.location_id();
 
-        let registered_files = table
-            .file_names()
+    // Check that bock ranges do not contain overlapping ranges.
+    {
+        let ranges = table
+            .ranges()
             .await
-            .map(BTreeSet::from_iter)
-            .map_err(|err| ConsistencyCheckError::CorruptedDataset(tbl.dataset.to_string(), err))?;
-
-        let store = table.object_store();
-        let path = table.path();
-
-        // Collect all stored files whose filename matches `is_dump_file`.
-        let stored_files: BTreeMap<String, ObjectMeta> =
-            table.parquet_files().await.map_err(|err| {
-                ConsistencyCheckError::CorruptedDataset(physical_dataset.name().to_string(), err)
-            })?;
-
-        for (filename, object_meta) in &stored_files {
-            if !registered_files.contains(filename) {
-                // This file was written by a dump job but it is not present in the metadata DB,
-                // so it is an orphaned file. Delete it.
-                tracing::warn!("Deleting orphaned file: {}", object_meta.location);
-                store.delete(&object_meta.location).await?;
-            }
-        }
-
-        // Check for files in the metadata DB that do not exist in the store.
-        for filename in registered_files {
-            if !stored_files.contains_key(&filename) {
-                let err =
-                    format!("file `{path}/{filename}` is registered in metadata DB but is not in the data store")
-                        .into();
-                return Err(ConsistencyCheckError::CorruptedDataset(dataset_name, err));
-            }
+            .map_err(|err| ConsistencyCheckError::CorruptedTable(location_id, err))?;
+        if let Err(e) = MultiRange::from_ranges(ranges) {
+            return Err(ConsistencyCheckError::CorruptedTable(location_id, e.into()));
         }
     }
+
+    let registered_files = table
+        .file_names()
+        .await
+        .map(BTreeSet::from_iter)
+        .map_err(|err| ConsistencyCheckError::CorruptedTable(location_id, err))?;
+
+    let store = table.object_store();
+    let path = table.path();
+
+    // Collect all stored files whose filename matches `is_dump_file`.
+    let stored_files: BTreeMap<String, ObjectMeta> = table
+        .parquet_files()
+        .await
+        .map_err(|err| ConsistencyCheckError::CorruptedTable(location_id, err))?;
+
+    for (filename, object_meta) in &stored_files {
+        if !registered_files.contains(filename) {
+            // This file was written by a dump job but it is not present in the metadata DB,
+            // so it is an orphaned file. Delete it.
+            tracing::warn!("Deleting orphaned file: {}", object_meta.location);
+            store.delete(&object_meta.location).await?;
+        }
+    }
+
+    // Check for files in the metadata DB that do not exist in the store.
+    for filename in registered_files {
+        if !stored_files.contains_key(&filename) {
+            let err =
+                    format!("file `{path}/{filename}` is registered in metadata DB but is not in the data store")
+                        .into();
+            return Err(ConsistencyCheckError::CorruptedTable(location_id, err));
+        }
+    }
+
     Ok(())
 }
 
@@ -186,6 +184,6 @@ enum ConsistencyCheckError {
     #[error("object store error: {0}")]
     ObjectStoreError(#[from] object_store::Error),
 
-    #[error("dataset {0} is corrupted: {1}")]
-    CorruptedDataset(String, BoxError),
+    #[error("table {0} is corrupted: {1}")]
+    CorruptedTable(LocationId, BoxError),
 }

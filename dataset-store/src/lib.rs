@@ -9,7 +9,7 @@ use std::{
 
 use async_udf::functions::AsyncScalarUDF;
 use common::{
-    catalog::physical::{Catalog, PhysicalDataset, PhysicalTable},
+    catalog::physical::{Catalog, PhysicalTable},
     config::Config,
     evm::udfs::EthCall,
     manifest::{Manifest, TableInput},
@@ -529,7 +529,6 @@ impl DatasetStore {
         let mut catalog = Catalog::empty();
         for dataset_name in dataset_names {
             let dataset = self.load_dataset(&dataset_name).await?;
-            let mut tables = Vec::with_capacity(dataset.dataset.tables.len());
 
             for table in Arc::new(dataset.dataset.clone()).resolved_tables() {
                 let physical_table = PhysicalTable::get_or_restore_active_revision(
@@ -549,10 +548,8 @@ impl DatasetStore {
                         .join(&format!("{}/{}/", dataset_name, table.name()))
                         .unwrap()
                 )))?;
-                tables.push(physical_table);
+                catalog.add_table(physical_table);
             }
-            let physical_dataset = PhysicalDataset::new(dataset.dataset.clone(), tables);
-            catalog.add_dataset(physical_dataset);
 
             // Create the `eth_call` UDF for the dataset.
             let udf = self

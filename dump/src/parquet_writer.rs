@@ -38,7 +38,7 @@ impl RawDatasetWriter {
         block_ranges_by_table: BTreeMap<String, MultiRange>,
     ) -> Result<Self, BoxError> {
         let mut writers = BTreeMap::new();
-        for table in dataset_ctx.catalog().all_tables() {
+        for table in dataset_ctx.catalog().tables() {
             // Unwrap: `block_ranges_by_table` contains an entry for each table.
             let table_name = table.table_name();
             let block_ranges = block_ranges_by_table.get(table_name).unwrap().clone();

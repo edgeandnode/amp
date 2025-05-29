@@ -26,7 +26,7 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub struct Catalog {
-    datasets: Vec<PhysicalDataset>,
+    tables: Vec<PhysicalTable>,
     /// User-defined functions (UDFs) specific to this catalog.
     udfs: Vec<ScalarUDF>,
 }
@@ -34,36 +34,32 @@ pub struct Catalog {
 impl Catalog {
     pub fn empty() -> Self {
         Catalog {
-            datasets: vec![],
+            tables: vec![],
             udfs: vec![],
         }
     }
 
-    pub fn new(datasets: Vec<PhysicalDataset>) -> Self {
+    pub fn new(tables: Vec<PhysicalTable>) -> Self {
         Catalog {
-            datasets,
+            tables,
             udfs: vec![],
         }
     }
 
-    pub fn add_dataset(&mut self, dataset: PhysicalDataset) {
-        self.datasets.push(dataset);
+    pub fn add_table(&mut self, dataset: PhysicalTable) {
+        self.tables.push(dataset);
     }
 
     pub fn add_udf(&mut self, udf: ScalarUDF) {
         self.udfs.push(udf);
     }
 
-    pub fn datasets(&self) -> &[PhysicalDataset] {
-        &self.datasets
+    pub fn tables(&self) -> &[PhysicalTable] {
+        &self.tables
     }
 
     pub fn udfs(&self) -> &[ScalarUDF] {
         &self.udfs
-    }
-
-    pub fn all_tables(&self) -> impl Iterator<Item = &PhysicalTable> {
-        self.datasets.iter().flat_map(|dataset| dataset.tables())
     }
 }
 

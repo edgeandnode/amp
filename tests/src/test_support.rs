@@ -85,10 +85,10 @@ impl SnapshotContext {
         let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
         let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
         let dataset = dataset_store.load_dataset(dataset).await?.dataset;
-        let dataset_name = &dataset.name;
+        let dataset_name = dataset.name.clone();
         let data_store = config.data_store.clone();
         let mut tables = Vec::new();
-        for table in Arc::new(dataset.clone()).resolved_tables() {
+        for table in Arc::new(dataset).resolved_tables() {
             tables.push(
                 PhysicalTable::restore_latest_revision(
                     &table,
@@ -108,8 +108,7 @@ impl SnapshotContext {
                 ),
             );
         }
-        let dataset: PhysicalDataset = PhysicalDataset::new(dataset, tables);
-        let catalog = Catalog::new(vec![dataset]);
+        let catalog = Catalog::new(tables);
         let ctx: QueryContext = QueryContext::for_catalog(catalog, config.make_query_env()?)?;
         Ok(Self {
             ctx,
@@ -161,7 +160,7 @@ impl SnapshotContext {
     async fn check_block_range_eq(&self, blessed: &SnapshotContext) -> Result<(), BoxError> {
         let blessed_block_ranges = block_ranges_by_table(&blessed.ctx).await?;
 
-        for table in self.ctx.catalog().all_tables() {
+        for table in self.ctx.catalog().tables() {
             let table_name = table.table_name().to_string();
             let ranges = table.ranges().await?;
             let expected_range = MultiRange::from_ranges(ranges)?;
@@ -181,7 +180,7 @@ impl SnapshotContext {
     pub async fn assert_eq(&self, other: &SnapshotContext) -> Result<(), BoxError> {
         self.check_block_range_eq(other).await?;
 
-        for table in self.ctx.catalog().all_tables() {
+        for table in self.ctx.catalog().tables() {
             let query = parse_sql(&format!(
                 "select * from {} order by block_num",
                 table.table_ref()
@@ -275,7 +274,11 @@ async fn dump(
         )
         .await?,
     );
-    let catalog = Catalog::new(datasets);
+
+    let mut catalog = Catalog::empty();
+    for table in datasets.iter().flat_map(|d| d.tables()) {
+        catalog.add_table(table.clone());
+    }
     Ok(catalog)
 }
 

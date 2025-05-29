@@ -4,7 +4,7 @@ pub mod metrics;
 use std::sync::Arc;
 
 use common::{
-    catalog::physical::{Catalog, PhysicalDataset, PhysicalTable},
+    catalog::physical::{Catalog, PhysicalTable},
     query_context::QueryEnv,
     BoxError, QueryContext,
 };
@@ -41,7 +41,7 @@ pub async fn dump_check(
         let table = PhysicalTable::new(table.clone(), url, location_id, metadata_db.clone())?;
         tables.push(table);
     }
-    let catalog = Catalog::new(vec![PhysicalDataset::new(dataset.clone(), tables)]);
+    let catalog = Catalog::new(tables);
     let ctx = Arc::new(QueryContext::for_catalog(catalog, env.clone())?);
 
     let jobs = {
