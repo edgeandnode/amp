@@ -19,7 +19,7 @@ pub(crate) fn pb_to_rows(
     message_descriptor: &MessageDescriptor,
     value: &[u8],
     schemas: &[Table],
-    block_num: u64,
+    block: &RawTableBlock,
 ) -> Result<RawDatasetRows, anyhow::Error> {
     let dynamic_message = DynamicMessage::decode(message_descriptor.clone(), value)
         .context("failed to decode module output message")?;
@@ -38,18 +38,18 @@ pub(crate) fn pb_to_rows(
             }
 
             let table = table.unwrap();
-            let rows = message_to_rows(list, table.schema.clone(), block_num);
+            let rows = message_to_rows(list, table.schema.clone(), block.number);
             if let Err(err) = rows {
                 return Some(Err(err.into()));
             }
 
-            let block = RawTableBlock {
-                number: block_num,
-                network: table.network.clone(),
-            };
             Some(
-                RawTableRows::new(table.clone(), block, rows.unwrap().columns().to_vec())
-                    .map_err(|e| anyhow!(e)),
+                RawTableRows::new(
+                    table.clone(),
+                    block.clone(),
+                    rows.unwrap().columns().to_vec(),
+                )
+                .map_err(|e| anyhow!(e)),
             )
         })
         .collect();

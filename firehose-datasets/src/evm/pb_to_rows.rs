@@ -198,6 +198,7 @@ pub fn protobufs_to_rows(
     let block = RawTableBlock {
         number: header.block_num,
         network: network.to_string(),
+        hash: header.hash.into(),
     };
     let header_row = {
         let mut builder = BlockRowsBuilder::with_capacity(1);

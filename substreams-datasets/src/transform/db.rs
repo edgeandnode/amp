@@ -27,7 +27,7 @@ use crate::proto::sf::substreams::{
 pub(crate) fn pb_to_rows(
     value: &[u8],
     schemas: &[Table],
-    block_num: u64,
+    block: &RawTableBlock,
 ) -> Result<RawDatasetRows, anyhow::Error> {
     let changes = DatabaseChanges::decode(value).context("failed to decode dbChanges output")?;
     let tables: Result<Vec<_>, anyhow::Error> = schemas
@@ -45,22 +45,22 @@ pub(crate) fn pb_to_rows(
             if table_changes.is_empty() {
                 return None;
             }
-            let rows = table_changes_to_rows(&table_changes, table.schema.clone(), block_num);
+            let rows = table_changes_to_rows(&table_changes, table.schema.clone(), block.number);
             if let Err(err) = rows {
                 return Some(Err(err
                     .context(format!(
                         "Processing table changes for '{}' at block {}",
-                        table.name, block_num
+                        table.name, block.number
                     ))
                     .into()));
             }
-            let block = RawTableBlock {
-                number: block_num,
-                network: table.network.clone(),
-            };
             Some(
-                RawTableRows::new(table.clone(), block, rows.unwrap().columns().to_vec())
-                    .map_err(|e| anyhow!(e)),
+                RawTableRows::new(
+                    table.clone(),
+                    block.clone(),
+                    rows.unwrap().columns().to_vec(),
+                )
+                .map_err(|e| anyhow!(e)),
             )
         })
         .collect();

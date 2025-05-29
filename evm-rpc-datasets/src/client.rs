@@ -303,6 +303,7 @@ fn rpc_to_rows(
     let block = RawTableBlock {
         number: header.block_num,
         network: network.to_string(),
+        hash: header.hash.into(),
     };
 
     let header_row = {

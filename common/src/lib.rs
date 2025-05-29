@@ -18,6 +18,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 
+use alloy::primitives::BlockHash;
 use arrow::{array::FixedSizeBinaryArray, datatypes::DataType};
 pub use arrow_helpers::*;
 pub use catalog::logical::*;
@@ -91,6 +92,7 @@ pub struct RawTableRows {
 pub struct RawTableBlock {
     pub number: BlockNum,
     pub network: String,
+    pub hash: BlockHash,
 }
 
 impl RawTableRows {

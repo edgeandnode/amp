@@ -260,6 +260,7 @@ fn default_to_arrow() {
             .build(RawTableBlock {
                 number: call.block_num,
                 network: "test_network".to_string(),
+                hash: call.block_hash.into(),
             })
             .unwrap()
     };
