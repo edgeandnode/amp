@@ -5,7 +5,7 @@ use std::{
 };
 
 use common::{
-    catalog::physical::{PhysicalDataset, PhysicalTable},
+    catalog::physical::PhysicalTable,
     config::Config,
     manifest,
     parquet::basic::{Compression, ZstdLevel},
@@ -68,14 +68,14 @@ pub async fn dump(
                 );
             }
         }
-        physical_datasets.push(PhysicalDataset::new(dataset, tables));
+        physical_datasets.push(tables);
     }
 
     match run_every {
         None => {
-            for dataset in physical_datasets {
-                dump::dump_dataset(
-                    &dataset,
+            for tables in physical_datasets {
+                dump::dump_tables(
+                    &tables,
                     &dataset_store,
                     &config,
                     n_jobs,
@@ -91,9 +91,9 @@ pub async fn dump(
         Some(mut run_every) => loop {
             run_every.tick().await;
 
-            for dataset in &physical_datasets {
-                dump::dump_dataset(
-                    dataset,
+            for tables in &physical_datasets {
+                dump::dump_tables(
+                    tables,
                     &dataset_store,
                     &config,
                     n_jobs,

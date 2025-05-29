@@ -64,35 +64,6 @@ impl Catalog {
 }
 
 #[derive(Debug, Clone)]
-pub struct PhysicalDataset {
-    dataset: Dataset,
-    tables: Vec<PhysicalTable>,
-}
-
-impl PhysicalDataset {
-    pub fn new(dataset: Dataset, tables: Vec<PhysicalTable>) -> Self {
-        Self { dataset, tables }
-    }
-
-    /// All tables in the catalog
-    pub fn tables(&self) -> impl Iterator<Item = &PhysicalTable> {
-        self.tables.iter()
-    }
-
-    pub fn name(&self) -> &str {
-        &self.dataset.name
-    }
-
-    pub fn kind(&self) -> &str {
-        &self.dataset.kind
-    }
-
-    pub fn location_ids(&self) -> Vec<LocationId> {
-        self.tables.iter().map(|t| t.location_id()).collect()
-    }
-}
-
-#[derive(Debug, Clone)]
 pub struct PhysicalTable {
     /// Logical table representation.
     table: ResolvedTable,
@@ -303,6 +274,10 @@ impl PhysicalTable {
 }
 
 impl PhysicalTable {
+    pub fn dataset(&self) -> &Dataset {
+        self.table.dataset()
+    }
+
     pub fn table_name(&self) -> &str {
         &self.table.name()
     }

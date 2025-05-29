@@ -17,7 +17,7 @@ use common::{
         datatypes::DataType,
         json::writer::JsonArray,
     },
-    catalog::physical::{Catalog, PhysicalDataset, PhysicalTable},
+    catalog::physical::{Catalog, PhysicalTable},
     config::{Addrs, Config, FigmentJson},
     metadata::block_ranges_by_table,
     multirange::MultiRange,
@@ -26,7 +26,7 @@ use common::{
     BoxError, QueryContext,
 };
 use dataset_store::DatasetStore;
-use dump::{dump_dataset, parquet_opts};
+use dump::{dump_tables, parquet_opts};
 use figment::providers::Format as _;
 use fs_err as fs;
 use futures::{stream::TryStreamExt, StreamExt as _};
@@ -245,10 +245,10 @@ async fn dump(
 ) -> Result<Catalog, BoxError> {
     let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
     let dataset_store = DatasetStore::new(config.clone(), metadata_db);
-    let mut datasets = Vec::new();
+    let mut tables = Vec::new();
     // First dump dependencies, then main dataset
     for dataset_name in dependencies {
-        datasets.push(
+        tables.push(
             dump_test_dataset(
                 dataset_name,
                 &*config,
@@ -262,7 +262,7 @@ async fn dump(
         );
     }
 
-    datasets.push(
+    tables.push(
         dump_test_dataset(
             dataset_name,
             &*config,
@@ -276,8 +276,8 @@ async fn dump(
     );
 
     let mut catalog = Catalog::empty();
-    for table in datasets.iter().flat_map(|d| d.tables()) {
-        catalog.add_table(table.clone());
+    for table in tables.into_iter().flatten() {
+        catalog.add_table(table);
     }
     Ok(catalog)
 }
@@ -321,7 +321,7 @@ async fn dump_test_dataset(
     end: u64,
     n_jobs: u16,
     clear: bool,
-) -> Result<PhysicalDataset, BoxError> {
+) -> Result<Vec<PhysicalTable>, BoxError> {
     let partition_size = 1024 * 1024; // 100 kB
     let input_batch_block_size = 100_000;
     let compression = Compression::ZSTD(ZstdLevel::try_new(1).unwrap());
@@ -334,7 +334,7 @@ async fn dump_test_dataset(
     }
     let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
     let data_store = config.data_store.clone();
-    let dataset = {
+    let tables = {
         let dataset = dataset_store.load_dataset(dataset_name).await?.dataset;
         let mut tables = Vec::new();
         for table in Arc::new(dataset.clone()).resolved_tables() {
@@ -351,11 +351,11 @@ async fn dump_test_dataset(
 
             tables.push(physical_table);
         }
-        PhysicalDataset::new(dataset, tables)
+        tables
     };
 
-    dump_dataset(
-        &dataset,
+    dump_tables(
+        &tables,
         dataset_store,
         config,
         n_jobs,
@@ -367,7 +367,7 @@ async fn dump_test_dataset(
     )
     .await?;
 
-    Ok(dataset)
+    Ok(tables)
 }
 
 pub async fn check_provider_file(filename: &str) {

@@ -5,7 +5,7 @@ use std::{
 };
 
 use common::{
-    catalog::physical::{Catalog, PhysicalDataset, PhysicalTable},
+    catalog::physical::{Catalog, PhysicalTable},
     config::Config,
     metadata::block_ranges_by_table,
     multirange::MultiRange,
@@ -21,9 +21,9 @@ mod block_ranges;
 mod raw_dataset;
 mod sql_dataset;
 
-/// Dumps a dataset
-pub async fn dump_dataset(
-    dataset: &PhysicalDataset,
+/// Dumps a set of tables. All tables must belong to the same dataset.
+pub async fn dump_tables(
+    tables: &[PhysicalTable],
     dataset_store: &Arc<DatasetStore>,
     config: &Config,
     n_jobs: u16,
@@ -33,12 +33,27 @@ pub async fn dump_dataset(
     start: i64,
     end_block: Option<i64>,
 ) -> Result<(), BoxError> {
-    let catalog = Catalog::new(dataset.tables().cloned().collect());
+    if tables.is_empty() {
+        return Ok(());
+    }
+
+    // Check that all tables belong to the same dataset.
+    let dataset = {
+        let ds = tables[0].table().dataset();
+        for table in tables {
+            if table.dataset().name != ds.name {
+                return Err(format!("Table {} is not in {}", table.table_ref(), ds.name).into());
+            }
+        }
+        ds
+    };
+
+    let catalog = Catalog::new(tables.to_vec());
     let env = config.make_query_env()?;
     let query_ctx = Arc::new(QueryContext::for_catalog(catalog, env.clone())?);
 
     // Ensure consistency before starting the dump procedure.
-    for table in dataset.tables() {
+    for table in tables {
         consistency_check(table).await?;
     }
 
@@ -58,13 +73,13 @@ pub async fn dump_dataset(
         );
     }
 
-    let kind = DatasetKind::from_str(dataset.kind())?;
+    let kind = DatasetKind::from_str(&dataset.kind)?;
     match kind {
         DatasetKind::EvmRpc | DatasetKind::Firehose | DatasetKind::Substreams => {
             raw_dataset::dump(
                 n_jobs,
                 query_ctx,
-                dataset.name(),
+                &dataset.name,
                 dataset_store,
                 block_ranges_by_table,
                 partition_size,
@@ -80,10 +95,8 @@ pub async fn dump_dataset(
             }
 
             let dataset = match kind {
-                DatasetKind::Sql => dataset_store.load_sql_dataset(dataset.name()).await?,
-                DatasetKind::Manifest => {
-                    dataset_store.load_manifest_dataset(dataset.name()).await?
-                }
+                DatasetKind::Sql => dataset_store.load_sql_dataset(&dataset.name).await?,
+                DatasetKind::Manifest => dataset_store.load_manifest_dataset(&dataset.name).await?,
                 _ => unreachable!(),
             };
 
@@ -103,7 +116,7 @@ pub async fn dump_dataset(
         }
     }
 
-    tracing::info!("dump of dataset {} completed successfully", dataset.name());
+    tracing::info!("dump of dataset {} completed successfully", dataset.name);
 
     Ok(())
 }

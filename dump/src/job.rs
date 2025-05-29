@@ -4,18 +4,14 @@ use std::{
     sync::Arc,
 };
 
-use common::{
-    catalog::physical::{PhysicalDataset, PhysicalTable},
-    config::Config,
-    BoxError,
-};
+use common::{catalog::physical::PhysicalTable, config::Config, BoxError};
 use dataset_store::DatasetStore;
 use metadata_db::{JobId, MetadataDb};
 use serde::{Deserialize, Serialize};
-use tracing::{debug, instrument};
+use tracing::instrument;
 
 use crate::{
-    core::dump_dataset, default_input_batch_size_blocks, default_parquet_opts,
+    core::dump_tables, default_input_batch_size_blocks, default_parquet_opts,
     default_partition_size,
 };
 
@@ -30,14 +26,15 @@ use crate::{
 /// Currently, the "dump job" is what have implemented so that's what we have here.
 #[derive(Debug, Clone)]
 pub enum Job {
-    DumpDataset { dataset: PhysicalDataset },
+    /// All tables must belong to the same dataset.
+    DumpTables { tables: Vec<PhysicalTable> },
 }
 
 impl fmt::Display for Job {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Job::DumpDataset { dataset } => {
-                write!(f, "DumpDataset({})", dataset.name())
+            Job::DumpTables { tables } => {
+                write!(f, "DumpTables({})", tables.len())
             }
         }
     }
@@ -106,8 +103,8 @@ impl Job {
                     )?);
                 }
 
-                Ok(Job::DumpDataset {
-                    dataset: PhysicalDataset::new(dataset, physical_tables),
+                Ok(Job::DumpTables {
+                    tables: physical_tables,
                 })
             }
         }
@@ -119,17 +116,11 @@ impl Job {
         metadata_db: Arc<MetadataDb>,
     ) -> Result<(), BoxError> {
         match self {
-            Job::DumpDataset { dataset } => {
-                debug!(
-                    "Starting dump job for dataset {} with location ids {:?}",
-                    dataset.name(),
-                    dataset.location_ids()
-                );
-
+            Job::DumpTables { tables } => {
                 let dataset_store = DatasetStore::new(config.clone(), metadata_db);
 
-                dump_dataset(
-                    dataset,
+                dump_tables(
+                    tables,
                     &dataset_store.clone(),
                     &config.clone(),
                     1,
