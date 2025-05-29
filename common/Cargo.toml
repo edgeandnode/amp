@@ -8,7 +8,6 @@ metadata-db = { path = "../metadata-db" }
 alloy.workspace = true
 atty.workspace = true
 bytes.workspace = true
-chrono.workspace = true
 datafusion-proto.workspace = true
 datafusion.workspace = true
 figment.workspace = true
