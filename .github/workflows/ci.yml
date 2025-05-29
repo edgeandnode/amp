@@ -48,7 +48,7 @@ jobs:
           version: ^0.9
 
       - name: Unit tests
-        run: cargo test --verbose --workspace --exclude tests -- --nocapture
+        run: just test-unit --verbose
 
   integration-tests:
     name: Integration tests
@@ -102,7 +102,7 @@ jobs:
           RPC_ETH_MAINNET_URL: ${{ secrets.RPC_ETH_MAINNET_URL }}
 
       - name: Integration tests
-        run: cargo test --verbose -p tests -- --nocapture
+        run: just test-it --verbose
 
   rustfmt:
     name: Check rustfmt style
@@ -119,8 +119,11 @@ jobs:
           cache: false
           rustflags: ''
 
+      - name: Setup just
+        uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v3
+
       - name: Check formatting
-        run: cargo +nightly fmt --all -- --check
+        run: just fmt-check
 
   release-check:
     name: Build in release mode
@@ -138,8 +141,11 @@ jobs:
           cache: false
           rustflags: ''
 
+      - name: Setup just
+        uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v3
+
       - name: Cargo check (release)
-        run: cargo check --release
+        run: just check --release
 
   typescript:
     name: TypeScript
