@@ -250,9 +250,8 @@ mod test {
     use alloy::primitives::BlockHash;
     use rand::{rngs::StdRng, seq::SliceRandom, Rng as _, RngCore, SeedableRng};
 
-    use crate::BlockNum;
-
     use super::{BlockRange, TableRanges};
+    use crate::BlockNum;
 
     #[test]
     fn canonical_segments() {
