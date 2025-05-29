@@ -432,7 +432,7 @@ impl PhysicalTable {
     /// Return all parquet files for this table. If `dump_only` is `true`,
     /// only files of the form `<number>.parquet` will be returned. The
     /// result is a map from filename to object metadata.
-    pub async fn parquet_files(&self) -> object_store::Result<BTreeMap<String, ObjectMeta>> {
+    pub async fn parquet_files(&self) -> Result<BTreeMap<String, ObjectMeta>, BoxError> {
         let parquet_files = self
             .stream_parquet_files()
             .map_err(|source| object_store::Error::Generic {
