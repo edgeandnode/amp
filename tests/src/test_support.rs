@@ -129,7 +129,9 @@ impl SnapshotContext {
     ) -> Result<SnapshotContext, BoxError> {
         use figment::providers::Json;
 
-        let temp_dir = tempfile::Builder::new().keep(keep_temp_dir).tempdir()?;
+        let temp_dir = tempfile::Builder::new()
+            .disable_cleanup(keep_temp_dir)
+            .tempdir()?;
         let path = temp_dir.path();
         info!("Dumping dataset to {}", path.display());
 
@@ -477,7 +479,9 @@ pub async fn run_query_on_fresh_server(
     } else {
         use figment::providers::Json;
 
-        let temp_dir = tempfile::Builder::new().keep(*KEEP_TEMP_DIRS).tempdir()?;
+        let temp_dir = tempfile::Builder::new()
+            .disable_cleanup(*KEEP_TEMP_DIRS)
+            .tempdir()?;
         let path = temp_dir.path();
 
         let config_override = Some(Json::string(&format!(
