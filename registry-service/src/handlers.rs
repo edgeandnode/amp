@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::BTreeSet, sync::Arc};
 
 use axum::{extract::State, http::StatusCode, Json};
 use common::{
@@ -20,6 +20,7 @@ pub struct OutputSchemaRequest {
 #[derive(Debug, Serialize)]
 pub struct OutputSchemaResponse {
     schema: TableSchema,
+    networks: Vec<String>,
 }
 
 #[derive(Debug, Error)]
@@ -66,7 +67,9 @@ pub async fn output_schema_handler(
         .map_err(DatasetStoreError)?;
     let schema = ctx.sql_output_schema(stmt).await.map_err(PlanningError)?;
 
+    let networks: BTreeSet<&String> = ctx.catalog().iter().map(|t| &t.table.network).collect();
     Ok(Json(OutputSchemaResponse {
         schema: schema.into(),
+        networks: networks.into_iter().map(|n| n.clone()).collect(),
     }))
 }

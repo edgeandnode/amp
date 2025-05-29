@@ -45,7 +45,7 @@ pub(crate) fn pb_to_rows(
 
             let block = RawTableBlock {
                 number: block_num,
-                network: table.network.clone().unwrap(),
+                network: table.network.clone(),
             };
             Some(
                 RawTableRows::new(table.clone(), block, rows.unwrap().columns().to_vec())
@@ -227,7 +227,7 @@ fn field_to_table(field: &FieldDescriptor, pool: &DescriptorPool, network: &str)
     Some(Table {
         name: field.name().to_string(),
         schema: Arc::new(Schema::new(fields)),
-        network: Some(network.to_string()),
+        network: network.to_string(),
     })
 }
 

@@ -19,7 +19,7 @@ pub fn table(network: String) -> Table {
     Table {
         name: TABLE_NAME.to_string(),
         schema: SCHEMA.clone(),
-        network: Some(network),
+        network: network,
     }
 }
 

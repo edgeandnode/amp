@@ -109,6 +109,5 @@ pub struct TableInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_location: Option<String>,
     /// Associated network for this table
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub network: Option<String>,
+    pub network: String,
 }

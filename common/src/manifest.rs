@@ -40,6 +40,7 @@ pub struct Dependency {
 pub struct Table {
     pub input: TableInput,
     pub schema: TableSchema,
+    pub network: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -94,7 +95,7 @@ impl Manifest {
             .map(|(name, table)| crate::Table {
                 name: name.clone(),
                 schema: table.schema.arrow.clone().into(),
-                network: None, // Network is not part of the manifest yet
+                network: table.network.clone(),
             })
             .collect()
     }

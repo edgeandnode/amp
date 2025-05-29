@@ -95,6 +95,7 @@ export class TableInput extends Schema.Class<TableInput>("TableInput")({
 export class Table extends Schema.Class<Table>("Table")({
   input: TableInput,
   schema: TableSchema,
+  network: Schema.String,
 }) {}
 
 export class FunctionManifest extends Schema.Class<FunctionManifest>("FunctionManifest")({

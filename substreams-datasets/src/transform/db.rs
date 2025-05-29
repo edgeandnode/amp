@@ -56,7 +56,7 @@ pub(crate) fn pb_to_rows(
             }
             let block = RawTableBlock {
                 number: block_num,
-                network: table.network.clone().unwrap(),
+                network: table.network.clone(),
             };
             Some(
                 RawTableRows::new(table.clone(), block, rows.unwrap().columns().to_vec())
@@ -302,7 +302,7 @@ fn statement_to_table(statement: &Statement, network: &str) -> Option<Table> {
             Some(Table {
                 name: name.to_string(),
                 schema: Arc::new(Schema::new(fields)),
-                network: Some(network.to_string()),
+                network: network.to_string(),
             })
         }
         _ => None,
