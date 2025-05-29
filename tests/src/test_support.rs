@@ -88,12 +88,11 @@ impl SnapshotContext {
         let dataset_name = &dataset.name;
         let data_store = config.data_store.clone();
         let mut tables = Vec::new();
-        for table in dataset.tables() {
+        for table in Arc::new(dataset.clone()).resolved_tables() {
             tables.push(
-                PhysicalTable::restore_latset_revision(
-                    table,
+                PhysicalTable::restore_latest_revision(
+                    &table,
                     data_store.clone(),
-                    dataset_name,
                     metadata_db.clone(),
                 )
                 .await?
@@ -103,7 +102,7 @@ impl SnapshotContext {
                         the dataset or table being deleted. \n\
                         Bless the dataset again with by running \
                         `cargo run -p tests -- bless {dataset_name} <start_block> <end_block>`",
-                        table.name
+                        table.name()
                     )
                     .as_str(),
                 ),
@@ -335,25 +334,16 @@ async fn dump_test_dataset(
     let dataset = {
         let dataset = dataset_store.load_dataset(dataset_name).await?.dataset;
         let mut tables = Vec::new();
-        for table in dataset.tables() {
+        for table in Arc::new(dataset.clone()).resolved_tables() {
             let physical_table = match PhysicalTable::get_or_restore_active_revision(
-                table,
-                dataset_name,
+                &table,
                 data_store.clone(),
                 metadata_db.clone(),
             )
             .await?
             {
                 Some(physical_table) if !clear => physical_table,
-                _ => {
-                    PhysicalTable::next_revision(
-                        table,
-                        &data_store,
-                        dataset_name,
-                        metadata_db.clone(),
-                    )
-                    .await?
-                }
+                _ => PhysicalTable::next_revision(&table, &data_store, metadata_db.clone()).await?,
             };
 
             tables.push(physical_table);

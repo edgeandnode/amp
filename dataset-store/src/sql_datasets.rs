@@ -75,7 +75,7 @@ pub(super) async fn dataset(
         let schema = ctx.sql_output_schema(query.clone()).await?;
         let network = {
             let tables = ctx.catalog().iter();
-            let mut networks: BTreeSet<_> = tables.map(|t| t.table.network.clone()).collect();
+            let mut networks: BTreeSet<_> = tables.map(|t| t.table().network.clone()).collect();
             if networks.len() > 1 {
                 return Err(format!(
                     "table {} has dependencies in multiple networks: {:?}",

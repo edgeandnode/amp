@@ -52,10 +52,9 @@ pub async fn dump(
     for dataset_name in datasets {
         let dataset = dataset_store.load_dataset(&dataset_name).await?.dataset;
         let mut tables = Vec::with_capacity(dataset.tables.len());
-        for table in dataset.tables() {
+        for table in Arc::new(dataset.clone()).resolved_tables() {
             if let Some(physical_table) = PhysicalTable::get_or_restore_active_revision(
-                table,
-                &dataset_name,
+                &table,
                 data_store.clone(),
                 metadata_db.clone(),
             )
@@ -64,13 +63,8 @@ pub async fn dump(
                 tables.push(physical_table);
             } else {
                 tables.push(
-                    PhysicalTable::next_revision(
-                        table,
-                        data_store.as_ref(),
-                        &dataset_name,
-                        metadata_db.clone(),
-                    )
-                    .await?,
+                    PhysicalTable::next_revision(&table, data_store.as_ref(), metadata_db.clone())
+                        .await?,
                 );
             }
         }

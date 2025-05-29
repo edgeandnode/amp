@@ -94,11 +94,11 @@ impl Job {
                     .map(|(id, tbl, url)| (tbl.clone(), (id, url)))
                     .collect::<BTreeMap<_, _>>();
                 let mut physical_tables = vec![];
-                for table in dataset.tables() {
+
+                for table in Arc::new(dataset.clone()).resolved_tables() {
                     // Unwrap: We checked consistency above.
-                    let (id, url) = output_locations_by_name.remove(&table.name).unwrap();
+                    let (id, url) = output_locations_by_name.remove(table.name()).unwrap();
                     physical_tables.push(PhysicalTable::new(
-                        &dataset.name,
                         table.clone(),
                         url,
                         id,

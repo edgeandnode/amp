@@ -148,7 +148,6 @@ pub async fn dump(
 ) -> Result<(), BoxError> {
     let physical_dataset = &dst_ctx.catalog().datasets()[0].clone();
     let mut join_handles = vec![];
-    let dataset_name = dataset.name().to_string();
 
     for (table, query) in dataset.queries {
         let dataset_store = dataset_store.clone();
@@ -157,7 +156,6 @@ pub async fn dump(
         let physical_dataset = physical_dataset.clone();
         let block_ranges_by_table = block_ranges_by_table.clone();
         let parquet_opts = parquet_opts.clone();
-        let dataset_name = dataset_name.clone();
 
         let handle = tokio::spawn(async move {
             let physical_table = {
@@ -218,7 +216,6 @@ pub async fn dump(
                 let physical_table = PhysicalTable::next_revision(
                     physical_table.table(),
                     &data_store,
-                    &dataset_name,
                     dataset_store.metadata_db.clone(),
                 )
                 .await?;

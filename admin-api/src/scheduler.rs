@@ -36,14 +36,14 @@ impl Scheduler {
             return Err("no available workers".into());
         };
 
-        let dataset: Dataset = dataset.into();
+        let dataset: Arc<Dataset> = Arc::new(dataset.into());
+        let dataset_name = dataset.name.clone();
 
         let mut locations = Vec::new();
-        for table in dataset.tables() {
+        for table in dataset.resolved_tables() {
             let physical_table = PhysicalTable::next_revision(
-                table,
+                &table,
                 &self.config.data_store,
-                &dataset.name,
                 self.metadata_db.clone().into(),
             )
             .await?;
@@ -51,7 +51,7 @@ impl Scheduler {
         }
 
         let job_desc = serde_json::to_string(&JobDesc::DumpDataset {
-            dataset: dataset.name,
+            dataset: dataset_name,
         })?;
 
         self.metadata_db

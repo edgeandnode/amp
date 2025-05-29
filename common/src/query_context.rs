@@ -45,7 +45,7 @@ use crate::{
         EvmDecode, EvmDecodeParams, EvmDecodeType, EvmEncodeParams, EvmEncodeType, EvmTopic,
     },
     stream_helpers::is_streaming,
-    BoxError, Table,
+    BoxError, ResolvedTable,
 };
 
 #[derive(Error, Debug)]
@@ -81,23 +81,6 @@ pub struct ResolvedTables {
     pub tables: Vec<ResolvedTable>,
     /// UDFs specific to the datasets corresponding to the resolved tables.
     pub udfs: Vec<ScalarUDF>,
-}
-
-#[derive(Clone, Debug)]
-pub struct ResolvedTable {
-    pub catalog_schema: String,
-    pub table: Table,
-    pub table_ref: TableReference,
-}
-
-impl ResolvedTable {
-    pub fn new(catalog_schema: String, table: Table) -> Self {
-        Self {
-            catalog_schema: catalog_schema.clone(),
-            table: table.clone(),
-            table_ref: TableReference::partial(catalog_schema, table.name),
-        }
-    }
 }
 
 /// A context for planning SQL queries.
@@ -404,14 +387,13 @@ async fn create_empty_tables(
 ) -> Result<(), Error> {
     for table in tables {
         // The catalog schema needs to be explicitly created or table creation will fail.
-        create_catalog_schema(ctx, table.catalog_schema.to_string())
+        create_catalog_schema(ctx, table.catalog_schema().to_string())
             .await
             .map_err(|e| Error::DatasetError(e.into()))?;
 
         // Unwrap: Table is empty.
-        let mem_table =
-            MemTable::try_new(table.table.schema.as_ref().clone().into(), vec![vec![]]).unwrap();
-        ctx.register_table(table.table_ref.clone(), Arc::new(mem_table))
+        let mem_table = MemTable::try_new(table.schema().clone().into(), vec![vec![]]).unwrap();
+        ctx.register_table(table.table_ref().clone(), Arc::new(mem_table))
             .map_err(|e| Error::DatasetError(e.into()))?;
     }
     Ok(())
