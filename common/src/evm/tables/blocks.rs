@@ -6,9 +6,9 @@ use arrow::{
 };
 
 use crate::{
-    arrow, timestamp_type, BoxError, Bytes32, Bytes32ArrayBuilder, EvmAddress as Address,
-    EvmAddressArrayBuilder, EvmCurrency, EvmCurrencyArrayBuilder, RawTableBlock, RawTableRows,
-    Table, Timestamp, TimestampArrayBuilder, BLOCK_NUM, BYTES32_TYPE,
+    arrow, metadata::range::BlockRange, timestamp_type, BoxError, Bytes32, Bytes32ArrayBuilder,
+    EvmAddress as Address, EvmAddressArrayBuilder, EvmCurrency, EvmCurrencyArrayBuilder,
+    RawTableRows, Table, Timestamp, TimestampArrayBuilder, BLOCK_NUM, BYTES32_TYPE,
     EVM_ADDRESS_TYPE as ADDRESS_TYPE, EVM_CURRENCY_TYPE,
 };
 
@@ -179,7 +179,7 @@ impl BlockRowsBuilder {
         self.parent_beacon_root.append_option(*parent_beacon_root);
     }
 
-    pub fn build(self, block: RawTableBlock) -> Result<RawTableRows, BoxError> {
+    pub fn build(self, range: BlockRange) -> Result<RawTableRows, BoxError> {
         let Self {
             mut block_num,
             mut timestamp,
@@ -228,7 +228,7 @@ impl BlockRowsBuilder {
             Arc::new(parent_beacon_root.finish()),
         ];
 
-        RawTableRows::new(table(block.network.clone()), block, columns)
+        RawTableRows::new(table(range.network.clone()), range, columns)
     }
 }
 
@@ -239,9 +239,11 @@ fn default_to_arrow() {
         let mut builder = BlockRowsBuilder::with_capacity(1);
         builder.append(&block);
         builder
-            .build(RawTableBlock {
-                number: block.block_num,
+            .build(BlockRange {
+                numbers: block.block_num..=block.block_num,
                 network: "test_network".to_string(),
+                hash: block.hash.into(),
+                prev_hash: Some(block.parent_hash.into()),
             })
             .unwrap()
     };

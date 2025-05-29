@@ -1,4 +1,4 @@
-use common::{RawDatasetRows, RawTableBlock, Table};
+use common::{metadata::range::BlockRange, RawDatasetRows, Table};
 
 use crate::proto::sf::substreams::v1::Package;
 
@@ -6,7 +6,7 @@ use crate::proto::sf::substreams::v1::Package;
 pub(crate) fn pb_to_rows(
     _value: &[u8],
     _tables: &[Table],
-    _block: &RawTableBlock,
+    _range: &BlockRange,
 ) -> Result<RawDatasetRows, anyhow::Error> {
     todo!("Entities output type not implemented")
 }

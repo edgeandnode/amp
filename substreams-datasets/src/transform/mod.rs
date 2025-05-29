@@ -3,7 +3,7 @@ pub mod entities;
 pub mod proto;
 
 use anyhow::Context as _;
-use common::{parquet::data_type::AsBytes, RawDatasetRows, RawTableBlock};
+use common::{metadata::range::BlockRange, parquet::data_type::AsBytes, RawDatasetRows};
 
 use crate::{
     proto::sf::substreams::rpc::v2::BlockScopedData,
@@ -16,10 +16,11 @@ pub fn transform(
     tables: &Tables,
 ) -> Result<RawDatasetRows, anyhow::Error> {
     let clock = block_data.clock.as_ref().unwrap();
-    let block = RawTableBlock {
-        number: clock.number,
+    let range = BlockRange {
+        numbers: clock.number..=clock.number,
         network: tables.tables[0].network.clone(),
         hash: clock.id.parse().context("failed to parse block hash")?,
+        prev_hash: None,
     };
 
     let value = block_data
@@ -31,10 +32,10 @@ pub fn transform(
 
     let table_rows = match &tables.output_type {
         OutputType::Proto(message_descriptor) => {
-            proto::pb_to_rows(message_descriptor, value.as_bytes(), &tables.tables, &block)
+            proto::pb_to_rows(message_descriptor, value.as_bytes(), &tables.tables, &range)
         }
-        OutputType::DbOut => db::pb_to_rows(value.as_bytes(), &tables.tables, &block),
-        OutputType::Entities => entities::pb_to_rows(value.as_bytes(), &tables.tables, &block),
+        OutputType::DbOut => db::pb_to_rows(value.as_bytes(), &tables.tables, &range),
+        OutputType::Entities => entities::pb_to_rows(value.as_bytes(), &tables.tables, &range),
     };
     Ok(table_rows?)
 }
