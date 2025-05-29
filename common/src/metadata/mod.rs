@@ -6,6 +6,7 @@ use metadata_db::MetadataDb;
 use crate::{multirange::MultiRange, BoxError, QueryContext};
 
 pub mod parquet;
+pub mod range;
 
 pub async fn ranges_for_table(
     location_id: i64,
