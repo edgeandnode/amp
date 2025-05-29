@@ -89,7 +89,7 @@ async fn sql_over_eth_firehose_dump() {
 #[tokio::test]
 async fn sql_tests() {
     for test in load_sql_tests("sql-tests.yaml").unwrap() {
-        let results = run_query_on_fresh_server(&test.query, vec![], vec![], None)
+        let results = run_query_on_fresh_server(&test.name, &test.query, vec![], vec![], None)
             .await
             .map_err(|e| format!("{e:?}"));
         test.assert_result_eq(results);
@@ -100,6 +100,7 @@ async fn sql_tests() {
 async fn streaming_tests() {
     for test in load_sql_tests("sql-streaming-tests.yaml").unwrap() {
         let results = run_query_on_fresh_server(
+            &test.name,
             &test.query,
             test.initial_dumps.clone(),
             test.dumps_on_running_server.clone(),

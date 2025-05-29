@@ -37,7 +37,7 @@ use pretty_assertions::assert_str_eq;
 use serde::{Deserialize, Deserializer};
 use tempfile::TempDir;
 use tokio::time;
-use tracing::{debug, info, instrument};
+use tracing::{debug, info, instrument, warn};
 
 /// Assume the `cargo test` command is run either from the workspace root or from the crate root.
 const TEST_CONFIG_BASE_DIRS: [&str; 2] = ["tests/config", "config"];
@@ -465,6 +465,7 @@ fn dynamic_addrs() -> Addrs {
 /// Start a nozzle server, execute the given query, convert the result to JSONL, shut down the
 /// server and return the JSONL string in binary format.
 pub async fn run_query_on_fresh_server(
+    test_name: &str,
     query: &str,
     initial_dumps: Vec<DumpTestDatasetCommand>,
     dumps_on_running_server: Vec<DumpTestDatasetCommand>,
@@ -481,6 +482,7 @@ pub async fn run_query_on_fresh_server(
 
         let temp_dir = tempfile::Builder::new()
             .disable_cleanup(*KEEP_TEMP_DIRS)
+            .prefix(test_name)
             .tempdir()?;
         let path = temp_dir.path();
 
@@ -567,6 +569,10 @@ pub async fn run_query_on_fresh_server(
                     break;
                 }
                 Err(_) => {
+                    warn!(
+                        "({test_name}) Streaming timed out after {:?}, stopping...",
+                        streaming_options.max_duration
+                    );
                     break;
                 }
             }
