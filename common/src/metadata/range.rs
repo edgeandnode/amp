@@ -20,7 +20,10 @@ pub struct TableRangesDiff {
     pub sub: Vec<BlockRange>,
 }
 
-// assuming single block range per segment, for now
+/// Block ranges associated with a table. This incrementally organizes block ranges into either
+/// the canonical chain or a set of forks. The canonical chain is defined as the set of adjacent
+/// block ranges with the greatest block height.
+// We are assuming single block range per segment, for now.
 #[derive(Default)]
 pub struct TableRanges {
     canonical: Option<RangeGroup>,
@@ -45,7 +48,7 @@ impl TableRanges {
 
     /// Merge known block ranges. This fails if the given block numbers do not correspond to a set
     /// of adjacent and complete block ranges. This should be done after the associated files have
-    /// been merged, and the merged files have been comitted to the metadata DB.
+    /// been merged, and the merged files have been committed to the metadata DB.
     pub fn merge(&mut self, numbers: RangeInclusive<BlockNum>) -> Result<(), ()> {
         if let Some(canonical) = &mut self.canonical {
             if let Ok(()) = canonical.merge(numbers.clone()) {
@@ -61,8 +64,7 @@ impl TableRanges {
     }
 
     /// Insert a block range, returning a diff of the canonical chain.
-    /// The canonical chain is defined as the set of adjacent block ranges with the greatest block
-    /// height.
+    /// Block ranges may be inserted in any order.
     pub fn insert(&mut self, range: BlockRange) -> TableRangesDiff {
         let mut diff: TableRangesDiff = Default::default();
         match &mut self.canonical {
