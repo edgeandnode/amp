@@ -14,7 +14,6 @@ use common::{
     BoxError,
 };
 use dataset_store::{DatasetKind, DatasetStore};
-use metadata_db::MetadataDb;
 use object_store::ObjectMeta;
 
 mod block_ranges;
@@ -36,10 +35,9 @@ pub async fn dump_dataset(
     let catalog = Catalog::new(vec![dataset.clone()]);
     let env = config.make_query_env()?;
     let query_ctx = Arc::new(QueryContext::for_catalog(catalog, env.clone())?);
-    let metadata_db = dataset_store.metadata_db.as_ref();
 
     // Ensure consistency before starting the dump procedure.
-    consistency_check(dataset, metadata_db).await?;
+    consistency_check(dataset).await?;
 
     // Query the block ranges, we might already have some ranges if this is not the first dump run
     // for this dataset.
@@ -122,23 +120,17 @@ pub async fn dump_dataset(
 /// On fail: Return a `CorruptedDataset` error.
 async fn consistency_check(
     physical_dataset: &PhysicalDataset,
-    metadata_db: &MetadataDb,
 ) -> Result<(), ConsistencyCheckError> {
     // See also: metadata-consistency
-
-    use common::metadata::{filenames_for_table, ranges_for_table};
 
     for table in physical_dataset.tables() {
         let dataset_name = table.catalog_schema().to_string();
         let tbl = table.table_id();
-        let location_id = table.location_id();
         // Check that bock ranges do not contain overlapping ranges.
         {
-            let ranges = ranges_for_table(location_id, metadata_db)
-                .await
-                .map_err(|err| {
-                    ConsistencyCheckError::CorruptedDataset(table.catalog_schema().to_string(), err)
-                })?;
+            let ranges = table.ranges().await.map_err(|err| {
+                ConsistencyCheckError::CorruptedDataset(table.catalog_schema().to_string(), err)
+            })?;
             if let Err(e) = MultiRange::from_ranges(ranges) {
                 return Err(ConsistencyCheckError::CorruptedDataset(
                     dataset_name,
@@ -147,7 +139,8 @@ async fn consistency_check(
             }
         }
 
-        let registered_files = filenames_for_table(metadata_db, location_id)
+        let registered_files = table
+            .file_names()
             .await
             .map(BTreeSet::from_iter)
             .map_err(|err| ConsistencyCheckError::CorruptedDataset(tbl.dataset.to_string(), err))?;
@@ -156,10 +149,10 @@ async fn consistency_check(
         let path = table.path();
 
         // Collect all stored files whose filename matches `is_dump_file`.
-        let stored_files: BTreeMap<String, ObjectMeta> = table
-            .parquet_files(true)
-            .await
-            .map_err(ConsistencyCheckError::ObjectStoreError)?;
+        let stored_files: BTreeMap<String, ObjectMeta> =
+            table.parquet_files().await.map_err(|err| {
+                ConsistencyCheckError::CorruptedDataset(physical_dataset.name().to_string(), err)
+            })?;
 
         for (filename, object_meta) in &stored_files {
             if !registered_files.contains(filename) {

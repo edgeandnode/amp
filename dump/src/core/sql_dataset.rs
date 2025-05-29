@@ -165,10 +165,11 @@ pub async fn dump(
                 tables.find(|t| t.table_name() == table).unwrap()
             };
 
-            let src_ctx = dataset_store
+            let src_ctx: Arc<QueryContext> = dataset_store
                 .clone()
                 .ctx_for_sql(&query, env.clone())
-                .await?;
+                .await?
+                .into();
             let plan = src_ctx.plan_sql(query.clone()).await?;
             let is_incr = is_incremental(&plan)?;
             let (start, end) = match (start, end) {
@@ -176,7 +177,7 @@ pub async fn dump(
                     (start as BlockNum, end as BlockNum)
                 }
                 _ => {
-                    match max_end_block(&plan, &src_ctx, &dataset_store.metadata_db).await? {
+                    match max_end_block(&plan, src_ctx).await? {
                         Some(max_end_block) => {
                             block_ranges::resolve_relative(start, end, max_end_block)?
                         }
@@ -269,9 +270,10 @@ async fn dump_sql_query(
         writer.write(&batch).await?;
     }
 
-    let parquet_meta = writer.close(end).await?;
+    let (parquet_meta, object_meta) = writer.close(end).await?;
     commit_metadata(
         parquet_meta,
+        object_meta,
         dataset_store.metadata_db.clone(),
         physical_table.location_id(),
     )

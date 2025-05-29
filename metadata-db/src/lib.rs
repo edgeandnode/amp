@@ -3,7 +3,7 @@ use std::{sync::Arc, time::Duration};
 use futures::stream::{BoxStream, Stream};
 use sqlx::{
     postgres::{PgListener, PgNotification},
-    Executor, Postgres,
+    Executor, FromRow, Postgres,
 };
 use thiserror::Error;
 use tokio::time::MissedTickBehavior;
@@ -32,7 +32,29 @@ pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
 pub const DEFAULT_DEAD_WORKER_INTERVAL: Duration = Duration::from_secs(5);
 
 /// Row ids, always non-negative.
+pub type FileId = i64;
 pub type LocationId = i64;
+pub type JobDatabaseId = i64;
+
+#[derive(Debug, FromRow)]
+pub struct FileMetadataRow {
+    /// file_metadata.id
+    pub id: FileId,
+    /// file_metadata.location_id
+    pub location_id: LocationId,
+    /// file_metadata.file_name
+    pub file_name: String,
+    /// location.url
+    pub url: String,
+    /// file_metadata.object_size
+    pub object_size: Option<i64>,
+    /// file_metadata.object_e_tag
+    pub object_e_tag: Option<String>,
+    /// file_metadata.object_version
+    pub object_version: Option<String>,
+    /// file_metadata.metadata
+    pub metadata: serde_json::Value,
+}
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -420,54 +442,49 @@ impl MetadataDb {
         Ok(channel.into_stream())
     }
 
-    /// Produces a stream of all names of files for a given tbl catalogued by the MetadataDb
-    pub fn stream_file_names<'a>(
-        &'a self,
-        location_id: i64,
-    ) -> BoxStream<'a, Result<String, sqlx::Error>> {
-        let sql = "
-            SELECT sr.file_name
-              FROM file_metadata sr
-             WHERE sr.location_id = $1
-          ORDER BY 1 ASC
+    pub fn stream_file_metadata(
+        &self,
+        location_id: LocationId,
+    ) -> BoxStream<'_, Result<FileMetadataRow, sqlx::Error>> {
+        let query = "
+        SELECT fm.id
+             , fm.location_id
+             , fm.file_name
+             , l.url
+             , fm.object_size
+             , fm.object_e_tag
+             , fm.object_version
+             , fm.metadata
+          FROM file_metadata fm
+          JOIN locations l ON fm.location_id = l.id
+         WHERE location_id = $1;
         ";
 
-        sqlx::query_scalar(sql).bind(location_id).fetch(&*self.pool)
-    }
-
-    #[instrument(skip(self))]
-    /// Produces a stream of all block ranges for a given tbl catalogued by the MetadataDb
-    pub fn stream_ranges<'a>(
-        &'a self,
-        location_id: i64,
-    ) -> BoxStream<'a, Result<(i64, i64), sqlx::Error>> {
-        let sql = "
-            SELECT CAST(sr.metadata->>'range_start' AS BIGINT)
-                 , CAST(sr.metadata->>'range_end' AS BIGINT)
-              FROM file_metadata sr
-             WHERE sr.location_id = $1
-          ORDER BY 1 ASC
-        ";
-
-        sqlx::query_as(sql).bind(location_id).fetch(&*self.pool)
+        sqlx::query_as(query).bind(location_id).fetch(&*self.pool)
     }
 
     pub async fn insert_metadata(
         &self,
         location_id: i64,
         file_name: String,
-        metadata: serde_json::Value,
+        object_size: u64,
+        object_e_tag: Option<String>,
+        object_version: Option<String>,
+        parquet_meta: serde_json::Value,
     ) -> Result<(), Error> {
         let sql = "
-        INSERT INTO file_metadata (location_id, file_name, metadata)
-        VALUES ($1, $2, $3)
+        INSERT INTO file_metadata (location_id, file_name, object_size, object_e_tag, object_version, metadata)
+        VALUES ($1, $2, $3, $4, $5, $6)
         ON CONFLICT DO NOTHING
         ";
 
         sqlx::query(sql)
             .bind(location_id)
             .bind(file_name)
-            .bind(metadata)
+            .bind(object_size as i64)
+            .bind(object_e_tag)
+            .bind(object_version)
+            .bind(parquet_meta)
             .execute(&*self.pool)
             .await?;
 

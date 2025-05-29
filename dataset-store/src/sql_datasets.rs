@@ -4,7 +4,6 @@ use std::{
 };
 
 use common::{
-    metadata::ranges_for_table,
     multirange::MultiRange,
     query_context::{parse_sql, QueryEnv},
     BlockNum, BoxError, Dataset, QueryContext, Table, BLOCK_NUM,
@@ -18,7 +17,7 @@ use datafusion::{
     sql::{parser, TableReference},
 };
 use futures::StreamExt as _;
-use metadata_db::{LocationId, MetadataDb, TableId};
+use metadata_db::LocationId;
 use object_store::ObjectMeta;
 use serde::Deserialize;
 use tracing::instrument;
@@ -109,18 +108,17 @@ pub(super) async fn dataset(
 // Get synced ranges for table
 async fn get_ranges_for_table(
     table: &TableReference,
-    metadata_db: &MetadataDb,
+    ctx: &QueryContext,
 ) -> Result<MultiRange, BoxError> {
-    let tbl = TableId {
-        // Unwrap: table references are of the partial form: [dataset].[table_name]
-        dataset: table.schema().unwrap(),
-        dataset_version: None,
-        table: table.table(),
+    let Some(table) = ctx.get_table(table) else {
+        return Err(format!(
+            "table {}.{} not found",
+            table.schema().unwrap(),
+            table.table()
+        )
+        .into());
     };
-    let Some((_, location_id)) = metadata_db.get_active_location(tbl).await? else {
-        return Err(format!("table {}.{} not found", tbl.dataset, tbl.table).into());
-    };
-    let ranges = ranges_for_table(location_id, metadata_db).await?;
+    let ranges = table.ranges().await?;
     let ranges = MultiRange::from_ranges(ranges)?;
 
     Ok(ranges)
@@ -135,7 +133,6 @@ async fn get_ranges_for_table(
 pub async fn execute_plan_for_range(
     plan: LogicalPlan,
     ctx: &QueryContext,
-    metadata_db: &MetadataDb,
     start: BlockNum,
     end: BlockNum,
 ) -> Result<SendableRecordBatchStream, BoxError> {
@@ -145,7 +142,11 @@ pub async fn execute_plan_for_range(
     {
         let needed_range = MultiRange::from_ranges(vec![(start, end)]).unwrap();
         for table in tables {
-            let ranges = get_ranges_for_table(&table, metadata_db).await?;
+            let physical_table = ctx
+                .get_table(&table)
+                .ok_or::<BoxError>(format!("table {} not found", table).into())?;
+            let ranges = physical_table.ranges().await?;
+            let ranges = MultiRange::from_ranges(ranges)?;
             let synced = ranges.intersection(&needed_range) == needed_range;
             if !synced {
                 return Err(format!("tried to query range {needed_range} of table {table} but it has not been synced").into());
@@ -173,10 +174,9 @@ pub async fn execute_query_for_range(
     end: BlockNum,
 ) -> Result<SendableRecordBatchStream, BoxError> {
     let ctx = dataset_store.clone().ctx_for_sql(&query, env).await?;
-    let metadata_db = dataset_store.metadata_db.as_ref();
     let plan = ctx.plan_sql(query).await?;
 
-    execute_plan_for_range(plan, &ctx, metadata_db, start, end).await
+    execute_plan_for_range(plan, &ctx, start, end).await
 }
 
 // All physical tables locations that have been queried
@@ -216,7 +216,7 @@ fn extract_table_references_from_plan(plan: &LogicalPlan) -> Result<Vec<TableRef
 #[instrument(skip_all, err)]
 pub async fn synced_blocks_for_plan(
     plan: &LogicalPlan,
-    metadata_db: &MetadataDb,
+    ctx: &QueryContext,
 ) -> Result<MultiRange, BoxError> {
     let tables = extract_table_references_from_plan(&plan)?;
 
@@ -224,10 +224,9 @@ pub async fn synced_blocks_for_plan(
 
     if !tables.is_empty() {
         let mut tables = tables.into_iter();
-
-        ranges = get_ranges_for_table(&tables.next().unwrap(), metadata_db).await?;
+        ranges = get_ranges_for_table(&tables.next().unwrap(), ctx).await?;
         for table in tables {
-            let other_ranges = get_ranges_for_table(&table, metadata_db).await?;
+            let other_ranges = get_ranges_for_table(&table, ctx).await?;
             ranges = ranges.intersection(&other_ranges);
         }
     }
@@ -239,8 +238,7 @@ pub async fn synced_blocks_for_plan(
 #[instrument(skip_all, err)]
 pub async fn max_end_block(
     plan: &LogicalPlan,
-    ctx: &QueryContext,
-    metadata_db: &MetadataDb,
+    ctx: Arc<QueryContext>,
 ) -> Result<Option<BlockNum>, BoxError> {
     let tables = extract_table_references_from_plan(&plan)?;
 
@@ -248,8 +246,10 @@ pub async fn max_end_block(
         return Ok(None);
     }
 
-    let synced_block_for_table = |_, table: TableReference| async move {
-        let ranges = get_ranges_for_table(&table, metadata_db).await?;
+    let synced_block_for_table = move |ctx: Arc<QueryContext>, table: TableReference| async move {
+        let table = ctx.get_table(&table).expect("table not found");
+        let ranges = table.ranges().await?;
+        let ranges = MultiRange::from_ranges(ranges)?;
 
         // Take the end block of the earliest contiguous range as the "synced block"
         Ok::<_, BoxError>(ranges.first().map(|r| r.1))
@@ -258,9 +258,9 @@ pub async fn max_end_block(
     let mut tables = tables.into_iter();
 
     // Unwrap: `tables` is not empty.
-    let mut end = synced_block_for_table(ctx, tables.next().unwrap()).await?;
+    let mut end = synced_block_for_table(ctx.clone(), tables.next().unwrap()).await?;
     for table in tables {
-        let next_end = synced_block_for_table(ctx, table).await?;
+        let next_end = synced_block_for_table(ctx.clone(), table).await?;
         end = end.min(next_end);
     }
 

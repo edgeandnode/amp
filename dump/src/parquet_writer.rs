@@ -12,7 +12,7 @@ use common::{
     BlockNum, BoxError, QueryContext, RawTableRows, Timestamp,
 };
 use metadata_db::MetadataDb;
-use object_store::{buffered::BufWriter, path::Path};
+use object_store::{buffered::BufWriter, path::Path, ObjectMeta};
 use tracing::debug;
 use url::Url;
 
@@ -65,10 +65,11 @@ impl RawDatasetWriter {
 
         let table_name = table_rows.table.name.as_str();
         let writer = self.writers.get_mut(table_name).unwrap();
-        if let Some(parquet_meta) = writer.write(&table_rows).await? {
+        let file_meta = writer.write(&table_rows).await?;
+        if let Some((parquet_meta, object_meta)) = file_meta {
             let location_id = writer.table.location_id();
-            let metadata_db = &self.metadata_db;
-            commit_metadata(parquet_meta, metadata_db.clone(), location_id).await?;
+            let metadata_db = self.metadata_db.clone();
+            commit_metadata(parquet_meta, object_meta, metadata_db, location_id).await?;
         }
 
         Ok(())
@@ -79,8 +80,11 @@ impl RawDatasetWriter {
         for (_, writer) in self.writers {
             let location_id = writer.table.location_id();
             let metadata_db = self.metadata_db.clone();
-            if let Some(parquet_meta) = writer.close().await? {
-                commit_metadata(parquet_meta, metadata_db, location_id).await?
+
+            let file_meta = writer.close().await?;
+
+            if let Some((parquet_meta, object_meta)) = file_meta {
+                commit_metadata(parquet_meta, object_meta, metadata_db, location_id).await?
             }
         }
 
@@ -90,13 +94,26 @@ impl RawDatasetWriter {
 
 pub async fn commit_metadata(
     parquet_meta: ParquetMeta,
+    ObjectMeta {
+        size: object_size,
+        e_tag: object_e_tag,
+        version: object_version,
+        ..
+    }: ObjectMeta,
     metadata_db: Arc<MetadataDb>,
     location_id: i64,
 ) -> Result<(), BoxError> {
     let file_name = parquet_meta.filename.clone();
     let parquet_meta = serde_json::to_value(parquet_meta)?;
     metadata_db
-        .insert_metadata(location_id, file_name, parquet_meta)
+        .insert_metadata(
+            location_id,
+            file_name,
+            object_size,
+            object_e_tag,
+            object_version,
+            parquet_meta,
+        )
         .await?;
 
     // Notify that the dataset has been changed
@@ -156,7 +173,7 @@ impl TableWriter {
     pub async fn write(
         &mut self,
         table_rows: &RawTableRows,
-    ) -> Result<Option<ParquetMeta>, BoxError> {
+    ) -> Result<Option<(ParquetMeta, ObjectMeta)>, BoxError> {
         assert_eq!(table_rows.table.name, self.table.table_name());
 
         let mut parquet_meta = None;
@@ -241,7 +258,7 @@ impl TableWriter {
         }
     }
 
-    async fn close(self) -> Result<Option<ParquetMeta>, BoxError> {
+    async fn close(self) -> Result<Option<(ParquetMeta, ObjectMeta)>, BoxError> {
         // We should be closing the last range.
         assert!(self.ranges_to_write.is_empty());
 
@@ -294,7 +311,7 @@ impl ParquetFileWriter {
     }
 
     #[must_use]
-    pub async fn close(mut self, end: BlockNum) -> Result<ParquetMeta, BoxError> {
+    pub async fn close(mut self, end: BlockNum) -> Result<(ParquetMeta, ObjectMeta), BoxError> {
         if end < self.start {
             return Err(
                 format!("end block {} must be after start block {}", end, self.start).into(),
@@ -308,7 +325,7 @@ impl ParquetFileWriter {
             self.file_url, self.start, end
         );
 
-        let marquet_meta = ParquetMeta {
+        let parquet_meta = ParquetMeta {
             table: self.table.table_name().to_string(),
             range_start: self.start,
             range_end: end,
@@ -316,15 +333,18 @@ impl ParquetFileWriter {
             created_at: Timestamp::now(),
         };
 
-        let marquet_meta_key = PARQUET_METADATA_KEY.to_string();
-        let marquet_meta_value = serde_json::to_string(&marquet_meta)?;
+        let parquet_meta_key = PARQUET_METADATA_KEY.to_string();
+        let parquet_meta_value = serde_json::to_string(&parquet_meta)?;
 
-        let kv_metadata = KeyValue::new(marquet_meta_key, marquet_meta_value);
+        let kv_metadata = KeyValue::new(parquet_meta_key, parquet_meta_value);
 
         self.writer.append_key_value_metadata(kv_metadata);
         self.writer.close().await?;
 
-        Ok(marquet_meta)
+        let location = Path::from_url_path(self.file_url.path())?;
+        let object_meta = self.table.object_store().head(&location).await?;
+
+        Ok((parquet_meta, object_meta))
     }
 
     // This is calculate as:

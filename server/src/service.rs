@@ -178,15 +178,13 @@ impl Service {
     async fn execute_plan_for_range_and_send_results_to_stream(
         plan: LogicalPlan,
         ctx: &QueryContext,
-        metadata_db: &MetadataDb,
         start: BlockNum,
         end: BlockNum,
         mut tx: mpsc::Sender<datafusion::error::Result<RecordBatch>>,
     ) -> () {
-        let mut stream =
-            dataset_store::sql_datasets::execute_plan_for_range(plan, ctx, metadata_db, start, end)
-                .await
-                .unwrap();
+        let mut stream = dataset_store::sql_datasets::execute_plan_for_range(plan, ctx, start, end)
+            .await
+            .unwrap();
 
         while let Some(batch) = stream.next().await {
             match batch {
@@ -224,14 +222,11 @@ impl Service {
             return ctx.execute_plan(plan).await.map_err(|err| Error::from(err));
         }
 
-        let metadata_db_ref = self.dataset_store.metadata_db.as_ref();
-
         // Start infinite stream
-        let first_range =
-            dataset_store::sql_datasets::synced_blocks_for_plan(&plan, metadata_db_ref)
-                .await
-                .map_err(|e| Error::CoreError(CoreError::DatasetError(e)))?
-                .first();
+        let first_range = dataset_store::sql_datasets::synced_blocks_for_plan(&plan, &ctx)
+            .await
+            .map_err(|e| Error::CoreError(CoreError::DatasetError(e)))?
+            .first();
         let mut current_end_block = first_range.map(|(_, end)| end);
 
         let (tx, rx) = mpsc::channel(1);
@@ -241,15 +236,10 @@ impl Service {
         // Execute initial ranges
         if let Some((start, end)) = first_range {
             // Execute the first range and return an error if a query is not valid
-            let mut stream = dataset_store::sql_datasets::execute_plan_for_range(
-                plan.clone(),
-                &ctx,
-                metadata_db_ref,
-                start,
-                end,
-            )
-            .await
-            .map_err(|e| Error::CoreError(CoreError::DatasetError(e)))?;
+            let mut stream =
+                dataset_store::sql_datasets::execute_plan_for_range(plan.clone(), &ctx, start, end)
+                    .await
+                    .map_err(|e| Error::CoreError(CoreError::DatasetError(e)))?;
 
             let mut tx_first_range = tx.clone();
             tokio::spawn(async move {
@@ -284,10 +274,9 @@ impl Service {
             let mut notifications = futures::stream::select_all(notifications);
 
             while let Some(Ok(_)) = notifications.next().await {
-                let end =
-                    dataset_store::sql_datasets::max_end_block(&plan, ctx.as_ref(), &metadata_db)
-                        .await
-                        .unwrap();
+                let end = dataset_store::sql_datasets::max_end_block(&plan, ctx.clone())
+                    .await
+                    .unwrap();
 
                 let (start, end) = match (current_end_block, end) {
                     (Some(start), Some(end)) if end > start => (start + 1, end),
@@ -298,7 +287,6 @@ impl Service {
                 Self::execute_plan_for_range_and_send_results_to_stream(
                     plan.clone(),
                     &ctx,
-                    &metadata_db,
                     start,
                     end,
                     tx.clone(),

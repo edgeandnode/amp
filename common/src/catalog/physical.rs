@@ -6,7 +6,10 @@ use datafusion::{
     parquet::arrow::async_reader::{AsyncFileReader, ParquetObjectReader},
     sql::TableReference,
 };
-use futures::{stream, TryStreamExt};
+use futures::{
+    stream::{self, BoxStream},
+    StreamExt, TryStreamExt,
+};
 use metadata_db::{LocationId, MetadataDb, TableId};
 use object_store::{path::Path, ObjectMeta, ObjectStore};
 use url::Url;
@@ -14,7 +17,10 @@ use uuid::Uuid;
 
 use super::logical::Table;
 use crate::{
-    metadata::parquet::{ParquetMeta, PARQUET_METADATA_KEY},
+    metadata::{
+        parquet::{ParquetMeta, PARQUET_METADATA_KEY},
+        FileMetadata,
+    },
     store::{infer_object_store, Store},
     BoxError, Dataset,
 };
@@ -288,9 +294,19 @@ impl PhysicalTable {
         while let Some(object_meta) = file_stream.try_next().await? {
             let (file_name, nozzle_meta) =
                 nozzle_meta_from_object_meta(&object_meta, object_store.clone()).await?;
-            let nozzle_meta_json = serde_json::to_value(nozzle_meta)?;
+            let parquet_meta_json = serde_json::to_value(nozzle_meta)?;
+            let object_size = object_meta.size;
+            let object_e_tag = object_meta.e_tag;
+            let object_version = object_meta.version;
             metadata_db
-                .insert_metadata(location_id, file_name, nozzle_meta_json)
+                .insert_metadata(
+                    location_id,
+                    file_name,
+                    object_size,
+                    object_e_tag,
+                    object_version,
+                    parquet_meta_json,
+                )
                 .await?;
         }
 
@@ -367,47 +383,71 @@ impl PhysicalTable {
         &self.table
     }
 
+    pub fn stream_file_metadata(&self) -> BoxStream<'_, Result<FileMetadata, BoxError>> {
+        self.metadata_db
+            .stream_file_metadata(self.location_id)
+            .map(|row| row?.try_into())
+            .boxed()
+    }
+
+    pub fn stream_ranges(&self) -> BoxStream<'_, Result<(u64, u64), BoxError>> {
+        self.stream_file_metadata()
+            .map_ok(
+                |FileMetadata {
+                     parquet_meta:
+                         ParquetMeta {
+                             range_start,
+                             range_end,
+                             ..
+                         },
+                     ..
+                 }| { (range_start, range_end) },
+            )
+            .boxed()
+    }
+
+    pub fn stream_file_names(&self) -> BoxStream<'_, Result<String, BoxError>> {
+        self.stream_file_metadata()
+            .map_ok(|FileMetadata { file_name, .. }| file_name)
+            .boxed()
+    }
+
+    pub fn stream_parquet_files(&self) -> BoxStream<'_, Result<(String, ObjectMeta), BoxError>> {
+        self.stream_file_metadata()
+            .map_ok(
+                move |FileMetadata {
+                          object_meta,
+                          file_name,
+                          ..
+                      }| (file_name, object_meta),
+            )
+            .boxed()
+    }
+
+    pub async fn file_names(&self) -> Result<Vec<String>, BoxError> {
+        let file_names = self.stream_file_names().try_collect().await?;
+        Ok(file_names)
+    }
+
     /// Return all parquet files for this table. If `dump_only` is `true`,
     /// only files of the form `<number>.parquet` will be returned. The
     /// result is a map from filename to object metadata.
-    pub async fn parquet_files(
-        &self,
-        dump_only: bool,
-    ) -> object_store::Result<BTreeMap<String, ObjectMeta>> {
-        // Check that this is a file written by a dump job, with name in the format:
-        // "<block_num>.parquet".
-        let is_dump_file = |filename: &str| {
-            filename.ends_with(".parquet")
-                && (!dump_only || filename.trim_end_matches(".parquet").parse::<u64>().is_ok())
-        };
-
-        let files = self
-            .object_store
-            .list(Some(&self.path))
-            .try_collect::<Vec<ObjectMeta>>()
-            .await?
-            .into_iter()
-            // Unwrap: A full object path always has a filename.
-            .map(|f| (f.location.filename().unwrap().to_string(), f))
-            .filter(|(filename, _)| is_dump_file(filename))
-            .collect();
-        Ok(files)
+    pub async fn parquet_files(&self) -> Result<BTreeMap<String, ObjectMeta>, BoxError> {
+        let parquet_files = self
+            .stream_parquet_files()
+            .try_collect::<BTreeMap<String, ObjectMeta>>()
+            .await?;
+        Ok(parquet_files)
     }
 
     pub async fn ranges(&self) -> Result<Vec<(u64, u64)>, BoxError> {
-        let mut ranges = vec![];
-        let mut range_stream = self.metadata_db.stream_ranges(self.location_id());
-
-        while let Some(range) = range_stream.try_next().await? {
-            let range = (range.0 as u64, range.1 as u64);
-            ranges.push(range);
-        }
+        let ranges = self.stream_ranges().try_collect().await?;
         Ok(ranges)
     }
 
     /// Truncate this table by deleting all dump files making up the table
     pub async fn truncate(&self) -> Result<(), BoxError> {
-        let files = self.parquet_files(false).await?;
+        let files = self.parquet_files().await?;
         let num_files = files.len();
         let locations = Box::pin(stream::iter(files.into_values().map(|m| Ok(m.location))));
         let deleted = self

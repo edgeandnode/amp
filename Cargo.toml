@@ -25,7 +25,7 @@ edition = "2021"
 version = "0.1.0"
 
 [workspace.dependencies]
-alloy = { version = "1.0.3", features = [
+alloy = { version = "1.0", features = [
     "json-abi",
     "dyn-abi",
     "provider-http",
@@ -36,6 +36,7 @@ alloy = { version = "1.0.3", features = [
 async-trait = "0.1.80"
 atty = "0.2.14"
 bytes = "1"
+chrono = "0.4.41"
 clap = { version = "4.5.2", features = ["derive", "env"] }
 figment = { version = "0.10.19", features = ["toml", "env", "json"] }
 fs-err = "3.0.0"
@@ -45,8 +46,8 @@ itertools = "0.14.0"
 pgtemp = "0.6.0"
 pretty_assertions = "1.4.1"
 prometheus = "0.13"
-serde = { version = "1.0.197", features = ["derive"] }
-serde_json = "1.0.114"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 serde_yaml = "0.9.34"
 snmalloc-rs = "0.3.4"
 tempfile = "3.13.0"
