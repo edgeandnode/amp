@@ -52,7 +52,7 @@ pub async fn dump(
     for dataset_name in datasets {
         let dataset = dataset_store.load_dataset(&dataset_name).await?.dataset;
         let mut tables = Vec::with_capacity(dataset.tables.len());
-        for table in Arc::new(dataset.clone()).resolved_tables() {
+        for table in Arc::new(dataset).resolved_tables() {
             if let Some(physical_table) = PhysicalTable::get_or_restore_active_revision(
                 &table,
                 data_store.clone(),
