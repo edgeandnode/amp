@@ -65,11 +65,11 @@ impl RawDatasetWriter {
 
         let table_name = table_rows.table.name.as_str();
         let writer = self.writers.get_mut(table_name).unwrap();
-        let scanned_range = writer.write(&table_rows).await?;
-        if let Some((scanned_range, object_meta)) = scanned_range {
+        let file_meta = writer.write(&table_rows).await?;
+        if let Some((parquet_meta, object_meta)) = file_meta {
             let location_id = writer.table.location_id();
             let metadata_db = self.metadata_db.clone();
-            commit_metadata(scanned_range, object_meta, metadata_db, location_id).await?;
+            commit_metadata(parquet_meta, object_meta, metadata_db, location_id).await?;
         }
 
         Ok(())
@@ -81,10 +81,10 @@ impl RawDatasetWriter {
             let location_id = writer.table.location_id();
             let metadata_db = self.metadata_db.clone();
 
-            let scanned_range = writer.close().await?;
+            let file_meta = writer.close().await?;
 
-            if let Some((scanned_range, object_meta)) = scanned_range {
-                commit_metadata(scanned_range, object_meta, metadata_db, location_id).await?
+            if let Some((parquet_meta, object_meta)) = file_meta {
+                commit_metadata(parquet_meta, object_meta, metadata_db, location_id).await?
             }
         }
 
