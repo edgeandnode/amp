@@ -31,7 +31,7 @@ pub struct TableRanges {
 }
 
 impl TableRanges {
-    #[cfg(test)]
+    #[cfg(any(test, debug_assertions))]
     fn check_invariants(&self) {
         let canonical = match &self.canonical {
             Some(group) => group,
@@ -50,6 +50,9 @@ impl TableRanges {
     /// of adjacent and complete block ranges. This should be done after the associated files have
     /// been merged, and the merged files have been committed to the metadata DB.
     pub fn merge(&mut self, numbers: RangeInclusive<BlockNum>) -> Result<(), ()> {
+        #[cfg(any(test, debug_assertions))]
+        self.check_invariants();
+
         if let Some(canonical) = &mut self.canonical {
             if let Ok(()) = canonical.merge(numbers.clone()) {
                 return Ok(());
@@ -66,6 +69,9 @@ impl TableRanges {
     /// Insert a block range, returning a diff of the canonical chain.
     /// Block ranges may be inserted in any order.
     pub fn insert(&mut self, range: BlockRange) -> TableRangesDiff {
+        #[cfg(any(test, debug_assertions))]
+        self.check_invariants();
+
         let mut diff: TableRangesDiff = Default::default();
         match &mut self.canonical {
             None => {
@@ -143,7 +149,7 @@ impl TableRanges {
 struct RangeGroup(Vec<BlockRange>);
 
 impl RangeGroup {
-    #[cfg(test)]
+    #[cfg(any(test, debug_assertions))]
     fn check_invariants(&self) {
         use itertools::Itertools as _;
         assert!(!self.0.is_empty());
@@ -237,7 +243,6 @@ mod test {
         );
         let mut model: Vec<BlockRange> = Default::default();
         let mut table: TableRanges = Default::default();
-        table.check_invariants();
         for range in {
             let mut ranges = ranges.clone();
             ranges.shuffle(&mut rng);
@@ -245,7 +250,6 @@ mod test {
         } {
             println!("insert ({:?}, {})", range.numbers, range.hash.0[31]);
             let diff = table.insert(range);
-            table.check_invariants();
 
             for range in diff.sub {
                 let index = model.iter().position(|r| r == &range).unwrap();
@@ -255,6 +259,7 @@ mod test {
                 model.push(range);
             }
         }
+        table.check_invariants();
 
         model.sort_by_key(|r| *r.numbers.start());
         let expected_model = ranges
