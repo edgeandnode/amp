@@ -139,7 +139,6 @@ async fn consistency_check(
             }
         }
 
-
         let registered_files = table
             .file_names()
             .await
