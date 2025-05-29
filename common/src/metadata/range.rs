@@ -44,7 +44,8 @@ impl TableRanges {
     }
 
     /// Merge known block ranges. This fails if the given block numbers do not correspond to a set
-    /// of adjacent and complete block ranges.
+    /// of adjacent and complete block ranges. This should be done after the associated files have
+    /// been merged, and the merged files have been comitted to the metadata DB.
     pub fn merge(&mut self, numbers: RangeInclusive<BlockNum>) -> Result<(), ()> {
         if let Some(canonical) = &mut self.canonical {
             if let Ok(()) = canonical.merge(numbers.clone()) {
@@ -186,18 +187,18 @@ impl RangeGroup {
     }
 
     fn merge(&mut self, numbers: RangeInclusive<BlockNum>) -> Result<(), ()> {
-        let start = self
-            .0
-            .iter()
-            .position(|r| r.numbers.start() == numbers.start())
-            .ok_or(())?;
         let end = self
             .0
             .iter()
             .position(|r| r.numbers.end() == numbers.end())
             .ok_or(())?;
-        let index = start;
-        let (start, end) = (self.0.remove(start), self.0.remove(end));
+        let end = self.0.remove(end);
+        let index = self
+            .0
+            .iter()
+            .position(|r| r.numbers.start() == numbers.start())
+            .ok_or(())?;
+        let start = self.0.remove(index);
         let range = BlockRange {
             numbers: *start.numbers.start()..=*end.numbers.end(),
             network: start.network,
