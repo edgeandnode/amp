@@ -20,6 +20,8 @@ pub fn transform(
         numbers: clock.number..=clock.number,
         network: tables.tables[0].network.clone(),
         hash: clock.id.parse().context("failed to parse block hash")?,
+        // `None` here prevents canonical chain selection based on block hashes.
+        // See `BlockRange` for more details.
         prev_hash: None,
     };
 
