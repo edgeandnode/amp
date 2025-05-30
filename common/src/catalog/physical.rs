@@ -15,19 +15,18 @@ use object_store::{path::Path, ObjectMeta, ObjectStore};
 use url::Url;
 use uuid::Uuid;
 
-use super::logical::Table;
 use crate::{
     metadata::{
         parquet::{ParquetMeta, PARQUET_METADATA_KEY},
         FileMetadata,
     },
     store::{infer_object_store, Store},
-    BoxError, Dataset,
+    BoxError, Dataset, ResolvedTable,
 };
 
 #[derive(Debug, Clone)]
 pub struct Catalog {
-    datasets: Vec<PhysicalDataset>,
+    tables: Vec<PhysicalTable>,
     /// User-defined functions (UDFs) specific to this catalog.
     udfs: Vec<ScalarUDF>,
 }
@@ -35,74 +34,39 @@ pub struct Catalog {
 impl Catalog {
     pub fn empty() -> Self {
         Catalog {
-            datasets: vec![],
+            tables: vec![],
             udfs: vec![],
         }
     }
 
-    pub fn new(datasets: Vec<PhysicalDataset>) -> Self {
+    pub fn new(tables: Vec<PhysicalTable>) -> Self {
         Catalog {
-            datasets,
+            tables,
             udfs: vec![],
         }
     }
 
-    pub fn add_dataset(&mut self, dataset: PhysicalDataset) {
-        self.datasets.push(dataset);
+    pub fn add_table(&mut self, dataset: PhysicalTable) {
+        self.tables.push(dataset);
     }
 
     pub fn add_udf(&mut self, udf: ScalarUDF) {
         self.udfs.push(udf);
     }
 
-    pub fn datasets(&self) -> &[PhysicalDataset] {
-        &self.datasets
+    pub fn tables(&self) -> &[PhysicalTable] {
+        &self.tables
     }
 
     pub fn udfs(&self) -> &[ScalarUDF] {
         &self.udfs
-    }
-
-    pub fn all_tables(&self) -> impl Iterator<Item = &PhysicalTable> {
-        self.datasets.iter().flat_map(|dataset| dataset.tables())
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct PhysicalDataset {
-    dataset: Dataset,
-    tables: Vec<PhysicalTable>,
-}
-
-impl PhysicalDataset {
-    pub fn new(dataset: Dataset, tables: Vec<PhysicalTable>) -> Self {
-        Self { dataset, tables }
-    }
-
-    /// All tables in the catalog
-    pub fn tables(&self) -> impl Iterator<Item = &PhysicalTable> {
-        self.tables.iter()
-    }
-
-    pub fn name(&self) -> &str {
-        &self.dataset.name
-    }
-
-    pub fn kind(&self) -> &str {
-        &self.dataset.kind
-    }
-
-    pub fn location_ids(&self) -> Vec<LocationId> {
-        self.tables.iter().map(|t| t.location_id()).collect()
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct PhysicalTable {
     /// Logical table representation.
-    table: Table,
-    /// Qualified table reference in the format `dataset_name.table_name`.
-    table_ref: TableReference,
+    table: ResolvedTable,
 
     /// Absolute URL to the data location, path section of the URL and the corresponding object store.
     url: Url,
@@ -120,21 +84,16 @@ pub struct PhysicalTable {
 impl PhysicalTable {
     /// Create a new physical table with the given dataset name, table, URL, and object store.
     pub fn new(
-        dataset_name: &str,
-        table: Table,
+        table: ResolvedTable,
         url: Url,
         location_id: LocationId,
         metadata_db: Arc<MetadataDb>,
     ) -> Result<Self, BoxError> {
-        validate_name(&table.name)?;
-
-        let table_ref = TableReference::partial(dataset_name, table.name.as_str());
         let path = Path::from_url_path(url.path()).unwrap();
         let (object_store, _) = infer_object_store(&url)?;
 
         Ok(Self {
             table,
-            table_ref,
             url,
             path,
             object_store,
@@ -147,28 +106,26 @@ impl PhysicalTable {
     /// This is used for creating a new location (revision) for a new or  existing table in
     /// the metadata database.
     pub async fn next_revision(
-        table: &Table,
+        table: &ResolvedTable,
         data_store: &Store,
-        dataset_name: &str,
         metadata_db: Arc<MetadataDb>,
     ) -> Result<Self, BoxError> {
+        let dataset_name = &table.dataset().name;
         let table_id = TableId {
             dataset: dataset_name,
             dataset_version: None,
-            table: &table.name,
+            table: &table.name(),
         };
 
-        let path = make_location_path(table_id);
+        let path = make_location_path(dataset_name, &table.name());
         let url = data_store.url().join(&path)?;
         let location_id = metadata_db
             .register_location(table_id, data_store.bucket(), &path, &url, false)
             .await?;
 
         let path = Path::from_url_path(url.path()).unwrap();
-        let table_ref = TableReference::partial(dataset_name, table.name.as_str());
         let physical_table = Self {
             table: table.clone(),
-            table_ref,
             url,
             path,
             object_store: data_store.object_store(),
@@ -180,19 +137,19 @@ impl PhysicalTable {
 
     /// Attempts to restore the latest revision of a table from the data store.
     /// If the table is not found, it returns `None`.
-    pub async fn restore_latset_revision(
-        table: &Table,
+    pub async fn restore_latest_revision(
+        table: &ResolvedTable,
         data_store: Arc<Store>,
-        dataset_name: &str,
         metadata_db: Arc<MetadataDb>,
     ) -> Result<Option<Self>, BoxError> {
+        let dataset_name = &table.dataset().name;
         let table_id = TableId {
-            dataset: dataset_name,
+            dataset: &table.dataset().name,
             dataset_version: None,
-            table: &table.name,
+            table: &table.name(),
         };
 
-        let prefix = format!("{}/{}/", &dataset_name, table.name);
+        let prefix = format!("{}/{}/", &dataset_name, table.name());
         let url = data_store.url().join(&prefix)?;
         let path = Path::from_url_path(url.path()).unwrap();
         let revisions = list_revisions(&data_store, &prefix, &path).await?;
@@ -209,40 +166,34 @@ impl PhysicalTable {
     /// Attempt to get the active revision of a table. If it doesn't exist, restore the latest revision
     /// and register it in the metadata database.
     pub async fn get_or_restore_active_revision(
-        table: &Table,
-        dataset_name: &str,
+        table: &ResolvedTable,
         data_store: Arc<Store>,
         metadata_db: Arc<MetadataDb>,
     ) -> Result<Option<Self>, BoxError> {
+        let dataset_name = &table.dataset().name;
         let table_id = TableId {
             dataset: dataset_name,
             dataset_version: None,
-            table: &table.name,
+            table: &table.name(),
         };
 
-        let physical_table =
-            if let Some((url, location_id)) = metadata_db.get_active_location(table_id).await? {
-                let table_ref = TableReference::partial(dataset_name, table.name.as_str());
-                let path = Path::from_url_path(url.path()).unwrap();
-                let (object_store, _) = infer_object_store(&url)?;
-                Some(Self {
-                    table: table.clone(),
-                    table_ref,
-                    url,
-                    path,
-                    object_store,
-                    location_id,
-                    metadata_db: metadata_db.clone(),
-                })
-            } else {
-                PhysicalTable::restore_latset_revision(
-                    table,
-                    data_store.clone(),
-                    dataset_name,
-                    metadata_db.clone(),
-                )
+        let physical_table = if let Some((url, location_id)) =
+            metadata_db.get_active_location(table_id).await?
+        {
+            let path = Path::from_url_path(url.path()).unwrap();
+            let (object_store, _) = infer_object_store(&url)?;
+            Some(Self {
+                table: table.clone(),
+                url,
+                path,
+                object_store,
+                location_id,
+                metadata_db: metadata_db.clone(),
+            })
+        } else {
+            PhysicalTable::restore_latest_revision(table, data_store.clone(), metadata_db.clone())
                 .await?
-            };
+        };
 
         Ok(physical_table)
     }
@@ -254,7 +205,7 @@ impl PhysicalTable {
     /// Revisions are expected to be sorted in ascending order by their revision uuid.
     async fn restore_latest(
         revisions: BTreeMap<String, (Path, Url, String)>,
-        table: &Table,
+        table: &ResolvedTable,
         table_id: &TableId<'_>,
         data_store: Arc<Store>,
         metadata_db: Arc<MetadataDb>,
@@ -270,7 +221,7 @@ impl PhysicalTable {
 
     /// Restore a location from the data store and register it in the metadata database.
     async fn restore(
-        table: &Table,
+        table: &ResolvedTable,
         table_id: &TableId<'_>,
         prefix: &str,
         path: &Path,
@@ -278,7 +229,6 @@ impl PhysicalTable {
         data_store: Arc<Store>,
         metadata_db: Arc<MetadataDb>,
     ) -> Result<Self, BoxError> {
-        let table_ref = TableReference::partial(table_id.dataset, table.name.as_str());
         let metadata_db: Arc<MetadataDb> = metadata_db.clone().into();
         let location_id = metadata_db
             .register_location(*table_id, data_store.bucket(), prefix, url, false)
@@ -312,7 +262,6 @@ impl PhysicalTable {
 
         let physical_table = Self {
             table: table.clone(),
-            table_ref,
             url: url.clone(),
             path: path.clone(),
             object_store,
@@ -325,8 +274,12 @@ impl PhysicalTable {
 }
 
 impl PhysicalTable {
+    pub fn dataset(&self) -> &Dataset {
+        self.table.dataset()
+    }
+
     pub fn table_name(&self) -> &str {
-        &self.table.name
+        &self.table.name()
     }
 
     pub fn url(&self) -> &Url {
@@ -339,11 +292,11 @@ impl PhysicalTable {
 
     pub fn catalog_schema(&self) -> &str {
         // Unwrap: This is always constructed with a schema.
-        &self.table_ref.schema().unwrap()
+        &self.table.catalog_schema()
     }
 
     pub fn schema(&self) -> SchemaRef {
-        self.table.schema.clone()
+        self.table.schema().clone()
     }
 
     pub fn location_id(&self) -> LocationId {
@@ -352,7 +305,7 @@ impl PhysicalTable {
 
     /// Qualified table reference in the format `dataset_name.table_name`.
     pub fn table_ref(&self) -> &TableReference {
-        &self.table_ref
+        &self.table.table_ref()
     }
 
     pub fn table_id(&self) -> TableId<'_> {
@@ -365,6 +318,7 @@ impl PhysicalTable {
 
     pub fn order_exprs(&self) -> Vec<Vec<SortExpr>> {
         self.table
+            .table()
             .sorted_by()
             .iter()
             .map(|col_name| vec![col(col_name).sort(true, false)])
@@ -372,14 +326,14 @@ impl PhysicalTable {
     }
 
     pub fn network(&self) -> &str {
-        &self.table.network
+        &self.table.network()
     }
 
     pub fn object_store(&self) -> Arc<dyn ObjectStore> {
         self.object_store.clone()
     }
 
-    pub fn table(&self) -> &Table {
+    pub fn table(&self) -> &ResolvedTable {
         &self.table
     }
 
@@ -467,37 +421,16 @@ impl PhysicalTable {
     }
 }
 
-fn validate_name(name: &str) -> Result<(), BoxError> {
-    if let Some(c) = name
-        .chars()
-        .find(|&c| !(c.is_ascii_lowercase() || c == '_' || c.is_numeric()))
-    {
-        return Err(format!(
-            "names must be lowercase and contain only letters, underscores, and numbers, \
-             the name: '{name}' is not allowed because it contains the character '{c}'"
-        )
-        .into());
-    }
-
-    Ok(())
-}
-
-// The path format is: `<dataset>/[<version>/]<table>/<UUIDv7>/`
-pub fn make_location_path(table_id: TableId<'_>) -> String {
+// The path format is: `<dataset>/<table>/<UUIDv7>/`
+pub fn make_location_path(dataset: &str, table: &str) -> String {
     let mut path = String::new();
 
     // Add dataset
-    path.push_str(table_id.dataset);
+    path.push_str(dataset);
     path.push('/');
 
-    // Add version if present
-    if let Some(version) = table_id.dataset_version {
-        path.push_str(version);
-        path.push('/');
-    }
-
     // Add table
-    path.push_str(table_id.table);
+    path.push_str(table);
     path.push('/');
 
     // Add UUIDv7

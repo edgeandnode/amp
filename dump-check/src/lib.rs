@@ -4,7 +4,7 @@ pub mod metrics;
 use std::sync::Arc;
 
 use common::{
-    catalog::physical::{Catalog, PhysicalDataset, PhysicalTable},
+    catalog::physical::{Catalog, PhysicalTable},
     query_context::QueryEnv,
     BoxError, QueryContext,
 };
@@ -27,26 +27,21 @@ pub async fn dump_check(
     let client = dataset_store.load_client(&dataset_name).await?;
     let total_blocks = end_block - start + 1;
     let mut tables = Vec::with_capacity(dataset.tables.len());
-    for table in dataset.tables() {
+
+    for table in Arc::new(dataset.clone()).resolved_tables() {
         let table_id = TableId {
             dataset: dataset_name,
             dataset_version: None,
-            table: &table.name,
+            table: &table.name(),
         };
         let (url, location_id) = metadata_db
             .get_active_location(table_id)
             .await?
             .ok_or(format!("No active location for {table_id:?}"))?;
-        let table = PhysicalTable::new(
-            dataset_name,
-            table.clone(),
-            url,
-            location_id,
-            metadata_db.clone(),
-        )?;
+        let table = PhysicalTable::new(table.clone(), url, location_id, metadata_db.clone())?;
         tables.push(table);
     }
-    let catalog = Catalog::new(vec![PhysicalDataset::new(dataset.clone(), tables)]);
+    let catalog = Catalog::new(tables);
     let ctx = Arc::new(QueryContext::for_catalog(catalog, env.clone())?);
 
     let jobs = {

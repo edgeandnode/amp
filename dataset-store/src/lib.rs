@@ -9,11 +9,11 @@ use std::{
 
 use async_udf::functions::AsyncScalarUDF;
 use common::{
-    catalog::physical::{Catalog, PhysicalDataset, PhysicalTable},
+    catalog::physical::{Catalog, PhysicalTable},
     config::Config,
     evm::udfs::EthCall,
     manifest::{Manifest, TableInput},
-    query_context::{self, parse_sql, PlanningContext, QueryEnv, ResolvedTable, ResolvedTables},
+    query_context::{self, parse_sql, PlanningContext, QueryEnv, ResolvedTables},
     sql_visitors::all_function_names,
     store::StoreError,
     BlockNum, BlockStreamer, BoxError, Dataset, DatasetWithProvider, QueryContext, RawDatasetRows,
@@ -529,11 +529,10 @@ impl DatasetStore {
         let mut catalog = Catalog::empty();
         for dataset_name in dataset_names {
             let dataset = self.load_dataset(&dataset_name).await?;
-            let mut tables = Vec::with_capacity(dataset.dataset.tables.len());
-            for table in dataset.dataset.tables() {
+
+            for table in Arc::new(dataset.dataset.clone()).resolved_tables() {
                 let physical_table = PhysicalTable::get_or_restore_active_revision(
-                    table,
-                    &dataset_name,
+                    &table,
                     self.config.data_store.clone(),
                     self.metadata_db.clone(),
                 )
@@ -542,17 +541,15 @@ impl DatasetStore {
                 .ok_or(DatasetError::unknown(format!(
                     "No table files found for table {}.{} in {:?}",
                     dataset_name,
-                    table.name,
+                    table.name(),
                     self.config
                         .data_store
                         .url()
-                        .join(&format!("{}/{}/", dataset_name, table.name))
+                        .join(&format!("{}/{}/", dataset_name, table.name()))
                         .unwrap()
                 )))?;
-                tables.push(physical_table);
+                catalog.add_table(physical_table);
             }
-            let physical_dataset = PhysicalDataset::new(dataset.dataset.clone(), tables);
-            catalog.add_dataset(physical_dataset);
 
             // Create the `eth_call` UDF for the dataset.
             let udf = self
@@ -641,8 +638,8 @@ impl DatasetStore {
                 udfs.push(udf.into());
             }
 
-            for table in dataset.dataset.tables {
-                resolved_tables.push(ResolvedTable::new(dataset_name.clone(), table));
+            for table in Arc::new(dataset.dataset).resolved_tables() {
+                resolved_tables.push(table);
             }
         }
         Ok(ResolvedTables {

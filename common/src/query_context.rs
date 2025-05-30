@@ -5,10 +5,11 @@ use async_udf::physical_optimizer::AsyncFuncRule;
 use bincode::{config, Decode, Encode};
 use bytes::Bytes;
 use datafusion::{
+    catalog::MemorySchemaProvider,
     common::{
         not_impl_err,
         tree_node::{Transformed, TreeNode as _, TreeNodeRewriter},
-        Constraints, DFSchema, DFSchemaRef, ToDFSchema as _,
+        Constraints, DFSchemaRef, ToDFSchema as _,
     },
     datasource::{DefaultTableSource, MemTable, TableProvider, TableType},
     error::DataFusionError,
@@ -19,8 +20,8 @@ use datafusion::{
         SendableRecordBatchStream, SessionStateBuilder,
     },
     logical_expr::{
-        AggregateUDF, CreateCatalogSchema, CreateExternalTable, DdlStatement, Extension,
-        LogicalPlan, LogicalPlanBuilder, ScalarUDF, SortExpr, TableScan,
+        AggregateUDF, CreateExternalTable, DdlStatement, Extension, LogicalPlan,
+        LogicalPlanBuilder, ScalarUDF, SortExpr, TableScan,
     },
     physical_plan::{displayable, ExecutionPlan},
     sql::{parser, TableReference},
@@ -45,7 +46,7 @@ use crate::{
         EvmDecode, EvmDecodeParams, EvmDecodeType, EvmEncodeParams, EvmEncodeType, EvmTopic,
     },
     stream_helpers::is_streaming,
-    BoxError, Table,
+    BoxError, ResolvedTable,
 };
 
 #[derive(Error, Debug)]
@@ -81,23 +82,6 @@ pub struct ResolvedTables {
     pub tables: Vec<ResolvedTable>,
     /// UDFs specific to the datasets corresponding to the resolved tables.
     pub udfs: Vec<ScalarUDF>,
-}
-
-#[derive(Clone, Debug)]
-pub struct ResolvedTable {
-    pub catalog_schema: String,
-    pub table: Table,
-    pub table_ref: TableReference,
-}
-
-impl ResolvedTable {
-    pub fn new(catalog_schema: String, table: Table) -> Self {
-        Self {
-            catalog_schema: catalog_schema.clone(),
-            table: table.clone(),
-            table_ref: TableReference::partial(catalog_schema, table.name),
-        }
-    }
 }
 
 /// A context for planning SQL queries.
@@ -324,8 +308,10 @@ impl QueryContext {
             .build();
         let ctx = SessionContext::new_with_state(state);
 
-        for ds in self.catalog.datasets() {
-            create_physical_tables(&ctx, ds.tables()).await?;
+        for ds in self.catalog.tables() {
+            create_physical_table(&ctx, ds)
+                .await
+                .map_err(|e| Error::DatasetError(e.into()))?;
         }
 
         self.register_udfs(&ctx);
@@ -373,7 +359,8 @@ impl QueryContext {
         };
 
         self.catalog
-            .all_tables()
+            .tables()
+            .iter()
             .find(|table| table.table_id() == table_id)
     }
 }
@@ -404,31 +391,11 @@ async fn create_empty_tables(
 ) -> Result<(), Error> {
     for table in tables {
         // The catalog schema needs to be explicitly created or table creation will fail.
-        create_catalog_schema(ctx, table.catalog_schema.to_string())
-            .await
-            .map_err(|e| Error::DatasetError(e.into()))?;
+        create_catalog_schema(ctx, table.catalog_schema().to_string());
 
         // Unwrap: Table is empty.
-        let mem_table =
-            MemTable::try_new(table.table.schema.as_ref().clone().into(), vec![vec![]]).unwrap();
-        ctx.register_table(table.table_ref.clone(), Arc::new(mem_table))
-            .map_err(|e| Error::DatasetError(e.into()))?;
-    }
-    Ok(())
-}
-
-async fn create_physical_tables(
-    ctx: &SessionContext,
-    tables: impl Iterator<Item = &PhysicalTable>,
-) -> Result<(), Error> {
-    for table in tables {
-        // The catalog schema needs to be explicitly created or table creation will fail.
-        create_catalog_schema(ctx, table.catalog_schema().to_string())
-            .await
-            .map_err(|e| Error::DatasetError(e.into()))?;
-
-        create_physical_table(ctx, table)
-            .await
+        let mem_table = MemTable::try_new(table.schema().clone().into(), vec![vec![]]).unwrap();
+        ctx.register_table(table.table_ref().clone(), Arc::new(mem_table))
             .map_err(|e| Error::DatasetError(e.into()))?;
     }
     Ok(())
@@ -438,6 +405,9 @@ async fn create_physical_table(
     ctx: &SessionContext,
     table: &PhysicalTable,
 ) -> Result<(), DataFusionError> {
+    // The catalog schema needs to be explicitly created or table creation will fail.
+    create_catalog_schema(ctx, table.catalog_schema().to_string());
+
     let table_ref = table.table_ref().clone();
     let schema = table.schema().to_dfschema_ref()?;
 
@@ -481,22 +451,13 @@ fn create_external_table_cmd(
     LogicalPlan::Ddl(DdlStatement::CreateExternalTable(command))
 }
 
-async fn create_catalog_schema(ctx: &SessionContext, schema_name: String) -> Result<(), Error> {
-    let command = DdlStatement::CreateCatalogSchema(CreateCatalogSchema {
-        schema_name,
-
-        // We call this for every table so we may create the schema multiple times.
-        if_not_exists: true,
-
-        // This 'schema' has no meaning.
-        schema: Arc::new(DFSchema::empty()),
-    });
-
-    ctx.execute_logical_plan(LogicalPlan::Ddl(command))
-        .await
-        .map_err(|e| Error::DatasetError(e.into()))?;
-
-    Ok(())
+fn create_catalog_schema(ctx: &SessionContext, schema_name: String) {
+    // We only have use catalog, the default one.
+    let catalog = ctx.catalog(&ctx.catalog_names()[0]).unwrap();
+    if catalog.schema(&schema_name).is_none() {
+        let schema = Arc::new(MemorySchemaProvider::new());
+        catalog.register_schema(&schema_name, schema).unwrap();
+    }
 }
 
 fn udfs() -> Vec<ScalarUDF> {

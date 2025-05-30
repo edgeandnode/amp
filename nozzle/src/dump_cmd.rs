@@ -5,7 +5,7 @@ use std::{
 };
 
 use common::{
-    catalog::physical::{PhysicalDataset, PhysicalTable},
+    catalog::physical::PhysicalTable,
     config::Config,
     manifest,
     parquet::basic::{Compression, ZstdLevel},
@@ -52,10 +52,9 @@ pub async fn dump(
     for dataset_name in datasets {
         let dataset = dataset_store.load_dataset(&dataset_name).await?.dataset;
         let mut tables = Vec::with_capacity(dataset.tables.len());
-        for table in dataset.tables() {
+        for table in Arc::new(dataset).resolved_tables() {
             if let Some(physical_table) = PhysicalTable::get_or_restore_active_revision(
-                table,
-                &dataset_name,
+                &table,
                 data_store.clone(),
                 metadata_db.clone(),
             )
@@ -64,24 +63,19 @@ pub async fn dump(
                 tables.push(physical_table);
             } else {
                 tables.push(
-                    PhysicalTable::next_revision(
-                        table,
-                        data_store.as_ref(),
-                        &dataset_name,
-                        metadata_db.clone(),
-                    )
-                    .await?,
+                    PhysicalTable::next_revision(&table, data_store.as_ref(), metadata_db.clone())
+                        .await?,
                 );
             }
         }
-        physical_datasets.push(PhysicalDataset::new(dataset, tables));
+        physical_datasets.push(tables);
     }
 
     match run_every {
         None => {
-            for dataset in physical_datasets {
-                dump::dump_dataset(
-                    &dataset,
+            for tables in physical_datasets {
+                dump::dump_tables(
+                    &tables,
                     &dataset_store,
                     &config,
                     n_jobs,
@@ -97,9 +91,9 @@ pub async fn dump(
         Some(mut run_every) => loop {
             run_every.tick().await;
 
-            for dataset in &physical_datasets {
-                dump::dump_dataset(
-                    dataset,
+            for tables in &physical_datasets {
+                dump::dump_tables(
+                    tables,
                     &dataset_store,
                     &config,
                     n_jobs,

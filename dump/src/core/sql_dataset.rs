@@ -146,23 +146,20 @@ pub async fn dump(
     end: Option<i64>,
     input_batch_size_blocks: u64,
 ) -> Result<(), BoxError> {
-    let physical_dataset = &dst_ctx.catalog().datasets()[0].clone();
     let mut join_handles = vec![];
-    let dataset_name = dataset.name().to_string();
 
     for (table, query) in dataset.queries {
+        let dst_ctx = dst_ctx.clone();
         let dataset_store = dataset_store.clone();
         let env = env.clone();
         let data_store = data_store.clone();
-        let physical_dataset = physical_dataset.clone();
         let block_ranges_by_table = block_ranges_by_table.clone();
         let parquet_opts = parquet_opts.clone();
-        let dataset_name = dataset_name.clone();
 
         let handle = tokio::spawn(async move {
             let physical_table = {
-                let mut tables = physical_dataset.tables();
-                tables.find(|t| t.table_name() == table).unwrap()
+                let tables = dst_ctx.catalog().tables();
+                tables.iter().find(|t| t.table_name() == table).unwrap()
             };
 
             let src_ctx: Arc<QueryContext> = dataset_store
@@ -218,7 +215,6 @@ pub async fn dump(
                 let physical_table = PhysicalTable::next_revision(
                     physical_table.table(),
                     &data_store,
-                    &dataset_name,
                     dataset_store.metadata_db.clone(),
                 )
                 .await?;

@@ -67,7 +67,7 @@ pub async fn output_schema_handler(
         .map_err(DatasetStoreError)?;
     let schema = ctx.sql_output_schema(stmt).await.map_err(PlanningError)?;
 
-    let networks: BTreeSet<&String> = ctx.catalog().iter().map(|t| &t.table.network).collect();
+    let networks: BTreeSet<&String> = ctx.catalog().iter().map(|t| &t.table().network).collect();
     Ok(Json(OutputSchemaResponse {
         schema: schema.into(),
         networks: networks.into_iter().map(|n| n.clone()).collect(),

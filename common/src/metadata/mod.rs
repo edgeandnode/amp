@@ -85,7 +85,7 @@ pub async fn block_ranges_by_table(
 ) -> Result<BTreeMap<String, MultiRange>, BoxError> {
     let mut multirange_by_table = BTreeMap::default();
 
-    for table in ctx.catalog().all_tables() {
+    for table in ctx.catalog().tables() {
         let ranges = ranges_for_table(table.location_id(), &table.metadata_db).await?;
         let multi_range = MultiRange::from_ranges(ranges)?;
         multirange_by_table.insert(table.table_name().to_string(), multi_range);
