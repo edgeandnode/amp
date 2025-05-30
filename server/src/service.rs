@@ -471,8 +471,7 @@ impl Service {
         let function_names = vec![];
         let catalog = self
             .dataset_store
-            .clone()
-            .load_catalog_for_table_refs(table_refs.iter(), function_names, &self.env)
+            .load_physical_catalog(table_refs.iter(), function_names, &self.env)
             .await?;
         let query_ctx = QueryContext::for_catalog(catalog, self.env.clone())?;
         let plan = query_ctx.prepare_remote_plan(plan).await?;

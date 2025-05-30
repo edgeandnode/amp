@@ -13,11 +13,11 @@ use common::{
     config::Config,
     evm::udfs::EthCall,
     manifest::{Manifest, TableInput},
-    query_context::{self, parse_sql, PlanningContext, QueryEnv, ResolvedTables},
+    query_context::{self, parse_sql, PlanningContext, QueryEnv},
     sql_visitors::all_function_names,
     store::StoreError,
-    BlockNum, BlockStreamer, BoxError, Dataset, DatasetWithProvider, QueryContext, RawDatasetRows,
-    Store,
+    BlockNum, BlockStreamer, BoxError, Dataset, DatasetWithProvider, LogicalCatalog, QueryContext,
+    RawDatasetRows, Store,
 };
 use datafusion::{
     common::HashMap,
@@ -499,73 +499,38 @@ impl DatasetStore {
         let function_names = all_function_names(query).map_err(DatasetError::unknown)?;
 
         let catalog = self
-            .load_catalog_for_table_refs(tables.iter(), function_names, &env)
+            .load_physical_catalog(tables.iter(), function_names, &env)
             .await?;
         QueryContext::for_catalog(catalog, env.clone()).map_err(DatasetError::unknown)
     }
 
     /// Looks up the datasets for the given table references and loads them into a catalog.
-    pub async fn load_catalog_for_table_refs<'a>(
-        self: Arc<Self>,
+    pub async fn load_physical_catalog<'a>(
+        self: &Arc<Self>,
         table_refs: impl Iterator<Item = &'a TableReference>,
         function_names: Vec<Vec<String>>,
         env: &QueryEnv,
     ) -> Result<Catalog, DatasetError> {
-        let mut dataset_names = datasets_from_table_refs(table_refs)?;
-        for func_name in function_names {
-            match func_name.as_slice() {
-                // Simple name assumed to be Datafusion built-in function.
-                [_] => continue,
-                [dataset, _] => {
-                    dataset_names.insert(dataset.clone());
-                }
-                _ => {
-                    return Err(DatasetError::no_context(Error::UnsupportedFunctionName(
-                        func_name.join(".").into(),
-                    )))
-                }
-            }
+        let logical_catalog = self
+            .load_logical_catalog(table_refs, function_names, &env.isolate_pool)
+            .await?;
+
+        let mut tables = Vec::new();
+        for table in logical_catalog.tables {
+            let physical_table = PhysicalTable::get_or_restore_active_revision(
+                &table,
+                self.config.data_store.clone(),
+                self.metadata_db.clone(),
+            )
+            .await
+            .map_err(DatasetError::unknown)?
+            .ok_or(DatasetError::unknown(format!(
+                "No files found for table {}",
+                table.table_ref()
+            )))?;
+            tables.push(physical_table);
         }
-        let mut catalog = Catalog::empty();
-        for dataset_name in dataset_names {
-            let dataset = self.load_dataset(&dataset_name).await?;
-
-            for table in Arc::new(dataset.dataset.clone()).resolved_tables() {
-                let physical_table = PhysicalTable::get_or_restore_active_revision(
-                    &table,
-                    self.config.data_store.clone(),
-                    self.metadata_db.clone(),
-                )
-                .await
-                .map_err(DatasetError::unknown)?
-                .ok_or(DatasetError::unknown(format!(
-                    "No table files found for table {}.{} in {:?}",
-                    dataset_name,
-                    table.name(),
-                    self.config
-                        .data_store
-                        .url()
-                        .join(&format!("{}/{}/", dataset_name, table.name()))
-                        .unwrap()
-                )))?;
-                catalog.add_table(physical_table);
-            }
-
-            // Create the `eth_call` UDF for the dataset.
-            let udf = self
-                .eth_call_for_dataset(&dataset)
-                .await
-                .map_err(|e| (dataset_name.clone(), e))?;
-            if let Some(udf) = udf {
-                catalog.add_udf(udf);
-            }
-
-            // Add JS UDFs
-            for udf in dataset.dataset.functions(env.isolate_pool.clone()) {
-                catalog.add_udf(udf.into());
-            }
-        }
-        Ok(catalog)
+        Ok(Catalog::new(tables, logical_catalog.udfs))
     }
 
     /// Initial catalog including UDFs for all datasets.
@@ -592,20 +557,19 @@ impl DatasetStore {
         let (tables, _) = resolve_table_references(query, true).map_err(DatasetError::unknown)?;
         let function_names = all_function_names(query).map_err(DatasetError::unknown)?;
         let resolved_tables = self
-            .load_resolved_tables(tables.iter(), function_names)
+            .load_logical_catalog(tables.iter(), function_names, &IsolatePool::dummy())
             .await?;
         Ok(PlanningContext::new(resolved_tables))
     }
 
     /// Looks up the datasets for the given table references and creates resolved tables. Create
     /// UDFs specific to the referenced datasets.
-    ///
-    /// TODO: This function is heavily duplicated with `load_catalog_for_table_refs`.
-    async fn load_resolved_tables(
-        self: Arc<Self>,
+    async fn load_logical_catalog(
+        self: &Arc<Self>,
         table_refs: impl Iterator<Item = &TableReference>,
         function_names: Vec<Vec<String>>,
-    ) -> Result<ResolvedTables, DatasetError> {
+        isolate_pool: &IsolatePool,
+    ) -> Result<LogicalCatalog, DatasetError> {
         let mut dataset_names = datasets_from_table_refs(table_refs)?;
         for func_name in function_names {
             match func_name.as_slice() {
@@ -634,7 +598,7 @@ impl DatasetStore {
             }
 
             // Add JS UDFs
-            for udf in dataset.dataset.functions(IsolatePool::dummy()) {
+            for udf in dataset.dataset.functions(isolate_pool.clone()) {
                 udfs.push(udf.into());
             }
 
@@ -642,7 +606,7 @@ impl DatasetStore {
                 resolved_tables.push(table);
             }
         }
-        Ok(ResolvedTables {
+        Ok(LogicalCatalog {
             tables: resolved_tables,
             udfs,
         })
