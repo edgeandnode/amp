@@ -118,7 +118,6 @@ use std::{collections::BTreeMap, sync::Arc};
 use common::{
     catalog::physical::PhysicalTable,
     multirange::MultiRange,
-    parquet::file::properties::WriterProperties as ParquetWriterProperties,
     query_context::{QueryContext, QueryEnv},
     BlockNum, BoxError,
 };
@@ -129,36 +128,34 @@ use dataset_store::{
 use futures::{future::try_join_all, TryFutureExt as _, TryStreamExt};
 use tracing::instrument;
 
-use super::block_ranges;
-use crate::parquet_writer::{commit_metadata, ParquetFileWriter};
+use super::{block_ranges, Ctx};
+use crate::parquet_writer::{commit_metadata, ParquetFileWriter, ParquetWriterProperties};
 
 /// Dumps a SQL dataset
 #[instrument(skip_all, fields(dataset = %dataset.name()), err)]
 pub async fn dump(
-    dst_ctx: Arc<QueryContext>,
+    ctx: Ctx,
+    query_ctx: Arc<QueryContext>,
     dataset: SqlDataset,
-    data_store: Arc<common::Store>,
-    dataset_store: &Arc<DatasetStore>,
     env: &QueryEnv,
     block_ranges_by_table: BTreeMap<String, MultiRange>,
     parquet_opts: &ParquetWriterProperties,
-    start: i64,
-    end: Option<i64>,
     input_batch_size_blocks: u64,
+    (start, end): (i64, Option<i64>),
 ) -> Result<(), BoxError> {
     let mut join_handles = vec![];
 
     for (table, query) in dataset.queries {
-        let dst_ctx = dst_ctx.clone();
-        let dataset_store = dataset_store.clone();
+        let dataset_store = ctx.dataset_store.clone();
+        let data_store = ctx.data_store.clone();
+        let query_ctx = query_ctx.clone();
         let env = env.clone();
-        let data_store = data_store.clone();
         let block_ranges_by_table = block_ranges_by_table.clone();
         let parquet_opts = parquet_opts.clone();
 
         let handle = tokio::spawn(async move {
             let physical_table = {
-                let tables = dst_ctx.catalog().tables();
+                let tables = query_ctx.catalog().tables();
                 tables.iter().find(|t| t.table_name() == table).unwrap()
             };
 
@@ -174,7 +171,7 @@ pub async fn dump(
                     (start as BlockNum, end as BlockNum)
                 }
                 _ => {
-                    match max_end_block(&plan, src_ctx).await? {
+                    match max_end_block(&plan, &src_ctx).await? {
                         Some(max_end_block) => {
                             block_ranges::resolve_relative(start, end, max_end_block)?
                         }
@@ -268,9 +265,9 @@ async fn dump_sql_query(
 
     let (parquet_meta, object_meta) = writer.close(end).await?;
     commit_metadata(
+        &dataset_store.metadata_db,
         parquet_meta,
         object_meta,
-        dataset_store.metadata_db.clone(),
         physical_table.location_id(),
     )
     .await

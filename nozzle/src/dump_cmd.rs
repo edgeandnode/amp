@@ -71,19 +71,23 @@ pub async fn dump(
         physical_datasets.push(tables);
     }
 
+    let ctx = dump::Ctx {
+        config: config.clone(),
+        metadata_db: metadata_db.clone(),
+        dataset_store: dataset_store.clone(),
+        data_store: data_store.clone(),
+    };
     match run_every {
         None => {
             for tables in physical_datasets {
                 dump::dump_tables(
+                    ctx.clone(),
                     &tables,
-                    &dataset_store,
-                    &config,
                     n_jobs,
                     partition_size,
                     input_batch_size_blocks,
                     &parquet_opts,
-                    start,
-                    end_block,
+                    (start, end_block),
                 )
                 .await?
             }
@@ -93,15 +97,13 @@ pub async fn dump(
 
             for tables in &physical_datasets {
                 dump::dump_tables(
+                    ctx.clone(),
                     tables,
-                    &dataset_store,
-                    &config,
                     n_jobs,
                     partition_size,
                     input_batch_size_blocks,
                     &parquet_opts,
-                    start,
-                    end_block,
+                    (start, end_block),
                 )
                 .await?;
             }
