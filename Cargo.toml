@@ -80,10 +80,11 @@ indoc = "2.0.6"
 
 # Datafusion and Arrow crates
 arrow-flight = { version = "55", features = ["flight-sql-experimental"] }
-datafusion = { git = "https://github.com/apache/datafusion", rev = "09a7a2a", features = [
+datafusion = { git = "https://github.com/apache/datafusion", rev = "2c2f225", features = [
     "serde",
 ] }
-datafusion-proto = { git = "https://github.com/apache/datafusion", rev = "09a7a2a" }
+datafusion-datasource = { git = "https://github.com/apache/datafusion", rev = "2c2f225" }
+datafusion-proto = { git = "https://github.com/apache/datafusion", rev = "2c2f225" }
 object_store = { version = "0.12", features = ["aws", "gcp", "azure"] }
 
 # Crates that should follow the version used by DataFusion and Arrow
