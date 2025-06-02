@@ -12,6 +12,7 @@ use futures::{
 };
 use metadata_db::{LocationId, MetadataDb, TableId};
 use object_store::{path::Path, ObjectMeta, ObjectStore};
+use tracing::info;
 use url::Url;
 use uuid::Uuid;
 
@@ -106,6 +107,7 @@ impl PhysicalTable {
         table: &ResolvedTable,
         data_store: &Store,
         metadata_db: Arc<MetadataDb>,
+        set_active: bool,
     ) -> Result<Self, BoxError> {
         let dataset_name = &table.dataset().name;
         let table_id = TableId {
@@ -119,6 +121,12 @@ impl PhysicalTable {
         let location_id = metadata_db
             .register_location(table_id, data_store.bucket(), &path, &url, false)
             .await?;
+
+        if set_active {
+            metadata_db
+                .set_active_location(table_id, url.as_str())
+                .await?;
+        }
 
         let path = Path::from_url_path(url.path()).unwrap();
         let physical_table = Self {
@@ -160,11 +168,9 @@ impl PhysicalTable {
         .await
     }
 
-    /// Attempt to get the active revision of a table. If it doesn't exist, restore the latest revision
-    /// and register it in the metadata database.
-    pub async fn get_or_restore_active_revision(
+    /// Attempt to get the active revision of a table.
+    pub async fn get_active(
         table: &ResolvedTable,
-        data_store: Arc<Store>,
         metadata_db: Arc<MetadataDb>,
     ) -> Result<Option<Self>, BoxError> {
         let dataset_name = &table.dataset().name;
@@ -174,25 +180,28 @@ impl PhysicalTable {
             table: &table.name(),
         };
 
-        let physical_table = if let Some((url, location_id)) =
-            metadata_db.get_active_location(table_id).await?
-        {
-            let path = Path::from_url_path(url.path()).unwrap();
-            let (object_store, _) = infer_object_store(&url)?;
-            Some(Self {
-                table: table.clone(),
-                url,
-                path,
-                object_store,
-                location_id,
-                metadata_db: metadata_db.clone(),
-            })
-        } else {
-            PhysicalTable::restore_latest_revision(table, data_store.clone(), metadata_db.clone())
-                .await?
+        let Some((url, location_id)) = metadata_db.get_active_location(table_id).await? else {
+            return Ok(None);
         };
 
-        Ok(physical_table)
+        let path = Path::from_url_path(url.path()).unwrap();
+        let (object_store, _) = infer_object_store(&url)?;
+
+        info!(
+            "Restored table `{}` from {} with id {}",
+            table.table_ref(),
+            url,
+            location_id
+        );
+
+        Ok(Some(Self {
+            table: table.clone(),
+            url,
+            path,
+            object_store,
+            location_id,
+            metadata_db: metadata_db.clone(),
+        }))
     }
 
     /// Attempt to restore the latest revision of a table from a provided map of revisions

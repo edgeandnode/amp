@@ -88,6 +88,8 @@ async fn sql_over_eth_firehose_dump() {
 
 #[tokio::test]
 async fn sql_tests() {
+    tracing_helpers::register_logger();
+
     for test in load_sql_tests("sql-tests.yaml").unwrap() {
         let results = run_query_on_fresh_server(&test.name, &test.query, vec![], vec![], None)
             .await
@@ -98,6 +100,8 @@ async fn sql_tests() {
 
 #[tokio::test]
 async fn streaming_tests() {
+    tracing_helpers::register_logger();
+
     for test in load_sql_tests("sql-streaming-tests.yaml").unwrap() {
         let results = run_query_on_fresh_server(
             &test.name,
