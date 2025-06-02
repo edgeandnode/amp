@@ -46,7 +46,7 @@ use crate::{
         EvmDecode, EvmDecodeParams, EvmDecodeType, EvmEncodeParams, EvmEncodeType, EvmTopic,
     },
     stream_helpers::is_streaming,
-    BoxError, ResolvedTable,
+    BoxError, LogicalCatalog, ResolvedTable,
 };
 
 #[derive(Error, Debug)]
@@ -77,17 +77,10 @@ pub enum Error {
     ConfigError(DataFusionError),
 }
 
-#[derive(Clone, Debug)]
-pub struct ResolvedTables {
-    pub tables: Vec<ResolvedTable>,
-    /// UDFs specific to the datasets corresponding to the resolved tables.
-    pub udfs: Vec<ScalarUDF>,
-}
-
 /// A context for planning SQL queries.
 pub struct PlanningContext {
     session_config: SessionConfig,
-    catalog: ResolvedTables,
+    catalog: LogicalCatalog,
 }
 
 // Serialized plan with additional options
@@ -108,7 +101,7 @@ pub fn remote_plan_from_bytes(bytes: &Bytes) -> Result<RemotePlan, Error> {
 }
 
 impl PlanningContext {
-    pub fn new(catalog: ResolvedTables) -> Self {
+    pub fn new(catalog: LogicalCatalog) -> Self {
         Self {
             session_config: SessionConfig::from_env().unwrap(),
             catalog,

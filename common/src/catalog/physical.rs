@@ -39,11 +39,8 @@ impl Catalog {
         }
     }
 
-    pub fn new(tables: Vec<PhysicalTable>) -> Self {
-        Catalog {
-            tables,
-            udfs: vec![],
-        }
+    pub fn new(tables: Vec<PhysicalTable>, udfs: Vec<ScalarUDF>) -> Self {
+        Catalog { tables, udfs }
     }
 
     pub fn add_table(&mut self, dataset: PhysicalTable) {

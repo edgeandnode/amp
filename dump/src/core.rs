@@ -48,7 +48,7 @@ pub async fn dump_tables(
         ds
     };
 
-    let catalog = Catalog::new(tables.to_vec());
+    let catalog = Catalog::new(tables.to_vec(), vec![]);
     let env = ctx.config.make_query_env()?;
     let query_ctx = Arc::new(QueryContext::for_catalog(catalog, env.clone())?);
 

@@ -3,6 +3,7 @@ use std::sync::Arc;
 use async_udf::functions::AsyncScalarUDF;
 use datafusion::{
     arrow::datatypes::{DataType, SchemaRef},
+    logical_expr::ScalarUDF,
     sql::TableReference,
 };
 use js_runtime::isolate_pool::IsolatePool;
@@ -158,4 +159,11 @@ fn validate_name(name: &str) -> Result<(), BoxError> {
     }
 
     Ok(())
+}
+
+#[derive(Clone, Debug)]
+pub struct LogicalCatalog {
+    pub tables: Vec<ResolvedTable>,
+    /// UDFs specific to the datasets corresponding to the resolved tables.
+    pub udfs: Vec<ScalarUDF>,
 }

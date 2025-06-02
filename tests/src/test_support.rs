@@ -108,7 +108,7 @@ impl SnapshotContext {
                 ),
             );
         }
-        let catalog = Catalog::new(tables);
+        let catalog = Catalog::new(tables, vec![]);
         let ctx: QueryContext = QueryContext::for_catalog(catalog, config.make_query_env()?)?;
         Ok(Self {
             ctx,
