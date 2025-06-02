@@ -17,7 +17,8 @@ use common::{
         blocks::{Block, BlockRowsBuilder},
         logs::{Log, LogRowsBuilder},
     },
-    BlockNum, BlockStreamer, BoxError, EvmCurrency, RawDatasetRows, RawTableBlock, Timestamp,
+    metadata::range::BlockRange,
+    BlockNum, BlockStreamer, BoxError, EvmCurrency, RawDatasetRows, Timestamp,
 };
 use futures::future::try_join_all;
 use thiserror::Error;
@@ -300,9 +301,11 @@ fn rpc_to_rows(
         transactions.push(rpc_transaction_to_row(&header, tx, receipt, idx)?);
     }
 
-    let block = RawTableBlock {
-        number: header.block_num,
+    let block = BlockRange {
+        numbers: header.block_num..=header.block_num,
         network: network.to_string(),
+        hash: header.hash.into(),
+        prev_hash: Some(header.parent_hash.into()),
     };
 
     let header_row = {

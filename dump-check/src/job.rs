@@ -114,7 +114,7 @@ pub async fn run_job(job: Job<impl BlockStreamer>) -> Result<(), BoxError> {
             continue;
         }
 
-        let block_num = dataset_rows.block().number;
+        let block_num = dataset_rows.block_num();
         for table_rows in dataset_rows {
             if table_rows.is_empty() {
                 continue;

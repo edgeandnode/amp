@@ -6,9 +6,9 @@ use arrow::{
 };
 
 use crate::{
-    arrow, timestamp_type, BoxError, Bytes32, Bytes32ArrayBuilder, EvmAddress as Address,
-    EvmAddressArrayBuilder, RawTableBlock, RawTableRows, Table, Timestamp, TimestampArrayBuilder,
-    BLOCK_NUM, BYTES32_TYPE, EVM_ADDRESS_TYPE as ADDRESS_TYPE,
+    arrow, metadata::range::BlockRange, timestamp_type, BoxError, Bytes32, Bytes32ArrayBuilder,
+    EvmAddress as Address, EvmAddressArrayBuilder, RawTableRows, Table, Timestamp,
+    TimestampArrayBuilder, BLOCK_NUM, BYTES32_TYPE, EVM_ADDRESS_TYPE as ADDRESS_TYPE,
 };
 
 static SCHEMA: LazyLock<SchemaRef> = LazyLock::new(|| Arc::new(schema()));
@@ -129,7 +129,7 @@ impl LogRowsBuilder {
         self.log_index.append_value(*log_index);
     }
 
-    pub fn build(self, block: RawTableBlock) -> Result<RawTableRows, BoxError> {
+    pub fn build(self, range: BlockRange) -> Result<RawTableRows, BoxError> {
         let Self {
             block_hash,
             mut block_num,
@@ -160,7 +160,7 @@ impl LogRowsBuilder {
             Arc::new(data.finish()),
         ];
 
-        RawTableRows::new(table(block.network.clone()), block, columns)
+        RawTableRows::new(table(range.network.clone()), range, columns)
     }
 }
 
@@ -171,9 +171,11 @@ fn default_to_arrow() {
         let mut builder = LogRowsBuilder::with_capacity(1);
         builder.append(&log);
         builder
-            .build(RawTableBlock {
-                number: log.block_num,
+            .build(BlockRange {
+                numbers: log.block_num..=log.block_num,
                 network: "test_network".to_string(),
+                hash: log.block_hash.into(),
+                prev_hash: None,
             })
             .unwrap()
     };

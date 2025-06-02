@@ -7,10 +7,10 @@ use common::{
         },
         datatypes::{DataType, Field, Schema, SchemaRef},
     },
+    metadata::range::BlockRange,
     BoxError, Bytes32, Bytes32ArrayBuilder, EvmAddress as Address, EvmAddressArrayBuilder,
-    EvmCurrency, EvmCurrencyArrayBuilder, RawTableBlock, RawTableRows, Table, Timestamp,
-    TimestampArrayBuilder, BLOCK_NUM, BYTES32_TYPE, EVM_ADDRESS_TYPE as ADDRESS_TYPE,
-    EVM_CURRENCY_TYPE,
+    EvmCurrency, EvmCurrencyArrayBuilder, RawTableRows, Table, Timestamp, TimestampArrayBuilder,
+    BLOCK_NUM, BYTES32_TYPE, EVM_ADDRESS_TYPE as ADDRESS_TYPE, EVM_CURRENCY_TYPE,
 };
 
 static SCHEMA: LazyLock<SchemaRef> = LazyLock::new(|| Arc::new(schema()));
@@ -213,7 +213,7 @@ impl TransactionRowsBuilder {
         self.status.append_value(*status);
     }
 
-    pub(crate) fn build(self, block: RawTableBlock) -> Result<RawTableRows, BoxError> {
+    pub(crate) fn build(self, range: BlockRange) -> Result<RawTableRows, BoxError> {
         let Self {
             block_hash,
             mut block_num,
@@ -262,7 +262,7 @@ impl TransactionRowsBuilder {
             Arc::new(status.finish()),
         ];
 
-        RawTableRows::new(table(block.network.clone()), block, columns)
+        RawTableRows::new(table(range.network.clone()), range, columns)
     }
 }
 
@@ -273,9 +273,11 @@ fn default_to_arrow() {
         let mut builder = TransactionRowsBuilder::with_capacity(1);
         builder.append(&tx);
         builder
-            .build(RawTableBlock {
-                number: tx.block_num,
+            .build(BlockRange {
+                numbers: tx.block_num..=tx.block_num,
                 network: "test_network".to_string(),
+                hash: tx.block_hash.into(),
+                prev_hash: None,
             })
             .unwrap()
     };
