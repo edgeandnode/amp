@@ -83,31 +83,7 @@ impl SnapshotContext {
     pub async fn blessed(dataset: &str) -> Result<Self, BoxError> {
         let config = load_test_config(None).await?;
         let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
-        let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
-        let dataset = dataset_store.load_dataset(dataset).await?.dataset;
-        let dataset_name = dataset.name.clone();
-        let data_store = config.data_store.clone();
-        let mut tables = Vec::new();
-        for table in Arc::new(dataset).resolved_tables() {
-            tables.push(
-                PhysicalTable::restore_latest_revision(
-                    &table,
-                    data_store.clone(),
-                    metadata_db.clone(),
-                )
-                .await?
-                .expect(
-                    format!(
-                        "Failed to restore blessed table {dataset_name}.{}. This is likely due to \
-                        the dataset or table being deleted. \n\
-                        Bless the dataset again with by running \
-                        `cargo run -p tests -- bless {dataset_name} <start_block> <end_block>`",
-                        table.name()
-                    )
-                    .as_str(),
-                ),
-            );
-        }
+        let tables = restore_blessed_dataset(dataset, &metadata_db).await?;
         let catalog = Catalog::new(tables, vec![]);
         let ctx: QueryContext = QueryContext::for_catalog(catalog, config.make_query_env()?)?;
         Ok(Self {
@@ -339,16 +315,14 @@ async fn dump_test_dataset(
         let dataset = dataset_store.load_dataset(dataset_name).await?.dataset;
         let mut tables = Vec::new();
         for table in Arc::new(dataset.clone()).resolved_tables() {
-            let physical_table = match PhysicalTable::get_or_restore_active_revision(
-                &table,
-                data_store.clone(),
-                metadata_db.clone(),
-            )
-            .await?
-            {
-                Some(physical_table) if !clear => physical_table,
-                _ => PhysicalTable::next_revision(&table, &data_store, metadata_db.clone()).await?,
-            };
+            let physical_table =
+                match PhysicalTable::get_active(&table, metadata_db.clone()).await? {
+                    Some(physical_table) if !clear => physical_table,
+                    _ => {
+                        PhysicalTable::next_revision(&table, &data_store, metadata_db.clone(), true)
+                            .await?
+                    }
+                };
 
             tables.push(physical_table);
         }
@@ -490,10 +464,20 @@ pub async fn run_query_on_fresh_server(
 
         load_test_config(config_override).await?
     };
-    let metadata_db = config.metadata_db().await?.into();
+    let metadata_db = Arc::new(config.metadata_db().await?);
+
+    restore_blessed_dataset("eth_firehose", &metadata_db).await?;
+    restore_blessed_dataset("eth_rpc", &metadata_db).await?;
+
     let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel(1);
-    let (bound, server) =
-        nozzle::server::run(config.clone(), metadata_db, false, false, shutdown_rx).await?;
+    let (bound, server) = nozzle::server::run(
+        config.clone(),
+        metadata_db.clone(),
+        false,
+        false,
+        shutdown_rx,
+    )
+    .await?;
     tokio::spawn(async move {
         server.await.unwrap();
     });
@@ -751,4 +735,33 @@ impl DatasetPackage {
 
         Ok(())
     }
+}
+
+async fn restore_blessed_dataset(
+    dataset: &str,
+    metadata_db: &Arc<MetadataDb>,
+) -> Result<Vec<PhysicalTable>, BoxError> {
+    let config = load_test_config(None).await?;
+    let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
+    let dataset = dataset_store.load_dataset(dataset).await?.dataset;
+    let dataset_name = dataset.name.clone();
+    let data_store = config.data_store.clone();
+    let mut tables = Vec::new();
+    for table in Arc::new(dataset).resolved_tables() {
+        tables.push(
+            PhysicalTable::restore_latest_revision(&table, data_store.clone(), metadata_db.clone())
+                .await?
+                .expect(
+                    format!(
+                        "Failed to restore blessed table {dataset_name}.{}. This is likely due to \
+                        the dataset or table being deleted. \n\
+                        Bless the dataset again with by running \
+                        `cargo run -p tests -- bless {dataset_name} <start_block> <end_block>`",
+                        table.name()
+                    )
+                    .as_str(),
+                ),
+        );
+    }
+    Ok(tables)
 }

@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{fmt, sync::Arc};
 
 use async_udf::functions::AsyncScalarUDF;
 use datafusion::{
@@ -84,6 +84,12 @@ pub struct ResolvedTable {
     table: Table,
     dataset: Arc<Dataset>,
     table_ref: TableReference,
+}
+
+impl fmt::Display for ResolvedTable {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.table_ref)
+    }
 }
 
 impl ResolvedTable {

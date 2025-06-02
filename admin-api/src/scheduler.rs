@@ -45,6 +45,7 @@ impl Scheduler {
                 &table,
                 &self.config.data_store,
                 self.metadata_db.clone().into(),
+                false,
             )
             .await?;
             locations.push(physical_table.location_id());

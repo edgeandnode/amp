@@ -213,6 +213,7 @@ pub async fn dump(
                     physical_table.table(),
                     &data_store,
                     dataset_store.metadata_db.clone(),
+                    false,
                 )
                 .await?;
                 tracing::info!(

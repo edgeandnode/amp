@@ -517,17 +517,13 @@ impl DatasetStore {
 
         let mut tables = Vec::new();
         for table in logical_catalog.tables {
-            let physical_table = PhysicalTable::get_or_restore_active_revision(
-                &table,
-                self.config.data_store.clone(),
-                self.metadata_db.clone(),
-            )
-            .await
-            .map_err(DatasetError::unknown)?
-            .ok_or(DatasetError::unknown(format!(
-                "No files found for table {}",
-                table.table_ref()
-            )))?;
+            let physical_table = PhysicalTable::get_active(&table, self.metadata_db.clone())
+                .await
+                .map_err(DatasetError::unknown)?
+                .ok_or(DatasetError::unknown(format!(
+                    "Table {} has not been synced",
+                    table,
+                )))?;
             tables.push(physical_table);
         }
         Ok(Catalog::new(tables, logical_catalog.udfs))
