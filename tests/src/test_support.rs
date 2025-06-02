@@ -573,7 +573,7 @@ pub async fn run_query_on_fresh_server(
 
 pub fn load_sql_tests(file_name: &str) -> Result<Vec<SqlTest>, BoxError> {
     let crate_path = env!("CARGO_MANIFEST_DIR");
-    let path = format!("{crate_path}/{file_name}");
+    let path = format!("{crate_path}/specs/{file_name}");
     let content =
         fs::read(&path).map_err(|e| BoxError::from(format!("Failed to read {file_name}: {e}")))?;
     serde_yaml::from_slice(&content)
