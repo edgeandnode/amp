@@ -9,3 +9,6 @@ max_mem_mb = 30000
 # Paths where DataFusion can create temporary files. Setting this to an
 # empty array disables spill-to-disk
 spill_location = []
+
+# Patched over at runtime by the test harness.
+metadata_db_url = "patch_me"

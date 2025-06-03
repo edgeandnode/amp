@@ -12,7 +12,7 @@ use url::Url;
 
 mod conn;
 #[cfg(feature = "temp-db")]
-mod temp;
+pub mod temp;
 pub mod workers;
 
 use self::conn::{DbConn, DbConnPool};
