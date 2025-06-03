@@ -33,8 +33,7 @@ use figment::{
 };
 use fs_err as fs;
 use futures::{stream::TryStreamExt, StreamExt as _};
-use metadata_db::temp::TempMetadataDb;
-use metadata_db::{MetadataDb, KEEP_TEMP_DIRS};
+use metadata_db::{temp::TempMetadataDb, MetadataDb, KEEP_TEMP_DIRS};
 use nozzle::{dump_cmd::datasets_and_dependencies, server::BoundAddrs};
 use object_store::path::Path;
 use pretty_assertions::assert_str_eq;
