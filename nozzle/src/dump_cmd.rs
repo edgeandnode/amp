@@ -141,7 +141,7 @@ fn resolve_end_block(start_block: i64, end_block: String) -> Result<i64, BoxErro
 
 /// Return the input datasets and their dataset dependencies. The output set is ordered such that
 /// each dataset comes after all datasets it depends on.
-async fn datasets_and_dependencies(
+pub async fn datasets_and_dependencies(
     store: &Arc<DatasetStore>,
     mut datasets: Vec<String>,
 ) -> Result<Vec<String>, BoxError> {

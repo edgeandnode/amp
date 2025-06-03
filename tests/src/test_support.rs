@@ -18,7 +18,7 @@ use common::{
         json::writer::JsonArray,
     },
     catalog::physical::{Catalog, PhysicalTable},
-    config::{Addrs, Config, FigmentJson},
+    config::{Addrs, Config},
     metadata::block_ranges_by_table,
     multirange::MultiRange,
     parquet::basic::{Compression, ZstdLevel},
@@ -27,24 +27,24 @@ use common::{
 };
 use dataset_store::DatasetStore;
 use dump::{dump_tables, parquet_opts, Ctx as DumpCtx};
-use figment::providers::Format as _;
+use figment::{
+    providers::{Format as _, Json},
+    Figment,
+};
 use fs_err as fs;
 use futures::{stream::TryStreamExt, StreamExt as _};
-use metadata_db::{MetadataDb, KEEP_TEMP_DIRS};
-use nozzle::server::BoundAddrs;
+use metadata_db::{temp::TempMetadataDb, MetadataDb, KEEP_TEMP_DIRS};
+use nozzle::{dump_cmd::datasets_and_dependencies, server::BoundAddrs};
 use object_store::path::Path;
 use pretty_assertions::assert_str_eq;
 use serde::{Deserialize, Deserializer};
-use tempfile::TempDir;
 use tokio::time;
 use tracing::{debug, info, instrument, warn};
 
 /// Assume the `cargo test` command is run either from the workspace root or from the crate root.
 const TEST_CONFIG_BASE_DIRS: [&str; 2] = ["tests/config", "config"];
 
-pub async fn load_test_config(
-    literal_override: Option<FigmentJson>,
-) -> Result<Arc<Config>, BoxError> {
+pub async fn load_test_config(config_override: Option<Figment>) -> Result<Arc<Config>, BoxError> {
     let mut path = None;
     for dir in TEST_CONFIG_BASE_DIRS.iter() {
         let p = format!("{}/config.toml", dir);
@@ -62,61 +62,110 @@ pub async fn load_test_config(
         "Couldn't find a test config file, `cargo test` must be run from the workspace root or the tests crate root"
     );
     Ok(Arc::new(
-        Config::load(path, false, literal_override, dynamic_addrs()).await?,
+        Config::load(path, false, config_override, dynamic_addrs()).await?,
     ))
 }
 
-pub async fn bless(dataset_name: &str, start: u64, end: u64) -> Result<(), BoxError> {
-    let config = load_test_config(None).await?;
+pub async fn bless(
+    test_env: &TestEnv,
+    dataset_name: &str,
+    start: u64,
+    end: u64,
+) -> Result<(), BoxError> {
+    let config = test_env.config.clone();
+    let deps = {
+        let ds = dataset_name.to_string();
+        let mut ds_and_deps = datasets_and_dependencies(&test_env.dataset_store, vec![ds]).await?;
+        assert_eq!(ds_and_deps.pop(), Some(dataset_name.to_string()));
+        ds_and_deps
+    };
+    for dep in deps {
+        restore_blessed_dataset(&dep, &test_env.metadata_db).await?;
+    }
+
     dump(config, dataset_name, vec![], start, end, 1, true).await?;
     Ok(())
 }
 
+pub struct TestEnv {
+    pub config: Arc<Config>,
+    pub metadata_db: Arc<MetadataDb>,
+    dataset_store: Arc<DatasetStore>,
+
+    // Drop guard
+    _temp_db: TempMetadataDb,
+    _temp_dir: Option<tempfile::TempDir>,
+}
+
+impl TestEnv {
+    /// Create a new test environment with a temp metadata database and data directory.
+    pub async fn temp() -> Result<Self, BoxError> {
+        Self::new(true).await
+    }
+
+    /// Create a new test environment with a temp metadata database, but the blessed data directory.
+    pub async fn blessed() -> Result<Self, BoxError> {
+        Self::new(false).await
+    }
+    pub async fn new(temp: bool) -> Result<Self, BoxError> {
+        let db = TempMetadataDb::new(*KEEP_TEMP_DIRS).await;
+        let figment = Figment::from(Json::string(&format!(
+            r#"{{ "metadata_db_url": "{}" }}"#,
+            db.url(),
+        )));
+
+        let (temp_dir, figment) = if temp {
+            let temp_dir = tempfile::Builder::new()
+                .disable_cleanup(*KEEP_TEMP_DIRS)
+                .tempdir()?;
+            let data_path = temp_dir.path();
+            info!("Temporary data dir {}", data_path.display());
+            let figment = figment.merge(Figment::from(Json::string(&format!(
+                r#"{{ "data_dir": "{}" }}"#,
+                data_path.display(),
+            ))));
+            (Some(temp_dir), figment)
+        } else {
+            (None, figment)
+        };
+
+        let config = load_test_config(Some(figment)).await?;
+        let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
+        let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
+        Ok(Self {
+            config: config.clone(),
+            metadata_db,
+            dataset_store,
+            _temp_db: db,
+            _temp_dir: temp_dir,
+        })
+    }
+}
+
 pub struct SnapshotContext {
     pub(crate) ctx: QueryContext,
-
-    /// For a dataset dumped to a temporary directory. The directory is deleted on drop.
-    _temp_dir: Option<TempDir>,
 }
 
 impl SnapshotContext {
-    pub async fn blessed(dataset: &str) -> Result<Self, BoxError> {
-        let config = load_test_config(None).await?;
-        let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
-        let tables = restore_blessed_dataset(dataset, &metadata_db).await?;
+    pub async fn blessed(env: &TestEnv, dataset: &str) -> Result<Self, BoxError> {
+        let metadata_db = &env.metadata_db;
+        let tables = restore_blessed_dataset(dataset, metadata_db).await?;
         let catalog = Catalog::new(tables, vec![]);
-        let ctx: QueryContext = QueryContext::for_catalog(catalog, config.make_query_env()?)?;
-        Ok(Self {
-            ctx,
-            _temp_dir: None,
-        })
+        let ctx: QueryContext = QueryContext::for_catalog(catalog, env.config.make_query_env()?)?;
+        Ok(Self { ctx })
     }
 
     /// Dump the dataset to a temporary data directory.
     pub async fn temp_dump(
+        test_env: &TestEnv,
         dataset_name: &str,
         dependencies: Vec<&str>,
         start: u64,
         end: u64,
         n_jobs: u16,
-        keep_temp_dir: bool,
     ) -> Result<SnapshotContext, BoxError> {
-        use figment::providers::Json;
-
-        let temp_dir = tempfile::Builder::new()
-            .disable_cleanup(keep_temp_dir)
-            .tempdir()?;
-        let path = temp_dir.path();
-        info!("Dumping dataset to {}", path.display());
-
-        let config_override = Some(Json::string(&format!(
-            r#"{{ "data_dir": "{}" }}"#,
-            path.display()
-        )));
-
-        let config = load_test_config(config_override).await?;
         let catalog = dump(
-            config.clone(),
+            test_env.config.clone(),
             dataset_name,
             dependencies,
             start,
@@ -125,12 +174,9 @@ impl SnapshotContext {
             true,
         )
         .await?;
-        let ctx = QueryContext::for_catalog(catalog, config.make_query_env()?)?;
+        let ctx = QueryContext::for_catalog(catalog, test_env.config.make_query_env()?)?;
 
-        Ok(SnapshotContext {
-            ctx,
-            _temp_dir: Some(temp_dir),
-        })
+        Ok(SnapshotContext { ctx })
     }
 
     async fn check_block_range_eq(&self, blessed: &SnapshotContext) -> Result<(), BoxError> {
@@ -258,16 +304,18 @@ async fn dump(
     Ok(catalog)
 }
 
-pub async fn check_blocks(dataset_name: &str, start: u64, end: u64) -> Result<(), BoxError> {
-    let config = load_test_config(None).await?;
-    let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
-    let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
-    let env = config.make_query_env()?;
+pub async fn check_blocks(
+    test_env: &TestEnv,
+    dataset_name: &str,
+    start: u64,
+    end: u64,
+) -> Result<(), BoxError> {
+    let env = test_env.config.make_query_env()?;
 
     dump_check::dump_check(
         dataset_name,
-        &dataset_store,
-        metadata_db,
+        &test_env.dataset_store,
+        test_env.metadata_db.clone(),
         &env,
         1000,
         1,
@@ -436,6 +484,7 @@ fn dynamic_addrs() -> Addrs {
 /// Start a nozzle server, execute the given query, convert the result to JSONL, shut down the
 /// server and return the JSONL string in binary format.
 pub async fn run_query_on_fresh_server(
+    test_env: &TestEnv,
     test_name: &str,
     query: &str,
     initial_dumps: Vec<DumpTestDatasetCommand>,
@@ -445,33 +494,14 @@ pub async fn run_query_on_fresh_server(
     check_provider_file("rpc_eth_mainnet.toml").await;
     check_provider_file("firehose_eth_mainnet.toml").await;
 
-    // Start the nozzle server.
-    let config = if initial_dumps.is_empty() && dumps_on_running_server.is_empty() {
-        load_test_config(None).await?
-    } else {
-        use figment::providers::Json;
-
-        let temp_dir = tempfile::Builder::new()
-            .disable_cleanup(*KEEP_TEMP_DIRS)
-            .prefix(test_name)
-            .tempdir()?;
-        let path = temp_dir.path();
-
-        let config_override = Some(Json::string(&format!(
-            r#"{{ "data_dir": "{}" }}"#,
-            path.display()
-        )));
-
-        load_test_config(config_override).await?
-    };
-    let metadata_db = Arc::new(config.metadata_db().await?);
+    let metadata_db = test_env.metadata_db.clone();
 
     restore_blessed_dataset("eth_firehose", &metadata_db).await?;
     restore_blessed_dataset("eth_rpc", &metadata_db).await?;
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel(1);
     let (bound, server) = nozzle::server::run(
-        config.clone(),
+        test_env.config.clone(),
         metadata_db.clone(),
         false,
         false,
@@ -489,7 +519,7 @@ pub async fn run_query_on_fresh_server(
             .map(|s| s.as_str())
             .collect();
         let _ = dump(
-            config.clone(),
+            test_env.config.clone(),
             &initial_dump.dataset_name,
             dependencies,
             initial_dump.start,
@@ -513,6 +543,7 @@ pub async fn run_query_on_fresh_server(
     let mut rows_returned: usize = 0;
 
     // Dumps on running server
+    let config = test_env.config.clone();
     tokio::spawn(async move {
         for dump_command in dumps_on_running_server {
             let dependencies: Vec<&str> = dump_command
@@ -573,7 +604,7 @@ pub async fn run_query_on_fresh_server(
 
 pub fn load_sql_tests(file_name: &str) -> Result<Vec<SqlTest>, BoxError> {
     let crate_path = env!("CARGO_MANIFEST_DIR");
-    let path = format!("{crate_path}/{file_name}");
+    let path = format!("{crate_path}/specs/{file_name}");
     let content =
         fs::read(&path).map_err(|e| BoxError::from(format!("Failed to read {file_name}: {e}")))?;
     serde_yaml::from_slice(&content)
