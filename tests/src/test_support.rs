@@ -35,7 +35,7 @@ use fs_err as fs;
 use futures::{stream::TryStreamExt, StreamExt as _};
 use metadata_db::temp::TempMetadataDb;
 use metadata_db::{MetadataDb, KEEP_TEMP_DIRS};
-use nozzle::server::BoundAddrs;
+use nozzle::{dump_cmd::datasets_and_dependencies, server::BoundAddrs};
 use object_store::path::Path;
 use pretty_assertions::assert_str_eq;
 use serde::{Deserialize, Deserializer};
@@ -74,6 +74,16 @@ pub async fn bless(
     end: u64,
 ) -> Result<(), BoxError> {
     let config = test_env.config.clone();
+    let deps = {
+        let ds = dataset_name.to_string();
+        let mut ds_and_deps = datasets_and_dependencies(&test_env.dataset_store, vec![ds]).await?;
+        assert_eq!(ds_and_deps.pop(), Some(dataset_name.to_string()));
+        ds_and_deps
+    };
+    for dep in deps {
+        restore_blessed_dataset(&dep, &test_env.metadata_db).await?;
+    }
+
     dump(config, dataset_name, vec![], start, end, 1, true).await?;
     Ok(())
 }
@@ -112,7 +122,7 @@ impl TestEnv {
             let data_path = temp_dir.path();
             info!("Temporary data dir {}", data_path.display());
             let figment = figment.merge(Figment::from(Json::string(&format!(
-                r#"{{ "metadata_db_url": "{}" }}"#,
+                r#"{{ "data_dir": "{}" }}"#,
                 data_path.display(),
             ))));
             (Some(temp_dir), figment)
