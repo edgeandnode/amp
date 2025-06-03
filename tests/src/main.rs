@@ -1,6 +1,6 @@
 use clap::Parser;
 use common::tracing_helpers;
-use tests::test_support::bless;
+use tests::test_support::{bless, TestEnv};
 use tracing::warn;
 
 /// CLI for test support.
@@ -37,7 +37,10 @@ async fn main() {
             start_block,
             end_block,
         } => {
-            bless(&dataset, start_block, end_block).await.unwrap();
+            let test_env = TestEnv::blessed().await.unwrap();
+            bless(&test_env, &dataset, start_block, end_block)
+                .await
+                .unwrap();
             warn!("wrote new blessed dataset for {dataset}");
         }
     }

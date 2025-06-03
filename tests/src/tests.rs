@@ -19,7 +19,7 @@ async fn evm_rpc_single_dump() {
     let dataset_name = "eth_rpc";
     check_provider_file("rpc_eth_mainnet.toml").await;
 
-    let test_env = TestEnv::new().await.unwrap();
+    let test_env = TestEnv::temp().await.unwrap();
 
     let blessed = SnapshotContext::blessed(&test_env, &dataset_name)
         .await
@@ -45,7 +45,7 @@ async fn eth_firehose_single_dump() {
     let dataset_name = "eth_firehose";
     check_provider_file("firehose_eth_mainnet.toml").await;
 
-    let test_env = TestEnv::new().await.unwrap();
+    let test_env = TestEnv::temp().await.unwrap();
     let blessed = SnapshotContext::blessed(&test_env, &dataset_name)
         .await
         .unwrap();
@@ -67,7 +67,7 @@ async fn sql_over_eth_firehose_dump() {
     tracing_helpers::register_logger();
     let dataset_name = "sql_over_eth_firehose";
 
-    let test_env = TestEnv::new().await.unwrap();
+    let test_env = TestEnv::temp().await.unwrap();
     let blessed = SnapshotContext::blessed(&test_env, &dataset_name)
         .await
         .unwrap();
@@ -89,7 +89,7 @@ async fn sql_over_eth_firehose_dump() {
 #[tokio::test]
 async fn sql_tests() {
     tracing_helpers::register_logger();
-    let test_env = TestEnv::new().await.unwrap();
+    let test_env = TestEnv::temp().await.unwrap();
 
     for test in load_sql_tests("sql-tests.yaml").unwrap() {
         let results =
@@ -103,7 +103,7 @@ async fn sql_tests() {
 #[tokio::test]
 async fn streaming_tests() {
     tracing_helpers::register_logger();
-    let test_env = TestEnv::new().await.unwrap();
+    let test_env = TestEnv::temp().await.unwrap();
 
     for test in load_sql_tests("sql-streaming-tests.yaml").unwrap() {
         let results = run_query_on_fresh_server(
@@ -125,7 +125,7 @@ async fn streaming_tests() {
 async fn basic_function() -> Result<(), BoxError> {
     tracing_helpers::register_logger();
 
-    let test_env = TestEnv::new().await.unwrap();
+    let test_env = TestEnv::temp().await.unwrap();
     let (tx, rx) = broadcast::channel(1);
     std::mem::forget(tx);
 

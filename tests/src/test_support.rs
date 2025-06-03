@@ -18,7 +18,7 @@ use common::{
         json::writer::JsonArray,
     },
     catalog::physical::{Catalog, PhysicalTable},
-    config::{Addrs, Config, FigmentJson},
+    config::{Addrs, Config},
     metadata::block_ranges_by_table,
     multirange::MultiRange,
     parquet::basic::{Compression, ZstdLevel},
@@ -27,7 +27,10 @@ use common::{
 };
 use dataset_store::DatasetStore;
 use dump::{dump_tables, parquet_opts, Ctx as DumpCtx};
-use figment::providers::{Format as _, Json};
+use figment::{
+    providers::{Format as _, Json},
+    Figment,
+};
 use fs_err as fs;
 use futures::{stream::TryStreamExt, StreamExt as _};
 use metadata_db::temp::TempMetadataDb;
@@ -42,9 +45,7 @@ use tracing::{debug, info, instrument, warn};
 /// Assume the `cargo test` command is run either from the workspace root or from the crate root.
 const TEST_CONFIG_BASE_DIRS: [&str; 2] = ["tests/config", "config"];
 
-pub async fn load_test_config(
-    literal_override: Option<FigmentJson>,
-) -> Result<Arc<Config>, BoxError> {
+pub async fn load_test_config(config_override: Option<Figment>) -> Result<Arc<Config>, BoxError> {
     let mut path = None;
     for dir in TEST_CONFIG_BASE_DIRS.iter() {
         let p = format!("{}/config.toml", dir);
@@ -62,12 +63,17 @@ pub async fn load_test_config(
         "Couldn't find a test config file, `cargo test` must be run from the workspace root or the tests crate root"
     );
     Ok(Arc::new(
-        Config::load(path, false, literal_override, dynamic_addrs()).await?,
+        Config::load(path, false, config_override, dynamic_addrs()).await?,
     ))
 }
 
-pub async fn bless(dataset_name: &str, start: u64, end: u64) -> Result<(), BoxError> {
-    let config = load_test_config(None).await?;
+pub async fn bless(
+    test_env: &TestEnv,
+    dataset_name: &str,
+    start: u64,
+    end: u64,
+) -> Result<(), BoxError> {
+    let config = test_env.config.clone();
     dump(config, dataset_name, vec![], start, end, 1, true).await?;
     Ok(())
 }
@@ -79,27 +85,42 @@ pub struct TestEnv {
 
     // Drop guard
     _temp_db: TempMetadataDb,
-    _temp_dir: tempfile::TempDir,
+    _temp_dir: Option<tempfile::TempDir>,
 }
 
 impl TestEnv {
-    pub async fn new() -> Result<Self, BoxError> {
-        let temp_dir = tempfile::Builder::new()
-            .disable_cleanup(*KEEP_TEMP_DIRS)
-            .tempdir()?;
-        let data_path = temp_dir.path();
-        info!("Temporary data dir {}", data_path.display());
+    /// Create a new test environment with a temp metadata database and data directory.
+    pub async fn temp() -> Result<Self, BoxError> {
+        Self::new(true).await
+    }
 
+    /// Create a new test environment with a temp metadata database, but the blessed data directory.
+    pub async fn blessed() -> Result<Self, BoxError> {
+        Self::new(false).await
+    }
+    pub async fn new(temp: bool) -> Result<Self, BoxError> {
         let db = TempMetadataDb::new(*KEEP_TEMP_DIRS).await;
-        let config_override = Some(Json::string(&format!(
-            r#"{{ 
-                "data_dir": "{}",
-                "metadata_db_url": "{}"
-            }}"#,
-            data_path.display(),
-            db.url()
+        let figment = Figment::from(Json::string(&format!(
+            r#"{{ "metadata_db_url": "{}" }}"#,
+            db.url(),
         )));
-        let config = load_test_config(config_override).await?;
+
+        let (temp_dir, figment) = if temp {
+            let temp_dir = tempfile::Builder::new()
+                .disable_cleanup(*KEEP_TEMP_DIRS)
+                .tempdir()?;
+            let data_path = temp_dir.path();
+            info!("Temporary data dir {}", data_path.display());
+            let figment = figment.merge(Figment::from(Json::string(&format!(
+                r#"{{ "metadata_db_url": "{}" }}"#,
+                data_path.display(),
+            ))));
+            (Some(temp_dir), figment)
+        } else {
+            (None, figment)
+        };
+
+        let config = load_test_config(Some(figment)).await?;
         let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
         let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
         Ok(Self {
