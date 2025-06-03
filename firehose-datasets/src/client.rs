@@ -1,21 +1,20 @@
 use std::{str::FromStr, time::Duration};
 
+use async_stream::stream;
 use common::{store::Store, BlockNum, BlockStreamer, BoxError, RawDatasetRows};
 use futures::{Stream, StreamExt as _, TryStreamExt as _};
 use pbfirehose::{stream_client::StreamClient, ForkStep, Response as StreamResponse};
 use prost::Message as _;
-use tokio::sync::mpsc;
 use tonic::{
     codec::CompressionEncoding,
     metadata::{Ascii, MetadataValue},
     service::{interceptor::InterceptedService, Interceptor},
     transport::{ClientTlsConfig, Endpoint, Uri},
 };
-use tracing::debug;
 
 use crate::{
     dataset::{extract_provider, FirehoseProvider},
-    evm::pbethereum,
+    evm::{pb_to_rows::protobufs_to_rows, pbethereum},
     proto::sf::firehose::v2 as pbfirehose,
     Error,
 };
@@ -157,74 +156,75 @@ impl Interceptor for AuthInterceptor {
 }
 
 impl BlockStreamer for Client {
-    /// Once spawned, will continuously fetch blocks from the Firehose and send them through the channel.
+    /// Creates a stream that continuously fetches blocks from the Firehose.
     ///
-    /// Terminates with `Ok` when the Firehose stream reaches `end_block`, or the channel receiver goes
-    /// away.
+    /// The stream will yield blocks from `start_block` to `end_block`.
     ///
-    /// Terminates with `Err` when there is an error estabilishing the stream.
-    ///
-    /// Errors from the Firehose stream are logged and retried.
+    /// Errors from the Firehose stream are logged and retried automatically.
     async fn block_stream(
         mut self,
         start_block: u64,
         end_block: u64,
-        tx: mpsc::Sender<RawDatasetRows>,
-    ) -> Result<(), BoxError> {
-        use crate::evm::pb_to_rows::protobufs_to_rows;
-
+    ) -> impl Stream<Item = Result<RawDatasetRows, BoxError>> + Send {
         const RETRY_BACKOFF: Duration = Duration::from_secs(5);
 
-        // Explicitly track the next block in case we need to restart the Firehose stream.
-        let mut next_block = start_block;
+        stream! {
+            // Explicitly track the next block in case we need to restart the Firehose stream.
+            let mut next_block = start_block;
 
-        // A retry loop for consuming the Firehose.
-        'retry: loop {
-            let mut stream = match self.blocks(next_block as i64, end_block).await {
-                Ok(stream) => Box::pin(stream),
-
-                // If there is an error at the initial connection, we don't retry here as that's
-                // unexpected.
-                Err(err) => break Err(err.into()),
-            };
-            while let Some(block) = stream.next().await {
-                match block {
-                    Ok(block) => {
-                        let block_num = block.number;
-
-                        let table_rows = protobufs_to_rows(block, &self.network).map_err(|e| {
-                            format!(
-                                "error converting Protobufs to rows on block {}: {}",
-                                block_num, e
-                            )
-                        })?;
-
-                        // Send the block and check if the receiver has gone away.
-                        if tx.send(table_rows).await.is_err() {
-                            break;
-                        }
-
-                        next_block = block_num + 1;
-                    }
+            'retry: loop {
+                let mut stream = match self.blocks(next_block as i64, end_block).await {
+                    Ok(stream) => std::pin::pin!(stream),
+                    // If there is an error at the initial connection, we don't retry here as that's
+                    // unexpected.
                     Err(err) => {
-                        // Log and retry.
-                        debug!("error reading firehose stream, retrying in {} seconds, error message: {}", RETRY_BACKOFF.as_secs(), err);
-                        tokio::time::sleep(RETRY_BACKOFF).await;
-                        continue 'retry;
+                        yield Err(err.into());
+                        return;
+                    }
+                };
+
+                while let Some(block_result) = stream.next().await {
+                    match block_result {
+                        Ok(block) => {
+                            let block_num = block.number;
+
+                            match protobufs_to_rows(block, &self.network) {
+                                Ok(table_rows) => {
+                                    yield Ok(table_rows);
+                                    next_block = block_num + 1;
+                                }
+                                Err(err) => {
+                                    yield Err(format!(
+                                        "error converting Protobufs to rows on block {}: {}",
+                                        block_num,
+                                        err
+                                    ).into());
+                                    return;
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            // Log the error and retry after `RETRY_BACKOFF` seconds
+                            tracing::debug!(error=%err, "error reading firehose stream, retrying in {} seconds", RETRY_BACKOFF.as_secs());
+                            tokio::time::sleep(RETRY_BACKOFF).await;
+                            continue 'retry;
+                        }
                     }
                 }
-            }
 
-            // The stream has ended, or the receiver has gone away, either way we hit a natural
-            // termination condition.
-            break Ok(());
+                // The stream has ended, or the receiver has gone away,
+                // either way we hit a natural termination condition
+                break;
+            }
         }
     }
 
     async fn latest_block(&mut self, finalized: bool) -> Result<BlockNum, BoxError> {
         // See also: only-final-blocks
         _ = finalized;
-        let block = self.blocks(-1, 0).await?.boxed().next().await;
-        Ok(block.transpose()?.map(|b| b.number).unwrap_or(0))
+        let stream = self.blocks(-1, 0).await?;
+        let mut stream = std::pin::pin!(stream);
+        let block = stream.next().await;
+        Ok(block.transpose()?.map(|block| block.number).unwrap_or(0))
     }
 }

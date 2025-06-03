@@ -88,14 +88,11 @@ use std::{
 use common::{
     multirange::MultiRange, query_context::QueryContext, BlockNum, BlockStreamer, BoxError,
 };
+use futures::TryStreamExt as _;
 use metadata_db::MetadataDb;
 use tracing::instrument;
 
-use super::{
-    block_ranges,
-    tasks::{AbortOnDropHandle, FailFastJoinSet},
-    Ctx,
-};
+use super::{block_ranges, tasks::FailFastJoinSet, Ctx};
 use crate::parquet_writer::{ParquetWriterProperties, RawDatasetWriter};
 
 /// Dumps a raw dataset by extracting blockchain data from specified block ranges
@@ -245,14 +242,9 @@ impl<S: BlockStreamer> DumpPartition<S> {
     }
 
     async fn run_range(&self, start: u64, end: u64) -> Result<(), BoxError> {
-        let (mut extractor, extractor_handle) = {
+        let stream = {
             let block_streamer = self.block_streamer.clone();
-            let (tx, rx) = tokio::sync::mpsc::channel(100);
-            let extractor_task = block_streamer.block_stream(start, end, tx);
-
-            // Wrapping the returned handle in an AbortOnDropHandle to avoid leaking the task if the
-            // job partition is dropped before the task finishes
-            (rx, AbortOnDropHandle::new(tokio::spawn(extractor_task)))
+            block_streamer.block_stream(start, end).await
         };
 
         let mut writer = RawDatasetWriter::new(
@@ -265,16 +257,12 @@ impl<S: BlockStreamer> DumpPartition<S> {
             self.block_ranges_by_table.clone(),
         )?;
 
-        while let Some(dataset_rows) = extractor.recv().await {
+        let mut stream = std::pin::pin!(stream);
+        while let Some(dataset_rows) = stream.try_next().await? {
             for table_rows in dataset_rows {
                 writer.write(table_rows).await?;
             }
         }
-
-        // The extraction task stopped sending blocks, so it must have terminated. Here we wait for it to
-        // finish and check for any errors and panics.
-        tracing::debug!("Waiting for job partition #{} to finish", self.id);
-        extractor_handle.await??;
 
         // Close the last part file for each table, checking for any errors.
         writer.close().await?;
