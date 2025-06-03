@@ -20,6 +20,7 @@ use object_store::ObjectMeta;
 mod block_ranges;
 mod raw_dataset;
 mod sql_dataset;
+mod tasks;
 
 use crate::parquet_writer::ParquetWriterProperties;
 
