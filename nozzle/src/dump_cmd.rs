@@ -63,7 +63,7 @@ pub async fn dump(
                         &table,
                         data_store.as_ref(),
                         metadata_db.clone(),
-                        false,
+                        true,
                     )
                     .await?,
                 );
