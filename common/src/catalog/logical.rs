@@ -8,7 +8,7 @@ use datafusion::{
 };
 use js_runtime::isolate_pool::IsolatePool;
 
-use crate::{js_udf::JsUdf, BoxError, SPECIAL_BLOCK_NUM};
+use crate::{js_udf::JsUdf, BoxError, BLOCK_NUM, SPECIAL_BLOCK_NUM};
 
 /// Identifies a dataset and its data schema.
 #[derive(Clone, Debug)]
@@ -74,7 +74,11 @@ impl Table {
         // - Make this less hardcoded to handle non-blockchain data.
         // - Have a consistency check that the data really is sorted.
         // - Do we want to address and leverage https://github.com/apache/arrow-datafusion/issues/4177?
-        vec![SPECIAL_BLOCK_NUM.to_string(), "timestamp".to_string()]
+        vec![
+            SPECIAL_BLOCK_NUM.to_string(),
+            BLOCK_NUM.to_string(),
+            "timestamp".to_string(),
+        ]
     }
 }
 
