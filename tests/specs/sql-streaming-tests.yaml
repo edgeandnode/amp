@@ -38,6 +38,20 @@
       {"__block_num": 15000000, "block_num": 15000000}
     ]
 
+- name: select_special_block_num_qualified
+  query: |
+    SELECT b.__block_num, block_num
+    FROM eth_firehose.blocks AS b
+    WHERE block_num >= 15000000
+    SETTINGS stream = true
+  streamingOptions:
+    maxDuration: 10s
+    atLeastRows: 1
+  results: |
+    [
+      {"__block_num": 15000000, "block_num": 15000000}
+    ]
+
 - name: select_block_num_qualified
   query: SELECT eth_firehose.blocks.block_num FROM eth_firehose.blocks WHERE block_num >= 15000000 SETTINGS stream = true
   streamingOptions:
