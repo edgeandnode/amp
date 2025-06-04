@@ -120,31 +120,6 @@
       {"hash": "9a71a95be3fe957457b11817587e5af4c7e24836d5b383c430ff25b9286a457f"}
     ]
 
-- name: query_uses_double_underscore
-  query: |
-    SELECT hash as __hash FROM eth_firehose.blocks
-    SETTINGS stream = true
-  streamingOptions:
-    maxDuration: 10s
-    atLeastRows: 1
-  results: |
-    [
-      {"__hash": "9a71a95be3fe957457b11817587e5af4c7e24836d5b383c430ff25b9286a457f"}
-    ]
-
-- name: subquery_uses_double_underscore
-  query: |
-    SELECT block_num FROM
-      (SELECT hash AS __hash, block_num FROM eth_firehose.blocks)
-    SETTINGS stream = true
-  streamingOptions:
-    maxDuration: 10s
-    atLeastRows: 1
-  results: |
-    [
-      {"block_num": 15000000}
-    ]
-
 - name: select_block_num
   query: SELECT block_num FROM eth_firehose_stream.blocks WHERE block_num >= 15000000 SETTINGS stream = true
   streamingOptions:

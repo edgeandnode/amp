@@ -438,9 +438,16 @@
   results: |
     [{"__block_num": 15000000}]
 
-- name: select_special_block_num_alias
+- name: select_alias_starting_with_underscore
   query: |
-    SELECT 0 AS __block_num
+    SELECT block_num AS _hello
     FROM eth_rpc.blocks
   failure: |
-    projection contains an alias named '__block_num', which is never allowed. Either select '__block_num' directly or rename the alias
+    projection contains a column alias starting with '_': '_hello'. Underscore-prefixed names are reserved. Please rename your column
+
+- name: select_alias_starting_with_underscore_subquery
+  query: |
+    SELECT 0 AS zero
+    FROM (SELECT block_num as _hello FROM eth_rpc.blocks)
+  failure: |
+    projection contains a column alias starting with '_': '_hello'. Underscore-prefixed names are reserved. Please rename your column

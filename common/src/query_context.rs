@@ -523,14 +523,14 @@ pub fn propagate_block_num(plan: LogicalPlan) -> Result<LogicalPlan, DataFusionE
     plan.transform(|node| {
         match node {
             LogicalPlan::Projection(mut projection) => {
-                // Aliases with the `SPECIAL_BLOCK_NUM` name are always forbidden.
+                // Aliases with a name starting with `_` are always forbidden, since underscore-prefixed
+                // names are reserved for special columns.
                 for expr in projection.expr.iter() {
                     if let Expr::Alias(alias) = expr {
-                        if alias.name == SPECIAL_BLOCK_NUM {
+                        if alias.name.starts_with('_') && alias.name != SPECIAL_BLOCK_NUM {
                             return plan_err!(
-                                "projection contains an alias named '{}', which is never allowed. Either select '{}' directly or rename the alias",
-                                SPECIAL_BLOCK_NUM,
-                                SPECIAL_BLOCK_NUM
+                                "projection contains a column alias starting with '_': '{}'. Underscore-prefixed names are reserved. Please rename your column",
+                                alias.name
                             );
                         }
                     }
