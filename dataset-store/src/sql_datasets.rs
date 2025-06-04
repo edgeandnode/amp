@@ -90,7 +90,7 @@ pub(super) async fn dataset(
             schema: schema.as_ref().clone().into(),
             network,
         };
-        tables.push(table);
+        tables.push(table.with_special_block_num_column());
         queries.insert(table_name.to_string(), query);
     }
 

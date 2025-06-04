@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, sync::Arc};
 
 use datafusion::{
-    arrow::datatypes::{DataType, Field, Schema, SchemaRef},
+    arrow::datatypes::SchemaRef,
     logical_expr::{col, ScalarUDF, SortExpr},
     parquet::arrow::async_reader::{AsyncFileReader, ParquetObjectReader},
     sql::TableReference,
@@ -10,7 +10,6 @@ use futures::{
     stream::{self, BoxStream},
     StreamExt, TryStreamExt,
 };
-use itertools::Itertools;
 use metadata_db::{LocationId, MetadataDb, TableId};
 use object_store::{path::Path, ObjectMeta, ObjectStore};
 use tracing::info;
@@ -23,7 +22,7 @@ use crate::{
         FileMetadata,
     },
     store::{infer_object_store, Store},
-    BoxError, Dataset, ResolvedTable, SPECIAL_BLOCK_NUM,
+    BoxError, Dataset, ResolvedTable,
 };
 
 #[derive(Debug, Clone)]
@@ -99,19 +98,6 @@ impl PhysicalTable {
             location_id,
             metadata_db,
         })
-    }
-
-    /// Prepend the `SPECIAL_BLOCK_NUM` column to the table schema. This is useful for SQL datasets.
-    pub fn with_special_block_num_column(mut self) -> Self {
-        let schema = self.table.schema();
-        let metadata = schema.metadata.clone();
-        let fields = std::iter::once(Field::new(SPECIAL_BLOCK_NUM, DataType::UInt64, false))
-            .chain(schema.fields().iter().map(|f| f.as_ref().clone()))
-            .collect_vec();
-        self.table = self
-            .table
-            .with_schema(Schema::new_with_metadata(fields, metadata));
-        self
     }
 
     /// Create a new physical table with the given dataset name, table, URL, and object store.

@@ -25,7 +25,7 @@ use common::{
     query_context::parse_sql,
     BoxError, QueryContext,
 };
-use dataset_store::{sql_datasets, DatasetStore};
+use dataset_store::DatasetStore;
 use dump::{dump_tables, parquet_opts, Ctx as DumpCtx};
 use figment::{
     providers::{Format as _, Json},
@@ -371,13 +371,7 @@ async fn dump_test_dataset(
                             .await?
                     }
                 };
-
-            tables.push(if dataset.kind == sql_datasets::DATASET_KIND {
-                // SQL datasets must include the `SPECIAL_BLOCK_NUM` column.
-                physical_table.with_special_block_num_column()
-            } else {
-                physical_table
-            });
+            tables.push(physical_table);
         }
         tables
     };
@@ -797,13 +791,7 @@ async fn restore_blessed_dataset(
                     )
                     .as_str(),
                 );
-        tables.push(
-            if physical_table.dataset().kind == sql_datasets::DATASET_KIND {
-                physical_table.with_special_block_num_column()
-            } else {
-                physical_table
-            },
-        );
+        tables.push(physical_table);
     }
     Ok(tables)
 }

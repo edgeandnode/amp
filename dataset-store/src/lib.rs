@@ -524,13 +524,7 @@ impl DatasetStore {
                     "Table {} has not been synced",
                     table,
                 )))?;
-            tables.push(
-                if physical_table.dataset().kind == sql_datasets::DATASET_KIND {
-                    physical_table.with_special_block_num_column()
-                } else {
-                    physical_table
-                },
-            );
+            tables.push(physical_table);
         }
         Ok(Catalog::new(tables, logical_catalog.udfs))
     }
