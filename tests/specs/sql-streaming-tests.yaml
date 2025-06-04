@@ -224,28 +224,6 @@
   streamingOptions:
     maxDuration: 10s
     atLeastRows: 4
-  initialDumps:
-    - dataset: eth_firehose_stream
-      start: 15000000
-      end: 15000001
-      nJobs: 1
-    - dataset: sql_stream_ds
-      start: 15000001
-      end: 15000001
-      nJobs: 1
-  dumpsOnRunningServer:
-    - dataset: eth_firehose_stream
-      start: 15000002
-      end: 15000002
-      nJobs: 1
-    - dataset: eth_firehose_stream
-      start: 15000002
-      end: 15000004
-      nJobs: 1
-    - dataset: sql_stream_ds
-      start: 15000002
-      end: 15000004
-      nJobs: 1
   results: |
     [
       {
@@ -297,28 +275,6 @@
   streamingOptions:
     maxDuration: 10s
     atLeastRows: 4
-  initialDumps:
-    - dataset: eth_firehose_stream
-      start: 15000000
-      end: 15000001
-      nJobs: 1
-    - dataset: sql_stream_ds
-      start: 15000001
-      end: 15000001
-      nJobs: 1
-  dumpsOnRunningServer:
-    - dataset: eth_firehose_stream
-      start: 15000002
-      end: 15000002
-      nJobs: 1
-    - dataset: eth_firehose_stream
-      start: 15000002
-      end: 15000004
-      nJobs: 1
-    - dataset: sql_stream_ds
-      start: 15000002
-      end: 15000004
-      nJobs: 1
   results: |
     [
       {
@@ -336,28 +292,6 @@
   streamingOptions:
     maxDuration: 10s
     atLeastRows: 4
-  initialDumps:
-    - dataset: eth_firehose_stream
-      start: 15000000
-      end: 15000001
-      nJobs: 1
-    - dataset: sql_stream_ds
-      start: 15000001
-      end: 15000001
-      nJobs: 1
-  dumpsOnRunningServer:
-    - dataset: eth_firehose_stream
-      start: 15000002
-      end: 15000002
-      nJobs: 1
-    - dataset: eth_firehose_stream
-      start: 15000002
-      end: 15000004
-      nJobs: 1
-    - dataset: sql_stream_ds
-      start: 15000002
-      end: 15000004
-      nJobs: 1
   results: |
     [
       {"src": "eth", "block_num": 15000001},
@@ -377,28 +311,6 @@
   streamingOptions:
     maxDuration: 10s
     atLeastRows: 4
-  initialDumps:
-    - dataset: eth_firehose_stream
-      start: 15000000
-      end: 15000001
-      nJobs: 1
-    - dataset: sql_stream_ds
-      start: 15000001
-      end: 15000001
-      nJobs: 1
-  dumpsOnRunningServer:
-    - dataset: eth_firehose_stream
-      start: 15000002
-      end: 15000002
-      nJobs: 1
-    - dataset: eth_firehose_stream
-      start: 15000002
-      end: 15000004
-      nJobs: 1
-    - dataset: sql_stream_ds
-      start: 15000002
-      end: 15000004
-      nJobs: 1
   results: |
     [
       {"src": "eth", "hash": "7a7d7c23bb8c5e340eead8537bb5e2f3e125bfa0b588cf07e4aa140ba374295e"},
