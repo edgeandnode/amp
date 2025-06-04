@@ -19,7 +19,7 @@ use common::{
     catalog::{collect_scanned_tables, physical::Catalog},
     config::Config,
     query_context::{
-        parse_sql, transform_plan, unproject_special_block_num_column, Error as CoreError,
+        parse_sql, propagate_block_num, unproject_special_block_num_column, Error as CoreError,
         QueryContext, QueryEnv,
     },
     BlockNum,
@@ -233,7 +233,7 @@ impl Service {
             let should_transform =
                 should_transform_plan(&plan).map_err(|e| Error::ExecutionError(e))?;
             let plan = if should_transform {
-                let plan = transform_plan(plan, None).map_err(|e| Error::ExecutionError(e))?;
+                let plan = propagate_block_num(plan).map_err(|e| Error::ExecutionError(e))?;
                 let plan = unproject_special_block_num_column(plan, original_schema)
                     .map_err(|e| Error::ExecutionError(e))?;
                 plan

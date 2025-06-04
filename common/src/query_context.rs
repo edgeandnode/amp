@@ -21,11 +21,11 @@ use datafusion::{
         SendableRecordBatchStream, SessionStateBuilder,
     },
     logical_expr::{
-        AggregateUDF, CreateExternalTable, DdlStatement, Extension, Filter, LogicalPlan,
+        AggregateUDF, CreateExternalTable, DdlStatement, Extension, LogicalPlan,
         LogicalPlanBuilder, Projection, ScalarUDF, SortExpr, TableScan,
     },
     physical_plan::{displayable, ExecutionPlan},
-    prelude::{col, lit, Expr},
+    prelude::{col, Expr},
     sql::{parser, TableReference},
 };
 use datafusion_proto::{
@@ -518,12 +518,8 @@ async fn execute_plan(
     execute_stream(physical_plan, ctx.task_ctx()).map_err(Error::PlanningError)
 }
 
-/// Propagate the `SPECIAL_BLOCK_NUM` column through the logical plan. Optionally,
-/// add range constraints to the plan if `range` is provided.
-pub fn transform_plan(
-    plan: LogicalPlan,
-    range: Option<(u64, u64)>,
-) -> Result<LogicalPlan, DataFusionError> {
+/// Propagate the `SPECIAL_BLOCK_NUM` column through the logical plan.
+pub fn propagate_block_num(plan: LogicalPlan) -> Result<LogicalPlan, DataFusionError> {
     plan.transform(|node| {
         match node {
             LogicalPlan::Projection(mut projection) => {
@@ -569,11 +565,9 @@ pub fn transform_plan(
                 Ok(Transformed::yes(LogicalPlan::Projection(projection)))
             }
             LogicalPlan::TableScan(table_scan) => {
-                let should_add_constraints = table_scan.source.table_type() == TableType::Base && table_scan.source.get_logical_plan().is_none();
-
-                let plan = if table_scan.source.schema().fields().iter().any(|f| f.name() == SPECIAL_BLOCK_NUM) {
+                if table_scan.source.schema().fields().iter().any(|f| f.name() == SPECIAL_BLOCK_NUM) {
                     // If the table already has a `SPECIAL_BLOCK_NUM` column, we don't need to add it.
-                    LogicalPlan::TableScan(table_scan)
+                    Ok(Transformed::no(LogicalPlan::TableScan(table_scan)))
                 } else {
                     // Add a projection on top of the TableScan to select the `BLOCK_NUM` column
                     // as `SPECIAL_BLOCK_NUM`.
@@ -607,19 +601,7 @@ pub fn transform_plan(
                         Arc::new(LogicalPlan::TableScan(table_scan)),
                         Arc::new(schema),
                     )?;
-                    LogicalPlan::Projection(projection)
-                };
-
-                match range {
-                    Some((start, end)) if should_add_constraints => {
-                        // Add `where start <= SPECIAL_BLOCK_NUM and SPECIAL_BLOCK_NUM <= end`
-                        // constraints.
-                        let mut predicate = col(SPECIAL_BLOCK_NUM).lt_eq(lit(end));
-                        predicate = predicate.and(lit(start).lt_eq(col(SPECIAL_BLOCK_NUM)));
-                        let with_filter = Filter::try_new(predicate, Arc::new(plan))?;
-                        Ok(Transformed::yes(LogicalPlan::Filter(with_filter)))
-                    }
-                    _ => Ok(Transformed::yes(plan)),
+                    Ok(Transformed::yes(LogicalPlan::Projection(projection)))
                 }
             }
             LogicalPlan::Union(mut union) => {

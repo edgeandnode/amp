@@ -5,8 +5,8 @@ use std::{
 
 use common::{
     multirange::MultiRange,
-    query_context::{parse_sql, transform_plan, unproject_special_block_num_column, QueryEnv},
-    BlockNum, BoxError, Dataset, QueryContext, Table, BLOCK_NUM, SPECIAL_BLOCK_NUM,
+    query_context::{parse_sql, propagate_block_num, unproject_special_block_num_column, QueryEnv},
+    BlockNum, BoxError, Dataset, QueryContext, Table, SPECIAL_BLOCK_NUM,
 };
 use datafusion::{
     common::tree_node::{Transformed, TreeNode, TreeNodeRecursion},
@@ -157,7 +157,8 @@ pub async fn execute_plan_for_range(
     }
 
     let plan = {
-        let plan = transform_plan(plan, Some((start, end)))?;
+        let plan = propagate_block_num(plan)?;
+        let plan = constrain_by_block_num(plan, start, end)?;
         let plan = order_by_block_num(plan);
         if is_sql_dataset {
             // SQL datasets always project the special block number column, because it has
@@ -177,6 +178,34 @@ fn order_by_block_num(plan: LogicalPlan) -> LogicalPlan {
         fetch: None,
     };
     LogicalPlan::Sort(sort)
+}
+
+#[instrument(skip_all, err)]
+fn constrain_by_block_num(
+    plan: LogicalPlan,
+    start: u64,
+    end: u64,
+) -> Result<LogicalPlan, DataFusionError> {
+    plan.transform(|node| {
+        // Add `where start <= SPECIAL_BLOCK_NUM and SPECIAL_BLOCK_NUM <= end`
+        // constraints to projections over table scans.
+        if let LogicalPlan::Projection(projection) = &node {
+            match projection.input.as_ref() {
+                LogicalPlan::TableScan(TableScan { source, .. })
+                    if source.table_type() == TableType::Base
+                        && source.get_logical_plan().is_none() =>
+                {
+                    let mut predicate = col(SPECIAL_BLOCK_NUM).lt_eq(lit(end));
+                    predicate = predicate.and(lit(start).lt_eq(col(SPECIAL_BLOCK_NUM)));
+                    let with_filter = Filter::try_new(predicate, Arc::new(node))?;
+                    return Ok(Transformed::yes(LogicalPlan::Filter(with_filter)));
+                }
+                _ => {}
+            }
+        }
+        Ok(Transformed::no(node))
+    })
+    .map(|t| t.data)
 }
 
 /// This will:
@@ -354,28 +383,4 @@ pub fn is_incremental(plan: &LogicalPlan) -> Result<bool, BoxError> {
         Some(err) => Err(err),
         None => Ok(is_incr),
     }
-}
-
-#[instrument(skip_all, err)]
-fn inject_block_range_constraints(
-    plan: LogicalPlan,
-    start: u64,
-    end: u64,
-) -> Result<LogicalPlan, DataFusionError> {
-    plan.transform(|node| match &node {
-        // Insert the clauses in non-view table scans
-        LogicalPlan::TableScan(TableScan { source, .. })
-            if source.table_type() == TableType::Base && source.get_logical_plan().is_none() =>
-        {
-            // `where start <= block_num and block_num <= end`
-            // Is it ok for this to be unqualified? Or should it be `TABLE_NAME.block_num`?
-            let mut predicate = col(SPECIAL_BLOCK_NUM).lt_eq(lit(end));
-            predicate = predicate.and(lit(start).lt_eq(col(BLOCK_NUM)));
-
-            let with_filter = Filter::try_new(predicate, Arc::new(node))?;
-            Ok(Transformed::yes(LogicalPlan::Filter(with_filter)))
-        }
-        _ => Ok(Transformed::no(node)),
-    })
-    .map(|t| t.data)
 }
