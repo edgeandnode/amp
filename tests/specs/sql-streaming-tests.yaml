@@ -26,7 +26,7 @@
 
 - name: select_special_block_num
   query: |
-    SELECT __block_num, block_num
+    SELECT _block_num, block_num
     FROM eth_firehose.blocks
     WHERE block_num >= 15000000
     SETTINGS stream = true
@@ -35,12 +35,12 @@
     atLeastRows: 1
   results: |
     [
-      {"__block_num": 15000000, "block_num": 15000000}
+      {"_block_num": 15000000, "block_num": 15000000}
     ]
 
 - name: select_special_block_num_qualified
   query: |
-    SELECT b.__block_num, block_num
+    SELECT b._block_num, block_num
     FROM eth_firehose.blocks AS b
     WHERE block_num >= 15000000
     SETTINGS stream = true
@@ -49,7 +49,7 @@
     atLeastRows: 1
   results: |
     [
-      {"__block_num": 15000000, "block_num": 15000000}
+      {"_block_num": 15000000, "block_num": 15000000}
     ]
 
 - name: select_block_num_qualified
@@ -216,7 +216,7 @@
   results: |
     [
       {
-        "__block_num": 15000002,
+        "_block_num": 15000002,
         "base_fee_per_gas": 16923463966,
         "block_num": 15000002,
         "difficulty": 13816281616556442,
@@ -236,7 +236,7 @@
         "transactions_root": "59bb84ab1c8348653f5af29e46c76b03bebc940f8f0ef0e941393df95340e4c9"
       },
       {
-        "__block_num": 15000004,
+        "_block_num": 15000004,
         "base_fee_per_gas": 16620862882,
         "block_num": 15000004,
         "difficulty": 13820679663067546,
@@ -267,11 +267,11 @@
   results: |
     [
       {
-        "__block_num": 15000002,
+        "_block_num": 15000002,
         "hash": "b8aeee482d9cdf68868e758983a47bc24012398848b8f64f159966ff0530642b"
       },
       {
-        "__block_num": 15000004,
+        "_block_num": 15000004,
         "hash": "eaf9d38e71769834c83dadad0d16ebf704fd2f96ca7eb1ac34ea9d069d5ecf76"
       }
     ]

@@ -41,7 +41,7 @@ pub const BLOCK_NUM: &str = "block_num";
 
 /// Special column name for block numbers. These are implicitly selected when doing streaming
 /// queries, and in some other cases.
-pub const SPECIAL_BLOCK_NUM: &str = "__block_num";
+pub const SPECIAL_BLOCK_NUM: &str = "_block_num";
 
 pub type BlockNum = u64;
 pub type Bytes32 = [u8; 32];
