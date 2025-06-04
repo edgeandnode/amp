@@ -2,13 +2,13 @@ use std::{fmt, sync::Arc};
 
 use async_udf::functions::AsyncScalarUDF;
 use datafusion::{
-    arrow::datatypes::{DataType, SchemaRef},
+    arrow::datatypes::{DataType, Schema, SchemaRef},
     logical_expr::ScalarUDF,
     sql::TableReference,
 };
 use js_runtime::isolate_pool::IsolatePool;
 
-use crate::{js_udf::JsUdf, BoxError, BLOCK_NUM};
+use crate::{js_udf::JsUdf, BoxError, SPECIAL_BLOCK_NUM};
 
 /// Identifies a dataset and its data schema.
 #[derive(Clone, Debug)]
@@ -74,7 +74,7 @@ impl Table {
         // - Make this less hardcoded to handle non-blockchain data.
         // - Have a consistency check that the data really is sorted.
         // - Do we want to address and leverage https://github.com/apache/arrow-datafusion/issues/4177?
-        vec![BLOCK_NUM.to_string(), "timestamp".to_string()]
+        vec![SPECIAL_BLOCK_NUM.to_string(), "timestamp".to_string()]
     }
 }
 
@@ -133,6 +133,18 @@ impl ResolvedTable {
 
     pub fn schema(&self) -> &SchemaRef {
         &self.table.schema
+    }
+
+    pub fn with_schema(self, schema: Schema) -> Self {
+        Self {
+            table: Table {
+                name: self.table.name,
+                schema: schema.into(),
+                network: self.table.network,
+            },
+            dataset: self.dataset,
+            table_ref: self.table_ref,
+        }
     }
 }
 

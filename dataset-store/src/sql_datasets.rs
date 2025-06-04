@@ -5,8 +5,8 @@ use std::{
 
 use common::{
     multirange::MultiRange,
-    query_context::{parse_sql, QueryEnv},
-    BlockNum, BoxError, Dataset, QueryContext, Table, BLOCK_NUM,
+    query_context::{parse_sql, transform_plan, unproject_special_block_num_column, QueryEnv},
+    BlockNum, BoxError, Dataset, QueryContext, Table, BLOCK_NUM, SPECIAL_BLOCK_NUM,
 };
 use datafusion::{
     common::tree_node::{Transformed, TreeNode, TreeNodeRecursion},
@@ -72,7 +72,7 @@ pub(super) async fn dataset(
         let raw_query = defs_store.get_string(file.location.clone()).await?;
         let query = parse_sql(&raw_query)?;
         let ctx = store.clone().planning_ctx_for_sql(&query).await?;
-        let schema = ctx.sql_output_schema(query.clone()).await?;
+        let schema = ctx.sql_output_schema(query.clone(), &[]).await?;
         let network = {
             let tables = ctx.catalog().iter();
             let mut networks: BTreeSet<_> = tables.map(|t| t.table().network.clone()).collect();
@@ -135,7 +135,9 @@ pub async fn execute_plan_for_range(
     ctx: &QueryContext,
     start: BlockNum,
     end: BlockNum,
+    is_sql_dataset: bool,
 ) -> Result<SendableRecordBatchStream, BoxError> {
+    let original_schema = plan.schema().clone();
     let tables = extract_table_references_from_plan(&plan)?;
 
     // Validate dependency block ranges
@@ -155,10 +157,26 @@ pub async fn execute_plan_for_range(
     }
 
     let plan = {
-        let plan = inject_block_range_constraints(plan, start, end)?;
-        order_by_block_num(plan)
+        let plan = transform_plan(plan, Some((start, end)))?;
+        let plan = order_by_block_num(plan);
+        if is_sql_dataset {
+            // SQL datasets always project the special block number column, because it has
+            // to end up in the file.
+            plan
+        } else {
+            unproject_special_block_num_column(plan, original_schema)?
+        }
     };
     Ok(ctx.execute_plan(plan).await?)
+}
+
+fn order_by_block_num(plan: LogicalPlan) -> LogicalPlan {
+    let sort = Sort {
+        expr: vec![col(SPECIAL_BLOCK_NUM).sort(true, false)],
+        input: Arc::new(plan),
+        fetch: None,
+    };
+    LogicalPlan::Sort(sort)
 }
 
 /// This will:
@@ -176,7 +194,7 @@ pub async fn execute_query_for_range(
     let ctx = dataset_store.clone().ctx_for_sql(&query, env).await?;
     let plan = ctx.plan_sql(query).await?;
 
-    execute_plan_for_range(plan, &ctx, start, end).await
+    execute_plan_for_range(plan, &ctx, start, end, true).await
 }
 
 // All physical tables locations that have been queried
@@ -351,7 +369,7 @@ fn inject_block_range_constraints(
         {
             // `where start <= block_num and block_num <= end`
             // Is it ok for this to be unqualified? Or should it be `TABLE_NAME.block_num`?
-            let mut predicate = col(BLOCK_NUM).lt_eq(lit(end));
+            let mut predicate = col(SPECIAL_BLOCK_NUM).lt_eq(lit(end));
             predicate = predicate.and(lit(start).lt_eq(col(BLOCK_NUM)));
 
             let with_filter = Filter::try_new(predicate, Arc::new(node))?;
@@ -360,13 +378,4 @@ fn inject_block_range_constraints(
         _ => Ok(Transformed::no(node)),
     })
     .map(|t| t.data)
-}
-
-fn order_by_block_num(plan: LogicalPlan) -> LogicalPlan {
-    let sort = Sort {
-        expr: vec![col(BLOCK_NUM).sort(true, false)],
-        input: Arc::new(plan),
-        fetch: None,
-    };
-    LogicalPlan::Sort(sort)
 }

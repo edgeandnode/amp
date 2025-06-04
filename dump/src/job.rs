@@ -4,6 +4,7 @@ use std::{
 };
 
 use common::{catalog::physical::PhysicalTable, BoxError};
+use dataset_store::sql_datasets;
 use metadata_db::JobId;
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
@@ -73,15 +74,18 @@ impl Job {
                     .collect::<BTreeMap<_, _>>();
                 let mut physical_tables = vec![];
 
+                let kind = dataset.kind.clone();
                 for table in Arc::new(dataset).resolved_tables() {
                     // Unwrap: We checked consistency above.
                     let (id, url) = output_locations_by_name.remove(table.name()).unwrap();
-                    physical_tables.push(PhysicalTable::new(
-                        table.clone(),
-                        url,
-                        id,
-                        ctx.metadata_db.clone(),
-                    )?);
+                    let physical_table =
+                        PhysicalTable::new(table.clone(), url, id, ctx.metadata_db.clone())?;
+                    physical_tables.push(if kind == sql_datasets::DATASET_KIND {
+                        // SQL datasets must include the `SPECIAL_BLOCK_NUM` column.
+                        physical_table.with_special_block_num_column()
+                    } else {
+                        physical_table
+                    });
                 }
 
                 Ok(Job::DumpTables {

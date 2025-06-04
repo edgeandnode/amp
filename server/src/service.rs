@@ -18,12 +18,21 @@ use common::{
     arrow::{self, ipc::writer::IpcDataGenerator},
     catalog::{collect_scanned_tables, physical::Catalog},
     config::Config,
-    query_context::{parse_sql, Error as CoreError, QueryContext, QueryEnv},
+    query_context::{
+        parse_sql, transform_plan, unproject_special_block_num_column, Error as CoreError,
+        QueryContext, QueryEnv,
+    },
     BlockNum,
 };
 use datafusion::{
-    arrow::array::RecordBatch, common::DFSchema, error::DataFusionError,
-    execution::SendableRecordBatchStream, logical_expr::LogicalPlan,
+    arrow::array::RecordBatch,
+    common::{
+        tree_node::{TreeNode, TreeNodeRecursion},
+        DFSchema,
+    },
+    error::DataFusionError,
+    execution::SendableRecordBatchStream,
+    logical_expr::LogicalPlan,
 };
 use dataset_store::{sql_datasets::is_incremental, DatasetError, DatasetStore};
 use futures::{channel::mpsc, SinkExt, Stream, StreamExt as _, TryStreamExt};
@@ -182,9 +191,10 @@ impl Service {
         end: BlockNum,
         mut tx: mpsc::Sender<datafusion::error::Result<RecordBatch>>,
     ) -> () {
-        let mut stream = dataset_store::sql_datasets::execute_plan_for_range(plan, ctx, start, end)
-            .await
-            .unwrap();
+        let mut stream =
+            dataset_store::sql_datasets::execute_plan_for_range(plan, ctx, start, end, false)
+                .await
+                .unwrap();
 
         while let Some(batch) = stream.next().await {
             match batch {
@@ -219,6 +229,17 @@ impl Service {
 
         // If not streaming or metadata db is not available, execute once
         if !is_streaming {
+            let original_schema = plan.schema().clone();
+            let should_transform =
+                should_transform_plan(&plan).map_err(|e| Error::ExecutionError(e))?;
+            let plan = if should_transform {
+                let plan = transform_plan(plan, None).map_err(|e| Error::ExecutionError(e))?;
+                let plan = unproject_special_block_num_column(plan, original_schema)
+                    .map_err(|e| Error::ExecutionError(e))?;
+                plan
+            } else {
+                plan
+            };
             return ctx.execute_plan(plan).await.map_err(|err| Error::from(err));
         }
 
@@ -236,10 +257,15 @@ impl Service {
         // Execute initial ranges
         if let Some((start, end)) = first_range {
             // Execute the first range and return an error if a query is not valid
-            let mut stream =
-                dataset_store::sql_datasets::execute_plan_for_range(plan.clone(), &ctx, start, end)
-                    .await
-                    .map_err(|e| Error::CoreError(CoreError::DatasetError(e)))?;
+            let mut stream = dataset_store::sql_datasets::execute_plan_for_range(
+                plan.clone(),
+                &ctx,
+                start,
+                end,
+                false,
+            )
+            .await
+            .map_err(|e| Error::CoreError(CoreError::DatasetError(e)))?;
 
             let mut tx_first_range = tx.clone();
             tokio::spawn(async move {
@@ -301,6 +327,22 @@ impl Service {
 
         Ok(Box::pin(adapter) as SendableRecordBatchStream)
     }
+}
+
+fn should_transform_plan(plan: &LogicalPlan) -> Result<bool, DataFusionError> {
+    let mut result = true;
+    plan.apply(|node| {
+        match node {
+            LogicalPlan::EmptyRelation(_) | LogicalPlan::Aggregate(_) => {
+                // If any node is an empty relation or aggregate function, trying to propagate the `SPECIAL_BLOCK_NUM` will
+                // probably cause problems.
+                result = false;
+                Ok(TreeNodeRecursion::Stop)
+            }
+            _ => Ok(TreeNodeRecursion::Continue),
+        }
+    })?;
+    Ok(result)
 }
 
 #[async_trait::async_trait]

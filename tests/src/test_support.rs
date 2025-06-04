@@ -25,7 +25,7 @@ use common::{
     query_context::parse_sql,
     BoxError, QueryContext,
 };
-use dataset_store::DatasetStore;
+use dataset_store::{sql_datasets, DatasetStore};
 use dump::{dump_tables, parquet_opts, Ctx as DumpCtx};
 use figment::{
     providers::{Format as _, Json},
@@ -372,7 +372,12 @@ async fn dump_test_dataset(
                     }
                 };
 
-            tables.push(physical_table);
+            tables.push(if dataset.kind == sql_datasets::DATASET_KIND {
+                // SQL datasets must include the `SPECIAL_BLOCK_NUM` column.
+                physical_table.with_special_block_num_column()
+            } else {
+                physical_table
+            });
         }
         tables
     };
@@ -779,7 +784,7 @@ async fn restore_blessed_dataset(
     let data_store = config.data_store.clone();
     let mut tables = Vec::new();
     for table in Arc::new(dataset).resolved_tables() {
-        tables.push(
+        let physical_table =
             PhysicalTable::restore_latest_revision(&table, data_store.clone(), metadata_db.clone())
                 .await?
                 .expect(
@@ -791,7 +796,13 @@ async fn restore_blessed_dataset(
                         table.name()
                     )
                     .as_str(),
-                ),
+                );
+        tables.push(
+            if physical_table.dataset().kind == sql_datasets::DATASET_KIND {
+                physical_table.with_special_block_num_column()
+            } else {
+                physical_table
+            },
         );
     }
     Ok(tables)

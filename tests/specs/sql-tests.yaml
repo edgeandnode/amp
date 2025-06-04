@@ -430,3 +430,17 @@
     SELECT evm_encode_type(CAST(635000 AS DECIMAL(38, 0)), 'uint128') AS uint128
   results: |
     [{"uint128":"000000000000000000000000000000000000000000000000000000000009b078"}]
+
+- name: select_special_block_num
+  query: |
+    SELECT __block_num
+    FROM eth_rpc.blocks
+  results: |
+    [{"__block_num": 15000000}]
+
+- name: select_special_block_num_alias
+  query: |
+    SELECT 0 AS __block_num
+    FROM eth_rpc.blocks
+  failure: |
+    projection contains an alias named '__block_num', which is never allowed. Either select '__block_num' directly or rename the alias

@@ -8,7 +8,7 @@ use common::{
     query_context::QueryEnv,
     BoxError, QueryContext,
 };
-use dataset_store::DatasetStore;
+use dataset_store::{sql_datasets, DatasetStore};
 use futures::future::try_join_all;
 use job::Job;
 use metadata_db::{MetadataDb, TableId};
@@ -39,7 +39,12 @@ pub async fn dump_check(
             .await?
             .ok_or(format!("No active location for {table_id:?}"))?;
         let table = PhysicalTable::new(table.clone(), url, location_id, metadata_db.clone())?;
-        tables.push(table);
+        tables.push(if dataset.kind == sql_datasets::DATASET_KIND {
+            // SQL datasets must include the `SPECIAL_BLOCK_NUM` column.
+            table.with_special_block_num_column()
+        } else {
+            table
+        });
     }
     let catalog = Catalog::new(tables, vec![]);
     let ctx = Arc::new(QueryContext::for_catalog(catalog, env.clone())?);

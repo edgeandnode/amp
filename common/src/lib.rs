@@ -39,6 +39,10 @@ pub type BoxResult<T> = Result<T, BoxError>;
 /// The block number column name.
 pub const BLOCK_NUM: &str = "block_num";
 
+/// Special column name for block numbers. These are implicitly selected when doing streaming
+/// queries, and in some other cases.
+pub const SPECIAL_BLOCK_NUM: &str = "__block_num";
+
 pub type BlockNum = u64;
 pub type Bytes32 = [u8; 32];
 pub type EvmAddress = [u8; 20];
