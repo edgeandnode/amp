@@ -16,7 +16,6 @@ use common::{
     catalog::physical::{Catalog, PhysicalTable},
     config::{Addrs, Config},
     metadata::block_ranges_by_table,
-    multirange::MultiRange,
     query_context::parse_sql,
     BoxError, QueryContext,
 };
@@ -187,8 +186,7 @@ impl SnapshotContext {
 
         for table in self.ctx.catalog().tables() {
             let table_name = table.table_name().to_string();
-            let ranges = table.ranges().await?;
-            let expected_range = MultiRange::from_ranges(ranges)?;
+            let expected_range = table.multi_range().await?;
             let actual_range = &blessed_block_ranges[&table_name];
             let table_qualified = table.table_ref().to_string();
             assert_eq!(

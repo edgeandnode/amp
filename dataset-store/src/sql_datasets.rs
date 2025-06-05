@@ -121,10 +121,7 @@ async fn get_ranges_for_table(
         )
         .into());
     };
-    let ranges = table.ranges().await?;
-    let ranges = MultiRange::from_ranges(ranges)?;
-
-    Ok(ranges)
+    table.multi_range().await
 }
 
 /// This will:
@@ -150,8 +147,7 @@ pub async fn execute_plan_for_range(
             let physical_table = ctx
                 .get_table(&table)
                 .ok_or::<BoxError>(format!("table {} not found", table).into())?;
-            let ranges = physical_table.ranges().await?;
-            let ranges = MultiRange::from_ranges(ranges)?;
+            let ranges = physical_table.multi_range().await?;
             let synced = ranges.intersection(&needed_range) == needed_range;
             if !synced {
                 return Err(format!("tried to query range {needed_range} of table {table} but it has not been synced").into());
@@ -304,9 +300,7 @@ pub async fn max_end_block(
 
     let synced_block_for_table = move |ctx: Arc<QueryContext>, table: TableReference| async move {
         let table = ctx.get_table(&table).expect("table not found");
-        let ranges = table.ranges().await?;
-        let ranges = MultiRange::from_ranges(ranges)?;
-
+        let ranges = table.multi_range().await?;
         // Take the end block of the earliest contiguous range as the "synced block"
         Ok::<_, BoxError>(ranges.first().map(|r| r.1))
     };

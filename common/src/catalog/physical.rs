@@ -20,6 +20,7 @@ use crate::{
         parquet::{ParquetMeta, PARQUET_METADATA_KEY},
         FileMetadata,
     },
+    multirange::MultiRange,
     store::{infer_object_store, Store},
     BoxError, Dataset, ResolvedTable,
 };
@@ -395,6 +396,11 @@ impl PhysicalTable {
     pub async fn ranges(&self) -> Result<Vec<(u64, u64)>, BoxError> {
         let ranges = self.stream_ranges().try_collect().await?;
         Ok(ranges)
+    }
+
+    pub async fn multi_range(&self) -> Result<MultiRange, BoxError> {
+        let ranges = self.stream_ranges().try_collect().await?;
+        MultiRange::from_ranges(ranges).map_err(Into::into)
     }
 
     /// Truncate this table by deleting all dump files making up the table

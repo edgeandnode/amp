@@ -8,7 +8,6 @@ use common::{
     catalog::physical::{Catalog, PhysicalTable},
     config::Config,
     metadata::block_ranges_by_table,
-    multirange::MultiRange,
     query_context::{Error as QueryError, QueryContext},
     store::Store as DataStore,
     BoxError,
@@ -151,15 +150,10 @@ async fn consistency_check(table: &PhysicalTable) -> Result<(), ConsistencyCheck
     let location_id = table.location_id();
 
     // Check that bock ranges do not contain overlapping ranges.
-    {
-        let ranges = table
-            .ranges()
-            .await
-            .map_err(|err| ConsistencyCheckError::CorruptedTable(location_id, err))?;
-        if let Err(e) = MultiRange::from_ranges(ranges) {
-            return Err(ConsistencyCheckError::CorruptedTable(location_id, e.into()));
-        }
-    }
+    table
+        .multi_range()
+        .await
+        .map_err(|err| ConsistencyCheckError::CorruptedTable(location_id, err))?;
 
     let registered_files = table
         .file_names()
