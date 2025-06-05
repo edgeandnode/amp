@@ -9,7 +9,7 @@ use datafusion::{
     common::{
         not_impl_err,
         tree_node::{Transformed, TreeNode as _, TreeNodeRewriter},
-        Constraints, DFSchemaRef, ToDFSchema as _,
+        DFSchemaRef,
     },
     datasource::{DefaultTableSource, MemTable, TableProvider, TableType},
     error::DataFusionError,
@@ -20,8 +20,7 @@ use datafusion::{
         SendableRecordBatchStream, SessionStateBuilder,
     },
     logical_expr::{
-        AggregateUDF, CreateExternalTable, DdlStatement, Extension, LogicalPlan,
-        LogicalPlanBuilder, ScalarUDF, SortExpr, TableScan,
+        AggregateUDF, Extension, LogicalPlan, LogicalPlanBuilder, ScalarUDF, TableScan,
     },
     physical_plan::{displayable, ExecutionPlan},
     sql::{parser, TableReference},
@@ -37,7 +36,6 @@ use js_runtime::isolate_pool::IsolatePool;
 use metadata_db::TableId;
 use thiserror::Error;
 use tracing::{debug, instrument};
-use url::Url;
 
 use crate::{
     arrow, attestation,
@@ -308,8 +306,8 @@ impl QueryContext {
             .build();
         let ctx = SessionContext::new_with_state(state);
 
-        for ds in self.catalog.tables() {
-            create_physical_table(&ctx, ds)
+        for table in self.catalog.tables() {
+            create_physical_table(&ctx, table.clone().into())
                 .await
                 .map_err(|e| Error::DatasetError(e.into()))?;
         }
@@ -351,7 +349,7 @@ impl QueryContext {
         Ok(concat_batches(&schema, &batch_stream).unwrap())
     }
 
-    pub fn get_table(&self, table_ref: &TableReference) -> Option<&PhysicalTable> {
+    pub fn get_table(&self, table_ref: &TableReference) -> Option<Arc<PhysicalTable>> {
         let table_id = TableId {
             dataset: table_ref.schema().unwrap(),
             dataset_version: None,
@@ -362,6 +360,7 @@ impl QueryContext {
             .tables()
             .iter()
             .find(|table| table.table_id() == table_id)
+            .cloned()
     }
 }
 
@@ -403,52 +402,19 @@ async fn create_empty_tables(
 
 async fn create_physical_table(
     ctx: &SessionContext,
-    table: &PhysicalTable,
+    table: Arc<PhysicalTable>,
 ) -> Result<(), DataFusionError> {
     // The catalog schema needs to be explicitly created or table creation will fail.
     create_catalog_schema(ctx, table.catalog_schema().to_string());
 
     let table_ref = table.table_ref().clone();
-    let schema = table.schema().to_dfschema_ref()?;
 
     // This may overwrite a previously registered store, but that should not make a difference.
     // The only segment of the `table.url()` that matters here is the schema and bucket name.
     ctx.register_object_store(table.url(), table.object_store());
-
-    let cmd = create_external_table_cmd(table_ref, schema, &table.url(), table.order_exprs());
-    ctx.execute_logical_plan(cmd).await?;
+    ctx.register_table(table_ref, table)?;
 
     Ok(())
-}
-
-fn create_external_table_cmd(
-    name: TableReference,
-    schema: DFSchemaRef,
-    url: &Url,
-    order_exprs: Vec<Vec<SortExpr>>,
-) -> LogicalPlan {
-    let command = CreateExternalTable {
-        file_type: "PARQUET".to_string(),
-
-        name,
-        schema,
-        location: url.to_string(),
-        order_exprs,
-
-        // Up to our preference, but maybe it's more robust for the caller to check duplicates.
-        if_not_exists: false,
-
-        // Things we don't currently use.
-        table_partition_cols: vec![],
-        options: Default::default(),
-        constraints: Constraints::empty(),
-        column_defaults: Default::default(),
-        definition: None,
-        unbounded: false,
-        temporary: false,
-    };
-
-    LogicalPlan::Ddl(DdlStatement::CreateExternalTable(command))
 }
 
 fn create_catalog_schema(ctx: &SessionContext, schema_name: String) {

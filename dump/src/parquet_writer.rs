@@ -41,7 +41,7 @@ impl RawDatasetWriter {
             let table_name = table.table_name();
             let block_ranges = block_ranges_by_table.get(table_name).unwrap().clone();
             let writer = TableWriter::new(
-                table.clone(),
+                table.as_ref().clone(),
                 opts.clone(),
                 partition_size,
                 block_ranges,

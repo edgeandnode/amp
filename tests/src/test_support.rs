@@ -105,7 +105,8 @@ impl SnapshotContext {
                         table.name()
                     )
                     .as_str(),
-                ),
+                )
+                .into(),
             );
         }
         let catalog = Catalog::new(tables);
@@ -321,7 +322,7 @@ async fn dump_test_dataset(
     end: u64,
     n_jobs: u16,
     clear: bool,
-) -> Result<Vec<PhysicalTable>, BoxError> {
+) -> Result<Vec<Arc<PhysicalTable>>, BoxError> {
     let partition_size = 1024 * 1024; // 100 kB
     let input_batch_block_size = 100_000;
     let compression = Compression::ZSTD(ZstdLevel::try_new(1).unwrap());
@@ -350,7 +351,7 @@ async fn dump_test_dataset(
                 _ => PhysicalTable::next_revision(&table, &data_store, metadata_db.clone()).await?,
             };
 
-            tables.push(physical_table);
+            tables.push(Arc::new(physical_table));
         }
         tables
     };

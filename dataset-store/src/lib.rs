@@ -548,7 +548,7 @@ impl DatasetStore {
                         .join(&format!("{}/{}/", dataset_name, table.name()))
                         .unwrap()
                 )))?;
-                catalog.add_table(physical_table);
+                catalog.add_table(Arc::new(physical_table));
             }
 
             // Create the `eth_call` UDF for the dataset.

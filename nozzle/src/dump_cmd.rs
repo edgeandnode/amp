@@ -48,7 +48,7 @@ pub async fn dump(
     let dump_order: Vec<&str> = datasets.iter().map(|d| d.as_str()).collect();
     info!("dump order: {}", dump_order.join(", "));
 
-    let mut physical_datasets = vec![];
+    let mut physical_datasets: Vec<Vec<Arc<PhysicalTable>>> = vec![];
     for dataset_name in datasets {
         let dataset = dataset_store.load_dataset(&dataset_name).await?.dataset;
         let mut tables = Vec::with_capacity(dataset.tables.len());
@@ -60,11 +60,12 @@ pub async fn dump(
             )
             .await?
             {
-                tables.push(physical_table);
+                tables.push(physical_table.into());
             } else {
                 tables.push(
                     PhysicalTable::next_revision(&table, data_store.as_ref(), metadata_db.clone())
-                        .await?,
+                        .await?
+                        .into(),
                 );
             }
         }

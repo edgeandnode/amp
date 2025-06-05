@@ -39,7 +39,7 @@ pub async fn dump_check(
             .await?
             .ok_or(format!("No active location for {table_id:?}"))?;
         let table = PhysicalTable::new(table.clone(), url, location_id, metadata_db.clone())?;
-        tables.push(table);
+        tables.push(table.into());
     }
     let catalog = Catalog::new(tables);
     let ctx = Arc::new(QueryContext::for_catalog(catalog, env.clone())?);

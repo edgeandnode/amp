@@ -52,7 +52,7 @@ type BlockRangeScalar = (BlockNumScalar, BlockNumScalar);
 
 #[derive(Debug, Clone)]
 pub struct Catalog {
-    tables: Vec<PhysicalTable>,
+    tables: Vec<Arc<PhysicalTable>>,
     /// User-defined functions (UDFs) specific to this catalog.
     udfs: Vec<ScalarUDF>,
 }
@@ -65,22 +65,22 @@ impl Catalog {
         }
     }
 
-    pub fn new(tables: Vec<PhysicalTable>) -> Self {
+    pub fn new(tables: Vec<Arc<PhysicalTable>>) -> Self {
         Catalog {
             tables,
             udfs: vec![],
         }
     }
 
-    pub fn add_table(&mut self, dataset: PhysicalTable) {
-        self.tables.push(dataset);
+    pub fn add_table(&mut self, table: Arc<PhysicalTable>) {
+        self.tables.push(table);
     }
 
     pub fn add_udf(&mut self, udf: ScalarUDF) {
         self.udfs.push(udf);
     }
 
-    pub fn tables(&self) -> &[PhysicalTable] {
+    pub fn tables(&self) -> &[Arc<PhysicalTable>] {
         &self.tables
     }
 
@@ -568,7 +568,7 @@ impl TableProvider for PhysicalTable {
             .create_physical_plan(
                 state,
                 FileScanConfigBuilder::new(
-                    ObjectStoreUrl::parse(self.url().as_ref())?,
+                    self.object_store_url()?,
                     self.schema(),
                     ParquetFormat::default().file_source(),
                 )
@@ -590,6 +590,17 @@ impl TableProvider for PhysicalTable {
 
 /// Helper methods for `PhysicalTable` to implement the `TableProvider` trait.
 impl PhysicalTable {
+    fn object_store_url(&self) -> DataFusionResult<ObjectStoreUrl> {
+        let url_start = self.url().as_str().find("://").ok_or_else(|| {
+            DataFusionError::Internal(format!(
+                "Invalid URL: {}. Expected format: <scheme>://<path>",
+                self.url()
+            ))
+        })?;
+        let scheme = self.url().as_str()[..url_start].to_string() + "://";
+        ObjectStoreUrl::parse(scheme)
+    }
+
     fn create_output_ordering(&self) -> DataFusionResult<Vec<LexOrdering>> {
         let schema = self.schema();
         let sort_order = self.order_exprs();
