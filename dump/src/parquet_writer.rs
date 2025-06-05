@@ -4,7 +4,10 @@ pub use common::parquet::file::properties::WriterProperties as ParquetWriterProp
 use common::{
     arrow::array::RecordBatch,
     catalog::physical::PhysicalTable,
-    metadata::parquet::{ParquetMeta, PARQUET_METADATA_KEY},
+    metadata::{
+        parquet::{ParquetMeta, PARQUET_METADATA_KEY},
+        range::BlockRange,
+    },
     multirange::MultiRange,
     parquet::{arrow::AsyncArrowWriter, errors::ParquetError, format::KeyValue},
     BlockNum, BoxError, QueryContext, RawTableRows, Timestamp,
@@ -63,7 +66,7 @@ impl RawDatasetWriter {
 
         let table_name = table_rows.table.name.as_str();
         let writer = self.writers.get_mut(table_name).unwrap();
-        if let Some((parquet_meta, object_meta)) = writer.write(&table_rows).await? {
+        if let Some((parquet_meta, object_meta)) = writer.write(table_rows).await? {
             let location_id = writer.table.location_id();
             commit_metadata(&self.metadata_db, parquet_meta, object_meta, location_id).await?;
         }
@@ -130,6 +133,7 @@ struct RawTableWriter {
 
     current_range: Option<(u64, u64)>,
     current_file: Option<ParquetFileWriter>,
+    current_file_ranges: Vec<BlockRange>,
 }
 
 impl RawTableWriter {
@@ -140,7 +144,7 @@ impl RawTableWriter {
         block_ranges: MultiRange,
         start: BlockNum,
         end: BlockNum,
-    ) -> Result<RawTableWriter, BoxError> {
+    ) -> Result<Self, BoxError> {
         let ranges_to_write = {
             // Limit maximum range size to 1_000_000 blocks.
             let mut ranges = block_ranges
@@ -150,13 +154,14 @@ impl RawTableWriter {
             ranges
         };
 
-        let mut this = RawTableWriter {
+        let mut this = Self {
             table,
             opts,
             ranges_to_write,
             partition_size,
             current_range: None,
             current_file: None,
+            current_file_ranges: vec![],
         };
         this.next_range()?;
         Ok(this)
@@ -164,7 +169,7 @@ impl RawTableWriter {
 
     pub async fn write(
         &mut self,
-        table_rows: &RawTableRows,
+        table_rows: RawTableRows,
     ) -> Result<Option<(ParquetMeta, ObjectMeta)>, BoxError> {
         assert_eq!(table_rows.table.name, self.table.table_name());
 
@@ -210,10 +215,12 @@ impl RawTableWriter {
                 self.opts.clone(),
                 block_num,
             )?);
+            self.current_file_ranges.clear();
         }
 
         let rows = &table_rows.rows;
         self.current_file.as_mut().unwrap().write(rows).await?;
+        self.current_file_ranges.push(table_rows.range);
 
         Ok(parquet_meta)
     }
@@ -231,6 +238,7 @@ impl RawTableWriter {
             )?),
             None => None,
         };
+        self.current_file_ranges.clear();
         Ok(())
     }
 
@@ -259,9 +267,17 @@ impl RawTableWriter {
     async fn close_current_file(&mut self) -> Result<(ParquetMeta, ObjectMeta), BoxError> {
         assert!(self.current_file.is_some());
         let file = self.current_file.take().unwrap();
-        let (start, end) = self.current_range.unwrap();
-        assert!(start <= end);
-        file.close(end).await
+        let start = self.current_file_ranges.first().unwrap();
+        let end = self.current_file_ranges.last().unwrap();
+        assert_eq!(start.network, end.network);
+        assert!(start.numbers.start() <= end.numbers.end());
+        let range = BlockRange {
+            numbers: *start.numbers.start()..=*end.numbers.end(),
+            network: start.network.clone(),
+            hash: end.hash,
+            prev_hash: start.prev_hash,
+        };
+        file.close(range).await
     }
 }
 
@@ -269,11 +285,7 @@ pub struct ParquetFileWriter {
     writer: AsyncArrowWriter<BufWriter>,
     file_url: Url,
     filename: String,
-
     table: PhysicalTable,
-
-    // The first block number in the range that this writer is responsible for.
-    start: BlockNum,
 }
 
 impl ParquetFileWriter {
@@ -282,6 +294,7 @@ impl ParquetFileWriter {
         opts: ParquetWriterProperties,
         start: BlockNum,
     ) -> Result<ParquetFileWriter, BoxError> {
+        // TODO: We need to make file names unique when we start handling non-finalized blocks.
         let filename = {
             // Pad `start` to 9 digits for lexicographical sorting.
             let padded_start = format!("{:09}", start);
@@ -293,10 +306,9 @@ impl ParquetFileWriter {
         let writer = AsyncArrowWriter::try_new(object_writer, table.schema(), Some(opts.clone()))?;
         Ok(ParquetFileWriter {
             writer,
-            start,
-            table,
             file_url,
             filename,
+            table,
         })
     }
 
@@ -305,33 +317,30 @@ impl ParquetFileWriter {
     }
 
     #[must_use]
-    pub async fn close(mut self, end: BlockNum) -> Result<(ParquetMeta, ObjectMeta), BoxError> {
-        if end < self.start {
-            return Err(
-                format!("end block {} must be after start block {}", end, self.start).into(),
-            );
-        }
-
+    pub async fn close(mut self, range: BlockRange) -> Result<(ParquetMeta, ObjectMeta), BoxError> {
         self.writer.flush().await?;
 
         debug!(
             "wrote {} for range {} to {}",
-            self.file_url, self.start, end
+            self.file_url,
+            range.numbers.start(),
+            range.numbers.end(),
         );
 
         let parquet_meta = ParquetMeta {
             table: self.table.table_name().to_string(),
-            range_start: self.start,
-            range_end: end,
             filename: self.filename,
             created_at: Timestamp::now(),
+            range_start: *range.numbers.start(),
+            range_end: *range.numbers.end(),
+            range_network: range.network,
+            range_hash: range.hash,
+            range_prev_hash: range.prev_hash,
         };
-
-        let parquet_meta_key = PARQUET_METADATA_KEY.to_string();
-        let parquet_meta_value = serde_json::to_string(&parquet_meta)?;
-
-        let kv_metadata = KeyValue::new(parquet_meta_key, parquet_meta_value);
-
+        let kv_metadata = KeyValue::new(
+            PARQUET_METADATA_KEY.to_string(),
+            serde_json::to_string(&parquet_meta)?,
+        );
         self.writer.append_key_value_metadata(kv_metadata);
         self.writer.close().await?;
 

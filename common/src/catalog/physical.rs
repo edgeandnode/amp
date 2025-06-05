@@ -18,6 +18,7 @@ use uuid::Uuid;
 use crate::{
     metadata::{
         parquet::{ParquetMeta, PARQUET_METADATA_KEY},
+        range::BlockRange,
         FileMetadata,
     },
     multirange::MultiRange,
@@ -343,7 +344,7 @@ impl PhysicalTable {
             .boxed()
     }
 
-    pub fn stream_ranges(&self) -> BoxStream<'_, Result<(u64, u64), BoxError>> {
+    pub fn stream_ranges(&self) -> BoxStream<'_, Result<BlockRange, BoxError>> {
         self.stream_file_metadata()
             .map_ok(
                 |FileMetadata {
@@ -351,10 +352,20 @@ impl PhysicalTable {
                          ParquetMeta {
                              range_start,
                              range_end,
+                             range_network,
+                             range_hash,
+                             range_prev_hash,
                              ..
                          },
                      ..
-                 }| { (range_start, range_end) },
+                 }| {
+                    BlockRange {
+                        numbers: range_start..=range_end,
+                        network: range_network,
+                        hash: range_hash,
+                        prev_hash: range_prev_hash,
+                    }
+                },
             )
             .boxed()
     }
@@ -393,13 +404,17 @@ impl PhysicalTable {
         Ok(parquet_files)
     }
 
-    pub async fn ranges(&self) -> Result<Vec<(u64, u64)>, BoxError> {
+    pub async fn ranges(&self) -> Result<Vec<BlockRange>, BoxError> {
         let ranges = self.stream_ranges().try_collect().await?;
         Ok(ranges)
     }
 
     pub async fn multi_range(&self) -> Result<MultiRange, BoxError> {
-        let ranges = self.stream_ranges().try_collect().await?;
+        let ranges = self
+            .stream_ranges()
+            .map(|r| r.map(|r| r.numbers.clone().into_inner()))
+            .try_collect()
+            .await?;
         MultiRange::from_ranges(ranges).map_err(Into::into)
     }
 

@@ -18,6 +18,7 @@
 //!
 //! See also: metadata-consistency
 
+use alloy::primitives::BlockHash;
 use serde::{Deserialize, Serialize};
 
 use crate::Timestamp;
@@ -27,8 +28,12 @@ pub const PARQUET_METADATA_KEY: &'static str = "nozzle_metadata";
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ParquetMeta {
     pub table: String,
-    pub range_start: u64,
-    pub range_end: u64,
     pub filename: String,
     pub created_at: Timestamp,
+    pub range_start: u64,
+    pub range_end: u64,
+    pub range_network: String,
+    pub range_hash: BlockHash,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub range_prev_hash: Option<BlockHash>,
 }
