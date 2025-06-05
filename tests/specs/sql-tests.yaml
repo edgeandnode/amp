@@ -1,3 +1,15 @@
+- name: select_alias_special_block_num_empty_relation
+  query: |
+    SELECT 0 AS _block_num
+  failure: |
+    projection contains a column alias starting with '_': '_block_num'. Underscore-prefixed names are reserved. Please rename your column
+
+- name: select_alias_special_block_num_table
+  query: |
+    SELECT 0 AS _block_num FROM eth_rpc.blocks
+  failure: |
+    projection contains a column alias starting with '_': '_block_num'. Underscore-prefixed names are reserved. Please rename your column
+
 - name: select_1
   query: SELECT 1
   results: |

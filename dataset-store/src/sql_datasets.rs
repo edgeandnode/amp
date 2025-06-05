@@ -5,7 +5,10 @@ use std::{
 
 use common::{
     multirange::MultiRange,
-    query_context::{parse_sql, propagate_block_num, unproject_special_block_num_column, QueryEnv},
+    query_context::{
+        forbid_underscore_prefixed_aliases, parse_sql, propagate_block_num,
+        unproject_special_block_num_column, QueryEnv,
+    },
     BlockNum, BoxError, Dataset, QueryContext, Table, BLOCK_NUM, SPECIAL_BLOCK_NUM,
 };
 use datafusion::{
@@ -157,6 +160,7 @@ pub async fn execute_plan_for_range(
     }
 
     let plan = {
+        forbid_underscore_prefixed_aliases(&plan)?;
         let plan = propagate_block_num(plan)?;
         let plan = constrain_by_block_num(plan, start, end)?;
         let plan = order_by_block_num(plan);

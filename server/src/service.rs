@@ -19,8 +19,8 @@ use common::{
     catalog::{collect_scanned_tables, physical::Catalog},
     config::Config,
     query_context::{
-        parse_sql, propagate_block_num, unproject_special_block_num_column, Error as CoreError,
-        QueryContext, QueryEnv,
+        forbid_underscore_prefixed_aliases, parse_sql, propagate_block_num,
+        unproject_special_block_num_column, Error as CoreError, QueryContext, QueryEnv,
     },
     BlockNum,
 };
@@ -232,6 +232,7 @@ impl Service {
             let original_schema = plan.schema().clone();
             let should_transform =
                 should_transform_plan(&plan).map_err(|e| Error::ExecutionError(e))?;
+            forbid_underscore_prefixed_aliases(&plan).map_err(|e| Error::ExecutionError(e))?;
             let plan = if should_transform {
                 let plan = propagate_block_num(plan).map_err(|e| Error::ExecutionError(e))?;
                 let plan = unproject_special_block_num_column(plan, original_schema)

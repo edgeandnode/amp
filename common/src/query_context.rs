@@ -9,7 +9,9 @@ use datafusion::{
     catalog::MemorySchemaProvider,
     common::{
         not_impl_err, plan_err,
-        tree_node::{Transformed, TransformedResult, TreeNode as _, TreeNodeRewriter},
+        tree_node::{
+            Transformed, TransformedResult, TreeNode as _, TreeNodeRecursion, TreeNodeRewriter,
+        },
         Column, Constraints, DFSchema, DFSchemaRef, ToDFSchema as _,
     },
     datasource::{DefaultTableSource, MemTable, TableProvider, TableType},
@@ -518,16 +520,15 @@ async fn execute_plan(
     execute_stream(physical_plan, ctx.task_ctx()).map_err(Error::PlanningError)
 }
 
-/// Propagate the `SPECIAL_BLOCK_NUM` column through the logical plan.
-pub fn propagate_block_num(plan: LogicalPlan) -> Result<LogicalPlan, DataFusionError> {
-    plan.transform(|node| {
+/// Aliases with a name starting with `_` are always forbidden, since underscore-prefixed
+/// names are reserved for special columns.
+pub fn forbid_underscore_prefixed_aliases(plan: &LogicalPlan) -> Result<(), DataFusionError> {
+    plan.apply(|node| {
         match node {
-            LogicalPlan::Projection(mut projection) => {
-                // Aliases with a name starting with `_` are always forbidden, since underscore-prefixed
-                // names are reserved for special columns.
+            LogicalPlan::Projection(projection) => {
                 for expr in projection.expr.iter() {
                     if let Expr::Alias(alias) = expr {
-                        if alias.name.starts_with('_') && alias.name != SPECIAL_BLOCK_NUM {
+                        if alias.name.starts_with('_') {
                             return plan_err!(
                                 "projection contains a column alias starting with '_': '{}'. Underscore-prefixed names are reserved. Please rename your column",
                                 alias.name
@@ -535,7 +536,19 @@ pub fn propagate_block_num(plan: LogicalPlan) -> Result<LogicalPlan, DataFusionE
                         }
                     }
                 }
+            }
+            _ => {}
+        }
+        Ok(TreeNodeRecursion::Continue)
+    })?;
+    Ok(())
+}
 
+/// Propagate the `SPECIAL_BLOCK_NUM` column through the logical plan.
+pub fn propagate_block_num(plan: LogicalPlan) -> Result<LogicalPlan, DataFusionError> {
+    plan.transform(|node| {
+        match node {
+            LogicalPlan::Projection(mut projection) => {
                 // If the projection already selects the `SPECIAL_BLOCK_NUM` column directly, we don't need to
                 // add that column, but we do have to ensure that the `SPECIAL_BLOCK_NUM` is not
                 // qualified with a table name (since it does not necessarily belong to a table).
@@ -552,11 +565,7 @@ pub fn propagate_block_num(plan: LogicalPlan) -> Result<LogicalPlan, DataFusionE
                 // Prepend `SPECIAL_BLOCK_NUM` column to the projection.
                 projection.expr.insert(0, col(SPECIAL_BLOCK_NUM));
                 let mut schema = DFSchema::from_unqualified_fields(
-                    Fields::from(vec![Field::new(
-                        SPECIAL_BLOCK_NUM,
-                        DataType::UInt64,
-                        false,
-                    )]),
+                    Fields::from(vec![Field::new(SPECIAL_BLOCK_NUM, DataType::UInt64, false)]),
                     Default::default(),
                 )
                 .unwrap();
@@ -565,37 +574,33 @@ pub fn propagate_block_num(plan: LogicalPlan) -> Result<LogicalPlan, DataFusionE
                 Ok(Transformed::yes(LogicalPlan::Projection(projection)))
             }
             LogicalPlan::TableScan(table_scan) => {
-                if table_scan.source.schema().fields().iter().any(|f| f.name() == SPECIAL_BLOCK_NUM) {
+                if table_scan
+                    .source
+                    .schema()
+                    .fields()
+                    .iter()
+                    .any(|f| f.name() == SPECIAL_BLOCK_NUM)
+                {
                     // If the table already has a `SPECIAL_BLOCK_NUM` column, we don't need to add it.
                     Ok(Transformed::no(LogicalPlan::TableScan(table_scan)))
                 } else {
                     // Add a projection on top of the TableScan to select the `BLOCK_NUM` column
                     // as `SPECIAL_BLOCK_NUM`.
                     let mut schema = DFSchema::from_unqualified_fields(
-                        Fields::from(vec![Field::new(
-                            SPECIAL_BLOCK_NUM,
-                            DataType::UInt64,
-                            false,
-                        )]),
+                        Fields::from(vec![Field::new(SPECIAL_BLOCK_NUM, DataType::UInt64, false)]),
                         Default::default(),
                     )
                     .unwrap();
                     schema.merge(table_scan.projected_schema.as_ref());
                     let col_exprs = iter::once(col(BLOCK_NUM).alias(SPECIAL_BLOCK_NUM)).chain(
-                        table_scan
-                            .projected_schema
-                            .fields()
-                            .iter()
-                            .map(|f| {
-                                Expr::Column(
-                                    Column {
-                                        relation: Some(table_scan.table_name.clone()),
-                                        name: f.name().to_string(),
-                                        spans: Default::default(),
-                                    }
-                                )
+                        table_scan.projected_schema.fields().iter().map(|f| {
+                            Expr::Column(Column {
+                                relation: Some(table_scan.table_name.clone()),
+                                name: f.name().to_string(),
+                                spans: Default::default(),
                             })
-                        );
+                        }),
+                    );
                     let projection = Projection::try_new_with_schema(
                         col_exprs.collect(),
                         Arc::new(LogicalPlan::TableScan(table_scan)),
@@ -607,11 +612,7 @@ pub fn propagate_block_num(plan: LogicalPlan) -> Result<LogicalPlan, DataFusionE
             LogicalPlan::Union(mut union) => {
                 // Add the `SPECIAL_BLOCK_NUM` column to the union schema.
                 let mut schema = DFSchema::from_unqualified_fields(
-                    Fields::from(vec![Field::new(
-                        SPECIAL_BLOCK_NUM,
-                        DataType::UInt64,
-                        false,
-                    )]),
+                    Fields::from(vec![Field::new(SPECIAL_BLOCK_NUM, DataType::UInt64, false)]),
                     Default::default(),
                 )
                 .unwrap();
@@ -621,7 +622,8 @@ pub fn propagate_block_num(plan: LogicalPlan) -> Result<LogicalPlan, DataFusionE
             }
             _ => Ok(Transformed::no(node)),
         }
-    }).data()
+    })
+    .data()
 }
 
 /// If the original query does not select the `SPECIAL_BLOCK_NUM` column, this will
