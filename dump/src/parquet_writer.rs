@@ -172,11 +172,8 @@ impl RawTableWriter {
         let block_num = table_rows.block_num();
 
         // The block is past the current range, so we need to close the current file and start a new one.
-        if self.current_range.is_some_and(|r| r.1 < block_num) {
-            // Unwrap: `current_range` is `Some` by `is_some_and`.
-            let end = self.current_range.unwrap().1;
-            // Unwrap: If `current_range` is `Some` then `current_file` is also `Some`.
-            parquet_meta = Some(self.current_file.take().unwrap().close(end).await?);
+        if self.current_range.is_some_and(|(_, end)| end < block_num) {
+            parquet_meta = Some(self.close_current_file().await?);
             self.next_range()?;
         }
 
@@ -202,9 +199,8 @@ impl RawTableWriter {
             assert!(parquet_meta.is_none());
 
             // Close the current file at `block_num - 1`, the highest block height scanned by it.
-            let end = block_num - 1;
-            let file_to_close = self.current_file.take().unwrap();
-            parquet_meta = Some(file_to_close.close(end).await?);
+            assert!(self.current_range.unwrap().1 == (block_num - 1));
+            parquet_meta = Some(self.close_current_file().await?);
 
             // The current range was partially written, so we need to split it.
             let end = self.current_range.unwrap().1;
@@ -250,16 +246,22 @@ impl RawTableWriter {
         }
     }
 
-    async fn close(self) -> Result<Option<(ParquetMeta, ObjectMeta)>, BoxError> {
+    async fn close(mut self) -> Result<Option<(ParquetMeta, ObjectMeta)>, BoxError> {
         // We should be closing the last range.
         assert!(self.ranges_to_write.is_empty());
 
-        if let (Some(range), Some(file)) = (self.current_range, self.current_file) {
-            let end = range.1;
-            file.close(end).await.map(Some)
-        } else {
-            Ok(None)
+        if self.current_file.is_none() {
+            return Ok(None);
         }
+        self.close_current_file().await.map(Some)
+    }
+
+    async fn close_current_file(&mut self) -> Result<(ParquetMeta, ObjectMeta), BoxError> {
+        assert!(self.current_file.is_some());
+        let file = self.current_file.take().unwrap();
+        let (start, end) = self.current_range.unwrap();
+        assert!(start <= end);
+        file.close(end).await
     }
 }
 
