@@ -76,9 +76,12 @@ impl Job {
                 for table in Arc::new(dataset).resolved_tables() {
                     // Unwrap: We checked consistency above.
                     let (id, url) = output_locations_by_name.remove(table.name()).unwrap();
-                    let physical_table =
-                        PhysicalTable::new(table.clone(), url, id, ctx.metadata_db.clone())?;
-                    physical_tables.push(physical_table);
+                    physical_tables.push(PhysicalTable::new(
+                        table.clone(),
+                        url,
+                        id,
+                        ctx.metadata_db.clone(),
+                    )?);
                 }
 
                 Ok(Job::DumpTables {
