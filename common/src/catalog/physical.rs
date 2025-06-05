@@ -346,27 +346,20 @@ impl PhysicalTable {
 
     pub fn stream_ranges(&self) -> BoxStream<'_, Result<BlockRange, BoxError>> {
         self.stream_file_metadata()
-            .map_ok(
-                |FileMetadata {
-                     parquet_meta:
-                         ParquetMeta {
-                             range_start,
-                             range_end,
-                             range_network,
-                             range_hash,
-                             range_prev_hash,
-                             ..
-                         },
-                     ..
-                 }| {
-                    BlockRange {
-                        numbers: range_start..=range_end,
-                        network: range_network,
-                        hash: range_hash,
-                        prev_hash: range_prev_hash,
-                    }
-                },
-            )
+            .map(|r| {
+                let FileMetadata {
+                    location_id,
+                    parquet_meta: ParquetMeta { mut ranges, .. },
+                    ..
+                } = r?;
+                if ranges.len() != 1 {
+                    return Err(BoxError::from(format!(
+                        "expected exactly 1 range at location {}",
+                        location_id
+                    )));
+                }
+                Ok(ranges.remove(0))
+            })
             .boxed()
     }
 

@@ -331,11 +331,7 @@ impl ParquetFileWriter {
             table: self.table.table_name().to_string(),
             filename: self.filename,
             created_at: Timestamp::now(),
-            range_start: *range.numbers.start(),
-            range_end: *range.numbers.end(),
-            range_network: range.network,
-            range_hash: range.hash,
-            range_prev_hash: range.prev_hash,
+            ranges: vec![range],
         };
         let kv_metadata = KeyValue::new(
             PARQUET_METADATA_KEY.to_string(),

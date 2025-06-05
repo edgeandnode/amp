@@ -66,15 +66,14 @@ pub async fn ranges_for_table(
         .stream_file_metadata(location_id)
         .map(|res| {
             let FileMetadata {
-                parquet_meta:
-                    parquet::ParquetMeta {
-                        range_start,
-                        range_end,
-                        ..
-                    },
+                parquet_meta: parquet::ParquetMeta { ranges, .. },
                 ..
             } = res?.try_into()?;
-            Ok((range_start, range_end))
+            if ranges.len() != 1 {
+                return Err(format!("expected exactly 1 range at location {}", location_id).into());
+            }
+            let range = ranges[0].numbers.clone().into_inner();
+            Ok(range)
         })
         .try_collect::<Vec<_>>()
         .await
