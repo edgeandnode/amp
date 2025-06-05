@@ -21,12 +21,10 @@ use common::{
     config::{Addrs, Config},
     metadata::block_ranges_by_table,
     multirange::MultiRange,
-    parquet::basic::{Compression, ZstdLevel},
     query_context::parse_sql,
     BoxError, QueryContext,
 };
 use dataset_store::DatasetStore;
-use dump::{dump_tables, parquet_opts, Ctx as DumpCtx};
 use figment::{
     providers::{Format as _, Json},
     Figment,
@@ -34,6 +32,7 @@ use figment::{
 use fs_err as fs;
 use futures::{stream::TryStreamExt, StreamExt as _};
 use metadata_db::{temp::TempMetadataDb, MetadataDb, KEEP_TEMP_DIRS};
+use nozzle::dump_cmd::dump;
 use nozzle::{dump_cmd::datasets_and_dependencies, server::BoundAddrs};
 use object_store::path::Path;
 use pretty_assertions::assert_str_eq;
@@ -84,7 +83,7 @@ pub async fn bless(
     }
 
     clear_dataset(&test_env.config, dataset_name).await?;
-    dump(config, dataset_name, start, end, 1).await?;
+    dump_dataset(config, dataset_name, start, end, 1).await?;
     Ok(())
 }
 
@@ -164,7 +163,13 @@ impl SnapshotContext {
         end: u64,
         n_jobs: u16,
     ) -> Result<SnapshotContext, BoxError> {
-        let catalog = dump(test_env.config.clone(), dataset_name, start, end, n_jobs).await?;
+        dump_dataset(test_env.config.clone(), dataset_name, start, end, n_jobs).await?;
+        let catalog = catalog_for_dataset(
+            dataset_name,
+            &test_env.dataset_store,
+            test_env.metadata_db.clone(),
+        )
+        .await?;
         let ctx = QueryContext::for_catalog(catalog, test_env.config.make_query_env()?)?;
 
         Ok(SnapshotContext { ctx })
@@ -245,25 +250,51 @@ where
 
 #[instrument(skip_all)]
 /// Clears the dataset directory if specified, before dumping.
-async fn dump(
+async fn dump_dataset(
     config: Arc<Config>,
     dataset_name: &str,
     start: u64,
     end: u64,
     n_jobs: u16,
-) -> Result<Catalog, BoxError> {
+) -> Result<(), BoxError> {
+    // dump the dataset
+    let partition_size = 1024 * 1024; // 100 kB
+    let input_batch_block_size = 100_000;
     let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
-    let dataset_store = DatasetStore::new(config.clone(), metadata_db);
+
+    dump(
+        config.clone(),
+        metadata_db.clone(),
+        vec![dataset_name.to_string()],
+        true,
+        start as i64,
+        Some(end.to_string()),
+        n_jobs,
+        partition_size,
+        input_batch_block_size,
+        false,
+        None,
+    )
+    .await?;
+
+    Ok(())
+}
+
+async fn catalog_for_dataset(
+    dataset_name: &str,
+    dataset_store: &Arc<DatasetStore>,
+    metadata_db: Arc<MetadataDb>,
+) -> Result<Catalog, BoxError> {
+    let dataset = dataset_store.load_dataset(dataset_name).await?.dataset;
     let mut tables = Vec::new();
-
-    tables
-        .push(dump_test_dataset(dataset_name, &config, &dataset_store, start, end, n_jobs).await?);
-
-    let mut catalog = Catalog::empty();
-    for table in tables.into_iter().flatten() {
-        catalog.add_table(table);
+    for table in Arc::new(dataset.clone()).resolved_tables() {
+        // Unwrap: we just dumped the dataset, so it must have an active physical table.
+        let physical_table = PhysicalTable::get_active(&table, metadata_db.clone())
+            .await?
+            .unwrap();
+        tables.push(physical_table);
     }
-    Ok(catalog)
+    Ok(Catalog::new(tables, vec![]))
 }
 
 pub async fn check_blocks(
@@ -296,60 +327,6 @@ async fn clear_dataset(config: &Config, dataset_name: &str) -> Result<(), BoxErr
         .try_collect::<Vec<_>>()
         .await?;
     Ok(())
-}
-
-#[instrument(skip_all)]
-async fn dump_test_dataset(
-    dataset_name: &str,
-    config: &Arc<Config>,
-    dataset_store: &Arc<DatasetStore>,
-    start: u64,
-    end: u64,
-    n_jobs: u16,
-) -> Result<Vec<PhysicalTable>, BoxError> {
-    let partition_size = 1024 * 1024; // 100 kB
-    let input_batch_block_size = 100_000;
-    let compression = Compression::ZSTD(ZstdLevel::try_new(1).unwrap());
-
-    // Disable bloom filters, as they bloat the test files and are not tested themselves.
-    let parquet_opts = parquet_opts(compression, false);
-
-    let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
-    let data_store = config.data_store.clone();
-    let tables = {
-        let dataset = dataset_store.load_dataset(dataset_name).await?.dataset;
-        let mut tables = Vec::new();
-        for table in Arc::new(dataset.clone()).resolved_tables() {
-            let physical_table =
-                match PhysicalTable::get_active(&table, metadata_db.clone()).await? {
-                    Some(physical_table) => physical_table,
-                    _ => {
-                        PhysicalTable::next_revision(&table, &data_store, metadata_db.clone(), true)
-                            .await?
-                    }
-                };
-            tables.push(physical_table);
-        }
-        tables
-    };
-
-    dump_tables(
-        DumpCtx {
-            config: config.clone(),
-            metadata_db: metadata_db.clone(),
-            dataset_store: dataset_store.clone(),
-            data_store: data_store.clone(),
-        },
-        &tables,
-        n_jobs,
-        partition_size,
-        input_batch_block_size,
-        &parquet_opts,
-        (start as i64, Some(end as i64)),
-    )
-    .await?;
-
-    Ok(tables)
 }
 
 pub async fn check_provider_file(filename: &str) {
@@ -469,14 +446,14 @@ pub async fn run_query_on_fresh_server(
     });
 
     for initial_dump in initial_dumps {
-        let _ = dump(
+        dump_dataset(
             test_env.config.clone(),
             &initial_dump.dataset_name,
             initial_dump.start,
             initial_dump.end,
             initial_dump.n_jobs,
         )
-        .await;
+        .await?;
     }
 
     let client = FlightServiceClient::connect(format!("grpc://{}", bound.flight_addr)).await?;
@@ -495,14 +472,15 @@ pub async fn run_query_on_fresh_server(
     let config = test_env.config.clone();
     tokio::spawn(async move {
         for dump_command in dumps_on_running_server {
-            let _ = dump(
+            dump_dataset(
                 config.clone(),
                 &dump_command.dataset_name,
                 dump_command.start,
                 dump_command.end,
                 dump_command.n_jobs,
             )
-            .await;
+            .await
+            .unwrap();
         }
     });
 
