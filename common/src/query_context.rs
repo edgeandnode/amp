@@ -1,15 +1,18 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::{collections::BTreeMap, iter, sync::Arc};
 
 use arrow::{array::RecordBatch, compute::concat_batches, datatypes::SchemaRef};
 use async_udf::physical_optimizer::AsyncFuncRule;
 use bincode::{config, Decode, Encode};
 use bytes::Bytes;
 use datafusion::{
+    arrow::datatypes::{DataType, Field, Fields, Schema},
     catalog::MemorySchemaProvider,
     common::{
-        not_impl_err,
-        tree_node::{Transformed, TreeNode as _, TreeNodeRewriter},
-        Constraints, DFSchemaRef, ToDFSchema as _,
+        not_impl_err, plan_err,
+        tree_node::{
+            Transformed, TransformedResult, TreeNode as _, TreeNodeRecursion, TreeNodeRewriter,
+        },
+        Column, Constraints, DFSchema, DFSchemaRef, ToDFSchema as _,
     },
     datasource::{DefaultTableSource, MemTable, TableProvider, TableType},
     error::DataFusionError,
@@ -21,9 +24,10 @@ use datafusion::{
     },
     logical_expr::{
         AggregateUDF, CreateExternalTable, DdlStatement, Extension, LogicalPlan,
-        LogicalPlanBuilder, ScalarUDF, SortExpr, TableScan,
+        LogicalPlanBuilder, Projection, ScalarUDF, SortExpr, TableScan,
     },
     physical_plan::{displayable, ExecutionPlan},
+    prelude::{col, Expr},
     sql::{parser, TableReference},
 };
 use datafusion_proto::{
@@ -45,8 +49,9 @@ use crate::{
     evm::udfs::{
         EvmDecode, EvmDecodeParams, EvmDecodeType, EvmEncodeParams, EvmEncodeType, EvmTopic,
     },
+    internal,
     stream_helpers::is_streaming,
-    BoxError, LogicalCatalog, ResolvedTable,
+    BoxError, LogicalCatalog, ResolvedTable, BLOCK_NUM, SPECIAL_BLOCK_NUM,
 };
 
 #[derive(Error, Debug)]
@@ -109,8 +114,12 @@ impl PlanningContext {
     }
 
     /// Infers the output schema of the query by planning it against empty tables.
-    pub async fn sql_output_schema(&self, query: parser::Statement) -> Result<DFSchemaRef, Error> {
-        let ctx = self.datafusion_ctx().await?;
+    pub async fn sql_output_schema(
+        &self,
+        query: parser::Statement,
+        additional_fields: &[Field],
+    ) -> Result<DFSchemaRef, Error> {
+        let ctx = self.datafusion_ctx(additional_fields).await?;
         let plan = sql_to_plan(&ctx, query).await?;
         Ok(plan.schema().clone())
     }
@@ -124,7 +133,9 @@ impl PlanningContext {
         query: parser::Statement,
     ) -> Result<(Bytes, DFSchemaRef), Error> {
         let is_streaming = is_streaming(&query);
-        let ctx = self.datafusion_ctx().await?;
+        let ctx = self
+            .datafusion_ctx(&[Field::new(SPECIAL_BLOCK_NUM, DataType::UInt64, false)])
+            .await?;
         let plan = sql_to_plan(&ctx, query).await?;
         let schema = plan.schema().clone();
         let serialized_plan = logical_plan_to_bytes_with_extension_codec(&plan, &EmptyTableCodec)
@@ -145,7 +156,7 @@ impl PlanningContext {
         Ok((serialized_plan, schema))
     }
 
-    async fn datafusion_ctx(&self) -> Result<SessionContext, Error> {
+    async fn datafusion_ctx(&self, additional_fields: &[Field]) -> Result<SessionContext, Error> {
         let state = SessionStateBuilder::new()
             .with_config(self.session_config.clone())
             .with_runtime_env(Default::default())
@@ -153,7 +164,7 @@ impl PlanningContext {
             .with_physical_optimizer_rule(Arc::new(AsyncFuncRule))
             .build();
         let ctx = SessionContext::new_with_state(state);
-        create_empty_tables(&ctx, self.catalog.tables.iter()).await?;
+        create_empty_tables(&ctx, self.catalog.tables.iter(), additional_fields).await?;
         self.register_udfs(&ctx);
         Ok(ctx)
     }
@@ -381,13 +392,19 @@ fn verify_plan(plan: &LogicalPlan) -> Result<(), Error> {
 async fn create_empty_tables(
     ctx: &SessionContext,
     tables: impl Iterator<Item = &ResolvedTable>,
+    additional_fields: &[Field],
 ) -> Result<(), Error> {
     for table in tables {
         // The catalog schema needs to be explicitly created or table creation will fail.
         create_catalog_schema(ctx, table.catalog_schema().to_string());
 
         // Unwrap: Table is empty.
-        let mem_table = MemTable::try_new(table.schema().clone().into(), vec![vec![]]).unwrap();
+        let schema = Schema::try_merge([
+            Schema::new(additional_fields.to_vec()),
+            table.schema().as_ref().clone(),
+        ])
+        .unwrap();
+        let mem_table = MemTable::try_new(schema.into(), vec![vec![]]).unwrap();
         ctx.register_table(table.table_ref().clone(), Arc::new(mem_table))
             .map_err(|e| Error::DatasetError(e.into()))?;
     }
@@ -501,6 +518,145 @@ async fn execute_plan(
     debug!("physical plan: {}", print_physical_plan(&*physical_plan));
 
     execute_stream(physical_plan, ctx.task_ctx()).map_err(Error::PlanningError)
+}
+
+/// Aliases with a name starting with `_` are always forbidden, since underscore-prefixed
+/// names are reserved for special columns.
+pub fn forbid_underscore_prefixed_aliases(plan: &LogicalPlan) -> Result<(), DataFusionError> {
+    plan.apply(|node| {
+        match node {
+            LogicalPlan::Projection(projection) => {
+                for expr in projection.expr.iter() {
+                    if let Expr::Alias(alias) = expr {
+                        if alias.name.starts_with('_') {
+                            return plan_err!(
+                                "projection contains a column alias starting with '_': '{}'. Underscore-prefixed names are reserved. Please rename your column",
+                                alias.name
+                            );
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        Ok(TreeNodeRecursion::Continue)
+    })?;
+    Ok(())
+}
+
+/// Propagate the `SPECIAL_BLOCK_NUM` column through the logical plan.
+pub fn propagate_block_num(plan: LogicalPlan) -> Result<LogicalPlan, DataFusionError> {
+    plan.transform(|node| {
+        match node {
+            LogicalPlan::Projection(mut projection) => {
+                // If the projection already selects the `SPECIAL_BLOCK_NUM` column directly, we don't need to
+                // add that column, but we do have to ensure that the `SPECIAL_BLOCK_NUM` is not
+                // qualified with a table name (since it does not necessarily belong to a table).
+                for expr in projection.expr.iter_mut() {
+                    if let Expr::Column(c) = expr {
+                        if c.name() == SPECIAL_BLOCK_NUM {
+                            // Unqualify the column.
+                            c.relation = None;
+                            return Ok(Transformed::yes(LogicalPlan::Projection(projection)));
+                        }
+                    }
+                }
+
+                // Prepend `SPECIAL_BLOCK_NUM` column to the projection.
+                projection.expr.insert(0, col(SPECIAL_BLOCK_NUM));
+                let mut schema = DFSchema::from_unqualified_fields(
+                    Fields::from(vec![Field::new(SPECIAL_BLOCK_NUM, DataType::UInt64, false)]),
+                    Default::default(),
+                )
+                .unwrap();
+                schema.merge(projection.schema.as_ref());
+                projection.schema = Arc::new(schema);
+                Ok(Transformed::yes(LogicalPlan::Projection(projection)))
+            }
+            LogicalPlan::TableScan(table_scan) => {
+                if table_scan
+                    .source
+                    .schema()
+                    .fields()
+                    .iter()
+                    .any(|f| f.name() == SPECIAL_BLOCK_NUM)
+                {
+                    // If the table already has a `SPECIAL_BLOCK_NUM` column, we don't need to add it.
+                    Ok(Transformed::no(LogicalPlan::TableScan(table_scan)))
+                } else {
+                    // Add a projection on top of the TableScan to select the `BLOCK_NUM` column
+                    // as `SPECIAL_BLOCK_NUM`.
+                    let mut schema = DFSchema::from_unqualified_fields(
+                        Fields::from(vec![Field::new(SPECIAL_BLOCK_NUM, DataType::UInt64, false)]),
+                        Default::default(),
+                    )
+                    .unwrap();
+                    schema.merge(table_scan.projected_schema.as_ref());
+                    let col_exprs = iter::once(col(BLOCK_NUM).alias(SPECIAL_BLOCK_NUM)).chain(
+                        table_scan.projected_schema.fields().iter().map(|f| {
+                            Expr::Column(Column {
+                                relation: Some(table_scan.table_name.clone()),
+                                name: f.name().to_string(),
+                                spans: Default::default(),
+                            })
+                        }),
+                    );
+                    let projection = Projection::try_new_with_schema(
+                        col_exprs.collect(),
+                        Arc::new(LogicalPlan::TableScan(table_scan)),
+                        Arc::new(schema),
+                    )?;
+                    Ok(Transformed::yes(LogicalPlan::Projection(projection)))
+                }
+            }
+            LogicalPlan::Union(mut union) => {
+                // Add the `SPECIAL_BLOCK_NUM` column to the union schema.
+                let mut schema = DFSchema::from_unqualified_fields(
+                    Fields::from(vec![Field::new(SPECIAL_BLOCK_NUM, DataType::UInt64, false)]),
+                    Default::default(),
+                )
+                .unwrap();
+                schema.merge(&union.schema.as_ref());
+                union.schema = Arc::new(schema);
+                Ok(Transformed::yes(LogicalPlan::Union(union)))
+            }
+            _ => Ok(Transformed::no(node)),
+        }
+    })
+    .data()
+}
+
+/// If the original query does not select the `SPECIAL_BLOCK_NUM` column, this will
+/// project the `SPECIAL_BLOCK_NUM` out of the plan. (Essentially, add a projection
+/// on top of the query which selects all columns except `SPECIAL_BLOCK_NUM`.)
+pub fn unproject_special_block_num_column(
+    plan: LogicalPlan,
+    original_schema: Arc<DFSchema>,
+) -> Result<LogicalPlan, DataFusionError> {
+    if original_schema
+        .fields()
+        .iter()
+        .any(|f| f.name() == SPECIAL_BLOCK_NUM)
+    {
+        // If the original schema already contains the `SPECIAL_BLOCK_NUM` column, we don't need to
+        // project it out.
+        return Ok(plan);
+    }
+
+    let exprs = original_schema
+        .fields()
+        .iter()
+        .map(|f| col(f.name()))
+        .collect();
+    let projection = Projection::try_new_with_schema(exprs, Arc::new(plan), original_schema)
+        .map_err(|e| {
+            internal!(
+                "error while removing {} from projection: {}",
+                SPECIAL_BLOCK_NUM,
+                e
+            )
+        })?;
+    Ok(LogicalPlan::Projection(projection))
 }
 
 /// Prints the physical plan to a single line, for logging.

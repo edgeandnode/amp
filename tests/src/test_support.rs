@@ -371,7 +371,6 @@ async fn dump_test_dataset(
                             .await?
                     }
                 };
-
             tables.push(physical_table);
         }
         tables
@@ -779,7 +778,7 @@ async fn restore_blessed_dataset(
     let data_store = config.data_store.clone();
     let mut tables = Vec::new();
     for table in Arc::new(dataset).resolved_tables() {
-        tables.push(
+        let physical_table =
             PhysicalTable::restore_latest_revision(&table, data_store.clone(), metadata_db.clone())
                 .await?
                 .expect(
@@ -791,8 +790,8 @@ async fn restore_blessed_dataset(
                         table.name()
                     )
                     .as_str(),
-                ),
-        );
+                );
+        tables.push(physical_table);
     }
     Ok(tables)
 }

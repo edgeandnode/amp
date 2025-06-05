@@ -24,6 +24,44 @@
       {"block_num": 15000000}
     ]
 
+- name: select_special_block_num
+  query: |
+    SELECT _block_num, block_num
+    FROM eth_firehose.blocks
+    WHERE block_num >= 15000000
+    SETTINGS stream = true
+  streamingOptions:
+    maxDuration: 10s
+    atLeastRows: 1
+  results: |
+    [
+      {"_block_num": 15000000, "block_num": 15000000}
+    ]
+
+- name: select_special_block_num_qualified
+  query: |
+    SELECT b._block_num, block_num
+    FROM eth_firehose.blocks AS b
+    WHERE block_num >= 15000000
+    SETTINGS stream = true
+  streamingOptions:
+    maxDuration: 10s
+    atLeastRows: 1
+  results: |
+    [
+      {"_block_num": 15000000, "block_num": 15000000}
+    ]
+
+- name: select_block_num_qualified
+  query: SELECT eth_firehose.blocks.block_num FROM eth_firehose.blocks WHERE block_num >= 15000000 SETTINGS stream = true
+  streamingOptions:
+    maxDuration: 10s
+    atLeastRows: 1
+  results: |
+    [
+      {"block_num": 15000000}
+    ]
+
 - name: subquery
   query: SELECT * FROM (select block_num from eth_firehose.blocks) as t SETTINGS stream = true
   streamingOptions:
@@ -32,6 +70,36 @@
   results: |
     [
       {"block_num": 15000000}
+    ]
+
+- name: subquery_select_block_num_qualified
+  query: SELECT eth_firehose.blocks.block_num FROM (select block_num from eth_firehose.blocks) SETTINGS stream = true
+  streamingOptions:
+    maxDuration: 10s
+    atLeastRows: 1
+  results: |
+    [
+      {"block_num": 15000000}
+    ]
+
+- name: subquery_no_block_num
+  query: SELECT * FROM (select hash from eth_firehose.blocks) as t SETTINGS stream = true
+  streamingOptions:
+    maxDuration: 10s
+    atLeastRows: 1
+  results: |
+    [
+      {"hash": "9a71a95be3fe957457b11817587e5af4c7e24836d5b383c430ff25b9286a457f"}
+    ]
+
+- name: subquery_no_block_num_on_top_level
+  query: SELECT hash FROM (select hash, block_num from eth_firehose.blocks) as t SETTINGS stream = true
+  streamingOptions:
+    maxDuration: 10s
+    atLeastRows: 1
+  results: |
+    [
+      {"hash": "9a71a95be3fe957457b11817587e5af4c7e24836d5b383c430ff25b9286a457f"}
     ]
 
 - name: empty_result
@@ -50,6 +118,20 @@
   results: |
     [
       {"block_num": 15000000}
+    ]
+
+- name: union_query_no_block_num
+  query: |
+    SELECT hash FROM eth_firehose.blocks WHERE block_num < 10
+    UNION ALL
+    SELECT hash FROM eth_firehose.blocks WHERE block_num > 10
+    SETTINGS stream = true
+  streamingOptions:
+    maxDuration: 10s
+    atLeastRows: 1
+  results: |
+    [
+      {"hash": "9a71a95be3fe957457b11817587e5af4c7e24836d5b383c430ff25b9286a457f"}
     ]
 
 - name: select_block_num
@@ -88,8 +170,8 @@
       {"block_num": 15000004}
     ]
 
-- name: union_all_multiple_datasets
-  query: SELECT 'eth' as src, block_num FROM eth_firehose_stream.blocks UNION ALL select 'sql' as src, block_num FROM sql_stream_ds.even_blocks SETTINGS stream = true
+- name: select_no_block_num
+  query: SELECT hash FROM eth_firehose_stream.blocks WHERE block_num >= 15000000 SETTINGS stream = true
   streamingOptions:
     maxDuration: 10s
     atLeastRows: 4
@@ -117,10 +199,113 @@
       nJobs: 1
   results: |
     [
+      {"hash": "9a71a95be3fe957457b11817587e5af4c7e24836d5b383c430ff25b9286a457f"},
+      {"hash": "7a7d7c23bb8c5e340eead8537bb5e2f3e125bfa0b588cf07e4aa140ba374295e"},
+      {"hash": "b8aeee482d9cdf68868e758983a47bc24012398848b8f64f159966ff0530642b"},
+      {"hash": "8c7c97a90c546e0767b4ffd5aa287eed1d5af2f557a0e9f165aa43bbc8ecbe23"},
+      {"hash": "eaf9d38e71769834c83dadad0d16ebf704fd2f96ca7eb1ac34ea9d069d5ecf76"}
+    ]
+
+- name: sql_dataset_even_blocks
+  query: |
+    SELECT * FROM sql_stream_ds.even_blocks
+    SETTINGS stream = true
+  streamingOptions:
+    maxDuration: 10s
+    atLeastRows: 4
+  results: |
+    [
+      {
+        "_block_num": 15000002,
+        "base_fee_per_gas": 16923463966,
+        "block_num": 15000002,
+        "difficulty": 13816281616556442,
+        "extra_data": "617369612d65617374322d34357067",
+        "gas_limit": 30000000,
+        "gas_used": 12841454,
+        "hash": "b8aeee482d9cdf68868e758983a47bc24012398848b8f64f159966ff0530642b",
+        "logs_bloom": "4ae30324c9423ac47229106e9001262050b72aeaa40f052239935272543128475020035a91140a2010103b09083dcb20720784552b50bc049705168071643860040e71c0230e882e2d86aa9b44947b7045f4823115cc38102840bc049010323016a92088026303002f4456a258250ad5031318954a810ec00a710c131868f6309308054a8a6f186220c90f0023d16506640a3e59412094c8d0a3586baa54005e9e90011152d0faa1264ac0ec8896a42660a248c660e220c209b06030d8d9cc5663091c0a148a16b0054e1c100c3d120a3e5426458e89691aac6979a6b03c7a4022f2208be32088e4401019e2c0638ec040061a35a37818f452445da9a8a0ba31",
+        "miner": "ea674fdde714fd979de3edf0f56aa9716b898ec8",
+        "mix_hash": "8d952fad7166012f3bfdb81a2d7781618e7beec5ad270b8113d49727679ccc68",
+        "nonce": 7142328012485947460,
+        "ommers_hash": "1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+        "parent_hash": "7a7d7c23bb8c5e340eead8537bb5e2f3e125bfa0b588cf07e4aa140ba374295e",
+        "receipt_root": "0fb192ef4b65bbce9863873304aae34d1f5566e8317d1ac356172fa222b94a9e",
+        "state_root": "2d8c44462fbac09e0735a3493bcaee1dfe8ebf8152c929c4ed725dcc6d698967",
+        "timestamp": "2022-06-21T02:29:17Z",
+        "transactions_root": "59bb84ab1c8348653f5af29e46c76b03bebc940f8f0ef0e941393df95340e4c9"
+      },
+      {
+        "_block_num": 15000004,
+        "base_fee_per_gas": 16620862882,
+        "block_num": 15000004,
+        "difficulty": 13820679663067546,
+        "extra_data": "617369612d65617374322d3133",
+        "gas_limit": 30058619,
+        "gas_used": 21277536,
+        "hash": "eaf9d38e71769834c83dadad0d16ebf704fd2f96ca7eb1ac34ea9d069d5ecf76",
+        "logs_bloom": "9f2b67528d0a146770cef9d3b89b1fe6450ef0dbc11f56fa2df1d67ab6f0fd7bc93f416b85bf272076337b8229185b2b3bdeb147bb266db38c96ba8ff1a1af8d094a20db21751bee78a7d75e339af3f570a5e094affbd23028c69f9eaaa1f92117a2c825a30f4f25e5cefc955bf21df925524074d2d81c697e69b137d31a3ed7e234e5e986b7394bf6df1bed39b3e8777481266167711e7a6fa6f2466c7951d19fc36b8753e678076ed9c2d30deaef244b660a297ad0d31bbdfa566f10af7c556d364ee6880eabffc4bf7fc9f7a3dbff5b5ef3d23d2c7e955bdeff8ea16a329f7abab44c8806c5c58c2a167488b4fe876db7e73f31b8aeef3b81f9a3cdf2dd08",
+        "miner": "ea674fdde714fd979de3edf0f56aa9716b898ec8",
+        "mix_hash": "d5047cdda8cfafcb9ed224a298df9b4c2e96c55b0c4eb446eedce82c519b1a60",
+        "nonce": 1966300023577624340,
+        "ommers_hash": "1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+        "parent_hash": "8c7c97a90c546e0767b4ffd5aa287eed1d5af2f557a0e9f165aa43bbc8ecbe23",
+        "receipt_root": "7016b906d651038397176d2abde5b0e9de7619897532f16deccff522ecfd91d2",
+        "state_root": "9cc62b4fb332c5d029208fa3fab526befca71e033ac38a03164446239c9ef1bb",
+        "timestamp": "2022-06-21T02:29:45Z",
+        "transactions_root": "8900e8ebffdf2a07b7816976435c82ab5d2749b0085664d0e68b6e6b417d0211"
+      }
+    ]
+
+- name: sql_dataset_even_blocks_hashes_only
+  query: |
+    SELECT * FROM sql_stream_ds.even_blocks_hashes_only
+    SETTINGS stream = true
+  streamingOptions:
+    maxDuration: 10s
+    atLeastRows: 4
+  results: |
+    [
+      {
+        "_block_num": 15000002,
+        "hash": "b8aeee482d9cdf68868e758983a47bc24012398848b8f64f159966ff0530642b"
+      },
+      {
+        "_block_num": 15000004,
+        "hash": "eaf9d38e71769834c83dadad0d16ebf704fd2f96ca7eb1ac34ea9d069d5ecf76"
+      }
+    ]
+
+- name: union_all_multiple_datasets
+  query: SELECT 'eth' as src, block_num FROM eth_firehose_stream.blocks UNION ALL select 'sql' as src, block_num FROM sql_stream_ds.even_blocks SETTINGS stream = true
+  streamingOptions:
+    maxDuration: 10s
+    atLeastRows: 4
+  results: |
+    [
       {"src": "eth", "block_num": 15000001},
       {"src": "eth", "block_num": 15000002},
       {"src": "sql", "block_num": 15000002},
       {"src": "eth", "block_num": 15000003},
       {"src": "eth", "block_num": 15000004},
       {"src": "sql", "block_num": 15000004}
+    ]
+
+- name: union_all_multiple_datasets_no_block_num
+  query: |
+    SELECT 'eth' AS src, hash FROM eth_firehose_stream.blocks
+    UNION ALL
+    SELECT 'sql' AS src, hash FROM sql_stream_ds.even_blocks
+    SETTINGS stream = true
+  streamingOptions:
+    maxDuration: 10s
+    atLeastRows: 4
+  results: |
+    [
+      {"src": "eth", "hash": "7a7d7c23bb8c5e340eead8537bb5e2f3e125bfa0b588cf07e4aa140ba374295e"},
+      {"src": "eth", "hash": "b8aeee482d9cdf68868e758983a47bc24012398848b8f64f159966ff0530642b"},
+      {"src": "sql", "hash": "b8aeee482d9cdf68868e758983a47bc24012398848b8f64f159966ff0530642b"},
+      {"src": "eth", "hash": "8c7c97a90c546e0767b4ffd5aa287eed1d5af2f557a0e9f165aa43bbc8ecbe23"},
+      {"src": "eth", "hash": "eaf9d38e71769834c83dadad0d16ebf704fd2f96ca7eb1ac34ea9d069d5ecf76"},
+      {"src": "sql", "hash": "eaf9d38e71769834c83dadad0d16ebf704fd2f96ca7eb1ac34ea9d069d5ecf76"}
     ]

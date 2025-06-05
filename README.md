@@ -16,6 +16,21 @@ To quickly dive into the power of Nozzle with Python, best is to run the [`marim
 
 See [config.md](config.md) for how to configure nozzle.
 
+### Prerequisites
+
+If you want your `dump` command to persist and the data to be visible when you run the `server`, you
+will need to run the metadata DB. You can do this with `docker-compose`:
+
+```
+docker-compose up -d
+```
+
+This will run the metadata DB at `postgresql://postgres:postgres@localhost:5432/nozzle`.
+Update your config file to include it:
+```toml
+metadata_db_url = "postgresql://postgres:postgres@localhost:5432/nozzle"
+```
+
 ### nozzle dump
 
 Dump extractor interfaces to parquet files.

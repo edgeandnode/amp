@@ -5,8 +5,11 @@ use std::{
 
 use common::{
     multirange::MultiRange,
-    query_context::{parse_sql, QueryEnv},
-    BlockNum, BoxError, Dataset, QueryContext, Table, BLOCK_NUM,
+    query_context::{
+        forbid_underscore_prefixed_aliases, parse_sql, propagate_block_num,
+        unproject_special_block_num_column, QueryEnv,
+    },
+    BlockNum, BoxError, Dataset, QueryContext, Table, BLOCK_NUM, SPECIAL_BLOCK_NUM,
 };
 use datafusion::{
     common::tree_node::{Transformed, TreeNode, TreeNodeRecursion},
@@ -72,7 +75,7 @@ pub(super) async fn dataset(
         let raw_query = defs_store.get_string(file.location.clone()).await?;
         let query = parse_sql(&raw_query)?;
         let ctx = store.clone().planning_ctx_for_sql(&query).await?;
-        let schema = ctx.sql_output_schema(query.clone()).await?;
+        let schema = ctx.sql_output_schema(query.clone(), &[]).await?;
         let network = {
             let tables = ctx.catalog().iter();
             let mut networks: BTreeSet<_> = tables.map(|t| t.table().network.clone()).collect();
@@ -90,7 +93,7 @@ pub(super) async fn dataset(
             schema: schema.as_ref().clone().into(),
             network,
         };
-        tables.push(table);
+        tables.push(table.with_special_block_num_column());
         queries.insert(table_name.to_string(), query);
     }
 
@@ -135,7 +138,9 @@ pub async fn execute_plan_for_range(
     ctx: &QueryContext,
     start: BlockNum,
     end: BlockNum,
+    is_sql_dataset: bool,
 ) -> Result<SendableRecordBatchStream, BoxError> {
+    let original_schema = plan.schema().clone();
     let tables = extract_table_references_from_plan(&plan)?;
 
     // Validate dependency block ranges
@@ -155,10 +160,62 @@ pub async fn execute_plan_for_range(
     }
 
     let plan = {
-        let plan = inject_block_range_constraints(plan, start, end)?;
-        order_by_block_num(plan)
+        forbid_underscore_prefixed_aliases(&plan)?;
+        let plan = propagate_block_num(plan)?;
+        let plan = constrain_by_block_num(plan, start, end)?;
+        let plan = order_by_block_num(plan);
+        if is_sql_dataset {
+            // SQL datasets always project the special block number column, because it has
+            // to end up in the file.
+            plan
+        } else {
+            unproject_special_block_num_column(plan, original_schema)?
+        }
     };
     Ok(ctx.execute_plan(plan).await?)
+}
+
+fn order_by_block_num(plan: LogicalPlan) -> LogicalPlan {
+    let sort = Sort {
+        expr: vec![col(SPECIAL_BLOCK_NUM).sort(true, false)],
+        input: Arc::new(plan),
+        fetch: None,
+    };
+    LogicalPlan::Sort(sort)
+}
+
+#[instrument(skip_all, err)]
+fn constrain_by_block_num(
+    plan: LogicalPlan,
+    start: u64,
+    end: u64,
+) -> Result<LogicalPlan, DataFusionError> {
+    plan.transform(|node| match &node {
+        // Insert the clauses in non-view table scans
+        LogicalPlan::TableScan(TableScan { source, .. })
+            if source.table_type() == TableType::Base && source.get_logical_plan().is_none() =>
+        {
+            let column_name = if source
+                .schema()
+                .fields()
+                .iter()
+                .any(|f| f.name() == SPECIAL_BLOCK_NUM)
+            {
+                SPECIAL_BLOCK_NUM
+            } else {
+                BLOCK_NUM
+            };
+            // `where start <= block_num and block_num <= end`
+            // Is it ok for this to be unqualified? Or should it be `TABLE_NAME.block_num`?
+            let mut predicate = col(column_name).lt_eq(lit(end));
+            predicate = predicate.and(lit(start).lt_eq(col(column_name)));
+
+            let with_filter = Filter::try_new(predicate, Arc::new(node))?;
+            Ok(Transformed::yes(LogicalPlan::Filter(with_filter)))
+        }
+        _ => Ok(Transformed::no(node)),
+    })
+    .map(|t| t.data)
 }
 
 /// This will:
@@ -176,7 +233,7 @@ pub async fn execute_query_for_range(
     let ctx = dataset_store.clone().ctx_for_sql(&query, env).await?;
     let plan = ctx.plan_sql(query).await?;
 
-    execute_plan_for_range(plan, &ctx, start, end).await
+    execute_plan_for_range(plan, &ctx, start, end, true).await
 }
 
 // All physical tables locations that have been queried
@@ -336,37 +393,4 @@ pub fn is_incremental(plan: &LogicalPlan) -> Result<bool, BoxError> {
         Some(err) => Err(err),
         None => Ok(is_incr),
     }
-}
-
-#[instrument(skip_all, err)]
-fn inject_block_range_constraints(
-    plan: LogicalPlan,
-    start: u64,
-    end: u64,
-) -> Result<LogicalPlan, DataFusionError> {
-    plan.transform(|node| match &node {
-        // Insert the clauses in non-view table scans
-        LogicalPlan::TableScan(TableScan { source, .. })
-            if source.table_type() == TableType::Base && source.get_logical_plan().is_none() =>
-        {
-            // `where start <= block_num and block_num <= end`
-            // Is it ok for this to be unqualified? Or should it be `TABLE_NAME.block_num`?
-            let mut predicate = col(BLOCK_NUM).lt_eq(lit(end));
-            predicate = predicate.and(lit(start).lt_eq(col(BLOCK_NUM)));
-
-            let with_filter = Filter::try_new(predicate, Arc::new(node))?;
-            Ok(Transformed::yes(LogicalPlan::Filter(with_filter)))
-        }
-        _ => Ok(Transformed::no(node)),
-    })
-    .map(|t| t.data)
-}
-
-fn order_by_block_num(plan: LogicalPlan) -> LogicalPlan {
-    let sort = Sort {
-        expr: vec![col(BLOCK_NUM).sort(true, false)],
-        input: Arc::new(plan),
-        fetch: None,
-    };
-    LogicalPlan::Sort(sort)
 }

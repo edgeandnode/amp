@@ -1,0 +1,21 @@
+version: '3.8'
+services:
+  # Runs postgres at URL postgresql://postgres:postgres@localhost:5432/nozzle
+  db:
+    image: postgres:alpine
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - PGUSER=postgres
+      - POSTGRES_DB=nozzle
+    ports:
+      - '5432:5432'
+
+  # DB explorer right in your web browser at
+  # http://localhost:7402/?pgsql=db&username=postgres&db=nozzle&ns=public
+  # Password: postgres
+  adminer:
+    image: adminer
+    restart: always
+    ports:
+      - 7402:8080
