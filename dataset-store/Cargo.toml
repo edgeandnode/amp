@@ -4,6 +4,7 @@ edition.workspace = true
 version.workspace = true
 
 [dependencies]
+async-stream.workspace = true
 async-udf = { path = "../async-udf" }
 metadata-db = { path = "../metadata-db" }
 common = { path = "../common" }

@@ -1,43 +1,9 @@
 //! Tokio tasks utilities
-// Part of this code was borrowed from tokio_util::task::AbortOnDropHandle to avoid introducing a new dependency
-// Source: https://github.com/tokio-rs/tokio/blob/9563707aaa73a802fa4d3c51c12869a037641070/tokio-util/src/task/abort_on_drop.rs
 
-use std::{
-    future::Future,
-    pin::Pin,
-    task::{Context, Poll},
-};
+use std::future::Future;
 
 use common::BoxError;
-use tokio::task::{JoinError, JoinHandle, JoinSet};
-
-/// A wrapper around a [`tokio::task::JoinHandle`], which [aborts] the task when it is dropped.
-///
-/// [aborts]: tokio::task::JoinHandle::abort
-#[must_use = "Dropping the handle aborts the task immediately"]
-#[derive(Debug)]
-pub struct AbortOnDropHandle<T>(JoinHandle<T>);
-
-impl<T> AbortOnDropHandle<T> {
-    /// Create an [`AbortOnDropHandle`] from a [`JoinHandle`].
-    pub fn new(handle: JoinHandle<T>) -> Self {
-        Self(handle)
-    }
-}
-
-impl<T> Future for AbortOnDropHandle<T> {
-    type Output = Result<T, JoinError>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        Pin::new(&mut self.0).poll(cx)
-    }
-}
-
-impl<T> Drop for AbortOnDropHandle<T> {
-    fn drop(&mut self) {
-        self.0.abort()
-    }
-}
+use tokio::task::{JoinError, JoinSet};
 
 /// A wrapper around [`JoinSet`] that implements fail-fast semantics.
 ///
