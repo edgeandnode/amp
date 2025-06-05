@@ -12,17 +12,18 @@ use alloy::{
     },
     transports::http::reqwest::Url,
 };
+use async_stream::stream;
 use common::{
     evm::tables::{
         blocks::{Block, BlockRowsBuilder},
         logs::{Log, LogRowsBuilder},
     },
-    BlockNum, BlockStreamer, BoxError, EvmCurrency, RawDatasetRows, RawTableBlock, Timestamp,
+    metadata::range::BlockRange,
+    BlockNum, BlockStreamer, BoxError, EvmCurrency, RawDatasetRows, Timestamp,
 };
-use futures::future::try_join_all;
+use futures::{future::try_join_all, Stream};
 use thiserror::Error;
-use tokio::sync::mpsc;
-use tracing::{error, info, warn};
+use tracing::{error, warn};
 
 use crate::tables::transactions::{Transaction, TransactionRowsBuilder};
 
@@ -136,54 +137,70 @@ impl JsonRpcClient {
         })
     }
 
-    /// Fetch blocks from start_block to end_block. One method is called at a time.
+    /// Create a stream that fetches blocks from start_block to end_block. One method is called at a time.
     /// This is used when batch_size is set to 1 in the provider config.
-    async fn unbatched_block_stream(
+    fn unbatched_block_stream(
         self,
         start_block: u64,
         end_block: u64,
-        tx: mpsc::Sender<RawDatasetRows>,
-    ) -> Result<(), BoxError> {
-        info!(
+    ) -> impl Stream<Item = Result<RawDatasetRows, BoxError>> + Send {
+        tracing::info!(
             "Fetching blocks (not batched) {} to {}",
-            start_block, end_block
+            start_block,
+            end_block
         );
-        for block_num in start_block..=end_block {
-            let client_permit = self.limiter.acquire().await;
-            let block = self
-                .client
-                .get_block_by_number(BlockNumberOrTag::Number(block_num))
-                .full()
-                .await?
-                .ok_or_else(|| format!("block {} not found", block_num))?;
-            let receipts = try_join_all(
-                block
-                    .transactions
-                    .hashes()
-                    .map(|hash| self.client.get_transaction_receipt(hash)),
-            )
-            .await?;
-            drop(client_permit);
+        stream! {
+            for block_num in start_block..=end_block {
+                let client_permit = self.limiter.acquire().await;
+                let block_result = self
+                    .client
+                    .get_block_by_number(BlockNumberOrTag::Number(block_num))
+                    .full()
+                    .await;
 
-            let rows = rpc_to_rows(block, receipts, &self.network)?;
+                let block = match block_result {
+                    Ok(Some(block)) => block,
+                    Ok(None) => {
+                        yield Err(format!("block {} not found", block_num).into());
+                        continue;
+                    }
+                    Err(err) => {
+                        yield Err(err.into());
+                        continue;
+                    }
+                };
 
-            // Send the block and check if the receiver has gone away.
-            if tx.send(rows).await.is_err() {
-                break;
+                let receipts_result = try_join_all(
+                    block
+                        .transactions
+                        .hashes()
+                        .map(|hash| self.client.get_transaction_receipt(hash)),
+                )
+                .await;
+
+                drop(client_permit);
+
+                let receipts = match receipts_result {
+                    Ok(receipts) => receipts,
+                    Err(err) => {
+                        yield Err(err.into());
+                        continue;
+                    }
+                };
+
+                yield rpc_to_rows(block, receipts, &self.network);
             }
         }
-        Ok(())
     }
 
-    /// Fetch blocks in batches to avoid overwhelming the RPC server.
+    /// Create a stream that fetches blocks in batches to avoid overwhelming the RPC server.
     /// This is used when rpc_batch_size is set > 1 in the provider config.
-    async fn batched_block_stream(
+    fn batched_block_stream(
         self,
         start_block: u64,
         end_block: u64,
-        tx: mpsc::Sender<RawDatasetRows>,
-    ) -> Result<(), BoxError> {
-        info!("Fetching blocks (batched) {} to {}", start_block, end_block);
+    ) -> impl Stream<Item = Result<RawDatasetRows, BoxError>> + Send {
+        tracing::info!("Fetching blocks (batched) {} to {}", start_block, end_block);
         let batching_client = BatchingRpcWrapper::new(
             self.client.clone(),
             self.batch_size,
@@ -195,32 +212,41 @@ impl JsonRpcClient {
             .map(|block_num| ("eth_getBlockByNumber", (block_num, true)))
             .collect();
 
-        let blocks: Vec<alloy::rpc::types::Block> = batching_client.execute(block_calls).await?;
+        stream! {
+            let blocks_result: Result<Vec<alloy::rpc::types::Block>, BoxError> = batching_client.execute(block_calls).await;
+            let blocks = match blocks_result {
+                Ok(blocks) => blocks,
+                Err(err) => {
+                    yield Err(err);
+                    return;
+                }
+            };
 
-        for block in blocks {
-            let transaction_hashes = block.transactions.hashes();
+            for block in blocks {
+                let transaction_hashes = block.transactions.hashes();
 
-            // Fetch receipts in batch
-            let receipt_calls: Vec<_> = transaction_hashes
-                .map(|hash| {
-                    (
-                        "eth_getTransactionReceipt",
-                        [format!("0x{}", hex::encode(hash))],
-                    )
-                })
-                .collect();
+                // Fetch receipts in batch
+                let receipt_calls: Vec<_> = transaction_hashes
+                    .map(|hash| {
+                        (
+                            "eth_getTransactionReceipt",
+                            [format!("0x{}", hex::encode(hash))],
+                        )
+                    })
+                    .collect();
 
-            let receipts: Vec<Option<TransactionReceipt>> =
-                batching_client.execute(receipt_calls).await?;
+                let receipts_result: Result<Vec<Option<TransactionReceipt>>, BoxError> = batching_client.execute(receipt_calls).await;
+                let receipts = match receipts_result {
+                    Ok(receipts) => receipts,
+                    Err(err) => {
+                        yield Err(err);
+                        continue;
+                    }
+                };
 
-            let rows = rpc_to_rows(block, receipts, &self.network)?;
-
-            // Send the block and check if the receiver has gone away.
-            if tx.send(rows).await.is_err() {
-                break;
+                yield rpc_to_rows(block, receipts, &self.network);
             }
         }
-        Ok(())
     }
 }
 
@@ -235,12 +261,19 @@ impl BlockStreamer for JsonRpcClient {
         self,
         start: BlockNum,
         end: BlockNum,
-        tx: mpsc::Sender<RawDatasetRows>,
-    ) -> Result<(), BoxError> {
-        if self.batch_size > 1 {
-            self.batched_block_stream(start, end, tx).await
-        } else {
-            self.unbatched_block_stream(start, end, tx).await
+    ) -> impl Stream<Item = Result<RawDatasetRows, BoxError>> + Send {
+        // Each function returns a different concrete stream type, so we
+        // use `stream!` to unify them into a wrapper stream
+        stream! {
+            if self.batch_size > 1 {
+                for await item in self.batched_block_stream(start, end) {
+                    yield item;
+                }
+            } else {
+                for await item in self.unbatched_block_stream(start, end) {
+                    yield item;
+                }
+            }
         }
     }
 
@@ -300,9 +333,11 @@ fn rpc_to_rows(
         transactions.push(rpc_transaction_to_row(&header, tx, receipt, idx)?);
     }
 
-    let block = RawTableBlock {
-        number: header.block_num,
+    let block = BlockRange {
+        numbers: header.block_num..=header.block_num,
         network: network.to_string(),
+        hash: header.hash.into(),
+        prev_hash: Some(header.parent_hash.into()),
     };
 
     let header_row = {

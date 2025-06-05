@@ -10,7 +10,10 @@ use tokio::{
 };
 use tracing::instrument;
 
-use crate::job::{Job, JobCtx};
+mod job;
+
+pub use self::job::JobDesc;
+use self::job::{Job, JobCtx};
 
 pub struct Worker {
     config: Arc<Config>,
@@ -44,7 +47,7 @@ impl Worker {
         let heartbeat_task: JoinHandle<Result<(), WorkerError>> = tokio::spawn(async move {
             db.heartbeat_loop(&id)
                 .await
-                .map_err(|e| WorkerError::HeartbeatError(e.into()))
+                .map_err(|err| WorkerError::HeartbeatError(err.into()))
         });
 
         // Start listening for actions.

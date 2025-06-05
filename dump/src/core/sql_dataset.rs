@@ -90,8 +90,9 @@
 //! - **Atomic Batch Processing**: Each batch is processed atomically, ensuring that
 //!   partial results are not recorded in case of failures.
 //!
-//! - **Parallel Task Management**: Uses structured concurrency to ensure that if any
-//!   table processing fails, all other tasks are properly cleaned up.
+//! - **Parallel Task Management**: Uses a specialized join set (`DumpPartitionTasksJoinSet`)
+//!   to coordinate concurrent table processing tasks, ensuring that if any table processing
+//!   fails, all remaining tasks are immediately terminated to prevent partial dumps.
 //!
 //! - **Metadata Consistency**: Commits metadata updates only after successful
 //!   completion of each batch, maintaining consistency between data files and
@@ -125,10 +126,10 @@ use dataset_store::{
     sql_datasets::{is_incremental, max_end_block, SqlDataset},
     DatasetStore,
 };
-use futures::{future::try_join_all, TryFutureExt as _, TryStreamExt};
+use futures::TryStreamExt as _;
 use tracing::instrument;
 
-use super::{block_ranges, Ctx};
+use super::{block_ranges, tasks::FailFastJoinSet, Ctx};
 use crate::parquet_writer::{commit_metadata, ParquetFileWriter, ParquetWriterProperties};
 
 /// Dumps a SQL dataset
@@ -143,8 +144,9 @@ pub async fn dump(
     input_batch_size_blocks: u64,
     (start, end): (i64, Option<i64>),
 ) -> Result<(), BoxError> {
-    let mut join_handles = vec![];
+    let dataset_name = dataset.dataset.name.as_str();
 
+    let mut join_set = FailFastJoinSet::<Result<(), BoxError>>::new();
     for (table, query) in dataset.queries {
         let dataset_store = ctx.dataset_store.clone();
         let data_store = ctx.data_store.clone();
@@ -153,7 +155,7 @@ pub async fn dump(
         let block_ranges_by_table = block_ranges_by_table.clone();
         let parquet_opts = parquet_opts.clone();
 
-        let handle = tokio::spawn(async move {
+        join_set.spawn(async move {
             let physical_table = {
                 let tables = query_ctx.catalog().tables();
                 tables.iter().find(|t| t.table_name() == table).unwrap()
@@ -213,6 +215,7 @@ pub async fn dump(
                     physical_table.table(),
                     &data_store,
                     dataset_store.metadata_db.clone(),
+                    false,
                 )
                 .await?;
                 tracing::info!(
@@ -232,13 +235,15 @@ pub async fn dump(
                 .await?;
             }
 
-            Ok::<(), BoxError>(())
+            Ok(())
         });
-
-        join_handles.push(async { handle.err_into().await.and_then(|x| x) });
     }
 
-    try_join_all(join_handles).await?;
+    // Wait for all the jobs to finish, returning an error if any job panics or fails
+    if let Err(err) = join_set.try_wait_all().await {
+        tracing::error!(dataset=%dataset_name, error=%err, "dataset dump failed");
+        return Err(err.into_box_error());
+    }
 
     Ok(())
 }

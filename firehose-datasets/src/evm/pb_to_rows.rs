@@ -5,7 +5,8 @@ use common::{
         blocks::{Block, BlockRowsBuilder},
         logs::{Log, LogRowsBuilder},
     },
-    BoxError, Bytes32, EvmCurrency, RawDatasetRows, RawTableBlock, Timestamp,
+    metadata::range::BlockRange,
+    BoxError, Bytes32, EvmCurrency, RawDatasetRows, Timestamp,
 };
 use thiserror::Error;
 
@@ -195,9 +196,11 @@ pub fn protobufs_to_rows(
         }
     }
 
-    let block = RawTableBlock {
-        number: header.block_num,
+    let block = BlockRange {
+        numbers: header.block_num..=header.block_num,
         network: network.to_string(),
+        hash: header.hash.into(),
+        prev_hash: Some(header.parent_hash.into()),
     };
     let header_row = {
         let mut builder = BlockRowsBuilder::with_capacity(1);

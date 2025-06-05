@@ -53,21 +53,22 @@ pub async fn dump(
         let dataset = dataset_store.load_dataset(&dataset_name).await?.dataset;
         let mut tables = Vec::with_capacity(dataset.tables.len());
         for table in Arc::new(dataset).resolved_tables() {
-            if let Some(physical_table) = PhysicalTable::get_or_restore_active_revision(
-                &table,
-                data_store.clone(),
-                metadata_db.clone(),
-            )
-            .await?
+            if let Some(physical_table) =
+                PhysicalTable::get_active(&table, metadata_db.clone()).await?
             {
                 tables.push(physical_table.into());
             } else {
                 tables.push(
-                    PhysicalTable::next_revision(&table, data_store.as_ref(), metadata_db.clone())
-                        .await?
-                        .into(),
+                    PhysicalTable::next_revision(
+                        &table,
+                        data_store.as_ref(),
+                        metadata_db.clone(),
+                        true,
+                    )
+                    .await?
+                    .into(),
                 );
-            }
+            };
         }
         physical_datasets.push(tables);
     }
@@ -141,7 +142,7 @@ fn resolve_end_block(start_block: i64, end_block: String) -> Result<i64, BoxErro
 
 /// Return the input datasets and their dataset dependencies. The output set is ordered such that
 /// each dataset comes after all datasets it depends on.
-async fn datasets_and_dependencies(
+pub async fn datasets_and_dependencies(
     store: &Arc<DatasetStore>,
     mut datasets: Vec<String>,
 ) -> Result<Vec<String>, BoxError> {

@@ -169,7 +169,7 @@ impl TableWriter {
         assert_eq!(table_rows.table.name, self.table.table_name());
 
         let mut parquet_meta = None;
-        let block_num = table_rows.block.number;
+        let block_num = table_rows.block_num();
 
         // The block is past the current range, so we need to close the current file and start a new one.
         if self.current_range.is_some_and(|r| r.1 < block_num) {

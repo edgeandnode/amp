@@ -41,7 +41,7 @@ pub async fn dump_check(
         let table = PhysicalTable::new(table.clone(), url, location_id, metadata_db.clone())?;
         tables.push(table.into());
     }
-    let catalog = Catalog::new(tables);
+    let catalog = Catalog::new(tables, vec![]);
     let ctx = Arc::new(QueryContext::for_catalog(catalog, env.clone())?);
 
     let jobs = {

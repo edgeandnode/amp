@@ -8,7 +8,7 @@ use common::{
     query_context::QueryContext,
     BlockStreamer, BoxError, Dataset, BLOCK_NUM,
 };
-use futures::{future::join_all, FutureExt, StreamExt as _};
+use futures::{future::join_all, StreamExt as _, TryStreamExt as _};
 
 use crate::metrics::METRICS;
 
@@ -92,29 +92,26 @@ async fn validate_batches(
 }
 
 // Spawning a job:
-// - Spawns a task to fetch blocks from the `client`.
+// - Creates a stream to fetch blocks from the `client`.
 // - Returns a future that will validate firehose blocks against existing data.
 pub async fn run_job(job: Job<impl BlockStreamer>) -> Result<(), BoxError> {
-    let (mut firehose, firehose_join_handle) = {
-        let start_block = job.start;
-        let end_block = job.end;
+    let stream = {
         let block_streamer = job.block_streamer.clone();
-        let (tx, rx) = tokio::sync::mpsc::channel(100);
-        let firehose_task = block_streamer.block_stream(start_block, end_block, tx);
-        (rx, tokio::spawn(firehose_task))
+        block_streamer.block_stream(job.start, job.end).await
     };
 
     let mut table_map: HashMap<String, Vec<RecordBatch>> = HashMap::new();
     let mut batch_start = job.start;
 
-    while let Some(dataset_rows) = firehose.recv().await {
+    let mut stream = std::pin::pin!(stream);
+    while let Some(dataset_rows) = stream.try_next().await? {
         METRICS.blocks_read.inc();
 
         if dataset_rows.is_empty() {
             continue;
         }
 
-        let block_num = dataset_rows.block().number;
+        let block_num = dataset_rows.block_num();
         for table_rows in dataset_rows {
             if table_rows.is_empty() {
                 continue;
@@ -154,9 +151,6 @@ pub async fn run_job(job: Job<impl BlockStreamer>) -> Result<(), BoxError> {
             batch_start = block_num + 1;
         }
     }
-    // The Firehose task stopped sending blocks, so it must have terminated. Here we check if it
-    // terminated with any errors or panics.
-    firehose_join_handle.now_or_never().unwrap()??;
 
     Ok(())
 }

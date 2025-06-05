@@ -1,3 +1,15 @@
+- name: select_alias_special_block_num_empty_relation
+  query: |
+    SELECT 0 AS _block_num
+  failure: |
+    projection contains a column alias starting with '_': '_block_num'. Underscore-prefixed names are reserved. Please rename your column
+
+- name: select_alias_special_block_num_table
+  query: |
+    SELECT 0 AS _block_num FROM eth_rpc.blocks
+  failure: |
+    projection contains a column alias starting with '_': '_block_num'. Underscore-prefixed names are reserved. Please rename your column
+
 - name: select_1
   query: SELECT 1
   results: |
@@ -430,3 +442,24 @@
     SELECT evm_encode_type(CAST(635000 AS DECIMAL(38, 0)), 'uint128') AS uint128
   results: |
     [{"uint128":"000000000000000000000000000000000000000000000000000000000009b078"}]
+
+- name: select_special_block_num
+  query: |
+    SELECT _block_num
+    FROM eth_rpc.blocks
+  results: |
+    [{"_block_num": 15000000}]
+
+- name: select_alias_starting_with_underscore
+  query: |
+    SELECT block_num AS _hello
+    FROM eth_rpc.blocks
+  failure: |
+    projection contains a column alias starting with '_': '_hello'. Underscore-prefixed names are reserved. Please rename your column
+
+- name: select_alias_starting_with_underscore_subquery
+  query: |
+    SELECT 0 AS zero
+    FROM (SELECT block_num as _hello FROM eth_rpc.blocks)
+  failure: |
+    projection contains a column alias starting with '_': '_hello'. Underscore-prefixed names are reserved. Please rename your column

@@ -34,7 +34,7 @@ use datafusion_datasource::{
 use futures::{future, stream, Stream, StreamExt, TryStreamExt};
 use metadata_db::{LocationId, MetadataDb, TableId};
 use object_store::{path::Path, ObjectMeta, ObjectStore};
-use tracing::debug;
+use tracing::{debug, info};
 use url::Url;
 use uuid::Uuid;
 
@@ -65,11 +65,8 @@ impl Catalog {
         }
     }
 
-    pub fn new(tables: Vec<Arc<PhysicalTable>>) -> Self {
-        Catalog {
-            tables,
-            udfs: vec![],
-        }
+    pub fn new(tables: Vec<Arc<PhysicalTable>>, udfs: Vec<ScalarUDF>) -> Self {
+        Catalog { tables, udfs }
     }
 
     pub fn add_table(&mut self, table: Arc<PhysicalTable>) {
@@ -142,6 +139,7 @@ impl PhysicalTable {
         table: &ResolvedTable,
         data_store: &Store,
         metadata_db: Arc<MetadataDb>,
+        set_active: bool,
     ) -> Result<Self, BoxError> {
         let dataset_name = &table.dataset().name;
         let table_id = TableId {
@@ -155,6 +153,12 @@ impl PhysicalTable {
         let location_id = metadata_db
             .register_location(table_id, data_store.bucket(), &path, &url, false)
             .await?;
+
+        if set_active {
+            metadata_db
+                .set_active_location(table_id, url.as_str())
+                .await?;
+        }
 
         let path = Path::from_url_path(url.path()).unwrap();
 
@@ -201,11 +205,9 @@ impl PhysicalTable {
         .await
     }
 
-    /// Attempt to get the active revision of a table. If it doesn't exist, restore the latest revision
-    /// and register it in the metadata database.
-    pub async fn get_or_restore_active_revision(
+    /// Attempt to get the active revision of a table.
+    pub async fn get_active(
         table: &ResolvedTable,
-        data_store: Arc<Store>,
         metadata_db: Arc<MetadataDb>,
     ) -> Result<Option<Self>, BoxError> {
         let dataset_name = &table.dataset().name;
@@ -215,28 +217,29 @@ impl PhysicalTable {
             table: &table.name(),
         };
 
-        let physical_table = if let Some((url, location_id)) =
-            metadata_db.get_active_location(table_id).await?
-        {
-            let path = Path::from_url_path(url.path()).unwrap();
-            let (object_store, _) = infer_object_store(&url)?;
-            let collected_statistics: FileStatisticsCache =
-                Arc::new(DefaultFileStatisticsCache::default());
-            Some(Self {
-                table: table.clone(),
-                url,
-                path,
-                object_store,
-                location_id,
-                metadata_db: metadata_db.clone(),
-                collected_statistics,
-            })
-        } else {
-            PhysicalTable::restore_latest_revision(table, data_store.clone(), metadata_db.clone())
-                .await?
+        let Some((url, location_id)) = metadata_db.get_active_location(table_id).await? else {
+            return Ok(None);
         };
 
-        Ok(physical_table)
+        let path = Path::from_url_path(url.path()).unwrap();
+        let (object_store, _) = infer_object_store(&url)?;
+
+        info!(
+            "Restored table `{}` from {} with id {}",
+            table.table_ref(),
+            url,
+            location_id
+        );
+
+        Ok(Some(Self {
+            table: table.clone(),
+            url,
+            path,
+            object_store,
+            location_id,
+            metadata_db: metadata_db.clone(),
+            collected_statistics: Arc::new(DefaultFileStatisticsCache::default()),
+        }))
     }
 
     /// Attempt to restore the latest revision of a table from a provided map of revisions
@@ -547,7 +550,7 @@ impl TableProvider for PhysicalTable {
                         &self.schema(),
                         &file_groups,
                         output_ordering,
-                        10,
+                        1,
                     )
                 })
             })
@@ -555,7 +558,7 @@ impl TableProvider for PhysicalTable {
         {
             Some(Err(e)) => debug!("failed to split file groups by statistics: {e}"),
             Some(Ok(new_groups)) => {
-                if new_groups.len() <= 10 {
+                if new_groups.len() <= 1 {
                     file_groups = new_groups;
                 } else {
                     debug!("attempted to split file groups by statistics, but there were more file groups than target_partitions; falling back to unordered")
@@ -565,6 +568,8 @@ impl TableProvider for PhysicalTable {
         };
 
         ParquetFormat::default()
+            .with_enable_pruning(true)
+            .with_force_view_types(true)
             .create_physical_plan(
                 state,
                 FileScanConfigBuilder::new(
@@ -577,7 +582,6 @@ impl TableProvider for PhysicalTable {
                 .with_projection(projection.cloned())
                 .with_limit(limit)
                 .with_output_ordering(output_ordering)
-                .with_table_partition_cols(table_partition_cols)
                 .build(),
             )
             .await
@@ -591,13 +595,14 @@ impl TableProvider for PhysicalTable {
 /// Helper methods for `PhysicalTable` to implement the `TableProvider` trait.
 impl PhysicalTable {
     fn object_store_url(&self) -> DataFusionResult<ObjectStoreUrl> {
-        let url_start = self.url().as_str().find("://").ok_or_else(|| {
+        let url = self.url().as_str();
+        let url_start = url.find("://").ok_or_else(|| {
             DataFusionError::Internal(format!(
                 "Invalid URL: {}. Expected format: <scheme>://<path>",
                 self.url()
             ))
         })?;
-        let scheme = self.url().as_str()[..url_start].to_string() + "://";
+        let scheme = url[..url_start].to_string() + "://";
         ObjectStoreUrl::parse(scheme)
     }
 

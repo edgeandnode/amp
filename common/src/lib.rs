@@ -27,16 +27,21 @@ use datafusion::arrow::{
     error::ArrowError,
 };
 pub use datafusion::{arrow, parquet};
+use futures::Stream;
+use metadata::range::BlockRange;
 pub use query_context::QueryContext;
 use serde::{Deserialize, Serialize};
 pub use store::Store;
-use tokio::sync::mpsc;
 
 pub type BoxError = Box<dyn std::error::Error + Sync + Send + 'static>;
 pub type BoxResult<T> = Result<T, BoxError>;
 
 /// The block number column name.
 pub const BLOCK_NUM: &str = "block_num";
+
+/// Special column name for block numbers. These are implicitly selected when doing streaming
+/// queries, and in some other cases.
+pub const SPECIAL_BLOCK_NUM: &str = "_block_num";
 
 pub type BlockNum = u64;
 pub type Bytes32 = [u8; 32];
@@ -84,33 +89,30 @@ pub(crate) type TimestampArrayType = arrow::array::TimestampNanosecondArray;
 pub struct RawTableRows {
     pub table: Table,
     pub rows: RecordBatch,
-    pub block: RawTableBlock,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RawTableBlock {
-    pub number: BlockNum,
-    pub network: String,
+    pub range: BlockRange,
 }
 
 impl RawTableRows {
-    pub fn new(
-        table: Table,
-        block: RawTableBlock,
-        columns: Vec<ArrayRef>,
-    ) -> Result<Self, BoxError> {
+    pub fn new(table: Table, range: BlockRange, columns: Vec<ArrayRef>) -> Result<Self, BoxError> {
         let schema = table.schema.clone();
         let rows = RecordBatch::try_new(schema, columns)?;
-        Self::check_invariants(&block, &rows)
+        Self::check_invariants(&range, &rows)
             .map_err(|err| format!("malformed table {}: {}", table.name, err))?;
-        Ok(RawTableRows { table, rows, block })
+        Ok(RawTableRows { table, rows, range })
     }
 
     pub fn is_empty(&self) -> bool {
         self.rows.num_rows() == 0
     }
 
-    fn check_invariants(block: &RawTableBlock, rows: &RecordBatch) -> Result<(), BoxError> {
+    pub fn block_num(&self) -> BlockNum {
+        *self.range.numbers.start()
+    }
+
+    fn check_invariants(range: &BlockRange, rows: &RecordBatch) -> Result<(), BoxError> {
+        if range.numbers.start() != range.numbers.end() {
+            return Err("block range must contain a single block number".into());
+        }
         if rows.num_rows() == 0 {
             return Ok(());
         }
@@ -125,10 +127,10 @@ impl RawTableRows {
         // Unwrap: `rows` is not empty.
         let start = arrow::compute::kernels::aggregate::min(block_nums).unwrap();
         let end = arrow::compute::kernels::aggregate::max(block_nums).unwrap();
-        if start != block.number {
+        if start != *range.numbers.start() {
             return Err(format!("contains unexpected block_num: {}", start).into());
         };
-        if end != block.number {
+        if end != *range.numbers.start() {
             return Err(format!("contains unexpected block_num: {}", end).into());
         };
 
@@ -141,7 +143,7 @@ pub struct RawDatasetRows(Vec<RawTableRows>);
 impl RawDatasetRows {
     pub fn new(rows: Vec<RawTableRows>) -> Self {
         assert!(!rows.is_empty());
-        assert!(rows.iter().skip(1).all(|r| &r.block == &rows[0].block));
+        assert!(rows.iter().skip(1).all(|r| &r.range == &rows[0].range));
         Self(rows)
     }
 
@@ -149,8 +151,8 @@ impl RawDatasetRows {
         self.0.iter().all(|t| t.is_empty())
     }
 
-    pub fn block(&self) -> &RawTableBlock {
-        &self.0[0].block
+    pub fn block_num(&self) -> BlockNum {
+        self.0[0].block_num()
     }
 }
 
@@ -168,8 +170,7 @@ pub trait BlockStreamer: Clone + 'static {
         self,
         start: BlockNum,
         end: BlockNum,
-        tx: mpsc::Sender<RawDatasetRows>,
-    ) -> impl Future<Output = Result<(), BoxError>> + Send;
+    ) -> impl Future<Output = impl Stream<Item = Result<RawDatasetRows, BoxError>> + Send> + Send;
 
     fn latest_block(
         &mut self,

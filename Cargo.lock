@@ -2715,6 +2715,7 @@ name = "dataset-store"
 version = "0.1.0"
 dependencies = [
  "alloy",
+ "async-stream",
  "async-udf",
  "common",
  "datafusion",
@@ -3027,6 +3028,7 @@ name = "evm-rpc-datasets"
 version = "0.1.0"
 dependencies = [
  "alloy",
+ "async-stream",
  "common",
  "fs-err",
  "futures",
@@ -3095,6 +3097,7 @@ dependencies = [
 name = "firehose-datasets"
 version = "0.1.0"
 dependencies = [
+ "async-stream",
  "common",
  "fs-err",
  "futures",
@@ -6451,6 +6454,7 @@ name = "substreams-datasets"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-stream",
  "chrono",
  "common",
  "datafusion",

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use common::{
     catalog::physical::PhysicalTable, config::Config, manifest::Manifest, BoxError, Dataset,
 };
-use dump::job::JobDesc;
+use dump::worker::JobDesc;
 use metadata_db::MetadataDb;
 use rand::seq::IndexedRandom as _;
 
@@ -45,6 +45,7 @@ impl Scheduler {
                 &table,
                 &self.config.data_store,
                 self.metadata_db.clone().into(),
+                false,
             )
             .await?;
             locations.push(physical_table.location_id());

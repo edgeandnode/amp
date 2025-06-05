@@ -6,7 +6,8 @@ use common::{
         array::*,
         datatypes::{DataType as ArrowDataType, Field, Schema},
     },
-    RawDatasetRows, RawTableBlock, RawTableRows, Table, BLOCK_NUM,
+    metadata::range::BlockRange,
+    RawDatasetRows, RawTableRows, Table, BLOCK_NUM,
 };
 use prost::Message as _;
 pub use prost_reflect::MessageDescriptor;
@@ -19,7 +20,7 @@ pub(crate) fn pb_to_rows(
     message_descriptor: &MessageDescriptor,
     value: &[u8],
     schemas: &[Table],
-    block_num: u64,
+    range: &BlockRange,
 ) -> Result<RawDatasetRows, anyhow::Error> {
     let dynamic_message = DynamicMessage::decode(message_descriptor.clone(), value)
         .context("failed to decode module output message")?;
@@ -38,18 +39,19 @@ pub(crate) fn pb_to_rows(
             }
 
             let table = table.unwrap();
+            let block_num = *range.numbers.start();
             let rows = message_to_rows(list, table.schema.clone(), block_num);
             if let Err(err) = rows {
                 return Some(Err(err.into()));
             }
 
-            let block = RawTableBlock {
-                number: block_num,
-                network: table.network.clone(),
-            };
             Some(
-                RawTableRows::new(table.clone(), block, rows.unwrap().columns().to_vec())
-                    .map_err(|e| anyhow!(e)),
+                RawTableRows::new(
+                    table.clone(),
+                    range.clone(),
+                    rows.unwrap().columns().to_vec(),
+                )
+                .map_err(|e| anyhow!(e)),
             )
         })
         .collect();

@@ -1,13 +1,15 @@
-use std::sync::Arc;
+use std::{fmt, sync::Arc};
 
 use async_udf::functions::AsyncScalarUDF;
 use datafusion::{
-    arrow::datatypes::{DataType, SchemaRef},
+    arrow::datatypes::{DataType, Field, Schema, SchemaRef},
+    logical_expr::ScalarUDF,
     sql::TableReference,
 };
+use itertools::Itertools;
 use js_runtime::isolate_pool::IsolatePool;
 
-use crate::{js_udf::JsUdf, BoxError, BLOCK_NUM};
+use crate::{js_udf::JsUdf, BoxError, BLOCK_NUM, SPECIAL_BLOCK_NUM};
 
 /// Identifies a dataset and its data schema.
 #[derive(Clone, Debug)]
@@ -73,7 +75,18 @@ impl Table {
         // - Make this less hardcoded to handle non-blockchain data.
         // - Have a consistency check that the data really is sorted.
         // - Do we want to address and leverage https://github.com/apache/arrow-datafusion/issues/4177?
-        vec![BLOCK_NUM, "timestamp"]
+        vec![SPECIAL_BLOCK_NUM, BLOCK_NUM, "timestamp"]
+    }
+
+    /// Prepend the `SPECIAL_BLOCK_NUM` column to the table schema. This is useful for SQL datasets.
+    pub fn with_special_block_num_column(mut self) -> Self {
+        let schema = self.schema;
+        let metadata = schema.metadata.clone();
+        let fields = std::iter::once(Field::new(SPECIAL_BLOCK_NUM, DataType::UInt64, false))
+            .chain(schema.fields().iter().map(|f| f.as_ref().clone()))
+            .collect_vec();
+        self.schema = Arc::new(Schema::new_with_metadata(fields, metadata));
+        self
     }
 }
 
@@ -83,6 +96,12 @@ pub struct ResolvedTable {
     table: Table,
     dataset: Arc<Dataset>,
     table_ref: TableReference,
+}
+
+impl fmt::Display for ResolvedTable {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.table_ref)
+    }
 }
 
 impl ResolvedTable {
@@ -158,4 +177,11 @@ fn validate_name(name: &str) -> Result<(), BoxError> {
     }
 
     Ok(())
+}
+
+#[derive(Clone, Debug)]
+pub struct LogicalCatalog {
+    pub tables: Vec<ResolvedTable>,
+    /// UDFs specific to the datasets corresponding to the resolved tables.
+    pub udfs: Vec<ScalarUDF>,
 }

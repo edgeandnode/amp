@@ -13,6 +13,7 @@ toml.workspace = true
 serde_with = "3.9.0"
 futures.workspace = true
 tracing.workspace = true
+async-stream.workspace = true
 
 [dev-dependencies]
 fs-err.workspace = true

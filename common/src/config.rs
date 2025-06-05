@@ -57,7 +57,7 @@ impl Config {
     pub async fn load(
         file: impl Into<PathBuf>,
         env_override: bool,
-        literal_override: Option<FigmentJson>,
+        config_override: Option<Figment>,
         addrs: Addrs,
     ) -> Result<Self, BoxError> {
         let config_path: PathBuf = fs::canonicalize(file.into())?;
@@ -68,8 +68,8 @@ impl Config {
             if env_override {
                 config_builder = config_builder.merge(Env::prefixed("NOZZLE_CONFIG_"));
             }
-            if let Some(literal_override) = literal_override {
-                config_builder = config_builder.merge(literal_override);
+            if let Some(config_override) = config_override {
+                config_builder = config_builder.merge(config_override);
             }
             config_builder.extract()?
         };

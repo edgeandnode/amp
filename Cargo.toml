@@ -33,6 +33,7 @@ alloy = { version = "1.0", features = [
     "rpc",
     "json-rpc",
 ] }
+async-stream = "0.3.6"
 async-trait = "0.1.80"
 atty = "0.2.14"
 bytes = "1"

@@ -1,5 +1,3 @@
-mod dump_cmd;
-
 use std::sync::Arc;
 
 use clap::Parser as _;
@@ -8,6 +6,7 @@ use common::{
     tracing_helpers, BoxError,
 };
 use dump::worker::Worker;
+use nozzle::dump_cmd;
 use tokio::{signal, sync::broadcast};
 use tracing::{error, info};
 
