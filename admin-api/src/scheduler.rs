@@ -3,7 +3,7 @@ use std::sync::Arc;
 use common::{
     catalog::physical::PhysicalTable, config::Config, manifest::Manifest, BoxError, Dataset,
 };
-use dump::job::JobDesc;
+use dump::worker::JobDesc;
 use metadata_db::MetadataDb;
 use rand::seq::IndexedRandom as _;
 

@@ -6,7 +6,6 @@ use common::parquet::{
 };
 
 mod core;
-pub mod job;
 mod metrics; // unused for now
 mod parquet_writer;
 pub mod worker;
