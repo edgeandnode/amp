@@ -18,7 +18,7 @@ const MAX_PARTITION_BLOCK_RANGE: u64 = 1_000_000;
 
 /// Only used for raw datasets.
 pub struct RawDatasetWriter {
-    writers: BTreeMap<String, TableWriter>,
+    writers: BTreeMap<String, RawTableWriter>,
 
     metadata_db: Arc<MetadataDb>,
 }
@@ -40,7 +40,7 @@ impl RawDatasetWriter {
             // Unwrap: `block_ranges_by_table` contains an entry for each table.
             let table_name = table.table_name();
             let block_ranges = block_ranges_by_table.get(table_name).unwrap().clone();
-            let writer = TableWriter::new(
+            let writer = RawTableWriter::new(
                 table.clone(),
                 opts.clone(),
                 partition_size,
@@ -119,7 +119,7 @@ pub async fn commit_metadata(
     Ok(())
 }
 
-struct TableWriter {
+struct RawTableWriter {
     table: PhysicalTable,
     opts: ParquetWriterProperties,
     partition_size: u64,
@@ -132,7 +132,7 @@ struct TableWriter {
     current_file: Option<ParquetFileWriter>,
 }
 
-impl TableWriter {
+impl RawTableWriter {
     pub fn new(
         table: PhysicalTable,
         opts: ParquetWriterProperties,
@@ -140,7 +140,7 @@ impl TableWriter {
         block_ranges: MultiRange,
         start: BlockNum,
         end: BlockNum,
-    ) -> Result<TableWriter, BoxError> {
+    ) -> Result<RawTableWriter, BoxError> {
         let ranges_to_write = {
             // Limit maximum range size to 1_000_000 blocks.
             let mut ranges = block_ranges
@@ -150,7 +150,7 @@ impl TableWriter {
             ranges
         };
 
-        let mut this = TableWriter {
+        let mut this = RawTableWriter {
             table,
             opts,
             ranges_to_write,
