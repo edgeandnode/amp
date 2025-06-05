@@ -83,7 +83,8 @@ pub async fn bless(
         restore_blessed_dataset(&dep, &test_env.metadata_db).await?;
     }
 
-    dump(config, dataset_name, start, end, 1, true).await?;
+    clear_dataset(&test_env.config, dataset_name).await?;
+    dump(config, dataset_name, start, end, 1).await?;
     Ok(())
 }
 
@@ -163,15 +164,7 @@ impl SnapshotContext {
         end: u64,
         n_jobs: u16,
     ) -> Result<SnapshotContext, BoxError> {
-        let catalog = dump(
-            test_env.config.clone(),
-            dataset_name,
-            start,
-            end,
-            n_jobs,
-            true,
-        )
-        .await?;
+        let catalog = dump(test_env.config.clone(), dataset_name, start, end, n_jobs).await?;
         let ctx = QueryContext::for_catalog(catalog, test_env.config.make_query_env()?)?;
 
         Ok(SnapshotContext { ctx })
@@ -258,24 +251,13 @@ async fn dump(
     start: u64,
     end: u64,
     n_jobs: u16,
-    clear: bool,
 ) -> Result<Catalog, BoxError> {
     let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
     let dataset_store = DatasetStore::new(config.clone(), metadata_db);
     let mut tables = Vec::new();
 
-    tables.push(
-        dump_test_dataset(
-            dataset_name,
-            &config,
-            &dataset_store,
-            start,
-            end,
-            n_jobs,
-            clear,
-        )
-        .await?,
-    );
+    tables
+        .push(dump_test_dataset(dataset_name, &config, &dataset_store, start, end, n_jobs).await?);
 
     let mut catalog = Catalog::empty();
     for table in tables.into_iter().flatten() {
@@ -324,7 +306,6 @@ async fn dump_test_dataset(
     start: u64,
     end: u64,
     n_jobs: u16,
-    clear: bool,
 ) -> Result<Vec<PhysicalTable>, BoxError> {
     let partition_size = 1024 * 1024; // 100 kB
     let input_batch_block_size = 100_000;
@@ -332,10 +313,6 @@ async fn dump_test_dataset(
 
     // Disable bloom filters, as they bloat the test files and are not tested themselves.
     let parquet_opts = parquet_opts(compression, false);
-
-    if clear {
-        clear_dataset(config, dataset_name).await?;
-    }
 
     let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
     let data_store = config.data_store.clone();
@@ -345,7 +322,7 @@ async fn dump_test_dataset(
         for table in Arc::new(dataset.clone()).resolved_tables() {
             let physical_table =
                 match PhysicalTable::get_active(&table, metadata_db.clone()).await? {
-                    Some(physical_table) if !clear => physical_table,
+                    Some(physical_table) => physical_table,
                     _ => {
                         PhysicalTable::next_revision(&table, &data_store, metadata_db.clone(), true)
                             .await?
@@ -498,7 +475,6 @@ pub async fn run_query_on_fresh_server(
             initial_dump.start,
             initial_dump.end,
             initial_dump.n_jobs,
-            true,
         )
         .await;
     }
@@ -525,7 +501,6 @@ pub async fn run_query_on_fresh_server(
                 dump_command.start,
                 dump_command.end,
                 dump_command.n_jobs,
-                false,
             )
             .await;
         }
