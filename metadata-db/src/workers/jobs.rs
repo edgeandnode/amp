@@ -36,7 +36,7 @@ where
 /// `updated_at` timestamp.
 pub async fn update_job_status<'c, E>(
     exe: E,
-    id: JobId,
+    id: &JobId,
     status: JobStatus,
 ) -> Result<(), sqlx::Error>
 where

@@ -15,7 +15,7 @@ async fn schedule_and_retrieve_job() {
     // Pre-register the worker
     let worker_id = "test-worker-id".parse().expect("Invalid worker ID");
     metadata_db
-        .hello_worker(&worker_id)
+        .register_worker(&worker_id)
         .await
         .expect("Failed to pre-register the worker");
 

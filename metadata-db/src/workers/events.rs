@@ -106,7 +106,7 @@ pub enum JobNotifRecvError {
 }
 
 /// The payload of a worker action notification
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct JobNotification {
     pub node_id: WorkerNodeId,
     pub job_id: JobId,
@@ -130,12 +130,6 @@ impl JobNotification {
             job_id,
             action: JobNotifAction::Stop,
         }
-    }
-}
-
-impl std::fmt::Debug for JobNotification {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&serde_json::to_string(self).expect("failed to serialize notification"))
     }
 }
 
