@@ -150,18 +150,6 @@ impl ResolvedTable {
     pub fn schema(&self) -> &SchemaRef {
         &self.table.schema
     }
-
-    pub fn with_schema(self, schema: Schema) -> Self {
-        Self {
-            table: Table {
-                name: self.table.name,
-                schema: schema.into(),
-                network: self.table.network,
-            },
-            dataset: self.dataset,
-            table_ref: self.table_ref,
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
