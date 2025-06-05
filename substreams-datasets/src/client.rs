@@ -1,12 +1,11 @@
-use std::{str::FromStr as _, time::Duration};
+use std::{str::FromStr, time::Duration};
 
-use anyhow::Context as _;
+use async_stream::stream;
 use common::{BlockNum, BlockStreamer, BoxError, RawDatasetRows, Store, Table};
 use firehose_datasets::{client::AuthInterceptor, Error};
 use futures::{Stream, StreamExt as _, TryStreamExt as _};
 use pbsubstreams::{response::Message, stream_client::StreamClient, Request as StreamRequest};
 use prost::Message as _;
-use tokio::sync::mpsc;
 use tonic::{
     codec::CompressionEncoding,
     service::interceptor::InterceptedService,
@@ -135,81 +134,79 @@ impl Client {
 }
 
 impl BlockStreamer for Client {
-    /// Once spawned, will continuously fetch blocks from the Firehose and send them through the channel.
+    /// Creates a stream that continuously fetches blocks from Substreams.
     ///
-    /// Terminates with `Ok` when the Firehose stream reaches `end_block`, or the channel receiver goes
-    /// away.
-    ///
-    /// Terminates with `Err` when there is an error estabilishing the stream.
-    ///
-    /// Errors from the Firehose stream are logged and retried.
+    /// Errors from the Substreams stream are logged and retried automatically.
     async fn block_stream(
         mut self,
-        start: BlockNum,
-        end: BlockNum,
-        tx: mpsc::Sender<RawDatasetRows>,
-    ) -> Result<(), BoxError> {
-        // Explicitly track the next block in case we need to restart the Firehose stream.
-        let mut next_block = start;
+        start_block: BlockNum,
+        end_block: BlockNum,
+    ) -> impl Stream<Item = Result<RawDatasetRows, BoxError>> + Send {
         const RETRY_BACKOFF: Duration = Duration::from_secs(5);
 
-        // A retry loop for consuming the Firehose.
-        'retry: loop {
-            let mut stream = match self.blocks(next_block as i64, end).await {
-                Ok(stream) => Box::pin(stream),
+        stream! {
+            // Explicitly track the next block in case we need to restart the stream.
+            let mut next_block = start_block;
 
-                // If there is an error at the initial connection, we don't retry here as that's
-                // unexpected.
-                Err(err) => break Err(err.into()),
-            };
-            while let Some(block) = stream.next().await {
-                match block {
-                    Ok(block) => {
-                        if block.clock.is_none()
-                            || block.output.is_none()
-                            || block.output.as_ref().unwrap().map_output.is_none()
-                        {
-                            continue;
-                        }
-                        let block_num = block.clock.as_ref().unwrap().number;
-                        let table_rows = transform(block, &self.tables).context(format!(
-                            "error converting Blockscope to rows for block {block_num}"
-                        ))?;
-                        if table_rows.is_empty() {
-                            continue;
-                        }
-
-                        // Send the block and check if the receiver has gone away.
-                        if tx.send(table_rows).await.is_err() {
-                            break;
-                        }
-
-                        next_block = block_num + 1;
-                    }
+            'retry: loop {
+                let mut stream = match self.blocks(next_block as i64, end_block).await {
+                    Ok(stream) => std::pin::pin!(stream),
+                    // If there is an error at the initial connection, we don't retry here as that's
+                    // unexpected.
                     Err(err) => {
-                        // Log and retry.
-                        tracing::debug!("error reading substreams stream, retrying in {} seconds, error message: {}", RETRY_BACKOFF.as_secs(), err);
-                        tokio::time::sleep(RETRY_BACKOFF).await;
-                        continue 'retry;
+                        yield Err(err.into());
+                        return;
+                    }
+                };
+
+                while let Some(block_result) = stream.next().await {
+                    match block_result {
+                        Ok(block) => {
+                            let block_num = match (&block.clock, &block.output) {
+                                (Some(clock), Some(output)) if output.map_output.is_some() => {
+                                    clock.number
+                                }
+                                _ => continue,
+                            };
+
+                            match transform(block, &self.tables) {
+                                Ok(table_rows) if table_rows.is_empty() => continue,
+                                Ok(table_rows) => {
+                                    yield Ok(table_rows);
+                                    next_block = block_num + 1;
+                                }
+                                Err(err) => {
+                                    yield Err(format!(
+                                        "error converting Blockscope to rows on block {}: {}",
+                                        block_num, err
+                                    ).into());
+                                    return;
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            // Log the error and retry after `RETRY_BACKOFF` seconds
+                            tracing::debug!(error=%err, "error reading substreams stream, retrying in {} seconds", RETRY_BACKOFF.as_secs());
+                            tokio::time::sleep(RETRY_BACKOFF).await;
+                            continue 'retry;
+                        }
                     }
                 }
-            }
 
-            // The stream has ended, or the receiver has gone away, either way we hit a natural
-            // termination condition.
-            break Ok(());
+                // The stream has ended, or the receiver has gone away,
+                // either way we hit a natural termination condition
+                break;
+            }
         }
     }
 
     async fn latest_block(&mut self, finalized: bool) -> Result<BlockNum, BoxError> {
         // See also: only-final-blocks
         _ = finalized;
-        Ok(self
-            .blocks(-1, 0)
-            .await?
-            .boxed()
-            .next()
-            .await
+        let stream = self.blocks(-1, 0).await?;
+        let mut stream = std::pin::pin!(stream);
+        let block = stream.next().await;
+        Ok(block
             .transpose()?
             .map(|b| b.final_block_height)
             .unwrap_or(0))

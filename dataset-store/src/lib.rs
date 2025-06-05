@@ -7,6 +7,7 @@ use std::{
     sync::{Arc, RwLock},
 };
 
+use async_stream::stream;
 use async_udf::functions::AsyncScalarUDF;
 use common::{
     catalog::physical::{Catalog, PhysicalTable},
@@ -24,13 +25,12 @@ use datafusion::{
     logical_expr::ScalarUDF,
     sql::{parser, resolve::resolve_table_references, TableReference},
 };
-use futures::{future::BoxFuture, FutureExt as _, TryFutureExt as _};
+use futures::{future::BoxFuture, FutureExt as _, Stream, TryFutureExt as _};
 use js_runtime::isolate_pool::IsolatePool;
 use metadata_db::MetadataDb;
 use serde::Deserialize;
 use sql_datasets::SqlDataset;
 use thiserror::Error;
-use tokio::sync::mpsc;
 use tracing::{error, instrument};
 use url::Url;
 
@@ -363,13 +363,29 @@ impl DatasetStore {
                 self,
                 start_block: BlockNum,
                 end_block: BlockNum,
-                tx: mpsc::Sender<RawDatasetRows>,
-            ) -> Result<(), BoxError> {
-                match self {
-                    Self::EvmRpc(client) => client.block_stream(start_block, end_block, tx).await,
-                    Self::Firehose(client) => client.block_stream(start_block, end_block, tx).await,
-                    Self::Substreams(client) => {
-                        client.block_stream(start_block, end_block, tx).await
+            ) -> impl Stream<Item = Result<RawDatasetRows, BoxError>> + Send {
+                // Each client returns a different concrete stream type, so we
+                // use `stream!` to unify them into a wrapper stream
+                stream! {
+                    match self {
+                        Self::EvmRpc(client) => {
+                            let stream = client.block_stream(start_block, end_block).await;
+                            for await item in stream {
+                                yield item;
+                            }
+                        }
+                        Self::Firehose(client) => {
+                            let stream = client.block_stream(start_block, end_block).await;
+                            for await item in stream {
+                                yield item;
+                            }
+                        }
+                        Self::Substreams(client) => {
+                            let stream = client.block_stream(start_block, end_block).await;
+                            for await item in stream {
+                                yield item;
+                            }
+                        }
                     }
                 }
             }

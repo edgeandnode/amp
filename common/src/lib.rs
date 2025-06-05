@@ -27,11 +27,11 @@ use datafusion::arrow::{
     error::ArrowError,
 };
 pub use datafusion::{arrow, parquet};
+use futures::Stream;
 use metadata::range::BlockRange;
 pub use query_context::QueryContext;
 use serde::{Deserialize, Serialize};
 pub use store::Store;
-use tokio::sync::mpsc;
 
 pub type BoxError = Box<dyn std::error::Error + Sync + Send + 'static>;
 pub type BoxResult<T> = Result<T, BoxError>;
@@ -170,8 +170,7 @@ pub trait BlockStreamer: Clone + 'static {
         self,
         start: BlockNum,
         end: BlockNum,
-        tx: mpsc::Sender<RawDatasetRows>,
-    ) -> impl Future<Output = Result<(), BoxError>> + Send;
+    ) -> impl Future<Output = impl Stream<Item = Result<RawDatasetRows, BoxError>> + Send> + Send;
 
     fn latest_block(
         &mut self,
