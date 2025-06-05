@@ -83,7 +83,7 @@ pub async fn bless(
         restore_blessed_dataset(&dep, &test_env.metadata_db).await?;
     }
 
-    dump(config, dataset_name, vec![], start, end, 1, true).await?;
+    dump(config, dataset_name, start, end, 1, true).await?;
     Ok(())
 }
 
@@ -159,7 +159,6 @@ impl SnapshotContext {
     pub async fn temp_dump(
         test_env: &TestEnv,
         dataset_name: &str,
-        dependencies: Vec<&str>,
         start: u64,
         end: u64,
         n_jobs: u16,
@@ -167,7 +166,6 @@ impl SnapshotContext {
         let catalog = dump(
             test_env.config.clone(),
             dataset_name,
-            dependencies,
             start,
             end,
             n_jobs,
@@ -227,8 +225,6 @@ impl SnapshotContext {
 pub struct DumpTestDatasetCommand {
     #[serde(rename = "dataset")]
     pub(crate) dataset_name: String,
-    #[serde(default)]
-    pub(crate) dependencies: Vec<String>,
     pub(crate) start: u64,
     pub(crate) end: u64,
     #[serde(rename = "nJobs")]
@@ -259,7 +255,6 @@ where
 async fn dump(
     config: Arc<Config>,
     dataset_name: &str,
-    dependencies: Vec<&str>,
     start: u64,
     end: u64,
     n_jobs: u16,
@@ -268,21 +263,6 @@ async fn dump(
     let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
     let dataset_store = DatasetStore::new(config.clone(), metadata_db);
     let mut tables = Vec::new();
-    // First dump dependencies, then main dataset
-    for dataset_name in dependencies {
-        tables.push(
-            dump_test_dataset(
-                dataset_name,
-                &config,
-                &dataset_store,
-                start,
-                end,
-                n_jobs,
-                clear,
-            )
-            .await?,
-        );
-    }
 
     tables.push(
         dump_test_dataset(
@@ -512,15 +492,9 @@ pub async fn run_query_on_fresh_server(
     });
 
     for initial_dump in initial_dumps {
-        let dependencies: Vec<&str> = initial_dump
-            .dependencies
-            .iter()
-            .map(|s| s.as_str())
-            .collect();
         let _ = dump(
             test_env.config.clone(),
             &initial_dump.dataset_name,
-            dependencies,
             initial_dump.start,
             initial_dump.end,
             initial_dump.n_jobs,
@@ -545,15 +519,9 @@ pub async fn run_query_on_fresh_server(
     let config = test_env.config.clone();
     tokio::spawn(async move {
         for dump_command in dumps_on_running_server {
-            let dependencies: Vec<&str> = dump_command
-                .dependencies
-                .iter()
-                .map(|s| s.as_str())
-                .collect();
             let _ = dump(
                 config.clone(),
                 &dump_command.dataset_name,
-                dependencies,
                 dump_command.start,
                 dump_command.end,
                 dump_command.n_jobs,
@@ -767,7 +735,7 @@ impl DatasetPackage {
     }
 }
 
-async fn restore_blessed_dataset(
+pub async fn restore_blessed_dataset(
     dataset: &str,
     metadata_db: &Arc<MetadataDb>,
 ) -> Result<Vec<PhysicalTable>, BoxError> {
