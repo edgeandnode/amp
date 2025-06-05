@@ -260,8 +260,8 @@ async fn dump_sql_query(
 ) -> Result<(), BoxError> {
     use dataset_store::sql_datasets::execute_query_for_range;
 
-    let store = dataset_store.clone();
-    let mut stream = execute_query_for_range(query.clone(), store, env.clone(), start, end).await?;
+    let mut stream =
+        execute_query_for_range(query.clone(), dataset_store, env.clone(), start, end).await?;
     let mut writer = ParquetFileWriter::new(physical_table.clone(), parquet_opts.clone(), start)?;
 
     while let Some(batch) = stream.try_next().await? {

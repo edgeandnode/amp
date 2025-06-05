@@ -225,14 +225,13 @@ fn constrain_by_block_num(
 #[instrument(skip_all, err)]
 pub async fn execute_query_for_range(
     query: parser::Statement,
-    dataset_store: Arc<DatasetStore>,
+    dataset_store: &Arc<DatasetStore>,
     env: QueryEnv,
     start: BlockNum,
     end: BlockNum,
 ) -> Result<SendableRecordBatchStream, BoxError> {
-    let ctx = dataset_store.clone().ctx_for_sql(&query, env).await?;
+    let ctx = dataset_store.ctx_for_sql(&query, env).await?;
     let plan = ctx.plan_sql(query).await?;
-
     execute_plan_for_range(plan, &ctx, start, end, true).await
 }
 

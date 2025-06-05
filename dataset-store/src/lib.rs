@@ -278,7 +278,7 @@ impl DatasetStore {
     }
 
     async fn load_dataset_inner(
-        self: Arc<Self>,
+        self: &Arc<Self>,
         dataset_name: &str,
     ) -> Result<DatasetWithProvider, Error> {
         if let Some(dataset) = self.dataset_cache.read().unwrap().get(dataset_name) {
@@ -507,7 +507,7 @@ impl DatasetStore {
     /// 3. Look up the dataset names in the configured dataset store.
     /// 4. Collect the datasets into a catalog.
     pub async fn ctx_for_sql(
-        self: Arc<Self>,
+        self: &Arc<Self>,
         query: &parser::Statement,
         env: QueryEnv,
     ) -> Result<QueryContext, DatasetError> {
@@ -517,7 +517,7 @@ impl DatasetStore {
         let catalog = self
             .load_physical_catalog(tables.iter(), function_names, &env)
             .await?;
-        QueryContext::for_catalog(catalog, env.clone()).map_err(DatasetError::unknown)
+        QueryContext::for_catalog(catalog, env).map_err(DatasetError::unknown)
     }
 
     /// Looks up the datasets for the given table references and loads them into a catalog.

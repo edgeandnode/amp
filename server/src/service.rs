@@ -170,7 +170,6 @@ impl Service {
         let query = parse_sql(sql).map_err(|err| Error::from(err))?;
         let ctx = self
             .dataset_store
-            .clone()
             .ctx_for_sql(&query, self.env.clone())
             .await
             .map_err(|err| Error::DatasetStoreError(err))?;
