@@ -1822,6 +1822,7 @@ dependencies = [
  "bytes",
  "cargo_metadata",
  "datafusion",
+ "datafusion-datasource",
  "datafusion-proto",
  "figment",
  "fs-err",
