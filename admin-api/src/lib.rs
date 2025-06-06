@@ -8,7 +8,6 @@ use axum::{
 };
 use common::{config::Config, BoxResult};
 use dataset_store::DatasetStore;
-use tokio::sync::broadcast;
 
 mod ctx;
 mod handlers;
@@ -21,7 +20,6 @@ use scheduler::Scheduler;
 pub async fn serve(
     at: SocketAddr,
     config: Arc<Config>,
-    shutdown: broadcast::Receiver<()>,
 ) -> BoxResult<(SocketAddr, impl Future<Output = BoxResult<()>>)> {
     let metadata_db = config.metadata_db().await?;
 
@@ -43,5 +41,5 @@ pub async fn serve(
             scheduler,
         });
 
-    http_common::serve_at(at, app, shutdown).await
+    http_common::serve_at(at, app).await
 }

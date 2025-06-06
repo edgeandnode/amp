@@ -7,8 +7,7 @@ use common::{
 };
 use dump::worker::Worker;
 use nozzle::dump_cmd;
-use tokio::{signal, sync::broadcast};
-use tracing::{error, info};
+use tracing::info;
 
 #[global_allocator]
 static ALLOC: snmalloc_rs::SnMalloc = snmalloc_rs::SnMalloc;
@@ -143,8 +142,7 @@ async fn main_inner() -> Result<(), BoxError> {
             .await
         }
         Command::Server { no_admin, dev } => {
-            let (_, server) =
-                nozzle::server::run(config, metadata_db, no_admin, dev, ctrl_c_shutdown()).await?;
+            let (_, server) = nozzle::server::run(config, metadata_db, no_admin, dev).await?;
             server.await
         }
         Command::Worker { node_id } => {
@@ -152,38 +150,4 @@ async fn main_inner() -> Result<(), BoxError> {
             worker.run().await.map_err(Into::into)
         }
     }
-}
-
-/// Graceful shutdown as recommended by axum:
-/// https://github.com/tokio-rs/axum/blob/9c9cbb5c5f72452825388d63db4f1e36c0d9b3aa/examples/graceful-shutdown/src/main.rs
-fn ctrl_c_shutdown() -> broadcast::Receiver<()> {
-    let ctrl_c = async {
-        signal::ctrl_c()
-            .await
-            .expect("failed to install Ctrl+C handler");
-    };
-
-    #[cfg(unix)]
-    let terminate = async {
-        signal::unix::signal(signal::unix::SignalKind::terminate())
-            .expect("failed to install signal handler")
-            .recv()
-            .await;
-    };
-
-    #[cfg(not(unix))]
-    let terminate = std::future::pending::<()>();
-
-    let (tx, rx) = broadcast::channel(1);
-    tokio::spawn(async move {
-        tokio::select! {
-            _ = ctrl_c => {},
-            _ = terminate => {},
-        }
-        info!("gracefully shutting down");
-        if let Err(e) = tx.send(()) {
-            error!("failed to send shutdown signal: {e}");
-        }
-    });
-    rx
 }

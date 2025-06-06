@@ -7,7 +7,6 @@ use common::{config::Config, BoxResult};
 use dataset_store::DatasetStore;
 use handlers::output_schema_handler;
 use metadata_db::MetadataDb;
-use tokio::sync::broadcast;
 
 pub struct ServiceState {
     dataset_store: Arc<DatasetStore>,
@@ -17,7 +16,6 @@ pub async fn serve(
     at: SocketAddr,
     config: Arc<Config>,
     metadata_db: Arc<MetadataDb>,
-    shutdown: broadcast::Receiver<()>,
 ) -> BoxResult<(SocketAddr, impl Future<Output = BoxResult<()>>)> {
     let state = Arc::new(ServiceState {
         dataset_store: DatasetStore::new(config, metadata_db),
@@ -28,5 +26,5 @@ pub async fn serve(
         .route("/output_schema", post(output_schema_handler))
         .with_state(state);
 
-    http_common::serve_at(at, app, shutdown).await
+    http_common::serve_at(at, app).await
 }
