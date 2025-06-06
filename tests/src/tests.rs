@@ -9,7 +9,7 @@ use tokio::sync::broadcast;
 
 use crate::test_support::{
     check_blocks, check_provider_file, load_sql_tests, record_batch_to_json,
-    run_query_on_fresh_server, DatasetPackage, SnapshotContext, TestEnv,
+    restore_blessed_dataset, run_query_on_fresh_server, DatasetPackage, SnapshotContext, TestEnv,
 };
 
 #[tokio::test]
@@ -31,10 +31,9 @@ async fn evm_rpc_single_dump() {
         .expect("blessed data differed from provider");
 
     // Now dump the dataset to a temporary directory and check it again against the blessed files.
-    let temp_dump =
-        SnapshotContext::temp_dump(&test_env, &dataset_name, vec![], 15_000_000, 15_000_000, 1)
-            .await
-            .expect("temp dump failed");
+    let temp_dump = SnapshotContext::temp_dump(&test_env, &dataset_name, 15_000_000, 15_000_000, 1)
+        .await
+        .expect("temp dump failed");
     temp_dump.assert_eq(&blessed).await.unwrap();
 }
 
@@ -55,10 +54,9 @@ async fn eth_firehose_single_dump() {
         .await
         .expect("blessed data differed from provider");
     // Now dump the dataset to a temporary directory and check it again against the blessed files.
-    let temp_dump =
-        SnapshotContext::temp_dump(&test_env, &dataset_name, vec![], 15_000_000, 15_000_000, 1)
-            .await
-            .expect("temp dump failed");
+    let temp_dump = SnapshotContext::temp_dump(&test_env, &dataset_name, 15_000_000, 15_000_000, 1)
+        .await
+        .expect("temp dump failed");
     temp_dump.assert_eq(&blessed).await.unwrap();
 }
 
@@ -72,18 +70,16 @@ async fn sql_over_eth_firehose_dump() {
         .await
         .unwrap();
 
+    // Restore dependency
+    restore_blessed_dataset("eth_firehose", &test_env.metadata_db)
+        .await
+        .unwrap();
+
     // Now dump the dataset to a temporary directory and check blessed files against it.
-    let temp_dump = SnapshotContext::temp_dump(
-        &test_env,
-        &dataset_name,
-        vec!["eth_firehose"],
-        15_000_000,
-        15_000_000,
-        2,
-    )
-    .await
-    .expect("temp dump failed");
-    blessed.assert_eq(&temp_dump).await.unwrap();
+    let temp_dump = SnapshotContext::temp_dump(&test_env, &dataset_name, 15_000_000, 15_000_000, 2)
+        .await
+        .expect("temp dump failed");
+    temp_dump.assert_eq(&blessed).await.unwrap();
 }
 
 #[tokio::test]
