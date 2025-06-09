@@ -28,6 +28,7 @@ use datafusion::{
 use futures::{future::BoxFuture, FutureExt as _, Stream, TryFutureExt as _};
 use js_runtime::isolate_pool::IsolatePool;
 use metadata_db::MetadataDb;
+use object_store::ObjectMeta;
 use serde::Deserialize;
 use sql_datasets::SqlDataset;
 use thiserror::Error;
@@ -200,6 +201,8 @@ pub struct DatasetStore {
     eth_call_cache: Arc<RwLock<HashMap<String, ScalarUDF>>>,
     // This cache maps dataset name to the dataset definition.
     dataset_cache: Arc<RwLock<HashMap<String, DatasetWithProvider>>>,
+    // Cache of provider definitions.
+    providers_cache: Arc<RwLock<Option<Vec<ObjectMeta>>>>,
 }
 
 impl DatasetStore {
@@ -209,6 +212,7 @@ impl DatasetStore {
             metadata_db,
             eth_call_cache: Default::default(),
             dataset_cache: Default::default(),
+            providers_cache: Default::default(),
         })
     }
 
@@ -386,7 +390,7 @@ impl DatasetStore {
         dataset_kind: DatasetKind,
         dataset_network: String,
     ) -> Result<toml::Value, Error> {
-        for obj in self.providers_store().list_all_shallow().await? {
+        for obj in self.all_providers().await? {
             let location = obj.location.to_string();
             let (kind, network, provider) = self.kind_network_provider(&location).await?;
             if kind != dataset_kind || network != dataset_network {
@@ -398,6 +402,20 @@ impl DatasetStore {
             dataset_kind,
             network: dataset_network,
         })
+    }
+
+    async fn all_providers(&self) -> Result<Vec<ObjectMeta>, Error> {
+        if let Some(providers) = self.providers_cache.read().unwrap().as_ref() {
+            // Cache is already populated.
+            return Ok(providers.clone());
+        }
+        let providers = self
+            .providers_store()
+            .list_all_shallow()
+            .await
+            .map_err(Error::FetchError)?;
+        *self.providers_cache.write().unwrap() = Some(providers.clone());
+        Ok(providers)
     }
 
     async fn kind_and_dataset(&self, dataset_name: &str) -> Result<(DatasetKind, String), Error> {
