@@ -1,15 +1,16 @@
-use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
-use arrow_flight::decode::FlightRecordBatchStream;
-use arrow_flight::flight_service_client::FlightServiceClient;
-use arrow_flight::sql::client::FlightSqlServiceClient;
-use common::arrow::array::RecordBatch;
-use common::arrow::compute::concat_batches;
-use common::arrow::datatypes::SchemaRef;
-use common::arrow::ipc as arrow_ipc;
-use common::arrow::json::writer::ArrayWriter;
-use common::BoxError;
+use arrow_flight::{
+    decode::FlightRecordBatchStream, flight_service_client::FlightServiceClient,
+    sql::client::FlightSqlServiceClient,
+};
+use common::{
+    arrow::{
+        array::RecordBatch, compute::concat_batches, datatypes::SchemaRef, ipc as arrow_ipc,
+        json::writer::ArrayWriter,
+    },
+    BoxError,
+};
 use futures::stream::StreamExt;
 use tonic::transport::Channel;
 
