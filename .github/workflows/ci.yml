@@ -92,8 +92,7 @@ jobs:
 
       - name: Copy provider files
         run: |
-          cp tests/config/providers/COPY_ME_firehose_eth_mainnet.toml tests/config/providers/firehose_eth_mainnet.toml
-          cp tests/config/providers/COPY_ME_rpc_eth_mainnet.toml tests/config/providers/rpc_eth_mainnet.toml
+          cp -r tests/config/COPY_ME_providers tests/config/providers
           sed -i -e "s@\$FIREHOSE_ETH_MAINNET_URL@$FIREHOSE_ETH_MAINNET_URL@g" -e "s@\$FIREHOSE_ETH_MAINNET_TOKEN@$FIREHOSE_ETH_MAINNET_TOKEN@g" tests/config/providers/firehose_eth_mainnet.toml
           sed -i -e "s@\$RPC_ETH_MAINNET_URL@$RPC_ETH_MAINNET_URL@g" tests/config/providers/rpc_eth_mainnet.toml
         env:
