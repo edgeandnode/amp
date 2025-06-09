@@ -16,7 +16,6 @@ The following types of substreams modules can be used:
 ```toml
 kind = "substreams"
 name = "weth"
-provider = "substreams_provider.toml"
 module = "db_out"
 manifest = "=https://spkg.io/pinax-network/weth-v0.1.0.spkg"
 ```

@@ -1,4 +1,3 @@
 kind = "evm-rpc"
 name = "eth_rpc"
 network = "mainnet"
-provider = "rpc_eth_mainnet.toml"

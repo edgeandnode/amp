@@ -2,6 +2,7 @@ import { defineDataset } from "nozzl"
 
 export default defineDataset((ctx) => ({
   name: "basic_function",
+  network: "mainnet",
   version: "0.1.0",
   dependencies: {
     mainnet: {

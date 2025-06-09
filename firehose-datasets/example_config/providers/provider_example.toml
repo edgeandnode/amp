@@ -1,3 +1,5 @@
+kind = "firehose"
+
 # The firehose endpoint
 url = "https://<ENDPOINT>"
 

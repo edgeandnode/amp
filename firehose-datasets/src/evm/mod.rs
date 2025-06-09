@@ -5,7 +5,10 @@ pub mod tables;
 
 use common::{Dataset, DatasetWithProvider};
 
-pub fn dataset(dataset_cfg: toml::Value) -> Result<DatasetWithProvider, Error> {
+pub fn dataset(
+    dataset_cfg: toml::Value,
+    provider: toml::Value,
+) -> Result<DatasetWithProvider, Error> {
     let dataset_def: DatasetDef = dataset_cfg.try_into()?;
     Ok(DatasetWithProvider {
         dataset: Dataset {
@@ -14,7 +17,7 @@ pub fn dataset(dataset_cfg: toml::Value) -> Result<DatasetWithProvider, Error> {
             tables: tables::all(&dataset_def.network),
             functions: vec![],
         },
-        provider: Some(dataset_def.provider),
+        provider: Some(provider),
     })
 }
 

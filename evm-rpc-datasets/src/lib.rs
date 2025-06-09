@@ -3,7 +3,7 @@ mod tables;
 
 use alloy::transports::http::reqwest::Url;
 pub use client::JsonRpcClient;
-use common::{store::StoreError, BoxError, Dataset, DatasetWithProvider, Store};
+use common::{store::StoreError, BoxError, Dataset, DatasetWithProvider};
 use serde::Deserialize;
 use serde_with::serde_as;
 
@@ -23,9 +23,7 @@ pub enum Error {
 pub(crate) struct DatasetDef {
     pub kind: String,
     pub name: String,
-    pub provider: String,
     pub network: String,
-    pub concurrent_request_limit: Option<u16>,
 }
 
 #[serde_as]
@@ -33,7 +31,7 @@ pub(crate) struct DatasetDef {
 pub(crate) struct EvmRpcProvider {
     #[serde_as(as = "serde_with::DisplayFromStr")]
     pub url: Url,
-
+    pub concurrent_request_limit: Option<u16>,
     /// Maximum number of json-rpc requests to batch together.
     #[serde(default = "default_rpc_batch_size")]
     pub rpc_batch_size: usize,
@@ -43,7 +41,10 @@ fn default_rpc_batch_size() -> usize {
     100
 }
 
-pub fn dataset(dataset_cfg: toml::Value) -> Result<DatasetWithProvider, Error> {
+pub fn dataset(
+    dataset_cfg: toml::Value,
+    provider: toml::Value,
+) -> Result<DatasetWithProvider, Error> {
     let def: DatasetDef = dataset_cfg.try_into()?;
     Ok(DatasetWithProvider {
         dataset: Dataset {
@@ -52,21 +53,16 @@ pub fn dataset(dataset_cfg: toml::Value) -> Result<DatasetWithProvider, Error> {
             tables: tables::all(&def.network),
             functions: vec![],
         },
-        provider: Some(def.provider),
+        provider: Some(provider),
     })
 }
 
-pub async fn client(
-    dataset_cfg: toml::Value,
-    provider_store: &Store,
-) -> Result<JsonRpcClient, Error> {
-    let def: DatasetDef = dataset_cfg.try_into()?;
-    let provider_string = provider_store.get_string(def.provider.as_str()).await?;
-    let provider: EvmRpcProvider = toml::from_str(&provider_string)?;
-    let request_limit = u16::max(1, def.concurrent_request_limit.unwrap_or(1024));
+pub async fn client(provider: toml::Value, network: String) -> Result<JsonRpcClient, Error> {
+    let provider: EvmRpcProvider = provider.try_into()?;
+    let request_limit = u16::max(1, provider.concurrent_request_limit.unwrap_or(1024));
     let client = JsonRpcClient::new(
         provider.url,
-        def.network,
+        network,
         request_limit,
         provider.rpc_batch_size,
     )
