@@ -4,12 +4,8 @@ use std::{
     process::{ExitStatus, Stdio},
     str::FromStr as _,
     sync::Arc,
-    time::Duration,
 };
 
-use arrow_flight::{
-    flight_service_client::FlightServiceClient, sql::client::FlightSqlServiceClient,
-};
 use common::{
     arrow::{
         self,
@@ -38,9 +34,7 @@ use nozzle::{
 };
 use object_store::path::Path;
 use pretty_assertions::assert_str_eq;
-use serde::{Deserialize, Deserializer};
-use tokio::time;
-use tracing::{debug, info, instrument, warn};
+use tracing::{debug, info, instrument};
 
 /// Assume the `cargo test` command is run either from the workspace root or from the crate root.
 const TEST_CONFIG_BASE_DIRS: [&str; 2] = ["tests/config", "config"];
@@ -93,6 +87,7 @@ pub struct TestEnv {
     pub config: Arc<Config>,
     pub metadata_db: Arc<MetadataDb>,
     dataset_store: Arc<DatasetStore>,
+    pub server_addrs: BoundAddrs,
 
     // Drop guard
     _temp_db: TempMetadataDb,
@@ -134,10 +129,20 @@ impl TestEnv {
         let config = load_test_config(Some(figment)).await?;
         let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
         let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
+
+        let (bound, server) =
+            nozzle::server::run(config.clone(), metadata_db.clone(), false, false).await?;
+        tokio::spawn(server);
+
+        // TODO: Turn this into an explicit test step.
+        restore_blessed_dataset("eth_firehose", &metadata_db).await?;
+        restore_blessed_dataset("eth_rpc", &metadata_db).await?;
+
         Ok(Self {
             config: config.clone(),
             metadata_db,
             dataset_store,
+            server_addrs: bound,
             _temp_db: db,
             _temp_dir: temp_dir,
         })
@@ -221,38 +226,9 @@ impl SnapshotContext {
     }
 }
 
-#[derive(Debug, Clone, serde::Deserialize)]
-pub struct DumpTestDatasetCommand {
-    #[serde(rename = "dataset")]
-    pub(crate) dataset_name: String,
-    pub(crate) start: u64,
-    pub(crate) end: u64,
-    #[serde(rename = "nJobs")]
-    pub(crate) n_jobs: u16,
-}
-
-#[derive(Debug, Clone, serde::Deserialize)]
-pub struct StreamingExecutionOptions {
-    #[serde(rename = "maxDuration", deserialize_with = "deserialize_duration")]
-    pub(crate) max_duration: Duration,
-    #[serde(rename = "atLeastRows")]
-    pub(crate) at_least_rows: usize,
-}
-
-fn deserialize_duration<'de, D>(deserializer: D) -> Result<Duration, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let s = String::deserialize(deserializer)?;
-
-    // Parse strings like "10s" into Duration
-    humantime::parse_duration(&s)
-        .map_err(|e| serde::de::Error::custom(format!("invalid duration: {}", e)))
-}
-
 #[instrument(skip_all)]
 /// Clears the dataset directory if specified, before dumping.
-async fn dump_dataset(
+pub(crate) async fn dump_dataset(
     config: Arc<Config>,
     dataset_name: &str,
     start: u64,
@@ -416,129 +392,6 @@ fn dynamic_addrs() -> Addrs {
     }
 }
 
-/// Start a nozzle server, execute the given query, convert the result to JSONL, shut down the
-/// server and return the JSONL string in binary format.
-pub async fn run_query_on_fresh_server(
-    test_env: &TestEnv,
-    test_name: &str,
-    query: &str,
-    initial_dumps: Vec<DumpTestDatasetCommand>,
-    dumps_on_running_server: Vec<DumpTestDatasetCommand>,
-    streaming_options: Option<&StreamingExecutionOptions>,
-) -> Result<serde_json::Value, BoxError> {
-    check_provider_file("rpc_eth_mainnet.toml").await;
-    check_provider_file("firehose_eth_mainnet.toml").await;
-
-    let metadata_db = test_env.metadata_db.clone();
-
-    restore_blessed_dataset("eth_firehose", &metadata_db).await?;
-    restore_blessed_dataset("eth_rpc", &metadata_db).await?;
-
-    let (bound, server) =
-        nozzle::server::run(test_env.config.clone(), metadata_db.clone(), false, false).await?;
-    tokio::spawn(server);
-
-    for initial_dump in initial_dumps {
-        dump_dataset(
-            test_env.config.clone(),
-            &initial_dump.dataset_name,
-            initial_dump.start,
-            initial_dump.end,
-            initial_dump.n_jobs,
-        )
-        .await?;
-    }
-
-    let client = FlightServiceClient::connect(format!("grpc://{}", bound.flight_addr)).await?;
-    let mut client = FlightSqlServiceClient::new_from_inner(client);
-
-    // Execute the SQL query and collect the results.
-    let mut info = client.execute(query.to_string(), None).await?;
-    let mut batches = client
-        .do_get(info.endpoint[0].ticket.take().unwrap())
-        .await?;
-    let mut buf: Vec<u8> = Default::default();
-    let mut writer = arrow::json::writer::ArrayWriter::new(&mut buf);
-    let mut rows_returned: usize = 0;
-
-    // Dumps on running server
-    let config = test_env.config.clone();
-    tokio::spawn(async move {
-        for dump_command in dumps_on_running_server {
-            dump_dataset(
-                config.clone(),
-                &dump_command.dataset_name,
-                dump_command.start,
-                dump_command.end,
-                dump_command.n_jobs,
-            )
-            .await
-            .unwrap();
-        }
-    });
-
-    if let Some(streaming_options) = streaming_options {
-        loop {
-            match time::timeout(streaming_options.max_duration, batches.next()).await {
-                Ok(Some(batch)) => {
-                    let batch = batch?;
-                    writer.write(&batch)?;
-
-                    // Stop streaming if we have enough rows taken
-                    rows_returned += batch.num_rows();
-                    if rows_returned >= streaming_options.at_least_rows {
-                        break;
-                    }
-                }
-                Ok(None) => {
-                    break;
-                }
-                Err(_) => {
-                    warn!(
-                        "({test_name}) Streaming timed out after {:?}, stopping...",
-                        streaming_options.max_duration
-                    );
-                    break;
-                }
-            }
-        }
-    } else {
-        while let Some(batch) = batches.next().await {
-            let batch = batch?;
-            writer.write(&batch)?;
-        }
-    }
-
-    writer.finish()?;
-    serde_json::from_slice(&buf).map_err(Into::into)
-}
-
-pub fn load_sql_tests(file_name: &str) -> Result<Vec<SqlTest>, BoxError> {
-    let crate_path = env!("CARGO_MANIFEST_DIR");
-    let path = format!("{crate_path}/specs/{file_name}");
-    let content =
-        fs::read(&path).map_err(|e| BoxError::from(format!("Failed to read {file_name}: {e}")))?;
-    serde_yaml::from_slice(&content)
-        .map_err(|e| BoxError::from(format!("Failed to parse {file_name}: {e}")))
-}
-
-#[derive(Debug, Clone, serde::Deserialize)]
-pub struct SqlTest {
-    /// Test name.
-    pub name: String,
-    /// SQL query to execute.
-    pub query: String,
-    /// JSON-encoded results.
-    #[serde(flatten)]
-    pub result: SqlTestResult,
-    #[serde(default, rename = "streamingOptions")]
-    pub streaming_options: Option<StreamingExecutionOptions>,
-    #[serde(default, rename = "initialDumps")]
-    pub initial_dumps: Vec<DumpTestDatasetCommand>,
-    #[serde(default, rename = "dumpsOnRunningServer")]
-    pub dumps_on_running_server: Vec<DumpTestDatasetCommand>,
-}
-
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(untagged)]
 pub enum SqlTestResult {
@@ -546,39 +399,45 @@ pub enum SqlTestResult {
     Failure { failure: String },
 }
 
-impl SqlTest {
-    pub fn assert_result_eq(self, results: Result<serde_json::Value, String>) {
-        match self.result {
+impl SqlTestResult {
+    #[cfg(test)]
+    pub(crate) fn assert_eq(
+        &self,
+        actual_result: Result<serde_json::Value, BoxError>,
+    ) -> Result<(), BoxError> {
+        match self {
             SqlTestResult::Success {
-                results: expected_results,
+                results: expected_json_str,
             } => {
-                let expected_results: serde_json::Value = serde_json::from_str(&expected_results)
-                    .map_err(|e| {
-                        format!(
-                            "Failed to parse expected results for test \"{}\": {e:?}",
-                            self.name,
-                        )
-                    })
-                    .unwrap();
-                let results = results.unwrap();
+                let expected: serde_json::Value = serde_json::from_str(expected_json_str)
+                    .unwrap_or_else(|e| panic!("failed to parse expected JSON: {e}"));
+
+                let actual = actual_result.expect(&format!("expected success, got error",));
+
                 assert_str_eq!(
-                    results.to_string(),
-                    expected_results.to_string(),
-                    "SQL test \"{}\" failed: SQL query \"{}\" did not return the expected results, see sql-tests.yaml",
-                    self.name, self.query,
+                    actual.to_string(),
+                    expected.to_string(),
+                    "Test returned unexpected results",
                 );
             }
+
             SqlTestResult::Failure { failure } => {
-                let failure = failure.trim();
-                let results = results.unwrap_err();
-                if !results.to_string().contains(&failure) {
+                let expected_substring = failure.trim();
+
+                let actual_error =
+                    actual_result.expect_err(&format!("expected failure, got success"));
+
+                let actual_error_str = actual_error.to_string();
+
+                if !actual_error_str.contains(expected_substring) {
                     panic!(
-                        "SQL test \"{}\" failed: SQL query \"{}\" did not return the expected error, got \"{}\", expected \"{}\"",
-                        self.name, self.query, results, failure,
+                        "Expected substring: \"{}\"\nActual error: \"{}\"",
+                        expected_substring, actual_error_str
                     );
                 }
             }
         }
+        Ok(())
     }
 }
 

@@ -6,9 +6,13 @@ use dump::worker::Worker;
 use futures::StreamExt;
 use metadata_db::workers::WorkerNodeId;
 
-use crate::test_support::{
-    check_blocks, check_provider_file, load_sql_tests, record_batch_to_json,
-    restore_blessed_dataset, run_query_on_fresh_server, DatasetPackage, SnapshotContext, TestEnv,
+use crate::{
+    steps::load_test_steps,
+    test_client::TestClient,
+    test_support::{
+        check_blocks, check_provider_file, record_batch_to_json, restore_blessed_dataset,
+        DatasetPackage, SnapshotContext, TestEnv,
+    },
 };
 
 #[tokio::test]
@@ -85,34 +89,21 @@ async fn sql_over_eth_firehose_dump() {
 async fn sql_tests() {
     tracing_helpers::register_logger();
     let test_env = TestEnv::temp().await.unwrap();
+    let mut client = TestClient::connect(&test_env).await.unwrap();
 
-    for test in load_sql_tests("sql-tests.yaml").unwrap() {
-        let results =
-            run_query_on_fresh_server(&test_env, &test.name, &test.query, vec![], vec![], None)
-                .await
-                .map_err(|e| format!("{e:?}"));
-        test.assert_result_eq(results);
+    for step in load_test_steps("sql-tests.yaml").unwrap() {
+        step.run(&test_env, &mut client).await.unwrap()
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn streaming_tests() {
     tracing_helpers::register_logger();
     let test_env = TestEnv::temp().await.unwrap();
+    let mut client = TestClient::connect(&test_env).await.unwrap();
 
-    for test in load_sql_tests("sql-streaming-tests.yaml").unwrap() {
-        let results = run_query_on_fresh_server(
-            &test_env,
-            &test.name,
-            &test.query,
-            test.initial_dumps.clone(),
-            test.dumps_on_running_server.clone(),
-            test.streaming_options.as_ref(),
-        )
-        .await
-        .map_err(|e| format!("{e:?}"));
-
-        test.assert_result_eq(results);
+    for step in load_test_steps("sql-streaming-tests.yaml").unwrap() {
+        step.run(&test_env, &mut client).await.unwrap();
     }
 }
 

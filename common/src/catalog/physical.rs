@@ -12,7 +12,6 @@ use futures::{
 };
 use metadata_db::{LocationId, MetadataDb, TableId};
 use object_store::{path::Path, ObjectMeta, ObjectStore};
-use tracing::info;
 use url::Url;
 use uuid::Uuid;
 
@@ -186,13 +185,6 @@ impl PhysicalTable {
 
         let path = Path::from_url_path(url.path()).unwrap();
         let (object_store, _) = infer_object_store(&url)?;
-
-        info!(
-            "Restored table `{}` from {} with id {}",
-            table.table_ref(),
-            url,
-            location_id
-        );
 
         Ok(Some(Self {
             table: table.clone(),

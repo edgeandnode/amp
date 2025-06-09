@@ -6587,7 +6587,6 @@ dependencies = [
  "fs-err",
  "futures",
  "hex",
- "humantime",
  "metadata-db",
  "nozzle",
  "object_store",
@@ -6597,6 +6596,7 @@ dependencies = [
  "serde_yaml",
  "tempfile",
  "tokio",
+ "tonic",
  "tracing",
 ]
 
