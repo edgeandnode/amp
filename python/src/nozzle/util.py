@@ -257,7 +257,7 @@ def process_subgraph_metadata(json_data):
 
 def get_ipfs_data(df):
     for ipfs_hash in df['metadata_ipfs_hash']:
-        ipfs_url = 'https://api.thegraph.com/ipfs/api/v0/cat?arg=' + ipfs_hash
+        ipfs_url = 'https://ipfs.thegraph.com/ipfs/' + ipfs_hash
         ipfs_data = fetch_ipfs_data(ipfs_url)
         if ipfs_data:
             json_data = json.loads(ipfs_data)  # Convert the fetched data to a JSON object
