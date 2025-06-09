@@ -434,18 +434,9 @@ pub async fn run_query_on_fresh_server(
     restore_blessed_dataset("eth_firehose", &metadata_db).await?;
     restore_blessed_dataset("eth_rpc", &metadata_db).await?;
 
-    let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel(1);
-    let (bound, server) = nozzle::server::run(
-        test_env.config.clone(),
-        metadata_db.clone(),
-        false,
-        false,
-        shutdown_rx,
-    )
-    .await?;
-    tokio::spawn(async move {
-        server.await.unwrap();
-    });
+    let (bound, server) =
+        nozzle::server::run(test_env.config.clone(), metadata_db.clone(), false, false).await?;
+    tokio::spawn(server);
 
     for initial_dump in initial_dumps {
         dump_dataset(
@@ -517,8 +508,6 @@ pub async fn run_query_on_fresh_server(
             writer.write(&batch)?;
         }
     }
-
-    shutdown_tx.send(()).unwrap();
 
     writer.finish()?;
     serde_json::from_slice(&buf).map_err(Into::into)

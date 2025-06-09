@@ -5,7 +5,6 @@ use dataset_store::DatasetStore;
 use dump::worker::Worker;
 use futures::StreamExt;
 use metadata_db::workers::WorkerNodeId;
-use tokio::sync::broadcast;
 
 use crate::test_support::{
     check_blocks, check_provider_file, load_sql_tests, record_batch_to_json,
@@ -122,15 +121,11 @@ async fn basic_function() -> Result<(), BoxError> {
     tracing_helpers::register_logger();
 
     let test_env = TestEnv::temp().await.unwrap();
-    let (tx, rx) = broadcast::channel(1);
-    std::mem::forget(tx);
-
     let (bound_addrs, server) = nozzle::server::run(
         test_env.config.clone(),
         test_env.metadata_db.clone(),
         false,
         false,
-        rx,
     )
     .await?;
     tokio::spawn(server);

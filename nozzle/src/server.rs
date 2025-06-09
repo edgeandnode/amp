@@ -13,7 +13,6 @@ use futures::{
 };
 use metadata_db::MetadataDb;
 use server::service::Service;
-use tokio::sync::broadcast;
 use tonic::transport::{server::TcpIncoming, Server};
 
 #[derive(Debug, Clone, Copy)]
@@ -29,7 +28,6 @@ pub async fn run(
     metadata_db: Arc<MetadataDb>,
     no_admin: bool,
     dev: bool,
-    shutdown: broadcast::Receiver<()>,
 ) -> Result<(BoundAddrs, impl Future<Output = BoxResult<()>>), BoxError> {
     if config.max_mem_mb == 0 {
         tracing::info!("Memory limit is unlimited");
@@ -64,22 +62,11 @@ pub async fn run(
     flight_tcp_listener.set_nonblocking(true)?;
     let flight_server = Server::builder()
         .add_service(FlightServiceServer::new(service.clone()))
-        .serve_with_incoming_shutdown(
-            TcpIncoming::from_listener(
-                tokio::net::TcpListener::from_std(flight_tcp_listener)?,
-                true,
-                None,
-            )?,
-            {
-                let mut shutdown = shutdown.resubscribe();
-                async move {
-                    shutdown
-                        .recv()
-                        .await
-                        .expect("failed to receive shutdown signal");
-                }
-            },
-        )
+        .serve_with_incoming(TcpIncoming::from_listener(
+            tokio::net::TcpListener::from_std(flight_tcp_listener)?,
+            true,
+            None,
+        )?)
         .map_err(|e| {
             tracing::error!("Flight server error: {}", e);
             e.into()
@@ -87,8 +74,7 @@ pub async fn run(
         .boxed();
     tracing::info!("Serving Arrow Flight RPC at {}", flight_addr);
 
-    let (jsonl_addr, jsonl_server) =
-        run_jsonl_server(service, config.addrs.jsonl_addr, shutdown.resubscribe()).await?;
+    let (jsonl_addr, jsonl_server) = run_jsonl_server(service, config.addrs.jsonl_addr).await?;
     let jsonl_server = jsonl_server
         .map_err(|e| {
             tracing::error!("JSON lines server error: {}", e);
@@ -101,7 +87,6 @@ pub async fn run(
         config.addrs.registry_service_addr,
         config.clone(),
         metadata_db,
-        shutdown.resubscribe(),
     )
     .await?;
     let registry_service = registry_service
@@ -116,7 +101,7 @@ pub async fn run(
         true => (config.addrs.admin_api_addr, std::future::pending().boxed()),
         false => {
             let (admin_api_addr, admin_api) =
-                admin_api::serve(config.addrs.admin_api_addr, config, shutdown).await?;
+                admin_api::serve(config.addrs.admin_api_addr, config).await?;
             let admin_api = admin_api
                 .map_err(|e| {
                     tracing::error!("Admin API error: {}", e);
@@ -157,7 +142,6 @@ pub async fn run(
 async fn run_jsonl_server(
     service: Service,
     addr: SocketAddr,
-    shutdown: broadcast::Receiver<()>,
 ) -> BoxResult<(SocketAddr, impl Future<Output = BoxResult<()>>)> {
     let app = axum::Router::new()
         .route(
@@ -169,7 +153,7 @@ async fn run_jsonl_server(
                 .br(true)
                 .gzip(true),
         );
-    http_common::serve_at(addr, app, shutdown).await
+    http_common::serve_at(addr, app).await
 }
 
 async fn handle_jsonl_request(
