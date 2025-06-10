@@ -128,12 +128,11 @@ struct RawTableWriter {
     partition_size: u64,
 
     /// The ranges of block numbers that this writer is responsible for.
-    /// Organized as a stack, where the top range is the next one to be written.
+    /// Organized as a stack, where the top range is the one being written.
     ranges_to_write: Vec<(u64, u64)>,
 
-    current_range: Option<(u64, u64)>,
     current_file: Option<ParquetFileWriter>,
-    current_file_ranges: Vec<BlockRange>,
+    current_range: Option<BlockRange>,
 }
 
 impl RawTableWriter {
@@ -153,18 +152,18 @@ impl RawTableWriter {
             ranges.reverse();
             ranges
         };
-
-        let mut this = Self {
+        let current_file = match ranges_to_write.last() {
+            Some((start, _)) => Some(ParquetFileWriter::new(table.clone(), opts.clone(), *start)?),
+            None => None,
+        };
+        Ok(Self {
             table,
             opts,
             ranges_to_write,
             partition_size,
+            current_file,
             current_range: None,
-            current_file: None,
-            current_file_ranges: vec![],
-        };
-        this.next_range()?;
-        Ok(this)
+        })
     }
 
     pub async fn write(
@@ -177,20 +176,33 @@ impl RawTableWriter {
         let block_num = table_rows.block_num();
 
         // The block is past the current range, so we need to close the current file and start a new one.
-        if self.current_range.is_some_and(|(_, end)| end < block_num) {
+        if self
+            .ranges_to_write
+            .last()
+            .is_some_and(|(_, end)| *end < block_num)
+        {
             parquet_meta = Some(self.close_current_file().await?);
-            self.next_range()?;
+            assert!(self.current_file.is_none());
+            self.ranges_to_write.pop();
+            self.current_file = match self.ranges_to_write.last() {
+                Some((start, _)) => Some(ParquetFileWriter::new(
+                    self.table.clone(),
+                    self.opts.clone(),
+                    *start,
+                )?),
+                None => None,
+            };
         }
 
-        // For the rest of the function, since `is_finished` is false, we can unwrap `current_range`
-        // and `current_file`.
-        if self.is_finished() {
+        if self.ranges_to_write.is_empty() {
             // There are no more ranges to write.
+            assert!(self.current_file.is_none());
+            assert!(self.current_range.is_none());
             return Ok(parquet_meta);
         }
 
         // If the block stream has not yet reached the current range, then skip this block.
-        if block_num < self.current_range.unwrap().0 {
+        if block_num < self.ranges_to_write.last().unwrap().0 {
             return Ok(parquet_meta);
         }
 
@@ -204,79 +216,50 @@ impl RawTableWriter {
             assert!(parquet_meta.is_none());
 
             // Close the current file at `block_num - 1`, the highest block height scanned by it.
-            assert!(self.current_range.unwrap().1 == (block_num - 1));
+            assert!(self.ranges_to_write.last().unwrap().1 == (block_num - 1));
             parquet_meta = Some(self.close_current_file().await?);
 
             // The current range was partially written, so we need to split it.
-            let end = self.current_range.unwrap().1;
-            self.current_range = Some((block_num, end));
+            self.ranges_to_write.last_mut().unwrap().0 = block_num;
             self.current_file = Some(ParquetFileWriter::new(
                 self.table.clone(),
                 self.opts.clone(),
                 block_num,
             )?);
-            self.current_file_ranges.clear();
         }
 
         let rows = &table_rows.rows;
         self.current_file.as_mut().unwrap().write(rows).await?;
-        self.current_file_ranges.push(table_rows.range);
+        self.current_range = match self.current_range.take() {
+            None => Some(table_rows.range),
+            Some(range) => {
+                assert_eq!(&range.network, &table_rows.range.network);
+                Some(BlockRange {
+                    numbers: *range.numbers.start()..=*table_rows.range.numbers.end(),
+                    network: range.network,
+                    hash: table_rows.range.hash,
+                    prev_hash: range.prev_hash,
+                })
+            }
+        };
 
         Ok(parquet_meta)
     }
 
-    fn next_range(&mut self) -> Result<(), BoxError> {
-        // Assert that the current file has been closed.
-        assert!(self.current_file.is_none());
-
-        self.current_range = self.ranges_to_write.pop();
-        self.current_file = match self.current_range {
-            Some((start, _)) => Some(ParquetFileWriter::new(
-                self.table.clone(),
-                self.opts.clone(),
-                start,
-            )?),
-            None => None,
-        };
-        self.current_file_ranges.clear();
-        Ok(())
-    }
-
-    fn is_finished(&self) -> bool {
-        match (&self.current_range, &self.current_file) {
-            (Some(_), Some(_)) => false,
-            (None, None) => {
-                // If there is no current range and file, then there should be no ranges to write.
-                assert!(self.ranges_to_write.is_empty());
-                true
-            }
-            _ => panic!("inconsistent table writer state"),
-        }
-    }
-
     async fn close(mut self) -> Result<Option<(ParquetMeta, ObjectMeta)>, BoxError> {
-        // We should be closing the last range.
-        assert!(self.ranges_to_write.is_empty());
-
         if self.current_file.is_none() {
+            assert!(self.ranges_to_write.is_empty());
             return Ok(None);
         }
+        // We should be closing the last range.
+        assert!(self.ranges_to_write.len() == 1);
         self.close_current_file().await.map(Some)
     }
 
     async fn close_current_file(&mut self) -> Result<(ParquetMeta, ObjectMeta), BoxError> {
         assert!(self.current_file.is_some());
         let file = self.current_file.take().unwrap();
-        let start = self.current_file_ranges.first().unwrap();
-        let end = self.current_file_ranges.last().unwrap();
-        assert_eq!(start.network, end.network);
-        assert!(start.numbers.start() <= end.numbers.end());
-        let range = BlockRange {
-            numbers: *start.numbers.start()..=*end.numbers.end(),
-            network: start.network.clone(),
-            hash: end.hash,
-            prev_hash: start.prev_hash,
-        };
+        let range = self.current_range.take().unwrap();
         file.close(range).await
     }
 }
