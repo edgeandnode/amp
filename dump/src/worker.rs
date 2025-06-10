@@ -5,13 +5,14 @@ use common::{config::Config, BoxError};
 use dataset_store::DatasetStore;
 use futures::TryStreamExt as _;
 use metadata_db::{JobId, JobNotifAction as Action, JobNotifRecvError, MetadataDb, WorkerNodeId};
+use tokio_util::task::AbortOnDropHandle;
 
 mod job;
 mod job_set;
 
-use self::job::{Job, JobCtx};
-pub use self::{
-    job::JobDesc,
+pub use self::job::JobDesc;
+use self::{
+    job::{Job, JobCtx},
     job_set::{JobSet, JoinError as JobSetJoinError},
 };
 
@@ -42,12 +43,12 @@ impl Worker {
             .map_err(WorkerError::RegistrationFailed)?;
 
         // Establish a dedicated connection to the metadata DB, and start the heartbeat loop
-        let mut heartbeat_loop = {
+        let mut heartbeat_loop_handle = {
             let fut = (|| self.metadata_db.worker_heartbeat_loop(self.node_id.clone()))
                 .retry(ExponentialBuilder::default())
                 .await
-                .map_err(WorkerError::HeartbeatLoopConnectionError)?;
-            std::pin::pin!(fut)
+                .map_err(WorkerError::HeartbeatConnectionError)?;
+            AbortOnDropHandle::new(tokio::spawn(fut))
         };
 
         // Start listening for job notifications. Retry on initial connection failure
@@ -74,10 +75,27 @@ impl Worker {
 
         loop {
             tokio::select! { biased;
-                // 1. Poll the heartbeat loop
-                Err(err) = &mut heartbeat_loop => {
-                    // A fatal error occurred in the heartbeat loop, exit the worker
-                    return Err(WorkerError::HeartbeatUpdateFailed(err));
+                // 1. Poll the heartbeat loop task handle
+                res = &mut heartbeat_loop_handle => {
+                    match res {
+                        Ok(Ok(_)) => {
+                            // The heartbeat loop must never exit, this is a fatal error.
+                            // Exit the worker
+                            return Err(WorkerError::HeartbeatTaskFailed(
+                                "heartbeat loop task exited".into(),
+                            ));
+                        }
+                        Ok(Err(err)) => {
+                            // A fatal error occurred in the heartbeat loop.
+                            // Exit the worker
+                            return Err(WorkerError::HeartbeatUpdateFailed(err));
+                        }
+                        Err(err) => {
+                            // A fatal error occurred in the heartbeat loop task.
+                            // Exit the worker
+                            return Err(WorkerError::HeartbeatTaskFailed(err.into()));
+                        }
+                    }
                 },
 
                 // 2. Poll the job notifications stream
@@ -226,13 +244,17 @@ pub enum WorkerError {
     #[error("worker registration failed: {0}")]
     RegistrationFailed(metadata_db::Error),
 
-    /// The worker heartbeat loop failed to establish a dedicated connection to the metadata DB
-    #[error("worker heartbeat loop connection establishment failed: {0}")]
-    HeartbeatLoopConnectionError(metadata_db::Error),
+    /// The worker heartbeat task connection failed to establish a dedicated connection to the metadata DB
+    #[error("worker heartbeat connection establishment failed: {0}")]
+    HeartbeatConnectionError(metadata_db::Error),
 
     /// The worker failed to update its heartbeat in the metadata DB
     #[error("worker heartbeat update failed: {0}")]
     HeartbeatUpdateFailed(metadata_db::Error),
+
+    /// The worker heartbeat task failed
+    #[error("worker heartbeat task failed: {0}")]
+    HeartbeatTaskFailed(BoxError),
 
     /// A fatal error occurred while establishing the job notification listener
     /// connection to the metadata DB

@@ -28,16 +28,6 @@ pub struct JobSet {
 }
 
 impl JobSet {
-    /// Create a new [`JobSet`] instance
-    pub fn new() -> Self {
-        Default::default()
-    }
-
-    /// Returns `true` if a job with the given ID is tracked by the set
-    pub fn contains(&self, job_id: &JobId) -> bool {
-        self.job_id_to_handle.contains_key(job_id)
-    }
-
     /// Spawn a new job and register it in the set
     pub fn spawn(&mut self, job_id: JobId, job: Job) {
         if self.job_id_to_handle.contains_key(&job_id) {
