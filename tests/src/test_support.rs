@@ -182,17 +182,19 @@ impl SnapshotContext {
     }
 
     async fn check_block_range_eq(&self, blessed: &SnapshotContext) -> Result<(), BoxError> {
-        let blessed_block_ranges = block_ranges_by_table(&blessed.ctx).await?;
+        let mut blessed_block_ranges = block_ranges_by_table(&blessed.ctx).await?;
 
         for table in self.ctx.catalog().tables() {
-            let table_name = table.table_name().to_string();
-            let expected_range = table.multi_range().await?;
-            let actual_range = &blessed_block_ranges[&table_name];
+            let table_name = table.table_name();
+            let mut expected_ranges = table.ranges().await?;
+            expected_ranges.sort_by_key(|r| *r.numbers.start());
+            let actual_ranges = blessed_block_ranges.get_mut(table_name).unwrap();
+            actual_ranges.sort_by_key(|r| *r.numbers.start());
             let table_qualified = table.table_ref().to_string();
             assert_eq!(
-                expected_range, *actual_range,
+                &expected_ranges, actual_ranges,
                 "for table {table_qualified}, \
-                 the test expected data ranges to be exactly {expected_range}, but dataset has data ranges {actual_range}"
+                 the test expected data ranges to be exactly {expected_ranges:?}, but dataset has data ranges {actual_ranges:?}"
             );
         }
 
