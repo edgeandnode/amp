@@ -306,6 +306,9 @@ async fn dump_sql_query(
     .await
 }
 
+/// Derive the BlockRange for the dense block number range [start, end] from the `blocks` table
+/// of the raw dataset this table is derived from. For now, we only support materializing SQL
+/// queries depending on block data from a single network.
 async fn resolve_block_range(
     env: QueryEnv,
     dataset_store: &Arc<DatasetStore>,
