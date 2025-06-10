@@ -24,6 +24,9 @@ use crate::{metadata::range::BlockRange, Timestamp};
 
 pub const PARQUET_METADATA_KEY: &'static str = "nozzle_metadata";
 
+/// File metadata stored in the metadata DB and the KV metadata of the corresponding parquet file.
+/// Modifying the serialization of this struct may break compatibility with existing parquet files
+/// that have been dumped.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ParquetMeta {
     pub table: String,
