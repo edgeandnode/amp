@@ -349,6 +349,9 @@ pub fn is_incremental(plan: &LogicalPlan) -> Result<bool, BoxError> {
             // Embarrassingly parallel operators
             Projection(_) | Filter(_) | Union(_) | Unnest(_) => { /* incremental */ }
 
+            // Limit is stateful, it needs to count rows
+            Limit(_) => is_incr = false,
+
             // Not really logical operators, so we just skip them.
             Repartition(_) | TableScan(_) | EmptyRelation(_) | Values(_) | Subquery(_)
             | SubqueryAlias(_) => { /* incremental */ }
@@ -359,7 +362,7 @@ pub fn is_incremental(plan: &LogicalPlan) -> Result<bool, BoxError> {
             Join(_) => is_incr = false,
 
             // Sorts are not parallel or incremental
-            Sort(_) | Limit(_) => is_incr = false,
+            Sort(_) => is_incr = false,
 
             // Window functions are complicated, they often result in a sort.
             Window(_) => is_incr = false,
