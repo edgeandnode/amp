@@ -252,6 +252,7 @@ pub(crate) async fn dump_dataset(
         input_batch_block_size,
         false,
         None,
+        vec![],
     )
     .await?;
 

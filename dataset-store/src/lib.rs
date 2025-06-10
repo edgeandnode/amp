@@ -17,8 +17,8 @@ use common::{
     query_context::{self, parse_sql, PlanningContext, QueryEnv},
     sql_visitors::all_function_names,
     store::StoreError,
-    BlockNum, BlockStreamer, BoxError, Dataset, DatasetWithProvider, LogicalCatalog, QueryContext,
-    RawDatasetRows, Store,
+    BlockNum, BlockStreamer, BoxError, CustomDataset, Dataset, DatasetWithProvider,
+    DelegatingBlockStreamer, LogicalCatalog, QueryContext, RawDatasetRows, Store,
 };
 use datafusion::{
     common::HashMap,
@@ -83,7 +83,10 @@ pub enum DatasetKind {
     Substreams,
     Sql, // Will be deprecated in favor of `Manifest`
     Manifest,
+    CustomDataset, // For datasets defined externally.
 }
+
+pub const CUSTOM_DATASET_KIND: &str = "CustomDataset";
 
 impl DatasetKind {
     pub fn as_str(&self) -> &str {
@@ -93,6 +96,7 @@ impl DatasetKind {
             Self::Substreams => substreams_datasets::DATASET_KIND,
             Self::Sql => sql_datasets::DATASET_KIND,
             Self::Manifest => common::manifest::DATASET_KIND,
+            Self::CustomDataset => CUSTOM_DATASET_KIND,
         }
     }
 }
@@ -105,6 +109,7 @@ impl fmt::Display for DatasetKind {
             Self::Substreams => f.write_str(substreams_datasets::DATASET_KIND),
             Self::Sql => f.write_str(sql_datasets::DATASET_KIND),
             Self::Manifest => f.write_str(common::manifest::DATASET_KIND),
+            Self::CustomDataset => f.write_str(CUSTOM_DATASET_KIND),
         }
     }
 }
@@ -119,7 +124,8 @@ impl FromStr for DatasetKind {
             substreams_datasets::DATASET_KIND => Ok(Self::Substreams),
             sql_datasets::DATASET_KIND => Ok(Self::Sql),
             common::manifest::DATASET_KIND => Ok(Self::Manifest),
-            k => Err(Error::UnsupportedKind(k.to_string())),
+            CUSTOM_DATASET_KIND => Ok(Self::CustomDataset),
+            _ => Err(Error::UnsupportedKind(s.to_string())),
         }
     }
 }
@@ -194,6 +200,7 @@ pub struct DatasetStore {
     eth_call_cache: Arc<RwLock<HashMap<String, ScalarUDF>>>,
     // This cache maps dataset name to the dataset definition.
     dataset_cache: Arc<RwLock<HashMap<String, DatasetWithProvider>>>,
+    custom_dataset_registry: Arc<RwLock<HashMap<String, CustomDataset>>>,
 }
 
 impl DatasetStore {
@@ -203,6 +210,7 @@ impl DatasetStore {
             metadata_db,
             eth_call_cache: Default::default(),
             dataset_cache: Default::default(),
+            custom_dataset_registry: Arc::new(RwLock::new(HashMap::new())),
         })
     }
 
@@ -300,6 +308,17 @@ impl DatasetStore {
                 let dataset_toml: toml::Value = toml::from_str(&raw_dataset)?;
                 substreams_datasets::dataset(dataset_toml).await?
             }
+            DatasetKind::CustomDataset => {
+                let lock = self.custom_dataset_registry.read().unwrap();
+                let CustomDataset { dataset, .. } = lock.get(dataset_name).ok_or_else(|| {
+                    Error::Unknown(format!("Custom dataset '{dataset_name}' not registered").into())
+                })?;
+
+                DatasetWithProvider {
+                    dataset: dataset.clone(),
+                    provider: None,
+                }
+            }
             DatasetKind::Sql => {
                 let dataset_toml: toml::Value = toml::from_str(&raw_dataset)?;
                 DatasetWithProvider {
@@ -351,54 +370,6 @@ impl DatasetStore {
 
     #[instrument(skip(self), err)]
     async fn load_client_inner(&self, dataset_name: &str) -> Result<impl BlockStreamer, Error> {
-        #[derive(Clone)]
-        pub enum BlockStreamClient {
-            EvmRpc(evm_rpc_datasets::JsonRpcClient),
-            Firehose(firehose_datasets::Client),
-            Substreams(substreams_datasets::Client),
-        }
-
-        impl BlockStreamer for BlockStreamClient {
-            async fn block_stream(
-                self,
-                start_block: BlockNum,
-                end_block: BlockNum,
-            ) -> impl Stream<Item = Result<RawDatasetRows, BoxError>> + Send {
-                // Each client returns a different concrete stream type, so we
-                // use `stream!` to unify them into a wrapper stream
-                stream! {
-                    match self {
-                        Self::EvmRpc(client) => {
-                            let stream = client.block_stream(start_block, end_block).await;
-                            for await item in stream {
-                                yield item;
-                            }
-                        }
-                        Self::Firehose(client) => {
-                            let stream = client.block_stream(start_block, end_block).await;
-                            for await item in stream {
-                                yield item;
-                            }
-                        }
-                        Self::Substreams(client) => {
-                            let stream = client.block_stream(start_block, end_block).await;
-                            for await item in stream {
-                                yield item;
-                            }
-                        }
-                    }
-                }
-            }
-
-            async fn latest_block(&mut self, finalized: bool) -> Result<BlockNum, BoxError> {
-                match self {
-                    Self::EvmRpc(client) => client.latest_block(finalized).await,
-                    Self::Firehose(client) => client.latest_block(finalized).await,
-                    Self::Substreams(client) => client.latest_block(finalized).await,
-                }
-            }
-        }
-
         let (kind, raw_dataset) = self.kind_and_dataset(dataset_name).await?;
         let toml: toml::Value = toml::from_str(&raw_dataset)?;
 
@@ -414,6 +385,18 @@ impl DatasetStore {
             DatasetKind::Substreams => {
                 let client = substreams_datasets::Client::new(toml, self.providers_store()).await?;
                 Ok(BlockStreamClient::Substreams(client))
+            }
+            DatasetKind::CustomDataset => {
+                // in the case of custom dataset, we store it in a registry by name
+                let lock = self.custom_dataset_registry.read().unwrap();
+
+                let CustomDataset { block_streamer, .. } = lock
+                    .get(dataset_name)
+                    .expect("TODO: error prop. custom dataset not registered");
+
+                Ok(BlockStreamClient::CustomBlockStreamer(
+                    block_streamer.clone(),
+                ))
             }
             DatasetKind::Sql | DatasetKind::Manifest => {
                 Err(Error::UnsupportedKind(kind.to_string()))
@@ -641,6 +624,15 @@ impl DatasetStore {
     fn dataset_defs_store(&self) -> &Arc<Store> {
         &self.config.dataset_defs_store
     }
+
+    /// Register a custom dataset with a name and a block streamer. This allows the dataset to be
+    /// used by the dataset store and queried like any other dataset.
+    pub fn register_custom_dataset(&self, custom_dataset: CustomDataset) {
+        self.custom_dataset_registry
+            .write()
+            .unwrap()
+            .insert(custom_dataset.name.clone(), custom_dataset);
+    }
 }
 
 /// All dataset definitions must have a kind and name. The name must match the filename.
@@ -677,4 +669,62 @@ fn datasets_from_table_refs<'a>(
         dataset_names.insert(catalog_schema.to_string());
     }
     Ok(dataset_names)
+}
+
+#[derive(Clone)]
+pub enum BlockStreamClient {
+    EvmRpc(evm_rpc_datasets::JsonRpcClient),
+    Firehose(firehose_datasets::Client),
+    Substreams(substreams_datasets::Client),
+    CustomBlockStreamer(DelegatingBlockStreamer),
+}
+
+impl BlockStreamer for BlockStreamClient {
+    async fn block_stream(
+        self,
+        start_block: BlockNum,
+        end_block: BlockNum,
+    ) -> impl Stream<Item = Result<RawDatasetRows, BoxError>> + Send {
+        // Each client returns a different concrete stream type, so we
+        // use `stream!` to unify them into a wrapper stream
+        stream! {
+            match self {
+                Self::EvmRpc(client) => {
+                    let stream = client.block_stream(start_block, end_block).await;
+                    for await item in stream {
+                        yield item;
+                    }
+                }
+                Self::Firehose(client) => {
+                    let stream = client.block_stream(start_block, end_block).await;
+                    for await item in stream {
+                        yield item;
+                    }
+                }
+                Self::Substreams(client) => {
+                    let stream = client.block_stream(start_block, end_block).await;
+                    for await item in stream {
+                        yield item;
+                    }
+                }
+                Self::CustomBlockStreamer(client) => {
+                    let stream = client.block_stream(start_block, end_block).await;
+                    for await item in stream {
+                        yield item;
+                    }
+                }
+            }
+        }
+    }
+
+    async fn latest_block(&mut self, finalized: bool) -> Result<BlockNum, BoxError> {
+        match self {
+            Self::EvmRpc(client) => client.latest_block(finalized).await,
+            Self::Firehose(client) => client.latest_block(finalized).await,
+            Self::Substreams(client) => client.latest_block(finalized).await,
+            Self::CustomBlockStreamer(custom_block_streamer) => {
+                custom_block_streamer.latest_block(finalized).await
+            }
+        }
+    }
 }

@@ -1,5 +1,5 @@
 mod client;
-mod tables;
+pub mod tables;
 
 use alloy::transports::http::reqwest::Url;
 pub use client::JsonRpcClient;

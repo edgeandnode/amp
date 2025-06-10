@@ -138,6 +138,7 @@ async fn main_inner() -> Result<(), BoxError> {
                 input_batch_size_blocks,
                 disable_compression,
                 run_every_mins,
+                vec![],
             )
             .await
         }

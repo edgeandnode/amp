@@ -4,6 +4,7 @@ use std::{
     time::Duration,
 };
 
+use common::CustomDataset;
 use common::{
     catalog::physical::PhysicalTable,
     config::Config,
@@ -28,9 +29,15 @@ pub async fn dump(
     input_batch_size_blocks: u64,
     disable_compression: bool,
     run_every_mins: Option<u64>,
+    custom_datasets: Vec<CustomDataset>,
 ) -> Result<(), BoxError> {
     let data_store = config.data_store.clone();
     let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
+
+    for custom_dataset in custom_datasets {
+        dataset_store.register_custom_dataset(custom_dataset);
+    }
+
     let partition_size = partition_size_mb * 1024 * 1024;
     let compression = if disable_compression {
         parquet::basic::Compression::UNCOMPRESSED

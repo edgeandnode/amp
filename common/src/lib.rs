@@ -13,13 +13,17 @@ pub mod store;
 pub mod stream_helpers;
 pub mod tracing_helpers;
 
+use std::task::{Context, Poll};
 use std::{
     future::Future,
+    pin::Pin,
+    sync::Arc,
     time::{Duration, SystemTime},
 };
 
 use arrow::{array::FixedSizeBinaryArray, datatypes::DataType};
 pub use arrow_helpers::*;
+use async_trait::async_trait;
 pub use catalog::logical::*;
 use datafusion::arrow::{
     array::{ArrayRef, AsArray as _, RecordBatch},
@@ -176,4 +180,96 @@ pub trait BlockStreamer: Clone + 'static {
         &mut self,
         finalized: bool,
     ) -> impl Future<Output = Result<BlockNum, BoxError>> + Send;
+}
+
+/// Customizable block streamer. Implement this from outside of this crate to provide
+/// custom block streaming behavior, such as using a different RPC client or data source.
+#[async_trait]
+pub trait CustomBlockStreamer: Send + Sync {
+    async fn block_stream(
+        &self,
+        start_block: BlockNum,
+        end_block: BlockNum,
+    ) -> Pin<Box<dyn Stream<Item = Result<RawDatasetRows, BoxError>> + Send + 'static>>;
+
+    async fn latest_block(&self, finalized: bool) -> Result<BlockNum, BoxError>;
+}
+
+pub struct DynBlockStream {
+    inner: Pin<Box<dyn Stream<Item = Result<RawDatasetRows, BoxError>> + Send>>,
+}
+
+impl Stream for DynBlockStream {
+    type Item = Result<RawDatasetRows, BoxError>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.inner.as_mut().poll_next(cx)
+    }
+}
+
+pub struct DynBlockStreamFuture {
+    inner: Pin<
+        Box<
+            dyn Future<
+                    Output = Pin<Box<dyn Stream<Item = Result<RawDatasetRows, BoxError>> + Send>>,
+                > + Send,
+        >,
+    >,
+}
+
+impl Future for DynBlockStreamFuture {
+    type Output = DynBlockStream;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        match self.inner.as_mut().poll(cx) {
+            Poll::Ready(stream) => Poll::Ready(DynBlockStream { inner: stream }),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct DelegatingBlockStreamer {
+    inner: Arc<dyn CustomBlockStreamer>,
+}
+
+impl DelegatingBlockStreamer {
+    pub fn new<T: CustomBlockStreamer + 'static>(inner: T) -> Self {
+        Self {
+            inner: Arc::new(inner),
+        }
+    }
+
+    pub fn with_arc(inner: Arc<dyn CustomBlockStreamer>) -> Self {
+        Self { inner }
+    }
+}
+
+impl BlockStreamer for DelegatingBlockStreamer {
+    fn block_stream(
+        self,
+        start: BlockNum,
+        end: BlockNum,
+    ) -> impl Future<Output = impl Stream<Item = Result<RawDatasetRows, BoxError>> + Send> + Send
+    {
+        let inner = self.inner; // move out of self, async block will own
+        DynBlockStreamFuture {
+            inner: Box::pin(async move { inner.block_stream(start, end).await }),
+        }
+    }
+
+    fn latest_block(
+        &mut self,
+        finalized: bool,
+    ) -> impl Future<Output = Result<BlockNum, BoxError>> + Send {
+        let inner = self.inner.clone();
+        async move { inner.latest_block(finalized).await }
+    }
+}
+
+#[derive(Clone)]
+pub struct CustomDataset {
+    pub name: String,
+    pub block_streamer: DelegatingBlockStreamer,
+    pub dataset: Dataset,
 }
