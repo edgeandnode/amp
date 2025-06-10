@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@effect/platform": "^0.82.2",
-    "effect": "^3.15.1",
+    "@effect/platform": "^0.84.9",
+    "effect": "^3.16.5",
     "nozzl": "workspace:*"
   }
 }

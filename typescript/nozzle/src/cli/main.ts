@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { Command, Options, ValidationError } from "@effect/cli"
-import { Error as PlatformError, PlatformConfigProvider } from "@effect/platform"
+import { PlatformConfigProvider } from "@effect/platform"
 import { NodeContext, NodeRuntime } from "@effect/platform-node"
 import { Cause, Config, Console, Effect, Layer, Logger, LogLevel, String } from "effect"
 import * as Utils from "../Utils.js"
@@ -45,13 +45,6 @@ const runnable = Effect.suspend(() => cli(process.argv)).pipe(
     // Command validation errors are already printed by @effect/cli.
     if (ValidationError.isValidationError(squashed)) {
       return Effect.void
-    }
-
-    // TODO: This is a temporary hack to handle @effect/platform errors whilst those are not using `Data.TaggedError`.
-    if (PlatformError.isPlatformError(squashed)) {
-      const error = new Error(squashed.message)
-      error.cause = (squashed as any).cause
-      return Console.error(Utils.prettyCause(Cause.fail(error)))
     }
 
     return Console.error(Utils.prettyCause(cause))
