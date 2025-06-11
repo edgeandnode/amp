@@ -142,6 +142,8 @@ impl Worker {
     ) -> Result<(), WorkerError> {
         match action {
             Action::Start => {
+                tracing::info!(node_id=%self.node_id, %job_id, "job start requested");
+
                 // Load the job from the database. Retry on failure
                 // TODO: Make Job struct load agnostic (LNSD)
                 let job = (|| {
@@ -160,24 +162,26 @@ impl Worker {
                 .await
                 .map_err(WorkerError::JobLoadFailed)?;
 
-                // Spawn the job in the job set
-                self.job_set.spawn(job_id, job);
-
                 // Mark the job as RUNNING. Retry on failure
                 (|| self.metadata_db.mark_job_running(&job_id))
                     .retry(ExponentialBuilder::default())
                     .await
                     .map_err(WorkerError::JobStatusUpdateFailed)?;
+
+                // Spawn the job in the job set
+                self.job_set.spawn(job_id, job);
             }
             Action::Stop => {
+                // To avoid job state update races, mark it as STOPPING before actually aborting the job
                 tracing::info!(node_id=%self.node_id, %job_id, "job stop requested");
-                self.job_set.abort(&job_id);
 
                 // Mark the job as STOPPING. Retry on failure
                 (|| self.metadata_db.mark_job_stopping(&job_id))
                     .retry(ExponentialBuilder::default())
                     .await
                     .map_err(WorkerError::JobStatusUpdateFailed)?;
+
+                self.job_set.abort(&job_id);
             }
             _ => {
                 tracing::warn!(node_id=%self.node_id, %job_id, %action, "job action unhandled");
