@@ -29,6 +29,7 @@ use futures::{future::BoxFuture, FutureExt as _, Stream, TryFutureExt as _};
 use js_runtime::isolate_pool::IsolatePool;
 use metadata_db::MetadataDb;
 use object_store::ObjectMeta;
+use rand::seq::SliceRandom;
 use serde::Deserialize;
 use sql_datasets::SqlDataset;
 use thiserror::Error;
@@ -390,7 +391,10 @@ impl DatasetStore {
         dataset_kind: DatasetKind,
         dataset_network: String,
     ) -> Result<toml::Value, Error> {
-        for obj in self.all_providers().await? {
+        let mut providers = self.all_providers().await?;
+        // Shuffle to provide load balancing across providers.
+        providers.shuffle(&mut rand::rng());
+        for obj in providers {
             let location = obj.location.to_string();
             let (kind, network, provider) = self.kind_network_provider(&location).await?;
             if kind != dataset_kind || network != dataset_network {
