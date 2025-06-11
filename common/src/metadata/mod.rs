@@ -66,11 +66,12 @@ pub async fn ranges_for_table(
         .stream_file_metadata(location_id)
         .map(|res| {
             let FileMetadata {
+                file_name,
                 parquet_meta: parquet::ParquetMeta { mut ranges, .. },
                 ..
             } = res?.try_into()?;
             if ranges.len() != 1 {
-                return Err(format!("expected exactly 1 range at location {}", location_id).into());
+                return Err(format!("expected exactly 1 range in {file_name}").into());
             }
             Ok(ranges.remove(0))
         })

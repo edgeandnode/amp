@@ -348,14 +348,13 @@ impl PhysicalTable {
         self.stream_file_metadata()
             .map(|r| {
                 let FileMetadata {
-                    location_id,
+                    file_name,
                     parquet_meta: ParquetMeta { mut ranges, .. },
                     ..
                 } = r?;
                 if ranges.len() != 1 {
                     return Err(BoxError::from(format!(
-                        "expected exactly 1 range at location {}",
-                        location_id
+                        "expected exactly 1 range for {file_name}"
                     )));
                 }
                 Ok(ranges.remove(0))
