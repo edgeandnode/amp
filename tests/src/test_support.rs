@@ -236,7 +236,7 @@ pub(crate) async fn dump_dataset(
     n_jobs: u16,
 ) -> Result<(), BoxError> {
     // dump the dataset
-    let partition_size = 1024 * 1024; // 100 kB
+    let partition_size_mb = 100;
     let input_batch_block_size = 100_000;
     let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
 
@@ -248,7 +248,7 @@ pub(crate) async fn dump_dataset(
         start as i64,
         Some(end.to_string()),
         n_jobs,
-        partition_size,
+        partition_size_mb,
         input_batch_block_size,
         false,
         None,
