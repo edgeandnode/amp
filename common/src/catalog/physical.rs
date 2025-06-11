@@ -12,6 +12,7 @@ use futures::{
 };
 use metadata_db::{LocationId, MetadataDb, TableId};
 use object_store::{path::Path, ObjectMeta, ObjectStore};
+use tracing::info;
 use url::Url;
 use uuid::Uuid;
 
@@ -104,6 +105,7 @@ impl PhysicalTable {
     /// Create a new physical table with the given dataset name, table, URL, and object store.
     /// This is used for creating a new location (revision) for a new or  existing table in
     /// the metadata database.
+    #[tracing::instrument(skip_all, fields(table = %table, active = %set_active), err)]
     pub async fn next_revision(
         table: &ResolvedTable,
         data_store: &Store,
@@ -138,6 +140,9 @@ impl PhysicalTable {
             location_id,
             metadata_db,
         };
+
+        info!("Created new revision at {}", physical_table.path);
+
         Ok(physical_table)
     }
 
