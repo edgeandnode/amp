@@ -8,6 +8,13 @@ export class ManifestBuilderError extends Data.TaggedError("ManifestBuilderError
   readonly table: string
 }> {}
 
+// TODO: Remove this once the registry endpoint returns the `block_num` field for datasets.
+const blockNumField = new Model.ArrowField({
+  name: "block_num",
+  type: "UInt64",
+  nullable: false,
+})
+
 export class ManifestBuilder extends Effect.Service<ManifestBuilder>()("Nozzle/ManifestBuilder", {
   effect: Effect.gen(function*() {
     const client = yield* Api.Registry
@@ -29,13 +36,16 @@ export class ManifestBuilder extends Effect.Service<ManifestBuilder>()("Nozzle/M
                 }),
               )
             }
-            const network = schema.networks[0]
 
             const input = new Model.TableInput({ sql: table.sql })
             const output = new Model.Table({
               input,
-              schema: schema.schema,
-              network,
+              network: schema.networks[0],
+              schema: new Model.TableSchema({
+                arrow: new Model.ArrowSchema({
+                  fields: [blockNumField, ...schema.schema.arrow.fields],
+                }),
+              }),
             })
 
             return [name, output] as const
