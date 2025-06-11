@@ -226,8 +226,15 @@ impl MetadataDb {
     }
 
     /// Given a worker `node_id`, returns all the job IDs
-    pub async fn scheduled_jobs(&self, node_id: &WorkerNodeId) -> Result<Vec<JobId>, Error> {
+    pub async fn get_scheduled_jobs(&self, node_id: &WorkerNodeId) -> Result<Vec<JobId>, Error> {
         Ok(workers::jobs::get_job_ids_for_node(&*self.pool, node_id).await?)
+    }
+
+    /// Given a worker `node_id`, returns all the active job IDs for that worker
+    ///
+    /// A job is considered active if its in [`JobStatus::Scheduled`] or [`JobStatus::Running`].
+    pub async fn get_active_jobs(&self, node_id: &WorkerNodeId) -> Result<Vec<JobId>, Error> {
+        Ok(workers::jobs::get_active_job_ids_for_node(&*self.pool, node_id).await?)
     }
 
     /// Returns the job with the given ID

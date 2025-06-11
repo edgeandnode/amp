@@ -64,14 +64,14 @@ impl Worker {
             std::pin::pin!(stream)
         };
 
-        // TODO: Review the bootstrap logic (LNSD)
-        // let scheduled_jobs = self.metadata_db.scheduled_jobs(&self.node_id).await?;
-        // for job_id in scheduled_jobs {
-        //     let job = Job::load(job_ctx.clone(), &job_id)
-        //         .await
-        //         .map_err(WorkerError::JobLoadError)?;
-        //     spawn_job(job);
-        // }
+        // Fetch all the active jobs from the Metadata DB's jobs and spawn them
+        let active_job_ids = (|| self.metadata_db.get_active_jobs(&self.node_id))
+            .retry(ExponentialBuilder::default())
+            .await
+            .map_err(WorkerError::ActiveJobsFetchFailed)?;
+        for job_id in active_job_ids {
+            self.handle_job_action(job_id, Action::Start).await?;
+        }
 
         loop {
             tokio::select! { biased;
@@ -247,6 +247,10 @@ pub enum WorkerError {
     /// The worker failed to register in the metadata DB
     #[error("worker registration failed: {0}")]
     RegistrationFailed(metadata_db::Error),
+
+    /// A fatal error occurred while fetching active jobs at worker startup
+    #[error("failed to fetch active jobs: {0}")]
+    ActiveJobsFetchFailed(metadata_db::Error),
 
     /// The worker heartbeat task connection failed to establish a dedicated connection to the metadata DB
     #[error("worker heartbeat connection establishment failed: {0}")]
