@@ -79,7 +79,7 @@ async fn update_job_status_modifies_status() {
         .expect("Failed to schedule job");
 
     //* When
-    jobs::update_job_status(&mut *conn, job_id, JobStatus::Running)
+    jobs::update_job_status(&mut *conn, &job_id, JobStatus::Running)
         .await
         .expect("Failed to update job status");
 
@@ -208,7 +208,7 @@ async fn get_active_job_ids_for_node_retrieves_only_active_jobs() {
     let job_id_running = jobs::register_job(&mut *db, &worker_id, &job_desc_str)
         .await
         .expect("Failed to register job_id_running");
-    jobs::update_job_status(&mut *db, job_id_running, JobStatus::Running)
+    jobs::update_job_status(&mut *db, &job_id_running, JobStatus::Running)
         .await
         .expect("Failed to update job_id_running to Running");
 
@@ -216,21 +216,21 @@ async fn get_active_job_ids_for_node_retrieves_only_active_jobs() {
     let job_id_completed = jobs::register_job(&mut *db, &worker_id, &job_desc_str)
         .await
         .expect("Failed to register job_id_completed");
-    jobs::update_job_status(&mut *db, job_id_completed, JobStatus::Completed)
+    jobs::update_job_status(&mut *db, &job_id_completed, JobStatus::Completed)
         .await
         .expect("Failed to update job_id_completed to Completed");
 
     let job_id_failed = jobs::register_job(&mut *db, &worker_id, &job_desc_str)
         .await
         .expect("Failed to schedule job_id_failed");
-    jobs::update_job_status(&mut *db, job_id_failed, JobStatus::Failed)
+    jobs::update_job_status(&mut *db, &job_id_failed, JobStatus::Failed)
         .await
         .expect("Failed to update job_id_failed to Failed");
 
     let job_id_stopped = jobs::register_job(&mut *db, &worker_id, &job_desc_str)
         .await
         .expect("Failed to register job_id_stopped");
-    jobs::update_job_status(&mut *db, job_id_stopped, JobStatus::Stopped)
+    jobs::update_job_status(&mut *db, &job_id_stopped, JobStatus::Stopped)
         .await
         .expect("Failed to update job_id_stopped to Stopped");
 

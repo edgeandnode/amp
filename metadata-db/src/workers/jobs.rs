@@ -36,7 +36,7 @@ where
 /// `updated_at` timestamp.
 pub async fn update_job_status<'c, E>(
     exe: E,
-    id: JobId,
+    id: &JobId,
     status: JobStatus,
 ) -> Result<(), sqlx::Error>
 where
@@ -86,7 +86,7 @@ where
     Ok(res)
 }
 
-/// Get all job IDs scheduled for a given worker node
+/// Get all job IDs for a given worker node
 pub async fn get_job_ids_for_node<'c, E>(
     exe: E,
     node_id: &WorkerNodeId,
@@ -109,7 +109,7 @@ where
 
 /// Get all active job IDs for a given worker node
 ///
-/// A job is considered active if it's in a non-terminal state.
+/// A job is considered active if its in [`JobStatus::Scheduled`] or [`JobStatus::Running`].
 pub async fn get_active_job_ids_for_node<'c, E>(
     exe: E,
     node_id: &WorkerNodeId,
@@ -126,12 +126,7 @@ where
     };
     let res = sqlx::query_scalar(query)
         .bind(node_id)
-        .bind([
-            JobStatus::Scheduled,
-            JobStatus::Running,
-            JobStatus::StopRequested,
-            JobStatus::Stopping,
-        ])
+        .bind([JobStatus::Scheduled, JobStatus::Running])
         .fetch_all(exe)
         .await?;
     Ok(res)

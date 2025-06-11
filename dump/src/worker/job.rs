@@ -92,9 +92,9 @@ impl Job {
         }
     }
 
-    pub async fn run(&self) -> Result<(), BoxError> {
+    pub async fn run(self) -> Result<(), BoxError> {
         match self {
-            Job::DumpTables { ctx, tables } => {
+            Job::DumpTables { ctx, ref tables } => {
                 dump_tables(
                     ctx.clone(),
                     tables,
