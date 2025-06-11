@@ -65,11 +65,11 @@ export class DatasetDefinition extends Schema.Class<DatasetDefinition>("DatasetD
   tables: Schema.Record({
     key: Schema.String,
     value: TableDefinition,
-  }).pipe(Schema.optionalWith({ default: () => ({}) })),
+  }).pipe(Schema.optional),
   functions: Schema.Record({
     key: Schema.String,
     value: FunctionDefinition,
-  }).pipe(Schema.optionalWith({ default: () => ({}) })),
+  }).pipe(Schema.optional),
 }) {}
 
 export class ArrowField extends Schema.Class<ArrowField>("ArrowField")({
@@ -116,9 +116,9 @@ export class DatasetManifest extends Schema.Class<DatasetManifest>("DatasetManif
   tables: Schema.Record({
     key: Schema.String,
     value: Table,
-  }).pipe(Schema.optionalWith({ default: () => ({}) })),
+  }),
   functions: Schema.Record({
     key: Schema.String,
     value: FunctionManifest,
-  }).pipe(Schema.optionalWith({ default: () => ({}) })),
+  }),
 }) {}

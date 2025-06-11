@@ -13,7 +13,7 @@ export class ManifestBuilder extends Effect.Service<ManifestBuilder>()("Nozzle/M
     const client = yield* Api.Registry
     const build = (manifest: Model.DatasetDefinition) =>
       Effect.gen(function*() {
-        const tables = yield* Effect.forEach(Object.entries(manifest.tables), ([name, table]) =>
+        const tables = yield* Effect.forEach(Object.entries(manifest.tables ?? {}), ([name, table]) =>
           Effect.gen(function*() {
             const schema = yield* client.schema(table.sql).pipe(Effect.catchTags({
               RegistryError: (cause) =>
@@ -41,7 +41,7 @@ export class ManifestBuilder extends Effect.Service<ManifestBuilder>()("Nozzle/M
             return [name, output] as const
           }), { concurrency: 5 })
 
-        const functions = Object.entries(manifest.functions).map(([name, func]) => {
+        const functions = Object.entries(manifest.functions ?? {}).map(([name, func]) => {
           const { inputTypes, outputType, source } = func
           const functionManifest = new Model.FunctionManifest({
             name,
