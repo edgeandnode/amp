@@ -44,19 +44,14 @@ impl TestClient {
             .do_get(info.endpoint[0].ticket.take().unwrap())
             .await?;
 
-        tracing::debug!("here we are");
-
         let mut buf = Vec::new();
         let mut writer = ArrayWriter::new(&mut buf);
 
         let mut remaining = take.unwrap_or(usize::MAX);
 
         while let Some(batch_result) = batches.next().await {
-            tracing::debug!("now loopings");
-
-            let batch = dbg!(batch_result?);
-            let row_count = dbg!(batch.num_rows());
-            tracing::debug!("now loopings {row_count} rows in batch");
+            let batch = batch_result?;
+            let row_count = batch.num_rows();
 
             if remaining >= row_count {
                 writer.write(&batch)?;
