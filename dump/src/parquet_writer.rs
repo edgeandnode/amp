@@ -216,7 +216,10 @@ impl RawTableWriter {
             assert!(parquet_meta.is_none());
 
             // Close the current file at `block_num - 1`, the highest block height scanned by it.
-            assert!(self.ranges_to_write.last().unwrap().1 == (block_num - 1));
+            assert_eq!(
+                *self.current_range.as_ref().unwrap().numbers.end(),
+                block_num - 1
+            );
             parquet_meta = Some(self.close_current_file().await?);
 
             // The current range was partially written, so we need to split it.
