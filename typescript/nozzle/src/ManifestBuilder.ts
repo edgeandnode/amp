@@ -10,7 +10,7 @@ export class ManifestBuilderError extends Data.TaggedError("ManifestBuilderError
 
 // TODO: Remove this once the registry endpoint returns the `block_num` field for datasets.
 const blockNumField = new Model.ArrowField({
-  name: "block_num",
+  name: "_block_num",
   type: "UInt64",
   nullable: false,
 })
