@@ -16,7 +16,6 @@ use common::{
     catalog::physical::{Catalog, PhysicalTable},
     config::{Addrs, Config},
     metadata::block_ranges_by_table,
-    multirange::MultiRange,
     query_context::parse_sql,
     BoxError, QueryContext,
 };
@@ -183,18 +182,19 @@ impl SnapshotContext {
     }
 
     async fn check_block_range_eq(&self, blessed: &SnapshotContext) -> Result<(), BoxError> {
-        let blessed_block_ranges = block_ranges_by_table(&blessed.ctx).await?;
+        let mut blessed_block_ranges = block_ranges_by_table(&blessed.ctx).await?;
 
         for table in self.ctx.catalog().tables() {
-            let table_name = table.table_name().to_string();
-            let ranges = table.ranges().await?;
-            let expected_range = MultiRange::from_ranges(ranges)?;
-            let actual_range = &blessed_block_ranges[&table_name];
+            let table_name = table.table_name();
+            let mut expected_ranges = table.ranges().await?;
+            expected_ranges.sort_by_key(|r| *r.numbers.start());
+            let actual_ranges = blessed_block_ranges.get_mut(table_name).unwrap();
+            actual_ranges.sort_by_key(|r| *r.numbers.start());
             let table_qualified = table.table_ref().to_string();
             assert_eq!(
-                expected_range, *actual_range,
+                &expected_ranges, actual_ranges,
                 "for table {table_qualified}, \
-                 the test expected data ranges to be exactly {expected_range}, but dataset has data ranges {actual_range}"
+                 the test expected data ranges to be exactly {expected_ranges:?}, but dataset has data ranges {actual_ranges:?}"
             );
         }
 
@@ -236,7 +236,7 @@ pub(crate) async fn dump_dataset(
     n_jobs: u16,
 ) -> Result<(), BoxError> {
     // dump the dataset
-    let partition_size = 1024 * 1024; // 100 kB
+    let partition_size_mb = 100;
     let input_batch_block_size = 100_000;
     let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
 
@@ -248,7 +248,7 @@ pub(crate) async fn dump_dataset(
         start as i64,
         Some(end.to_string()),
         n_jobs,
-        partition_size,
+        partition_size_mb,
         input_batch_block_size,
         false,
         None,

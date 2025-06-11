@@ -244,13 +244,11 @@ impl QueryContext {
             opts.execution.collect_statistics = true;
         }
 
-        let this = Self {
+        Ok(Self {
             env,
             session_config,
             catalog,
-        };
-
-        Ok(this)
+        })
     }
 
     pub fn catalog(&self) -> &Catalog {

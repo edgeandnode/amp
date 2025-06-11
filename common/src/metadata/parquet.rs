@@ -20,15 +20,18 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::Timestamp;
+use crate::{metadata::range::BlockRange, Timestamp};
 
 pub const PARQUET_METADATA_KEY: &'static str = "nozzle_metadata";
 
+/// File metadata stored in the metadata DB and the KV metadata of the corresponding parquet file.
+/// Modifying the serialization of this struct may break compatibility with existing parquet files
+/// that have been dumped.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ParquetMeta {
     pub table: String,
-    pub range_start: u64,
-    pub range_end: u64,
     pub filename: String,
     pub created_at: Timestamp,
+    // for now, this list should contain exactly 1 entry
+    pub ranges: Vec<BlockRange>,
 }

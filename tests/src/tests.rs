@@ -28,7 +28,7 @@ async fn evm_rpc_single_dump() {
         .await
         .unwrap();
 
-    // Check the dataset directly against the Firehose provider with `check_blocks`.
+    // Check the dataset directly against the RPC provider with `check_blocks`.
     check_blocks(&test_env, dataset_name, 15_000_000, 15_000_000)
         .await
         .expect("blessed data differed from provider");

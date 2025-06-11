@@ -101,10 +101,6 @@ impl RawTableRows {
         Ok(RawTableRows { table, rows, range })
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.rows.num_rows() == 0
-    }
-
     pub fn block_num(&self) -> BlockNum {
         *self.range.numbers.start()
     }
@@ -145,10 +141,6 @@ impl RawDatasetRows {
         assert!(!rows.is_empty());
         assert!(rows.iter().skip(1).all(|r| &r.range == &rows[0].range));
         Self(rows)
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.0.iter().all(|t| t.is_empty())
     }
 
     pub fn block_num(&self) -> BlockNum {

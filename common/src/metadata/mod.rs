@@ -5,7 +5,7 @@ use metadata_db::{FileId, FileMetadataRow, LocationId, MetadataDb};
 use object_store::{path::Path, ObjectMeta};
 use url::Url;
 
-use crate::{multirange::MultiRange, BoxError, QueryContext};
+use crate::{metadata::range::BlockRange, multirange::MultiRange, BoxError, QueryContext};
 
 pub mod parquet;
 pub mod range;
@@ -61,20 +61,19 @@ impl TryFrom<FileMetadataRow> for FileMetadata {
 pub async fn ranges_for_table(
     location_id: i64,
     metadata_db: &MetadataDb,
-) -> Result<Vec<(u64, u64)>, BoxError> {
+) -> Result<Vec<BlockRange>, BoxError> {
     metadata_db
         .stream_file_metadata(location_id)
         .map(|res| {
             let FileMetadata {
-                parquet_meta:
-                    parquet::ParquetMeta {
-                        range_start,
-                        range_end,
-                        ..
-                    },
+                file_name,
+                parquet_meta: parquet::ParquetMeta { mut ranges, .. },
                 ..
             } = res?.try_into()?;
-            Ok((range_start, range_end))
+            if ranges.len() != 1 {
+                return Err(format!("expected exactly 1 range in {file_name}").into());
+            }
+            Ok(ranges.remove(0))
         })
         .try_collect::<Vec<_>>()
         .await
@@ -82,16 +81,28 @@ pub async fn ranges_for_table(
 
 pub async fn block_ranges_by_table(
     ctx: &QueryContext,
-) -> Result<BTreeMap<String, MultiRange>, BoxError> {
-    let mut multirange_by_table = BTreeMap::default();
-
+) -> Result<BTreeMap<String, Vec<BlockRange>>, BoxError> {
+    let mut ranges_by_table = BTreeMap::default();
     for table in ctx.catalog().tables() {
         let ranges = ranges_for_table(table.location_id(), &table.metadata_db).await?;
-        let multi_range = MultiRange::from_ranges(ranges)?;
-        multirange_by_table.insert(table.table_name().to_string(), multi_range);
+        ranges_by_table.insert(table.table_name().to_string(), ranges);
     }
+    Ok(ranges_by_table)
+}
 
-    Ok(multirange_by_table)
+pub async fn multiranges_by_table(
+    ctx: &QueryContext,
+) -> Result<BTreeMap<String, MultiRange>, BoxError> {
+    let ranges = block_ranges_by_table(ctx).await?;
+    let multi_ranges = ranges
+        .into_iter()
+        .map(|(k, v)| {
+            let ranges = v.into_iter().map(|r| r.numbers.into_inner()).collect();
+            let multirange = MultiRange::from_ranges(ranges)?;
+            Ok((k, multirange))
+        })
+        .collect::<Result<BTreeMap<String, MultiRange>, BoxError>>()?;
+    Ok(multi_ranges)
 }
 
 pub async fn filenames_for_table(

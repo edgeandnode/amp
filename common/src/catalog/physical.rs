@@ -18,8 +18,10 @@ use uuid::Uuid;
 use crate::{
     metadata::{
         parquet::{ParquetMeta, PARQUET_METADATA_KEY},
+        range::BlockRange,
         FileMetadata,
     },
+    multirange::MultiRange,
     store::{infer_object_store, Store},
     BoxError, Dataset, ResolvedTable,
 };
@@ -342,19 +344,21 @@ impl PhysicalTable {
             .boxed()
     }
 
-    pub fn stream_ranges(&self) -> BoxStream<'_, Result<(u64, u64), BoxError>> {
+    pub fn stream_ranges(&self) -> BoxStream<'_, Result<BlockRange, BoxError>> {
         self.stream_file_metadata()
-            .map_ok(
-                |FileMetadata {
-                     parquet_meta:
-                         ParquetMeta {
-                             range_start,
-                             range_end,
-                             ..
-                         },
-                     ..
-                 }| { (range_start, range_end) },
-            )
+            .map(|r| {
+                let FileMetadata {
+                    file_name,
+                    parquet_meta: ParquetMeta { mut ranges, .. },
+                    ..
+                } = r?;
+                if ranges.len() != 1 {
+                    return Err(BoxError::from(format!(
+                        "expected exactly 1 range for {file_name}"
+                    )));
+                }
+                Ok(ranges.remove(0))
+            })
             .boxed()
     }
 
@@ -392,9 +396,18 @@ impl PhysicalTable {
         Ok(parquet_files)
     }
 
-    pub async fn ranges(&self) -> Result<Vec<(u64, u64)>, BoxError> {
+    pub async fn ranges(&self) -> Result<Vec<BlockRange>, BoxError> {
         let ranges = self.stream_ranges().try_collect().await?;
         Ok(ranges)
+    }
+
+    pub async fn multi_range(&self) -> Result<MultiRange, BoxError> {
+        let ranges = self
+            .stream_ranges()
+            .map(|r| r.map(|r| r.numbers.clone().into_inner()))
+            .try_collect()
+            .await?;
+        MultiRange::from_ranges(ranges).map_err(Into::into)
     }
 
     /// Truncate this table by deleting all dump files making up the table

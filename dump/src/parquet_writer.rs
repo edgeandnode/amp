@@ -4,7 +4,10 @@ pub use common::parquet::file::properties::WriterProperties as ParquetWriterProp
 use common::{
     arrow::array::RecordBatch,
     catalog::physical::PhysicalTable,
-    metadata::parquet::{ParquetMeta, PARQUET_METADATA_KEY},
+    metadata::{
+        parquet::{ParquetMeta, PARQUET_METADATA_KEY},
+        range::BlockRange,
+    },
     multirange::MultiRange,
     parquet::{arrow::AsyncArrowWriter, errors::ParquetError, format::KeyValue},
     BlockNum, BoxError, QueryContext, RawTableRows, Timestamp,
@@ -18,7 +21,7 @@ const MAX_PARTITION_BLOCK_RANGE: u64 = 1_000_000;
 
 /// Only used for raw datasets.
 pub struct RawDatasetWriter {
-    writers: BTreeMap<String, TableWriter>,
+    writers: BTreeMap<String, RawTableWriter>,
 
     metadata_db: Arc<MetadataDb>,
 }
@@ -40,7 +43,7 @@ impl RawDatasetWriter {
             // Unwrap: `block_ranges_by_table` contains an entry for each table.
             let table_name = table.table_name();
             let block_ranges = block_ranges_by_table.get(table_name).unwrap().clone();
-            let writer = TableWriter::new(
+            let writer = RawTableWriter::new(
                 table.clone(),
                 opts.clone(),
                 partition_size,
@@ -57,13 +60,9 @@ impl RawDatasetWriter {
     }
 
     pub async fn write(&mut self, table_rows: RawTableRows) -> Result<(), BoxError> {
-        if table_rows.is_empty() {
-            return Ok(());
-        }
-
         let table_name = table_rows.table.name.as_str();
         let writer = self.writers.get_mut(table_name).unwrap();
-        if let Some((parquet_meta, object_meta)) = writer.write(&table_rows).await? {
+        if let Some((parquet_meta, object_meta)) = writer.write(table_rows).await? {
             let location_id = writer.table.location_id();
             commit_metadata(&self.metadata_db, parquet_meta, object_meta, location_id).await?;
         }
@@ -119,20 +118,20 @@ pub async fn commit_metadata(
     Ok(())
 }
 
-struct TableWriter {
+struct RawTableWriter {
     table: PhysicalTable,
     opts: ParquetWriterProperties,
     partition_size: u64,
 
     /// The ranges of block numbers that this writer is responsible for.
-    /// Organized as a stack, where the top range is the next one to be written.
+    /// Organized as a stack, where the top range is the one being written.
     ranges_to_write: Vec<(u64, u64)>,
 
-    current_range: Option<(u64, u64)>,
     current_file: Option<ParquetFileWriter>,
+    current_range: Option<BlockRange>,
 }
 
-impl TableWriter {
+impl RawTableWriter {
     pub fn new(
         table: PhysicalTable,
         opts: ParquetWriterProperties,
@@ -140,7 +139,7 @@ impl TableWriter {
         block_ranges: MultiRange,
         start: BlockNum,
         end: BlockNum,
-    ) -> Result<TableWriter, BoxError> {
+    ) -> Result<Self, BoxError> {
         let ranges_to_write = {
             // Limit maximum range size to 1_000_000 blocks.
             let mut ranges = block_ranges
@@ -149,22 +148,23 @@ impl TableWriter {
             ranges.reverse();
             ranges
         };
-
-        let mut this = TableWriter {
+        let current_file = match ranges_to_write.last() {
+            Some((start, _)) => Some(ParquetFileWriter::new(table.clone(), opts.clone(), *start)?),
+            None => None,
+        };
+        Ok(Self {
             table,
             opts,
             ranges_to_write,
             partition_size,
+            current_file,
             current_range: None,
-            current_file: None,
-        };
-        this.next_range()?;
-        Ok(this)
+        })
     }
 
     pub async fn write(
         &mut self,
-        table_rows: &RawTableRows,
+        table_rows: RawTableRows,
     ) -> Result<Option<(ParquetMeta, ObjectMeta)>, BoxError> {
         assert_eq!(table_rows.table.name, self.table.table_name());
 
@@ -172,23 +172,33 @@ impl TableWriter {
         let block_num = table_rows.block_num();
 
         // The block is past the current range, so we need to close the current file and start a new one.
-        if self.current_range.is_some_and(|r| r.1 < block_num) {
-            // Unwrap: `current_range` is `Some` by `is_some_and`.
-            let end = self.current_range.unwrap().1;
-            // Unwrap: If `current_range` is `Some` then `current_file` is also `Some`.
-            parquet_meta = Some(self.current_file.take().unwrap().close(end).await?);
-            self.next_range()?;
+        if self
+            .ranges_to_write
+            .last()
+            .is_some_and(|(_, end)| *end < block_num)
+        {
+            parquet_meta = Some(self.close_current_file().await?);
+            assert!(self.current_file.is_none());
+            self.ranges_to_write.pop();
+            self.current_file = match self.ranges_to_write.last() {
+                Some((start, _)) => Some(ParquetFileWriter::new(
+                    self.table.clone(),
+                    self.opts.clone(),
+                    *start,
+                )?),
+                None => None,
+            };
         }
 
-        // For the rest of the function, since `is_finished` is false, we can unwrap `current_range`
-        // and `current_file`.
-        if self.is_finished() {
+        if self.ranges_to_write.is_empty() {
             // There are no more ranges to write.
+            assert!(self.current_file.is_none());
+            assert!(self.current_range.is_none());
             return Ok(parquet_meta);
         }
 
         // If the block stream has not yet reached the current range, then skip this block.
-        if block_num < self.current_range.unwrap().0 {
+        if block_num < self.ranges_to_write.last().unwrap().0 {
             return Ok(parquet_meta);
         }
 
@@ -202,13 +212,14 @@ impl TableWriter {
             assert!(parquet_meta.is_none());
 
             // Close the current file at `block_num - 1`, the highest block height scanned by it.
-            let end = block_num - 1;
-            let file_to_close = self.current_file.take().unwrap();
-            parquet_meta = Some(file_to_close.close(end).await?);
+            assert_eq!(
+                *self.current_range.as_ref().unwrap().numbers.end(),
+                block_num - 1
+            );
+            parquet_meta = Some(self.close_current_file().await?);
 
             // The current range was partially written, so we need to split it.
-            let end = self.current_range.unwrap().1;
-            self.current_range = Some((block_num, end));
+            self.ranges_to_write.last_mut().unwrap().0 = block_num;
             self.current_file = Some(ParquetFileWriter::new(
                 self.table.clone(),
                 self.opts.clone(),
@@ -218,48 +229,37 @@ impl TableWriter {
 
         let rows = &table_rows.rows;
         self.current_file.as_mut().unwrap().write(rows).await?;
+        self.current_range = match self.current_range.take() {
+            None => Some(table_rows.range),
+            Some(range) => {
+                assert_eq!(&range.network, &table_rows.range.network);
+                Some(BlockRange {
+                    numbers: *range.numbers.start()..=*table_rows.range.numbers.end(),
+                    network: range.network,
+                    hash: table_rows.range.hash,
+                    prev_hash: range.prev_hash,
+                })
+            }
+        };
 
         Ok(parquet_meta)
     }
 
-    fn next_range(&mut self) -> Result<(), BoxError> {
-        // Assert that the current file has been closed.
-        assert!(self.current_file.is_none());
-
-        self.current_range = self.ranges_to_write.pop();
-        self.current_file = match self.current_range {
-            Some((start, _)) => Some(ParquetFileWriter::new(
-                self.table.clone(),
-                self.opts.clone(),
-                start,
-            )?),
-            None => None,
-        };
-        Ok(())
-    }
-
-    fn is_finished(&self) -> bool {
-        match (&self.current_range, &self.current_file) {
-            (Some(_), Some(_)) => false,
-            (None, None) => {
-                // If there is no current range and file, then there should be no ranges to write.
-                assert!(self.ranges_to_write.is_empty());
-                true
-            }
-            _ => panic!("inconsistent table writer state"),
+    async fn close(mut self) -> Result<Option<(ParquetMeta, ObjectMeta)>, BoxError> {
+        if self.current_file.is_none() {
+            assert!(self.ranges_to_write.is_empty());
+            return Ok(None);
         }
-    }
-
-    async fn close(self) -> Result<Option<(ParquetMeta, ObjectMeta)>, BoxError> {
         // We should be closing the last range.
-        assert!(self.ranges_to_write.is_empty());
+        assert!(self.ranges_to_write.len() == 1);
+        self.close_current_file().await.map(Some)
+    }
 
-        if let (Some(range), Some(file)) = (self.current_range, self.current_file) {
-            let end = range.1;
-            file.close(end).await.map(Some)
-        } else {
-            Ok(None)
-        }
+    async fn close_current_file(&mut self) -> Result<(ParquetMeta, ObjectMeta), BoxError> {
+        assert!(self.current_file.is_some());
+        let file = self.current_file.take().unwrap();
+        let range = self.current_range.take().unwrap();
+        file.close(range).await
     }
 }
 
@@ -267,11 +267,7 @@ pub struct ParquetFileWriter {
     writer: AsyncArrowWriter<BufWriter>,
     file_url: Url,
     filename: String,
-
     table: PhysicalTable,
-
-    // The first block number in the range that this writer is responsible for.
-    start: BlockNum,
 }
 
 impl ParquetFileWriter {
@@ -280,6 +276,7 @@ impl ParquetFileWriter {
         opts: ParquetWriterProperties,
         start: BlockNum,
     ) -> Result<ParquetFileWriter, BoxError> {
+        // TODO: We need to make file names unique when we start handling non-finalized blocks.
         let filename = {
             // Pad `start` to 9 digits for lexicographical sorting.
             let padded_start = format!("{:09}", start);
@@ -291,10 +288,9 @@ impl ParquetFileWriter {
         let writer = AsyncArrowWriter::try_new(object_writer, table.schema(), Some(opts.clone()))?;
         Ok(ParquetFileWriter {
             writer,
-            start,
-            table,
             file_url,
             filename,
+            table,
         })
     }
 
@@ -303,33 +299,26 @@ impl ParquetFileWriter {
     }
 
     #[must_use]
-    pub async fn close(mut self, end: BlockNum) -> Result<(ParquetMeta, ObjectMeta), BoxError> {
-        if end < self.start {
-            return Err(
-                format!("end block {} must be after start block {}", end, self.start).into(),
-            );
-        }
-
+    pub async fn close(mut self, range: BlockRange) -> Result<(ParquetMeta, ObjectMeta), BoxError> {
         self.writer.flush().await?;
 
         debug!(
             "wrote {} for range {} to {}",
-            self.file_url, self.start, end
+            self.file_url,
+            range.numbers.start(),
+            range.numbers.end(),
         );
 
         let parquet_meta = ParquetMeta {
             table: self.table.table_name().to_string(),
-            range_start: self.start,
-            range_end: end,
             filename: self.filename,
             created_at: Timestamp::now(),
+            ranges: vec![range],
         };
-
-        let parquet_meta_key = PARQUET_METADATA_KEY.to_string();
-        let parquet_meta_value = serde_json::to_string(&parquet_meta)?;
-
-        let kv_metadata = KeyValue::new(parquet_meta_key, parquet_meta_value);
-
+        let kv_metadata = KeyValue::new(
+            PARQUET_METADATA_KEY.to_string(),
+            serde_json::to_string(&parquet_meta)?,
+        );
         self.writer.append_key_value_metadata(kv_metadata);
         self.writer.close().await?;
 

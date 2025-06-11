@@ -114,14 +114,19 @@
 //! - **Incremental Updates**: Avoids reprocessing already-computed data by maintaining
 //!   precise tracking of processed block ranges per table.
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
 use common::{
     catalog::physical::PhysicalTable,
+    metadata::range::BlockRange,
     multirange::MultiRange,
-    query_context::{QueryContext, QueryEnv},
-    BlockNum, BoxError,
+    query_context::{parse_sql, QueryContext, QueryEnv},
+    BlockNum, BoxError, DatasetWithProvider,
 };
+use datafusion::common::cast::as_fixed_size_binary_array;
 use dataset_store::{
     sql_datasets::{is_incremental, max_end_block, SqlDataset},
     DatasetStore,
@@ -166,6 +171,13 @@ pub async fn dump(
                 .ctx_for_sql(&query, env.clone())
                 .await?
                 .into();
+            let src_datasets: BTreeSet<&str> = src_ctx
+                .catalog()
+                .tables()
+                .iter()
+                .map(|t| t.dataset().name.as_str())
+                .collect();
+
             let plan = src_ctx.plan_sql(query.clone()).await?;
             let is_incr = is_incremental(&plan)?;
             let (start, end) = match (start, end) {
@@ -197,12 +209,20 @@ pub async fn dump(
                             physical_table.table_ref()
                         );
 
+                        let range = resolve_block_range(
+                            env.clone(),
+                            &dataset_store,
+                            &src_datasets,
+                            physical_table.network().to_string(),
+                            start,
+                            batch_end,
+                        )
+                        .await?;
                         dump_sql_query(
                             &dataset_store,
                             &query,
                             &env,
-                            start,
-                            batch_end,
+                            range,
                             physical_table,
                             &parquet_opts,
                         )
@@ -223,12 +243,20 @@ pub async fn dump(
                     physical_table.table_ref(),
                     physical_table.url()
                 );
+                let range = resolve_block_range(
+                    env.clone(),
+                    &dataset_store,
+                    &src_datasets,
+                    physical_table.network().to_string(),
+                    start,
+                    end,
+                )
+                .await?;
                 dump_sql_query(
                     &dataset_store,
                     &query,
                     &env,
-                    start,
-                    end,
+                    range,
                     &physical_table,
                     &parquet_opts,
                 )
@@ -253,22 +281,22 @@ async fn dump_sql_query(
     dataset_store: &Arc<DatasetStore>,
     query: &datafusion::sql::parser::Statement,
     env: &QueryEnv,
-    start: BlockNum,
-    end: BlockNum,
+    range: BlockRange,
     physical_table: &common::catalog::physical::PhysicalTable,
     parquet_opts: &ParquetWriterProperties,
 ) -> Result<(), BoxError> {
     use dataset_store::sql_datasets::execute_query_for_range;
 
-    let store = dataset_store.clone();
-    let mut stream = execute_query_for_range(query.clone(), store, env.clone(), start, end).await?;
+    let (start, end) = range.numbers.clone().into_inner();
+    let mut stream =
+        execute_query_for_range(query.clone(), dataset_store, env.clone(), start, end).await?;
     let mut writer = ParquetFileWriter::new(physical_table.clone(), parquet_opts.clone(), start)?;
 
     while let Some(batch) = stream.try_next().await? {
         writer.write(&batch).await?;
     }
 
-    let (parquet_meta, object_meta) = writer.close(end).await?;
+    let (parquet_meta, object_meta) = writer.close(range).await?;
     commit_metadata(
         &dataset_store.metadata_db,
         parquet_meta,
@@ -276,4 +304,94 @@ async fn dump_sql_query(
         physical_table.location_id(),
     )
     .await
+}
+
+/// Derive the BlockRange for the dense block number range [start, end] from the `blocks` table
+/// of the raw dataset this table is derived from. For now, we only support materializing SQL
+/// queries depending on block data from a single network.
+async fn resolve_block_range(
+    env: QueryEnv,
+    dataset_store: &Arc<DatasetStore>,
+    src_datasets: &BTreeSet<&str>,
+    network: String,
+    start: BlockNum,
+    end: BlockNum,
+) -> Result<BlockRange, BoxError> {
+    let provider = {
+        let mut providers: Vec<DatasetWithProvider> = dataset_store
+            .all_datasets()
+            .await?
+            .into_iter()
+            .filter(|d| {
+                d.provider.is_some()
+                    && (d
+                        .dataset
+                        .tables
+                        .first()
+                        .map(|t| t.network == network)
+                        .unwrap_or(false))
+            })
+            .collect();
+
+        if providers.is_empty() {
+            return Err(format!("no provider found for network {network}").into());
+        }
+
+        match providers
+            .iter()
+            .position(|p| src_datasets.contains(p.dataset.name.as_str()))
+        {
+            Some(index) => providers.remove(index),
+            None => {
+                // Make sure fallback provider selection is deterministic.
+                providers.sort_by(|a, b| a.dataset.name.cmp(&b.dataset.name));
+                if providers.len() > 1 {
+                    tracing::debug!(
+                        "selecting provider {} for network {}",
+                        providers[0].dataset.name,
+                        network
+                    );
+                }
+                providers.remove(0)
+            }
+        }
+    };
+
+    assert!(provider.dataset.tables.iter().any(|t| t.name == "blocks"));
+    let blocks_table = format!("{}.blocks", provider.dataset.name);
+    let query = parse_sql(&format!(
+        r#"
+        SELECT * FROM
+            (SELECT hash FROM {blocks_table} WHERE block_num = {end}),
+            (SELECT parent_hash FROM {blocks_table} WHERE block_num = {start})
+        "#
+    ))?;
+    let ctx = dataset_store.ctx_for_sql(&query, env).await?;
+    let plan = ctx.plan_sql(query).await?;
+    let results = ctx.execute_and_concat(plan).await?;
+    if results.num_rows() != 1 {
+        return Err(format!(
+            "failed to resolve block metadata from {} for range {} to {}",
+            blocks_table, start, end,
+        )
+        .into());
+    }
+    let hash = as_fixed_size_binary_array(results.column_by_name("hash").unwrap())
+        .unwrap()
+        .value(0)
+        .try_into()
+        .unwrap();
+    let prev_hash = Some(
+        as_fixed_size_binary_array(results.column_by_name("parent_hash").unwrap())
+            .unwrap()
+            .value(0)
+            .try_into()
+            .unwrap(),
+    );
+    Ok(BlockRange {
+        numbers: start..=end,
+        network,
+        hash,
+        prev_hash,
+    })
 }

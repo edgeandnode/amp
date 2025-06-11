@@ -180,7 +180,6 @@ impl BlockStreamer for Client {
                             };
 
                             match transform(block, &self.tables) {
-                                Ok(table_rows) if table_rows.is_empty() => continue,
                                 Ok(table_rows) => {
                                     yield Ok(table_rows);
                                     next_block = block_num + 1;

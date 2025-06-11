@@ -4,7 +4,7 @@ use alloy::primitives::BlockHash;
 
 use crate::BlockNum;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub struct BlockRange {
     pub numbers: RangeInclusive<BlockNum>,
     pub network: String,
