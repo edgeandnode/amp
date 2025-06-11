@@ -14,6 +14,7 @@ const count = event("Count(uint256 count)")
 export default defineDataset(() => ({
   name: "example",
   version: "0.1.0",
+  network: "mainnet",
   dependencies: {
     mainnet: {
       owner: "graphprotocol",

@@ -23,7 +23,7 @@ pub struct Dataset {
 #[derive(Clone, Debug)]
 pub struct DatasetWithProvider {
     pub dataset: Dataset,
-    pub provider: Option<String>,
+    pub provider: Option<toml::Value>,
 }
 
 impl Dataset {

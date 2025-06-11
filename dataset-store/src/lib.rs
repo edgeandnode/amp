@@ -28,6 +28,8 @@ use datafusion::{
 use futures::{future::BoxFuture, FutureExt as _, Stream, TryFutureExt as _};
 use js_runtime::isolate_pool::IsolatePool;
 use metadata_db::MetadataDb;
+use object_store::ObjectMeta;
+use rand::seq::SliceRandom;
 use serde::Deserialize;
 use sql_datasets::SqlDataset;
 use thiserror::Error;
@@ -71,6 +73,12 @@ pub enum Error {
 
     #[error("error parsing SQL: {0}")]
     SqlParseError(query_context::Error),
+
+    #[error("provider not found for dataset kind '{dataset_kind}' and network '{network}'")]
+    ProviderNotFound {
+        dataset_kind: DatasetKind,
+        network: String,
+    },
 
     #[error("{0}")]
     Unknown(BoxError),
@@ -194,6 +202,8 @@ pub struct DatasetStore {
     eth_call_cache: Arc<RwLock<HashMap<String, ScalarUDF>>>,
     // This cache maps dataset name to the dataset definition.
     dataset_cache: Arc<RwLock<HashMap<String, DatasetWithProvider>>>,
+    // Cache of provider definitions.
+    providers_cache: Arc<RwLock<Option<Vec<ObjectMeta>>>>,
 }
 
 impl DatasetStore {
@@ -203,6 +213,7 @@ impl DatasetStore {
             metadata_db,
             eth_call_cache: Default::default(),
             dataset_cache: Default::default(),
+            providers_cache: Default::default(),
         })
     }
 
@@ -285,20 +296,23 @@ impl DatasetStore {
             return Ok(dataset.clone());
         }
 
-        let (kind, raw_dataset) = self.kind_and_dataset(dataset_name).await?;
+        let (kind, network, raw_dataset) = self.kind_network_dataset(dataset_name).await?;
 
         let dataset = match kind {
             DatasetKind::EvmRpc => {
                 let dataset_toml: toml::Value = toml::from_str(&raw_dataset)?;
-                evm_rpc_datasets::dataset(dataset_toml)?
+                let provider = self.find_provider(kind, network.clone()).await?;
+                evm_rpc_datasets::dataset(dataset_toml, provider)?
             }
             DatasetKind::Firehose => {
                 let dataset_toml: toml::Value = toml::from_str(&raw_dataset)?;
-                firehose_datasets::evm::dataset(dataset_toml)?
+                let provider = self.find_provider(kind, network.clone()).await?;
+                firehose_datasets::evm::dataset(dataset_toml, provider)?
             }
             DatasetKind::Substreams => {
                 let dataset_toml: toml::Value = toml::from_str(&raw_dataset)?;
-                substreams_datasets::dataset(dataset_toml).await?
+                let provider = self.find_provider(kind, network.clone()).await?;
+                substreams_datasets::dataset(dataset_toml, provider).await?
             }
             DatasetKind::Sql => {
                 let dataset_toml: toml::Value = toml::from_str(&raw_dataset)?;
@@ -349,81 +363,66 @@ impl DatasetStore {
             .map_err(|e| (dataset, e).into())
     }
 
-    #[instrument(skip(self), err)]
-    async fn load_client_inner(&self, dataset_name: &str) -> Result<impl BlockStreamer, Error> {
-        #[derive(Clone)]
-        pub enum BlockStreamClient {
-            EvmRpc(evm_rpc_datasets::JsonRpcClient),
-            Firehose(firehose_datasets::Client),
-            Substreams(substreams_datasets::Client),
-        }
-
-        impl BlockStreamer for BlockStreamClient {
-            async fn block_stream(
-                self,
-                start_block: BlockNum,
-                end_block: BlockNum,
-            ) -> impl Stream<Item = Result<RawDatasetRows, BoxError>> + Send {
-                // Each client returns a different concrete stream type, so we
-                // use `stream!` to unify them into a wrapper stream
-                stream! {
-                    match self {
-                        Self::EvmRpc(client) => {
-                            let stream = client.block_stream(start_block, end_block).await;
-                            for await item in stream {
-                                yield item;
-                            }
-                        }
-                        Self::Firehose(client) => {
-                            let stream = client.block_stream(start_block, end_block).await;
-                            for await item in stream {
-                                yield item;
-                            }
-                        }
-                        Self::Substreams(client) => {
-                            let stream = client.block_stream(start_block, end_block).await;
-                            for await item in stream {
-                                yield item;
-                            }
-                        }
-                    }
-                }
-            }
-
-            async fn latest_block(&mut self, finalized: bool) -> Result<BlockNum, BoxError> {
-                match self {
-                    Self::EvmRpc(client) => client.latest_block(finalized).await,
-                    Self::Firehose(client) => client.latest_block(finalized).await,
-                    Self::Substreams(client) => client.latest_block(finalized).await,
-                }
-            }
-        }
-
-        let (kind, raw_dataset) = self.kind_and_dataset(dataset_name).await?;
-        let toml: toml::Value = toml::from_str(&raw_dataset)?;
-
-        match kind {
-            DatasetKind::EvmRpc => {
-                let client = evm_rpc_datasets::client(toml, &self.providers_store()).await?;
-                Ok(BlockStreamClient::EvmRpc(client))
-            }
-            DatasetKind::Firehose => {
-                let client = firehose_datasets::Client::new(toml, self.providers_store()).await?;
-                Ok(BlockStreamClient::Firehose(client))
-            }
-            DatasetKind::Substreams => {
-                let client = substreams_datasets::Client::new(toml, self.providers_store()).await?;
-                Ok(BlockStreamClient::Substreams(client))
-            }
+    async fn load_client_inner(&self, dataset_name: &str) -> Result<BlockStreamClient, Error> {
+        let (dataset_kind, dataset_network, dataset) =
+            self.kind_network_dataset(dataset_name).await?;
+        let provider = self
+            .find_provider(dataset_kind, dataset_network.clone())
+            .await?;
+        Ok(match dataset_kind {
+            DatasetKind::EvmRpc => BlockStreamClient::EvmRpc(
+                evm_rpc_datasets::client(provider, dataset_network).await?,
+            ),
+            DatasetKind::Firehose => BlockStreamClient::Firehose(
+                firehose_datasets::Client::new(provider, dataset_network).await?,
+            ),
+            DatasetKind::Substreams => BlockStreamClient::Substreams(
+                substreams_datasets::Client::new(provider, &dataset, dataset_network).await?,
+            ),
             DatasetKind::Sql | DatasetKind::Manifest => {
-                Err(Error::UnsupportedKind(kind.to_string()))
+                // SQL and Manifest datasets don't have a client.
+                return Err(Error::UnsupportedKind(dataset_kind.to_string()));
             }
+        })
+    }
+
+    async fn find_provider(
+        &self,
+        dataset_kind: DatasetKind,
+        dataset_network: String,
+    ) -> Result<toml::Value, Error> {
+        let mut providers = self.all_providers().await?;
+        // Shuffle to provide load balancing across providers.
+        providers.shuffle(&mut rand::rng());
+        for obj in providers {
+            let location = obj.location.to_string();
+            let (kind, network, provider) = self.kind_network_provider(&location).await?;
+            if kind != dataset_kind || network != dataset_network {
+                continue;
+            }
+            return Ok(provider);
         }
+        Err(Error::ProviderNotFound {
+            dataset_kind,
+            network: dataset_network,
+        })
+    }
+
+    async fn all_providers(&self) -> Result<Vec<ObjectMeta>, Error> {
+        if let Some(providers) = self.providers_cache.read().unwrap().as_ref() {
+            // Cache is already populated.
+            return Ok(providers.clone());
+        }
+        let providers = self
+            .providers_store()
+            .list_all_shallow()
+            .await
+            .map_err(Error::FetchError)?;
+        *self.providers_cache.write().unwrap() = Some(providers.clone());
+        Ok(providers)
     }
 
     async fn kind_and_dataset(&self, dataset_name: &str) -> Result<(DatasetKind, String), Error> {
-        use Error::*;
-
         let (raw, common_fields) = {
             let filename = format!("{}.toml", dataset_name);
             match self.dataset_defs_store().get_string(filename).await {
@@ -443,11 +442,58 @@ impl DatasetStore {
             }
         };
         if common_fields.name != dataset_name {
-            return Err(NameMismatch(common_fields.name, dataset_name.to_string()));
+            return Err(Error::NameMismatch(
+                common_fields.name,
+                dataset_name.to_string(),
+            ));
         }
         let kind = DatasetKind::from_str(&common_fields.kind)?;
 
         Ok((kind, raw))
+    }
+
+    async fn kind_network_provider(
+        &self,
+        location: &str,
+    ) -> Result<(DatasetKind, String, toml::Value), Error> {
+        let raw = self.providers_store().get_string(location).await?;
+        let toml_value: toml::Value = toml::from_str(&raw)?;
+        let common_fields = ProviderDefsCommon::deserialize(toml_value.clone())?;
+        let kind = DatasetKind::from_str(&common_fields.kind)?;
+        Ok((kind, common_fields.network, toml_value))
+    }
+
+    async fn kind_network_dataset(
+        &self,
+        dataset_name: &str,
+    ) -> Result<(DatasetKind, String, String), Error> {
+        let (raw, common_fields) = {
+            let filename = format!("{}.toml", dataset_name);
+            match self.dataset_defs_store().get_string(filename).await {
+                Ok(raw_dataset) => {
+                    let toml_value: toml::Value = toml::from_str(&raw_dataset)?;
+                    (raw_dataset, DatasetDefsCommon::deserialize(toml_value)?)
+                }
+                Err(e) if e.is_not_found() => {
+                    // If it's not a TOML file, it might be a JSON file.
+                    // Ideally we migrate everything to JSON, but this is a stopgap.
+                    let filename = format!("{}.json", dataset_name);
+                    let raw_dataset = self.dataset_defs_store().get_string(filename).await?;
+                    let json_value: serde_json::Value = serde_json::from_str(&raw_dataset)?;
+                    (raw_dataset, DatasetDefsCommon::deserialize(json_value)?)
+                }
+                Err(e) => return Err(e.into()),
+            }
+        };
+        if common_fields.name != dataset_name {
+            return Err(Error::NameMismatch(
+                common_fields.name,
+                dataset_name.to_string(),
+            ));
+        }
+        let kind = DatasetKind::from_str(&common_fields.kind)?;
+
+        Ok((kind, common_fields.network, raw))
     }
 
     /// Returns cached eth_call scalar UDF, otherwise loads the UDF and caches it.
@@ -470,20 +516,8 @@ impl DatasetStore {
         }
 
         // Load the provider from the dataset definition.
-        if let Some(provider_location) = provider {
-            let provider = self
-                .providers_store()
-                .get_string(provider_location.clone())
-                .await?;
-            let provider: EvmRpcProvider = if provider_location.ends_with(".toml") {
-                toml::from_str(&provider)?
-            } else if provider_location.ends_with(".json") {
-                serde_json::from_str(&provider)?
-            } else {
-                return Err(Error::Unknown(
-                    format!("unknown provider format: {provider_location}").into(),
-                ));
-            };
+        if let Some(provider) = provider.clone() {
+            let provider: EvmRpcProvider = provider.try_into()?;
             // Cache the provider.
             let provider = alloy::providers::RootProvider::new_http(provider.url);
             let udf = AsyncScalarUDF::new(Arc::new(EthCall::new(&dataset.name, provider)))
@@ -643,11 +677,19 @@ impl DatasetStore {
     }
 }
 
-/// All dataset definitions must have a kind and name. The name must match the filename.
+/// All dataset definitions must have a kind, network and name. The name must match the filename.
 #[derive(Deserialize)]
 struct DatasetDefsCommon {
     kind: String,
+    network: String,
     name: String,
+}
+
+/// All providers definitions must have a kind and network.
+#[derive(Deserialize)]
+struct ProviderDefsCommon {
+    kind: String,
+    network: String,
 }
 
 fn datasets_from_table_refs<'a>(
@@ -677,4 +719,52 @@ fn datasets_from_table_refs<'a>(
         dataset_names.insert(catalog_schema.to_string());
     }
     Ok(dataset_names)
+}
+
+#[derive(Clone)]
+enum BlockStreamClient {
+    EvmRpc(evm_rpc_datasets::JsonRpcClient),
+    Firehose(firehose_datasets::Client),
+    Substreams(substreams_datasets::Client),
+}
+
+impl BlockStreamer for BlockStreamClient {
+    async fn block_stream(
+        self,
+        start_block: BlockNum,
+        end_block: BlockNum,
+    ) -> impl Stream<Item = Result<RawDatasetRows, BoxError>> + Send {
+        // Each client returns a different concrete stream type, so we
+        // use `stream!` to unify them into a wrapper stream
+        stream! {
+            match self {
+                Self::EvmRpc(client) => {
+                    let stream = client.block_stream(start_block, end_block).await;
+                    for await item in stream {
+                        yield item;
+                    }
+                }
+                Self::Firehose(client) => {
+                    let stream = client.block_stream(start_block, end_block).await;
+                    for await item in stream {
+                        yield item;
+                    }
+                }
+                Self::Substreams(client) => {
+                    let stream = client.block_stream(start_block, end_block).await;
+                    for await item in stream {
+                        yield item;
+                    }
+                }
+            }
+        }
+    }
+
+    async fn latest_block(&mut self, finalized: bool) -> Result<BlockNum, BoxError> {
+        match self {
+            Self::EvmRpc(client) => client.latest_block(finalized).await,
+            Self::Firehose(client) => client.latest_block(finalized).await,
+            Self::Substreams(client) => client.latest_block(finalized).await,
+        }
+    }
 }

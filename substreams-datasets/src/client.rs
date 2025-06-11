@@ -1,7 +1,7 @@
 use std::{str::FromStr, time::Duration};
 
 use async_stream::stream;
-use common::{BlockNum, BlockStreamer, BoxError, RawDatasetRows, Store, Table};
+use common::{BlockNum, BlockStreamer, BoxError, RawDatasetRows, Table};
 use firehose_datasets::{client::AuthInterceptor, Error};
 use futures::{Stream, StreamExt as _, TryStreamExt as _};
 use pbsubstreams::{response::Message, stream_client::StreamClient, Request as StreamRequest};
@@ -14,12 +14,13 @@ use tonic::{
 
 use super::tables::Tables;
 use crate::{
-    dataset::extract_def_and_provider,
+    dataset::SubstreamsProvider,
     proto::sf::substreams::{
         rpc::v2::{self as pbsubstreams, BlockScopedData},
         v1::Package,
     },
     transform::transform,
+    DatasetDef,
 };
 
 /// This client only handles final blocks.
@@ -57,8 +58,9 @@ impl Package {
 }
 
 impl Client {
-    pub async fn new(raw_config: toml::Value, provider_store: &Store) -> Result<Self, Error> {
-        let (def, provider) = extract_def_and_provider(raw_config, provider_store).await?;
+    pub async fn new(provider: toml::Value, dataset: &str, network: String) -> Result<Self, Error> {
+        let provider: SubstreamsProvider = provider.try_into()?;
+        let dataset_def: DatasetDef = toml::from_str(dataset)?;
 
         let stream_client = {
             let uri = Uri::from_str(&provider.url)?;
@@ -71,17 +73,25 @@ impl Client {
                 .send_compressed(CompressionEncoding::Gzip)
                 .max_decoding_message_size(100 * 1024 * 1024) // 100MiB
         };
-        let package = Package::from_url(def.manifest.as_str()).await?;
-        let network = package.network.clone();
+        let package = Package::from_url(dataset_def.manifest.as_str()).await?;
+        if package.network != network {
+            return Err(Error::AssertFail(
+                format!(
+                    "Package network '{}' does not match requested network '{}'",
+                    package.network, network
+                )
+                .into(),
+            ));
+        }
 
-        let tables = Tables::from_package(&package, &def.module)
+        let tables = Tables::from_package(&package, &dataset_def.module)
             .map_err(|_| Error::AssertFail("failed to build tables from spkg".into()))?;
 
         Ok(Self {
             stream_client,
             package,
             tables,
-            output_module: def.module,
+            output_module: dataset_def.module,
             network,
         })
     }

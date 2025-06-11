@@ -18,6 +18,14 @@ export const DatasetName = Schema.Lowercase.pipe(
   }),
 )
 
+export const DatasetNetwork = Schema.Lowercase.pipe(
+  Schema.annotations({
+    title: "Network",
+    description: "the network that this dataset is for",
+    examples: ["mainnet"],
+  }),
+)
+
 export const DatasetVersion = Schema.String.pipe(
   Schema.pattern(/^\d+\.\d+\.\d+$/),
   Schema.annotations({
@@ -55,6 +63,7 @@ export class FunctionDefinition extends Schema.Class<FunctionDefinition>("Functi
 
 export class DatasetDefinition extends Schema.Class<DatasetDefinition>("DatasetDefinition")({
   name: DatasetName,
+  network: DatasetNetwork,
   version: DatasetVersion,
   readme: DatasetReadme.pipe(Schema.optional),
   repository: DatasetRepository.pipe(Schema.optional),
@@ -107,6 +116,7 @@ export class FunctionManifest extends Schema.Class<FunctionManifest>("FunctionMa
 
 export class DatasetManifest extends Schema.Class<DatasetManifest>("DatasetManifest")({
   kind: Schema.Literal("manifest"),
+  network: DatasetNetwork,
   name: DatasetName,
   version: DatasetVersion,
   dependencies: Schema.Record({

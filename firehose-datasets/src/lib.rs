@@ -30,8 +30,6 @@ pub enum Error {
     Toml(#[from] toml::de::Error),
     #[error("store error: {0}")]
     StoreError(#[from] StoreError),
-    #[error("Dataset definition error: {0}")]
-    DatasetDefinitionError(BoxError),
 }
 
 mod dataset;

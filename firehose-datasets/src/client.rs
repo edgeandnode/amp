@@ -1,7 +1,7 @@
 use std::{str::FromStr, time::Duration};
 
 use async_stream::stream;
-use common::{store::Store, BlockNum, BlockStreamer, BoxError, RawDatasetRows};
+use common::{BlockNum, BlockStreamer, BoxError, RawDatasetRows};
 use futures::{Stream, StreamExt as _, TryStreamExt as _};
 use pbfirehose::{stream_client::StreamClient, ForkStep, Response as StreamResponse};
 use prost::Message as _;
@@ -13,7 +13,7 @@ use tonic::{
 };
 
 use crate::{
-    dataset::{extract_provider, FirehoseProvider},
+    dataset::FirehoseProvider,
     evm::{pb_to_rows::protobufs_to_rows, pbethereum},
     proto::sf::firehose::v2 as pbfirehose,
     Error,
@@ -31,14 +31,8 @@ pub struct Client {
 
 impl Client {
     /// Configure the client from a Firehose dataset definition.
-    pub async fn new(dataset_def: toml::Value, provider_store: &Store) -> Result<Self, Error> {
-        let provider = extract_provider(dataset_def, provider_store).await?;
-
-        let FirehoseProvider {
-            url,
-            token,
-            network,
-        } = provider;
+    pub async fn new(provider: toml::Value, network: String) -> Result<Self, Error> {
+        let FirehoseProvider { url, token } = provider.try_into()?;
 
         let client = {
             let uri = Uri::from_str(&url)?;

@@ -56,6 +56,7 @@ export class ManifestBuilder extends Effect.Service<ManifestBuilder>()("Nozzle/M
         return new Model.DatasetManifest({
           kind: "manifest",
           name: manifest.name,
+          network: manifest.network,
           version: manifest.version,
           tables: Object.fromEntries(tables),
           functions: Object.fromEntries(functions),

@@ -1,2 +1,4 @@
 # Copy this file into rpc_eth_mainnet.toml, filling in the provider
+kind = "evm-rpc"
 url = "$RPC_ETH_MAINNET_URL"
+network = "mainnet"
