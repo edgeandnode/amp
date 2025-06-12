@@ -1,8 +1,6 @@
 use std::sync::Arc;
 
-use common::{
-    catalog::physical::PhysicalTable, config::Config, manifest::Manifest, BoxError, Dataset,
-};
+use common::{catalog::physical::PhysicalTable, config::Config, BoxError, Dataset};
 use dump::worker::JobDesc;
 use metadata_db::MetadataDb;
 use rand::seq::IndexedRandom as _;
@@ -22,7 +20,7 @@ impl Scheduler {
     }
 
     /// Schedule a dump for a new copy of a dataset.
-    pub async fn schedule_dataset_dump(&self, dataset: Manifest) -> Result<(), BoxError> {
+    pub async fn schedule_dataset_dump(&self, dataset: Dataset) -> Result<(), BoxError> {
         // Scheduling procedure for a new `DumpDataset` job:
         // 1. Choose a responsive node.
         // 2. Create a new location for each table.
@@ -36,11 +34,10 @@ impl Scheduler {
             return Err("no available workers".into());
         };
 
-        let dataset: Arc<Dataset> = Arc::new(dataset.into());
         let dataset_name = dataset.name.clone();
 
         let mut locations = Vec::new();
-        for table in dataset.resolved_tables() {
+        for table in Arc::new(dataset).resolved_tables() {
             let physical_table = PhysicalTable::next_revision(
                 &table,
                 &self.config.data_store,
