@@ -6,10 +6,7 @@ use datafusion::{
     parquet::arrow::async_reader::{AsyncFileReader, ParquetObjectReader},
     sql::TableReference,
 };
-use futures::{
-    stream::{self, BoxStream},
-    StreamExt, TryStreamExt,
-};
+use futures::{stream, Stream, StreamExt, TryStreamExt};
 use metadata_db::{LocationId, MetadataDb, TableId};
 use object_store::{path::Path, ObjectMeta, ObjectStore};
 use url::Url;
@@ -393,47 +390,45 @@ impl PhysicalTable {
 
 // Methods for streaming metadata and file information of PhysicalTable
 impl PhysicalTable {
-    pub fn stream_file_metadata(&self) -> BoxStream<'_, Result<FileMetadata, BoxError>> {
+    pub fn stream_file_metadata<'a>(
+        &'a self,
+    ) -> impl Stream<Item = Result<FileMetadata, BoxError>> + 'a {
         self.metadata_db
             .stream_file_metadata(self.location_id)
             .map(|row| row?.try_into())
-            .boxed()
     }
 
-    pub fn stream_ranges(&self) -> BoxStream<'_, Result<BlockRange, BoxError>> {
-        self.stream_file_metadata()
-            .map(|r| {
-                let FileMetadata {
-                    file_name,
-                    parquet_meta: ParquetMeta { mut ranges, .. },
-                    ..
-                } = r?;
-                if ranges.len() != 1 {
-                    return Err(BoxError::from(format!(
-                        "expected exactly 1 range for {file_name}"
-                    )));
-                }
-                Ok(ranges.remove(0))
-            })
-            .boxed()
+    pub fn stream_ranges<'a>(&'a self) -> impl Stream<Item = Result<BlockRange, BoxError>> + 'a {
+        self.stream_file_metadata().map(|r| {
+            let FileMetadata {
+                file_name,
+                parquet_meta: ParquetMeta { mut ranges, .. },
+                ..
+            } = r?;
+            if ranges.len() != 1 {
+                return Err(BoxError::from(format!(
+                    "expected exactly 1 range for {file_name}"
+                )));
+            }
+            Ok(ranges.remove(0))
+        })
     }
 
-    pub fn stream_file_names(&self) -> BoxStream<'_, Result<String, BoxError>> {
+    pub fn stream_file_names<'a>(&'a self) -> impl Stream<Item = Result<String, BoxError>> + 'a {
         self.stream_file_metadata()
             .map_ok(|FileMetadata { file_name, .. }| file_name)
-            .boxed()
     }
 
-    pub fn stream_parquet_files(&self) -> BoxStream<'_, Result<(String, ObjectMeta), BoxError>> {
-        self.stream_file_metadata()
-            .map_ok(
-                move |FileMetadata {
-                          object_meta,
-                          file_name,
-                          ..
-                      }| (file_name, object_meta),
-            )
-            .boxed()
+    pub fn stream_parquet_files<'a>(
+        &'a self,
+    ) -> impl Stream<Item = Result<(String, ObjectMeta), BoxError>> + 'a {
+        self.stream_file_metadata().map_ok(
+            |FileMetadata {
+                 object_meta,
+                 file_name,
+                 ..
+             }| (file_name, object_meta),
+        )
     }
 }
 
