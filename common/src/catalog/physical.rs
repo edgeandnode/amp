@@ -80,6 +80,7 @@ pub struct PhysicalTable {
     pub metadata_db: Arc<MetadataDb>,
 }
 
+// Methods for creating and managing PhysicalTable instances
 impl PhysicalTable {
     /// Create a new physical table with the given dataset name, table, URL, and object store.
     pub fn new(
@@ -271,8 +272,30 @@ impl PhysicalTable {
 
         Ok(physical_table)
     }
+
+    /// Truncate this table by deleting all dump files making up the table
+    pub async fn truncate(&self) -> Result<(), BoxError> {
+        let files = self.parquet_files().await?;
+        let num_files = files.len();
+        let locations = Box::pin(stream::iter(files.into_values().map(|m| Ok(m.location))));
+        let deleted = self
+            .object_store
+            .delete_stream(locations)
+            .try_collect::<Vec<Path>>()
+            .await?;
+        if deleted.len() != num_files {
+            return Err(format!(
+                "expected to delete {} files, but deleted {}",
+                num_files,
+                deleted.len()
+            )
+            .into());
+        }
+        Ok(())
+    }
 }
 
+// Methods for accessing properties of PhysicalTable
 impl PhysicalTable {
     pub fn dataset(&self) -> &Dataset {
         self.table.dataset()
@@ -337,6 +360,39 @@ impl PhysicalTable {
         &self.table
     }
 
+    pub async fn file_names(&self) -> Result<Vec<String>, BoxError> {
+        let file_names = self.stream_file_names().try_collect().await?;
+        Ok(file_names)
+    }
+
+    /// Return all parquet files for this table. If `dump_only` is `true`,
+    /// only files of the form `<number>.parquet` will be returned. The
+    /// result is a map from filename to object metadata.
+    pub async fn parquet_files(&self) -> Result<BTreeMap<String, ObjectMeta>, BoxError> {
+        let parquet_files = self
+            .stream_parquet_files()
+            .try_collect::<BTreeMap<String, ObjectMeta>>()
+            .await?;
+        Ok(parquet_files)
+    }
+
+    pub async fn ranges(&self) -> Result<Vec<BlockRange>, BoxError> {
+        let ranges = self.stream_ranges().try_collect().await?;
+        Ok(ranges)
+    }
+
+    pub async fn multi_range(&self) -> Result<MultiRange, BoxError> {
+        let ranges = self
+            .stream_ranges()
+            .map(|r| r.map(|r| r.numbers.clone().into_inner()))
+            .try_collect()
+            .await?;
+        MultiRange::from_ranges(ranges).map_err(Into::into)
+    }
+}
+
+// Methods for streaming metadata and file information of PhysicalTable
+impl PhysicalTable {
     pub fn stream_file_metadata(&self) -> BoxStream<'_, Result<FileMetadata, BoxError>> {
         self.metadata_db
             .stream_file_metadata(self.location_id)
@@ -378,57 +434,6 @@ impl PhysicalTable {
                       }| (file_name, object_meta),
             )
             .boxed()
-    }
-
-    pub async fn file_names(&self) -> Result<Vec<String>, BoxError> {
-        let file_names = self.stream_file_names().try_collect().await?;
-        Ok(file_names)
-    }
-
-    /// Return all parquet files for this table. If `dump_only` is `true`,
-    /// only files of the form `<number>.parquet` will be returned. The
-    /// result is a map from filename to object metadata.
-    pub async fn parquet_files(&self) -> Result<BTreeMap<String, ObjectMeta>, BoxError> {
-        let parquet_files = self
-            .stream_parquet_files()
-            .try_collect::<BTreeMap<String, ObjectMeta>>()
-            .await?;
-        Ok(parquet_files)
-    }
-
-    pub async fn ranges(&self) -> Result<Vec<BlockRange>, BoxError> {
-        let ranges = self.stream_ranges().try_collect().await?;
-        Ok(ranges)
-    }
-
-    pub async fn multi_range(&self) -> Result<MultiRange, BoxError> {
-        let ranges = self
-            .stream_ranges()
-            .map(|r| r.map(|r| r.numbers.clone().into_inner()))
-            .try_collect()
-            .await?;
-        MultiRange::from_ranges(ranges).map_err(Into::into)
-    }
-
-    /// Truncate this table by deleting all dump files making up the table
-    pub async fn truncate(&self) -> Result<(), BoxError> {
-        let files = self.parquet_files().await?;
-        let num_files = files.len();
-        let locations = Box::pin(stream::iter(files.into_values().map(|m| Ok(m.location))));
-        let deleted = self
-            .object_store
-            .delete_stream(locations)
-            .try_collect::<Vec<Path>>()
-            .await?;
-        if deleted.len() != num_files {
-            return Err(format!(
-                "expected to delete {} files, but deleted {}",
-                num_files,
-                deleted.len()
-            )
-            .into());
-        }
-        Ok(())
     }
 }
 
