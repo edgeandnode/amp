@@ -26,7 +26,7 @@ use crate::parquet_writer::ParquetWriterProperties;
 /// Dumps a set of tables. All tables must belong to the same dataset.
 pub async fn dump_tables(
     ctx: Ctx,
-    tables: &[PhysicalTable],
+    tables: &[Arc<PhysicalTable>],
     n_jobs: u16,
     partition_size: u64,
     input_batch_size_blocks: u64,

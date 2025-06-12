@@ -574,7 +574,7 @@ impl DatasetStore {
                     "Table {} has not been synced",
                     table,
                 )))?;
-            tables.push(physical_table);
+            tables.push(physical_table.into());
         }
         Ok(Catalog::new(tables, logical_catalog.udfs))
     }

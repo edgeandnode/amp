@@ -266,7 +266,7 @@ async fn catalog_for_dataset(
         let physical_table = PhysicalTable::get_active(&table, metadata_db.clone())
             .await?
             .unwrap();
-        tables.push(physical_table);
+        tables.push(physical_table.into());
     }
     Ok(Catalog::new(tables, vec![]))
 }
@@ -537,7 +537,7 @@ impl DatasetPackage {
 pub async fn restore_blessed_dataset(
     dataset: &str,
     metadata_db: &Arc<MetadataDb>,
-) -> Result<Vec<PhysicalTable>, BoxError> {
+) -> Result<Vec<Arc<PhysicalTable>>, BoxError> {
     let config = load_test_config(None).await?;
     let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
     let dataset = dataset_store.load_dataset(dataset).await?.dataset;
@@ -558,7 +558,7 @@ pub async fn restore_blessed_dataset(
                     )
                     .as_str(),
                 );
-        tables.push(physical_table);
+        tables.push(physical_table.into());
     }
     Ok(tables)
 }

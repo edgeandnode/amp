@@ -119,7 +119,7 @@ pub async fn commit_metadata(
 }
 
 struct RawTableWriter {
-    table: PhysicalTable,
+    table: Arc<PhysicalTable>,
     opts: ParquetWriterProperties,
     partition_size: u64,
 
@@ -133,7 +133,7 @@ struct RawTableWriter {
 
 impl RawTableWriter {
     pub fn new(
-        table: PhysicalTable,
+        table: Arc<PhysicalTable>,
         opts: ParquetWriterProperties,
         partition_size: u64,
         block_ranges: MultiRange,
@@ -267,12 +267,12 @@ pub struct ParquetFileWriter {
     writer: AsyncArrowWriter<BufWriter>,
     file_url: Url,
     filename: String,
-    table: PhysicalTable,
+    table: Arc<PhysicalTable>,
 }
 
 impl ParquetFileWriter {
     pub fn new(
-        table: PhysicalTable,
+        table: Arc<PhysicalTable>,
         opts: ParquetWriterProperties,
         start: BlockNum,
     ) -> Result<ParquetFileWriter, BoxError> {

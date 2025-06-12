@@ -56,7 +56,7 @@ pub async fn dump(
             if let Some(physical_table) =
                 PhysicalTable::get_active(&table, metadata_db.clone()).await?
             {
-                tables.push(physical_table);
+                tables.push(physical_table.into());
             } else {
                 tables.push(
                     PhysicalTable::next_revision(
@@ -65,7 +65,8 @@ pub async fn dump(
                         metadata_db.clone(),
                         true,
                     )
-                    .await?,
+                    .await?
+                    .into(),
                 );
             };
         }

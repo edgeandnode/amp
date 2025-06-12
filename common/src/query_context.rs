@@ -353,7 +353,7 @@ impl QueryContext {
         Ok(concat_batches(&schema, &batch_stream).unwrap())
     }
 
-    pub fn get_table(&self, table_ref: &TableReference) -> Option<&PhysicalTable> {
+    pub fn get_table(&self, table_ref: &TableReference) -> Option<Arc<PhysicalTable>> {
         let table_id = TableId {
             dataset: table_ref.schema().unwrap(),
             dataset_version: None,
@@ -364,6 +364,7 @@ impl QueryContext {
             .tables()
             .iter()
             .find(|table| table.table_id() == table_id)
+            .cloned()
     }
 }
 

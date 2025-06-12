@@ -28,7 +28,7 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub struct Catalog {
-    tables: Vec<PhysicalTable>,
+    tables: Vec<Arc<PhysicalTable>>,
     /// User-defined functions (UDFs) specific to this catalog.
     udfs: Vec<ScalarUDF>,
 }
@@ -41,19 +41,19 @@ impl Catalog {
         }
     }
 
-    pub fn new(tables: Vec<PhysicalTable>, udfs: Vec<ScalarUDF>) -> Self {
+    pub fn new(tables: Vec<Arc<PhysicalTable>>, udfs: Vec<ScalarUDF>) -> Self {
         Catalog { tables, udfs }
     }
 
-    pub fn add_table(&mut self, dataset: PhysicalTable) {
-        self.tables.push(dataset);
+    pub fn add_table(&mut self, table: Arc<PhysicalTable>) {
+        self.tables.push(table);
     }
 
     pub fn add_udf(&mut self, udf: ScalarUDF) {
         self.udfs.push(udf);
     }
 
-    pub fn tables(&self) -> &[PhysicalTable] {
+    pub fn tables(&self) -> &[Arc<PhysicalTable>] {
         &self.tables
     }
 

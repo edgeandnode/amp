@@ -126,7 +126,7 @@ use common::{
     query_context::{parse_sql, QueryContext, QueryEnv},
     BlockNum, BoxError, DatasetWithProvider,
 };
-use datafusion::common::cast::as_fixed_size_binary_array;
+use datafusion::{common::cast::as_fixed_size_binary_array, sql::parser::Statement};
 use dataset_store::{
     sql_datasets::{is_incremental, max_end_block, SqlDataset},
     DatasetStore,
@@ -223,7 +223,7 @@ pub async fn dump(
                             &query,
                             &env,
                             range,
-                            physical_table,
+                            physical_table.clone(),
                             &parquet_opts,
                         )
                         .await?;
@@ -231,13 +231,14 @@ pub async fn dump(
                     }
                 }
             } else {
-                let physical_table = PhysicalTable::next_revision(
+                let physical_table: Arc<PhysicalTable> = PhysicalTable::next_revision(
                     physical_table.table(),
                     &data_store,
                     dataset_store.metadata_db.clone(),
                     false,
                 )
-                .await?;
+                .await?
+                .into();
                 tracing::info!(
                     "dumping entire {} to {}",
                     physical_table.table_ref(),
@@ -257,7 +258,7 @@ pub async fn dump(
                     &query,
                     &env,
                     range,
-                    &physical_table,
+                    physical_table,
                     &parquet_opts,
                 )
                 .await?;
@@ -279,10 +280,10 @@ pub async fn dump(
 #[instrument(skip_all, err)]
 async fn dump_sql_query(
     dataset_store: &Arc<DatasetStore>,
-    query: &datafusion::sql::parser::Statement,
+    query: &Statement,
     env: &QueryEnv,
     range: BlockRange,
-    physical_table: &common::catalog::physical::PhysicalTable,
+    physical_table: Arc<PhysicalTable>,
     parquet_opts: &ParquetWriterProperties,
 ) -> Result<(), BoxError> {
     use dataset_store::sql_datasets::execute_query_for_range;

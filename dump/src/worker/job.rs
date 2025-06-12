@@ -28,7 +28,7 @@ pub enum Job {
     DumpTables {
         ctx: JobCtx,
         /// All tables must belong to the same dataset.
-        tables: Vec<PhysicalTable>,
+        tables: Vec<Arc<PhysicalTable>>,
     },
 }
 
@@ -76,12 +76,9 @@ impl Job {
                 for table in Arc::new(dataset).resolved_tables() {
                     // Unwrap: We checked consistency above.
                     let (id, url) = output_locations_by_name.remove(table.name()).unwrap();
-                    physical_tables.push(PhysicalTable::new(
-                        table.clone(),
-                        url,
-                        id,
-                        ctx.metadata_db.clone(),
-                    )?);
+                    physical_tables.push(
+                        PhysicalTable::new(table.clone(), url, id, ctx.metadata_db.clone())?.into(),
+                    );
                 }
 
                 Ok(Job::DumpTables {
