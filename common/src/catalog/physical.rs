@@ -1,40 +1,30 @@
-use std::{collections::BTreeMap, ops::Deref, sync::Arc, u64};
+use std::{collections::BTreeMap, sync::Arc, u64};
 
 use datafusion::{
-    arrow::{
-        array::{Scalar, UInt64Array},
-        datatypes::{Field, SchemaRef},
-    },
+    arrow::datatypes::SchemaRef,
     catalog::{Session, TableProvider},
-    common::{project_schema, stats::Precision, Statistics},
-    datasource::{
-        file_format::parquet::ParquetFormat, listing::helpers::expr_applicable_for_cols, TableType,
-    },
-    error::{DataFusionError, Result as DataFusionResult},
+    common::{project_schema, Statistics},
+    datasource::{file_format::parquet::ParquetFormat, listing::ListingTableUrl, TableType},
+    error::Result as DataFusionResult,
     execution::{
         cache::{cache_manager::FileStatisticsCache, cache_unit::DefaultFileStatisticsCache},
         object_store::ObjectStoreUrl,
     },
-    logical_expr::{col, Between, BinaryExpr, Operator, ScalarUDF, SortExpr},
+    logical_expr::{col, ScalarUDF, SortExpr, TableProviderFilterPushDown},
     parquet::arrow::async_reader::{AsyncFileReader, ParquetObjectReader},
     physical_expr::{create_ordering, LexOrdering},
     physical_plan::{empty::EmptyExec, ExecutionPlan},
     prelude::Expr,
-    scalar::ScalarValue,
     sql::TableReference,
 };
 use datafusion_datasource::{
-    compute_all_files_statistics,
-    file_format::FileFormat,
-    file_groups::FileGroup,
-    file_scan_config::{FileScanConfig, FileScanConfigBuilder},
-    schema_adapter::DefaultSchemaAdapterFactory,
+    file_format::FileFormat, file_groups::FileGroup, file_scan_config::FileScanConfigBuilder,
     PartitionedFile,
 };
-use futures::{future, stream, Stream, StreamExt, TryStreamExt};
+use futures::{stream, Stream, StreamExt, TryStreamExt};
 use metadata_db::{LocationId, MetadataDb, TableId};
 use object_store::{path::Path, ObjectMeta, ObjectStore};
-use tracing::{debug, info};
+use tracing::{info, instrument};
 use url::Url;
 use uuid::Uuid;
 
@@ -44,11 +34,8 @@ use crate::{
         FileMetadata,
     },
     store::{infer_object_store, Store},
-    BoxError, Dataset, ResolvedTable, BLOCK_NUM,
+    BoxError, Dataset, ResolvedTable,
 };
-
-type BlockNumScalar = Scalar<UInt64Array>;
-type BlockRangeScalar = (BlockNumScalar, BlockNumScalar);
 
 #[derive(Debug, Clone)]
 pub struct Catalog {
@@ -387,11 +374,16 @@ impl PhysicalTable {
     }
 
     pub fn order_exprs(&self) -> Vec<Vec<SortExpr>> {
-        self.table
-            .table()
-            .sorted_by()
+        let sorted_by = self.table().table().sorted_by();
+        self.schema()
+            .fields()
             .iter()
-            .map(|col_name| vec![col(*col_name).sort(true, false)])
+            .filter_map(move |field| {
+                sorted_by
+                    .iter()
+                    .find(|name| *name == field.name())
+                    .map(|name| vec![SortExpr::new(col(*name), true, false)])
+            })
             .collect()
     }
 
@@ -425,6 +417,10 @@ impl PhysicalTable {
     pub async fn ranges(&self) -> Result<Vec<(u64, u64)>, BoxError> {
         self.stream_ranges().try_collect().await
     }
+
+    pub fn file_schema(&self) -> SchemaRef {
+        self.table.schema().clone()
+    }
 }
 
 /// Streaming methods for `PhysicalTable` to fetch file metadata, ranges, and file names.
@@ -457,42 +453,25 @@ impl PhysicalTable {
     fn stream_parquet_files(
         &self,
     ) -> impl Stream<Item = Result<(String, ObjectMeta), BoxError>> + '_ {
-        self.stream_file_metadata()
-            .map_ok(
-                move |FileMetadata {
-                          object_meta,
-                          file_name,
-                          ..
-                      }| (file_name, object_meta),
-            )
-            .boxed()
+        self.stream_file_metadata().map_ok(
+            |FileMetadata {
+                 object_meta,
+                 file_name,
+                 ..
+             }| (file_name, object_meta),
+        )
     }
 
     fn stream_partitioned_files<'a>(
         &'a self,
         ctx: &'a dyn Session,
-    ) -> impl Stream<Item = Result<(BlockRangeScalar, PartitionedFile), BoxError>> + 'a {
+    ) -> impl Stream<Item = Result<PartitionedFile, BoxError>> + 'a {
         self.stream_file_metadata().try_filter_map(
-            move |FileMetadata {
-                      object_meta,
-                      parquet_meta:
-                          ParquetMeta {
-                              range_start,
-                              range_end,
-                              ..
-                          },
-                      ..
-                  }| async move {
+            move |FileMetadata { object_meta, .. }| async move {
                 let part_file = PartitionedFile::from(object_meta);
                 let statistics = self.do_collect_statistics(ctx, &part_file).await?;
 
-                Ok(Some((
-                    (
-                        UInt64Array::new_scalar(range_start),
-                        UInt64Array::new_scalar(range_end),
-                    ),
-                    part_file.with_statistics(statistics),
-                )))
+                Ok(Some(part_file.with_statistics(statistics)))
             },
         )
     }
@@ -504,72 +483,38 @@ impl TableProvider for PhysicalTable {
         self
     }
 
+    fn supports_filters_pushdown(
+        &self,
+        filters: &[&Expr],
+    ) -> DataFusionResult<Vec<TableProviderFilterPushDown>> {
+        Ok(vec![
+            TableProviderFilterPushDown::Unsupported;
+            filters.len()
+        ])
+    }
+
     fn schema(&self) -> SchemaRef {
         Arc::clone(self.table.schema())
     }
 
+    #[instrument(skip_all)]
     async fn scan<'table, 'state, 'projection, 'filters>(
         &'table self,
         state: &'state dyn Session,
         projection: Option<&'projection Vec<usize>>,
-        filters: &'filters [Expr],
-        limit: Option<usize>,
+        _filters: &'filters [Expr],
+        _limit: Option<usize>,
     ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
-        let table_partition_cols = self.partition_cols()?;
-        let table_partition_col_names = table_partition_cols
-            .iter()
-            .map(Field::name)
-            .map(Deref::deref)
-            .collect::<Vec<_>>();
+        let file_group = self.list_files_for_scan(state).await?;
 
-        let (partition_filters, filters): &(Vec<&Expr>, Vec<&Expr>) =
-            &filters.iter().partition(|filter| {
-                can_be_evaluted_for_partition_pruning(&table_partition_col_names, filter)
-            });
-
-        let statistic_file_limit = if filters.is_empty() { limit } else { None };
-
-        let (mut file_groups, statistics) = self
-            .list_files_for_scan(state, partition_filters, statistic_file_limit)
-            .await?;
-
-        if file_groups.is_empty() {
+        if file_group.is_empty() {
             let projected_schema = project_schema(&self.schema(), projection)?;
             return Ok(Arc::new(EmptyExec::new(projected_schema)));
         }
 
         let output_ordering = self.create_output_ordering()?;
 
-        match state
-            .config_options()
-            .execution
-            .split_file_groups_by_statistics
-            .then(|| {
-                output_ordering.first().map(|output_ordering| {
-                    FileScanConfig::split_groups_by_statistics_with_target_partitions(
-                        &self.schema(),
-                        &file_groups,
-                        output_ordering,
-                        1,
-                    )
-                })
-            })
-            .flatten()
-        {
-            Some(Err(e)) => debug!("failed to split file groups by statistics: {e}"),
-            Some(Ok(new_groups)) => {
-                if new_groups.len() <= 1 {
-                    file_groups = new_groups;
-                } else {
-                    debug!("attempted to split file groups by statistics, but there were more file groups than target_partitions; falling back to unordered")
-                }
-            }
-            None => {} // no ordering required
-        };
-
-        ParquetFormat::default()
-            .with_enable_pruning(true)
-            .with_force_view_types(true)
+        let exec = ParquetFormat::default()
             .create_physical_plan(
                 state,
                 FileScanConfigBuilder::new(
@@ -577,14 +522,13 @@ impl TableProvider for PhysicalTable {
                     self.schema(),
                     ParquetFormat::default().file_source(),
                 )
-                .with_file_groups(file_groups)
-                .with_statistics(statistics)
-                .with_projection(projection.cloned())
-                .with_limit(limit)
+                .with_file_group(file_group)
                 .with_output_ordering(output_ordering)
+                .with_projection(projection.cloned())
                 .build(),
             )
-            .await
+            .await?;
+        Ok(exec)
     }
 
     fn table_type(&self) -> TableType {
@@ -595,15 +539,8 @@ impl TableProvider for PhysicalTable {
 /// Helper methods for `PhysicalTable` to implement the `TableProvider` trait.
 impl PhysicalTable {
     fn object_store_url(&self) -> DataFusionResult<ObjectStoreUrl> {
-        let url = self.url().as_str();
-        let url_start = url.find("://").ok_or_else(|| {
-            DataFusionError::Internal(format!(
-                "Invalid URL: {}. Expected format: <scheme>://<path>",
-                self.url()
-            ))
-        })?;
-        let scheme = url[..url_start].to_string() + "://";
-        ObjectStoreUrl::parse(scheme)
+        let listing_url = ListingTableUrl::parse(self.url())?;
+        Ok(listing_url.object_store())
     }
 
     fn create_output_ordering(&self) -> DataFusionResult<Vec<LexOrdering>> {
@@ -642,65 +579,17 @@ impl PhysicalTable {
         }
     }
 
-    fn pruned_partition_stream<'a>(
-        &'a self,
-        ctx: &'a dyn Session,
-        filters: &'a [&'a Expr],
-    ) -> impl Stream<Item = DataFusionResult<PartitionedFile>> + 'a {
-        let (filter_min, filter_max) = get_min_max_from_filters(filters);
-
-        self.stream_partitioned_files(ctx)
-            .try_filter_map(move |((range_start, range_end), partitioned_file)| {
-                future::ok(
-                    (filter_min
-                        .clone()
-                        .into_inner()
-                        .value(0)
-                        .le(&range_start.into_inner().value(0))
-                        && filter_max
-                            .clone()
-                            .into_inner()
-                            .value(0)
-                            .ge(&range_end.into_inner().value(0)))
-                    .then_some(partitioned_file),
-                )
-            })
-            .map_err(DataFusionError::from)
-    }
-
-    fn partition_cols(&self) -> DataFusionResult<Vec<Field>> {
-        let schema = self.schema();
-        self.table
-            .table()
-            .sorted_by()
-            .iter()
-            .filter(|name| **name == BLOCK_NUM)
-            .map(|name| Ok(schema.field_with_name(name)?.clone()))
-            .collect()
-    }
-
     async fn list_files_for_scan<'a>(
         &'a self,
         ctx: &'a dyn Session,
-        filters: &'a [&'a Expr],
-        limit: Option<usize>,
-    ) -> DataFusionResult<(Vec<FileGroup>, Statistics)> {
-        let files = self.pruned_partition_stream(ctx, filters);
-        let (file_group, inexact_stats) = get_files_with_limit(files, limit).await?;
-        let file_groups = vec![file_group];
-        let (mut file_groups, mut stats) =
-            compute_all_files_statistics(file_groups, self.schema(), true, inexact_stats)?;
-        let (schema_mapper, _) =
-            DefaultSchemaAdapterFactory::from_schema(self.schema()).map_schema(&self.schema())?;
-        stats.column_statistics = schema_mapper.map_column_statistics(&stats.column_statistics)?;
-        file_groups.iter_mut().try_for_each(|file_group| {
-            if let Some(stat) = file_group.statistics_mut() {
-                stat.column_statistics =
-                    schema_mapper.map_column_statistics(&stat.column_statistics)?;
-            }
-            Ok::<_, DataFusionError>(())
-        })?;
-        Ok((file_groups, stats))
+    ) -> DataFusionResult<FileGroup> {
+        let files = self
+            .stream_partitioned_files(ctx)
+            .try_collect::<Vec<_>>()
+            .await?;
+        let file_group = FileGroup::new(files);
+
+        Ok(file_group)
     }
 }
 
@@ -787,136 +676,4 @@ async fn nozzle_meta_from_object_meta(
     // Unwrap: We know this is a path with valid file name because we just opened it
     let file_name = object_meta.location.filename().unwrap().to_string();
     Ok((file_name, parquet_meta))
-}
-
-fn can_be_evaluted_for_partition_pruning(partition_column_names: &[&str], expr: &Expr) -> bool {
-    !partition_column_names.is_empty() && expr_applicable_for_cols(partition_column_names, expr)
-}
-
-/// Note: Converts gt/lt values to gte/lte equivalents for block number filters.
-///
-/// # DO NOT PUSH THIS TO MAIN
-/// ## THIS IS NOT A COMPLETE IMPLEMENTATION. WE WANT SOMETHING THAT CAN BE USED FOR ALL FILTERS, NOT JUST BLOCK NUMBERS COMPARING WITH LITERALS.
-fn get_min_max_from_filters(filters: &[&Expr]) -> BlockRangeScalar {
-    let mut min = None;
-    let mut max = None;
-
-    for filter in filters {
-        if let Expr::BinaryExpr(BinaryExpr { left, op, right }) = filter {
-            if let (Expr::Column(col), Expr::Literal(ScalarValue::UInt64(lit))) =
-                (left.as_ref(), right.as_ref())
-            {
-                if col.name() == BLOCK_NUM {
-                    if let Some(value) = lit {
-                        match op {
-                            Operator::Eq => {
-                                min = Some(*value);
-                                max = Some(*value);
-                            }
-                            Operator::GtEq => {
-                                min = Some(*value);
-                            }
-                            Operator::LtEq => {
-                                max = Some(*value);
-                            }
-                            Operator::Gt => {
-                                min = Some(value + 1);
-                            }
-                            Operator::Lt => {
-                                max = Some(value - 1);
-                            }
-                            Operator::NotEq => {
-                                min = Some(value + 1);
-                                max = Some(value - 1);
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-            }
-        } else if let Expr::Between(Between {
-            expr,
-            negated,
-            low,
-            high,
-        }) = filter
-        {
-            if let Expr::Column(col) = expr.as_ref() {
-                if col.name() == BLOCK_NUM {
-                    if let (
-                        Expr::Literal(ScalarValue::UInt64(low_lit)),
-                        Expr::Literal(ScalarValue::UInt64(high_lit)),
-                    ) = (low.as_ref(), high.as_ref())
-                    {
-                        if let (Some(low_value), Some(high_value)) = (low_lit, high_lit) {
-                            if *negated {
-                                min = Some(*high_value);
-                                max = Some(*low_value);
-                            } else {
-                                min = Some(*low_value);
-                                max = Some(*high_value);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    (
-        UInt64Array::new_scalar(min.unwrap_or(u64::MIN)),
-        UInt64Array::new_scalar(max.unwrap_or(u64::MAX)),
-    )
-}
-
-async fn get_files_with_limit(
-    files: impl Stream<Item = DataFusionResult<PartitionedFile>>,
-    limit: Option<usize>,
-) -> DataFusionResult<(FileGroup, bool)> {
-    let mut file_group = FileGroup::default();
-    // Fusing the stream allows us to call next safely even once it is finished.
-    let mut all_files = Box::pin(files.fuse());
-    enum ProcessingState {
-        ReadingFiles,
-        ReachedLimit,
-    }
-
-    let mut state = ProcessingState::ReadingFiles;
-    let mut num_rows = Precision::Absent;
-
-    while let Some(file_result) = all_files.next().await {
-        // Early exit if we've already reached our limit
-        if matches!(state, ProcessingState::ReachedLimit) {
-            break;
-        }
-
-        let file = file_result?;
-
-        if let Some(file_stats) = &file.statistics {
-            num_rows = if file_group.is_empty() {
-                // For the first file, just take its row count
-                file_stats.num_rows
-            } else {
-                // For subsequent files, accumulate the counts
-                num_rows.add(&file_stats.num_rows)
-            };
-        }
-
-        // Always add the file to our group
-        file_group.push(file);
-
-        // Check if we've hit the limit (if one was specified)
-        if let Some(limit) = limit {
-            if let Precision::Exact(row_count) = num_rows {
-                if row_count > limit {
-                    state = ProcessingState::ReachedLimit;
-                }
-            }
-        }
-    }
-    // If we still have files in the stream, it means that the limit kicked
-    // in, and the statistic could have been different had we processed the
-    // files in a different order.
-    let inexact_stats = all_files.next().await.is_some();
-    Ok((file_group, inexact_stats))
 }
