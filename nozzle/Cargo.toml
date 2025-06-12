@@ -26,6 +26,8 @@ tower-http = { version = "0.6.2", features = [
 admin-api = { path = "../admin-api" }
 registry-service = { path = "../registry-service" }
 http-common = { path = "../http-common" }
+prometheus.workspace = true
+lazy_static = "1.5.0"
 
 [build-dependencies]
 vergen-gitcl = { version = "1.0.8", features = ["build"] }

@@ -23,9 +23,21 @@ use common::{
 };
 use futures::{future::try_join_all, Stream};
 use thiserror::Error;
-use tracing::{error, warn};
+use tracing::{error, instrument, warn};
 
 use crate::tables::transactions::{Transaction, TransactionRowsBuilder};
+use prometheus::{register_histogram, Histogram};
+
+lazy_static::lazy_static! {
+    static ref RPC_REQUEST_DURATION: Histogram = register_histogram!(
+        "rpc_request_duration_seconds",
+        "Histogram of RPC request durations in seconds"
+    ).unwrap();
+    static ref RPC_REQUEST_ERRORS: prometheus::IntCounter = prometheus::register_int_counter!(
+        "rpc_request_errors_total",
+        "Total number of errors encountered during RPC requests"
+    ).unwrap();
+}
 
 #[derive(Error, Debug)]
 pub enum ToRowError {
@@ -59,6 +71,7 @@ impl BatchingRpcWrapper {
 
     /// Execute a batch of RPC calls with retries on failure.
     /// calls: Vec<(&'static str, Params)> - a vector of tuples containing the method name and parameters.
+    #[instrument(name = "batch_execute", skip(self, calls))]
     pub async fn execute<T: RpcRecv, Params: RpcSend>(
         &self,
         calls: Vec<(&'static str, Params)>,
@@ -88,9 +101,11 @@ impl BatchingRpcWrapper {
                 Ok::<_, BoxError>(responses)
             };
 
+            let timer = RPC_REQUEST_DURATION.start_timer();
             match batch_then_waiters.await {
                 Ok(responses) => {
                     results.extend(responses);
+                    timer.observe_duration();
                 }
                 Err(e) if remaining_attempts > 0 && self.batch_size > 1 => {
                     warn!(
@@ -102,6 +117,8 @@ impl BatchingRpcWrapper {
                     remaining_attempts -= 1;
                 }
                 Err(e) => {
+                    RPC_REQUEST_ERRORS.inc();
+                    tracing::error!("Batch execution failed: {:?}", e);
                     return Err(e.into());
                 }
             }
@@ -139,6 +156,7 @@ impl JsonRpcClient {
 
     /// Create a stream that fetches blocks from start_block to end_block. One method is called at a time.
     /// This is used when batch_size is set to 1 in the provider config.
+    #[instrument(name = "unbatched_block_stream", skip(self))]
     fn unbatched_block_stream(
         self,
         start_block: u64,
@@ -152,6 +170,7 @@ impl JsonRpcClient {
         stream! {
             for block_num in start_block..=end_block {
                 let client_permit = self.limiter.acquire().await;
+                let timer = RPC_REQUEST_DURATION.start_timer();
                 let block_result = self
                     .client
                     .get_block_by_number(BlockNumberOrTag::Number(block_num))
@@ -159,12 +178,20 @@ impl JsonRpcClient {
                     .await;
 
                 let block = match block_result {
-                    Ok(Some(block)) => block,
+                    Ok(Some(block)) => {
+                        timer.observe_duration();
+                        tracing::info!("Block {} fetched successfully", block_num);
+                        block
+                    }
                     Ok(None) => {
+                        timer.observe_duration();
+                        tracing::warn!("Block {} not found", block_num);
                         yield Err(format!("block {} not found", block_num).into());
                         continue;
                     }
                     Err(err) => {
+                        timer.observe_duration();
+                        tracing::error!("Failed to fetch block {}: {:?}", block_num, err);
                         yield Err(err.into());
                         continue;
                     }
@@ -183,6 +210,7 @@ impl JsonRpcClient {
                 let receipts = match receipts_result {
                     Ok(receipts) => receipts,
                     Err(err) => {
+                        tracing::error!("Failed to fetch receipts for block {}: {:?}", block_num, err);
                         yield Err(err.into());
                         continue;
                     }

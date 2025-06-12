@@ -14,7 +14,8 @@ use common::{
 use datafusion::{parquet, sql::resolve::resolve_table_references};
 use dataset_store::{sql_datasets, DatasetStore};
 use metadata_db::MetadataDb;
-use tracing::info;
+use prometheus::{Encoder, TextEncoder};
+use tracing::{error, info};
 
 pub async fn dump(
     config: Arc<Config>,
@@ -111,6 +112,7 @@ pub async fn dump(
         },
     }
 
+    log_metrics_to_stdout().await; // Log metrics after the dump function execution
     Ok(())
 }
 
@@ -284,5 +286,21 @@ mod tests {
                 None => assert!(result.is_err()),
             }
         }
+    }
+}
+
+pub async fn log_metrics_to_stdout() {
+    let encoder = TextEncoder::new();
+    let mut buffer = Vec::new();
+
+    if let Err(e) = encoder.encode(&prometheus::gather(), &mut buffer) {
+        error!("Failed to encode metrics: {:?}", e);
+        return;
+    }
+
+    if let Ok(metrics) = String::from_utf8(buffer) {
+        info!("Metrics:\n{}", metrics);
+    } else {
+        error!("Failed to convert metrics to UTF-8 string");
     }
 }

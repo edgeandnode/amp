@@ -20,3 +20,4 @@ sqlx.workspace = true
 serde.workspace = true
 backon = { version = "1.5.1", default-features = false, features = ["std", "tokio-sleep"] }
 tokio-util = { version = "0.7.15", features = ["rt"] }
+lazy_static = "1.5.0"
