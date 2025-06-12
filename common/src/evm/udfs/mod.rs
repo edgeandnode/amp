@@ -12,8 +12,7 @@ use datafusion::{
             FixedSizeListArray, FixedSizeListBuilder, Int16Array, Int32Array, Int64Array,
             Int8Array, ListArray, ListBuilder, NullBuilder, StringArray, StructArray, UInt16Array,
             UInt32Array, UInt64Array, UInt8Array,
-        },
-        error::ArrowError,
+        }, datatypes::FieldRef, error::ArrowError
     },
     common::{internal_err, plan_err},
     error::DataFusionError,
@@ -455,7 +454,7 @@ impl ScalarUDFImpl for EvmDecode {
         Ok(ColumnarValue::Array(ary))
     }
 
-    fn return_field_from_args(&self, args: ReturnFieldArgs) -> datafusion::error::Result<Field> {
+    fn return_field_from_args(&self, args: ReturnFieldArgs) -> datafusion::error::Result<FieldRef> {
         let args = args.scalar_arguments;
         if args.len() != 5 {
             return internal_err!(
@@ -477,9 +476,9 @@ impl ScalarUDFImpl for EvmDecode {
         let event = Event::try_from(signature).map_err(|e| e.context(self.name()))?;
         let fields = event.fields()?;
         if fields.is_empty() {
-            return Ok(Field::new(self.name(), DataType::Null, true));
+            return Ok(Field::new(self.name(), DataType::Null, true).into());
         }
-        Ok(Field::new_struct(self.name(), fields, false))
+        Ok(Field::new_struct(self.name(), fields, false).into())
     }
 
     fn aliases(&self) -> &[String] {
@@ -1527,14 +1526,14 @@ mod tests {
             SIG.to_string(),
         )))];
 
-        let arg_fields = vec![Field::new("signature", DataType::Utf8, false)];
-        let return_field = Field::new(evm_topic.name(), EvmTopic::RETURN_TYPE, false);
+        let arg_fields = vec![Field::new("signature", DataType::Utf8, false).into()];
+        let return_field = Field::new(evm_topic.name(), EvmTopic::RETURN_TYPE, false).into();
 
         let args = ScalarFunctionArgs {
             args,
-            arg_fields: arg_fields.iter().by_ref().collect(),
+            arg_fields,
             number_rows: 1,
-            return_field: &return_field,
+            return_field,
         };
         let result = evm_topic.invoke_with_args(args).unwrap();
         let ColumnarValue::Scalar(result) = result else {
@@ -1588,25 +1587,25 @@ mod tests {
         ];
 
         let arg_fields = vec![
-            Field::new("topic1", DataType::FixedSizeBinary(32), true),
-            Field::new("topic2", DataType::FixedSizeBinary(32), true),
-            Field::new("topic3", DataType::FixedSizeBinary(32), true),
-            Field::new("data", DataType::Binary, true),
-            Field::new("signature", DataType::Utf8, false),
+            Field::new("topic1", DataType::FixedSizeBinary(32), true).into(),
+            Field::new("topic2", DataType::FixedSizeBinary(32), true).into(),
+            Field::new("topic3", DataType::FixedSizeBinary(32), true).into(),
+            Field::new("data", DataType::Binary, true).into(),
+            Field::new("signature", DataType::Utf8, false).into(),
         ];
 
         let args = ScalarFunctionArgs {
             args,
-            arg_fields: arg_fields.iter().by_ref().collect(),
+            arg_fields,
             number_rows: CSV.len(),
-            return_field: &Field::new_struct(
+            return_field: Field::new_struct(
                 evm_decode.name(),
                 Event::try_from(&ScalarValue::new_utf8(SIG))
                     .unwrap()
                     .fields()
                     .unwrap(),
                 false,
-            ),
+            ).into(),
         };
         let result = evm_decode.invoke_with_args(args).unwrap();
         let ColumnarValue::Array(result) = result else {

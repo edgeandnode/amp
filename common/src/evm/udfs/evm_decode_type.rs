@@ -2,7 +2,7 @@ use std::{any::Any, sync::Arc};
 
 use alloy::dyn_abi::DynSolType;
 use datafusion::{
-    arrow::array::{make_builder, ArrayBuilder},
+    arrow::{array::{make_builder, ArrayBuilder}, datatypes::FieldRef},
     common::plan_err,
     error::DataFusionError,
     logical_expr::{
@@ -111,7 +111,7 @@ impl ScalarUDFImpl for EvmDecodeType {
         Ok(ColumnarValue::Array(ary))
     }
 
-    fn return_field_from_args(&self, args: ReturnFieldArgs) -> datafusion::error::Result<Field> {
+    fn return_field_from_args(&self, args: ReturnFieldArgs) -> datafusion::error::Result<FieldRef> {
         let args = args.scalar_arguments;
         if args.len() != 2 {
             return plan_err!(
@@ -134,7 +134,7 @@ impl ScalarUDFImpl for EvmDecodeType {
             .parse()
             .map_err(|e| plan!("failed to parse Solidity type: {}", e))?;
         let ty = sol_to_arrow_type(&sol_ty)?;
-        Ok(Field::new(self.name(), ty, false))
+        Ok(Field::new(self.name(), ty, false).into())
     }
 
     fn aliases(&self) -> &[String] {

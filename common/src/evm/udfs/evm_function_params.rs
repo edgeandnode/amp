@@ -5,7 +5,7 @@ use alloy::{
     json_abi::Function as AlloyFunction,
 };
 use datafusion::{
-    arrow::array::{ArrayBuilder, BinaryBuilder},
+    arrow::{array::{ArrayBuilder, BinaryBuilder}, datatypes::FieldRef},
     common::plan_err,
     error::DataFusionError,
     logical_expr::{
@@ -162,7 +162,7 @@ impl ScalarUDFImpl for EvmDecodeParams {
         Ok(ColumnarValue::Array(ary))
     }
 
-    fn return_field_from_args(&self, args: ReturnFieldArgs) -> datafusion::error::Result<Field> {
+    fn return_field_from_args(&self, args: ReturnFieldArgs) -> datafusion::error::Result<FieldRef> {
         let args = args.scalar_arguments;
         if args.len() != 2 {
             return plan_err!(
@@ -183,7 +183,7 @@ impl ScalarUDFImpl for EvmDecodeParams {
         };
         let call = FunctionCall::try_from(signature).map_err(|e| e.context(self.name()))?;
         let fields = self.fields(&call).map_err(|e| e.context(self.name()))?;
-        Ok(Field::new_struct(self.name(), fields, true))
+        Ok(Field::new_struct(self.name(), fields, true).into())
     }
 
     fn aliases(&self) -> &[String] {
