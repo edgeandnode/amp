@@ -68,7 +68,7 @@ pub struct Table {
 
 impl Table {
     /// Column names by which this table is naturally sorted.
-    pub fn sorted_by(&self) -> &[&str] {
+    pub const fn sorted_by(&self) -> &[&str] {
         // Leveraging `order_exprs` can optimize away sorting for many query plans.
         //
         // TODO:
