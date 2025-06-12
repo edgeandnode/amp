@@ -321,7 +321,7 @@ impl PhysicalTable {
             .table()
             .sorted_by()
             .iter()
-            .map(|col_name| vec![col(col_name).sort(true, false)])
+            .map(|col_name| vec![col(*col_name).sort(true, false)])
             .collect()
     }
 
