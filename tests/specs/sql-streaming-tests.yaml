@@ -1,3 +1,6 @@
+- name: restore_eth_firehose
+  restore: eth_firehose
+
 - name: invalid_streaming_query1
   query: SELECT count(*) FROM eth_firehose.blocks SETTINGS stream = true
   failure: |

@@ -133,10 +133,6 @@ impl TestEnv {
             nozzle::server::run(config.clone(), metadata_db.clone(), false, false).await?;
         tokio::spawn(server);
 
-        // TODO: Turn this into an explicit test step.
-        restore_blessed_dataset("eth_firehose", &metadata_db).await?;
-        restore_blessed_dataset("eth_rpc", &metadata_db).await?;
-
         Ok(Self {
             config: config.clone(),
             metadata_db,
