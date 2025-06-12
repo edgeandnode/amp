@@ -12,7 +12,7 @@ use datafusion::{
         tree_node::{
             Transformed, TransformedResult, TreeNode as _, TreeNodeRecursion, TreeNodeRewriter,
         },
-        Column, Constraints, DFSchema, DFSchemaRef, ToDFSchema as _,
+        Column, DFSchema, DFSchemaRef,
     },
     datasource::{DefaultTableSource, MemTable, TableProvider, TableType},
     error::DataFusionError,
@@ -23,8 +23,7 @@ use datafusion::{
         SendableRecordBatchStream, SessionStateBuilder,
     },
     logical_expr::{
-        AggregateUDF, CreateExternalTable, DdlStatement, Extension, LogicalPlan,
-        LogicalPlanBuilder, Projection, ScalarUDF, SortExpr, TableScan,
+        AggregateUDF, Extension, LogicalPlan, LogicalPlanBuilder, Projection, ScalarUDF, TableScan,
     },
     physical_plan::{displayable, ExecutionPlan},
     prelude::{col, Expr},
@@ -41,7 +40,6 @@ use js_runtime::isolate_pool::IsolatePool;
 use metadata_db::TableId;
 use thiserror::Error;
 use tracing::{debug, instrument};
-use url::Url;
 
 use crate::{
     arrow, attestation,
@@ -226,14 +224,14 @@ impl QueryContext {
         //
         // See https://github.com/apache/datafusion/issues/10336 for upstream default tracking.
         if std::env::var_os("DATAFUSION_EXECUTION_SPLIT_FILE_GROUPS_BY_STATISTICS").is_none() {
-            opts.execution.split_file_groups_by_statistics = true;
+            opts.execution.split_file_groups_by_statistics = false;
         }
 
         // Set `parquet.pushdown_filters` by default.
         //
         // See https://github.com/apache/datafusion/issues/3463 for upstream default tracking.
         if std::env::var_os("DATAFUSION_EXECUTION_PARQUET_PUSHDOWN_FILTERS").is_none() {
-            opts.execution.parquet.pushdown_filters = true;
+            opts.execution.parquet.pushdown_filters = false;
         }
 
         if std::env::var_os("DATAFUSION_EXECUTION_COLLECT_STATISTICS").is_none() {
@@ -310,8 +308,8 @@ impl QueryContext {
             .build();
         let ctx = SessionContext::new_with_state(state);
 
-        for ds in self.catalog.tables() {
-            create_physical_table(&ctx, ds)
+        for table in self.catalog.tables() {
+            create_physical_table(&ctx, table.clone())
                 .await
                 .map_err(|e| Error::DatasetError(e.into()))?;
         }
@@ -412,52 +410,20 @@ async fn create_empty_tables(
 
 async fn create_physical_table(
     ctx: &SessionContext,
-    table: &PhysicalTable,
+    provider: Arc<PhysicalTable>,
 ) -> Result<(), DataFusionError> {
     // The catalog schema needs to be explicitly created or table creation will fail.
-    create_catalog_schema(ctx, table.catalog_schema().to_string());
+    create_catalog_schema(ctx, provider.catalog_schema().to_string());
 
-    let table_ref = table.table_ref().clone();
-    let schema = table.schema().to_dfschema_ref()?;
+    let table_ref = provider.table_ref().clone();
 
     // This may overwrite a previously registered store, but that should not make a difference.
     // The only segment of the `table.url()` that matters here is the schema and bucket name.
-    ctx.register_object_store(table.url(), table.object_store());
+    ctx.register_object_store(provider.url(), provider.object_store());
 
-    let cmd = create_external_table_cmd(table_ref, schema, &table.url(), table.order_exprs());
-    ctx.execute_logical_plan(cmd).await?;
+    ctx.register_table(table_ref, provider)?;
 
     Ok(())
-}
-
-fn create_external_table_cmd(
-    name: TableReference,
-    schema: DFSchemaRef,
-    url: &Url,
-    order_exprs: Vec<Vec<SortExpr>>,
-) -> LogicalPlan {
-    let command = CreateExternalTable {
-        file_type: "PARQUET".to_string(),
-
-        name,
-        schema,
-        location: url.to_string(),
-        order_exprs,
-
-        // Up to our preference, but maybe it's more robust for the caller to check duplicates.
-        if_not_exists: false,
-
-        // Things we don't currently use.
-        table_partition_cols: vec![],
-        options: Default::default(),
-        constraints: Constraints::empty(),
-        column_defaults: Default::default(),
-        definition: None,
-        unbounded: false,
-        temporary: false,
-    };
-
-    LogicalPlan::Ddl(DdlStatement::CreateExternalTable(command))
 }
 
 fn create_catalog_schema(ctx: &SessionContext, schema_name: String) {

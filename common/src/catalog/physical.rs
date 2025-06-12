@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, future::IntoFuture, sync::Arc};
+use std::{collections::BTreeMap, sync::Arc};
 
 use datafusion::{
     arrow::datatypes::SchemaRef,
