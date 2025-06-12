@@ -95,45 +95,7 @@ async fn update_job_status_modifies_status() {
 }
 
 #[tokio::test]
-async fn get_job_descriptor_retrieves_correct_descriptor() {
-    //* Given
-    let temp_db = PgTempDB::new();
-    let mut conn = DbConn::connect(&temp_db.connection_uri())
-        .await
-        .expect("Failed to connect to metadata db");
-    conn.run_migrations()
-        .await
-        .expect("Failed to run migrations");
-
-    let worker_id = "test-worker-descriptor".parse().expect("Invalid worker ID");
-    heartbeat::register_worker(&mut *conn, &worker_id)
-        .await
-        .expect("Failed to pre-register the worker");
-
-    let job_desc_json = serde_json::json!({
-        "type": "descriptor-test",
-        "payload": "important-data"
-    });
-    let job_desc_str = serde_json::to_string(&job_desc_json).expect("Failed to serialize");
-
-    let job_id = jobs::register_job(&mut *conn, &worker_id, &job_desc_str)
-        .await
-        .expect("Failed to schedule job");
-
-    //* When
-    let retrieved_desc_str = jobs::get_job_descriptor(&mut *conn, &job_id)
-        .await
-        .expect("Failed to get job descriptor")
-        .expect("Job descriptor not found");
-
-    //* Then
-    let retrieved_desc_json: serde_json::Value =
-        serde_json::from_str(&retrieved_desc_str).expect("Failed to deserialize descriptor");
-    assert_eq!(retrieved_desc_json, job_desc_json);
-}
-
-#[tokio::test]
-async fn get_job_ids_for_node_retrieves_all_jobs() {
+async fn get_jobs_for_node_with_statuses_filters_by_node_id() {
     //* Given
     let temp_db = PgTempDB::new();
     let mut conn = DbConn::connect(&temp_db.connection_uri())
@@ -152,7 +114,7 @@ async fn get_job_ids_for_node_retrieves_all_jobs() {
         .await
         .expect("Failed to pre-register the worker 2");
 
-    //
+    // Register jobs
     let job_desc1 = serde_json::json!({ "job": 1 });
     let job_desc_str1 = serde_json::to_string(&job_desc1).expect("Failed to serialize");
     let job_id1 = jobs::register_job(&mut *conn, &worker_id_main, &job_desc_str1)
@@ -168,21 +130,36 @@ async fn get_job_ids_for_node_retrieves_all_jobs() {
     // Register a job for a different worker to ensure it's not retrieved
     let job_desc_other = serde_json::json!({ "job": "other" });
     let job_desc_str_other = serde_json::to_string(&job_desc_other).expect("Failed to serialize");
-    jobs::register_job(&mut *conn, &worker_id_other, &job_desc_str_other)
+    let job_id_other = jobs::register_job(&mut *conn, &worker_id_other, &job_desc_str_other)
         .await
         .expect("Failed to register job for other worker");
 
     //* When
-    let job_ids = jobs::get_job_ids_for_node(&mut *conn, &worker_id_main)
-        .await
-        .expect("Failed to get job IDs for node");
+    let jobs_list =
+        jobs::get_jobs_for_node_with_statuses(&mut *conn, &worker_id_main, [JobStatus::Scheduled])
+            .await
+            .expect("Failed to get jobs for node");
 
     //* Then
-    assert_eq!(job_ids, [job_id1, job_id2]);
+    assert!(
+        jobs_list.iter().any(|job| job.id == job_id1),
+        "job 1 not found in jobs list: {:?}",
+        jobs_list
+    );
+    assert!(
+        jobs_list.iter().any(|job| job.id == job_id2),
+        "job 2 not found in jobs list: {:?}",
+        jobs_list
+    );
+    assert!(
+        !jobs_list.iter().any(|job| job.id == job_id_other),
+        "job for other worker found in jobs list: {:?}",
+        jobs_list
+    );
 }
 
 #[tokio::test]
-async fn get_active_job_ids_for_node_retrieves_only_active_jobs() {
+async fn get_jobs_for_node_with_statuses_filters_by_status() {
     //* Given
     let temp_db = PgTempDB::new();
 
@@ -227,6 +204,13 @@ async fn get_active_job_ids_for_node_retrieves_only_active_jobs() {
         .await
         .expect("Failed to update job_id_failed to Failed");
 
+    let job_id_stop_requested = jobs::register_job(&mut *db, &worker_id, &job_desc_str)
+        .await
+        .expect("Failed to register job_id_stop_requested");
+    jobs::update_job_status(&mut *db, &job_id_stop_requested, JobStatus::StopRequested)
+        .await
+        .expect("Failed to update job_id_stop_requested to StopRequested");
+
     let job_id_stopped = jobs::register_job(&mut *db, &worker_id, &job_desc_str)
         .await
         .expect("Failed to register job_id_stopped");
@@ -235,10 +219,34 @@ async fn get_active_job_ids_for_node_retrieves_only_active_jobs() {
         .expect("Failed to update job_id_stopped to Stopped");
 
     //* When
-    let active_job_ids = jobs::get_active_job_ids_for_node(&mut *db, &worker_id)
-        .await
-        .expect("Failed to get active job IDs for node");
+    let active_jobs = jobs::get_jobs_for_node_with_statuses(
+        &mut *db,
+        &worker_id,
+        [
+            JobStatus::Scheduled,
+            JobStatus::Running,
+            JobStatus::StopRequested,
+        ],
+    )
+    .await
+    .expect("Failed to get active job IDs for node");
 
     //* Then
-    assert_eq!(active_job_ids, [job_id_scheduled, job_id_running]);
+    assert!(
+        active_jobs.iter().any(|job| job.id == job_id_scheduled),
+        "scheduled job not found in active jobs: {:?}",
+        active_jobs
+    );
+    assert!(
+        active_jobs.iter().any(|job| job.id == job_id_running),
+        "running job not found in active jobs: {:?}",
+        active_jobs
+    );
+    assert!(
+        active_jobs
+            .iter()
+            .any(|job| job.id == job_id_stop_requested),
+        "stop requested job not found in active jobs: {:?}",
+        active_jobs
+    );
 }

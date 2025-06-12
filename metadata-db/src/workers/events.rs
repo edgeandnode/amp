@@ -71,11 +71,6 @@ impl JobNotifListener {
         Ok(Self(listener))
     }
 
-    /// Consumes the [`Listener`] and returns the inner [`PgListener`].
-    pub fn into_inner(self) -> PgListener {
-        self.0
-    }
-
     /// Converts the listener into a stream of [`Notification`]s.
     ///
     /// # Error cases
@@ -193,5 +188,80 @@ impl<'de> serde::Deserialize<'de> for JobNotifAction {
     {
         let s: &str = serde::Deserialize::deserialize(deserializer)?;
         s.parse().map_err(serde::de::Error::custom)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::JobNotifAction;
+
+    #[test]
+    fn valid_action_string_parsing_succeeds() {
+        // Uppercase
+        let start_upper: Result<JobNotifAction, _> = "START".parse();
+        assert!(
+            matches!(start_upper, Ok(JobNotifAction::Start)),
+            "Expected START to parse as JobNotifAction::Start"
+        );
+
+        let stop_upper: Result<JobNotifAction, _> = "STOP".parse();
+        assert!(
+            matches!(stop_upper, Ok(JobNotifAction::Stop)),
+            "Expected STOP to parse as JobNotifAction::Stop"
+        );
+
+        // Test case-insensitive parsing
+        let start_lower: Result<JobNotifAction, _> = "start".parse();
+        assert!(
+            matches!(start_lower, Ok(JobNotifAction::Start)),
+            "Expected start to parse as JobNotifAction::Start"
+        );
+
+        let stop_lower: Result<JobNotifAction, _> = "stop".parse();
+        assert!(
+            matches!(stop_lower, Ok(JobNotifAction::Stop)),
+            "Expected stop to parse as JobNotifAction::Stop"
+        );
+    }
+
+    #[test]
+    fn invalid_action_string_parsing_fails() {
+        // Completely invalid strings
+        let invalid_upper: Result<JobNotifAction, _> = "INVALID".parse();
+        assert!(invalid_upper.is_err(), "Expected INVALID to fail parsing");
+
+        let invalid_lower: Result<JobNotifAction, _> = "invalid".parse();
+        assert!(invalid_lower.is_err(), "Expected invalid to fail parsing");
+
+        // Empty string
+        let empty: Result<JobNotifAction, _> = "".parse();
+        assert!(empty.is_err(), "Expected empty string to fail parsing");
+
+        // Similar but wrong action names
+        let pause_upper: Result<JobNotifAction, _> = "PAUSE".parse();
+        assert!(pause_upper.is_err(), "Expected PAUSE to fail parsing");
+
+        let run_upper: Result<JobNotifAction, _> = "RUN".parse();
+        assert!(run_upper.is_err(), "Expected RUN to fail parsing");
+
+        let begin_lower: Result<JobNotifAction, _> = "begin".parse();
+        assert!(begin_lower.is_err(), "Expected begin to fail parsing");
+
+        let end_lower: Result<JobNotifAction, _> = "end".parse();
+        assert!(end_lower.is_err(), "Expected end to fail parsing");
+
+        // Numeric strings
+        let numeric: Result<JobNotifAction, _> = "123".parse();
+        assert!(numeric.is_err(), "Expected 123 to fail parsing");
+
+        // Extended action names
+        let start_now_upper: Result<JobNotifAction, _> = "START_NOW".parse();
+        assert!(
+            start_now_upper.is_err(),
+            "Expected START_NOW to fail parsing"
+        );
+
+        let stop_now_upper: Result<JobNotifAction, _> = "STOP_NOW".parse();
+        assert!(stop_now_upper.is_err(), "Expected STOP_NOW to fail parsing");
     }
 }

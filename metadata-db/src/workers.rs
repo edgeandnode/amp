@@ -23,6 +23,7 @@ pub struct Worker {
 /// In-tree integration tests
 #[cfg(test)]
 mod tests {
+    mod it_events;
     mod it_heartbeat;
     mod it_jobs;
 }
