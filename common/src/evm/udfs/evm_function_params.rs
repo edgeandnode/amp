@@ -5,7 +5,10 @@ use alloy::{
     json_abi::Function as AlloyFunction,
 };
 use datafusion::{
-    arrow::{array::{ArrayBuilder, BinaryBuilder}, datatypes::FieldRef},
+    arrow::{
+        array::{ArrayBuilder, BinaryBuilder},
+        datatypes::FieldRef,
+    },
     common::plan_err,
     error::DataFusionError,
     logical_expr::{

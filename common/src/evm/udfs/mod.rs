@@ -12,7 +12,9 @@ use datafusion::{
             FixedSizeListArray, FixedSizeListBuilder, Int16Array, Int32Array, Int64Array,
             Int8Array, ListArray, ListBuilder, NullBuilder, StringArray, StructArray, UInt16Array,
             UInt32Array, UInt64Array, UInt8Array,
-        }, datatypes::FieldRef, error::ArrowError
+        },
+        datatypes::FieldRef,
+        error::ArrowError,
     },
     common::{internal_err, plan_err},
     error::DataFusionError,
@@ -1605,7 +1607,8 @@ mod tests {
                     .fields()
                     .unwrap(),
                 false,
-            ).into(),
+            )
+            .into(),
         };
         let result = evm_decode.invoke_with_args(args).unwrap();
         let ColumnarValue::Array(result) = result else {

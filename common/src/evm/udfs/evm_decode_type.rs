@@ -2,7 +2,10 @@ use std::{any::Any, sync::Arc};
 
 use alloy::dyn_abi::DynSolType;
 use datafusion::{
-    arrow::{array::{make_builder, ArrayBuilder}, datatypes::FieldRef},
+    arrow::{
+        array::{make_builder, ArrayBuilder},
+        datatypes::FieldRef,
+    },
     common::plan_err,
     error::DataFusionError,
     logical_expr::{
