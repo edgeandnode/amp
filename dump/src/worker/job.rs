@@ -53,7 +53,7 @@ impl Job {
                 let dataset_tables = dataset
                     .tables()
                     .iter()
-                    .map(|t| t.name.to_string())
+                    .map(|t| t.name().to_string())
                     .collect::<BTreeSet<_>>();
                 let job_tables = output_locations
                     .iter()

@@ -350,7 +350,7 @@ async fn resolve_block_range(
         }
     };
 
-    assert!(dataset.tables.iter().any(|t| t.name == "blocks"));
+    assert!(dataset.tables.iter().any(|t| t.name() == "blocks"));
     let blocks_table = format!("{}.blocks", dataset.name);
     let query = parse_sql(&format!(
         r#"

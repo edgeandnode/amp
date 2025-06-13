@@ -54,7 +54,7 @@ pub async fn schema_to_markdown(tables: Vec<Table>) -> String {
         file!()
     ));
     for table in tables {
-        markdown.push_str(&format!("## {}\n", table.name));
+        markdown.push_str(&format!("## {}\n", table.name()));
         markdown.push_str("````\n");
         markdown.push_str(&print_schema(&table).await);
         markdown.push_str("\n````\n");
@@ -65,7 +65,7 @@ pub async fn schema_to_markdown(tables: Vec<Table>) -> String {
 
 async fn print_schema(table: &Table) -> String {
     let plan = LogicalPlan::DescribeTable(DescribeTable {
-        schema: table.schema.clone(),
+        schema: table.schema().clone(),
         output_schema: Arc::new(LogicalPlan::describe_schema().try_into().unwrap()),
     });
     let ctx = SessionContext::new();
