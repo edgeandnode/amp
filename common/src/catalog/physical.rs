@@ -7,7 +7,7 @@ use datafusion::{
     datasource::{
         create_ordering,
         file_format::{parquet::ParquetFormat, FileFormat},
-        listing::{ListingTableUrl, PartitionedFile},
+        listing::{ListingTable, ListingTableUrl, PartitionedFile},
         physical_plan::{FileGroup, FileScanConfigBuilder},
         TableProvider, TableType,
     },
@@ -568,7 +568,9 @@ impl TableProvider for PhysicalTable {
             .create_physical_plan(
                 state,
                 FileScanConfigBuilder::new(object_store_url, file_schema, file_source)
-                    .with_file_group(file_group)
+                    .with_file_groups(
+                        file_group.split_files(state.config_options().execution.target_partitions),
+                    )
                     .with_output_ordering(output_ordering)
                     .with_projection(projection.cloned())
                     .build(),
