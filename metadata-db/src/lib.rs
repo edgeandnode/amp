@@ -186,7 +186,7 @@ impl MetadataDb {
 
     /// Listen to the worker actions notification channel for job notifications
     pub async fn listen_for_job_notifications(&self) -> Result<JobNotifListener, Error> {
-        workers::events::listen_url(&*self.url)
+        workers::events::listen_url(&self.url)
             .await
             .map_err(Into::into)
     }
@@ -225,16 +225,87 @@ impl MetadataDb {
         Ok(job_id)
     }
 
-    /// Given a worker `node_id`, returns all the job IDs
+    /// Given a worker `node_id`, returns all the job IDs  
+    #[deprecated(
+        note = "Use `get_scheduled_jobs_with_details` instead which returns full job objects"
+    )]
     pub async fn get_scheduled_jobs(&self, node_id: &WorkerNodeId) -> Result<Vec<JobId>, Error> {
-        Ok(workers::jobs::get_job_ids_for_node(&*self.pool, node_id).await?)
+        Ok(workers::jobs::get_jobs_for_node_with_statuses(
+            &*self.pool,
+            node_id,
+            [JobStatus::Scheduled, JobStatus::Running],
+        )
+        .await?
+        .into_iter()
+        .map(|job| job.id)
+        .collect())
     }
 
     /// Given a worker `node_id`, returns all the active job IDs for that worker
     ///
     /// A job is considered active if its in [`JobStatus::Scheduled`] or [`JobStatus::Running`].
+    #[deprecated(
+        note = "Use `get_active_jobs_with_details` instead which returns full job objects"
+    )]
     pub async fn get_active_jobs(&self, node_id: &WorkerNodeId) -> Result<Vec<JobId>, Error> {
-        Ok(workers::jobs::get_active_job_ids_for_node(&*self.pool, node_id).await?)
+        Ok(workers::jobs::get_jobs_for_node_with_statuses(
+            &*self.pool,
+            node_id,
+            [
+                JobStatus::Scheduled,
+                JobStatus::Running,
+                JobStatus::StopRequested,
+            ],
+        )
+        .await?
+        .into_iter()
+        .map(|job| job.id)
+        .collect())
+    }
+
+    /// Given a worker [`WorkerNodeId`], return all the scheduled jobs
+    ///
+    /// A job is considered scheduled if it's in one of the following non-terminal states:
+    /// - [`JobStatus::Scheduled`]
+    /// - [`JobStatus::Running`]
+    ///
+    /// This method is used to fetch all the jobs that the worker should be running after a restart.
+    pub async fn get_scheduled_jobs_with_details(
+        &self,
+        node_id: &WorkerNodeId,
+    ) -> Result<Vec<Job>, Error> {
+        Ok(workers::jobs::get_jobs_for_node_with_statuses(
+            &*self.pool,
+            node_id,
+            [JobStatus::Scheduled, JobStatus::Running],
+        )
+        .await?)
+    }
+
+    /// Given a worker [`WorkerNodeId`], return all the active jobs
+    ///
+    /// A job is considered active if it's in  on of the following non-terminal states:
+    /// - [`JobStatus::Scheduled`]
+    /// - [`JobStatus::Running`]
+    /// - [`JobStatus::StopRequested`]
+    ///
+    /// When connection issues cause the job notification channel to miss notifications, a job reconciliation routine
+    /// ensures each worker's job set remains synchronized with the Metadata DB. This method fetches all jobs that a
+    /// worker should be tracking, enabling the worker to reconcile its state when notifications are lost.
+    pub async fn get_active_jobs_with_details(
+        &self,
+        node_id: &WorkerNodeId,
+    ) -> Result<Vec<Job>, Error> {
+        Ok(workers::jobs::get_jobs_for_node_with_statuses(
+            &*self.pool,
+            node_id,
+            [
+                JobStatus::Scheduled,
+                JobStatus::Running,
+                JobStatus::StopRequested,
+            ],
+        )
+        .await?)
     }
 
     /// Returns the job with the given ID
@@ -243,8 +314,10 @@ impl MetadataDb {
     }
 
     /// For a given job ID, returns the job descriptor.
+    #[deprecated(note = "Use `get_job` instead which returns the full job object")]
     pub async fn job_desc(&self, id: &JobId) -> Result<Option<String>, Error> {
-        Ok(workers::jobs::get_job_descriptor(&*self.pool, id).await?)
+        let job = workers::jobs::get_job(&*self.pool, id).await?;
+        Ok(job.map(|j| j.desc.to_string()))
     }
 
     /// Marks a job as `RUNNING`

@@ -69,64 +69,28 @@ where
     Ok(res)
 }
 
-/// Get the job descriptor for a given job ID
-pub async fn get_job_descriptor<'c, E>(exe: E, id: &JobId) -> Result<Option<String>, sqlx::Error>
-where
-    E: sqlx::Executor<'c, Database = Postgres>,
-{
-    let query = indoc::indoc! {r#"
-        SELECT descriptor::text
-        FROM jobs
-        WHERE id = $1
-    "#};
-    let res = sqlx::query_scalar(query)
-        .bind(id)
-        .fetch_optional(exe)
-        .await?;
-    Ok(res)
-}
-
-/// Get all job IDs for a given worker node
-pub async fn get_job_ids_for_node<'c, E>(
+/// Get jobs for a given worker node with any of the specified statuses
+pub async fn get_jobs_for_node_with_statuses<'c, E, const N: usize>(
     exe: E,
     node_id: &WorkerNodeId,
-) -> Result<Vec<JobId>, sqlx::Error>
+    statuses: [JobStatus; N],
+) -> Result<Vec<Job>, sqlx::Error>
 where
     E: sqlx::Executor<'c, Database = Postgres>,
 {
     let query = indoc::indoc! {r#"
-        SELECT id
+        SELECT 
+            id, 
+            node_id, 
+            status, 
+            descriptor
         FROM jobs
-        WHERE node_id = $1
+        WHERE node_id = $1 AND status = ANY($2)
         ORDER BY id ASC
     "#};
-    let res = sqlx::query_scalar(query)
+    let res = sqlx::query_as(query)
         .bind(node_id)
-        .fetch_all(exe)
-        .await?;
-    Ok(res)
-}
-
-/// Get all active job IDs for a given worker node
-///
-/// A job is considered active if its in [`JobStatus::Scheduled`] or [`JobStatus::Running`].
-pub async fn get_active_job_ids_for_node<'c, E>(
-    exe: E,
-    node_id: &WorkerNodeId,
-) -> Result<Vec<JobId>, sqlx::Error>
-where
-    E: sqlx::Executor<'c, Database = Postgres>,
-{
-    let query = indoc::indoc! {r#"
-            SELECT id
-            FROM jobs
-            WHERE node_id = $1 AND status = ANY($2)
-            ORDER BY id ASC
-        "#,
-    };
-    let res = sqlx::query_scalar(query)
-        .bind(node_id)
-        .bind([JobStatus::Scheduled, JobStatus::Running])
+        .bind(statuses)
         .fetch_all(exe)
         .await?;
     Ok(res)
@@ -149,26 +113,6 @@ pub struct Job {
     pub desc: JsonValue,
 }
 
-impl Job {
-    /// Check if the job is active
-    ///
-    /// A job is active if it's in a non-terminal state.
-    pub fn is_active(&self) -> bool {
-        matches!(
-            self.status,
-            JobStatus::Scheduled
-                | JobStatus::Running
-                | JobStatus::StopRequested
-                | JobStatus::Stopping
-        )
-    }
-
-    /// Check if the job is completed
-    pub fn is_completed(&self) -> bool {
-        matches!(self.status, JobStatus::Completed)
-    }
-}
-
 /// A unique identifier for a job
 #[derive(
     Debug,
@@ -188,22 +132,10 @@ impl Job {
 #[sqlx(transparent)]
 pub struct JobId(i64);
 
-impl JobId {
-    /// Convert the [`JobId`] to an `i64`
-    pub fn to_i64(self) -> i64 {
-        self.0
-    }
-}
-
-impl AsRef<i64> for JobId {
-    fn as_ref(&self) -> &i64 {
-        &self.0
-    }
-}
-
-impl From<JobId> for i64 {
-    fn from(id: JobId) -> Self {
-        id.0
+#[cfg(test)]
+impl From<i64> for JobId {
+    fn from(value: i64) -> Self {
+        Self(value)
     }
 }
 
@@ -297,26 +229,6 @@ impl JobStatus {
 impl std::fmt::Display for JobStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_str())
-    }
-}
-
-impl serde::Serialize for JobStatus {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(self.as_str())
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for JobStatus {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let s: &str = serde::Deserialize::deserialize(deserializer)?;
-        // Since FromStr::Err is Infallible, unwrap is safe.
-        Ok(s.parse().unwrap())
     }
 }
 
