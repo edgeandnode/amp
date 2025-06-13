@@ -1,7 +1,6 @@
 //! Dataset deploy handler
 
 use axum::{extract::State, http::StatusCode, Json};
-use common::manifest::Manifest;
 use http_common::BoxRequestError;
 use object_store::path::Path;
 use serde::de::Error as _;
@@ -17,10 +16,6 @@ pub async fn handler(
     State(ctx): State<Ctx>,
     Json(payload): Json<DeployRequest>,
 ) -> Result<(StatusCode, &'static str), BoxRequestError> {
-    // Parse and validate the manifest
-    let manifest: Manifest =
-        serde_json::from_str(&payload.manifest).map_err(Error::InvalidManifest)?;
-
     if let Err(err) = validate_dataset_name(&payload.dataset_name) {
         let err = Error::InvalidManifest(serde_json::Error::custom(format!(
             "invalid dataset name: {err}"
@@ -29,8 +24,13 @@ pub async fn handler(
         return Err(err.into());
     }
 
-    // Write the manifest to the dataset def store
-    let path = Path::from(payload.dataset_name.clone() + ".json");
+    // Write the manifest to the dataset def store. Detect if JSON or TOML.
+    let format_extension = if payload.manifest.trim_start().starts_with('{') {
+        "json"
+    } else {
+        "toml"
+    };
+    let path = Path::from(format!("{}.{}", payload.dataset_name, format_extension));
     ctx.config
         .dataset_defs_store
         .prefixed_store()
@@ -41,8 +41,14 @@ pub async fn handler(
             Error::DatasetDefStoreError(err)
         })?;
 
+    let dataset = ctx
+        .store
+        .load_dataset(&payload.dataset_name)
+        .await
+        .map_err(Error::StoreError)?;
+
     ctx.scheduler
-        .schedule_dataset_dump(manifest)
+        .schedule_dataset_dump(dataset.dataset)
         .await
         .map_err(|err| {
             tracing::error!(error=?err, "failed to schedule dataset dump");

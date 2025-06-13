@@ -50,10 +50,11 @@ const make = ({
       |name = "anvil"
       |network = "anvil"
       |kind = "evm-rpc"
-      |provider = "anvil.toml"
     |`).trimStart()
 
     const provider = String.stripMargin(`|
+      |kind = "evm-rpc"
+      |network = "anvil"
       |url = "${rpc.url}"
     |`).trimStart()
 
