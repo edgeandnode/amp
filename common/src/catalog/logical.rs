@@ -15,15 +15,10 @@ use crate::{js_udf::JsUdf, BoxError, BLOCK_NUM, SPECIAL_BLOCK_NUM};
 #[derive(Clone, Debug)]
 pub struct Dataset {
     pub kind: String,
+    pub network: String,
     pub name: String,
     pub tables: Vec<Table>,
     pub functions: Vec<Function>,
-}
-
-#[derive(Clone, Debug)]
-pub struct DatasetWithProvider {
-    pub dataset: Dataset,
-    pub provider: Option<toml::Value>,
 }
 
 impl Dataset {

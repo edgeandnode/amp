@@ -3,21 +3,16 @@ use crate::{dataset::DatasetDef, Error};
 pub mod pb_to_rows;
 pub mod tables;
 
-use common::{Dataset, DatasetWithProvider};
+use common::Dataset;
 
-pub fn dataset(
-    dataset_cfg: toml::Value,
-    provider: toml::Value,
-) -> Result<DatasetWithProvider, Error> {
+pub fn dataset(dataset_cfg: toml::Value) -> Result<Dataset, Error> {
     let dataset_def: DatasetDef = dataset_cfg.try_into()?;
-    Ok(DatasetWithProvider {
-        dataset: Dataset {
-            kind: dataset_def.kind,
-            name: dataset_def.name,
-            tables: tables::all(&dataset_def.network),
-            functions: vec![],
-        },
-        provider: Some(provider),
+    Ok(Dataset {
+        kind: dataset_def.kind,
+        name: dataset_def.name,
+        tables: tables::all(&dataset_def.network),
+        network: dataset_def.network,
+        functions: vec![],
     })
 }
 

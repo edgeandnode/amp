@@ -9,29 +9,24 @@ pub use dataset::DATASET_KIND;
 mod dataset;
 mod proto;
 
-use common::{Dataset, DatasetWithProvider};
+use common::Dataset;
 use firehose_datasets::Error;
 use proto::sf::substreams::v1::Package;
 use tables::Tables;
 
 /// Does an network request to fetch the spkg from the URL in the `manifest` config key.
-pub async fn dataset(
-    dataset_cfg: toml::Value,
-    provider: toml::Value,
-) -> Result<DatasetWithProvider, Error> {
+pub async fn dataset(dataset_cfg: toml::Value) -> Result<Dataset, Error> {
     let dataset_def: DatasetDef = dataset_cfg.try_into()?;
     let package = Package::from_url(dataset_def.manifest.as_str()).await?;
 
     let tables = Tables::from_package(&package, &dataset_def.module)
         .map_err(|_| Error::AssertFail("failed to build tables from spkg".into()))?;
 
-    Ok(DatasetWithProvider {
-        dataset: Dataset {
-            kind: dataset_def.kind,
-            name: dataset_def.name,
-            tables: tables.tables,
-            functions: vec![],
-        },
-        provider: Some(provider),
+    Ok(Dataset {
+        kind: dataset_def.kind,
+        name: dataset_def.name,
+        tables: tables.tables,
+        functions: vec![],
+        network: dataset_def.network,
     })
 }

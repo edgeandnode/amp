@@ -4,7 +4,7 @@ use axum::{
     extract::{Path, State},
     Json,
 };
-use common::catalog::logical::DatasetWithProvider;
+use common::Dataset;
 use http_common::BoxRequestError;
 use metadata_db::TableId;
 
@@ -52,14 +52,11 @@ pub async fn handler(
 }
 
 /// Transforms a dataset object into a response type with location information
-async fn try_into_dataset_response(
-    ctx: &Ctx,
-    dataset: DatasetWithProvider,
-) -> Result<DatasetInfo, Error> {
-    let mut table_infos = Vec::with_capacity(dataset.dataset.tables.len());
-    for table in dataset.dataset.tables {
+async fn try_into_dataset_response(ctx: &Ctx, dataset: Dataset) -> Result<DatasetInfo, Error> {
+    let mut table_infos = Vec::with_capacity(dataset.tables.len());
+    for table in dataset.tables {
         let table_id = TableId {
-            dataset: &dataset.dataset.name,
+            dataset: &dataset.name,
             dataset_version: None,
             table: &table.name,
         };
@@ -83,8 +80,8 @@ async fn try_into_dataset_response(
     }
 
     Ok(DatasetInfo {
-        name: dataset.dataset.name,
-        kind: dataset.dataset.kind,
+        name: dataset.name,
+        kind: dataset.kind,
         tables: table_infos,
     })
 }

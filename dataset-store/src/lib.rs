@@ -17,8 +17,8 @@ use common::{
     query_context::{self, parse_sql, PlanningContext, QueryEnv},
     sql_visitors::all_function_names,
     store::StoreError,
-    BlockNum, BlockStreamer, BoxError, Dataset, DatasetWithProvider, LogicalCatalog, QueryContext,
-    RawDatasetRows, Store,
+    BlockNum, BlockStreamer, BoxError, Dataset, LogicalCatalog, QueryContext, RawDatasetRows,
+    Store,
 };
 use datafusion::{
     common::HashMap,
@@ -201,7 +201,7 @@ pub struct DatasetStore {
     // Cache maps dataset name to eth_call UDF.
     eth_call_cache: Arc<RwLock<HashMap<String, ScalarUDF>>>,
     // This cache maps dataset name to the dataset definition.
-    dataset_cache: Arc<RwLock<HashMap<String, DatasetWithProvider>>>,
+    dataset_cache: Arc<RwLock<HashMap<String, Dataset>>>,
     // Cache of provider definitions.
     providers_cache: Arc<RwLock<Option<Vec<ObjectMeta>>>>,
 }
@@ -218,17 +218,14 @@ impl DatasetStore {
     }
 
     // TODO: Update to return a Result<Option<..>, Error> if the dataset is not found
-    pub async fn load_dataset(
-        self: &Arc<Self>,
-        dataset: &str,
-    ) -> Result<DatasetWithProvider, DatasetError> {
+    pub async fn load_dataset(self: &Arc<Self>, dataset: &str) -> Result<Dataset, DatasetError> {
         self.clone()
             .load_dataset_inner(dataset)
             .await
             .map_err(|e| (dataset, e).into())
     }
 
-    pub async fn all_datasets(self: &Arc<Self>) -> Result<Vec<DatasetWithProvider>, DatasetError> {
+    pub async fn all_datasets(self: &Arc<Self>) -> Result<Vec<Dataset>, DatasetError> {
         let all_objs = self
             .dataset_defs_store()
             .list_all_shallow()
@@ -288,48 +285,36 @@ impl DatasetStore {
         Ok(SqlDataset { dataset, queries })
     }
 
-    async fn load_dataset_inner(
-        self: &Arc<Self>,
-        dataset_name: &str,
-    ) -> Result<DatasetWithProvider, Error> {
+    async fn load_dataset_inner(self: &Arc<Self>, dataset_name: &str) -> Result<Dataset, Error> {
         if let Some(dataset) = self.dataset_cache.read().unwrap().get(dataset_name) {
             return Ok(dataset.clone());
         }
 
-        let (kind, network, raw_dataset) = self.kind_network_dataset(dataset_name).await?;
+        let (kind, raw_dataset) = self.kind_and_dataset(dataset_name).await?;
 
         let dataset = match kind {
             DatasetKind::EvmRpc => {
                 let dataset_toml: toml::Value = toml::from_str(&raw_dataset)?;
-                let provider = self.find_provider(kind, network.clone()).await?;
-                evm_rpc_datasets::dataset(dataset_toml, provider)?
+                evm_rpc_datasets::dataset(dataset_toml)?
             }
             DatasetKind::Firehose => {
                 let dataset_toml: toml::Value = toml::from_str(&raw_dataset)?;
-                let provider = self.find_provider(kind, network.clone()).await?;
-                firehose_datasets::evm::dataset(dataset_toml, provider)?
+                firehose_datasets::evm::dataset(dataset_toml)?
             }
             DatasetKind::Substreams => {
                 let dataset_toml: toml::Value = toml::from_str(&raw_dataset)?;
-                let provider = self.find_provider(kind, network.clone()).await?;
-                substreams_datasets::dataset(dataset_toml, provider).await?
+                substreams_datasets::dataset(dataset_toml).await?
             }
             DatasetKind::Sql => {
                 let dataset_toml: toml::Value = toml::from_str(&raw_dataset)?;
-                DatasetWithProvider {
-                    dataset: self.clone().sql_dataset(dataset_toml).await?.dataset,
-                    provider: None,
-                }
+                self.clone().sql_dataset(dataset_toml).await?.dataset
             }
             DatasetKind::Manifest => {
                 let filename = format!("{}.json", dataset_name);
                 let raw_manifest = self.dataset_defs_store().get_string(filename).await?;
                 let manifest: Manifest =
                     serde_json::from_str(&raw_manifest).map_err(Error::ManifestError)?;
-                DatasetWithProvider {
-                    dataset: Dataset::from(manifest.clone()),
-                    provider: None,
-                }
+                Dataset::from(manifest.clone())
             }
         };
 
@@ -497,10 +482,7 @@ impl DatasetStore {
     }
 
     /// Returns cached eth_call scalar UDF, otherwise loads the UDF and caches it.
-    async fn eth_call_for_dataset(
-        &self,
-        DatasetWithProvider { dataset, provider }: &DatasetWithProvider,
-    ) -> Result<Option<ScalarUDF>, Error> {
+    async fn eth_call_for_dataset(&self, dataset: &Dataset) -> Result<Option<ScalarUDF>, Error> {
         #[derive(Deserialize)]
         struct EvmRpcProvider {
             url: Url,
@@ -516,21 +498,20 @@ impl DatasetStore {
         }
 
         // Load the provider from the dataset definition.
-        if let Some(provider) = provider.clone() {
-            let provider: EvmRpcProvider = provider.try_into()?;
-            // Cache the provider.
-            let provider = alloy::providers::RootProvider::new_http(provider.url);
-            let udf = AsyncScalarUDF::new(Arc::new(EthCall::new(&dataset.name, provider)))
-                .into_scalar_udf();
-            let udf = Arc::into_inner(udf).unwrap();
-            self.eth_call_cache
-                .write()
-                .unwrap()
-                .insert(dataset.name.clone(), udf.clone());
-            return Ok(Some(udf));
-        }
-
-        Ok(None)
+        let provider = self
+            .find_provider(DatasetKind::EvmRpc, dataset.network.clone())
+            .await?;
+        let provider: EvmRpcProvider = provider.try_into()?;
+        // Cache the provider.
+        let provider = alloy::providers::RootProvider::new_http(provider.url);
+        let udf =
+            AsyncScalarUDF::new(Arc::new(EthCall::new(&dataset.name, provider))).into_scalar_udf();
+        let udf = Arc::into_inner(udf).unwrap();
+        self.eth_call_cache
+            .write()
+            .unwrap()
+            .insert(dataset.name.clone(), udf.clone());
+        Ok(Some(udf))
     }
 
     /// Creates a `QueryContext` for a SQL query, this will infer and load any dependencies. The
@@ -586,7 +567,7 @@ impl DatasetStore {
             let udf = self
                 .eth_call_for_dataset(&dataset)
                 .await
-                .map_err(|e| (dataset.dataset.name.clone(), e))?;
+                .map_err(|e| (dataset.name.clone(), e))?;
             if let Some(udf) = udf {
                 catalog.add_udf(udf);
             }
@@ -644,11 +625,11 @@ impl DatasetStore {
             }
 
             // Add JS UDFs
-            for udf in dataset.dataset.functions(isolate_pool.clone()) {
+            for udf in dataset.functions(isolate_pool.clone()) {
                 udfs.push(udf.into());
             }
 
-            for table in Arc::new(dataset.dataset).resolved_tables() {
+            for table in Arc::new(dataset).resolved_tables() {
                 resolved_tables.push(table);
             }
         }

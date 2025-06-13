@@ -23,7 +23,7 @@ pub async fn dump_check(
     start: u64,
     end_block: u64,
 ) -> Result<(), BoxError> {
-    let dataset = dataset_store.load_dataset(&dataset_name).await?.dataset;
+    let dataset = dataset_store.load_dataset(&dataset_name).await?;
     let client = dataset_store.load_client(&dataset_name).await?;
     let total_blocks = end_block - start + 1;
     let mut tables = Vec::with_capacity(dataset.tables.len());
