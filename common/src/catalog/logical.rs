@@ -68,18 +68,14 @@ pub struct Table {
 
 impl Table {
     /// Column names by which this table is naturally sorted.
-    pub fn sorted_by(&self) -> Vec<String> {
+    pub const fn sorted_by(&self) -> &[&str] {
         // Leveraging `order_exprs` can optimize away sorting for many query plans.
         //
         // TODO:
         // - Make this less hardcoded to handle non-blockchain data.
         // - Have a consistency check that the data really is sorted.
         // - Do we want to address and leverage https://github.com/apache/arrow-datafusion/issues/4177?
-        vec![
-            SPECIAL_BLOCK_NUM.to_string(),
-            BLOCK_NUM.to_string(),
-            "timestamp".to_string(),
-        ]
+        &[SPECIAL_BLOCK_NUM, BLOCK_NUM, "timestamp"]
     }
 
     /// Prepend the `SPECIAL_BLOCK_NUM` column to the table schema. This is useful for SQL datasets.

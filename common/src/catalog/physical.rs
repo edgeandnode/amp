@@ -2,14 +2,28 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use datafusion::{
     arrow::datatypes::SchemaRef,
+    catalog::Session,
+    common::Statistics,
+    datasource::{
+        create_ordering,
+        file_format::{parquet::ParquetFormat, FileFormat},
+        listing::{ListingTableUrl, PartitionedFile},
+        physical_plan::{FileGroup, FileScanConfigBuilder},
+        TableProvider, TableType,
+    },
+    error::{DataFusionError, Result as DataFusionResult},
+    execution::{
+        cache::{cache_unit::DefaultFileStatisticsCache, CacheAccessor},
+        object_store::ObjectStoreUrl,
+    },
     logical_expr::{col, ScalarUDF, SortExpr},
     parquet::arrow::async_reader::{AsyncFileReader, ParquetObjectReader},
+    physical_expr::LexOrdering,
+    physical_plan::ExecutionPlan,
+    prelude::Expr,
     sql::TableReference,
 };
-use futures::{
-    stream::{self, BoxStream},
-    StreamExt, TryStreamExt,
-};
+use futures::{stream, Stream, StreamExt, TryStreamExt};
 use metadata_db::{LocationId, MetadataDb, TableId};
 use object_store::{path::Path, ObjectMeta, ObjectStore};
 use tracing::info;
@@ -29,7 +43,7 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub struct Catalog {
-    tables: Vec<PhysicalTable>,
+    tables: Vec<Arc<PhysicalTable>>,
     /// User-defined functions (UDFs) specific to this catalog.
     udfs: Vec<ScalarUDF>,
 }
@@ -42,19 +56,19 @@ impl Catalog {
         }
     }
 
-    pub fn new(tables: Vec<PhysicalTable>, udfs: Vec<ScalarUDF>) -> Self {
+    pub fn new(tables: Vec<Arc<PhysicalTable>>, udfs: Vec<ScalarUDF>) -> Self {
         Catalog { tables, udfs }
     }
 
-    pub fn add_table(&mut self, dataset: PhysicalTable) {
-        self.tables.push(dataset);
+    pub fn add_table(&mut self, table: Arc<PhysicalTable>) {
+        self.tables.push(table);
     }
 
     pub fn add_udf(&mut self, udf: ScalarUDF) {
         self.udfs.push(udf);
     }
 
-    pub fn tables(&self) -> &[PhysicalTable] {
+    pub fn tables(&self) -> &[Arc<PhysicalTable>] {
         &self.tables
     }
 
@@ -79,8 +93,12 @@ pub struct PhysicalTable {
     location_id: LocationId,
     /// Metadata database to use for this table.
     pub metadata_db: Arc<MetadataDb>,
+
+    /// Statistics Cache
+    statistics_cache: Arc<dyn CacheAccessor<Path, Arc<Statistics>, Extra = ObjectMeta>>,
 }
 
+// Methods for creating and managing PhysicalTable instances
 impl PhysicalTable {
     /// Create a new physical table with the given dataset name, table, URL, and object store.
     pub fn new(
@@ -91,6 +109,7 @@ impl PhysicalTable {
     ) -> Result<Self, BoxError> {
         let path = Path::from_url_path(url.path()).unwrap();
         let (object_store, _) = infer_object_store(&url)?;
+        let statistics_cache = Arc::new(DefaultFileStatisticsCache::default());
 
         Ok(Self {
             table,
@@ -99,6 +118,7 @@ impl PhysicalTable {
             object_store,
             location_id,
             metadata_db,
+            statistics_cache,
         })
     }
 
@@ -132,6 +152,7 @@ impl PhysicalTable {
         }
 
         let path = Path::from_url_path(url.path()).unwrap();
+        let statistics_cache = Arc::new(DefaultFileStatisticsCache::default());
         let physical_table = Self {
             table: table.clone(),
             url,
@@ -139,6 +160,7 @@ impl PhysicalTable {
             object_store: data_store.object_store(),
             location_id,
             metadata_db,
+            statistics_cache,
         };
 
         info!("Created new revision at {}", physical_table.path);
@@ -192,6 +214,7 @@ impl PhysicalTable {
 
         let path = Path::from_url_path(url.path()).unwrap();
         let (object_store, _) = infer_object_store(&url)?;
+        let statistics_cache = Arc::new(DefaultFileStatisticsCache::default());
 
         Ok(Some(Self {
             table: table.clone(),
@@ -200,6 +223,7 @@ impl PhysicalTable {
             object_store,
             location_id,
             metadata_db: metadata_db.clone(),
+            statistics_cache,
         }))
     }
 
@@ -264,6 +288,7 @@ impl PhysicalTable {
                 )
                 .await?;
         }
+        let statistics_cache = Arc::new(DefaultFileStatisticsCache::default());
 
         let physical_table = Self {
             table: table.clone(),
@@ -272,12 +297,35 @@ impl PhysicalTable {
             object_store,
             location_id,
             metadata_db,
+            statistics_cache,
         };
 
         Ok(physical_table)
     }
+
+    /// Truncate this table by deleting all dump files making up the table
+    pub async fn truncate(&self) -> Result<(), BoxError> {
+        let files = self.parquet_files().await?;
+        let num_files = files.len();
+        let locations = Box::pin(stream::iter(files.into_values().map(|m| Ok(m.location))));
+        let deleted = self
+            .object_store
+            .delete_stream(locations)
+            .try_collect::<Vec<Path>>()
+            .await?;
+        if deleted.len() != num_files {
+            return Err(format!(
+                "expected to delete {} files, but deleted {}",
+                num_files,
+                deleted.len()
+            )
+            .into());
+        }
+        Ok(())
+    }
 }
 
+// Methods for accessing properties of PhysicalTable
 impl PhysicalTable {
     pub fn dataset(&self) -> &Dataset {
         self.table.dataset()
@@ -322,11 +370,16 @@ impl PhysicalTable {
     }
 
     pub fn order_exprs(&self) -> Vec<Vec<SortExpr>> {
-        self.table
-            .table()
-            .sorted_by()
+        let sorted_by = self.table().table().sorted_by();
+        self.schema()
+            .fields()
             .iter()
-            .map(|col_name| vec![col(col_name).sort(true, false)])
+            .filter_map(move |field| {
+                sorted_by
+                    .iter()
+                    .find(|name| *name == field.name())
+                    .map(|name| vec![SortExpr::new(col(*name), true, false)])
+            })
             .collect()
     }
 
@@ -340,49 +393,6 @@ impl PhysicalTable {
 
     pub fn table(&self) -> &ResolvedTable {
         &self.table
-    }
-
-    pub fn stream_file_metadata(&self) -> BoxStream<'_, Result<FileMetadata, BoxError>> {
-        self.metadata_db
-            .stream_file_metadata(self.location_id)
-            .map(|row| row?.try_into())
-            .boxed()
-    }
-
-    pub fn stream_ranges(&self) -> BoxStream<'_, Result<BlockRange, BoxError>> {
-        self.stream_file_metadata()
-            .map(|r| {
-                let FileMetadata {
-                    file_name,
-                    parquet_meta: ParquetMeta { mut ranges, .. },
-                    ..
-                } = r?;
-                if ranges.len() != 1 {
-                    return Err(BoxError::from(format!(
-                        "expected exactly 1 range for {file_name}"
-                    )));
-                }
-                Ok(ranges.remove(0))
-            })
-            .boxed()
-    }
-
-    pub fn stream_file_names(&self) -> BoxStream<'_, Result<String, BoxError>> {
-        self.stream_file_metadata()
-            .map_ok(|FileMetadata { file_name, .. }| file_name)
-            .boxed()
-    }
-
-    pub fn stream_parquet_files(&self) -> BoxStream<'_, Result<(String, ObjectMeta), BoxError>> {
-        self.stream_file_metadata()
-            .map_ok(
-                move |FileMetadata {
-                          object_meta,
-                          file_name,
-                          ..
-                      }| (file_name, object_meta),
-            )
-            .boxed()
     }
 
     pub async fn file_names(&self) -> Result<Vec<String>, BoxError> {
@@ -414,26 +424,163 @@ impl PhysicalTable {
             .await?;
         MultiRange::from_ranges(ranges).map_err(Into::into)
     }
+}
 
-    /// Truncate this table by deleting all dump files making up the table
-    pub async fn truncate(&self) -> Result<(), BoxError> {
-        let files = self.parquet_files().await?;
-        let num_files = files.len();
-        let locations = Box::pin(stream::iter(files.into_values().map(|m| Ok(m.location))));
-        let deleted = self
-            .object_store
-            .delete_stream(locations)
-            .try_collect::<Vec<Path>>()
-            .await?;
-        if deleted.len() != num_files {
-            return Err(format!(
-                "expected to delete {} files, but deleted {}",
-                num_files,
-                deleted.len()
-            )
-            .into());
+// Methods for streaming metadata and file information of PhysicalTable
+impl PhysicalTable {
+    pub fn stream_file_metadata<'a>(
+        &'a self,
+    ) -> impl Stream<Item = Result<FileMetadata, BoxError>> + 'a {
+        self.metadata_db
+            .stream_file_metadata(self.location_id)
+            .map(|row| row?.try_into())
+    }
+
+    pub fn stream_ranges<'a>(&'a self) -> impl Stream<Item = Result<BlockRange, BoxError>> + 'a {
+        self.stream_file_metadata().map(|r| {
+            let FileMetadata {
+                file_name,
+                parquet_meta: ParquetMeta { mut ranges, .. },
+                ..
+            } = r?;
+            if ranges.len() != 1 {
+                return Err(BoxError::from(format!(
+                    "expected exactly 1 range for {file_name}"
+                )));
+            }
+            Ok(ranges.remove(0))
+        })
+    }
+
+    pub fn stream_file_names<'a>(&'a self) -> impl Stream<Item = Result<String, BoxError>> + 'a {
+        self.stream_file_metadata()
+            .map_ok(|FileMetadata { file_name, .. }| file_name)
+    }
+
+    pub fn stream_parquet_files<'a>(
+        &'a self,
+    ) -> impl Stream<Item = Result<(String, ObjectMeta), BoxError>> + 'a {
+        self.stream_file_metadata().map_ok(
+            |FileMetadata {
+                 object_meta,
+                 file_name,
+                 ..
+             }| (file_name, object_meta),
+        )
+    }
+}
+
+// helper methods for implementing `TableProvider` trait
+
+impl PhysicalTable {
+    async fn do_collect_statistics(
+        &self,
+        ctx: &dyn Session,
+        part_file: &PartitionedFile,
+    ) -> DataFusionResult<Arc<Statistics>> {
+        match self
+            .statistics_cache
+            .get_with_extra(&part_file.object_meta.location, &part_file.object_meta)
+        {
+            Some(statistics) => Ok(statistics),
+            None => {
+                let statistics = ParquetFormat::default()
+                    .infer_stats(
+                        ctx,
+                        &self.object_store,
+                        Arc::clone(&self.schema()),
+                        &part_file.object_meta,
+                    )
+                    .await?;
+                let statistics = Arc::new(statistics);
+                self.statistics_cache.put_with_extra(
+                    &part_file.object_meta.location,
+                    Arc::clone(&statistics),
+                    &part_file.object_meta,
+                );
+                Ok(statistics)
+            }
         }
-        Ok(())
+    }
+
+    fn object_store_url(&self) -> DataFusionResult<ObjectStoreUrl> {
+        Ok(ListingTableUrl::try_new(self.url.clone(), None)?.object_store())
+    }
+
+    fn output_ordering(&self) -> DataFusionResult<Vec<LexOrdering>> {
+        let schema = self.schema();
+        let sort_order = self.order_exprs();
+        create_ordering(&schema, &sort_order)
+    }
+
+    fn stream_partitioned_files<'a>(
+        &'a self,
+        ctx: &'a dyn Session,
+    ) -> impl Stream<Item = DataFusionResult<PartitionedFile>> + 'a {
+        self.stream_file_metadata()
+            .map_err(DataFusionError::from)
+            .map(async move |res| {
+                let FileMetadata { object_meta, .. } = res?;
+                let mut partitioned_file = PartitionedFile::from(object_meta.clone());
+                let statistics = self.do_collect_statistics(ctx, &partitioned_file).await?;
+
+                partitioned_file.statistics = Some(statistics);
+                Ok(partitioned_file)
+            })
+            .buffered(ctx.config_options().execution.meta_fetch_concurrency)
+    }
+}
+
+#[async_trait::async_trait]
+impl TableProvider for PhysicalTable {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn table_type(&self) -> TableType {
+        TableType::Base
+    }
+
+    fn schema(&self) -> SchemaRef {
+        self.schema()
+    }
+
+    async fn scan(
+        &self,
+        state: &dyn Session,
+        projection: Option<&Vec<usize>>,
+        _filters: &[Expr],
+        _limit: Option<usize>,
+    ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
+        let files = self
+            .stream_partitioned_files(state)
+            .try_collect::<Vec<_>>()
+            .await?;
+        if files.is_empty() {
+            return Ok(Arc::new(datafusion::physical_plan::empty::EmptyExec::new(
+                self.schema(),
+            )));
+        }
+
+        let file_group = FileGroup::new(files);
+        let output_ordering = self.output_ordering()?;
+
+        let file_schema = self.schema();
+        let object_store_url = self.object_store_url()?;
+        let file_source = ParquetFormat::default().file_source();
+
+        ParquetFormat::default()
+            .create_physical_plan(
+                state,
+                FileScanConfigBuilder::new(object_store_url, file_schema, file_source)
+                    .with_file_groups(
+                        file_group.split_files(state.config_options().execution.target_partitions),
+                    )
+                    .with_output_ordering(output_ordering)
+                    .with_projection(projection.cloned())
+                    .build(),
+            )
+            .await
     }
 }
 

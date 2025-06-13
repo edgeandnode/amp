@@ -3,7 +3,7 @@ use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 use datafusion::{
     error::DataFusionError,
     execution::{
-        disk_manager::DiskManagerConfig,
+        disk_manager::{DiskManagerBuilder, DiskManagerMode},
         memory_pool::{FairSpillPool, GreedyMemoryPool, MemoryPool},
         runtime_env::RuntimeEnvBuilder,
     },
@@ -105,11 +105,14 @@ impl Config {
         };
 
         let spill_allowed = !self.spill_location.is_empty();
-        let disk_manager = if spill_allowed {
-            DiskManagerConfig::Disabled
+        let disk_manager_mode = if spill_allowed {
+            DiskManagerMode::Disabled
         } else {
-            DiskManagerConfig::NewSpecified(self.spill_location.clone())
+            DiskManagerMode::Directories(self.spill_location.clone())
         };
+
+        let disk_manager_builder = DiskManagerBuilder::default().with_mode(disk_manager_mode);
+
         let memory_pool: Option<Arc<dyn MemoryPool>> = if self.max_mem_mb > 0 {
             let max_mem_bytes = self.max_mem_mb * 1024 * 1024;
 
@@ -128,12 +131,13 @@ impl Config {
             list_files_cache: None,
         };
 
-        let runtime_config = RuntimeEnvBuilder {
-            disk_manager,
-            memory_pool,
-            cache_manager,
-            ..Default::default()
-        };
+        let mut runtime_config = RuntimeEnvBuilder::new()
+            .with_disk_manager_builder(disk_manager_builder)
+            .with_cache_manager(cache_manager);
+
+        if let Some(memory_pool) = memory_pool {
+            runtime_config = runtime_config.with_memory_pool(memory_pool);
+        }
 
         let runtime_env = runtime_config.build()?;
         let isolate_pool = IsolatePool::new();
