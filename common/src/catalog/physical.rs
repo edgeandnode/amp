@@ -7,7 +7,7 @@ use datafusion::{
     datasource::{
         create_ordering,
         file_format::{parquet::ParquetFormat, FileFormat},
-        listing::{ListingTable, ListingTableUrl, PartitionedFile},
+        listing::{ListingTableUrl, PartitionedFile},
         physical_plan::{FileGroup, FileScanConfigBuilder},
         TableProvider, TableType,
     },
