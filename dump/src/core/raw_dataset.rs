@@ -90,6 +90,7 @@ use common::{
 };
 use futures::TryStreamExt as _;
 use metadata_db::MetadataDb;
+use tokio::sync::Mutex;
 use tracing::instrument;
 
 use super::{block_ranges, tasks::FailFastJoinSet, Ctx};
@@ -141,11 +142,11 @@ pub async fn dump(
 
     // Split them across the target number of jobs as to balance the number of blocks per job.
     let multiranges = ranges.split_and_partition(n_jobs as u64, 2000);
+    let (tx, rx) = tokio::sync::mpsc::channel::<DumpPartition<_>>(n_jobs as usize * 2);
 
-    let jobs = multiranges
-        .into_iter()
-        .enumerate()
-        .map(|(i, multirange)| DumpPartition {
+    // Enqueue all jobs
+    for (i, multirange) in multiranges.into_iter().enumerate() {
+        let job = DumpPartition {
             query_ctx: query_ctx.clone(),
             metadata_db: ctx.metadata_db.clone(),
             block_streamer: client.clone(),
@@ -154,22 +155,45 @@ pub async fn dump(
             partition_size,
             parquet_opts: parquet_opts.clone(),
             block_ranges_by_table: block_ranges_by_table.clone(),
-        });
+        };
+        tx.send(job).await.expect("queue send failed");
+    }
+    drop(tx); // Close the sender so workers exit when done
 
-    // Spawn the jobs, starting them with a 1 second delay between each.
-    // Note that tasks spawned in the join set start executing immediately in parallel
-    let mut join_set = FailFastJoinSet::<Result<(), BoxError>>::new();
-    for job in jobs {
-        join_set.spawn(job.run());
+    let rx = Arc::new(Mutex::new(rx));
+    let mut handles = Vec::new();
+    let num_workers = 8;
+    for worker in 0..num_workers {
+        let rx = Arc::clone(&rx);
+        handles.push(tokio::spawn(async move {
+            loop {
+                let job = {
+                    let mut guard = rx.lock().await;
+                    guard.recv().await
+                };
 
-        // Stagger the start of each job by 1s in an attempt to avoid client rate limits
-        tokio::time::sleep(Duration::from_secs(1)).await;
+                match job {
+                    Some(job) => {
+                        tracing::info!(
+                            "worker {} took job {} (block ranges {:?}) off the queue",
+                            worker,
+                            job.id,
+                            job.multirange,
+                        );
+
+                        if let Err(e) = job.run().await {
+                            tracing::error!(error = %e, "partition job failed");
+                        }
+                    }
+                    None => break,
+                }
+            }
+        }));
     }
 
-    // Wait for all the jobs to finish, returning an error if any job panics or fails
-    if let Err(err) = join_set.try_wait_all().await {
-        tracing::error!(dataset=%dataset_name, error=%err, "dataset dump failed");
-        return Err(err.into_box_error());
+    // Wait for all workers to finish
+    for handle in handles {
+        handle.await.expect("worker panicked");
     }
 
     Ok(())
@@ -230,12 +254,13 @@ impl<S: BlockStreamer> DumpPartition<S> {
 
             self.run_range(*range_start, *range_end).await?;
 
+            let run_time = start_time.elapsed();
             tracing::info!(
-                "job partition #{} finished scan for range [{}, {}] in {} minutes",
+                "job partition #{} finished scan for range [{}, {}] in {}",
                 self.id,
                 range_start,
                 range_end,
-                start_time.elapsed().as_secs() / 60
+                humantime::format_duration(run_time),
             );
         }
         Ok(())
