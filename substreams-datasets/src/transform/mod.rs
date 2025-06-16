@@ -18,7 +18,7 @@ pub fn transform(
     let clock = block_data.clock.as_ref().unwrap();
     let range = BlockRange {
         numbers: clock.number..=clock.number,
-        network: tables.tables[0].network.clone(),
+        network: tables.tables[0].network().to_string(),
         hash: clock.id.parse().context("failed to parse block hash")?,
         // `None` here prevents canonical chain selection based on block hashes.
         // See `BlockRange` for more details.

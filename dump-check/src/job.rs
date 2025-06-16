@@ -118,11 +118,7 @@ pub async fn run_job(job: Job<impl BlockStreamer>) -> Result<(), BoxError> {
             METRICS.bytes_read.inc_by(bytes as f64);
 
             table_map
-                .entry(format!(
-                    "{}.{}",
-                    job.dataset.name,
-                    table_rows.table.name.clone()
-                ))
+                .entry(format!("{}.{}", job.dataset.name, table_rows.table.name()))
                 .or_insert_with(Vec::new)
                 .push(table_rows.rows);
         }

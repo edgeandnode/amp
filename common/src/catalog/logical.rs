@@ -56,12 +56,32 @@ impl Dataset {
 #[derive(Clone, Hash, PartialEq, Eq, Debug)]
 pub struct Table {
     /// Bare table name.
-    pub name: String,
-    pub schema: SchemaRef,
-    pub network: String,
+    name: String,
+    schema: SchemaRef,
+    network: String,
 }
 
 impl Table {
+    pub fn new(name: String, schema: SchemaRef, network: String) -> Self {
+        Self {
+            name,
+            schema,
+            network,
+        }
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn schema(&self) -> &SchemaRef {
+        &self.schema
+    }
+
+    pub fn network(&self) -> &str {
+        &self.network
+    }
+
     /// Column names by which this table is naturally sorted.
     pub const fn sorted_by(&self) -> &[&str] {
         // Leveraging `order_exprs` can optimize away sorting for many query plans.
@@ -102,9 +122,9 @@ impl fmt::Display for ResolvedTable {
 impl ResolvedTable {
     /// Errors if the table name is invalid.
     pub fn new(table: Table, dataset: Arc<Dataset>) -> Result<Self, BoxError> {
-        validate_name(&table.name)?;
+        validate_name(table.name())?;
 
-        let table_ref = TableReference::partial(dataset.name.clone(), table.name.clone());
+        let table_ref = TableReference::partial(dataset.name.clone(), table.name().to_string());
         Ok(Self {
             table,
             dataset,

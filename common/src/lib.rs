@@ -94,10 +94,10 @@ pub struct RawTableRows {
 
 impl RawTableRows {
     pub fn new(table: Table, range: BlockRange, columns: Vec<ArrayRef>) -> Result<Self, BoxError> {
-        let schema = table.schema.clone();
+        let schema = table.schema().clone();
         let rows = RecordBatch::try_new(schema, columns)?;
         Self::check_invariants(&range, &rows)
-            .map_err(|err| format!("malformed table {}: {}", table.name, err))?;
+            .map_err(|err| format!("malformed table {}: {}", table.name(), err))?;
         Ok(RawTableRows { table, rows, range })
     }
 

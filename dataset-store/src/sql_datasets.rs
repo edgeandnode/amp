@@ -79,7 +79,8 @@ pub(super) async fn dataset(
         let schema = ctx.sql_output_schema(query.clone(), &[]).await?;
         let network = {
             let tables = ctx.catalog().iter();
-            let mut networks: BTreeSet<_> = tables.map(|t| t.table().network.clone()).collect();
+            let mut networks: BTreeSet<_> =
+                tables.map(|t| t.table().network().to_string()).collect();
             if networks.len() > 1 {
                 return Err(format!(
                     "table {} has dependencies in multiple networks: {:?}",
@@ -89,11 +90,11 @@ pub(super) async fn dataset(
             }
             networks.pop_first().unwrap()
         };
-        let table = Table {
-            name: table_name.to_string(),
-            schema: schema.as_ref().clone().into(),
+        let table = Table::new(
+            table_name.to_string(),
+            schema.as_ref().clone().into(),
             network,
-        };
+        );
         tables.push(table.with_special_block_num_column());
         queries.insert(table_name.to_string(), query);
     }

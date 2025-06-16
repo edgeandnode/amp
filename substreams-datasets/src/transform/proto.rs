@@ -33,14 +33,14 @@ pub(crate) fn pb_to_rows(
                 _ => return None,
             };
 
-            let table = schemas.iter().find(|t| t.name == field.name());
+            let table = schemas.iter().find(|t| t.name() == field.name());
             if table.is_none() {
                 return Some(Err(anyhow::anyhow!("table not found")));
             }
 
             let table = table.unwrap();
             let block_num = *range.numbers.start();
-            let rows = message_to_rows(list, table.schema.clone(), block_num);
+            let rows = message_to_rows(list, table.schema().clone(), block_num);
             if let Err(err) = rows {
                 return Some(Err(err.into()));
             }
@@ -226,11 +226,11 @@ fn field_to_table(field: &FieldDescriptor, pool: &DescriptorPool, network: &str)
             .collect::<Vec<_>>(),
     );
 
-    Some(Table {
-        name: field.name().to_string(),
-        schema: Arc::new(Schema::new(fields)),
-        network: network.to_string(),
-    })
+    Some(Table::new(
+        field.name().to_string(),
+        Arc::new(Schema::new(fields)),
+        network.to_string(),
+    ))
 }
 
 pub(crate) fn package_to_schemas(

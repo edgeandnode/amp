@@ -60,7 +60,7 @@ impl RawDatasetWriter {
     }
 
     pub async fn write(&mut self, table_rows: RawTableRows) -> Result<(), BoxError> {
-        let table_name = table_rows.table.name.as_str();
+        let table_name = table_rows.table.name();
         let writer = self.writers.get_mut(table_name).unwrap();
         if let Some((parquet_meta, object_meta)) = writer.write(table_rows).await? {
             let location_id = writer.table.location_id();
@@ -166,7 +166,7 @@ impl RawTableWriter {
         &mut self,
         table_rows: RawTableRows,
     ) -> Result<Option<(ParquetMeta, ObjectMeta)>, BoxError> {
-        assert_eq!(table_rows.table.name, self.table.table_name());
+        assert_eq!(table_rows.table.name(), self.table.table_name());
 
         let mut parquet_meta = None;
         let block_num = table_rows.block_num();

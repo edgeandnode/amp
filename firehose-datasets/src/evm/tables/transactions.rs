@@ -14,11 +14,7 @@ use common::{
 static SCHEMA: LazyLock<SchemaRef> = LazyLock::new(|| Arc::new(schema()));
 
 pub fn table(network: String) -> Table {
-    Table {
-        name: TABLE_NAME.to_string(),
-        schema: SCHEMA.clone(),
-        network: network,
-    }
+    Table::new(TABLE_NAME.to_string(), SCHEMA.clone(), network)
 }
 
 pub const TABLE_NAME: &'static str = "transactions";

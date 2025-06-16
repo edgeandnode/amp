@@ -75,9 +75,13 @@ pub async fn output_schema_handler(
         .await
         .map_err(PlanningError)?;
 
-    let networks: BTreeSet<&String> = ctx.catalog().iter().map(|t| &t.table().network).collect();
+    let networks: BTreeSet<String> = ctx
+        .catalog()
+        .iter()
+        .map(|t| t.table().network().to_string())
+        .collect();
     Ok(Json(OutputSchemaResponse {
         schema: schema.into(),
-        networks: networks.into_iter().map(|n| n.clone()).collect(),
+        networks: networks.into_iter().collect(),
     }))
 }

@@ -93,10 +93,12 @@ impl Manifest {
     pub fn tables(&self) -> Vec<crate::Table> {
         self.tables
             .iter()
-            .map(|(name, table)| crate::Table {
-                name: name.clone(),
-                schema: table.schema.arrow.clone().into(),
-                network: table.network.clone(),
+            .map(|(name, table)| {
+                crate::Table::new(
+                    name.clone(),
+                    table.schema.arrow.clone().into(),
+                    table.network.clone(),
+                )
             })
             .collect()
     }

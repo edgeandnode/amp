@@ -38,7 +38,7 @@ pub(crate) fn pb_to_rows(
                 .table_changes
                 .iter()
                 .filter(|change| {
-                    change.table == table.name
+                    change.table == table.name()
                         && table_change::Operation::try_from(change.operation).unwrap()
                             == table_change::Operation::Create
                 })
@@ -47,12 +47,13 @@ pub(crate) fn pb_to_rows(
                 return None;
             }
             let block_num = *range.numbers.start();
-            let rows = table_changes_to_rows(&table_changes, table.schema.clone(), block_num);
+            let rows = table_changes_to_rows(&table_changes, table.schema().clone(), block_num);
             if let Err(err) = rows {
                 return Some(Err(err
                     .context(format!(
                         "Processing table changes for '{}' at block {}",
-                        table.name, block_num
+                        table.name(),
+                        block_num
                     ))
                     .into()));
             }
@@ -301,11 +302,11 @@ fn statement_to_table(statement: &Statement, network: &str) -> Option<Table> {
                 )
                 .collect::<Vec<_>>();
 
-            Some(Table {
-                name: name.to_string(),
-                schema: Arc::new(Schema::new(fields)),
-                network: network.to_string(),
-            })
+            Some(Table::new(
+                name.to_string(),
+                Arc::new(Schema::new(fields)),
+                network.to_string(),
+            ))
         }
         _ => None,
     }

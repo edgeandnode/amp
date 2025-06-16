@@ -43,7 +43,7 @@ async fn try_into_datasets_response(
             let table_id = TableId {
                 dataset: &dataset.name,
                 dataset_version: None,
-                table: &table.name,
+                table: table.name(),
             };
 
             // Resolve active location for this table
@@ -52,15 +52,15 @@ async fn try_into_datasets_response(
                 .get_active_location(table_id)
                 .await
                 .map_err(|err| {
-                    tracing::debug!(table=%table.name, error=?err, "failed to get active location for table");
+                    tracing::debug!(table=%table.name(), error=?err, "failed to get active location for table");
                     Error::MetadataDbError(err)
                 })?
                 .map(|(url, _)| url.to_string());
 
             table_infos.push(TableInfo {
-                name: table.name,
+                name: table.name().to_string(),
                 active_location,
-                network: table.network,
+                network: table.network().to_string(),
             });
         }
 
