@@ -2,6 +2,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     str::FromStr,
     sync::Arc,
+    time::Instant,
 };
 
 use common::{
@@ -74,6 +75,7 @@ pub async fn dump_tables(
     }
 
     let kind = DatasetKind::from_str(&dataset.kind)?;
+    let start = Instant::now();
     match kind {
         DatasetKind::EvmRpc | DatasetKind::Firehose | DatasetKind::Substreams => {
             raw_dataset::dump(
@@ -117,7 +119,11 @@ pub async fn dump_tables(
         }
     }
 
-    tracing::info!("dump of dataset {} completed successfully", dataset.name);
+    tracing::info!(
+        "dump of dataset {} completed successfully in {:.2?} seconds",
+        dataset.name,
+        start.elapsed().as_secs_f64()
+    );
 
     Ok(())
 }
