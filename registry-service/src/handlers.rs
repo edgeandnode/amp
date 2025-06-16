@@ -2,11 +2,12 @@ use std::{collections::BTreeSet, sync::Arc};
 
 use axum::{extract::State, http::StatusCode, Json};
 use common::{
-    arrow::datatypes::{DataType, Field},
+    arrow::datatypes::{DataType, Field, Fields},
     manifest::TableSchema,
     query_context::{parse_sql, Error as QueryContextError},
     SPECIAL_BLOCK_NUM,
 };
+use datafusion::common::DFSchema;
 use http_common::{BoxRequestError, RequestError};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -17,6 +18,8 @@ use crate::ServiceState;
 #[derive(Debug, Deserialize)]
 pub struct OutputSchemaRequest {
     sql_query: String,
+    #[serde(default)]
+    is_sql_dataset: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -74,12 +77,25 @@ pub async fn output_schema_handler(
         )
         .await
         .map_err(PlanningError)?;
+    let schema = if payload.is_sql_dataset {
+        // For SQL datasets, the `SPECIAL_BLOCK_NUM` field is always included in the schema.
+        let mut new_schema = DFSchema::from_unqualified_fields(
+            Fields::from(vec![Field::new(SPECIAL_BLOCK_NUM, DataType::UInt64, false)]),
+            Default::default(),
+        )
+        .unwrap();
+        new_schema.merge(schema.as_ref());
+        new_schema.into()
+    } else {
+        schema
+    };
 
     let networks: BTreeSet<String> = ctx
         .catalog()
         .iter()
         .map(|t| t.table().network().to_string())
         .collect();
+
     Ok(Json(OutputSchemaResponse {
         schema: schema.into(),
         networks: networks.into_iter().collect(),
