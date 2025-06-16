@@ -48,7 +48,7 @@ pub async fn handler(
         .map_err(Error::StoreError)?;
 
     ctx.scheduler
-        .schedule_dataset_dump(dataset.dataset)
+        .schedule_dataset_dump(dataset)
         .await
         .map_err(|err| {
             tracing::error!(error=?err, "failed to schedule dataset dump");
