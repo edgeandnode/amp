@@ -1,9 +1,15 @@
-use std::{mem, sync::Arc, time::Duration};
+use std::collections::HashMap;
+use std::{
+    mem,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use alloy::{
     consensus::{EthereumTxEnvelope, Transaction as _},
     eips::{BlockNumberOrTag, Typed2718},
     hex::{self, ToHexExt},
+    primitives::FixedBytes,
     providers::Provider as _,
     rpc::{
         client::BatchRequest,
@@ -63,11 +69,18 @@ impl BatchingRpcWrapper {
         &self,
         calls: Vec<(&'static str, Params)>,
     ) -> Result<Vec<T>, BoxError> {
+        if calls.is_empty() {
+            warn!("No calls to execute, returning empty result");
+            return Ok(Vec::new());
+        }
         let mut results = Vec::new();
         let mut remaining_calls = calls;
         let mut remaining_attempts = self.retries;
 
+        let all_start = Instant::now();
         while !remaining_calls.is_empty() {
+            let start = Instant::now();
+            let starting_calls = remaining_calls.len();
             let chunk: Vec<_> = remaining_calls
                 .drain(..self.batch_size.min(remaining_calls.len()))
                 .collect();
@@ -90,6 +103,12 @@ impl BatchingRpcWrapper {
 
             match batch_then_waiters.await {
                 Ok(responses) => {
+                    tracing::info!(
+                        "batched block stream: processed {}/{} calls in {}ms",
+                        responses.len(),
+                        starting_calls,
+                        start.elapsed().as_millis()
+                    );
                     results.extend(responses);
                 }
                 Err(e) if remaining_attempts > 0 && self.batch_size > 1 => {
@@ -106,6 +125,11 @@ impl BatchingRpcWrapper {
                 }
             }
         }
+        tracing::info!(
+            "BatchingRpcWrapper executed {} calls in {}ms",
+            results.len(),
+            all_start.elapsed().as_millis()
+        );
 
         Ok(results)
     }
@@ -211,45 +235,71 @@ impl JsonRpcClient {
         stream! {
 
             let block_calls: Vec<_> = (start_block..=end_block)
-                .map(|block_num| ("eth_getBlockByNumber", (block_num, true)))
-
+                .map(|block_num| (
+                    "eth_getBlockByNumber",
+                    [BlockNumberOrTag::Number(block_num), true],
+                ))
                 .collect::<Vec<_>>()
-                .chunks(self.batch_size).map(<[_]>::to_vec)
+                .chunks(self.batch_size * 10)
+                .map(<[_]>::to_vec)
                 .collect();
 
-            for batch_calls in block_calls {
-                let blocks_result: Result<Vec<alloy::rpc::types::Block>, BoxError> = batching_client.execute(batch_calls).await;
-                let blocks = match blocks_result {
-                    Ok(blocks) => blocks,
+            // Collect blocks and their transaction hashes together
+            let blocks_result: Result<Vec<alloy::rpc::types::Block>, BoxError> = batching_client.execute(block_calls).await;
+            let blocks = match blocks_result {
+                Ok(blocks) => blocks,
+                Err(err) => {
+                    yield Err(err);
+                    return;
+                }
+            };
+
+            // Collect all transaction hashes from the blocks, and those should be fetched in a big batch
+            let mut block_tx_hashes: HashMap<u64, Vec<FixedBytes<32>>> = HashMap::new();
+            let mut all_transaction_hashes = Vec::new();
+            for block in &blocks {
+                let block_num = block.header.number;
+                let tx_hashes: Vec<FixedBytes<32>> = block.transactions.hashes().collect();
+                all_transaction_hashes.extend(&tx_hashes);
+                block_tx_hashes.insert(block_num, tx_hashes);
+            }
+
+            if !all_transaction_hashes.is_empty() {
+                // Fetch receipts in batch for all transaction hashes
+                let receipt_calls: Vec<_> = all_transaction_hashes.iter()
+                    .map(|hash: &FixedBytes<32>| (
+                        "eth_getTransactionReceipt",
+                        [format!("0x{}", hex::encode(hash))],
+                    ))
+                    .collect();
+
+                tracing::info!("Fetching {} receipts for {} transactions", receipt_calls.len(), all_transaction_hashes.len());
+                let receipts_result: Result<Vec<Option<TransactionReceipt>>, BoxError> = batching_client.execute(receipt_calls).await;
+                let receipts = match receipts_result {
+                    Ok(receipts) => receipts,
                     Err(err) => {
                         yield Err(err);
                         return;
                     }
                 };
 
-                for block in blocks {
-                    let transaction_hashes = block.transactions.hashes();
+                // Map receipts to their tx_hash for fast lookup
+                let tx_hash_to_receipt: HashMap<_, _> = all_transaction_hashes
+                    .iter()
+                    .cloned()
+                    .zip(receipts.into_iter())
+                    .collect();
 
-                    // Fetch receipts in batch
-                    let receipt_calls: Vec<_> = transaction_hashes
-                        .map(|hash| {
-                            (
-                                "eth_getTransactionReceipt",
-                                [format!("0x{}", hex::encode(hash))],
-                            )
-                        })
-                        .collect();
-
-                    let receipts_result: Result<Vec<Option<TransactionReceipt>>, BoxError> = batching_client.execute(receipt_calls).await;
-                    let receipts = match receipts_result {
-                        Ok(receipts) => receipts,
-                        Err(err) => {
-                            yield Err(err);
-                            continue;
-                        }
-                    };
-
-                    yield rpc_to_rows(block, receipts, &self.network);
+                // For each block, reconstruct the per-block receipt vector by looking up each tx hash
+                for block in blocks.into_iter() {
+                    let tx_hashes = &block_tx_hashes[&block.header.number];
+                    let block_receipts: Vec<_> = tx_hashes.iter().map(|h| tx_hash_to_receipt.get(h).cloned().unwrap_or(None)).collect();
+                    yield rpc_to_rows(block, block_receipts, &self.network);
+                }
+            } else {
+                // No transactions in any block, just yield the block rows
+                for block in blocks.into_iter() {
+                    yield rpc_to_rows(block, Vec::new(), &self.network);
                 }
             }
         }
