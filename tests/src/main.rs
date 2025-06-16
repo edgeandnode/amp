@@ -37,7 +37,7 @@ async fn main() {
             start_block,
             end_block,
         } => {
-            let test_env = TestEnv::blessed().await.unwrap();
+            let test_env = TestEnv::blessed("bless_cmd").await.unwrap();
             bless(&test_env, &dataset, start_block, end_block)
                 .await
                 .unwrap();

@@ -17,8 +17,7 @@ use crate::{
     steps::load_test_steps,
     test_client::TestClient,
     test_support::{
-        check_blocks, check_provider_file, record_batch_to_json, restore_blessed_dataset,
-        DatasetPackage, SnapshotContext, TestEnv,
+        check_blocks, check_provider_file, restore_blessed_dataset, SnapshotContext, TestEnv,
     },
 };
 
@@ -29,7 +28,7 @@ async fn evm_rpc_single_dump() {
     let dataset_name = "eth_rpc";
     check_provider_file("rpc_eth_mainnet.toml").await;
 
-    let test_env = TestEnv::temp().await.unwrap();
+    let test_env = TestEnv::temp("evm_rpc_single_dump").await.unwrap();
 
     let blessed = SnapshotContext::blessed(&test_env, &dataset_name)
         .await
@@ -54,7 +53,7 @@ async fn eth_firehose_single_dump() {
     let dataset_name = "eth_firehose";
     check_provider_file("firehose_eth_mainnet.toml").await;
 
-    let test_env = TestEnv::temp().await.unwrap();
+    let test_env = TestEnv::temp("eth_firehose_single_dump").await.unwrap();
     let blessed = SnapshotContext::blessed(&test_env, &dataset_name)
         .await
         .unwrap();
@@ -75,7 +74,7 @@ async fn sql_over_eth_firehose_dump() {
     tracing_helpers::register_logger();
     let dataset_name = "sql_over_eth_firehose";
 
-    let test_env = TestEnv::temp().await.unwrap();
+    let test_env = TestEnv::temp("sql_over_eth_firehose").await.unwrap();
     let blessed = SnapshotContext::blessed(&test_env, &dataset_name)
         .await
         .unwrap();
@@ -95,7 +94,7 @@ async fn sql_over_eth_firehose_dump() {
 #[tokio::test]
 async fn sql_tests() {
     tracing_helpers::register_logger();
-    let test_env = TestEnv::temp().await.unwrap();
+    let test_env = TestEnv::temp("sql_tests").await.unwrap();
     let mut client = TestClient::connect(&test_env).await.unwrap();
 
     for step in load_test_steps("sql-tests.yaml").unwrap() {
@@ -106,7 +105,7 @@ async fn sql_tests() {
 #[tokio::test(flavor = "multi_thread")]
 async fn streaming_tests() {
     tracing_helpers::register_logger();
-    let test_env = TestEnv::temp().await.unwrap();
+    let test_env = TestEnv::temp("sql_streaming_tests").await.unwrap();
     let mut client = TestClient::connect(&test_env).await.unwrap();
 
     for step in load_test_steps("sql-streaming-tests.yaml").unwrap() {
@@ -118,51 +117,12 @@ async fn streaming_tests() {
 async fn basic_function() -> Result<(), BoxError> {
     tracing_helpers::register_logger();
 
-    let test_env = TestEnv::temp().await.unwrap();
-    let (bound_addrs, server) = nozzle::server::run(
-        test_env.config.clone(),
-        test_env.metadata_db.clone(),
-        false,
-        false,
-    )
-    .await?;
-    tokio::spawn(server);
+    let test_env = TestEnv::temp("basic_function").await.unwrap();
+    let mut client = TestClient::connect(&test_env).await.unwrap();
 
-    let worker = Worker::new(
-        test_env.config.clone(),
-        test_env.metadata_db.clone(),
-        WorkerNodeId::from_str("basic_function").unwrap(),
-    );
-    tokio::spawn(worker.run());
-
-    // Run `pnpm build` on the dataset.
-    let dataset = DatasetPackage::new("basic_function");
-    dataset.pnpm_install().await?;
-    dataset.deploy(bound_addrs).await?;
-
-    let dataset_store = DatasetStore::new(test_env.config.clone(), test_env.metadata_db.clone());
-    let env = test_env.config.make_query_env()?;
-    let ctx = dataset_store
-        .ctx_for_sql(&parse_sql("SELECT basic_function.testString()")?, env)
-        .await?;
-    let result = ctx
-        .execute_sql("SELECT basic_function.testString()")
-        .await?
-        .next()
-        .await
-        .unwrap()?;
-    assert_eq!(
-        record_batch_to_json(result),
-        "[{\"basic_function.testString()\":\"I'm a function\"}]"
-    );
-
-    // TOOD: Fix function calls on flight server.
-    // for test in load_sql_tests("basic-function.yaml").unwrap() {
-    //     let results = run_query_on_fresh_server(&test.query, vec![], vec![], None)
-    //         .await
-    //         .map_err(|e| format!("{e:?}"));
-    //     test.assert_result_eq(results);
-    // }
+    for step in load_test_steps("basic-function.yaml").unwrap() {
+        step.run(&test_env, &mut client).await.unwrap();
+    }
 
     Ok(())
 }
@@ -175,7 +135,7 @@ async fn anvil_rpc_reorg() {
     check_provider_file("rpc_anvil.toml").await;
 
     let http = reqwest::Client::new();
-    let test_env = TestEnv::temp().await.unwrap();
+    let test_env = TestEnv::temp("anvil_rpc_reorg").await.unwrap();
     let dataset_store = DatasetStore::new(test_env.config.clone(), test_env.metadata_db.clone());
     let provider = alloy::providers::ProviderBuilder::new()
         .connect_anvil_with_config(|anvil| anvil.port(8545 as u16));
