@@ -38,7 +38,6 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.12",
- "tokio",
  "tracing",
 ]
 
@@ -2769,7 +2768,6 @@ dependencies = [
  "serde_json",
  "substreams-datasets",
  "thiserror 2.0.12",
- "tokio",
  "toml",
  "tracing",
  "url",
@@ -2934,7 +2932,6 @@ dependencies = [
  "prometheus",
  "serde",
  "serde_json",
- "sqlx",
  "thiserror 2.0.12",
  "tokio",
  "tokio-util",
@@ -5489,7 +5486,6 @@ dependencies = [
  "metadata-db",
  "serde",
  "thiserror 2.0.12",
- "tokio",
  "tracing",
 ]
 
