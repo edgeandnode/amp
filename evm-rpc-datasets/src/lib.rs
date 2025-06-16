@@ -3,7 +3,7 @@ mod tables;
 
 use alloy::transports::http::reqwest::Url;
 pub use client::JsonRpcClient;
-use common::{store::StoreError, BoxError, Dataset, DatasetWithProvider};
+use common::{store::StoreError, BoxError, Dataset};
 use serde::Deserialize;
 use serde_with::serde_as;
 
@@ -41,19 +41,14 @@ fn default_rpc_batch_size() -> usize {
     100
 }
 
-pub fn dataset(
-    dataset_cfg: toml::Value,
-    provider: toml::Value,
-) -> Result<DatasetWithProvider, Error> {
+pub fn dataset(dataset_cfg: toml::Value) -> Result<Dataset, Error> {
     let def: DatasetDef = dataset_cfg.try_into()?;
-    Ok(DatasetWithProvider {
-        dataset: Dataset {
-            kind: def.kind,
-            name: def.name,
-            tables: tables::all(&def.network),
-            functions: vec![],
-        },
-        provider: Some(provider),
+    Ok(Dataset {
+        kind: def.kind,
+        name: def.name,
+        tables: tables::all(&def.network),
+        network: def.network,
+        functions: vec![],
     })
 }
 

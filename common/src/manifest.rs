@@ -17,6 +17,7 @@ pub const DATASET_KIND: &str = "manifest";
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manifest {
     pub name: String,
+    pub network: String,
     pub version: semver::Version,
 
     #[serde(default)]
@@ -141,6 +142,7 @@ impl From<Manifest> for Dataset {
 
         Dataset {
             kind: DATASET_KIND.to_string(),
+            network: manifest.network,
             name: manifest.name,
             tables,
             functions: manifest

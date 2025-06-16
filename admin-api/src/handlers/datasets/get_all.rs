@@ -1,7 +1,7 @@
 //! Dataset get all handler
 
 use axum::{extract::State, Json};
-use common::catalog::logical::DatasetWithProvider;
+use common::Dataset;
 use http_common::BoxRequestError;
 use metadata_db::TableId;
 
@@ -33,10 +33,10 @@ pub async fn handler(State(ctx): State<Ctx>) -> Result<Json<DatasetsResponse>, B
 /// Transforms dataset objects into response types with location information
 async fn try_into_datasets_response(
     ctx: &Ctx,
-    datasets: impl IntoIterator<Item = DatasetWithProvider>,
+    datasets: impl IntoIterator<Item = Dataset>,
 ) -> Result<DatasetsResponse, Error> {
     let mut dataset_infos = Vec::new();
-    for DatasetWithProvider { dataset, .. } in datasets {
+    for dataset in datasets {
         // Get table information for each table in the dataset
         let mut table_infos = Vec::with_capacity(dataset.tables.len());
         for table in dataset.tables {

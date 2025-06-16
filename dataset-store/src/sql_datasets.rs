@@ -45,6 +45,7 @@ pub const DATASET_KIND: &str = "sql";
 #[derive(Debug, Deserialize)]
 pub(super) struct DatasetDef {
     pub kind: String,
+    pub network: String,
     pub name: String,
 }
 
@@ -100,6 +101,7 @@ pub(super) async fn dataset(
     Ok(SqlDataset {
         dataset: Dataset {
             kind: def.kind,
+            network: def.network,
             name: def.name,
             tables,
             functions: vec![],

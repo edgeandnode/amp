@@ -47,7 +47,7 @@ impl Job {
 
         match job_desc {
             JobDesc::DumpDataset { dataset } => {
-                let dataset = ctx.dataset_store.load_dataset(&dataset).await?.dataset;
+                let dataset = ctx.dataset_store.load_dataset(&dataset).await?;
 
                 // Consistency check: All tables must be present in the job's output.
                 let dataset_tables = dataset

@@ -259,7 +259,7 @@ async fn catalog_for_dataset(
     dataset_store: &Arc<DatasetStore>,
     metadata_db: Arc<MetadataDb>,
 ) -> Result<Catalog, BoxError> {
-    let dataset = dataset_store.load_dataset(dataset_name).await?.dataset;
+    let dataset = dataset_store.load_dataset(dataset_name).await?;
     let mut tables = Vec::new();
     for table in Arc::new(dataset.clone()).resolved_tables() {
         // Unwrap: we just dumped the dataset, so it must have an active physical table.
@@ -540,7 +540,7 @@ pub async fn restore_blessed_dataset(
 ) -> Result<Vec<Arc<PhysicalTable>>, BoxError> {
     let config = load_test_config(None).await?;
     let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
-    let dataset = dataset_store.load_dataset(dataset).await?.dataset;
+    let dataset = dataset_store.load_dataset(dataset).await?;
     let dataset_name = dataset.name.clone();
     let data_store = config.data_store.clone();
     let mut tables = Vec::new();

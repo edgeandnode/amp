@@ -124,7 +124,7 @@ use common::{
     metadata::range::BlockRange,
     multirange::MultiRange,
     query_context::{parse_sql, QueryContext, QueryEnv},
-    BlockNum, BoxError, DatasetWithProvider,
+    BlockNum, BoxError, Dataset,
 };
 use datafusion::{common::cast::as_fixed_size_binary_array, sql::parser::Statement};
 use dataset_store::{
@@ -318,48 +318,40 @@ async fn resolve_block_range(
     start: BlockNum,
     end: BlockNum,
 ) -> Result<BlockRange, BoxError> {
-    let provider = {
-        let mut providers: Vec<DatasetWithProvider> = dataset_store
+    let dataset = {
+        let mut datasets: Vec<Dataset> = dataset_store
             .all_datasets()
             .await?
             .into_iter()
-            .filter(|d| {
-                d.provider.is_some()
-                    && (d
-                        .dataset
-                        .tables
-                        .first()
-                        .map(|t| t.network == network)
-                        .unwrap_or(false))
-            })
+            .filter(|d| d.network == network)
             .collect();
 
-        if providers.is_empty() {
+        if datasets.is_empty() {
             return Err(format!("no provider found for network {network}").into());
         }
 
-        match providers
+        match datasets
             .iter()
-            .position(|p| src_datasets.contains(p.dataset.name.as_str()))
+            .position(|d| src_datasets.contains(d.name.as_str()))
         {
-            Some(index) => providers.remove(index),
+            Some(index) => datasets.remove(index),
             None => {
                 // Make sure fallback provider selection is deterministic.
-                providers.sort_by(|a, b| a.dataset.name.cmp(&b.dataset.name));
-                if providers.len() > 1 {
+                datasets.sort_by(|a, b| a.name.cmp(&b.name));
+                if datasets.len() > 1 {
                     tracing::debug!(
                         "selecting provider {} for network {}",
-                        providers[0].dataset.name,
+                        datasets[0].name,
                         network
                     );
                 }
-                providers.remove(0)
+                datasets.remove(0)
             }
         }
     };
 
-    assert!(provider.dataset.tables.iter().any(|t| t.name == "blocks"));
-    let blocks_table = format!("{}.blocks", provider.dataset.name);
+    assert!(dataset.tables.iter().any(|t| t.name == "blocks"));
+    let blocks_table = format!("{}.blocks", dataset.name);
     let query = parse_sql(&format!(
         r#"
         SELECT * FROM
