@@ -29,14 +29,14 @@ jobs:
           # Install dependencies
           sudo apt-get update
           sudo apt-get install -y protobuf-compiler postgresql
-          
+
           # Add PostgreSQL binaries to PATH
           echo "/usr/lib/postgresql/$(pg_lsclusters | awk 'NR==2 {print $1}')/bin" >> $GITHUB_PATH
 
       - uses: actions-rust-lang/setup-rust-toolchain@9d7e65c320fdb52dcd45ffaa68deb6c02c8754d9 # v1
         with:
           cache: false
-          rustflags: ''
+          rustflags: ""
 
       - name: Setup just
         uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v3
@@ -60,7 +60,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y protobuf-compiler postgresql
-  
+
       - name: Install pnpm
         uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4
 
@@ -68,17 +68,20 @@ jobs:
         uses: oven-sh/setup-bun@735343b667d3e6f658f44d0eca948eb6282f2b76 # v2
         with:
           bun-version: latest
-        
+
       - name: pnpm install
         run: pnpm install
 
       - uses: actions-rust-lang/setup-rust-toolchain@9d7e65c320fdb52dcd45ffaa68deb6c02c8754d9 # v1
         with:
           cache: false
-          rustflags: ''
+          rustflags: ""
 
       - name: Setup just
         uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v3
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@82dee4ba654bd2146511f85f0d013af94670c4de #v1.4
 
       - name: Install cargo-nextest
         uses: baptiste0928/cargo-install@91c5da15570085bcde6f4d7aed98cb82d6769fd3 # v3
@@ -116,7 +119,7 @@ jobs:
           toolchain: nightly # Required for unstable features (see `rustfmt.toml` for details)
           components: rustfmt
           cache: false
-          rustflags: ''
+          rustflags: ""
 
       - name: Setup just
         uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v3
@@ -138,7 +141,7 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@9d7e65c320fdb52dcd45ffaa68deb6c02c8754d9 # v1
         with:
           cache: false
-          rustflags: ''
+          rustflags: ""
 
       - name: Setup just
         uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v3
