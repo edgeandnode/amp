@@ -32,5 +32,4 @@ serde_json.workspace = true
 serde.workspace = true
 serde_yaml.workspace = true
 tonic.workspace = true
-url.workspace = true
 alloy-rpc-types-anvil = "1.0.9"
