@@ -2,12 +2,11 @@ use std::{collections::BTreeSet, sync::Arc};
 
 use axum::{extract::State, http::StatusCode, Json};
 use common::{
-    arrow::datatypes::{DataType, Field, Fields},
+    arrow::datatypes::{DataType, Field},
     manifest::TableSchema,
-    query_context::{parse_sql, Error as QueryContextError},
+    query_context::{parse_sql, prepend_special_block_num_field, Error as QueryContextError},
     SPECIAL_BLOCK_NUM,
 };
-use datafusion::common::DFSchema;
 use http_common::{BoxRequestError, RequestError};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -79,13 +78,7 @@ pub async fn output_schema_handler(
         .map_err(PlanningError)?;
     let schema = if payload.is_sql_dataset {
         // For SQL datasets, the `SPECIAL_BLOCK_NUM` field is always included in the schema.
-        let mut new_schema = DFSchema::from_unqualified_fields(
-            Fields::from(vec![Field::new(SPECIAL_BLOCK_NUM, DataType::UInt64, false)]),
-            Default::default(),
-        )
-        .unwrap();
-        new_schema.merge(schema.as_ref());
-        new_schema.into()
+        prepend_special_block_num_field(&schema)
     } else {
         schema
     };
