@@ -100,7 +100,7 @@ FROM (
     SELECT 
         l.block_num,
         l.timestamp,
-        evm_decode(l.topic1, l.topic2, l.topic3, l.data, 'Transfer(address indexed from, address indexed to, uint256 value)') AS event
+        evm_decode_log(l.topic1, l.topic2, l.topic3, l.data, 'Transfer(address indexed from, address indexed to, uint256 value)') AS event
     FROM eth_firehose.logs l
     WHERE
         l.topic0 = evm_topic('Transfer(address indexed from, address indexed to, uint256 value)')

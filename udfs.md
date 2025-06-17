@@ -3,10 +3,10 @@
 Nozzle provides a number of "built-in" SQL functions that the user can call to manipulate
 the data they are querying.
 
-## `evm_decode`
+## `evm_decode_log`
 
 ```sql
-T evm_decode(
+T evm_decode_log(
     FixedSizeBinary(20) topic1,
     FixedSizeBinary(20) topic2,
     FixedSizeBinary(20) topic3,
@@ -16,7 +16,7 @@ T evm_decode(
 ```
 
 Decodes an EVM event log. The signature parameter is the Solidity signature of the event.
-The return type of `evm_decode` is the SQL version of the return type specified in the signature.
+The return type of `evm_decode_log` is the SQL version of the return type specified in the signature.
 
 ## `evm_topic`
 
