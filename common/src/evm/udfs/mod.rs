@@ -386,6 +386,7 @@ pub fn decode(
 
 #[derive(Debug)]
 pub struct EvmDecodeLog {
+    name: &'static str,
     signature: Signature,
 }
 
@@ -401,7 +402,17 @@ impl EvmDecodeLog {
             ],
             Volatility::Immutable,
         );
-        Self { signature }
+        Self {
+            name: "evm_decode_log",
+            signature,
+        }
+    }
+
+    pub fn with_deprecated_name(self) -> Self {
+        Self {
+            name: "evm_decode",
+            ..self
+        }
     }
 }
 
@@ -411,7 +422,7 @@ impl ScalarUDFImpl for EvmDecodeLog {
     }
 
     fn name(&self) -> &str {
-        "evm_decode_log"
+        self.name
     }
 
     fn signature(&self) -> &Signature {

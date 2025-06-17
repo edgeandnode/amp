@@ -438,6 +438,7 @@ fn create_catalog_schema(ctx: &SessionContext, schema_name: String) {
 fn udfs() -> Vec<ScalarUDF> {
     vec![
         EvmDecodeLog::new().into(),
+        EvmDecodeLog::new().with_deprecated_name().into(),
         EvmTopic::new().into(),
         EvmEncodeParams::new().into(),
         EvmDecodeParams::new().into(),
