@@ -26,7 +26,7 @@ use datafusion::{
 use futures::{stream, Stream, StreamExt, TryStreamExt};
 use metadata_db::{LocationId, MetadataDb, TableId};
 use object_store::{path::Path, ObjectMeta, ObjectStore};
-use tracing::info;
+use tracing::{error, info};
 use url::Url;
 use uuid::Uuid;
 
@@ -561,8 +561,9 @@ impl TableProvider for PhysicalTable {
                 self.schema(),
             )));
         }
+        let target_partitions = state.config_options().execution.target_partitions;
+        let file_groups = round_robin(files, target_partitions);
 
-        let file_group = FileGroup::new(files);
         let output_ordering = self.output_ordering()?;
 
         let file_schema = self.schema();
@@ -573,9 +574,7 @@ impl TableProvider for PhysicalTable {
             .create_physical_plan(
                 state,
                 FileScanConfigBuilder::new(object_store_url, file_schema, file_source)
-                    .with_file_groups(
-                        file_group.split_files(state.config_options().execution.target_partitions),
-                    )
+                    .with_file_groups(file_groups)
                     .with_output_ordering(output_ordering)
                     .with_projection(projection.cloned())
                     .build(),
@@ -667,4 +666,16 @@ async fn nozzle_meta_from_object_meta(
     // Unwrap: We know this is a path with valid file name because we just opened it
     let file_name = object_meta.location.filename().unwrap().to_string();
     Ok((file_name, parquet_meta))
+}
+
+fn round_robin(files: Vec<PartitionedFile>, target_partitions: usize) -> Vec<FileGroup> {
+    let size = files.len().min(target_partitions);
+    if size <= 0 {
+        return vec![];
+    }
+    let mut groups = vec![FileGroup::default(); size];
+    for (idx, file) in files.into_iter().enumerate() {
+        groups[idx % size].push(file);
+    }
+    groups
 }
