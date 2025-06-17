@@ -26,7 +26,7 @@ use datafusion::{
 use futures::{stream, Stream, StreamExt, TryStreamExt};
 use metadata_db::{LocationId, MetadataDb, TableId};
 use object_store::{path::Path, ObjectMeta, ObjectStore};
-use tracing::{error, info};
+use tracing::info;
 use url::Url;
 use uuid::Uuid;
 
