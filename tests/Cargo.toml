@@ -10,6 +10,7 @@ name = "tests"
 name = "tests"
 
 [dependencies]
+alloy.workspace = true
 clap.workspace = true
 common = { path = "../common" }
 dataset-store = { path = "../dataset-store" }
@@ -31,3 +32,4 @@ serde_json.workspace = true
 serde.workspace = true
 serde_yaml.workspace = true
 tonic.workspace = true
+alloy-rpc-types-anvil = "1.0.9"

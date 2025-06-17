@@ -4,7 +4,7 @@ use axum::{extract::State, http::StatusCode, Json};
 use common::{
     arrow::datatypes::{DataType, Field},
     manifest::TableSchema,
-    query_context::{parse_sql, Error as QueryContextError},
+    query_context::{parse_sql, prepend_special_block_num_field, Error as QueryContextError},
     SPECIAL_BLOCK_NUM,
 };
 use http_common::{BoxRequestError, RequestError};
@@ -17,6 +17,8 @@ use crate::ServiceState;
 #[derive(Debug, Deserialize)]
 pub struct OutputSchemaRequest {
     sql_query: String,
+    #[serde(default)]
+    is_sql_dataset: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -74,12 +76,19 @@ pub async fn output_schema_handler(
         )
         .await
         .map_err(PlanningError)?;
+    let schema = if payload.is_sql_dataset {
+        // For SQL datasets, the `SPECIAL_BLOCK_NUM` field is always included in the schema.
+        prepend_special_block_num_field(&schema)
+    } else {
+        schema
+    };
 
     let networks: BTreeSet<String> = ctx
         .catalog()
         .iter()
         .map(|t| t.table().network().to_string())
         .collect();
+
     Ok(Json(OutputSchemaResponse {
         schema: schema.into(),
         networks: networks.into_iter().collect(),

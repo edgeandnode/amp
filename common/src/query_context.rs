@@ -530,13 +530,7 @@ pub fn propagate_block_num(plan: LogicalPlan) -> Result<LogicalPlan, DataFusionE
 
                 // Prepend `SPECIAL_BLOCK_NUM` column to the projection.
                 projection.expr.insert(0, col(SPECIAL_BLOCK_NUM));
-                let mut schema = DFSchema::from_unqualified_fields(
-                    Fields::from(vec![Field::new(SPECIAL_BLOCK_NUM, DataType::UInt64, false)]),
-                    Default::default(),
-                )
-                .unwrap();
-                schema.merge(projection.schema.as_ref());
-                projection.schema = Arc::new(schema);
+                projection.schema = prepend_special_block_num_field(&projection.schema);
                 Ok(Transformed::yes(LogicalPlan::Projection(projection)))
             }
             LogicalPlan::TableScan(table_scan) => {
@@ -552,12 +546,7 @@ pub fn propagate_block_num(plan: LogicalPlan) -> Result<LogicalPlan, DataFusionE
                 } else {
                     // Add a projection on top of the TableScan to select the `BLOCK_NUM` column
                     // as `SPECIAL_BLOCK_NUM`.
-                    let mut schema = DFSchema::from_unqualified_fields(
-                        Fields::from(vec![Field::new(SPECIAL_BLOCK_NUM, DataType::UInt64, false)]),
-                        Default::default(),
-                    )
-                    .unwrap();
-                    schema.merge(table_scan.projected_schema.as_ref());
+                    let schema = prepend_special_block_num_field(&table_scan.projected_schema);
                     let col_exprs = iter::once(col(BLOCK_NUM).alias(SPECIAL_BLOCK_NUM)).chain(
                         table_scan.projected_schema.fields().iter().map(|f| {
                             Expr::Column(Column {
@@ -570,20 +559,14 @@ pub fn propagate_block_num(plan: LogicalPlan) -> Result<LogicalPlan, DataFusionE
                     let projection = Projection::try_new_with_schema(
                         col_exprs.collect(),
                         Arc::new(LogicalPlan::TableScan(table_scan)),
-                        Arc::new(schema),
+                        schema,
                     )?;
                     Ok(Transformed::yes(LogicalPlan::Projection(projection)))
                 }
             }
             LogicalPlan::Union(mut union) => {
                 // Add the `SPECIAL_BLOCK_NUM` column to the union schema.
-                let mut schema = DFSchema::from_unqualified_fields(
-                    Fields::from(vec![Field::new(SPECIAL_BLOCK_NUM, DataType::UInt64, false)]),
-                    Default::default(),
-                )
-                .unwrap();
-                schema.merge(&union.schema.as_ref());
-                union.schema = Arc::new(schema);
+                union.schema = prepend_special_block_num_field(&union.schema);
                 Ok(Transformed::yes(LogicalPlan::Union(union)))
             }
             _ => Ok(Transformed::no(node)),
@@ -623,6 +606,16 @@ pub fn unproject_special_block_num_column(
             )
         })?;
     Ok(LogicalPlan::Projection(projection))
+}
+
+pub fn prepend_special_block_num_field(schema: &DFSchema) -> Arc<DFSchema> {
+    let mut new_schema = DFSchema::from_unqualified_fields(
+        Fields::from(vec![Field::new(SPECIAL_BLOCK_NUM, DataType::UInt64, false)]),
+        Default::default(),
+    )
+    .unwrap();
+    new_schema.merge(schema);
+    new_schema.into()
 }
 
 /// Prints the physical plan to a single line, for logging.
