@@ -8,13 +8,6 @@ export class ManifestBuilderError extends Data.TaggedError("ManifestBuilderError
   readonly table: string
 }> {}
 
-// TODO: Remove this once the registry endpoint returns the `block_num` field for datasets.
-const blockNumField = new Model.ArrowField({
-  name: "_block_num",
-  type: "UInt64",
-  nullable: false,
-})
-
 export class ManifestBuilder extends Effect.Service<ManifestBuilder>()("Nozzle/ManifestBuilder", {
   effect: Effect.gen(function*() {
     const client = yield* Api.Registry
@@ -22,7 +15,7 @@ export class ManifestBuilder extends Effect.Service<ManifestBuilder>()("Nozzle/M
       Effect.gen(function*() {
         const tables = yield* Effect.forEach(Object.entries(manifest.tables ?? {}), ([name, table]) =>
           Effect.gen(function*() {
-            const schema = yield* client.schema(table.sql).pipe(Effect.catchTags({
+            const schema = yield* client.schema(table.sql, true /* this is an SQL dataset */).pipe(Effect.catchTags({
               RegistryError: (cause) =>
                 new ManifestBuilderError({ cause, message: "Failed to get schema", table: name }),
             }))
@@ -36,16 +29,13 @@ export class ManifestBuilder extends Effect.Service<ManifestBuilder>()("Nozzle/M
                 }),
               )
             }
+            const network = schema.networks[0]
 
             const input = new Model.TableInput({ sql: table.sql })
             const output = new Model.Table({
               input,
-              network: schema.networks[0],
-              schema: new Model.TableSchema({
-                arrow: new Model.ArrowSchema({
-                  fields: [blockNumField, ...schema.schema.arrow.fields],
-                }),
-              }),
+              schema: schema.schema,
+              network,
             })
 
             return [name, output] as const
