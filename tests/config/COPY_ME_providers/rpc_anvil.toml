@@ -1,0 +1,4 @@
+# Copy this file into providers/rpc_anvil.toml
+kind = "evm-rpc"
+url = "http://localhost:8545"
+network = "anvil"
