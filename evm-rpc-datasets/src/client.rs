@@ -208,43 +208,49 @@ impl JsonRpcClient {
             self.limiter.clone(),
         );
 
-        let block_calls: Vec<_> = (start_block..=end_block)
-            .map(|block_num| ("eth_getBlockByNumber", (block_num, true)))
-            .collect();
-
         stream! {
-            let blocks_result: Result<Vec<alloy::rpc::types::Block>, BoxError> = batching_client.execute(block_calls).await;
-            let blocks = match blocks_result {
-                Ok(blocks) => blocks,
-                Err(err) => {
-                    yield Err(err);
-                    return;
-                }
-            };
 
-            for block in blocks {
-                let transaction_hashes = block.transactions.hashes();
+            let block_calls: Vec<_> = (start_block..=end_block)
+                .map(|block_num| ("eth_getBlockByNumber", (block_num, true)))
 
-                // Fetch receipts in batch
-                let receipt_calls: Vec<_> = transaction_hashes
-                    .map(|hash| {
-                        (
-                            "eth_getTransactionReceipt",
-                            [format!("0x{}", hex::encode(hash))],
-                        )
-                    })
-                    .collect();
+                .collect::<Vec<_>>()
+                .chunks(self.batch_size).map(<[_]>::to_vec)
+                .collect();
 
-                let receipts_result: Result<Vec<Option<TransactionReceipt>>, BoxError> = batching_client.execute(receipt_calls).await;
-                let receipts = match receipts_result {
-                    Ok(receipts) => receipts,
+            for batch_calls in block_calls {
+                let blocks_result: Result<Vec<alloy::rpc::types::Block>, BoxError> = batching_client.execute(batch_calls).await;
+                let blocks = match blocks_result {
+                    Ok(blocks) => blocks,
                     Err(err) => {
                         yield Err(err);
-                        continue;
+                        return;
                     }
                 };
 
-                yield rpc_to_rows(block, receipts, &self.network);
+                for block in blocks {
+                    let transaction_hashes = block.transactions.hashes();
+
+                    // Fetch receipts in batch
+                    let receipt_calls: Vec<_> = transaction_hashes
+                        .map(|hash| {
+                            (
+                                "eth_getTransactionReceipt",
+                                [format!("0x{}", hex::encode(hash))],
+                            )
+                        })
+                        .collect();
+
+                    let receipts_result: Result<Vec<Option<TransactionReceipt>>, BoxError> = batching_client.execute(receipt_calls).await;
+                    let receipts = match receipts_result {
+                        Ok(receipts) => receipts,
+                        Err(err) => {
+                            yield Err(err);
+                            continue;
+                        }
+                    };
+
+                    yield rpc_to_rows(block, receipts, &self.network);
+                }
             }
         }
     }
