@@ -201,13 +201,13 @@ async fn anvil_rpc_reorg() {
             parent_hash: block.header.parent_hash,
         }
     };
-    let reorg = async |depth: u8| {
+    let reorg = async |depth: u64| {
         assert_ne!(depth, 0);
         let original_head = latest_block().await;
         tracing::info!(depth, "reorg");
         provider
             .anvil_reorg(alloy_rpc_types_anvil::ReorgOptions {
-                depth: 1,
+                depth,
                 tx_block_pairs: vec![],
             })
             .await
