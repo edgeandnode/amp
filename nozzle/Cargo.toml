@@ -6,7 +6,7 @@ build = "build.rs"
 
 [features]
 default = ["snmalloc"]
-snmalloc = ["snmalloc-rs"]
+snmalloc = ["dep:snmalloc-rs"]
 
 [dependencies]
 metadata-db = { path = "../metadata-db" }
