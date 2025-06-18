@@ -20,7 +20,11 @@ impl Scheduler {
     }
 
     /// Schedule a dump for a new copy of a dataset.
-    pub async fn schedule_dataset_dump(&self, dataset: Dataset) -> Result<(), BoxError> {
+    pub async fn schedule_dataset_dump(
+        &self,
+        dataset: Dataset,
+        end_block: Option<i64>,
+    ) -> Result<(), BoxError> {
         // Scheduling procedure for a new `DumpDataset` job:
         // 1. Choose a responsive node.
         // 2. Create a new location for each table.
@@ -50,6 +54,7 @@ impl Scheduler {
 
         let job_desc = serde_json::to_string(&JobDesc::DumpDataset {
             dataset: dataset_name,
+            end_block,
         })?;
 
         self.metadata_db

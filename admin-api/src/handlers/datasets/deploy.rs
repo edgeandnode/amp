@@ -48,7 +48,7 @@ pub async fn handler(
         .map_err(Error::StoreError)?;
 
     ctx.scheduler
-        .schedule_dataset_dump(dataset)
+        .schedule_dataset_dump(dataset, payload.end_block)
         .await
         .map_err(|err| {
             tracing::error!(error=?err, "failed to schedule dataset dump");
@@ -68,4 +68,5 @@ pub struct DeployRequest {
     dataset_name: String,
     /// JSON string representation of the dataset manifest
     manifest: String,
+    end_block: Option<i64>,
 }

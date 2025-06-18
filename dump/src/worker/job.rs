@@ -29,6 +29,8 @@ pub enum Job {
         ctx: JobCtx,
         /// All tables must belong to the same dataset.
         tables: Vec<Arc<PhysicalTable>>,
+        /// The end block to dump, or `None` for the latest block.
+        end_block: Option<i64>,
     },
 }
 
@@ -46,7 +48,7 @@ impl Job {
         let output_locations = ctx.metadata_db.output_locations(job_id).await?;
 
         match job_desc {
-            JobDesc::DumpDataset { dataset } => {
+            JobDesc::DumpDataset { dataset, end_block } => {
                 let dataset = ctx.dataset_store.load_dataset(&dataset).await?;
 
                 // Consistency check: All tables must be present in the job's output.
@@ -84,6 +86,7 @@ impl Job {
                 Ok(Job::DumpTables {
                     ctx,
                     tables: physical_tables,
+                    end_block,
                 })
             }
         }
@@ -91,7 +94,11 @@ impl Job {
 
     pub async fn run(self) -> Result<(), BoxError> {
         match self {
-            Job::DumpTables { ctx, ref tables } => {
+            Job::DumpTables {
+                ctx,
+                ref tables,
+                end_block,
+            } => {
                 dump_tables(
                     ctx.clone(),
                     tables,
@@ -99,7 +106,7 @@ impl Job {
                     default_partition_size(),
                     default_input_batch_size_blocks(),
                     &default_parquet_opts(),
-                    (0, None),
+                    (0, end_block),
                 )
                 .await
             }
@@ -127,5 +134,8 @@ impl std::fmt::Debug for Job {
 /// metadata DB table.
 #[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Serialize, Deserialize)]
 pub enum JobDesc {
-    DumpDataset { dataset: String },
+    DumpDataset {
+        dataset: String,
+        end_block: Option<i64>,
+    },
 }
