@@ -1,6 +1,9 @@
-- name: select_basic_function
+- name: deploy_basic_function
+  deploy: basic_function
+
+- name: query_basic_function
   query: SELECT basic_function.testString()
   results: |
     [
-      {"col_name": "I'm a function"}
+      {"basic_function.testString()":"I'm a function"}
     ]

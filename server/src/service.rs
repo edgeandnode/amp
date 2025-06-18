@@ -16,7 +16,6 @@ use axum::{
 use bytes::{BufMut, Bytes, BytesMut};
 use common::{
     arrow::{self, ipc::writer::IpcDataGenerator},
-    catalog::{collect_scanned_tables, physical::Catalog},
     config::Config,
     query_context::{
         forbid_underscore_prefixed_aliases, parse_sql, propagate_block_num,
@@ -90,7 +89,8 @@ impl IntoResponse for Error {
             Error::CoreError(
                 CoreError::InvalidPlan(_)
                 | CoreError::SqlParseError(_)
-                | CoreError::PlanEncodingError(_),
+                | CoreError::PlanEncodingError(_)
+                | CoreError::PlanDecodingError(_),
             ) => StatusCode::BAD_REQUEST,
             Error::CoreError(
                 CoreError::DatasetError(_)
@@ -128,7 +128,7 @@ impl From<Error> for Status {
             Error::CoreError(CoreError::SqlParseError(_)) => {
                 Status::invalid_argument(e.to_string())
             }
-            Error::CoreError(CoreError::PlanEncodingError(_)) => {
+            Error::CoreError(CoreError::PlanEncodingError(_) | CoreError::PlanDecodingError(_)) => {
                 Status::invalid_argument(e.to_string())
             }
             Error::CoreError(CoreError::DatasetError(_)) => Status::internal(e.to_string()),
@@ -151,19 +151,13 @@ impl From<Error> for Status {
 pub struct Service {
     env: QueryEnv,
     dataset_store: Arc<DatasetStore>,
-    initial_catalog: Catalog,
 }
 
 impl Service {
     pub async fn new(config: Arc<Config>, metadata_db: Arc<MetadataDb>) -> Result<Self, Error> {
         let env = config.make_query_env().map_err(Error::ExecutionError)?;
         let dataset_store = DatasetStore::new(config.clone(), metadata_db);
-        let initial_catalog = dataset_store.initial_catalog().await?;
-        Ok(Self {
-            env,
-            dataset_store,
-            initial_catalog,
-        })
+        Ok(Self { env, dataset_store })
     }
 
     pub async fn execute_query(&self, sql: &str) -> Result<SendableRecordBatchStream, Error> {
@@ -499,24 +493,17 @@ impl Service {
     }
 
     async fn do_get(&self, ticket: arrow_flight::Ticket) -> Result<TonicStream<FlightData>, Error> {
-        //  DataFusion requires a context for initially deserializing a logical plan. That context is used a
-        // `FunctionRegistry` for UDFs. That context must include all UDFs that may be used in the
-        // query.
-        let ctx = QueryContext::for_catalog(self.initial_catalog.clone(), self.env.clone())?;
         let remote_plan = common::query_context::remote_plan_from_bytes(&ticket.ticket)?;
-        let plan = ctx.plan_from_bytes(&remote_plan.serialized_plan).await?;
+        let table_refs = remote_plan.table_refs.into_iter().map(|t| t.into());
 
-        // The deserialized plan references empty tables, so we need to load the actual tables from the catalog.
-        let table_refs = collect_scanned_tables(&plan);
-
-        // TODO: Properly decode and then collect function names, using a trick similar to `EmptyTableCodec`.
-        let function_names = vec![];
         let catalog = self
             .dataset_store
-            .load_physical_catalog(table_refs.iter(), function_names, &self.env)
+            .load_physical_catalog(table_refs, remote_plan.function_refs, &self.env)
             .await?;
         let query_ctx = QueryContext::for_catalog(catalog, self.env.clone())?;
-        let plan = query_ctx.prepare_remote_plan(plan).await?;
+        let plan = query_ctx
+            .plan_from_bytes(&remote_plan.serialized_plan)
+            .await?;
 
         let query_ctx = Arc::new(query_ctx);
         let stream = self

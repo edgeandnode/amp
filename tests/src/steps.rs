@@ -4,7 +4,7 @@ use serde::Deserialize;
 
 use crate::{
     test_client::TestClient,
-    test_support::{dump_dataset, restore_blessed_dataset, SqlTestResult, TestEnv},
+    test_support::{dump_dataset, restore_blessed_dataset, DatasetPackage, SqlTestResult, TestEnv},
 };
 
 #[derive(Debug, Deserialize)]
@@ -15,6 +15,13 @@ pub(crate) enum TestStep {
     StreamTake(StreamTakeStep),
     Query(QueryStep),
     Restore(RestoreStep),
+    Deploy(DeployStep),
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DeployStep {
+    pub name: String,
+    pub deploy: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -107,6 +114,7 @@ impl TestStep {
             TestStep::Query(step) => &step.name,
             TestStep::Stream(step) => &step.name,
             TestStep::Restore(step) => &step.name,
+            TestStep::Deploy(step) => &step.name,
         }
     }
 
@@ -122,6 +130,11 @@ impl TestStep {
             TestStep::Restore(step) => {
                 restore_blessed_dataset(&step.restore, &test_env.metadata_db).await?;
                 Ok(())
+            }
+            TestStep::Deploy(step) => {
+                let dataset_package = DatasetPackage::new(&step.deploy);
+                dataset_package.pnpm_install().await?;
+                dataset_package.deploy(test_env.server_addrs).await
             }
         };
 

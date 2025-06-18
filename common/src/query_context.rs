@@ -1,20 +1,18 @@
-use std::{collections::BTreeMap, iter, sync::Arc};
+use std::{iter, sync::Arc};
 
-use arrow::{array::RecordBatch, compute::concat_batches, datatypes::SchemaRef};
+use arrow::{array::RecordBatch, compute::concat_batches};
 use async_udf::physical_optimizer::AsyncFuncRule;
 use bincode::{config, Decode, Encode};
 use bytes::Bytes;
 use datafusion::{
-    arrow::datatypes::{DataType, Field, Fields, Schema},
-    catalog::MemorySchemaProvider,
+    arrow::datatypes::{DataType, Field, Fields, Schema, SchemaRef},
+    catalog::{MemorySchemaProvider, TableProvider},
     common::{
         not_impl_err, plan_err,
-        tree_node::{
-            Transformed, TransformedResult, TreeNode as _, TreeNodeRecursion, TreeNodeRewriter,
-        },
+        tree_node::{Transformed, TransformedResult, TreeNode as _, TreeNodeRecursion},
         Column, DFSchema, DFSchemaRef,
     },
-    datasource::{DefaultTableSource, MemTable, TableProvider, TableType},
+    datasource::MemTable,
     error::DataFusionError,
     execution::{
         config::SessionConfig,
@@ -22,9 +20,7 @@ use datafusion::{
         runtime_env::RuntimeEnv,
         SendableRecordBatchStream, SessionStateBuilder,
     },
-    logical_expr::{
-        AggregateUDF, Extension, LogicalPlan, LogicalPlanBuilder, Projection, ScalarUDF, TableScan,
-    },
+    logical_expr::{AggregateUDF, Extension, LogicalPlan, Projection, ScalarUDF},
     physical_plan::{displayable, ExecutionPlan},
     prelude::{col, Expr},
     sql::{parser, TableReference},
@@ -35,7 +31,7 @@ use datafusion_proto::{
     },
     logical_plan::LogicalExtensionCodec,
 };
-use futures::TryStreamExt;
+use futures::{FutureExt as _, TryStreamExt};
 use js_runtime::isolate_pool::IsolatePool;
 use metadata_db::TableId;
 use thiserror::Error;
@@ -59,6 +55,9 @@ pub enum Error {
 
     #[error("plan encoding error: {0}")]
     PlanEncodingError(DataFusionError),
+
+    #[error("plan decoding error: {0}")]
+    PlanDecodingError(DataFusionError),
 
     #[error("planning error: {0}")]
     PlanningError(DataFusionError),
@@ -91,11 +90,13 @@ pub struct PlanningContext {
 pub struct RemotePlan {
     pub serialized_plan: Vec<u8>,
     pub is_streaming: bool,
+    pub table_refs: Vec<String>,
+    pub function_refs: Vec<String>,
 }
 
 pub fn remote_plan_from_bytes(bytes: &Bytes) -> Result<RemotePlan, Error> {
     let (remote_plan, _) = bincode::decode_from_slice(bytes, config::standard()).map_err(|e| {
-        Error::PlanEncodingError(DataFusionError::Plan(format!(
+        Error::PlanDecodingError(DataFusionError::Plan(format!(
             "Failed to serialize remote plan: {}",
             e
         )))
@@ -136,11 +137,16 @@ impl PlanningContext {
             .await?;
         let plan = sql_to_plan(&ctx, query).await?;
         let schema = plan.schema().clone();
-        let serialized_plan = logical_plan_to_bytes_with_extension_codec(&plan, &EmptyTableCodec)
-            .map_err(Error::PlanEncodingError)?;
+        let serialized_plan =
+            logical_plan_to_bytes_with_extension_codec(&plan, &TableProviderCodec)
+                .map_err(Error::PlanEncodingError)?;
+        let LogicalCatalog { tables, udfs } = &self.catalog;
+        let table_refs = tables.iter().map(|t| t.table_ref().to_string()).collect();
         let remote_plan = RemotePlan {
             serialized_plan: serialized_plan.to_vec(),
             is_streaming,
+            table_refs,
+            function_refs: udfs.iter().map(|f| f.name().to_string()).collect(),
         };
         let serialized_plan = Bytes::from(
             bincode::encode_to_vec(&remote_plan, config::standard()).map_err(|e| {
@@ -274,25 +280,9 @@ impl QueryContext {
     /// This will deserialize the plan with empty tables in the `TableScan` nodes.
     pub async fn plan_from_bytes(&self, bytes: &[u8]) -> Result<LogicalPlan, Error> {
         let ctx = self.datafusion_ctx().await?;
-        let plan = logical_plan_from_bytes_with_extension_codec(bytes, &ctx, &EmptyTableCodec)
-            .map_err(Error::PlanEncodingError)?;
+        let plan = logical_plan_from_bytes_with_extension_codec(bytes, &ctx, &TableProviderCodec)
+            .map_err(Error::PlanDecodingError)?;
         verify_plan(&plan)?;
-        Ok(plan)
-    }
-
-    /// A remote plan has empty tables, so this will attach the actual table providers from our
-    /// catalog to the plan before executing it.
-    pub async fn prepare_remote_plan(&self, plan: LogicalPlan) -> Result<LogicalPlan, Error> {
-        let ctx = self.datafusion_ctx().await?;
-        let all_tables = all_tables(&ctx).await;
-        let mut rewriter = AttachTablesToPlan {
-            providers: all_tables,
-        };
-        let plan = plan
-            .rewrite(&mut rewriter)
-            .map_err(Error::PlanningError)?
-            .data;
-
         Ok(plan)
     }
 
@@ -626,59 +616,10 @@ fn print_physical_plan(plan: &dyn ExecutionPlan) -> String {
         .replace('\n', "\\n")
 }
 
-/// Replaces placeholder table providers coming from a deserialized plan with the actual providers
-/// registered in a local session context.
-struct AttachTablesToPlan {
-    providers: BTreeMap<TableReference, Arc<dyn TableProvider + 'static>>,
-}
-
-impl TreeNodeRewriter for AttachTablesToPlan {
-    type Node = LogicalPlan;
-    fn f_up(&mut self, node: Self::Node) -> Result<Transformed<LogicalPlan>, DataFusionError> {
-        match node {
-            // Look for table scans that are not view references, and replace their provider with the
-            // one registered in the local context.
-            LogicalPlan::TableScan(TableScan {
-                table_name, source, ..
-            }) if source.table_type() == TableType::Base && source.get_logical_plan().is_none() => {
-                let provider = self.providers.get(&table_name).ok_or_else(|| {
-                    DataFusionError::External(
-                        format!("table {table_name} is not registered in the context").into(),
-                    )
-                })?;
-                let new_source = Arc::new(DefaultTableSource::new(provider.clone()));
-                Ok(Transformed::yes(
-                    LogicalPlanBuilder::scan(table_name, new_source, None)?.build()?,
-                ))
-            }
-            _ => Ok(Transformed::no(node)),
-        }
-    }
-}
-
-async fn all_tables(ctx: &SessionContext) -> BTreeMap<TableReference, Arc<dyn TableProvider>> {
-    let mut tables = BTreeMap::new();
-
-    // Unwrap: We always have a single catalog, the default one.
-    let catalog = ctx.catalog(&ctx.catalog_names()[0]).unwrap();
-    for catalog_schema in catalog.schema_names() {
-        // Unwrap: This was taken from `schema_names`.
-        let schema_provider = catalog.schema(&catalog_schema).unwrap();
-        for table_name in schema_provider.table_names() {
-            // Unwrap: This was taken from `table_names`.
-            let table_provider = schema_provider.table(&table_name).await.unwrap().unwrap();
-            let table_ref = TableReference::partial(catalog_schema.clone(), table_name);
-            tables.insert(table_ref, table_provider);
-        }
-    }
-
-    tables
-}
-
 #[derive(Debug)]
-pub struct EmptyTableCodec;
+pub struct TableProviderCodec;
 
-impl LogicalExtensionCodec for EmptyTableCodec {
+impl LogicalExtensionCodec for TableProviderCodec {
     fn try_decode(
         &self,
         _buf: &[u8],
@@ -695,12 +636,14 @@ impl LogicalExtensionCodec for EmptyTableCodec {
     fn try_decode_table_provider(
         &self,
         _buf: &[u8],
-        _table_ref: &TableReference,
-        schema: SchemaRef,
-        _ctx: &SessionContext,
+        table_ref: &TableReference,
+        _schema: SchemaRef,
+        ctx: &SessionContext,
     ) -> Result<Arc<dyn TableProvider>, DataFusionError> {
-        let table = MemTable::try_new(schema, vec![vec![]])?;
-        Ok(Arc::new(table))
+        // Unwrap: We use the default catalog and schema providers which are not async.
+        ctx.table_provider(table_ref.clone())
+            .now_or_never()
+            .unwrap()
     }
 
     fn try_encode_table_provider(

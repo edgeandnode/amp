@@ -4,12 +4,13 @@ use datafusion::sql::{
     parser::Statement,
     sqlparser::ast::{Expr, Function, ObjectNamePart, Visit, Visitor},
 };
+use itertools::Itertools;
 use js_runtime::BoxError;
 
-/// Returns a list of all function names in the SQL statement, split by the dot operator.
+/// Returns a list of all function names in the SQL statement.
 ///
 /// Errors in case of some DML statements.
-pub fn all_function_names(stmt: &Statement) -> Result<Vec<Vec<String>>, BoxError> {
+pub fn all_function_names(stmt: &Statement) -> Result<Vec<String>, BoxError> {
     let mut collector = FunctionCollector {
         functions: Vec::new(),
     };
@@ -37,7 +38,7 @@ pub fn all_function_names(stmt: &Statement) -> Result<Vec<Vec<String>>, BoxError
                 .map(|s| match s {
                     ObjectNamePart::Identifier(ident) => ident.value,
                 })
-                .collect()
+                .join(".")
         })
         .collect())
 }
