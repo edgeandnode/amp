@@ -32,7 +32,25 @@
       }
     ]
 
-- name: evm_decode
+- name: evm_decode_log
+  query: |
+    SELECT evm_decode_log(l.topic1, l.topic2, l.topic3, l.data, 'Transfer(address indexed from, address indexed to, uint256 value)') AS decoded
+    FROM eth_rpc.logs l
+    WHERE l.topic0 = evm_topic('Transfer(address indexed from, address indexed to, uint256 value)')
+    AND l.topic3 IS NULL
+    LIMIT 1
+  results: |
+    [
+      {
+        "decoded": {
+          "from": "06729eb2424da47898f935267bd4a62940de5105",
+          "to": "beefbabeea323f07c59926295205d3b7a17e8638",
+          "value": "6818627949560085517"
+        }
+      }
+    ]
+
+- name: evm_decode_log_deprecated_name
   query: |
     SELECT evm_decode(l.topic1, l.topic2, l.topic3, l.data, 'Transfer(address indexed from, address indexed to, uint256 value)') AS decoded
     FROM eth_rpc.logs l

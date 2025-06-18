@@ -385,11 +385,12 @@ pub fn decode(
 }
 
 #[derive(Debug)]
-pub struct EvmDecode {
+pub struct EvmDecodeLog {
+    name: &'static str,
     signature: Signature,
 }
 
-impl EvmDecode {
+impl EvmDecodeLog {
     pub fn new() -> Self {
         let signature = Signature::exact(
             vec![
@@ -401,17 +402,27 @@ impl EvmDecode {
             ],
             Volatility::Immutable,
         );
-        Self { signature }
+        Self {
+            name: "evm_decode_log",
+            signature,
+        }
+    }
+
+    pub fn with_deprecated_name(self) -> Self {
+        Self {
+            name: "evm_decode",
+            ..self
+        }
     }
 }
 
-impl ScalarUDFImpl for EvmDecode {
+impl ScalarUDFImpl for EvmDecodeLog {
     fn as_any(&self) -> &dyn Any {
         self
     }
 
     fn name(&self) -> &str {
-        "evm_decode"
+        self.name
     }
 
     fn signature(&self) -> &Signature {
@@ -1547,8 +1558,8 @@ mod tests {
     }
 
     #[test]
-    fn invoke_evm_decode() {
-        let evm_decode = EvmDecode::new();
+    fn invoke_evm_decode_log() {
+        let evm_decode_log = EvmDecodeLog::new();
         let topic1 = CSV
             .into_iter()
             .map(|(topic, _, _)| B256::from_hex(topic).unwrap().to_vec())
@@ -1601,7 +1612,7 @@ mod tests {
             arg_fields,
             number_rows: CSV.len(),
             return_field: Field::new_struct(
-                evm_decode.name(),
+                evm_decode_log.name(),
                 Event::try_from(&ScalarValue::new_utf8(SIG))
                     .unwrap()
                     .fields()
@@ -1610,7 +1621,7 @@ mod tests {
             )
             .into(),
         };
-        let result = evm_decode.invoke_with_args(args).unwrap();
+        let result = evm_decode_log.invoke_with_args(args).unwrap();
         let ColumnarValue::Array(result) = result else {
             panic!("expected Array, got {:?}", result);
         };

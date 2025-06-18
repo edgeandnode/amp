@@ -45,7 +45,7 @@ use crate::{
     arrow, attestation,
     catalog::physical::{Catalog, PhysicalTable},
     evm::udfs::{
-        EvmDecode, EvmDecodeParams, EvmDecodeType, EvmEncodeParams, EvmEncodeType, EvmTopic,
+        EvmDecodeLog, EvmDecodeParams, EvmDecodeType, EvmEncodeParams, EvmEncodeType, EvmTopic,
     },
     internal,
     stream_helpers::is_streaming,
@@ -437,7 +437,8 @@ fn create_catalog_schema(ctx: &SessionContext, schema_name: String) {
 
 fn udfs() -> Vec<ScalarUDF> {
     vec![
-        EvmDecode::new().into(),
+        EvmDecodeLog::new().into(),
+        EvmDecodeLog::new().with_deprecated_name().into(),
         EvmTopic::new().into(),
         EvmEncodeParams::new().into(),
         EvmDecodeParams::new().into(),

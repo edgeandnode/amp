@@ -78,7 +78,7 @@ def _(factory_path, uniswap_factory):
            pc.dec['fee'] as fee,
            pc.dec['tickSpacing'] as tick_spacing
           from (select l.block_num,
-                       evm_decode(l.topic1, l.topic2, l.topic3, l.data, '{pool_created_sig}') as dec
+                       evm_decode_log(l.topic1, l.topic2, l.topic3, l.data, '{pool_created_sig}') as dec
                   from eth_firehose.logs l
                  where l.address = arrow_cast(x'{uniswap_factory}', 'FixedSizeBinary(20)')
                    and l.topic0 = evm_topic('{pool_created_sig}')) pc
@@ -111,7 +111,7 @@ def _(Abi, client, pool_created_query, pool_path):
            sw.dec['liquidity'] as liquidity,
            sw.dec['tick'] as tick
       from (select sl.block_num, sl.tx_hash,
-                   evm_decode(sl.topic1, sl.topic2, sl.topic3, sl.data, '{swap_sig}') as dec
+                   evm_decode_log(sl.topic1, sl.topic2, sl.topic3, sl.data, '{swap_sig}') as dec
               from pc, eth_firehose.logs sl
              where sl.address = pc.pool
                and sl.block_num >= pc.block_num
