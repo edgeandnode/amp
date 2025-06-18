@@ -61,10 +61,10 @@ pub enum Error {
     #[error("Error connecting to metadata db: {0}")]
     ConnectionError(sqlx::Error),
 
-    #[error("{0}")]
+    #[error(transparent)]
     MigrationError(#[from] sqlx::migrate::MigrateError),
 
-    #[error("Metadata db error: {0}")]
+    #[error(transparent)]
     DbError(#[from] sqlx::Error),
 
     #[error("Error sending notification: {0}")]
@@ -82,11 +82,41 @@ pub enum Error {
     UrlParseError(#[from] url::ParseError),
 }
 
+impl Error {
+    /// Returns `true` if the error is likely to be a transient connection issue.
+    ///
+    /// This is used to determine if an operation should be retried.
+    ///
+    /// The following errors are considered retryable:
+    /// - `Error::ConnectionError`: This is a wrapper around `sqlx::Error` that is returned when
+    ///   the initial connection to the database fails.
+    /// - `sqlx::Error::Io`: An I/O error, often indicating a network issue or a closed socket.
+    /// - `sqlx::Error::Tls`: An error that occurred during the TLS handshake.
+    /// - `sqlx::Error::PoolTimedOut`: The connection pool timed out waiting for a free connection.
+    /// - `sqlx::Error::PoolClosed`: The connection pool was closed while an operation was pending.
+    ///
+    /// Other database errors, such as constraint violations or serialization issues, are not
+    /// considered transient and will not be retried.
+    pub fn is_connection_error(&self) -> bool {
+        match self {
+            Error::ConnectionError(_) => true,
+            Error::DbError(err) => matches!(
+                err,
+                sqlx::Error::Io(_)
+                    | sqlx::Error::Tls(_)
+                    | sqlx::Error::PoolTimedOut
+                    | sqlx::Error::PoolClosed
+            ),
+            _ => false,
+        }
+    }
+}
+
 impl From<conn::ConnError> for Error {
     fn from(err: conn::ConnError) -> Self {
         match err {
-            conn::ConnError::ConnectionError(e) => Error::ConnectionError(e),
-            conn::ConnError::MigrationFailed(e) => Error::MigrationError(e),
+            conn::ConnError::ConnectionError(err) => Error::ConnectionError(err),
+            conn::ConnError::MigrationFailed(err) => Error::MigrationError(err),
         }
     }
 }
@@ -225,44 +255,6 @@ impl MetadataDb {
         Ok(job_id)
     }
 
-    /// Given a worker `node_id`, returns all the job IDs
-    #[deprecated(
-        note = "Use `get_scheduled_jobs_with_details` instead which returns full job objects"
-    )]
-    pub async fn get_scheduled_jobs(&self, node_id: &WorkerNodeId) -> Result<Vec<JobId>, Error> {
-        Ok(workers::jobs::get_jobs_for_node_with_statuses(
-            &*self.pool,
-            node_id,
-            [JobStatus::Scheduled, JobStatus::Running],
-        )
-        .await?
-        .into_iter()
-        .map(|job| job.id)
-        .collect())
-    }
-
-    /// Given a worker `node_id`, returns all the active job IDs for that worker
-    ///
-    /// A job is considered active if its in [`JobStatus::Scheduled`] or [`JobStatus::Running`].
-    #[deprecated(
-        note = "Use `get_active_jobs_with_details` instead which returns full job objects"
-    )]
-    pub async fn get_active_jobs(&self, node_id: &WorkerNodeId) -> Result<Vec<JobId>, Error> {
-        Ok(workers::jobs::get_jobs_for_node_with_statuses(
-            &*self.pool,
-            node_id,
-            [
-                JobStatus::Scheduled,
-                JobStatus::Running,
-                JobStatus::StopRequested,
-            ],
-        )
-        .await?
-        .into_iter()
-        .map(|job| job.id)
-        .collect())
-    }
-
     /// Given a worker [`WorkerNodeId`], return all the scheduled jobs
     ///
     /// A job is considered scheduled if it's in one of the following non-terminal states:
@@ -311,13 +303,6 @@ impl MetadataDb {
     /// Returns the job with the given ID
     pub async fn get_job(&self, id: &JobId) -> Result<Option<Job>, Error> {
         Ok(workers::jobs::get_job(&*self.pool, id).await?)
-    }
-
-    /// For a given job ID, returns the job descriptor.
-    #[deprecated(note = "Use `get_job` instead which returns the full job object")]
-    pub async fn job_desc(&self, id: &JobId) -> Result<Option<String>, Error> {
-        let job = workers::jobs::get_job(&*self.pool, id).await?;
-        Ok(job.map(|j| j.desc.to_string()))
     }
 
     /// Marks a job as `RUNNING`

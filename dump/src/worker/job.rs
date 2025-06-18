@@ -35,20 +35,16 @@ pub enum Job {
 }
 
 impl Job {
-    /// Load a job from the database.
-    #[instrument(skip(ctx), err)]
-    pub async fn load(ctx: JobCtx, job_id: &JobId) -> Result<Job, BoxError> {
-        let raw_desc = ctx
-            .metadata_db
-            .job_desc(job_id)
-            .await?
-            .ok_or_else(|| format!("job `{}` not found", job_id))?;
-        let job_desc: JobDesc = serde_json::from_str(&raw_desc)
-            .map_err(|e| format!("error parsing job descriptor `{}`: {}", raw_desc, e))?;
-        let output_locations = ctx.metadata_db.output_locations(job_id).await?;
-
+    /// Try to build a job from a job ID and descriptor.
+    #[instrument(skip(ctx, job_id, job_desc), err)]
+    pub async fn try_from_descriptor(
+        ctx: JobCtx,
+        job_id: JobId,
+        job_desc: JobDesc,
+    ) -> Result<Job, BoxError> {
         match job_desc {
             JobDesc::DumpDataset { dataset, end_block } => {
+                let output_locations = ctx.metadata_db.output_locations(&job_id).await?;
                 let dataset = ctx.dataset_store.load_dataset(&dataset).await?;
 
                 // Consistency check: All tables must be present in the job's output.
@@ -73,19 +69,19 @@ impl Job {
                     .into_iter()
                     .map(|(id, tbl, url)| (tbl.clone(), (id, url)))
                     .collect::<BTreeMap<_, _>>();
-                let mut physical_tables = vec![];
 
+                let mut tables = vec![];
                 for table in Arc::new(dataset).resolved_tables() {
                     // Unwrap: We checked consistency above.
                     let (id, url) = output_locations_by_name.remove(table.name()).unwrap();
-                    physical_tables.push(
-                        PhysicalTable::new(table.clone(), url, id, ctx.metadata_db.clone())?.into(),
-                    );
+                    let table =
+                        PhysicalTable::new(table.clone(), url, id, ctx.metadata_db.clone())?;
+                    tables.push(Arc::new(table));
                 }
 
                 Ok(Job::DumpTables {
                     ctx,
-                    tables: physical_tables,
+                    tables,
                     end_block,
                 })
             }
@@ -96,12 +92,12 @@ impl Job {
         match self {
             Job::DumpTables {
                 ctx,
-                ref tables,
+                tables,
                 end_block,
             } => {
                 dump_tables(
-                    ctx.clone(),
-                    tables,
+                    ctx,
+                    &tables,
                     1,
                     default_partition_size(),
                     default_input_batch_size_blocks(),
