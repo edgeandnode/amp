@@ -57,7 +57,7 @@ pub async fn load_test_config(config_override: Option<Figment>) -> Result<Arc<Co
         "Couldn't find a test config file, `cargo test` must be run from the workspace root or the tests crate root"
     );
     Ok(Arc::new(
-        Config::load(path, false, config_override, dynamic_addrs()).await?,
+        Config::load(path, false, config_override, dynamic_addrs(), true).await?,
     ))
 }
 

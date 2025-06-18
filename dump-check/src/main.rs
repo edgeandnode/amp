@@ -56,7 +56,7 @@ async fn main() -> Result<(), BoxError> {
         n_jobs,
     } = args;
 
-    let config = Arc::new(Config::load(config_path, true, None, Addrs::default()).await?);
+    let config = Arc::new(Config::load(config_path, true, None, Addrs::default(), false).await?);
     let metadata_db: Arc<MetadataDb> = MetadataDb::connect(&config.metadata_db_url).await?.into();
     let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
 

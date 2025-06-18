@@ -5,16 +5,6 @@ use tokio::sync::OnceCell;
 
 use crate::MetadataDb;
 
-/// Whether to allow the use of a temporary Metadata DB
-///
-/// This is set to `true` by default, but can be overridden by the `ALLOW_TEMP_DB` environment
-/// variable.
-pub static ALLOW_TEMP_DB: LazyLock<bool> = LazyLock::new(|| {
-    std::env::var("ALLOW_TEMP_DB")
-        .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
-        .unwrap_or(true)
-});
-
 /// Whether to keep the temporary directory after the Metadata DB is dropped
 ///
 /// This is set to `false` by default, but can be overridden by the `KEEP_TEMP_DIRS` environment
@@ -35,7 +25,7 @@ pub struct TempMetadataDb {
 
     /// Temporary database handle
     ///
-    /// On drop, the database is deleted.   
+    /// On drop, the database is deleted.
     _temp_db: PgTempDB,
 }
 

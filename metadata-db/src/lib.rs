@@ -17,7 +17,7 @@ pub mod workers;
 
 use self::conn::{DbConn, DbConnPool};
 #[cfg(feature = "temp-db")]
-pub use self::temp::{temp_metadata_db, ALLOW_TEMP_DB, KEEP_TEMP_DIRS};
+pub use self::temp::{temp_metadata_db, KEEP_TEMP_DIRS};
 pub use self::workers::{
     events::{JobNotifAction, JobNotifListener, JobNotifRecvError, JobNotification},
     jobs::{Job, JobId, JobStatus},
@@ -225,7 +225,7 @@ impl MetadataDb {
         Ok(job_id)
     }
 
-    /// Given a worker `node_id`, returns all the job IDs  
+    /// Given a worker `node_id`, returns all the job IDs
     #[deprecated(
         note = "Use `get_scheduled_jobs_with_details` instead which returns full job objects"
     )]
@@ -527,8 +527,8 @@ impl MetadataDb {
         id: &JobId,
     ) -> Result<Vec<(LocationId, String, Url)>, Error> {
         let query = indoc::indoc! {r#"
-            SELECT id, tbl, url 
-            FROM locations 
+            SELECT id, tbl, url
+            FROM locations
             WHERE writer = $1
         "#};
 
