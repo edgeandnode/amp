@@ -560,8 +560,7 @@ impl MetadataDb {
              , fm.metadata
           FROM file_metadata fm
           JOIN locations l ON fm.location_id = l.id
-         WHERE location_id = $1
-      ORDER BY file_name;
+         WHERE location_id = $1;
         ";
 
         sqlx::query_as(query).bind(location_id).fetch(&*self.pool)

@@ -516,16 +516,30 @@ impl PhysicalTable {
     fn stream_partitioned_files<'a>(
         &'a self,
         ctx: &'a dyn Session,
-    ) -> impl Stream<Item = DataFusionResult<PartitionedFile>> + 'a {
+    ) -> impl Stream<Item = DataFusionResult<(u64, PartitionedFile)>> + 'a {
         self.stream_file_metadata()
             .map_err(DataFusionError::from)
             .map(async move |res| {
-                let FileMetadata { object_meta, .. } = res?;
+                let FileMetadata {
+                    object_meta,
+                    parquet_meta: ParquetMeta { ranges, .. },
+                    ..
+                } = res?;
                 let mut partitioned_file = PartitionedFile::from(object_meta.clone());
                 let statistics = self.do_collect_statistics(ctx, &partitioned_file).await?;
 
                 partitioned_file.statistics = Some(statistics);
-                Ok(partitioned_file)
+
+                let range_start = ranges
+                    .first()
+                    .ok_or(DataFusionError::Execution(format!(
+                        "No ranges found for file `{}` for table `{}`",
+                        object_meta.location,
+                        self.table_ref()
+                    )))?
+                    .numbers
+                    .start();
+                Ok((*range_start, partitioned_file))
             })
             .buffered(ctx.config_options().execution.meta_fetch_concurrency)
     }
@@ -554,7 +568,7 @@ impl TableProvider for PhysicalTable {
     ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
         let files = self
             .stream_partitioned_files(state)
-            .try_collect::<Vec<_>>()
+            .try_collect::<BTreeMap<_, _>>()
             .await?;
         if files.is_empty() {
             return Ok(Arc::new(datafusion::physical_plan::empty::EmptyExec::new(
@@ -668,13 +682,13 @@ async fn nozzle_meta_from_object_meta(
     Ok((file_name, parquet_meta))
 }
 
-fn round_robin(files: Vec<PartitionedFile>, target_partitions: usize) -> Vec<FileGroup> {
+fn round_robin(files: BTreeMap<u64, PartitionedFile>, target_partitions: usize) -> Vec<FileGroup> {
     let size = files.len().min(target_partitions);
     if size <= 0 {
         return vec![];
     }
     let mut groups = vec![FileGroup::default(); size];
-    for (idx, file) in files.into_iter().enumerate() {
+    for (idx, (_, file)) in files.into_iter().enumerate() {
         groups[idx % size].push(file);
     }
     groups
