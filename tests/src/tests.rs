@@ -1,4 +1,4 @@
-use std::{ops::RangeInclusive, str::FromStr as _};
+use std::ops::RangeInclusive;
 
 use alloy::{
     primitives::BlockHash,
@@ -9,9 +9,6 @@ use common::{
     metadata::range::BlockRange, query_context::parse_sql, tracing_helpers, BlockNum, BoxError,
 };
 use dataset_store::DatasetStore;
-use dump::worker::Worker;
-use futures::StreamExt;
-use metadata_db::workers::WorkerNodeId;
 
 use crate::{
     steps::load_test_steps,
