@@ -5,7 +5,11 @@ use metadata_db::{FileId, FileMetadataRow, LocationId, MetadataDb};
 use object_store::{path::Path, ObjectMeta};
 use url::Url;
 
-use crate::{metadata::range::BlockRange, multirange::MultiRange, BoxError, QueryContext};
+use crate::{
+    metadata::range::BlockRange,
+    multirange::{self, MultiRange},
+    BoxError, QueryContext,
+};
 
 pub mod parquet;
 pub mod range;
@@ -94,15 +98,15 @@ pub async fn multiranges_by_table(
     ctx: &QueryContext,
 ) -> Result<BTreeMap<String, MultiRange>, BoxError> {
     let ranges = block_ranges_by_table(ctx).await?;
-    let multi_ranges = ranges
+    ranges
         .into_iter()
-        .map(|(k, v)| {
-            let ranges = v.into_iter().map(|r| r.numbers.into_inner()).collect();
-            let multirange = MultiRange::from_ranges(ranges)?;
-            Ok((k, multirange))
-        })
-        .collect::<Result<BTreeMap<String, MultiRange>, BoxError>>()?;
-    Ok(multi_ranges)
+        .map(|(k, v)| Ok((k, ranges_to_multirange(v)?)))
+        .collect()
+}
+
+pub fn ranges_to_multirange(ranges: Vec<BlockRange>) -> Result<MultiRange, multirange::Error> {
+    let ranges = ranges.into_iter().map(|r| r.numbers.into_inner()).collect();
+    MultiRange::from_ranges(ranges)
 }
 
 pub async fn filenames_for_table(

@@ -33,6 +33,35 @@ pub async fn dump_tables(
     parquet_opts: &ParquetWriterProperties,
     range: (i64, Option<i64>),
 ) -> Result<(), BoxError> {
+    let mut kinds = BTreeSet::new();
+    for t in tables {
+        kinds.insert(DatasetKind::from_str(&t.dataset().kind)?);
+    }
+
+    if kinds.iter().any(|k| k.is_raw()) {
+        dump_raw_tables(ctx, tables, n_jobs, partition_size, parquet_opts, range).await
+    } else {
+        dump_user_tables(
+            ctx,
+            tables,
+            input_batch_size_blocks,
+            n_jobs,
+            parquet_opts,
+            range,
+        )
+        .await
+    }
+}
+
+/// Dumps a set of raw dataset tables. All tables must belong to the same dataset.
+pub async fn dump_raw_tables(
+    ctx: Ctx,
+    tables: &[Arc<PhysicalTable>],
+    n_jobs: u16,
+    partition_size: u64,
+    parquet_opts: &ParquetWriterProperties,
+    range: (i64, Option<i64>),
+) -> Result<(), BoxError> {
     if tables.is_empty() {
         return Ok(());
     }
@@ -89,35 +118,69 @@ pub async fn dump_tables(
             .await?;
         }
         DatasetKind::Sql | DatasetKind::Manifest => {
-            if n_jobs > 1 {
-                tracing::info!("n_jobs > 1 has no effect for SQL datasets");
-            }
-
-            let dataset = match kind {
-                DatasetKind::Sql => ctx.dataset_store.load_sql_dataset(&dataset.name).await?,
-                DatasetKind::Manifest => {
-                    ctx.dataset_store
-                        .load_manifest_dataset(&dataset.name)
-                        .await?
-                }
-                _ => unreachable!(),
-            };
-
-            sql_dataset::dump(
-                ctx,
-                query_ctx,
-                dataset,
-                &env,
-                block_ranges_by_table,
-                parquet_opts,
-                input_batch_size_blocks,
-                range,
+            return Err(format!(
+                "Attempted to dump dataset `{}` of kind `{}` as raw dataset",
+                dataset.name, kind,
             )
-            .await?;
+            .into())
         }
     }
 
     tracing::info!("dump of dataset {} completed successfully", dataset.name);
+
+    Ok(())
+}
+
+pub async fn dump_user_tables(
+    ctx: Ctx,
+    tables: &[Arc<PhysicalTable>],
+    input_batch_size_blocks: u64,
+    n_jobs: u16,
+    parquet_opts: &ParquetWriterProperties,
+    range: (i64, Option<i64>),
+) -> Result<(), BoxError> {
+    if n_jobs > 1 {
+        tracing::info!("n_jobs > 1 has no effect for SQL datasets");
+    }
+
+    let env = ctx.config.make_query_env()?;
+
+    for table in tables {
+        consistency_check(table).await?;
+
+        let dataset = table.table().dataset();
+        let kind = DatasetKind::from_str(&dataset.kind)?;
+
+        let dataset = match kind {
+            DatasetKind::Sql => ctx.dataset_store.load_sql_dataset(&dataset.name).await?,
+            DatasetKind::Manifest => {
+                ctx.dataset_store
+                    .load_manifest_dataset(&dataset.name)
+                    .await?
+            }
+            _ => {
+                return Err(format!(
+                    "Unsupported dataset kind {:?} for table {}",
+                    kind,
+                    table.table_ref()
+                )
+                .into())
+            }
+        };
+
+        sql_dataset::dump_table(
+            ctx.clone(),
+            dataset,
+            &env,
+            table.clone(),
+            parquet_opts,
+            input_batch_size_blocks,
+            range,
+        )
+        .await?;
+
+        tracing::info!("dump of `{}` completed successfully", table.table_name());
+    }
 
     Ok(())
 }

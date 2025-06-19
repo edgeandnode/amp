@@ -1,7 +1,4 @@
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    sync::Arc,
-};
+use std::sync::Arc;
 
 use common::{catalog::physical::PhysicalTable, BoxError};
 use metadata_db::JobId;
@@ -14,15 +11,13 @@ use crate::{
     default_partition_size,
 };
 
-/// This is currently very simple, but the job abstraction is expected to become a central one.
+/// The kind of job is inferred from the location and associated dataset information.
 ///
 /// Three kinds of jobs are expected to exist:
 /// - Raw Datasets, that read from an adapter and often write to all their tables at once.
 /// - Views, which write the output of a SQL query to a single table.
 /// - Stream Handlers, which run stateful user code over an ordered input stream, potentially writing
 ///   to multiple tables.
-///
-/// Currently, the "dump job" is what have implemented so that's what we have here.
 #[derive(Clone)]
 pub enum Job {
     DumpTables {
@@ -42,41 +37,30 @@ impl Job {
         job_id: JobId,
         job_desc: JobDesc,
     ) -> Result<Job, BoxError> {
+        let output_locations = ctx.metadata_db.output_locations(&job_id).await?;
         match job_desc {
-            JobDesc::DumpDataset { dataset, end_block } => {
-                let output_locations = ctx.metadata_db.output_locations(&job_id).await?;
-                let dataset = ctx.dataset_store.load_dataset(&dataset).await?;
-
-                // Consistency check: All tables must be present in the job's output.
-                let dataset_tables = dataset
-                    .tables()
-                    .iter()
-                    .map(|t| t.name().to_string())
-                    .collect::<BTreeSet<_>>();
-                let job_tables = output_locations
-                    .iter()
-                    .map(|(_, tbl, _)| tbl.clone())
-                    .collect::<BTreeSet<_>>();
-                if dataset_tables != job_tables {
-                    return Err(format!(
-                        "Inconsistent job state: dataset tables and job output tables do not match: {:?} != {:?}",
-                        dataset_tables, job_tables
-                    ).into());
-                }
-
-                // Instantiate the physical tables.
-                let mut output_locations_by_name = output_locations
-                    .into_iter()
-                    .map(|(id, tbl, url)| (tbl.clone(), (id, url)))
-                    .collect::<BTreeMap<_, _>>();
-
+            JobDesc::Dump { end_block } => {
                 let mut tables = vec![];
-                for table in Arc::new(dataset).resolved_tables() {
-                    // Unwrap: We checked consistency above.
-                    let (id, url) = output_locations_by_name.remove(table.name()).unwrap();
-                    let table =
-                        PhysicalTable::new(table.clone(), url, id, ctx.metadata_db.clone())?;
-                    tables.push(Arc::new(table));
+                for location in output_locations {
+                    let dataset =
+                        Arc::new(ctx.dataset_store.load_dataset(&location.dataset).await?);
+                    let mut resolved_tables = dataset.resolved_tables();
+                    let Some(table) = resolved_tables.find(|t| t.name() == location.table) else {
+                        return Err(format!(
+                            "Table `{}` not found in dataset `{}`",
+                            location.table, location.dataset
+                        )
+                        .into());
+                    };
+                    tables.push(
+                        PhysicalTable::new(
+                            table.clone(),
+                            location.url,
+                            location.id,
+                            ctx.metadata_db.clone(),
+                        )?
+                        .into(),
+                    );
                 }
 
                 Ok(Job::DumpTables {
@@ -130,8 +114,5 @@ impl std::fmt::Debug for Job {
 /// metadata DB table.
 #[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Serialize, Deserialize)]
 pub enum JobDesc {
-    DumpDataset {
-        dataset: String,
-        end_block: Option<i64>,
-    },
+    Dump { end_block: Option<i64> },
 }
