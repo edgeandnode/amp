@@ -9,6 +9,7 @@ use dump::worker::Worker;
 use nozzle::dump_cmd;
 use tracing::info;
 
+#[cfg(feature = "snmalloc")]
 #[global_allocator]
 static ALLOC: snmalloc_rs::SnMalloc = snmalloc_rs::SnMalloc;
 
