@@ -9,16 +9,12 @@ use datafusion::{
     common::{stats::Precision, ColumnStatistics, DFSchema, Statistics},
     datasource::{
         create_ordering,
-        file_format::{parquet::ParquetFormat, FileFormat},
         listing::{ListingTableUrl, PartitionedFile},
         physical_plan::{parquet::ParquetAccessPlan, FileGroup, FileScanConfigBuilder},
         TableProvider, TableType,
     },
     error::{DataFusionError, Result as DataFusionResult},
-    execution::{
-        cache::{cache_unit::DefaultFileStatisticsCache, CacheAccessor},
-        object_store::ObjectStoreUrl,
-    },
+    execution::object_store::ObjectStoreUrl,
     logical_expr::{col, utils::conjunction, ScalarUDF, SortExpr},
     parquet::{
         data_type::{ByteArray, FixedLenByteArray, Int96},
@@ -40,8 +36,10 @@ use tracing::info;
 use url::Url;
 use uuid::Uuid;
 
-use super::statistics::{determine_pruning, update_statistics, PruningGuarantees};
 use crate::{
+    catalog::statistics::{
+        determine_pruning, update_statistics, PruningGuarantees, RowGroupStatisticsCache,
+    },
     metadata::{
         parquet::ParquetMeta, range::BlockRange, read_metadata_bytes_from_parquet, FileMetadata,
     },
@@ -104,7 +102,7 @@ pub struct PhysicalTable {
     pub metadata_db: Arc<MetadataDb>,
 
     /// Statistics Cache
-    statistics_cache: Arc<dyn CacheAccessor<Path, Arc<Statistics>, Extra = ObjectMeta>>,
+    statistics_cache: Arc<RowGroupStatisticsCache>,
 }
 
 // Methods for creating and managing PhysicalTable instances
@@ -118,7 +116,7 @@ impl PhysicalTable {
     ) -> Result<Self, BoxError> {
         let path = Path::from_url_path(url.path()).unwrap();
         let (object_store, _) = infer_object_store(&url)?;
-        let statistics_cache = Arc::new(DefaultFileStatisticsCache::default());
+        let statistics_cache = Arc::new(RowGroupStatisticsCache::default());
 
         Ok(Self {
             table,
@@ -161,7 +159,7 @@ impl PhysicalTable {
         }
 
         let path = Path::from_url_path(url.path()).unwrap();
-        let statistics_cache = Arc::new(DefaultFileStatisticsCache::default());
+        let statistics_cache = Arc::new(RowGroupStatisticsCache::default());
         let physical_table = Self {
             table: table.clone(),
             url,
@@ -223,7 +221,7 @@ impl PhysicalTable {
 
         let path = Path::from_url_path(url.path()).unwrap();
         let (object_store, _) = infer_object_store(&url)?;
-        let statistics_cache = Arc::new(DefaultFileStatisticsCache::default());
+        let statistics_cache = Arc::new(RowGroupStatisticsCache::default());
 
         Ok(Some(Self {
             table: table.clone(),
@@ -296,7 +294,7 @@ impl PhysicalTable {
                 )
                 .await?;
         }
-        let statistics_cache = Arc::new(DefaultFileStatisticsCache::default());
+        let statistics_cache = Arc::new(RowGroupStatisticsCache::default());
 
         let physical_table = Self {
             table: table.clone(),

@@ -7,10 +7,15 @@ use object_store::{path::Path, ObjectMeta, ObjectStore};
 use parquet::ParquetMeta;
 use url::Url;
 
-use crate::{metadata::range::BlockRange, multirange::MultiRange, BoxError, QueryContext};
+use crate::{
+    catalog::statistics::RowGroupId, metadata::range::BlockRange, multirange::MultiRange, BoxError,
+    QueryContext,
+};
 
 pub mod parquet;
 pub mod range;
+
+pub type MetadataHash = Arc<[u8]>;
 
 #[derive(Debug, Clone)]
 pub struct FileMetadata {
@@ -19,7 +24,8 @@ pub struct FileMetadata {
     pub location_id: LocationId,
     pub object_meta: ObjectMeta,
     pub parquet_meta: ParquetMeta,
-    pub statistics: Vec<RowGroupMetaDataPtr>,
+    pub statistics: Vec<(RowGroupId, RowGroupMetaDataPtr)>,
+    pub metadata_hash: MetadataHash,
 }
 
 impl TryFrom<FileMetadataRow> for FileMetadata {
@@ -34,7 +40,7 @@ impl TryFrom<FileMetadataRow> for FileMetadata {
             object_e_tag: e_tag,
             object_version: version,
             metadata,
-            ..
+            metadata_hash,
         }: FileMetadataRow,
     ) -> Result<Self, Self::Error> {
         let url = Url::parse(&url)?.join(&file_name)?;
@@ -54,12 +60,36 @@ impl TryFrom<FileMetadataRow> for FileMetadata {
         let parquet_meta =
             ParquetMeta::try_from_file_metadata(arrow_file_metadata, &url, location_id)?;
 
+        let range_start = *parquet_meta
+            .ranges
+            .first()
+            .ok_or(format!(
+                "No ranges found in parquet metadata for file {file_name}"
+            ))?
+            .numbers
+            .start();
+
         let statistics = arrow_metadata
             .row_groups()
             .into_iter()
             .cloned()
-            .map(|rg| Arc::new(rg))
+            .enumerate()
+            .map(|(ordinal, rg)| {
+                (
+                    (
+                        range_start,
+                        rg.ordinal()
+                            .map(|idx| idx.try_into().ok())
+                            .flatten()
+                            .unwrap_or(ordinal as u64),
+                    )
+                        .into(),
+                    Arc::new(rg),
+                )
+            })
             .collect::<Vec<_>>();
+
+        let metadata_hash = Arc::from(metadata_hash);
 
         Ok(Self {
             file_id,
@@ -68,6 +98,7 @@ impl TryFrom<FileMetadataRow> for FileMetadata {
             object_meta,
             parquet_meta,
             statistics,
+            metadata_hash,
         })
     }
 }

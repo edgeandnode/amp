@@ -1,5 +1,6 @@
 use std::{
-    collections::{HashMap, HashSet},
+    cmp::Ordering,
+    collections::{BTreeMap, HashMap, HashSet},
     sync::Arc,
 };
 
@@ -11,10 +12,111 @@ use datafusion::{
     scalar::ScalarValue,
 };
 
-use crate::{BLOCK_NUM, SPECIAL_BLOCK_NUM};
+use crate::{metadata::MetadataHash, BlockNum, BLOCK_NUM, SPECIAL_BLOCK_NUM};
 
 pub(super) type PruningGuarantees =
     HashMap<Guarantee, HashMap<Arc<str>, HashSet<Arc<ScalarValue>>>>;
+
+pub(crate) type RowGroupOrdinal = u64;
+
+#[derive(Debug, Clone, Eq, Ord, PartialEq, Hash)]
+pub struct RowGroupId(
+    /// The scanned range start block number for a file.
+    pub BlockNum,
+    /// The ordinal of the row group within the file.
+    pub RowGroupOrdinal,
+);
+
+impl From<(BlockNum, RowGroupOrdinal)> for RowGroupId {
+    fn from((block_num, ordinal): (BlockNum, RowGroupOrdinal)) -> Self {
+        Self(block_num, ordinal)
+    }
+}
+
+impl PartialOrd for RowGroupId {
+    fn ge(&self, other: &Self) -> bool {
+        self.0 >= other.0 && self.1 >= other.1
+    }
+    fn gt(&self, other: &Self) -> bool {
+        self.0 > other.0 || (self.0 == other.0 && self.1 > other.1)
+    }
+    fn le(&self, other: &Self) -> bool {
+        self.0 <= other.0 && self.1 <= other.1
+    }
+    fn lt(&self, other: &Self) -> bool {
+        self.0 < other.0 || (self.0 == other.0 && self.1 < other.1)
+    }
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        if self == other {
+            Some(Ordering::Equal)
+        } else if self > other {
+            Some(Ordering::Greater)
+        } else {
+            Some(Ordering::Less)
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub(super) struct RowGroupStatisticsCache {
+    inner: BTreeMap<RowGroupId, (Arc<Statistics>, MetadataHash)>,
+}
+
+// methods to provide CacheAccessor-like functionality for RowGroupStatisticsCache
+impl RowGroupStatisticsCache {
+    /// Get `Statistics` for specified row_group.
+    fn get(&self, k: &RowGroupId) -> Option<Arc<Statistics>> {
+        self.inner
+            .get(k)
+            .map(|(statistics, ..)| Arc::clone(statistics))
+    }
+
+    /// Get `Statistics` for specified row_group.
+    /// Returns None if `Statistics` have changed or not found.
+    fn get_with_extra(&self, k: &RowGroupId, e: &MetadataHash) -> Option<Arc<Statistics>> {
+        self.inner
+            .get(k)
+            .map(|(statistics, hash)| {
+                if hash == e {
+                    Some(Arc::clone(statistics))
+                } else {
+                    None
+                }
+            })
+            .flatten()
+    }
+
+    fn put_with_extra(
+        &mut self,
+        key: &RowGroupId,
+        value: Arc<Statistics>,
+        e: &MetadataHash,
+    ) -> Option<Arc<Statistics>> {
+        self.inner
+            .insert(key.clone(), (value, e.clone()))
+            .map(|(statistics, ..)| statistics)
+    }
+
+    fn remove(&mut self, k: &RowGroupId) -> Option<Arc<Statistics>> {
+        self.inner.remove(k).map(|(statistics, ..)| statistics)
+    }
+
+    fn contains_key(&self, k: &RowGroupId) -> bool {
+        self.inner.contains_key(k)
+    }
+
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    fn clear(&mut self) {
+        self.inner.clear()
+    }
+
+    fn name(&self) -> String {
+        "RowGroupStatisticsCache".to_string()
+    }
+}
 
 pub(super) fn statistics_converter<T, U: std::fmt::Debug + Clone + Eq + PartialOrd>(
     val: T,
