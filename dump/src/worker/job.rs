@@ -40,8 +40,9 @@ impl Job {
     pub async fn load(ctx: JobCtx, job_id: &JobId) -> Result<Job, BoxError> {
         let raw_desc = ctx
             .metadata_db
-            .job_desc(job_id)
+            .get_job(job_id)
             .await?
+            .map(|j| j.desc.to_string())
             .ok_or_else(|| format!("job `{}` not found", job_id))?;
         let job_desc: JobDesc = serde_json::from_str(&raw_desc)
             .map_err(|e| format!("error parsing job descriptor `{}`: {}", raw_desc, e))?;
