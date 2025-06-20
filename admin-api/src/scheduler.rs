@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use common::{catalog::physical::PhysicalTable, config::Config, BoxError, Dataset};
 use dump::worker::JobDesc;
-use metadata_db::MetadataDb;
+use metadata_db::{JobId, MetadataDb};
 use rand::seq::IndexedRandom as _;
 
 #[derive(Clone)]
@@ -24,7 +24,7 @@ impl Scheduler {
         &self,
         dataset: Dataset,
         end_block: Option<i64>,
-    ) -> Result<(), BoxError> {
+    ) -> Result<JobId, BoxError> {
         // Scheduling procedure for a new `DumpDataset` job:
         // 1. Choose a responsive node.
         // 2. Create a new location for each table.
@@ -60,10 +60,11 @@ impl Scheduler {
             end_block,
         })?;
 
-        self.metadata_db
+        let job_id = self
+            .metadata_db
             .schedule_job(node_id, &job_desc, &locations)
             .await?;
 
-        Ok(())
+        Ok(job_id)
     }
 }

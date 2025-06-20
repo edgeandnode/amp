@@ -155,7 +155,6 @@ impl std::fmt::Display for JobId {
 /// status is not one of the valid values in the enum, the `UNKNOWN` status is
 /// returned.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[non_exhaustive]
 pub enum JobStatus {
     /// Job is being scheduled.
     ///
