@@ -22,6 +22,10 @@ pub enum StoreError {
     ObjectStore(#[from] object_store::Error),
     #[error("object is not an utf8 text file: {0}")]
     NotUtf8(String),
+    #[error("invalid object store url: {0}")]
+    InvalidUrl(BoxError),
+    #[error("invalid object store scheme: {0} {1}")]
+    InvalidObjectStore(String, BoxError),
 }
 
 impl StoreError {
@@ -59,9 +63,10 @@ impl Store {
     /// - Prefixed: `s3://bucket-name/my_prefix/`
     ///
     /// If `data_location` is a relative filesystem path, then `base` will be used as the prefix.
-    pub fn new(data_location: String, base: Option<&std::path::Path>) -> Result<Self, BoxError> {
-        let url = infer_url(data_location, base)?;
-        let (unprefixed, bucket) = infer_object_store(&url)?;
+    pub fn new(data_location: String, base: Option<&std::path::Path>) -> Result<Self, StoreError> {
+        let url = infer_url(data_location, base).map_err(|err| StoreError::InvalidUrl(err))?;
+        let (unprefixed, bucket) = infer_object_store(&url)
+            .map_err(|err| StoreError::InvalidObjectStore(url.to_string(), err))?;
         let prefix = url.path().to_string();
         let store = Arc::new(PrefixStore::new(unprefixed.clone(), prefix.as_str()));
         Ok(Self {
