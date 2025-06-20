@@ -1,16 +1,16 @@
-use std::{iter, sync::Arc};
+use std::sync::Arc;
 
 use arrow::{array::RecordBatch, compute::concat_batches};
 use async_udf::physical_optimizer::AsyncFuncRule;
 use bincode::{config, Decode, Encode};
 use bytes::Bytes;
 use datafusion::{
-    arrow::datatypes::{DataType, Field, Fields, Schema, SchemaRef},
+    arrow::datatypes::{DataType, Field, Fields, SchemaRef},
     catalog::{MemorySchemaProvider, TableProvider},
     common::{
         not_impl_err, plan_err,
         tree_node::{Transformed, TransformedResult, TreeNode as _, TreeNodeRecursion},
-        Column, DFSchema, DFSchemaRef,
+        DFSchema, DFSchemaRef,
     },
     datasource::MemTable,
     error::DataFusionError,
@@ -45,7 +45,7 @@ use crate::{
     },
     internal,
     stream_helpers::is_streaming,
-    BoxError, LogicalCatalog, ResolvedTable, BLOCK_NUM, SPECIAL_BLOCK_NUM,
+    BoxError, LogicalCatalog, ResolvedTable, SPECIAL_BLOCK_NUM,
 };
 
 #[derive(Error, Debug)]
@@ -113,12 +113,8 @@ impl PlanningContext {
     }
 
     /// Infers the output schema of the query by planning it against empty tables.
-    pub async fn sql_output_schema(
-        &self,
-        query: parser::Statement,
-        additional_fields: &[Field],
-    ) -> Result<DFSchemaRef, Error> {
-        let ctx = self.datafusion_ctx(additional_fields).await?;
+    pub async fn sql_output_schema(&self, query: parser::Statement) -> Result<DFSchemaRef, Error> {
+        let ctx = self.datafusion_ctx().await?;
         let plan = sql_to_plan(&ctx, query).await?;
         Ok(plan.schema().clone())
     }
@@ -132,9 +128,7 @@ impl PlanningContext {
         query: parser::Statement,
     ) -> Result<(Bytes, DFSchemaRef), Error> {
         let is_streaming = is_streaming(&query);
-        let ctx = self
-            .datafusion_ctx(&[Field::new(SPECIAL_BLOCK_NUM, DataType::UInt64, false)])
-            .await?;
+        let ctx = self.datafusion_ctx().await?;
         let plan = sql_to_plan(&ctx, query).await?;
         let schema = plan.schema().clone();
         let serialized_plan =
@@ -160,7 +154,7 @@ impl PlanningContext {
         Ok((serialized_plan, schema))
     }
 
-    async fn datafusion_ctx(&self, additional_fields: &[Field]) -> Result<SessionContext, Error> {
+    async fn datafusion_ctx(&self) -> Result<SessionContext, Error> {
         let state = SessionStateBuilder::new()
             .with_config(self.session_config.clone())
             .with_runtime_env(Default::default())
@@ -168,7 +162,7 @@ impl PlanningContext {
             .with_physical_optimizer_rule(Arc::new(AsyncFuncRule))
             .build();
         let ctx = SessionContext::new_with_state(state);
-        create_empty_tables(&ctx, self.catalog.tables.iter(), additional_fields).await?;
+        create_empty_tables(&ctx, self.catalog.tables.iter()).await?;
         self.register_udfs(&ctx);
         Ok(ctx)
     }
@@ -379,19 +373,12 @@ fn verify_plan(plan: &LogicalPlan) -> Result<(), Error> {
 async fn create_empty_tables(
     ctx: &SessionContext,
     tables: impl Iterator<Item = &ResolvedTable>,
-    additional_fields: &[Field],
 ) -> Result<(), Error> {
     for table in tables {
         // The catalog schema needs to be explicitly created or table creation will fail.
         create_catalog_schema(ctx, table.catalog_schema().to_string());
-
-        // Unwrap: Table is empty.
-        let schema = Schema::try_merge([
-            Schema::new(additional_fields.to_vec()),
-            table.schema().as_ref().clone(),
-        ])
-        .unwrap();
-        let mem_table = MemTable::try_new(schema.into(), vec![vec![]]).unwrap();
+        let schema = table.schema().clone();
+        let mem_table = MemTable::try_new(schema, vec![vec![]]).unwrap();
         ctx.register_table(table.table_ref().clone(), Arc::new(mem_table))
             .map_err(|e| Error::DatasetError(e.into()))?;
     }
@@ -522,37 +509,6 @@ pub fn propagate_block_num(plan: LogicalPlan) -> Result<LogicalPlan, DataFusionE
                 projection.expr.insert(0, col(SPECIAL_BLOCK_NUM));
                 projection.schema = prepend_special_block_num_field(&projection.schema);
                 Ok(Transformed::yes(LogicalPlan::Projection(projection)))
-            }
-            LogicalPlan::TableScan(table_scan) => {
-                if table_scan
-                    .source
-                    .schema()
-                    .fields()
-                    .iter()
-                    .any(|f| f.name() == SPECIAL_BLOCK_NUM)
-                {
-                    // If the table already has a `SPECIAL_BLOCK_NUM` column, we don't need to add it.
-                    Ok(Transformed::no(LogicalPlan::TableScan(table_scan)))
-                } else {
-                    // Add a projection on top of the TableScan to select the `BLOCK_NUM` column
-                    // as `SPECIAL_BLOCK_NUM`.
-                    let schema = prepend_special_block_num_field(&table_scan.projected_schema);
-                    let col_exprs = iter::once(col(BLOCK_NUM).alias(SPECIAL_BLOCK_NUM)).chain(
-                        table_scan.projected_schema.fields().iter().map(|f| {
-                            Expr::Column(Column {
-                                relation: Some(table_scan.table_name.clone()),
-                                name: f.name().to_string(),
-                                spans: Default::default(),
-                            })
-                        }),
-                    );
-                    let projection = Projection::try_new_with_schema(
-                        col_exprs.collect(),
-                        Arc::new(LogicalPlan::TableScan(table_scan)),
-                        schema,
-                    )?;
-                    Ok(Transformed::yes(LogicalPlan::Projection(projection)))
-                }
             }
             LogicalPlan::Union(mut union) => {
                 // Add the `SPECIAL_BLOCK_NUM` column to the union schema.

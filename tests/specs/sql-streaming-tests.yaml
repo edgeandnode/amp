@@ -20,33 +20,31 @@
       {"block_num": 15000000}
     ]
 
-# TODO: Fix _block_num selection
-# - name: select_special_block_num
-#   query: |
-#     SELECT _block_num, block_num
-#     FROM eth_firehose.blocks
-#     WHERE block_num >= 15000000
-#     SETTINGS stream = true
-#   streamingOptions:
-#     atLeastRows: 1
-#   results: |
-#     [
-#       {"_block_num": 15000000, "block_num": 15000000}
-#     ]
+- name: select_special_block_num
+  query: |
+    SELECT _block_num, block_num
+    FROM eth_firehose.blocks
+    WHERE block_num >= 15000000
+    SETTINGS stream = true
+  streamingOptions:
+    atLeastRows: 1
+  results: |
+    [
+      {"_block_num": 15000000, "block_num": 15000000}
+    ]
 
-# TODO: Fix _block_num selection
-# - name: select_special_block_num_qualified
-#   query: |
-#     SELECT b._block_num, block_num
-#     FROM eth_firehose.blocks AS b
-#     WHERE block_num >= 15000000
-#     SETTINGS stream = true
-#   streamingOptions:
-#     atLeastRows: 1
-#   results: |
-#     [
-#       {"_block_num": 15000000, "block_num": 15000000}
-#     ]
+- name: select_special_block_num_qualified
+  query: |
+    SELECT b._block_num, block_num
+    FROM eth_firehose.blocks AS b
+    WHERE block_num >= 15000000
+    SETTINGS stream = true
+  streamingOptions:
+    atLeastRows: 1
+  results: |
+    [
+      {"_block_num": 15000000, "block_num": 15000000}
+    ]
 
 - name: select_block_num_qualified
   query: SELECT eth_firehose.blocks.block_num FROM eth_firehose.blocks WHERE block_num >= 15000000 SETTINGS stream = true

@@ -5,6 +5,7 @@ Auto-generated file. See `schema_to_markdown` in `common/src/catalog/mod.rs`.
 +--------------------+---------------------------------------+-------------+
 | column_name        | data_type                             | is_nullable |
 +--------------------+---------------------------------------+-------------+
+| _block_num         | UInt64                                | NO          |
 | block_num          | UInt64                                | NO          |
 | timestamp          | Timestamp(Nanosecond, Some("+00:00")) | NO          |
 | hash               | FixedSizeBinary(32)                   | NO          |
@@ -33,6 +34,7 @@ Auto-generated file. See `schema_to_markdown` in `common/src/catalog/mod.rs`.
 +--------------------------+---------------------------------------+-------------+
 | column_name              | data_type                             | is_nullable |
 +--------------------------+---------------------------------------+-------------+
+| _block_num               | UInt64                                | NO          |
 | block_hash               | FixedSizeBinary(32)                   | NO          |
 | block_num                | UInt64                                | NO          |
 | timestamp                | Timestamp(Nanosecond, Some("+00:00")) | NO          |
@@ -61,6 +63,7 @@ Auto-generated file. See `schema_to_markdown` in `common/src/catalog/mod.rs`.
 +-------------+---------------------------------------+-------------+
 | column_name | data_type                             | is_nullable |
 +-------------+---------------------------------------+-------------+
+| _block_num  | UInt64                                | NO          |
 | block_hash  | FixedSizeBinary(32)                   | NO          |
 | block_num   | UInt64                                | NO          |
 | timestamp   | Timestamp(Nanosecond, Some("+00:00")) | NO          |

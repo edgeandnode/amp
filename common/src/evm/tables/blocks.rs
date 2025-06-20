@@ -9,7 +9,7 @@ use crate::{
     arrow, metadata::range::BlockRange, timestamp_type, BoxError, Bytes32, Bytes32ArrayBuilder,
     EvmAddress as Address, EvmAddressArrayBuilder, EvmCurrency, EvmCurrencyArrayBuilder,
     RawTableRows, Table, Timestamp, TimestampArrayBuilder, BLOCK_NUM, BYTES32_TYPE,
-    EVM_ADDRESS_TYPE as ADDRESS_TYPE, EVM_CURRENCY_TYPE,
+    EVM_ADDRESS_TYPE as ADDRESS_TYPE, EVM_CURRENCY_TYPE, SPECIAL_BLOCK_NUM,
 };
 
 static SCHEMA: LazyLock<SchemaRef> = LazyLock::new(|| Arc::new(schema()));
@@ -23,6 +23,7 @@ pub const TABLE_NAME: &'static str = "blocks";
 /// Prefer using the pre-computed SCHEMA
 fn schema() -> Schema {
     Schema::new(vec![
+        Field::new(SPECIAL_BLOCK_NUM, DataType::UInt64, false),
         Field::new(BLOCK_NUM, DataType::UInt64, false),
         Field::new("timestamp", timestamp_type(), false),
         Field::new("hash", BYTES32_TYPE, false),
@@ -77,6 +78,7 @@ pub struct Block {
 }
 
 pub struct BlockRowsBuilder {
+    special_block_num: UInt64Builder,
     block_num: UInt64Builder,
     timestamp: TimestampArrayBuilder,
     hash: Bytes32ArrayBuilder,
@@ -103,6 +105,7 @@ pub struct BlockRowsBuilder {
 impl BlockRowsBuilder {
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
+            special_block_num: UInt64Builder::with_capacity(capacity),
             block_num: UInt64Builder::with_capacity(capacity),
             timestamp: TimestampArrayBuilder::with_capacity(capacity),
             hash: Bytes32ArrayBuilder::with_capacity(capacity),
@@ -152,6 +155,7 @@ impl BlockRowsBuilder {
             parent_beacon_root,
         } = row;
 
+        self.special_block_num.append_value(*block_num);
         self.block_num.append_value(*block_num);
         self.timestamp.append_value(*timestamp);
         self.hash.append_value(*hash);
@@ -177,6 +181,7 @@ impl BlockRowsBuilder {
 
     pub fn build(self, range: BlockRange) -> Result<RawTableRows, BoxError> {
         let Self {
+            mut special_block_num,
             mut block_num,
             mut timestamp,
             hash,
@@ -201,7 +206,8 @@ impl BlockRowsBuilder {
         } = self;
 
         let columns = vec![
-            Arc::new(block_num.finish()) as ArrayRef,
+            Arc::new(special_block_num.finish()) as ArrayRef,
+            Arc::new(block_num.finish()),
             Arc::new(timestamp.finish()),
             Arc::new(hash.finish()),
             Arc::new(parent_hash.finish()),
@@ -243,6 +249,6 @@ fn default_to_arrow() {
             })
             .unwrap()
     };
-    assert_eq!(rows.rows.num_columns(), 21);
+    assert_eq!(rows.rows.num_columns(), 22);
     assert_eq!(rows.rows.num_rows(), 1);
 }
