@@ -24,7 +24,6 @@ pub use catalog::logical::*;
 use datafusion::arrow::{
     array::{ArrayRef, AsArray as _, RecordBatch},
     datatypes::{TimeUnit, UInt64Type, DECIMAL128_MAX_PRECISION},
-    error::ArrowError,
 };
 pub use datafusion::{arrow, parquet};
 use futures::Stream;
