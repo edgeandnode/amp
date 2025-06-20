@@ -230,14 +230,14 @@ impl QueryContext {
         //
         // See https://github.com/apache/datafusion/issues/10336 for upstream default tracking.
         if std::env::var_os("DATAFUSION_EXECUTION_SPLIT_FILE_GROUPS_BY_STATISTICS").is_none() {
-            opts.execution.split_file_groups_by_statistics = false;
+            opts.execution.split_file_groups_by_statistics = true;
         }
 
         // Set `parquet.pushdown_filters` by default.
         //
         // See https://github.com/apache/datafusion/issues/3463 for upstream default tracking.
         if std::env::var_os("DATAFUSION_EXECUTION_PARQUET_PUSHDOWN_FILTERS").is_none() {
-            opts.execution.parquet.pushdown_filters = false;
+            opts.execution.parquet.pushdown_filters = true;
         }
 
         if std::env::var_os("DATAFUSION_EXECUTION_COLLECT_STATISTICS").is_none() {
