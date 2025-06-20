@@ -5,17 +5,19 @@ use std::{
 
 use datafusion::{
     arrow::datatypes::SchemaRef,
-    catalog::Session,
+    catalog::{memory::DataSourceExec, Session},
     common::{stats::Precision, ColumnStatistics, DFSchema, Statistics},
     datasource::{
         create_ordering,
-        listing::{ListingTableUrl, PartitionedFile},
-        physical_plan::{parquet::ParquetAccessPlan, FileGroup, FileScanConfigBuilder},
+        listing::{FileRange, ListingTableUrl, PartitionedFile},
+        physical_plan::{
+            parquet::ParquetAccessPlan, FileGroup, FileScanConfigBuilder, ParquetSource,
+        },
         TableProvider, TableType,
     },
     error::{DataFusionError, Result as DataFusionResult},
-    execution::object_store::ObjectStoreUrl,
-    logical_expr::{col, utils::conjunction, ScalarUDF, SortExpr},
+    execution::{cache::CacheAccessor, object_store::ObjectStoreUrl},
+    logical_expr::{col, utils::conjunction, ScalarUDF, SortExpr, TableProviderFilterPushDown},
     parquet::{
         data_type::{ByteArray, FixedLenByteArray, Int96},
         file::{metadata::ColumnChunkMetaData, statistics::Statistics as FileStatistics},
@@ -24,28 +26,31 @@ use datafusion::{
         utils::{Guarantee, LiteralGuarantee},
         LexOrdering,
     },
+    physical_optimizer::pruning::PruningPredicate,
     physical_plan::{ExecutionPlan, PhysicalExpr},
     prelude::Expr,
     scalar::ScalarValue,
     sql::TableReference,
 };
-use futures::{stream, Stream, StreamExt, TryStreamExt};
+use futures::{stream, FutureExt, Stream, StreamExt, TryStreamExt};
 use metadata_db::{LocationId, MetadataDb, TableId};
 use object_store::{path::Path, ObjectMeta, ObjectStore};
 use tracing::info;
 use url::Url;
 use uuid::Uuid;
 
+use super::statistics::{get_min_block_num, RowGroupId};
 use crate::{
     catalog::statistics::{
         determine_pruning, update_statistics, PruningGuarantees, RowGroupStatisticsCache,
     },
     metadata::{
         parquet::ParquetMeta, range::BlockRange, read_metadata_bytes_from_parquet, FileMetadata,
+        MetadataHash,
     },
     multirange::MultiRange,
     store::{infer_object_store, Store},
-    BoxError, Dataset, ResolvedTable,
+    BoxError, BoxResult, Dataset, ResolvedTable,
 };
 
 #[derive(Debug, Clone)]
@@ -740,36 +745,40 @@ impl PhysicalTable {
 }
 
 // helper methods for implementing `TableProvider` trait
-
 impl PhysicalTable {
-    async fn do_collect_statistics(
+    async fn apply_statistics(
         &self,
-        ctx: &dyn Session,
-        part_file: &PartitionedFile,
-    ) -> DataFusionResult<Arc<Statistics>> {
-        match self
+        part_file: PartitionedFile,
+        column_chunks: Vec<ColumnChunkMetaData>,
+        predicate: Arc<PruningGuarantees>,
+        row_group_id: RowGroupId,
+        metadata_hash: MetadataHash,
+    ) -> BoxResult<(u64, PartitionedFile)> {
+        let statistics = match self
             .statistics_cache
-            .get_with_extra(&part_file.object_meta.location, &part_file.object_meta)
+            .get_with_extra(&row_group_id, &metadata_hash)
         {
-            Some(statistics) => Ok(statistics),
+            Some(statistics) => statistics,
             None => {
-                let statistics = ParquetFormat::default()
-                    .infer_stats(
-                        ctx,
-                        &self.object_store,
-                        Arc::clone(&self.schema()),
-                        &part_file.object_meta,
-                    )
-                    .await?;
-                let statistics = Arc::new(statistics);
+                let statistics = self.process_column_chunks(column_chunks)?;
                 self.statistics_cache.put_with_extra(
-                    &part_file.object_meta.location,
-                    Arc::clone(&statistics),
-                    &part_file.object_meta,
+                    &row_group_id,
+                    statistics.clone(),
+                    &metadata_hash,
                 );
-                Ok(statistics)
+                statistics
             }
-        }
+        };
+
+        let min_block_num = get_min_block_num(&statistics, &self.schema(), self.table_name())?;
+        let access_plan = self.prune(predicate, &statistics);
+
+        Ok((
+            min_block_num,
+            part_file
+                .with_statistics(statistics)
+                .with_extensions(Arc::new(access_plan)),
+        ))
     }
 
     fn object_store_url(&self) -> DataFusionResult<ObjectStoreUrl> {
@@ -785,32 +794,53 @@ impl PhysicalTable {
     fn stream_partitioned_files<'a>(
         &'a self,
         ctx: &'a dyn Session,
-    ) -> impl Stream<Item = DataFusionResult<(u64, PartitionedFile)>> + 'a {
+        predicate: Arc<PruningGuarantees>,
+    ) -> impl Stream<Item = BoxResult<(u64, PartitionedFile)>> + 'a {
         self.stream_file_metadata()
-            .map_err(DataFusionError::from)
-            .map(async move |res| {
-                let FileMetadata {
-                    object_meta,
-                    parquet_meta: ParquetMeta { ranges, .. },
-                    ..
-                } = res?;
-                let mut partitioned_file = PartitionedFile::from(object_meta.clone());
-                let statistics = self.do_collect_statistics(ctx, &partitioned_file).await?;
+            .map_ok(
+                move |FileMetadata {
+                          object_meta,
+                          statistics,
+                          metadata_hash,
+                          ..
+                      }| {
+                    let predicate = predicate.clone();
+                    stream::iter(statistics.into_iter())
+                        .map(move |(row_group_id, row_group)| {
+                            let column_chunks = row_group.columns().to_vec();
+                            let start = row_group.file_offset().ok_or(
+                                DataFusionError::Internal(format!(
+                                    "File offset not found for row group in file {}",
+                                    object_meta.location
+                                )),
+                            )?;
+                            let end = start + row_group.total_byte_size();
+                            let range = Some(FileRange { start, end });
+                            let part_file = PartitionedFile {
+                                object_meta: object_meta.clone(),
+                                range,
+                                partition_values: Default::default(),
+                                statistics: Default::default(),
+                                extensions: Default::default(),
+                                metadata_size_hint: None,
+                            };
 
-                partitioned_file.statistics = Some(statistics);
-
-                let range_start = ranges
-                    .first()
-                    .ok_or(DataFusionError::Execution(format!(
-                        "No ranges found for file `{}` for table `{}`",
-                        object_meta.location,
-                        self.table_ref()
-                    )))?
-                    .numbers
-                    .start();
-                Ok((*range_start, partitioned_file))
-            })
-            .buffered(ctx.config_options().execution.meta_fetch_concurrency)
+                            Ok::<_, BoxError>(
+                                self.apply_statistics(
+                                    part_file,
+                                    column_chunks,
+                                    predicate.clone(),
+                                    row_group_id,
+                                    metadata_hash.clone(),
+                                )
+                                .into_stream()
+                                .boxed(),
+                            )
+                        })
+                        .try_flatten()
+                },
+            )
+            .try_flatten_unordered(ctx.config_options().execution.target_partitions)
     }
 }
 
@@ -832,18 +862,34 @@ impl TableProvider for PhysicalTable {
         &self,
         state: &dyn Session,
         projection: Option<&Vec<usize>>,
-        _filters: &[Expr],
-        _limit: Option<usize>,
+        filters: &[Expr],
+        limit: Option<usize>,
     ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
+        let predicate = filters
+            .is_empty()
+            .then_some(datafusion::physical_expr::expressions::lit(true))
+            .unwrap_or(self.filters_to_predicate(state, filters)?);
+
+        let pruning_predicate =
+            Arc::new(PruningPredicate::try_new(predicate.clone(), self.schema())?);
+
+        let mut literal_values = Arc::new(HashMap::new());
+        self.write_literal_values(
+            pruning_predicate.literal_guarantees(),
+            Arc::make_mut(&mut literal_values),
+        );
+
         let files = self
-            .stream_partitioned_files(state)
+            .stream_partitioned_files(state, literal_values)
             .try_collect::<BTreeMap<_, _>>()
             .await?;
+
         if files.is_empty() {
             return Ok(Arc::new(datafusion::physical_plan::empty::EmptyExec::new(
                 self.schema(),
             )));
         }
+
         let target_partitions = state.config_options().execution.target_partitions;
         let file_groups = round_robin(files, target_partitions);
 
@@ -851,18 +897,30 @@ impl TableProvider for PhysicalTable {
 
         let file_schema = self.schema();
         let object_store_url = self.object_store_url()?;
-        let file_source = ParquetFormat::default().file_source();
+        let file_source = ParquetSource::default()
+            .with_predicate(predicate)
+            .with_pushdown_filters(true)
+            .into();
 
-        ParquetFormat::default()
-            .create_physical_plan(
-                state,
-                FileScanConfigBuilder::new(object_store_url, file_schema, file_source)
-                    .with_file_groups(file_groups)
-                    .with_output_ordering(output_ordering)
-                    .with_projection(projection.cloned())
-                    .build(),
-            )
-            .await
+        let file_scan_config =
+            FileScanConfigBuilder::new(object_store_url, file_schema, file_source)
+                .with_file_groups(file_groups)
+                .with_limit(limit)
+                .with_output_ordering(output_ordering)
+                .with_projection(projection.cloned())
+                .build();
+
+        Ok(DataSourceExec::from_data_source(file_scan_config))
+    }
+
+    fn supports_filters_pushdown(
+        &self,
+        filters: &[&Expr],
+    ) -> DataFusionResult<Vec<TableProviderFilterPushDown>> {
+        // Inexact because the pruning can't handle all expressions and pruning
+        // is not done at the row level -- there may be rows in returned files
+        // that do not pass the filter
+        Ok(vec![TableProviderFilterPushDown::Inexact; filters.len()])
     }
 }
 
