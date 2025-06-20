@@ -1879,6 +1879,7 @@ dependencies = [
  "bincode",
  "bytes",
  "cargo_metadata",
+ "dashmap",
  "datafusion",
  "datafusion-proto",
  "figment",

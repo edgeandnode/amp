@@ -1,13 +1,15 @@
 use std::{
     cmp::Ordering,
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{HashMap, HashSet},
     sync::Arc,
 };
 
+use dashmap::DashMap;
 use datafusion::{
     arrow::datatypes::SchemaRef,
     common::{stats::Precision, Column, ColumnStatistics, SchemaError::FieldNotFound, Statistics},
     error::{DataFusionError, Result as DataFusionResult},
+    execution::cache::CacheAccessor,
     physical_expr::utils::Guarantee,
     scalar::ScalarValue,
 };
@@ -59,16 +61,18 @@ impl PartialOrd for RowGroupId {
 
 #[derive(Debug, Clone, Default)]
 pub(super) struct RowGroupStatisticsCache {
-    inner: BTreeMap<RowGroupId, (Arc<Statistics>, MetadataHash)>,
+    inner: DashMap<RowGroupId, (Arc<Statistics>, MetadataHash)>,
 }
 
 // methods to provide CacheAccessor-like functionality for RowGroupStatisticsCache
-impl RowGroupStatisticsCache {
+impl CacheAccessor<RowGroupId, Arc<Statistics>> for RowGroupStatisticsCache {
+    type Extra = MetadataHash;
     /// Get `Statistics` for specified row_group.
     fn get(&self, k: &RowGroupId) -> Option<Arc<Statistics>> {
-        self.inner
-            .get(k)
-            .map(|(statistics, ..)| Arc::clone(statistics))
+        self.inner.get(k).map(|item| {
+            let (statistics, _) = item.value();
+            Arc::clone(statistics)
+        })
     }
 
     /// Get `Statistics` for specified row_group.
@@ -76,7 +80,8 @@ impl RowGroupStatisticsCache {
     fn get_with_extra(&self, k: &RowGroupId, e: &MetadataHash) -> Option<Arc<Statistics>> {
         self.inner
             .get(k)
-            .map(|(statistics, hash)| {
+            .map(|item| {
+                let (statistics, hash) = item.value();
                 if hash == e {
                     Some(Arc::clone(statistics))
                 } else {
@@ -86,8 +91,13 @@ impl RowGroupStatisticsCache {
             .flatten()
     }
 
+    /// Save collected file statistics
+    fn put(&self, _key: &RowGroupId, _value: Arc<Statistics>) -> Option<Arc<Statistics>> {
+        panic!("Put cache in RowGroupStatisticsCache without Extra not supported.")
+    }
+
     fn put_with_extra(
-        &mut self,
+        &self,
         key: &RowGroupId,
         value: Arc<Statistics>,
         e: &MetadataHash,
@@ -98,7 +108,7 @@ impl RowGroupStatisticsCache {
     }
 
     fn remove(&mut self, k: &RowGroupId) -> Option<Arc<Statistics>> {
-        self.inner.remove(k).map(|(statistics, ..)| statistics)
+        self.inner.remove(k).map(|(_, (statistics, ..))| statistics)
     }
 
     fn contains_key(&self, k: &RowGroupId) -> bool {
@@ -109,7 +119,7 @@ impl RowGroupStatisticsCache {
         self.inner.len()
     }
 
-    fn clear(&mut self) {
+    fn clear(&self) {
         self.inner.clear()
     }
 
