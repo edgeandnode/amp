@@ -297,12 +297,12 @@ async fn dump_sql_query(
         writer.write(&batch).await?;
     }
 
-    let (parquet_meta, object_meta) = writer.close(range).await?;
+    let (metadata, object_meta) = writer.close(range).await?;
     commit_metadata(
         &dataset_store.metadata_db,
-        parquet_meta,
         object_meta,
         physical_table.location_id(),
+        metadata,
     )
     .await
 }
