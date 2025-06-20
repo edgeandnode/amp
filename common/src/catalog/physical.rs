@@ -1,14 +1,17 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashMap, HashSet},
+    sync::Arc,
+};
 
 use datafusion::{
     arrow::datatypes::SchemaRef,
     catalog::Session,
-    common::Statistics,
+    common::{stats::Precision, ColumnStatistics, DFSchema, Statistics},
     datasource::{
         create_ordering,
         file_format::{parquet::ParquetFormat, FileFormat},
         listing::{ListingTableUrl, PartitionedFile},
-        physical_plan::{FileGroup, FileScanConfigBuilder},
+        physical_plan::{parquet::ParquetAccessPlan, FileGroup, FileScanConfigBuilder},
         TableProvider, TableType,
     },
     error::{DataFusionError, Result as DataFusionResult},
@@ -16,10 +19,18 @@ use datafusion::{
         cache::{cache_unit::DefaultFileStatisticsCache, CacheAccessor},
         object_store::ObjectStoreUrl,
     },
-    logical_expr::{col, ScalarUDF, SortExpr},
-    physical_expr::LexOrdering,
-    physical_plan::ExecutionPlan,
+    logical_expr::{col, utils::conjunction, ScalarUDF, SortExpr},
+    parquet::{
+        data_type::{ByteArray, FixedLenByteArray, Int96},
+        file::{metadata::ColumnChunkMetaData, statistics::Statistics as FileStatistics},
+    },
+    physical_expr::{
+        utils::{Guarantee, LiteralGuarantee},
+        LexOrdering,
+    },
+    physical_plan::{ExecutionPlan, PhysicalExpr},
     prelude::Expr,
+    scalar::ScalarValue,
     sql::TableReference,
 };
 use futures::{stream, Stream, StreamExt, TryStreamExt};
@@ -29,6 +40,7 @@ use tracing::info;
 use url::Url;
 use uuid::Uuid;
 
+use super::statistics::{determine_pruning, update_statistics, PruningGuarantees};
 use crate::{
     metadata::{
         parquet::ParquetMeta, range::BlockRange, read_metadata_bytes_from_parquet, FileMetadata,
@@ -462,6 +474,270 @@ impl PhysicalTable {
                  ..
              }| (file_name, object_meta),
         )
+    }
+}
+
+// helper methods for managing statistics and pruning
+impl PhysicalTable {
+    fn filters_to_predicate(
+        &self,
+        state: &dyn Session,
+        filters: &[Expr],
+    ) -> DataFusionResult<Arc<dyn PhysicalExpr>> {
+        let df_schema = DFSchema::try_from(self.schema())?;
+        let predicate = conjunction(filters.to_vec());
+        let predicate = predicate
+            .map(|predicate| state.create_physical_expr(predicate, &df_schema))
+            .transpose()?
+            .unwrap_or_else(|| datafusion::physical_expr::expressions::lit(true));
+        Ok(predicate)
+    }
+
+    fn process_column_chunks(
+        &self,
+        column_chunks: Vec<ColumnChunkMetaData>,
+    ) -> DataFusionResult<Arc<Statistics>> {
+        let mut column_statistics = vec![ColumnStatistics::default(); column_chunks.len()];
+        let schema = self.schema();
+        let mut num_rows = Precision::Absent;
+        for chunk in column_chunks {
+            if let Some(chunk_statistics) = chunk.statistics() {
+                let name = chunk.column_descr().name();
+                let idx = schema.index_of(name)?;
+                let column = &mut column_statistics[idx];
+                match chunk_statistics {
+                    FileStatistics::Boolean(inner) => {
+                        let distinct_count_opt = inner.distinct_count();
+                        let null_count_opt = inner.null_count_opt();
+                        let max_opt = inner.max_opt();
+                        let min_opt = inner.min_opt();
+                        let max_is_exact = inner.max_is_exact();
+                        let min_is_exact = inner.min_is_exact();
+                        let f = |v: &bool| ScalarValue::Boolean(Some(*v));
+                        update_statistics(
+                            column,
+                            distinct_count_opt,
+                            null_count_opt,
+                            max_opt,
+                            min_opt,
+                            max_is_exact,
+                            min_is_exact,
+                            f,
+                        );
+                    }
+                    FileStatistics::ByteArray(inner) => {
+                        let distinct_count_opt = inner.distinct_count();
+                        let null_count_opt = inner.null_count_opt();
+                        let max_opt = inner.max_opt();
+                        let min_opt = inner.min_opt();
+                        let max_is_exact = inner.max_is_exact();
+                        let min_is_exact = inner.min_is_exact();
+                        let f = |v: &ByteArray| ScalarValue::Binary(Some(v.data().to_vec()));
+                        update_statistics(
+                            column,
+                            distinct_count_opt,
+                            null_count_opt,
+                            max_opt,
+                            min_opt,
+                            max_is_exact,
+                            min_is_exact,
+                            f,
+                        );
+                    }
+                    FileStatistics::Double(inner) => {
+                        let distinct_count_opt = inner.distinct_count();
+                        let null_count_opt = inner.null_count_opt();
+                        let max_opt = inner.max_opt();
+                        let min_opt = inner.min_opt();
+                        let max_is_exact = inner.max_is_exact();
+                        let min_is_exact = inner.min_is_exact();
+                        let f = |v: &f64| ScalarValue::Float64(Some(*v));
+                        update_statistics(
+                            column,
+                            distinct_count_opt,
+                            null_count_opt,
+                            max_opt,
+                            min_opt,
+                            max_is_exact,
+                            min_is_exact,
+                            f,
+                        );
+                    }
+                    FileStatistics::FixedLenByteArray(inner) => {
+                        let distinct_count_opt = inner.distinct_count();
+                        let null_count_opt = inner.null_count_opt();
+                        let max_opt = inner.max_opt();
+                        let min_opt = inner.min_opt();
+                        let max_is_exact = inner.max_is_exact();
+                        let min_is_exact = inner.min_is_exact();
+                        let f = |v: &FixedLenByteArray| {
+                            ScalarValue::FixedSizeBinary(
+                                chunk.column_descr().type_length(),
+                                Some(v.data().to_vec()),
+                            )
+                        };
+                        update_statistics(
+                            column,
+                            distinct_count_opt,
+                            null_count_opt,
+                            max_opt,
+                            min_opt,
+                            max_is_exact,
+                            min_is_exact,
+                            f,
+                        );
+                    }
+                    FileStatistics::Float(inner) => {
+                        let distinct_count_opt = inner.distinct_count();
+                        let null_count_opt = inner.null_count_opt();
+                        let max_opt = inner.max_opt();
+                        let min_opt = inner.min_opt();
+                        let max_is_exact = inner.max_is_exact();
+                        let min_is_exact = inner.min_is_exact();
+                        let f = |v: &f32| ScalarValue::Float32(Some(*v));
+                        update_statistics(
+                            column,
+                            distinct_count_opt,
+                            null_count_opt,
+                            max_opt,
+                            min_opt,
+                            max_is_exact,
+                            min_is_exact,
+                            f,
+                        );
+                    }
+                    FileStatistics::Int32(inner) => {
+                        let distinct_count_opt = inner.distinct_count();
+                        let null_count_opt = inner.null_count_opt();
+                        let max_opt = inner.max_opt();
+                        let min_opt = inner.min_opt();
+                        let max_is_exact = inner.max_is_exact();
+                        let min_is_exact = inner.min_is_exact();
+                        let f = |v: &i32| ScalarValue::Int32(Some(*v));
+                        update_statistics(
+                            column,
+                            distinct_count_opt,
+                            null_count_opt,
+                            max_opt,
+                            min_opt,
+                            max_is_exact,
+                            min_is_exact,
+                            f,
+                        );
+                    }
+                    FileStatistics::Int64(inner) => {
+                        let distinct_count_opt = inner.distinct_count();
+                        let null_count_opt = inner.null_count_opt();
+                        let max_opt = inner.max_opt();
+                        let min_opt = inner.min_opt();
+                        let max_is_exact = inner.max_is_exact();
+                        let min_is_exact = inner.min_is_exact();
+                        let f = |v: &i64| ScalarValue::Int64(Some(*v));
+                        update_statistics(
+                            column,
+                            distinct_count_opt,
+                            null_count_opt,
+                            max_opt,
+                            min_opt,
+                            max_is_exact,
+                            min_is_exact,
+                            f,
+                        );
+                    }
+                    FileStatistics::Int96(inner) => {
+                        let distinct_count_opt = inner.distinct_count();
+                        let null_count_opt = inner.null_count_opt();
+                        let max_opt = inner.max_opt();
+                        let min_opt = inner.min_opt();
+                        let max_is_exact = inner.max_is_exact();
+                        let min_is_exact = inner.min_is_exact();
+                        let f = |v: &Int96| {
+                            ScalarValue::TimestampNanosecond(
+                                Some(v.to_nanos()),
+                                Some(Arc::from("UTC")),
+                            )
+                        };
+                        update_statistics(
+                            column,
+                            distinct_count_opt,
+                            null_count_opt,
+                            max_opt,
+                            min_opt,
+                            max_is_exact,
+                            min_is_exact,
+                            f,
+                        );
+                    }
+                }
+                num_rows = Precision::Exact(chunk.num_values() as usize).max(&num_rows);
+            }
+        }
+        let statsistics = Statistics {
+            column_statistics,
+            num_rows,
+            ..Default::default()
+        };
+        Ok(statsistics.into())
+    }
+
+    fn prune(
+        &self,
+        guarantees: Arc<PruningGuarantees>,
+        statistics: &Statistics,
+    ) -> ParquetAccessPlan {
+        let prune = false;
+        let schema = self.schema();
+
+        determine_pruning(
+            Guarantee::In,
+            guarantees.clone(),
+            statistics,
+            &schema,
+            prune,
+        );
+        determine_pruning(Guarantee::NotIn, guarantees, statistics, &schema, prune);
+
+        match prune {
+            true => ParquetAccessPlan::new_none(1),
+            false => ParquetAccessPlan::new_all(1),
+        }
+    }
+
+    fn write_literal_values(
+        &self,
+        guarantees: &[LiteralGuarantee],
+        literal_values: &mut PruningGuarantees,
+    ) {
+        let sorted_non_null_columns = self.table().table().sorted_by();
+
+        for (guarantee, literals, column_name) in guarantees.into_iter().filter_map(|g| {
+            sorted_non_null_columns
+                .contains(&g.column.name())
+                .then_some::<(_, _, Arc<str>)>((
+                    g.guarantee,
+                    g.literals
+                        .iter()
+                        .cloned()
+                        .map(Arc::new)
+                        .collect::<HashSet<_>>(),
+                    g.column.name().into(),
+                ))
+        }) {
+            literal_values
+                .entry(guarantee)
+                .and_modify(|map: &mut HashMap<Arc<str>, HashSet<Arc<ScalarValue>>>| {
+                    map.entry(column_name.clone())
+                        .and_modify(|column_literals: &mut HashSet<Arc<ScalarValue>>| {
+                            column_literals.extend(literals.clone())
+                        })
+                        .or_insert(literals.clone());
+                })
+                .or_insert_with(|| {
+                    let mut map = HashMap::new();
+                    map.insert(column_name.clone(), literals.clone());
+                    map
+                });
+        }
     }
 }
 
