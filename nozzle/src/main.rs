@@ -111,7 +111,9 @@ async fn main_inner() -> Result<(), BoxError> {
     );
 
     let args = Args::parse();
-    let config = Arc::new(Config::load(args.config, true, None, Addrs::default()).await?);
+    let allow_temp_db = matches!(&args.command, Command::Server { dev, .. } if *dev);
+    let config =
+        Arc::new(Config::load(args.config, true, None, Addrs::default(), allow_temp_db).await?);
     let metadata_db = config.metadata_db().await?.into();
 
     match args.command {

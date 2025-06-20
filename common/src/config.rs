@@ -14,7 +14,7 @@ use figment::{
 };
 use fs_err as fs;
 use js_runtime::isolate_pool::IsolatePool;
-use metadata_db::{temp_metadata_db, MetadataDb, ALLOW_TEMP_DB, KEEP_TEMP_DIRS};
+use metadata_db::{temp_metadata_db, MetadataDb, KEEP_TEMP_DIRS};
 use serde::Deserialize;
 
 use crate::{query_context::QueryEnv, BoxError, Store};
@@ -59,6 +59,7 @@ impl Config {
         env_override: bool,
         config_override: Option<Figment>,
         addrs: Addrs,
+        allow_temp_db: bool,
     ) -> Result<Self, BoxError> {
         let config_path: PathBuf = fs::canonicalize(file.into())?;
         let contents = fs::read_to_string(&config_path)?;
@@ -80,12 +81,10 @@ impl Config {
         let providers_store = Store::new(config_file.providers_dir, base)?;
         let dataset_defs_store = Store::new(config_file.dataset_defs_dir, base)?;
 
-        let metadata_db_url = match (config_file.metadata_db_url, *ALLOW_TEMP_DB) {
+        let metadata_db_url = match (config_file.metadata_db_url, allow_temp_db) {
             (Some(url), _) => url,
             (None, true) => temp_metadata_db(*KEEP_TEMP_DIRS).await.url().to_string(),
-            (None, false) => {
-                return Err("No metadata db url provided and allow_use_temp_db is false".into())
-            }
+            (None, false) => return Err("metadata_db_url not provided".into()),
         };
 
         Ok(Self {

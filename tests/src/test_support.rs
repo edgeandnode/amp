@@ -20,13 +20,14 @@ use common::{
     BoxError, QueryContext,
 };
 use dataset_store::DatasetStore;
+use dump::worker::Worker;
 use figment::{
     providers::{Format as _, Json},
     Figment,
 };
 use fs_err as fs;
 use futures::{stream::TryStreamExt, StreamExt as _};
-use metadata_db::{temp::TempMetadataDb, MetadataDb, KEEP_TEMP_DIRS};
+use metadata_db::{temp::TempMetadataDb, MetadataDb, WorkerNodeId, KEEP_TEMP_DIRS};
 use nozzle::{
     dump_cmd::{datasets_and_dependencies, dump},
     server::BoundAddrs,
@@ -56,7 +57,7 @@ pub async fn load_test_config(config_override: Option<Figment>) -> Result<Arc<Co
         "Couldn't find a test config file, `cargo test` must be run from the workspace root or the tests crate root"
     );
     Ok(Arc::new(
-        Config::load(path, false, config_override, dynamic_addrs()).await?,
+        Config::load(path, false, config_override, dynamic_addrs(), true).await?,
     ))
 }
 
@@ -95,15 +96,16 @@ pub struct TestEnv {
 
 impl TestEnv {
     /// Create a new test environment with a temp metadata database and data directory.
-    pub async fn temp() -> Result<Self, BoxError> {
-        Self::new(true).await
+    pub async fn temp(test_name: &str) -> Result<Self, BoxError> {
+        Self::new(test_name, true).await
     }
 
     /// Create a new test environment with a temp metadata database, but the blessed data directory.
-    pub async fn blessed() -> Result<Self, BoxError> {
-        Self::new(false).await
+    pub async fn blessed(test_name: &str) -> Result<Self, BoxError> {
+        Self::new(test_name, false).await
     }
-    pub async fn new(temp: bool) -> Result<Self, BoxError> {
+
+    pub async fn new(test_name: &str, temp: bool) -> Result<Self, BoxError> {
         let db = TempMetadataDb::new(*KEEP_TEMP_DIRS).await;
         let figment = Figment::from(Json::string(&format!(
             r#"{{ "metadata_db_url": "{}" }}"#,
@@ -132,6 +134,13 @@ impl TestEnv {
         let (bound, server) =
             nozzle::server::run(config.clone(), metadata_db.clone(), false, false).await?;
         tokio::spawn(server);
+
+        let worker = Worker::new(
+            config.clone(),
+            metadata_db.clone(),
+            WorkerNodeId::from_str(test_name).unwrap(),
+        );
+        tokio::spawn(worker.run());
 
         Ok(Self {
             config: config.clone(),

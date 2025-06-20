@@ -20,7 +20,11 @@ impl Scheduler {
     }
 
     /// Schedule a dump for a new copy of a dataset.
-    pub async fn schedule_dataset_dump(&self, dataset: Dataset) -> Result<(), BoxError> {
+    pub async fn schedule_dataset_dump(
+        &self,
+        dataset: Dataset,
+        end_block: Option<i64>,
+    ) -> Result<(), BoxError> {
         // Scheduling procedure for a new `DumpDataset` job:
         // 1. Choose a responsive node.
         // 2. Create a new location for each table.
@@ -37,19 +41,23 @@ impl Scheduler {
         let dataset_name = dataset.name.clone();
 
         let mut locations = Vec::new();
+        let metadata_db = Arc::new(self.metadata_db.clone());
         for table in Arc::new(dataset).resolved_tables() {
-            let physical_table = PhysicalTable::next_revision(
-                &table,
-                &self.config.data_store,
-                self.metadata_db.clone().into(),
-                true,
-            )
-            .await?;
+            let physical_table = match PhysicalTable::get_active(&table, metadata_db.clone())
+                .await?
+            {
+                Some(physical_table) => physical_table,
+                None => {
+                    let store = &self.config.data_store;
+                    PhysicalTable::next_revision(&table, store, metadata_db.clone(), true).await?
+                }
+            };
             locations.push(physical_table.location_id());
         }
 
         let job_desc = serde_json::to_string(&JobDesc::DumpDataset {
             dataset: dataset_name,
+            end_block,
         })?;
 
         self.metadata_db

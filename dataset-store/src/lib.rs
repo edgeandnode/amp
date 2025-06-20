@@ -57,7 +57,7 @@ pub enum Error {
     UnsupportedName(BoxError),
 
     #[error("unsupported function name: {0}")]
-    UnsupportedFunctionName(BoxError),
+    UnsupportedFunctionName(String),
 
     #[error("EVM RPC error: {0}")]
     EvmRpcError(#[from] evm_rpc_datasets::Error),
@@ -530,7 +530,7 @@ impl DatasetStore {
         let function_names = all_function_names(query).map_err(DatasetError::unknown)?;
 
         let catalog = self
-            .load_physical_catalog(tables.iter(), function_names, &env)
+            .load_physical_catalog(tables, function_names, &env)
             .await?;
         QueryContext::for_catalog(catalog, env).map_err(DatasetError::unknown)
     }
@@ -538,8 +538,8 @@ impl DatasetStore {
     /// Looks up the datasets for the given table references and loads them into a catalog.
     pub async fn load_physical_catalog<'a>(
         self: &Arc<Self>,
-        table_refs: impl Iterator<Item = &'a TableReference>,
-        function_names: Vec<Vec<String>>,
+        table_refs: impl IntoIterator<Item = TableReference>,
+        function_names: impl IntoIterator<Item = String>,
         env: &QueryEnv,
     ) -> Result<Catalog, DatasetError> {
         let logical_catalog = self
@@ -560,21 +560,6 @@ impl DatasetStore {
         Ok(Catalog::new(tables, logical_catalog.udfs))
     }
 
-    /// Initial catalog including UDFs for all datasets.
-    pub async fn initial_catalog(self: &Arc<Self>) -> Result<Catalog, DatasetError> {
-        let mut catalog = Catalog::empty();
-        for dataset in self.all_datasets().await? {
-            let udf = self
-                .eth_call_for_dataset(&dataset)
-                .await
-                .map_err(|e| (dataset.name.clone(), e))?;
-            if let Some(udf) = udf {
-                catalog.add_udf(udf);
-            }
-        }
-        Ok(catalog)
-    }
-
     /// Similar to `ctx_for_sql`, but only for planning and not execution. This does not require a
     /// physical location to exist for the dataset views.
     pub async fn planning_ctx_for_sql(
@@ -584,7 +569,7 @@ impl DatasetStore {
         let (tables, _) = resolve_table_references(query, true).map_err(DatasetError::unknown)?;
         let function_names = all_function_names(query).map_err(DatasetError::unknown)?;
         let resolved_tables = self
-            .load_logical_catalog(tables.iter(), function_names, &IsolatePool::dummy())
+            .load_logical_catalog(tables, function_names, &IsolatePool::dummy())
             .await?;
         Ok(PlanningContext::new(resolved_tables))
     }
@@ -593,21 +578,21 @@ impl DatasetStore {
     /// UDFs specific to the referenced datasets.
     async fn load_logical_catalog(
         self: &Arc<Self>,
-        table_refs: impl Iterator<Item = &TableReference>,
-        function_names: Vec<Vec<String>>,
+        table_refs: impl IntoIterator<Item = TableReference>,
+        function_names: impl IntoIterator<Item = String>,
         isolate_pool: &IsolatePool,
     ) -> Result<LogicalCatalog, DatasetError> {
-        let mut dataset_names = datasets_from_table_refs(table_refs)?;
+        let mut dataset_names = datasets_from_table_refs(table_refs.into_iter())?;
         for func_name in function_names {
-            match func_name.as_slice() {
+            match func_name.split('.').collect::<Vec<_>>().as_slice() {
                 // Simple name assumed to be Datafusion built-in function.
                 [_] => continue,
                 [dataset, _] => {
-                    dataset_names.insert(dataset.clone());
+                    dataset_names.insert(dataset.to_string());
                 }
                 _ => {
                     return Err(DatasetError::no_context(Error::UnsupportedFunctionName(
-                        func_name.join(".").into(),
+                        func_name,
                     )))
                 }
             }
@@ -674,7 +659,7 @@ struct ProviderDefsCommon {
 }
 
 fn datasets_from_table_refs<'a>(
-    table_refs: impl Iterator<Item = &'a TableReference>,
+    table_refs: impl Iterator<Item = TableReference>,
 ) -> Result<BTreeSet<String>, DatasetError> {
     let mut dataset_names = BTreeSet::new();
     for t in table_refs {
