@@ -514,16 +514,30 @@ impl PhysicalTable {
     fn stream_partitioned_files<'a>(
         &'a self,
         ctx: &'a dyn Session,
-    ) -> impl Stream<Item = DataFusionResult<PartitionedFile>> + 'a {
+    ) -> impl Stream<Item = DataFusionResult<(u64, PartitionedFile)>> + 'a {
         self.stream_file_metadata()
             .map_err(DataFusionError::from)
             .map(async move |res| {
-                let FileMetadata { object_meta, .. } = res?;
-                let mut partitioned_file = PartitionedFile::from(object_meta);
+                let FileMetadata {
+                    object_meta,
+                    parquet_meta: ParquetMeta { ranges, .. },
+                    ..
+                } = res?;
+                let mut partitioned_file = PartitionedFile::from(object_meta.clone());
                 let statistics = self.do_collect_statistics(ctx, &partitioned_file).await?;
 
                 partitioned_file.statistics = Some(statistics);
-                Ok(partitioned_file)
+
+                let range_start = ranges
+                    .first()
+                    .ok_or(DataFusionError::Execution(format!(
+                        "No ranges found for file `{}` for table `{}`",
+                        object_meta.location,
+                        self.table_ref()
+                    )))?
+                    .numbers
+                    .start();
+                Ok((*range_start, partitioned_file))
             })
             .buffered(ctx.config_options().execution.meta_fetch_concurrency)
     }
@@ -552,15 +566,16 @@ impl TableProvider for PhysicalTable {
     ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
         let files = self
             .stream_partitioned_files(state)
-            .try_collect::<Vec<_>>()
+            .try_collect::<BTreeMap<_, _>>()
             .await?;
         if files.is_empty() {
             return Ok(Arc::new(datafusion::physical_plan::empty::EmptyExec::new(
                 self.schema(),
             )));
         }
+        let target_partitions = state.config_options().execution.target_partitions;
+        let file_groups = round_robin(files, target_partitions);
 
-        let file_group = FileGroup::new(files);
         let output_ordering = self.output_ordering()?;
 
         let file_schema = self.schema();
@@ -571,9 +586,7 @@ impl TableProvider for PhysicalTable {
             .create_physical_plan(
                 state,
                 FileScanConfigBuilder::new(object_store_url, file_schema, file_source)
-                    .with_file_groups(
-                        file_group.split_files(state.config_options().execution.target_partitions),
-                    )
+                    .with_file_groups(file_groups)
                     .with_output_ordering(output_ordering)
                     .with_projection(projection.cloned())
                     .build(),
@@ -665,4 +678,16 @@ async fn nozzle_meta_from_object_meta(
     // Unwrap: We know this is a path with valid file name because we just opened it
     let file_name = object_meta.location.filename().unwrap().to_string();
     Ok((file_name, parquet_meta))
+}
+
+fn round_robin(files: BTreeMap<u64, PartitionedFile>, target_partitions: usize) -> Vec<FileGroup> {
+    let size = files.len().min(target_partitions);
+    if size <= 0 {
+        return vec![];
+    }
+    let mut groups = vec![FileGroup::default(); size];
+    for (idx, (_, file)) in files.into_iter().enumerate() {
+        groups[idx % size].push(file);
+    }
+    groups
 }
