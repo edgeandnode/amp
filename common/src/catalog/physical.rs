@@ -258,7 +258,6 @@ impl PhysicalTable {
         data_store: Arc<Store>,
         metadata_db: Arc<MetadataDb>,
     ) -> Result<Self, BoxError> {
-        let metadata_db: Arc<MetadataDb> = metadata_db.clone().into();
         let location_id = metadata_db
             .register_location(*table_id, data_store.bucket(), prefix, url, false)
             .await?;
@@ -332,7 +331,7 @@ impl PhysicalTable {
     }
 
     pub fn table_name(&self) -> &str {
-        &self.table.name()
+        self.table.name()
     }
 
     pub fn url(&self) -> &Url {
@@ -344,8 +343,7 @@ impl PhysicalTable {
     }
 
     pub fn catalog_schema(&self) -> &str {
-        // Unwrap: This is always constructed with a schema.
-        &self.table.catalog_schema()
+        self.table.catalog_schema()
     }
 
     pub fn schema(&self) -> SchemaRef {
@@ -358,7 +356,7 @@ impl PhysicalTable {
 
     /// Qualified table reference in the format `dataset_name.table_name`.
     pub fn table_ref(&self) -> &TableReference {
-        &self.table.table_ref()
+        self.table.table_ref()
     }
 
     pub fn table_id(&self) -> TableId<'_> {
@@ -384,7 +382,7 @@ impl PhysicalTable {
     }
 
     pub fn network(&self) -> &str {
-        &self.table.network()
+        self.table.network()
     }
 
     pub fn object_store(&self) -> Arc<dyn ObjectStore> {
