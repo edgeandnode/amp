@@ -7,7 +7,7 @@ use common::{
         datatypes::{DataType as ArrowDataType, Field, Schema, TimeUnit},
     },
     metadata::range::BlockRange,
-    timestamp_type, RawDatasetRows, RawTableRows, Table, BLOCK_NUM,
+    timestamp_type, RawDatasetRows, RawTableRows, Table, BLOCK_NUM, SPECIAL_BLOCK_NUM,
 };
 use datafusion::sql::sqlparser::{
     ast::{CreateTable, DataType as SqlDataType, Statement},
@@ -270,37 +270,39 @@ fn sql_to_schemas(sql: String, network: &str) -> Result<Vec<Table>, anyhow::Erro
 fn statement_to_table(statement: &Statement, network: &str) -> Option<Table> {
     match statement {
         Statement::CreateTable(CreateTable { name, columns, .. }) => {
-            let fields = std::iter::once(Field::new(BLOCK_NUM, ArrowDataType::UInt64, false))
-                .chain(
-                    columns
-                        .iter()
-                        .filter(|column| column.name.value != BLOCK_NUM)
-                        .map(|column| {
-                            let datatype = match column.data_type {
-                                SqlDataType::Int(_) => ArrowDataType::Int32,
-                                SqlDataType::BigInt(_) => ArrowDataType::Int64,
-                                SqlDataType::SmallInt(_) => ArrowDataType::Int16,
-                                SqlDataType::TinyInt(_) => ArrowDataType::Int8,
-                                SqlDataType::Char(_) => ArrowDataType::Utf8,
-                                SqlDataType::Varchar(_) => ArrowDataType::Utf8,
-                                SqlDataType::Text => ArrowDataType::Utf8,
-                                SqlDataType::Date => ArrowDataType::Date32,
-                                SqlDataType::Time(_, _) => {
-                                    ArrowDataType::Time64(TimeUnit::Nanosecond)
-                                }
-                                // SqlDataType::Timestamp(_,_) => ArrowDataType::Timestamp(TimeUnit::Nanosecond, None),
-                                SqlDataType::Timestamp(_, _) => timestamp_type(),
-                                SqlDataType::Decimal(_) => ArrowDataType::Float64,
-                                SqlDataType::Real => ArrowDataType::Float32,
-                                SqlDataType::Double(_) => ArrowDataType::Float64,
-                                SqlDataType::Boolean => ArrowDataType::Boolean,
-                                SqlDataType::Binary(_) => ArrowDataType::Binary,
-                                _ => ArrowDataType::Utf8,
-                            };
-                            Field::new(column.name.value.as_str(), datatype, false)
-                        }),
-                )
-                .collect::<Vec<_>>();
+            let fields = [
+                Field::new(SPECIAL_BLOCK_NUM, ArrowDataType::UInt64, false),
+                Field::new(BLOCK_NUM, ArrowDataType::UInt64, false),
+            ]
+            .into_iter()
+            .chain(
+                columns
+                    .iter()
+                    .filter(|column| column.name.value != BLOCK_NUM)
+                    .map(|column| {
+                        let datatype = match column.data_type {
+                            SqlDataType::Int(_) => ArrowDataType::Int32,
+                            SqlDataType::BigInt(_) => ArrowDataType::Int64,
+                            SqlDataType::SmallInt(_) => ArrowDataType::Int16,
+                            SqlDataType::TinyInt(_) => ArrowDataType::Int8,
+                            SqlDataType::Char(_) => ArrowDataType::Utf8,
+                            SqlDataType::Varchar(_) => ArrowDataType::Utf8,
+                            SqlDataType::Text => ArrowDataType::Utf8,
+                            SqlDataType::Date => ArrowDataType::Date32,
+                            SqlDataType::Time(_, _) => ArrowDataType::Time64(TimeUnit::Nanosecond),
+                            // SqlDataType::Timestamp(_,_) => ArrowDataType::Timestamp(TimeUnit::Nanosecond, None),
+                            SqlDataType::Timestamp(_, _) => timestamp_type(),
+                            SqlDataType::Decimal(_) => ArrowDataType::Float64,
+                            SqlDataType::Real => ArrowDataType::Float32,
+                            SqlDataType::Double(_) => ArrowDataType::Float64,
+                            SqlDataType::Boolean => ArrowDataType::Boolean,
+                            SqlDataType::Binary(_) => ArrowDataType::Binary,
+                            _ => ArrowDataType::Utf8,
+                        };
+                        Field::new(column.name.value.as_str(), datatype, false)
+                    }),
+            )
+            .collect::<Vec<_>>();
 
             Some(Table::new(
                 name.to_string(),

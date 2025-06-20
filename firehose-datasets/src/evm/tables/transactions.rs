@@ -9,6 +9,7 @@ use common::{
     BoxError, Bytes32, Bytes32ArrayBuilder, EvmAddress as Address, EvmAddressArrayBuilder,
     EvmCurrency, EvmCurrencyArrayBuilder, RawTableRows, Table, Timestamp, TimestampArrayBuilder,
     BLOCK_NUM, BYTES32_TYPE, EVM_ADDRESS_TYPE as ADDRESS_TYPE, EVM_CURRENCY_TYPE,
+    SPECIAL_BLOCK_NUM,
 };
 
 static SCHEMA: LazyLock<SchemaRef> = LazyLock::new(|| Arc::new(schema()));
@@ -21,6 +22,7 @@ pub const TABLE_NAME: &'static str = "transactions";
 
 /// Prefer using the pre-computed SCHEMA
 fn schema() -> Schema {
+    let special_block_num = Field::new(SPECIAL_BLOCK_NUM, DataType::UInt64, false);
     let block_hash = Field::new("block_hash", BYTES32_TYPE, false);
     let block_num = Field::new(BLOCK_NUM, DataType::UInt64, false);
     let timestamp = Field::new("timestamp", common::timestamp_type(), false);
@@ -47,6 +49,7 @@ fn schema() -> Schema {
     let end_ordinal = Field::new("end_ordinal", DataType::UInt64, false);
 
     let fields = vec![
+        special_block_num,
         block_hash,
         block_num,
         timestamp,
@@ -119,6 +122,7 @@ pub(crate) struct Transaction {
 }
 
 pub(crate) struct TransactionRowsBuilder {
+    special_block_num: UInt64Builder,
     block_hash: Bytes32ArrayBuilder,
     block_num: UInt64Builder,
     timestamp: TimestampArrayBuilder,
@@ -148,6 +152,7 @@ pub(crate) struct TransactionRowsBuilder {
 impl TransactionRowsBuilder {
     pub(crate) fn with_capacity(capacity: usize) -> Self {
         Self {
+            special_block_num: UInt64Builder::with_capacity(capacity),
             block_hash: Bytes32ArrayBuilder::with_capacity(capacity),
             block_num: UInt64Builder::with_capacity(capacity),
             timestamp: TimestampArrayBuilder::with_capacity(capacity),
@@ -203,6 +208,7 @@ impl TransactionRowsBuilder {
             end_ordinal,
         } = tx;
 
+        self.special_block_num.append_value(*block_num);
         self.block_hash.append_value(*block_hash);
         self.block_num.append_value(*block_num);
         self.timestamp.append_value(*timestamp);
@@ -232,6 +238,7 @@ impl TransactionRowsBuilder {
 
     pub(crate) fn build(self, range: BlockRange) -> Result<RawTableRows, BoxError> {
         let Self {
+            mut special_block_num,
             block_hash,
             mut block_num,
             mut timestamp,
@@ -259,7 +266,8 @@ impl TransactionRowsBuilder {
         } = self;
 
         let columns = vec![
-            Arc::new(block_hash.finish()) as ArrayRef,
+            Arc::new(special_block_num.finish()) as ArrayRef,
+            Arc::new(block_hash.finish()),
             Arc::new(block_num.finish()),
             Arc::new(timestamp.finish()),
             Arc::new(tx_index.finish()),
@@ -304,6 +312,6 @@ fn default_to_arrow() {
             })
             .unwrap()
     };
-    assert_eq!(rows.rows.num_columns(), 24);
+    assert_eq!(rows.rows.num_columns(), 25);
     assert_eq!(rows.rows.num_rows(), 1);
 }

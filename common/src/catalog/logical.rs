@@ -2,11 +2,10 @@ use std::{fmt, sync::Arc};
 
 use async_udf::functions::AsyncScalarUDF;
 use datafusion::{
-    arrow::datatypes::{DataType, Field, Schema, SchemaRef},
+    arrow::datatypes::{DataType, SchemaRef},
     logical_expr::ScalarUDF,
     sql::TableReference,
 };
-use itertools::Itertools;
 use js_runtime::isolate_pool::IsolatePool;
 
 use crate::{js_udf::JsUdf, BoxError, BLOCK_NUM, SPECIAL_BLOCK_NUM};
@@ -91,17 +90,6 @@ impl Table {
         // - Have a consistency check that the data really is sorted.
         // - Do we want to address and leverage https://github.com/apache/arrow-datafusion/issues/4177?
         &[SPECIAL_BLOCK_NUM, BLOCK_NUM, "timestamp"]
-    }
-
-    /// Prepend the `SPECIAL_BLOCK_NUM` column to the table schema. This is useful for SQL datasets.
-    pub fn with_special_block_num_column(mut self) -> Self {
-        let schema = self.schema;
-        let metadata = schema.metadata.clone();
-        let fields = std::iter::once(Field::new(SPECIAL_BLOCK_NUM, DataType::UInt64, false))
-            .chain(schema.fields().iter().map(|f| f.as_ref().clone()))
-            .collect_vec();
-        self.schema = Arc::new(Schema::new_with_metadata(fields, metadata));
-        self
     }
 }
 

@@ -2,10 +2,8 @@ use std::{collections::BTreeSet, sync::Arc};
 
 use axum::{extract::State, http::StatusCode, Json};
 use common::{
-    arrow::datatypes::{DataType, Field},
     manifest::TableSchema,
     query_context::{parse_sql, prepend_special_block_num_field, Error as QueryContextError},
-    SPECIAL_BLOCK_NUM,
 };
 use http_common::{BoxRequestError, RequestError};
 use serde::{Deserialize, Serialize};
@@ -69,13 +67,7 @@ pub async fn output_schema_handler(
         .planning_ctx_for_sql(&stmt)
         .await
         .map_err(DatasetStoreError)?;
-    let schema = ctx
-        .sql_output_schema(
-            stmt,
-            &[Field::new(SPECIAL_BLOCK_NUM, DataType::UInt64, false)],
-        )
-        .await
-        .map_err(PlanningError)?;
+    let schema = ctx.sql_output_schema(stmt).await.map_err(PlanningError)?;
     let schema = if payload.is_sql_dataset {
         // For SQL datasets, the `SPECIAL_BLOCK_NUM` field is always included in the schema.
         prepend_special_block_num_field(&schema)

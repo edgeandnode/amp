@@ -6,8 +6,8 @@ use std::{
 use common::{
     multirange::MultiRange,
     query_context::{
-        forbid_underscore_prefixed_aliases, parse_sql, propagate_block_num,
-        unproject_special_block_num_column, QueryEnv,
+        forbid_underscore_prefixed_aliases, parse_sql, prepend_special_block_num_field,
+        propagate_block_num, unproject_special_block_num_column, QueryEnv,
     },
     BlockNum, BoxError, Dataset, QueryContext, Table, BLOCK_NUM, SPECIAL_BLOCK_NUM,
 };
@@ -76,7 +76,7 @@ pub(super) async fn dataset(
         let raw_query = defs_store.get_string(file.location.clone()).await?;
         let query = parse_sql(&raw_query)?;
         let ctx = store.clone().planning_ctx_for_sql(&query).await?;
-        let schema = ctx.sql_output_schema(query.clone(), &[]).await?;
+        let schema = ctx.sql_output_schema(query.clone()).await?;
         let network = {
             let tables = ctx.catalog().iter();
             let mut networks: BTreeSet<_> =
@@ -90,12 +90,18 @@ pub(super) async fn dataset(
             }
             networks.pop_first().unwrap()
         };
+        let schema =
+            if schema.fields().first().expect("schema not empty").name() != SPECIAL_BLOCK_NUM {
+                prepend_special_block_num_field(&schema)
+            } else {
+                schema
+            };
         let table = Table::new(
             table_name.to_string(),
             schema.as_ref().clone().into(),
             network,
         );
-        tables.push(table.with_special_block_num_column());
+        tables.push(table);
         queries.insert(table_name.to_string(), query);
     }
 

@@ -68,7 +68,7 @@ pub async fn dump(
                     .await?
                     .into(),
                 );
-            };
+            }
         }
         physical_datasets.push(tables);
     }
