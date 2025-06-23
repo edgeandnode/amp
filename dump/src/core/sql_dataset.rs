@@ -119,14 +119,12 @@ use std::{collections::BTreeSet, sync::Arc};
 use common::{
     catalog::physical::PhysicalTable,
     metadata::range::BlockRange,
+    plan_visitors::is_incremental,
     query_context::{parse_sql, QueryContext, QueryEnv},
     BlockNum, BoxError, Dataset,
 };
 use datafusion::{common::cast::as_fixed_size_binary_array, sql::parser::Statement};
-use dataset_store::{
-    sql_datasets::{is_incremental, max_end_block, SqlDataset},
-    DatasetStore,
-};
+use dataset_store::{sql_datasets::SqlDataset, DatasetStore};
 use futures::TryStreamExt as _;
 use tracing::instrument;
 
@@ -181,7 +179,7 @@ pub async fn dump_table(
         let (start, end) = match (start, end) {
             (start, Some(end)) if start >= 0 && end >= 0 => (start as BlockNum, end as BlockNum),
             _ => {
-                match max_end_block(&plan, &src_ctx).await? {
+                match src_ctx.max_end_block(&plan).await? {
                     Some(max_end_block) => {
                         block_ranges::resolve_relative(start, end, max_end_block)?
                     }

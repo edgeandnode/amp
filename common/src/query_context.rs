@@ -7,11 +7,7 @@ use bytes::Bytes;
 use datafusion::{
     arrow::datatypes::{DataType, Field, Fields, SchemaRef},
     catalog::{MemorySchemaProvider, TableProvider},
-    common::{
-        not_impl_err, plan_err,
-        tree_node::{Transformed, TransformedResult, TreeNode as _, TreeNodeRecursion},
-        DFSchema, DFSchemaRef,
-    },
+    common::{not_impl_err, DFSchema, DFSchemaRef},
     datasource::MemTable,
     error::DataFusionError,
     execution::{
@@ -20,9 +16,8 @@ use datafusion::{
         runtime_env::RuntimeEnv,
         SendableRecordBatchStream, SessionStateBuilder,
     },
-    logical_expr::{AggregateUDF, Extension, LogicalPlan, Projection, ScalarUDF},
+    logical_expr::{AggregateUDF, Extension, LogicalPlan, ScalarUDF},
     physical_plan::{displayable, ExecutionPlan},
-    prelude::{col, Expr},
     sql::{parser, TableReference},
 };
 use datafusion_proto::{
@@ -33,7 +28,7 @@ use datafusion_proto::{
 };
 use futures::{FutureExt as _, TryStreamExt};
 use js_runtime::isolate_pool::IsolatePool;
-use metadata_db::TableId;
+use metadata_db::{LocationId, TableId};
 use thiserror::Error;
 use tracing::{debug, instrument};
 
@@ -43,9 +38,10 @@ use crate::{
     evm::udfs::{
         EvmDecodeLog, EvmDecodeParams, EvmDecodeType, EvmEncodeParams, EvmEncodeType, EvmTopic,
     },
-    internal,
+    multirange::MultiRange,
+    plan_visitors::extract_table_references_from_plan,
     stream_helpers::is_streaming,
-    BoxError, LogicalCatalog, ResolvedTable, SPECIAL_BLOCK_NUM,
+    BlockNum, BoxError, LogicalCatalog, ResolvedTable, SPECIAL_BLOCK_NUM,
 };
 
 #[derive(Error, Debug)]
@@ -348,6 +344,86 @@ impl QueryContext {
             .find(|table| table.table_id() == table_id)
             .cloned()
     }
+
+    /// Get all physical table locations that have been queried by the given plan.
+    #[instrument(skip_all, err)]
+    pub async fn queried_physical_tables(
+        &self,
+        plan: &LogicalPlan,
+    ) -> Result<Vec<LocationId>, BoxError> {
+        let tables = extract_table_references_from_plan(&plan)?;
+
+        let locations: Vec<_> = tables
+            .into_iter()
+            .filter_map(|t| self.get_table(&t).map(|t| t.location_id()))
+            .collect();
+
+        Ok(locations)
+    }
+
+    /// Get the blocks that have been synced for all tables in the plan.
+    #[instrument(skip_all, err)]
+    pub async fn synced_blocks_for_plan(&self, plan: &LogicalPlan) -> Result<MultiRange, BoxError> {
+        let tables = extract_table_references_from_plan(&plan)?;
+
+        let mut ranges = MultiRange::empty();
+
+        if !tables.is_empty() {
+            let mut tables = tables.into_iter();
+            ranges = self.get_ranges_for_table(&tables.next().unwrap()).await?;
+            for table in tables {
+                let other_ranges = self.get_ranges_for_table(&table).await?;
+                ranges = ranges.intersection(&other_ranges);
+            }
+        }
+
+        Ok(ranges)
+    }
+
+    /// Get the most recent block that has been synced for all tables in the plan.
+    #[instrument(skip_all, err)]
+    pub async fn max_end_block(&self, plan: &LogicalPlan) -> Result<Option<BlockNum>, BoxError> {
+        let tables = extract_table_references_from_plan(&plan)?;
+
+        if tables.is_empty() {
+            return Ok(None);
+        }
+
+        let mut tables = tables.into_iter();
+
+        // Unwrap: `tables` is not empty.
+        let mut end = self.synced_block_for_table(tables.next().unwrap()).await?;
+        for table in tables {
+            let next_end = self.synced_block_for_table(table).await?;
+            end = end.min(next_end);
+        }
+
+        Ok(end)
+    }
+
+    /// Helper method to get ranges for a specific table.
+    async fn get_ranges_for_table(&self, table: &TableReference) -> Result<MultiRange, BoxError> {
+        let Some(table) = self.get_table(table) else {
+            return Err(format!(
+                "table {}.{} not found",
+                table.schema().unwrap(),
+                table.table()
+            )
+            .into());
+        };
+        table.multi_range().await
+    }
+
+    /// Helper method to get the synced block for a specific table.
+    async fn synced_block_for_table(
+        &self,
+        table: TableReference,
+    ) -> Result<Option<BlockNum>, BoxError> {
+        let table = self.get_table(&table).expect("table not found");
+        let ranges = table.multi_range().await?;
+        // Take the end block of the earliest contiguous range as the "synced block"
+        Ok(ranges.first().map(|r| r.1))
+    }
 }
 
 #[instrument(skip_all, err)]
@@ -461,97 +537,6 @@ async fn execute_plan(
     debug!("physical plan: {}", print_physical_plan(&*physical_plan));
 
     execute_stream(physical_plan, ctx.task_ctx()).map_err(Error::PlanningError)
-}
-
-/// Aliases with a name starting with `_` are always forbidden, since underscore-prefixed
-/// names are reserved for special columns.
-pub fn forbid_underscore_prefixed_aliases(plan: &LogicalPlan) -> Result<(), DataFusionError> {
-    plan.apply(|node| {
-        match node {
-            LogicalPlan::Projection(projection) => {
-                for expr in projection.expr.iter() {
-                    if let Expr::Alias(alias) = expr {
-                        if alias.name.starts_with('_') {
-                            return plan_err!(
-                                "projection contains a column alias starting with '_': '{}'. Underscore-prefixed names are reserved. Please rename your column",
-                                alias.name
-                            );
-                        }
-                    }
-                }
-            }
-            _ => {}
-        }
-        Ok(TreeNodeRecursion::Continue)
-    })?;
-    Ok(())
-}
-
-/// Propagate the `SPECIAL_BLOCK_NUM` column through the logical plan.
-pub fn propagate_block_num(plan: LogicalPlan) -> Result<LogicalPlan, DataFusionError> {
-    plan.transform(|node| {
-        match node {
-            LogicalPlan::Projection(mut projection) => {
-                // If the projection already selects the `SPECIAL_BLOCK_NUM` column directly, we don't need to
-                // add that column, but we do have to ensure that the `SPECIAL_BLOCK_NUM` is not
-                // qualified with a table name (since it does not necessarily belong to a table).
-                for expr in projection.expr.iter_mut() {
-                    if let Expr::Column(c) = expr {
-                        if c.name() == SPECIAL_BLOCK_NUM {
-                            // Unqualify the column.
-                            c.relation = None;
-                            return Ok(Transformed::yes(LogicalPlan::Projection(projection)));
-                        }
-                    }
-                }
-
-                // Prepend `SPECIAL_BLOCK_NUM` column to the projection.
-                projection.expr.insert(0, col(SPECIAL_BLOCK_NUM));
-                projection.schema = prepend_special_block_num_field(&projection.schema);
-                Ok(Transformed::yes(LogicalPlan::Projection(projection)))
-            }
-            LogicalPlan::Union(mut union) => {
-                // Add the `SPECIAL_BLOCK_NUM` column to the union schema.
-                union.schema = prepend_special_block_num_field(&union.schema);
-                Ok(Transformed::yes(LogicalPlan::Union(union)))
-            }
-            _ => Ok(Transformed::no(node)),
-        }
-    })
-    .data()
-}
-
-/// If the original query does not select the `SPECIAL_BLOCK_NUM` column, this will
-/// project the `SPECIAL_BLOCK_NUM` out of the plan. (Essentially, add a projection
-/// on top of the query which selects all columns except `SPECIAL_BLOCK_NUM`.)
-pub fn unproject_special_block_num_column(
-    plan: LogicalPlan,
-    original_schema: Arc<DFSchema>,
-) -> Result<LogicalPlan, DataFusionError> {
-    if original_schema
-        .fields()
-        .iter()
-        .any(|f| f.name() == SPECIAL_BLOCK_NUM)
-    {
-        // If the original schema already contains the `SPECIAL_BLOCK_NUM` column, we don't need to
-        // project it out.
-        return Ok(plan);
-    }
-
-    let exprs = original_schema
-        .fields()
-        .iter()
-        .map(|f| col(f.name()))
-        .collect();
-    let projection = Projection::try_new_with_schema(exprs, Arc::new(plan), original_schema)
-        .map_err(|e| {
-            internal!(
-                "error while removing {} from projection: {}",
-                SPECIAL_BLOCK_NUM,
-                e
-            )
-        })?;
-    Ok(LogicalPlan::Projection(projection))
 }
 
 pub fn prepend_special_block_num_field(schema: &DFSchema) -> Arc<DFSchema> {

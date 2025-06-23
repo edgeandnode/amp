@@ -7,6 +7,7 @@ pub mod js_udf;
 pub mod manifest;
 pub mod metadata;
 pub mod multirange;
+pub mod plan_visitors;
 pub mod query_context;
 pub mod sql_visitors;
 pub mod store;
