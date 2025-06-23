@@ -61,10 +61,10 @@ pub enum Error {
     #[error("Error connecting to metadata db: {0}")]
     ConnectionError(sqlx::Error),
 
-    #[error(transparent)]
+    #[error("Error running migrations: {0}")]
     MigrationError(#[from] sqlx::migrate::MigrateError),
 
-    #[error(transparent)]
+    #[error("Error executing database query: {0}")]
     DbError(#[from] sqlx::Error),
 
     #[error("Error sending notification: {0}")]

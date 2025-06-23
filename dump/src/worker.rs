@@ -37,7 +37,7 @@ impl Worker {
         let data_store = config.data_store.clone();
         let meta = WorkerMetadataDb::new(metadata_db.clone());
 
-        let mut reconcile_interval = tokio::time::interval(Duration::from_secs(30));
+        let mut reconcile_interval = tokio::time::interval(Duration::from_secs(60));
         reconcile_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
         Self {
