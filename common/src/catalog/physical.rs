@@ -410,7 +410,8 @@ impl PhysicalTable {
         Ok(self.synced_range().await?.map(|range| *range.end()))
     }
 
-    pub async fn multi_range(&self) -> Result<MultiRange, BoxError> {
+    // TODO: rm MultiRange
+    async fn multi_range(&self) -> Result<MultiRange, BoxError> {
         let ranges = self
             .stream_file_metadata()
             .map(|r| {

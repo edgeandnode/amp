@@ -1,14 +1,14 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
+    ops::RangeInclusive,
     str::FromStr,
     sync::Arc,
 };
 
 use common::{
-    BoxError,
+    BlockNum, BoxError,
     catalog::physical::{Catalog, PhysicalTable},
     config::Config,
-    multirange::MultiRange,
     query_context::{Error as QueryError, QueryContext},
     store::Store as DataStore,
 };
@@ -92,21 +92,21 @@ pub async fn dump_raw_tables(
 
     // Query the block ranges, we might already have some ranges if this is not the first dump run
     // for this dataset.
-    let mut block_ranges_by_table: BTreeMap<String, MultiRange> = Default::default();
+    let mut synced_ranges_by_table: BTreeMap<String, Option<RangeInclusive<BlockNum>>> =
+        Default::default();
     for table in tables {
-        block_ranges_by_table.insert(table.table_name().to_string(), table.multi_range().await?);
+        synced_ranges_by_table.insert(table.table_name().to_string(), table.synced_range().await?);
     }
 
-    for (table_name, multirange) in &block_ranges_by_table {
-        if multirange.total_len() == 0 {
+    for (table_name, range) in &synced_ranges_by_table {
+        let Some(range) = range else {
             continue;
-        }
-
+        };
         tracing::info!(
-            "table `{}` has scanned {} blocks in the ranges: {}",
+            "table `{}` has scanned block range [{}-{}]",
             table_name,
-            multirange.total_len(),
-            multirange,
+            range.start(),
+            range.end(),
         );
     }
 
@@ -118,7 +118,7 @@ pub async fn dump_raw_tables(
                 n_jobs,
                 query_ctx,
                 &dataset.name,
-                block_ranges_by_table,
+                synced_ranges_by_table,
                 partition_size,
                 parquet_opts,
                 range,
@@ -221,10 +221,22 @@ async fn consistency_check(table: &PhysicalTable) -> Result<(), ConsistencyCheck
     let location_id = table.location_id();
 
     // Check that bock ranges do not contain overlapping ranges.
-    table
-        .multi_range()
+    let ranges: Vec<(BlockNum, BlockNum)> = table
+        .files()
         .await
-        .map_err(|err| ConsistencyCheckError::CorruptedTable(location_id, err))?;
+        .map_err(|err| ConsistencyCheckError::CorruptedTable(location_id, err))?
+        .into_iter()
+        .map(|m| m.parquet_meta.ranges[0].numbers.clone().into_inner())
+        .collect();
+    for window in ranges.windows(2) {
+        let ((a, b), (c, d)) = (window[0], window[1]);
+        if !((a <= b) && (b <= c) && (c <= d)) {
+            return Err(ConsistencyCheckError::CorruptedTable(
+                location_id,
+                format!("overlapping block ranges: [{a}-{b}] and [{c}-{d}]").into(),
+            ));
+        }
+    }
 
     let registered_files: BTreeSet<String> = table
         .files()
@@ -281,4 +293,70 @@ enum ConsistencyCheckError {
 
     #[error("table {0} is corrupted: {1}")]
     CorruptedTable(LocationId, BoxError),
+}
+
+pub fn missing_block_ranges(
+    synced: RangeInclusive<BlockNum>,
+    desired: RangeInclusive<BlockNum>,
+) -> Vec<RangeInclusive<BlockNum>> {
+    // no overlap
+    if (synced.end() < desired.start()) || (synced.start() > desired.end()) {
+        return vec![desired];
+    }
+    // desired is subset of synced
+    if (synced.start() <= desired.start()) && (synced.end() >= desired.end()) {
+        return vec![];
+    }
+    // partial overlap
+    let mut result = Vec::new();
+    if desired.start() < synced.start() {
+        result.push(*desired.start()..=(*synced.start() - 1));
+    }
+    if desired.end() > synced.end() {
+        result.push((*synced.end() + 1)..=*desired.end());
+    }
+    result
+}
+
+#[cfg(test)]
+mod test {
+    #[test]
+    fn missing_block_ranges() {
+        // no overlap, desired before synced
+        assert_eq!(super::missing_block_ranges(10..=20, 0..=5), vec![0..=5]);
+        // no overlap, desired after synced
+        assert_eq!(super::missing_block_ranges(0..=5, 10..=20), vec![10..=20]);
+        // desired is subset of synced
+        assert_eq!(super::missing_block_ranges(0..=10, 2..=8), vec![]);
+        // desired is same as synced
+        assert_eq!(super::missing_block_ranges(0..=10, 0..=10), vec![]);
+        // synced starts before desired, ends with desired
+        assert_eq!(super::missing_block_ranges(0..=10, 0..=10), vec![]);
+        // synced starts with desired, ends after desired
+        assert_eq!(super::missing_block_ranges(0..=10, 0..=10), vec![]);
+        // partial overlap, desired starts before synced
+        assert_eq!(super::missing_block_ranges(5..=10, 0..=7), vec![0..=4]);
+        // partial overlap, desired ends after synced
+        assert_eq!(super::missing_block_ranges(0..=5, 3..=10), vec![6..=10]);
+        // partial overlap, desired surrounds synced
+        assert_eq!(
+            super::missing_block_ranges(5..=10, 0..=15),
+            vec![0..=4, 11..=15]
+        );
+        // desired starts same as synced, ends after synced
+        assert_eq!(super::missing_block_ranges(0..=5, 0..=10), vec![6..=10]);
+        // desired starts before synced, ends same as synced
+        assert_eq!(super::missing_block_ranges(5..=10, 0..=10), vec![0..=4]);
+        // adjacent ranges (desired just before synced)
+        assert_eq!(super::missing_block_ranges(5..=10, 0..=4), vec![0..=4]);
+        // adjacent ranges (desired just after synced)
+        assert_eq!(super::missing_block_ranges(0..=5, 6..=10), vec![6..=10]);
+        // single block ranges
+        assert_eq!(super::missing_block_ranges(0..=0, 0..=0), vec![]);
+        assert_eq!(super::missing_block_ranges(0..=0, 1..=1), vec![1..=1]);
+        assert_eq!(super::missing_block_ranges(1..=1, 0..=0), vec![0..=0]);
+        assert_eq!(super::missing_block_ranges(0..=2, 0..=3), vec![3..=3]);
+        assert_eq!(super::missing_block_ranges(1..=3, 0..=3), vec![0..=0]);
+        assert_eq!(super::missing_block_ranges(0..=2, 0..=3), vec![3..=3]);
+    }
 }

@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc};
 
 pub use common::parquet::file::properties::WriterProperties as ParquetWriterProperties;
 use common::{
@@ -9,7 +9,6 @@ use common::{
         parquet::{PARQUET_METADATA_KEY, ParquetMeta},
         range::BlockRange,
     },
-    multirange::MultiRange,
     parquet::{arrow::AsyncArrowWriter, errors::ParquetError, format::KeyValue},
 };
 use metadata_db::MetadataDb;
@@ -17,6 +16,8 @@ use object_store::{ObjectMeta, buffered::BufWriter, path::Path};
 use rand::RngCore as _;
 use tracing::debug;
 use url::Url;
+
+use crate::missing_block_ranges;
 
 const MAX_PARTITION_BLOCK_RANGE: u64 = 1_000_000;
 
@@ -37,18 +38,18 @@ impl RawDatasetWriter {
         start: BlockNum,
         end: BlockNum,
         partition_size: u64,
-        block_ranges_by_table: BTreeMap<String, MultiRange>,
+        synced_ranges_by_table: BTreeMap<String, Option<RangeInclusive<BlockNum>>>,
     ) -> Result<Self, BoxError> {
         let mut writers = BTreeMap::new();
         for table in dataset_ctx.catalog().tables() {
-            // Unwrap: `block_ranges_by_table` contains an entry for each table.
+            // Unwrap: `synced_ranges_by_table` contains an entry for each table.
             let table_name = table.table_name();
-            let block_ranges = block_ranges_by_table.get(table_name).unwrap().clone();
+            let synced_range = synced_ranges_by_table.get(table_name).unwrap().clone();
             let writer = RawTableWriter::new(
                 table.clone(),
                 opts.clone(),
                 partition_size,
-                block_ranges,
+                synced_range,
                 start,
                 end,
             )?;
@@ -127,7 +128,7 @@ struct RawTableWriter {
 
     /// The ranges of block numbers that this writer is responsible for.
     /// Organized as a stack, where the top range is the one being written.
-    ranges_to_write: Vec<(u64, u64)>,
+    ranges_to_write: Vec<RangeInclusive<BlockNum>>,
 
     current_file: Option<ParquetFileWriter>,
     current_range: Option<BlockRange>,
@@ -138,20 +139,24 @@ impl RawTableWriter {
         table: Arc<PhysicalTable>,
         opts: ParquetWriterProperties,
         partition_size: u64,
-        block_ranges: MultiRange,
+        synced_range: Option<RangeInclusive<BlockNum>>,
         start: BlockNum,
         end: BlockNum,
     ) -> Result<Self, BoxError> {
         let ranges_to_write = {
-            // Limit maximum range size to 1_000_000 blocks.
-            let mut ranges = block_ranges
-                .complement(start, end)
-                .split_with_max(MAX_PARTITION_BLOCK_RANGE);
+            let missing_ranges = synced_range
+                .map(|synced| missing_block_ranges(synced, start..=end))
+                .unwrap_or(vec![start..=end]);
+            let mut ranges = limit_ranges(missing_ranges, MAX_PARTITION_BLOCK_RANGE);
             ranges.reverse();
             ranges
         };
         let current_file = match ranges_to_write.last() {
-            Some((start, _)) => Some(ParquetFileWriter::new(table.clone(), opts.clone(), *start)?),
+            Some(range) => Some(ParquetFileWriter::new(
+                table.clone(),
+                opts.clone(),
+                *range.start(),
+            )?),
             None => None,
         };
         Ok(Self {
@@ -177,16 +182,16 @@ impl RawTableWriter {
         if self
             .ranges_to_write
             .last()
-            .is_some_and(|(_, end)| *end < block_num)
+            .is_some_and(|r| *r.end() < block_num)
         {
             parquet_meta = Some(self.close_current_file().await?);
             assert!(self.current_file.is_none());
             self.ranges_to_write.pop();
             self.current_file = match self.ranges_to_write.last() {
-                Some((start, _)) => Some(ParquetFileWriter::new(
+                Some(range) => Some(ParquetFileWriter::new(
                     self.table.clone(),
                     self.opts.clone(),
-                    *start,
+                    *range.start(),
                 )?),
                 None => None,
             };
@@ -200,7 +205,7 @@ impl RawTableWriter {
         }
 
         // If the block stream has not yet reached the current range, then skip this block.
-        if block_num < self.ranges_to_write.last().unwrap().0 {
+        if block_num < *self.ranges_to_write.last().unwrap().start() {
             return Ok(parquet_meta);
         }
 
@@ -221,7 +226,8 @@ impl RawTableWriter {
             parquet_meta = Some(self.close_current_file().await?);
 
             // The current range was partially written, so we need to split it.
-            self.ranges_to_write.last_mut().unwrap().0 = block_num;
+            let range = self.ranges_to_write.pop().unwrap();
+            self.ranges_to_write.push(block_num..=*range.end());
             self.current_file = Some(ParquetFileWriter::new(
                 self.table.clone(),
                 self.opts.clone(),
@@ -334,5 +340,46 @@ impl ParquetFileWriter {
     // size of row groups flushed to storage + encoded (but uncompressed) size of the in progress row group
     pub fn bytes_written(&self) -> usize {
         self.writer.bytes_written() + self.writer.in_progress_size()
+    }
+}
+
+fn limit_ranges(
+    mut ranges: Vec<RangeInclusive<BlockNum>>,
+    max_len: u64,
+) -> Vec<RangeInclusive<BlockNum>> {
+    assert!(max_len > 0);
+    let mut index = 0;
+    while index < ranges.len() {
+        let (start, end) = ranges[index].clone().into_inner();
+        assert!(start <= end);
+        let len = (end - start) + 1;
+        if len > max_len {
+            let new_end = start + max_len - 1;
+            ranges.insert(index, start..=new_end);
+            ranges[index + 1] = (new_end + 1)..=end;
+        }
+        index += 1;
+    }
+    ranges
+}
+
+#[cfg(test)]
+mod test {
+    #[test]
+    fn limit_ranges() {
+        // shorter than max_len
+        assert_eq!(super::limit_ranges(vec![1..=5], 10), vec![1..=5]);
+        // exactly equal to max_len
+        assert_eq!(super::limit_ranges(vec![1..=5], 5), vec![1..=5]);
+        // needs to split one range
+        assert_eq!(
+            super::limit_ranges(vec![1..=10], 4),
+            vec![1..=4, 5..=8, 9..=10]
+        );
+        // multiple ranges with only one needing split
+        assert_eq!(
+            super::limit_ranges(vec![1..=10, 15..=18], 4),
+            vec![1..=4, 5..=8, 9..=10, 15..=18]
+        );
     }
 }

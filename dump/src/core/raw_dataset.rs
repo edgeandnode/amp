@@ -81,19 +81,23 @@
 
 use std::{
     collections::BTreeMap,
+    ops::RangeInclusive,
     sync::Arc,
     time::{Duration, Instant},
 };
 
 use common::{
-    BlockNum, BlockStreamer, BoxError, multirange::MultiRange, query_context::QueryContext,
+    BlockNum, BlockStreamer, BoxError, block_range_intersection, query_context::QueryContext,
 };
 use futures::TryStreamExt as _;
 use metadata_db::MetadataDb;
 use tracing::instrument;
 
 use super::{Ctx, block_ranges, tasks::FailFastJoinSet};
-use crate::parquet_writer::{ParquetWriterProperties, RawDatasetWriter};
+use crate::{
+    missing_block_ranges,
+    parquet_writer::{ParquetWriterProperties, RawDatasetWriter},
+};
 
 /// Dumps a raw dataset by extracting blockchain data from specified block ranges
 /// and writing it to partitioned Parquet files.
@@ -106,7 +110,7 @@ pub async fn dump(
     n_jobs: u16,
     query_ctx: Arc<QueryContext>,
     dataset_name: &str,
-    block_ranges_by_table: BTreeMap<String, MultiRange>,
+    synced_ranges_by_table: BTreeMap<String, Option<RangeInclusive<BlockNum>>>,
     partition_size: u64,
     parquet_opts: &ParquetWriterProperties,
     (start, end): (i64, Option<i64>),
@@ -123,37 +127,50 @@ pub async fn dump(
 
     // Use the intersection of the block ranges for all tables, only considering ranges scanned for
     // all tables.
-    let block_ranges = {
-        let mut block_ranges = block_ranges_by_table.clone().into_values();
-        let first = block_ranges.next().ok_or("no tables")?;
-
-        block_ranges.fold(first, |acc, r| acc.intersection(&r))
+    let synced_range = {
+        let mut synced: Option<RangeInclusive<BlockNum>> = None;
+        for range in synced_ranges_by_table.values() {
+            synced = match (synced, range.clone()) {
+                (None, r) | (r, None) => r,
+                (Some(a), Some(b)) => block_range_intersection(a, b),
+            };
+        }
+        synced
     };
 
     // Find the ranges of blocks that have not been scanned yet for at least one table.
-    let ranges = block_ranges.complement(start, end);
-    tracing::info!("dumping dataset {dataset_name} for ranges {ranges}");
+    let ranges = synced_range
+        .map(|synced| missing_block_ranges(synced, start..=end))
+        .unwrap_or(vec![start..=end]);
+    tracing::info!(
+        "dumping dataset {dataset_name} for ranges {}",
+        ranges
+            .iter()
+            .map(|r| format!("[{}-{}]", r.start(), r.end()))
+            .collect::<Vec<String>>()
+            .join(", ")
+    );
 
-    if ranges.total_len() == 0 {
+    if ranges.is_empty() {
         tracing::info!("no blocks to dump for {dataset_name}");
         return Ok(());
     }
 
     // Split them across the target number of jobs as to balance the number of blocks per job.
-    let multiranges = ranges.split_and_partition(n_jobs as u64, 2000);
+    let ranges = split_and_partition(ranges, n_jobs as u64, 2000);
 
-    let jobs = multiranges
+    let jobs = ranges
         .into_iter()
         .enumerate()
-        .map(|(i, multirange)| DumpPartition {
+        .map(|(i, ranges)| DumpPartition {
             query_ctx: query_ctx.clone(),
             metadata_db: ctx.metadata_db.clone(),
             block_streamer: client.clone(),
-            multirange,
+            ranges,
             id: i as u32,
             partition_size,
             parquet_opts: parquet_opts.clone(),
-            block_ranges_by_table: block_ranges_by_table.clone(),
+            synced_ranges_by_table: synced_ranges_by_table.clone(),
         });
 
     // Spawn the jobs, starting them with a 1 second delay between each.
@@ -175,6 +192,56 @@ pub async fn dump(
     Ok(())
 }
 
+/// Splits block ranges into at most `n` partitions where each partition is as equal in total
+/// length as possible. If a range exceeds the target partition size, it is split across
+/// partitions. `min_partition_blocks` should be used to prevent partitions from being too small,
+/// though the last partition may still be smaller than that.
+fn split_and_partition(
+    mut ranges: Vec<RangeInclusive<BlockNum>>,
+    n: u64,
+    min_partition_blocks: u64,
+) -> Vec<Vec<RangeInclusive<BlockNum>>> {
+    if ranges.is_empty() {
+        return vec![];
+    }
+
+    let range_blocks = |r: &RangeInclusive<BlockNum>| -> u64 { (*r.end() - *r.start()) + 1 };
+    let total_blocks =
+        |ranges: &[RangeInclusive<BlockNum>]| -> u64 { ranges.iter().map(range_blocks).sum() };
+    let target_partition_blocks = total_blocks(&ranges).div_ceil(n).max(min_partition_blocks);
+    let mut partitions: Vec<Vec<RangeInclusive<BlockNum>>> = Default::default();
+    let mut current_partition: Vec<RangeInclusive<BlockNum>> = Default::default();
+    let mut capacity = target_partition_blocks;
+    while !ranges.is_empty() {
+        let len = range_blocks(&ranges[0]);
+        if len > capacity {
+            let (start, end) = ranges[0].clone().into_inner();
+            let new_end = (start + capacity) - 1;
+            ranges[0] = (new_end + 1)..=end;
+            current_partition.push(start..=new_end);
+            capacity = 0;
+        } else {
+            current_partition.push(ranges.remove(0));
+            capacity -= len;
+        }
+        if capacity == 0 {
+            capacity = target_partition_blocks;
+            partitions.push(current_partition);
+            current_partition = Default::default();
+        }
+    }
+    assert!(
+        partitions
+            .iter()
+            .all(|p| total_blocks(p) >= min_partition_blocks)
+    );
+    if !current_partition.is_empty() {
+        partitions.push(current_partition);
+    }
+    assert!(partitions.len() <= n as usize);
+    partitions
+}
+
 /// A partition of a raw dataset dump job that processes a subset of block ranges.
 ///
 /// Each partition operates independently and processes its assigned block ranges sequentially.
@@ -194,7 +261,7 @@ struct DumpPartition<S: BlockStreamer> {
     /// The query context
     query_ctx: Arc<QueryContext>,
     /// The block ranges to scan
-    multirange: MultiRange,
+    ranges: Vec<RangeInclusive<BlockNum>>,
     /// The Parquet writer properties
     parquet_opts: ParquetWriterProperties,
     /// The target size of each table partition file in bytes.
@@ -204,8 +271,8 @@ struct DumpPartition<S: BlockStreamer> {
     /// Note that different tables may have a different number of partitions for a same block range.
     /// Lighter tables will have less parts than heavier tables.
     partition_size: u64,
-    /// The block ranges by table
-    block_ranges_by_table: BTreeMap<String, MultiRange>,
+    /// The synced block ranges by table
+    synced_ranges_by_table: BTreeMap<String, Option<RangeInclusive<BlockNum>>>,
     /// The partition ID
     id: u32,
 }
@@ -215,26 +282,29 @@ impl<S: BlockStreamer> DumpPartition<S> {
         tracing::info!(
             "job partition #{} ranges to scan: {}",
             self.id,
-            self.multirange
+            self.ranges
+                .iter()
+                .map(|r| format!("[{}-{}]", r.start(), r.end()))
+                .collect::<Vec<String>>()
+                .join(", "),
         );
 
         // The ranges are run sequentially by design, as parallelism is controlled by the number of jobs.
-        for (range_start, range_end) in &self.multirange.ranges {
+        for range in &self.ranges {
             tracing::info!(
-                "job partition #{} starting scan for range [{}, {}]",
+                "job partition #{} starting scan for range [{}-{}]",
                 self.id,
-                range_start,
-                range_end
+                range.start(),
+                range.end(),
             );
             let start_time = Instant::now();
 
-            self.run_range(*range_start, *range_end).await?;
+            self.run_range(*range.start(), *range.end()).await?;
 
             tracing::info!(
-                "job partition #{} finished scan for range [{}, {}] in {} minutes",
+                "job partition #{} finished scan for range {:?} in {} minutes",
                 self.id,
-                range_start,
-                range_end,
+                range,
                 start_time.elapsed().as_secs() / 60
             );
         }
@@ -254,7 +324,7 @@ impl<S: BlockStreamer> DumpPartition<S> {
             start,
             end,
             self.partition_size,
-            self.block_ranges_by_table.clone(),
+            self.synced_ranges_by_table.clone(),
         )?;
 
         let mut stream = std::pin::pin!(stream);
@@ -268,5 +338,48 @@ impl<S: BlockStreamer> DumpPartition<S> {
         writer.close().await?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    #[test]
+    fn split_and_partition() {
+        assert_eq!(
+            super::split_and_partition(vec![0..=10], 2, 4),
+            vec![vec![0..=5], vec![6..=10]],
+        );
+        assert_eq!(
+            super::split_and_partition(vec![1..=5, 10..=15, 20..=25], 1, 5),
+            vec![vec![1..=5, 10..=15, 20..=25]],
+        );
+        assert_eq!(
+            super::split_and_partition(vec![1..=10, 11..=20, 21..=30], 3, 5),
+            vec![vec![1..=10], vec![11..=20], vec![21..=30]],
+        );
+        assert_eq!(
+            super::split_and_partition(vec![1..=30], 3, 5),
+            vec![vec![1..=10], vec![11..=20], vec![21..=30]],
+        );
+        assert_eq!(
+            super::split_and_partition(vec![0..=9, 20..=29], 4, 5),
+            vec![vec![0..=4], vec![5..=9], vec![20..=24], vec![25..=29]],
+        );
+        assert_eq!(
+            super::split_and_partition(vec![1..=5, 6..=10, 11..=15, 16..=20], 4, 10),
+            vec![vec![1..=5, 6..=10], vec![11..=15, 16..=20]],
+        );
+        assert_eq!(
+            super::split_and_partition(vec![1..=100], 2, 10),
+            vec![vec![1..=50], vec![51..=100]],
+        );
+        assert_eq!(
+            super::split_and_partition(vec![1..=5, 11..=20], 5, 10),
+            vec![vec![1..=5, 11..=15], vec![16..=20]],
+        );
+        assert_eq!(
+            super::split_and_partition(vec![1..=100], 4, 10),
+            vec![[1..=25], [26..=50], [51..=75], [76..=100]],
+        );
     }
 }
