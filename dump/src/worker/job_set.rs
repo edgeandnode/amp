@@ -31,7 +31,7 @@ impl JobSet {
     /// Spawn a new job and register it in the set
     pub fn spawn(&mut self, job_id: JobId, job: Job) {
         if self.job_id_to_handle.contains_key(&job_id) {
-            tracing::warn!(%job_id, "Job already spawned, skipping.");
+            tracing::debug!(%job_id, "Job already spawned, skipping.");
             return;
         }
 
@@ -52,7 +52,7 @@ impl JobSet {
         let handle = match self.job_id_to_handle.get(job_id) {
             Some(handle) => handle,
             None => {
-                tracing::warn!(%job_id, "Job not found, skipping.");
+                tracing::debug!(%job_id, "Job not found, skipping.");
                 return;
             }
         };
