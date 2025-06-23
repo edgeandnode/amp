@@ -400,6 +400,9 @@ impl PhysicalTable {
         self.stream_file_metadata().try_collect().await
     }
 
+    /// Return the block range to use for query execution over this table. This is defined as the
+    /// contiguous range of block numbers starting from the lowest start block. Ok(None) is
+    /// returned if no block range has been synced.
     pub async fn synced_range(&self) -> Result<Option<RangeInclusive<BlockNum>>, BoxError> {
         let ranges = self.multi_range().await?;
         Ok(ranges.first().map(|(start, end)| start..=end))
