@@ -13,13 +13,8 @@ use common::{
     query_context::{parse_sql, prepend_special_block_num_field, QueryEnv},
     BlockNum, BoxError, Dataset, QueryContext, Table, SPECIAL_BLOCK_NUM,
 };
-use datafusion::{
-    execution::SendableRecordBatchStream,
-    logical_expr::LogicalPlan,
-    sql::{parser, TableReference},
-};
+use datafusion::{execution::SendableRecordBatchStream, logical_expr::LogicalPlan, sql::parser};
 use futures::StreamExt as _;
-use metadata_db::LocationId;
 use object_store::ObjectMeta;
 use serde::Deserialize;
 use tracing::instrument;
@@ -117,21 +112,6 @@ pub(super) async fn dataset(
 }
 
 // Get synced ranges for table
-async fn get_ranges_for_table(
-    table: &TableReference,
-    ctx: &QueryContext,
-) -> Result<MultiRange, BoxError> {
-    let Some(table) = ctx.get_table(table) else {
-        return Err(format!(
-            "table {}.{} not found",
-            table.schema().unwrap(),
-            table.table()
-        )
-        .into());
-    };
-    table.multi_range().await
-}
-
 /// This will:
 /// - Validate that dependencies have synced the required block range.
 /// - Inject block range constraints into the plan.
@@ -197,70 +177,3 @@ pub async fn execute_query_for_range(
 }
 
 // All physical tables locations that have been queried
-#[instrument(skip_all, err)]
-pub async fn queried_physical_tables(
-    plan: &LogicalPlan,
-    qc: &QueryContext,
-) -> Result<Vec<LocationId>, BoxError> {
-    let tables = extract_table_references_from_plan(&plan)?;
-
-    let locations: Vec<_> = tables
-        .into_iter()
-        .filter_map(|t| qc.get_table(&t).map(|t| t.location_id()))
-        .collect();
-
-    Ok(locations)
-}
-
-/// The blocks that have been synced for all tables in the plan.
-#[instrument(skip_all, err)]
-pub async fn synced_blocks_for_plan(
-    plan: &LogicalPlan,
-    ctx: &QueryContext,
-) -> Result<MultiRange, BoxError> {
-    let tables = extract_table_references_from_plan(&plan)?;
-
-    let mut ranges = MultiRange::empty();
-
-    if !tables.is_empty() {
-        let mut tables = tables.into_iter();
-        ranges = get_ranges_for_table(&tables.next().unwrap(), ctx).await?;
-        for table in tables {
-            let other_ranges = get_ranges_for_table(&table, ctx).await?;
-            ranges = ranges.intersection(&other_ranges);
-        }
-    }
-
-    Ok(ranges)
-}
-
-/// The most recent block that has been synced for all tables in the plan.
-#[instrument(skip_all, err)]
-pub async fn max_end_block(
-    plan: &LogicalPlan,
-    ctx: &Arc<QueryContext>,
-) -> Result<Option<BlockNum>, BoxError> {
-    let tables = extract_table_references_from_plan(&plan)?;
-
-    if tables.is_empty() {
-        return Ok(None);
-    }
-
-    let synced_block_for_table = move |ctx: Arc<QueryContext>, table: TableReference| async move {
-        let table = ctx.get_table(&table).expect("table not found");
-        let ranges = table.multi_range().await?;
-        // Take the end block of the earliest contiguous range as the "synced block"
-        Ok::<_, BoxError>(ranges.first().map(|r| r.1))
-    };
-
-    let mut tables = tables.into_iter();
-
-    // Unwrap: `tables` is not empty.
-    let mut end = synced_block_for_table(ctx.clone(), tables.next().unwrap()).await?;
-    for table in tables {
-        let next_end = synced_block_for_table(ctx.clone(), table).await?;
-        end = end.min(next_end);
-    }
-
-    Ok(end)
-}

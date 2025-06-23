@@ -28,7 +28,7 @@ use datafusion_proto::{
 };
 use futures::{FutureExt as _, TryStreamExt};
 use js_runtime::isolate_pool::IsolatePool;
-use metadata_db::TableId;
+use metadata_db::{LocationId, TableId};
 use thiserror::Error;
 use tracing::{debug, instrument};
 
@@ -38,8 +38,10 @@ use crate::{
     evm::udfs::{
         EvmDecodeLog, EvmDecodeParams, EvmDecodeType, EvmEncodeParams, EvmEncodeType, EvmTopic,
     },
+    multirange::MultiRange,
+    plan_visitors::extract_table_references_from_plan,
     stream_helpers::is_streaming,
-    BoxError, LogicalCatalog, ResolvedTable, SPECIAL_BLOCK_NUM,
+    BlockNum, BoxError, LogicalCatalog, ResolvedTable, SPECIAL_BLOCK_NUM,
 };
 
 #[derive(Error, Debug)]
@@ -341,6 +343,86 @@ impl QueryContext {
             .iter()
             .find(|table| table.table_id() == table_id)
             .cloned()
+    }
+
+    /// Get all physical table locations that have been queried by the given plan.
+    #[instrument(skip_all, err)]
+    pub async fn queried_physical_tables(
+        &self,
+        plan: &LogicalPlan,
+    ) -> Result<Vec<LocationId>, BoxError> {
+        let tables = extract_table_references_from_plan(&plan)?;
+
+        let locations: Vec<_> = tables
+            .into_iter()
+            .filter_map(|t| self.get_table(&t).map(|t| t.location_id()))
+            .collect();
+
+        Ok(locations)
+    }
+
+    /// Get the blocks that have been synced for all tables in the plan.
+    #[instrument(skip_all, err)]
+    pub async fn synced_blocks_for_plan(&self, plan: &LogicalPlan) -> Result<MultiRange, BoxError> {
+        let tables = extract_table_references_from_plan(&plan)?;
+
+        let mut ranges = MultiRange::empty();
+
+        if !tables.is_empty() {
+            let mut tables = tables.into_iter();
+            ranges = self.get_ranges_for_table(&tables.next().unwrap()).await?;
+            for table in tables {
+                let other_ranges = self.get_ranges_for_table(&table).await?;
+                ranges = ranges.intersection(&other_ranges);
+            }
+        }
+
+        Ok(ranges)
+    }
+
+    /// Get the most recent block that has been synced for all tables in the plan.
+    #[instrument(skip_all, err)]
+    pub async fn max_end_block(&self, plan: &LogicalPlan) -> Result<Option<BlockNum>, BoxError> {
+        let tables = extract_table_references_from_plan(&plan)?;
+
+        if tables.is_empty() {
+            return Ok(None);
+        }
+
+        let mut tables = tables.into_iter();
+
+        // Unwrap: `tables` is not empty.
+        let mut end = self.synced_block_for_table(tables.next().unwrap()).await?;
+        for table in tables {
+            let next_end = self.synced_block_for_table(table).await?;
+            end = end.min(next_end);
+        }
+
+        Ok(end)
+    }
+
+    /// Helper method to get ranges for a specific table.
+    async fn get_ranges_for_table(&self, table: &TableReference) -> Result<MultiRange, BoxError> {
+        let Some(table) = self.get_table(table) else {
+            return Err(format!(
+                "table {}.{} not found",
+                table.schema().unwrap(),
+                table.table()
+            )
+            .into());
+        };
+        table.multi_range().await
+    }
+
+    /// Helper method to get the synced block for a specific table.
+    async fn synced_block_for_table(
+        &self,
+        table: TableReference,
+    ) -> Result<Option<BlockNum>, BoxError> {
+        let table = self.get_table(&table).expect("table not found");
+        let ranges = table.multi_range().await?;
+        // Take the end block of the earliest contiguous range as the "synced block"
+        Ok(ranges.first().map(|r| r.1))
     }
 }
 
