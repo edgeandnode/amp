@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{ops::RangeInclusive, sync::Arc};
 
 use arrow::{array::RecordBatch, compute::concat_batches};
 use async_udf::physical_optimizer::AsyncFuncRule;
@@ -33,12 +33,11 @@ use thiserror::Error;
 use tracing::{debug, instrument};
 
 use crate::{
-    arrow, attestation,
+    arrow, attestation, block_range_intersection,
     catalog::physical::{Catalog, PhysicalTable},
     evm::udfs::{
         EvmDecodeLog, EvmDecodeParams, EvmDecodeType, EvmEncodeParams, EvmEncodeType, EvmTopic,
     },
-    multirange::MultiRange,
     plan_visitors::extract_table_references_from_plan,
     stream_helpers::is_streaming,
     BlockNum, BoxError, LogicalCatalog, ResolvedTable, SPECIAL_BLOCK_NUM,
@@ -363,46 +362,32 @@ impl QueryContext {
 
     /// Get the blocks that have been synced for all tables in the plan.
     #[instrument(skip_all, err)]
-    pub async fn synced_blocks_for_plan(&self, plan: &LogicalPlan) -> Result<MultiRange, BoxError> {
-        let tables = extract_table_references_from_plan(&plan)?;
-
-        let mut ranges = MultiRange::empty();
-
-        if !tables.is_empty() {
-            let mut tables = tables.into_iter();
-            ranges = self.get_ranges_for_table(&tables.next().unwrap()).await?;
-            for table in tables {
-                let other_ranges = self.get_ranges_for_table(&table).await?;
-                ranges = ranges.intersection(&other_ranges);
-            }
+    pub async fn synced_blocks_for_plan(
+        &self,
+        plan: &LogicalPlan,
+    ) -> Result<Option<RangeInclusive<BlockNum>>, BoxError> {
+        let mut range: Option<RangeInclusive<BlockNum>> = None;
+        for table in extract_table_references_from_plan(&plan)? {
+            range = match (range, self.get_synced_range_for_table(&table).await?) {
+                (None, range) | (range, None) => range,
+                (Some(a), Some(b)) => block_range_intersection(a, b),
+            };
         }
-
-        Ok(ranges)
+        Ok(range)
     }
 
     /// Get the most recent block that has been synced for all tables in the plan.
     #[instrument(skip_all, err)]
     pub async fn max_end_block(&self, plan: &LogicalPlan) -> Result<Option<BlockNum>, BoxError> {
-        let tables = extract_table_references_from_plan(&plan)?;
-
-        if tables.is_empty() {
-            return Ok(None);
-        }
-
-        let mut tables = tables.into_iter();
-
-        // Unwrap: `tables` is not empty.
-        let mut end = self.synced_block_for_table(tables.next().unwrap()).await?;
-        for table in tables {
-            let next_end = self.synced_block_for_table(table).await?;
-            end = end.min(next_end);
-        }
-
-        Ok(end)
+        let range = self.synced_blocks_for_plan(plan).await?;
+        Ok(range.map(|r| *r.end()))
     }
 
     /// Helper method to get ranges for a specific table.
-    async fn get_ranges_for_table(&self, table: &TableReference) -> Result<MultiRange, BoxError> {
+    async fn get_synced_range_for_table(
+        &self,
+        table: &TableReference,
+    ) -> Result<Option<RangeInclusive<BlockNum>>, BoxError> {
         let Some(table) = self.get_table(table) else {
             return Err(format!(
                 "table {}.{} not found",
@@ -411,18 +396,7 @@ impl QueryContext {
             )
             .into());
         };
-        table.multi_range().await
-    }
-
-    /// Helper method to get the synced block for a specific table.
-    async fn synced_block_for_table(
-        &self,
-        table: TableReference,
-    ) -> Result<Option<BlockNum>, BoxError> {
-        let table = self.get_table(&table).expect("table not found");
-        let ranges = table.multi_range().await?;
-        // Take the end block of the earliest contiguous range as the "synced block"
-        Ok(ranges.first().map(|r| r.1))
+        table.synced_range().await
     }
 }
 

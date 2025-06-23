@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc};
 
 use datafusion::{
     arrow::datatypes::SchemaRef,
@@ -37,7 +37,7 @@ use crate::{
     },
     multirange::MultiRange,
     store::{infer_object_store, Store},
-    BoxError, Dataset, ResolvedTable,
+    BlockNum, BoxError, Dataset, ResolvedTable,
 };
 
 #[derive(Debug, Clone)]
@@ -398,6 +398,11 @@ impl PhysicalTable {
 
     pub async fn files(&self) -> Result<Vec<FileMetadata>, BoxError> {
         self.stream_file_metadata().try_collect().await
+    }
+
+    pub async fn synced_range(&self) -> Result<Option<RangeInclusive<BlockNum>>, BoxError> {
+        let ranges = self.multi_range().await?;
+        Ok(ranges.first().map(|(start, end)| start..=end))
     }
 
     pub async fn multi_range(&self) -> Result<MultiRange, BoxError> {
