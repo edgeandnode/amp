@@ -39,6 +39,9 @@ pub async fn dump_tables(
     }
 
     if kinds.iter().any(|k| k.is_raw()) {
+        if !kinds.iter().all(|k| k.is_raw()) {
+            return Err("Cannot mix raw and non-raw datasets in a same dump".into());
+        }
         dump_raw_tables(ctx, tables, n_jobs, partition_size, parquet_opts, range).await
     } else {
         dump_user_tables(
@@ -140,7 +143,7 @@ pub async fn dump_user_tables(
     range: (i64, Option<i64>),
 ) -> Result<(), BoxError> {
     if n_jobs > 1 {
-        tracing::info!("n_jobs > 1 has no effect for SQL datasets");
+        tracing::warn!("n_jobs > 1 has no effect for SQL datasets");
     }
 
     let env = ctx.config.make_query_env()?;

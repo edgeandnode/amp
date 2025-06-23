@@ -105,7 +105,10 @@ impl DatasetKind {
     }
 
     pub fn is_raw(&self) -> bool {
-        matches!(self, Self::EvmRpc | Self::Firehose | Self::Substreams)
+        match self {
+            Self::EvmRpc | Self::Firehose | Self::Substreams => true,
+            Self::Sql | Self::Manifest => false,
+        }
     }
 }
 
