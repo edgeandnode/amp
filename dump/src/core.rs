@@ -13,6 +13,7 @@ use common::{
     BoxError,
 };
 use dataset_store::{DatasetKind, DatasetStore};
+use futures::TryStreamExt as _;
 use metadata_db::{LocationId, MetadataDb};
 use object_store::ObjectMeta;
 
@@ -222,19 +223,23 @@ async fn consistency_check(table: &PhysicalTable) -> Result<(), ConsistencyCheck
         .map_err(|err| ConsistencyCheckError::CorruptedTable(location_id, err))?;
 
     let registered_files = table
-        .file_names()
+        .stream_file_metadata()
+        .map_ok(|m| m.file_name)
+        .try_collect::<BTreeSet<String>>()
         .await
-        .map(BTreeSet::from_iter)
         .map_err(|err| ConsistencyCheckError::CorruptedTable(location_id, err))?;
 
     let store = table.object_store();
     let path = table.path();
 
-    // Collect all stored files whose filename matches `is_dump_file`.
-    let stored_files: BTreeMap<String, ObjectMeta> = table
-        .parquet_files()
+    let stored_files: BTreeMap<String, ObjectMeta> = store
+        .list(Some(table.path()))
+        .try_collect::<Vec<ObjectMeta>>()
         .await
-        .map_err(|err| ConsistencyCheckError::CorruptedTable(location_id, err))?;
+        .map_err(|err| ConsistencyCheckError::CorruptedTable(location_id, err.into()))?
+        .into_iter()
+        .filter_map(|object| Some((object.location.filename()?.to_string(), object)))
+        .collect();
 
     for (filename, object_meta) in &stored_files {
         if !registered_files.contains(filename) {
