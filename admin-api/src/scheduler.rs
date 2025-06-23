@@ -38,8 +38,6 @@ impl Scheduler {
             return Err("no available workers".into());
         };
 
-        let dataset_name = dataset.name.clone();
-
         let mut locations = Vec::new();
         let metadata_db = Arc::new(self.metadata_db.clone());
         for table in Arc::new(dataset).resolved_tables() {
@@ -55,10 +53,7 @@ impl Scheduler {
             locations.push(physical_table.location_id());
         }
 
-        let job_desc = serde_json::to_string(&JobDesc::DumpDataset {
-            dataset: dataset_name,
-            end_block,
-        })?;
+        let job_desc = serde_json::to_string(&JobDesc::Dump { end_block })?;
 
         let job_id = self
             .metadata_db

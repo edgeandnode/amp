@@ -56,6 +56,19 @@ pub struct FileMetadataRow {
     pub metadata: serde_json::Value,
 }
 
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct Location {
+    /// location.id
+    pub id: LocationId,
+    /// location.dataset
+    pub dataset: String,
+    /// location.table
+    pub table: String,
+    /// location.url
+    #[sqlx(try_from = "&'a str")]
+    pub url: Url,
+}
+
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Error connecting to metadata db: {0}")]
@@ -507,27 +520,19 @@ impl MetadataDb {
     }
 
     /// Returns tuples of `(location_id, table_name, url)`.
-    pub async fn output_locations(
-        &self,
-        id: &JobId,
-    ) -> Result<Vec<(LocationId, String, Url)>, Error> {
+    pub async fn output_locations(&self, id: &JobId) -> Result<Vec<Location>, Error> {
         let query = indoc::indoc! {r#"
-            SELECT id, tbl, url
+            SELECT id, dataset, tbl, url
             FROM locations
             WHERE writer = $1
         "#};
 
-        let tuples: Vec<(LocationId, String, String)> = sqlx::query_as(query)
+        let tuples = sqlx::query_as(query)
             .bind(id)
             .fetch_all(&*self.pool)
             .await?;
 
-        let urls = tuples
-            .into_iter()
-            .map(|(id, tbl, url)| Ok((id, tbl, Url::parse(&url)?)))
-            .collect::<Result<Vec<_>, Error>>()?;
-
-        Ok(urls)
+        Ok(tuples)
     }
 
     pub fn stream_file_metadata(

@@ -84,7 +84,7 @@ pub enum Error {
     Unknown(BoxError),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum DatasetKind {
     EvmRpc,
     Firehose,
@@ -101,6 +101,13 @@ impl DatasetKind {
             Self::Substreams => substreams_datasets::DATASET_KIND,
             Self::Sql => sql_datasets::DATASET_KIND,
             Self::Manifest => common::manifest::DATASET_KIND,
+        }
+    }
+
+    pub fn is_raw(&self) -> bool {
+        match self {
+            Self::EvmRpc | Self::Firehose | Self::Substreams => true,
+            Self::Sql | Self::Manifest => false,
         }
     }
 }

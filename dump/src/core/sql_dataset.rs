@@ -114,15 +114,11 @@
 //! - **Incremental Updates**: Avoids reprocessing already-computed data by maintaining
 //!   precise tracking of processed block ranges per table.
 
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    sync::Arc,
-};
+use std::{collections::BTreeSet, sync::Arc};
 
 use common::{
     catalog::physical::PhysicalTable,
-    metadata::range::BlockRange,
-    multirange::MultiRange,
+    metadata::{range::BlockRange, ranges_for_table, ranges_to_multirange},
     query_context::{parse_sql, QueryContext, QueryEnv},
     BlockNum, BoxError, Dataset,
 };
@@ -137,136 +133,143 @@ use tracing::instrument;
 use super::{block_ranges, tasks::FailFastJoinSet, Ctx};
 use crate::parquet_writer::{commit_metadata, ParquetFileWriter, ParquetWriterProperties};
 
-/// Dumps a SQL dataset
+/// Dumps a SQL dataset table
 #[instrument(skip_all, fields(dataset = %dataset.name()), err)]
-pub async fn dump(
+pub async fn dump_table(
     ctx: Ctx,
-    query_ctx: Arc<QueryContext>,
     dataset: SqlDataset,
     env: &QueryEnv,
-    block_ranges_by_table: BTreeMap<String, MultiRange>,
+    table: Arc<PhysicalTable>,
     parquet_opts: &ParquetWriterProperties,
     input_batch_size_blocks: u64,
     (start, end): (i64, Option<i64>),
 ) -> Result<(), BoxError> {
     let dataset_name = dataset.dataset.name.as_str();
+    let table_name = table.table_name().to_string();
+    let query = dataset
+        .queries
+        .get(&table_name)
+        .ok_or_else(|| {
+            format!(
+                "table `{}` not found in dataset `{}`",
+                table_name, dataset_name
+            )
+        })?
+        .clone();
 
     let mut join_set = FailFastJoinSet::<Result<(), BoxError>>::new();
-    for (table, query) in dataset.queries {
-        let dataset_store = ctx.dataset_store.clone();
-        let data_store = ctx.data_store.clone();
-        let query_ctx = query_ctx.clone();
-        let env = env.clone();
-        let block_ranges_by_table = block_ranges_by_table.clone();
-        let parquet_opts = parquet_opts.clone();
+    let dataset_store = ctx.dataset_store.clone();
+    let data_store = ctx.data_store.clone();
+    let env = env.clone();
+    let parquet_opts = parquet_opts.clone();
 
-        join_set.spawn(async move {
-            let physical_table = {
-                let tables = query_ctx.catalog().tables();
-                tables.iter().find(|t| t.table_name() == table).unwrap()
-            };
+    join_set.spawn(async move {
+        let src_ctx: Arc<QueryContext> = dataset_store
+            .clone()
+            .ctx_for_sql(&query, env.clone())
+            .await?
+            .into();
+        let src_datasets: BTreeSet<&str> = src_ctx
+            .catalog()
+            .tables()
+            .iter()
+            .map(|t| t.dataset().name.as_str())
+            .collect();
 
-            let src_ctx: Arc<QueryContext> = dataset_store
-                .clone()
-                .ctx_for_sql(&query, env.clone())
-                .await?
-                .into();
-            let src_datasets: BTreeSet<&str> = src_ctx
-                .catalog()
-                .tables()
-                .iter()
-                .map(|t| t.dataset().name.as_str())
-                .collect();
-
-            let plan = src_ctx.plan_sql(query.clone()).await?;
-            let is_incr = is_incremental(&plan)?;
-            let (start, end) = match (start, end) {
-                (start, Some(end)) if start >= 0 && end >= 0 => {
-                    (start as BlockNum, end as BlockNum)
-                }
-                _ => {
-                    match max_end_block(&plan, &src_ctx).await? {
-                        Some(max_end_block) => {
-                            block_ranges::resolve_relative(start, end, max_end_block)?
-                        }
-                        None => {
-                            // If the dependencies have synced nothing, we have nothing to do.
-                            tracing::warn!("no blocks to dump for {table}, dependencies are empty");
-                            return Ok::<(), BoxError>(());
-                        }
+        let plan = src_ctx.plan_sql(query.clone()).await?;
+        let is_incr = is_incremental(&plan)?;
+        let (start, end) = match (start, end) {
+            (start, Some(end)) if start >= 0 && end >= 0 => (start as BlockNum, end as BlockNum),
+            _ => {
+                match max_end_block(&plan, &src_ctx).await? {
+                    Some(max_end_block) => {
+                        block_ranges::resolve_relative(start, end, max_end_block)?
                     }
-                }
-            };
-
-            if is_incr {
-                let ranges_to_scan = block_ranges_by_table[&table].complement(start, end);
-                for (start, end) in ranges_to_scan.ranges {
-                    let mut start = start;
-                    while start <= end {
-                        let batch_end = std::cmp::min(start + input_batch_size_blocks - 1, end);
-                        tracing::info!(
-                            "dumping {} between blocks {start} and {batch_end}",
-                            physical_table.table_ref()
+                    None => {
+                        // If the dependencies have synced nothing, we have nothing to do.
+                        tracing::warn!(
+                            "no blocks to dump for {table_name}, dependencies are empty"
                         );
-
-                        let range = resolve_block_range(
-                            env.clone(),
-                            &dataset_store,
-                            &src_datasets,
-                            physical_table.network().to_string(),
-                            start,
-                            batch_end,
-                        )
-                        .await?;
-                        dump_sql_query(
-                            &dataset_store,
-                            &query,
-                            &env,
-                            range,
-                            physical_table.clone(),
-                            &parquet_opts,
-                        )
-                        .await?;
-                        start = batch_end + 1;
+                        return Ok::<(), BoxError>(());
                     }
                 }
-            } else {
-                let physical_table: Arc<PhysicalTable> = PhysicalTable::next_revision(
-                    physical_table.table(),
-                    &data_store,
-                    dataset_store.metadata_db.clone(),
-                    false,
-                )
-                .await?
-                .into();
-                tracing::info!(
-                    "dumping entire {} to {}",
-                    physical_table.table_ref(),
-                    physical_table.url()
-                );
-                let range = resolve_block_range(
-                    env.clone(),
-                    &dataset_store,
-                    &src_datasets,
-                    physical_table.network().to_string(),
-                    start,
-                    end,
-                )
-                .await?;
-                dump_sql_query(
-                    &dataset_store,
-                    &query,
-                    &env,
-                    range,
-                    physical_table,
-                    &parquet_opts,
-                )
-                .await?;
             }
+        };
 
-            Ok(())
-        });
-    }
+        if is_incr {
+            let existing_ranges = ranges_to_multirange(
+                ranges_for_table(table.location_id(), &table.metadata_db).await?,
+            )?;
+            tracing::info!(
+                "table `{}` has scanned {} blocks in the ranges: {}",
+                table_name,
+                existing_ranges.total_len(),
+                existing_ranges,
+            );
+            let ranges_to_scan = existing_ranges.complement(start, end);
+            for (start, end) in ranges_to_scan.ranges {
+                let mut start = start;
+                while start <= end {
+                    let batch_end = std::cmp::min(start + input_batch_size_blocks - 1, end);
+                    tracing::info!("dumping {table_name} between blocks {start} and {batch_end}");
+
+                    let range = resolve_block_range(
+                        env.clone(),
+                        &dataset_store,
+                        &src_datasets,
+                        table.network().to_string(),
+                        start,
+                        batch_end,
+                    )
+                    .await?;
+                    dump_sql_query(
+                        &dataset_store,
+                        &query,
+                        &env,
+                        range,
+                        table.clone(),
+                        &parquet_opts,
+                    )
+                    .await?;
+                    start = batch_end + 1;
+                }
+            }
+        } else {
+            let physical_table: Arc<PhysicalTable> = PhysicalTable::next_revision(
+                table.table(),
+                &data_store,
+                dataset_store.metadata_db.clone(),
+                false,
+            )
+            .await?
+            .into();
+            tracing::info!(
+                "dumping entire {} to {}",
+                physical_table.table_ref(),
+                physical_table.url()
+            );
+            let range = resolve_block_range(
+                env.clone(),
+                &dataset_store,
+                &src_datasets,
+                physical_table.network().to_string(),
+                start,
+                end,
+            )
+            .await?;
+            dump_sql_query(
+                &dataset_store,
+                &query,
+                &env,
+                range,
+                physical_table,
+                &parquet_opts,
+            )
+            .await?;
+        }
+
+        Ok(())
+    });
 
     // Wait for all the jobs to finish, returning an error if any job panics or fails
     if let Err(err) = join_set.try_wait_all().await {
