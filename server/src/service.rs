@@ -17,10 +17,11 @@ use bytes::{BufMut, Bytes, BytesMut};
 use common::{
     arrow::{self, ipc::writer::IpcDataGenerator},
     config::Config,
-    query_context::{
-        forbid_underscore_prefixed_aliases, parse_sql, propagate_block_num,
-        unproject_special_block_num_column, Error as CoreError, QueryContext, QueryEnv,
+    plan_visitors::{
+        forbid_underscore_prefixed_aliases, is_incremental, propagate_block_num,
+        unproject_special_block_num_column,
     },
+    query_context::{parse_sql, Error as CoreError, QueryContext, QueryEnv},
     BlockNum,
 };
 use datafusion::{
@@ -33,7 +34,7 @@ use datafusion::{
     execution::SendableRecordBatchStream,
     logical_expr::LogicalPlan,
 };
-use dataset_store::{sql_datasets::is_incremental, DatasetError, DatasetStore};
+use dataset_store::{DatasetError, DatasetStore};
 use futures::{channel::mpsc, SinkExt, Stream, StreamExt as _, TryStreamExt};
 use metadata_db::MetadataDb;
 use prost::Message as _;
@@ -223,11 +224,10 @@ impl Service {
         // If not streaming or metadata db is not available, execute once
         if !is_streaming {
             let original_schema = plan.schema().clone();
-            let should_transform =
-                should_transform_plan(&plan).map_err(|e| Error::ExecutionError(e))?;
-            forbid_underscore_prefixed_aliases(&plan).map_err(|e| Error::ExecutionError(e))?;
+            let should_transform = should_transform_plan(&plan).map_err(Error::ExecutionError)?;
+            forbid_underscore_prefixed_aliases(&plan).map_err(Error::ExecutionError)?;
             let plan = if should_transform {
-                let plan = propagate_block_num(plan).map_err(|e| Error::ExecutionError(e))?;
+                let plan = propagate_block_num(plan).map_err(Error::ExecutionError)?;
                 let plan = unproject_special_block_num_column(plan, original_schema)
                     .map_err(|e| Error::ExecutionError(e))?;
                 plan
@@ -281,9 +281,7 @@ impl Service {
 
         // async listen
         tokio::spawn(async move {
-            let locations = dataset_store::sql_datasets::queried_physical_tables(&plan, &ctx)
-                .await
-                .unwrap();
+            let locations = ctx.catalog().tables().iter().map(|t| t.location_id());
 
             let mut notifications = Vec::new();
             for location in locations {
