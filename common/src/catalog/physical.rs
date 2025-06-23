@@ -304,9 +304,13 @@ impl PhysicalTable {
 
     /// Truncate this table by deleting all dump files making up the table
     pub async fn truncate(&self) -> Result<(), BoxError> {
-        let files = self.parquet_files().await?;
-        let num_files = files.len();
-        let locations = Box::pin(stream::iter(files.into_values().map(|m| Ok(m.location))));
+        let file_locations: Vec<Path> = self
+            .stream_file_metadata()
+            .map_ok(|m| m.object_meta.location)
+            .try_collect()
+            .await?;
+        let num_files = file_locations.len();
+        let locations = Box::pin(stream::iter(file_locations.into_iter().map(Ok)));
         let deleted = self
             .object_store
             .delete_stream(locations)
@@ -393,21 +397,6 @@ impl PhysicalTable {
         &self.table
     }
 
-    pub async fn file_names(&self) -> Result<Vec<String>, BoxError> {
-        let file_names = self.stream_file_names().try_collect().await?;
-        Ok(file_names)
-    }
-
-    /// Return all parquet files for this table. The result is a map from filename to object
-    /// metadata.
-    pub async fn parquet_files(&self) -> Result<BTreeMap<String, ObjectMeta>, BoxError> {
-        let parquet_files = self
-            .stream_parquet_files()
-            .try_collect::<BTreeMap<String, ObjectMeta>>()
-            .await?;
-        Ok(parquet_files)
-    }
-
     pub async fn ranges(&self) -> Result<Vec<BlockRange>, BoxError> {
         let ranges = self.stream_ranges().try_collect().await?;
         Ok(ranges)
@@ -433,7 +422,7 @@ impl PhysicalTable {
             .map(|row| row?.try_into())
     }
 
-    pub fn stream_ranges<'a>(&'a self) -> impl Stream<Item = Result<BlockRange, BoxError>> + 'a {
+    fn stream_ranges<'a>(&'a self) -> impl Stream<Item = Result<BlockRange, BoxError>> + 'a {
         self.stream_file_metadata().map(|r| {
             let FileMetadata {
                 file_name,
@@ -447,23 +436,6 @@ impl PhysicalTable {
             }
             Ok(ranges.remove(0))
         })
-    }
-
-    pub fn stream_file_names<'a>(&'a self) -> impl Stream<Item = Result<String, BoxError>> + 'a {
-        self.stream_file_metadata()
-            .map_ok(|FileMetadata { file_name, .. }| file_name)
-    }
-
-    pub fn stream_parquet_files<'a>(
-        &'a self,
-    ) -> impl Stream<Item = Result<(String, ObjectMeta), BoxError>> + 'a {
-        self.stream_file_metadata().map_ok(
-            |FileMetadata {
-                 object_meta,
-                 file_name,
-                 ..
-             }| (file_name, object_meta),
-        )
     }
 }
 
