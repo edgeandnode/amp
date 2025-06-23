@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     io::ErrorKind,
     path::PathBuf,
     process::{ExitStatus, Stdio},
@@ -15,7 +16,7 @@ use common::{
     },
     catalog::physical::{Catalog, PhysicalTable},
     config::{Addrs, Config},
-    metadata::block_ranges_by_table,
+    metadata::range::BlockRange,
     query_context::parse_sql,
     BoxError, QueryContext,
 };
@@ -187,7 +188,10 @@ impl SnapshotContext {
     }
 
     async fn check_block_range_eq(&self, blessed: &SnapshotContext) -> Result<(), BoxError> {
-        let mut blessed_block_ranges = block_ranges_by_table(&blessed.ctx).await?;
+        let mut blessed_block_ranges: BTreeMap<String, Vec<BlockRange>> = Default::default();
+        for table in blessed.ctx.catalog().tables() {
+            blessed_block_ranges.insert(table.table_name().to_string(), table.ranges().await?);
+        }
 
         for table in self.ctx.catalog().tables() {
             let table_name = table.table_name();

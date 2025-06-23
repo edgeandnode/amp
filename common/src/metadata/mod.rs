@@ -1,15 +1,8 @@
-use std::collections::BTreeMap;
-
-use futures::{StreamExt as _, TryStreamExt as _};
-use metadata_db::{FileId, FileMetadataRow, LocationId, MetadataDb};
+use metadata_db::{FileId, FileMetadataRow, LocationId};
 use object_store::{path::Path, ObjectMeta};
 use url::Url;
 
-use crate::{
-    metadata::range::BlockRange,
-    multirange::{self, MultiRange},
-    BoxError, QueryContext,
-};
+use crate::BoxError;
 
 pub mod parquet;
 pub mod range;
@@ -60,66 +53,4 @@ impl TryFrom<FileMetadataRow> for FileMetadata {
             parquet_meta,
         })
     }
-}
-
-pub async fn ranges_for_table(
-    location_id: i64,
-    metadata_db: &MetadataDb,
-) -> Result<Vec<BlockRange>, BoxError> {
-    metadata_db
-        .stream_file_metadata(location_id)
-        .map(|res| {
-            let FileMetadata {
-                file_name,
-                parquet_meta: parquet::ParquetMeta { mut ranges, .. },
-                ..
-            } = res?.try_into()?;
-            if ranges.len() != 1 {
-                return Err(format!("expected exactly 1 range in {file_name}").into());
-            }
-            Ok(ranges.remove(0))
-        })
-        .try_collect::<Vec<_>>()
-        .await
-}
-
-pub async fn block_ranges_by_table(
-    ctx: &QueryContext,
-) -> Result<BTreeMap<String, Vec<BlockRange>>, BoxError> {
-    let mut ranges_by_table = BTreeMap::default();
-    for table in ctx.catalog().tables() {
-        let ranges = ranges_for_table(table.location_id(), &table.metadata_db).await?;
-        ranges_by_table.insert(table.table_name().to_string(), ranges);
-    }
-    Ok(ranges_by_table)
-}
-
-pub async fn multiranges_by_table(
-    ctx: &QueryContext,
-) -> Result<BTreeMap<String, MultiRange>, BoxError> {
-    let ranges = block_ranges_by_table(ctx).await?;
-    ranges
-        .into_iter()
-        .map(|(k, v)| Ok((k, ranges_to_multirange(v)?)))
-        .collect()
-}
-
-pub fn ranges_to_multirange(ranges: Vec<BlockRange>) -> Result<MultiRange, multirange::Error> {
-    let ranges = ranges.into_iter().map(|r| r.numbers.into_inner()).collect();
-    MultiRange::from_ranges(ranges)
-}
-
-pub async fn filenames_for_table(
-    metadata_db: &MetadataDb,
-    location_id: i64,
-) -> Result<Vec<String>, BoxError> {
-    let file_names = metadata_db
-        .stream_file_metadata(location_id)
-        .map(|res| {
-            let FileMetadata { file_name, .. } = res?.try_into()?;
-            Ok::<_, BoxError>(file_name)
-        })
-        .try_collect::<Vec<_>>()
-        .await?;
-    Ok(file_names)
 }
