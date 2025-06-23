@@ -397,11 +397,6 @@ impl PhysicalTable {
         &self.table
     }
 
-    pub async fn ranges(&self) -> Result<Vec<BlockRange>, BoxError> {
-        let ranges = self.stream_ranges().try_collect().await?;
-        Ok(ranges)
-    }
-
     pub async fn multi_range(&self) -> Result<MultiRange, BoxError> {
         let ranges = self
             .stream_ranges()
