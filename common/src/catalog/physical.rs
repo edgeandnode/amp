@@ -410,11 +410,15 @@ impl PhysicalTable {
             .await?;
         MultiRange::from_ranges(ranges).map_err(Into::into)
     }
+
+    pub async fn files(&self) -> Result<Vec<FileMetadata>, BoxError> {
+        self.stream_file_metadata().try_collect().await
+    }
 }
 
 // Methods for streaming metadata and file information of PhysicalTable
 impl PhysicalTable {
-    pub fn stream_file_metadata<'a>(
+    fn stream_file_metadata<'a>(
         &'a self,
     ) -> impl Stream<Item = Result<FileMetadata, BoxError>> + 'a {
         self.metadata_db

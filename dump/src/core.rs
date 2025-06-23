@@ -226,12 +226,13 @@ async fn consistency_check(table: &PhysicalTable) -> Result<(), ConsistencyCheck
         .await
         .map_err(|err| ConsistencyCheckError::CorruptedTable(location_id, err))?;
 
-    let registered_files = table
-        .stream_file_metadata()
-        .map_ok(|m| m.file_name)
-        .try_collect::<BTreeSet<String>>()
+    let registered_files: BTreeSet<String> = table
+        .files()
         .await
-        .map_err(|err| ConsistencyCheckError::CorruptedTable(location_id, err))?;
+        .map_err(|err| ConsistencyCheckError::CorruptedTable(location_id, err))?
+        .into_iter()
+        .map(|m| m.file_name)
+        .collect();
 
     let store = table.object_store();
     let path = table.path();
