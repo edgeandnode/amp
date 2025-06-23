@@ -7,7 +7,7 @@ use std::{
 use common::{
     catalog::physical::{Catalog, PhysicalTable},
     config::Config,
-    metadata::multiranges_by_table,
+    multirange::MultiRange,
     query_context::{Error as QueryError, QueryContext},
     store::Store as DataStore,
     BoxError,
@@ -92,7 +92,11 @@ pub async fn dump_raw_tables(
 
     // Query the block ranges, we might already have some ranges if this is not the first dump run
     // for this dataset.
-    let block_ranges_by_table = multiranges_by_table(&query_ctx).await?;
+    let mut block_ranges_by_table: BTreeMap<String, MultiRange> = Default::default();
+    for table in tables {
+        block_ranges_by_table.insert(table.table_name().to_string(), table.multi_range().await?);
+    }
+
     for (table_name, multirange) in &block_ranges_by_table {
         if multirange.total_len() == 0 {
             continue;

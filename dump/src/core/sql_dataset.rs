@@ -118,7 +118,7 @@ use std::{collections::BTreeSet, sync::Arc};
 
 use common::{
     catalog::physical::PhysicalTable,
-    metadata::{range::BlockRange, ranges_for_table, ranges_to_multirange},
+    metadata::range::BlockRange,
     query_context::{parse_sql, QueryContext, QueryEnv},
     BlockNum, BoxError, Dataset,
 };
@@ -197,9 +197,7 @@ pub async fn dump_table(
         };
 
         if is_incr {
-            let existing_ranges = ranges_to_multirange(
-                ranges_for_table(table.location_id(), &table.metadata_db).await?,
-            )?;
+            let existing_ranges = table.multi_range().await?;
             tracing::info!(
                 "table `{}` has scanned {} blocks in the ranges: {}",
                 table_name,
