@@ -33,7 +33,6 @@ use uuid::Uuid;
 use crate::{
     metadata::{
         parquet::{ParquetMeta, PARQUET_METADATA_KEY},
-        range::BlockRange,
         FileMetadata,
     },
     multirange::MultiRange,
@@ -397,17 +396,29 @@ impl PhysicalTable {
         &self.table
     }
 
+    pub async fn files(&self) -> Result<Vec<FileMetadata>, BoxError> {
+        self.stream_file_metadata().try_collect().await
+    }
+
     pub async fn multi_range(&self) -> Result<MultiRange, BoxError> {
         let ranges = self
-            .stream_ranges()
-            .map(|r| r.map(|r| r.numbers.clone().into_inner()))
+            .stream_file_metadata()
+            .map(|r| {
+                let FileMetadata {
+                    file_name,
+                    parquet_meta: ParquetMeta { ranges, .. },
+                    ..
+                } = r?;
+                if ranges.len() != 1 {
+                    return Err(BoxError::from(format!(
+                        "expected exactly 1 range for {file_name}"
+                    )));
+                }
+                Ok(ranges[0].numbers.clone().into_inner())
+            })
             .try_collect()
             .await?;
         MultiRange::from_ranges(ranges).map_err(Into::into)
-    }
-
-    pub async fn files(&self) -> Result<Vec<FileMetadata>, BoxError> {
-        self.stream_file_metadata().try_collect().await
     }
 }
 
@@ -419,22 +430,6 @@ impl PhysicalTable {
         self.metadata_db
             .stream_file_metadata(self.location_id)
             .map(|row| row?.try_into())
-    }
-
-    fn stream_ranges<'a>(&'a self) -> impl Stream<Item = Result<BlockRange, BoxError>> + 'a {
-        self.stream_file_metadata().map(|r| {
-            let FileMetadata {
-                file_name,
-                parquet_meta: ParquetMeta { mut ranges, .. },
-                ..
-            } = r?;
-            if ranges.len() != 1 {
-                return Err(BoxError::from(format!(
-                    "expected exactly 1 range for {file_name}"
-                )));
-            }
-            Ok(ranges.remove(0))
-        })
     }
 }
 
