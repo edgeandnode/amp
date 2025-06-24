@@ -1,27 +1,23 @@
-use common::arrow::array::RecordBatch;
-use common::arrow::datatypes::SchemaRef;
-use common::catalog::physical::PhysicalTable;
-use common::query_context::QueryContext;
-use common::BlockNum;
-use common::BoxError;
-use datafusion::error::DataFusionError;
-use datafusion::execution::SendableRecordBatchStream;
-use datafusion::logical_expr::LogicalPlan;
-use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
-use futures::channel::mpsc;
-use futures::future::BoxFuture;
-use futures::stream::StreamExt;
-use futures::Stream;
-use futures::TryStreamExt as _;
-use metadata_db::LocationId;
-use metadata_db::MetadataDb;
-use std::collections::BTreeMap;
-use std::pin::Pin;
-use std::sync::Arc;
-use std::task::ready;
-use std::task::{Context, Poll};
-use tracing::instrument;
-use tracing::warn;
+use std::{
+    collections::BTreeMap,
+    pin::Pin,
+    sync::Arc,
+    task::{ready, Context, Poll},
+};
+
+use common::{
+    arrow::{array::RecordBatch, datatypes::SchemaRef},
+    catalog::physical::PhysicalTable,
+    query_context::QueryContext,
+    BlockNum, BoxError,
+};
+use datafusion::{
+    error::DataFusionError, execution::SendableRecordBatchStream, logical_expr::LogicalPlan,
+    physical_plan::stream::RecordBatchStreamAdapter,
+};
+use futures::{channel::mpsc, future::BoxFuture, stream::StreamExt, Stream, TryStreamExt as _};
+use metadata_db::{LocationId, MetadataDb};
+use tracing::{instrument, warn};
 
 // Tracks watermarks for a set of tables
 struct Watermarks {
