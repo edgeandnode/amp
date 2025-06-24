@@ -38,7 +38,7 @@
             protobuf
             uv
             cmake
-            nodejs-slim_23
+            nodejs-slim
             postgresql
           ]) ++ pkgs.lib.optionals pkgs.stdenv.isDarwin (with pkgs; [
             libiconv
