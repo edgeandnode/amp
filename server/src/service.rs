@@ -238,19 +238,18 @@ impl Service {
         }
 
         // Start infinite stream
-        let first_range = ctx
+        let synced_range = ctx
             .synced_blocks_for_plan(&plan)
             .await
-            .map_err(|e| Error::CoreError(CoreError::DatasetError(e)))?
-            .first();
-        let mut current_end_block = first_range.map(|(_, end)| end);
+            .map_err(|e| Error::CoreError(CoreError::DatasetError(e)))?;
+        let mut current_end_block = synced_range.as_ref().map(|r| *r.end());
 
         let (tx, rx) = mpsc::channel(1);
 
         let schema = plan.schema().clone().as_ref().clone().into();
 
         // Execute initial ranges
-        if let Some((start, end)) = first_range {
+        if let Some((start, end)) = synced_range.map(|r| r.into_inner()) {
             // Execute the first range and return an error if a query is not valid
             let mut stream = dataset_store::sql_datasets::execute_plan_for_range(
                 plan.clone(),

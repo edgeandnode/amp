@@ -4,7 +4,6 @@ use std::{
 };
 
 use common::{
-    multirange::MultiRange,
     plan_visitors::{
         constrain_by_block_num, extract_table_references_from_plan,
         forbid_underscore_prefixed_aliases, order_by_block_num, propagate_block_num,
@@ -130,15 +129,16 @@ pub async fn execute_plan_for_range(
 
     // Validate dependency block ranges
     {
-        let needed_range = MultiRange::from_ranges(vec![(start, end)]).unwrap();
         for table in tables {
             let physical_table = ctx
                 .get_table(&table)
                 .ok_or::<BoxError>(format!("table {} not found", table).into())?;
-            let ranges = physical_table.multi_range().await?;
-            let synced = ranges.intersection(&needed_range) == needed_range;
+            let range = physical_table.synced_range().await?;
+            let synced = range
+                .map(|r| r.contains(&start) && r.contains(&end))
+                .unwrap_or(false);
             if !synced {
-                return Err(format!("tried to query range {needed_range} of table {table} but it has not been synced").into());
+                return Err(format!("tried to query range [{start}-{end}] of table {table} but it has not been synced").into());
             }
         }
     }

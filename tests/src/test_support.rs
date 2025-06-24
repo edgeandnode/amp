@@ -190,12 +190,13 @@ impl SnapshotContext {
     async fn check_block_range_eq(&self, blessed: &SnapshotContext) -> Result<(), BoxError> {
         let mut blessed_block_ranges: BTreeMap<String, Vec<BlockRange>> = Default::default();
         for table in blessed.ctx.catalog().tables() {
-            blessed_block_ranges.insert(table.table_name().to_string(), table.ranges().await?);
+            blessed_block_ranges
+                .insert(table.table_name().to_string(), table_ranges(&table).await?);
         }
 
         for table in self.ctx.catalog().tables() {
             let table_name = table.table_name();
-            let mut expected_ranges = table.ranges().await?;
+            let mut expected_ranges = table_ranges(&table).await?;
             expected_ranges.sort_by_key(|r| *r.numbers.start());
             let actual_ranges = blessed_block_ranges.get_mut(table_name).unwrap();
             actual_ranges.sort_by_key(|r| *r.numbers.start());
@@ -282,6 +283,17 @@ async fn catalog_for_dataset(
         tables.push(physical_table.into());
     }
     Ok(Catalog::new(tables, vec![]))
+}
+
+pub async fn table_ranges(table: &PhysicalTable) -> Result<Vec<BlockRange>, BoxError> {
+    let files = table.files().await?;
+    Ok(files
+        .into_iter()
+        .map(|mut f| {
+            assert!(f.parquet_meta.ranges.len() == 1);
+            f.parquet_meta.ranges.remove(0)
+        })
+        .collect())
 }
 
 pub async fn check_blocks(

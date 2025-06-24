@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc};
 
 use datafusion::{
     arrow::datatypes::SchemaRef,
@@ -33,12 +33,11 @@ use uuid::Uuid;
 use crate::{
     metadata::{
         parquet::{ParquetMeta, PARQUET_METADATA_KEY},
-        range::BlockRange,
         FileMetadata,
     },
     multirange::MultiRange,
     store::{infer_object_store, Store},
-    BoxError, Dataset, ResolvedTable,
+    BlockNum, BoxError, Dataset, ResolvedTable,
 };
 
 #[derive(Debug, Clone)]
@@ -397,15 +396,34 @@ impl PhysicalTable {
         &self.table
     }
 
-    pub async fn ranges(&self) -> Result<Vec<BlockRange>, BoxError> {
-        let ranges = self.stream_ranges().try_collect().await?;
-        Ok(ranges)
+    pub async fn files(&self) -> Result<Vec<FileMetadata>, BoxError> {
+        self.stream_file_metadata().try_collect().await
+    }
+
+    /// Return the block range to use for query execution over this table. This is defined as the
+    /// contiguous range of block numbers starting from the lowest start block. Ok(None) is
+    /// returned if no block range has been synced.
+    pub async fn synced_range(&self) -> Result<Option<RangeInclusive<BlockNum>>, BoxError> {
+        let ranges = self.multi_range().await?;
+        Ok(ranges.first().map(|(start, end)| start..=end))
     }
 
     pub async fn multi_range(&self) -> Result<MultiRange, BoxError> {
         let ranges = self
-            .stream_ranges()
-            .map(|r| r.map(|r| r.numbers.clone().into_inner()))
+            .stream_file_metadata()
+            .map(|r| {
+                let FileMetadata {
+                    file_name,
+                    parquet_meta: ParquetMeta { ranges, .. },
+                    ..
+                } = r?;
+                if ranges.len() != 1 {
+                    return Err(BoxError::from(format!(
+                        "expected exactly 1 range for {file_name}"
+                    )));
+                }
+                Ok(ranges[0].numbers.clone().into_inner())
+            })
             .try_collect()
             .await?;
         MultiRange::from_ranges(ranges).map_err(Into::into)
@@ -414,28 +432,12 @@ impl PhysicalTable {
 
 // Methods for streaming metadata and file information of PhysicalTable
 impl PhysicalTable {
-    pub fn stream_file_metadata<'a>(
+    fn stream_file_metadata<'a>(
         &'a self,
     ) -> impl Stream<Item = Result<FileMetadata, BoxError>> + 'a {
         self.metadata_db
             .stream_file_metadata(self.location_id)
             .map(|row| row?.try_into())
-    }
-
-    fn stream_ranges<'a>(&'a self) -> impl Stream<Item = Result<BlockRange, BoxError>> + 'a {
-        self.stream_file_metadata().map(|r| {
-            let FileMetadata {
-                file_name,
-                parquet_meta: ParquetMeta { mut ranges, .. },
-                ..
-            } = r?;
-            if ranges.len() != 1 {
-                return Err(BoxError::from(format!(
-                    "expected exactly 1 range for {file_name}"
-                )));
-            }
-            Ok(ranges.remove(0))
-        })
     }
 }
 
