@@ -408,6 +408,11 @@ impl PhysicalTable {
         Ok(ranges.first().map(|(start, end)| start..=end))
     }
 
+    // The most recent block number that has been synced for this table.
+    pub async fn watermark(&self) -> Result<Option<BlockNum>, BoxError> {
+        Ok(self.synced_range().await?.map(|range| *range.end()))
+    }
+
     pub async fn multi_range(&self) -> Result<MultiRange, BoxError> {
         let ranges = self
             .stream_file_metadata()

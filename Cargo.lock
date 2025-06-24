@@ -6077,6 +6077,7 @@ name = "server"
 version = "0.1.0"
 dependencies = [
  "arrow-flight",
+ "async-stream",
  "async-trait",
  "axum 0.8.4",
  "bytes",
@@ -6090,6 +6091,7 @@ dependencies = [
  "thiserror 2.0.12",
  "tokio",
  "tonic",
+ "tracing",
 ]
 
 [[package]]

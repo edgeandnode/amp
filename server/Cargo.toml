@@ -6,6 +6,7 @@ version.workspace = true
 [dependencies]
 metadata-db = { path = "../metadata-db" }
 arrow-flight.workspace = true
+async-stream.workspace = true
 async-trait.workspace = true
 bytes.workspace = true
 common = { path = "../common" }
@@ -18,3 +19,4 @@ tonic.workspace = true
 axum.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
+tracing.workspace = true

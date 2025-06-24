@@ -134,11 +134,12 @@ pub async fn execute_plan_for_range(
                 .get_table(&table)
                 .ok_or::<BoxError>(format!("table {} not found", table).into())?;
             let range = physical_table.synced_range().await?;
-            let synced = range
-                .map(|r| r.contains(&start) && r.contains(&end))
-                .unwrap_or(false);
+            let synced = range.map(|r| r.contains(&end)).unwrap_or(false);
             if !synced {
-                return Err(format!("tried to query range [{start}-{end}] of table {table} but it has not been synced").into());
+                return Err(format!(
+                    "tried to query up to block {end} of table {table} but it has not been synced"
+                )
+                .into());
             }
         }
     }
@@ -175,5 +176,3 @@ pub async fn execute_query_for_range(
     let plan = ctx.plan_sql(query).await?;
     execute_plan_for_range(plan, &ctx, start, end, true).await
 }
-
-// All physical tables locations that have been queried
