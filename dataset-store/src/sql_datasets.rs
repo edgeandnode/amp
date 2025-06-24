@@ -11,16 +11,9 @@ use common::{
         unproject_special_block_num_column,
     },
     query_context::{parse_sql, prepend_special_block_num_field, QueryEnv},
-    BlockNum, BoxError, Dataset, DatasetValue, QueryContext, Table, BLOCK_NUM, SPECIAL_BLOCK_NUM,
+    BlockNum, BoxError, Dataset, DatasetValue, QueryContext, Table, SPECIAL_BLOCK_NUM,
 };
-use datafusion::{
-    common::tree_node::{Transformed, TreeNode, TreeNodeRecursion},
-    datasource::TableType,
-    error::DataFusionError,
-    execution::SendableRecordBatchStream,
-    logical_expr::{col, lit, Filter, LogicalPlan, Sort, TableScan},
-    sql::{parser, TableReference},
-};
+use datafusion::{execution::SendableRecordBatchStream, logical_expr::LogicalPlan, sql::parser};
 use futures::StreamExt as _;
 use object_store::ObjectMeta;
 use serde::Deserialize;
