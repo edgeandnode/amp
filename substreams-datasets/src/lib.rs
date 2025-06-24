@@ -15,10 +15,9 @@ use proto::sf::substreams::v1::Package;
 use tables::Tables;
 
 /// Does an network request to fetch the spkg from the URL in the `manifest` config key.
-pub async fn dataset(dataset_cfg: toml::Value) -> Result<Dataset, Error> {
-    let dataset_def: DatasetDef = dataset_cfg.try_into()?;
+pub async fn dataset(dataset_cfg: common::DatasetValue) -> Result<Dataset, Error> {
+    let dataset_def = DatasetDef::from_value(dataset_cfg)?;
     let package = Package::from_url(dataset_def.manifest.as_str()).await?;
-
     let tables = Tables::from_package(&package, &dataset_def.module)
         .map_err(|_| Error::AssertFail("failed to build tables from spkg".into()))?;
 

@@ -26,10 +26,12 @@ pub enum Error {
     UriParse(#[from] InvalidUri),
     #[error("invalid auth token: {0}")]
     Utf8(#[from] InvalidMetadataValue),
-    #[error("TOML parse error: {0}")]
-    Toml(#[from] toml::de::Error),
     #[error("store error: {0}")]
     StoreError(#[from] StoreError),
+    #[error("TOML parse error: {0}")]
+    Toml(#[from] toml::de::Error),
+    #[error("JSON parse error: {0}")]
+    Json(#[from] serde_json::Error),
 }
 
 mod dataset;

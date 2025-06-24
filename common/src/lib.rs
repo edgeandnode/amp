@@ -170,3 +170,8 @@ pub trait BlockStreamer: Clone + 'static {
         finalized: bool,
     ) -> impl Future<Output = Result<BlockNum, BoxError>> + Send;
 }
+
+pub enum DatasetValue {
+    Toml(toml::Value),
+    Json(serde_json::Value),
+}
