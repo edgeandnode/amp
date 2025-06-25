@@ -208,9 +208,10 @@ impl Service {
             return ctx.execute_plan(plan).await.map_err(|err| Error::from(err));
         }
 
-        let query = StreamingQuery::new(ctx.clone(), plan, self.dataset_store.metadata_db.clone())
-            .await
-            .map_err(|e| Error::StreamingExecutionError(e.to_string()))?;
+        let query =
+            StreamingQuery::spawn(ctx.clone(), plan, self.dataset_store.metadata_db.clone())
+                .await
+                .map_err(|e| Error::StreamingExecutionError(e.to_string()))?;
 
         Ok(query.as_record_batch_stream())
     }

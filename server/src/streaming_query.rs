@@ -1,9 +1,4 @@
-use std::{
-    collections::BTreeMap,
-    pin::Pin,
-    sync::Arc,
-    task::{ready, Context, Poll},
-};
+use std::{collections::BTreeMap, pin::Pin, sync::Arc};
 
 use common::{
     arrow::{array::RecordBatch, datatypes::SchemaRef},
@@ -15,8 +10,13 @@ use datafusion::{
     error::DataFusionError, execution::SendableRecordBatchStream, logical_expr::LogicalPlan,
     physical_plan::stream::RecordBatchStreamAdapter,
 };
-use futures::{channel::mpsc, future::BoxFuture, stream::StreamExt, Stream, TryStreamExt as _};
+use futures::{
+    stream::{self, StreamExt},
+    FutureExt, Stream, TryStreamExt as _,
+};
 use metadata_db::{LocationId, MetadataDb};
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
 use tracing::{instrument, warn};
 
 // Tracks watermarks for a set of tables
@@ -96,11 +96,10 @@ pub async fn watermark_updates(
 
     // Create the stream channel. This is unbounded because we never want to put backpressure on the
     // PG notification queue.
-    let (tx, rx) = mpsc::unbounded();
+    let (tx, rx) = mpsc::unbounded_channel();
 
     // Send initial watermark
-    tx.unbounded_send(Ok(watermarks.common_watermark()))
-        .unwrap();
+    tx.send(Ok(watermarks.common_watermark())).unwrap();
 
     // Spawn task to handle new ranges from notifications
     tokio::spawn(async move {
@@ -114,14 +113,54 @@ pub async fn watermark_updates(
                 Err(e) => Err(e),
             };
 
-            if tx.unbounded_send(res).is_err() {
+            if tx.send(res).is_err() {
                 break; // Receiver dropped
             }
         }
         warn!("notification stream ended");
     });
 
-    Ok(Box::pin(rx))
+    Ok(Box::pin(UnboundedReceiverStream::new(rx)))
+}
+
+pub struct StreamingQueryHandle {
+    rx: mpsc::Receiver<RecordBatch>,
+    join_handle: tokio::task::JoinHandle<Result<(), BoxError>>,
+    schema: SchemaRef,
+}
+
+impl StreamingQueryHandle {
+    pub fn as_stream(self) -> impl Stream<Item = Result<RecordBatch, BoxError>> {
+        let data_stream = ReceiverStream::new(self.rx);
+
+        let join = self.join_handle;
+
+        // If `tx` has been dropped then the query task has terminated. So we check if it has
+        // terminated with errors, and if so send the error as the final item of the stream.
+        let get_task_result = async move {
+            // Unwrap: The task is known to have terminated.
+            match join.now_or_never().unwrap() {
+                Ok(Ok(())) => None,
+                Ok(Err(e)) => Some(Err(e)),
+                Err(join_err) => Some(Err(
+                    format!("Streaming task failed to join: {}", join_err).into()
+                )),
+            }
+        };
+
+        data_stream
+            .map(Ok)
+            .chain(stream::once(get_task_result).filter_map(|x| async { x }))
+    }
+
+    pub fn as_record_batch_stream(self) -> SendableRecordBatchStream {
+        let schema = self.schema.clone();
+        let stream = RecordBatchStreamAdapter::new(
+            schema,
+            self.as_stream().map_err(DataFusionError::External),
+        );
+        Box::pin(stream)
+    }
 }
 
 /// A streaming query that continuously listens for new blocks and emits incremental results.
@@ -131,112 +170,93 @@ pub struct StreamingQuery {
     ctx: Arc<QueryContext>,
     plan: LogicalPlan,
     state: StreamState,
+    tx: mpsc::Sender<RecordBatch>,
 }
 
 struct StreamState {
     watermark_stream: WatermarkStream,
     next_start: BlockNum,
-
-    // Microbatch that needs to be started
-    pending_microbatch: Option<BoxFuture<'static, Result<SendableRecordBatchStream, BoxError>>>,
-
-    // Microbatch that has been started and is emitting results
-    current_microbatch: Option<SendableRecordBatchStream>,
 }
 
 impl StreamingQuery {
     /// Creates a new streaming query. It is assumed that the `ctx` was built such that it contains
     /// only the tables relevant for the query.
-    pub async fn new(
+    ///
+    /// The query execution loop will run in its own task.
+    pub async fn spawn(
         ctx: Arc<QueryContext>,
         plan: LogicalPlan,
         metadata_db: Arc<MetadataDb>,
-    ) -> Result<Self, BoxError> {
+    ) -> Result<StreamingQueryHandle, BoxError> {
         let watermark_stream = watermark_updates(ctx.clone(), metadata_db.clone()).await?;
-        Ok(Self {
+        let schema: SchemaRef = plan.schema().clone().as_ref().clone().into();
+        let (tx, rx) = mpsc::channel(10);
+        let streaming_query = Self {
             ctx,
             plan,
+            tx,
             state: StreamState {
                 watermark_stream,
                 next_start: 0,
-                current_microbatch: None,
-                pending_microbatch: None,
             },
+        };
+
+        let join_handle = tokio::spawn(streaming_query.execute());
+
+        Ok(StreamingQueryHandle {
+            rx,
+            join_handle,
+            schema,
         })
     }
 
-    pub fn as_record_batch_stream(self) -> SendableRecordBatchStream {
-        let schema: SchemaRef = self.plan.schema().clone().as_ref().clone().into();
-        let stream =
-            RecordBatchStreamAdapter::new(schema, self.map_err(|e| DataFusionError::External(e)));
-        Box::pin(stream)
-    }
-}
-
-impl Stream for StreamingQuery {
-    type Item = Result<RecordBatch, BoxError>;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+    /// The loop:
+    /// 1. Get new input watermark
+    /// 2. Execute microbatch up to that watermark
+    /// 3. Send out results
+    #[instrument(skip_all, err)]
+    async fn execute(mut self) -> Result<(), BoxError> {
         loop {
-            // First check if we have a pending microbatch to start
-            if let Some(ref mut pending) = self.state.pending_microbatch {
-                match ready!(pending.as_mut().poll(cx)) {
-                    Ok(result_stream) => {
-                        self.state.current_microbatch = Some(result_stream);
-                        self.state.pending_microbatch = None;
-                        // Continue to poll the new result stream
-                    }
-                    Err(e) => {
-                        return Poll::Ready(Some(Err(e)));
-                    }
-                }
-            }
-
-            // If we have a current result stream, try to get the next batch from it
-            if let Some(ref mut result_stream) = self.state.current_microbatch {
-                match ready!(Pin::new(result_stream).poll_next(cx)) {
-                    Some(Ok(batch)) => return Poll::Ready(Some(Ok(batch))),
-                    Some(Err(e)) => return Poll::Ready(Some(Err(e.into()))),
-                    None => {
-                        // Current stream is exhausted, clear it and continue to get next watermark
-                        self.state.current_microbatch = None;
-                    }
-                }
-            }
-
-            // No current result stream or it's exhausted, try to get next watermark
-            match ready!(Pin::new(&mut self.state.watermark_stream).poll_next(cx)) {
-                Some(Ok(Some(watermark))) => {
-                    if watermark < self.state.next_start {
-                        // Duplicate watermark, nothing to do
-                        continue;
-                    }
-
-                    let start = self.state.next_start;
-                    self.state.next_start = watermark + 1;
-
-                    // Create a future for the async operation
-                    let plan = self.plan.clone();
-                    let ctx = self.ctx.clone();
-
-                    let future = Box::pin(async move {
-                        dataset_store::sql_datasets::execute_plan_for_range(
-                            plan, &ctx, start, watermark, false,
-                        )
-                        .await
-                    });
-
-                    self.state.pending_microbatch = Some(future);
-                    // Continue the loop to poll the pending execution
-                }
-                // Tables seem empty, lets wait for some data
-                Some(Ok(None)) => {}
-                Some(Err(e)) => {
-                    return Poll::Ready(Some(Err(e)));
-                }
-                None => {
+            // Get the next watermark
+            let watermark = {
+                let Some(watermark) = self.state.watermark_stream.next().await else {
                     // Watermark stream ended, no more data ever?
-                    return Poll::Ready(None);
+                    return Ok(());
+                };
+
+                let watermark = watermark?;
+
+                match watermark {
+                    // Duplicate watermark, nothing to do
+                    Some(watermark) if watermark < self.state.next_start => continue,
+
+                    Some(watermark) => watermark,
+
+                    // Tables seem empty, lets wait for some data
+                    None => continue,
+                }
+            };
+
+            let start = self.state.next_start;
+            self.state.next_start = watermark + 1;
+
+            // Start microbatch execution
+            let mut stream = dataset_store::sql_datasets::execute_plan_for_range(
+                self.plan.clone(),
+                &self.ctx,
+                start,
+                watermark,
+                false,
+            )
+            .await?;
+
+            // Drain the microbatch completely
+            while let Some(item) = stream.next().await {
+                let item = item?;
+                let res = self.tx.send(item).await;
+                if res.is_err() {
+                    // Receiver dropped
+                    return Ok(());
                 }
             }
         }
