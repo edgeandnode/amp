@@ -22,10 +22,8 @@ use common::{
         unproject_special_block_num_column,
     },
     query_context::{parse_sql, Error as CoreError, QueryContext, QueryEnv},
-    BlockNum,
 };
 use datafusion::{
-    arrow::array::RecordBatch,
     common::{
         tree_node::{TreeNode, TreeNodeRecursion},
         DFSchema,
@@ -35,11 +33,13 @@ use datafusion::{
     logical_expr::LogicalPlan,
 };
 use dataset_store::{DatasetError, DatasetStore};
-use futures::{channel::mpsc, SinkExt, Stream, StreamExt as _, TryStreamExt};
+use futures::{Stream, StreamExt as _, TryStreamExt};
 use metadata_db::MetadataDb;
 use prost::Message as _;
 use thiserror::Error;
 use tonic::{Request, Response, Status};
+
+use crate::streaming_query::StreamingQuery;
 
 type TonicStream<T> = Pin<Box<dyn Stream<Item = Result<T, Status>> + Send + 'static>>;
 
@@ -178,41 +178,12 @@ impl Service {
         self.execute_plan(ctx, plan, is_streaming).await
     }
 
-    async fn execute_plan_for_range_and_send_results_to_stream(
-        plan: LogicalPlan,
-        ctx: &QueryContext,
-        start: BlockNum,
-        end: BlockNum,
-        mut tx: mpsc::Sender<datafusion::error::Result<RecordBatch>>,
-    ) -> () {
-        let mut stream =
-            dataset_store::sql_datasets::execute_plan_for_range(plan, ctx, start, end, false)
-                .await
-                .unwrap();
-
-        while let Some(batch) = stream.next().await {
-            match batch {
-                Ok(batch) => {
-                    if tx.send(Ok(batch)).await.is_err() {
-                        return;
-                    }
-                }
-                Err(e) => {
-                    let _ = tx.send(Err(e)).await;
-                    return;
-                }
-            }
-        }
-    }
-
     pub async fn execute_plan(
         &self,
         ctx: Arc<QueryContext>,
         plan: LogicalPlan,
         is_streaming: bool,
     ) -> Result<SendableRecordBatchStream, Error> {
-        use futures::channel::mpsc;
-
         // is_incremental returns an error if query contains EXPLAIN, DML, etc.
         let is_incr = is_incremental(&plan).map_err(|e| Error::InvalidQuery(e.to_string()))?;
         if is_streaming && !is_incr {
@@ -237,85 +208,12 @@ impl Service {
             return ctx.execute_plan(plan).await.map_err(|err| Error::from(err));
         }
 
-        // Start infinite stream
-        let synced_range = ctx
-            .synced_blocks_for_plan(&plan)
-            .await
-            .map_err(|e| Error::CoreError(CoreError::DatasetError(e)))?;
-        let mut current_end_block = synced_range.as_ref().map(|r| *r.end());
+        let query =
+            StreamingQuery::spawn(ctx.clone(), plan, self.dataset_store.metadata_db.clone())
+                .await
+                .map_err(|e| Error::StreamingExecutionError(e.to_string()))?;
 
-        let (tx, rx) = mpsc::channel(1);
-
-        let schema = plan.schema().clone().as_ref().clone().into();
-
-        // Execute initial ranges
-        if let Some((start, end)) = synced_range.map(|r| r.into_inner()) {
-            // Execute the first range and return an error if a query is not valid
-            let mut stream = dataset_store::sql_datasets::execute_plan_for_range(
-                plan.clone(),
-                &ctx,
-                start,
-                end,
-                false,
-            )
-            .await
-            .map_err(|e| Error::CoreError(CoreError::DatasetError(e)))?;
-
-            let mut tx_first_range = tx.clone();
-            tokio::spawn(async move {
-                while let Some(batch) = stream.next().await {
-                    let send_result = tx_first_range.send(batch).await;
-                    if send_result.is_err() {
-                        return Err(Error::StreamingExecutionError(
-                            "failed to return a next batch".to_string(),
-                        ));
-                    }
-                }
-
-                Ok(())
-            });
-        }
-
-        let ctx = ctx.clone();
-        let metadata_db = self.dataset_store.metadata_db.as_ref().clone();
-
-        // async listen
-        tokio::spawn(async move {
-            let locations = ctx.catalog().tables().iter().map(|t| t.location_id());
-
-            let mut notifications = Vec::new();
-            for location in locations {
-                let channel = common::stream_helpers::change_tracking_pg_channel(location);
-                let stream = metadata_db.listen(&channel).await.unwrap();
-                notifications.push(stream);
-            }
-            let mut notifications = futures::stream::select_all(notifications);
-
-            while let Some(Ok(_)) = notifications.next().await {
-                let end = ctx.max_end_block(&plan).await.unwrap();
-
-                let (start, end) = match (current_end_block, end) {
-                    (Some(start), Some(end)) if end > start => (start + 1, end),
-                    (None, Some(end)) => (0, end),
-                    (_, _) => continue,
-                };
-
-                Self::execute_plan_for_range_and_send_results_to_stream(
-                    plan.clone(),
-                    &ctx,
-                    start,
-                    end,
-                    tx.clone(),
-                )
-                .await;
-
-                current_end_block = Some(end);
-            }
-        });
-
-        let adapter = datafusion::physical_plan::stream::RecordBatchStreamAdapter::new(schema, rx);
-
-        Ok(Box::pin(adapter) as SendableRecordBatchStream)
+        Ok(query.as_record_batch_stream())
     }
 }
 

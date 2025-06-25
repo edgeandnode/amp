@@ -64,6 +64,7 @@ tokio = { version = "1.36.0", features = [
     "parking_lot",
     "signal",
 ] }
+tokio-stream = "0.1.17"
 url = { version = "2.5.0", features = ["serde"] }
 sqlx = { version = "0.8.3", features = [
     "runtime-tokio",
@@ -81,9 +82,7 @@ indoc = "2.0.6"
 
 # Datafusion and Arrow crates
 arrow-flight = { version = "55", features = ["flight-sql-experimental"] }
-datafusion = { version = "48", features = [
-    "serde",
-] }
+datafusion = { version = "48", features = ["serde"] }
 datafusion-proto = { version = "48" }
 object_store = { version = "0.12", features = ["aws", "gcp", "azure"] }
 
