@@ -14,7 +14,7 @@ use alloy::{
     rpc::{
         client::BatchRequest,
         json_rpc::{RpcRecv, RpcSend},
-        types::{Header, Log as RpcLog, TransactionReceipt},
+        types::{Block as AlloyBlock, Header, Log as RpcLog, TransactionReceipt},
     },
     transports::http::reqwest::Url,
 };
@@ -28,8 +28,12 @@ use common::{
     BlockNum, BlockStreamer, BoxError, EvmCurrency, RawDatasetRows, Timestamp,
 };
 use futures::{future::try_join_all, Stream};
+use histogram::Histogram;
+use indicatif::ProgressStyle;
 use thiserror::Error;
+use tokio::sync::Mutex;
 use tracing::{error, warn};
+use tracing_indicatif::span_ext::IndicatifSpanExt;
 
 use crate::tables::transactions::{Transaction, TransactionRowsBuilder};
 
@@ -40,11 +44,67 @@ pub enum ToRowError {
     #[error("overflow in field {0}: {1}")]
     Overflow(&'static str, BoxError),
 }
+
+#[derive(Debug)]
+pub struct Stats {
+    pub id: usize,
+    pub latency_micros: Histogram,
+    pub request_counter: usize,
+    pub last_histogram_log: Instant,
+}
+
+impl Stats {
+    pub fn new(id: usize) -> Self {
+        Self {
+            id,
+            latency_micros: Histogram::new(5, 55).expect("Failed to create histogram"),
+            request_counter: 0,
+            last_histogram_log: Instant::now(),
+        }
+    }
+    pub fn log_stats(&mut self) -> Result<(), BoxError> {
+        let elapsed = Instant::now().duration_since(self.last_histogram_log);
+        let count = self.request_counter;
+        let avg_qps = if elapsed.as_micros() > 0 {
+            count as f64 / (elapsed.as_micros() as f64 / 1_000_000.0)
+        } else {
+            0.0
+        };
+        let mut line = format!(
+            "[id={}] avg_qps={:.2} total_requests={}",
+            self.id, avg_qps, count
+        );
+        for percentile in [0.5, 0.9, 0.95, 0.99] {
+            if let Some(bucket) = self.latency_micros.percentile(percentile)? {
+                line.push_str(&format!(
+                    " p{}={}-{}µs({})",
+                    (percentile * 100.0) as u32,
+                    bucket.start(),
+                    bucket.end(),
+                    bucket.count()
+                ));
+            } else {
+                line.push_str(&format!(" p{}=N/A", (percentile * 100.0) as u32));
+            }
+        }
+        tracing::info!("{}", line);
+        self.last_histogram_log = Instant::now();
+        self.request_counter = 0;
+        Ok(())
+    }
+}
+
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+static BATCHING_RPC_WRAPPER_SEQ: AtomicUsize = AtomicUsize::new(1);
+
 pub struct BatchingRpcWrapper {
     client: alloy::providers::RootProvider,
     batch_size: usize,
     retries: usize,
     limiter: Arc<tokio::sync::Semaphore>,
+    stats: Arc<Mutex<Stats>>,
+    pub id: usize,
 }
 
 impl BatchingRpcWrapper {
@@ -54,25 +114,48 @@ impl BatchingRpcWrapper {
         retries: usize,
         limiter: Arc<tokio::sync::Semaphore>,
     ) -> Self {
-        assert!(batch_size > 0, "batch_size must be > 0");
+        let id = BATCHING_RPC_WRAPPER_SEQ.fetch_add(1, Ordering::Relaxed);
+        let stats = Arc::new(Mutex::new(Stats::new(id)));
+        let stats_clone = stats.clone();
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(std::time::Duration::from_secs(60));
+            loop {
+                ticker.tick().await;
+                let mut stats = stats_clone.lock().await;
+                if let Err(e) = stats.log_stats() {
+                    tracing::warn!("Failed to log stats: {e}");
+                }
+            }
+        });
         Self {
             client,
             batch_size,
             retries,
             limiter,
+            stats,
+            id,
         }
     }
 
     /// Execute a batch of RPC calls with retries on failure.
     /// calls: Vec<(&'static str, Params)> - a vector of tuples containing the method name and parameters.
+    #[tracing::instrument(skip(self, calls), fields(id = self.id))]
     pub async fn execute<T: RpcRecv, Params: RpcSend>(
         &self,
         calls: Vec<(&'static str, Params)>,
     ) -> Result<Vec<T>, BoxError> {
+        let span = tracing::Span::current();
+        span.pb_set_style(
+            &ProgressStyle::default_bar()
+                .template("execute [{elapsed_precise}] [{bar:40.yellow/blue}] {pos}/{len} ({percent_precise}%) {span_fields}")
+                .unwrap()
+                .progress_chars("#>-"),
+        );
         if calls.is_empty() {
-            warn!("No calls to execute, returning empty result");
+            span.pb_set_message("done");
             return Ok(Vec::new());
         }
+        span.pb_set_length(calls.len() as u64);
         let mut results = Vec::new();
         let mut remaining_calls = calls;
         let mut remaining_attempts = self.retries;
@@ -92,9 +175,18 @@ impl BatchingRpcWrapper {
                 waiters.push(batch.add_call(*method, &params)?);
             }
 
+            let stats = self.stats.clone();
             let batch_then_waiters = async move {
+                let start = Instant::now();
                 batch.send().await?;
                 let responses = try_join_all(waiters).await?;
+                let mut stats = stats.lock().await;
+                stats
+                    .latency_micros
+                    .increment(start.elapsed().as_micros() as u64)
+                    .expect("Failed to record latency in histogram");
+                stats.request_counter += responses.len();
+                tracing::Span::current().pb_inc(responses.len() as u64);
                 Ok::<_, BoxError>(responses)
             };
 
@@ -109,14 +201,17 @@ impl BatchingRpcWrapper {
                     remaining_attempts -= 1;
                 }
                 Err(e) => {
+                    span.pb_set_message("done (error)");
                     return Err(e.into());
                 }
             }
         }
+        span.pb_set_message("done");
         Ok(results)
     }
 
     /// If a batch fails, try each call individually to isolate the failure for debugging.
+    #[tracing::instrument(skip(self, results, chunk, e))]
     async fn request_batch_individually<T: RpcRecv, Params: RpcSend>(
         &self,
         results: &mut Vec<T>,
@@ -124,11 +219,18 @@ impl BatchingRpcWrapper {
         chunk: &Vec<(&'static str, Params)>,
         e: BoxError,
     ) -> Result<(), BoxError> {
-        let delay_ms = 500 * (self.retries - remaining_attempts) as u64;
+        let delay_ms = 500 * (self.retries - remaining_attempts + 1) as u64;
         warn!(
             "Batch failed. Error({:?}) Batch size {}. Retries left: {}, will wait for {}ms before retrying",
             e, self.batch_size, remaining_attempts, delay_ms
         );
+        let retry_span = tracing::Span::current();
+        retry_span.pb_set_style(&indicatif::ProgressStyle::default_bar()
+            .template("Retry {spinner:.yellow} [{elapsed_precise}] [{bar:40.yellow/blue}] {pos}/{len} ({percent_precise})")
+            .unwrap()
+            .progress_chars("#>-")
+        );
+        retry_span.pb_set_length(chunk.len() as u64);
         for (method, params) in chunk {
             tracing::info!(
                 "Retrying {} with params {:?} after error: {}",
@@ -141,16 +243,21 @@ impl BatchingRpcWrapper {
             match result {
                 Ok(response) => {
                     results.push(response);
+                    let mut stats = self.stats.lock().await;
+                    stats.request_counter += 1;
+                    tracing::Span::current().pb_inc(1);
                 }
                 Err(err) => {
                     error!(
                         "Error executing {} with params {:?}: {}",
                         method, params, err
                     );
+                    tracing::Span::current().pb_set_message("done (error)");
                     return Err(err.into());
                 }
             }
         }
+        tracing::Span::current().pb_set_message("done");
         tokio::time::sleep(Duration::from_millis(delay_ms)).await;
         Ok(())
     }
@@ -245,112 +352,113 @@ impl JsonRpcClient {
         start_block: u64,
         end_block: u64,
     ) -> impl Stream<Item = Result<RawDatasetRows, BoxError>> + Send {
-        tracing::info!("Fetching blocks (batched) {} to {}", start_block, end_block);
+        let block_calls: Vec<_> = (start_block..=end_block)
+            .map(|block_num| {
+                (
+                    "eth_getBlockByNumber",
+                    (BlockNumberOrTag::Number(block_num), true),
+                )
+            })
+            .collect::<Vec<_>>()
+            .chunks(self.batch_size * 10)
+            .map(<[_]>::to_vec)
+            .map(|calls| Batch {
+                start_block,
+                end_block,
+                calls,
+            })
+            .collect();
         let batching_client = BatchingRpcWrapper::new(
             self.client.clone(),
             self.batch_size,
             10,
             self.limiter.clone(),
         );
-
-        let mut blocks_completed = 0;
-        let mut txns_completed = 0;
-
+        let network = self.network.clone();
         stream! {
-            let stream_start = Instant::now();
-            let block_calls: Vec<_> = (start_block..=end_block)
-                .map(|block_num| (
-                    "eth_getBlockByNumber",
-                    (BlockNumberOrTag::Number(block_num), true),
-                ))
-                .collect::<Vec<_>>()
-                .chunks(self.batch_size * 10)
-                .map(<[_]>::to_vec)
-                .collect();
-
-            for batch_calls in block_calls {
-                let start = Instant::now();
-                // Collect blocks and their transaction hashes together
-                let blocks_result: Result<Vec<alloy::rpc::types::Block>, BoxError> = batching_client.execute(batch_calls).await;
-                let blocks = match blocks_result {
-                    Ok(blocks) => blocks,
+            for batch in block_calls {
+                match fetch_block_batch(&batching_client, batch, &network).await {
+                    Ok(rows_vec) => {
+                        for row in rows_vec {
+                            yield Ok(row);
+                        }
+                    }
                     Err(err) => {
                         yield Err(err);
                         return;
                     }
-                };
-
-                // Collect all transaction hashes from the blocks, and those should be fetched in a big batch
-                let mut block_tx_hashes: HashMap<u64, Vec<FixedBytes<32>>> = HashMap::new();
-                let mut all_transaction_hashes = Vec::new();
-                for block in &blocks {
-                    let block_num = block.header.number;
-                    let tx_hashes: Vec<FixedBytes<32>> = block.transactions.hashes().collect();
-                    all_transaction_hashes.extend(&tx_hashes);
-                    block_tx_hashes.insert(block_num, tx_hashes);
                 }
-
-                if !all_transaction_hashes.is_empty() {
-                    // Fetch receipts in batch for all transaction hashes
-                    let receipt_calls: Vec<_> = all_transaction_hashes.iter()
-                        .map(|hash: &FixedBytes<32>| (
-                            "eth_getTransactionReceipt",
-                            [format!("0x{}", hex::encode(hash))],
-                        ))
-                        .collect();
-
-                    let receipts_result: Result<Vec<Option<TransactionReceipt>>, BoxError> = batching_client.execute(receipt_calls).await;
-                    let receipts = match receipts_result {
-                        Ok(receipts) => receipts,
-                        Err(err) => {
-                            yield Err(err);
-                            return;
-                        }
-                    };
-
-                    // Map receipts to their tx_hash for fast lookup
-                    let tx_hash_to_receipt: HashMap<_, _> = all_transaction_hashes
-                        .iter()
-                        .cloned()
-                        .zip(receipts.into_iter())
-                        .collect();
-
-                    // For each block, reconstruct the per-block receipt vector by looking up each tx hash
-                    for block in blocks.into_iter() {
-                        let tx_hashes = &block_tx_hashes[&block.header.number];
-                        let block_receipts: Vec<_> = tx_hashes.iter().map(|h| tx_hash_to_receipt.get(h).cloned().unwrap_or(None)).collect();
-                        blocks_completed += 1;
-                        txns_completed += block_receipts.len();
-                        yield rpc_to_rows(block, block_receipts, &self.network);
-                    }
-
-                } else {
-                    // No transactions in any block, just yield the block rows
-                    for block in blocks.into_iter() {
-                        blocks_completed += 1;
-                        yield rpc_to_rows(block, Vec::new(), &self.network);
-                    }
-                }
-
-                tracing::info!(
-                    "Progress {}/{} ({}%) blocks (with {} txns) in {}ms",
-                    blocks_completed,
-                    end_block - start_block + 1,
-                    (start_block as f32 / end_block as f32) * 100.0,
-                    txns_completed,
-                    start.elapsed().as_millis()
-                );
             }
-            tracing::info!(
-                "Total time to fetch blocks {} to {}: {}ms, processed {} blocks with {} txns",
-                start_block,
-                end_block,
-                stream_start.elapsed().as_millis(),
-                blocks_completed,
-                txns_completed
-            );
         }
     }
+}
+
+struct Batch {
+    start_block: u64,
+    end_block: u64,
+    calls: Vec<(&'static str, (BlockNumberOrTag, bool))>,
+}
+#[tracing::instrument(skip(batching_client, batch, network), fields(id = batching_client.id, start_block = batch.start_block, end_block = batch.end_block))]
+pub async fn fetch_block_batch(
+    batching_client: &BatchingRpcWrapper,
+    batch: Batch,
+    network: &str,
+) -> Result<Vec<RawDatasetRows>, BoxError> {
+    let span = tracing::Span::current();
+    span.pb_set_length(batch.calls.len() as u64);
+    span.pb_set_style(
+        &ProgressStyle::default_bar()
+            .template(
+                "Block fetch [{elapsed_precise}] [{bar:40.yellow/blue}] {pos}/{len} ({percent_precise}%) {span_fields}",
+            )
+            .unwrap()
+            .progress_chars("#>-"),
+    );
+    // span.record("start_block", &batch.start_block);
+    // span.record("end_block", &batch.end_block);
+    // span.record("id", &batching_client.id);
+
+    let blocks: Vec<AlloyBlock> = batching_client.execute(batch.calls).await?;
+    let mut block_tx_hashes: HashMap<u64, Vec<FixedBytes<32>>> = HashMap::new();
+    let mut all_transaction_hashes = Vec::new();
+    for block in &blocks {
+        let block_num = block.header.number;
+        let tx_hashes: Vec<FixedBytes<32>> = block.transactions.hashes().collect();
+        all_transaction_hashes.extend(&tx_hashes);
+        block_tx_hashes.insert(block_num, tx_hashes);
+    }
+    let mut results = Vec::new();
+    if !all_transaction_hashes.is_empty() {
+        let receipt_calls: Vec<_> = all_transaction_hashes
+            .iter()
+            .map(|hash: &FixedBytes<32>| {
+                (
+                    "eth_getTransactionReceipt",
+                    [format!("0x{}", hex::encode(hash))],
+                )
+            })
+            .collect();
+        let receipts = batching_client.execute(receipt_calls).await?;
+        let tx_hash_to_receipt: HashMap<_, _> = all_transaction_hashes
+            .iter()
+            .cloned()
+            .zip(receipts.into_iter())
+            .collect();
+        for block in blocks.into_iter() {
+            let tx_hashes = &block_tx_hashes[&block.header.number];
+            let block_receipts: Vec<_> = tx_hashes
+                .iter()
+                .map(|h| tx_hash_to_receipt.get(h).cloned().unwrap_or(None))
+                .collect();
+            results.push(rpc_to_rows(block, block_receipts, network)?);
+        }
+    } else {
+        for block in blocks.into_iter() {
+            results.push(rpc_to_rows(block, Vec::new(), network)?);
+        }
+    }
+    span.pb_inc(results.len() as u64);
+    Ok(results)
 }
 
 impl AsRef<alloy::providers::RootProvider> for JsonRpcClient {
