@@ -18,9 +18,13 @@
 //!
 //! See also: metadata-consistency
 
+use datafusion::parquet::file::metadata::{KeyValue, ParquetMetaData};
+use metadata_db::LocationId;
 use serde::{Deserialize, Serialize};
+use url::Url;
 
-use crate::{metadata::range::BlockRange, Timestamp};
+use super::FileMetadata;
+use crate::{metadata::range::BlockRange, BoxResult, Timestamp};
 
 pub const PARQUET_METADATA_KEY: &'static str = "nozzle_metadata";
 
@@ -34,4 +38,44 @@ pub struct ParquetMeta {
     pub created_at: Timestamp,
     // for now, this list should contain exactly 1 entry
     pub ranges: Vec<BlockRange>,
+}
+
+impl ParquetMeta {
+    pub fn try_from_parquet_metadata(
+        metadata: ParquetMetaData,
+        url: Url,
+        location_id: LocationId,
+    ) -> BoxResult<Self> {
+        let key_value_metadata = metadata
+            .file_metadata()
+            .key_value_metadata()
+            .ok_or(format!(
+                "Parquet file metadata does not contain key-value metadata.\
+                 File: {url}, Location ID: {location_id}",
+            ))?
+            .as_slice();
+        let parquet_meta: ParquetMeta = key_value_metadata
+            .iter()
+            .find(|KeyValue { key, .. }| key == PARQUET_METADATA_KEY)
+            .ok_or(format!(
+                "Parquet file metadata does not contain key-value with key {PARQUET_METADATA_KEY}.\
+                 File: {url}, Location ID: {location_id}",
+            ))?
+            .value
+            .as_deref()
+            .map(serde_json::from_str)
+            .ok_or(format!(
+                "Parquet file {url} metadata does not contain value for key {PARQUET_METADATA_KEY}.\
+                 File: {url}, Location ID: {location_id}",
+            ))??;
+        Ok(parquet_meta)
+    }
+
+    pub fn try_from_file_metadata(file_metadata: FileMetadata) -> BoxResult<Self> {
+        Self::try_from_parquet_metadata(
+            file_metadata.metadata,
+            file_metadata.url,
+            file_metadata.location_id,
+        )
+    }
 }
