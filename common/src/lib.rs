@@ -172,6 +172,11 @@ pub trait BlockStreamer: Clone + 'static {
     ) -> impl Future<Output = Result<BlockNum, BoxError>> + Send;
 }
 
+pub enum DatasetValue {
+    Toml(toml::Value),
+    Json(serde_json::Value),
+}
+
 pub fn block_range_intersection(
     a: RangeInclusive<BlockNum>,
     b: RangeInclusive<BlockNum>,

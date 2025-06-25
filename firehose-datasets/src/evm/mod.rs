@@ -5,8 +5,9 @@ pub mod tables;
 
 use common::Dataset;
 
-pub fn dataset(dataset_cfg: toml::Value) -> Result<Dataset, Error> {
-    let dataset_def: DatasetDef = dataset_cfg.try_into()?;
+pub fn dataset(dataset_cfg: common::DatasetValue) -> Result<Dataset, Error> {
+    let dataset_def = DatasetDef::from_value(dataset_cfg)?;
+
     Ok(Dataset {
         kind: dataset_def.kind,
         name: dataset_def.name,

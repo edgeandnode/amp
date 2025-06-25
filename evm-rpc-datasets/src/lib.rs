@@ -3,8 +3,9 @@ mod tables;
 
 use alloy::transports::http::reqwest::Url;
 pub use client::JsonRpcClient;
-use common::{store::StoreError, BoxError, Dataset};
+use common::{store::StoreError, BoxError, Dataset, DatasetValue};
 use serde::Deserialize;
+use serde_json;
 use serde_with::serde_as;
 
 pub const DATASET_KIND: &str = "evm-rpc";
@@ -17,6 +18,8 @@ pub enum Error {
     StoreError(#[from] StoreError),
     #[error("TOML parse error: {0}")]
     Toml(#[from] toml::de::Error),
+    #[error("JSON parse error: {0}")]
+    Json(#[from] serde_json::Error),
 }
 
 #[derive(Debug, Deserialize)]
@@ -24,6 +27,15 @@ pub(crate) struct DatasetDef {
     pub kind: String,
     pub name: String,
     pub network: String,
+}
+
+impl DatasetDef {
+    fn from_value(value: common::DatasetValue) -> Result<Self, Error> {
+        match value {
+            DatasetValue::Toml(value) => value.try_into().map_err(From::from),
+            DatasetValue::Json(value) => serde_json::from_value(value).map_err(From::from),
+        }
+    }
 }
 
 #[serde_as]
@@ -41,8 +53,8 @@ fn default_rpc_batch_size() -> usize {
     100
 }
 
-pub fn dataset(dataset_cfg: toml::Value) -> Result<Dataset, Error> {
-    let def: DatasetDef = dataset_cfg.try_into()?;
+pub fn dataset(dataset_cfg: common::DatasetValue) -> Result<Dataset, Error> {
+    let def = DatasetDef::from_value(dataset_cfg)?;
     Ok(Dataset {
         kind: def.kind,
         name: def.name,
@@ -55,6 +67,7 @@ pub fn dataset(dataset_cfg: toml::Value) -> Result<Dataset, Error> {
 pub async fn client(provider: toml::Value, network: String) -> Result<JsonRpcClient, Error> {
     let provider: EvmRpcProvider = provider.try_into()?;
     let request_limit = u16::max(1, provider.concurrent_request_limit.unwrap_or(1024));
+
     let client = JsonRpcClient::new(
         provider.url,
         network,

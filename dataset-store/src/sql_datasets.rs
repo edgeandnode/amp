@@ -10,7 +10,7 @@ use common::{
         unproject_special_block_num_column,
     },
     query_context::{parse_sql, prepend_special_block_num_field, QueryEnv},
-    BlockNum, BoxError, Dataset, QueryContext, Table, SPECIAL_BLOCK_NUM,
+    BlockNum, BoxError, Dataset, DatasetValue, QueryContext, Table, SPECIAL_BLOCK_NUM,
 };
 use datafusion::{execution::SendableRecordBatchStream, logical_expr::LogicalPlan, sql::parser};
 use futures::StreamExt as _;
@@ -19,6 +19,14 @@ use serde::Deserialize;
 use tracing::instrument;
 
 use crate::DatasetStore;
+
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("TOML parse error: {0}")]
+    Toml(#[from] toml::de::Error),
+    #[error("JSON parse error: {0}")]
+    Json(#[from] serde_json::Error),
+}
 
 pub struct SqlDataset {
     pub dataset: Dataset,
@@ -42,11 +50,20 @@ pub(super) struct DatasetDef {
     pub name: String,
 }
 
+impl DatasetDef {
+    pub fn from_value(value: common::DatasetValue) -> Result<Self, Error> {
+        match value {
+            DatasetValue::Toml(value) => value.try_into().map_err(From::from),
+            DatasetValue::Json(value) => serde_json::from_value(value).map_err(From::from),
+        }
+    }
+}
+
 pub(super) async fn dataset(
     store: Arc<DatasetStore>,
-    dataset_def: toml::Value,
+    dataset_def: common::DatasetValue,
 ) -> Result<SqlDataset, BoxError> {
-    let def: DatasetDef = dataset_def.try_into()?;
+    let def = DatasetDef::from_value(dataset_def)?;
     if def.kind != DATASET_KIND {
         return Err(format!("expected dataset kind '{DATASET_KIND}', got '{}'", def.kind).into());
     }
