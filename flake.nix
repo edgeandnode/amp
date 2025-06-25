@@ -38,12 +38,10 @@
             protobuf
             uv
             cmake
-            nodejs-slim_23
+            nodejs-slim
             postgresql
           ]) ++ pkgs.lib.optionals pkgs.stdenv.isDarwin (with pkgs; [
             libiconv
-            # Required to compile `dump`.
-            darwin.apple_sdk.frameworks.SystemConfiguration
           ]);
         };
       });
