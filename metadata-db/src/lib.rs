@@ -35,6 +35,8 @@ pub const DEFAULT_DEAD_WORKER_INTERVAL: Duration = Duration::from_secs(5);
 pub type FileId = i64;
 pub type LocationId = i64;
 pub type JobDatabaseId = i64;
+pub type MetadataBytes = Vec<u8>;
+pub type MetadataHash = [u8; 32];
 
 #[derive(Debug, FromRow)]
 pub struct FileMetadataRow {
@@ -53,9 +55,9 @@ pub struct FileMetadataRow {
     /// file_metadata.object_version
     pub object_version: Option<String>,
     /// file_metadata.metadata
-    pub metadata: Vec<u8>,
+    pub metadata: MetadataBytes,
     /// file_metadata.metadata_hash
-    pub metadata_hash: Vec<u8>,
+    pub metadata_hash: MetadataHash,
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]

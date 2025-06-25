@@ -17,7 +17,6 @@ use datafusion::{
         object_store::ObjectStoreUrl,
     },
     logical_expr::{col, ScalarUDF, SortExpr},
-    parquet::arrow::async_reader::{AsyncFileReader, ParquetObjectReader},
     physical_expr::LexOrdering,
     physical_plan::ExecutionPlan,
     prelude::Expr,
@@ -31,11 +30,7 @@ use url::Url;
 use uuid::Uuid;
 
 use crate::{
-    metadata::{
-        parquet::{ParquetMeta, PARQUET_METADATA_KEY},
-        range::BlockRange,
-        FileMetadata,
-    },
+    metadata::{range::BlockRange, read_metadata_bytes_from_parquet, FileMetadata},
     multirange::MultiRange,
     store::{infer_object_store, Store},
     BoxError, Dataset, ResolvedTable,
@@ -270,9 +265,9 @@ impl PhysicalTable {
         let mut file_stream = object_store.list(Some(&path));
 
         while let Some(object_meta) = file_stream.try_next().await? {
-            let (file_name, nozzle_meta) =
-                nozzle_meta_from_object_meta(&object_meta, object_store.clone()).await?;
-            let parquet_meta_json = serde_json::to_value(nozzle_meta)?;
+            let (file_name, metadata) =
+                read_metadata_bytes_from_parquet(&object_meta, object_store.clone()).await?;
+
             let object_size = object_meta.size;
             let object_e_tag = object_meta.e_tag;
             let object_version = object_meta.version;
@@ -283,7 +278,7 @@ impl PhysicalTable {
                     object_size,
                     object_e_tag,
                     object_version,
-                    parquet_meta_json,
+                    metadata,
                 )
                 .await?;
         }
@@ -422,20 +417,9 @@ impl PhysicalTable {
             .map(|row| row?.try_into())
     }
 
-    fn stream_ranges<'a>(&'a self) -> impl Stream<Item = Result<BlockRange, BoxError>> + 'a {
-        self.stream_file_metadata().map(|r| {
-            let FileMetadata {
-                file_name,
-                parquet_meta: ParquetMeta { mut ranges, .. },
-                ..
-            } = r?;
-            if ranges.len() != 1 {
-                return Err(BoxError::from(format!(
-                    "expected exactly 1 range for {file_name}"
-                )));
-            }
-            Ok(ranges.remove(0))
-        })
+    pub fn stream_ranges<'a>(&'a self) -> impl Stream<Item = Result<BlockRange, BoxError>> + 'a {
+        self.stream_file_metadata()
+            .map(FileMetadata::try_into_range)
     }
 }
 
@@ -489,26 +473,15 @@ impl PhysicalTable {
         self.stream_file_metadata()
             .map_err(DataFusionError::from)
             .map(async move |res| {
-                let FileMetadata {
-                    object_meta,
-                    parquet_meta: ParquetMeta { ranges, .. },
-                    ..
-                } = res?;
-                let mut partitioned_file = PartitionedFile::from(object_meta.clone());
+                let file_metadata = res?;
+                let mut partitioned_file = PartitionedFile::from(file_metadata.object_meta.clone());
                 let statistics = self.do_collect_statistics(ctx, &partitioned_file).await?;
 
+                let range_start = FileMetadata::try_get_range(&file_metadata)
+                    .map(|ref range| *range.numbers.start())?;
                 partitioned_file.statistics = Some(statistics);
 
-                let range_start = ranges
-                    .first()
-                    .ok_or(DataFusionError::Execution(format!(
-                        "No ranges found for file `{}` for table `{}`",
-                        object_meta.location,
-                        self.table_ref()
-                    )))?
-                    .numbers
-                    .start();
-                Ok((*range_start, partitioned_file))
+                Ok((range_start, partitioned_file))
             })
             .buffered(ctx.config_options().execution.meta_fetch_concurrency)
     }
@@ -608,47 +581,6 @@ pub async fn list_revisions(
             Some((revision, (full_path, full_url, full_prefix)))
         })
         .collect())
-}
-
-async fn nozzle_meta_from_object_meta(
-    object_meta: &ObjectMeta,
-    object_store: Arc<dyn ObjectStore>,
-) -> Result<(String, ParquetMeta), BoxError> {
-    let mut reader = ParquetObjectReader::new(object_store.clone(), object_meta.location.clone())
-        .with_file_size(object_meta.size);
-    let parquet_metadata = reader.get_metadata(None).await?;
-    let file_metadata = parquet_metadata.file_metadata();
-    let key_value_metadata =
-        file_metadata
-            .key_value_metadata()
-            .ok_or(crate::ArrowError::ParquetError(format!(
-                "Unable to fetch Key Value metadata for file {}",
-                &object_meta.location
-            )))?;
-    let parquet_meta_key_value_pair = key_value_metadata
-        .into_iter()
-        .find(|key_value| key_value.key.as_str() == PARQUET_METADATA_KEY)
-        .ok_or(crate::ArrowError::ParquetError(format!(
-            "Missing key: {} in file metadata for file {}",
-            PARQUET_METADATA_KEY, &object_meta.location
-        )))?;
-    let parquet_meta_json =
-        parquet_meta_key_value_pair
-            .value
-            .as_ref()
-            .ok_or(crate::ArrowError::ParquetError(format!(
-                "Unable to parse ParquetMeta from empty value in metadata for file {}",
-                &object_meta.location
-            )))?;
-    let parquet_meta: ParquetMeta = serde_json::from_str(parquet_meta_json).map_err(|e| {
-        crate::ArrowError::ParseError(format!(
-            "Unable to parse ParquetMeta from key value metadata for file {}: {}",
-            &object_meta.location, e
-        ))
-    })?;
-    // Unwrap: We know this is a path with valid file name because we just opened it
-    let file_name = object_meta.location.filename().unwrap().to_string();
-    Ok((file_name, parquet_meta))
 }
 
 fn round_robin(files: BTreeMap<u64, PartitionedFile>, target_partitions: usize) -> Vec<FileGroup> {
