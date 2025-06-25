@@ -35,6 +35,8 @@ pub const DEFAULT_DEAD_WORKER_INTERVAL: Duration = Duration::from_secs(5);
 pub type FileId = i64;
 pub type LocationId = i64;
 pub type JobDatabaseId = i64;
+pub type MetadataBytes = Vec<u8>;
+pub type MetadataHash = Vec<u8>;
 
 #[derive(Debug, FromRow)]
 pub struct FileMetadataRow {
@@ -53,7 +55,9 @@ pub struct FileMetadataRow {
     /// file_metadata.object_version
     pub object_version: Option<String>,
     /// file_metadata.metadata
-    pub metadata: serde_json::Value,
+    pub metadata: MetadataBytes,
+    /// file_metadata.metadata_hash
+    pub metadata_hash: MetadataHash,
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -548,6 +552,7 @@ impl MetadataDb {
              , fm.object_e_tag
              , fm.object_version
              , fm.metadata
+             , fm.metadata_hash
           FROM file_metadata fm
           JOIN locations l ON fm.location_id = l.id
          WHERE location_id = $1;
@@ -563,12 +568,14 @@ impl MetadataDb {
         object_size: u64,
         object_e_tag: Option<String>,
         object_version: Option<String>,
-        parquet_meta: serde_json::Value,
+        metadata: Vec<u8>,
     ) -> Result<(), Error> {
         let sql = "
         INSERT INTO file_metadata (location_id, file_name, object_size, object_e_tag, object_version, metadata)
         VALUES ($1, $2, $3, $4, $5, $6)
-        ON CONFLICT DO NOTHING
+        ON CONFLICT (location_id, file_name) DO UPDATE
+            SET metadata = EXCLUDED.metadata
+            WHERE file_metadata.metadata_hash <> sha256(EXCLUDED.metadata)
         ";
 
         sqlx::query(sql)
@@ -577,7 +584,7 @@ impl MetadataDb {
             .bind(object_size as i64)
             .bind(object_e_tag)
             .bind(object_version)
-            .bind(parquet_meta)
+            .bind(metadata)
             .execute(&*self.pool)
             .await?;
 
