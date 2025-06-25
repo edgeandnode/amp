@@ -14,7 +14,8 @@ use crate::{
     steps::load_test_steps,
     test_client::TestClient,
     test_support::{
-        check_blocks, check_provider_file, restore_blessed_dataset, SnapshotContext, TestEnv,
+        check_blocks, check_provider_file, restore_blessed_dataset, table_ranges, SnapshotContext,
+        TestEnv,
     },
 };
 
@@ -204,7 +205,7 @@ async fn anvil_rpc_reorg() {
         let ctx = dataset_store.ctx_for_sql(&sql, env).await.unwrap();
         let tables = ctx.catalog().tables();
         let table = tables.iter().find(|t| t.table_name() == "blocks").unwrap();
-        table.ranges().await.unwrap()
+        table_ranges(&table).await.unwrap()
     };
 
     mine(2).await;

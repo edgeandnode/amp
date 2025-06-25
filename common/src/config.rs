@@ -16,8 +16,9 @@ use fs_err as fs;
 use js_runtime::isolate_pool::IsolatePool;
 use metadata_db::{temp_metadata_db, MetadataDb, KEEP_TEMP_DIRS};
 use serde::Deserialize;
+use thiserror::Error;
 
-use crate::{query_context::QueryEnv, BoxError, Store};
+use crate::{query_context::QueryEnv, Store};
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -29,6 +30,7 @@ pub struct Config {
     pub spill_location: Vec<PathBuf>,
     /// Addresses to bind the server to. Used during testing.
     pub addrs: Addrs,
+    pub config_path: PathBuf,
 }
 
 #[derive(Debug, Clone)]
@@ -51,6 +53,20 @@ pub struct ConfigFile {
 
 pub type FigmentJson = figment::providers::Data<figment::providers::Json>;
 
+#[derive(Error, Debug)]
+pub enum ConfigError {
+    #[error("IO error at {0}: {1}")]
+    Io(PathBuf, std::io::Error),
+    #[error("Missing required config at {0}: {1}")]
+    MissingConfig(PathBuf, &'static str),
+    #[error("Config parse error at {0}: {1}")]
+    Figment(PathBuf, figment::Error),
+    #[error("Store error at {0}: {1}")]
+    Store(PathBuf, crate::store::StoreError),
+    #[error("Metadata DB error at {0}: {1}")]
+    MetadataDb(PathBuf, metadata_db::Error),
+}
+
 impl Config {
     ///
     /// `env_override` allows env vars prefixed with `NOZZLE_CONFIG_` to override config values.
@@ -60,9 +76,12 @@ impl Config {
         config_override: Option<Figment>,
         addrs: Addrs,
         allow_temp_db: bool,
-    ) -> Result<Self, BoxError> {
-        let config_path: PathBuf = fs::canonicalize(file.into())?;
-        let contents = fs::read_to_string(&config_path)?;
+    ) -> Result<Self, ConfigError> {
+        let input_path = file.into();
+        let config_path = fs::canonicalize(&input_path)
+            .map_err(|err| ConfigError::Io(input_path.clone(), err))?;
+        let contents = fs::read_to_string(&config_path)
+            .map_err(|err| ConfigError::Io(config_path.clone(), err))?;
 
         let config_file: ConfigFile = {
             let mut config_builder = Figment::new().merge(Toml::string(&contents));
@@ -72,19 +91,29 @@ impl Config {
             if let Some(config_override) = config_override {
                 config_builder = config_builder.merge(config_override);
             }
-            config_builder.extract()?
+            config_builder
+                .extract()
+                .map_err(|e| ConfigError::Figment(config_path.clone(), e))?
         };
 
         // Resolve any filesystem paths relative to the directory of the config file.
         let base = config_path.parent();
-        let data_store = Store::new(config_file.data_dir, base)?;
-        let providers_store = Store::new(config_file.providers_dir, base)?;
-        let dataset_defs_store = Store::new(config_file.dataset_defs_dir, base)?;
+        let data_store = Store::new(config_file.data_dir, base)
+            .map_err(|e| ConfigError::Store(config_path.clone(), e))?;
+        let providers_store = Store::new(config_file.providers_dir, base)
+            .map_err(|e| ConfigError::Store(config_path.clone(), e))?;
+        let dataset_defs_store = Store::new(config_file.dataset_defs_dir, base)
+            .map_err(|e| ConfigError::Store(config_path.clone(), e))?;
 
         let metadata_db_url = match (config_file.metadata_db_url, allow_temp_db) {
             (Some(url), _) => url,
             (None, true) => temp_metadata_db(*KEEP_TEMP_DIRS).await.url().to_string(),
-            (None, false) => return Err("metadata_db_url not provided".into()),
+            (None, false) => {
+                return Err(ConfigError::MissingConfig(
+                    config_path.clone(),
+                    "metadata_db_url",
+                ))
+            }
         };
 
         Ok(Self {
@@ -95,6 +124,7 @@ impl Config {
             max_mem_mb: config_file.max_mem_mb,
             spill_location: config_file.spill_location,
             addrs,
+            config_path,
         })
     }
 
@@ -124,9 +154,7 @@ impl Config {
             None
         };
         let cache_manager = CacheManagerConfig {
-            // Caches parquet file statistics. Seems like a good thing.
             table_files_statistics_cache: Some(Arc::new(DefaultFileStatisticsCache::default())),
-            // Seems it might lead to staleness in the ListingTable, better not.
             list_files_cache: None,
         };
 
@@ -140,16 +168,16 @@ impl Config {
 
         let runtime_env = runtime_config.build()?;
         let isolate_pool = IsolatePool::new();
-        return Ok(QueryEnv {
+        Ok(QueryEnv {
             df_env: Arc::new(runtime_env),
             isolate_pool,
-        });
+        })
     }
 
-    pub async fn metadata_db(&self) -> Result<MetadataDb, BoxError> {
+    pub async fn metadata_db(&self) -> Result<MetadataDb, ConfigError> {
         MetadataDb::connect(&self.metadata_db_url)
             .await
-            .map_err(Into::into)
+            .map_err(|e| ConfigError::MetadataDb(self.config_path.clone(), e))
     }
 }
 
