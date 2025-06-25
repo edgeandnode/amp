@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc};
 
 use datafusion::{
     arrow::datatypes::SchemaRef,
@@ -30,10 +30,10 @@ use url::Url;
 use uuid::Uuid;
 
 use crate::{
-    metadata::{range::BlockRange, read_metadata_bytes_from_parquet, FileMetadata},
+    metadata::{read_metadata_bytes_from_parquet, FileMetadata},
     multirange::MultiRange,
     store::{infer_object_store, Store},
-    BoxError, Dataset, ResolvedTable,
+    BlockNum, BoxError, Dataset, ResolvedTable,
 };
 
 #[derive(Debug, Clone)]
@@ -392,15 +392,25 @@ impl PhysicalTable {
         &self.table
     }
 
-    pub async fn ranges(&self) -> Result<Vec<BlockRange>, BoxError> {
-        let ranges = self.stream_ranges().try_collect().await?;
-        Ok(ranges)
+    pub async fn files(&self) -> Result<Vec<FileMetadata>, BoxError> {
+        self.stream_file_metadata().try_collect().await
+    }
+
+    /// Return the block range to use for query execution over this table. This is defined as the
+    /// contiguous range of block numbers starting from the lowest start block. Ok(None) is
+    /// returned if no block range has been synced.
+    pub async fn synced_range(&self) -> Result<Option<RangeInclusive<BlockNum>>, BoxError> {
+        let ranges = self.multi_range().await?;
+        Ok(ranges.first().map(|(start, end)| start..=end))
     }
 
     pub async fn multi_range(&self) -> Result<MultiRange, BoxError> {
         let ranges = self
-            .stream_ranges()
-            .map(|r| r.map(|r| r.numbers.clone().into_inner()))
+            .stream_file_metadata()
+            .map(|r| {
+                let range = FileMetadata::try_into_range(r)?;
+                Ok::<_, BoxError>((*range.numbers.start(), *range.numbers.end()))
+            })
             .try_collect()
             .await?;
         MultiRange::from_ranges(ranges).map_err(Into::into)
@@ -409,17 +419,12 @@ impl PhysicalTable {
 
 // Methods for streaming metadata and file information of PhysicalTable
 impl PhysicalTable {
-    pub fn stream_file_metadata<'a>(
+    fn stream_file_metadata<'a>(
         &'a self,
     ) -> impl Stream<Item = Result<FileMetadata, BoxError>> + 'a {
         self.metadata_db
             .stream_file_metadata(self.location_id)
             .map(|row| row?.try_into())
-    }
-
-    pub fn stream_ranges<'a>(&'a self) -> impl Stream<Item = Result<BlockRange, BoxError>> + 'a {
-        self.stream_file_metadata()
-            .map(FileMetadata::try_into_range)
     }
 }
 

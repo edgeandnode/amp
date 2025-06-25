@@ -17,8 +17,8 @@ use common::{
     query_context::{self, parse_sql, PlanningContext, QueryEnv},
     sql_visitors::all_function_names,
     store::StoreError,
-    BlockNum, BlockStreamer, BoxError, Dataset, LogicalCatalog, QueryContext, RawDatasetRows,
-    Store,
+    BlockNum, BlockStreamer, BoxError, Dataset, DatasetValue, LogicalCatalog, QueryContext,
+    RawDatasetRows, Store,
 };
 use datafusion::{
     common::HashMap,
@@ -297,25 +297,14 @@ impl DatasetStore {
             return Ok(dataset.clone());
         }
 
-        let (kind, raw_dataset) = self.kind_and_dataset(dataset_name).await?;
-
+        let (common, raw_dataset) = self.common_data_and_dataset(dataset_name).await?;
+        let kind = DatasetKind::from_str(&common.kind)?;
+        let value = raw_dataset.deserialize()?;
         let dataset = match kind {
-            DatasetKind::EvmRpc => {
-                let dataset_toml: toml::Value = toml::from_str(&raw_dataset)?;
-                evm_rpc_datasets::dataset(dataset_toml)?
-            }
-            DatasetKind::Firehose => {
-                let dataset_toml: toml::Value = toml::from_str(&raw_dataset)?;
-                firehose_datasets::evm::dataset(dataset_toml)?
-            }
-            DatasetKind::Substreams => {
-                let dataset_toml: toml::Value = toml::from_str(&raw_dataset)?;
-                substreams_datasets::dataset(dataset_toml).await?
-            }
-            DatasetKind::Sql => {
-                let dataset_toml: toml::Value = toml::from_str(&raw_dataset)?;
-                self.clone().sql_dataset(dataset_toml).await?.dataset
-            }
+            DatasetKind::EvmRpc => evm_rpc_datasets::dataset(value)?,
+            DatasetKind::Firehose => firehose_datasets::evm::dataset(value)?,
+            DatasetKind::Substreams => substreams_datasets::dataset(value).await?,
+            DatasetKind::Sql => self.clone().sql_dataset(value).await?.dataset,
             DatasetKind::Manifest => {
                 let filename = format!("{}.json", dataset_name);
                 let raw_manifest = self.dataset_defs_store().get_string(filename).await?;
@@ -339,14 +328,16 @@ impl DatasetStore {
         self: Arc<Self>,
         dataset_name: &str,
     ) -> Result<SqlDataset, Error> {
-        let (kind, raw_dataset) = self.kind_and_dataset(dataset_name).await?;
+        let (common, raw_dataset) = self.common_data_and_dataset(dataset_name).await?;
+        let kind = DatasetKind::from_str(&common.kind)?;
+
         if kind != DatasetKind::Sql {
             return Err(Error::UnsupportedKind(kind.to_string()));
         }
 
-        let dataset_toml: toml::Value = toml::from_str(&raw_dataset)?;
+        let value = raw_dataset.deserialize()?;
 
-        self.sql_dataset(dataset_toml).await
+        self.sql_dataset(value).await
     }
 
     pub async fn load_client(&self, dataset: &str) -> Result<impl BlockStreamer, DatasetError> {
@@ -356,24 +347,24 @@ impl DatasetStore {
     }
 
     async fn load_client_inner(&self, dataset_name: &str) -> Result<BlockStreamClient, Error> {
-        let (dataset_kind, dataset_network, dataset) =
-            self.kind_network_dataset(dataset_name).await?;
-        let provider = self
-            .find_provider(dataset_kind, dataset_network.clone())
-            .await?;
-        Ok(match dataset_kind {
-            DatasetKind::EvmRpc => BlockStreamClient::EvmRpc(
-                evm_rpc_datasets::client(provider, dataset_network).await?,
-            ),
+        let (common, raw_dataset) = self.common_data_and_dataset(dataset_name).await?;
+        let value = raw_dataset.deserialize()?;
+        let kind = DatasetKind::from_str(&common.kind)?;
+
+        let provider = self.find_provider(kind, common.network.clone()).await?;
+        Ok(match kind {
+            DatasetKind::EvmRpc => {
+                BlockStreamClient::EvmRpc(evm_rpc_datasets::client(provider, common.network).await?)
+            }
             DatasetKind::Firehose => BlockStreamClient::Firehose(
-                firehose_datasets::Client::new(provider, dataset_network).await?,
+                firehose_datasets::Client::new(provider, common.network).await?,
             ),
             DatasetKind::Substreams => BlockStreamClient::Substreams(
-                substreams_datasets::Client::new(provider, &dataset, dataset_network).await?,
+                substreams_datasets::Client::new(provider, value, common.network).await?,
             ),
             DatasetKind::Sql | DatasetKind::Manifest => {
                 // SQL and Manifest datasets don't have a client.
-                return Err(Error::UnsupportedKind(dataset_kind.to_string()));
+                return Err(Error::UnsupportedKind(common.kind));
             }
         })
     }
@@ -414,36 +405,6 @@ impl DatasetStore {
         Ok(providers)
     }
 
-    async fn kind_and_dataset(&self, dataset_name: &str) -> Result<(DatasetKind, String), Error> {
-        let (raw, common_fields) = {
-            let filename = format!("{}.toml", dataset_name);
-            match self.dataset_defs_store().get_string(filename).await {
-                Ok(raw_dataset) => {
-                    let toml_value: toml::Value = toml::from_str(&raw_dataset)?;
-                    (raw_dataset, DatasetDefsCommon::deserialize(toml_value)?)
-                }
-                Err(e) if e.is_not_found() => {
-                    // If it's not a TOML file, it might be a JSON file.
-                    // Ideally we migrate everything to JSON, but this is a stopgap.
-                    let filename = format!("{}.json", dataset_name);
-                    let raw_dataset = self.dataset_defs_store().get_string(filename).await?;
-                    let json_value: serde_json::Value = serde_json::from_str(&raw_dataset)?;
-                    (raw_dataset, DatasetDefsCommon::deserialize(json_value)?)
-                }
-                Err(e) => return Err(e.into()),
-            }
-        };
-        if common_fields.name != dataset_name {
-            return Err(Error::NameMismatch(
-                common_fields.name,
-                dataset_name.to_string(),
-            ));
-        }
-        let kind = DatasetKind::from_str(&common_fields.kind)?;
-
-        Ok((kind, raw))
-    }
-
     async fn kind_network_provider(
         &self,
         location: &str,
@@ -455,37 +416,44 @@ impl DatasetStore {
         Ok((kind, common_fields.network, toml_value))
     }
 
-    async fn kind_network_dataset(
+    async fn common_data_and_dataset(
         &self,
         dataset_name: &str,
-    ) -> Result<(DatasetKind, String, String), Error> {
-        let (raw, common_fields) = {
-            let filename = format!("{}.toml", dataset_name);
-            match self.dataset_defs_store().get_string(filename).await {
-                Ok(raw_dataset) => {
-                    let toml_value: toml::Value = toml::from_str(&raw_dataset)?;
-                    (raw_dataset, DatasetDefsCommon::deserialize(toml_value)?)
+    ) -> Result<(DatasetDefsCommon, RawDataset), Error> {
+        use Error::*;
+
+        let raw_dataset = self
+            .dataset_defs_store()
+            .get_string(format!("{}.toml", dataset_name))
+            .map_ok(RawDataset::Toml)
+            .or_else(|err| async move {
+                if !err.is_not_found() {
+                    return Err(err);
                 }
-                Err(e) if e.is_not_found() => {
-                    // If it's not a TOML file, it might be a JSON file.
-                    // Ideally we migrate everything to JSON, but this is a stopgap.
-                    let filename = format!("{}.json", dataset_name);
-                    let raw_dataset = self.dataset_defs_store().get_string(filename).await?;
-                    let json_value: serde_json::Value = serde_json::from_str(&raw_dataset)?;
-                    (raw_dataset, DatasetDefsCommon::deserialize(json_value)?)
-                }
-                Err(e) => return Err(e.into()),
+
+                self.dataset_defs_store()
+                    .get_string(format!("{}.json", dataset_name))
+                    .await
+                    .map(RawDataset::Json)
+            })
+            .await?;
+
+        let common = match raw_dataset {
+            RawDataset::Toml(ref raw) => {
+                let toml = toml::Value::from_str(raw)?;
+                DatasetDefsCommon::deserialize(toml)?
+            }
+            RawDataset::Json(ref raw) => {
+                let json = serde_json::Value::from_str(raw)?;
+                DatasetDefsCommon::deserialize(json)?
             }
         };
-        if common_fields.name != dataset_name {
-            return Err(Error::NameMismatch(
-                common_fields.name,
-                dataset_name.to_string(),
-            ));
-        }
-        let kind = DatasetKind::from_str(&common_fields.kind)?;
 
-        Ok((kind, common_fields.network, raw))
+        if common.name != dataset_name {
+            return Err(NameMismatch(common.name, dataset_name.to_string()));
+        }
+
+        Ok((common, raw_dataset))
     }
 
     /// Returns cached eth_call scalar UDF, otherwise loads the UDF and caches it.
@@ -634,7 +602,7 @@ impl DatasetStore {
     /// Each `.sql` file in the directory with the same name as the dataset will be loaded as a table.
     fn sql_dataset(
         self: Arc<Self>,
-        dataset_def: toml::Value,
+        dataset_def: common::DatasetValue,
     ) -> BoxFuture<'static, Result<SqlDataset, Error>> {
         sql_datasets::dataset(self, dataset_def)
             .map_err(Error::SqlDatasetError)
@@ -647,6 +615,22 @@ impl DatasetStore {
 
     fn dataset_defs_store(&self) -> &Arc<Store> {
         &self.config.dataset_defs_store
+    }
+}
+
+enum RawDataset {
+    Toml(String),
+    Json(String),
+}
+
+impl RawDataset {
+    fn deserialize(&self) -> Result<DatasetValue, Error> {
+        let value = match self {
+            RawDataset::Toml(raw) => DatasetValue::Toml(toml::Value::from_str(raw)?),
+            RawDataset::Json(raw) => DatasetValue::Json(serde_json::Value::from_str(raw)?),
+        };
+
+        Ok(value)
     }
 }
 

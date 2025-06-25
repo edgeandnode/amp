@@ -16,6 +16,7 @@ pub mod tracing_helpers;
 
 use std::{
     future::Future,
+    ops::RangeInclusive,
     time::{Duration, SystemTime},
 };
 
@@ -168,4 +169,22 @@ pub trait BlockStreamer: Clone + 'static {
         &mut self,
         finalized: bool,
     ) -> impl Future<Output = Result<BlockNum, BoxError>> + Send;
+}
+
+pub enum DatasetValue {
+    Toml(toml::Value),
+    Json(serde_json::Value),
+}
+
+pub fn block_range_intersection(
+    a: RangeInclusive<BlockNum>,
+    b: RangeInclusive<BlockNum>,
+) -> Option<RangeInclusive<BlockNum>> {
+    let start = BlockNum::max(*a.start(), *b.start());
+    let end = BlockNum::min(*a.end(), *b.end());
+    if start <= end {
+        Some(start..=end)
+    } else {
+        None
+    }
 }
