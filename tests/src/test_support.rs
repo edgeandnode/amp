@@ -16,7 +16,7 @@ use common::{
     },
     catalog::physical::{Catalog, PhysicalTable},
     config::{Addrs, Config},
-    metadata::range::BlockRange,
+    metadata::{parquet::ParquetMeta, range::BlockRange},
     query_context::parse_sql,
     BoxError, QueryContext,
 };
@@ -287,13 +287,14 @@ async fn catalog_for_dataset(
 
 pub async fn table_ranges(table: &PhysicalTable) -> Result<Vec<BlockRange>, BoxError> {
     let files = table.files().await?;
-    Ok(files
+    files
         .into_iter()
-        .map(|mut f| {
-            assert!(f.parquet_meta.ranges.len() == 1);
-            f.parquet_meta.ranges.remove(0)
+        .map(|f| {
+            let ParquetMeta { mut ranges, .. } = ParquetMeta::try_from_file_metadata(f)?;
+            assert!(ranges.len() == 1);
+            Ok(ranges.remove(0))
         })
-        .collect())
+        .collect()
 }
 
 pub async fn check_blocks(
