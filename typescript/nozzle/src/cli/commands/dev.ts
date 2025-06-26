@@ -5,7 +5,6 @@ import type * as Viem from "viem"
 import * as Api from "../../Api.js"
 import * as ConfigLoader from "../../ConfigLoader.js"
 import * as EvmRpc from "../../EvmRpc.js"
-import * as ManifestDeployer from "../../ManifestDeployer.js"
 import * as Nozzle from "../../Nozzle.js"
 import * as Utils from "../../Utils.js"
 
@@ -67,13 +66,18 @@ export const dev = Command.make("dev", {
         Stream.chunks,
         Stream.filter(Chunk.isNonEmpty),
         Stream.mapAccumEffect(Option.none<Viem.Hash>(), (state, chunk) => {
-          // Reset nozzle if there's no previous block hash or if a reorg is detected.
-          const reset = Option.isNone(state) || hasReorg(state.value, chunk)
           const last = Chunk.lastNonEmpty(chunk)
-          return nozzle.dump(last.number, reset).pipe(
-            Effect.catchAllCause(Utils.logCauseWith("Failed to dump block")),
-            Effect.as([Option.some(last.hash), void 0] as const),
-          )
+
+          // Reset nozzle if there's no previous block hash or if a reorg is detected.
+          return Option.isNone(state) || hasReorg(state.value, chunk) ?
+            nozzle.reset(last.number).pipe(
+              Effect.catchAllCause(Utils.logCauseWith("Failed to reset nozzle")),
+              Effect.as([Option.some(last.hash), void 0] as const),
+            ) :
+            nozzle.dump(last.number).pipe(
+              Effect.catchAllCause(Utils.logCauseWith("Failed to dump block")),
+              Effect.as([Option.some(last.hash), void 0] as const),
+            )
         }),
         Stream.orDie,
         Stream.runDrain,
@@ -89,10 +93,7 @@ export const dev = Command.make("dev", {
       directory: args.directory,
     }).pipe(
       Layer.provideMerge(EvmRpc.EvmRpc.withUrl(`${args.rpc}`)),
-      Layer.provide(ManifestDeployer.ManifestDeployer.Default.pipe(
-        Layer.provide(Api.Admin.withUrl("http://localhost:1610")),
-      )),
-    ).pipe(
+      Layer.provideMerge(Api.Admin.withUrl("http://localhost:1610")),
       Layer.merge(ConfigLoader.ConfigLoader.Default.pipe(
         Layer.provide(Api.Registry.withUrl("http://localhost:1611")),
       )),

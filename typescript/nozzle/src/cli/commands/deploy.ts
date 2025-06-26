@@ -2,7 +2,6 @@ import { Command, Options } from "@effect/cli"
 import { Config, Console, Effect, Layer, Schema } from "effect"
 import * as Api from "../../Api.js"
 import * as ManifestContext from "../../ManifestContext.js"
-import * as ManifestDeployer from "../../ManifestDeployer.js"
 
 export const deploy = Command.make("deploy", {
   args: {
@@ -36,16 +35,15 @@ export const deploy = Command.make("deploy", {
   Command.withHandler(() =>
     Effect.gen(function*() {
       const manifest = yield* ManifestContext.ManifestContext
-      const deployer = yield* ManifestDeployer.ManifestDeployer
-      const result = yield* deployer.deploy(manifest)
+      const admin = yield* Api.Admin
+      const result = yield* admin.deploy(manifest)
       yield* Console.log(result)
     })
   ),
   Command.provide(({ args }) =>
     ManifestContext.layerFromFile({ manifest: args.manifest, config: args.config }).pipe(
-      Layer.merge(ManifestDeployer.ManifestDeployer.Default),
-      Layer.provide(Api.Admin.withUrl(`${args.admin}`)),
       Layer.provide(Api.Registry.withUrl(`${args.registry}`)),
+      Layer.merge(Api.Admin.withUrl(`${args.admin}`)),
     )
   ),
 )

@@ -62,21 +62,46 @@ export class AdminErrorResponse extends Schema.Class<AdminErrorResponse>("AdminE
   readonly _tag = "AdminErrorResponse" as const
 }
 
-export class AdminApiGroup extends HttpApiGroup.make("admin", { topLevel: true }).add(
-  HttpApiEndpoint.post("deploy")`/deploy`
-    .setPayload(Schema.Struct({ dataset_name: Schema.String, manifest: Schema.parseJson(Model.DatasetManifest) }))
-    .addSuccess(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }))
-    .addError(AdminErrorResponse, { status: 400 }) // MANIFEST_PARSE_ERROR
-    .addError(AdminErrorResponse, { status: 500 }), // SCHEDULER_ERROR & DATASET_DEF_STORE_ERROR
-) {}
+const DatasetParam = HttpApiSchema.param("id", Model.DatasetName)
+const GetDatasetEndpoint = HttpApiEndpoint.get("getDataset")`/datasets/${DatasetParam}`
+  .addSuccess(Schema.parseJson(Model.DatasetManifest))
+  .addError(AdminErrorResponse, { status: 500 }) // DATASET_DEF_STORE_ERROR
+
+const GetDatasetsEndpoint = HttpApiEndpoint.get("getDatasets")`/datasets`
+  .addSuccess(Schema.Array(Schema.String))
+  .addError(AdminErrorResponse, { status: 500 }) // DATASET_DEF_STORE_ERROR
+
+const ManifestOrString = Schema.Union(Schema.String, Schema.parseJson(Model.DatasetManifest))
+const DeployDatasetEndpoint = HttpApiEndpoint.post("deployDataset")`/datasets`
+  .setPayload(Schema.Struct({ dataset_name: Schema.String, manifest: ManifestOrString }))
+  .addSuccess(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }))
+  .addError(AdminErrorResponse, { status: 400 }) // MANIFEST_PARSE_ERROR
+  .addError(AdminErrorResponse, { status: 500 }) // SCHEDULER_ERROR & DATASET_DEF_STORE_ERROR
+
+const DumpDatasetEndpoint = HttpApiEndpoint.post("dumpDataset")`/datasets/${DatasetParam}/dump`
+  .setPayload(
+    Schema.Struct({
+      end_block: Schema.optional(Schema.BigIntFromNumber),
+      wait_for_completion: Schema.optional(Schema.Boolean),
+    }),
+  )
+  .addSuccess(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }))
+  .addError(AdminErrorResponse, { status: 500 }) // SCHEDULER_ERROR & STORE_ERROR
+
+export class AdminApiGroup extends HttpApiGroup.make("admin", { topLevel: true })
+  .add(GetDatasetsEndpoint)
+  .add(GetDatasetEndpoint)
+  .add(DeployDatasetEndpoint)
+  .add(DumpDatasetEndpoint)
+{}
 
 export class AdminApi extends HttpApi.make("admin").add(AdminApiGroup) {}
 
 const makeAdmin = (url: string) =>
   Effect.gen(function*() {
     const client = yield* HttpApiClient.make(AdminApi, { baseUrl: url })
-    const deploy = (manifest: Model.DatasetManifest) =>
-      client.deploy({ payload: { dataset_name: manifest.name, manifest } }).pipe(
+    const deploy = (name: string, manifest: string | Model.DatasetManifest) =>
+      client.deployDataset({ payload: { dataset_name: name, manifest } }).pipe(
         Effect.catchTags({
           AdminErrorResponse: (cause) => new AdminError({ cause, message: cause.error_message }),
           HttpApiDecodeError: (cause) => new AdminError({ cause, message: "Malformed response" }),
@@ -86,7 +111,23 @@ const makeAdmin = (url: string) =>
         }),
       )
 
-    return { deploy }
+    const dump = (id: string, options?: { block?: bigint; wait?: boolean }) =>
+      client.dumpDataset({ path: { id }, payload: { end_block: options?.block, wait_for_completion: options?.wait } })
+        .pipe(
+          Effect.catchTags({
+            AdminErrorResponse: (cause) => new AdminError({ cause, message: cause.error_message }),
+            HttpApiDecodeError: (cause) => new AdminError({ cause, message: "Malformed response" }),
+            RequestError: (cause) => new AdminError({ cause, message: "Request error" }),
+            ResponseError: (cause) => new AdminError({ cause, message: "Response error" }),
+            ParseError: (cause) => new AdminError({ cause, message: "Parse error" }),
+          }),
+        )
+
+    return {
+      dump,
+      deploy: (manifest: Model.DatasetManifest) => deploy(manifest.name, manifest),
+      deployRaw: (name: string, manifest: string) => deploy(name, manifest),
+    }
   })
 
 export class Admin extends Effect.Service<Admin>()("Nozzle/Api/Admin", {

@@ -1,9 +1,9 @@
 import { Machine } from "@effect/experimental"
 import { Command as Cmd, FileSystem, Socket } from "@effect/platform"
-import { Context, Data, Effect, Fiber, Layer, Request, Schedule, String } from "effect"
+import { Context, Data, Effect, Fiber, Layer, Option, Request, Schedule, String } from "effect"
 import * as Net from "node:net"
+import * as Api from "./Api.js"
 import * as EvmRpc from "./EvmRpc.js"
-import * as ManifestDeployer from "./ManifestDeployer.js"
 import type * as Model from "./Model.js"
 
 export class NozzleError extends Data.TaggedError("NozzleError")<{
@@ -31,7 +31,7 @@ const make = ({
   Effect.gen(function*() {
     const rpc = yield* EvmRpc.EvmRpc
     const fs = yield* FileSystem.FileSystem
-    const deployer = yield* ManifestDeployer.ManifestDeployer
+    const admin = yield* Api.Admin
 
     yield* fs.makeDirectory(directory).pipe(
       Effect.zipRight(Effect.addFinalizer(() => fs.remove(directory, { recursive: true }).pipe(Effect.ignore))),
@@ -67,7 +67,6 @@ const make = ({
     yield* Effect.all([
       fs.writeFileString(`${directory}/config.toml`, config),
       fs.writeFileString(`${directory}/providers/anvil.toml`, provider),
-      fs.writeFileString(`${directory}/datasets/anvil.toml`, dataset),
     ]).pipe(Effect.orDie)
 
     const cmd = (cmd: string, ...args: Array<string>) =>
@@ -75,6 +74,14 @@ const make = ({
         NOZZLE_CONFIG: `${directory}/config.toml`,
         NOZZLE_LOG: logging,
       }))
+
+    // NOTE: Leave this here for debugging purposes.
+    // const cmd = (cmd: string, ...args: Array<string>) =>
+    //   Cmd.make("cargo", "run", "--release", "-p", "nozzle", "--", cmd, ...args).pipe(Cmd.env({
+    //     NOZZLE_CONFIG: `${directory}/config.toml`,
+    //     NOZZLE_LOG: logging,
+    //     RUST_BACKTRACE: "full",
+    //   }))
 
     // This effect starts the server in the background.
     const process = yield* Effect.acquireRelease(
@@ -93,9 +100,9 @@ const make = ({
           waitForPort(1610),
           waitForPort(1611),
         ], { concurrency: "unbounded" }).pipe(
-          Effect.timeout("10 seconds"),
           Effect.mapError((cause) => new NozzleError({ cause, message: "Server failed to start" })),
           Effect.interruptible,
+          Effect.zipRight(admin.deployRaw("anvil", dataset)),
         )
 
         // Whether the server exited with a non-zero exit code or not, at this point it's an error.
@@ -118,42 +125,52 @@ const make = ({
       Effect.forkScoped,
     )
 
+    const initial: MachineState = {
+      dataset: Option.none(),
+      block: Option.none(),
+    }
+
     const machine = Machine.make(
-      Machine.procedures.make("anvil").pipe(
+      Machine.procedures.make(initial).pipe(
         Machine.procedures.add<Deploy>()("Deploy", (ctx) =>
           Effect.gen(function*() {
-            yield* Effect.logDebug(`Deploying manifest "${ctx.request.manifest.name}"`)
-
-            if (ctx.state !== "anvil") {
-              // TODO: Resetting a specific dataset should be exposed via the control plane.
-              yield* fs.remove(`${directory}/datasets/${ctx.state}.json`).pipe(Effect.ignore)
-              yield* fs.remove(`${directory}/data/${ctx.state}`, { recursive: true }).pipe(Effect.ignore)
-            }
-
-            yield* deployer.deploy(ctx.request.manifest).pipe(
+            yield* Effect.logDebug(`Deploying dataset "${ctx.request.manifest.name}"`)
+            yield* admin.deploy(ctx.request.manifest).pipe(
               Effect.mapError((cause) => new NozzleError({ cause, message: "Failed to deploy manifest" })),
             )
 
-            return [void 0, ctx.request.manifest.name] as const
+            const state: MachineState = {
+              ...ctx.state,
+              dataset: Option.some(ctx.request.manifest),
+            }
+
+            return [void 0, state] as const
           })),
         Machine.procedures.add<Dump>()("Dump", (ctx) =>
           Effect.gen(function*() {
-            yield* Effect.logDebug(`Dumping data for dataset "${ctx.state}" up to block ${ctx.request.block}`)
-
-            // TODO: Resetting globally should be exposed via the control plane.
-            if (ctx.request.reset) {
-              yield* fs.remove(`${directory}/data`, { recursive: true }).pipe(Effect.ignore)
-              yield* fs.makeDirectory(`${directory}/data`).pipe(Effect.ignore)
+            const dataset = Option.isSome(ctx.state.dataset) ? ctx.state.dataset.value.name : "anvil"
+            if (dataset === "anvil") {
+              // TODO: Properly resolve the dependency graph.
+              yield* Effect.logDebug(`Dumping parent dataset "anvil" up to block ${ctx.request.block}`)
+              yield* admin.dump("anvil", { block: ctx.request.block, wait: true }).pipe(
+                Effect.mapError((cause) => new NozzleError({ cause, message: "Failed to dump dataset" })),
+              )
             }
-
-            yield* cmd("dump", `--dataset=${ctx.state}`, `--end-block=${ctx.request.block}`).pipe(
-              Cmd.stdout("inherit"),
-              Cmd.stderr("inherit"),
-              Cmd.exitCode,
-              Effect.mapError((cause) => new NozzleError({ cause, message: "Deploy failed" })),
-              Effect.filterOrFail((code) => code === 0, () => new NozzleError({ message: "Deploy failed" })),
+            yield* Effect.logDebug(`Dumping dataset "${dataset}" up to block ${ctx.request.block}`)
+            yield* admin.dump(dataset, { block: ctx.request.block, wait: true }).pipe(
+              Effect.mapError((cause) => new NozzleError({ cause, message: "Failed to dump dataset" })),
             )
 
+            const state: MachineState = {
+              ...ctx.state,
+              block: Option.some(ctx.request.block),
+            }
+
+            return [void 0, state] as const
+          })),
+        Machine.procedures.add<Reset>()("Reset", (ctx) =>
+          Effect.gen(function*() {
+            // TODO: Reset everything
             return [void 0, ctx.state] as const
           })),
       ),
@@ -161,12 +178,14 @@ const make = ({
 
     const actor = yield* Machine.boot(machine)
     const join = Effect.raceFirst(actor.join, Fiber.join(server))
-    const dump = (block: bigint, reset = false) => actor.send(new Dump({ block, reset }))
+    const dump = (block: bigint) => actor.send(new Dump({ block }))
+    const reset = (block: bigint) => actor.send(new Reset({ block }))
     const deploy = (manifest: Model.DatasetManifest) => actor.send(new Deploy({ manifest }))
 
     return {
       join,
       dump,
+      reset,
       deploy,
     }
   })
@@ -191,14 +210,19 @@ const waitForPort = (port: number) =>
     Effect.asVoid,
   )
 
-interface DeployPayload {
+interface MachineState {
+  dataset: Option.Option<Model.DatasetManifest>
+  block: Option.Option<bigint>
+}
+
+class Deploy extends Request.TaggedClass("Deploy")<void, NozzleError, {
   manifest: Model.DatasetManifest
-}
+}> {}
 
-interface DumpPayload {
+class Dump extends Request.TaggedClass("Dump")<void, NozzleError, {
   block: bigint
-  reset: boolean
-}
+}> {}
 
-class Deploy extends Request.TaggedClass("Deploy")<void, NozzleError, DeployPayload> {}
-class Dump extends Request.TaggedClass("Dump")<void, NozzleError, DumpPayload> {}
+class Reset extends Request.TaggedClass("Reset")<void, NozzleError, {
+  block: bigint
+}> {}
