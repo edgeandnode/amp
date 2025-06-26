@@ -174,7 +174,7 @@ pub fn is_incremental(plan: &LogicalPlan) -> Result<bool, BoxError> {
 
             // Not really logical operators, so we just skip them.
             Repartition(_) | TableScan(_) | EmptyRelation(_) | Values(_) | Subquery(_)
-            | SubqueryAlias(_) => { /* incremental */ }
+            | SubqueryAlias(_) | DescribeTable(_) | Explain(_) | Analyze(_) => { /* incremental */ }
 
             // Aggregations and join materialization seem doable
             // incrementally but need thinking through.
@@ -190,12 +190,7 @@ pub fn is_incremental(plan: &LogicalPlan) -> Result<bool, BoxError> {
             // Another complicated one.
             RecursiveQuery(_) => is_incr = false,
 
-            // Commands that don't make sense in a dataset definition.
-            DescribeTable(_) | Explain(_) | Analyze(_) => {
-                err = unsupported(format!("{}", node.display()))
-            }
-
-            // Definitely not supported and would be caught elsewhere.
+            // Definitely not supported.
             Dml(_) | Ddl(_) | Statement(_) | Copy(_) => {
                 err = unsupported(format!("{}", node.display()))
             }
