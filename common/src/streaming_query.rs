@@ -1,11 +1,5 @@
 use std::{collections::BTreeMap, pin::Pin, sync::Arc};
 
-use common::{
-    arrow::{array::RecordBatch, datatypes::SchemaRef},
-    catalog::physical::PhysicalTable,
-    query_context::QueryContext,
-    BlockNum, BoxError,
-};
 use datafusion::{
     error::DataFusionError, execution::SendableRecordBatchStream, logical_expr::LogicalPlan,
     physical_plan::stream::RecordBatchStreamAdapter,
@@ -18,6 +12,13 @@ use metadata_db::{LocationId, MetadataDb};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
 use tracing::{instrument, warn};
+
+use crate::{
+    arrow::{array::RecordBatch, datatypes::SchemaRef},
+    catalog::physical::PhysicalTable,
+    query_context::QueryContext,
+    BlockNum, BoxError,
+};
 
 // Tracks watermarks for a set of tables
 struct Watermarks {
@@ -86,7 +87,7 @@ pub async fn watermark_updates(
     let mut channel_to_location: BTreeMap<String, LocationId> = BTreeMap::new();
     let mut notification_streams = Vec::new();
     for location in locations {
-        let channel = common::stream_helpers::change_tracking_pg_channel(location);
+        let channel = crate::stream_helpers::change_tracking_pg_channel(location);
         let stream = metadata_db.listen(&channel).await?;
         notification_streams.push(stream.map_ok(|n| n.channel().to_string()));
         channel_to_location.insert(channel, location);
@@ -241,14 +242,10 @@ impl StreamingQuery {
             self.state.next_start = watermark + 1;
 
             // Start microbatch execution
-            let mut stream = dataset_store::sql_datasets::execute_plan_for_range(
-                self.plan.clone(),
-                &self.ctx,
-                start,
-                watermark,
-                false,
-            )
-            .await?;
+            let mut stream = self
+                .ctx
+                .execute_plan_for_range(self.plan.clone(), start, watermark, false)
+                .await?;
 
             // Drain the microbatch completely
             while let Some(item) = stream.next().await {
