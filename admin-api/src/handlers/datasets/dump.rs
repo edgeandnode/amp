@@ -73,7 +73,8 @@ pub async fn handler(
                 | JobStatus::Stopping => sleep(POLL_INTERVAL).await,
             }
         }
+        Ok((StatusCode::OK, "Dump completed successfully"))
+    } else {
+        Ok((StatusCode::OK, "Dump job scheduled successfully"))
     }
-
-    Ok((StatusCode::OK, "Dump job scheduled successfully"))
 }
