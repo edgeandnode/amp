@@ -48,6 +48,18 @@ impl TableRanges {
         }
     }
 
+    pub fn canonical_range(&self) -> Option<BlockRange> {
+        let canonical_ranges = &self.canonical.as_ref()?.0;
+        let start = canonical_ranges.first()?;
+        let end = canonical_ranges.last()?;
+        Some(BlockRange {
+            numbers: *start.numbers.start()..=*end.numbers.end(),
+            network: start.network.clone(),
+            hash: end.hash,
+            prev_hash: start.prev_hash,
+        })
+    }
+
     /// Merge known block ranges. This fails if the given block numbers do not correspond to a set
     /// of adjacent and complete block ranges. This should be done after the associated files have
     /// been merged, and the merged files have been committed to the metadata DB.
