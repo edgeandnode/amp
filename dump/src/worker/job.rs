@@ -45,10 +45,10 @@ impl Job {
                     let dataset =
                         Arc::new(ctx.dataset_store.load_dataset(&location.dataset).await?);
                     let mut resolved_tables = dataset.resolved_tables();
-                    let Some(table) = resolved_tables.find(|t| t.name() == location.table) else {
+                    let Some(table) = resolved_tables.find(|t| t.name() == location.tbl) else {
                         return Err(format!(
                             "Table `{}` not found in dataset `{}`",
-                            location.table, location.dataset
+                            location.tbl, location.dataset
                         )
                         .into());
                     };
