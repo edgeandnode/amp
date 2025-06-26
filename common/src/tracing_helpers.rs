@@ -1,5 +1,8 @@
 use std::sync::Once;
 
+use tracing_indicatif::IndicatifLayer;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{filter::LevelFilter, EnvFilter};
 
 static NOZZLE_LOG_ENV_VAR: &str = "NOZZLE_LOG";
@@ -43,9 +46,15 @@ pub fn register_logger() {
             }
         }
 
-        tracing_subscriber::fmt()
-            .with_env_filter(env_filter)
-            .with_ansi(atty::is(atty::Stream::Stderr))
+        let indicatif_layer = IndicatifLayer::new().with_max_progress_bars(64, None);
+        let fmt_layer = tracing_subscriber::fmt::layer()
+            .with_writer(indicatif_layer.get_stderr_writer())
+            .with_ansi(atty::is(atty::Stream::Stderr));
+
+        tracing_subscriber::registry()
+            .with(env_filter)
+            .with(fmt_layer)
+            .with(indicatif_layer)
             .init();
 
         tracing::info!("log level: {}", nozzle_log_level);
