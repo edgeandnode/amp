@@ -75,5 +75,5 @@ pub async fn handler(
         }
     }
 
-    todo!()
+    Ok((StatusCode::OK, "Dump job scheduled successfully"))
 }
