@@ -302,9 +302,10 @@ impl<S: BlockStreamer> DumpPartition<S> {
             self.run_range(*range.start(), *range.end()).await?;
 
             tracing::info!(
-                "job partition #{} finished scan for range {:?} in {} minutes",
+                "job partition #{} finished scan for range [{}-{}] in {} minutes",
                 self.id,
-                range,
+                range.start(),
+                range.end(),
                 start_time.elapsed().as_secs() / 60
             );
         }
