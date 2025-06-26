@@ -34,4 +34,12 @@ pub struct ParquetMeta {
     pub created_at: Timestamp,
     // for now, this list should contain exactly 1 entry
     pub ranges: Vec<BlockRange>,
+    // for now, assume that all files are associated with the canonical chain since we dump
+    // finalized block data
+    #[serde(default = "default_canonical")]
+    pub canonical: bool,
+}
+
+fn default_canonical() -> bool {
+    true
 }

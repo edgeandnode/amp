@@ -315,6 +315,7 @@ impl ParquetFileWriter {
             filename: self.filename,
             created_at: Timestamp::now(),
             ranges: vec![range],
+            canonical: true,
         };
         let kv_metadata = KeyValue::new(
             PARQUET_METADATA_KEY.to_string(),
