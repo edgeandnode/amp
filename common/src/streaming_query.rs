@@ -11,6 +11,7 @@ use futures::{
 use metadata_db::{LocationId, MetadataDb};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
+use tokio_util::task::AbortOnDropHandle;
 use tracing::{instrument, warn};
 
 use crate::{
@@ -124,9 +125,12 @@ pub async fn watermark_updates(
     Ok(Box::pin(UnboundedReceiverStream::new(rx)))
 }
 
+/// A handle to a streaming query that can be used to retrieve results as a stream.
+///
+/// Aborts the query task when dropped.
 pub struct StreamingQueryHandle {
     rx: mpsc::Receiver<RecordBatch>,
-    join_handle: tokio::task::JoinHandle<Result<(), BoxError>>,
+    join_handle: AbortOnDropHandle<Result<(), BoxError>>,
     schema: SchemaRef,
 }
 
@@ -202,7 +206,7 @@ impl StreamingQuery {
             },
         };
 
-        let join_handle = tokio::spawn(streaming_query.execute());
+        let join_handle = AbortOnDropHandle::new(tokio::spawn(streaming_query.execute()));
 
         Ok(StreamingQueryHandle {
             rx,

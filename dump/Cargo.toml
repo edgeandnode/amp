@@ -21,5 +21,5 @@ backon = { version = "1.5.1", default-features = false, features = [
     "std",
     "tokio-sleep",
 ] }
-tokio-util = { version = "0.7.15", features = ["rt"] }
 rand.workspace = true
+tokio-util.workspace = true
