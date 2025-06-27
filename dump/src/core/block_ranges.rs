@@ -78,7 +78,7 @@ impl ResolutionError {
 
 #[cfg(test)]
 mod tests {
-    use super::{resolve_relative, ResolutionError};
+    use super::{ResolutionError, resolve_relative};
 
     #[test]
     fn resolve_block_range_variants() {

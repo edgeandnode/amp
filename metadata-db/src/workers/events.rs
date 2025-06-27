@@ -5,7 +5,7 @@
 //! when a new job is available reducing the latency of the job scheduling.
 
 use futures::stream::{Stream, TryStreamExt as _};
-use sqlx::{postgres::PgListener, Postgres};
+use sqlx::{Postgres, postgres::PgListener};
 
 use super::{jobs::JobId, node_id::WorkerNodeId};
 

@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use datafusion::{
     arrow::{
         array::Array,
-        datatypes::{i256, Field},
+        datatypes::{Field, i256},
     },
     common::scalar::ScalarStructBuilder,
     scalar::ScalarValue,
@@ -13,7 +13,7 @@ use datafusion::{
 use num_traits::cast::ToPrimitive;
 use v8_value::V8Value;
 
-use crate::{exception::catch, BoxError};
+use crate::{BoxError, exception::catch};
 
 pub trait FromV8: Sized + Send {
     /// Converts a V8 value to a Rust value.

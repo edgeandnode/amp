@@ -1,14 +1,14 @@
 use std::{collections::HashMap, ops::RangeInclusive, sync::Arc};
 
 use common::{
+    BLOCK_NUM, BlockStreamer, BoxError, Dataset,
     arrow::{
         array::{AsArray, RecordBatch},
         datatypes::UInt64Type,
     },
     query_context::QueryContext,
-    BlockStreamer, BoxError, Dataset, BLOCK_NUM,
 };
-use futures::{future::join_all, StreamExt as _, TryStreamExt as _};
+use futures::{StreamExt as _, TryStreamExt as _, future::join_all};
 
 use crate::metrics::METRICS;
 

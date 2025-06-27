@@ -3,20 +3,20 @@ use std::{str::FromStr, time::Duration};
 use async_stream::stream;
 use common::{BlockNum, BlockStreamer, BoxError, RawDatasetRows};
 use futures::{Stream, StreamExt as _, TryStreamExt as _};
-use pbfirehose::{stream_client::StreamClient, ForkStep, Response as StreamResponse};
+use pbfirehose::{ForkStep, Response as StreamResponse, stream_client::StreamClient};
 use prost::Message as _;
 use tonic::{
     codec::CompressionEncoding,
     metadata::{Ascii, MetadataValue},
-    service::{interceptor::InterceptedService, Interceptor},
+    service::{Interceptor, interceptor::InterceptedService},
     transport::{ClientTlsConfig, Endpoint, Uri},
 };
 
 use crate::{
+    Error,
     dataset::FirehoseProvider,
     evm::{pb_to_rows::protobufs_to_rows, pbethereum},
     proto::sf::firehose::v2 as pbfirehose,
-    Error,
 };
 
 /// This client only handles final blocks.
@@ -73,7 +73,7 @@ impl Client {
         &mut self,
         start: i64,
         stop: BlockNum,
-    ) -> Result<impl Stream<Item = Result<pbethereum::Block, Error>>, Error> {
+    ) -> Result<impl Stream<Item = Result<pbethereum::Block, Error>> + use<>, Error> {
         let request = tonic::Request::new(pbfirehose::Request {
             start_block_num: start as i64,
             stop_block_num: stop,

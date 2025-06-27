@@ -4,9 +4,9 @@ pub mod metrics;
 use std::sync::Arc;
 
 use common::{
+    BoxError, QueryContext,
     catalog::physical::{Catalog, PhysicalTable},
     query_context::QueryEnv,
-    BoxError, QueryContext,
 };
 use dataset_store::DatasetStore;
 use futures::future::try_join_all;

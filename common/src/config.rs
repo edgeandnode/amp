@@ -9,16 +9,16 @@ use datafusion::{
     },
 };
 use figment::{
-    providers::{Env, Format as _, Toml},
     Figment,
+    providers::{Env, Format as _, Toml},
 };
 use fs_err as fs;
 use js_runtime::isolate_pool::IsolatePool;
-use metadata_db::{temp_metadata_db, MetadataDb, KEEP_TEMP_DIRS};
+use metadata_db::{KEEP_TEMP_DIRS, MetadataDb, temp_metadata_db};
 use serde::Deserialize;
 use thiserror::Error;
 
-use crate::{query_context::QueryEnv, Store};
+use crate::{Store, query_context::QueryEnv};
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -112,7 +112,7 @@ impl Config {
                 return Err(ConfigError::MissingConfig(
                     config_path.clone(),
                     "metadata_db_url",
-                ))
+                ));
             }
         };
 

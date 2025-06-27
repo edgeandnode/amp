@@ -248,7 +248,7 @@ mod test {
     use std::{collections::BTreeMap, ops::Range};
 
     use alloy::primitives::BlockHash;
-    use rand::{rngs::StdRng, seq::SliceRandom, Rng as _, RngCore, SeedableRng};
+    use rand::{Rng as _, RngCore, SeedableRng, rngs::StdRng, seq::SliceRandom};
 
     use super::{BlockRange, TableRanges};
     use crate::BlockNum;
@@ -363,9 +363,11 @@ mod test {
             let end = rng.random_range((start + 1)..(start + 3));
             ranges.append(&mut gen_ranges(start..end, fork_index));
         }
-        assert!(ranges
-            .iter()
-            .all(|r| *r.numbers.end() < canonical_chain_depth as u64));
+        assert!(
+            ranges
+                .iter()
+                .all(|r| *r.numbers.end() < canonical_chain_depth as u64)
+        );
         ranges
     }
 }

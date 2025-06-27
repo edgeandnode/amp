@@ -3,8 +3,8 @@ pub mod tables;
 pub mod transform;
 
 pub use client::Client;
-use dataset::DatasetDef;
 pub use dataset::DATASET_KIND;
+use dataset::DatasetDef;
 
 mod dataset;
 mod proto;

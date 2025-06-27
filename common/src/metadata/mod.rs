@@ -1,5 +1,5 @@
 use metadata_db::{FileId, FileMetadataRow, LocationId};
-use object_store::{path::Path, ObjectMeta};
+use object_store::{ObjectMeta, path::Path};
 use url::Url;
 
 use crate::BoxError;

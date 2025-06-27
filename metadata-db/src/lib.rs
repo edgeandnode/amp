@@ -2,8 +2,8 @@ use std::{future::Future, sync::Arc, time::Duration};
 
 use futures::stream::{BoxStream, Stream};
 use sqlx::{
-    postgres::{PgListener, PgNotification},
     Executor, FromRow, Postgres,
+    postgres::{PgListener, PgNotification},
 };
 use thiserror::Error;
 use tokio::time::MissedTickBehavior;
@@ -17,11 +17,11 @@ pub mod workers;
 
 use self::conn::{DbConn, DbConnPool};
 #[cfg(feature = "temp-db")]
-pub use self::temp::{temp_metadata_db, KEEP_TEMP_DIRS};
+pub use self::temp::{KEEP_TEMP_DIRS, temp_metadata_db};
 pub use self::workers::{
+    WorkerNodeId,
     events::{JobNotifAction, JobNotifListener, JobNotifRecvError, JobNotification},
     jobs::{Job, JobId, JobStatus},
-    WorkerNodeId,
 };
 
 /// Frequency on which to send a heartbeat.
@@ -193,7 +193,7 @@ impl MetadataDb {
     pub async fn worker_heartbeat_loop(
         &self,
         node_id: WorkerNodeId,
-    ) -> Result<impl Future<Output = Result<(), Error>>, Error> {
+    ) -> Result<impl Future<Output = Result<(), Error>> + use<>, Error> {
         let mut conn = DbConn::connect(&self.url).await?;
 
         let fut = async move {
@@ -612,7 +612,7 @@ impl MetadataDb {
     pub async fn listen(
         &self,
         channel_name: &str,
-    ) -> Result<impl Stream<Item = Result<PgNotification, sqlx::Error>>, sqlx::Error> {
+    ) -> Result<impl Stream<Item = Result<PgNotification, sqlx::Error>> + use<>, sqlx::Error> {
         let mut channel = PgListener::connect(&self.url).await?;
         channel.listen(channel_name).await?;
         Ok(channel.into_stream())

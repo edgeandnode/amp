@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use clap::Parser;
 use common::{
-    config::{Addrs, Config},
     BoxError,
+    config::{Addrs, Config},
 };
 use dataset_store::DatasetStore;
 use metadata_db::MetadataDb;

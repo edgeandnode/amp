@@ -3,14 +3,14 @@ use std::{any::Any, sync::Arc};
 use alloy::dyn_abi::DynSolType;
 use datafusion::{
     arrow::{
-        array::{make_builder, ArrayBuilder},
+        array::{ArrayBuilder, make_builder},
         datatypes::FieldRef,
     },
     common::plan_err,
     error::DataFusionError,
     logical_expr::{
-        simplify::{ExprSimplifyResult, SimplifyInfo},
         ColumnarValue, ReturnFieldArgs, ScalarUDFImpl, Signature, Volatility,
+        simplify::{ExprSimplifyResult, SimplifyInfo},
     },
     prelude::Expr,
     scalar::ScalarValue,
@@ -76,7 +76,7 @@ impl ScalarUDFImpl for EvmDecodeType {
                     "{}: expected scalar argument for the Solidity type but got {}",
                     self.name(),
                     v.data_type()
-                )
+                );
             }
         };
         let sol_ty = match sol_ty {
@@ -106,7 +106,7 @@ impl ScalarUDFImpl for EvmDecodeType {
                         "{}: expected Binary scalar, but got {}",
                         self.name(),
                         scalar_value.data_type()
-                    )
+                    );
                 }
             },
         };

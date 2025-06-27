@@ -5,12 +5,12 @@ use std::{
 };
 
 use common::{
+    BoxError,
     catalog::physical::{Catalog, PhysicalTable},
     config::Config,
     multirange::MultiRange,
     query_context::{Error as QueryError, QueryContext},
     store::Store as DataStore,
-    BoxError,
 };
 use dataset_store::{DatasetKind, DatasetStore};
 use futures::TryStreamExt as _;
@@ -130,7 +130,7 @@ pub async fn dump_raw_tables(
                 "Attempted to dump dataset `{}` of kind `{}` as raw dataset",
                 dataset.name, kind,
             )
-            .into())
+            .into());
         }
     }
 
@@ -172,7 +172,7 @@ pub async fn dump_user_tables(
                     kind,
                     table.table_ref()
                 )
-                .into())
+                .into());
             }
         };
 
@@ -258,9 +258,10 @@ async fn consistency_check(table: &PhysicalTable) -> Result<(), ConsistencyCheck
     // Check for files in the metadata DB that do not exist in the store.
     for filename in registered_files {
         if !stored_files.contains_key(&filename) {
-            let err =
-                    format!("file `{path}/{filename}` is registered in metadata DB but is not in the data store")
-                        .into();
+            let err = format!(
+                "file `{path}/{filename}` is registered in metadata DB but is not in the data store"
+            )
+            .into();
             return Err(ConsistencyCheckError::CorruptedTable(location_id, err));
         }
     }

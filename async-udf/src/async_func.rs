@@ -2,10 +2,10 @@ use std::{fmt::Display, sync::Arc};
 
 use datafusion::{
     arrow::{
-        array::{make_array, Array, ArrayRef, MutableArrayData, RecordBatch},
+        array::{Array, ArrayRef, MutableArrayData, RecordBatch, make_array},
         datatypes::{Field, Schema, SchemaRef},
     },
-    common::{internal_err, not_impl_err, Result},
+    common::{Result, internal_err, not_impl_err},
     config::ConfigOptions,
     logical_expr::{ColumnarValue, ScalarUDF},
     physical_expr::{PhysicalExpr, ScalarFunctionExpr},

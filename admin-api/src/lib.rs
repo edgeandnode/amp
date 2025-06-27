@@ -3,10 +3,10 @@
 use std::{future::Future, net::SocketAddr, sync::Arc};
 
 use axum::{
-    routing::{get, post},
     Router,
+    routing::{get, post},
 };
-use common::{config::Config, BoxResult};
+use common::{BoxResult, config::Config};
 use dataset_store::DatasetStore;
 
 mod ctx;

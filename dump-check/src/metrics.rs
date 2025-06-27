@@ -1,5 +1,5 @@
 use lazy_static::lazy_static;
-use prometheus::{register_counter, Counter};
+use prometheus::{Counter, register_counter};
 
 lazy_static! {
     pub static ref METRICS: MetricsRegistry = MetricsRegistry::new();

@@ -32,8 +32,11 @@ pub struct TempMetadataDb {
 impl TempMetadataDb {
     /// Create a new temporary Metadata DB
     pub async fn new(keep: bool) -> Self {
-        // Set C locale
-        std::env::set_var("LANG", "C");
+        // Set C locale. To remove this `unsafe` we need:
+        // https://github.com/boustrophedon/pgtemp/pull/21
+        unsafe {
+            std::env::set_var("LANG", "C");
+        }
 
         let builder = PgTempDBBuilder::new().persist_data(keep);
         let pg_temp = PgTempDB::from_builder(builder);

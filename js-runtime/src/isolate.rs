@@ -1,13 +1,14 @@
 use datafusion::common::HashMap;
 use v8::{
-    script_compiler::{CompileOptions, NoCacheReason},
     Handle as _,
+    script_compiler::{CompileOptions, NoCacheReason},
 };
 
 use crate::{
+    BoxError,
     convert::{FromV8, ToV8},
-    exception::{catch, ExceptionMessage},
-    init_platform, BoxError,
+    exception::{ExceptionMessage, catch},
+    init_platform,
 };
 
 #[derive(Debug, thiserror::Error)]

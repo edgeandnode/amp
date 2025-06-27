@@ -2,18 +2,18 @@ use std::{collections::BTreeMap, sync::Arc};
 
 pub use common::parquet::file::properties::WriterProperties as ParquetWriterProperties;
 use common::{
+    BlockNum, BoxError, QueryContext, RawTableRows, Timestamp,
     arrow::array::RecordBatch,
     catalog::physical::PhysicalTable,
     metadata::{
-        parquet::{ParquetMeta, PARQUET_METADATA_KEY},
+        parquet::{PARQUET_METADATA_KEY, ParquetMeta},
         range::BlockRange,
     },
     multirange::MultiRange,
     parquet::{arrow::AsyncArrowWriter, errors::ParquetError, format::KeyValue},
-    BlockNum, BoxError, QueryContext, RawTableRows, Timestamp,
 };
 use metadata_db::MetadataDb;
-use object_store::{buffered::BufWriter, path::Path, ObjectMeta};
+use object_store::{ObjectMeta, buffered::BufWriter, path::Path};
 use rand::RngCore as _;
 use tracing::debug;
 use url::Url;

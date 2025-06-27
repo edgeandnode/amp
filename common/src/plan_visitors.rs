@@ -2,21 +2,20 @@ use std::{collections::BTreeSet, sync::Arc};
 
 use datafusion::{
     common::{
-        plan_err,
+        DFSchema, plan_err,
         tree_node::{Transformed, TransformedResult as _, TreeNode as _, TreeNodeRecursion},
-        DFSchema,
     },
     datasource::TableType,
     error::DataFusionError,
     logical_expr::{Filter, LogicalPlan, Projection, Sort, TableScan},
-    prelude::{col, lit, Expr},
+    prelude::{Expr, col, lit},
     sql::TableReference,
 };
 use tracing::instrument;
 
 use crate::{
-    internal, query_context::prepend_special_block_num_field, BoxError, BLOCK_NUM,
-    SPECIAL_BLOCK_NUM,
+    BLOCK_NUM, BoxError, SPECIAL_BLOCK_NUM, internal,
+    query_context::prepend_special_block_num_field,
 };
 
 /// Aliases with a name starting with `_` are always forbidden, since underscore-prefixed

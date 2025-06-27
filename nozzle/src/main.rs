@@ -2,8 +2,9 @@ use std::sync::Arc;
 
 use clap::Parser as _;
 use common::{
+    BoxError,
     config::{Addrs, Config},
-    tracing_helpers, BoxError,
+    tracing_helpers,
 };
 use dump::worker::Worker;
 use nozzle::dump_cmd;

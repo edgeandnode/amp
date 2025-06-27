@@ -2,11 +2,11 @@ use std::ops::RangeInclusive;
 
 use alloy::{
     primitives::BlockHash,
-    providers::{ext::AnvilApi as _, DynProvider, Provider},
+    providers::{DynProvider, Provider, ext::AnvilApi as _},
     transports::http::reqwest,
 };
 use common::{
-    metadata::range::BlockRange, query_context::parse_sql, tracing_helpers, BlockNum, BoxError,
+    BlockNum, BoxError, metadata::range::BlockRange, query_context::parse_sql, tracing_helpers,
 };
 use dataset_store::DatasetStore;
 
@@ -14,8 +14,8 @@ use crate::{
     steps::load_test_steps,
     test_client::TestClient,
     test_support::{
-        check_blocks, check_provider_file, restore_blessed_dataset, table_ranges, SnapshotContext,
-        TestEnv,
+        SnapshotContext, TestEnv, check_blocks, check_provider_file, restore_blessed_dataset,
+        table_ranges,
     },
 };
 

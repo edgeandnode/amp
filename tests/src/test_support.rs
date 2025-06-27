@@ -8,6 +8,7 @@ use std::{
 };
 
 use common::{
+    BoxError, QueryContext,
     arrow::{
         self,
         array::{BinaryArray, FixedSizeBinaryArray, RecordBatch, StringArray},
@@ -18,17 +19,16 @@ use common::{
     config::{Addrs, Config},
     metadata::range::BlockRange,
     query_context::parse_sql,
-    BoxError, QueryContext,
 };
 use dataset_store::DatasetStore;
 use dump::worker::Worker;
 use figment::{
-    providers::{Format as _, Json},
     Figment,
+    providers::{Format as _, Json},
 };
 use fs_err as fs;
-use futures::{stream::TryStreamExt, StreamExt as _};
-use metadata_db::{temp::TempMetadataDb, MetadataDb, WorkerNodeId, KEEP_TEMP_DIRS};
+use futures::{StreamExt as _, stream::TryStreamExt};
+use metadata_db::{KEEP_TEMP_DIRS, MetadataDb, WorkerNodeId, temp::TempMetadataDb};
 use nozzle::{
     dump_cmd::{datasets_and_dependencies, dump},
     server::BoundAddrs,

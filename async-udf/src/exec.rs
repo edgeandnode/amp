@@ -9,8 +9,8 @@ use datafusion::{
     execution::{SendableRecordBatchStream, TaskContext},
     physical_expr::EquivalenceProperties,
     physical_plan::{
-        stream::RecordBatchStreamAdapter, DisplayAs, DisplayFormatType, ExecutionPlan,
-        ExecutionPlanProperties, Partitioning, PlanProperties,
+        DisplayAs, DisplayFormatType, ExecutionPlan, ExecutionPlanProperties, Partitioning,
+        PlanProperties, stream::RecordBatchStreamAdapter,
     },
 };
 use futures::stream::StreamExt;
