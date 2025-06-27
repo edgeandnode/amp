@@ -1,6 +1,13 @@
 use std::sync::Arc;
 
-use datafusion::parquet::file::metadata::{ParquetMetaData, ParquetMetaDataReader};
+use bytes::Bytes;
+use datafusion::parquet::{
+    arrow::{
+        arrow_reader::ArrowReaderOptions,
+        async_reader::{AsyncFileReader, ParquetObjectReader},
+    },
+    file::metadata::{ParquetMetaData, ParquetMetaDataReader, ParquetMetaDataWriter},
+};
 use metadata_db::{FileId, FileMetadataRow, LocationId, MetadataHash};
 use object_store::{path::Path, ObjectMeta, ObjectStore};
 use url::Url;
@@ -49,7 +56,9 @@ impl TryFrom<FileMetadataRow> for FileMetadata {
             version,
         };
 
-        let metadata = ParquetMetaDataReader::decode_metadata(&metadata)?;
+        let metadata = ParquetMetaDataReader::new()
+            .with_page_indexes(true)
+            .parse_and_finish(&Bytes::from_iter(metadata))?;
 
         Ok(Self {
             file_id,
@@ -67,20 +76,16 @@ pub async fn read_metadata_bytes_from_parquet(
     object_meta: &ObjectMeta,
     object_store: Arc<dyn ObjectStore>,
 ) -> Result<(String, Vec<u8>), BoxError> {
-    let mut footer = [0u8; 8];
-    let range = object_meta.size - 8..object_meta.size;
-    footer.copy_from_slice(&object_store.get_range(&object_meta.location, range).await?);
-    let footer = ParquetMetaDataReader::decode_footer_tail(&footer)
-        .map_err(|e| BoxError::from(format!("Failed to decode footer: {e}")))?;
-    let metadata_length = footer.metadata_length();
-    let capacity = metadata_length + 8;
-    let range = object_meta.size - capacity as u64..object_meta.size;
-    let metadata = object_store
-        .get_range(&object_meta.location, range)
-        .await?
-        .to_vec();
+    let metadata = ParquetObjectReader::new(object_store, object_meta.location.clone())
+        .with_preload_column_index(true)
+        .with_preload_offset_index(true)
+        .get_metadata(Some(&ArrowReaderOptions::default().with_page_index(true)))
+        .await?;
 
-    // Unwrap: We know this is a path with valid file name because we just opened it
+    let mut buf = Vec::new();
+    ParquetMetaDataWriter::new(&mut buf, &metadata).finish()?;
+
+    // Unwrap: We just opened this file, so it must have a valid filename.
     let file_name = object_meta.location.filename().unwrap().to_string();
-    Ok((file_name, metadata))
+    Ok((file_name, buf))
 }
