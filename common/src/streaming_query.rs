@@ -73,6 +73,8 @@ pub type WatermarkStream =
     Pin<Box<dyn Stream<Item = Result<Option<BlockNum>, BoxError>> + Send + Sync + 'static>>;
 
 /// Creates a stream of watermark updates for the tables in the context.
+///
+/// `end_block` can be used to force the stream to end once a specific block number is reached.
 #[instrument(skip_all, err)]
 pub async fn watermark_updates(
     ctx: Arc<QueryContext>,
@@ -195,13 +197,24 @@ impl StreamingQueryHandle {
 pub struct StreamingQuery {
     ctx: Arc<QueryContext>,
     plan: LogicalPlan,
+    end_block: Option<BlockNum>,
+    is_sql_dataset: bool,
     state: StreamState,
     tx: mpsc::Sender<QueryMessage>,
 }
 
-struct StreamState {
+pub struct StreamState {
     watermark_stream: WatermarkStream,
     next_start: BlockNum,
+}
+
+impl StreamState {
+    pub fn new(watermark_stream: WatermarkStream, next_start: BlockNum) -> Self {
+        Self {
+            watermark_stream,
+            next_start,
+        }
+    }
 }
 
 impl StreamingQuery {
@@ -210,21 +223,21 @@ impl StreamingQuery {
     ///
     /// The query execution loop will run in its own task.
     pub async fn spawn(
+        initial_state: StreamState,
         ctx: Arc<QueryContext>,
         plan: LogicalPlan,
-        metadata_db: Arc<MetadataDb>,
+        end_block: Option<BlockNum>,
+        is_sql_dataset: bool,
     ) -> Result<StreamingQueryHandle, BoxError> {
-        let watermark_stream = watermark_updates(ctx.clone(), metadata_db.clone()).await?;
         let schema: SchemaRef = plan.schema().clone().as_ref().clone().into();
         let (tx, rx) = mpsc::channel(10);
         let streaming_query = Self {
             ctx,
             plan,
             tx,
-            state: StreamState {
-                watermark_stream,
-                next_start: 0,
-            },
+            end_block,
+            is_sql_dataset,
+            state: initial_state,
         };
 
         let join_handle = AbortOnDropHandle::new(tokio::spawn(streaming_query.execute()));
@@ -257,7 +270,10 @@ impl StreamingQuery {
                     // Duplicate watermark, nothing to do
                     Some(watermark) if watermark < self.state.next_start => continue,
 
-                    Some(watermark) => watermark,
+                    Some(watermark) => match self.end_block {
+                        None => watermark,
+                        Some(end) => watermark.min(end),
+                    },
 
                     // Tables seem empty, lets wait for some data
                     None => continue,
@@ -270,7 +286,7 @@ impl StreamingQuery {
             // Start microbatch execution
             let mut stream = self
                 .ctx
-                .execute_plan_for_range(self.plan.clone(), start, watermark, false)
+                .execute_plan_for_range(self.plan.clone(), start, watermark, self.is_sql_dataset)
                 .await?;
 
             // Drain the microbatch completely
@@ -284,6 +300,11 @@ impl StreamingQuery {
 
             // Send completion message for this microbatch
             let _ = self.tx.send(QueryMessage::Completed(watermark)).await;
+
+            if Some(watermark) == self.end_block {
+                // If we reached the end block, we are done
+                return Ok(());
+            }
         }
     }
 }

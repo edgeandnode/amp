@@ -122,6 +122,7 @@ use common::{
     metadata::range::BlockRange,
     plan_visitors::is_incremental,
     query_context::{QueryContext, QueryEnv, parse_sql},
+    streaming_query::{StreamState, StreamingQuery, watermark_updates},
 };
 use datafusion::{common::cast::as_fixed_size_binary_array, sql::parser::Statement};
 use dataset_store::{DatasetStore, sql_datasets::SqlDataset};
@@ -287,9 +288,15 @@ async fn dump_sql_query(
 ) -> Result<(), BoxError> {
     let (start, end) = range.numbers.clone().into_inner();
     let mut stream = {
-        let ctx = dataset_store.ctx_for_sql(&query, env.clone()).await?;
+        let ctx = Arc::new(dataset_store.ctx_for_sql(&query, env.clone()).await?);
         let plan = ctx.plan_sql(query.clone()).await?;
-        ctx.execute_plan_for_range(plan, start, end, true).await?
+        let initial_state = StreamState::new(
+            watermark_updates(ctx.clone(), physical_table.metadata_db.clone()).await?,
+            start,
+        );
+        StreamingQuery::spawn(initial_state, ctx, plan, Some(end), true)
+            .await?
+            .as_record_batch_stream()
     };
     let mut writer = ParquetFileWriter::new(physical_table.clone(), parquet_opts.clone(), start)?;
 
