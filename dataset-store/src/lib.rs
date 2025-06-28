@@ -26,6 +26,7 @@ use datafusion::{
     sql::{parser, resolve::resolve_table_references, TableReference},
 };
 use futures::{future::BoxFuture, FutureExt as _, Stream, TryFutureExt as _};
+use graph_networks_registry::NetworksRegistry;
 use js_runtime::isolate_pool::IsolatePool;
 use metadata_db::MetadataDb;
 use object_store::ObjectMeta;
@@ -49,6 +50,9 @@ pub enum Error {
 
     #[error("unsupported dataset kind '{0}'")]
     UnsupportedKind(String),
+
+    #[error("'{0}' network not found in Network Registry")]
+    NetworkNameError(String),
 
     #[error("dataset field 'name = \"{0}\"' does not match filename '{1}'")]
     NameMismatch(String, String),
@@ -380,6 +384,9 @@ impl DatasetStore {
         for obj in providers {
             let location = obj.location.to_string();
             let (kind, network, provider) = self.kind_network_provider(&location).await?;
+            if !self.validate_network_name(&network).await {
+                return Err(Error::NetworkNameError(network));
+            }
             if kind != dataset_kind || network != dataset_network {
                 continue;
             }
@@ -403,6 +410,16 @@ impl DatasetStore {
             .map_err(Error::FetchError)?;
         *self.providers_cache.write().unwrap() = Some(providers.clone());
         Ok(providers)
+    }
+
+    async fn validate_network_name(&self, network: &str) -> bool {
+        let registry = NetworksRegistry::from_latest_version()
+            .await
+            .expect("Failed to fetch registry");
+        match registry.get_network_by_id(network) {
+            Some(_) => true,
+            None => false,
+        }
     }
 
     async fn kind_network_provider(
