@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
 use clap::Parser as _;
 use common::{
@@ -6,7 +6,6 @@ use common::{
     tracing_helpers, BoxError,
 };
 use dump::worker::Worker;
-use generate_manifest;
 use nozzle::dump_cmd;
 use tracing::info;
 
@@ -100,6 +99,13 @@ enum Command {
         /// The name of the dataset.
         #[arg(long, required = true, env = "GM_NAME")]
         name: String,
+
+        /// Output file or directory. If it's a file, the name _should_ match the `kind` parameter
+        /// (the file will be generated even if it doesn't).
+        ///
+        /// If not specified, the manifest will be printed to stdout.
+        #[arg(short, long, env = "GM_OUT")]
+        out: Option<PathBuf>,
     },
 }
 
@@ -170,6 +176,19 @@ async fn main_inner() -> Result<(), BoxError> {
             network,
             kind,
             name,
-        } => generate_manifest::run(network, kind, name),
+            out,
+        } => {
+            if let Some(mut out) = out {
+                if out.is_dir() {
+                    out.push(format!("{}.json", &kind));
+                }
+
+                let mut out = std::fs::File::create(out)?;
+                generate_manifest::run(network, kind, name, &mut out)
+            } else {
+                let mut stdout = std::io::stdout();
+                generate_manifest::run(network, kind, name, &mut stdout)
+            }
+        }
     }
 }

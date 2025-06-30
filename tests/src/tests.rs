@@ -8,7 +8,7 @@ use alloy::{
 use common::{
     metadata::range::BlockRange, query_context::parse_sql, tracing_helpers, BlockNum, BoxError,
 };
-use dataset_store::DatasetStore;
+use dataset_store::{DatasetDefsCommon, DatasetStore};
 use generate_manifest;
 
 use crate::{
@@ -239,16 +239,6 @@ async fn anvil_rpc_reorg() {
     assert_eq!(ranges, expected_ranges);
 }
 
-struct FileDeleteGuard<'a> {
-    file_name: &'a str,
-}
-
-impl Drop for FileDeleteGuard<'_> {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(self.file_name).unwrap();
-    }
-}
-
 #[test]
 fn generate_manifest_success() {
     tracing_helpers::register_logger();
@@ -257,15 +247,15 @@ fn generate_manifest_success() {
     let kind = "evm-rpc".to_string();
     let name = "eth_rpc".to_string();
 
-    let file_name = format!("{}.json", kind);
-    let _guard = FileDeleteGuard {
-        file_name: &file_name,
-    };
+    let mut out = Vec::new();
 
-    let _ = generate_manifest::run(network, kind.clone(), name).unwrap();
+    let _ = generate_manifest::run(network.clone(), kind.clone(), name.clone(), &mut out).unwrap();
 
-    let manifest_exists = std::fs::exists(&file_name).unwrap();
-    assert!(manifest_exists);
+    let out: DatasetDefsCommon = serde_json::from_slice(&out).unwrap();
+
+    assert_eq!(out.network, network);
+    assert_eq!(out.kind, kind);
+    assert_eq!(out.name, name);
 }
 
 #[test]
@@ -276,7 +266,9 @@ fn generate_manifest_bad_dataset_kind() {
     let bad_kind = "bad_kind".to_string();
     let name = "eth_rpc".to_string();
 
-    let err = generate_manifest::run(network, bad_kind.clone(), name).unwrap_err();
+    let mut out = Vec::new();
+
+    let err = generate_manifest::run(network, bad_kind.clone(), name, &mut out).unwrap_err();
     assert_eq!(
         err.to_string(),
         format!("unsupported dataset kind '{}'", bad_kind)
