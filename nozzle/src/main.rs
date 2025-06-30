@@ -6,6 +6,7 @@ use common::{
     tracing_helpers, BoxError,
 };
 use dump::worker::Worker;
+use generate_manifest;
 use nozzle::dump_cmd;
 use tracing::info;
 
@@ -87,6 +88,19 @@ enum Command {
         #[arg(long, env = "NOZZLE_NODE_ID")]
         node_id: String,
     },
+    GenerateManifest {
+        /// The name of the network.
+        #[arg(long, required = true, env = "GM_NETWORK")]
+        network: String,
+
+        /// Kind of the dataset.
+        #[arg(long, required = true, env = "GM_KIND")]
+        kind: String,
+
+        /// The name of the dataset.
+        #[arg(long, required = true, env = "GM_NAME")]
+        name: String,
+    },
 }
 
 #[tokio::main]
@@ -152,5 +166,10 @@ async fn main_inner() -> Result<(), BoxError> {
             let worker = Worker::new(config.clone(), metadata_db, node_id.parse()?);
             worker.run().await.map_err(Into::into)
         }
+        Command::GenerateManifest {
+            network,
+            kind,
+            name,
+        } => generate_manifest::run(network, kind, name),
     }
 }

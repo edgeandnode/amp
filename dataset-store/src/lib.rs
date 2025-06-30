@@ -30,7 +30,7 @@ use js_runtime::isolate_pool::IsolatePool;
 use metadata_db::MetadataDb;
 use object_store::ObjectMeta;
 use rand::seq::SliceRandom;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sql_datasets::SqlDataset;
 use thiserror::Error;
 use tracing::{error, instrument};
@@ -635,11 +635,11 @@ impl RawDataset {
 }
 
 /// All dataset definitions must have a kind, network and name. The name must match the filename.
-#[derive(Deserialize)]
-struct DatasetDefsCommon {
-    kind: String,
-    network: String,
-    name: String,
+#[derive(Deserialize, Serialize)]
+pub struct DatasetDefsCommon {
+    pub kind: String,
+    pub network: String,
+    pub name: String,
 }
 
 /// All providers definitions must have a kind and network.

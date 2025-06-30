@@ -9,6 +9,7 @@ use common::{
     metadata::range::BlockRange, query_context::parse_sql, tracing_helpers, BlockNum, BoxError,
 };
 use dataset_store::DatasetStore;
+use generate_manifest;
 
 use crate::{
     steps::load_test_steps,
@@ -236,4 +237,48 @@ async fn anvil_rpc_reorg() {
         },
     ];
     assert_eq!(ranges, expected_ranges);
+}
+
+struct FileDeleteGuard<'a> {
+    file_name: &'a str,
+}
+
+impl Drop for FileDeleteGuard<'_> {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(self.file_name).unwrap();
+    }
+}
+
+#[test]
+fn generate_manifest_success() {
+    tracing_helpers::register_logger();
+
+    let network = "mainnet".to_string();
+    let kind = "evm-rpc".to_string();
+    let name = "eth_rpc".to_string();
+
+    let file_name = format!("{}.json", kind);
+    let _guard = FileDeleteGuard {
+        file_name: &file_name,
+    };
+
+    let _ = generate_manifest::run(network, kind.clone(), name).unwrap();
+
+    let manifest_exists = std::fs::exists(&file_name).unwrap();
+    assert!(manifest_exists);
+}
+
+#[test]
+fn generate_manifest_bad_dataset_kind() {
+    tracing_helpers::register_logger();
+
+    let network = "mainnet".to_string();
+    let bad_kind = "bad_kind".to_string();
+    let name = "eth_rpc".to_string();
+
+    let err = generate_manifest::run(network, bad_kind.clone(), name).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        format!("unsupported dataset kind '{}'", bad_kind)
+    );
 }

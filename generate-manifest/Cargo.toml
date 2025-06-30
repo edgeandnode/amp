@@ -1,0 +1,12 @@
+[package]
+name = "generate-manifest"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+common = { path = "../common" }
+dataset-store = { path = "../dataset-store" }
+thiserror.workspace = true
