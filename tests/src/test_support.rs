@@ -132,8 +132,16 @@ impl TestEnv {
         let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
         let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
 
-        let (bound, server) =
-            nozzle::server::run(config.clone(), metadata_db.clone(), false, false).await?;
+        let (bound, server) = nozzle::server::run(
+            config.clone(),
+            metadata_db.clone(),
+            false,
+            true,
+            true,
+            true,
+            true,
+        )
+        .await?;
         tokio::spawn(server);
 
         let worker = Worker::new(
