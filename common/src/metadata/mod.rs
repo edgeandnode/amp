@@ -10,10 +10,12 @@ use datafusion::parquet::{
 };
 use metadata_db::{FileId, FileMetadataRow, LocationId, MetadataHash};
 use object_store::{path::Path, ObjectMeta, ObjectStore};
+use parquet::ParquetMeta;
 use url::Url;
 
-use crate::BoxError;
+use crate::{BoxError, BoxResult};
 
+pub mod cache;
 pub mod parquet;
 pub mod range;
 
@@ -24,8 +26,38 @@ pub struct FileMetadata {
     pub location_id: LocationId,
     pub object_meta: ObjectMeta,
     pub url: Url,
-    pub metadata: ParquetMetaData,
+    pub metadata: Arc<ParquetMetaData>,
     pub metadata_hash: MetadataHash,
+}
+
+impl FileMetadata {
+    pub fn file_id(&self) -> FileId {
+        self.file_id
+    }
+
+    pub fn location_id(&self) -> LocationId {
+        self.location_id
+    }
+
+    pub fn file_name(&self) -> &str {
+        &self.file_name
+    }
+
+    pub fn object_meta(&self) -> &ObjectMeta {
+        &self.object_meta
+    }
+
+    pub fn url(&self) -> &Url {
+        &self.url
+    }
+
+    pub fn metadata(&self) -> Arc<ParquetMetaData> {
+        self.metadata.clone()
+    }
+
+    pub fn parquet_meta(&self) -> BoxResult<ParquetMeta> {
+        ParquetMeta::try_from_parquet_metadata(self.metadata(), self.url(), self.location_id())
+    }
 }
 
 impl TryFrom<FileMetadataRow> for FileMetadata {
@@ -58,7 +90,8 @@ impl TryFrom<FileMetadataRow> for FileMetadata {
 
         let metadata = ParquetMetaDataReader::new()
             .with_page_indexes(true)
-            .parse_and_finish(&Bytes::from_iter(metadata))?;
+            .parse_and_finish(&Bytes::from_iter(metadata))?
+            .into();
 
         Ok(Self {
             file_id,
