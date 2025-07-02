@@ -36,7 +36,7 @@ pub type FileId = i64;
 pub type LocationId = i64;
 pub type JobDatabaseId = i64;
 pub type MetadataBytes = Vec<u8>;
-pub type MetadataHash = Vec<u8>;
+pub type MetadataHash = [u8; 64];
 
 #[derive(Debug, FromRow)]
 pub struct FileMetadataRow {
@@ -573,9 +573,7 @@ impl MetadataDb {
         let sql = "
         INSERT INTO file_metadata (location_id, file_name, object_size, object_e_tag, object_version, metadata)
         VALUES ($1, $2, $3, $4, $5, $6)
-        ON CONFLICT (location_id, file_name) DO UPDATE
-            SET metadata = EXCLUDED.metadata
-            WHERE file_metadata.metadata_hash <> sha256(EXCLUDED.metadata)
+        ON CONFLICT DO NOTHING;
         ";
 
         sqlx::query(sql)
