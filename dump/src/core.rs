@@ -231,7 +231,7 @@ async fn consistency_check(table: &PhysicalTable) -> Result<(), ConsistencyCheck
         .await
         .map_err(|err| ConsistencyCheckError::CorruptedTable(location_id, err))?
         .into_iter()
-        .map(|m| m.file_name)
+        .map(|m| m.file_name().to_string())
         .collect();
 
     let store = table.object_store();
