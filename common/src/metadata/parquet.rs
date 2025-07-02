@@ -18,6 +18,8 @@
 //!
 //! See also: metadata-consistency
 
+use std::sync::Arc;
+
 use datafusion::parquet::file::metadata::{KeyValue, ParquetMetaData};
 use metadata_db::LocationId;
 use serde::{Deserialize, Serialize};
@@ -42,8 +44,8 @@ pub struct ParquetMeta {
 
 impl ParquetMeta {
     pub fn try_from_parquet_metadata(
-        metadata: ParquetMetaData,
-        url: Url,
+        metadata: Arc<ParquetMetaData>,
+        url: &Url,
         location_id: LocationId,
     ) -> BoxResult<Self> {
         let key_value_metadata = metadata
@@ -54,6 +56,7 @@ impl ParquetMeta {
                  File: {url}, Location ID: {location_id}",
             ))?
             .as_slice();
+
         let parquet_meta: ParquetMeta = key_value_metadata
             .iter()
             .find(|KeyValue { key, .. }| key == PARQUET_METADATA_KEY)
@@ -68,14 +71,15 @@ impl ParquetMeta {
                 "Parquet file {url} metadata does not contain value for key {PARQUET_METADATA_KEY}.\
                  File: {url}, Location ID: {location_id}",
             ))??;
+
         Ok(parquet_meta)
     }
 
-    pub fn try_from_file_metadata(file_metadata: FileMetadata) -> BoxResult<Self> {
+    pub fn try_from_file_metadata(file_metadata: Arc<FileMetadata>) -> BoxResult<Self> {
         Self::try_from_parquet_metadata(
-            file_metadata.metadata,
-            file_metadata.url,
-            file_metadata.location_id,
+            file_metadata.metadata(),
+            file_metadata.url(),
+            file_metadata.location_id(),
         )
     }
 }
