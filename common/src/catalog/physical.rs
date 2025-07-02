@@ -3,18 +3,19 @@ use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc};
 use datafusion::{
     arrow::datatypes::SchemaRef,
     catalog::Session,
+    common::DFSchema,
     datasource::{
         create_ordering,
         file_format::{parquet::ParquetFormat, FileFormat},
         listing::{ListingTableUrl, PartitionedFile},
-        physical_plan::{FileGroup, FileScanConfigBuilder, ParquetSource},
+        physical_plan::{FileGroup, FileScanConfigBuilder, FileSource, ParquetSource},
         TableProvider, TableType,
     },
     error::{DataFusionError, Result as DataFusionResult},
     execution::{cache::CacheAccessor, object_store::ObjectStoreUrl},
-    logical_expr::{col, ScalarUDF, SortExpr},
+    logical_expr::{col, utils::conjunction, ScalarUDF, SortExpr, TableProviderFilterPushDown},
     physical_expr::LexOrdering,
-    physical_plan::ExecutionPlan,
+    physical_plan::{ExecutionPlan, PhysicalExpr},
     prelude::Expr,
     sql::TableReference,
 };
@@ -450,6 +451,21 @@ impl PhysicalTable {
 // helper methods for implementing `TableProvider` trait
 
 impl PhysicalTable {
+    fn filters_to_predicate(
+        &self,
+        state: &dyn Session,
+        filters: &[Expr],
+    ) -> DataFusionResult<Arc<dyn PhysicalExpr>> {
+        let df_schema = DFSchema::try_from(self.schema())?;
+        let predicate = conjunction(filters.to_vec());
+        let predicate = predicate
+            .map(|predicate| state.create_physical_expr(predicate, &df_schema))
+            .transpose()?
+            .unwrap_or_else(|| datafusion::physical_expr::expressions::lit(true));
+
+        Ok(predicate)
+    }
+
     fn object_store_url(&self) -> DataFusionResult<ObjectStoreUrl> {
         Ok(ListingTableUrl::try_new(self.url.clone(), None)?.object_store())
     }
@@ -476,6 +492,8 @@ impl PhysicalTable {
                     ..
                 } = file_meta.as_ref();
 
+                // let table_schema = self.schema();
+                // let statistics = statistics_from_parquet_meta_calc(metadata, table_schema)?.into();
                 let partitioned_file = PartitionedFile::from(object_meta.clone());
 
                 let ParquetMeta { ranges, .. } =
@@ -511,13 +529,15 @@ impl TableProvider for PhysicalTable {
         self.schema()
     }
 
+    #[tracing::instrument(skip_all, err)]
     async fn scan(
         &self,
         state: &dyn Session,
         projection: Option<&Vec<usize>>,
-        _filters: &[Expr],
-        _limit: Option<usize>,
+        filters: &[Expr],
+        limit: Option<usize>,
     ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
+        let predicate = self.filters_to_predicate(state, filters)?;
         let files = self
             .stream_partitioned_files(state)
             .try_collect::<BTreeMap<_, _>>()
@@ -534,20 +554,34 @@ impl TableProvider for PhysicalTable {
 
         let file_schema = self.schema();
         let object_store_url = self.object_store_url()?;
-        let file_source = ParquetSource::default()
+        let file_source: Arc<dyn FileSource> = ParquetSource::default()
             .with_parquet_file_reader_factory(self.metadata_cache.clone())
+            .with_predicate(predicate)
             .into();
 
         ParquetFormat::default()
             .create_physical_plan(
                 state,
-                FileScanConfigBuilder::new(object_store_url, file_schema, file_source)
-                    .with_file_groups(file_groups)
-                    .with_output_ordering(output_ordering)
-                    .with_projection(projection.cloned())
-                    .build(),
+                FileScanConfigBuilder::new(
+                    object_store_url,
+                    file_schema,
+                    ParquetSource::default().into(),
+                )
+                .with_file_groups(file_groups)
+                .with_output_ordering(output_ordering)
+                .with_projection(projection.cloned())
+                .with_limit(limit)
+                .with_source(file_source)
+                .build(),
             )
             .await
+    }
+
+    fn supports_filters_pushdown(
+        &self,
+        filters: &[&Expr],
+    ) -> DataFusionResult<Vec<TableProviderFilterPushDown>> {
+        Ok(vec![TableProviderFilterPushDown::Inexact; filters.len()])
     }
 }
 
