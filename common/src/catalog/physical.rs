@@ -661,7 +661,7 @@ fn round_robin(
     let mut file_groups = vec![FileGroup::default(); size];
     let mut file_id_groups: Vec<Vec<FileId>> = vec![vec![]; size];
     for (idx, (_, (id, file))) in files.into_iter().enumerate() {
-        file_groups[idx % size].push(file.with_extensions(Arc::new((idx % size, id))));
+        file_groups[idx % size].push(file.with_extensions(Arc::new(idx % size)));
         file_id_groups[idx % size].push(id);
     }
     (file_groups, file_id_groups)
