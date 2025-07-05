@@ -1,5 +1,6 @@
 use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc};
 
+use dashmap::DashMap;
 use datafusion::{
     arrow::datatypes::SchemaRef,
     catalog::Session,
@@ -12,7 +13,7 @@ use datafusion::{
         TableProvider, TableType,
     },
     error::{DataFusionError, Result as DataFusionResult},
-    execution::{cache::CacheAccessor, object_store::ObjectStoreUrl},
+    execution::object_store::ObjectStoreUrl,
     logical_expr::{col, utils::conjunction, ScalarUDF, SortExpr, TableProviderFilterPushDown},
     physical_expr::LexOrdering,
     physical_plan::{ExecutionPlan, PhysicalExpr},
@@ -20,16 +21,16 @@ use datafusion::{
     sql::TableReference,
 };
 use futures::{stream, Stream, StreamExt, TryStreamExt};
-use metadata_db::{LocationId, MetadataDb, TableId};
+use metadata_db::{FileId, FileMetadataRow, LocationId, MetadataDb, TableId};
 use object_store::{path::Path, ObjectStore};
+use tokio::sync::mpsc;
 use tracing::info;
 use url::Url;
 use uuid::Uuid;
 
+use super::reader::NozzleParquetFileReaderFactory;
 use crate::{
-    metadata::{
-        cache::MetadataCache, parquet::ParquetMeta, read_metadata_bytes_from_parquet, FileMetadata,
-    },
+    metadata::{parquet::ParquetMeta, read_metadata_bytes_from_parquet, FileMetadata},
     multirange::MultiRange,
     store::{infer_object_store, Store},
     BlockNum, BoxError, Dataset, ResolvedTable,
@@ -85,9 +86,6 @@ pub struct PhysicalTable {
     location_id: LocationId,
     /// Metadata database to use for this table.
     pub metadata_db: Arc<MetadataDb>,
-
-    /// Statistics Cache
-    metadata_cache: Arc<MetadataCache>,
 }
 
 // Methods for creating and managing PhysicalTable instances
@@ -100,8 +98,6 @@ impl PhysicalTable {
         metadata_db: Arc<MetadataDb>,
     ) -> Result<Self, BoxError> {
         let path = Path::from_url_path(url.path()).unwrap();
-        let (object_store, _) = infer_object_store(&url)?;
-        let metadata_cache = Arc::new(MetadataCache::new(object_store.clone()));
 
         Ok(Self {
             table,
@@ -109,7 +105,6 @@ impl PhysicalTable {
             path,
             location_id,
             metadata_db,
-            metadata_cache,
         })
     }
 
@@ -143,14 +138,13 @@ impl PhysicalTable {
         }
 
         let path = Path::from_url_path(url.path()).unwrap();
-        let metadata_cache = Arc::new(MetadataCache::new(data_store.object_store()));
+
         let physical_table = Self {
             table: table.clone(),
             url,
             path,
             location_id,
             metadata_db,
-            metadata_cache,
         };
 
         info!("Created new revision at {}", physical_table.path);
@@ -203,8 +197,6 @@ impl PhysicalTable {
         };
 
         let path = Path::from_url_path(url.path()).unwrap();
-        let (object_store, _) = infer_object_store(&url)?;
-        let metadata_cache = Arc::new(MetadataCache::new(object_store));
 
         Ok(Some(Self {
             table: table.clone(),
@@ -212,7 +204,6 @@ impl PhysicalTable {
             path,
             location_id,
             metadata_db: metadata_db.clone(),
-            metadata_cache,
         }))
     }
 
@@ -275,7 +266,6 @@ impl PhysicalTable {
                 )
                 .await?;
         }
-        let metadata_cache = Arc::new(MetadataCache::new(object_store));
 
         let physical_table = Self {
             table: table.clone(),
@@ -283,7 +273,6 @@ impl PhysicalTable {
             path: path.clone(),
             location_id,
             metadata_db,
-            metadata_cache,
         };
 
         Ok(physical_table)
@@ -377,7 +366,9 @@ impl PhysicalTable {
     }
 
     pub fn object_store(&self) -> Arc<dyn ObjectStore> {
-        self.metadata_cache.store.clone()
+        infer_object_store(self.url())
+            .map(|(object_store, _)| object_store)
+            .expect("Failed to infer object store")
     }
 
     pub fn table(&self) -> &ResolvedTable {
@@ -426,24 +417,9 @@ impl PhysicalTable {
             .stream_file_metadata(self.location_id)
             .map(|row| {
                 let row = row?;
-                let file_id = row.id;
-                let metadata_hash = row.metadata_hash;
+                let file_metadata: Arc<FileMetadata> = FileMetadata::try_from(row)?.into();
 
-                if let Some(file_metadata) =
-                    self.metadata_cache.get_with_extra(&file_id, &metadata_hash)
-                {
-                    return Ok(file_metadata);
-                } else {
-                    let file_metadata: Arc<FileMetadata> = FileMetadata::try_from(row)?.into();
-
-                    self.metadata_cache.put_with_extra(
-                        &file_id,
-                        file_metadata.clone(),
-                        &metadata_hash,
-                    );
-
-                    return Ok(file_metadata);
-                }
+                Ok(file_metadata)
             })
     }
 }
@@ -476,15 +452,57 @@ impl PhysicalTable {
         create_ordering(&schema, &sort_order)
     }
 
+    fn create_parquet_file_reader_factory(
+        &self,
+        file_id_groups: Vec<Vec<FileId>>,
+    ) -> Arc<NozzleParquetFileReaderFactory> {
+        let metadata_generator = DashMap::new();
+
+        for (group_id, file_ids) in file_id_groups.into_iter().enumerate() {
+            let (sender, receiver) = mpsc::channel(1);
+            metadata_generator.insert(group_id, receiver);
+
+            let sender_clone = sender.clone();
+            let metadata_db_clone = self.metadata_db.clone();
+            let file_ids = Arc::new(file_ids);
+            let location_id = self.location_id;
+
+            tokio::spawn(async move {
+                let mut stream = metadata_db_clone.stream_file_metadata(location_id);
+
+                while let Some(Ok(FileMetadataRow { id, metadata, .. })) = stream.next().await {
+                    if file_ids.contains(&id) {
+                        if let Err(e) = sender_clone.send(metadata).await {
+                            if e.to_string().as_str() == "channel closed" {
+                                // The receiver has been dropped, we can stop sending
+                                break;
+                            } else {
+                                tracing::error!("Failed to send metadata: {}", e);
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        let factory = NozzleParquetFileReaderFactory {
+            metadata_generator: metadata_generator.into(),
+            object_store: self.object_store(),
+        };
+
+        Arc::new(factory)
+    }
+
     fn stream_partitioned_files<'a>(
         &'a self,
         ctx: &'a dyn Session,
-    ) -> impl Stream<Item = DataFusionResult<(u64, PartitionedFile)>> + 'a {
+    ) -> impl Stream<Item = DataFusionResult<(u64, (FileId, PartitionedFile))>> + 'a {
         self.stream_file_metadata()
             .map_err(DataFusionError::from)
             .map(async move |res| {
                 let file_meta = res?;
                 let FileMetadata {
+                    file_id,
                     ref object_meta,
                     ref url,
                     ref metadata,
@@ -494,7 +512,8 @@ impl PhysicalTable {
 
                 // let table_schema = self.schema();
                 // let statistics = statistics_from_parquet_meta_calc(metadata, table_schema)?.into();
-                let partitioned_file = PartitionedFile::from(object_meta.clone());
+                let partitioned_file = PartitionedFile::from(object_meta.clone())
+                    .with_range(0, object_meta.size as i64);
 
                 let ParquetMeta { ranges, .. } =
                     ParquetMeta::try_from_parquet_metadata(metadata.clone(), url, *location_id)?;
@@ -509,7 +528,7 @@ impl PhysicalTable {
                     .numbers
                     .start();
 
-                Ok((*range_start, partitioned_file))
+                Ok((*range_start, (*file_id, partitioned_file)))
             })
             .buffer_unordered(ctx.config_options().execution.meta_fetch_concurrency)
     }
@@ -548,14 +567,16 @@ impl TableProvider for PhysicalTable {
             )));
         }
         let target_partitions = state.config_options().execution.target_partitions;
-        let file_groups = round_robin(files, target_partitions);
+        let (file_groups, file_id_groups) = round_robin(files, target_partitions);
+
+        let parquet_file_reader_factory = self.create_parquet_file_reader_factory(file_id_groups);
 
         let output_ordering = self.output_ordering()?;
 
         let file_schema = self.schema();
         let object_store_url = self.object_store_url()?;
         let file_source: Arc<dyn FileSource> = ParquetSource::default()
-            .with_parquet_file_reader_factory(self.metadata_cache.clone())
+            .with_parquet_file_reader_factory(parquet_file_reader_factory)
             .with_predicate(predicate)
             .into();
 
@@ -629,14 +650,19 @@ pub async fn list_revisions(
         .collect())
 }
 
-fn round_robin(files: BTreeMap<u64, PartitionedFile>, target_partitions: usize) -> Vec<FileGroup> {
+fn round_robin(
+    files: BTreeMap<u64, (FileId, PartitionedFile)>,
+    target_partitions: usize,
+) -> (Vec<FileGroup>, Vec<Vec<FileId>>) {
     let size = files.len().min(target_partitions);
     if size <= 0 {
-        return vec![];
+        return (vec![], vec![]);
     }
-    let mut groups = vec![FileGroup::default(); size];
-    for (idx, (_, file)) in files.into_iter().enumerate() {
-        groups[idx % size].push(file);
+    let mut file_groups = vec![FileGroup::default(); size];
+    let mut file_id_groups: Vec<Vec<FileId>> = vec![vec![]; size];
+    for (idx, (_, (id, file))) in files.into_iter().enumerate() {
+        file_groups[idx % size].push(file.with_extensions(Arc::new((idx % size, id))));
+        file_id_groups[idx % size].push(id);
     }
-    groups
+    (file_groups, file_id_groups)
 }

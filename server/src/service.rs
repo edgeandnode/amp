@@ -162,6 +162,7 @@ impl Service {
     }
 
     pub async fn execute_query(&self, sql: &str) -> Result<SendableRecordBatchStream, Error> {
+        let now = std::time::Instant::now();
         let query = parse_sql(sql).map_err(|err| Error::from(err))?;
         let ctx = self
             .dataset_store
@@ -175,7 +176,10 @@ impl Service {
         let is_streaming = common::stream_helpers::is_streaming(&query);
 
         let ctx = Arc::new(ctx);
-        self.execute_plan(ctx, plan, is_streaming).await
+        let fut = self.execute_plan(ctx, plan, is_streaming).await;
+        tracing::debug!("SQL: {}", sql);
+        tracing::debug!("Query execution took {:?}", now.elapsed());
+        fut
     }
 
     async fn execute_plan_for_range_and_send_results_to_stream(
