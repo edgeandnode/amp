@@ -1,9 +1,10 @@
+#![allow(unreachable_code, unused_variables)]
 use std::{ops::Range, sync::Arc};
 
 use bytes::Bytes;
 use dashmap::DashMap;
 use datafusion::{
-    datasource::physical_plan::ParquetFileReaderFactory,
+    datasource::physical_plan::{ParquetFileMetrics, ParquetFileReaderFactory},
     error::DataFusionError,
     parquet::{
         arrow::{
@@ -20,7 +21,6 @@ use futures::{
 };
 use object_store::ObjectStore;
 use tokio::sync::mpsc;
-use tracing::warn;
 
 #[derive(Debug, Clone)]
 pub(super) struct NozzleParquetFileReaderFactory {
@@ -31,7 +31,7 @@ pub(super) struct NozzleParquetFileReaderFactory {
 impl NozzleParquetFileReaderFactory {
     fn next(&self, group_id: usize) -> Option<Arc<ParquetMetaData>> {
         if let Some(mut receiver) = self.metadata_generator.get_mut(&group_id) {
-            if let Some(metadata) = receiver.blocking_recv() {
+            if let Some(metadata) = tokio::task::block_in_place(move || receiver.blocking_recv()) {
                 let metadata: Arc<ParquetMetaData> = ParquetMetaDataReader::new()
                     .with_page_indexes(true)
                     .parse_and_finish(&Bytes::from_iter(metadata))
@@ -48,27 +48,25 @@ impl NozzleParquetFileReaderFactory {
 }
 
 impl ParquetFileReaderFactory for NozzleParquetFileReaderFactory {
-    #[tracing::instrument(skip_all)]
     fn create_reader(
         &self,
-        _partition_index: usize,
+        partition_index: usize,
         file_meta: datafusion::datasource::physical_plan::FileMeta,
         metadata_size_hint: Option<usize>,
-        _metrics: &datafusion::physical_plan::metrics::ExecutionPlanMetricsSet,
+        metrics: &datafusion::physical_plan::metrics::ExecutionPlanMetricsSet,
     ) -> Result<
         Box<dyn datafusion::parquet::arrow::async_reader::AsyncFileReader + Send>,
         DataFusionError,
     > {
-        warn!(
-            "NozzleParquetFileReaderFactory::create_reader called with file_meta: {:?}",
-            file_meta.location()
-        );
-        let file_group_id: usize = *file_meta
+        let file_metrics =
+            ParquetFileMetrics::new(partition_index, file_meta.location().as_ref(), metrics);
+
+        let group_id = *file_meta
             .extensions
             .ok_or(DataFusionError::Plan(
                 "FileMeta must contain extensions with group_id".to_string(),
             ))?
-            .downcast()
+            .downcast::<usize>()
             .map_err(|e| {
                 let e_type = e.type_id();
                 DataFusionError::Internal(format!(
@@ -76,20 +74,27 @@ impl ParquetFileReaderFactory for NozzleParquetFileReaderFactory {
                     e_type
                 ))
             })?;
+
         let metadata = self
-            .next(file_group_id)
+            .next(group_id)
             .ok_or(DataFusionError::Execution(format!(
                 "No metadata found for group_id: {}",
-                file_group_id
+                group_id
             )))?;
-
         let path = file_meta.object_meta.location.clone();
-        let mut inner = ParquetObjectReader::new(self.object_store.clone(), path);
+
+        let mut inner = ParquetObjectReader::new(self.object_store.clone(), path)
+            .with_file_size(file_meta.object_meta.size);
 
         if let Some(hint) = metadata_size_hint {
             inner = inner.with_footer_size_hint(hint);
         }
-        let reader = NozzleReader { metadata, inner };
+
+        let reader = NozzleReader {
+            metadata,
+            file_metrics,
+            inner,
+        };
         Ok(Box::new(reader))
     }
 }
@@ -97,12 +102,24 @@ impl ParquetFileReaderFactory for NozzleParquetFileReaderFactory {
 #[derive(Debug, Clone)]
 pub struct NozzleReader {
     metadata: Arc<ParquetMetaData>,
+    file_metrics: ParquetFileMetrics,
     inner: ParquetObjectReader,
 }
 
 impl AsyncFileReader for NozzleReader {
     fn get_bytes(&mut self, range: Range<u64>) -> BoxFuture<'_, ParquetResult<bytes::Bytes>> {
+        let bytes_scanned = range.end - range.start;
+        self.file_metrics.bytes_scanned.add(bytes_scanned as usize);
         self.inner.get_bytes(range)
+    }
+
+    fn get_byte_ranges(
+        &mut self,
+        ranges: Vec<Range<u64>>,
+    ) -> BoxFuture<'_, ParquetResult<Vec<Bytes>>> {
+        let total = ranges.iter().map(|r| r.end - r.start).sum::<u64>() as usize;
+        self.file_metrics.bytes_scanned.add(total);
+        self.inner.get_byte_ranges(ranges)
     }
 
     fn get_metadata<'a>(
