@@ -15,7 +15,6 @@ use url::Url;
 
 use crate::{BoxError, BoxResult};
 
-pub mod cache;
 pub mod parquet;
 pub mod range;
 
