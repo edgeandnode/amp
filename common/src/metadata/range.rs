@@ -74,9 +74,23 @@ impl TableRanges {
         for range_group in self.canonical.iter().chain(&self.forks) {
             let (first, last) = range_group.bounds();
             let range = *first.numbers.start()..=*last.numbers.end();
-            missing.append(&mut missing_block_ranges(range, desired.clone()));
+            if missing.is_empty() {
+                missing.append(&mut missing_block_ranges(range, desired.clone()));
+                continue;
+            }
+            let mut index = 0;
+            while index < missing.len() {
+                let ranges = missing_block_ranges(range.clone(), missing.remove(index));
+                if ranges.is_empty() {
+                    continue;
+                }
+                for range in ranges {
+                    missing.insert(index, range);
+                    index += 1;
+                }
+            }
         }
-        merge_ranges(missing)
+        missing
     }
 
     /// Merge known block ranges. This fails if the given block numbers do not correspond to a set
@@ -316,7 +330,10 @@ pub fn merge_ranges(mut ranges: Vec<RangeInclusive<BlockNum>>) -> Vec<RangeInclu
 
 #[cfg(test)]
 mod test {
-    use std::{collections::BTreeMap, ops::Range};
+    use std::{
+        collections::BTreeMap,
+        ops::{Range, RangeInclusive},
+    };
 
     use alloy::primitives::BlockHash;
     use rand::{Rng as _, RngCore, SeedableRng, rngs::StdRng, seq::SliceRandom};
@@ -483,7 +500,7 @@ mod test {
     }
 
     #[test]
-    fn merge_overlapping_ranges() {
+    fn merge_ranges() {
         assert_eq!(super::merge_ranges(vec![]), vec![]);
         assert_eq!(super::merge_ranges(vec![1..=5]), vec![1..=5]);
         assert_eq!(
@@ -513,6 +530,41 @@ mod test {
         assert_eq!(
             super::merge_ranges(vec![1..=5, 7..=10]),
             vec![1..=5, 7..=10]
+        );
+    }
+
+    #[test]
+    fn missing_ranges() {
+        fn missing_ranges(
+            ranges: Vec<RangeInclusive<BlockNum>>,
+            desired: RangeInclusive<BlockNum>,
+        ) -> Vec<RangeInclusive<BlockNum>> {
+            let mut table: TableRanges = Default::default();
+            for numbers in ranges {
+                table.insert(BlockRange {
+                    numbers,
+                    network: "test".to_string(),
+                    hash: Default::default(),
+                    prev_hash: None,
+                });
+            }
+            table.missing_ranges(desired)
+        }
+
+        assert_eq!(missing_ranges(vec![], 0..=10), vec![0..=10]);
+        assert_eq!(missing_ranges(vec![0..=10], 0..=10), vec![]);
+        assert_eq!(missing_ranges(vec![0..=5], 10..=15), vec![10..=15]);
+        assert_eq!(missing_ranges(vec![3..=7], 0..=10), vec![0..=2, 8..=10]);
+        assert_eq!(missing_ranges(vec![0..=15], 5..=10), vec![]);
+        assert_eq!(missing_ranges(vec![5..=15], 0..=10), vec![0..=4]);
+        assert_eq!(missing_ranges(vec![0..=5], 0..=10), vec![6..=10]);
+        assert_eq!(
+            missing_ranges(vec![0..=3, 5..=7], 0..=10),
+            vec![4..=4, 8..=10]
+        );
+        assert_eq!(
+            missing_ranges(vec![0..=2, 5..=7, 1..=12], 0..=15),
+            vec![13..=15]
         );
     }
 }
