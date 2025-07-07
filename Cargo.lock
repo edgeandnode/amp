@@ -1897,6 +1897,7 @@ dependencies = [
  "stable-hash",
  "thiserror 2.0.12",
  "tokio",
+ "tokio-stream",
  "toml",
  "tracing",
  "tracing-subscriber",
@@ -2980,6 +2981,7 @@ dependencies = [
  "metadata-db",
  "object_store",
  "prometheus",
+ "rand 0.9.1",
  "serde",
  "serde_json",
  "thiserror 2.0.12",
@@ -6090,7 +6092,6 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.12",
  "tokio",
- "tokio-stream",
  "tonic",
  "tracing",
 ]

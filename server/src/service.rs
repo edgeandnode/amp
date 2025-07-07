@@ -22,6 +22,7 @@ use common::{
         unproject_special_block_num_column,
     },
     query_context::{parse_sql, Error as CoreError, QueryContext, QueryEnv},
+    streaming_query::StreamingQuery,
 };
 use datafusion::{
     common::{
@@ -38,8 +39,6 @@ use metadata_db::MetadataDb;
 use prost::Message as _;
 use thiserror::Error;
 use tonic::{Request, Response, Status};
-
-use crate::streaming_query::StreamingQuery;
 
 type TonicStream<T> = Pin<Box<dyn Stream<Item = Result<T, Status>> + Send + 'static>>;
 
@@ -205,15 +204,16 @@ impl Service {
             } else {
                 plan
             };
-            return ctx.execute_plan(plan).await.map_err(|err| Error::from(err));
+            ctx.execute_plan(plan).await.map_err(|err| Error::from(err))
+        } else {
+            // If streaming, we need to spawn a streaming query.
+            let query =
+                StreamingQuery::spawn(ctx.clone(), plan, self.dataset_store.metadata_db.clone())
+                    .await
+                    .map_err(|e| Error::StreamingExecutionError(e.to_string()))?;
+
+            Ok(query.as_record_batch_stream())
         }
-
-        let query =
-            StreamingQuery::spawn(ctx.clone(), plan, self.dataset_store.metadata_db.clone())
-                .await
-                .map_err(|e| Error::StreamingExecutionError(e.to_string()))?;
-
-        Ok(query.as_record_batch_stream())
     }
 }
 

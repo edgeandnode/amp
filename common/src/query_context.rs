@@ -38,7 +38,11 @@ use crate::{
     evm::udfs::{
         EvmDecodeLog, EvmDecodeParams, EvmDecodeType, EvmEncodeParams, EvmEncodeType, EvmTopic,
     },
-    plan_visitors::extract_table_references_from_plan,
+    plan_visitors::{
+        constrain_by_block_num, extract_table_references_from_plan,
+        forbid_underscore_prefixed_aliases, order_by_block_num, propagate_block_num,
+        unproject_special_block_num_column,
+    },
     stream_helpers::is_streaming,
     BlockNum, BoxError, LogicalCatalog, ResolvedTable, SPECIAL_BLOCK_NUM,
 };
@@ -397,6 +401,55 @@ impl QueryContext {
             .into());
         };
         table.synced_range().await
+    }
+
+    /// This will:
+    /// - Validate that dependencies have synced the required block range.
+    /// - Inject block range constraints into the plan.
+    /// - Inject 'order by block_num' into the plan.
+    /// - Execute the plan.
+    #[instrument(skip_all, err)]
+    pub async fn execute_plan_for_range(
+        &self,
+        plan: LogicalPlan,
+        start: BlockNum,
+        end: BlockNum,
+        is_sql_dataset: bool,
+    ) -> Result<SendableRecordBatchStream, BoxError> {
+        let original_schema = plan.schema().clone();
+        let tables = extract_table_references_from_plan(&plan)?;
+
+        // Validate dependency block ranges
+        {
+            for table in tables {
+                let physical_table = self
+                    .get_table(&table)
+                    .ok_or::<BoxError>(format!("table {} not found", table).into())?;
+                let range = physical_table.synced_range().await?;
+                let synced = range.map(|r| r.contains(&end)).unwrap_or(false);
+                if !synced {
+                    return Err(format!(
+                    "tried to query up to block {end} of table {table} but it has not been synced"
+                )
+                    .into());
+                }
+            }
+        }
+
+        let plan = {
+            forbid_underscore_prefixed_aliases(&plan)?;
+            let plan = propagate_block_num(plan)?;
+            let plan = constrain_by_block_num(plan, start, end)?;
+            let plan = order_by_block_num(plan);
+            if is_sql_dataset {
+                // SQL datasets always project the special block number column, because it has
+                // to end up in the file.
+                plan
+            } else {
+                unproject_special_block_num_column(plan, original_schema)?
+            }
+        };
+        Ok(self.execute_plan(plan).await?)
     }
 }
 
