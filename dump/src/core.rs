@@ -200,19 +200,32 @@ async fn consistency_check(table: &PhysicalTable) -> Result<(), ConsistencyCheck
     let location_id = table.location_id();
 
     // Check that bock ranges do not contain overlapping ranges.
-    let ranges: Vec<(BlockNum, BlockNum)> = table
+    let mut ranges: Vec<(BlockNum, BlockNum)> = table
         .files()
         .await
         .map_err(|err| ConsistencyCheckError::CorruptedTable(location_id, err))?
         .into_iter()
         .map(|m| m.parquet_meta.ranges[0].numbers.clone().into_inner())
         .collect();
+    ranges.sort_by_key(|(start, _)| *start);
     for window in ranges.windows(2) {
         let ((a, b), (c, d)) = (window[0], window[1]);
-        if !((a <= b) && (b <= c) && (c <= d)) {
+        if !(b < c) {
             return Err(ConsistencyCheckError::CorruptedTable(
                 location_id,
                 format!("overlapping block ranges: [{a}-{b}] and [{c}-{d}]").into(),
+            ));
+        }
+        if !(a <= b) {
+            return Err(ConsistencyCheckError::CorruptedTable(
+                location_id,
+                format!("malformed block range: [{a}-{b}]").into(),
+            ));
+        }
+        if !(c <= d) {
+            return Err(ConsistencyCheckError::CorruptedTable(
+                location_id,
+                format!("malformed block range: [{c}-{d}]").into(),
             ));
         }
     }
