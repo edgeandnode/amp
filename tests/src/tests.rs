@@ -19,7 +19,7 @@ use crate::{
     },
 };
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn evm_rpc_single_dump() {
     tracing_helpers::register_logger();
 
@@ -44,7 +44,7 @@ async fn evm_rpc_single_dump() {
     temp_dump.assert_eq(&blessed).await.unwrap();
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn eth_firehose_single_dump() {
     tracing_helpers::register_logger();
 
@@ -67,7 +67,7 @@ async fn eth_firehose_single_dump() {
     temp_dump.assert_eq(&blessed).await.unwrap();
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn sql_over_eth_firehose_dump() {
     tracing_helpers::register_logger();
     let dataset_name = "sql_over_eth_firehose";
@@ -89,7 +89,7 @@ async fn sql_over_eth_firehose_dump() {
     temp_dump.assert_eq(&blessed).await.unwrap();
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn sql_tests() {
     tracing_helpers::register_logger();
     let test_env = TestEnv::temp("sql_tests").await.unwrap();
@@ -111,7 +111,7 @@ async fn streaming_tests() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn basic_function() -> Result<(), BoxError> {
     tracing_helpers::register_logger();
 
@@ -125,7 +125,7 @@ async fn basic_function() -> Result<(), BoxError> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn anvil_rpc_reorg() {
     tracing_helpers::register_logger();
 
