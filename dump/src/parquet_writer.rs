@@ -17,8 +17,6 @@ use rand::RngCore as _;
 use tracing::debug;
 use url::Url;
 
-use crate::missing_block_ranges;
-
 const MAX_PARTITION_BLOCK_RANGE: u64 = 1_000_000;
 
 /// Only used for raw datasets.
@@ -35,24 +33,15 @@ impl RawDatasetWriter {
         dataset_ctx: Arc<QueryContext>,
         metadata_db: Arc<MetadataDb>,
         opts: ParquetWriterProperties,
-        start: BlockNum,
-        end: BlockNum,
         partition_size: u64,
-        synced_ranges_by_table: BTreeMap<String, Option<RangeInclusive<BlockNum>>>,
+        missing_ranges_by_table: &BTreeMap<String, Vec<RangeInclusive<BlockNum>>>,
     ) -> Result<Self, BoxError> {
         let mut writers = BTreeMap::new();
         for table in dataset_ctx.catalog().tables() {
-            // Unwrap: `synced_ranges_by_table` contains an entry for each table.
+            // Unwrap: `missing_ranges_by_table` contains an entry for each table.
             let table_name = table.table_name();
-            let synced_range = synced_ranges_by_table.get(table_name).unwrap().clone();
-            let writer = RawTableWriter::new(
-                table.clone(),
-                opts.clone(),
-                partition_size,
-                synced_range,
-                start,
-                end,
-            )?;
+            let ranges = missing_ranges_by_table.get(table_name).unwrap().clone();
+            let writer = RawTableWriter::new(table.clone(), opts.clone(), partition_size, ranges)?;
             writers.insert(table_name.to_string(), writer);
         }
         Ok(RawDatasetWriter {
@@ -139,18 +128,9 @@ impl RawTableWriter {
         table: Arc<PhysicalTable>,
         opts: ParquetWriterProperties,
         partition_size: u64,
-        synced_range: Option<RangeInclusive<BlockNum>>,
-        start: BlockNum,
-        end: BlockNum,
+        missing_ranges: Vec<RangeInclusive<BlockNum>>,
     ) -> Result<Self, BoxError> {
-        let ranges_to_write = {
-            let missing_ranges = synced_range
-                .map(|synced| missing_block_ranges(synced, start..=end))
-                .unwrap_or(vec![start..=end]);
-            let mut ranges = limit_ranges(missing_ranges, MAX_PARTITION_BLOCK_RANGE);
-            ranges.reverse();
-            ranges
-        };
+        let ranges_to_write = limit_ranges(missing_ranges, MAX_PARTITION_BLOCK_RANGE);
         let current_file = match ranges_to_write.last() {
             Some(range) => Some(ParquetFileWriter::new(
                 table.clone(),

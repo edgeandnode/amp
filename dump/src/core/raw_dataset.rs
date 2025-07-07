@@ -87,17 +87,15 @@ use std::{
 };
 
 use common::{
-    BlockNum, BlockStreamer, BoxError, block_range_intersection, query_context::QueryContext,
+    BlockNum, BlockStreamer, BoxError, catalog::physical::PhysicalTable,
+    metadata::range::merge_overlapping_ranges, query_context::QueryContext,
 };
 use futures::TryStreamExt as _;
 use metadata_db::MetadataDb;
 use tracing::instrument;
 
 use super::{Ctx, block_ranges, tasks::FailFastJoinSet};
-use crate::{
-    missing_block_ranges,
-    parquet_writer::{ParquetWriterProperties, RawDatasetWriter},
-};
+use crate::parquet_writer::{ParquetWriterProperties, RawDatasetWriter};
 
 /// Dumps a raw dataset by extracting blockchain data from specified block ranges
 /// and writing it to partitioned Parquet files.
@@ -110,7 +108,7 @@ pub async fn dump(
     n_jobs: u16,
     query_ctx: Arc<QueryContext>,
     dataset_name: &str,
-    synced_ranges_by_table: BTreeMap<String, Option<RangeInclusive<BlockNum>>>,
+    tables: &[Arc<PhysicalTable>],
     partition_size: u64,
     parquet_opts: &ParquetWriterProperties,
     (start, end): (i64, Option<i64>),
@@ -125,41 +123,43 @@ pub async fn dump(
         }
     };
 
-    // Use the intersection of the block ranges for all tables, only considering ranges scanned for
-    // all tables.
-    let synced_range = {
-        let mut synced: Option<RangeInclusive<BlockNum>> = None;
-        for range in synced_ranges_by_table.values() {
-            synced = match (synced, range.clone()) {
-                (None, r) | (r, None) => r,
-                (Some(a), Some(b)) => block_range_intersection(a, b),
-            };
-        }
-        synced
+    let mut missing_ranges_by_table: BTreeMap<String, Vec<RangeInclusive<BlockNum>>> =
+        Default::default();
+    for table in tables {
+        missing_ranges_by_table.insert(
+            table.table().name().to_string(),
+            table.missing_ranges(start..=end).await?,
+        );
+    }
+
+    // Use the union of missing table block ranges.
+    let missing_dataset_ranges = {
+        let ranges: Vec<RangeInclusive<BlockNum>> = missing_ranges_by_table
+            .values()
+            .flatten()
+            .cloned()
+            .collect();
+        merge_overlapping_ranges(ranges)
     };
 
-    // Find the ranges of blocks that have not been scanned yet for at least one table.
-    let ranges = synced_range
-        .map(|synced| missing_block_ranges(synced, start..=end))
-        .unwrap_or(vec![start..=end]);
-    tracing::info!(
-        "dumping dataset {dataset_name} for ranges {}",
-        ranges
-            .iter()
-            .map(|r| format!("[{}-{}]", r.start(), r.end()))
-            .collect::<Vec<String>>()
-            .join(", ")
-    );
-
-    if ranges.is_empty() {
+    if missing_dataset_ranges.is_empty() {
         tracing::info!("no blocks to dump for {dataset_name}");
         return Ok(());
+    } else {
+        tracing::info!(
+            "dumping dataset {dataset_name} for ranges {}",
+            missing_dataset_ranges
+                .iter()
+                .map(|r| format!("[{}-{}]", r.start(), r.end()))
+                .collect::<Vec<String>>()
+                .join(", ")
+        );
     }
 
     // Split them across the target number of jobs as to balance the number of blocks per job.
-    let ranges = split_and_partition(ranges, n_jobs as u64, 2000);
+    let missing_dataset_ranges = split_and_partition(missing_dataset_ranges, n_jobs as u64, 2000);
 
-    let jobs = ranges
+    let jobs = missing_dataset_ranges
         .into_iter()
         .enumerate()
         .map(|(i, ranges)| DumpPartition {
@@ -170,7 +170,7 @@ pub async fn dump(
             id: i as u32,
             partition_size,
             parquet_opts: parquet_opts.clone(),
-            synced_ranges_by_table: synced_ranges_by_table.clone(),
+            missing_ranges_by_table: missing_ranges_by_table.clone(),
         });
 
     // Spawn the jobs, starting them with a 1 second delay between each.
@@ -271,8 +271,8 @@ struct DumpPartition<S: BlockStreamer> {
     /// Note that different tables may have a different number of partitions for a same block range.
     /// Lighter tables will have less parts than heavier tables.
     partition_size: u64,
-    /// The synced block ranges by table
-    synced_ranges_by_table: BTreeMap<String, Option<RangeInclusive<BlockNum>>>,
+    /// The missing block ranges by table
+    missing_ranges_by_table: BTreeMap<String, Vec<RangeInclusive<BlockNum>>>,
     /// The partition ID
     id: u32,
 }
@@ -322,10 +322,8 @@ impl<S: BlockStreamer> DumpPartition<S> {
             self.query_ctx.clone(),
             self.metadata_db.clone(),
             self.parquet_opts.clone(),
-            start,
-            end,
             self.partition_size,
-            self.synced_ranges_by_table.clone(),
+            &self.missing_ranges_by_table,
         )?;
 
         let mut stream = std::pin::pin!(stream);

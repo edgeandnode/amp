@@ -1,6 +1,5 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    ops::RangeInclusive,
     str::FromStr,
     sync::Arc,
 };
@@ -90,26 +89,6 @@ pub async fn dump_raw_tables(
         consistency_check(table).await?;
     }
 
-    // Query the block ranges, we might already have some ranges if this is not the first dump run
-    // for this dataset.
-    let mut synced_ranges_by_table: BTreeMap<String, Option<RangeInclusive<BlockNum>>> =
-        Default::default();
-    for table in tables {
-        synced_ranges_by_table.insert(table.table_name().to_string(), table.synced_range().await?);
-    }
-
-    for (table_name, range) in &synced_ranges_by_table {
-        let Some(range) = range else {
-            continue;
-        };
-        tracing::info!(
-            "table `{}` has scanned block range [{}-{}]",
-            table_name,
-            range.start(),
-            range.end(),
-        );
-    }
-
     let kind = DatasetKind::from_str(&dataset.kind)?;
     match kind {
         DatasetKind::EvmRpc | DatasetKind::Firehose | DatasetKind::Substreams => {
@@ -118,7 +97,7 @@ pub async fn dump_raw_tables(
                 n_jobs,
                 query_ctx,
                 &dataset.name,
-                synced_ranges_by_table,
+                tables,
                 partition_size,
                 parquet_opts,
                 range,
@@ -293,70 +272,4 @@ enum ConsistencyCheckError {
 
     #[error("table {0} is corrupted: {1}")]
     CorruptedTable(LocationId, BoxError),
-}
-
-pub fn missing_block_ranges(
-    synced: RangeInclusive<BlockNum>,
-    desired: RangeInclusive<BlockNum>,
-) -> Vec<RangeInclusive<BlockNum>> {
-    // no overlap
-    if (synced.end() < desired.start()) || (synced.start() > desired.end()) {
-        return vec![desired];
-    }
-    // desired is subset of synced
-    if (synced.start() <= desired.start()) && (synced.end() >= desired.end()) {
-        return vec![];
-    }
-    // partial overlap
-    let mut result = Vec::new();
-    if desired.start() < synced.start() {
-        result.push(*desired.start()..=(*synced.start() - 1));
-    }
-    if desired.end() > synced.end() {
-        result.push((*synced.end() + 1)..=*desired.end());
-    }
-    result
-}
-
-#[cfg(test)]
-mod test {
-    #[test]
-    fn missing_block_ranges() {
-        // no overlap, desired before synced
-        assert_eq!(super::missing_block_ranges(10..=20, 0..=5), vec![0..=5]);
-        // no overlap, desired after synced
-        assert_eq!(super::missing_block_ranges(0..=5, 10..=20), vec![10..=20]);
-        // desired is subset of synced
-        assert_eq!(super::missing_block_ranges(0..=10, 2..=8), vec![]);
-        // desired is same as synced
-        assert_eq!(super::missing_block_ranges(0..=10, 0..=10), vec![]);
-        // synced starts before desired, ends with desired
-        assert_eq!(super::missing_block_ranges(0..=10, 0..=10), vec![]);
-        // synced starts with desired, ends after desired
-        assert_eq!(super::missing_block_ranges(0..=10, 0..=10), vec![]);
-        // partial overlap, desired starts before synced
-        assert_eq!(super::missing_block_ranges(5..=10, 0..=7), vec![0..=4]);
-        // partial overlap, desired ends after synced
-        assert_eq!(super::missing_block_ranges(0..=5, 3..=10), vec![6..=10]);
-        // partial overlap, desired surrounds synced
-        assert_eq!(
-            super::missing_block_ranges(5..=10, 0..=15),
-            vec![0..=4, 11..=15]
-        );
-        // desired starts same as synced, ends after synced
-        assert_eq!(super::missing_block_ranges(0..=5, 0..=10), vec![6..=10]);
-        // desired starts before synced, ends same as synced
-        assert_eq!(super::missing_block_ranges(5..=10, 0..=10), vec![0..=4]);
-        // adjacent ranges (desired just before synced)
-        assert_eq!(super::missing_block_ranges(5..=10, 0..=4), vec![0..=4]);
-        // adjacent ranges (desired just after synced)
-        assert_eq!(super::missing_block_ranges(0..=5, 6..=10), vec![6..=10]);
-        // single block ranges
-        assert_eq!(super::missing_block_ranges(0..=0, 0..=0), vec![]);
-        assert_eq!(super::missing_block_ranges(0..=0, 1..=1), vec![1..=1]);
-        assert_eq!(super::missing_block_ranges(1..=1, 0..=0), vec![0..=0]);
-        assert_eq!(super::missing_block_ranges(0..=2, 0..=3), vec![3..=3]);
-        assert_eq!(super::missing_block_ranges(1..=3, 0..=3), vec![0..=0]);
-        assert_eq!(super::missing_block_ranges(0..=2, 0..=3), vec![3..=3]);
-    }
 }

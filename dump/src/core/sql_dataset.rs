@@ -119,7 +119,7 @@ use std::{collections::BTreeSet, sync::Arc};
 use common::{
     BlockNum, BoxError, Dataset,
     catalog::physical::PhysicalTable,
-    metadata::range::BlockRange,
+    metadata::range::{BlockRange, missing_block_ranges},
     plan_visitors::is_incremental,
     query_context::{QueryContext, QueryEnv, parse_sql},
 };
@@ -129,10 +129,7 @@ use futures::TryStreamExt as _;
 use tracing::instrument;
 
 use super::{Ctx, block_ranges, tasks::FailFastJoinSet};
-use crate::{
-    missing_block_ranges,
-    parquet_writer::{ParquetFileWriter, ParquetWriterProperties, commit_metadata},
-};
+use crate::parquet_writer::{ParquetFileWriter, ParquetWriterProperties, commit_metadata};
 
 /// Dumps a SQL dataset table
 #[instrument(skip_all, fields(dataset = %dataset.name()), err)]

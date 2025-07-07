@@ -60,6 +60,25 @@ impl TableRanges {
         })
     }
 
+    /// Return the block ranges missing from this table out of the given `desired` range. The
+    /// returned ranges will be non-overlapping.
+    pub fn missing_ranges(
+        &self,
+        desired: RangeInclusive<BlockNum>,
+    ) -> Vec<RangeInclusive<BlockNum>> {
+        if self.canonical.is_none() && self.forks.is_empty() {
+            return vec![desired];
+        }
+
+        let mut missing: Vec<RangeInclusive<BlockNum>> = Default::default();
+        for range_group in self.canonical.iter().chain(&self.forks) {
+            let (first, last) = range_group.bounds();
+            let range = *first.numbers.start()..=*last.numbers.end();
+            missing.append(&mut missing_block_ranges(range, desired.clone()));
+        }
+        merge_overlapping_ranges(missing)
+    }
+
     /// Merge known block ranges. This fails if the given block numbers do not correspond to a set
     /// of adjacent and complete block ranges. This should be done after the associated files have
     /// been merged, and the merged files have been committed to the metadata DB.
@@ -255,6 +274,47 @@ impl RangeGroup {
     }
 }
 
+pub fn missing_block_ranges(
+    synced: RangeInclusive<BlockNum>,
+    desired: RangeInclusive<BlockNum>,
+) -> Vec<RangeInclusive<BlockNum>> {
+    // no overlap
+    if (synced.end() < desired.start()) || (synced.start() > desired.end()) {
+        return vec![desired];
+    }
+    // desired is subset of synced
+    if (synced.start() <= desired.start()) && (synced.end() >= desired.end()) {
+        return vec![];
+    }
+    // partial overlap
+    let mut result = Vec::new();
+    if desired.start() < synced.start() {
+        result.push(*desired.start()..=(*synced.start() - 1));
+    }
+    if desired.end() > synced.end() {
+        result.push((*synced.end() + 1)..=*desired.end());
+    }
+    result
+}
+
+pub fn merge_overlapping_ranges(
+    mut ranges: Vec<RangeInclusive<BlockNum>>,
+) -> Vec<RangeInclusive<BlockNum>> {
+    ranges.sort_by_key(|r| *r.start());
+    let mut index = 1;
+    while index < ranges.len() {
+        let current_range = ranges[index - 1].clone();
+        let next_range = ranges[index].clone();
+        if next_range.start() <= current_range.end() {
+            ranges[index - 1] = *current_range.start()..=*next_range.end();
+            ranges.remove(index);
+        } else {
+            index += 1;
+        }
+    }
+    ranges
+}
+
 #[cfg(test)]
 mod test {
     use std::{collections::BTreeMap, ops::Range};
@@ -381,5 +441,45 @@ mod test {
                 .all(|r| *r.numbers.end() < canonical_chain_depth as u64)
         );
         ranges
+    }
+
+    #[test]
+    fn missing_block_ranges() {
+        // no overlap, desired before synced
+        assert_eq!(super::missing_block_ranges(10..=20, 0..=5), vec![0..=5]);
+        // no overlap, desired after synced
+        assert_eq!(super::missing_block_ranges(0..=5, 10..=20), vec![10..=20]);
+        // desired is subset of synced
+        assert_eq!(super::missing_block_ranges(0..=10, 2..=8), vec![]);
+        // desired is same as synced
+        assert_eq!(super::missing_block_ranges(0..=10, 0..=10), vec![]);
+        // synced starts before desired, ends with desired
+        assert_eq!(super::missing_block_ranges(0..=10, 0..=10), vec![]);
+        // synced starts with desired, ends after desired
+        assert_eq!(super::missing_block_ranges(0..=10, 0..=10), vec![]);
+        // partial overlap, desired starts before synced
+        assert_eq!(super::missing_block_ranges(5..=10, 0..=7), vec![0..=4]);
+        // partial overlap, desired ends after synced
+        assert_eq!(super::missing_block_ranges(0..=5, 3..=10), vec![6..=10]);
+        // partial overlap, desired surrounds synced
+        assert_eq!(
+            super::missing_block_ranges(5..=10, 0..=15),
+            vec![0..=4, 11..=15]
+        );
+        // desired starts same as synced, ends after synced
+        assert_eq!(super::missing_block_ranges(0..=5, 0..=10), vec![6..=10]);
+        // desired starts before synced, ends same as synced
+        assert_eq!(super::missing_block_ranges(5..=10, 0..=10), vec![0..=4]);
+        // adjacent ranges (desired just before synced)
+        assert_eq!(super::missing_block_ranges(5..=10, 0..=4), vec![0..=4]);
+        // adjacent ranges (desired just after synced)
+        assert_eq!(super::missing_block_ranges(0..=5, 6..=10), vec![6..=10]);
+        // single block ranges
+        assert_eq!(super::missing_block_ranges(0..=0, 0..=0), vec![]);
+        assert_eq!(super::missing_block_ranges(0..=0, 1..=1), vec![1..=1]);
+        assert_eq!(super::missing_block_ranges(1..=1, 0..=0), vec![0..=0]);
+        assert_eq!(super::missing_block_ranges(0..=2, 0..=3), vec![3..=3]);
+        assert_eq!(super::missing_block_ranges(1..=3, 0..=3), vec![0..=0]);
+        assert_eq!(super::missing_block_ranges(0..=2, 0..=3), vec![3..=3]);
     }
 }

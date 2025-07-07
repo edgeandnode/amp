@@ -401,7 +401,25 @@ impl PhysicalTable {
     /// contiguous range of block numbers starting from the lowest start block. Ok(None) is
     /// returned if no block range has been synced.
     pub async fn synced_range(&self) -> Result<Option<RangeInclusive<BlockNum>>, BoxError> {
-        let ranges: Vec<BlockRange> = self
+        let ranges = self.ranges().await?;
+        Ok(ranges.canonical_range().map(|r| r.numbers))
+    }
+
+    /// Return the most recent block number that has been synced for this table.
+    pub async fn watermark(&self) -> Result<Option<BlockNum>, BoxError> {
+        Ok(self.synced_range().await?.map(|range| *range.end()))
+    }
+
+    pub async fn missing_ranges(
+        &self,
+        desired: RangeInclusive<BlockNum>,
+    ) -> Result<Vec<RangeInclusive<BlockNum>>, BoxError> {
+        let ranges = self.ranges().await?;
+        Ok(ranges.missing_ranges(desired))
+    }
+
+    async fn ranges(&self) -> Result<TableRanges, BoxError> {
+        let block_ranges: Vec<BlockRange> = self
             .stream_file_metadata()
             .map(|result| {
                 let FileMetadata {
@@ -418,16 +436,11 @@ impl PhysicalTable {
             })
             .try_collect()
             .await?;
-        let mut table_ranges: TableRanges = Default::default();
-        for range in ranges {
-            table_ranges.insert(range);
+        let mut ranges: TableRanges = Default::default();
+        for range in block_ranges {
+            ranges.insert(range);
         }
-        Ok(table_ranges.canonical_range().map(|r| r.numbers))
-    }
-
-    // The most recent block number that has been synced for this table.
-    pub async fn watermark(&self) -> Result<Option<BlockNum>, BoxError> {
-        Ok(self.synced_range().await?.map(|range| *range.end()))
+        Ok(ranges)
     }
 }
 
