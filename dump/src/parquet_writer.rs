@@ -105,6 +105,7 @@ pub async fn commit_metadata(
             object_e_tag,
             object_version,
             parquet_meta,
+            true, // assuming only canonical ranges for now
         )
         .await?;
 
