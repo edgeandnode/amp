@@ -66,8 +66,8 @@ pub struct Location {
     pub id: LocationId,
     /// location.dataset
     pub dataset: String,
-    /// location.table
-    pub table: String,
+    /// location.tbl
+    pub tbl: String,
     /// location.url
     #[sqlx(try_from = "&'a str")]
     pub url: Url,

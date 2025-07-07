@@ -285,11 +285,12 @@ async fn dump_sql_query(
     physical_table: Arc<PhysicalTable>,
     parquet_opts: &ParquetWriterProperties,
 ) -> Result<(), BoxError> {
-    use dataset_store::sql_datasets::execute_query_for_range;
-
     let (start, end) = range.numbers.clone().into_inner();
-    let mut stream =
-        execute_query_for_range(query.clone(), dataset_store, env.clone(), start, end).await?;
+    let mut stream = {
+        let ctx = dataset_store.ctx_for_sql(&query, env.clone()).await?;
+        let plan = ctx.plan_sql(query.clone()).await?;
+        ctx.execute_plan_for_range(plan, start, end, true).await?
+    };
     let mut writer = ParquetFileWriter::new(physical_table.clone(), parquet_opts.clone(), start)?;
 
     while let Some(batch) = stream.try_next().await? {

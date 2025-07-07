@@ -487,3 +487,8 @@
     FROM (SELECT block_num as _hello FROM eth_rpc.blocks)
   failure: |
     projection contains a column alias starting with '_': '_hello'. Underscore-prefixed names are reserved. Please rename your column
+
+- name: basic_explain
+  query: EXPLAIN select block_num FROM eth_rpc.blocks
+  results: |
+    [{"plan":"Projection: eth_rpc.blocks.block_num\n  TableScan: eth_rpc.blocks","plan_type":"initial_logical_plan"}]

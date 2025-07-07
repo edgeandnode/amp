@@ -15,6 +15,7 @@ use common::{
 };
 use metadata_db::{MetadataBytes, MetadataDb};
 use object_store::{buffered::BufWriter, path::Path, ObjectMeta};
+use rand::RngCore as _;
 use tracing::debug;
 use url::Url;
 
@@ -285,8 +286,8 @@ impl ParquetFileWriter {
         // TODO: We need to make file names unique when we start handling non-finalized blocks.
         let filename = {
             // Pad `start` to 9 digits for lexicographical sorting.
-            let padded_start = format!("{:09}", start);
-            format!("{padded_start}.parquet")
+            // Add a 64-bit hex value from a crytpo RNG to avoid name conflicts from chain reorgs.
+            format!("{:09}-{:016x}.parquet", start, rand::rng().next_u64())
         };
         let file_url = table.url().join(&filename)?;
         let file_path = Path::from_url_path(file_url.path())?;
