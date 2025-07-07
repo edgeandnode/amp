@@ -7,9 +7,9 @@ use datafusion::{
     common::DFSchema,
     datasource::{
         create_ordering,
-        file_format::{parquet::ParquetFormat, FileFormat},
         listing::{ListingTableUrl, PartitionedFile},
-        physical_plan::{FileGroup, FileScanConfigBuilder, FileSource, ParquetSource},
+        physical_plan::{FileGroup, FileScanConfigBuilder, ParquetSource},
+        source::DataSourceExec,
         TableProvider, TableType,
     },
     error::{DataFusionError, Result as DataFusionResult},
@@ -21,7 +21,7 @@ use datafusion::{
     sql::TableReference,
 };
 use futures::{stream, Stream, StreamExt, TryStreamExt};
-use metadata_db::{FileId, FileMetadataRow, LocationId, MetadataDb, TableId};
+use metadata_db::{FileId, LocationId, MetadataDb, TableId};
 use object_store::{path::Path, ObjectStore};
 use tokio::sync::mpsc;
 use tracing::info;
@@ -464,22 +464,21 @@ impl PhysicalTable {
 
             let sender_clone = sender.clone();
             let metadata_db_clone = self.metadata_db.clone();
-            let file_ids = Arc::new(file_ids);
-            let location_id = self.location_id;
 
             tokio::spawn(async move {
-                let mut stream = metadata_db_clone.stream_file_metadata(location_id);
+                let mut stream = metadata_db_clone
+                    .stream_file_metadata_bytes(&file_ids)
+                    .zip(stream::iter(file_ids.iter()));
+                while let Some((Ok((returned, metadata)), expected)) = stream.next().await {
+                    assert!(
+                        returned == *expected,
+                        "Expected file ID {}, but got {}",
+                        expected,
+                        returned
+                    );
 
-                while let Some(Ok(FileMetadataRow { id, metadata, .. })) = stream.next().await {
-                    if file_ids.contains(&id) {
-                        if let Err(e) = sender_clone.send(metadata).await {
-                            if e.to_string().as_str() == "channel closed" {
-                                // The receiver has been dropped, we can stop sending
-                                break;
-                            } else {
-                                tracing::error!("Failed to send metadata: {}", e);
-                            }
-                        }
+                    if let Err(_) = sender_clone.send(metadata).await {
+                        break; // Stop sending if the receiver is closed
                     }
                 }
             });
@@ -575,27 +574,30 @@ impl TableProvider for PhysicalTable {
 
         let file_schema = self.schema();
         let object_store_url = self.object_store_url()?;
-        let file_source: Arc<dyn FileSource> = ParquetSource::default()
-            .with_parquet_file_reader_factory(parquet_file_reader_factory)
-            .with_predicate(predicate)
-            .into();
 
-        ParquetFormat::default()
-            .create_physical_plan(
-                state,
-                FileScanConfigBuilder::new(
-                    object_store_url,
-                    file_schema,
-                    ParquetSource::default().into(),
-                )
-                .with_file_groups(file_groups)
-                .with_output_ordering(output_ordering)
-                .with_projection(projection.cloned())
-                .with_limit(limit)
-                .with_source(file_source)
-                .build(),
+        let table_parquet_options = state.table_options().parquet.clone();
+        let file_source = Arc::new(
+            ParquetSource::new(table_parquet_options)
+                .with_predicate(predicate)
+                .with_pushdown_filters(true)
+                .with_parquet_file_reader_factory(parquet_file_reader_factory),
+        );
+
+        let data_source = Arc::new(
+            FileScanConfigBuilder::new(
+                object_store_url.clone(),
+                file_schema.clone(),
+                Arc::new(ParquetSource::default()),
             )
-            .await
+            .with_file_groups(file_groups)
+            .with_output_ordering(output_ordering)
+            .with_projection(projection.cloned())
+            .with_limit(limit)
+            .with_source(file_source)
+            .build(),
+        );
+
+        Ok(Arc::new(DataSourceExec::new(data_source)))
     }
 
     fn supports_filters_pushdown(
@@ -650,16 +652,20 @@ pub async fn list_revisions(
         .collect())
 }
 
+pub type FileIdGroup = Vec<FileId>;
+
 fn round_robin(
     files: BTreeMap<u64, (FileId, PartitionedFile)>,
     target_partitions: usize,
-) -> (Vec<FileGroup>, Vec<Vec<FileId>>) {
+) -> (Vec<FileGroup>, Vec<FileIdGroup>) {
     let size = files.len().min(target_partitions);
     if size <= 0 {
         return (vec![], vec![]);
     }
-    let mut file_groups = vec![FileGroup::default(); size];
-    let mut file_id_groups: Vec<Vec<FileId>> = vec![vec![]; size];
+
+    let mut file_groups: Vec<FileGroup> = vec![FileGroup::default(); size];
+    let mut file_id_groups: Vec<FileIdGroup> = vec![vec![]; size];
+
     for (idx, (_, (id, file))) in files.into_iter().enumerate() {
         file_groups[idx % size].push(file.with_extensions(Arc::new(idx % size)));
         file_id_groups[idx % size].push(id);
