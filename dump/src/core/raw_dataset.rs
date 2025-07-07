@@ -88,7 +88,7 @@ use std::{
 
 use common::{
     BlockNum, BlockStreamer, BoxError, catalog::physical::PhysicalTable,
-    metadata::range::merge_overlapping_ranges, query_context::QueryContext,
+    metadata::range::merge_ranges, query_context::QueryContext,
 };
 use futures::TryStreamExt as _;
 use metadata_db::MetadataDb;
@@ -139,7 +139,7 @@ pub async fn dump(
             .flatten()
             .cloned()
             .collect();
-        merge_overlapping_ranges(ranges)
+        merge_ranges(ranges)
     };
 
     if missing_dataset_ranges.is_empty() {
