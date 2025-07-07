@@ -4,7 +4,7 @@ use std::{ops::Range, sync::Arc};
 use bytes::Bytes;
 use dashmap::DashMap;
 use datafusion::{
-    datasource::physical_plan::{ParquetFileMetrics, ParquetFileReaderFactory},
+    datasource::physical_plan::{FileMeta, ParquetFileMetrics, ParquetFileReaderFactory},
     error::DataFusionError,
     parquet::{
         arrow::{
@@ -14,6 +14,7 @@ use datafusion::{
         errors::Result as ParquetResult,
         file::metadata::{ParquetMetaData, ParquetMetaDataReader},
     },
+    physical_plan::metrics::ExecutionPlanMetricsSet,
 };
 use futures::{
     future::{ok as ok_future, BoxFuture},
@@ -51,13 +52,10 @@ impl ParquetFileReaderFactory for NozzleParquetFileReaderFactory {
     fn create_reader(
         &self,
         partition_index: usize,
-        file_meta: datafusion::datasource::physical_plan::FileMeta,
+        file_meta: FileMeta,
         metadata_size_hint: Option<usize>,
-        metrics: &datafusion::physical_plan::metrics::ExecutionPlanMetricsSet,
-    ) -> Result<
-        Box<dyn datafusion::parquet::arrow::async_reader::AsyncFileReader + Send>,
-        DataFusionError,
-    > {
+        metrics: &ExecutionPlanMetricsSet,
+    ) -> Result<Box<dyn AsyncFileReader + Send>, DataFusionError> {
         let file_metrics =
             ParquetFileMetrics::new(partition_index, file_meta.location().as_ref(), metrics);
 
@@ -81,6 +79,7 @@ impl ParquetFileReaderFactory for NozzleParquetFileReaderFactory {
                 "No metadata found for group_id: {}",
                 group_id
             )))?;
+
         let path = file_meta.object_meta.location.clone();
 
         let mut inner = ParquetObjectReader::new(self.object_store.clone(), path)
@@ -95,6 +94,7 @@ impl ParquetFileReaderFactory for NozzleParquetFileReaderFactory {
             file_metrics,
             inner,
         };
+
         Ok(Box::new(reader))
     }
 }

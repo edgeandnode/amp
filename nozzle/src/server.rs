@@ -161,7 +161,6 @@ async fn handle_jsonl_request(
     fn error_payload(message: impl std::fmt::Display) -> String {
         format!(r#"{{"error": "{}"}}"#, message)
     }
-    let now = std::time::Instant::now();
     let stream = match service.execute_query(&request).await {
         Ok(stream) => stream,
         Err(err) => return err.into_response(),
@@ -175,7 +174,6 @@ async fn handle_jsonl_request(
             Ok(String::from_utf8(buf).unwrap())
         })
         .map_err(error_payload);
-    tracing::debug!("JSON lines request processed in {:?}", now.elapsed());
     axum::response::Response::builder()
         .header("content-type", "application/x-ndjson")
         .body(axum::body::Body::from_stream(stream))

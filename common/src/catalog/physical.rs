@@ -556,15 +556,18 @@ impl TableProvider for PhysicalTable {
         limit: Option<usize>,
     ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
         let predicate = self.filters_to_predicate(state, filters)?;
+
         let files = self
             .stream_partitioned_files(state)
             .try_collect::<BTreeMap<_, _>>()
             .await?;
+
         if files.is_empty() {
             return Ok(Arc::new(datafusion::physical_plan::empty::EmptyExec::new(
                 self.schema(),
             )));
         }
+
         let target_partitions = state.config_options().execution.target_partitions;
         let (file_groups, file_id_groups) = round_robin(files, target_partitions);
 
@@ -572,10 +575,12 @@ impl TableProvider for PhysicalTable {
 
         let output_ordering = self.output_ordering()?;
 
-        let file_schema = self.schema();
         let object_store_url = self.object_store_url()?;
 
         let table_parquet_options = state.table_options().parquet.clone();
+
+        let file_schema = self.schema();
+
         let file_source = Arc::new(
             ParquetSource::new(table_parquet_options)
                 .with_predicate(predicate)
