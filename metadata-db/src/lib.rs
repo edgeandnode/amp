@@ -588,6 +588,19 @@ impl MetadataDb {
 
         Ok(())
     }
+
+    pub fn stream_file_metadata_bytes<'a>(
+        &'a self,
+        file_ids: &'a [FileId],
+    ) -> BoxStream<'a, Result<(FileId, Vec<u8>), sqlx::Error>> {
+        let query = "
+           SELECT fm.id, fm.metadata
+             FROM UNNEST($1) WITH ORDINALITY AS v(id, rn)
+        LEFT JOIN file_metadata fm ON v.id = fm.id
+         ORDER BY v.rn ASC;
+        ";
+        sqlx::query_as(query).bind(file_ids).fetch(&*self.pool)
+    }
 }
 
 /// Generic notification API
