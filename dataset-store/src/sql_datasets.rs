@@ -4,8 +4,8 @@ use std::{
 };
 
 use common::{
+    BoxError, Dataset, DatasetValue, SPECIAL_BLOCK_NUM, Table,
     query_context::{parse_sql, prepend_special_block_num_field},
-    BoxError, Dataset, DatasetValue, Table, SPECIAL_BLOCK_NUM,
 };
 use datafusion::sql::parser;
 use futures::StreamExt as _;

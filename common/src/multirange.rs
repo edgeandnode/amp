@@ -10,7 +10,9 @@ pub enum Error {
     #[error("values are not sorted or contain duplicates: {0:?}")]
     UnsortedOrDuplicates(Vec<u64>),
 
-    #[error("tried to append ranges that are not consecutive: left ends with {0} and right starts with {1}")]
+    #[error(
+        "tried to append ranges that are not consecutive: left ends with {0} and right starts with {1}"
+    )]
     NonConsecutive(u64, u64),
 
     #[error("range overlap: {0:?} and {1:?}")]

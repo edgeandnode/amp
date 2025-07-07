@@ -63,7 +63,7 @@ impl ScalarUDFImpl for EvmEncodeType {
                     "{}: expected scalar argument for the Solidity type but got {}",
                     self.name(),
                     v.data_type()
-                )
+                );
             }
         };
         let sol_ty = match sol_ty {

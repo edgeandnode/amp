@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use common::{catalog::physical::PhysicalTable, BoxError};
+use common::{BoxError, catalog::physical::PhysicalTable};
 use metadata_db::JobId;
 use serde::{Deserialize, Serialize};
 use tracing::instrument;

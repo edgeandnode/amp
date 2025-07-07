@@ -12,8 +12,8 @@ use datafusion::{
     common::plan_err,
     error::DataFusionError,
     logical_expr::{
-        simplify::{ExprSimplifyResult, SimplifyInfo},
         ColumnarValue, ReturnFieldArgs, ScalarUDFImpl, Signature, Volatility,
+        simplify::{ExprSimplifyResult, SimplifyInfo},
     },
     prelude::Expr,
     scalar::ScalarValue,
@@ -26,7 +26,7 @@ use crate::{
         array::{Array, BinaryArray, StructBuilder},
         datatypes::{DataType, Field, Fields},
     },
-    evm::udfs::{array_to_sol_value, num_rows, scalar_to_sol_value, FieldBuilder},
+    evm::udfs::{FieldBuilder, array_to_sol_value, num_rows, scalar_to_sol_value},
     plan,
 };
 
@@ -134,7 +134,7 @@ impl ScalarUDFImpl for EvmDecodeParams {
                     "{}: expected scalar argument for the signature but got {}",
                     self.name(),
                     v.data_type()
-                )
+                );
             }
         };
 
@@ -157,7 +157,7 @@ impl ScalarUDFImpl for EvmDecodeParams {
                         "{}: expected Binary scalar, but got {}",
                         self.name(),
                         scalar_value.data_type()
-                    )
+                    );
                 }
             },
         };
@@ -181,7 +181,7 @@ impl ScalarUDFImpl for EvmDecodeParams {
                 return plan_err!(
                     "{}: expected a string literal for the signature",
                     self.name()
-                )
+                );
             }
         };
         let call = FunctionCall::try_from(signature).map_err(|e| e.context(self.name()))?;
@@ -322,7 +322,7 @@ impl ScalarUDFImpl for EvmEncodeParams {
                     "{}: expected scalar argument for the Solidity function signature but got {}",
                     self.name(),
                     v.data_type()
-                )
+                );
             }
         };
 

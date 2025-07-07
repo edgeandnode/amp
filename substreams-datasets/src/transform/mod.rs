@@ -3,7 +3,7 @@ pub mod entities;
 pub mod proto;
 
 use anyhow::Context as _;
-use common::{metadata::range::BlockRange, parquet::data_type::AsBytes, RawDatasetRows};
+use common::{RawDatasetRows, metadata::range::BlockRange, parquet::data_type::AsBytes};
 
 use crate::{
     proto::sf::substreams::rpc::v2::BlockScopedData,

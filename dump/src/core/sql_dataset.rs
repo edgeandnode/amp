@@ -117,19 +117,19 @@
 use std::{collections::BTreeSet, sync::Arc};
 
 use common::{
+    BlockNum, BoxError, Dataset,
     catalog::physical::PhysicalTable,
     metadata::range::BlockRange,
     plan_visitors::is_incremental,
-    query_context::{parse_sql, QueryContext, QueryEnv},
-    BlockNum, BoxError, Dataset,
+    query_context::{QueryContext, QueryEnv, parse_sql},
 };
 use datafusion::{common::cast::as_fixed_size_binary_array, sql::parser::Statement};
-use dataset_store::{sql_datasets::SqlDataset, DatasetStore};
+use dataset_store::{DatasetStore, sql_datasets::SqlDataset};
 use futures::TryStreamExt as _;
 use tracing::instrument;
 
-use super::{block_ranges, tasks::FailFastJoinSet, Ctx};
-use crate::parquet_writer::{commit_metadata, ParquetFileWriter, ParquetWriterProperties};
+use super::{Ctx, block_ranges, tasks::FailFastJoinSet};
+use crate::parquet_writer::{ParquetFileWriter, ParquetWriterProperties, commit_metadata};
 
 /// Dumps a SQL dataset table
 #[instrument(skip_all, fields(dataset = %dataset.name()), err)]

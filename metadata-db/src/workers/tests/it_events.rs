@@ -4,7 +4,7 @@ use std::pin::pin;
 
 use futures::stream::StreamExt;
 use pgtemp::PgTempDB;
-use tokio::time::{timeout, Duration};
+use tokio::time::{Duration, timeout};
 
 use crate::{
     conn::DbConn,

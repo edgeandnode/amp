@@ -6,14 +6,14 @@ use std::{
 
 use arrow_flight::flight_service_server::FlightServiceServer;
 use axum::response::IntoResponse;
-use common::{arrow, config::Config, BoxError, BoxResult};
+use common::{BoxError, BoxResult, arrow, config::Config};
 use dump::worker::Worker;
 use futures::{
-    stream::FuturesUnordered, FutureExt, StreamExt as _, TryFutureExt as _, TryStreamExt as _,
+    FutureExt, StreamExt as _, TryFutureExt as _, TryStreamExt as _, stream::FuturesUnordered,
 };
 use metadata_db::MetadataDb;
 use server::service::Service;
-use tonic::transport::{server::TcpIncoming, Server};
+use tonic::transport::{Server, server::TcpIncoming};
 
 #[derive(Debug, Clone, Copy)]
 pub struct BoundAddrs {

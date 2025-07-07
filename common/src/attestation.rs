@@ -8,7 +8,7 @@ use datafusion::{
     },
     error::DataFusionError,
     logical_expr::{
-        function::AccumulatorArgs, Accumulator, AggregateUDFImpl, Signature, Volatility,
+        Accumulator, AggregateUDFImpl, Signature, Volatility, function::AccumulatorArgs,
     },
     scalar::ScalarValue,
 };
@@ -239,7 +239,7 @@ fn hash_column(
         | t @ DataType::RunEndEncoded(_, _) => {
             return Err(DataFusionError::NotImplemented(format!(
                 "hash column type {t}"
-            )))
+            )));
         }
     };
     Ok(())
@@ -258,7 +258,7 @@ mod test {
         logical_expr::Accumulator,
         scalar::ScalarValue,
     };
-    use rand::{prelude::SliceRandom as _, rng, rngs::StdRng, Rng as _, RngCore, SeedableRng};
+    use rand::{Rng as _, RngCore, SeedableRng, prelude::SliceRandom as _, rng, rngs::StdRng};
 
     #[derive(Debug)]
     struct TestRecords(Vec<TestRow>);

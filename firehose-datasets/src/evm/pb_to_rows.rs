@@ -1,12 +1,12 @@
 use std::time::Duration;
 
 use common::{
+    BoxError, Bytes32, EvmCurrency, RawDatasetRows, Timestamp,
     evm::tables::{
         blocks::{Block, BlockRowsBuilder},
         logs::{Log, LogRowsBuilder},
     },
     metadata::range::BlockRange,
-    BoxError, Bytes32, EvmCurrency, RawDatasetRows, Timestamp,
 };
 use thiserror::Error;
 
@@ -169,7 +169,7 @@ pub fn protobufs_to_rows(
                         (Some(_), Some(_), None, _) => topic2 = Some(topic),
                         (Some(_), Some(_), Some(_), None) => topic3 = Some(topic),
                         (Some(_), Some(_), Some(_), Some(_)) => {
-                            return Err(AssertFail("log has more than four topics".into()))
+                            return Err(AssertFail("log has more than four topics".into()));
                         }
                     }
                 }

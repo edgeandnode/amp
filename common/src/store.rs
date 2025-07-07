@@ -2,15 +2,15 @@ use std::{future::Future, path::PathBuf, sync::Arc};
 
 use bytes::Bytes;
 use fs_err as fs;
-use futures::{stream::BoxStream, StreamExt, TryStreamExt};
+use futures::{StreamExt, TryStreamExt, stream::BoxStream};
 use object_store::{
+    ObjectMeta, ObjectStore, ObjectStoreScheme,
     aws::{AmazonS3Builder, AmazonS3ConfigKey},
     azure::{AzureConfigKey, MicrosoftAzureBuilder},
     gcp::{GoogleCloudStorageBuilder, GoogleConfigKey},
     local::LocalFileSystem,
     path::Path,
     prefix::PrefixStore,
-    ObjectMeta, ObjectStore, ObjectStoreScheme,
 };
 use url::Url;
 
@@ -153,10 +153,10 @@ pub fn infer_object_store(url: &Url) -> Result<(Arc<dyn ObjectStore>, Option<Str
         }
         ObjectStoreScheme::Http => {
             let err_msg = format!(
-        "unsupported object store url: {}. If you are attempting to configure an S3-compatible object store, \
+                "unsupported object store url: {}. If you are attempting to configure an S3-compatible object store, \
          please use the `s3://` scheme and configure AWS_ENDPOINT. See the documentation for more details.",
-            url
-        );
+                url
+            );
             Err(err_msg.into())
         }
         ObjectStoreScheme::Memory | _ => {

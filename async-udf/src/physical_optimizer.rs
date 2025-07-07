@@ -2,15 +2,15 @@ use std::sync::Arc;
 
 use datafusion::{
     common::{
-        tree_node::{Transformed, TransformedResult, TreeNode, TreeNodeRecursion},
         Result,
+        tree_node::{Transformed, TransformedResult, TreeNode, TreeNodeRecursion},
     },
     config::ConfigOptions,
-    physical_expr::{expressions::Column, PhysicalExpr, ScalarFunctionExpr},
+    physical_expr::{PhysicalExpr, ScalarFunctionExpr, expressions::Column},
     physical_optimizer::PhysicalOptimizerRule,
     physical_plan::{
-        coalesce_batches::CoalesceBatchesExec, filter::FilterExec, projection::ProjectionExec,
-        ExecutionPlan,
+        ExecutionPlan, coalesce_batches::CoalesceBatchesExec, filter::FilterExec,
+        projection::ProjectionExec,
     },
 };
 
@@ -172,11 +172,7 @@ impl AsyncMapper {
             .enumerate()
             .find_map(
                 |(idx, async_expr)| {
-                    if async_expr == &expr {
-                        Some(idx)
-                    } else {
-                        None
-                    }
+                    if async_expr == &expr { Some(idx) } else { None }
                 },
             )
         else {

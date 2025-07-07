@@ -1,5 +1,5 @@
 pub use crate::proto::sf::ethereum::r#type::v2 as pbethereum;
-use crate::{dataset::DatasetDef, Error};
+use crate::{Error, dataset::DatasetDef};
 pub mod pb_to_rows;
 pub mod tables;
 

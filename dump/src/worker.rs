@@ -1,6 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
-use common::{config::Config, BoxError};
+use common::{BoxError, config::Config};
 use dataset_store::DatasetStore;
 use futures::TryStreamExt as _;
 use metadata_db::MetadataDb;

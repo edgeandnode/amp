@@ -7,7 +7,7 @@ pub mod client;
 pub mod evm;
 
 pub use client::Client;
-use common::{store::StoreError, BoxError};
+use common::{BoxError, store::StoreError};
 pub use dataset::DATASET_KIND;
 use thiserror::Error;
 use tonic::{codegen::http::uri::InvalidUri, metadata::errors::InvalidMetadataValue};

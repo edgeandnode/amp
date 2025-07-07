@@ -3,7 +3,7 @@ mod tables;
 
 use alloy::transports::http::reqwest::Url;
 pub use client::JsonRpcClient;
-use common::{store::StoreError, BoxError, Dataset, DatasetValue};
+use common::{BoxError, Dataset, DatasetValue, store::StoreError};
 use serde::Deserialize;
 use serde_json;
 use serde_with::serde_as;

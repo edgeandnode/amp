@@ -6,10 +6,10 @@ use arrow::{
 };
 
 use crate::{
-    arrow, metadata::range::BlockRange, timestamp_type, BoxError, Bytes32, Bytes32ArrayBuilder,
-    EvmAddress as Address, EvmAddressArrayBuilder, RawTableRows, Table, Timestamp,
-    TimestampArrayBuilder, BLOCK_NUM, BYTES32_TYPE, EVM_ADDRESS_TYPE as ADDRESS_TYPE,
-    SPECIAL_BLOCK_NUM,
+    BLOCK_NUM, BYTES32_TYPE, BoxError, Bytes32, Bytes32ArrayBuilder,
+    EVM_ADDRESS_TYPE as ADDRESS_TYPE, EvmAddress as Address, EvmAddressArrayBuilder, RawTableRows,
+    SPECIAL_BLOCK_NUM, Table, Timestamp, TimestampArrayBuilder, arrow, metadata::range::BlockRange,
+    timestamp_type,
 };
 
 static SCHEMA: LazyLock<SchemaRef> = LazyLock::new(|| Arc::new(schema()));

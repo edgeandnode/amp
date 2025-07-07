@@ -1,8 +1,8 @@
 //! Dataset get by ID handler
 
 use axum::{
-    extract::{Path, State},
     Json,
+    extract::{Path, State},
 };
 use common::Dataset;
 use http_common::BoxRequestError;

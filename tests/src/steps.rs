@@ -1,10 +1,10 @@
-use common::{arrow::json, BoxError};
+use common::{BoxError, arrow::json};
 use fs_err as fs;
 use serde::Deserialize;
 
 use crate::{
     test_client::TestClient,
-    test_support::{dump_dataset, restore_blessed_dataset, DatasetPackage, SqlTestResult, TestEnv},
+    test_support::{DatasetPackage, SqlTestResult, TestEnv, dump_dataset, restore_blessed_dataset},
 };
 
 #[derive(Debug, Deserialize)]

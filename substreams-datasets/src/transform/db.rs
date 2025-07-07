@@ -1,13 +1,14 @@
 use std::sync::Arc;
 
-use anyhow::{anyhow, Context as _};
+use anyhow::{Context as _, anyhow};
 use common::{
+    BLOCK_NUM, RawDatasetRows, RawTableRows, SPECIAL_BLOCK_NUM, Table,
     arrow::{
         array::*,
         datatypes::{DataType as ArrowDataType, Field, Schema, TimeUnit},
     },
     metadata::range::BlockRange,
-    timestamp_type, RawDatasetRows, RawTableRows, Table, BLOCK_NUM, SPECIAL_BLOCK_NUM,
+    timestamp_type,
 };
 use datafusion::sql::sqlparser::{
     ast::{CreateTable, DataType as SqlDataType, Statement},
@@ -18,8 +19,8 @@ use prost::Message as _;
 
 use crate::proto::sf::substreams::{
     sink::{
-        database::v1::{table_change, DatabaseChanges, TableChange},
-        sql::v1::{service::Engine as SqlEngine, Service as SqlService},
+        database::v1::{DatabaseChanges, TableChange, table_change},
+        sql::v1::{Service as SqlService, service::Engine as SqlEngine},
     },
     v1::Package,
 };

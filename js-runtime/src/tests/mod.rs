@@ -6,7 +6,7 @@ use datafusion::{
             ArrayRef, BooleanArray, Int32Array, ListBuilder, StringArray, StringBuilder,
             StructArray,
         },
-        datatypes::{i256, DataType, Field, DECIMAL128_MAX_PRECISION, DECIMAL256_MAX_PRECISION},
+        datatypes::{DECIMAL128_MAX_PRECISION, DECIMAL256_MAX_PRECISION, DataType, Field, i256},
     },
     scalar::ScalarValue,
 };

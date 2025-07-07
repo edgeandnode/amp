@@ -1,17 +1,17 @@
 use std::{pin::Pin, sync::Arc};
 
 use arrow_flight::{
+    ActionType, FlightData, FlightDescriptor, FlightEndpoint, FlightInfo, HandshakeRequest,
+    HandshakeResponse, PutResult, Ticket,
     encode::FlightDataEncoderBuilder,
     flight_descriptor::DescriptorType,
     flight_service_server::FlightService,
     sql::{Any, CommandStatementQuery},
-    ActionType, FlightData, FlightDescriptor, FlightEndpoint, FlightInfo, HandshakeRequest,
-    HandshakeResponse, PutResult, Ticket,
 };
 use axum::{
+    Json,
     http::StatusCode,
     response::{IntoResponse, Response as AxumResponse},
-    Json,
 };
 use bytes::{BufMut, Bytes, BytesMut};
 use common::{
@@ -21,13 +21,13 @@ use common::{
         forbid_underscore_prefixed_aliases, is_incremental, propagate_block_num,
         unproject_special_block_num_column,
     },
-    query_context::{parse_sql, Error as CoreError, QueryContext, QueryEnv},
+    query_context::{Error as CoreError, QueryContext, QueryEnv, parse_sql},
     streaming_query::StreamingQuery,
 };
 use datafusion::{
     common::{
-        tree_node::{TreeNode, TreeNodeRecursion},
         DFSchema,
+        tree_node::{TreeNode, TreeNodeRecursion},
     },
     error::DataFusionError,
     execution::SendableRecordBatchStream,

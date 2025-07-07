@@ -1,9 +1,9 @@
 use std::time::Duration;
 
 use axum::{
+    Json,
     extract::{Path, State},
     http::StatusCode,
-    Json,
 };
 use http_common::BoxRequestError;
 use metadata_db::JobStatus;

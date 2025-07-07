@@ -2,9 +2,9 @@ use std::{str::FromStr, time::Duration};
 
 use async_stream::stream;
 use common::{BlockNum, BlockStreamer, BoxError, DatasetValue, RawDatasetRows, Table};
-use firehose_datasets::{client::AuthInterceptor, Error};
+use firehose_datasets::{Error, client::AuthInterceptor};
 use futures::{Stream, StreamExt as _, TryStreamExt as _};
-use pbsubstreams::{response::Message, stream_client::StreamClient, Request as StreamRequest};
+use pbsubstreams::{Request as StreamRequest, response::Message, stream_client::StreamClient};
 use prost::Message as _;
 use tonic::{
     codec::CompressionEncoding,
@@ -14,13 +14,13 @@ use tonic::{
 
 use super::tables::Tables;
 use crate::{
+    DatasetDef,
     dataset::SubstreamsProvider,
     proto::sf::substreams::{
         rpc::v2::{self as pbsubstreams, BlockScopedData},
         v1::Package,
     },
     transform::transform,
-    DatasetDef,
 };
 
 /// This client only handles final blocks.
@@ -110,7 +110,7 @@ impl Client {
         &mut self,
         start: i64,
         stop: BlockNum,
-    ) -> Result<impl Stream<Item = Result<BlockScopedData, Error>>, Error> {
+    ) -> Result<impl Stream<Item = Result<BlockScopedData, Error>> + use<>, Error> {
         let request = tonic::Request::new(StreamRequest {
             start_block_num: start as i64,
             stop_block_num: stop,

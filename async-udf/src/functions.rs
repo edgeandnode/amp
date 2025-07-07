@@ -3,7 +3,7 @@ use std::{any::Any, fmt::Debug, sync::Arc};
 use async_trait::async_trait;
 use datafusion::{
     arrow::{array::ArrayRef, datatypes::DataType},
-    common::{internal_err, Result},
+    common::{Result, internal_err},
     config::ConfigOptions,
     logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDF, ScalarUDFImpl, Signature},
 };

@@ -5,14 +5,14 @@ use std::{
 };
 
 use common::{
+    BoxError,
     catalog::physical::PhysicalTable,
     config::Config,
     manifest,
     parquet::basic::{Compression, ZstdLevel},
-    BoxError,
 };
 use datafusion::{parquet, sql::resolve::resolve_table_references};
-use dataset_store::{sql_datasets, DatasetStore};
+use dataset_store::{DatasetStore, sql_datasets};
 use metadata_db::MetadataDb;
 use tracing::info;
 
