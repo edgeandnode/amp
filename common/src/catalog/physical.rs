@@ -272,17 +272,15 @@ impl PhysicalTable {
             let (file_name, nozzle_meta) =
                 nozzle_meta_from_object_meta(&object_meta, object_store.clone()).await?;
             let parquet_meta_json = serde_json::to_value(nozzle_meta)?;
-            let object_size = object_meta.size;
-            let object_e_tag = object_meta.e_tag;
-            let object_version = object_meta.version;
             metadata_db
                 .insert_metadata(
                     location_id,
                     file_name,
-                    object_size,
-                    object_e_tag,
-                    object_version,
+                    object_meta.size,
+                    object_meta.e_tag,
+                    object_meta.version,
                     parquet_meta_json,
+                    true,
                 )
                 .await?;
         }
