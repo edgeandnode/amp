@@ -61,7 +61,9 @@ impl TableRanges {
     }
 
     /// Return the block ranges missing from this table out of the given `desired` range. The
-    /// returned ranges will be non-overlapping.
+    /// returned ranges will be non-overlapping. For now, we avoid overlapping between canonical
+    /// and non-canonical block ranges since we don't disambiguate between the files for query
+    /// execution.
     pub fn missing_ranges(
         &self,
         desired: RangeInclusive<BlockNum>,
