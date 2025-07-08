@@ -79,9 +79,18 @@ enum Command {
         /// Run in dev mode, which starts a worker in the same process.
         #[arg(long, env = "SERVER_DEV")]
         dev: bool,
-        /// Disable admin API
-        #[arg(long, env = "SERVER_NO_ADMIN")]
-        no_admin: bool,
+        /// Enable Arrow Flight RPC Server
+        #[arg(long, env = "FLIGHT_SERVER")]
+        flight_server: bool,
+        /// Enable JSON Lines Server
+        #[arg(long, env = "JSONL_SERVER")]
+        jsonl_server: bool,
+        /// Enable Registry Server
+        #[arg(long, env = "REGISTRY_SERVER")]
+        registry_server: bool,
+        /// Enable Admin API Server
+        #[arg(long, env = "ADMIN_SERVER")]
+        admin_server: bool,
     },
     Worker {
         /// The node id of the worker.
@@ -145,8 +154,30 @@ async fn main_inner() -> Result<(), BoxError> {
             )
             .await
         }
-        Command::Server { no_admin, dev } => {
-            let (_, server) = nozzle::server::run(config, metadata_db, no_admin, dev).await?;
+        Command::Server {
+            dev,
+            mut flight_server,
+            mut jsonl_server,
+            mut registry_server,
+            mut admin_server,
+        } => {
+            if !flight_server && !jsonl_server && !registry_server && !admin_server {
+                flight_server = true;
+                jsonl_server = true;
+                registry_server = true;
+                admin_server = true;
+            }
+
+            let (_, server) = nozzle::server::run(
+                config,
+                metadata_db,
+                dev,
+                flight_server,
+                jsonl_server,
+                registry_server,
+                admin_server,
+            )
+            .await?;
             server.await
         }
         Command::Worker { node_id } => {
