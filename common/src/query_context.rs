@@ -2,23 +2,23 @@ use std::{ops::RangeInclusive, sync::Arc};
 
 use arrow::{array::RecordBatch, compute::concat_batches};
 use async_udf::physical_optimizer::AsyncFuncRule;
-use bincode::{config, Decode, Encode};
+use bincode::{Decode, Encode, config};
 use bytes::Bytes;
 use datafusion::{
     arrow::datatypes::{DataType, Field, Fields, SchemaRef},
     catalog::{MemorySchemaProvider, TableProvider},
-    common::{not_impl_err, DFSchema, DFSchemaRef},
+    common::{DFSchema, DFSchemaRef, not_impl_err},
     datasource::MemTable,
     error::DataFusionError,
     execution::{
+        SendableRecordBatchStream, SessionStateBuilder,
         config::SessionConfig,
         context::{SQLOptions, SessionContext},
         runtime_env::RuntimeEnv,
-        SendableRecordBatchStream, SessionStateBuilder,
     },
     logical_expr::{AggregateUDF, Extension, LogicalPlan, ScalarUDF},
-    physical_plan::{displayable, ExecutionPlan},
-    sql::{parser, TableReference},
+    physical_plan::{ExecutionPlan, displayable},
+    sql::{TableReference, parser},
 };
 use datafusion_proto::{
     bytes::{
@@ -33,7 +33,8 @@ use thiserror::Error;
 use tracing::{debug, instrument};
 
 use crate::{
-    arrow, attestation, block_range_intersection,
+    BlockNum, BoxError, LogicalCatalog, ResolvedTable, SPECIAL_BLOCK_NUM, arrow, attestation,
+    block_range_intersection,
     catalog::physical::{Catalog, PhysicalTable},
     evm::udfs::{
         EvmDecodeLog, EvmDecodeParams, EvmDecodeType, EvmEncodeParams, EvmEncodeType, EvmTopic,
@@ -44,7 +45,6 @@ use crate::{
         unproject_special_block_num_column,
     },
     stream_helpers::is_streaming,
-    BlockNum, BoxError, LogicalCatalog, ResolvedTable, SPECIAL_BLOCK_NUM,
 };
 
 #[derive(Error, Debug)]

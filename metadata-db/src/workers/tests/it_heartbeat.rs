@@ -6,7 +6,7 @@ use pgtemp::PgTempDB;
 
 use crate::{
     conn::DbConn,
-    workers::{heartbeat, WorkerNodeId},
+    workers::{WorkerNodeId, heartbeat},
 };
 
 /// The interval used for testing the active workers list

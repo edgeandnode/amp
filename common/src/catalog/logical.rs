@@ -8,7 +8,7 @@ use datafusion::{
 };
 use js_runtime::isolate_pool::IsolatePool;
 
-use crate::{js_udf::JsUdf, BoxError, BLOCK_NUM, SPECIAL_BLOCK_NUM};
+use crate::{BLOCK_NUM, BoxError, SPECIAL_BLOCK_NUM, js_udf::JsUdf};
 
 /// Identifies a dataset and its data schema.
 #[derive(Clone, Debug)]

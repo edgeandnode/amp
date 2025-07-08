@@ -26,7 +26,7 @@ pub use arrow_helpers::*;
 pub use catalog::logical::*;
 use datafusion::arrow::{
     array::{ArrayRef, AsArray as _, RecordBatch},
-    datatypes::{TimeUnit, UInt64Type, DECIMAL128_MAX_PRECISION},
+    datatypes::{DECIMAL128_MAX_PRECISION, TimeUnit, UInt64Type},
     error::ArrowError,
 };
 pub use datafusion::{arrow, parquet};

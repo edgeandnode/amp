@@ -2,8 +2,8 @@ mod handlers;
 
 use std::{future::Future, net::SocketAddr, sync::Arc};
 
-use axum::{routing::post, Router};
-use common::{config::Config, BoxResult};
+use axum::{Router, routing::post};
+use common::{BoxResult, config::Config};
 use dataset_store::DatasetStore;
 use handlers::output_schema_handler;
 use metadata_db::MetadataDb;

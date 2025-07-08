@@ -1,13 +1,13 @@
 use std::sync::Arc;
 
-use anyhow::{anyhow, Context as _};
+use anyhow::{Context as _, anyhow};
 use common::{
+    BLOCK_NUM, RawDatasetRows, RawTableRows, Table,
     arrow::{
         array::*,
         datatypes::{DataType as ArrowDataType, Field, Schema},
     },
     metadata::range::BlockRange,
-    RawDatasetRows, RawTableRows, Table, BLOCK_NUM,
 };
 use prost::Message as _;
 pub use prost_reflect::MessageDescriptor;

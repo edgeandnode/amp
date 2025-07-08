@@ -5,11 +5,11 @@ use arrow_flight::{
     sql::client::FlightSqlServiceClient,
 };
 use common::{
+    BoxError,
     arrow::{
         array::RecordBatch, compute::concat_batches, datatypes::SchemaRef, ipc as arrow_ipc,
         json::writer::ArrayWriter,
     },
-    BoxError,
 };
 use futures::stream::StreamExt;
 use tonic::transport::Channel;

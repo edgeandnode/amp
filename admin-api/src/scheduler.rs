@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use common::{catalog::physical::PhysicalTable, config::Config, BoxError, Dataset};
+use common::{BoxError, Dataset, catalog::physical::PhysicalTable, config::Config};
 use dump::worker::JobDesc;
 use metadata_db::{JobId, MetadataDb};
 use rand::seq::IndexedRandom as _;

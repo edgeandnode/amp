@@ -5,8 +5,8 @@ use datafusion::{
     physical_plan::stream::RecordBatchStreamAdapter,
 };
 use futures::{
-    stream::{self, StreamExt},
     FutureExt, Stream, TryStreamExt as _,
+    stream::{self, StreamExt},
 };
 use metadata_db::{LocationId, MetadataDb};
 use tokio::sync::mpsc;
@@ -14,10 +14,10 @@ use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
 use tracing::{instrument, warn};
 
 use crate::{
+    BlockNum, BoxError,
     arrow::{array::RecordBatch, datatypes::SchemaRef},
     catalog::physical::PhysicalTable,
     query_context::QueryContext,
-    BlockNum, BoxError,
 };
 
 // Tracks watermarks for a set of tables

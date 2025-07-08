@@ -2,8 +2,8 @@ use std::{future::Future, sync::Arc, time::Duration};
 
 use futures::stream::{BoxStream, Stream};
 use sqlx::{
-    postgres::{PgListener, PgNotification},
     Executor, FromRow, Postgres,
+    postgres::{PgListener, PgNotification},
 };
 use thiserror::Error;
 use tokio::time::MissedTickBehavior;
@@ -17,11 +17,11 @@ pub mod workers;
 
 use self::conn::{DbConn, DbConnPool};
 #[cfg(feature = "temp-db")]
-pub use self::temp::{temp_metadata_db, KEEP_TEMP_DIRS};
+pub use self::temp::{KEEP_TEMP_DIRS, temp_metadata_db};
 pub use self::workers::{
+    WorkerNodeId,
     events::{JobNotifAction, JobNotifListener, JobNotifRecvError, JobNotification},
     jobs::{Job, JobId, JobStatus},
-    WorkerNodeId,
 };
 
 /// Frequency on which to send a heartbeat.
@@ -54,6 +54,8 @@ pub struct FileMetadataRow {
     pub object_version: Option<String>,
     /// file_metadata.metadata
     pub metadata: serde_json::Value,
+    /// file_metadata.canonical
+    pub canonical: bool,
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -193,7 +195,7 @@ impl MetadataDb {
     pub async fn worker_heartbeat_loop(
         &self,
         node_id: WorkerNodeId,
-    ) -> Result<impl Future<Output = Result<(), Error>>, Error> {
+    ) -> Result<impl Future<Output = Result<(), Error>> + use<>, Error> {
         let mut conn = DbConn::connect(&self.url).await?;
 
         let fut = async move {
@@ -548,6 +550,7 @@ impl MetadataDb {
              , fm.object_e_tag
              , fm.object_version
              , fm.metadata
+             , fm.canonical
           FROM file_metadata fm
           JOIN locations l ON fm.location_id = l.id
          WHERE location_id = $1;
@@ -564,10 +567,11 @@ impl MetadataDb {
         object_e_tag: Option<String>,
         object_version: Option<String>,
         parquet_meta: serde_json::Value,
+        canonical: bool,
     ) -> Result<(), Error> {
         let sql = "
-        INSERT INTO file_metadata (location_id, file_name, object_size, object_e_tag, object_version, metadata)
-        VALUES ($1, $2, $3, $4, $5, $6)
+        INSERT INTO file_metadata (location_id, file_name, object_size, object_e_tag, object_version, metadata, canonical)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
         ON CONFLICT DO NOTHING
         ";
 
@@ -578,6 +582,7 @@ impl MetadataDb {
             .bind(object_e_tag)
             .bind(object_version)
             .bind(parquet_meta)
+            .bind(canonical)
             .execute(&*self.pool)
             .await?;
 
@@ -612,7 +617,7 @@ impl MetadataDb {
     pub async fn listen(
         &self,
         channel_name: &str,
-    ) -> Result<impl Stream<Item = Result<PgNotification, sqlx::Error>>, sqlx::Error> {
+    ) -> Result<impl Stream<Item = Result<PgNotification, sqlx::Error>> + use<>, sqlx::Error> {
         let mut channel = PgListener::connect(&self.url).await?;
         channel.listen(channel_name).await?;
         Ok(channel.into_stream())

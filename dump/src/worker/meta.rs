@@ -52,7 +52,7 @@ impl WorkerMetadataDb {
     pub async fn worker_heartbeat_loop(
         &self,
         node_id: &WorkerNodeId,
-    ) -> Result<impl Future<Output = Result<(), MetadataDbError>>, MetadataDbError> {
+    ) -> Result<impl Future<Output = Result<(), MetadataDbError>> + use<>, MetadataDbError> {
         (|| self.0.worker_heartbeat_loop(node_id.clone()))
             .retry(retry_policy())
             .when(|err| err.is_connection_error())

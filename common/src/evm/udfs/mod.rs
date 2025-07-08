@@ -3,15 +3,15 @@ use std::{any::Any, str::FromStr, sync::Arc};
 use alloy::{
     dyn_abi::{DynSolType, DynSolValue, DynToken, Specifier as _},
     json_abi::Event as AlloyEvent,
-    primitives::{ruint::FromUintError, Address, BigIntConversionError, Signed, B256, I256, U256},
+    primitives::{Address, B256, BigIntConversionError, I256, Signed, U256, ruint::FromUintError},
 };
 use datafusion::{
     arrow::{
         array::{
             ArrayBuilder, BooleanArray, Decimal128Array, Decimal256Array, FixedSizeBinaryArray,
-            FixedSizeListArray, FixedSizeListBuilder, Int16Array, Int32Array, Int64Array,
-            Int8Array, ListArray, ListBuilder, NullBuilder, StringArray, StructArray, UInt16Array,
-            UInt32Array, UInt64Array, UInt8Array,
+            FixedSizeListArray, FixedSizeListBuilder, Int8Array, Int16Array, Int32Array,
+            Int64Array, ListArray, ListBuilder, NullBuilder, StringArray, StructArray, UInt8Array,
+            UInt16Array, UInt32Array, UInt64Array,
         },
         datatypes::FieldRef,
         error::ArrowError,
@@ -19,8 +19,8 @@ use datafusion::{
     common::{internal_err, plan_err},
     error::DataFusionError,
     logical_expr::{
-        simplify::{ExprSimplifyResult, SimplifyInfo},
         ColumnarValue, ReturnFieldArgs, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility,
+        simplify::{ExprSimplifyResult, SimplifyInfo},
     },
     prelude::Expr,
     scalar::ScalarValue,
@@ -33,19 +33,19 @@ use itertools::izip;
 use tracing::trace;
 
 use crate::{
+    BYTES32_TYPE, Bytes32ArrayType,
     arrow::{
         array::{
             Array, BinaryArray, BinaryBuilder, BooleanBuilder, Decimal128Builder,
-            Decimal256Builder, FixedSizeBinaryBuilder, Int16Builder, Int32Builder, Int64Builder,
-            Int8Builder, StringBuilder, StructBuilder, UInt16Builder, UInt32Builder, UInt64Builder,
-            UInt8Builder,
+            Decimal256Builder, FixedSizeBinaryBuilder, Int8Builder, Int16Builder, Int32Builder,
+            Int64Builder, StringBuilder, StructBuilder, UInt8Builder, UInt16Builder, UInt32Builder,
+            UInt64Builder,
         },
         datatypes::{
-            i256, validate_decimal256_precision, validate_decimal_precision, DataType, Field,
-            Fields, DECIMAL128_MAX_PRECISION, DECIMAL256_MAX_PRECISION,
+            DECIMAL128_MAX_PRECISION, DECIMAL256_MAX_PRECISION, DataType, Field, Fields, i256,
+            validate_decimal_precision, validate_decimal256_precision,
         },
     },
-    Bytes32ArrayType, BYTES32_TYPE,
 };
 
 mod eth_call;
@@ -318,9 +318,7 @@ impl Event {
             Err(e) => {
                 trace!(
                     "failed to decode event '{}{}', filling with nulls. Error: {}",
-                    self.name,
-                    self.body_tuple,
-                    e
+                    self.name, self.body_tuple, e
                 );
                 for (number, ty) in tys.iter().enumerate() {
                     let mut field_builder =
@@ -453,7 +451,7 @@ impl ScalarUDFImpl for EvmDecodeLog {
                     "{}: expected scalar argument for the signature but got {}",
                     self.name(),
                     v.data_type()
-                )
+                );
             }
         };
 
@@ -483,7 +481,7 @@ impl ScalarUDFImpl for EvmDecodeLog {
                 return plan_err!(
                     "{}: expected a string literal for the signature",
                     self.name()
-                )
+                );
             }
         };
         let event = Event::try_from(signature).map_err(|e| e.context(self.name()))?;
@@ -557,7 +555,7 @@ impl ScalarUDFImpl for EvmTopic {
                     "{}: expected scalar argument for the signature but got {}",
                     self.name(),
                     v.data_type()
-                )
+                );
             }
         };
         let event = Event::try_from(signature).map_err(|e| e.context(self.name()))?;
@@ -980,7 +978,7 @@ fn scalar_to_sol_value(
                     "cannot convert fixed size list of size {} to solidity type {}",
                     items.len(),
                     sol_type
-                )
+                );
             }
         },
         ScalarValue::Struct(items) => match sol_type {
@@ -1007,7 +1005,7 @@ fn scalar_to_sol_value(
                 "Unsupported type {} for Solidity type {}",
                 arrow_value.data_type(),
                 sol_type
-            )
+            );
         }
     }
 }
@@ -1150,10 +1148,10 @@ fn array_to_sol_value(
                     ))
                 } else {
                     plan_err!(
-                            "cannot convert fixed size binary of size {} to Solidity fixed bytes of size {}",
-                            value.len(),
-                            len
-                        )
+                        "cannot convert fixed size binary of size {} to Solidity fixed bytes of size {}",
+                        value.len(),
+                        len
+                    )
                 }
             }
             DynSolType::Address => {
@@ -1165,14 +1163,17 @@ fn array_to_sol_value(
                 if value.len() == 20 {
                     Ok(DynSolValue::Address(Address::from_slice(value)))
                 } else {
-                    plan_err!("cannot convert fixed size binary of size {} to Solidity address, expected 20 bytes", value.len())
+                    plan_err!(
+                        "cannot convert fixed size binary of size {} to Solidity address, expected 20 bytes",
+                        value.len()
+                    )
                 }
             }
             _ => {
                 return plan_err!(
                     "cannot convert fixed size binary to solidity type {}",
                     sol_type
-                )
+                );
             }
         },
         DataType::Utf8 => {
@@ -1225,7 +1226,7 @@ fn array_to_sol_value(
                     "cannot convert fixed size list of size {} to solidity type {}",
                     arrow_sz,
                     sol_type
-                )
+                );
             }
         },
         DataType::Struct(_) => match sol_type {
@@ -1253,7 +1254,7 @@ fn array_to_sol_value(
                 "Unsupported type {} for Solidity type {}",
                 ary.data_type(),
                 sol_type
-            )
+            );
         }
     }
 }
@@ -1301,7 +1302,7 @@ fn sol_to_arrow_type(ty: &DynSolType) -> Result<DataType, DataFusionError> {
             DataType::Struct(Fields::from_iter(fields))
         }
         DynSolType::Function => {
-            return plan_err!("cannot convert solidity type {} to arrow data type", ty)
+            return plan_err!("cannot convert solidity type {} to arrow data type", ty);
         }
     };
     Ok(df)
@@ -1383,7 +1384,7 @@ mod tests {
     use alloy::{
         hex,
         hex::FromHex as _,
-        primitives::{Bytes, B256},
+        primitives::{B256, Bytes},
     };
     use datafusion::arrow::array::StringArray;
 
@@ -1410,8 +1411,7 @@ mod tests {
     }
 
     // Signature of a Uniswap v3 swap
-    const SIG: &str =
-            "Swap(address indexed sender,address indexed recipient,int256 amount0,int256 amount1,uint160 sqrtPriceX96,uint128 liquidity,int24 tick)";
+    const SIG: &str = "Swap(address indexed sender,address indexed recipient,int256 amount0,int256 amount1,uint160 sqrtPriceX96,uint128 liquidity,int24 tick)";
 
     // topic0: Swap event
     static TOPIC_0: LazyLock<B256> = LazyLock::new(|| {

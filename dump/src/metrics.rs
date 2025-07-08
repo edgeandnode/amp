@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use prometheus::{register, IntCounterVec, Opts};
+use prometheus::{IntCounterVec, Opts, register};
 
 pub struct ParquetWriterMetrics {
     pub files_written: IntCounterVec,

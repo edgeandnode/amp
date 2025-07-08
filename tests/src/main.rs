@@ -1,6 +1,6 @@
 use clap::Parser;
 use common::tracing_helpers;
-use tests::test_support::{bless, TestEnv};
+use tests::test_support::{TestEnv, bless};
 use tracing::warn;
 
 /// CLI for test support.

@@ -20,14 +20,14 @@ use alloy::{
 };
 use async_stream::stream;
 use common::{
+    BlockNum, BlockStreamer, BoxError, EvmCurrency, RawDatasetRows, Timestamp,
     evm::tables::{
         blocks::{Block, BlockRowsBuilder},
         logs::{Log, LogRowsBuilder},
     },
     metadata::range::BlockRange,
-    BlockNum, BlockStreamer, BoxError, EvmCurrency, RawDatasetRows, Timestamp,
 };
-use futures::{future::try_join_all, Stream};
+use futures::{Stream, future::try_join_all};
 use thiserror::Error;
 use tracing::{error, warn};
 
@@ -559,7 +559,7 @@ fn rpc_transaction_to_row(
         tx_index: u32::try_from(tx_index)
             .map_err(|e| ToRowError::Overflow("tx_index", e.into()))?,
         tx_hash: tx.inner.tx_hash().0,
-        to: tx.to().map(|addr| addr.0 .0).unwrap_or_default(),
+        to: tx.to().map(|addr| addr.0.0).unwrap_or_default(),
         nonce: tx.nonce(),
         gas_price: tx
             .gas_price()

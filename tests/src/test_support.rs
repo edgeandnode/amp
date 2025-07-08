@@ -8,6 +8,7 @@ use std::{
 };
 
 use common::{
+    BoxError, QueryContext,
     arrow::{
         self,
         array::{BinaryArray, FixedSizeBinaryArray, RecordBatch, StringArray},
@@ -18,17 +19,16 @@ use common::{
     config::{Addrs, Config},
     metadata::range::BlockRange,
     query_context::parse_sql,
-    BoxError, QueryContext,
 };
 use dataset_store::DatasetStore;
 use dump::worker::Worker;
 use figment::{
-    providers::{Format as _, Json},
     Figment,
+    providers::{Format as _, Json},
 };
 use fs_err as fs;
-use futures::{stream::TryStreamExt, StreamExt as _};
-use metadata_db::{temp::TempMetadataDb, MetadataDb, WorkerNodeId, KEEP_TEMP_DIRS};
+use futures::{StreamExt as _, stream::TryStreamExt};
+use metadata_db::{KEEP_TEMP_DIRS, MetadataDb, WorkerNodeId, temp::TempMetadataDb};
 use nozzle::{
     dump_cmd::{datasets_and_dependencies, dump},
     server::BoundAddrs,
@@ -132,8 +132,16 @@ impl TestEnv {
         let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
         let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
 
-        let (bound, server) =
-            nozzle::server::run(config.clone(), metadata_db.clone(), false, false).await?;
+        let (bound, server) = nozzle::server::run(
+            config.clone(),
+            metadata_db.clone(),
+            false,
+            true,
+            true,
+            true,
+            true,
+        )
+        .await?;
         tokio::spawn(server);
 
         let worker = Worker::new(

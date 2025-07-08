@@ -5,39 +5,38 @@ use datafusion::{
     catalog::Session,
     common::Statistics,
     datasource::{
-        create_ordering,
-        file_format::{parquet::ParquetFormat, FileFormat},
+        TableProvider, TableType, create_ordering,
+        file_format::{FileFormat, parquet::ParquetFormat},
         listing::{ListingTableUrl, PartitionedFile},
         physical_plan::{FileGroup, FileScanConfigBuilder},
-        TableProvider, TableType,
     },
     error::{DataFusionError, Result as DataFusionResult},
     execution::{
-        cache::{cache_unit::DefaultFileStatisticsCache, CacheAccessor},
+        cache::{CacheAccessor, cache_unit::DefaultFileStatisticsCache},
         object_store::ObjectStoreUrl,
     },
-    logical_expr::{col, ScalarUDF, SortExpr},
+    logical_expr::{ScalarUDF, SortExpr, col},
     parquet::arrow::async_reader::{AsyncFileReader, ParquetObjectReader},
     physical_expr::LexOrdering,
     physical_plan::ExecutionPlan,
     prelude::Expr,
     sql::TableReference,
 };
-use futures::{stream, Stream, StreamExt, TryStreamExt};
+use futures::{Stream, StreamExt, TryStreamExt, stream};
 use metadata_db::{LocationId, MetadataDb, TableId};
-use object_store::{path::Path, ObjectMeta, ObjectStore};
+use object_store::{ObjectMeta, ObjectStore, path::Path};
 use tracing::info;
 use url::Url;
 use uuid::Uuid;
 
 use crate::{
+    BlockNum, BoxError, Dataset, ResolvedTable,
     metadata::{
-        parquet::{ParquetMeta, PARQUET_METADATA_KEY},
         FileMetadata,
+        parquet::{PARQUET_METADATA_KEY, ParquetMeta},
     },
     multirange::MultiRange,
-    store::{infer_object_store, Store},
-    BlockNum, BoxError, Dataset, ResolvedTable,
+    store::{Store, infer_object_store},
 };
 
 #[derive(Debug, Clone)]
@@ -272,17 +271,15 @@ impl PhysicalTable {
             let (file_name, nozzle_meta) =
                 nozzle_meta_from_object_meta(&object_meta, object_store.clone()).await?;
             let parquet_meta_json = serde_json::to_value(nozzle_meta)?;
-            let object_size = object_meta.size;
-            let object_e_tag = object_meta.e_tag;
-            let object_version = object_meta.version;
             metadata_db
                 .insert_metadata(
                     location_id,
                     file_name,
-                    object_size,
-                    object_e_tag,
-                    object_version,
+                    object_meta.size,
+                    object_meta.e_tag,
+                    object_meta.version,
                     parquet_meta_json,
+                    true,
                 )
                 .await?;
         }

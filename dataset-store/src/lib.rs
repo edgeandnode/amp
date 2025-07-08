@@ -10,22 +10,22 @@ use std::{
 use async_stream::stream;
 use async_udf::functions::AsyncScalarUDF;
 use common::{
+    BlockNum, BlockStreamer, BoxError, Dataset, DatasetValue, LogicalCatalog, QueryContext,
+    RawDatasetRows, Store,
     catalog::physical::{Catalog, PhysicalTable},
     config::Config,
     evm::udfs::EthCall,
     manifest::{Manifest, TableInput},
-    query_context::{self, parse_sql, PlanningContext, QueryEnv},
+    query_context::{self, PlanningContext, QueryEnv, parse_sql},
     sql_visitors::all_function_names,
     store::StoreError,
-    BlockNum, BlockStreamer, BoxError, Dataset, DatasetValue, LogicalCatalog, QueryContext,
-    RawDatasetRows, Store,
 };
 use datafusion::{
     common::HashMap,
     logical_expr::ScalarUDF,
-    sql::{parser, resolve::resolve_table_references, TableReference},
+    sql::{TableReference, parser, resolve::resolve_table_references},
 };
-use futures::{future::BoxFuture, FutureExt as _, Stream, TryFutureExt as _};
+use futures::{FutureExt as _, Stream, TryFutureExt as _, future::BoxFuture};
 use js_runtime::isolate_pool::IsolatePool;
 use metadata_db::MetadataDb;
 use object_store::ObjectMeta;
@@ -568,7 +568,7 @@ impl DatasetStore {
                 _ => {
                     return Err(DatasetError::no_context(Error::UnsupportedFunctionName(
                         func_name,
-                    )))
+                    )));
                 }
             }
         }

@@ -3,8 +3,8 @@ use datafusion::arrow::array::{
 };
 
 use crate::{
-    timestamp_type, Bytes32ArrayType, EvmAddressArrayType, Timestamp, TimestampArrayType,
-    EVM_CURRENCY_TYPE,
+    Bytes32ArrayType, EVM_CURRENCY_TYPE, EvmAddressArrayType, Timestamp, TimestampArrayType,
+    timestamp_type,
 };
 
 #[derive(Debug)]

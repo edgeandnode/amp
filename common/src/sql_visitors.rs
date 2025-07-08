@@ -17,7 +17,7 @@ pub fn all_function_names(stmt: &Statement) -> Result<Vec<String>, BoxError> {
     let stmt = match stmt {
         Statement::Statement(statement) => statement,
         Statement::CreateExternalTable(_) | Statement::CopyTo(_) => {
-            return Err("DML not supported".into())
+            return Err("DML not supported".into());
         }
         Statement::Explain(explain) => match explain.statement.as_ref() {
             Statement::Statement(statement) => statement,

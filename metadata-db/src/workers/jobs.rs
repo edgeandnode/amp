@@ -1,6 +1,6 @@
 //! Metadata DB worker nodes job queue
 
-use sqlx::{types::JsonValue, Postgres};
+use sqlx::{Postgres, types::JsonValue};
 
 use super::WorkerNodeId;
 

@@ -86,13 +86,13 @@ use std::{
 };
 
 use common::{
-    multirange::MultiRange, query_context::QueryContext, BlockNum, BlockStreamer, BoxError,
+    BlockNum, BlockStreamer, BoxError, multirange::MultiRange, query_context::QueryContext,
 };
 use futures::TryStreamExt as _;
 use metadata_db::MetadataDb;
 use tracing::instrument;
 
-use super::{block_ranges, tasks::FailFastJoinSet, Ctx};
+use super::{Ctx, block_ranges, tasks::FailFastJoinSet};
 use crate::parquet_writer::{ParquetWriterProperties, RawDatasetWriter};
 
 /// Dumps a raw dataset by extracting blockchain data from specified block ranges

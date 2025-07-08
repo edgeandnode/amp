@@ -3,9 +3,9 @@
 use std::time::Duration;
 
 use sqlx::{
+    Connection as _, PgConnection, Pool, Postgres,
     migrate::{MigrateError, Migrator},
     postgres::PgPoolOptions,
-    Connection as _, PgConnection, Pool, Postgres,
 };
 use tracing::instrument;
 
