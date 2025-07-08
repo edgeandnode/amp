@@ -11,6 +11,7 @@ use futures::{
 use metadata_db::{LocationId, MetadataDb};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
+use tokio_util::task::AbortOnDropHandle;
 use tracing::{instrument, warn};
 
 use crate::{
@@ -72,6 +73,8 @@ pub type WatermarkStream =
     Pin<Box<dyn Stream<Item = Result<Option<BlockNum>, BoxError>> + Send + Sync + 'static>>;
 
 /// Creates a stream of watermark updates for the tables in the context.
+///
+/// `end_block` can be used to force the stream to end once a specific block number is reached.
 #[instrument(skip_all, err)]
 pub async fn watermark_updates(
     ctx: Arc<QueryContext>,
@@ -124,14 +127,35 @@ pub async fn watermark_updates(
     Ok(Box::pin(UnboundedReceiverStream::new(rx)))
 }
 
+/// Represents a message from the streaming query, which can be either data or a completion signal.
+/// Receiving `Completed(n)` indicates that the query has emitted all outputs up to block number `n`.
+///
+/// Completion points do not necessarily follow increments of 1, as the query progresses in batches.
+pub enum QueryMessage {
+    Data(RecordBatch),
+    Completed(BlockNum),
+}
+
+impl QueryMessage {
+    fn as_data(self) -> Option<RecordBatch> {
+        match self {
+            QueryMessage::Data(data) => Some(data),
+            QueryMessage::Completed(_) => None,
+        }
+    }
+}
+
+/// A handle to a streaming query that can be used to retrieve results as a stream.
+///
+/// Aborts the query task when dropped.
 pub struct StreamingQueryHandle {
-    rx: mpsc::Receiver<RecordBatch>,
-    join_handle: tokio::task::JoinHandle<Result<(), BoxError>>,
+    rx: mpsc::Receiver<QueryMessage>,
+    join_handle: AbortOnDropHandle<Result<(), BoxError>>,
     schema: SchemaRef,
 }
 
 impl StreamingQueryHandle {
-    pub fn as_stream(self) -> impl Stream<Item = Result<RecordBatch, BoxError>> {
+    pub fn as_stream(self) -> impl Stream<Item = Result<QueryMessage, BoxError>> + Unpin {
         let data_stream = ReceiverStream::new(self.rx);
 
         let join = self.join_handle;
@@ -152,13 +176,16 @@ impl StreamingQueryHandle {
         data_stream
             .map(Ok)
             .chain(stream::once(get_task_result).filter_map(|x| async { x }))
+            .boxed()
     }
 
     pub fn as_record_batch_stream(self) -> SendableRecordBatchStream {
         let schema = self.schema.clone();
         let stream = RecordBatchStreamAdapter::new(
             schema,
-            self.as_stream().map_err(DataFusionError::External),
+            self.as_stream()
+                .try_filter_map(|m| async { Ok(m.as_data()) })
+                .map_err(DataFusionError::External),
         );
         Box::pin(stream)
     }
@@ -170,13 +197,24 @@ impl StreamingQueryHandle {
 pub struct StreamingQuery {
     ctx: Arc<QueryContext>,
     plan: LogicalPlan,
+    end_block: Option<BlockNum>,
+    is_sql_dataset: bool,
     state: StreamState,
-    tx: mpsc::Sender<RecordBatch>,
+    tx: mpsc::Sender<QueryMessage>,
 }
 
-struct StreamState {
+pub struct StreamState {
     watermark_stream: WatermarkStream,
     next_start: BlockNum,
+}
+
+impl StreamState {
+    pub fn new(watermark_stream: WatermarkStream, next_start: BlockNum) -> Self {
+        Self {
+            watermark_stream,
+            next_start,
+        }
+    }
 }
 
 impl StreamingQuery {
@@ -185,24 +223,24 @@ impl StreamingQuery {
     ///
     /// The query execution loop will run in its own task.
     pub async fn spawn(
+        initial_state: StreamState,
         ctx: Arc<QueryContext>,
         plan: LogicalPlan,
-        metadata_db: Arc<MetadataDb>,
+        end_block: Option<BlockNum>,
+        is_sql_dataset: bool,
     ) -> Result<StreamingQueryHandle, BoxError> {
-        let watermark_stream = watermark_updates(ctx.clone(), metadata_db.clone()).await?;
         let schema: SchemaRef = plan.schema().clone().as_ref().clone().into();
         let (tx, rx) = mpsc::channel(10);
         let streaming_query = Self {
             ctx,
             plan,
             tx,
-            state: StreamState {
-                watermark_stream,
-                next_start: 0,
-            },
+            end_block,
+            is_sql_dataset,
+            state: initial_state,
         };
 
-        let join_handle = tokio::spawn(streaming_query.execute());
+        let join_handle = AbortOnDropHandle::new(tokio::spawn(streaming_query.execute()));
 
         Ok(StreamingQueryHandle {
             rx,
@@ -213,8 +251,9 @@ impl StreamingQuery {
 
     /// The loop:
     /// 1. Get new input watermark
-    /// 2. Execute microbatch up to that watermark
-    /// 3. Send out results
+    /// 2. Start executing microbatch up to that watermark
+    /// 3. Stream out time-ordered results
+    /// 4. Once execution of batch is exhausted, send completion trigger
     #[instrument(skip_all, err)]
     async fn execute(mut self) -> Result<(), BoxError> {
         loop {
@@ -231,7 +270,10 @@ impl StreamingQuery {
                     // Duplicate watermark, nothing to do
                     Some(watermark) if watermark < self.state.next_start => continue,
 
-                    Some(watermark) => watermark,
+                    Some(watermark) => match self.end_block {
+                        None => watermark,
+                        Some(end) => watermark.min(end),
+                    },
 
                     // Tables seem empty, lets wait for some data
                     None => continue,
@@ -244,17 +286,24 @@ impl StreamingQuery {
             // Start microbatch execution
             let mut stream = self
                 .ctx
-                .execute_plan_for_range(self.plan.clone(), start, watermark, false)
+                .execute_plan_for_range(self.plan.clone(), start, watermark, self.is_sql_dataset)
                 .await?;
 
             // Drain the microbatch completely
             while let Some(item) = stream.next().await {
                 let item = item?;
-                let res = self.tx.send(item).await;
-                if res.is_err() {
-                    // Receiver dropped
-                    return Ok(());
-                }
+
+                // If the receiver in `StreamingQueryHandle` is dropped, then this task has been
+                // aborted, so we don't bother checking for errors when sending a message.
+                let _ = self.tx.send(QueryMessage::Data(item)).await;
+            }
+
+            // Send completion message for this microbatch
+            let _ = self.tx.send(QueryMessage::Completed(watermark)).await;
+
+            if Some(watermark) == self.end_block {
+                // If we reached the end block, we are done
+                return Ok(());
             }
         }
     }

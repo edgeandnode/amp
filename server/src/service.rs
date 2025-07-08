@@ -22,7 +22,7 @@ use common::{
         unproject_special_block_num_column,
     },
     query_context::{Error as CoreError, QueryContext, QueryEnv, parse_sql},
-    streaming_query::StreamingQuery,
+    streaming_query::{StreamState, StreamingQuery, watermark_updates},
 };
 use datafusion::{
     common::{
@@ -207,10 +207,14 @@ impl Service {
             ctx.execute_plan(plan).await.map_err(|err| Error::from(err))
         } else {
             // If streaming, we need to spawn a streaming query.
-            let query =
-                StreamingQuery::spawn(ctx.clone(), plan, self.dataset_store.metadata_db.clone())
-                    .await
-                    .map_err(|e| Error::StreamingExecutionError(e.to_string()))?;
+            let db = self.dataset_store.metadata_db.clone();
+            let watermark_stream = watermark_updates(ctx.clone(), db.clone())
+                .await
+                .map_err(|e| Error::StreamingExecutionError(e.to_string()))?;
+            let initial_state = StreamState::new(watermark_stream, 0);
+            let query = StreamingQuery::spawn(initial_state, ctx.clone(), plan, None, false)
+                .await
+                .map_err(|e| Error::StreamingExecutionError(e.to_string()))?;
 
             Ok(query.as_record_batch_stream())
         }
