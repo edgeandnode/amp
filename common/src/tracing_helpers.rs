@@ -14,6 +14,7 @@ const NOZZLE_CRATES: &[&str] = &[
     "dump_check",
     "evm_rpc_datasets",
     "firehose_datasets",
+    "generate_manifest",
     "http_common",
     "js_runtime",
     "metadata_db",

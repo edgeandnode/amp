@@ -8,7 +8,8 @@ use alloy::{
 use common::{
     BlockNum, BoxError, metadata::range::BlockRange, query_context::parse_sql, tracing_helpers,
 };
-use dataset_store::DatasetStore;
+use dataset_store::{DatasetDefsCommon, DatasetStore};
+use generate_manifest;
 
 use crate::{
     steps::load_test_steps,
@@ -236,4 +237,40 @@ async fn anvil_rpc_reorg() {
         },
     ];
     assert_eq!(ranges, expected_ranges);
+}
+
+#[test]
+fn generate_manifest_success() {
+    tracing_helpers::register_logger();
+
+    let network = "mainnet".to_string();
+    let kind = "evm-rpc".to_string();
+    let name = "eth_rpc".to_string();
+
+    let mut out = Vec::new();
+
+    let _ = generate_manifest::run(network.clone(), kind.clone(), name.clone(), &mut out).unwrap();
+
+    let out: DatasetDefsCommon = serde_json::from_slice(&out).unwrap();
+
+    assert_eq!(out.network, network);
+    assert_eq!(out.kind, kind);
+    assert_eq!(out.name, name);
+}
+
+#[test]
+fn generate_manifest_bad_dataset_kind() {
+    tracing_helpers::register_logger();
+
+    let network = "mainnet".to_string();
+    let bad_kind = "bad_kind".to_string();
+    let name = "eth_rpc".to_string();
+
+    let mut out = Vec::new();
+
+    let err = generate_manifest::run(network, bad_kind.clone(), name, &mut out).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        format!("unsupported dataset kind '{}'", bad_kind)
+    );
 }

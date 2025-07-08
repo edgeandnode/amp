@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
 use clap::Parser as _;
 use common::{
@@ -97,6 +97,26 @@ enum Command {
         #[arg(long, env = "NOZZLE_NODE_ID")]
         node_id: String,
     },
+    GenerateManifest {
+        /// The name of the network.
+        #[arg(long, required = true, env = "GM_NETWORK")]
+        network: String,
+
+        /// Kind of the dataset.
+        #[arg(long, required = true, env = "GM_KIND")]
+        kind: String,
+
+        /// The name of the dataset.
+        #[arg(long, required = true, env = "GM_NAME")]
+        name: String,
+
+        /// Output file or directory. If it's a directory, the generated file name will
+        /// match the `kind` parameter.
+        ///
+        /// If not specified, the manifest will be printed to stdout.
+        #[arg(short, long, env = "GM_OUT")]
+        out: Option<PathBuf>,
+    },
 }
 
 #[tokio::main]
@@ -183,6 +203,24 @@ async fn main_inner() -> Result<(), BoxError> {
         Command::Worker { node_id } => {
             let worker = Worker::new(config.clone(), metadata_db, node_id.parse()?);
             worker.run().await.map_err(Into::into)
+        }
+        Command::GenerateManifest {
+            network,
+            kind,
+            name,
+            out,
+        } => {
+            if let Some(mut out) = out {
+                if out.is_dir() {
+                    out.push(format!("{}.json", &kind));
+                }
+
+                let mut out = std::fs::File::create(out)?;
+                generate_manifest::run(network, kind, name, &mut out)
+            } else {
+                let mut stdout = std::io::stdout();
+                generate_manifest::run(network, kind, name, &mut stdout)
+            }
         }
     }
 }
