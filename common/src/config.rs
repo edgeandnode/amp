@@ -80,7 +80,6 @@ impl Config {
         file: impl Into<PathBuf>,
         env_override: bool,
         config_override: Option<Figment>,
-        addrs: Addrs,
         allow_temp_db: bool,
     ) -> Result<Self, ConfigError> {
         let input_path = file.into();
@@ -104,7 +103,7 @@ impl Config {
 
         // Resolve any filesystem paths relative to the directory of the config file.
         let base = config_path.parent();
-        let addrs = Addrs::from_config_file(&config_file, addrs)?;
+        let addrs = Addrs::from_config_file(&config_file, Addrs::default())?;
         let data_store = Store::new(config_file.data_dir, base)
             .map_err(|e| ConfigError::Store(config_path.clone(), e))?;
         let providers_store = Store::new(config_file.providers_dir, base)

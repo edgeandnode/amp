@@ -3,10 +3,7 @@ mod ui;
 use std::sync::Arc;
 
 use clap::Parser;
-use common::{
-    BoxError,
-    config::{Addrs, Config},
-};
+use common::{BoxError, config::Config};
 use dataset_store::DatasetStore;
 use metadata_db::MetadataDb;
 
@@ -56,7 +53,7 @@ async fn main() -> Result<(), BoxError> {
         n_jobs,
     } = args;
 
-    let config = Arc::new(Config::load(config_path, true, None, Addrs::default(), false).await?);
+    let config = Arc::new(Config::load(config_path, true, None, false).await?);
     let metadata_db: Arc<MetadataDb> = MetadataDb::connect(&config.metadata_db_url).await?.into();
     let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
 

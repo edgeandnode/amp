@@ -12,3 +12,8 @@ spill_location = []
 
 # Patched over at runtime by the test harness.
 metadata_db_url = "patch_me"
+
+flight_addr = "0.0.0.0:0"
+jsonl_addr = "0.0.0.0:0"
+registry_service_addr = "0.0.0.0:0"
+admin_api_addr = "0.0.0.0:0"

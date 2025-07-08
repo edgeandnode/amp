@@ -16,7 +16,7 @@ use common::{
         json::writer::JsonArray,
     },
     catalog::physical::{Catalog, PhysicalTable},
-    config::{Addrs, Config},
+    config::Config,
     metadata::range::BlockRange,
     query_context::parse_sql,
 };
@@ -58,7 +58,7 @@ pub async fn load_test_config(config_override: Option<Figment>) -> Result<Arc<Co
         "Couldn't find a test config file, `cargo test` must be run from the workspace root or the tests crate root"
     );
     Ok(Arc::new(
-        Config::load(path, false, config_override, dynamic_addrs(), true).await?,
+        Config::load(path, false, config_override, true).await?,
     ))
 }
 
@@ -410,15 +410,6 @@ pub fn record_batch_to_json(record_batch: RecordBatch) -> String {
     writer.finish().unwrap();
 
     String::from_utf8(writer.into_inner()).unwrap()
-}
-
-fn dynamic_addrs() -> Addrs {
-    Addrs {
-        flight_addr: ([0, 0, 0, 0], 0).into(),
-        jsonl_addr: ([0, 0, 0, 0], 0).into(),
-        registry_service_addr: ([0, 0, 0, 0], 0).into(),
-        admin_api_addr: ([0, 0, 0, 0], 0).into(),
-    }
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
