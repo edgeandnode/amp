@@ -1,11 +1,7 @@
 use std::{path::PathBuf, sync::Arc};
 
 use clap::Parser as _;
-use common::{
-    BoxError,
-    config::{Addrs, Config},
-    tracing_helpers,
-};
+use common::{BoxError, config::Config, tracing_helpers};
 use dump::worker::Worker;
 use nozzle::dump_cmd;
 use tracing::info;
@@ -143,8 +139,7 @@ async fn main_inner() -> Result<(), BoxError> {
 
     let args = Args::parse();
     let allow_temp_db = matches!(&args.command, Command::Server { dev, .. } if *dev);
-    let config =
-        Arc::new(Config::load(args.config, true, None, Addrs::default(), allow_temp_db).await?);
+    let config = Arc::new(Config::load(args.config, true, None, allow_temp_db).await?);
     let metadata_db = config.metadata_db().await?.into();
 
     match args.command {

@@ -49,6 +49,10 @@ pub struct ConfigFile {
     pub metadata_db_url: Option<String>,
     pub max_mem_mb: usize,
     pub spill_location: Vec<PathBuf>,
+    pub flight_addr: Option<String>,
+    pub jsonl_addr: Option<String>,
+    pub registry_service_addr: Option<String>,
+    pub admin_api_addr: Option<String>,
 }
 
 pub type FigmentJson = figment::providers::Data<figment::providers::Json>;
@@ -65,6 +69,8 @@ pub enum ConfigError {
     Store(PathBuf, crate::store::StoreError),
     #[error("Metadata DB error at {0}: {1}")]
     MetadataDb(PathBuf, metadata_db::Error),
+    #[error("Invalid address format for {0}: {1}")]
+    InvalidAddress(String, String),
 }
 
 impl Config {
@@ -74,7 +80,6 @@ impl Config {
         file: impl Into<PathBuf>,
         env_override: bool,
         config_override: Option<Figment>,
-        addrs: Addrs,
         allow_temp_db: bool,
     ) -> Result<Self, ConfigError> {
         let input_path = file.into();
@@ -98,6 +103,7 @@ impl Config {
 
         // Resolve any filesystem paths relative to the directory of the config file.
         let base = config_path.parent();
+        let addrs = Addrs::from_config_file(&config_file, Addrs::default())?;
         let data_store = Store::new(config_file.data_dir, base)
             .map_err(|e| ConfigError::Store(config_path.clone(), e))?;
         let providers_store = Store::new(config_file.providers_dir, base)
@@ -189,5 +195,47 @@ impl Default for Addrs {
             registry_service_addr: ([0, 0, 0, 0], 1611).into(),
             admin_api_addr: ([0, 0, 0, 0], 1610).into(),
         }
+    }
+}
+
+impl Addrs {
+    pub fn from_config_file(
+        config_file: &ConfigFile,
+        default_addrs: Addrs,
+    ) -> Result<Self, ConfigError> {
+        let parse_addr = |addr_str: &Option<String>,
+                          default: SocketAddr,
+                          name: &str|
+         -> Result<SocketAddr, ConfigError> {
+            match addr_str {
+                Some(addr) => addr
+                    .parse::<SocketAddr>()
+                    .map_err(|e| ConfigError::InvalidAddress(name.to_string(), e.to_string())),
+                None => Ok(default),
+            }
+        };
+
+        Ok(Self {
+            flight_addr: parse_addr(
+                &config_file.flight_addr,
+                default_addrs.flight_addr,
+                "flight_addr",
+            )?,
+            jsonl_addr: parse_addr(
+                &config_file.jsonl_addr,
+                default_addrs.jsonl_addr,
+                "jsonl_addr",
+            )?,
+            registry_service_addr: parse_addr(
+                &config_file.registry_service_addr,
+                default_addrs.registry_service_addr,
+                "registry_service_addr",
+            )?,
+            admin_api_addr: parse_addr(
+                &config_file.admin_api_addr,
+                default_addrs.admin_api_addr,
+                "admin_api_addr",
+            )?,
+        })
     }
 }
