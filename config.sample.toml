@@ -27,3 +27,16 @@ max_mem_mb = 0
 # Paths where DataFusion can create temporary files. Setting this to an
 # empty array disables spill-to-disk
 spill_location = []
+
+# Service addresses (optional - defaults shown below)
+# Arrow Flight RPC server address
+# flight_addr = "0.0.0.0:1602"
+
+# JSON Lines server address  
+# jsonl_addr = "0.0.0.0:1603"
+
+# Registry service address
+# registry_service_addr = "0.0.0.0:1611"
+
+# Admin API server address
+# admin_api_addr = "0.0.0.0:1610"
