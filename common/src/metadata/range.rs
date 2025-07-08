@@ -46,6 +46,13 @@ impl TableRanges {
         for r in self.forks.iter() {
             r.check_invariants();
         }
+
+        // canonical group contains minimum block number
+        let canonical_min = canonical.start();
+        let forks_min = self.forks.iter().min_by_key(|g| g.start());
+        if let Some(forks_min) = forks_min.map(|g| g.start()) {
+            assert!(canonical_min <= forks_min);
+        }
     }
 
     pub fn canonical_range(&self) -> Option<BlockRange> {
@@ -74,8 +81,7 @@ impl TableRanges {
 
         let mut missing: Vec<RangeInclusive<BlockNum>> = Default::default();
         for range_group in self.canonical.iter().chain(&self.forks) {
-            let (first, last) = range_group.bounds();
-            let range = *first.numbers.start()..=*last.numbers.end();
+            let range = range_group.start()..=range_group.end();
             if missing.is_empty() {
                 missing.append(&mut missing_block_ranges(range, desired.clone()));
                 continue;
@@ -131,14 +137,12 @@ impl TableRanges {
             Some(canonical) => match canonical.insert(&range) {
                 Ok(()) => {
                     for index in 0..self.forks.len() {
-                        if !self.forks[index].adjacent_before(canonical.bounds().0) {
+                        if !self.forks[index].adjacent_after(canonical.bounds().1) {
                             continue;
                         }
                         let mut fork = self.forks.remove(index);
                         diff.add.append(&mut fork.0.clone());
-                        let mut canonical = self.canonical.take().unwrap();
-                        fork.0.append(&mut canonical.0);
-                        self.canonical = Some(fork);
+                        canonical.0.append(&mut fork.0);
                         break;
                     }
                     diff.add.push(range);
@@ -147,10 +151,21 @@ impl TableRanges {
                 Err(()) => (),
             },
         };
+
         let fork_index = self.update_forks(range);
         let canonical = self.canonical.as_ref().unwrap();
         let fork = &self.forks[fork_index];
-        if fork.bounds().1.numbers.end() > canonical.bounds().1.numbers.end() {
+
+        if fork.adjacent_after(canonical.bounds().1) {
+            diff.add.append(&mut fork.0.clone());
+            let canonical = self.canonical.as_mut().unwrap();
+            canonical.0.append(&mut self.forks.remove(fork_index).0);
+            return diff;
+        }
+
+        if (fork.start() < canonical.start())
+            || (fork.start() == canonical.start() && fork.end() > canonical.end())
+        {
             diff.add.append(&mut fork.0.clone());
             diff.sub.append(&mut canonical.0.clone());
             self.forks.push(self.canonical.take().unwrap());
@@ -211,6 +226,14 @@ impl RangeGroup {
 
     fn bounds(&self) -> (&BlockRange, &BlockRange) {
         (self.0.first().unwrap(), self.0.last().unwrap())
+    }
+
+    fn start(&self) -> BlockNum {
+        *self.0.first().unwrap().numbers.start()
+    }
+
+    fn end(&self) -> BlockNum {
+        *self.0.last().unwrap().numbers.end()
     }
 
     fn adjacent_before(&self, range: &BlockRange) -> bool {
