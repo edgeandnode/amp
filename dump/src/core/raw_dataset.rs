@@ -299,7 +299,7 @@ impl<S: BlockStreamer> DumpPartition<S> {
             );
             let start_time = Instant::now();
 
-            self.run_range(*range.start(), *range.end()).await?;
+            self.run_range(range.clone()).await?;
 
             tracing::info!(
                 "job partition #{} finished scan for range [{}-{}] in {} minutes",
@@ -312,18 +312,51 @@ impl<S: BlockStreamer> DumpPartition<S> {
         Ok(())
     }
 
-    async fn run_range(&self, start: u64, end: u64) -> Result<(), BoxError> {
+    async fn run_range(&self, range: RangeInclusive<BlockNum>) -> Result<(), BoxError> {
         let stream = {
             let block_streamer = self.block_streamer.clone();
-            block_streamer.block_stream(start, end).await
+            block_streamer
+                .block_stream(*range.start(), *range.end())
+                .await
         };
+
+        // limit the missing table ranges to the partition range
+        let mut missing_ranges_by_table: BTreeMap<String, Vec<RangeInclusive<BlockNum>>> =
+            Default::default();
+        for (table, ranges) in &self.missing_ranges_by_table {
+            let entry = missing_ranges_by_table.entry(table.clone()).or_default();
+            for missing in ranges {
+                // no overlap
+                if (missing.end() < range.start()) || (missing.start() > range.end()) {
+                    continue;
+                }
+                // range is subset of missing
+                if (missing.start() <= range.start()) && (missing.end() >= range.end()) {
+                    entry.push(range.clone());
+                    break;
+                }
+                // partial overlap
+                if range.start() < missing.start() {
+                    entry.push(*missing.start()..=*range.end());
+                }
+                if range.end() > missing.end() {
+                    entry.push(*range.start()..=*missing.end());
+                }
+            }
+            // all table ranges in partition
+            assert!(
+                entry
+                    .iter()
+                    .all(|r| (range.start() <= r.start()) && (r.end() <= range.end()))
+            );
+        }
 
         let mut writer = RawDatasetWriter::new(
             self.query_ctx.clone(),
             self.metadata_db.clone(),
             self.parquet_opts.clone(),
             self.partition_size,
-            &self.missing_ranges_by_table,
+            missing_ranges_by_table,
         )?;
 
         let mut stream = std::pin::pin!(stream);

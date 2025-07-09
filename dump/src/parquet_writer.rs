@@ -34,7 +34,7 @@ impl RawDatasetWriter {
         metadata_db: Arc<MetadataDb>,
         opts: ParquetWriterProperties,
         partition_size: u64,
-        missing_ranges_by_table: &BTreeMap<String, Vec<RangeInclusive<BlockNum>>>,
+        missing_ranges_by_table: BTreeMap<String, Vec<RangeInclusive<BlockNum>>>,
     ) -> Result<Self, BoxError> {
         let mut writers = BTreeMap::new();
         for table in dataset_ctx.catalog().tables() {
