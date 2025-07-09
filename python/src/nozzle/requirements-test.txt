@@ -1,0 +1,34 @@
+# Core testing framework
+pytest>=7.0.0
+pytest-asyncio>=0.21.0      # Async test support
+pytest-mock>=3.10.0         # Mocking utilities
+pytest-cov>=4.0.0           # Coverage reporting
+pytest-xdist>=3.0.0         # Parallel test execution
+pytest-benchmark>=4.0.0     # Performance benchmarking
+
+# Database testing
+psycopg2-binary>=2.9.0      # PostgreSQL testing
+redis>=4.5.0                # Redis testing
+testcontainers>=3.7.0       # Docker containers for testing
+
+# Docker support
+docker>=6.0.0               # Docker Python client
+
+# Test utilities
+factory-boy>=3.2.0          # Test data factories
+faker>=18.0.0               # Fake data generation
+freezegun>=1.2.0            # Time mocking
+responses>=0.23.0           # HTTP mocking
+
+# Performance testing
+memory-profiler>=0.60.0     # Memory usage profiling
+psutil>=5.9.0               # System resource monitoring
+
+# Code quality
+flake8>=6.0.0               # Linting
+black>=23.0.0               # Code formatting
+isort>=5.12.0               # Import sorting
+mypy>=1.0.0                 # Type checking
+
+# Documentation testing
+doctest>=1.0.0              # Docstring testing
