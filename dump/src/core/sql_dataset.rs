@@ -129,7 +129,9 @@ use futures::TryStreamExt as _;
 use tracing::instrument;
 
 use super::{Ctx, block_ranges, tasks::FailFastJoinSet};
-use crate::parquet_writer::{ParquetFileWriter, ParquetWriterProperties, commit_metadata};
+use crate::parquet_writer::{
+    CompletedFile, ParquetFileWriter, ParquetWriterProperties, commit_metadata,
+};
 
 /// Dumps a SQL dataset table
 #[instrument(skip_all, fields(dataset = %dataset.name()), err)]
@@ -297,12 +299,19 @@ async fn dump_sql_query(
         writer.write(&batch).await?;
     }
 
-    let (parquet_meta, object_meta) = writer.close(range).await?;
+    let CompletedFile {
+        parquet_meta,
+        object_meta,
+        footer_bytes,
+        location_id,
+    } = writer.close(range).await?;
+
     commit_metadata(
         &dataset_store.metadata_db,
         parquet_meta,
         object_meta,
-        physical_table.location_id(),
+        footer_bytes,
+        location_id,
     )
     .await
 }
