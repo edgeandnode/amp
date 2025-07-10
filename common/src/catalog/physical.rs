@@ -34,8 +34,8 @@ use crate::{
     metadata::{
         FileMetadata,
         parquet::{PARQUET_METADATA_KEY, ParquetMeta},
+        range::{BlockRange, TableRanges},
     },
-    multirange::MultiRange,
     store::{Store, infer_object_store},
 };
 
@@ -401,34 +401,46 @@ impl PhysicalTable {
     /// contiguous range of block numbers starting from the lowest start block. Ok(None) is
     /// returned if no block range has been synced.
     pub async fn synced_range(&self) -> Result<Option<RangeInclusive<BlockNum>>, BoxError> {
-        let ranges = self.multi_range().await?;
-        Ok(ranges.first().map(|(start, end)| start..=end))
+        let ranges = self.ranges().await?;
+        Ok(ranges.canonical_range().map(|r| r.numbers))
     }
 
-    // The most recent block number that has been synced for this table.
+    /// Return the most recent block number that has been synced for this table.
     pub async fn watermark(&self) -> Result<Option<BlockNum>, BoxError> {
         Ok(self.synced_range().await?.map(|range| *range.end()))
     }
 
-    pub async fn multi_range(&self) -> Result<MultiRange, BoxError> {
-        let ranges = self
+    pub async fn missing_ranges(
+        &self,
+        desired: RangeInclusive<BlockNum>,
+    ) -> Result<Vec<RangeInclusive<BlockNum>>, BoxError> {
+        let ranges = self.ranges().await?;
+        Ok(ranges.missing_ranges(desired))
+    }
+
+    async fn ranges(&self) -> Result<TableRanges, BoxError> {
+        let block_ranges: Vec<BlockRange> = self
             .stream_file_metadata()
-            .map(|r| {
+            .map(|result| {
                 let FileMetadata {
                     file_name,
-                    parquet_meta: ParquetMeta { ranges, .. },
+                    parquet_meta: ParquetMeta { mut ranges, .. },
                     ..
-                } = r?;
+                } = result?;
                 if ranges.len() != 1 {
                     return Err(BoxError::from(format!(
                         "expected exactly 1 range for {file_name}"
                     )));
                 }
-                Ok(ranges[0].numbers.clone().into_inner())
+                Ok(ranges.remove(0))
             })
             .try_collect()
             .await?;
-        MultiRange::from_ranges(ranges).map_err(Into::into)
+        let mut ranges: TableRanges = Default::default();
+        for range in block_ranges {
+            ranges.insert(range);
+        }
+        Ok(ranges)
     }
 }
 

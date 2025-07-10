@@ -4,10 +4,12 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 authors = [
-    { name = "Ford", email = "ford@thegraph.com" }
+    { name = "Ford", email = "ford@edgeandnode.com" }
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "adbc-driver-manager>=1.5.0",
+    "adbc-driver-postgresql>=1.5.0",
     "base58>=2.1.1",
     "eth-hash[pysha3]>=0.7.1",
     "eth-utils>=5.2.0",
