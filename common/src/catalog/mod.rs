@@ -8,6 +8,7 @@ use datafusion::{
 
 use crate::Table;
 
+mod exec;
 pub mod logical;
 pub mod physical;
 
