@@ -326,29 +326,12 @@ impl<S: BlockStreamer> DumpPartition<S> {
         for (table, ranges) in &self.missing_ranges_by_table {
             let entry = missing_ranges_by_table.entry(table.clone()).or_default();
             for missing in ranges {
-                // no overlap
-                if (missing.end() < range.start()) || (missing.start() > range.end()) {
-                    continue;
-                }
-                // range is subset of missing
-                if (missing.start() <= range.start()) && (missing.end() >= range.end()) {
-                    entry.push(range.clone());
-                    break;
-                }
-                // partial overlap
-                if range.start() < missing.start() {
-                    entry.push(*missing.start()..=*range.end());
-                }
-                if range.end() > missing.end() {
-                    entry.push(*range.start()..=*missing.end());
+                let start = BlockNum::max(*missing.start(), *range.start());
+                let end = BlockNum::min(*missing.end(), *range.end());
+                if start <= end {
+                    entry.push(start..=end);
                 }
             }
-            // all table ranges in partition
-            assert!(
-                entry
-                    .iter()
-                    .all(|r| (range.start() <= r.start()) && (r.end() <= range.end()))
-            );
         }
 
         let mut writer = RawDatasetWriter::new(
