@@ -6,7 +6,7 @@ use alloy::{
     transports::http::reqwest,
 };
 use common::{
-    BlockNum, BoxError, metadata::range::BlockRange, query_context::parse_sql, tracing_helpers,
+    BlockNum, BoxError, metadata::segments::BlockRange, query_context::parse_sql, tracing_helpers,
 };
 use dataset_store::{DatasetDefsCommon, DatasetStore};
 use generate_manifest;

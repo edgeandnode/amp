@@ -11,7 +11,7 @@ use common::{
         },
         datatypes::{DataType, Field, Schema, SchemaRef},
     },
-    metadata::range::BlockRange,
+    metadata::segments::BlockRange,
 };
 
 static SCHEMA: LazyLock<SchemaRef> = LazyLock::new(|| Arc::new(schema()));

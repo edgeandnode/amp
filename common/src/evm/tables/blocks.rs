@@ -9,7 +9,7 @@ use crate::{
     BLOCK_NUM, BYTES32_TYPE, BoxError, Bytes32, Bytes32ArrayBuilder,
     EVM_ADDRESS_TYPE as ADDRESS_TYPE, EVM_CURRENCY_TYPE, EvmAddress as Address,
     EvmAddressArrayBuilder, EvmCurrency, EvmCurrencyArrayBuilder, RawTableRows, SPECIAL_BLOCK_NUM,
-    Table, Timestamp, TimestampArrayBuilder, arrow, metadata::range::BlockRange, timestamp_type,
+    Table, Timestamp, TimestampArrayBuilder, arrow, metadata::segments::BlockRange, timestamp_type,
 };
 
 static SCHEMA: LazyLock<SchemaRef> = LazyLock::new(|| Arc::new(schema()));

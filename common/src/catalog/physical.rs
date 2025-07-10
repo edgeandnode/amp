@@ -34,7 +34,7 @@ use crate::{
     metadata::{
         FileMetadata,
         parquet::{PARQUET_METADATA_KEY, ParquetMeta},
-        range::{BlockRange, TableRanges},
+        segments::{BlockRange, TableRanges},
     },
     store::{Store, infer_object_store},
 };

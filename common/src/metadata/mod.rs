@@ -5,7 +5,7 @@ use url::Url;
 use crate::BoxError;
 
 pub mod parquet;
-pub mod range;
+pub mod segments;
 
 #[derive(Debug, Clone)]
 pub struct FileMetadata {
