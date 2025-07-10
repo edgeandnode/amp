@@ -102,12 +102,25 @@ async fn sql_tests() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn streaming_tests() {
+async fn streaming_tests_basic() {
     tracing_helpers::register_logger();
-    let test_env = TestEnv::temp("sql_streaming_tests").await.unwrap();
+    let test_env = TestEnv::temp("sql_streaming_tests_basic").await.unwrap();
     let mut client = TestClient::connect(&test_env).await.unwrap();
 
-    for step in load_test_steps("sql-streaming-tests.yaml").unwrap() {
+    for step in load_test_steps("sql-streaming-tests-basic.yaml").unwrap() {
+        step.run(&test_env, &mut client).await.unwrap();
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn streaming_tests_with_sql_datasets() {
+    tracing_helpers::register_logger();
+    let test_env = TestEnv::temp("sql_streaming_tests_with_sql_datasets")
+        .await
+        .unwrap();
+    let mut client = TestClient::connect(&test_env).await.unwrap();
+
+    for step in load_test_steps("sql-streaming-tests-with-sql-datasets.yaml").unwrap() {
         step.run(&test_env, &mut client).await.unwrap();
     }
 }
