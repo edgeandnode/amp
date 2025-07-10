@@ -27,9 +27,10 @@ use uuid::Uuid;
 
 use crate::{
     BlockNum, BoxError, Dataset, ResolvedTable,
+    catalog::exec::source::NozzleSource,
     metadata::{
-        FileMetadata,
-        parquet::{PARQUET_METADATA_KEY, ParquetMeta},
+        FileMetadata, nozzle_metadata_from_parquet_file,
+        parquet::ParquetMeta,
         range::{BlockRange, TableRanges},
     },
     store::{Store, infer_object_store},
