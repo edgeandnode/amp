@@ -7,6 +7,11 @@ network = "mainnet"
 # The EVM RPC endpoint
 url = "https://<ENDPOINT>"
 
-# Rpc batch size, defaults to 100 if not set.
+# Rpc batch size, defaults to 1000 if not set.
 # The maximum number of requests to send in a single batch. When set to 1, no batching is used.
-rpc_batch_size = 100
+# Set to 1000 to match Erigon's --rpc.batch.limit 1000 for optimal performance.
+rpc_batch_size = 1000
+
+# Optional: Override the concurrent request limit (defaults to 100)
+# Reduce this if experiencing I/O saturation on the RPC server
+# concurrent_request_limit = 50

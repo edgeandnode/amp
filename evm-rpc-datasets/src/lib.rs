@@ -38,7 +38,7 @@ pub(crate) struct EvmRpcProvider {
 }
 
 fn default_rpc_batch_size() -> usize {
-    100
+    1000 // Increased from 100 to match Erigon's --rpc.batch.limit 1000
 }
 
 pub fn dataset(dataset_cfg: toml::Value) -> Result<Dataset, Error> {
@@ -54,7 +54,7 @@ pub fn dataset(dataset_cfg: toml::Value) -> Result<Dataset, Error> {
 
 pub async fn client(provider: toml::Value, network: String) -> Result<JsonRpcClient, Error> {
     let provider: EvmRpcProvider = provider.try_into()?;
-    let request_limit = u16::max(1, provider.concurrent_request_limit.unwrap_or(1024));
+    let request_limit = u16::max(1, provider.concurrent_request_limit.unwrap_or(100)); // Reduced from 1024 to prevent I/O saturation
     let client = JsonRpcClient::new(
         provider.url,
         network,
