@@ -8,11 +8,11 @@ import * as Utils from "../Utils.js"
 
 import { build } from "./commands/build.js"
 import { codegen } from "./commands/codegen.js"
-import { datasetWorks } from "./commands/dataset-works.js"
 import { deploy } from "./commands/deploy.js"
 import { dev } from "./commands/dev.js"
 import { proxy } from "./commands/proxy.js"
 import { query } from "./commands/query.js"
+import { studio } from "./commands/studio.js"
 
 const levels = LogLevel.allLevels.map((value) => String.toLowerCase(value.label)) as Array<Lowercase<LogLevel.Literal>>
 const nozzle = Command.make("nozzle", {
@@ -25,7 +25,7 @@ const nozzle = Command.make("nozzle", {
   },
 }).pipe(
   Command.withDescription("The Nozzle Command Line Interface"),
-  Command.withSubcommands([build, datasetWorks, deploy, dev, codegen, query, proxy]),
+  Command.withSubcommands([build, studio, deploy, dev, codegen, query, proxy]),
   Command.provide(({ args }) => Logger.minimumLogLevel(args.logs)),
 )
 

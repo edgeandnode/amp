@@ -20,8 +20,8 @@ const DatasetWorksFileRouter = Effect.gen(function*() {
    */
   const isLocal = EffectString.endsWith("commands")(__dirname)
   const datasetWorksClientDist = isLocal
-    ? path.resolve(__dirname, "..", "..", "..", "..", "dataset-works", "dist")
-    : path.resolve(__dirname, "dataset-works", "dist")
+    ? path.resolve(__dirname, "..", "..", "..", "..", "studio", "dist")
+    : path.resolve(__dirname, "studio", "dist")
 
   return HttpRouter.empty.pipe(
     HttpRouter.get(
@@ -59,15 +59,15 @@ const Server = Effect.all({
   Layer.unwrapEffect,
 )
 
-export const datasetWorks = Command.make("dataset-works", {
+export const studio = Command.make("studio", {
   args: {
     port: Options.integer("port").pipe(
       Options.withAlias("p"),
       Options.withDefault(3000),
-      Options.withDescription("The port to run the dataset works studio server on. Default 3000"),
+      Options.withDescription("The port to run the nozzle dataset studio server on. Default 3000"),
     ),
     open: Options.boolean("open").pipe(
-      Options.withDescription("If true, opens the dataset works studio in your browser"),
+      Options.withDescription("If true, opens the nozzle dataset studio in your browser"),
       Options.withDefault(true),
     ),
     browser: Options.choice("browser", [
@@ -81,13 +81,13 @@ export const datasetWorks = Command.make("dataset-works", {
     ]).pipe(
       Options.withAlias("b"),
       Options.withDescription(
-        "Broweser to open the dataset works studio app in. Default is your default selected browser",
+        "Broweser to open the nozzle dataset studio app in. Default is your default selected browser",
       ),
       Options.withDefault("browser"),
     ),
   },
 }).pipe(
-  Command.withDescription("Opens the nozzle dataset works visualization tool"),
+  Command.withDescription("Opens the nozzle dataset studio visualization tool"),
   Command.withHandler(({ args }) =>
     Effect.gen(function*() {
       yield* Server.pipe(
@@ -99,7 +99,7 @@ export const datasetWorks = Command.make("dataset-works", {
               return yield* openBrowser(args.port, args.browser).pipe(
                 Effect.tapErrorCause((cause) =>
                   Console.warn(
-                    `Failure opening dataset works studio in your browser. Open at http://localhost:${args.port}`,
+                    `Failure opening nozzle dataset studio in your browser. Open at http://localhost:${args.port}`,
                     {
                       cause,
                     },
@@ -111,7 +111,7 @@ export const datasetWorks = Command.make("dataset-works", {
             return Effect.void
           })
         ),
-        Layer.tap(() => Console.log(`🎉 Typesync studio started and running at http://localhost:${args.port}`)),
+        Layer.tap(() => Console.log(`🎉 nozzle dataset studio started and running at http://localhost:${args.port}`)),
         Layer.launch,
       )
     })

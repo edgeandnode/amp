@@ -1,4 +1,4 @@
-# Dataset Works
+# Nozzle Dataset Studio
 
 Visualization and validation tool for nozzle datasets.
 Lets users view the available tables to them for querying based off the events provided by their smart contract(s). With these tables, and nozzle User-Defined Functions (UDFs), lets user run raw sql queries to see data from their smart contracts and visualize it in a UI.

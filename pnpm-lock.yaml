@@ -86,7 +86,78 @@ importers:
         specifier: ^6.3.5
         version: 6.3.5(@types/node@24.0.0)(jiti@2.4.2)(lightningcss@1.30.1)(tsx@4.20.3)(yaml@2.8.0)
 
-  typescript/dataset-works:
+  typescript/example:
+    dependencies:
+      '@effect/platform':
+        specifier: ^0.87.11
+        version: 0.87.11(effect@3.16.12)
+      effect:
+        specifier: ^3.16.12
+        version: 3.16.12
+      nozzl:
+        specifier: workspace:*
+        version: link:../nozzle
+
+  typescript/nozzle:
+    dependencies:
+      '@bufbuild/protobuf':
+        specifier: ^2.2.5
+        version: 2.2.5
+      '@connectrpc/connect-node':
+        specifier: ^2.0.2
+        version: 2.0.2(@bufbuild/protobuf@2.2.5)(@connectrpc/connect@2.0.2(@bufbuild/protobuf@2.2.5))
+      '@effect/cli':
+        specifier: ^0.66.11
+        version: 0.66.11(@effect/platform@0.87.11(effect@3.16.12))(@effect/printer-ansi@0.40.12(@effect/typeclass@0.31.12(effect@3.16.12))(effect@3.16.12))(@effect/printer@0.40.12(@effect/typeclass@0.31.12(effect@3.16.12))(effect@3.16.12))(effect@3.16.12)
+      '@effect/experimental':
+        specifier: ^0.51.12
+        version: 0.51.12(@effect/platform@0.87.11(effect@3.16.12))(effect@3.16.12)
+      '@effect/platform-node':
+        specifier: ^0.89.3
+        version: 0.89.3(@effect/cluster@0.29.5(@effect/platform@0.87.11(effect@3.16.12))(@effect/rpc@0.55.3(@effect/platform@0.87.11(effect@3.16.12))(effect@3.16.12))(@effect/sql@0.33.2(@effect/experimental@0.51.12(@effect/platform@0.87.11(effect@3.16.12))(effect@3.16.12))(@effect/platform@0.87.11(effect@3.16.12))(effect@3.16.12))(effect@3.16.12))(@effect/platform@0.87.11(effect@3.16.12))(@effect/rpc@0.55.3(@effect/platform@0.87.11(effect@3.16.12))(effect@3.16.12))(@effect/sql@0.33.2(@effect/experimental@0.51.12(@effect/platform@0.87.11(effect@3.16.12))(effect@3.16.12))(@effect/platform@0.87.11(effect@3.16.12))(effect@3.16.12))(effect@3.16.12)
+      jiti:
+        specifier: ^2.4.2
+        version: 2.4.2
+      open:
+        specifier: ^10.1.2
+        version: 10.1.2
+      viem:
+        specifier: ^2.31.0
+        version: 2.31.0(typescript@5.4.5)(zod@3.24.4)
+    devDependencies:
+      '@bufbuild/buf':
+        specifier: ^1.53.0
+        version: 1.53.0
+      '@bufbuild/protoc-gen-es':
+        specifier: ^2.2.5
+        version: 2.2.5(@bufbuild/protobuf@2.2.5)
+      '@connectrpc/connect':
+        specifier: ^2.0.2
+        version: 2.0.2(@bufbuild/protobuf@2.2.5)
+      '@effect/platform':
+        specifier: ^0.87.11
+        version: 0.87.11(effect@3.16.12)
+      '@effect/vitest':
+        specifier: ^0.23.12
+        version: 0.23.12(effect@3.16.12)(vitest@3.2.3(@types/node@24.0.0)(jiti@2.4.2)(jsdom@26.1.0)(lightningcss@1.30.1)(tsx@4.20.3)(yaml@2.8.0))
+      '@nozzl/utils':
+        specifier: workspace:*
+        version: link:../utils
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.0.0
+      apache-arrow:
+        specifier: ^20.0.0
+        version: 20.0.0
+      effect:
+        specifier: ^3.16.12
+        version: 3.16.12
+      vitest:
+        specifier: ^3.2.3
+        version: 3.2.3(@types/node@24.0.0)(jiti@2.4.2)(jsdom@26.1.0)(lightningcss@1.30.1)(tsx@4.20.3)(yaml@2.8.0)
+    publishDirectory: dist
+
+  typescript/studio:
     dependencies:
       '@faker-js/faker':
         specifier: ^9.6.0
@@ -167,77 +238,6 @@ importers:
       web-vitals:
         specifier: ^5.0.3
         version: 5.0.3
-
-  typescript/example:
-    dependencies:
-      '@effect/platform':
-        specifier: ^0.87.11
-        version: 0.87.11(effect@3.16.12)
-      effect:
-        specifier: ^3.16.12
-        version: 3.16.12
-      nozzl:
-        specifier: workspace:*
-        version: link:../nozzle
-
-  typescript/nozzle:
-    dependencies:
-      '@bufbuild/protobuf':
-        specifier: ^2.2.5
-        version: 2.2.5
-      '@connectrpc/connect-node':
-        specifier: ^2.0.2
-        version: 2.0.2(@bufbuild/protobuf@2.2.5)(@connectrpc/connect@2.0.2(@bufbuild/protobuf@2.2.5))
-      '@effect/cli':
-        specifier: ^0.66.11
-        version: 0.66.11(@effect/platform@0.87.11(effect@3.16.12))(@effect/printer-ansi@0.40.12(@effect/typeclass@0.31.12(effect@3.16.12))(effect@3.16.12))(@effect/printer@0.40.12(@effect/typeclass@0.31.12(effect@3.16.12))(effect@3.16.12))(effect@3.16.12)
-      '@effect/experimental':
-        specifier: ^0.51.12
-        version: 0.51.12(@effect/platform@0.87.11(effect@3.16.12))(effect@3.16.12)
-      '@effect/platform-node':
-        specifier: ^0.89.3
-        version: 0.89.3(@effect/cluster@0.29.5(@effect/platform@0.87.11(effect@3.16.12))(@effect/rpc@0.55.3(@effect/platform@0.87.11(effect@3.16.12))(effect@3.16.12))(@effect/sql@0.33.2(@effect/experimental@0.51.12(@effect/platform@0.87.11(effect@3.16.12))(effect@3.16.12))(@effect/platform@0.87.11(effect@3.16.12))(effect@3.16.12))(effect@3.16.12))(@effect/platform@0.87.11(effect@3.16.12))(@effect/rpc@0.55.3(@effect/platform@0.87.11(effect@3.16.12))(effect@3.16.12))(@effect/sql@0.33.2(@effect/experimental@0.51.12(@effect/platform@0.87.11(effect@3.16.12))(effect@3.16.12))(@effect/platform@0.87.11(effect@3.16.12))(effect@3.16.12))(effect@3.16.12)
-      jiti:
-        specifier: ^2.4.2
-        version: 2.4.2
-      open:
-        specifier: ^10.1.2
-        version: 10.1.2
-      viem:
-        specifier: ^2.31.0
-        version: 2.31.0(typescript@5.4.5)(zod@3.24.4)
-    devDependencies:
-      '@bufbuild/buf':
-        specifier: ^1.53.0
-        version: 1.53.0
-      '@bufbuild/protoc-gen-es':
-        specifier: ^2.2.5
-        version: 2.2.5(@bufbuild/protobuf@2.2.5)
-      '@connectrpc/connect':
-        specifier: ^2.0.2
-        version: 2.0.2(@bufbuild/protobuf@2.2.5)
-      '@effect/platform':
-        specifier: ^0.87.11
-        version: 0.87.11(effect@3.16.12)
-      '@effect/vitest':
-        specifier: ^0.23.12
-        version: 0.23.12(effect@3.16.12)(vitest@3.2.3(@types/node@24.0.0)(jiti@2.4.2)(jsdom@26.1.0)(lightningcss@1.30.1)(tsx@4.20.3)(yaml@2.8.0))
-      '@nozzl/utils':
-        specifier: workspace:*
-        version: link:../utils
-      '@types/node':
-        specifier: ^24.0.0
-        version: 24.0.0
-      apache-arrow:
-        specifier: ^20.0.0
-        version: 20.0.0
-      effect:
-        specifier: ^3.16.12
-        version: 3.16.12
-      vitest:
-        specifier: ^3.2.3
-        version: 3.2.3(@types/node@24.0.0)(jiti@2.4.2)(jsdom@26.1.0)(lightningcss@1.30.1)(tsx@4.20.3)(yaml@2.8.0)
-    publishDirectory: dist
 
   typescript/utils:
     dependencies:
@@ -6994,7 +6994,7 @@ snapshots:
       debug: 4.4.1
       es-module-lexer: 1.7.0
       pathe: 2.0.3
-      vite: 6.3.5(@types/node@24.0.0)(jiti@2.4.2)(lightningcss@1.30.1)(tsx@4.20.3)(yaml@2.8.0)
+      vite: 7.0.4(@types/node@24.0.0)(jiti@2.4.2)(lightningcss@1.30.1)(tsx@4.20.3)(yaml@2.8.0)
     transitivePeerDependencies:
       - '@types/node'
       - jiti

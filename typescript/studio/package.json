@@ -1,5 +1,5 @@
 {
-  "name": "@nozzle/dataset-works",
+  "name": "@nozzle/studio",
   "description": "UI for interacting with nozzle datasets. Writing, running and validating queries and datasets to create a dataset definition for deploying",
   "private": true,
   "type": "module",
