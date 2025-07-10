@@ -66,6 +66,7 @@ tokio = { version = "1.36.0", features = [
     "signal",
 ] }
 tokio-stream = "0.1.17"
+tokio-util = { version = "0.7.15", features = ["rt"] }
 url = { version = "2.5.0", features = ["serde"] }
 sqlx = { version = "0.8.3", features = [
     "runtime-tokio",

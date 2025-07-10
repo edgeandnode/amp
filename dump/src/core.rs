@@ -5,10 +5,9 @@ use std::{
 };
 
 use common::{
-    BoxError,
+    BlockNum, BoxError,
     catalog::physical::{Catalog, PhysicalTable},
     config::Config,
-    multirange::MultiRange,
     query_context::{Error as QueryError, QueryContext},
     store::Store as DataStore,
 };
@@ -90,26 +89,6 @@ pub async fn dump_raw_tables(
         consistency_check(table).await?;
     }
 
-    // Query the block ranges, we might already have some ranges if this is not the first dump run
-    // for this dataset.
-    let mut block_ranges_by_table: BTreeMap<String, MultiRange> = Default::default();
-    for table in tables {
-        block_ranges_by_table.insert(table.table_name().to_string(), table.multi_range().await?);
-    }
-
-    for (table_name, multirange) in &block_ranges_by_table {
-        if multirange.total_len() == 0 {
-            continue;
-        }
-
-        tracing::info!(
-            "table `{}` has scanned {} blocks in the ranges: {}",
-            table_name,
-            multirange.total_len(),
-            multirange,
-        );
-    }
-
     let kind = DatasetKind::from_str(&dataset.kind)?;
     match kind {
         DatasetKind::EvmRpc | DatasetKind::Firehose | DatasetKind::Substreams => {
@@ -118,7 +97,7 @@ pub async fn dump_raw_tables(
                 n_jobs,
                 query_ctx,
                 &dataset.name,
-                block_ranges_by_table,
+                tables,
                 partition_size,
                 parquet_opts,
                 range,
@@ -220,19 +199,40 @@ async fn consistency_check(table: &PhysicalTable) -> Result<(), ConsistencyCheck
 
     let location_id = table.location_id();
 
-    // Check that bock ranges do not contain overlapping ranges.
-    table
-        .multi_range()
+    let files = table
+        .files()
         .await
         .map_err(|err| ConsistencyCheckError::CorruptedTable(location_id, err))?;
 
-    let registered_files: BTreeSet<String> = table
-        .files()
-        .await
-        .map_err(|err| ConsistencyCheckError::CorruptedTable(location_id, err))?
-        .into_iter()
-        .map(|m| m.file_name)
+    // Check that bock ranges do not contain overlapping ranges.
+    let mut ranges: Vec<(BlockNum, BlockNum)> = files
+        .iter()
+        .map(|m| m.parquet_meta.ranges[0].numbers.clone().into_inner())
         .collect();
+    ranges.sort_by_key(|(start, _)| *start);
+    for window in ranges.windows(2) {
+        let ((a, b), (c, d)) = (window[0], window[1]);
+        if !(b < c) {
+            return Err(ConsistencyCheckError::CorruptedTable(
+                location_id,
+                format!("overlapping block ranges: [{a}-{b}] and [{c}-{d}]").into(),
+            ));
+        }
+        if !(a <= b) {
+            return Err(ConsistencyCheckError::CorruptedTable(
+                location_id,
+                format!("malformed block range: [{a}-{b}]").into(),
+            ));
+        }
+        if !(c <= d) {
+            return Err(ConsistencyCheckError::CorruptedTable(
+                location_id,
+                format!("malformed block range: [{c}-{d}]").into(),
+            ));
+        }
+    }
+
+    let registered_files: BTreeSet<String> = files.into_iter().map(|m| m.file_name).collect();
 
     let store = table.object_store();
     let path = table.path();

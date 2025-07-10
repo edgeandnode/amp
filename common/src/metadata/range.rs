@@ -46,6 +46,59 @@ impl TableRanges {
         for r in self.forks.iter() {
             r.check_invariants();
         }
+
+        // canonical group contains minimum block number
+        let canonical_min = canonical.start();
+        let forks_min = self.forks.iter().min_by_key(|g| g.start());
+        if let Some(forks_min) = forks_min.map(|g| g.start()) {
+            assert!(canonical_min <= forks_min);
+        }
+    }
+
+    pub fn canonical_range(&self) -> Option<BlockRange> {
+        let canonical_ranges = &self.canonical.as_ref()?.0;
+        let start = canonical_ranges.first()?;
+        let end = canonical_ranges.last()?;
+        Some(BlockRange {
+            numbers: *start.numbers.start()..=*end.numbers.end(),
+            network: start.network.clone(),
+            hash: end.hash,
+            prev_hash: start.prev_hash,
+        })
+    }
+
+    /// Return the block ranges missing from this table out of the given `desired` range. The
+    /// returned ranges will be non-overlapping. For now, we avoid overlapping between canonical
+    /// and non-canonical block ranges since we don't disambiguate between the files for query
+    /// execution.
+    pub fn missing_ranges(
+        &self,
+        desired: RangeInclusive<BlockNum>,
+    ) -> Vec<RangeInclusive<BlockNum>> {
+        if self.canonical.is_none() && self.forks.is_empty() {
+            return vec![desired];
+        }
+
+        let mut missing: Vec<RangeInclusive<BlockNum>> = Default::default();
+        for range_group in self.canonical.iter().chain(&self.forks) {
+            let range = range_group.start()..=range_group.end();
+            if missing.is_empty() {
+                missing.append(&mut missing_block_ranges(range, desired.clone()));
+                continue;
+            }
+            let mut index = 0;
+            while index < missing.len() {
+                let ranges = missing_block_ranges(range.clone(), missing.remove(index));
+                if ranges.is_empty() {
+                    continue;
+                }
+                for range in ranges {
+                    missing.insert(index, range);
+                    index += 1;
+                }
+            }
+        }
+        missing
     }
 
     /// Merge known block ranges. This fails if the given block numbers do not correspond to a set
@@ -84,14 +137,12 @@ impl TableRanges {
             Some(canonical) => match canonical.insert(&range) {
                 Ok(()) => {
                     for index in 0..self.forks.len() {
-                        if !self.forks[index].adjacent_before(canonical.bounds().0) {
+                        if !self.forks[index].adjacent_after(canonical.bounds().1) {
                             continue;
                         }
                         let mut fork = self.forks.remove(index);
                         diff.add.append(&mut fork.0.clone());
-                        let mut canonical = self.canonical.take().unwrap();
-                        fork.0.append(&mut canonical.0);
-                        self.canonical = Some(fork);
+                        canonical.0.append(&mut fork.0);
                         break;
                     }
                     diff.add.push(range);
@@ -100,10 +151,21 @@ impl TableRanges {
                 Err(()) => (),
             },
         };
+
         let fork_index = self.update_forks(range);
         let canonical = self.canonical.as_ref().unwrap();
         let fork = &self.forks[fork_index];
-        if fork.bounds().1.numbers.end() > canonical.bounds().1.numbers.end() {
+
+        if fork.adjacent_after(canonical.bounds().1) {
+            diff.add.append(&mut fork.0.clone());
+            let canonical = self.canonical.as_mut().unwrap();
+            canonical.0.append(&mut self.forks.remove(fork_index).0);
+            return diff;
+        }
+
+        if (fork.start() < canonical.start())
+            || (fork.start() == canonical.start() && fork.end() > canonical.end())
+        {
             diff.add.append(&mut fork.0.clone());
             diff.sub.append(&mut canonical.0.clone());
             self.forks.push(self.canonical.take().unwrap());
@@ -164,6 +226,14 @@ impl RangeGroup {
 
     fn bounds(&self) -> (&BlockRange, &BlockRange) {
         (self.0.first().unwrap(), self.0.last().unwrap())
+    }
+
+    fn start(&self) -> BlockNum {
+        *self.0.first().unwrap().numbers.start()
+    }
+
+    fn end(&self) -> BlockNum {
+        *self.0.last().unwrap().numbers.end()
     }
 
     fn adjacent_before(&self, range: &BlockRange) -> bool {
@@ -243,9 +313,35 @@ impl RangeGroup {
     }
 }
 
+pub fn missing_block_ranges(
+    synced: RangeInclusive<BlockNum>,
+    desired: RangeInclusive<BlockNum>,
+) -> Vec<RangeInclusive<BlockNum>> {
+    // no overlap
+    if (synced.end() < desired.start()) || (synced.start() > desired.end()) {
+        return vec![desired];
+    }
+    // desired is subset of synced
+    if (synced.start() <= desired.start()) && (synced.end() >= desired.end()) {
+        return vec![];
+    }
+    // partial overlap
+    let mut result = Vec::new();
+    if desired.start() < synced.start() {
+        result.push(*desired.start()..=(*synced.start() - 1));
+    }
+    if desired.end() > synced.end() {
+        result.push((*synced.end() + 1)..=*desired.end());
+    }
+    result
+}
+
 #[cfg(test)]
 mod test {
-    use std::{collections::BTreeMap, ops::Range};
+    use std::{
+        collections::BTreeMap,
+        ops::{Range, RangeInclusive},
+    };
 
     use alloy::primitives::BlockHash;
     use rand::{Rng as _, RngCore, SeedableRng, rngs::StdRng, seq::SliceRandom};
@@ -369,5 +465,80 @@ mod test {
                 .all(|r| *r.numbers.end() < canonical_chain_depth as u64)
         );
         ranges
+    }
+
+    #[test]
+    fn missing_block_ranges() {
+        // no overlap, desired before synced
+        assert_eq!(super::missing_block_ranges(10..=20, 0..=5), vec![0..=5]);
+        // no overlap, desired after synced
+        assert_eq!(super::missing_block_ranges(0..=5, 10..=20), vec![10..=20]);
+        // desired is subset of synced
+        assert_eq!(super::missing_block_ranges(0..=10, 2..=8), vec![]);
+        // desired is same as synced
+        assert_eq!(super::missing_block_ranges(0..=10, 0..=10), vec![]);
+        // synced starts before desired, ends with desired
+        assert_eq!(super::missing_block_ranges(0..=10, 0..=10), vec![]);
+        // synced starts with desired, ends after desired
+        assert_eq!(super::missing_block_ranges(0..=10, 0..=10), vec![]);
+        // partial overlap, desired starts before synced
+        assert_eq!(super::missing_block_ranges(5..=10, 0..=7), vec![0..=4]);
+        // partial overlap, desired ends after synced
+        assert_eq!(super::missing_block_ranges(0..=5, 3..=10), vec![6..=10]);
+        // partial overlap, desired surrounds synced
+        assert_eq!(
+            super::missing_block_ranges(5..=10, 0..=15),
+            vec![0..=4, 11..=15]
+        );
+        // desired starts same as synced, ends after synced
+        assert_eq!(super::missing_block_ranges(0..=5, 0..=10), vec![6..=10]);
+        // desired starts before synced, ends same as synced
+        assert_eq!(super::missing_block_ranges(5..=10, 0..=10), vec![0..=4]);
+        // adjacent ranges (desired just before synced)
+        assert_eq!(super::missing_block_ranges(5..=10, 0..=4), vec![0..=4]);
+        // adjacent ranges (desired just after synced)
+        assert_eq!(super::missing_block_ranges(0..=5, 6..=10), vec![6..=10]);
+        // single block ranges
+        assert_eq!(super::missing_block_ranges(0..=0, 0..=0), vec![]);
+        assert_eq!(super::missing_block_ranges(0..=0, 1..=1), vec![1..=1]);
+        assert_eq!(super::missing_block_ranges(1..=1, 0..=0), vec![0..=0]);
+        assert_eq!(super::missing_block_ranges(0..=2, 0..=3), vec![3..=3]);
+        assert_eq!(super::missing_block_ranges(1..=3, 0..=3), vec![0..=0]);
+        assert_eq!(super::missing_block_ranges(0..=2, 0..=3), vec![3..=3]);
+    }
+
+    #[test]
+    fn missing_ranges() {
+        fn missing_ranges(
+            ranges: Vec<RangeInclusive<BlockNum>>,
+            desired: RangeInclusive<BlockNum>,
+        ) -> Vec<RangeInclusive<BlockNum>> {
+            let mut table: TableRanges = Default::default();
+            for numbers in ranges {
+                table.insert(BlockRange {
+                    numbers,
+                    network: "test".to_string(),
+                    hash: Default::default(),
+                    prev_hash: None,
+                });
+            }
+            table.missing_ranges(desired)
+        }
+
+        assert_eq!(missing_ranges(vec![], 0..=10), vec![0..=10]);
+        assert_eq!(missing_ranges(vec![0..=10], 0..=10), vec![]);
+        assert_eq!(missing_ranges(vec![0..=5], 10..=15), vec![10..=15]);
+        assert_eq!(missing_ranges(vec![3..=7], 0..=10), vec![0..=2, 8..=10]);
+        assert_eq!(missing_ranges(vec![0..=15], 5..=10), vec![]);
+        assert_eq!(missing_ranges(vec![5..=15], 0..=10), vec![0..=4]);
+        assert_eq!(missing_ranges(vec![0..=5], 0..=10), vec![6..=10]);
+        assert_eq!(
+            missing_ranges(vec![0..=3, 5..=7], 0..=10),
+            vec![4..=4, 8..=10]
+        );
+        assert_eq!(
+            missing_ranges(vec![0..=2, 5..=7, 1..=12], 0..=15),
+            vec![13..=15]
+        );
     }
 }
