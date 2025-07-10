@@ -480,29 +480,6 @@ impl PhysicalTable {
 
                 Ok::<_, DataFusionError>((*range_start, partitioned_file))
             })
-        // .map_ok(move |(range_start, partitioned_file)| {
-        //     stream::repeat((range_start, partitioned_file)).scan(
-        //         0,
-        //         move |read_offset, (range_start, partitioned_file)| {
-        //             if *read_offset >= partitioned_file.object_meta.size {
-        //                 return future::ready(None);
-        //             }
-        //             let start = read_offset.clone();
-        //             let end = partitioned_file
-        //                 .object_meta
-        //                 .size
-        //                 .min(start + repartition_file_min_size);
-
-        //             *read_offset += repartition_file_min_size;
-
-        //             future::ready(Some(Ok((
-        //                 (range_start, start),
-        //                 partitioned_file.with_range(start as i64, end as i64),
-        //             ))))
-        //         },
-        //     )
-        // })
-        // .try_flatten()
     }
 
     fn filters_to_predicate(
