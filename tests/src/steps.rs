@@ -122,7 +122,7 @@ impl TestStep {
         let result = match self {
             TestStep::Dump(step) => {
                 let config = test_env.config.clone();
-                dump_dataset(config, &step.dataset, step.start, step.end, 1).await
+                dump_dataset(&config, &step.dataset, step.start, step.end, 1, None).await
             }
             TestStep::StreamTake(step) => step.run(client).await,
             TestStep::Query(step) => step.run(client).await,

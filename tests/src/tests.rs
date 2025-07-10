@@ -15,7 +15,7 @@ use crate::{
     steps::load_test_steps,
     test_client::TestClient,
     test_support::{
-        SnapshotContext, TestEnv, check_blocks, check_provider_file, restore_blessed_dataset,
+        self, SnapshotContext, TestEnv, check_blocks, check_provider_file, restore_blessed_dataset,
         table_ranges,
     },
 };
@@ -286,4 +286,51 @@ fn generate_manifest_bad_dataset_kind() {
         err.to_string(),
         format!("unsupported dataset kind '{}'", bad_kind)
     );
+}
+
+#[tokio::test]
+async fn sql_dataset_input_batch_size() {
+    tracing_helpers::register_logger();
+
+    // 1. Setup
+    let test_env = TestEnv::temp("sql_dataset_input_batch_size").await.unwrap();
+
+    // 2. First dump eth_firehose dependency on the spot
+    let start = 15_000_000;
+    let end = 15_000_003;
+
+    test_support::dump_dataset(&test_env.config, "eth_firehose", start, end, 1, None)
+        .await
+        .unwrap();
+
+    // 3. Execute dump of sql_stream_ds with input_batch_size_blocks=1
+    let dataset_name = "sql_stream_ds";
+
+    test_support::dump_dataset(&test_env.config, dataset_name, start, end, 1, Some(1))
+        .await
+        .unwrap();
+
+    // 4. Get catalog and count files
+    let catalog = test_support::catalog_for_dataset(
+        dataset_name,
+        &test_env.dataset_store,
+        test_env.metadata_db.clone(),
+    )
+    .await
+    .unwrap();
+
+    // Find the even_blocks table
+    let table = catalog
+        .tables()
+        .iter()
+        .find(|t| t.table_name() == "even_blocks")
+        .unwrap();
+
+    let file_count = table.files().await.unwrap().len();
+
+    // 5. With batch size 1 and 4 blocks, we expect 4 files (even if some are empty) since
+    // input_batch_size_blocks=1 should create one file per block even_blocks only includes even
+    // block numbers, so we expect 2 files with data for blocks 15000000 and 15000002, plus empty
+    // files for odd blocks
+    assert_eq!(file_count, 4);
 }
