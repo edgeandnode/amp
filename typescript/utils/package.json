@@ -7,10 +7,10 @@
     "nozzl-utils": "./src/main.ts"
   },
   "dependencies": {
-    "@effect/cli": "^0.63.9",
-    "@effect/platform": "^0.84.9",
-    "@effect/platform-node": "^0.85.13",
-    "effect": "^3.16.5"
+    "@effect/cli": "^0.66.11",
+    "@effect/platform": "^0.87.11",
+    "@effect/platform-node": "^0.89.3",
+    "effect": "^3.16.12"
   },
   "devDependencies": {
     "@types/node": "^24.0.0"
