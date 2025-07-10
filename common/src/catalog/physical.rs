@@ -577,21 +577,7 @@ impl TableProvider for PhysicalTable {
         &self,
         filters: &[&Expr],
     ) -> DataFusionResult<Vec<TableProviderFilterPushDown>> {
-        let sorted_by = self.table.table().sorted_by();
-        Ok(filters
-            .iter()
-            .map(|expr| {
-                if expr
-                    .column_refs()
-                    .iter()
-                    .any(|col| sorted_by.contains(&col.name()))
-                {
-                    TableProviderFilterPushDown::Exact
-                } else {
-                    TableProviderFilterPushDown::Inexact
-                }
-            })
-            .collect())
+        Ok(vec![TableProviderFilterPushDown::Inexact; filters.len()])
     }
 }
 
