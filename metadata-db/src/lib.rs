@@ -35,6 +35,7 @@ pub const DEFAULT_DEAD_WORKER_INTERVAL: Duration = Duration::from_secs(5);
 pub type FileId = i64;
 pub type LocationId = i64;
 pub type JobDatabaseId = i64;
+pub type FooterBytes = Vec<u8>;
 
 #[derive(Debug, FromRow)]
 pub struct FileMetadataRow {
@@ -568,10 +569,11 @@ impl MetadataDb {
         object_version: Option<String>,
         parquet_meta: serde_json::Value,
         canonical: bool,
+        footer: FooterBytes,
     ) -> Result<(), Error> {
         let sql = "
-        INSERT INTO file_metadata (location_id, file_name, object_size, object_e_tag, object_version, metadata, canonical)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        INSERT INTO file_metadata (location_id, file_name, object_size, object_e_tag, object_version, metadata, canonical, footer)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         ON CONFLICT DO NOTHING
         ";
 
@@ -583,10 +585,24 @@ impl MetadataDb {
             .bind(object_version)
             .bind(parquet_meta)
             .bind(canonical)
+            .bind(footer)
             .execute(&*self.pool)
             .await?;
 
         Ok(())
+    }
+
+    pub async fn get_footer_bytes(&self, file_id: &FileId) -> Result<Vec<u8>, Error> {
+        let sql = "
+        SELECT footer
+          FROM file_metadata
+         WHERE id = $1;";
+
+        sqlx::query_scalar(sql)
+            .bind(file_id)
+            .fetch_one(&*self.pool)
+            .await
+            .map_err(Error::from)
     }
 }
 
