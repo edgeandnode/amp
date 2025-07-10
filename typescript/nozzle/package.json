@@ -31,10 +31,11 @@
     "nozzl": "bun ./src/cli/main.ts"
   },
   "dependencies": {
-    "@effect/cli": "^0.63.9",
-    "@effect/experimental": "^0.48.10",
-    "@effect/platform-node": "^0.85.13",
+    "@effect/cli": "^0.66.11",
+    "@effect/experimental": "^0.51.12",
+    "@effect/platform-node": "^0.89.3",
     "jiti": "^2.4.2",
+    "open": "^10.1.2",
     "viem": "^2.31.0"
   },
   "peerDependencies": {
@@ -43,19 +44,19 @@
     "@connectrpc/connect-node": "^2.0.2",
     "@effect/platform": "^0.80.11",
     "apache-arrow": "^19.0.1",
-    "effect": "^3.14.11"
+    "effect": "^3.16.12"
   },
   "devDependencies": {
     "@bufbuild/buf": "^1.53.0",
     "@bufbuild/protoc-gen-es": "^2.2.5",
     "@connectrpc/connect": "^2.0.2",
-    "@effect/platform": "^0.84.9",
-    "@effect/platform-node": "^0.76.21",
-    "@effect/vitest": "^0.23.5",
+    "@effect/platform": "^0.87.11",
+    "@effect/platform-node": "^0.89.3",
+    "@effect/vitest": "^0.23.12",
     "@nozzl/utils": "workspace:*",
     "@types/node": "^24.0.0",
     "apache-arrow": "^20.0.0",
-    "effect": "^3.16.5",
+    "effect": "^3.16.12",
     "vitest": "^3.2.3"
   }
 }
