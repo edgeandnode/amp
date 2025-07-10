@@ -119,7 +119,7 @@ use std::{collections::BTreeSet, sync::Arc};
 use common::{
     BlockNum, BoxError, Dataset,
     catalog::physical::PhysicalTable,
-    metadata::range::BlockRange,
+    metadata::range::{BlockRange, missing_block_ranges},
     plan_visitors::is_incremental,
     query_context::{QueryContext, QueryEnv, parse_sql},
     streaming_query::{StreamState, StreamingQuery, watermark_updates},
@@ -196,16 +196,20 @@ pub async fn dump_table(
         };
 
         if is_incr {
-            let existing_ranges = table.multi_range().await?;
-            tracing::info!(
-                "table `{}` has scanned {} blocks in the ranges: {}",
-                table_name,
-                existing_ranges.total_len(),
-                existing_ranges,
-            );
-            let ranges_to_scan = existing_ranges.complement(start, end);
-            for (start, end) in ranges_to_scan.ranges {
-                let mut start = start;
+            let synced_range = table.synced_range().await?;
+            if let Some(range) = synced_range.as_ref() {
+                tracing::info!(
+                    "table `{}` has scanned block range [{}-{}]",
+                    table_name,
+                    range.start(),
+                    range.end(),
+                );
+            }
+            let ranges_to_scan = synced_range
+                .map(|synced| missing_block_ranges(synced, start..=end))
+                .unwrap_or(vec![start..=end]);
+            for range in ranges_to_scan {
+                let (mut start, end) = range.into_inner();
                 while start <= end {
                     let batch_end = std::cmp::min(start + input_batch_size_blocks - 1, end);
                     tracing::info!("dumping {table_name} between blocks {start} and {batch_end}");
