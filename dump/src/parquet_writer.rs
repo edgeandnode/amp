@@ -6,13 +6,14 @@ use common::{
     arrow::array::RecordBatch,
     catalog::physical::PhysicalTable,
     metadata::{
+        extract_footer_bytes_from_file,
         parquet::{PARQUET_METADATA_KEY, ParquetMeta},
         range::BlockRange,
     },
     multirange::MultiRange,
     parquet::{arrow::AsyncArrowWriter, errors::ParquetError, format::KeyValue},
 };
-use metadata_db::MetadataDb;
+use metadata_db::{FooterBytes, LocationId, MetadataDb};
 use object_store::{ObjectMeta, buffered::BufWriter, path::Path};
 use rand::RngCore as _;
 use tracing::debug;
@@ -63,9 +64,21 @@ impl RawDatasetWriter {
     pub async fn write(&mut self, table_rows: RawTableRows) -> Result<(), BoxError> {
         let table_name = table_rows.table.name();
         let writer = self.writers.get_mut(table_name).unwrap();
-        if let Some((parquet_meta, object_meta)) = writer.write(table_rows).await? {
-            let location_id = writer.table.location_id();
-            commit_metadata(&self.metadata_db, parquet_meta, object_meta, location_id).await?;
+        if let Some(CompletedFile {
+            parquet_meta,
+            object_meta,
+            footer_bytes,
+            location_id,
+        }) = writer.write(table_rows).await?
+        {
+            commit_metadata(
+                &self.metadata_db,
+                parquet_meta,
+                object_meta,
+                footer_bytes,
+                location_id,
+            )
+            .await?;
         }
 
         Ok(())
@@ -74,14 +87,33 @@ impl RawDatasetWriter {
     /// Close and flush all pending writes.
     pub async fn close(self) -> Result<(), BoxError> {
         for (_, writer) in self.writers {
-            let location_id = writer.table.location_id();
-            if let Some((parquet_meta, object_meta)) = writer.close().await? {
-                commit_metadata(&self.metadata_db, parquet_meta, object_meta, location_id).await?
+            if let Some(CompletedFile {
+                parquet_meta,
+                object_meta,
+                footer_bytes,
+                location_id,
+            }) = writer.close().await?
+            {
+                commit_metadata(
+                    &self.metadata_db,
+                    parquet_meta,
+                    object_meta,
+                    footer_bytes,
+                    location_id,
+                )
+                .await?
             }
         }
 
         Ok(())
     }
+}
+
+pub struct CompletedFile {
+    pub parquet_meta: ParquetMeta,
+    pub object_meta: ObjectMeta,
+    pub footer_bytes: FooterBytes,
+    pub location_id: LocationId,
 }
 
 pub async fn commit_metadata(
@@ -93,6 +125,7 @@ pub async fn commit_metadata(
         version: object_version,
         ..
     }: ObjectMeta,
+    footer_bytes: FooterBytes,
     location_id: i64,
 ) -> Result<(), BoxError> {
     let file_name = parquet_meta.filename.clone();
@@ -106,6 +139,7 @@ pub async fn commit_metadata(
             object_version,
             parquet_meta,
             true, // assuming only canonical ranges for now
+            footer_bytes,
         )
         .await?;
 
@@ -167,7 +201,7 @@ impl RawTableWriter {
     pub async fn write(
         &mut self,
         table_rows: RawTableRows,
-    ) -> Result<Option<(ParquetMeta, ObjectMeta)>, BoxError> {
+    ) -> Result<Option<CompletedFile>, BoxError> {
         assert_eq!(table_rows.table.name(), self.table.table_name());
 
         let mut parquet_meta = None;
@@ -247,7 +281,7 @@ impl RawTableWriter {
         Ok(parquet_meta)
     }
 
-    async fn close(mut self) -> Result<Option<(ParquetMeta, ObjectMeta)>, BoxError> {
+    async fn close(mut self) -> Result<Option<CompletedFile>, BoxError> {
         if self.current_file.is_none() {
             assert!(self.ranges_to_write.is_empty());
             return Ok(None);
@@ -257,7 +291,7 @@ impl RawTableWriter {
         self.close_current_file().await.map(Some)
     }
 
-    async fn close_current_file(&mut self) -> Result<(ParquetMeta, ObjectMeta), BoxError> {
+    async fn close_current_file(&mut self) -> Result<CompletedFile, BoxError> {
         assert!(self.current_file.is_some());
         let file = self.current_file.take().unwrap();
         let range = self.current_range.take().unwrap();
@@ -301,7 +335,7 @@ impl ParquetFileWriter {
     }
 
     #[must_use]
-    pub async fn close(mut self, range: BlockRange) -> Result<(ParquetMeta, ObjectMeta), BoxError> {
+    pub async fn close(mut self, range: BlockRange) -> Result<CompletedFile, BoxError> {
         self.writer.flush().await?;
 
         debug!(
@@ -327,7 +361,17 @@ impl ParquetFileWriter {
         let location = Path::from_url_path(self.file_url.path())?;
         let object_meta = self.table.object_store().head(&location).await?;
 
-        Ok((parquet_meta, object_meta))
+        let footer_bytes =
+            extract_footer_bytes_from_file(&object_meta, self.table.object_store()).await?;
+
+        let location_id = self.table.location_id();
+
+        Ok(CompletedFile {
+            parquet_meta,
+            object_meta,
+            footer_bytes,
+            location_id,
+        })
     }
 
     // This is calculate as:
