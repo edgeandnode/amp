@@ -592,7 +592,7 @@ impl MetadataDb {
         Ok(())
     }
 
-    pub async fn get_footer_bytes(&self, file_id: &FileId) -> Result<Vec<u8>, Error> {
+    pub async fn get_footer_bytes(&self, file_id: &FileId) -> Result<FooterBytes, Error> {
         let sql = "
         SELECT footer
           FROM file_metadata
