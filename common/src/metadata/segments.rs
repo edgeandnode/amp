@@ -63,6 +63,13 @@ impl TableSegments {
         }
     }
 
+    pub fn canonical_segments(&self) -> Vec<Segment> {
+        self.canonical
+            .as_ref()
+            .map(|c| c.0.clone())
+            .unwrap_or_default()
+    }
+
     pub fn canonical_range(&self) -> Option<BlockRange> {
         let canonical_ranges = &self.canonical.as_ref()?.0;
         let start = &canonical_ranges.first()?.range;
