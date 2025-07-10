@@ -1,8 +1,16 @@
 use std::ops::RangeInclusive;
 
 use alloy::primitives::BlockHash;
+use object_store::ObjectMeta;
 
 use crate::BlockNum;
+
+/// A BlockRange associated with the matadata from a file in object storage.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Segment {
+    pub range: BlockRange,
+    pub object: ObjectMeta,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub struct BlockRange {
@@ -15,24 +23,24 @@ pub struct BlockRange {
 }
 
 #[derive(Debug, Default)]
-pub struct TableRangesDiff {
-    /// block ranges added to the canonical chain
-    pub add: Vec<BlockRange>,
-    /// block ranges removed from the canonical chain
-    pub sub: Vec<BlockRange>,
+pub struct TableSegmentsDiff {
+    /// segments added to the canonical chain
+    pub add: Vec<Segment>,
+    /// segments removed from the canonical chain
+    pub sub: Vec<Segment>,
 }
 
-/// Block ranges associated with a table. This incrementally organizes block ranges into either
-/// the canonical chain or a set of forks. The canonical chain is defined as the set of adjacent
-/// block ranges with the greatest block height.
+/// Segments associated with a table. This incrementally organizes segments into either the
+/// canonical chain or a set of forks. The canonical chain is defined as the set of adjacent
+/// segments with the greatest block height.
 // We are assuming single block range per segment, for now.
 #[derive(Default)]
-pub struct TableRanges {
-    canonical: Option<RangeGroup>,
-    forks: Vec<RangeGroup>,
+pub struct TableSegments {
+    canonical: Option<SegmentGroup>,
+    forks: Vec<SegmentGroup>,
 }
 
-impl TableRanges {
+impl TableSegments {
     #[cfg(any(test, debug_assertions))]
     fn check_invariants(&self) {
         let canonical = match &self.canonical {
@@ -57,8 +65,8 @@ impl TableRanges {
 
     pub fn canonical_range(&self) -> Option<BlockRange> {
         let canonical_ranges = &self.canonical.as_ref()?.0;
-        let start = canonical_ranges.first()?;
-        let end = canonical_ranges.last()?;
+        let start = &canonical_ranges.first()?.range;
+        let end = &canonical_ranges.last()?.range;
         Some(BlockRange {
             numbers: *start.numbers.start()..=*end.numbers.end(),
             network: start.network.clone(),
@@ -104,16 +112,20 @@ impl TableRanges {
     /// Merge known block ranges. This fails if the given block numbers do not correspond to a set
     /// of adjacent and complete block ranges. This should be done after the associated files have
     /// been merged, and the merged files have been committed to the metadata DB.
-    pub fn merge(&mut self, numbers: RangeInclusive<BlockNum>) -> Result<(), ()> {
+    pub fn merge(
+        &mut self,
+        numbers: RangeInclusive<BlockNum>,
+        object: ObjectMeta,
+    ) -> Result<(), ()> {
         #[cfg(any(test, debug_assertions))]
         self.check_invariants();
 
         if let Some(canonical) = &mut self.canonical {
-            if let Ok(()) = canonical.merge(numbers.clone()) {
+            if let Ok(()) = canonical.merge(numbers.clone(), object.clone()) {
                 return Ok(());
             }
             for fork in &mut self.forks {
-                if let Ok(()) = fork.merge(numbers.clone()) {
+                if let Ok(()) = fork.merge(numbers.clone(), object.clone()) {
                     return Ok(());
                 }
             }
@@ -121,20 +133,20 @@ impl TableRanges {
         Err(())
     }
 
-    /// Insert a block range, returning a diff of the canonical chain.
-    /// Block ranges may be inserted in any order.
-    pub fn insert(&mut self, range: BlockRange) -> TableRangesDiff {
+    /// Insert a segment, returning a diff of the canonical chain.
+    /// Segments may be inserted in any order.
+    pub fn insert(&mut self, segment: Segment) -> TableSegmentsDiff {
         #[cfg(any(test, debug_assertions))]
         self.check_invariants();
 
-        let mut diff: TableRangesDiff = Default::default();
+        let mut diff: TableSegmentsDiff = Default::default();
         match &mut self.canonical {
             None => {
-                self.canonical = Some(RangeGroup(vec![range.clone()]));
-                diff.add.push(range);
+                self.canonical = Some(SegmentGroup(vec![segment.clone()]));
+                diff.add.push(segment);
                 return diff;
             }
-            Some(canonical) => match canonical.insert(&range) {
+            Some(canonical) => match canonical.insert(&segment) {
                 Ok(()) => {
                     for index in 0..self.forks.len() {
                         if !self.forks[index].adjacent_after(canonical.bounds().1) {
@@ -145,14 +157,14 @@ impl TableRanges {
                         canonical.0.append(&mut fork.0);
                         break;
                     }
-                    diff.add.push(range);
+                    diff.add.push(segment);
                     return diff;
                 }
                 Err(()) => (),
             },
         };
 
-        let fork_index = self.update_forks(range);
+        let fork_index = self.update_forks(segment);
         let canonical = self.canonical.as_ref().unwrap();
         let fork = &self.forks[fork_index];
 
@@ -174,14 +186,14 @@ impl TableRanges {
         diff
     }
 
-    fn update_forks(&mut self, range: BlockRange) -> usize {
+    fn update_forks(&mut self, segment: Segment) -> usize {
         for index in 0..self.forks.len() {
-            match self.forks[index].insert(&range) {
+            match self.forks[index].insert(&segment) {
                 Ok(()) => return self.merge_forks(index),
                 Err(()) => continue,
             };
         }
-        self.forks.push(RangeGroup(vec![range]));
+        self.forks.push(SegmentGroup(vec![segment]));
         self.forks.len() - 1
     }
 
@@ -210,30 +222,32 @@ impl TableRanges {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-struct RangeGroup(Vec<BlockRange>);
+struct SegmentGroup(Vec<Segment>);
 
-impl RangeGroup {
+impl SegmentGroup {
     #[cfg(any(test, debug_assertions))]
     fn check_invariants(&self) {
         use itertools::Itertools as _;
         assert!(!self.0.is_empty());
         for (a, b) in self.0.iter().tuple_windows() {
-            assert!((*a.numbers.end() + 1) == *b.numbers.start());
-            assert!(a.network == b.network);
-            assert!(b.prev_hash.map(|h| h == a.hash).unwrap_or(true));
+            assert!((*a.range.numbers.end() + 1) == *b.range.numbers.start());
+            assert!(a.range.network == b.range.network);
+            assert!(b.range.prev_hash.map(|h| h == a.range.hash).unwrap_or(true));
         }
     }
 
     fn bounds(&self) -> (&BlockRange, &BlockRange) {
-        (self.0.first().unwrap(), self.0.last().unwrap())
+        let first = &self.0.first().unwrap().range;
+        let last = &self.0.last().unwrap().range;
+        (first, last)
     }
 
     fn start(&self) -> BlockNum {
-        *self.0.first().unwrap().numbers.start()
+        *self.0.first().unwrap().range.numbers.start()
     }
 
     fn end(&self) -> BlockNum {
-        *self.0.last().unwrap().numbers.end()
+        *self.0.last().unwrap().range.numbers.end()
     }
 
     fn adjacent_before(&self, range: &BlockRange) -> bool {
@@ -264,51 +278,52 @@ impl RangeGroup {
         }
     }
 
-    fn insert(&mut self, range: &BlockRange) -> Result<(), ()> {
-        if self.adjacent_before(range) {
-            self.0.push(range.clone());
+    fn insert(&mut self, segment: &Segment) -> Result<(), ()> {
+        if self.adjacent_before(&segment.range) {
+            self.0.push(segment.clone());
             return Ok(());
         }
-        if self.adjacent_after(range) {
-            self.0.insert(0, range.clone());
+        if self.adjacent_after(&segment.range) {
+            self.0.insert(0, segment.clone());
             return Ok(());
         }
-        if let Some(index) = self
-            .0
-            .iter()
-            .position(|r| (r.network == range.network) && (r.numbers == range.numbers))
-        {
-            if &self.0[index] == range {
+        if let Some(index) = self.0.iter().position(|s| {
+            (s.range.network == segment.range.network) && (s.range.numbers == segment.range.numbers)
+        }) {
+            if &self.0[index] == segment {
                 return Ok(());
             }
-            if self.0[index].prev_hash.is_none() && range.prev_hash.is_none() {
-                self.0[index] = range.clone();
+            if self.0[index].range.prev_hash.is_none() && segment.range.prev_hash.is_none() {
+                self.0[index] = segment.clone();
                 return Ok(());
             }
         }
         Err(())
     }
 
-    fn merge(&mut self, numbers: RangeInclusive<BlockNum>) -> Result<(), ()> {
+    fn merge(&mut self, numbers: RangeInclusive<BlockNum>, object: ObjectMeta) -> Result<(), ()> {
         let end = self
             .0
             .iter()
-            .position(|r| r.numbers.end() == numbers.end())
+            .position(|s| s.range.numbers.end() == numbers.end())
             .ok_or(())?;
-        let end = self.0.remove(end);
+        let end = self.0.remove(end).range;
         let index = self
             .0
             .iter()
-            .position(|r| r.numbers.start() == numbers.start())
+            .position(|s| s.range.numbers.start() == numbers.start())
             .ok_or(())?;
-        let start = self.0.remove(index);
-        let range = BlockRange {
-            numbers: *start.numbers.start()..=*end.numbers.end(),
-            network: start.network,
-            hash: end.hash,
-            prev_hash: start.prev_hash,
+        let start = self.0.remove(index).range;
+        let segment = Segment {
+            range: BlockRange {
+                numbers: *start.numbers.start()..=*end.numbers.end(),
+                network: start.network,
+                hash: end.hash,
+                prev_hash: start.prev_hash,
+            },
+            object,
         };
-        self.0.insert(index, range);
+        self.0.insert(index, segment);
         Ok(())
     }
 }
@@ -344,10 +359,11 @@ mod test {
     };
 
     use alloy::primitives::BlockHash;
+    use object_store::ObjectMeta;
     use rand::{Rng as _, RngCore, SeedableRng, rngs::StdRng, seq::SliceRandom};
 
-    use super::{BlockRange, TableRanges};
-    use crate::BlockNum;
+    use super::{BlockRange, TableSegments};
+    use crate::{BlockNum, metadata::segments::Segment};
 
     #[test]
     fn canonical_segments() {
@@ -355,36 +371,40 @@ mod test {
         println!("seed: {seed}");
         let mut rng = StdRng::seed_from_u64(seed);
 
-        let ranges = gen_ranges(&mut rng);
+        let segments = gen_segments(&mut rng);
         println!(
             "{:?}",
-            ranges
+            segments
                 .iter()
-                .map(|r| format!("({:?}, {})", r.numbers, r.hash.0[31]))
+                .map(|s| format!("({:?}, {})", s.range.numbers, s.range.hash.0[31]))
                 .collect::<Vec<_>>()
         );
         let mut model: Vec<BlockRange> = Default::default();
-        let mut table: TableRanges = Default::default();
-        for range in {
-            let mut ranges = ranges.clone();
-            ranges.shuffle(&mut rng);
-            ranges
+        let mut table: TableSegments = Default::default();
+        for segment in {
+            let mut segments = segments.clone();
+            segments.shuffle(&mut rng);
+            segments
         } {
-            println!("insert ({:?}, {})", range.numbers, range.hash.0[31]);
-            let diff = table.insert(range);
-            for range in diff.sub {
-                let index = model.iter().position(|r| r == &range).unwrap();
+            println!(
+                "insert ({:?}, {})",
+                segment.range.numbers, segment.range.hash.0[31]
+            );
+            let diff = table.insert(segment);
+            for segment in diff.sub {
+                let index = model.iter().position(|r| r == &segment.range).unwrap();
                 model.remove(index);
             }
-            for range in diff.add {
-                model.push(range);
+            for segment in diff.add {
+                model.push(segment.range);
             }
         }
         table.check_invariants();
 
         model.sort_by_key(|r| *r.numbers.start());
-        let expected_model = ranges
+        let expected_model = segments
             .iter()
+            .map(|s| &s.range)
             .filter(|r| r.hash[31] == 0)
             .cloned()
             .collect::<Vec<BlockRange>>();
@@ -397,33 +417,36 @@ mod test {
         println!("seed: {seed}");
         let mut rng = StdRng::seed_from_u64(seed);
 
-        let mut ranges = gen_ranges(&mut rng);
-        for range in &mut ranges {
-            range.prev_hash = None;
+        let mut segments = gen_segments(&mut rng);
+        for segment in &mut segments {
+            segment.range.prev_hash = None;
         }
         println!(
             "{:?}",
-            ranges
+            segments
                 .iter()
-                .map(|r| format!("({:?}, {})", r.numbers, r.hash.0[31]))
+                .map(|s| format!("({:?}, {})", s.range.numbers, s.range.hash.0[31]))
                 .collect::<Vec<_>>()
         );
         let mut model: BTreeMap<BlockNum, BlockRange> = Default::default();
         let mut expected: BTreeMap<BlockNum, BlockRange> = Default::default();
-        let mut table: TableRanges = Default::default();
-        for range in {
-            let mut ranges = ranges.clone();
-            ranges.shuffle(&mut rng);
-            ranges
+        let mut table: TableSegments = Default::default();
+        for segment in {
+            let mut segments = segments.clone();
+            segments.shuffle(&mut rng);
+            segments
         } {
-            println!("insert ({:?}, {})", range.numbers, range.hash.0[31]);
-            expected.insert(*range.numbers.start(), range.clone());
-            let diff = table.insert(range);
-            for range in diff.sub {
-                model.remove(range.numbers.start());
+            println!(
+                "insert ({:?}, {})",
+                segment.range.numbers, segment.range.hash.0[31]
+            );
+            expected.insert(*segment.range.numbers.start(), segment.range.clone());
+            let diff = table.insert(segment);
+            for segment in diff.sub {
+                model.remove(segment.range.numbers.start());
             }
-            for range in diff.add {
-                model.insert(*range.numbers.start(), range);
+            for segment in diff.add {
+                model.insert(*segment.range.numbers.start(), segment.range);
             }
         }
         table.check_invariants();
@@ -431,7 +454,7 @@ mod test {
         assert_eq!(expected, model);
     }
 
-    fn gen_ranges(rng: &mut StdRng) -> Vec<BlockRange> {
+    fn gen_segments(rng: &mut StdRng) -> Vec<Segment> {
         let hash = |number: u8, fork_index: u8| -> BlockHash {
             let mut hash: BlockHash = Default::default();
             hash.0[0] = number;
@@ -465,6 +488,18 @@ mod test {
                 .all(|r| *r.numbers.end() < canonical_chain_depth as u64)
         );
         ranges
+            .into_iter()
+            .map(|range| Segment {
+                object: ObjectMeta {
+                    location: format!("{:?}", range.hash).into(),
+                    last_modified: Default::default(),
+                    size: 0,
+                    e_tag: None,
+                    version: None,
+                },
+                range,
+            })
+            .collect()
     }
 
     #[test]
@@ -513,13 +548,22 @@ mod test {
             ranges: Vec<RangeInclusive<BlockNum>>,
             desired: RangeInclusive<BlockNum>,
         ) -> Vec<RangeInclusive<BlockNum>> {
-            let mut table: TableRanges = Default::default();
+            let mut table: TableSegments = Default::default();
             for numbers in ranges {
-                table.insert(BlockRange {
-                    numbers,
-                    network: "test".to_string(),
-                    hash: Default::default(),
-                    prev_hash: None,
+                table.insert(Segment {
+                    range: BlockRange {
+                        numbers,
+                        network: "test".to_string(),
+                        hash: Default::default(),
+                        prev_hash: None,
+                    },
+                    object: ObjectMeta {
+                        location: Default::default(),
+                        last_modified: Default::default(),
+                        size: 0,
+                        e_tag: None,
+                        version: None,
+                    },
                 });
             }
             table.missing_ranges(desired)

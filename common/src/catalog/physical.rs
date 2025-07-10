@@ -34,7 +34,7 @@ use crate::{
     metadata::{
         FileMetadata,
         parquet::{PARQUET_METADATA_KEY, ParquetMeta},
-        segments::{BlockRange, TableRanges},
+        segments::{Segment, TableSegments},
     },
     store::{Store, infer_object_store},
 };
@@ -401,8 +401,8 @@ impl PhysicalTable {
     /// contiguous range of block numbers starting from the lowest start block. Ok(None) is
     /// returned if no block range has been synced.
     pub async fn synced_range(&self) -> Result<Option<RangeInclusive<BlockNum>>, BoxError> {
-        let ranges = self.ranges().await?;
-        Ok(ranges.canonical_range().map(|r| r.numbers))
+        let segments = self.segments().await?;
+        Ok(segments.canonical_range().map(|r| r.numbers))
     }
 
     /// Return the most recent block number that has been synced for this table.
@@ -414,16 +414,17 @@ impl PhysicalTable {
         &self,
         desired: RangeInclusive<BlockNum>,
     ) -> Result<Vec<RangeInclusive<BlockNum>>, BoxError> {
-        let ranges = self.ranges().await?;
-        Ok(ranges.missing_ranges(desired))
+        let segments = self.segments().await?;
+        Ok(segments.missing_ranges(desired))
     }
 
-    async fn ranges(&self) -> Result<TableRanges, BoxError> {
-        let block_ranges: Vec<BlockRange> = self
+    async fn segments(&self) -> Result<TableSegments, BoxError> {
+        let metadata_segments: Vec<Segment> = self
             .stream_file_metadata()
             .map(|result| {
                 let FileMetadata {
                     file_name,
+                    object_meta,
                     parquet_meta: ParquetMeta { mut ranges, .. },
                     ..
                 } = result?;
@@ -432,15 +433,18 @@ impl PhysicalTable {
                         "expected exactly 1 range for {file_name}"
                     )));
                 }
-                Ok(ranges.remove(0))
+                Ok(Segment {
+                    range: ranges.remove(0),
+                    object: object_meta,
+                })
             })
             .try_collect()
             .await?;
-        let mut ranges: TableRanges = Default::default();
-        for range in block_ranges {
-            ranges.insert(range);
+        let mut segments: TableSegments = Default::default();
+        for segment in metadata_segments {
+            segments.insert(segment);
         }
-        Ok(ranges)
+        Ok(segments)
     }
 }
 
