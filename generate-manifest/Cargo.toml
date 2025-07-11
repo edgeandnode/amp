@@ -9,4 +9,6 @@ serde_json.workspace = true
 tracing.workspace = true
 common = { path = "../common" }
 dataset-store = { path = "../dataset-store" }
+evm-rpc-datasets = { path = "../evm-rpc-datasets" }
+firehose-datasets = { path = "../firehose-datasets" }
 thiserror.workspace = true
