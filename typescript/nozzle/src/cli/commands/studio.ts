@@ -64,20 +64,64 @@ const DatasetWorksFileRouter = Effect.gen(function*() {
   )
 })
 
-export class FileChangeStreamItem extends Schema.Class<FileChangeStreamItem>("/nozzle/models/FileChangeStreamItem")({
-  file: Schema.NonEmptyTrimmedString,
+export class QueryableEvent extends Schema.Class<QueryableEvent>("/nozzle/models/events/QueryableEvent")({
+  name: Schema.NonEmptyTrimmedString.annotations({
+    identifier: "QueryableEvent.name",
+    description: "Parsed event name",
+    examples: ["Count", "Transfer"],
+  }),
+  params: Schema.Array(Schema.Struct({
+    name: Schema.NonEmptyTrimmedString.annotations({
+      identifier: "QueryableEvent.params.name",
+      description: "Name of the emitted event param",
+    }),
+    datatype: Schema.NonEmptyTrimmedString.annotations({
+      identifier: "QueryableEvent.params.datatype",
+      description: "Type of the emitted event param",
+      examples: ["uint256", "bytes32", "address"],
+    }),
+    indexed: Schema.NullOr(Schema.Boolean).annotations({
+      identifier: "QueryableEvent.params.indexed",
+      description: "If true, the emitted parameter is indexed",
+    }),
+  })).annotations({
+    identifier: "QueryableEvent.params",
+    description: "The parameters emitted with the event",
+    examples: [[{ name: "count", datatype: "uint256", indexed: false }], [
+      {
+        name: "from",
+        datatype: "address",
+        indexed: true,
+      },
+      {
+        name: "to",
+        datatype: "address",
+        indexed: true,
+      },
+      {
+        name: "value",
+        datatype: "uint256",
+        indexed: null,
+      },
+    ]],
+  }),
+  signature: Schema.NonEmptyTrimmedString.annotations({
+    identifier: "QueryableEvent.signature",
+    description: "The event signature, including the event params.",
+    examples: ["Count(uint256 count)", "Transfer(address indexed from, address indexed to, uint256 value)"],
+  }),
 }) {}
 
 class NozzleStudioApiRouter extends HttpApiGroup.make("NozzleStudioApi").add(
-  HttpApiEndpoint.get("DatasetChanges")`/dataset/changes`
+  HttpApiEndpoint.get("QueryableEventStream")`/events/stream`
     .addSuccess(
       Schema.String.pipe(HttpApiSchema.withEncoding({
         kind: "Json",
-        contentType: "application/octet-stream",
+        contentType: "text/event-stream",
       })),
     )
     .annotateContext(OpenApi.annotations({
-      title: "File Changes SSE",
+      title: "Queryable Smart Contract events stream",
       version: "v1",
       description:
         "Listens to file changes on the smart contracts/abis and emits updates of the available events to query",
@@ -86,12 +130,28 @@ class NozzleStudioApiRouter extends HttpApiGroup.make("NozzleStudioApi").add(
 
 class NozzleStudioApi extends HttpApi.make("NozzleStudioApi").add(NozzleStudioApiRouter).prefix("/api") {}
 
-const fileChangeStream = Stream.make(
-  FileChangeStreamItem.make({ file: "/contracts/stc/Counter.sol" }),
-  FileChangeStreamItem.make({ file: "/contracts/stc/Counter.sol" }),
+const queryableEventStream = Stream.make(
+  QueryableEvent.make({
+    name: "Count",
+    params: [{ name: "count", datatype: "uint256", indexed: false }],
+    signature: "Count(uint256 count)",
+  }),
+  QueryableEvent.make({
+    name: "Transfer",
+    params: [
+      { name: "from", datatype: "address", indexed: true },
+      { name: "to", datatype: "address", indexed: true },
+      { name: "value", datatype: "uint256", indexed: false },
+    ],
+    signature: "Transfer(address indexed from, address indexed to, uint256 value)",
+  }),
 ).pipe(
   Stream.schedule(Schedule.spaced("500 millis")),
-  Stream.map((item) => new TextEncoder().encode(item.file)),
+  Stream.map((item) => {
+    const jsonData = JSON.stringify(item)
+    const sseData = `data: ${jsonData}\n\n`
+    return new TextEncoder().encode(sseData)
+  }),
 )
 
 const NozzleStudioApiLive = HttpApiBuilder.group(
@@ -99,10 +159,15 @@ const NozzleStudioApiLive = HttpApiBuilder.group(
   "NozzleStudioApi",
   (handlers) =>
     handlers.handle(
-      "DatasetChanges",
+      "QueryableEventStream",
       () =>
         Effect.gen(function*() {
-          return yield* HttpServerResponse.stream(fileChangeStream)
+          return yield* HttpServerResponse.stream(queryableEventStream).pipe(
+            HttpServerResponse.setHeaders({
+              "Cache-Control": "no-cache",
+              "Connection": "keep-alive",
+            }),
+          )
         }),
     ),
 )
