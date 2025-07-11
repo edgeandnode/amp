@@ -11,7 +11,8 @@ use async_stream::stream;
 use async_udf::functions::AsyncScalarUDF;
 use common::{
     BlockNum, BlockStreamer, BoxError, Dataset, DatasetValue, LogicalCatalog, QueryContext,
-    RawDatasetRows, Store,
+    RawDatasetRows, SPECIAL_BLOCK_NUM, Store,
+    arrow::datatypes::DataType,
     catalog::physical::{Catalog, PhysicalTable},
     config::Config,
     evm::udfs::EthCall,
@@ -52,6 +53,12 @@ pub enum Error {
 
     #[error("dataset field 'name = \"{0}\"' does not match filename '{1}'")]
     NameMismatch(String, String),
+
+    #[error("Schema mismatch")]
+    SchemaMismatch,
+
+    #[error("`schema` field is missing, but required for dataset kind {dataset_kind}")]
+    SchemaMissing { dataset_kind: DatasetKind },
 
     #[error("unsupported table name: {0}")]
     UnsupportedName(BoxError),
@@ -301,8 +308,38 @@ impl DatasetStore {
         let kind = DatasetKind::from_str(&common.kind)?;
         let value = raw_dataset.deserialize()?;
         let dataset = match kind {
-            DatasetKind::EvmRpc => evm_rpc_datasets::dataset(value)?,
-            DatasetKind::Firehose => firehose_datasets::evm::dataset(value)?,
+            DatasetKind::EvmRpc => {
+                let schema_built_in =
+                    vec_table_to_schema(evm_rpc_datasets::tables::all(&common.network));
+
+                match common.schema {
+                    Some(loaded_schema) => {
+                        if loaded_schema != schema_built_in {
+                            return Err(Error::SchemaMismatch);
+                        }
+                    }
+                    None => {
+                        return Err(Error::SchemaMissing { dataset_kind: kind });
+                    }
+                }
+                evm_rpc_datasets::dataset(value)?
+            }
+            DatasetKind::Firehose => {
+                let schema_built_in =
+                    vec_table_to_schema(firehose_datasets::evm::tables::all(&common.network));
+
+                match common.schema {
+                    Some(loaded_schema) => {
+                        if loaded_schema != schema_built_in {
+                            return Err(Error::SchemaMismatch);
+                        }
+                    }
+                    None => {
+                        return Err(Error::SchemaMissing { dataset_kind: kind });
+                    }
+                }
+                firehose_datasets::evm::dataset(value)?
+            }
             DatasetKind::Substreams => substreams_datasets::dataset(value).await?,
             DatasetKind::Sql => self.clone().sql_dataset(value).await?.dataset,
             DatasetKind::Manifest => {
@@ -438,15 +475,12 @@ impl DatasetStore {
             })
             .await?;
 
-        let common = match raw_dataset {
+        let common: DatasetDefsCommon = match raw_dataset {
             RawDataset::Toml(ref raw) => {
-                let toml = toml::Value::from_str(raw)?;
-                DatasetDefsCommon::deserialize(toml)?
+                tracing::warn!("TOML dataset format is deprecated!");
+                toml::from_str::<DatasetDefsCommon>(raw)?.into()
             }
-            RawDataset::Json(ref raw) => {
-                let json = serde_json::Value::from_str(raw)?;
-                DatasetDefsCommon::deserialize(json)?
-            }
+            RawDataset::Json(ref raw) => serde_json::from_str::<DatasetDefsCommon>(raw)?.into(),
         };
 
         if common.name != dataset_name {
@@ -634,13 +668,18 @@ impl RawDataset {
     }
 }
 
-/// All dataset definitions must have a kind, network and name. The name must match the filename.
+/// All dataset definitions must have a kind, network and name. The name must match the filename. Schema is optional for TOML dataset format.
 #[derive(Deserialize, Serialize)]
 pub struct DatasetDefsCommon {
     pub kind: String,
     pub network: String,
     pub name: String,
+    pub schema: Option<SerializableSchema>,
 }
+
+/// A serializable representation of a collection of [`arrow::datatypes::Schema`]s, without any metadata.
+pub type SerializableSchema =
+    std::collections::HashMap<String, std::collections::HashMap<String, DataType>>;
 
 /// All providers definitions must have a kind and network.
 #[derive(Deserialize)]
@@ -724,4 +763,22 @@ impl BlockStreamer for BlockStreamClient {
             Self::Substreams(client) => client.latest_block(finalized).await,
         }
     }
+}
+
+pub fn vec_table_to_schema(tables: Vec<common::catalog::logical::Table>) -> SerializableSchema {
+    tables
+        .into_iter()
+        .map(|table| {
+            let inner_map = table
+                .schema()
+                .fields()
+                .iter()
+                .filter(|field| field.name() != SPECIAL_BLOCK_NUM)
+                .fold(std::collections::HashMap::new(), |mut acc, field| {
+                    acc.insert(field.name().clone(), field.data_type().clone());
+                    acc
+                });
+            (table.name().to_string().clone(), inner_map)
+        })
+        .collect()
 }

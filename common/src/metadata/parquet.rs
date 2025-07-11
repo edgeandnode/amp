@@ -20,7 +20,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Timestamp, metadata::range::BlockRange};
+use crate::{Timestamp, metadata::segments::BlockRange};
 
 pub const PARQUET_METADATA_KEY: &'static str = "nozzle_metadata";
 

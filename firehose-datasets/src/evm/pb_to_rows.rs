@@ -6,7 +6,7 @@ use common::{
         blocks::{Block, BlockRowsBuilder},
         logs::{Log, LogRowsBuilder},
     },
-    metadata::range::BlockRange,
+    metadata::segments::BlockRange,
 };
 use thiserror::Error;
 
