@@ -1,7 +1,20 @@
 import { Command, Options } from "@effect/cli"
-import { HttpMiddleware, HttpRouter, HttpServer, HttpServerResponse, Path } from "@effect/platform"
+import {
+  HttpApi,
+  HttpApiBuilder,
+  HttpApiEndpoint,
+  HttpApiGroup,
+  HttpApiScalar,
+  HttpApiSchema,
+  HttpMiddleware,
+  HttpRouter,
+  HttpServer,
+  HttpServerResponse,
+  OpenApi,
+  Path,
+} from "@effect/platform"
 import { NodeHttpServer } from "@effect/platform-node"
-import { Console, Data, Effect, Layer, Option, String as EffectString, Struct } from "effect"
+import { Console, Data, Effect, Layer, Option, Schedule, Schema, Stream, String as EffectString, Struct } from "effect"
 import { createServer } from "node:http"
 import { fileURLToPath } from "node:url"
 import open, { type AppName, apps } from "open"
@@ -51,10 +64,64 @@ const DatasetWorksFileRouter = Effect.gen(function*() {
   )
 })
 
+export class FileChangeStreamItem extends Schema.Class<FileChangeStreamItem>("/nozzle/models/FileChangeStreamItem")({
+  file: Schema.NonEmptyTrimmedString,
+}) {}
+
+class NozzleStudioApiRouter extends HttpApiGroup.make("NozzleStudioApi").add(
+  HttpApiEndpoint.get("DatasetChanges")`/dataset/changes`
+    .addSuccess(
+      Schema.String.pipe(HttpApiSchema.withEncoding({
+        kind: "Json",
+        contentType: "application/octet-stream",
+      })),
+    )
+    .annotateContext(OpenApi.annotations({
+      title: "File Changes SSE",
+      version: "v1",
+      description:
+        "Listens to file changes on the smart contracts/abis and emits updates of the available events to query",
+    })),
+).prefix("/v1") {}
+
+class NozzleStudioApi extends HttpApi.make("NozzleStudioApi").add(NozzleStudioApiRouter).prefix("/api") {}
+
+const fileChangeStream = Stream.make(
+  FileChangeStreamItem.make({ file: "/contracts/stc/Counter.sol" }),
+  FileChangeStreamItem.make({ file: "/contracts/stc/Counter.sol" }),
+).pipe(
+  Stream.schedule(Schedule.spaced("500 millis")),
+  Stream.map((item) => new TextEncoder().encode(item.file)),
+)
+
+const NozzleStudioApiLive = HttpApiBuilder.group(
+  NozzleStudioApi,
+  "NozzleStudioApi",
+  (handlers) =>
+    handlers.handle(
+      "DatasetChanges",
+      () =>
+        Effect.gen(function*() {
+          return yield* HttpServerResponse.stream(fileChangeStream)
+        }),
+    ),
+)
+const NozzleStudioApiLayer = Layer.merge(HttpApiBuilder.middlewareCors(), HttpApiScalar.layer({ path: "/api/docs" }))
+  .pipe(
+    Layer.provideMerge(HttpApiBuilder.api(NozzleStudioApi)),
+    Layer.provide(NozzleStudioApiLive),
+  )
+const ApiLive = HttpApiBuilder.httpApp.pipe(
+  Effect.provide(Layer.mergeAll(NozzleStudioApiLayer, HttpApiBuilder.Router.Live, HttpApiBuilder.Middleware.layer)),
+)
+
 const Server = Effect.all({
+  api: ApiLive,
   files: DatasetWorksFileRouter,
 }).pipe(
-  Effect.map(({ files }) => HttpRouter.empty.pipe(HttpRouter.mount("/", files))),
+  Effect.map(({ api, files }) =>
+    HttpRouter.empty.pipe(HttpRouter.mount("/", files), HttpRouter.mountApp("/api", api, { includePrefix: true }))
+  ),
   Effect.map((router) => HttpServer.serve(HttpMiddleware.logger)(router)),
   Layer.unwrapEffect,
 )
