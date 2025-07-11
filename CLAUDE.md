@@ -175,7 +175,7 @@ curl -X POST http://localhost:1603 --data "select * from eth_rpc.logs limit 10"
 2. Maintain type safety
 3. Prefer async operations
 4. Always run `cargo test`
-5. Always run `cargo fmt`
+5. Always run `cargo +nightly fmt`
 6. Fix all warnings
 
 ### SQL Naming
