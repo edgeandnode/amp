@@ -159,7 +159,11 @@ impl Service {
     pub async fn new(config: Arc<Config>, metadata_db: Arc<MetadataDb>) -> Result<Self, Error> {
         let env = config.make_query_env().map_err(Error::ExecutionError)?;
         let dataset_store = DatasetStore::new(config.clone(), metadata_db);
-        Ok(Self { config, env, dataset_store })
+        Ok(Self {
+            config,
+            env,
+            dataset_store,
+        })
     }
 
     pub async fn execute_query(&self, sql: &str) -> Result<SendableRecordBatchStream, Error> {
@@ -233,10 +237,16 @@ impl Service {
             };
 
             let initial_state = StreamState::new(watermark_stream, earliest_block);
-            let query =
-                StreamingQuery::spawn(initial_state, ctx.clone(), plan, None, false, self.config.microbatch_max_interval)
-                    .await
-                    .map_err(|e| Error::StreamingExecutionError(e.to_string()))?;
+            let query = StreamingQuery::spawn(
+                initial_state,
+                ctx.clone(),
+                plan,
+                None,
+                false,
+                self.config.microbatch_max_interval,
+            )
+            .await
+            .map_err(|e| Error::StreamingExecutionError(e.to_string()))?;
 
             Ok(query.as_record_batch_stream())
         }
