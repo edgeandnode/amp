@@ -3,15 +3,17 @@
 Unit tests for Redis loader implementation.
 """
 
-import pytest
 from unittest.mock import Mock, patch
+
+import pytest
 import redis
 
 try:
-    from src.nozzle.loaders.implementations.redis_loader import RedisLoader, RedisDataStructure, RedisConnectionConfig
-    from src.nozzle.loaders.base import LoadResult, LoadMode
+    from src.nozzle.loaders.base import LoadMode, LoadResult
+    from src.nozzle.loaders.implementations.redis_loader import RedisConnectionConfig, RedisDataStructure, RedisLoader
 except ImportError:
-    pytest.skip("nozzle modules not available", allow_module_level=True)
+    pytest.skip('nozzle modules not available', allow_module_level=True)
+
 
 @pytest.mark.unit
 class TestRedisLoader:
@@ -20,36 +22,15 @@ class TestRedisLoader:
     @pytest.fixture
     def mock_config(self):
         """Mock Redis configuration"""
-        return {
-            'host': 'localhost',
-            'port': 6379,
-            'db': 0,
-            'password': 'testpass',
-            'data_structure': 'hash',
-            'key_pattern': '{table}:{id}',
-            'batch_size': 1000,
-            'ttl': 3600,
-            'pipeline_size': 500
-        }
+        return {'host': 'localhost', 'port': 6379, 'db': 0, 'password': 'testpass', 'data_structure': 'hash', 'key_pattern': '{table}:{id}', 'batch_size': 1000, 'ttl': 3600, 'pipeline_size': 500}
 
     @pytest.fixture
     def mock_redis_client(self):
         """Mock Redis client"""
         client = Mock()
         client.ping.return_value = True  # Redis ping returns True in redis-py
-        client.info.return_value = {
-            'redis_version': '7.0.0',
-            'used_memory_human': '1.2M',
-            'connected_clients': 1,
-            'total_commands_processed': 100,
-            'keyspace_hits': 50,
-            'keyspace_misses': 10,
-            'uptime_in_seconds': 3600
-        }
-        client.config_get.return_value = {
-            'maxmemory': '1GB',
-            'maxmemory-policy': 'allkeys-lru'
-        }
+        client.info.return_value = {'redis_version': '7.0.0', 'used_memory_human': '1.2M', 'connected_clients': 1, 'total_commands_processed': 100, 'keyspace_hits': 50, 'keyspace_misses': 10, 'uptime_in_seconds': 3600}
+        client.config_get.return_value = {'maxmemory': '1GB', 'maxmemory-policy': 'allkeys-lru'}
 
         # Mock pipeline
         pipeline = Mock()
@@ -111,7 +92,7 @@ class TestRedisLoader:
     @patch('src.nozzle.loaders.implementations.redis_loader.redis.ConnectionPool')
     def test_connect_failure(self, mock_pool_class, mock_config):
         """Test connection failure"""
-        mock_pool_class.side_effect = redis.ConnectionError("Connection failed")
+        mock_pool_class.side_effect = redis.ConnectionError('Connection failed')
 
         loader = RedisLoader(mock_config)
 
@@ -172,11 +153,7 @@ class TestRedisLoader:
         mock_client.pipeline.return_value = mock_pipeline
         loader.redis_client = mock_client
 
-        data_dict = {
-            'id': [1, 2, 3],
-            'name': ['Alice', 'Bob', 'Charlie'],
-            'score': [85.5, 92.0, 78.5]
-        }
+        data_dict = {'id': [1, 2, 3], 'name': ['Alice', 'Bob', 'Charlie'], 'score': [85.5, 92.0, 78.5]}
 
         rows_loaded = loader._load_as_hashes_optimized(data_dict, 3, 'users')
 
@@ -195,11 +172,7 @@ class TestRedisLoader:
         mock_client.pipeline.return_value = mock_pipeline
         loader.redis_client = mock_client
 
-        data_dict = {
-            'id': [1, 2],
-            'name': ['Alice', 'Bob'],
-            'active': [True, False]
-        }
+        data_dict = {'id': [1, 2], 'name': ['Alice', 'Bob'], 'active': [True, False]}
 
         rows_loaded = loader._load_as_strings_optimized(data_dict, 2, 'users')
 
@@ -229,7 +202,7 @@ class TestRedisLoader:
         # Verify the method was called with the correct arguments
         call_args = loader._load_as_hashes_optimized.call_args
         data_dict = call_args[0][0]  # First argument should be data_dict
-        num_rows = call_args[0][1]    # Second argument should be num_rows
+        num_rows = call_args[0][1]  # Second argument should be num_rows
         table_name = call_args[0][2]  # Third argument should be table_name
 
         assert isinstance(data_dict, dict)
@@ -288,14 +261,14 @@ class TestRedisLoader:
 
         # Mock Redis client that raises exception
         mock_client = Mock()
-        mock_client.pipeline.side_effect = redis.ConnectionError("Connection failed")
+        mock_client.pipeline.side_effect = redis.ConnectionError('Connection failed')
         loader.redis_client = mock_client
 
         result = loader.load_batch(test_batch, 'test_table')
 
         assert not result.success
         assert result.rows_loaded == 0
-        assert result.error == "Connection failed"
+        assert result.error == 'Connection failed'
 
     def test_clear_data(self, mock_config):
         """Test clearing data for overwrite mode"""
@@ -324,19 +297,8 @@ class TestRedisLoader:
 
         mock_client = Mock()
         mock_client.ping.return_value = True
-        mock_client.info.return_value = {
-            'redis_version': '7.0.0',
-            'used_memory_human': '1.5M',
-            'connected_clients': 2,
-            'total_commands_processed': 1000,
-            'keyspace_hits': 800,
-            'keyspace_misses': 200,
-            'uptime_in_seconds': 7200
-        }
-        mock_client.config_get.return_value = {
-            'maxmemory': '2GB',
-            'maxmemory-policy': 'allkeys-lru'
-        }
+        mock_client.info.return_value = {'redis_version': '7.0.0', 'used_memory_human': '1.5M', 'connected_clients': 2, 'total_commands_processed': 1000, 'keyspace_hits': 800, 'keyspace_misses': 200, 'uptime_in_seconds': 7200}
+        mock_client.config_get.return_value = {'maxmemory': '2GB', 'maxmemory-policy': 'allkeys-lru'}
         mock_client.set.return_value = True
         mock_client.get.return_value = b'test_value'
         mock_client.delete.return_value = True
@@ -400,6 +362,7 @@ class TestRedisLoader:
         loader.connect.assert_called_once()
         loader.disconnect.assert_called_once()
 
+
 @pytest.mark.unit
 class TestRedisDataStructures:
     """Test different Redis data structures"""
@@ -407,15 +370,7 @@ class TestRedisDataStructures:
     @pytest.fixture
     def loader_configs(self):
         """Different loader configurations for each data structure"""
-        return {
-            'hash': {'host': 'localhost', 'data_structure': 'hash'},
-            'string': {'host': 'localhost', 'data_structure': 'string'},
-            'stream': {'host': 'localhost', 'data_structure': 'stream'},
-            'set': {'host': 'localhost', 'data_structure': 'set'},
-            'sorted_set': {'host': 'localhost', 'data_structure': 'sorted_set'},
-            'list': {'host': 'localhost', 'data_structure': 'list'},
-            'json': {'host': 'localhost', 'data_structure': 'json'}
-        }
+        return {'hash': {'host': 'localhost', 'data_structure': 'hash'}, 'string': {'host': 'localhost', 'data_structure': 'string'}, 'stream': {'host': 'localhost', 'data_structure': 'stream'}, 'set': {'host': 'localhost', 'data_structure': 'set'}, 'sorted_set': {'host': 'localhost', 'data_structure': 'sorted_set'}, 'list': {'host': 'localhost', 'data_structure': 'list'}, 'json': {'host': 'localhost', 'data_structure': 'json'}}
 
     def test_hash_structure_initialization(self, loader_configs):
         """Test hash data structure initialization"""
