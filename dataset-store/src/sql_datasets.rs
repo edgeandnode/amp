@@ -38,7 +38,7 @@ impl SqlDataset {
 pub const DATASET_KIND: &str = "sql";
 
 #[derive(Debug, Deserialize)]
-pub(super) struct DatasetDef {
+struct DatasetDef {
     pub kind: String,
     pub network: String,
     pub name: String,
