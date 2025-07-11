@@ -303,7 +303,7 @@ async fn sql_dataset_input_batch_size() {
         .await
         .unwrap();
 
-    // 3. Execute dump of sql_stream_ds with input_batch_size_blocks=1
+    // 3. Execute dump of sql_stream_ds with microbatch_max_interval=1
     let dataset_name = "sql_stream_ds";
 
     test_support::dump_dataset(&test_env.config, dataset_name, start, end, 1, Some(1))
@@ -329,7 +329,7 @@ async fn sql_dataset_input_batch_size() {
     let file_count = table.files().await.unwrap().len();
 
     // 5. With batch size 1 and 4 blocks, we expect 4 files (even if some are empty) since
-    // input_batch_size_blocks=1 should create one file per block even_blocks only includes even
+    // microbatch_max_interval=1 should create one file per block even_blocks only includes even
     // block numbers, so we expect 2 files with data for blocks 15000000 and 15000002, plus empty
     // files for odd blocks
     assert_eq!(file_count, 4);

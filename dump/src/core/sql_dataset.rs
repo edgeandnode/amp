@@ -58,7 +58,7 @@
 //!   computing the complement of already-processed ranges within the target range.
 //!
 //! - **Batch Processing**: Splits large unprocessed ranges into smaller batches based
-//!   on the configured `input_batch_size_blocks` parameter. This prevents memory
+//!   on the configured `microbatch_max_interval` parameter. This prevents memory
 //!   exhaustion and allows for better progress tracking.
 //!
 //! - **Sequential Batch Execution**: Processes batches sequentially within each table
@@ -140,7 +140,7 @@ pub async fn dump_table(
     env: &QueryEnv,
     table: Arc<PhysicalTable>,
     parquet_opts: &ParquetWriterProperties,
-    input_batch_size_blocks: u64,
+    microbatch_max_interval: u64,
     (start, end): (i64, Option<i64>),
 ) -> Result<(), BoxError> {
     let dataset_name = dataset.dataset.name.as_str();
@@ -228,7 +228,7 @@ pub async fn dump_table(
                     range,
                     table.clone(),
                     &parquet_opts,
-                    input_batch_size_blocks,
+                    microbatch_max_interval,
                 )
                 .await?;
             }
@@ -262,7 +262,7 @@ pub async fn dump_table(
                 range,
                 physical_table,
                 &parquet_opts,
-                input_batch_size_blocks,
+                microbatch_max_interval,
             )
             .await?;
         }

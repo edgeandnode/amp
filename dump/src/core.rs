@@ -29,7 +29,7 @@ pub async fn dump_tables(
     tables: &[Arc<PhysicalTable>],
     n_jobs: u16,
     partition_size: u64,
-    input_batch_size_blocks: u64,
+    microbatch_max_interval: u64,
     parquet_opts: &ParquetWriterProperties,
     range: (i64, Option<i64>),
 ) -> Result<(), BoxError> {
@@ -47,7 +47,7 @@ pub async fn dump_tables(
         dump_user_tables(
             ctx,
             tables,
-            input_batch_size_blocks,
+            microbatch_max_interval,
             n_jobs,
             parquet_opts,
             range,
@@ -121,7 +121,7 @@ pub async fn dump_raw_tables(
 pub async fn dump_user_tables(
     ctx: Ctx,
     tables: &[Arc<PhysicalTable>],
-    input_batch_size_blocks: u64,
+    microbatch_max_interval: u64,
     n_jobs: u16,
     parquet_opts: &ParquetWriterProperties,
     range: (i64, Option<i64>),
@@ -161,7 +161,7 @@ pub async fn dump_user_tables(
             &env,
             table.clone(),
             parquet_opts,
-            input_batch_size_blocks,
+            microbatch_max_interval,
             range,
         )
         .await?;
