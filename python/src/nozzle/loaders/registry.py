@@ -1,7 +1,7 @@
 import importlib
-import pkgutil
 import logging
-from typing import Any, Dict, Type, List
+import pkgutil
+from typing import Any, Dict, List, Type
 
 from .base import DataLoader
 

@@ -1,10 +1,12 @@
+import logging
+import time
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional, Iterator
 from dataclasses import dataclass, field
 from enum import Enum
+from logging import Logger
+from typing import Any, Dict, Iterator, Optional
+
 import pyarrow as pa
-import time
-import logging
 
 
 class LoadMode(Enum):
@@ -26,7 +28,7 @@ class LoadResult:
     error: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
 
-    def __str__(self):
+    def __str__(self) -> str:
         if self.success:
             return f'✅ Loaded {self.rows_loaded} rows to {self.table_name} in {self.duration:.2f}s'
         else:
@@ -48,11 +50,16 @@ class LoadConfig:
 class DataLoader(ABC):
     """Abstract base class for all data loaders"""
 
-    def __init__(self, config: Dict[str, Any]):
-        self.config = config
-        self.logger = logging.getLogger(f'{self.__class__.__name__}')
-        self._connection = None
-        self._is_connected = False
+    def __init__(self, config: Dict[str, Any]) -> None:
+        self.config: Dict[str, Any] = config
+        self.logger: Logger = logging.getLogger(f'{self.__class__.__name__}')
+        self._connection: Optional[Any] = None
+        self._is_connected: bool = False
+
+    @property
+    def is_connected(self) -> bool:
+        """Check if the loader is connected to the target system."""
+        return self._is_connected
 
     @abstractmethod
     def connect(self) -> None:
@@ -81,26 +88,28 @@ class DataLoader(ABC):
 
         total_rows = 0
         start_time = time.time()
+        batch_count = 0
 
         try:
             for batch in batch_iterator:
+                batch_count += 1
                 result = self.load_batch(batch, table_name, **kwargs)
 
                 if result.success:
                     total_rows += result.rows_loaded
-                    self.logger.info(f'Loaded batch: {result.rows_loaded} rows in {result.duration:.2f}s')
+                    self.logger.info(f'Loaded batch {batch_count}: {result.rows_loaded} rows in {result.duration:.2f}s')
                 else:
-                    self.logger.error(f'Failed to load batch: {result.error}')
+                    self.logger.error(f'Failed to load batch {batch_count}: {result.error}')
 
                 yield result
 
         except Exception as e:
-            self.logger.error(f'Stream loading failed: {str(e)}')
-            yield LoadResult(rows_loaded=0, duration=time.time() - start_time, table_name=table_name, loader_type=self.__class__.__name__, success=False, error=str(e))
+            self.logger.error(f'Stream loading failed after {batch_count} batches: {str(e)}')
+            yield LoadResult(rows_loaded=total_rows, duration=time.time() - start_time, table_name=table_name, loader_type=self.__class__.__name__, success=False, error=str(e), metadata={'batches_processed': batch_count})
 
-    def __enter__(self):
+    def __enter__(self) -> 'DataLoader':
         self.connect()
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type: Optional[type], exc_val: Optional[BaseException], exc_tb: Optional[Any]) -> None:
         self.disconnect()

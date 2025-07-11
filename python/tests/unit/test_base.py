@@ -1,4 +1,5 @@
 # tests/unit/test_base.py
+
 """
 Unit tests for base classes and utilities.
 Updated for nozzle project structure.
@@ -7,13 +8,12 @@ Updated for nozzle project structure.
 import pytest
 
 try:
-    from src.nozzle.loaders.base import LoadResult, LoadConfig, LoadMode
+    from src.nozzle.loaders.base import LoadConfig, LoadMode, LoadResult
 except ImportError:
     # Skip tests if modules not available
     pytest.skip('nozzle modules not available', allow_module_level=True)
 
 from tests.fixtures.mock_clients import MockDataLoader
-from tests.fixtures.test_data import create_test_arrow_table
 
 
 @pytest.mark.unit

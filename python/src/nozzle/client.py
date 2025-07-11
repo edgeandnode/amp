@@ -1,12 +1,14 @@
+import logging
+from typing import Dict, Iterator, List, Optional, Union
+
+import pyarrow as pa
 from google.protobuf.any_pb2 import Any
 from pyarrow import flight
-import pyarrow as pa
+
 from . import FlightSql_pb2
-from .loaders.registry import create_loader, get_available_loaders
-from .loaders.base import LoadResult, LoadConfig, LoadMode
 from .config.connection_manager import ConnectionManager
-import logging
-from typing import Dict, Optional, Union, Iterator, List, Any as Anytype
+from .loaders.base import LoadConfig, LoadMode, LoadResult
+from .loaders.registry import create_loader, get_available_loaders
 
 
 class QueryBuilder:

@@ -1,15 +1,16 @@
 # nozzle/loaders/implementations/redis_loader.py
 
-import redis
+import hashlib
 import json
 import time
-import hashlib
-from typing import Dict, Any, Optional, List, Union
-from enum import Enum
-import pyarrow as pa
 from dataclasses import dataclass
+from enum import Enum
+from typing import Any, Dict, List, Optional
 
-from ..base import DataLoader, LoadResult, LoadMode
+import pyarrow as pa
+import redis
+
+from ..base import DataLoader, LoadMode, LoadResult
 
 
 class RedisDataStructure(Enum):
@@ -646,10 +647,10 @@ class RedisLoader(DataLoader):
 # Example usage and testing
 def create_comprehensive_test_data() -> pa.Table:
     """Create comprehensive test data for all Redis data structures"""
-    import pandas as pd
-    import numpy as np
-    from datetime import datetime, timedelta
     import random
+    from datetime import datetime, timedelta
+
+    import pandas as pd
 
     # Create 1000 rows of diverse data
     base_time = datetime.now()

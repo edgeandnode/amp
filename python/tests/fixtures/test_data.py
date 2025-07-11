@@ -3,13 +3,12 @@
 Test data generation utilities for data loader tests.
 """
 
-import pyarrow as pa
-import pandas as pd
-from datetime import datetime, date, timedelta
-from decimal import Decimal
 import random
-import string
-from typing import Optional
+from datetime import date, datetime, timedelta
+from decimal import Decimal
+
+import pandas as pd
+import pyarrow as pa
 
 
 def create_test_arrow_table(num_rows: int = 1000, include_nulls: bool = True, include_complex_types: bool = True) -> pa.Table:

@@ -1,21 +1,21 @@
-from psycopg2.pool import ThreadedConnectionPool
-import pyarrow as pa
-from pyarrow import csv
-import io
 import time
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional, Set, Union
 
-from ..base import DataLoader, LoadResult, LoadMode
+import pyarrow as pa
+from psycopg2.pool import ThreadedConnectionPool
+
+from ..base import DataLoader, LoadMode, LoadResult
+from ._postgres_helpers import has_binary_columns, prepare_csv_data, prepare_insert_data
 
 
 class PostgreSQLLoader(DataLoader):
-    """PostgreSQL data loader"""
+    """PostgreSQL data loader with zero-copy operations and connection pooling."""
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any]) -> None:
         super().__init__(config)
-        self.pool = None
-        self._default_batch_size = config.get('batch_size', 10000)
-        self._created_tables = set()  # Track tables we've already created
+        self.pool: Optional[ThreadedConnectionPool] = None
+        self._default_batch_size: int = config.get('batch_size', 10000)
+        self._created_tables: Set[str] = set()  # Track tables we've already created
 
     def connect(self) -> None:
         """Establish connection pool to PostgreSQL"""
@@ -121,149 +121,31 @@ class PostgreSQLLoader(DataLoader):
             self.logger.error(f'Failed to load table: {str(e)}')
             return LoadResult(rows_loaded=0, duration=time.time() - start_time, table_name=table_name, loader_type='postgresql', success=False, error=str(e))
 
-    def _copy_arrow_batch(self, cursor, batch: pa.RecordBatch, table_name: str, mode: LoadMode):
+    def _copy_arrow_batch(self, cursor: Any, batch: pa.RecordBatch, table_name: str, mode: LoadMode) -> None:
         """Use PostgreSQL COPY for efficient data loading directly from Arrow RecordBatch"""
+        self._copy_arrow_data(cursor, batch, table_name, mode)
 
-        # Handle different load modes
-        if mode == LoadMode.OVERWRITE:
-            cursor.execute(f'TRUNCATE TABLE {table_name}')
-
-        # Check if we have binary columns that need special handling
-        has_binary = any(pa.types.is_binary(field.type) or pa.types.is_large_binary(field.type) or pa.types.is_fixed_size_binary(field.type) for field in batch.schema)
-
-        if has_binary:
-            # Use INSERT statements for binary data
-            self._insert_arrow_batch(cursor, batch, table_name)
-        else:
-            # Use efficient CSV COPY for non-binary data
-            self._csv_copy_arrow_batch(cursor, batch, table_name)
-
-    def _csv_copy_arrow_batch(self, cursor, batch: pa.RecordBatch, table_name: str):
-        """Use CSV COPY for non-binary data (most efficient)"""
-        # Use Arrow's built-in CSV writer for maximum efficiency (zero-copy)
-        output = io.BytesIO()
-
-        # Create CSV write options optimized for PostgreSQL COPY
-        try:
-            csv_write_options = csv.WriteOptions(
-                include_header=False,
-                delimiter='\t',
-                null_string='\\N',  # PostgreSQL null representation
-                quoting_style='none',  # No quotes for better performance
-            )
-        except TypeError:
-            # Fallback for older PyArrow versions that might not support all options
-            try:
-                csv_write_options = csv.WriteOptions(include_header=False, delimiter='\t')
-            except TypeError:
-                # Ultimate fallback - use default options
-                csv_write_options = csv.WriteOptions()
-
-        # Write Arrow batch directly to CSV format (zero-copy operation)
-        csv.write_csv(batch, output, write_options=csv_write_options)
-
-        # Convert to StringIO for psycopg2 compatibility
-        csv_data = output.getvalue().decode('utf-8')
-
-        # Handle null values manually if WriteOptions didn't support null_string
-        if '\\N' not in csv_data and 'None' in csv_data:
-            csv_data = csv_data.replace('None', '\\N')
-
-        csv_buffer = io.StringIO(csv_data)
-
-        # Get column names from Arrow schema
-        column_names = [field.name for field in batch.schema]
-
-        # Use PostgreSQL COPY command for maximum efficiency
-        try:
-            cursor.copy_from(csv_buffer, table_name, columns=column_names, sep='\t', null='\\N')
-        except Exception as e:
-            # Provide helpful error message for common issues
-            if 'does not exist' in str(e):
-                raise RuntimeError(f"Table '{table_name}' does not exist. Set create_table=True to auto-create. error: {e}")
-            elif 'permission denied' in str(e).lower():
-                raise RuntimeError(f"Permission denied writing to table '{table_name}'. Check user permissions.")
-            else:
-                raise RuntimeError(f'COPY operation failed: {str(e)}')
-
-    def _insert_arrow_batch(self, cursor, batch: pa.RecordBatch, table_name: str):
-        """Use INSERT statements for data with binary columns"""
-        # Convert Arrow batch to Python objects
-        data_dict = batch.to_pydict()
-
-        # Get column names
-        column_names = [field.name for field in batch.schema]
-
-        # Create INSERT statement with proper placeholder
-        placeholders = ', '.join(['%s'] * len(column_names))
-        insert_sql = f'INSERT INTO {table_name} ({", ".join(column_names)}) VALUES ({placeholders})'
-
-        # Prepare data for insertion
-        rows = []
-        for i in range(batch.num_rows):
-            row = []
-            for col_name in column_names:
-                value = data_dict[col_name][i]
-                # Convert binary data to bytes for BYTEA
-                if isinstance(value, bytes):
-                    row.append(value)
-                else:
-                    row.append(value)
-            rows.append(tuple(row))
-
-        # Use executemany for efficiency
-        try:
-            cursor.executemany(insert_sql, rows)
-        except Exception as e:
-            raise RuntimeError(f'INSERT operation failed: {str(e)}')
-
-    def _copy_arrow_table(self, cursor, table: pa.Table, table_name: str, mode: LoadMode):
+    def _copy_arrow_table(self, cursor: Any, table: pa.Table, table_name: str, mode: LoadMode) -> None:
         """Use PostgreSQL COPY for efficient data loading directly from Arrow Table"""
+        self._copy_arrow_data(cursor, table, table_name, mode)
 
+    def _copy_arrow_data(self, cursor: Any, data: Union[pa.RecordBatch, pa.Table], table_name: str, mode: LoadMode) -> None:
+        """Common method for copying Arrow data to PostgreSQL."""
         # Handle different load modes
         if mode == LoadMode.OVERWRITE:
             cursor.execute(f'TRUNCATE TABLE {table_name}')
 
         # Check if we have binary columns that need special handling
-        has_binary = any(pa.types.is_binary(field.type) or pa.types.is_large_binary(field.type) or pa.types.is_fixed_size_binary(field.type) for field in table.schema)
-
-        if has_binary:
+        if has_binary_columns(data.schema):
             # Use INSERT statements for binary data
-            self._insert_arrow_table(cursor, table, table_name)
+            self._insert_arrow_data(cursor, data, table_name)
         else:
             # Use efficient CSV COPY for non-binary data
-            self._csv_copy_arrow_table(cursor, table, table_name)
+            self._csv_copy_arrow_data(cursor, data, table_name)
 
-    def _csv_copy_arrow_table(self, cursor, table: pa.Table, table_name: str):
-        """Use CSV COPY for non-binary data (most efficient)"""
-        # Use Arrow's built-in CSV writer for maximum efficiency (zero-copy)
-        output = io.BytesIO()
-
-        # Create CSV write options optimized for PostgreSQL COPY
-        try:
-            csv_write_options = csv.WriteOptions(include_header=False, delimiter='\t', null_string='\\N', quoting_style='none')
-        except TypeError:
-            # Fallback for older PyArrow versions
-            try:
-                csv_write_options = csv.WriteOptions(include_header=False, delimiter='\t')
-            except TypeError:
-                # Ultimate fallback
-                csv_write_options = csv.WriteOptions()
-
-        # Write Arrow table directly to CSV format (zero-copy operation)
-        csv.write_csv(table, output, write_options=csv_write_options)
-
-        # Convert to StringIO for psycopg2 compatibility
-        csv_data = output.getvalue().decode('utf-8')
-
-        # Handle null values manually if needed
-        if '\\N' not in csv_data and 'None' in csv_data:
-            csv_data = csv_data.replace('None', '\\N')
-
-        csv_buffer = io.StringIO(csv_data)
-
-        # Get column names from Arrow schema
-        column_names = [field.name for field in table.schema]
+    def _csv_copy_arrow_data(self, cursor: Any, data: Union[pa.RecordBatch, pa.Table], table_name: str) -> None:
+        """Use CSV COPY for non-binary data (most efficient)."""
+        csv_buffer, column_names = prepare_csv_data(data)
 
         # Use PostgreSQL COPY command for maximum efficiency
         try:
@@ -277,30 +159,10 @@ class PostgreSQLLoader(DataLoader):
             else:
                 raise RuntimeError(f'COPY operation failed: {str(e)}')
 
-    def _insert_arrow_table(self, cursor, table: pa.Table, table_name: str):
-        """Use INSERT statements for data with binary columns"""
-        # Convert Arrow table to Python objects
-        data_dict = table.to_pydict()
-
-        # Get column names
-        column_names = [field.name for field in table.schema]
-
-        # Create INSERT statement with proper placeholder
-        placeholders = ', '.join(['%s'] * len(column_names))
-        insert_sql = f'INSERT INTO {table_name} ({", ".join(column_names)}) VALUES ({placeholders})'
-
-        # Prepare data for insertion
-        rows = []
-        for i in range(table.num_rows):
-            row = []
-            for col_name in column_names:
-                value = data_dict[col_name][i]
-                # Convert binary data to bytes for BYTEA
-                if isinstance(value, bytes):
-                    row.append(value)
-                else:
-                    row.append(value)
-            rows.append(tuple(row))
+    def _insert_arrow_data(self, cursor: Any, data: Union[pa.RecordBatch, pa.Table], table_name: str) -> None:
+        """Use INSERT statements for data with binary columns."""
+        insert_sql_template, rows = prepare_insert_data(data)
+        insert_sql = f'INSERT INTO {table_name} {insert_sql_template}'
 
         # Use executemany for efficiency
         try:
@@ -308,7 +170,7 @@ class PostgreSQLLoader(DataLoader):
         except Exception as e:
             raise RuntimeError(f'INSERT operation failed: {str(e)}')
 
-    def _create_table_from_schema(self, cursor, schema: pa.Schema, table_name: str):
+    def _create_table_from_schema(self, cursor: Any, schema: pa.Schema, table_name: str) -> None:
         """Create PostgreSQL table from Arrow schema with comprehensive type mapping"""
 
         # Check if table already exists to avoid unnecessary work

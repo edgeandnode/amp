@@ -4,18 +4,19 @@ Mock clients and components for testing the data loader framework.
 Fixed import paths for nozzle project structure.
 """
 
+from typing import Any, Dict, Optional
 from unittest.mock import Mock
+
 import pyarrow as pa
-from typing import Optional, Dict, Any
 
 # Import with proper error handling
 try:
     from src.nozzle.loaders.base import DataLoader, LoadResult
 except ImportError:
     # Provide fallback implementations for when modules aren't available
+    from abc import ABC, abstractmethod
     from dataclasses import dataclass
     from typing import Any
-    from abc import ABC, abstractmethod
 
     @dataclass
     class LoadResult:
@@ -88,7 +89,7 @@ class MockDataLoader(DataLoader):
         super().__init__(config)
         self.load_calls = []
         self.should_fail = False
-        self.fail_message = "Mock failure"
+        self.fail_message = 'Mock failure'
 
     def connect(self) -> None:
         self._is_connected = True
@@ -100,43 +101,17 @@ class MockDataLoader(DataLoader):
         self.load_calls.append(('batch', table_name, batch.num_rows))
 
         if self.should_fail:
-            return LoadResult(
-                rows_loaded=0,
-                duration=0.1,
-                table_name=table_name,
-                loader_type="mock",
-                success=False,
-                error=self.fail_message
-            )
+            return LoadResult(rows_loaded=0, duration=0.1, table_name=table_name, loader_type='mock', success=False, error=self.fail_message)
 
-        return LoadResult(
-            rows_loaded=batch.num_rows,
-            duration=0.1,
-            table_name=table_name,
-            loader_type="mock",
-            success=True
-        )
+        return LoadResult(rows_loaded=batch.num_rows, duration=0.1, table_name=table_name, loader_type='mock', success=True)
 
     def load_table(self, table: pa.Table, table_name: str, **kwargs) -> LoadResult:
         self.load_calls.append(('table', table_name, table.num_rows))
 
         if self.should_fail:
-            return LoadResult(
-                rows_loaded=0,
-                duration=0.1,
-                table_name=table_name,
-                loader_type="mock",
-                success=False,
-                error=self.fail_message
-            )
+            return LoadResult(rows_loaded=0, duration=0.1, table_name=table_name, loader_type='mock', success=False, error=self.fail_message)
 
-        return LoadResult(
-            rows_loaded=table.num_rows,
-            duration=0.1,
-            table_name=table_name,
-            loader_type="mock",
-            success=True
-        )
+        return LoadResult(rows_loaded=table.num_rows, duration=0.1, table_name=table_name, loader_type='mock', success=True)
 
 
 class MockConnectionManager:
