@@ -1,3 +1,0 @@
-kind = "evm-rpc"
-name = "anvil_rpc"
-network = "anvil"
