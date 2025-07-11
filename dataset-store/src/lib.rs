@@ -57,6 +57,9 @@ pub enum Error {
     #[error("Schema mismatch")]
     SchemaMismatch,
 
+    #[error("`schema` field is missing, but required for dataset kind {dataset_kind}")]
+    SchemaMissing { dataset_kind: DatasetKind },
+
     #[error("unsupported table name: {0}")]
     UnsupportedName(BoxError),
 
@@ -310,10 +313,14 @@ impl DatasetStore {
                     vec_table_to_schema(evm_rpc_datasets::tables::all(&common.network));
 
                 match common.schema {
-                    Some(loaded_schema) if loaded_schema != schema_built_in => {
-                        return Err(Error::SchemaMismatch);
+                    Some(loaded_schema) => {
+                        if loaded_schema != schema_built_in {
+                            return Err(Error::SchemaMismatch);
+                        }
                     }
-                    _ => {}
+                    None => {
+                        return Err(Error::SchemaMissing { dataset_kind: kind });
+                    }
                 }
                 evm_rpc_datasets::dataset(value)?
             }
@@ -322,10 +329,14 @@ impl DatasetStore {
                     vec_table_to_schema(firehose_datasets::evm::tables::all(&common.network));
 
                 match common.schema {
-                    Some(loaded_schema) if loaded_schema != schema_built_in => {
-                        return Err(Error::SchemaMismatch);
+                    Some(loaded_schema) => {
+                        if loaded_schema != schema_built_in {
+                            return Err(Error::SchemaMismatch);
+                        }
                     }
-                    _ => {}
+                    None => {
+                        return Err(Error::SchemaMissing { dataset_kind: kind });
+                    }
                 }
                 firehose_datasets::evm::dataset(value)?
             }
@@ -467,9 +478,9 @@ impl DatasetStore {
         let common: DatasetDefsCommon = match raw_dataset {
             RawDataset::Toml(ref raw) => {
                 tracing::warn!("TOML dataset format is deprecated!");
-                toml::from_str::<DatasetDefsCommonToml>(raw)?.into()
+                toml::from_str::<DatasetDefsCommon>(raw)?.into()
             }
-            RawDataset::Json(ref raw) => serde_json::from_str::<DatasetDefsCommonJson>(raw)?.into(),
+            RawDataset::Json(ref raw) => serde_json::from_str::<DatasetDefsCommon>(raw)?.into(),
         };
 
         if common.name != dataset_name {
@@ -664,46 +675,6 @@ pub struct DatasetDefsCommon {
     pub network: String,
     pub name: String,
     pub schema: Option<SerializableSchema>,
-}
-
-impl From<DatasetDefsCommonToml> for DatasetDefsCommon {
-    fn from(toml: DatasetDefsCommonToml) -> Self {
-        DatasetDefsCommon {
-            kind: toml.kind,
-            network: toml.network,
-            name: toml.name,
-            schema: toml.schema,
-        }
-    }
-}
-
-impl From<DatasetDefsCommonJson> for DatasetDefsCommon {
-    fn from(json: DatasetDefsCommonJson) -> Self {
-        DatasetDefsCommon {
-            kind: json.kind,
-            network: json.network,
-            name: json.name,
-            schema: Some(json.schema),
-        }
-    }
-}
-
-/// All TOML dataset definitions must have a kind, network and name. The name must match the filename. Schema is optional for TOML dataset format.
-#[derive(Deserialize)]
-pub struct DatasetDefsCommonToml {
-    pub kind: String,
-    pub network: String,
-    pub name: String,
-    pub schema: Option<SerializableSchema>,
-}
-
-/// All JSON dataset definitions must have a kind, network, name and schema. The name must match the filename.
-#[derive(Deserialize)]
-pub struct DatasetDefsCommonJson {
-    pub kind: String,
-    pub network: String,
-    pub name: String,
-    pub schema: SerializableSchema,
 }
 
 /// A serializable representation of a collection of [`arrow::datatypes::Schema`]s, without any metadata.
