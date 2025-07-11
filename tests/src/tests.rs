@@ -10,6 +10,7 @@ use common::{
 };
 use dataset_store::{DatasetDefsCommon, DatasetStore};
 use generate_manifest;
+use serial_test::serial;
 
 use crate::{
     steps::load_test_steps,
@@ -126,6 +127,7 @@ async fn basic_function() -> Result<(), BoxError> {
     Ok(())
 }
 
+#[serial]
 #[tokio::test]
 async fn persist_start_block_test() -> Result<(), BoxError> {
     tracing_helpers::register_logger();
@@ -145,6 +147,7 @@ async fn persist_start_block_test() -> Result<(), BoxError> {
     Ok(())
 }
 
+#[serial]
 #[tokio::test]
 async fn anvil_rpc_reorg() {
     tracing_helpers::register_logger();

@@ -34,3 +34,4 @@ serde_yaml.workspace = true
 tonic.workspace = true
 alloy-rpc-types-anvil = "1.0.9"
 generate-manifest = { path = "../generate-manifest" }
+serial_test = "3.0.0"
