@@ -111,6 +111,11 @@ export class QueryableEvent extends Schema.Class<QueryableEvent>("/nozzle/models
     examples: ["Count(uint256 count)", "Transfer(address indexed from, address indexed to, uint256 value)"],
   }),
 }) {}
+export class QueryableEventStream
+  extends Schema.Class<QueryableEventStream>("/nozzle/models/events/QueryableEventStream")({
+    events: Schema.Array(QueryableEvent),
+  })
+{}
 
 class NozzleStudioApiRouter extends HttpApiGroup.make("NozzleStudioApi").add(
   HttpApiEndpoint.get("QueryableEventStream")`/events/stream`
@@ -131,19 +136,23 @@ class NozzleStudioApiRouter extends HttpApiGroup.make("NozzleStudioApi").add(
 class NozzleStudioApi extends HttpApi.make("NozzleStudioApi").add(NozzleStudioApiRouter).prefix("/api") {}
 
 const queryableEventStream = Stream.make(
-  QueryableEvent.make({
-    name: "Count",
-    params: [{ name: "count", datatype: "uint256", indexed: false }],
-    signature: "Count(uint256 count)",
-  }),
-  QueryableEvent.make({
-    name: "Transfer",
-    params: [
-      { name: "from", datatype: "address", indexed: true },
-      { name: "to", datatype: "address", indexed: true },
-      { name: "value", datatype: "uint256", indexed: false },
+  QueryableEventStream.make({
+    events: [
+      QueryableEvent.make({
+        name: "Count",
+        params: [{ name: "count", datatype: "uint256", indexed: false }],
+        signature: "Count(uint256 count)",
+      }),
+      QueryableEvent.make({
+        name: "Transfer",
+        params: [
+          { name: "from", datatype: "address", indexed: true },
+          { name: "to", datatype: "address", indexed: true },
+          { name: "value", datatype: "uint256", indexed: false },
+        ],
+        signature: "Transfer(address indexed from, address indexed to, uint256 value)",
+      }),
     ],
-    signature: "Transfer(address indexed from, address indexed to, uint256 value)",
   }),
 ).pipe(
   Stream.schedule(Schedule.spaced("500 millis")),
