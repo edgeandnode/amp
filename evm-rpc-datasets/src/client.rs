@@ -25,7 +25,7 @@ use common::{
         blocks::{Block, BlockRowsBuilder},
         logs::{Log, LogRowsBuilder},
     },
-    metadata::range::BlockRange,
+    metadata::segments::BlockRange,
 };
 use futures::{Stream, future::try_join_all};
 use thiserror::Error;

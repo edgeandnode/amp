@@ -119,7 +119,7 @@ use std::{collections::BTreeSet, sync::Arc};
 use common::{
     BlockNum, BoxError, Dataset,
     catalog::physical::PhysicalTable,
-    metadata::range::{BlockRange, missing_block_ranges},
+    metadata::segments::{BlockRange, missing_block_ranges},
     plan_visitors::is_incremental,
     query_context::{QueryContext, QueryEnv, parse_sql},
     streaming_query::{StreamState, StreamingQuery, watermark_updates},

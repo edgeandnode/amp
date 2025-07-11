@@ -7,7 +7,7 @@ use common::{
     catalog::physical::PhysicalTable,
     metadata::{
         parquet::{PARQUET_METADATA_KEY, ParquetMeta},
-        range::BlockRange,
+        segments::BlockRange,
     },
     parquet::{arrow::AsyncArrowWriter, errors::ParquetError, format::KeyValue},
 };

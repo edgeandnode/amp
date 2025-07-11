@@ -17,7 +17,7 @@ use common::{
     },
     catalog::physical::{Catalog, PhysicalTable},
     config::Config,
-    metadata::range::BlockRange,
+    metadata::segments::BlockRange,
     query_context::parse_sql,
 };
 use dataset_store::DatasetStore;

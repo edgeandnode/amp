@@ -1,4 +1,4 @@
-use common::{RawDatasetRows, Table, metadata::range::BlockRange};
+use common::{RawDatasetRows, Table, metadata::segments::BlockRange};
 
 use crate::proto::sf::substreams::v1::Package;
 

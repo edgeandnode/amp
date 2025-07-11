@@ -30,7 +30,7 @@ use datafusion::arrow::{
 };
 pub use datafusion::{arrow, parquet};
 use futures::Stream;
-use metadata::range::BlockRange;
+use metadata::segments::BlockRange;
 pub use query_context::QueryContext;
 use serde::{Deserialize, Serialize};
 pub use store::Store;

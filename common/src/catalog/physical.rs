@@ -22,7 +22,7 @@ use datafusion::{
     prelude::Expr,
     sql::TableReference,
 };
-use futures::{Stream, StreamExt, TryStreamExt, stream};
+use futures::{Stream, StreamExt, TryStreamExt, future::join_all, stream};
 use metadata_db::{LocationId, MetadataDb, TableId};
 use object_store::{ObjectMeta, ObjectStore, path::Path};
 use tracing::info;
@@ -34,7 +34,7 @@ use crate::{
     metadata::{
         FileMetadata,
         parquet::{PARQUET_METADATA_KEY, ParquetMeta},
-        range::{BlockRange, TableRanges},
+        segments::{Segment, TableSegments},
     },
     store::{Store, infer_object_store},
 };
@@ -401,8 +401,8 @@ impl PhysicalTable {
     /// contiguous range of block numbers starting from the lowest start block. Ok(None) is
     /// returned if no block range has been synced.
     pub async fn synced_range(&self) -> Result<Option<RangeInclusive<BlockNum>>, BoxError> {
-        let ranges = self.ranges().await?;
-        Ok(ranges.canonical_range().map(|r| r.numbers))
+        let segments = self.segments().await?;
+        Ok(segments.canonical_range().map(|r| r.numbers))
     }
 
     /// Return the most recent block number that has been synced for this table.
@@ -414,16 +414,17 @@ impl PhysicalTable {
         &self,
         desired: RangeInclusive<BlockNum>,
     ) -> Result<Vec<RangeInclusive<BlockNum>>, BoxError> {
-        let ranges = self.ranges().await?;
-        Ok(ranges.missing_ranges(desired))
+        let segments = self.segments().await?;
+        Ok(segments.missing_ranges(desired))
     }
 
-    async fn ranges(&self) -> Result<TableRanges, BoxError> {
-        let block_ranges: Vec<BlockRange> = self
+    async fn segments(&self) -> Result<TableSegments, BoxError> {
+        let metadata_segments: Vec<Segment> = self
             .stream_file_metadata()
             .map(|result| {
                 let FileMetadata {
                     file_name,
+                    object_meta,
                     parquet_meta: ParquetMeta { mut ranges, .. },
                     ..
                 } = result?;
@@ -432,15 +433,18 @@ impl PhysicalTable {
                         "expected exactly 1 range for {file_name}"
                     )));
                 }
-                Ok(ranges.remove(0))
+                Ok(Segment {
+                    range: ranges.remove(0),
+                    object: object_meta,
+                })
             })
             .try_collect()
             .await?;
-        let mut ranges: TableRanges = Default::default();
-        for range in block_ranges {
-            ranges.insert(range);
+        let mut segments: TableSegments = Default::default();
+        for segment in metadata_segments {
+            segments.insert(segment);
         }
-        Ok(ranges)
+        Ok(segments)
     }
 }
 
@@ -498,35 +502,36 @@ impl PhysicalTable {
         create_ordering(&schema, &sort_order)
     }
 
-    fn stream_partitioned_files<'a>(
-        &'a self,
-        ctx: &'a dyn Session,
-    ) -> impl Stream<Item = DataFusionResult<(u64, PartitionedFile)>> + 'a {
-        self.stream_file_metadata()
-            .map_err(DataFusionError::from)
-            .map(async move |res| {
-                let FileMetadata {
-                    object_meta,
-                    parquet_meta: ParquetMeta { ranges, .. },
-                    ..
-                } = res?;
-                let mut partitioned_file = PartitionedFile::from(object_meta.clone());
-                let statistics = self.do_collect_statistics(ctx, &partitioned_file).await?;
-
-                partitioned_file.statistics = Some(statistics);
-
-                let range_start = ranges
-                    .first()
-                    .ok_or(DataFusionError::Execution(format!(
-                        "No ranges found for file `{}` for table `{}`",
-                        object_meta.location,
-                        self.table_ref()
-                    )))?
-                    .numbers
-                    .start();
-                Ok((*range_start, partitioned_file))
-            })
-            .buffered(ctx.config_options().execution.meta_fetch_concurrency)
+    async fn fetch_partitioned_files(
+        &self,
+        ctx: &dyn Session,
+    ) -> DataFusionResult<BTreeMap<BlockNum, PartitionedFile>> {
+        let mut canonical_segments = self
+            .segments()
+            .await
+            .map_err(DataFusionError::from)?
+            .canonical_segments();
+        let mut partitioned_files: BTreeMap<BlockNum, PartitionedFile> = Default::default();
+        while !canonical_segments.is_empty() {
+            let batch_len = usize::min(
+                canonical_segments.len(),
+                ctx.config_options().execution.meta_fetch_concurrency,
+            );
+            let batch: Vec<Segment> = canonical_segments.drain(0..batch_len).collect();
+            let results: Vec<DataFusionResult<(BlockNum, PartitionedFile)>> =
+                join_all(batch.into_iter().map(async |Segment { range, object }| {
+                    let mut partitioned_file = PartitionedFile::from(object);
+                    let statistics = self.do_collect_statistics(ctx, &partitioned_file).await?;
+                    partitioned_file.statistics = Some(statistics);
+                    Ok((*range.numbers.start(), partitioned_file))
+                }))
+                .await;
+            for result in results {
+                let (start_block, partitioned_file) = result?;
+                partitioned_files.insert(start_block, partitioned_file);
+            }
+        }
+        Ok(partitioned_files)
     }
 }
 
@@ -551,10 +556,7 @@ impl TableProvider for PhysicalTable {
         _filters: &[Expr],
         _limit: Option<usize>,
     ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
-        let files = self
-            .stream_partitioned_files(state)
-            .try_collect::<BTreeMap<_, _>>()
-            .await?;
+        let files = self.fetch_partitioned_files(state).await?;
         if files.is_empty() {
             return Ok(Arc::new(datafusion::physical_plan::empty::EmptyExec::new(
                 self.schema(),

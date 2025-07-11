@@ -7,7 +7,7 @@ use common::{
         array::*,
         datatypes::{DataType as ArrowDataType, Field, Schema},
     },
-    metadata::range::BlockRange,
+    metadata::segments::BlockRange,
 };
 use prost::Message as _;
 pub use prost_reflect::MessageDescriptor;
