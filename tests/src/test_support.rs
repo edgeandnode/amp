@@ -255,7 +255,6 @@ pub(crate) async fn dump_dataset(
 ) -> Result<(), BoxError> {
     // dump the dataset
     let partition_size_mb = 100;
-    let input_batch_block_size = microbatch_max_interval.unwrap_or(100_000);
     let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
 
     dump(
@@ -267,9 +266,9 @@ pub(crate) async fn dump_dataset(
         Some(end.to_string()),
         n_jobs,
         partition_size_mb,
-        input_batch_block_size,
         false,
         None,
+        microbatch_max_interval,
     )
     .await?;
 
