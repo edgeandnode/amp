@@ -1,0 +1,1 @@
+ALTER TABLE locations ADD COLUMN start_block BIGINT;
