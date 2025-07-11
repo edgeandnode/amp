@@ -12,7 +12,7 @@ use dataset_store::{DatasetDefsCommon, DatasetStore};
 use generate_manifest;
 
 use crate::{
-    steps::{load_test_steps},
+    steps::load_test_steps,
     test_client::TestClient,
     test_support::{
         SnapshotContext, TestEnv, check_blocks, check_provider_file, restore_blessed_dataset,
@@ -132,8 +132,8 @@ async fn persist_start_block_test() -> Result<(), BoxError> {
     let test_env = TestEnv::temp("persist_start_block_test").await?;
     let mut client = TestClient::connect(&test_env).await?;
 
-    let provider =
-        alloy::providers::ProviderBuilder::new().connect_anvil_with_config(|anvil| anvil.port(8545 as u16));
+    let provider = alloy::providers::ProviderBuilder::new()
+        .connect_anvil_with_config(|anvil| anvil.port(8545u16));
     let provider = alloy::providers::DynProvider::new(provider);
     provider.anvil_mine(Some(10), None).await?;
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
@@ -156,7 +156,7 @@ async fn anvil_rpc_reorg() {
     let test_env = TestEnv::temp("anvil_rpc_reorg").await.unwrap();
     let dataset_store = DatasetStore::new(test_env.config.clone(), test_env.metadata_db.clone());
     let provider = alloy::providers::ProviderBuilder::new()
-        .connect_anvil_with_config(|anvil| anvil.port(8545 as u16));
+        .connect_anvil_with_config(|anvil| anvil.port(8545u16));
     let provider = DynProvider::new(provider);
 
     #[derive(Debug, PartialEq, Eq, serde::Deserialize)]

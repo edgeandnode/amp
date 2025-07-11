@@ -98,7 +98,9 @@ pub enum Error {
     #[error("Error parsing URL: {0}")]
     UrlParseError(#[from] url::ParseError),
 
-    #[error("Cannot start dump: location has existing start_block={existing}, but requested start_block={requested}")]
+    #[error(
+        "Cannot start dump: location has existing start_block={existing}, but requested start_block={requested}"
+    )]
     MismatchedStartBlock { existing: i64, requested: i64 },
 }
 
@@ -602,12 +604,11 @@ impl MetadataDb {
         let mut conn = self.pool.acquire().await?;
         let mut tx = conn.begin().await?;
 
-        let existing_start_block: Option<i64> = sqlx::query_scalar(
-            "SELECT start_block FROM locations WHERE id = $1 FOR UPDATE",
-        )
-        .bind(location_id)
-        .fetch_one(&mut *tx)
-        .await?;
+        let existing_start_block: Option<i64> =
+            sqlx::query_scalar("SELECT start_block FROM locations WHERE id = $1 FOR UPDATE")
+                .bind(location_id)
+                .fetch_one(&mut *tx)
+                .await?;
 
         match existing_start_block {
             Some(existing) if existing != start_block => {

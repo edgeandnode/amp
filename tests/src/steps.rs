@@ -136,7 +136,11 @@ impl TestStep {
                     return if result.is_err() {
                         Ok(())
                     } else {
-                        Err(format!("Test step \"{}\" was expected to fail, but succeeded", self.name()).into())
+                        Err(format!(
+                            "Test step \"{}\" was expected to fail, but succeeded",
+                            self.name()
+                        )
+                        .into())
                     };
                 }
                 result
