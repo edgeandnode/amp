@@ -123,6 +123,15 @@ pub async fn dump(
         }
     };
 
+    for table in tables {
+        let start_block = start.try_into().map_err(|e| {
+            format!("start_block value {} is out of range: {}", start, e)
+        })?;
+        ctx.metadata_db
+            .check_and_set_start_block(table.location_id(), start_block)
+            .await?;
+    }
+
     let mut missing_ranges_by_table: BTreeMap<String, Vec<RangeInclusive<BlockNum>>> =
         Default::default();
     for table in tables {

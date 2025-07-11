@@ -2,7 +2,7 @@ use std::{future::Future, sync::Arc, time::Duration};
 
 use futures::stream::{BoxStream, Stream};
 use sqlx::{
-    Executor, FromRow, Postgres,
+    Acquire, Executor, FromRow, Postgres,
     postgres::{PgListener, PgNotification},
 };
 use thiserror::Error;
@@ -69,6 +69,8 @@ pub struct Location {
     /// location.url
     #[sqlx(try_from = "&'a str")]
     pub url: Url,
+    /// location.start_block
+    pub start_block: Option<i64>,
 }
 
 #[derive(Error, Debug)]
@@ -95,6 +97,9 @@ pub enum Error {
 
     #[error("Error parsing URL: {0}")]
     UrlParseError(#[from] url::ParseError),
+
+    #[error("Cannot start dump: location has existing start_block={existing}, but requested start_block={requested}")]
+    MismatchedStartBlock { existing: i64, requested: i64 },
 }
 
 impl Error {
@@ -586,6 +591,42 @@ impl MetadataDb {
             .execute(&*self.pool)
             .await?;
 
+        Ok(())
+    }
+
+    pub async fn check_and_set_start_block(
+        &self,
+        location_id: LocationId,
+        start_block: i64,
+    ) -> Result<(), Error> {
+        let mut conn = self.pool.acquire().await?;
+        let mut tx = conn.begin().await?;
+
+        let existing_start_block: Option<i64> = sqlx::query_scalar(
+            "SELECT start_block FROM locations WHERE id = $1 FOR UPDATE",
+        )
+        .bind(location_id)
+        .fetch_one(&mut *tx)
+        .await?;
+
+        match existing_start_block {
+            Some(existing) if existing != start_block => {
+                return Err(Error::MismatchedStartBlock {
+                    existing,
+                    requested: start_block,
+                });
+            }
+            Some(_) => {}
+            None => {
+                sqlx::query("UPDATE locations SET start_block = $1 WHERE id = $2")
+                    .bind(start_block)
+                    .bind(location_id)
+                    .execute(&mut *tx)
+                    .await?;
+            }
+        }
+
+        tx.commit().await?;
         Ok(())
     }
 }

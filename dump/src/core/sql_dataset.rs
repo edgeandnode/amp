@@ -195,6 +195,13 @@ pub async fn dump_table(
             }
         };
 
+        let start_block = start.try_into().map_err(|e| {
+            format!("start_block value {} is out of range: {}", start, e)
+        })?;
+        ctx.metadata_db
+            .check_and_set_start_block(table.location_id(), start_block)
+            .await?;
+
         if is_incr {
             let synced_range = table.synced_range().await?;
             if let Some(range) = synced_range.as_ref() {
