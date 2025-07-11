@@ -9,7 +9,7 @@ use common::{
         array::{ArrayRef, BinaryBuilder, Int32Builder, UInt32Builder, UInt64Builder},
         datatypes::{DataType, Field, Schema, SchemaRef},
     },
-    metadata::range::BlockRange,
+    metadata::segments::BlockRange,
 };
 
 static SCHEMA: LazyLock<SchemaRef> = LazyLock::new(|| Arc::new(schema()));

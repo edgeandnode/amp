@@ -7,7 +7,7 @@ use common::{
         array::*,
         datatypes::{DataType as ArrowDataType, Field, Schema, TimeUnit},
     },
-    metadata::range::BlockRange,
+    metadata::segments::BlockRange,
     timestamp_type,
 };
 use datafusion::sql::sqlparser::{

@@ -6,7 +6,7 @@ use alloy::{
     transports::http::reqwest,
 };
 use common::{
-    BlockNum, BoxError, metadata::range::BlockRange, query_context::parse_sql, tracing_helpers,
+    BlockNum, BoxError, metadata::segments::BlockRange, query_context::parse_sql, tracing_helpers,
 };
 use dataset_store::{DatasetDefsCommon, DatasetStore};
 use generate_manifest;
@@ -217,26 +217,24 @@ async fn anvil_rpc_reorg() {
     dump(0..=3).await;
     let blocks1 = query_blocks(0..=3).await;
 
-    // For now, we don't handle reorgs. But we're checking that metadata reflects the current
-    // expected behavior.
-    assert_eq!(&blocks0, &blocks1[0..=2]);
-    assert_ne!(&blocks1[2].hash, &blocks1[3].parent_hash);
+    // For now, we don't fully handle reorgs. But we're checking that metadata reflects the current
+    // expected behavior. We only expect to query the "canonical chain", which will not resolve the
+    // reorg unless the uncled block range is re-dumped.
+    assert_eq!(&blocks0, &blocks1);
     let ranges = metadata_ranges().await;
-    let expected_ranges = vec![
-        BlockRange {
+    assert_eq!(ranges.len(), 2);
+    assert_eq!(
+        &ranges[0],
+        &BlockRange {
             numbers: 0..=2,
             network: "anvil".to_string(),
             hash: blocks1[2].hash,
             prev_hash: Some(blocks1[0].parent_hash),
-        },
-        BlockRange {
-            numbers: 3..=3,
-            network: "anvil".to_string(),
-            hash: blocks1[3].hash,
-            prev_hash: Some(blocks1[3].parent_hash),
-        },
-    ];
-    assert_eq!(ranges, expected_ranges);
+        }
+    );
+    assert_eq!(ranges[1].numbers, 3..=3);
+    assert_eq!(&ranges[1].network, "anvil");
+    assert_ne!(&ranges[1].prev_hash, &Some(ranges[0].hash));
 }
 
 #[test]

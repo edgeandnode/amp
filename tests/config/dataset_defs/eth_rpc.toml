@@ -1,3 +1,0 @@
-kind = "evm-rpc"
-name = "eth_rpc"
-network = "mainnet"

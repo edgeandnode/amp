@@ -1,7 +1,7 @@
 {
   "kind": "firehose",
+  "name": "eth_firehose_stream",
   "network": "mainnet",
-  "name": "eth_firehose",
   "schema": {
     "blocks": {
       "mix_hash": { "FixedSizeBinary": 32 },
@@ -90,3 +90,4 @@
     }
   }
 }
+
