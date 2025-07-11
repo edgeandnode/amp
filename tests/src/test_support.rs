@@ -269,6 +269,7 @@ pub(crate) async fn dump_dataset(
         false,
         None,
         microbatch_max_interval,
+        None,
     )
     .await?;
 

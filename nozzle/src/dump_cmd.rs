@@ -1,11 +1,12 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
+    fs,
     sync::Arc,
     time::Duration,
 };
 
 use common::{
-    BoxError,
+    BoxError, Store,
     catalog::physical::PhysicalTable,
     config::Config,
     manifest,
@@ -28,8 +29,18 @@ pub async fn dump(
     disable_compression: bool,
     run_every_mins: Option<u64>,
     microbatch_max_interval_override: Option<u64>,
+    new_location: Option<String>,
 ) -> Result<(), BoxError> {
-    let data_store = config.data_store.clone();
+    let data_store = match new_location {
+        Some(location) => {
+            let data_path = fs::canonicalize(&location)
+                .map_err(|e| format!("Failed to canonicalize path '{}': {}", location, e))?;
+            let base = data_path.parent();
+            Arc::new(Store::new(location, base)?)
+        }
+        None => config.data_store.clone(),
+    };
+
     let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
     let partition_size = partition_size_mb * 1024 * 1024;
     let compression = if disable_compression {
