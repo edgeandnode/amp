@@ -25,9 +25,9 @@ pub async fn dump(
     end_block: Option<String>,
     n_jobs: u16,
     partition_size_mb: u64,
-    input_batch_size_blocks: u64,
     disable_compression: bool,
     run_every_mins: Option<u64>,
+    microbatch_max_interval_override: Option<u64>,
 ) -> Result<(), BoxError> {
     let data_store = config.data_store.clone();
     let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
@@ -87,7 +87,7 @@ pub async fn dump(
                     &tables,
                     n_jobs,
                     partition_size,
-                    input_batch_size_blocks,
+                    microbatch_max_interval_override.unwrap_or(config.microbatch_max_interval),
                     &parquet_opts,
                     (start, end_block),
                 )
@@ -103,7 +103,7 @@ pub async fn dump(
                     tables,
                     n_jobs,
                     partition_size,
-                    input_batch_size_blocks,
+                    microbatch_max_interval_override.unwrap_or(config.microbatch_max_interval),
                     &parquet_opts,
                     (start, end_block),
                 )

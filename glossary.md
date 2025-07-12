@@ -14,7 +14,7 @@ A SQL query string or a DataFusion logical plan ([spec](https://docs.rs/datafusi
 A named query that is part of a dataset. Can be referred to in queries, as in `select * from dataset.view`.
 
 ### Dataset
-A user-defined set of views. A Dataset is a unit of ownership, publishing and versioning.
+A user-defined set of views. A Dataset is a unit of ownership, publishing and versioning. Sometimes called a derived dataset, user dataset or sql dataset.
 
 ## Physical
 

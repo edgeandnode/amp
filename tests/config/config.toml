@@ -6,6 +6,9 @@ data_dir = "data"
 # unlimited
 max_mem_mb = 30000
 
+# Maximum number of blocks to process per microbatch in SQL datasets
+microbatch_max_interval = 100000
+
 # Paths where DataFusion can create temporary files. Setting this to an
 # empty array disables spill-to-disk
 spill_location = []

@@ -1,0 +1,114 @@
+- name: restore_eth_firehose
+  restore: eth_firehose
+
+- name: invalid_streaming_query1
+  query: SELECT count(*) FROM eth_firehose.blocks SETTINGS stream = true
+  failure: |
+    invalid query: not incremental queries are not supported for streaming
+
+- name: invalid_streaming_query2
+  query: SELECT max(block_num) as block_num FROM eth_firehose.blocks SETTINGS stream = true
+  failure: |
+    invalid query: not incremental queries are not supported for streaming
+
+- name: select_block_num
+  query: SELECT block_num FROM eth_firehose.blocks WHERE block_num >= 15000000 SETTINGS stream = true
+  streamingOptions:
+    atLeastRows: 1
+  results: |
+    [
+      {"block_num": 15000000}
+    ]
+
+- name: select_special_block_num
+  query: |
+    SELECT _block_num, block_num
+    FROM eth_firehose.blocks
+    WHERE block_num >= 15000000
+    SETTINGS stream = true
+  streamingOptions:
+    atLeastRows: 1
+  results: |
+    [
+      {"_block_num": 15000000, "block_num": 15000000}
+    ]
+
+- name: select_special_block_num_qualified
+  query: |
+    SELECT b._block_num, block_num
+    FROM eth_firehose.blocks AS b
+    WHERE block_num >= 15000000
+    SETTINGS stream = true
+  streamingOptions:
+    atLeastRows: 1
+  results: |
+    [
+      {"_block_num": 15000000, "block_num": 15000000}
+    ]
+
+- name: select_block_num_qualified
+  query: SELECT eth_firehose.blocks.block_num FROM eth_firehose.blocks WHERE block_num >= 15000000 SETTINGS stream = true
+  streamingOptions:
+    atLeastRows: 1
+  results: |
+    [
+      {"block_num": 15000000}
+    ]
+
+- name: subquery
+  query: SELECT * FROM (select block_num from eth_firehose.blocks) as t SETTINGS stream = true
+  streamingOptions:
+    atLeastRows: 1
+  results: |
+    [
+      {"block_num": 15000000}
+    ]
+
+- name: subquery_select_block_num_qualified
+  query: SELECT eth_firehose.blocks.block_num FROM (select block_num from eth_firehose.blocks) SETTINGS stream = true
+  streamingOptions:
+    atLeastRows: 1
+  results: |
+    [
+      {"block_num": 15000000}
+    ]
+
+- name: subquery_no_block_num
+  query: SELECT * FROM (select hash from eth_firehose.blocks) as t SETTINGS stream = true
+  streamingOptions:
+    atLeastRows: 1
+  results: |
+    [
+      {"hash": "9a71a95be3fe957457b11817587e5af4c7e24836d5b383c430ff25b9286a457f"}
+    ]
+
+- name: subquery_no_block_num_on_top_level
+  query: SELECT hash FROM (select hash, block_num from eth_firehose.blocks) as t SETTINGS stream = true
+  streamingOptions:
+    atLeastRows: 1
+  results: |
+    [
+      {"hash": "9a71a95be3fe957457b11817587e5af4c7e24836d5b383c430ff25b9286a457f"}
+    ]
+
+- name: union_query
+  query: SELECT block_num FROM eth_firehose.blocks WHERE block_num < 10 UNION ALL SELECT block_num FROM eth_firehose.blocks WHERE block_num > 10 SETTINGS stream = true
+  streamingOptions:
+    atLeastRows: 1
+  results: |
+    [
+      {"block_num": 15000000}
+    ]
+
+- name: union_query_no_block_num
+  query: |
+    SELECT hash FROM eth_firehose.blocks WHERE block_num < 10
+    UNION ALL
+    SELECT hash FROM eth_firehose.blocks WHERE block_num > 10
+    SETTINGS stream = true
+  streamingOptions:
+    atLeastRows: 1
+  results: |
+    [
+      {"hash": "9a71a95be3fe957457b11817587e5af4c7e24836d5b383c430ff25b9286a457f"}
+    ]

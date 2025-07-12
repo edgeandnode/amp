@@ -426,7 +426,7 @@ impl QueryContext {
                     .get_table(&table)
                     .ok_or::<BoxError>(format!("table {} not found", table).into())?;
                 let range = physical_table.synced_range().await?;
-                let synced = range.map(|r| r.contains(&end)).unwrap_or(false);
+                let synced = range.map(|r| end <= *r.end()).unwrap_or(false);
                 if !synced {
                     return Err(format!(
                     "tried to query up to block {end} of table {table} but it has not been synced"

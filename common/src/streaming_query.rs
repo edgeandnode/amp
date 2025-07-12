@@ -201,6 +201,7 @@ pub struct StreamingQuery {
     is_sql_dataset: bool,
     state: StreamState,
     tx: mpsc::Sender<QueryMessage>,
+    microbatch_max_interval: u64,
 }
 
 pub struct StreamState {
@@ -228,6 +229,7 @@ impl StreamingQuery {
         plan: LogicalPlan,
         end_block: Option<BlockNum>,
         is_sql_dataset: bool,
+        microbatch_max_interval: u64,
     ) -> Result<StreamingQueryHandle, BoxError> {
         let schema: SchemaRef = plan.schema().clone().as_ref().clone().into();
         let (tx, rx) = mpsc::channel(10);
@@ -238,6 +240,7 @@ impl StreamingQuery {
             end_block,
             is_sql_dataset,
             state: initial_state,
+            microbatch_max_interval,
         };
 
         let join_handle = AbortOnDropHandle::new(tokio::spawn(streaming_query.execute()));
@@ -283,23 +286,39 @@ impl StreamingQuery {
             let start = self.state.next_start;
             self.state.next_start = watermark + 1;
 
-            // Start microbatch execution
-            let mut stream = self
-                .ctx
-                .execute_plan_for_range(self.plan.clone(), start, watermark, self.is_sql_dataset)
-                .await?;
+            // Process in chunks based on microbatch_max_interval
+            let mut microbatch_start = start;
+            while microbatch_start <= watermark {
+                let microbatch_end = std::cmp::min(
+                    microbatch_start + self.microbatch_max_interval - 1,
+                    watermark,
+                );
 
-            // Drain the microbatch completely
-            while let Some(item) = stream.next().await {
-                let item = item?;
+                // Start microbatch execution for this chunk
+                let mut stream = self
+                    .ctx
+                    .execute_plan_for_range(
+                        self.plan.clone(),
+                        microbatch_start,
+                        microbatch_end,
+                        self.is_sql_dataset,
+                    )
+                    .await?;
 
-                // If the receiver in `StreamingQueryHandle` is dropped, then this task has been
-                // aborted, so we don't bother checking for errors when sending a message.
-                let _ = self.tx.send(QueryMessage::Data(item)).await;
+                // Drain the microbatch completely
+                while let Some(item) = stream.next().await {
+                    let item = item?;
+
+                    // If the receiver in `StreamingQueryHandle` is dropped, then this task has been
+                    // aborted, so we don't bother checking for errors when sending a message.
+                    let _ = self.tx.send(QueryMessage::Data(item)).await;
+                }
+
+                // Send completion message for this chunk
+                let _ = self.tx.send(QueryMessage::Completed(microbatch_end)).await;
+
+                microbatch_start = microbatch_end + 1;
             }
-
-            // Send completion message for this microbatch
-            let _ = self.tx.send(QueryMessage::Completed(watermark)).await;
 
             if Some(watermark) == self.end_block {
                 // If we reached the end block, we are done
