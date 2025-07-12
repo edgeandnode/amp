@@ -11,7 +11,7 @@ test-unit:
 # Integration tests (requires databases)
 test-integration:
 	@echo "🔗 Running integration tests..."
-	TEST_INTEGRATION=1 $(PYTHON) pytest tests/integration/ -m "integration" -v
+	TEST_INTEGRATION=1 $(PYTHON) pytest -s tests/integration/ -m "integration" -v
 
 # All tests with coverage
 test-all:
