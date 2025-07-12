@@ -289,7 +289,7 @@ impl StreamingQuery {
             // Process in chunks based on microbatch_max_interval
             let mut microbatch_start = start;
             while microbatch_start <= watermark {
-                let chunk_end = std::cmp::min(
+                let microbatch_end = std::cmp::min(
                     microbatch_start + self.microbatch_max_interval - 1,
                     watermark,
                 );
@@ -300,7 +300,7 @@ impl StreamingQuery {
                     .execute_plan_for_range(
                         self.plan.clone(),
                         microbatch_start,
-                        chunk_end,
+                        microbatch_end,
                         self.is_sql_dataset,
                     )
                     .await?;
@@ -315,9 +315,9 @@ impl StreamingQuery {
                 }
 
                 // Send completion message for this chunk
-                let _ = self.tx.send(QueryMessage::Completed(chunk_end)).await;
+                let _ = self.tx.send(QueryMessage::Completed(microbatch_end)).await;
 
-                microbatch_start = chunk_end + 1;
+                microbatch_start = microbatch_end + 1;
             }
 
             if Some(watermark) == self.end_block {
