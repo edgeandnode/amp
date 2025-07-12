@@ -70,6 +70,10 @@ enum Command {
         /// The location of the dump. If not specified, the dump will be written to the default location in NOZZLE_DATA_DIR.
         #[arg(long)]
         location: Option<String>,
+
+        /// Overwrite existing location and dump to a new, fresh directory
+        #[arg(long, env = "DUMP_FRESH")]
+        fresh: bool,
     },
     Server {
         /// Run in dev mode, which starts a worker in the same process.
@@ -153,6 +157,7 @@ async fn main_inner() -> Result<(), BoxError> {
             ignore_deps,
             run_every_mins,
             location,
+            fresh,
         } => {
             dump_cmd::dump(
                 config,
@@ -167,6 +172,7 @@ async fn main_inner() -> Result<(), BoxError> {
                 run_every_mins,
                 None,
                 location,
+                fresh,
             )
             .await
         }
