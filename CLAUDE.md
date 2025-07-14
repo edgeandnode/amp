@@ -203,3 +203,7 @@ curl -X POST http://localhost:1603 --data "select * from eth_rpc.logs limit 10"
 ## More info
 
 Look into `glossary.md` for more.
+
+## Planning
+
+AI generated plans for issues are registered in `issue_context/`.
