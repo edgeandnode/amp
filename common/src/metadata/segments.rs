@@ -3,7 +3,7 @@ use std::ops::RangeInclusive;
 use alloy::primitives::BlockHash;
 use object_store::ObjectMeta;
 
-use crate::BlockNum;
+use crate::{BlockNum, block_range_intersection};
 
 /// A BlockRange associated with the matadata from a file in object storage.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -90,29 +90,62 @@ impl TableSegments {
         &self,
         desired: RangeInclusive<BlockNum>,
     ) -> Vec<RangeInclusive<BlockNum>> {
-        if self.canonical.is_none() && self.forks.is_empty() {
+        let Some(canonical) = &self.canonical else {
+            assert!(self.forks.is_empty());
             return vec![desired];
-        }
-
-        let mut missing: Vec<RangeInclusive<BlockNum>> = Default::default();
-        for range_group in self.canonical.iter().chain(&self.forks) {
-            let range = range_group.start()..=range_group.end();
-            if missing.is_empty() {
-                missing.append(&mut missing_block_ranges(range, desired.clone()));
-                continue;
-            }
+        };
+        let mut missing: Vec<RangeInclusive<BlockNum>> =
+            missing_block_ranges(canonical.start()..=canonical.end(), desired.clone());
+        // remove overlapping fork ranges
+        for fork in &self.forks {
+            let fork_range = fork.start()..=fork.end();
             let mut index = 0;
             while index < missing.len() {
-                let ranges = missing_block_ranges(range.clone(), missing.remove(index));
-                if ranges.is_empty() {
+                if block_range_intersection(missing[index].clone(), fork_range.clone()).is_none() {
+                    index += 1;
                     continue;
                 }
-                for range in ranges {
-                    missing.insert(index, range);
-                    index += 1;
-                }
+                let ranges = missing_block_ranges(fork_range.clone(), missing[index].clone());
+                let next_index = index + ranges.len();
+                missing.splice(index..=index, ranges);
+                index = next_index;
             }
         }
+
+        let max_fork = self.forks.iter().max_by_key(|g| g.end());
+        let reorg_depth = 1;
+        if let (Some(canonical), Some(max_fork)) = (&self.canonical, max_fork)
+            && max_fork.end() > canonical.end()
+            && let Some(intersection) = block_range_intersection(
+                canonical.start()..=canonical.end(),
+                max_fork.start().saturating_sub(reorg_depth)..=max_fork.end(),
+            )
+            && block_range_intersection(intersection.clone(), desired.clone()).is_some()
+        {
+            let reorg_range_start: BlockNum = canonical
+                .0
+                .iter()
+                .map(|s| &s.range.numbers)
+                .filter(|r| block_range_intersection((*r).clone(), intersection.clone()).is_some())
+                .map(|r| *r.start())
+                .min()
+                .unwrap();
+            let reorg_range =
+                reorg_range_start..=intersection.start().saturating_sub(reorg_depth - 1);
+            if let Some(range) = block_range_intersection(reorg_range, desired) {
+                missing.push(range);
+                missing.sort_by_key(|r| *r.start());
+            }
+        }
+
+        for windows in missing.windows(2) {
+            let ((a, b), (c, d)) = (
+                windows[0].clone().into_inner(),
+                windows[1].clone().into_inner(),
+            );
+            debug_assert!((a <= b) && (b < c) && (c <= d));
+        }
+
         missing
     }
 
@@ -189,7 +222,19 @@ impl TableSegments {
             diff.sub.append(&mut canonical.0.clone());
             self.forks.push(self.canonical.take().unwrap());
             self.canonical = Some(self.forks.remove(fork_index));
+        } else if let Some(fork_base_index) = canonical
+            .0
+            .iter()
+            .rposition(|s| fork.adjacent_after(&s.range))
+        {
+            diff.add.append(&mut fork.0.clone());
+            let canonical = self.canonical.as_mut().unwrap();
+            let reorged = canonical.0.split_off(fork_base_index + 1);
+            diff.sub.append(&mut reorged.clone());
+            self.forks.push(SegmentGroup(reorged));
+            canonical.0.append(&mut self.forks.remove(fork_index).0);
         }
+
         diff
     }
 
@@ -577,19 +622,42 @@ mod test {
         }
 
         assert_eq!(missing_ranges(vec![], 0..=10), vec![0..=10]);
+        // just canonical ranges
         assert_eq!(missing_ranges(vec![0..=10], 0..=10), vec![]);
         assert_eq!(missing_ranges(vec![0..=5], 10..=15), vec![10..=15]);
         assert_eq!(missing_ranges(vec![3..=7], 0..=10), vec![0..=2, 8..=10]);
         assert_eq!(missing_ranges(vec![0..=15], 5..=10), vec![]);
         assert_eq!(missing_ranges(vec![5..=15], 0..=10), vec![0..=4]);
         assert_eq!(missing_ranges(vec![0..=5], 0..=10), vec![6..=10]);
+        // non-overlapping segment groups
+        assert_eq!(
+            missing_ranges(vec![0..=5, 8..=8], 0..=10),
+            vec![6..=7, 9..=10],
+        );
+        assert_eq!(
+            missing_ranges(vec![1..=2, 4..=4, 8..=9], 0..=10),
+            vec![0..=0, 3..=3, 5..=7, 10..=10],
+        );
+        // overlapping segment groups, no reorg
+        assert_eq!(missing_ranges(vec![0..=8, 2..=4], 0..=10), vec![9..=10]);
         assert_eq!(
             missing_ranges(vec![0..=3, 5..=7], 0..=10),
             vec![4..=4, 8..=10]
         );
         assert_eq!(
-            missing_ranges(vec![0..=2, 5..=7, 1..=12], 0..=15),
-            vec![13..=15]
+            missing_ranges(vec![0..=3, 2..=5, 4..=7], 0..=10),
+            vec![8..=10]
         );
+        // overlapping segment groups, reorg
+        assert_eq!(missing_ranges(vec![0..=2, 1..=3], 0..=3), vec![0..=0]);
+        assert_eq!(missing_ranges(vec![0..=2, 2..=3], 0..=2), vec![0..=1]);
+        assert_eq!(
+            missing_ranges(vec![0..=3, 5..=7, 2..=12], 0..=15),
+            vec![0..=1, 13..=15]
+        );
+        assert_eq!(missing_ranges(vec![0..=5, 3..=8], 0..=7), vec![0..=2]);
+        assert_eq!(missing_ranges(vec![0..=20, 10..=30], 12..=18), vec![]);
+        // reorg intersection with desired range
+        assert_eq!(missing_ranges(vec![0..=5, 3..=8], 2..=7), vec![2..=2]);
     }
 }

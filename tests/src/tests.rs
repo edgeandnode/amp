@@ -222,32 +222,42 @@ async fn anvil_rpc_reorg() {
         table_ranges(&table).await.unwrap()
     };
 
+    dump(0..=0).await;
     mine(2).await;
-    dump(0..=2).await;
+    dump(1..=2).await;
     let blocks0 = query_blocks(0..=2).await;
     reorg(1).await;
     mine(1).await;
     dump(0..=3).await;
     let blocks1 = query_blocks(0..=3).await;
+    dump(0..=3).await;
+    let blocks2 = query_blocks(0..=3).await;
 
-    // For now, we don't fully handle reorgs. But we're checking that metadata reflects the current
-    // expected behavior. We only expect to query the "canonical chain", which will not resolve the
-    // reorg unless the uncled block range is re-dumped.
+    // At this point, the chain looks like this:
+    //   0, 1, 2
+    //       , 2', 3
+    // blocks0 should contain ranges [0,0], [1,2]
+    // blocks1 should contain ranges [0,0], [1,2] (missing block 2', and therefore treating range [3,3] as a fork)
+    assert_eq!(blocks0.len(), 3);
     assert_eq!(&blocks0, &blocks1);
-    let ranges = metadata_ranges().await;
-    assert_eq!(ranges.len(), 2);
+    // blocks2 should contain ranges [0,0], [1,2'], [3,3] (retaining range [1,2] as a fork)
+    assert_eq!(blocks2.len(), 4);
+    assert_ne!(&blocks1[2].hash, &blocks2[3].parent_hash);
+    for window in blocks2.windows(2) {
+        assert_eq!(window[0].hash, window[1].parent_hash);
+    }
+    let mut ranges = metadata_ranges().await;
+    ranges.sort_by_key(|r| *r.numbers.start());
     assert_eq!(
-        &ranges[0],
-        &BlockRange {
-            numbers: 0..=2,
-            network: "anvil".to_string(),
-            hash: blocks1[2].hash,
-            prev_hash: Some(blocks1[0].parent_hash),
-        }
+        ranges.iter().map(|r| r.numbers.clone()).collect::<Vec<_>>(),
+        vec![0..=0, 1..=2, 1..=2, 3..=3],
     );
-    assert_eq!(ranges[1].numbers, 3..=3);
-    assert_eq!(&ranges[1].network, "anvil");
-    assert_ne!(&ranges[1].prev_hash, &Some(ranges[0].hash));
+    assert!(ranges.contains(&BlockRange {
+        numbers: blocks1[1].block_num..=blocks1[2].block_num,
+        network: "anvil".to_string(),
+        hash: blocks1[2].hash,
+        prev_hash: Some(blocks1[1].parent_hash),
+    }));
 }
 
 #[tokio::test]
