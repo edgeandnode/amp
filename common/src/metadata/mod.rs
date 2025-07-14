@@ -14,8 +14,6 @@ pub struct FileMetadata {
     pub location_id: LocationId,
     pub object_meta: ObjectMeta,
     pub parquet_meta: parquet::ParquetMeta,
-    /// true when the file is associated with canonical chains
-    pub canonical: bool,
 }
 
 impl TryFrom<FileMetadataRow> for FileMetadata {
@@ -30,7 +28,6 @@ impl TryFrom<FileMetadataRow> for FileMetadata {
             object_e_tag: e_tag,
             object_version: version,
             metadata,
-            canonical,
         }: FileMetadataRow,
     ) -> Result<Self, Self::Error> {
         let url = Url::parse(&url)?.join(&file_name)?;
@@ -54,7 +51,6 @@ impl TryFrom<FileMetadataRow> for FileMetadata {
             location_id,
             object_meta,
             parquet_meta,
-            canonical,
         })
     }
 }

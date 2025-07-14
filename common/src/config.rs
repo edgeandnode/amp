@@ -28,6 +28,7 @@ pub struct Config {
     pub metadata_db_url: String,
     pub max_mem_mb: usize,
     pub spill_location: Vec<PathBuf>,
+    pub microbatch_max_interval: u64,
     /// Addresses to bind the server to. Used during testing.
     pub addrs: Addrs,
     pub config_path: PathBuf,
@@ -49,6 +50,7 @@ pub struct ConfigFile {
     pub metadata_db_url: Option<String>,
     pub max_mem_mb: usize,
     pub spill_location: Vec<PathBuf>,
+    pub microbatch_max_interval: Option<u64>,
     pub flight_addr: Option<String>,
     pub jsonl_addr: Option<String>,
     pub registry_service_addr: Option<String>,
@@ -129,6 +131,7 @@ impl Config {
             metadata_db_url,
             max_mem_mb: config_file.max_mem_mb,
             spill_location: config_file.spill_location,
+            microbatch_max_interval: config_file.microbatch_max_interval.unwrap_or(100_000),
             addrs,
             config_path,
         })

@@ -7,7 +7,7 @@ use tracing::instrument;
 
 pub use crate::core::Ctx as JobCtx;
 use crate::{
-    core::dump_tables, default_input_batch_size_blocks, default_parquet_opts,
+    core::dump_tables, default_microbatch_max_interval, default_parquet_opts,
     default_partition_size,
 };
 
@@ -84,7 +84,7 @@ impl Job {
                     &tables,
                     1,
                     default_partition_size(),
-                    default_input_batch_size_blocks(),
+                    default_microbatch_max_interval(),
                     &default_parquet_opts(),
                     (0, end_block),
                 )
