@@ -1,10 +1,155 @@
 import { Command, Options } from "@effect/cli"
-import { HttpMiddleware, HttpRouter, HttpServer, HttpServerResponse, Path } from "@effect/platform"
+import {
+  HttpApi,
+  HttpApiBuilder,
+  HttpApiEndpoint,
+  HttpApiGroup,
+  HttpApiScalar,
+  HttpApiSchema,
+  HttpMiddleware,
+  HttpRouter,
+  HttpServer,
+  HttpServerResponse,
+  OpenApi,
+  Path,
+} from "@effect/platform"
 import { NodeHttpServer } from "@effect/platform-node"
-import { Console, Data, Effect, Layer, Option, String as EffectString, Struct } from "effect"
+import { Console, Data, Effect, Layer, Option, Schedule, Schema, Stream, String as EffectString, Struct } from "effect"
 import { createServer } from "node:http"
 import { fileURLToPath } from "node:url"
 import open, { type AppName, apps } from "open"
+
+export class QueryableEvent extends Schema.Class<QueryableEvent>("Nozzle/models/events/QueryableEvent")({
+  name: Schema.NonEmptyTrimmedString.annotations({
+    identifier: "QueryableEvent.name",
+    description: "Parsed event name",
+    examples: ["Count", "Transfer"],
+  }),
+  params: Schema.Array(Schema.Struct({
+    name: Schema.NonEmptyTrimmedString.annotations({
+      identifier: "QueryableEvent.params.name",
+      description: "Name of the emitted event param",
+    }),
+    datatype: Schema.NonEmptyTrimmedString.annotations({
+      identifier: "QueryableEvent.params.datatype",
+      description: "Type of the emitted event param",
+      examples: ["uint256", "bytes32", "address"],
+    }),
+    indexed: Schema.NullOr(Schema.Boolean).annotations({
+      identifier: "QueryableEvent.params.indexed",
+      description: "If true, the emitted parameter is indexed",
+    }),
+  })).annotations({
+    identifier: "QueryableEvent.params",
+    description: "The parameters emitted with the event",
+    examples: [[{ name: "count", datatype: "uint256", indexed: false }], [
+      {
+        name: "from",
+        datatype: "address",
+        indexed: true,
+      },
+      {
+        name: "to",
+        datatype: "address",
+        indexed: true,
+      },
+      {
+        name: "value",
+        datatype: "uint256",
+        indexed: null,
+      },
+    ]],
+  }),
+  signature: Schema.NonEmptyTrimmedString.annotations({
+    identifier: "QueryableEvent.signature",
+    description: "The event signature, including the event params.",
+    examples: ["Count(uint256 count)", "Transfer(address indexed from, address indexed to, uint256 value)"],
+  }),
+  source: Schema.NonEmptyTrimmedString.annotations({
+    identifier: "QueryableEvent.source",
+    description: "Smart Contract source where the event comes from",
+    examples: ["contracts/src/Counter.sol"],
+  }),
+}) {}
+export class QueryableEventStream
+  extends Schema.Class<QueryableEventStream>("Nozzle/models/events/QueryableEventStream")({
+    events: Schema.Array(QueryableEvent),
+  })
+{}
+
+class NozzleStudioApiRouter extends HttpApiGroup.make("NozzleStudioApi").add(
+  HttpApiEndpoint.get("QueryableEventStream")`/events/stream`
+    .addSuccess(
+      Schema.String.pipe(HttpApiSchema.withEncoding({
+        kind: "Json",
+        contentType: "text/event-stream",
+      })),
+    )
+    .annotateContext(OpenApi.annotations({
+      title: "Queryable Smart Contract events stream",
+      version: "v1",
+      description:
+        "Listens to file changes on the smart contracts/abis and emits updates of the available events to query",
+    })),
+).prefix("/v1") {}
+
+class NozzleStudioApi extends HttpApi.make("NozzleStudioApi").add(NozzleStudioApiRouter).prefix("/api") {}
+
+const queryableEventStream = Stream.make(
+  QueryableEventStream.make({
+    events: [
+      QueryableEvent.make({
+        name: "Count",
+        params: [{ name: "count", datatype: "uint256", indexed: false }],
+        signature: "Count(uint256 count)",
+        source: "./contracts/src/Counter.sol",
+      }),
+      QueryableEvent.make({
+        name: "Transfer",
+        params: [
+          { name: "from", datatype: "address", indexed: true },
+          { name: "to", datatype: "address", indexed: true },
+          { name: "value", datatype: "uint256", indexed: false },
+        ],
+        signature: "Transfer(address indexed from, address indexed to, uint256 value)",
+        source: "./contracts/src/Counter.sol",
+      }),
+    ],
+  }),
+).pipe(
+  Stream.schedule(Schedule.spaced("500 millis")),
+  Stream.map((item) => {
+    const jsonData = JSON.stringify(item)
+    const sseData = `data: ${jsonData}\n\n`
+    return new TextEncoder().encode(sseData)
+  }),
+)
+
+const NozzleStudioApiLive = HttpApiBuilder.group(
+  NozzleStudioApi,
+  "NozzleStudioApi",
+  (handlers) =>
+    handlers.handle(
+      "QueryableEventStream",
+      () =>
+        Effect.gen(function*() {
+          return yield* HttpServerResponse.stream(queryableEventStream).pipe(
+            HttpServerResponse.setHeaders({
+              "Cache-Control": "no-cache",
+              "Connection": "keep-alive",
+            }),
+          )
+        }),
+    ),
+)
+const NozzleStudioApiLayer = Layer.merge(HttpApiBuilder.middlewareCors(), HttpApiScalar.layer({ path: "/api/docs" }))
+  .pipe(
+    Layer.provideMerge(HttpApiBuilder.api(NozzleStudioApi)),
+    Layer.provide(NozzleStudioApiLive),
+  )
+const ApiLive = HttpApiBuilder.httpApp.pipe(
+  Effect.provide(Layer.mergeAll(NozzleStudioApiLayer, HttpApiBuilder.Router.Live, HttpApiBuilder.Middleware.layer)),
+)
 
 const DatasetWorksFileRouter = Effect.gen(function*() {
   const path = yield* Path.Path
@@ -52,9 +197,12 @@ const DatasetWorksFileRouter = Effect.gen(function*() {
 })
 
 const Server = Effect.all({
+  api: ApiLive,
   files: DatasetWorksFileRouter,
 }).pipe(
-  Effect.map(({ files }) => HttpRouter.empty.pipe(HttpRouter.mount("/", files))),
+  Effect.map(({ api, files }) =>
+    HttpRouter.empty.pipe(HttpRouter.mount("/", files), HttpRouter.mountApp("/api", api, { includePrefix: true }))
+  ),
   Effect.map((router) => HttpServer.serve(HttpMiddleware.logger)(router)),
   Layer.unwrapEffect,
 )
