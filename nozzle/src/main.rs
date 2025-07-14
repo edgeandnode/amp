@@ -182,7 +182,8 @@ async fn main_inner() -> Result<(), BoxError> {
                 location,
                 fresh,
             )
-            .await
+            .await?;
+            Ok(())
         }
         Command::Server {
             dev,
