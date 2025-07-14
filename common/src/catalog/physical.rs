@@ -292,7 +292,6 @@ impl PhysicalTable {
                     object_meta.e_tag,
                     object_meta.version,
                     parquet_meta_json,
-                    true,
                 )
                 .await?;
         }
