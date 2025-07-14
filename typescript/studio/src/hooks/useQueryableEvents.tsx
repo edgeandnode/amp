@@ -10,18 +10,25 @@ import { API_ORIGIN } from "../constants.js"
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
 
-const QueryEventStreamInstanceDecoder = Schema.decodeUnknownSync(Schema.parseJson(Model.QueryableEventStream))
+const QueryEventStreamInstanceDecoder = Schema.decodeUnknownSync(
+  Schema.parseJson(Model.QueryableEventStream),
+)
 const QueryableEventStreamTransformer = Schema.transform(
   // Response type comes as an encoded string prepended with "data: ". this denotes it as a SSE
-  Schema.NonEmptyTrimmedString.pipe(Schema.filter((val) => EffectString.startsWith("data: ")(val))),
+  Schema.NonEmptyTrimmedString.pipe(
+    Schema.filter((val) => EffectString.startsWith("data: ")(val)),
+  ),
   // Decode it to a Model.QueryableEventStream instance,
   Model.QueryableEventStream,
   {
     strict: true,
     // Transformer to take the received encoded string source to the Model.QueryEventStream
     decode(input) {
-      if (EffectString.isEmpty(input) || !EffectString.startsWith("data: ")(input)) {
-        return Model.QueryableEventStream.make({ events:[] })
+      if (
+        EffectString.isEmpty(input) ||
+        !EffectString.startsWith("data: ")(input)
+      ) {
+        return Model.QueryableEventStream.make({ events: [] })
       }
       // parse string into Model.QueryableEventStream
       return QueryEventStreamInstanceDecoder(EffectString.slice(6)(input))
@@ -32,9 +39,11 @@ const QueryableEventStreamTransformer = Schema.transform(
       const sseData = `data: ${jsonData}\n\n`
       return encoder.encode(sseData).toString()
     },
-  }
+  },
 )
-const QueryableEventStreamDecoder = Schema.decodeUnknownSync(QueryableEventStreamTransformer)
+const QueryableEventStreamDecoder = Schema.decodeUnknownSync(
+  QueryableEventStreamTransformer,
+)
 
 export const useQueryableEventsOptions = queryOptions({
   queryKey: ["QueryableEvents", "list"] as const,
@@ -42,12 +51,16 @@ export const useQueryableEventsOptions = queryOptions({
     const response = await fetch(`${API_ORIGIN}/events/stream`)
 
     if (!response.ok) {
-      throw new FetchQueryableEventsError({message:`Failed to fetch events: ${response.statusText}`})
+      throw new FetchQueryableEventsError({
+        message: `Failed to fetch events: ${response.statusText}`,
+      })
     }
 
     const reader = response.body?.getReader()
     if (!reader) {
-      throw new FetchQueryableEventsError({message: "No response body available"})
+      throw new FetchQueryableEventsError({
+        message: "No response body available",
+      })
     }
 
     let buffer = ""
@@ -70,7 +83,9 @@ export const useQueryableEventsOptions = queryOptions({
               const parsed = QueryableEventStreamDecoder(line)
               events = EffectArray.appendAll(events, parsed.events)
             } catch (error) {
-              console.warn("Failed parsing QueryableEvent data from stream", {error})
+              console.warn("Failed parsing QueryableEvent data from stream", {
+                error,
+              })
             }
           }
         }
@@ -100,6 +115,8 @@ export function useQueryableEvents(
   })
 }
 
-export class FetchQueryableEventsError extends Data.TaggedError("Nozzle/studio/errors/FetchQueryableEventsError")<{
+export class FetchQueryableEventsError extends Data.TaggedError(
+  "Nozzle/studio/errors/FetchQueryableEventsError",
+)<{
   readonly message: string
-}>{}
+}> {}

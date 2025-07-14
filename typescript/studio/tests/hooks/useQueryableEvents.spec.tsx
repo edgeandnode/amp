@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { renderHook, waitFor } from "@testing-library/react"
 import * as Model from "nozzl/Model"
 import type { ReactNode } from "react"
-import { beforeEach,describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { useQueryableEvents } from "../../src/hooks/useQueryableEvents.js"
 
@@ -73,9 +73,7 @@ describe("useQueryableEvents", () => {
     })
 
     // Format as SSE
-    const sseChunks = [
-      `data: ${JSON.stringify(mockEventData)}\n\n`,
-    ]
+    const sseChunks = [`data: ${JSON.stringify(mockEventData)}\n\n`]
 
     // Mock fetch
     global.fetch = vi.fn().mockResolvedValue({
@@ -161,7 +159,9 @@ describe("useQueryableEvents", () => {
       expect(result.current.isError).toBe(true)
     })
 
-    expect(result.current.error?.message).toContain("Failed to fetch events: Internal Server Error")
+    expect(result.current.error?.message).toContain(
+      "Failed to fetch events: Internal Server Error",
+    )
   })
 
   it("should handle missing response body", async () => {
@@ -178,7 +178,9 @@ describe("useQueryableEvents", () => {
       expect(result.current.isError).toBe(true)
     })
 
-    expect(result.current.error?.message).toContain("No response body available")
+    expect(result.current.error?.message).toContain(
+      "No response body available",
+    )
   })
 
   it("should handle malformed SSE data gracefully", async () => {
@@ -188,7 +190,9 @@ describe("useQueryableEvents", () => {
     ]
 
     // Mock console.warn to verify it's called
-    const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const consoleWarnSpy = vi
+      .spyOn(console, "warn")
+      .mockImplementation(() => {})
 
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
@@ -209,14 +213,14 @@ describe("useQueryableEvents", () => {
         name: "Valid",
         signature: "Valid(uint256 test)",
         source: "./contracts/src/Counter.sol",
-        params: [{ name: "test", datatype: "uint256", indexed: false }]
+        params: [{ name: "test", datatype: "uint256", indexed: false }],
       }),
     ])
 
     // Should have warned about the invalid data
     expect(consoleWarnSpy).toHaveBeenCalledWith(
       "Failed parsing QueryableEvent data from stream",
-      expect.any(Object)
+      expect.any(Object),
     )
 
     consoleWarnSpy.mockRestore()
