@@ -1,13 +1,7 @@
 import type { RankingInfo } from "@tanstack/match-sorter-utils"
 import { compareItems, rankItem } from "@tanstack/match-sorter-utils"
 import { createFileRoute } from "@tanstack/react-router"
-import type {
-  Column,
-  ColumnDef,
-  ColumnFiltersState,
-  FilterFn,
-  SortingFn,
-} from "@tanstack/react-table"
+import type { Column, ColumnDef, ColumnFiltersState, FilterFn, SortingFn } from "@tanstack/react-table"
 import {
   flexRender,
   getCoreRowModel,
@@ -55,12 +49,10 @@ const fuzzySort: SortingFn<any> = (rowA, rowB, columnId) => {
   let dir = 0
 
   // Only sort by rank if the column has ranking information
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+
   if (rowA.columnFiltersMeta[columnId]) {
     dir = compareItems(
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       rowA.columnFiltersMeta[columnId]?.itemRank,
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       rowB.columnFiltersMeta[columnId]?.itemRank,
     )
   }
@@ -182,11 +174,13 @@ function TableDemo() {
                               desc: " 🔽",
                             }[header.column.getIsSorted() as string] ?? null}
                           </div>
-                          {header.column.getCanFilter() ? (
-                            <div className="mt-2">
-                              <Filter column={header.column} />
-                            </div>
-                          ) : null}
+                          {header.column.getCanFilter() ?
+                            (
+                              <div className="mt-2">
+                                <Filter column={header.column} />
+                              </div>
+                            ) :
+                            null}
                         </>
                       )}
                     </th>
@@ -251,8 +245,7 @@ function TableDemo() {
         <span className="flex items-center gap-1">
           <div>Page</div>
           <strong>
-            {table.getState().pagination.pageIndex + 1} of{" "}
-            {table.getPageCount()}
+            {table.getState().pagination.pageIndex + 1} of {table.getPageCount()}
           </strong>
         </span>
         <span className="flex items-center gap-1">

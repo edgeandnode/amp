@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from "./routes/__root"
 import { Route as IndexRouteImport } from "./routes/index"
 import { Route as DemoTanstackQueryRouteImport } from "./routes/demo.tanstack-query"
 import { Route as DemoTableRouteImport } from "./routes/demo.table"
+import { Route as DemoQueryableEventsRouteImport } from "./routes/demo.queryable-events"
 
 const IndexRoute = IndexRouteImport.update({
   id: "/",
@@ -28,33 +29,51 @@ const DemoTableRoute = DemoTableRouteImport.update({
   path: "/demo/table",
   getParentRoute: () => rootRouteImport,
 } as any)
+const DemoQueryableEventsRoute = DemoQueryableEventsRouteImport.update({
+  id: "/demo/queryable-events",
+  path: "/demo/queryable-events",
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute
+  "/demo/queryable-events": typeof DemoQueryableEventsRoute
   "/demo/table": typeof DemoTableRoute
   "/demo/tanstack-query": typeof DemoTanstackQueryRoute
 }
 export interface FileRoutesByTo {
   "/": typeof IndexRoute
+  "/demo/queryable-events": typeof DemoQueryableEventsRoute
   "/demo/table": typeof DemoTableRoute
   "/demo/tanstack-query": typeof DemoTanstackQueryRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   "/": typeof IndexRoute
+  "/demo/queryable-events": typeof DemoQueryableEventsRoute
   "/demo/table": typeof DemoTableRoute
   "/demo/tanstack-query": typeof DemoTanstackQueryRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: "/" | "/demo/table" | "/demo/tanstack-query"
+  fullPaths:
+    | "/"
+    | "/demo/queryable-events"
+    | "/demo/table"
+    | "/demo/tanstack-query"
   fileRoutesByTo: FileRoutesByTo
-  to: "/" | "/demo/table" | "/demo/tanstack-query"
-  id: "__root__" | "/" | "/demo/table" | "/demo/tanstack-query"
+  to: "/" | "/demo/queryable-events" | "/demo/table" | "/demo/tanstack-query"
+  id:
+    | "__root__"
+    | "/"
+    | "/demo/queryable-events"
+    | "/demo/table"
+    | "/demo/tanstack-query"
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  DemoQueryableEventsRoute: typeof DemoQueryableEventsRoute
   DemoTableRoute: typeof DemoTableRoute
   DemoTanstackQueryRoute: typeof DemoTanstackQueryRoute
 }
@@ -82,11 +101,19 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof DemoTableRouteImport
       parentRoute: typeof rootRouteImport
     }
+    "/demo/queryable-events": {
+      id: "/demo/queryable-events"
+      path: "/demo/queryable-events"
+      fullPath: "/demo/queryable-events"
+      preLoaderRoute: typeof DemoQueryableEventsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  DemoQueryableEventsRoute: DemoQueryableEventsRoute,
   DemoTableRoute: DemoTableRoute,
   DemoTanstackQueryRoute: DemoTanstackQueryRoute,
 }

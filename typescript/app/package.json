@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@connectrpc/connect-web": "^2.0.2",
-    "effect": "^3.16.12",
+    "effect": "^3.16.13",
     "nozzl": "workspace:*",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
