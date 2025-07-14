@@ -19,63 +19,7 @@ import { createServer } from "node:http"
 import { fileURLToPath } from "node:url"
 import open, { type AppName, apps } from "open"
 
-export class QueryableEvent extends Schema.Class<QueryableEvent>("Nozzle/models/events/QueryableEvent")({
-  name: Schema.NonEmptyTrimmedString.annotations({
-    identifier: "QueryableEvent.name",
-    description: "Parsed event name",
-    examples: ["Count", "Transfer"],
-  }),
-  params: Schema.Array(Schema.Struct({
-    name: Schema.NonEmptyTrimmedString.annotations({
-      identifier: "QueryableEvent.params.name",
-      description: "Name of the emitted event param",
-    }),
-    datatype: Schema.NonEmptyTrimmedString.annotations({
-      identifier: "QueryableEvent.params.datatype",
-      description: "Type of the emitted event param",
-      examples: ["uint256", "bytes32", "address"],
-    }),
-    indexed: Schema.NullOr(Schema.Boolean).annotations({
-      identifier: "QueryableEvent.params.indexed",
-      description: "If true, the emitted parameter is indexed",
-    }),
-  })).annotations({
-    identifier: "QueryableEvent.params",
-    description: "The parameters emitted with the event",
-    examples: [[{ name: "count", datatype: "uint256", indexed: false }], [
-      {
-        name: "from",
-        datatype: "address",
-        indexed: true,
-      },
-      {
-        name: "to",
-        datatype: "address",
-        indexed: true,
-      },
-      {
-        name: "value",
-        datatype: "uint256",
-        indexed: null,
-      },
-    ]],
-  }),
-  signature: Schema.NonEmptyTrimmedString.annotations({
-    identifier: "QueryableEvent.signature",
-    description: "The event signature, including the event params.",
-    examples: ["Count(uint256 count)", "Transfer(address indexed from, address indexed to, uint256 value)"],
-  }),
-  source: Schema.NonEmptyTrimmedString.annotations({
-    identifier: "QueryableEvent.source",
-    description: "Smart Contract source where the event comes from",
-    examples: ["contracts/src/Counter.sol"],
-  }),
-}) {}
-export class QueryableEventStream
-  extends Schema.Class<QueryableEventStream>("Nozzle/models/events/QueryableEventStream")({
-    events: Schema.Array(QueryableEvent),
-  })
-{}
+import * as Model from "../../Model.js"
 
 class NozzleStudioApiRouter extends HttpApiGroup.make("NozzleStudioApi").add(
   HttpApiEndpoint.get("QueryableEventStream")`/events/stream`
@@ -96,15 +40,15 @@ class NozzleStudioApiRouter extends HttpApiGroup.make("NozzleStudioApi").add(
 class NozzleStudioApi extends HttpApi.make("NozzleStudioApi").add(NozzleStudioApiRouter).prefix("/api") {}
 
 const queryableEventStream = Stream.make(
-  QueryableEventStream.make({
+  Model.QueryableEventStream.make({
     events: [
-      QueryableEvent.make({
+      Model.QueryableEvent.make({
         name: "Count",
         params: [{ name: "count", datatype: "uint256", indexed: false }],
         signature: "Count(uint256 count)",
         source: "./contracts/src/Counter.sol",
       }),
-      QueryableEvent.make({
+      Model.QueryableEvent.make({
         name: "Transfer",
         params: [
           { name: "from", datatype: "address", indexed: true },
