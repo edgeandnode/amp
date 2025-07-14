@@ -19,52 +19,7 @@ import { createServer } from "node:http"
 import { fileURLToPath } from "node:url"
 import open, { type AppName, apps } from "open"
 
-const DatasetWorksFileRouter = Effect.gen(function*() {
-  const path = yield* Path.Path
-
-  const __filename = fileURLToPath(import.meta.url)
-  const __dirname = path.dirname(__filename)
-  /**
-   * This resolves an issue when running the cli in dev mode locally vs published mode.
-   * In local dev mode, the __dirname will end with `commands` as this file will be ran from the ./commands directory.
-   * When running in the compiled dist mode, the __dirname will end with `dist`.
-   *
-   * @todo clean this up and figure out a better way to derive
-   */
-  const isLocal = EffectString.endsWith("commands")(__dirname)
-  const datasetWorksClientDist = isLocal
-    ? path.resolve(__dirname, "..", "..", "..", "..", "studio", "dist")
-    : path.resolve(__dirname, "studio", "dist")
-
-  return HttpRouter.empty.pipe(
-    HttpRouter.get(
-      "/",
-      HttpServerResponse.file(path.join(datasetWorksClientDist, "index.html")).pipe(
-        Effect.orElse(() => HttpServerResponse.empty({ status: 404 })),
-      ),
-    ),
-    HttpRouter.get(
-      "/assets/:file",
-      Effect.gen(function*() {
-        const file = yield* HttpRouter.params.pipe(Effect.map(Struct.get("file")), Effect.map(Option.fromNullable))
-
-        if (Option.isNone(file)) {
-          return HttpServerResponse.empty({ status: 404 })
-        }
-
-        const assets = path.join(datasetWorksClientDist, "assets")
-        const normalized = path.normalize(path.join(assets, ...file.value.split("/")))
-        if (!normalized.startsWith(assets)) {
-          return HttpServerResponse.empty({ status: 404 })
-        }
-
-        return yield* HttpServerResponse.file(normalized)
-      }).pipe(Effect.orElse(() => HttpServerResponse.empty({ status: 404 }))),
-    ),
-  )
-})
-
-export class QueryableEvent extends Schema.Class<QueryableEvent>("/nozzle/models/events/QueryableEvent")({
+export class QueryableEvent extends Schema.Class<QueryableEvent>("Nozzle/models/events/QueryableEvent")({
   name: Schema.NonEmptyTrimmedString.annotations({
     identifier: "QueryableEvent.name",
     description: "Parsed event name",
@@ -110,9 +65,14 @@ export class QueryableEvent extends Schema.Class<QueryableEvent>("/nozzle/models
     description: "The event signature, including the event params.",
     examples: ["Count(uint256 count)", "Transfer(address indexed from, address indexed to, uint256 value)"],
   }),
+  source: Schema.NonEmptyTrimmedString.annotations({
+    identifier: "QueryableEvent.source",
+    description: "Smart Contract source where the event comes from",
+    examples: ["contracts/src/Counter.sol"],
+  }),
 }) {}
 export class QueryableEventStream
-  extends Schema.Class<QueryableEventStream>("/nozzle/models/events/QueryableEventStream")({
+  extends Schema.Class<QueryableEventStream>("Nozzle/models/events/QueryableEventStream")({
     events: Schema.Array(QueryableEvent),
   })
 {}
@@ -142,6 +102,7 @@ const queryableEventStream = Stream.make(
         name: "Count",
         params: [{ name: "count", datatype: "uint256", indexed: false }],
         signature: "Count(uint256 count)",
+        source: "./contracts/src/Counter.sol",
       }),
       QueryableEvent.make({
         name: "Transfer",
@@ -151,6 +112,7 @@ const queryableEventStream = Stream.make(
           { name: "value", datatype: "uint256", indexed: false },
         ],
         signature: "Transfer(address indexed from, address indexed to, uint256 value)",
+        source: "./contracts/src/Counter.sol",
       }),
     ],
   }),
@@ -188,6 +150,51 @@ const NozzleStudioApiLayer = Layer.merge(HttpApiBuilder.middlewareCors(), HttpAp
 const ApiLive = HttpApiBuilder.httpApp.pipe(
   Effect.provide(Layer.mergeAll(NozzleStudioApiLayer, HttpApiBuilder.Router.Live, HttpApiBuilder.Middleware.layer)),
 )
+
+const DatasetWorksFileRouter = Effect.gen(function*() {
+  const path = yield* Path.Path
+
+  const __filename = fileURLToPath(import.meta.url)
+  const __dirname = path.dirname(__filename)
+  /**
+   * This resolves an issue when running the cli in dev mode locally vs published mode.
+   * In local dev mode, the __dirname will end with `commands` as this file will be ran from the ./commands directory.
+   * When running in the compiled dist mode, the __dirname will end with `dist`.
+   *
+   * @todo clean this up and figure out a better way to derive
+   */
+  const isLocal = EffectString.endsWith("commands")(__dirname)
+  const datasetWorksClientDist = isLocal
+    ? path.resolve(__dirname, "..", "..", "..", "..", "studio", "dist")
+    : path.resolve(__dirname, "studio", "dist")
+
+  return HttpRouter.empty.pipe(
+    HttpRouter.get(
+      "/",
+      HttpServerResponse.file(path.join(datasetWorksClientDist, "index.html")).pipe(
+        Effect.orElse(() => HttpServerResponse.empty({ status: 404 })),
+      ),
+    ),
+    HttpRouter.get(
+      "/assets/:file",
+      Effect.gen(function*() {
+        const file = yield* HttpRouter.params.pipe(Effect.map(Struct.get("file")), Effect.map(Option.fromNullable))
+
+        if (Option.isNone(file)) {
+          return HttpServerResponse.empty({ status: 404 })
+        }
+
+        const assets = path.join(datasetWorksClientDist, "assets")
+        const normalized = path.normalize(path.join(assets, ...file.value.split("/")))
+        if (!normalized.startsWith(assets)) {
+          return HttpServerResponse.empty({ status: 404 })
+        }
+
+        return yield* HttpServerResponse.file(normalized)
+      }).pipe(Effect.orElse(() => HttpServerResponse.empty({ status: 404 }))),
+    ),
+  )
+})
 
 const Server = Effect.all({
   api: ApiLive,
