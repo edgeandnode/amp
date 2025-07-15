@@ -30,6 +30,7 @@ pub async fn dump(
     run_every_mins: Option<u64>,
     microbatch_max_interval_override: Option<u64>,
     new_location: Option<String>,
+    fresh: bool,
 ) -> Result<(), BoxError> {
     let data_store = match new_location {
         Some(location) => {
@@ -64,22 +65,24 @@ pub async fn dump(
         let dataset = dataset_store.load_dataset(&dataset_name).await?;
         let mut tables = Vec::with_capacity(dataset.tables.len());
         for table in Arc::new(dataset).resolved_tables() {
-            if let Some(physical_table) =
-                PhysicalTable::get_active(&table, metadata_db.clone()).await?
-            {
-                tables.push(physical_table.into());
-            } else {
-                tables.push(
-                    PhysicalTable::next_revision(
-                        &table,
-                        data_store.as_ref(),
-                        metadata_db.clone(),
-                        true,
-                    )
+            let physical_table = if fresh {
+                PhysicalTable::next_revision(&table, data_store.as_ref(), metadata_db.clone(), true)
                     .await?
-                    .into(),
-                );
-            }
+            } else {
+                match PhysicalTable::get_active(&table, metadata_db.clone()).await? {
+                    Some(physical_table) => physical_table,
+                    None => {
+                        PhysicalTable::next_revision(
+                            &table,
+                            data_store.as_ref(),
+                            metadata_db.clone(),
+                            true,
+                        )
+                        .await?
+                    }
+                }
+            };
+            tables.push(physical_table.into());
         }
         physical_datasets.push(tables);
     }
