@@ -17,6 +17,7 @@ use bytes::{BufMut, Bytes, BytesMut};
 use common::{
     arrow::{self, ipc::writer::IpcDataGenerator},
     config::Config,
+    notification_multiplexer::{self, NotificationMultiplexerHandle},
     plan_visitors::{
         forbid_underscore_prefixed_aliases, is_incremental, propagate_block_num,
         unproject_special_block_num_column,
@@ -153,16 +154,20 @@ pub struct Service {
     config: Arc<Config>,
     env: QueryEnv,
     dataset_store: Arc<DatasetStore>,
+    notification_multiplexer: Arc<NotificationMultiplexerHandle>,
 }
 
 impl Service {
     pub async fn new(config: Arc<Config>, metadata_db: Arc<MetadataDb>) -> Result<Self, Error> {
         let env = config.make_query_env().map_err(Error::ExecutionError)?;
-        let dataset_store = DatasetStore::new(config.clone(), metadata_db);
+        let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
+        let notification_multiplexer =
+            Arc::new(notification_multiplexer::spawn((*metadata_db).clone()));
         Ok(Self {
             config,
             env,
             dataset_store,
+            notification_multiplexer,
         })
     }
 
@@ -213,8 +218,7 @@ impl Service {
             ctx.execute_plan(plan).await.map_err(|err| Error::from(err))
         } else {
             // If streaming, we need to spawn a streaming query.
-            let db = self.dataset_store.metadata_db.clone();
-            let watermark_stream = watermark_updates(ctx.clone(), db.clone())
+            let watermark_stream = watermark_updates(ctx.clone(), &self.notification_multiplexer)
                 .await
                 .map_err(|e| Error::StreamingExecutionError(e.to_string()))?;
 

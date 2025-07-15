@@ -597,7 +597,18 @@ impl MetadataDb {
         Ok(())
     }
 
+    #[instrument(skip(self), err)]
+    pub async fn notify_location_change(&self, location_id: LocationId) -> Result<(), Error> {
+        self.notify("change-tracking", &location_id.to_string())
+            .await
+    }
+
     /// Listens on a PostgreSQL notification channel using LISTEN.
+    ///
+    /// # Connection management
+    ///
+    /// This does not take a connection from the pool, but instead establishes a new connection
+    /// to the database. This connection is maintained for the lifetime of the stream.
     ///
     /// # Error cases
     ///
@@ -612,9 +623,11 @@ impl MetadataDb {
     pub async fn listen(
         &self,
         channel_name: &str,
-    ) -> Result<impl Stream<Item = Result<PgNotification, sqlx::Error>> + use<>, sqlx::Error> {
-        let mut channel = PgListener::connect(&self.url).await?;
-        channel.listen(channel_name).await?;
+    ) -> Result<impl Stream<Item = Result<PgNotification, sqlx::Error>> + use<>, Error> {
+        let mut channel = PgListener::connect(&self.url)
+            .await
+            .map_err(Error::ConnectionError)?;
+        channel.listen(channel_name).await.map_err(Error::DbError)?;
         Ok(channel.into_stream())
     }
 }

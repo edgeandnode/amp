@@ -8,6 +8,7 @@ use common::{
     BlockNum, BoxError,
     catalog::physical::{Catalog, PhysicalTable},
     config::Config,
+    notification_multiplexer::NotificationMultiplexerHandle,
     query_context::{Error as QueryError, QueryContext},
     store::Store as DataStore,
 };
@@ -179,6 +180,8 @@ pub struct Ctx {
     pub metadata_db: Arc<MetadataDb>,
     pub dataset_store: Arc<DatasetStore>,
     pub data_store: Arc<DataStore>,
+    /// Shared notification multiplexer for streaming queries
+    pub notification_multiplexer: Arc<NotificationMultiplexerHandle>,
 }
 
 /// This will check and fix consistency issues when possible. When fixing is not possible, it will

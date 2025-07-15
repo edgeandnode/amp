@@ -9,7 +9,7 @@ use common::{
     BoxError, Store,
     catalog::physical::PhysicalTable,
     config::Config,
-    manifest,
+    manifest, notification_multiplexer,
     parquet::basic::{Compression, ZstdLevel},
 };
 use datafusion::{parquet, sql::resolve::resolve_table_references};
@@ -86,11 +86,15 @@ pub async fn dump(
         physical_datasets.push(tables);
     }
 
+    let notification_multiplexer =
+        Arc::new(notification_multiplexer::spawn((*metadata_db).clone()));
+
     let ctx = dump::Ctx {
         config: config.clone(),
         metadata_db: metadata_db.clone(),
         dataset_store: dataset_store.clone(),
         data_store: data_store.clone(),
+        notification_multiplexer,
     };
 
     let all_tables: Vec<Arc<PhysicalTable>> = physical_datasets.iter().flatten().cloned().collect();
