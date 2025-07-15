@@ -161,7 +161,8 @@ impl Service {
     pub async fn new(config: Arc<Config>, metadata_db: Arc<MetadataDb>) -> Result<Self, Error> {
         let env = config.make_query_env().map_err(Error::ExecutionError)?;
         let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
-        let notification_multiplexer = Arc::new(NotificationMultiplexerHandle::spawn((*metadata_db).clone()));
+        let notification_multiplexer =
+            Arc::new(NotificationMultiplexerHandle::spawn((*metadata_db).clone()));
         Ok(Self {
             config,
             env,

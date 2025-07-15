@@ -29,17 +29,14 @@ impl NotificationMultiplexerHandle {
             metadata_db: metadata_db.clone(),
             watchers: watchers.clone(),
         };
-        
-        let join_handle = AbortOnDropHandle::new(tokio::spawn(
-            multiplexer.execute_with_retry()
-        ));
+
+        let join_handle = AbortOnDropHandle::new(tokio::spawn(multiplexer.execute_with_retry()));
 
         NotificationMultiplexerHandle {
             watchers,
             _join_handle: join_handle,
         }
     }
-
 
     #[instrument(skip(self))]
     pub async fn subscribe(&self, location_id: LocationId) -> watch::Receiver<()> {
@@ -61,7 +58,7 @@ impl NotificationMultiplexer {
     async fn execute_with_retry(self) {
         let metadata_db = self.metadata_db.clone();
         let watchers = self.watchers.clone();
-        
+
         let _ = (|| async {
             let multiplexer = NotificationMultiplexer {
                 metadata_db: metadata_db.clone(),
