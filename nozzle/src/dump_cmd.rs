@@ -92,9 +92,9 @@ pub async fn dump(
         dataset_store: dataset_store.clone(),
         data_store: data_store.clone(),
     };
-    
+
     let all_tables: Vec<Arc<PhysicalTable>> = physical_datasets.iter().flatten().cloned().collect();
-    
+
     match run_every {
         None => {
             for tables in &physical_datasets {
