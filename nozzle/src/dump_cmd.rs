@@ -10,6 +10,7 @@ use common::{
     catalog::physical::PhysicalTable,
     config::Config,
     manifest,
+    notification_multiplexer::NotificationMultiplexerHandle,
     parquet::basic::{Compression, ZstdLevel},
 };
 use datafusion::{parquet, sql::resolve::resolve_table_references};
@@ -84,11 +85,15 @@ pub async fn dump(
         physical_datasets.push(tables);
     }
 
+    let notification_multiplexer =
+        Arc::new(NotificationMultiplexerHandle::spawn((*metadata_db).clone()));
+
     let ctx = dump::Ctx {
         config: config.clone(),
         metadata_db: metadata_db.clone(),
         dataset_store: dataset_store.clone(),
         data_store: data_store.clone(),
+        notification_multiplexer,
     };
     match run_every {
         None => {

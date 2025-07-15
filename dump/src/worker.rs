@@ -1,6 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
-use common::{BoxError, config::Config};
+use common::{BoxError, config::Config, notification_multiplexer::NotificationMultiplexerHandle};
 use dataset_store::DatasetStore;
 use futures::TryStreamExt as _;
 use metadata_db::MetadataDb;
@@ -40,6 +40,9 @@ impl Worker {
         let mut reconcile_interval = tokio::time::interval(Duration::from_secs(60));
         reconcile_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
+        let notification_multiplexer =
+            Arc::new(NotificationMultiplexerHandle::spawn((*metadata_db).clone()));
+
         Self {
             node_id,
             reconcile_interval,
@@ -49,6 +52,7 @@ impl Worker {
                 metadata_db,
                 dataset_store,
                 data_store,
+                notification_multiplexer,
             },
             job_set: Default::default(),
         }

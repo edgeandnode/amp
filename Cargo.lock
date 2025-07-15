@@ -1877,6 +1877,7 @@ dependencies = [
  "async-trait",
  "async-udf",
  "atty",
+ "backon",
  "bincode",
  "bytes",
  "cargo_metadata",
