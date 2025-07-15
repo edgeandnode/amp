@@ -35,6 +35,8 @@
     "@effect/experimental": "^0.52.0",
     "@effect/platform-node": "^0.90.0",
     "jiti": "^2.4.2",
+    "js-toml": "^1.0.1",
+    "minimatch": "^10.0.3",
     "open": "^10.1.2",
     "viem": "^2.31.0"
   },

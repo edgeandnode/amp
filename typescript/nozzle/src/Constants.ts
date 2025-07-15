@@ -1,0 +1,28 @@
+import { HashSet } from "effect"
+
+export const foundryOutputExludeList = HashSet.make(
+  "build-info/*.json",
+  "Common.sol/**",
+  "Components.sol/**",
+  "Script.sol/**",
+  "StdAssertions.sol/**",
+  "StdInvariant.sol/**",
+  "StdError.sol/**",
+  "StdChains.sol/**",
+  "StdCheats.sol/**",
+  "StdConstants.sol/**",
+  "StdMath.sol/**",
+  "StdJson.sol/**",
+  "StdStorage.sol/**",
+  "StdCheats.sol/**",
+  "StdStyle.sol/**",
+  "StdToml.sol/**",
+  "StdUtils.sol/**",
+  "Vm.sol/**",
+  "safeconsole.sol/**",
+  "console.sol/**",
+  "console2.sol/**",
+  "Test.sol/**",
+  "**.s.sol/*.json",
+  "**.t.sol/*.json",
+)
