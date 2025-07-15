@@ -17,7 +17,7 @@ use bytes::{BufMut, Bytes, BytesMut};
 use common::{
     arrow::{self, ipc::writer::IpcDataGenerator},
     config::Config,
-    notification_multiplexer::NotificationMultiplexerHandle,
+    notification_multiplexer::{self, NotificationMultiplexerHandle},
     plan_visitors::{
         forbid_underscore_prefixed_aliases, is_incremental, propagate_block_num,
         unproject_special_block_num_column,
@@ -162,7 +162,7 @@ impl Service {
         let env = config.make_query_env().map_err(Error::ExecutionError)?;
         let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
         let notification_multiplexer =
-            Arc::new(NotificationMultiplexerHandle::spawn((*metadata_db).clone()));
+            Arc::new(notification_multiplexer::spawn((*metadata_db).clone()));
         Ok(Self {
             config,
             env,

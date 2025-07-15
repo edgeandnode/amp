@@ -1,6 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
-use common::{BoxError, config::Config, notification_multiplexer::NotificationMultiplexerHandle};
+use common::{BoxError, config::Config, notification_multiplexer};
 use dataset_store::DatasetStore;
 use futures::TryStreamExt as _;
 use metadata_db::MetadataDb;
@@ -41,7 +41,7 @@ impl Worker {
         reconcile_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
         let notification_multiplexer =
-            Arc::new(NotificationMultiplexerHandle::spawn((*metadata_db).clone()));
+            Arc::new(notification_multiplexer::spawn((*metadata_db).clone()));
 
         Self {
             node_id,

@@ -9,8 +9,7 @@ use common::{
     BoxError, Store,
     catalog::physical::PhysicalTable,
     config::Config,
-    manifest,
-    notification_multiplexer::NotificationMultiplexerHandle,
+    manifest, notification_multiplexer,
     parquet::basic::{Compression, ZstdLevel},
 };
 use datafusion::{parquet, sql::resolve::resolve_table_references};
@@ -86,7 +85,7 @@ pub async fn dump(
     }
 
     let notification_multiplexer =
-        Arc::new(NotificationMultiplexerHandle::spawn((*metadata_db).clone()));
+        Arc::new(notification_multiplexer::spawn((*metadata_db).clone()));
 
     let ctx = dump::Ctx {
         config: config.clone(),

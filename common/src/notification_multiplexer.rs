@@ -5,7 +5,7 @@ use metadata_db::{LocationId, MetadataDb};
 use tokio::sync::{Mutex, watch};
 use tokio_stream::StreamExt;
 use tokio_util::task::AbortOnDropHandle;
-use tracing::{debug, instrument, trace, warn};
+use tracing::{debug, error, instrument, trace, warn};
 
 use crate::BoxError;
 
@@ -21,22 +21,27 @@ pub struct NotificationMultiplexerHandle {
     _join_handle: AbortOnDropHandle<()>,
 }
 
-impl NotificationMultiplexerHandle {
-    pub fn spawn(metadata_db: MetadataDb) -> Self {
-        let watchers = Arc::new(Mutex::new(HashMap::new()));
+/// Spawns a new notification multiplexer and returns a handle to it.
+///
+/// This creates a background task that maintains a single PostgreSQL LISTEN connection
+/// and multiplexes notifications to multiple tokio::watch channels based on location_id.
+pub fn spawn(metadata_db: MetadataDb) -> NotificationMultiplexerHandle {
+    let watchers = Arc::new(Mutex::new(HashMap::new()));
 
-        let multiplexer = NotificationMultiplexer {
-            metadata_db: metadata_db.clone(),
-            watchers: watchers.clone(),
-        };
+    let multiplexer = NotificationMultiplexer {
+        metadata_db: metadata_db.clone(),
+        watchers: watchers.clone(),
+    };
 
-        let join_handle = AbortOnDropHandle::new(tokio::spawn(multiplexer.execute_with_retry()));
+    let join_handle = AbortOnDropHandle::new(tokio::spawn(multiplexer.execute_with_retry()));
 
-        NotificationMultiplexerHandle {
-            watchers,
-            _join_handle: join_handle,
-        }
+    NotificationMultiplexerHandle {
+        watchers,
+        _join_handle: join_handle,
     }
+}
+
+impl NotificationMultiplexerHandle {
 
     #[instrument(skip(self))]
     pub async fn subscribe(&self, location_id: LocationId) -> watch::Receiver<()> {
@@ -108,7 +113,7 @@ impl NotificationMultiplexer {
                     }
                 }
                 Err(e) => {
-                    warn!(
+                    error!(
                         "Failed to parse location_id from payload '{}': {}",
                         payload, e
                     );
