@@ -194,7 +194,7 @@ pub struct Ctx {
 ///
 /// Check: metadata entries do not contain overlapping ranges.
 /// On fail: Return a `CorruptedDataset` error.
-async fn consistency_check(table: &PhysicalTable) -> Result<(), ConsistencyCheckError> {
+pub async fn consistency_check(table: &PhysicalTable) -> Result<(), ConsistencyCheckError> {
     // See also: metadata-consistency
 
     let location_id = table.location_id();
@@ -272,7 +272,7 @@ async fn consistency_check(table: &PhysicalTable) -> Result<(), ConsistencyCheck
 /// Error type for consistency checks
 #[derive(Debug, thiserror::Error)]
 #[error("consistency check error: {0}")]
-enum ConsistencyCheckError {
+pub enum ConsistencyCheckError {
     #[error("internal query error: {0}")]
     QueryError(#[from] QueryError),
 

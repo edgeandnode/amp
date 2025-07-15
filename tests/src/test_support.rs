@@ -21,7 +21,7 @@ use common::{
     query_context::parse_sql,
 };
 use dataset_store::DatasetStore;
-use dump::worker::Worker;
+use dump::{consistency_check, worker::Worker};
 use figment::{
     Figment,
     providers::{Format as _, Json},
@@ -257,7 +257,7 @@ pub(crate) async fn dump_dataset(
     let partition_size_mb = 100;
     let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
 
-    dump(
+    let physical_tables = dump(
         config.clone(),
         metadata_db.clone(),
         vec![dataset_name.to_string()],
@@ -273,6 +273,11 @@ pub(crate) async fn dump_dataset(
         false,
     )
     .await?;
+
+    // Run consistency check on all tables after dump
+    for physical_table in physical_tables {
+        consistency_check(&physical_table).await?;
+    }
 
     Ok(())
 }

@@ -31,7 +31,7 @@ pub async fn dump(
     microbatch_max_interval_override: Option<u64>,
     new_location: Option<String>,
     fresh: bool,
-) -> Result<(), BoxError> {
+) -> Result<Vec<Arc<PhysicalTable>>, BoxError> {
     let data_store = match new_location {
         Some(location) => {
             let data_path = fs::canonicalize(&location)
@@ -41,7 +41,6 @@ pub async fn dump(
         }
         None => config.data_store.clone(),
     };
-
     let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
     let partition_size = partition_size_mb * 1024 * 1024;
     let compression = if disable_compression {
@@ -93,12 +92,15 @@ pub async fn dump(
         dataset_store: dataset_store.clone(),
         data_store: data_store.clone(),
     };
+
+    let all_tables: Vec<Arc<PhysicalTable>> = physical_datasets.iter().flatten().cloned().collect();
+
     match run_every {
         None => {
-            for tables in physical_datasets {
+            for tables in &physical_datasets {
                 dump::dump_tables(
                     ctx.clone(),
-                    &tables,
+                    tables,
                     n_jobs,
                     partition_size,
                     microbatch_max_interval_override.unwrap_or(config.microbatch_max_interval),
@@ -126,7 +128,7 @@ pub async fn dump(
         },
     }
 
-    Ok(())
+    Ok(all_tables)
 }
 
 // if end_block starts with "+" then it is a relative block number
