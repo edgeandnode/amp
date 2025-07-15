@@ -42,7 +42,6 @@ pub fn spawn(metadata_db: MetadataDb) -> NotificationMultiplexerHandle {
 }
 
 impl NotificationMultiplexerHandle {
-
     #[instrument(skip(self))]
     pub async fn subscribe(&self, location_id: LocationId) -> watch::Receiver<()> {
         let mut watchers = self.watchers.lock().await;
