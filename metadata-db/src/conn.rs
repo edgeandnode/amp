@@ -89,6 +89,7 @@ impl DbConn {
     /// - Locks the DB before running migrations.
     /// - Never runs the same migration twice.
     /// - Errors on changes to old migrations.
+    #[cfg(test)]
     #[instrument(skip(self), err)]
     pub async fn run_migrations(&mut self) -> Result<(), ConnError> {
         static MIGRATOR: Migrator = sqlx::migrate!();
