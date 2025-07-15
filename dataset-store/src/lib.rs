@@ -281,6 +281,45 @@ impl DatasetStore {
             .map_err(|e| (dataset, e).into())
     }
 
+    /// Loads a [RawDataset] and [common](DatasetDefsCommon) data for a TOML or JSON file with the
+    /// given name.
+    async fn common_data_and_dataset(
+        &self,
+        dataset_name: &str,
+    ) -> Result<(DatasetDefsCommon, RawDataset), Error> {
+        use Error::*;
+
+        let raw_dataset = self
+            .dataset_defs_store()
+            .get_string(format!("{}.toml", dataset_name))
+            .map_ok(RawDataset::Toml)
+            .or_else(|err| async move {
+                if !err.is_not_found() {
+                    return Err(err);
+                }
+
+                self.dataset_defs_store()
+                    .get_string(format!("{}.json", dataset_name))
+                    .await
+                    .map(RawDataset::Json)
+            })
+            .await?;
+
+        let common: DatasetDefsCommon = match raw_dataset {
+            RawDataset::Toml(ref raw) => {
+                tracing::warn!("TOML dataset format is deprecated!");
+                toml::from_str::<DatasetDefsCommon>(raw)?.into()
+            }
+            RawDataset::Json(ref raw) => serde_json::from_str::<DatasetDefsCommon>(raw)?.into(),
+        };
+
+        if common.name != dataset_name {
+            return Err(NameMismatch(common.name, dataset_name.to_string()));
+        }
+
+        Ok((common, raw_dataset))
+    }
+
     async fn load_manifest_dataset_inner(
         self: Arc<Self>,
         dataset_name: &str,
@@ -306,50 +345,45 @@ impl DatasetStore {
 
         let (common, raw_dataset) = self.common_data_and_dataset(dataset_name).await?;
         let kind = DatasetKind::from_str(&common.kind)?;
-        let value = raw_dataset.deserialize()?;
-        let dataset = match kind {
+        let value = raw_dataset.to_value()?;
+        let (dataset, ground_truth_schema) = match kind {
             DatasetKind::EvmRpc => {
-                let schema_built_in =
-                    vec_table_to_schema(evm_rpc_datasets::tables::all(&common.network));
-
-                match common.schema {
-                    Some(loaded_schema) => {
-                        if loaded_schema != schema_built_in {
-                            return Err(Error::SchemaMismatch);
-                        }
-                    }
-                    None => {
-                        return Err(Error::SchemaMissing { dataset_kind: kind });
-                    }
-                }
-                evm_rpc_datasets::dataset(value)?
+                let builtin_schema: SerializableSchema =
+                    evm_rpc_datasets::tables::all(&common.network).into();
+                (evm_rpc_datasets::dataset(value)?, Some(builtin_schema))
             }
             DatasetKind::Firehose => {
-                let schema_built_in =
-                    vec_table_to_schema(firehose_datasets::evm::tables::all(&common.network));
-
-                match common.schema {
-                    Some(loaded_schema) => {
-                        if loaded_schema != schema_built_in {
-                            return Err(Error::SchemaMismatch);
-                        }
-                    }
-                    None => {
-                        return Err(Error::SchemaMissing { dataset_kind: kind });
-                    }
-                }
-                firehose_datasets::evm::dataset(value)?
+                let builtin_schema: SerializableSchema =
+                    firehose_datasets::evm::tables::all(&common.network).into();
+                (
+                    firehose_datasets::evm::dataset(value)?,
+                    Some(builtin_schema),
+                )
             }
-            DatasetKind::Substreams => substreams_datasets::dataset(value).await?,
-            DatasetKind::Sql => self.clone().sql_dataset(value).await?.dataset,
+            DatasetKind::Substreams => {
+                let dataset = substreams_datasets::dataset(value).await?;
+                let store_schema: SerializableSchema = dataset.tables.as_slice().into();
+                (dataset, Some(store_schema))
+            }
+            DatasetKind::Sql => {
+                let store_dataset = Arc::clone(&self).sql_dataset(value).await?.dataset;
+                (store_dataset, None)
+            }
             DatasetKind::Manifest => {
-                let filename = format!("{}.json", dataset_name);
-                let raw_manifest = self.dataset_defs_store().get_string(filename).await?;
-                let manifest: Manifest =
-                    serde_json::from_str(&raw_manifest).map_err(Error::ManifestError)?;
-                Dataset::from(manifest.clone())
+                let manifest = raw_dataset.to_manifest()?;
+                let dataset = Dataset::from(manifest);
+                (dataset, None)
             }
         };
+
+        if let Some(ground_truth_schema) = ground_truth_schema {
+            let Some(loaded_schema) = common.schema else {
+                return Err(Error::SchemaMissing { dataset_kind: kind });
+            };
+            if loaded_schema != ground_truth_schema {
+                return Err(Error::SchemaMismatch);
+            }
+        }
 
         // Cache the dataset.
         self.dataset_cache
@@ -372,7 +406,7 @@ impl DatasetStore {
             return Err(Error::UnsupportedKind(kind.to_string()));
         }
 
-        let value = raw_dataset.deserialize()?;
+        let value = raw_dataset.to_value()?;
 
         self.sql_dataset(value).await
     }
@@ -385,7 +419,7 @@ impl DatasetStore {
 
     async fn load_client_inner(&self, dataset_name: &str) -> Result<BlockStreamClient, Error> {
         let (common, raw_dataset) = self.common_data_and_dataset(dataset_name).await?;
-        let value = raw_dataset.deserialize()?;
+        let value = raw_dataset.to_value()?;
         let kind = DatasetKind::from_str(&common.kind)?;
 
         let provider = self.find_provider(kind, common.network.clone()).await?;
@@ -451,43 +485,6 @@ impl DatasetStore {
         let common_fields = ProviderDefsCommon::deserialize(toml_value.clone())?;
         let kind = DatasetKind::from_str(&common_fields.kind)?;
         Ok((kind, common_fields.network, toml_value))
-    }
-
-    async fn common_data_and_dataset(
-        &self,
-        dataset_name: &str,
-    ) -> Result<(DatasetDefsCommon, RawDataset), Error> {
-        use Error::*;
-
-        let raw_dataset = self
-            .dataset_defs_store()
-            .get_string(format!("{}.toml", dataset_name))
-            .map_ok(RawDataset::Toml)
-            .or_else(|err| async move {
-                if !err.is_not_found() {
-                    return Err(err);
-                }
-
-                self.dataset_defs_store()
-                    .get_string(format!("{}.json", dataset_name))
-                    .await
-                    .map(RawDataset::Json)
-            })
-            .await?;
-
-        let common: DatasetDefsCommon = match raw_dataset {
-            RawDataset::Toml(ref raw) => {
-                tracing::warn!("TOML dataset format is deprecated!");
-                toml::from_str::<DatasetDefsCommon>(raw)?.into()
-            }
-            RawDataset::Json(ref raw) => serde_json::from_str::<DatasetDefsCommon>(raw)?.into(),
-        };
-
-        if common.name != dataset_name {
-            return Err(NameMismatch(common.name, dataset_name.to_string()));
-        }
-
-        Ok((common, raw_dataset))
     }
 
     /// Returns cached eth_call scalar UDF, otherwise loads the UDF and caches it.
@@ -652,13 +649,23 @@ impl DatasetStore {
     }
 }
 
+/// Represents a raw dataset definition, either in TOML or JSON format.
 enum RawDataset {
     Toml(String),
     Json(String),
 }
 
 impl RawDataset {
-    fn deserialize(&self) -> Result<DatasetValue, Error> {
+    pub fn to_manifest(&self) -> Result<Manifest, Error> {
+        let manifest = match self {
+            RawDataset::Toml(raw) => toml::from_str(raw)?,
+            RawDataset::Json(raw) => serde_json::from_str(raw)?,
+        };
+
+        Ok(manifest)
+    }
+
+    fn to_value(&self) -> Result<DatasetValue, Error> {
         let value = match self {
             RawDataset::Toml(raw) => DatasetValue::Toml(toml::Value::from_str(raw)?),
             RawDataset::Json(raw) => DatasetValue::Json(serde_json::Value::from_str(raw)?),
@@ -678,8 +685,10 @@ pub struct DatasetDefsCommon {
 }
 
 /// A serializable representation of a collection of [`arrow::datatypes::Schema`]s, without any metadata.
-pub type SerializableSchema =
-    std::collections::HashMap<String, std::collections::HashMap<String, DataType>>;
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SerializableSchema(
+    std::collections::HashMap<String, std::collections::HashMap<String, DataType>>,
+);
 
 /// All providers definitions must have a kind and network.
 #[derive(Deserialize)]
@@ -765,20 +774,46 @@ impl BlockStreamer for BlockStreamClient {
     }
 }
 
-pub fn vec_table_to_schema(tables: Vec<common::catalog::logical::Table>) -> SerializableSchema {
-    tables
-        .into_iter()
-        .map(|table| {
-            let inner_map = table
-                .schema()
-                .fields()
-                .iter()
-                .filter(|field| field.name() != SPECIAL_BLOCK_NUM)
-                .fold(std::collections::HashMap::new(), |mut acc, field| {
-                    acc.insert(field.name().clone(), field.data_type().clone());
-                    acc
-                });
-            (table.name().to_string().clone(), inner_map)
-        })
-        .collect()
+impl From<Vec<common::catalog::logical::Table>> for SerializableSchema {
+    fn from(tables: Vec<common::catalog::logical::Table>) -> Self {
+        let inner = tables
+            .into_iter()
+            .map(|table| {
+                let inner_map = table
+                    .schema()
+                    .fields()
+                    .iter()
+                    .filter(|&field| field.name() != SPECIAL_BLOCK_NUM)
+                    .fold(std::collections::HashMap::new(), |mut acc, field| {
+                        acc.insert(field.name().clone(), field.data_type().clone());
+                        acc
+                    });
+                (table.name().to_string().clone(), inner_map)
+            })
+            .collect();
+
+        Self(inner)
+    }
+}
+
+impl From<&[common::catalog::logical::Table]> for SerializableSchema {
+    fn from(tables: &[common::catalog::logical::Table]) -> Self {
+        let inner = tables
+            .iter()
+            .map(|table| {
+                let inner_map = table
+                    .schema()
+                    .fields()
+                    .iter()
+                    .filter(|&field| field.name() != SPECIAL_BLOCK_NUM)
+                    .fold(std::collections::HashMap::new(), |mut acc, field| {
+                        acc.insert(field.name().clone(), field.data_type().clone());
+                        acc
+                    });
+                (table.name().to_string().clone(), inner_map)
+            })
+            .collect();
+
+        Self(inner)
+    }
 }

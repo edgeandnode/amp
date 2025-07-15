@@ -116,6 +116,14 @@ enum Command {
         /// If not specified, the manifest will be printed to stdout.
         #[arg(short, long, env = "GM_OUT")]
         out: Option<PathBuf>,
+
+        /// Substreams package manifest URL, required for DatasetKind::Substreams.
+        #[arg(long, env = "GM_SS_MANIFEST_URL")]
+        manifest: Option<String>,
+
+        /// Substreams output module name, required for DatasetKind::Substreams.
+        #[arg(long, env = "GM_SS_MODULE")]
+        module: Option<String>,
     },
 }
 
@@ -211,6 +219,8 @@ async fn main_inner() -> Result<(), BoxError> {
             kind,
             name,
             out,
+            manifest,
+            module,
         } => {
             if let Some(mut out) = out {
                 if out.is_dir() {
@@ -218,10 +228,10 @@ async fn main_inner() -> Result<(), BoxError> {
                 }
 
                 let mut out = std::fs::File::create(out)?;
-                generate_manifest::run(network, kind, name, &mut out)
+                generate_manifest::run(network, kind, name, manifest, module, &mut out).await
             } else {
                 let mut stdout = std::io::stdout();
-                generate_manifest::run(network, kind, name, &mut stdout)
+                generate_manifest::run(network, kind, name, manifest, module, &mut stdout).await
             }
         }
     }
