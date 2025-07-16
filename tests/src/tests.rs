@@ -8,7 +8,7 @@ use alloy::{
 use common::{
     BlockNum, BoxError, metadata::segments::BlockRange, query_context::parse_sql, tracing_helpers,
 };
-use dataset_store::{DatasetDefsCommon, DatasetStore};
+use dataset_store::{DatasetDefsCommon, DatasetStore, SerializableSchema};
 use generate_manifest;
 
 use crate::{
@@ -250,8 +250,8 @@ async fn anvil_rpc_reorg() {
     assert_ne!(&ranges[1].prev_hash, &Some(ranges[0].hash));
 }
 
-#[test]
-fn generate_manifest_success() {
+#[tokio::test]
+async fn generate_manifest_evm_rpc_builtin() {
     tracing_helpers::register_logger();
 
     let network = "mainnet".to_string();
@@ -260,26 +260,170 @@ fn generate_manifest_success() {
 
     let mut out = Vec::new();
 
-    let _ = generate_manifest::run(network.clone(), kind.clone(), name.clone(), &mut out).unwrap();
+    let _ = generate_manifest::run(
+        network.clone(),
+        kind.clone(),
+        name.clone(),
+        None,
+        None,
+        &mut out,
+    )
+    .await
+    .unwrap();
 
     let out: DatasetDefsCommon = serde_json::from_slice(&out).unwrap();
+    let builtin_schema: SerializableSchema = evm_rpc_datasets::tables::all(&network).into();
 
     assert_eq!(out.network, network);
     assert_eq!(out.kind, kind);
     assert_eq!(out.name, name);
+    assert_eq!(out.schema.unwrap(), builtin_schema)
 }
 
-#[test]
-fn generate_manifest_bad_dataset_kind() {
+#[tokio::test]
+async fn generate_manifest_firehose_builtin() {
+    tracing_helpers::register_logger();
+
+    let network = "mainnet".to_string();
+    let kind = "firehose".to_string();
+    let name = "firehose".to_string();
+
+    let mut out = Vec::new();
+
+    let _ = generate_manifest::run(
+        network.clone(),
+        kind.clone(),
+        name.clone(),
+        None,
+        None,
+        &mut out,
+    )
+    .await
+    .unwrap();
+
+    let out: DatasetDefsCommon = serde_json::from_slice(&out).unwrap();
+    let builtin_schema: SerializableSchema = firehose_datasets::evm::tables::all(&network).into();
+
+    assert_eq!(out.network, network);
+    assert_eq!(out.kind, kind);
+    assert_eq!(out.name, name);
+    assert_eq!(out.schema.unwrap(), builtin_schema)
+}
+
+#[tokio::test]
+async fn generate_manifest_substreams() {
+    tracing_helpers::register_logger();
+
+    let network = "mainnet".to_string();
+    let kind = "substreams".to_string();
+    let name = "substreams".to_string();
+    let manifest = "https://spkg.io/pinax-network/weth-v0.1.0.spkg".to_string();
+    let module = "map_events".to_string();
+
+    let mut out = Vec::new();
+
+    let _ = generate_manifest::run(
+        network.clone(),
+        kind.clone(),
+        name.clone(),
+        Some(manifest.clone()),
+        Some(module.clone()),
+        &mut out,
+    )
+    .await
+    .unwrap();
+
+    let out: DatasetDefsCommon = serde_json::from_slice(&out).unwrap();
+    let dataset_def = substreams_datasets::dataset::DatasetDef {
+        kind: kind.clone(),
+        network: network.clone(),
+        name: name.clone(),
+        manifest,
+        module,
+    };
+
+    let schema = substreams_datasets::tables(dataset_def)
+        .await
+        .map(Into::into)
+        .unwrap();
+
+    assert_eq!(out.network, network);
+    assert_eq!(out.kind, kind);
+    assert_eq!(out.name, name);
+    assert_eq!(out.schema.unwrap(), schema);
+}
+
+#[tokio::test]
+async fn generate_manifest_sql() {
+    tracing_helpers::register_logger();
+
+    let network = "mainnet".to_string();
+    let kind = "sql".to_string();
+    let name = "sql_over_eth_firehose".to_string();
+
+    let mut out = Vec::new();
+
+    let err = generate_manifest::run(
+        network.clone(),
+        kind.clone(),
+        name.clone(),
+        None,
+        None,
+        &mut out,
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(err.contains("doesn't support dataset generation"));
+}
+
+#[tokio::test]
+async fn generate_manifest_manifest_builtin() {
+    tracing_helpers::register_logger();
+
+    let network = "mainnet".to_string();
+    let kind = "manifest".to_string();
+    let name = "basic_function".to_string();
+
+    let mut out = Vec::new();
+
+    let err = generate_manifest::run(
+        network.clone(),
+        kind.clone(),
+        name.clone(),
+        None,
+        None,
+        &mut out,
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(err.contains("doesn't support dataset generation"));
+}
+
+#[tokio::test]
+async fn generate_manifest_bad_dataset_kind() {
     tracing_helpers::register_logger();
 
     let network = "mainnet".to_string();
     let bad_kind = "bad_kind".to_string();
     let name = "eth_rpc".to_string();
+    let manifest = Some("https://spkg.io/pinax-network/weth-v0.1.0.spkg".to_string());
+    let module = Some("map_events".to_string());
 
     let mut out = Vec::new();
 
-    let err = generate_manifest::run(network, bad_kind.clone(), name, &mut out).unwrap_err();
+    let err = generate_manifest::run(
+        network.clone(),
+        bad_kind.clone(),
+        name.clone(),
+        manifest,
+        module,
+        &mut out,
+    )
+    .await
+    .unwrap_err();
+
     assert_eq!(
         err.to_string(),
         format!("unsupported dataset kind '{}'", bad_kind)

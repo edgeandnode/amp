@@ -120,6 +120,7 @@ use common::{
     BlockNum, BoxError, Dataset,
     catalog::physical::PhysicalTable,
     metadata::segments::{BlockRange, missing_block_ranges},
+    notification_multiplexer::NotificationMultiplexerHandle,
     plan_visitors::is_incremental,
     query_context::{QueryContext, QueryEnv, parse_sql},
     streaming_query::{QueryMessage, StreamState, StreamingQuery, watermark_updates},
@@ -229,6 +230,7 @@ pub async fn dump_table(
                     table.clone(),
                     &parquet_opts,
                     microbatch_max_interval,
+                    &ctx.notification_multiplexer,
                 )
                 .await?;
             }
@@ -263,6 +265,7 @@ pub async fn dump_table(
                 physical_table,
                 &parquet_opts,
                 microbatch_max_interval,
+                &ctx.notification_multiplexer,
             )
             .await?;
         }
@@ -288,13 +291,14 @@ async fn dump_sql_query(
     physical_table: Arc<PhysicalTable>,
     parquet_opts: &ParquetWriterProperties,
     microbatch_max_interval: u64,
+    notification_multiplexer: &Arc<NotificationMultiplexerHandle>,
 ) -> Result<(), BoxError> {
     let (start, end) = range.numbers.clone().into_inner();
     let mut stream = {
         let ctx = Arc::new(dataset_store.ctx_for_sql(&query, env.clone()).await?);
         let plan = ctx.plan_sql(query.clone()).await?;
         let initial_state = StreamState::new(
-            watermark_updates(ctx.clone(), physical_table.metadata_db.clone()).await?,
+            watermark_updates(ctx.clone(), notification_multiplexer).await?,
             start,
         );
         StreamingQuery::spawn(

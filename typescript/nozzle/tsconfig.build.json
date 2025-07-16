@@ -1,9 +1,8 @@
 {
   "extends": "./tsconfig.src.json",
   "compilerOptions": {
-    "types": ["node"],
-    "stripInternal": true,
-    "outDir": "build/dist",
-    "tsBuildInfoFile": "build/tsconfig.build.tsbuildinfo"
+    "tsBuildInfoFile": ".tsbuildinfo/build.tsbuildinfo",
+    "outDir": "dist",
+    "stripInternal": true
   }
 }

@@ -1,9 +1,4 @@
 use datafusion::{logical_expr::sqlparser::ast::Value, sql::parser::Statement};
-use metadata_db::LocationId;
-
-pub fn change_tracking_pg_channel(location_id: LocationId) -> String {
-    format!("change-tracking-physical-table-id:{}", location_id)
-}
 
 // Returns true if the query is a streaming query, ending with "SETTINGS stream = true"
 // E.g. "SELECT * FROM eth_firehose.blocks SETTINGS stream = true"
@@ -35,12 +30,6 @@ pub fn is_streaming(stmt: &Statement) -> bool {
 mod tests {
     use super::*;
     use crate::query_context::parse_sql;
-
-    #[test]
-    fn test_change_tracking_pg_channel() {
-        let channel = change_tracking_pg_channel(12345);
-        assert_eq!(channel, "change-tracking-physical-table-id:12345");
-    }
 
     #[test]
     fn test_is_streaming() {

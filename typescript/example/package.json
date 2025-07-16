@@ -7,8 +7,8 @@
     "studio": "nozzl studio"
   },
   "dependencies": {
-    "@effect/platform": "^0.87.11",
-    "effect": "^3.16.13",
+    "@effect/platform": "^0.88.1",
+    "effect": "^3.16.16",
     "nozzl": "workspace:*"
   }
 }

@@ -66,6 +66,14 @@ enum Command {
         /// How often to run the dump job in minutes. By default will run once and exit.
         #[arg(long, env = "DUMP_RUN_EVERY_MINS")]
         run_every_mins: Option<u64>,
+
+        /// The location of the dump. If not specified, the dump will be written to the default location in NOZZLE_DATA_DIR.
+        #[arg(long)]
+        location: Option<String>,
+
+        /// Overwrite existing location and dump to a new, fresh directory
+        #[arg(long, env = "DUMP_FRESH")]
+        fresh: bool,
     },
     Server {
         /// Run in dev mode, which starts a worker in the same process.
@@ -108,6 +116,14 @@ enum Command {
         /// If not specified, the manifest will be printed to stdout.
         #[arg(short, long, env = "GM_OUT")]
         out: Option<PathBuf>,
+
+        /// Substreams package manifest URL, required for DatasetKind::Substreams.
+        #[arg(long, env = "GM_SS_MANIFEST_URL")]
+        manifest: Option<String>,
+
+        /// Substreams output module name, required for DatasetKind::Substreams.
+        #[arg(long, env = "GM_SS_MODULE")]
+        module: Option<String>,
     },
 }
 
@@ -148,6 +164,8 @@ async fn main_inner() -> Result<(), BoxError> {
             dataset: datasets,
             ignore_deps,
             run_every_mins,
+            location,
+            fresh,
         } => {
             dump_cmd::dump(
                 config,
@@ -161,8 +179,11 @@ async fn main_inner() -> Result<(), BoxError> {
                 disable_compression,
                 run_every_mins,
                 None,
+                location,
+                fresh,
             )
-            .await
+            .await?;
+            Ok(())
         }
         Command::Server {
             dev,
@@ -199,6 +220,8 @@ async fn main_inner() -> Result<(), BoxError> {
             kind,
             name,
             out,
+            manifest,
+            module,
         } => {
             if let Some(mut out) = out {
                 if out.is_dir() {
@@ -206,10 +229,10 @@ async fn main_inner() -> Result<(), BoxError> {
                 }
 
                 let mut out = std::fs::File::create(out)?;
-                generate_manifest::run(network, kind, name, &mut out)
+                generate_manifest::run(network, kind, name, manifest, module, &mut out).await
             } else {
                 let mut stdout = std::io::stdout();
-                generate_manifest::run(network, kind, name, &mut stdout)
+                generate_manifest::run(network, kind, name, manifest, module, &mut stdout).await
             }
         }
     }
