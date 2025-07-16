@@ -1,14 +1,7 @@
-use std::ops::RangeInclusive;
+mod anvil;
 
-use alloy::{
-    primitives::BlockHash,
-    providers::{DynProvider, Provider, ext::AnvilApi as _},
-    transports::http::reqwest,
-};
-use common::{
-    BlockNum, BoxError, metadata::segments::BlockRange, query_context::parse_sql, tracing_helpers,
-};
-use dataset_store::{DatasetDefsCommon, DatasetStore, SerializableSchema};
+use common::{BoxError, tracing_helpers};
+use dataset_store::{DatasetDefsCommon, SerializableSchema};
 use generate_manifest;
 
 use crate::{
@@ -16,7 +9,6 @@ use crate::{
     test_client::TestClient,
     test_support::{
         self, SnapshotContext, TestEnv, check_blocks, check_provider_file, restore_blessed_dataset,
-        table_ranges,
     },
 };
 
@@ -137,127 +129,6 @@ async fn basic_function() -> Result<(), BoxError> {
     }
 
     Ok(())
-}
-
-#[tokio::test]
-async fn anvil_rpc_reorg() {
-    tracing_helpers::register_logger();
-
-    let dataset_name = "anvil_rpc";
-    check_provider_file("rpc_anvil.toml").await;
-
-    let http = reqwest::Client::new();
-    let test_env = TestEnv::temp("anvil_rpc_reorg").await.unwrap();
-    let dataset_store = DatasetStore::new(test_env.config.clone(), test_env.metadata_db.clone());
-    let provider = alloy::providers::ProviderBuilder::new()
-        .connect_anvil_with_config(|anvil| anvil.port(8545 as u16));
-    let provider = DynProvider::new(provider);
-
-    #[derive(Debug, PartialEq, Eq, serde::Deserialize)]
-    struct BlockRow {
-        block_num: BlockNum,
-        hash: BlockHash,
-        parent_hash: BlockHash,
-    }
-
-    let mine = async |blocks: u64| provider.anvil_mine(Some(blocks), None).await.unwrap();
-    let latest_block = async || {
-        let block = provider
-            .get_block(alloy::eips::BlockId::latest())
-            .await
-            .unwrap()
-            .unwrap();
-        BlockRow {
-            block_num: block.header.number,
-            hash: block.header.hash,
-            parent_hash: block.header.parent_hash,
-        }
-    };
-    let reorg = async |depth: u64| {
-        assert_ne!(depth, 0);
-        let original_head = latest_block().await;
-        tracing::info!(depth, "reorg");
-        provider
-            .anvil_reorg(alloy_rpc_types_anvil::ReorgOptions {
-                depth,
-                tx_block_pairs: vec![],
-            })
-            .await
-            .unwrap();
-        let new_head = latest_block().await;
-        assert_eq!(original_head.block_num, new_head.block_num);
-        assert_ne!(original_head.hash, new_head.hash);
-    };
-    let query_blocks = async |range: RangeInclusive<BlockNum>| -> Vec<BlockRow> {
-        let url = format!("http://{}/", test_env.server_addrs.jsonl_addr);
-        let sql = format!(
-            r#"
-            select block_num, hash, parent_hash
-            from anvil_rpc.blocks
-            where block_num >= {} and block_num <= {}
-            "#,
-            range.start(),
-            range.end(),
-        );
-        let response = http.post(url).body(sql).send().await.unwrap();
-        let buffer = response.text().await.unwrap();
-        let mut rows: Vec<BlockRow> = Default::default();
-        for line in buffer.lines() {
-            rows.push(serde_json::from_str(line).unwrap());
-        }
-        rows.sort_by_key(|r| r.block_num);
-        rows
-    };
-    let dump = async |range: RangeInclusive<BlockNum>| {
-        SnapshotContext::temp_dump(&test_env, &dataset_name, *range.start(), *range.end(), 1)
-            .await
-            .unwrap()
-    };
-    let metadata_ranges = async || -> Vec<BlockRange> {
-        let sql = parse_sql("select * from anvil_rpc.blocks").unwrap();
-        let env = test_env.config.make_query_env().unwrap();
-        let ctx = dataset_store.ctx_for_sql(&sql, env).await.unwrap();
-        let tables = ctx.catalog().tables();
-        let table = tables.iter().find(|t| t.table_name() == "blocks").unwrap();
-        table_ranges(&table).await.unwrap()
-    };
-
-    dump(0..=0).await;
-    mine(2).await;
-    dump(1..=2).await;
-    let blocks0 = query_blocks(0..=2).await;
-    reorg(1).await;
-    mine(1).await;
-    dump(0..=3).await;
-    let blocks1 = query_blocks(0..=3).await;
-    dump(0..=3).await;
-    let blocks2 = query_blocks(0..=3).await;
-
-    // At this point, the chain looks like this:
-    //   0, 1, 2
-    //       , 2', 3
-    // blocks0 should contain ranges [0,0], [1,2]
-    // blocks1 should contain ranges [0,0], [1,2] (missing block 2', and therefore treating range [3,3] as a fork)
-    assert_eq!(blocks0.len(), 3);
-    assert_eq!(&blocks0, &blocks1);
-    // blocks2 should contain ranges [0,0], [1,2'], [3,3] (retaining range [1,2] as a fork)
-    assert_eq!(blocks2.len(), 4);
-    assert_ne!(&blocks1[2].hash, &blocks2[3].parent_hash);
-    for window in blocks2.windows(2) {
-        assert_eq!(window[0].hash, window[1].parent_hash);
-    }
-    let mut ranges = metadata_ranges().await;
-    ranges.sort_by_key(|r| *r.numbers.start());
-    assert_eq!(
-        ranges.iter().map(|r| r.numbers.clone()).collect::<Vec<_>>(),
-        vec![0..=0, 1..=2, 1..=2, 3..=3],
-    );
-    assert!(ranges.contains(&BlockRange {
-        numbers: blocks1[1].block_num..=blocks1[2].block_num,
-        network: "anvil".to_string(),
-        hash: blocks1[2].hash,
-        prev_hash: Some(blocks1[1].parent_hash),
-    }));
 }
 
 #[tokio::test]
