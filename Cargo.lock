@@ -4519,6 +4519,7 @@ dependencies = [
  "generate-manifest",
  "http-common",
  "metadata-db",
+ "regex",
  "registry-service",
  "serde",
  "serde_json",

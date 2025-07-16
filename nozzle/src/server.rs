@@ -1,3 +1,4 @@
+use regex::Regex;
 use std::{
     future::Future,
     net::{SocketAddr, TcpListener},
@@ -163,7 +164,8 @@ async fn run_jsonl_server(
         .layer(
             tower_http::compression::CompressionLayer::new()
                 .br(true)
-                .gzip(true),
+                .gzip(true)
+                .deflate(true),
         );
     http_common::serve_at(addr, app).await
 }
@@ -174,6 +176,10 @@ async fn handle_jsonl_request(
 ) -> axum::response::Response {
     fn error_payload(message: impl std::fmt::Display) -> String {
         format!(r#"{{"error": "{}"}}"#, message)
+    }
+    fn is_streaming_query(query: &str) -> bool {
+        let re = Regex::new(r"(?i)SETTINGS\s+stream\s*=\s*true").unwrap();
+        re.is_match(query)
     }
     let stream = match service.execute_query(&request).await {
         Ok(stream) => stream,
@@ -188,8 +194,16 @@ async fn handle_jsonl_request(
             Ok(String::from_utf8(buf).unwrap())
         })
         .map_err(error_payload);
-    axum::response::Response::builder()
-        .header("content-type", "application/x-ndjson")
+
+    let mut response =
+        axum::response::Response::builder().header("content-type", "application/x-ndjson");
+
+    // For streaming queries, disable compression
+    if is_streaming_query(&request) {
+        response = response.header("content-encoding", "identity");
+    }
+
+    response
         .body(axum::body::Body::from_stream(stream))
         .unwrap()
 }
