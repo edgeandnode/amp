@@ -2,3 +2,4 @@ packages:
   - typescript/*
 onlyBuiltDependencies:
   - '@tailwindcss/oxide'
+  - core-js-pure

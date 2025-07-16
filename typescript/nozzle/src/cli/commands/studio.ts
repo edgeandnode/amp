@@ -3,6 +3,7 @@ import {
   HttpApi,
   HttpApiBuilder,
   HttpApiEndpoint,
+  HttpApiError,
   HttpApiGroup,
   HttpApiScalar,
   HttpApiSchema,
@@ -14,12 +15,12 @@ import {
   Path,
 } from "@effect/platform"
 import { NodeHttpServer } from "@effect/platform-node"
-import { Console, Data, Effect, Layer, Option, Schedule, Schema, Stream, String as EffectString, Struct } from "effect"
+import { Console, Data, Effect, Layer, Option, Schema, String as EffectString, Struct } from "effect"
 import { createServer } from "node:http"
 import { fileURLToPath } from "node:url"
 import open, { type AppName, apps } from "open"
 
-import * as Model from "../../Model.js"
+import { FoundryQueryableEventResolver } from "../../Studio/index.js"
 
 class NozzleStudioApiRouter extends HttpApiGroup.make("NozzleStudioApi").add(
   HttpApiEndpoint.get("QueryableEventStream")`/events/stream`
@@ -29,6 +30,7 @@ class NozzleStudioApiRouter extends HttpApiGroup.make("NozzleStudioApi").add(
         contentType: "text/event-stream",
       })),
     )
+    .addError(HttpApiError.InternalServerError)
     .annotateContext(OpenApi.annotations({
       title: "Queryable Smart Contract events stream",
       version: "v1",
@@ -39,36 +41,6 @@ class NozzleStudioApiRouter extends HttpApiGroup.make("NozzleStudioApi").add(
 
 class NozzleStudioApi extends HttpApi.make("NozzleStudioApi").add(NozzleStudioApiRouter).prefix("/api") {}
 
-const queryableEventStream = Stream.make(
-  Model.QueryableEventStream.make({
-    events: [
-      Model.QueryableEvent.make({
-        name: "Count",
-        params: [{ name: "count", datatype: "uint256", indexed: false }],
-        signature: "Count(uint256 count)",
-        source: "./contracts/src/Counter.sol",
-      }),
-      Model.QueryableEvent.make({
-        name: "Transfer",
-        params: [
-          { name: "from", datatype: "address", indexed: true },
-          { name: "to", datatype: "address", indexed: true },
-          { name: "value", datatype: "uint256", indexed: false },
-        ],
-        signature: "Transfer(address indexed from, address indexed to, uint256 value)",
-        source: "./contracts/src/Counter.sol",
-      }),
-    ],
-  }),
-).pipe(
-  Stream.schedule(Schedule.spaced("500 millis")),
-  Stream.map((item) => {
-    const jsonData = JSON.stringify(item)
-    const sseData = `data: ${jsonData}\n\n`
-    return new TextEncoder().encode(sseData)
-  }),
-)
-
 const NozzleStudioApiLive = HttpApiBuilder.group(
   NozzleStudioApi,
   "NozzleStudioApi",
@@ -77,8 +49,15 @@ const NozzleStudioApiLive = HttpApiBuilder.group(
       "QueryableEventStream",
       () =>
         Effect.gen(function*() {
-          return yield* HttpServerResponse.stream(queryableEventStream).pipe(
+          const resolver = yield* FoundryQueryableEventResolver.FoundryQueryableEventResolver
+
+          const stream = yield* resolver.queryableEventsStream().pipe(
+            Effect.catchAll(() => new HttpApiError.InternalServerError()),
+          )
+
+          return yield* HttpServerResponse.stream(stream, { contentType: "text/event-stream" }).pipe(
             HttpServerResponse.setHeaders({
+              "Content-Type": "text/event-stream",
               "Cache-Control": "no-cache",
               "Connection": "keep-alive",
             }),
@@ -89,6 +68,7 @@ const NozzleStudioApiLive = HttpApiBuilder.group(
 const NozzleStudioApiLayer = Layer.merge(HttpApiBuilder.middlewareCors(), HttpApiScalar.layer({ path: "/api/docs" }))
   .pipe(
     Layer.provideMerge(HttpApiBuilder.api(NozzleStudioApi)),
+    Layer.provide(FoundryQueryableEventResolver.layer),
     Layer.provide(NozzleStudioApiLive),
   )
 const ApiLive = HttpApiBuilder.httpApp.pipe(
@@ -208,6 +188,7 @@ export const studio = Command.make("studio", {
       )
     })
   ),
+  Command.provide(FoundryQueryableEventResolver.layer),
 )
 
 const openBrowser = (port: number, browser: AppName | "arc" | "safari" | "browser" | "browserPrivate") =>
@@ -256,6 +237,6 @@ const openBrowser = (port: number, browser: AppName | "arc" | "safari" | "browse
     }
   })
 
-export class OpenBrowserError extends Data.TaggedError("/nozzl/errors/OpenBrowserError")<{
+export class OpenBrowserError extends Data.TaggedError("Nozzle/cli/studio/errors/OpenBrowserError")<{
   readonly cause: unknown
 }> {}

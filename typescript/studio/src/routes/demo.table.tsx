@@ -1,7 +1,13 @@
 import type { RankingInfo } from "@tanstack/match-sorter-utils"
 import { compareItems, rankItem } from "@tanstack/match-sorter-utils"
 import { createFileRoute } from "@tanstack/react-router"
-import type { Column, ColumnDef, ColumnFiltersState, FilterFn, SortingFn } from "@tanstack/react-table"
+import type {
+  Column,
+  ColumnDef,
+  ColumnFiltersState,
+  FilterFn,
+  SortingFn,
+} from "@tanstack/react-table"
 import {
   flexRender,
   getCoreRowModel,
@@ -174,13 +180,11 @@ function TableDemo() {
                               desc: " 🔽",
                             }[header.column.getIsSorted() as string] ?? null}
                           </div>
-                          {header.column.getCanFilter() ?
-                            (
-                              <div className="mt-2">
-                                <Filter column={header.column} />
-                              </div>
-                            ) :
-                            null}
+                          {header.column.getCanFilter() ? (
+                            <div className="mt-2">
+                              <Filter column={header.column} />
+                            </div>
+                          ) : null}
                         </>
                       )}
                     </th>
@@ -245,7 +249,8 @@ function TableDemo() {
         <span className="flex items-center gap-1">
           <div>Page</div>
           <strong>
-            {table.getState().pagination.pageIndex + 1} of {table.getPageCount()}
+            {table.getState().pagination.pageIndex + 1} of{" "}
+            {table.getPageCount()}
           </strong>
         </span>
         <span className="flex items-center gap-1">
