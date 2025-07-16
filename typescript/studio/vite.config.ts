@@ -22,4 +22,10 @@ export default defineConfig({
       "@": resolve(__dirname, "./src"),
     },
   },
+  optimizeDeps: {
+    exclude: ["@effect/platform-node", "@effect/platform-node-shared"],
+  },
+  define: {
+    global: "globalThis",
+  },
 })

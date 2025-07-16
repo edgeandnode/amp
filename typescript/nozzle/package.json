@@ -24,7 +24,8 @@
     "./Arrow": "./src/Arrow.ts",
     "./ArrowFlight": "./src/ArrowFlight.ts",
     "./JsonLines": "./src/JsonLines.ts",
-    "./Model": "./src/Model.ts"
+    "./Model": "./src/Model.ts",
+    "./StudioModel": "./src/Studio/Model.ts"
   },
   "scripts": {
     "build": "nozzl-utils build",

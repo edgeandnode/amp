@@ -1,31 +1,32 @@
 "use client"
 
 import { Schema } from "effect"
-import * as Model from "nozzl/Model"
+import type { QueryableEvent } from "nozzl/StudioModel"
+import { QueryableEventStream } from "nozzl/StudioModel"
 import { useCallback, useEffect, useReducer, useRef } from "react"
 
 import * as Constants from "../constants.js"
 
 const QueryEventStreamInstanceDecoder = Schema.decodeUnknownSync(
-  Schema.parseJson(Model.QueryableEventStream),
+  Schema.parseJson(QueryableEventStream),
 )
 
 export interface UseQueryableEventsQueryOptions {
   enabled?: boolean
-  onSuccess?: (data: ReadonlyArray<Model.QueryableEvent>) => void
+  onSuccess?: (data: ReadonlyArray<QueryableEvent>) => void
   onError?: (error: Error) => void
   retry?: boolean
   retryDelay?: number
 }
 
 export interface State {
-  data: ReadonlyArray<Model.QueryableEvent>
+  data: ReadonlyArray<QueryableEvent>
   error?: Error | null | undefined
   status: "idle" | "fetching" | "success" | "error"
 }
 export type Action =
   | { type: "FETCHING" }
-  | { type: "SUCCESS"; payload: ReadonlyArray<Model.QueryableEvent> }
+  | { type: "SUCCESS"; payload: ReadonlyArray<QueryableEvent> }
   | { type: "ERROR"; payload: Error }
   | { type: "RESET" }
 

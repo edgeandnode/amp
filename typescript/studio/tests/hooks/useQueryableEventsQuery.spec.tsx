@@ -1,5 +1,5 @@
 import { renderHook, waitFor } from "@testing-library/react"
-import * as Model from "nozzl/Model"
+import { QueryableEvent, QueryableEventStream } from "nozzl/StudioModel"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { useQueryableEventsQuery } from "../../src/hooks/useQueryableEventsQuery.js"
@@ -39,14 +39,14 @@ class MockEventSource {
   removeEventListener(type: string, listener: (event: any) => void) {
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (this.listeners[type]) {
-      this.listeners[type] = this.listeners[type].filter(l => l !== listener)
+      this.listeners[type] = this.listeners[type].filter((l) => l !== listener)
     }
   }
 
   dispatchEvent(event: { type: string; data?: string }) {
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     const listeners = this.listeners[event.type] || []
-    listeners.forEach(listener => listener(event))
+    listeners.forEach((listener) => listener(event))
   }
 
   close() {
@@ -72,8 +72,8 @@ Object.assign(global, {
       CONNECTING: 0,
       OPEN: 1,
       CLOSED: 2,
-    }
-  )
+    },
+  ),
 })
 
 describe("useQueryableEventsQuery", () => {
@@ -90,15 +90,15 @@ describe("useQueryableEventsQuery", () => {
 
   it("should connect to EventSource and decode server-sent events successfully", async () => {
     // Mock SSE data in the format the API would send
-    const mockEventData = Model.QueryableEventStream.make({
+    const mockEventData = QueryableEventStream.make({
       events: [
-        Model.QueryableEvent.make({
+        QueryableEvent.make({
           name: "Count",
           params: [{ name: "count", datatype: "uint256", indexed: false }],
           signature: "Count(uint256 count)",
           source: ["./contracts/src/Counter.sol"],
         }),
-        Model.QueryableEvent.make({
+        QueryableEvent.make({
           name: "Transfer",
           params: [
             { name: "from", datatype: "address", indexed: true },
@@ -127,13 +127,15 @@ describe("useQueryableEventsQuery", () => {
     })
 
     expect(result.current.data).toEqual(mockEventData.events)
-    expect(global.EventSource).toHaveBeenCalledWith("http://test-api.com/events/stream")
+    expect(global.EventSource).toHaveBeenCalledWith(
+      "http://test-api.com/events/stream",
+    )
   })
 
   it("should handle multiple SSE messages", async () => {
-    const mockEventData1 = Model.QueryableEventStream.make({
+    const mockEventData1 = QueryableEventStream.make({
       events: [
-        Model.QueryableEvent.make({
+        QueryableEvent.make({
           name: "Count",
           params: [{ name: "count", datatype: "uint256", indexed: false }],
           signature: "Count(uint256 count)",
@@ -142,9 +144,9 @@ describe("useQueryableEventsQuery", () => {
       ],
     })
 
-    const mockEventData2 = Model.QueryableEventStream.make({
+    const mockEventData2 = QueryableEventStream.make({
       events: [
-        Model.QueryableEvent.make({
+        QueryableEvent.make({
           name: "Transfer",
           params: [
             { name: "from", datatype: "address", indexed: true },
@@ -196,9 +198,7 @@ describe("useQueryableEventsQuery", () => {
       expect(result.current.isError).toBe(true)
     })
 
-    expect(result.current.error?.message).toContain(
-      "SSE connection error",
-    )
+    expect(result.current.error?.message).toContain("SSE connection error")
   })
 
   it("should handle malformed SSE data gracefully", async () => {
@@ -221,15 +221,15 @@ describe("useQueryableEventsQuery", () => {
       expect(result.current.isError).toBe(true)
     })
 
-    expect(result.current.error?.message).toContain(
-      "parseJson",
-    )
+    expect(result.current.error?.message).toContain("parseJson")
 
     consoleWarnSpy.mockRestore()
   })
 
   it("should handle disabled state", () => {
-    const { result } = renderHook(() => useQueryableEventsQuery({ enabled: false }))
+    const { result } = renderHook(() =>
+      useQueryableEventsQuery({ enabled: false }),
+    )
 
     // Should not connect when disabled
     expect(result.current.isLoading).toBe(false)
@@ -261,12 +261,16 @@ describe("useQueryableEventsQuery", () => {
     result.current.refetch()
 
     await waitFor(() => {
-      expect(global.EventSource).toHaveBeenCalledWith("http://test-api.com/events/stream")
+      expect(global.EventSource).toHaveBeenCalledWith(
+        "http://test-api.com/events/stream",
+      )
     })
   })
 
   it("should handle retry functionality", () => {
-    const { result } = renderHook(() => useQueryableEventsQuery({ retry: true, retryDelay: 100 }))
+    const { result } = renderHook(() =>
+      useQueryableEventsQuery({ retry: true, retryDelay: 100 }),
+    )
 
     // Hook should start loading immediately when enabled
     expect(result.current.isLoading).toBe(true)
@@ -278,24 +282,28 @@ describe("useQueryableEventsQuery", () => {
   it("should handle callbacks configuration", () => {
     const onSuccess = vi.fn()
     const onError = vi.fn()
-    const { result } = renderHook(() => useQueryableEventsQuery({ onSuccess, onError }))
+    const { result } = renderHook(() =>
+      useQueryableEventsQuery({ onSuccess, onError }),
+    )
 
     // Should accept callback configurations and start loading
     expect(result.current.isLoading).toBe(true)
     expect(result.current.data).toEqual([])
-    expect(typeof result.current.refetch).toBe('function')
+    expect(typeof result.current.refetch).toBe("function")
   })
 
   it("should expose correct interface", () => {
-    const { result } = renderHook(() => useQueryableEventsQuery({ enabled: false }))
+    const { result } = renderHook(() =>
+      useQueryableEventsQuery({ enabled: false }),
+    )
 
     // Should expose the correct interface
-    expect(result.current).toHaveProperty('data')
-    expect(result.current).toHaveProperty('error')
-    expect(result.current).toHaveProperty('isLoading')
-    expect(result.current).toHaveProperty('isError')
-    expect(result.current).toHaveProperty('isSuccess')
-    expect(result.current).toHaveProperty('refetch')
-    expect(typeof result.current.refetch).toBe('function')
+    expect(result.current).toHaveProperty("data")
+    expect(result.current).toHaveProperty("error")
+    expect(result.current).toHaveProperty("isLoading")
+    expect(result.current).toHaveProperty("isError")
+    expect(result.current).toHaveProperty("isSuccess")
+    expect(result.current).toHaveProperty("refetch")
+    expect(typeof result.current.refetch).toBe("function")
   })
 })

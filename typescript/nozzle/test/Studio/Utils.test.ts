@@ -1,5 +1,5 @@
 import { describe, it } from "vitest"
-import * as Utils from "../src/Utils.js"
+import * as Utils from "../../src/Studio/Utils.js"
 
 describe("Nozzle/Utils", () => {
   describe("foundryOutputPathExcluded", () => {
