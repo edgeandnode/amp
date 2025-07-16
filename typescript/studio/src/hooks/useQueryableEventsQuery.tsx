@@ -1,8 +1,8 @@
 "use client"
 
 import { Schema } from "effect"
-import type { QueryableEvent } from "nozzl/StudioModel"
-import { QueryableEventStream } from "nozzl/StudioModel"
+import type { QueryableEvent } from "nozzl/Studio/Model"
+import { QueryableEventStream } from "nozzl/Studio/Model"
 import { useCallback, useEffect, useReducer, useRef } from "react"
 
 import * as Constants from "../constants.js"
