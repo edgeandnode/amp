@@ -10,16 +10,16 @@
   },
   "dependencies": {
     "@connectrpc/connect-web": "^2.0.2",
-    "effect": "^3.16.5",
+    "effect": "^3.16.16",
     "nozzl": "workspace:*",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
-    "@types/react": "^19.1.7",
+    "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
-    "@vitejs/plugin-react": "^4.5.2",
+    "@vitejs/plugin-react": "^4.6.0",
     "typescript": "^5.8.3",
-    "vite": "^6.3.5"
+    "vite": "^7.0.4"
   }
 }

@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 
 import { Command, Options, ValidationError } from "@effect/cli"
 import { PlatformConfigProvider } from "@effect/platform"
