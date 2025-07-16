@@ -3,27 +3,24 @@
   "type": "module",
   "packageManager": "pnpm@10.10.0+sha512.d615db246fe70f25dcfea6d8d73dee782ce23e2245e3c4f6f888249fb568149318637dca73c2c5c8ef2a4ca0d5657fb9567188bfab47f566d1ee6ce987815c39",
   "scripts": {
-    "check": "tsc -b tsconfig.json",
+    "build": "tsc -b typescript/tsconfig.build.json && pnpm recursive --parallel build",
+    "check": "tsc -b typescript/tsconfig.json",
     "lint": "eslint \"typescript/**/*.{ts,tsx,json}\"",
     "format": "pnpm lint --fix",
     "test": "vitest"
   },
   "devDependencies": {
     "@effect/eslint-plugin": "^0.3.2",
-    "@effect/language-service": "^0.19.0",
-    "@eslint/js": "^9.28.0",
-    "eslint": "^9.28.0",
-    "eslint-import-resolver-typescript": "^4.4.3",
-    "eslint-plugin-import-x": "^4.15.1",
+    "@effect/language-service": "^0.27.1",
+    "@eslint/js": "^9.31.0",
+    "eslint": "^9.31.0",
+    "eslint-import-resolver-typescript": "^4.4.4",
+    "eslint-plugin-import-x": "^4.16.1",
     "eslint-plugin-simple-import-sort": "^12.1.1",
     "eslint-plugin-sort-destructure-keys": "^2.0.0",
-    "prettier": "^3.5.3",
+    "prettier": "^3.6.2",
     "typescript": "^5.8.3",
-    "typescript-eslint": "^8.34.0"
-  },
-  "dependencies": {
-    "nozzl": "workspace:*",
-    "viem": "^2.31.0",
-    "vitest": "^3.2.3"
+    "typescript-eslint": "^8.37.0",
+    "vitest": "^3.2.4"
   }
 }
