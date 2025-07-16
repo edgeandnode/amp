@@ -34,7 +34,6 @@ registry-service = { path = "../registry-service" }
 http-common = { path = "../http-common" }
 serde.workspace = true
 serde_json.workspace = true
-regex = "1.11.1"
 
 [build-dependencies]
 vergen-gitcl = { version = "1.0.8", features = ["build"] }

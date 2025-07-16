@@ -6,13 +6,15 @@ use std::{
 
 use arrow_flight::flight_service_server::FlightServiceServer;
 use axum::response::IntoResponse;
-use common::{BoxError, BoxResult, arrow, config::Config};
+use common::{
+    BoxError, BoxResult, arrow, config::Config, query_context::parse_sql,
+    stream_helpers::is_streaming,
+};
 use dump::worker::Worker;
 use futures::{
     FutureExt, StreamExt as _, TryFutureExt as _, TryStreamExt as _, stream::FuturesUnordered,
 };
 use metadata_db::MetadataDb;
-use regex::Regex;
 use server::service::Service;
 use tonic::transport::{Server, server::TcpIncoming};
 
@@ -177,10 +179,6 @@ async fn handle_jsonl_request(
     fn error_payload(message: impl std::fmt::Display) -> String {
         format!(r#"{{"error": "{}"}}"#, message)
     }
-    fn is_streaming_query(query: &str) -> bool {
-        let re = Regex::new(r"(?i)SETTINGS\s+stream\s*=\s*true").unwrap();
-        re.is_match(query)
-    }
     let stream = match service.execute_query(&request).await {
         Ok(stream) => stream,
         Err(err) => return err.into_response(),
@@ -194,15 +192,16 @@ async fn handle_jsonl_request(
             Ok(String::from_utf8(buf).unwrap())
         })
         .map_err(error_payload);
-
     let mut response =
         axum::response::Response::builder().header("content-type", "application/x-ndjson");
-
+    let query = match parse_sql(&request) {
+        Ok(query) => query,
+        Err(err) => return err.into_response(),
+    };
     // For streaming queries, disable compression
-    if is_streaming_query(&request) {
+    if is_streaming(&query) {
         response = response.header("content-encoding", "identity");
     }
-
     response
         .body(axum::body::Body::from_stream(stream))
         .unwrap()
