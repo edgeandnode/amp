@@ -199,11 +199,15 @@ export class QueryableEvent extends Schema.Class<QueryableEvent>(
       "Transfer(address indexed from, address indexed to, uint256 value)",
     ],
   }),
-  source: Schema.NonEmptyTrimmedString.annotations({
-    identifier: "QueryableEvent.source",
-    description: "Smart Contract source where the event comes from",
-    examples: ["contracts/src/Counter.sol"],
-  }),
+  source: Schema.Array(
+    Schema.NonEmptyTrimmedString.annotations({
+      identifier: "QueryableEvent.source",
+      description: "Smart Contract source where the event comes from",
+      examples: ["contracts/src/Counter.sol"],
+    }),
+  ).pipe(
+    Schema.minItems(1),
+  ),
 }) {}
 export class QueryableEventStream extends Schema.Class<QueryableEventStream>(
   "Nozzle/models/events/QueryableEventStream",

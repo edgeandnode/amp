@@ -24,6 +24,7 @@ import {
   Either,
   Layer,
   Option,
+  pipe,
   Schema,
   Stream,
   String as EffectString,
@@ -52,6 +53,100 @@ const FoundryTomlConfig = Schema.Struct({
 type FoundryTomlConfig = typeof FoundryTomlConfig.Type
 const FoundryTomlConfigDecoder = Schema.decodeUnknownEither(FoundryTomlConfig)
 
+class FoundryOutputAbiFunction
+  extends Schema.Class<FoundryOutputAbiFunction>("Nozzle/cli/studio/models/FoundryOutputAbiFunction")({
+    type: Schema.Literal("function"),
+    name: Schema.NonEmptyTrimmedString,
+    inputs: Schema.Array(
+      Schema.Struct({
+        name: Schema.String,
+        type: Schema.String,
+        internalType: Schema.String,
+      }),
+    ),
+    outputs: Schema.Array(
+      Schema.Struct({
+        name: Schema.String,
+        type: Schema.String,
+        internalType: Schema.String,
+      }),
+    ),
+    stateMutability: Schema.String,
+  })
+{}
+class FoundryOutputAbiEvent
+  extends Schema.Class<FoundryOutputAbiEvent>("Nozzle/cli/studio/models/FoundryOutputAbiEvent")({
+    type: Schema.Literal("event"),
+    name: Schema.NonEmptyTrimmedString,
+    inputs: Schema.Array(
+      Schema.Struct({
+        name: Schema.NonEmptyTrimmedString,
+        type: Schema.NonEmptyTrimmedString,
+        indexed: Schema.Boolean,
+        internalType: Schema.String,
+      }),
+    ),
+    anonymous: Schema.Boolean,
+  })
+{
+  get signature(): string {
+    const params = pipe(
+      this.inputs,
+      EffectArray.map((input) => input.indexed ? `${input.type} indexed ${input.name}` : `${input.type} ${input.name}`),
+      EffectArray.join(", "),
+    )
+    return `${this.name}(${params})`
+  }
+}
+const FoundOuputAbiObject = Schema.Union(
+  FoundryOutputAbiFunction,
+  FoundryOutputAbiEvent,
+  // handle unknown types
+  Schema.Record({ key: Schema.String, value: Schema.Any }),
+)
+class FoundryOutput extends Schema.Class<FoundryOutput>("Nozzle/cli/studio/models/FoundryOutput")({
+  abi: Schema.Array(FoundOuputAbiObject),
+  // parse the metadata to get the contract source
+  metadata: Schema.Struct({
+    compiler: Schema.Struct({
+      version: Schema.String,
+    }),
+    language: Schema.String,
+    output: Schema.Struct({
+      abi: Schema.Array(FoundOuputAbiObject),
+      devdoc: Schema.Struct({
+        kind: Schema.String,
+        methods: Schema.Object,
+        version: Schema.NonNegativeInt,
+      }),
+      userdoc: Schema.Struct({
+        kind: Schema.String,
+        methods: Schema.Any,
+        version: Schema.NonNegativeInt,
+      }),
+    }),
+    settings: Schema.Record({ key: Schema.String, value: Schema.Any }),
+    version: Schema.NonNegativeInt,
+    sources: Schema.Record({
+      // name of the file the output was built from
+      key: Schema.NonEmptyTrimmedString,
+      value: Schema.Any,
+    }),
+  }),
+}) {}
+const FoundryOutputDecoder = Schema.decodeUnknownEither(Schema.parseJson(FoundryOutput))
+
+function abiOutputIsEvent(item: any): item is FoundryOutputAbiEvent {
+  if (typeof item !== "object") {
+    return false
+  } else if (!Object.hasOwn(item, "type")) {
+    return false
+  }
+  const type = item.type
+
+  return type === "event"
+}
+
 /**
  * Goal of this resolver is to build an array of [QueryableEvent](../../Model.ts) from the watched source of Smart Contract events.
  *
@@ -60,7 +155,7 @@ const FoundryTomlConfigDecoder = Schema.decodeUnknownEither(FoundryTomlConfig)
  * The output files are watched, and then changes are emitted on a stream through the api.
  */
 class QueryableEventResolver
-  extends Effect.Service<QueryableEventResolver>()("Nozzle/services/QueryableEventResolver", {
+  extends Effect.Service<QueryableEventResolver>()("Nozzle/cli/studio/services/QueryableEventResolver", {
     dependencies: [NodeFileSystem.layer],
     effect: Effect.gen(function*() {
       const fs = yield* FileSystem.FileSystem
@@ -129,23 +224,43 @@ class QueryableEventResolver
 
           // Build a QueryableEventStream from the _current_ state of the foundry output files.
           // This will get concatenated to the updates stream of events
-          const currentEvents = fs.readDirectory(outPath, { recursive: true }).pipe(
-            Effect.map((paths) => EffectArray.filter(paths, (path) => Utils.foundryOutputPathIncluded(path))),
-            // for each path, derive ABI and pull events to make into QueryableEventStream instance
-            Effect.map((paths) =>
-              Model.QueryableEventStream.make({
-                events: EffectArray.map(paths, (_) =>
-                  Model.QueryableEvent.make({
-                    name: "Count",
-                    params: [{ name: "count", datatype: "uint256", indexed: false }],
-                    signature: "Count(uint256 count)",
-                    source: "./contracts/src/Counter.sol",
-                  })),
+          const currentEventsStream = Stream.fromIterableEffect(fs.readDirectory(outPath, { recursive: true })).pipe(
+            Stream.filter((filePath) => Utils.foundryOutputPathIncluded(filePath)),
+            Stream.mapEffect((filePath) =>
+              Effect.gen(function*() {
+                const resolvedPath = path.resolve(outPath, filePath)
+                const rawAbi = yield* fs.readFileString(resolvedPath)
+                const decoded = FoundryOutputDecoder(rawAbi)
+
+                return Either.match(decoded, {
+                  onLeft() {
+                    return Model.QueryableEventStream.make({ events: [] })
+                  },
+                  onRight(right) {
+                    const sources = Object.keys(right.metadata.sources)
+                    const events = pipe(
+                      right.abi,
+                      EffectArray.filter(abiOutputIsEvent),
+                      EffectArray.map((event) =>
+                        Model.QueryableEvent.make({
+                          name: event.name,
+                          source: sources,
+                          signature: event.signature,
+                          params: EffectArray.map(event.inputs, (input) => ({
+                            name: input.name,
+                            datatype: input.type,
+                            indexed: input.indexed,
+                          })),
+                        })
+                      ),
+                    )
+                    return Model.QueryableEventStream.make({ events })
+                  },
+                })
               })
             ),
-            // maps the QueryableEventStream to an SSE encoded event to send on the Stream response api
-            Effect.map((event) => {
-              const jsonData = JSON.stringify(event)
+            Stream.map((stream) => {
+              const jsonData = JSON.stringify(stream)
               const sseData = `data: ${jsonData}\n\n`
               return new TextEncoder().encode(sseData)
             }),
@@ -159,17 +274,36 @@ class QueryableEventResolver
             // Filter out ignored directories/files and only watch .json files
             Stream.filter((watchFilePath) => Utils.foundryOutputPathIncluded(watchFilePath)),
             // derive the ABI -> events from the path
-            Stream.mapEffect((_) =>
+            Stream.mapEffect((watchFilePath) =>
               Effect.gen(function*() {
-                return Model.QueryableEventStream.make({
-                  events: [
-                    Model.QueryableEvent.make({
-                      name: "Count",
-                      params: [{ name: "count", datatype: "uint256", indexed: false }],
-                      signature: "Count(uint256 count)",
-                      source: "./contracts/src/Counter.sol",
-                    }),
-                  ],
+                const filePath = path.resolve(outPath, watchFilePath)
+                const rawAbi = yield* fs.readFileString(filePath)
+                const decoded = FoundryOutputDecoder(rawAbi)
+
+                return Either.match(decoded, {
+                  onLeft() {
+                    return Model.QueryableEventStream.make({ events: [] })
+                  },
+                  onRight(right) {
+                    const sources = Object.keys(right.metadata.sources)
+                    const events = pipe(
+                      right.abi,
+                      EffectArray.filter(abiOutputIsEvent),
+                      EffectArray.map((event) =>
+                        Model.QueryableEvent.make({
+                          name: event.name,
+                          source: sources,
+                          signature: event.signature,
+                          params: EffectArray.map(event.inputs, (input) => ({
+                            name: input.name,
+                            datatype: input.type,
+                            indexed: input.indexed,
+                          })),
+                        })
+                      ),
+                    )
+                    return Model.QueryableEventStream.make({ events })
+                  },
                 })
               })
             ),
@@ -182,9 +316,7 @@ class QueryableEventResolver
           )
 
           // concat together current derived events with the file watcher stream
-          return Stream.fromEffect(currentEvents).pipe(
-            Stream.concat(updates),
-          )
+          return Stream.concat(currentEventsStream, updates)
         })
 
       return {
@@ -227,8 +359,9 @@ const NozzleStudioApiLive = HttpApiBuilder.group(
             Effect.catchAll(() => new HttpApiError.InternalServerError()),
           )
 
-          return yield* HttpServerResponse.stream(stream).pipe(
+          return yield* HttpServerResponse.stream(stream, { contentType: "text/event-stream" }).pipe(
             HttpServerResponse.setHeaders({
+              "Content-Type": "text/event-stream",
               "Cache-Control": "no-cache",
               "Connection": "keep-alive",
             }),
@@ -408,6 +541,6 @@ const openBrowser = (port: number, browser: AppName | "arc" | "safari" | "browse
     }
   })
 
-export class OpenBrowserError extends Data.TaggedError("/nozzl/errors/OpenBrowserError")<{
+export class OpenBrowserError extends Data.TaggedError("Nozzle/cli/studio/errors/OpenBrowserError")<{
   readonly cause: unknown
 }> {}
