@@ -1,4 +1,3 @@
-use regex::Regex;
 use std::{
     future::Future,
     net::{SocketAddr, TcpListener},
@@ -13,6 +12,7 @@ use futures::{
     FutureExt, StreamExt as _, TryFutureExt as _, TryStreamExt as _, stream::FuturesUnordered,
 };
 use metadata_db::MetadataDb;
+use regex::Regex;
 use server::service::Service;
 use tonic::transport::{Server, server::TcpIncoming};
 
