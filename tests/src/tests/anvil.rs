@@ -2,33 +2,40 @@ use std::{ops::RangeInclusive, sync::Arc};
 
 use alloy::{
     primitives::BlockHash,
-    providers::{DynProvider, Provider as _, ext::AnvilApi as _},
+    providers::{Provider as _, ext::AnvilApi as _},
     transports::http::reqwest,
 };
 use common::{BlockNum, metadata::segments::BlockRange, query_context::parse_sql, tracing_helpers};
 use dataset_store::DatasetStore;
+use rand::{Rng, RngCore, SeedableRng as _, rngs::StdRng};
+use tokio::sync::{Mutex, MutexGuard};
 
 use crate::test_support::{SnapshotContext, TestEnv, check_provider_file, table_ranges};
 
 const DATASET_NAME: &str = "anvil_rpc";
 
-struct AnvilTestContext {
+struct AnvilTestContext<'anvil> {
     env: TestEnv,
     http: reqwest::Client,
     provider: alloy::providers::DynProvider,
+    _anvil_lock: MutexGuard<'anvil, ()>,
 }
 
-impl AnvilTestContext {
+impl AnvilTestContext<'_> {
     async fn setup(test_name: &str) -> Self {
+        static ANVIL_LOCK: Mutex<()> = Mutex::const_new(());
+        let anvil_lock = ANVIL_LOCK.lock().await;
+
         tracing_helpers::register_logger();
         check_provider_file("rpc_anvil.toml").await;
         Self {
             env: TestEnv::temp(test_name).await.unwrap(),
             http: reqwest::Client::new(),
-            provider: DynProvider::new(
+            provider: alloy::providers::DynProvider::new(
                 alloy::providers::ProviderBuilder::new()
                     .connect_anvil_with_config(|anvil| anvil.port(8545 as u16)),
             ),
+            _anvil_lock: anvil_lock,
         }
     }
 
@@ -37,13 +44,14 @@ impl AnvilTestContext {
     }
 
     async fn mine(&self, blocks: u64) {
+        tracing::info!(blocks, "mine");
         self.provider.anvil_mine(Some(blocks), None).await.unwrap()
     }
 
     async fn reorg(&self, depth: u64) {
+        tracing::info!(depth, "reorg");
         assert_ne!(depth, 0);
         let original_head = self.latest_block().await;
-        tracing::info!(depth, "reorg");
         self.provider
             .anvil_reorg(alloy_rpc_types_anvil::ReorgOptions {
                 depth,
@@ -93,6 +101,7 @@ impl AnvilTestContext {
             select block_num, hash, parent_hash
             from anvil_rpc.blocks
             where block_num >= {} and block_num <= {}
+            order by block_num asc
             "#,
             range.start(),
             range.end(),
@@ -155,4 +164,59 @@ async fn rpc_reorg_simple() {
         hash: blocks1[2].hash,
         prev_hash: Some(blocks1[1].parent_hash),
     }));
+}
+
+#[tokio::test]
+async fn rpc_reorg_prop() {
+    let test = AnvilTestContext::setup("rpc_reorg_prop").await;
+
+    let seed = rand::rng().next_u64();
+    println!("seed: {seed}");
+    let mut rng = StdRng::seed_from_u64(seed);
+
+    #[track_caller]
+    fn check_blocks(blocks: &[BlockRow]) {
+        for b in blocks.windows(2) {
+            assert_eq!(b[0].block_num, b[1].block_num - 1);
+            assert_eq!(b[0].hash, b[1].parent_hash);
+        }
+    }
+
+    for _ in 0..3 {
+        test.mine(rng.random_range(1..=3)).await;
+        test.dump(0..=test.latest_block().await.block_num).await;
+        let blocks0 = test.query_blocks(0..=1_000).await;
+        eprintln!("blocks0 = {:#?}", blocks0);
+        check_blocks(&blocks0);
+        assert_eq!(
+            blocks0.len(),
+            test.latest_block().await.block_num as usize + 1
+        );
+
+        let reorg_depth = u64::min(rng.random_range(1..=3), test.latest_block().await.block_num);
+        test.reorg(reorg_depth).await;
+        test.dump(0..=test.latest_block().await.block_num).await;
+        // no reorg detected, since dumped block height has not increased
+        assert_eq!(blocks0, test.query_blocks(0..=1_000).await);
+
+        // mine at least one block to detect reorg
+        test.mine(rng.random_range(1..=3)).await;
+        test.dump(0..=test.latest_block().await.block_num).await;
+
+        // the canonical chain must be resolved in at most reorg_depth dumps
+        for _ in 0..reorg_depth {
+            test.mine(rng.random_range(0..=3)).await;
+            test.dump(0..=test.latest_block().await.block_num).await;
+        }
+
+        let latest = test.latest_block().await;
+        eprintln!("latest = {:#?}", latest);
+        let blocks1 = test.query_blocks(0..=1_000).await;
+        eprintln!("blocks1 = {:#?}", blocks1);
+        let mut ranges = test.metadata_ranges().await;
+        ranges.sort_by_key(|r| *r.numbers.start());
+        eprintln!("ranges = {:#?}", ranges);
+        assert_eq!(blocks1.len(), latest.block_num as usize + 1);
+        assert_eq!(blocks1.last().unwrap().hash, latest.hash);
+    }
 }

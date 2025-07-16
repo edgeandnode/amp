@@ -6754,6 +6754,7 @@ dependencies = [
  "nozzle",
  "object_store",
  "pretty_assertions",
+ "rand 0.9.1",
  "serde",
  "serde_json",
  "serde_yaml",
