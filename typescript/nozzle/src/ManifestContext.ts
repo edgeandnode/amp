@@ -1,7 +1,7 @@
 import { FileSystem, Path } from "@effect/platform"
 import { Context, Data, Effect, Layer, Option, Schema } from "effect"
-import * as ConfigLoader from "./ConfigLoader.js"
-import * as Model from "./Model.js"
+import * as ConfigLoader from "./ConfigLoader.ts"
+import * as Model from "./Model.ts"
 
 export class ManifestContextError extends Data.TaggedError("ManifestContextError")<{
   readonly message: string

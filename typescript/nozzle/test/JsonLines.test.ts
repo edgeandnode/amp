@@ -1,6 +1,6 @@
 import { expect, it } from "@effect/vitest"
 import { Chunk, Effect, Schema, Stream } from "effect"
-import * as JsonLines from "../src/JsonLines.js"
+import * as JsonLines from "nozzl/JsonLines"
 
 it.layer(JsonLines.JsonLines.Default)((it) => {
   it.effect("should respond to a sql query", () =>
@@ -11,7 +11,7 @@ it.layer(JsonLines.JsonLines.Default)((it) => {
         SELECT * FROM VALUES (1, 2, 3, 4), (5, 6, 7, 8) AS TableLiteral(a, b, c, d)
       `
 
-      const result = yield* stream.pipe(Stream.runCollect).pipe(Effect.map(Chunk.toArray))
+      const result = yield* stream.pipe(Stream.runCollect, Effect.map(Chunk.toArray))
       expect(result).toStrictEqual([
         { a: 1, b: 2, c: 3, d: 4 },
         { a: 5, b: 6, c: 7, d: 8 },
@@ -26,7 +26,7 @@ it.layer(JsonLines.JsonLines.Default)((it) => {
         THIS IS A BAD QUERY
       `
 
-      const result = yield* stream.pipe(Stream.runDrain).pipe(Effect.flip)
+      const result = yield* stream.pipe(Stream.runDrain, Effect.flip)
       expect(result).toBeInstanceOf(JsonLines.JsonLinesError)
       expect(result.message).toContain("Expected: an SQL statement, found: THIS")
     }))

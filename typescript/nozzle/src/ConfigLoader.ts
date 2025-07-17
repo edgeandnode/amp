@@ -7,7 +7,11 @@ import * as ManifestBuilder from "./ManifestBuilder.js"
 import * as Model from "./Model.js"
 
 export class Context {
-  constructor(public definitionPath: string) {}
+  public definitionPath: string
+
+  constructor(definitionPath: string) {
+    this.definitionPath = definitionPath
+  }
 
   /// Reads a file relative to the directory of the dataset definition
   functionSource(relativePath: string): Model.FunctionSource {

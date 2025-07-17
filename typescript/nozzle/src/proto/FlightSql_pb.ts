@@ -3625,4 +3625,3 @@ export const UpdateDeleteRulesSchema: GenEnum<UpdateDeleteRules> = /*@__PURE__*/
  */
 export const experimental: GenExtension<MessageOptions, boolean> = /*@__PURE__*/
   extDesc(file_FlightSql, 0);
-

@@ -1,8 +1,8 @@
 import { Command, Options } from "@effect/cli"
 import { Config, Console, Effect, Layer, Schema } from "effect"
-import * as Api from "../../Api.js"
-import * as ManifestContext from "../../ManifestContext.js"
-import * as ManifestDeployer from "../../ManifestDeployer.js"
+import * as Api from "../../Api.ts"
+import * as ManifestContext from "../../ManifestContext.ts"
+import * as ManifestDeployer from "../../ManifestDeployer.ts"
 
 export const deploy = Command.make("deploy", {
   args: {

@@ -15,18 +15,13 @@ export default defineDataset(() => ({
   name: "example",
   version: "0.1.0",
   network: "mainnet",
-  dependencies: {
-    mainnet: {
-      owner: "graphprotocol",
-      name: "mainnet",
-      version: "0.1.0",
-    },
-  },
+  dependencies: {},
   tables: {
     counts: {
       sql: `
         SELECT c.address, c.block_num, c.timestamp, c.event['count'] as count
-        FROM (${count}) as c`,
+        FROM (${count}) as c
+      `,
     },
     transfers: {
       sql: `
