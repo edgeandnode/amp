@@ -231,6 +231,8 @@ impl StreamingQuery {
     ) -> Result<StreamingQueryHandle, BoxError> {
         let schema: SchemaRef = plan.schema().clone().as_ref().clone().into();
         let (tx, rx) = mpsc::channel(10);
+
+        let plan = ctx.optimize_plan(&plan).await?;
         let streaming_query = Self {
             ctx,
             plan,
@@ -300,6 +302,7 @@ impl StreamingQuery {
                         microbatch_start,
                         microbatch_end,
                         self.is_sql_dataset,
+                        false,
                     )
                     .await?;
 

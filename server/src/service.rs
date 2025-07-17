@@ -215,7 +215,9 @@ impl Service {
             } else {
                 plan
             };
-            ctx.execute_plan(plan).await.map_err(|err| Error::from(err))
+            ctx.execute_plan(plan, true)
+                .await
+                .map_err(|err| Error::from(err))
         } else {
             // If streaming, we need to spawn a streaming query.
             let watermark_stream = watermark_updates(ctx.clone(), &self.notification_multiplexer)

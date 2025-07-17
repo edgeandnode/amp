@@ -19,6 +19,7 @@ use datafusion::{
     },
     logical_expr::{AggregateUDF, Extension, LogicalPlan, ScalarUDF},
     physical_plan::{ExecutionPlan, displayable},
+    physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner as _},
     sql::{TableReference, parser},
 };
 use datafusion_proto::{
@@ -277,7 +278,7 @@ impl QueryContext {
     }
 
     pub async fn plan_sql(&self, query: parser::Statement) -> Result<LogicalPlan, Error> {
-        let ctx = self.datafusion_ctx().await?;
+        let ctx = self.datafusion_ctx()?;
         let plan = sql_to_plan(&ctx, query).await?;
         Ok(plan)
     }
@@ -288,15 +289,15 @@ impl QueryContext {
         debug!("query: {}", query);
 
         let statement = parse_sql(query)?;
-        let ctx = self.datafusion_ctx().await?;
+        let ctx = self.datafusion_ctx()?;
         let plan = sql_to_plan(&ctx, statement).await?;
 
-        execute_plan(&ctx, plan).await
+        execute_plan(&ctx, plan, true).await
     }
 
     /// This will deserialize the plan with empty tables in the `TableScan` nodes.
     pub async fn plan_from_bytes(&self, bytes: &[u8]) -> Result<LogicalPlan, Error> {
-        let ctx = self.datafusion_ctx().await?;
+        let ctx = self.datafusion_ctx()?;
         let plan = logical_plan_from_bytes_with_extension_codec(bytes, &ctx, &TableProviderCodec)
             .map_err(Error::PlanDecodingError)?;
         verify_plan(&plan)?;
@@ -306,7 +307,7 @@ impl QueryContext {
     /// Because `DatasetContext` is read-only, planning and execution can be done on ephemeral
     /// sessions created by this function, and they will behave the same as if they had been run
     /// against a persistent `SessionContext`
-    async fn datafusion_ctx(&self) -> Result<SessionContext, Error> {
+    fn datafusion_ctx(&self) -> Result<SessionContext, Error> {
         let state = SessionStateBuilder::new()
             .with_config(self.session_config.clone())
             .with_runtime_env(self.env.df_env.clone())
@@ -317,7 +318,6 @@ impl QueryContext {
 
         for table in self.catalog.tables() {
             create_physical_table(&ctx, table.clone())
-                .await
                 .map_err(|e| Error::DatasetError(e.into()))?;
         }
 
@@ -338,19 +338,27 @@ impl QueryContext {
         }
     }
 
+    pub async fn optimize_plan(&self, plan: &LogicalPlan) -> Result<LogicalPlan, Error> {
+        self.datafusion_ctx()?
+            .state()
+            .optimize(plan)
+            .map_err(Error::PlanningError)
+    }
+
     pub async fn execute_plan(
         &self,
         plan: LogicalPlan,
+        logical_optimize: bool,
     ) -> Result<SendableRecordBatchStream, Error> {
-        let ctx = self.datafusion_ctx().await?;
-        execute_plan(&ctx, plan).await
+        let ctx = self.datafusion_ctx()?;
+        execute_plan(&ctx, plan, logical_optimize).await
     }
 
     /// This will load the result set entirely in memory, so it should be used with caution.
     pub async fn execute_and_concat(&self, plan: LogicalPlan) -> Result<RecordBatch, Error> {
         let schema = plan.schema().inner().clone();
-        let ctx = self.datafusion_ctx().await?;
-        let batch_stream = execute_plan(&ctx, plan)
+        let ctx = self.datafusion_ctx()?;
+        let batch_stream = execute_plan(&ctx, plan, true)
             .await?
             .try_collect::<Vec<_>>()
             .await
@@ -439,6 +447,7 @@ impl QueryContext {
         start: BlockNum,
         end: BlockNum,
         is_sql_dataset: bool,
+        logical_optimize: bool,
     ) -> Result<SendableRecordBatchStream, BoxError> {
         let original_schema = plan.schema().clone();
         let tables = extract_table_references_from_plan(&plan)?;
@@ -473,7 +482,7 @@ impl QueryContext {
                 unproject_special_block_num_column(plan, original_schema)?
             }
         };
-        Ok(self.execute_plan(plan).await?)
+        Ok(self.execute_plan(plan, logical_optimize).await?)
     }
 }
 
@@ -512,7 +521,7 @@ async fn create_empty_tables(
     Ok(())
 }
 
-async fn create_physical_table(
+fn create_physical_table(
     ctx: &SessionContext,
     provider: Arc<PhysicalTable>,
 ) -> Result<(), DataFusionError> {
@@ -571,18 +580,24 @@ pub fn parse_sql(sql: &str) -> Result<parser::Statement, Error> {
     Ok(statement)
 }
 
+/// `logical_optimize` controls whether logical optimizations should be applied to `plan`.
 async fn execute_plan(
     ctx: &SessionContext,
-    plan: LogicalPlan,
+    mut plan: LogicalPlan,
+    logical_optimize: bool,
 ) -> Result<SendableRecordBatchStream, Error> {
     use datafusion::physical_plan::execute_stream;
 
     verify_plan(&plan)?;
     debug!("logical plan: {}", plan.to_string().replace('\n', "\\n"));
 
-    let physical_plan = ctx
-        .state()
-        .create_physical_plan(&plan)
+    if logical_optimize {
+        plan = ctx.state().optimize(&plan).map_err(Error::PlanningError)?;
+    }
+
+    let planner = DefaultPhysicalPlanner::default();
+    let physical_plan = planner
+        .create_physical_plan(&plan, &ctx.state())
         .await
         .map_err(Error::PlanningError)?;
     debug!("physical plan: {}", print_physical_plan(&*physical_plan));
