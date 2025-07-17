@@ -113,6 +113,12 @@ pub async fn dump(
     parquet_opts: &ParquetWriterProperties,
     (start, end): (i64, Option<i64>),
 ) -> Result<(), BoxError> {
+    for table in tables {
+        ctx.metadata_db
+            .check_and_set_start_block(table.location_id(), start)
+            .await?;
+    }
+
     let mut client = ctx.dataset_store.load_client(dataset_name).await?;
 
     let (start, end) = match (start, end) {
@@ -122,15 +128,6 @@ pub async fn dump(
             block_ranges::resolve_relative(start, end, latest_block)?
         }
     };
-
-    for table in tables {
-        let start_block = start
-            .try_into()
-            .map_err(|e| format!("start_block value {} is out of range: {}", start, e))?;
-        ctx.metadata_db
-            .check_and_set_start_block(table.location_id(), start_block)
-            .await?;
-    }
 
     let mut missing_ranges_by_table: BTreeMap<String, Vec<RangeInclusive<BlockNum>>> =
         Default::default();

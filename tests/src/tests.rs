@@ -10,7 +10,6 @@ use common::{
 };
 use dataset_store::{DatasetDefsCommon, DatasetStore};
 use generate_manifest;
-use serial_test::serial;
 
 use crate::{
     steps::load_test_steps,
@@ -127,13 +126,13 @@ async fn basic_function() -> Result<(), BoxError> {
     Ok(())
 }
 
-#[serial]
 #[tokio::test]
 async fn persist_start_block_test() -> Result<(), BoxError> {
     tracing_helpers::register_logger();
     let test_env = TestEnv::temp("persist_start_block_test").await?;
     let mut client = TestClient::connect(&test_env).await?;
 
+    // Start Anvil on port 8545 to match the rpc_anvil.toml configuration
     let provider = alloy::providers::ProviderBuilder::new()
         .connect_anvil_with_config(|anvil| anvil.port(8545u16));
     let provider = alloy::providers::DynProvider::new(provider);
@@ -147,7 +146,6 @@ async fn persist_start_block_test() -> Result<(), BoxError> {
     Ok(())
 }
 
-#[serial]
 #[tokio::test]
 async fn anvil_rpc_reorg() {
     tracing_helpers::register_logger();
@@ -158,6 +156,7 @@ async fn anvil_rpc_reorg() {
     let http = reqwest::Client::new();
     let test_env = TestEnv::temp("anvil_rpc_reorg").await.unwrap();
     let dataset_store = DatasetStore::new(test_env.config.clone(), test_env.metadata_db.clone());
+    // Start Anvil on port 8545 to match the rpc_anvil.toml configuration
     let provider = alloy::providers::ProviderBuilder::new()
         .connect_anvil_with_config(|anvil| anvil.port(8545u16));
     let provider = DynProvider::new(provider);

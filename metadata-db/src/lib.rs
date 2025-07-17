@@ -373,14 +373,15 @@ impl MetadataDb {
         path: &str,
         url: &Url,
         active: bool,
+        start_block: Option<i64>,
     ) -> Result<LocationId, sqlx::Error> {
         // An empty `dataset_version` is represented as an empty string in the DB.
         let dataset_version = table.dataset_version.unwrap_or("");
         let mut tx = self.pool.begin().await?;
 
         let query = "
-            INSERT INTO locations (dataset, dataset_version, tbl, bucket, path, url, active)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            INSERT INTO locations (dataset, dataset_version, tbl, bucket, path, url, active, start_block)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             ON CONFLICT DO NOTHING;
         ";
 
@@ -392,6 +393,7 @@ impl MetadataDb {
             .bind(path)
             .bind(url.to_string())
             .bind(active)
+            .bind(start_block)
             .execute(&mut *tx)
             .await?;
 
@@ -596,6 +598,8 @@ impl MetadataDb {
         Ok(())
     }
 
+    /// Sets the start block for a location if it's not already set.
+    /// If it is already set, it must match the provided start_block.
     pub async fn check_and_set_start_block(
         &self,
         location_id: LocationId,

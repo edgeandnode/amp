@@ -47,7 +47,8 @@ impl Scheduler {
                 Some(physical_table) => physical_table,
                 None => {
                     let store = &self.config.data_store;
-                    PhysicalTable::next_revision(&table, store, metadata_db.clone(), true).await?
+                    PhysicalTable::next_revision(&table, store, metadata_db.clone(), true, None)
+                        .await?
                 }
             };
             locations.push(physical_table.location_id());

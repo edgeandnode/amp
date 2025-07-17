@@ -129,6 +129,7 @@ impl PhysicalTable {
         data_store: &Store,
         metadata_db: Arc<MetadataDb>,
         set_active: bool,
+        start_block: Option<i64>,
     ) -> Result<Self, BoxError> {
         let dataset_name = &table.dataset().name;
         let table_id = TableId {
@@ -140,7 +141,14 @@ impl PhysicalTable {
         let path = make_location_path(dataset_name, &table.name());
         let url = data_store.url().join(&path)?;
         let location_id = metadata_db
-            .register_location(table_id, data_store.bucket(), &path, &url, false)
+            .register_location(
+                table_id,
+                data_store.bucket(),
+                &path,
+                &url,
+                false,
+                start_block,
+            )
             .await?;
 
         if set_active {
@@ -257,7 +265,7 @@ impl PhysicalTable {
         metadata_db: Arc<MetadataDb>,
     ) -> Result<Self, BoxError> {
         let location_id = metadata_db
-            .register_location(*table_id, data_store.bucket(), prefix, url, false)
+            .register_location(*table_id, data_store.bucket(), prefix, url, false, None)
             .await?;
 
         metadata_db
