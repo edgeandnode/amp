@@ -1,6 +1,7 @@
 use std::{ops::RangeInclusive, sync::Arc};
 
 use alloy::{
+    node_bindings::{Anvil, AnvilInstance},
     primitives::BlockHash,
     providers::{Provider as _, ext::AnvilApi as _},
     transports::http::reqwest,
@@ -8,34 +9,33 @@ use alloy::{
 use common::{BlockNum, metadata::segments::BlockRange, query_context::parse_sql, tracing_helpers};
 use dataset_store::DatasetStore;
 use rand::{Rng, RngCore, SeedableRng as _, rngs::StdRng};
-use tokio::sync::{Mutex, MutexGuard};
 
-use crate::test_support::{SnapshotContext, TestEnv, check_provider_file, table_ranges};
+use crate::test_support::{SnapshotContext, TestEnv, table_ranges};
 
 const DATASET_NAME: &str = "anvil_rpc";
 
-struct AnvilTestContext<'anvil> {
+struct AnvilTestContext {
     env: TestEnv,
     http: reqwest::Client,
     provider: alloy::providers::DynProvider,
-    _anvil_lock: MutexGuard<'anvil, ()>,
+    _anvil: AnvilInstance,
 }
 
-impl AnvilTestContext<'_> {
+impl AnvilTestContext {
     async fn setup(test_name: &str) -> Self {
-        static ANVIL_LOCK: Mutex<()> = Mutex::const_new(());
-        let anvil_lock = ANVIL_LOCK.lock().await;
-
         tracing_helpers::register_logger();
-        check_provider_file("rpc_anvil.toml").await;
+        let http = reqwest::Client::new();
+        let anvil = Anvil::new().port(0_u16).spawn();
+        let url = anvil.endpoint_url();
+        let env = TestEnv::new(test_name, true, Some(url.as_str()))
+            .await
+            .unwrap();
+        let provider = alloy::providers::ProviderBuilder::new().connect_reqwest(http.clone(), url);
         Self {
-            env: TestEnv::temp(test_name).await.unwrap(),
-            http: reqwest::Client::new(),
-            provider: alloy::providers::DynProvider::new(
-                alloy::providers::ProviderBuilder::new()
-                    .connect_anvil_with_config(|anvil| anvil.timeout(30_000).port(8545 as u16)),
-            ),
-            _anvil_lock: anvil_lock,
+            env,
+            http,
+            provider: provider.erased(),
+            _anvil: anvil,
         }
     }
 
@@ -213,6 +213,7 @@ async fn rpc_reorg_prop() {
         eprintln!("latest = {:#?}", latest);
         let blocks1 = test.query_blocks(0..=1_000).await;
         eprintln!("blocks1 = {:#?}", blocks1);
+        check_blocks(&blocks1);
         let mut ranges = test.metadata_ranges().await;
         ranges.sort_by_key(|r| *r.numbers.start());
         eprintln!("ranges = {:#?}", ranges);
