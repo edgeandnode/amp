@@ -3,6 +3,7 @@ use std::{path::PathBuf, sync::Arc};
 use clap::Parser as _;
 use common::{BoxError, config::Config, tracing_helpers};
 use dump::worker::Worker;
+use metadata_db::MetadataDb;
 use nozzle::dump_cmd;
 use tracing::info;
 
@@ -13,12 +14,12 @@ static ALLOC: snmalloc_rs::SnMalloc = snmalloc_rs::SnMalloc;
 #[derive(Debug, clap::Parser)]
 struct Args {
     #[arg(long, env = "NOZZLE_CONFIG")]
-    config: String,
+    config: Option<String>,
     #[command(subcommand)]
     command: Command,
 }
 
-#[derive(Debug, clap::Subcommand)]
+#[derive(Debug, clap::Subcommand, Clone)]
 enum Command {
     Dump {
         /// The name of the dataset to dump. This will be looked up in the dataset definition directory.
@@ -150,9 +151,8 @@ async fn main_inner() -> Result<(), BoxError> {
     );
 
     let args = Args::parse();
-    let allow_temp_db = matches!(&args.command, Command::Server { dev, .. } if *dev);
-    let config = Arc::new(Config::load(args.config, true, None, allow_temp_db).await?);
-    let metadata_db = config.metadata_db().await?.into();
+    let command = args.command.clone();
+    let config_path = args.config;
 
     match args.command {
         Command::Dump {
@@ -167,6 +167,8 @@ async fn main_inner() -> Result<(), BoxError> {
             location,
             fresh,
         } => {
+            let (config, metadata_db) =
+                construct_confing_and_metadatadb(config_path.as_ref(), &command).await?;
             dump_cmd::dump(
                 config,
                 metadata_db,
@@ -192,6 +194,8 @@ async fn main_inner() -> Result<(), BoxError> {
             mut registry_server,
             mut admin_server,
         } => {
+            let (config, metadata_db) =
+                construct_confing_and_metadatadb(config_path.as_ref(), &command).await?;
             if !flight_server && !jsonl_server && !registry_server && !admin_server {
                 flight_server = true;
                 jsonl_server = true;
@@ -212,6 +216,8 @@ async fn main_inner() -> Result<(), BoxError> {
             server.await
         }
         Command::Worker { node_id } => {
+            let (config, metadata_db) =
+                construct_confing_and_metadatadb(config_path.as_ref(), &command).await?;
             let worker = Worker::new(config.clone(), metadata_db, node_id.parse()?);
             worker.run().await.map_err(Into::into)
         }
@@ -234,6 +240,23 @@ async fn main_inner() -> Result<(), BoxError> {
                 let mut stdout = std::io::stdout();
                 generate_manifest::run(network, kind, name, manifest, module, &mut stdout).await
             }
+        }
+    }
+}
+
+async fn construct_confing_and_metadatadb(
+    config_path: Option<&String>,
+    command: &Command,
+) -> Result<(Arc<Config>, Arc<MetadataDb>), BoxError> {
+    let allow_temp_db = matches!(&command, Command::Server { dev, .. } if *dev);
+    match config_path {
+        Some(config) => {
+            let config = Arc::new(Config::load(config, true, None, allow_temp_db).await?);
+            let metadata_db = config.metadata_db().await?.into();
+            Ok((config, metadata_db))
+        }
+        None => {
+            return Err("--config parameter is mandatory".into());
         }
     }
 }
