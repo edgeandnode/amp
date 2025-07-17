@@ -83,9 +83,12 @@ impl TableSegments {
     }
 
     /// Return the block ranges missing from this table out of the given `desired` range. The
-    /// returned ranges will be non-overlapping. For now, we avoid overlapping between canonical
-    /// and non-canonical block ranges since we don't disambiguate between the files for query
-    /// execution.
+    /// returned ranges are non-overlapping and sorted by their start block number.
+    ///
+    /// To resolve reorgs, the missing ranges may include blocks already indexed. A reorg is
+    /// detected when there is no missing range between the canonical chain and some fork with a
+    /// greater block height. When a reorg is detected, the missing ranges will include any
+    /// canonical ranges that overlap with the fork minus 1 block.
     pub fn missing_ranges(
         &self,
         desired: RangeInclusive<BlockNum>,
@@ -96,6 +99,7 @@ impl TableSegments {
         };
         let mut missing: Vec<RangeInclusive<BlockNum>> =
             missing_block_ranges(canonical.start()..=canonical.end(), desired.clone());
+
         // remove overlapping fork ranges
         for fork in &self.forks {
             let fork_range = fork.start()..=fork.end();
@@ -114,7 +118,7 @@ impl TableSegments {
 
         let max_fork = self.forks.iter().max_by_key(|g| g.end());
         let reorg_depth = 1;
-        if let (Some(canonical), Some(max_fork)) = (&self.canonical, max_fork)
+        if let Some(max_fork) = max_fork
             && max_fork.end() > canonical.end()
             && let Some(intersection) = block_range_intersection(
                 canonical.start()..=canonical.end(),
@@ -138,6 +142,7 @@ impl TableSegments {
             }
         }
 
+        // check ranges are non-overlapping and sorted
         for windows in missing.windows(2) {
             let ((a, b), (c, d)) = (
                 windows[0].clone().into_inner(),
