@@ -65,8 +65,14 @@ pub async fn dump(
         let mut tables = Vec::with_capacity(dataset.tables.len());
         for table in Arc::new(dataset).resolved_tables() {
             let physical_table = if fresh {
-                PhysicalTable::next_revision(&table, data_store.as_ref(), metadata_db.clone(), true)
-                    .await?
+                PhysicalTable::next_revision(
+                    &table,
+                    data_store.as_ref(),
+                    metadata_db.clone(),
+                    true,
+                    Some(start),
+                )
+                .await?
             } else {
                 match PhysicalTable::get_active(&table, metadata_db.clone()).await? {
                     Some(physical_table) => physical_table,
@@ -76,6 +82,7 @@ pub async fn dump(
                             data_store.as_ref(),
                             metadata_db.clone(),
                             true,
+                            Some(start),
                         )
                         .await?
                     }
