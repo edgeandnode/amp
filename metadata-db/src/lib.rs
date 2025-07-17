@@ -54,8 +54,6 @@ pub struct FileMetadataRow {
     pub object_version: Option<String>,
     /// file_metadata.metadata
     pub metadata: serde_json::Value,
-    /// file_metadata.canonical
-    pub canonical: bool,
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -559,7 +557,6 @@ impl MetadataDb {
              , fm.object_e_tag
              , fm.object_version
              , fm.metadata
-             , fm.canonical
           FROM file_metadata fm
           JOIN locations l ON fm.location_id = l.id
          WHERE location_id = $1;
@@ -576,11 +573,10 @@ impl MetadataDb {
         object_e_tag: Option<String>,
         object_version: Option<String>,
         parquet_meta: serde_json::Value,
-        canonical: bool,
     ) -> Result<(), Error> {
         let sql = "
-        INSERT INTO file_metadata (location_id, file_name, object_size, object_e_tag, object_version, metadata, canonical)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        INSERT INTO file_metadata (location_id, file_name, object_size, object_e_tag, object_version, metadata)
+        VALUES ($1, $2, $3, $4, $5, $6)
         ON CONFLICT DO NOTHING
         ";
 
@@ -591,7 +587,6 @@ impl MetadataDb {
             .bind(object_e_tag)
             .bind(object_version)
             .bind(parquet_meta)
-            .bind(canonical)
             .execute(&*self.pool)
             .await?;
 
@@ -648,7 +643,18 @@ impl MetadataDb {
         Ok(())
     }
 
+    #[instrument(skip(self), err)]
+    pub async fn notify_location_change(&self, location_id: LocationId) -> Result<(), Error> {
+        self.notify("change-tracking", &location_id.to_string())
+            .await
+    }
+
     /// Listens on a PostgreSQL notification channel using LISTEN.
+    ///
+    /// # Connection management
+    ///
+    /// This does not take a connection from the pool, but instead establishes a new connection
+    /// to the database. This connection is maintained for the lifetime of the stream.
     ///
     /// # Error cases
     ///
@@ -663,9 +669,11 @@ impl MetadataDb {
     pub async fn listen(
         &self,
         channel_name: &str,
-    ) -> Result<impl Stream<Item = Result<PgNotification, sqlx::Error>> + use<>, sqlx::Error> {
-        let mut channel = PgListener::connect(&self.url).await?;
-        channel.listen(channel_name).await?;
+    ) -> Result<impl Stream<Item = Result<PgNotification, sqlx::Error>> + use<>, Error> {
+        let mut channel = PgListener::connect(&self.url)
+            .await
+            .map_err(Error::ConnectionError)?;
+        channel.listen(channel_name).await.map_err(Error::DbError)?;
         Ok(channel.into_stream())
     }
 }

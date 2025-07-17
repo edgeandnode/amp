@@ -8,9 +8,9 @@ use futures::{
     FutureExt, Stream, TryStreamExt as _,
     stream::{self, StreamExt},
 };
-use metadata_db::{LocationId, MetadataDb};
+use metadata_db::LocationId;
 use tokio::sync::mpsc;
-use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
+use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream, WatchStream};
 use tokio_util::task::AbortOnDropHandle;
 use tracing::{instrument, warn};
 
@@ -18,6 +18,7 @@ use crate::{
     BlockNum, BoxError,
     arrow::{array::RecordBatch, datatypes::SchemaRef},
     catalog::physical::PhysicalTable,
+    notification_multiplexer::NotificationMultiplexerHandle,
     query_context::QueryContext,
 };
 
@@ -78,7 +79,7 @@ pub type WatermarkStream =
 #[instrument(skip_all, err)]
 pub async fn watermark_updates(
     ctx: Arc<QueryContext>,
-    metadata_db: Arc<MetadataDb>,
+    multiplexer_handle: &NotificationMultiplexerHandle,
 ) -> Result<WatermarkStream, BoxError> {
     let tables = ctx.catalog().tables().to_vec();
 
@@ -87,13 +88,11 @@ pub async fn watermark_updates(
 
     // Set up change notifications
     let locations = ctx.catalog().tables().iter().map(|t| t.location_id());
-    let mut channel_to_location: BTreeMap<String, LocationId> = BTreeMap::new();
     let mut notification_streams = Vec::new();
     for location in locations {
-        let channel = crate::stream_helpers::change_tracking_pg_channel(location);
-        let stream = metadata_db.listen(&channel).await?;
-        notification_streams.push(stream.map_ok(|n| n.channel().to_string()));
-        channel_to_location.insert(channel, location);
+        let receiver = multiplexer_handle.subscribe(location).await;
+        let stream = WatchStream::new(receiver).map(move |_| Ok::<LocationId, BoxError>(location));
+        notification_streams.push(stream);
     }
 
     let notifications = futures::stream::select_all(notification_streams);
@@ -108,9 +107,8 @@ pub async fn watermark_updates(
     // Spawn task to handle new ranges from notifications
     tokio::spawn(async move {
         let mut notifications = notifications;
-        while let Some(Ok(channel)) = notifications.next().await {
-            let location = channel_to_location.get(&*channel).unwrap();
-            let watermark = watermarks.update(*location).await;
+        while let Some(Ok(location)) = notifications.next().await {
+            let watermark = watermarks.update(location).await;
 
             let res = match watermark {
                 Ok(()) => Ok(watermarks.common_watermark()),
@@ -201,6 +199,7 @@ pub struct StreamingQuery {
     is_sql_dataset: bool,
     state: StreamState,
     tx: mpsc::Sender<QueryMessage>,
+    microbatch_max_interval: u64,
 }
 
 pub struct StreamState {
@@ -228,6 +227,7 @@ impl StreamingQuery {
         plan: LogicalPlan,
         end_block: Option<BlockNum>,
         is_sql_dataset: bool,
+        microbatch_max_interval: u64,
     ) -> Result<StreamingQueryHandle, BoxError> {
         let schema: SchemaRef = plan.schema().clone().as_ref().clone().into();
         let (tx, rx) = mpsc::channel(10);
@@ -238,6 +238,7 @@ impl StreamingQuery {
             end_block,
             is_sql_dataset,
             state: initial_state,
+            microbatch_max_interval,
         };
 
         let join_handle = AbortOnDropHandle::new(tokio::spawn(streaming_query.execute()));
@@ -283,23 +284,39 @@ impl StreamingQuery {
             let start = self.state.next_start;
             self.state.next_start = watermark + 1;
 
-            // Start microbatch execution
-            let mut stream = self
-                .ctx
-                .execute_plan_for_range(self.plan.clone(), start, watermark, self.is_sql_dataset)
-                .await?;
+            // Process in chunks based on microbatch_max_interval
+            let mut microbatch_start = start;
+            while microbatch_start <= watermark {
+                let microbatch_end = std::cmp::min(
+                    microbatch_start + self.microbatch_max_interval - 1,
+                    watermark,
+                );
 
-            // Drain the microbatch completely
-            while let Some(item) = stream.next().await {
-                let item = item?;
+                // Start microbatch execution for this chunk
+                let mut stream = self
+                    .ctx
+                    .execute_plan_for_range(
+                        self.plan.clone(),
+                        microbatch_start,
+                        microbatch_end,
+                        self.is_sql_dataset,
+                    )
+                    .await?;
 
-                // If the receiver in `StreamingQueryHandle` is dropped, then this task has been
-                // aborted, so we don't bother checking for errors when sending a message.
-                let _ = self.tx.send(QueryMessage::Data(item)).await;
+                // Drain the microbatch completely
+                while let Some(item) = stream.next().await {
+                    let item = item?;
+
+                    // If the receiver in `StreamingQueryHandle` is dropped, then this task has been
+                    // aborted, so we don't bother checking for errors when sending a message.
+                    let _ = self.tx.send(QueryMessage::Data(item)).await;
+                }
+
+                // Send completion message for this chunk
+                let _ = self.tx.send(QueryMessage::Completed(microbatch_end)).await;
+
+                microbatch_start = microbatch_end + 1;
             }
-
-            // Send completion message for this microbatch
-            let _ = self.tx.send(QueryMessage::Completed(watermark)).await;
 
             if Some(watermark) == self.end_block {
                 // If we reached the end block, we are done

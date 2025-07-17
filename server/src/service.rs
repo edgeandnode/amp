@@ -17,6 +17,7 @@ use bytes::{BufMut, Bytes, BytesMut};
 use common::{
     arrow::{self, ipc::writer::IpcDataGenerator},
     config::Config,
+    notification_multiplexer::{self, NotificationMultiplexerHandle},
     plan_visitors::{
         forbid_underscore_prefixed_aliases, is_incremental, propagate_block_num,
         unproject_special_block_num_column,
@@ -32,9 +33,10 @@ use datafusion::{
     error::DataFusionError,
     execution::SendableRecordBatchStream,
     logical_expr::LogicalPlan,
+    physical_plan::stream::RecordBatchStreamAdapter,
 };
 use dataset_store::{DatasetError, DatasetStore};
-use futures::{Stream, StreamExt as _, TryStreamExt};
+use futures::{Stream, StreamExt as _, TryStreamExt, stream};
 use metadata_db::MetadataDb;
 use prost::Message as _;
 use thiserror::Error;
@@ -149,15 +151,24 @@ impl From<Error> for Status {
 
 #[derive(Clone)]
 pub struct Service {
+    config: Arc<Config>,
     env: QueryEnv,
     dataset_store: Arc<DatasetStore>,
+    notification_multiplexer: Arc<NotificationMultiplexerHandle>,
 }
 
 impl Service {
     pub async fn new(config: Arc<Config>, metadata_db: Arc<MetadataDb>) -> Result<Self, Error> {
         let env = config.make_query_env().map_err(Error::ExecutionError)?;
-        let dataset_store = DatasetStore::new(config.clone(), metadata_db);
-        Ok(Self { env, dataset_store })
+        let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
+        let notification_multiplexer =
+            Arc::new(notification_multiplexer::spawn((*metadata_db).clone()));
+        Ok(Self {
+            config,
+            env,
+            dataset_store,
+            notification_multiplexer,
+        })
     }
 
     pub async fn execute_query(&self, sql: &str) -> Result<SendableRecordBatchStream, Error> {
@@ -207,14 +218,39 @@ impl Service {
             ctx.execute_plan(plan).await.map_err(|err| Error::from(err))
         } else {
             // If streaming, we need to spawn a streaming query.
-            let db = self.dataset_store.metadata_db.clone();
-            let watermark_stream = watermark_updates(ctx.clone(), db.clone())
+            let watermark_stream = watermark_updates(ctx.clone(), &self.notification_multiplexer)
                 .await
                 .map_err(|e| Error::StreamingExecutionError(e.to_string()))?;
-            let initial_state = StreamState::new(watermark_stream, 0);
-            let query = StreamingQuery::spawn(initial_state, ctx.clone(), plan, None, false)
+
+            // As an optimization, start the stream from the minimum start block across all tables.
+            // Otherwise starting from `0` would spend time scanning ranges known to be empty.
+            let earliest_block = ctx
+                .catalog()
+                .earliest_block()
                 .await
                 .map_err(|e| Error::StreamingExecutionError(e.to_string()))?;
+
+            // If no tables are synced, we return an empty stream.
+            let Some(earliest_block) = earliest_block else {
+                let schema = plan.schema().clone().as_ref().clone().into();
+                let empty_stream = Box::pin(RecordBatchStreamAdapter::new(
+                    schema,
+                    stream::empty().map(Ok),
+                ));
+                return Ok(empty_stream);
+            };
+
+            let initial_state = StreamState::new(watermark_stream, earliest_block);
+            let query = StreamingQuery::spawn(
+                initial_state,
+                ctx.clone(),
+                plan,
+                None,
+                false,
+                self.config.microbatch_max_interval,
+            )
+            .await
+            .map_err(|e| Error::StreamingExecutionError(e.to_string()))?;
 
             Ok(query.as_record_batch_stream())
         }

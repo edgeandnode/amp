@@ -58,7 +58,7 @@
 //!   computing the complement of already-processed ranges within the target range.
 //!
 //! - **Batch Processing**: Splits large unprocessed ranges into smaller batches based
-//!   on the configured `input_batch_size_blocks` parameter. This prevents memory
+//!   on the configured `microbatch_max_interval` parameter. This prevents memory
 //!   exhaustion and allows for better progress tracking.
 //!
 //! - **Sequential Batch Execution**: Processes batches sequentially within each table
@@ -120,13 +120,14 @@ use common::{
     BlockNum, BoxError, Dataset,
     catalog::physical::PhysicalTable,
     metadata::segments::{BlockRange, missing_block_ranges},
+    notification_multiplexer::NotificationMultiplexerHandle,
     plan_visitors::is_incremental,
     query_context::{QueryContext, QueryEnv, parse_sql},
-    streaming_query::{StreamState, StreamingQuery, watermark_updates},
+    streaming_query::{QueryMessage, StreamState, StreamingQuery, watermark_updates},
 };
 use datafusion::{common::cast::as_fixed_size_binary_array, sql::parser::Statement};
 use dataset_store::{DatasetStore, sql_datasets::SqlDataset};
-use futures::TryStreamExt as _;
+use futures::StreamExt as _;
 use tracing::instrument;
 
 use super::{Ctx, block_ranges, tasks::FailFastJoinSet};
@@ -140,7 +141,7 @@ pub async fn dump_table(
     env: &QueryEnv,
     table: Arc<PhysicalTable>,
     parquet_opts: &ParquetWriterProperties,
-    input_batch_size_blocks: u64,
+    microbatch_max_interval: u64,
     (start, end): (i64, Option<i64>),
 ) -> Result<(), BoxError> {
     let dataset_name = dataset.dataset.name.as_str();
@@ -216,31 +217,29 @@ pub async fn dump_table(
                 .map(|synced| missing_block_ranges(synced, start..=end))
                 .unwrap_or(vec![start..=end]);
             for range in ranges_to_scan {
-                let (mut start, end) = range.into_inner();
-                while start <= end {
-                    let batch_end = std::cmp::min(start + input_batch_size_blocks - 1, end);
-                    tracing::info!("dumping {table_name} between blocks {start} and {batch_end}");
+                let (start, end) = range.into_inner();
+                tracing::info!("dumping {table_name} between blocks {start} and {end}");
 
-                    let range = resolve_block_range(
-                        env.clone(),
-                        &dataset_store,
-                        &src_datasets,
-                        table.network().to_string(),
-                        start,
-                        batch_end,
-                    )
-                    .await?;
-                    dump_sql_query(
-                        &dataset_store,
-                        &query,
-                        &env,
-                        range,
-                        table.clone(),
-                        &parquet_opts,
-                    )
-                    .await?;
-                    start = batch_end + 1;
-                }
+                let range = resolve_block_range(
+                    env.clone(),
+                    &dataset_store,
+                    &src_datasets,
+                    table.network().to_string(),
+                    start,
+                    end,
+                )
+                .await?;
+                dump_sql_query(
+                    &dataset_store,
+                    &query,
+                    &env,
+                    range,
+                    table.clone(),
+                    &parquet_opts,
+                    microbatch_max_interval,
+                    &ctx.notification_multiplexer,
+                )
+                .await?;
             }
         } else {
             let physical_table: Arc<PhysicalTable> = PhysicalTable::next_revision(
@@ -273,6 +272,8 @@ pub async fn dump_table(
                 range,
                 physical_table,
                 &parquet_opts,
+                microbatch_max_interval,
+                &ctx.notification_multiplexer,
             )
             .await?;
         }
@@ -297,33 +298,74 @@ async fn dump_sql_query(
     range: BlockRange,
     physical_table: Arc<PhysicalTable>,
     parquet_opts: &ParquetWriterProperties,
+    microbatch_max_interval: u64,
+    notification_multiplexer: &Arc<NotificationMultiplexerHandle>,
 ) -> Result<(), BoxError> {
     let (start, end) = range.numbers.clone().into_inner();
     let mut stream = {
         let ctx = Arc::new(dataset_store.ctx_for_sql(&query, env.clone()).await?);
         let plan = ctx.plan_sql(query.clone()).await?;
         let initial_state = StreamState::new(
-            watermark_updates(ctx.clone(), physical_table.metadata_db.clone()).await?,
+            watermark_updates(ctx.clone(), notification_multiplexer).await?,
             start,
         );
-        StreamingQuery::spawn(initial_state, ctx, plan, Some(end), true)
-            .await?
-            .as_record_batch_stream()
+        StreamingQuery::spawn(
+            initial_state,
+            ctx,
+            plan,
+            Some(end),
+            true,
+            microbatch_max_interval,
+        )
+        .await?
+        .as_stream()
     };
-    let mut writer = ParquetFileWriter::new(physical_table.clone(), parquet_opts.clone(), start)?;
 
-    while let Some(batch) = stream.try_next().await? {
-        writer.write(&batch).await?;
+    let mut microbatch_start = start;
+    let mut writer = ParquetFileWriter::new(
+        physical_table.clone(),
+        parquet_opts.clone(),
+        microbatch_start,
+    )?;
+
+    // Receive data from the query stream, commiting a file on every watermark update received. The
+    // `microbatch_max_interval` parameter controls the frequency of these updates.
+    while let Some(message) = stream.next().await {
+        let message = message?;
+        match message {
+            QueryMessage::Data(batch) => {
+                writer.write(&batch).await?;
+            }
+            QueryMessage::Completed(microbatch_end) => {
+                // Close current file and commit metadata
+                let chunk_range = BlockRange {
+                    numbers: microbatch_start..=microbatch_end,
+                    network: range.network.clone(),
+                    hash: range.hash,
+                    prev_hash: range.prev_hash,
+                };
+                let (parquet_meta, object_meta) = writer.close(chunk_range).await?;
+                commit_metadata(
+                    &dataset_store.metadata_db,
+                    parquet_meta,
+                    object_meta,
+                    physical_table.location_id(),
+                )
+                .await?;
+
+                // Open new file for next chunk
+                microbatch_start = microbatch_end + 1;
+                writer = ParquetFileWriter::new(
+                    physical_table.clone(),
+                    parquet_opts.clone(),
+                    microbatch_start,
+                )?;
+            }
+        }
     }
+    assert!(microbatch_start == end + 1);
 
-    let (parquet_meta, object_meta) = writer.close(range).await?;
-    commit_metadata(
-        &dataset_store.metadata_db,
-        parquet_meta,
-        object_meta,
-        physical_table.location_id(),
-    )
-    .await
+    Ok(())
 }
 
 /// Derive the BlockRange for the dense block number range [start, end] from the `blocks` table

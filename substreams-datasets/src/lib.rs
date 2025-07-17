@@ -6,7 +6,7 @@ pub use client::Client;
 pub use dataset::DATASET_KIND;
 use dataset::DatasetDef;
 
-mod dataset;
+pub mod dataset;
 mod proto;
 
 use common::Dataset;
@@ -28,4 +28,14 @@ pub async fn dataset(dataset_cfg: common::DatasetValue) -> Result<Dataset, Error
         functions: vec![],
         network: dataset_def.network,
     })
+}
+
+pub async fn tables(
+    dataset_def: DatasetDef,
+) -> Result<Vec<common::catalog::logical::Table>, Error> {
+    let package = Package::from_url(dataset_def.manifest.as_str()).await?;
+    let tables = Tables::from_package(&package, &dataset_def.module)
+        .map_err(|_| Error::AssertFail("failed to build tables from spkg".into()))?;
+
+    Ok(tables.tables)
 }

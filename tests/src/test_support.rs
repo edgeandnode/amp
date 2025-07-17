@@ -21,7 +21,7 @@ use common::{
     query_context::parse_sql,
 };
 use dataset_store::DatasetStore;
-use dump::worker::Worker;
+use dump::{consistency_check, worker::Worker};
 use figment::{
     Figment,
     providers::{Format as _, Json},
@@ -80,14 +80,14 @@ pub async fn bless(
     }
 
     clear_dataset(&test_env.config, dataset_name).await?;
-    dump_dataset(config, dataset_name, start, end, 1).await?;
+    dump_dataset(&config, dataset_name, start, end, 1, None).await?;
     Ok(())
 }
 
 pub struct TestEnv {
     pub config: Arc<Config>,
     pub metadata_db: Arc<MetadataDb>,
-    dataset_store: Arc<DatasetStore>,
+    pub dataset_store: Arc<DatasetStore>,
     pub server_addrs: BoundAddrs,
 
     // Drop guard
@@ -183,7 +183,7 @@ impl SnapshotContext {
         end: u64,
         n_jobs: u16,
     ) -> Result<SnapshotContext, BoxError> {
-        dump_dataset(test_env.config.clone(), dataset_name, start, end, n_jobs).await?;
+        dump_dataset(&test_env.config, dataset_name, start, end, n_jobs, None).await?;
         let catalog = catalog_for_dataset(
             dataset_name,
             &test_env.dataset_store,
@@ -245,20 +245,19 @@ impl SnapshotContext {
 }
 
 #[instrument(skip_all)]
-/// Clears the dataset directory if specified, before dumping.
 pub(crate) async fn dump_dataset(
-    config: Arc<Config>,
+    config: &Arc<Config>,
     dataset_name: &str,
     start: u64,
     end: u64,
     n_jobs: u16,
+    microbatch_max_interval: Option<u64>,
 ) -> Result<(), BoxError> {
     // dump the dataset
     let partition_size_mb = 100;
-    let input_batch_block_size = 100_000;
     let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
 
-    dump(
+    let physical_tables = dump(
         config.clone(),
         metadata_db.clone(),
         vec![dataset_name.to_string()],
@@ -267,16 +266,23 @@ pub(crate) async fn dump_dataset(
         Some(end.to_string()),
         n_jobs,
         partition_size_mb,
-        input_batch_block_size,
         false,
         None,
+        microbatch_max_interval,
+        None,
+        false,
     )
     .await?;
+
+    // Run consistency check on all tables after dump
+    for physical_table in physical_tables {
+        consistency_check(&physical_table).await?;
+    }
 
     Ok(())
 }
 
-async fn catalog_for_dataset(
+pub(crate) async fn catalog_for_dataset(
     dataset_name: &str,
     dataset_store: &Arc<DatasetStore>,
     metadata_db: Arc<MetadataDb>,

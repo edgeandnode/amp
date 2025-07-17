@@ -95,17 +95,12 @@ pub async fn commit_metadata(
             object_e_tag,
             object_version,
             parquet_meta,
-            true, // assuming only canonical ranges for now
         )
         .await?;
 
     // Notify that the dataset has been changed
-    let change_tracking_channel = common::stream_helpers::change_tracking_pg_channel(location_id);
-    debug!(
-        "notified change tracking channel {}",
-        change_tracking_channel
-    );
-    metadata_db.notify(&change_tracking_channel, "").await?;
+    debug!("notifying location change for location_id: {}", location_id);
+    metadata_db.notify_location_change(location_id).await?;
 
     Ok(())
 }

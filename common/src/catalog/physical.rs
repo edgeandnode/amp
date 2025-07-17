@@ -73,6 +73,19 @@ impl Catalog {
     pub fn udfs(&self) -> &[ScalarUDF] {
         &self.udfs
     }
+
+    /// Returns the earliest block number across all tables in this catalog.
+    pub async fn earliest_block(&self) -> Result<Option<BlockNum>, BoxError> {
+        let mut earliest = None;
+        for table in &self.tables {
+            let synced_range = table.synced_range().await?;
+            match (earliest, &synced_range) {
+                (None, Some(range)) => earliest = Some(*range.start()),
+                _ => earliest = earliest.min(synced_range.map(|s| *s.start())),
+            }
+        }
+        Ok(earliest)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -287,7 +300,6 @@ impl PhysicalTable {
                     object_meta.e_tag,
                     object_meta.version,
                     parquet_meta_json,
-                    true,
                 )
                 .await?;
         }

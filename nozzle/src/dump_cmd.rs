@@ -1,14 +1,15 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
+    fs,
     sync::Arc,
     time::Duration,
 };
 
 use common::{
-    BoxError,
+    BoxError, Store,
     catalog::physical::PhysicalTable,
     config::Config,
-    manifest,
+    manifest, notification_multiplexer,
     parquet::basic::{Compression, ZstdLevel},
 };
 use datafusion::{parquet, sql::resolve::resolve_table_references};
@@ -25,11 +26,21 @@ pub async fn dump(
     end_block: Option<String>,
     n_jobs: u16,
     partition_size_mb: u64,
-    input_batch_size_blocks: u64,
     disable_compression: bool,
     run_every_mins: Option<u64>,
-) -> Result<(), BoxError> {
-    let data_store = config.data_store.clone();
+    microbatch_max_interval_override: Option<u64>,
+    new_location: Option<String>,
+    fresh: bool,
+) -> Result<Vec<Arc<PhysicalTable>>, BoxError> {
+    let data_store = match new_location {
+        Some(location) => {
+            let data_path = fs::canonicalize(&location)
+                .map_err(|e| format!("Failed to canonicalize path '{}': {}", location, e))?;
+            let base = data_path.parent();
+            Arc::new(Store::new(location, base)?)
+        }
+        None => config.data_store.clone(),
+    };
     let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
     let partition_size = partition_size_mb * 1024 * 1024;
     let compression = if disable_compression {
@@ -53,41 +64,50 @@ pub async fn dump(
         let dataset = dataset_store.load_dataset(&dataset_name).await?;
         let mut tables = Vec::with_capacity(dataset.tables.len());
         for table in Arc::new(dataset).resolved_tables() {
-            let physical_table =
+            let physical_table = if fresh {
+                PhysicalTable::next_revision(&table, data_store.as_ref(), metadata_db.clone(), true)
+                    .await?
+            } else {
                 match PhysicalTable::get_active(&table, metadata_db.clone()).await? {
                     Some(physical_table) => physical_table,
                     None => {
-                        let set_active = true;
                         PhysicalTable::next_revision(
                             &table,
                             data_store.as_ref(),
                             metadata_db.clone(),
-                            set_active,
-                            Some(start),
+                            true,
                         )
                         .await?
                     }
-                };
+                }
+            };
             tables.push(physical_table.into());
         }
         physical_datasets.push(tables);
     }
+
+    let notification_multiplexer =
+        Arc::new(notification_multiplexer::spawn((*metadata_db).clone()));
 
     let ctx = dump::Ctx {
         config: config.clone(),
         metadata_db: metadata_db.clone(),
         dataset_store: dataset_store.clone(),
         data_store: data_store.clone(),
+        notification_multiplexer,
     };
+
+    let all_tables: Vec<Arc<PhysicalTable>> = physical_datasets.iter().flatten().cloned().collect();
+
     match run_every {
         None => {
-            for tables in physical_datasets {
+            for tables in &physical_datasets {
                 dump::dump_tables(
                     ctx.clone(),
-                    &tables,
+                    tables,
                     n_jobs,
                     partition_size,
-                    input_batch_size_blocks,
+                    microbatch_max_interval_override.unwrap_or(config.microbatch_max_interval),
                     &parquet_opts,
                     (start, end_block),
                 )
@@ -103,7 +123,7 @@ pub async fn dump(
                     tables,
                     n_jobs,
                     partition_size,
-                    input_batch_size_blocks,
+                    microbatch_max_interval_override.unwrap_or(config.microbatch_max_interval),
                     &parquet_opts,
                     (start, end_block),
                 )
@@ -112,7 +132,7 @@ pub async fn dump(
         },
     }
 
-    Ok(())
+    Ok(all_tables)
 }
 
 // if end_block starts with "+" then it is a relative block number

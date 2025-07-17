@@ -59,10 +59,6 @@ enum Command {
         #[arg(long, default_value = "4096", env = "DUMP_PARTITION_SIZE_MB")]
         partition_size_mb: u64,
 
-        /// The maximum number of blocks to be dumped per SQL query at once. Defaults to 100_000.
-        #[arg(long, default_value = "100000", env = "DUMP_INPUT_BATCH_SIZE_BLOCKS")]
-        input_batch_size_blocks: u64,
-
         /// Whether to disable compression when writing parquet files. Defaults to false.
         #[arg(long, env = "DUMP_DISABLE_COMPRESSION")]
         disable_compression: bool,
@@ -70,6 +66,14 @@ enum Command {
         /// How often to run the dump job in minutes. By default will run once and exit.
         #[arg(long, env = "DUMP_RUN_EVERY_MINS")]
         run_every_mins: Option<u64>,
+
+        /// The location of the dump. If not specified, the dump will be written to the default location in NOZZLE_DATA_DIR.
+        #[arg(long)]
+        location: Option<String>,
+
+        /// Overwrite existing location and dump to a new, fresh directory
+        #[arg(long, env = "DUMP_FRESH")]
+        fresh: bool,
     },
     Server {
         /// Run in dev mode, which starts a worker in the same process.
@@ -112,6 +116,14 @@ enum Command {
         /// If not specified, the manifest will be printed to stdout.
         #[arg(short, long, env = "GM_OUT")]
         out: Option<PathBuf>,
+
+        /// Substreams package manifest URL, required for DatasetKind::Substreams.
+        #[arg(long, env = "GM_SS_MANIFEST_URL")]
+        manifest: Option<String>,
+
+        /// Substreams output module name, required for DatasetKind::Substreams.
+        #[arg(long, env = "GM_SS_MODULE")]
+        module: Option<String>,
     },
 }
 
@@ -148,11 +160,12 @@ async fn main_inner() -> Result<(), BoxError> {
             end_block,
             n_jobs,
             partition_size_mb,
-            input_batch_size_blocks,
             disable_compression,
             dataset: datasets,
             ignore_deps,
             run_every_mins,
+            location,
+            fresh,
         } => {
             dump_cmd::dump(
                 config,
@@ -163,11 +176,14 @@ async fn main_inner() -> Result<(), BoxError> {
                 end_block,
                 n_jobs,
                 partition_size_mb,
-                input_batch_size_blocks,
                 disable_compression,
                 run_every_mins,
+                None,
+                location,
+                fresh,
             )
-            .await
+            .await?;
+            Ok(())
         }
         Command::Server {
             dev,
@@ -204,6 +220,8 @@ async fn main_inner() -> Result<(), BoxError> {
             kind,
             name,
             out,
+            manifest,
+            module,
         } => {
             if let Some(mut out) = out {
                 if out.is_dir() {
@@ -211,10 +229,10 @@ async fn main_inner() -> Result<(), BoxError> {
                 }
 
                 let mut out = std::fs::File::create(out)?;
-                generate_manifest::run(network, kind, name, &mut out)
+                generate_manifest::run(network, kind, name, manifest, module, &mut out).await
             } else {
                 let mut stdout = std::io::stdout();
-                generate_manifest::run(network, kind, name, &mut stdout)
+                generate_manifest::run(network, kind, name, manifest, module, &mut stdout).await
             }
         }
     }

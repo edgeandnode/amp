@@ -131,19 +131,7 @@ impl TestStep {
         let result = match self {
             TestStep::Dump(step) => {
                 let config = test_env.config.clone();
-                let result = dump_dataset(config, &step.dataset, step.start, step.end, 1).await;
-                if step.expect_fail {
-                    return if result.is_err() {
-                        Ok(())
-                    } else {
-                        Err(format!(
-                            "Test step \"{}\" was expected to fail, but succeeded",
-                            self.name()
-                        )
-                        .into())
-                    };
-                }
-                result
+                dump_dataset(&config, &step.dataset, step.start, step.end, 1, None).await
             }
             TestStep::StreamTake(step) => step.run(client).await,
             TestStep::Query(step) => step.run(client).await,

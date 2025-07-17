@@ -6,56 +6,61 @@
   "description": "Nothing to see here yet",
   "repository": {
     "type": "git",
-    "url": "https://github.com"
+    "url": "https://github.com/edgeandnode/project-nozzle",
+    "directory": "typescript/nozzle"
   },
   "publishConfig": {
-    "access": "public",
-    "directory": "dist",
-    "linkDirectory": false
+    "bin": {
+      "nozzl": "./dist/cli/main.js"
+    },
+    "exports": {
+      ".": "./dist/index.js",
+      "./*": "./dist/*.js",
+      "./internal/*": null,
+      "./*/index": null
+    }
   },
   "bin": {
-    "nozzl": "./src/cli/main.ts"
+    "nozzl": "./src/cli/bun.ts"
   },
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./Api": "./src/Api.ts",
-    "./Arrow": "./src/Arrow.ts",
-    "./ArrowFlight": "./src/ArrowFlight.ts",
-    "./JsonLines": "./src/JsonLines.ts",
-    "./Model": "./src/Model.ts"
+    "./*": "./src/*.ts",
+    "./internal/*": null,
+    "./*/index": null
   },
+  "files": [
+    "dist",
+    "src"
+  ],
   "scripts": {
-    "build": "nozzl-utils build",
-    "nozzl": "bun ./src/cli/main.ts"
+    "build": "tsc -b tsconfig.build.json",
+    "nozzl": "bun ./src/cli/bun.ts"
   },
   "dependencies": {
-    "@effect/cli": "^0.63.9",
-    "@effect/experimental": "^0.48.10",
-    "@effect/platform-node": "^0.85.13",
+    "@effect/cli": "^0.67.1",
+    "@effect/experimental": "^0.52.2",
+    "@effect/platform-node": "^0.91.0",
     "jiti": "^2.4.2",
-    "viem": "^2.31.0"
+    "viem": "^2.31.7"
   },
   "peerDependencies": {
     "@bufbuild/protobuf": "^2.2.5",
     "@connectrpc/connect": "^2.0.2",
     "@connectrpc/connect-node": "^2.0.2",
-    "@effect/platform": "^0.80.11",
-    "apache-arrow": "^19.0.1",
-    "effect": "^3.14.11"
+    "@effect/platform": "^0.88.1",
+    "apache-arrow": "^20.0.0",
+    "effect": "^3.16.16"
   },
   "devDependencies": {
     "@bufbuild/buf": "^1.53.0",
     "@bufbuild/protoc-gen-es": "^2.2.5",
     "@connectrpc/connect": "^2.0.2",
-    "@effect/platform": "^0.84.9",
-    "@effect/platform-node": "^0.76.21",
-    "@effect/vitest": "^0.23.5",
-    "@nozzl/utils": "workspace:*",
-    "@types/node": "^24.0.0",
+    "@effect/platform": "^0.88.1",
+    "@effect/vitest": "^0.24.1",
+    "@types/node": "^24.0.14",
     "apache-arrow": "^20.0.0",
-    "effect": "^3.16.5",
-    "vitest": "^3.2.3"
+    "effect": "^3.16.16",
+    "vitest": "^3.2.4"
   }
 }

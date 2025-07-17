@@ -8,14 +8,14 @@ use alloy::{
 use common::{
     BlockNum, BoxError, metadata::segments::BlockRange, query_context::parse_sql, tracing_helpers,
 };
-use dataset_store::{DatasetDefsCommon, DatasetStore};
+use dataset_store::{DatasetDefsCommon, DatasetStore, SerializableSchema};
 use generate_manifest;
 
 use crate::{
     steps::load_test_steps,
     test_client::TestClient,
     test_support::{
-        SnapshotContext, TestEnv, check_blocks, check_provider_file, restore_blessed_dataset,
+        self, SnapshotContext, TestEnv, check_blocks, check_provider_file, restore_blessed_dataset,
         table_ranges,
     },
 };
@@ -102,12 +102,25 @@ async fn sql_tests() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn streaming_tests() {
+async fn streaming_tests_basic() {
     tracing_helpers::register_logger();
-    let test_env = TestEnv::temp("sql_streaming_tests").await.unwrap();
+    let test_env = TestEnv::temp("sql_streaming_tests_basic").await.unwrap();
     let mut client = TestClient::connect(&test_env).await.unwrap();
 
-    for step in load_test_steps("sql-streaming-tests.yaml").unwrap() {
+    for step in load_test_steps("sql-streaming-tests-basic.yaml").unwrap() {
+        step.run(&test_env, &mut client).await.unwrap();
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn streaming_tests_with_sql_datasets() {
+    tracing_helpers::register_logger();
+    let test_env = TestEnv::temp("sql_streaming_tests_with_sql_datasets")
+        .await
+        .unwrap();
+    let mut client = TestClient::connect(&test_env).await.unwrap();
+
+    for step in load_test_steps("sql-streaming-tests-with-sql-datasets.yaml").unwrap() {
         step.run(&test_env, &mut client).await.unwrap();
     }
 }
@@ -258,8 +271,8 @@ async fn anvil_rpc_reorg() {
     assert_ne!(&ranges[1].prev_hash, &Some(ranges[0].hash));
 }
 
-#[test]
-fn generate_manifest_success() {
+#[tokio::test]
+async fn generate_manifest_evm_rpc_builtin() {
     tracing_helpers::register_logger();
 
     let network = "mainnet".to_string();
@@ -268,28 +281,219 @@ fn generate_manifest_success() {
 
     let mut out = Vec::new();
 
-    let _ = generate_manifest::run(network.clone(), kind.clone(), name.clone(), &mut out).unwrap();
+    let _ = generate_manifest::run(
+        network.clone(),
+        kind.clone(),
+        name.clone(),
+        None,
+        None,
+        &mut out,
+    )
+    .await
+    .unwrap();
 
     let out: DatasetDefsCommon = serde_json::from_slice(&out).unwrap();
+    let builtin_schema: SerializableSchema = evm_rpc_datasets::tables::all(&network).into();
 
     assert_eq!(out.network, network);
     assert_eq!(out.kind, kind);
     assert_eq!(out.name, name);
+    assert_eq!(out.schema.unwrap(), builtin_schema)
 }
 
-#[test]
-fn generate_manifest_bad_dataset_kind() {
+#[tokio::test]
+async fn generate_manifest_firehose_builtin() {
+    tracing_helpers::register_logger();
+
+    let network = "mainnet".to_string();
+    let kind = "firehose".to_string();
+    let name = "firehose".to_string();
+
+    let mut out = Vec::new();
+
+    let _ = generate_manifest::run(
+        network.clone(),
+        kind.clone(),
+        name.clone(),
+        None,
+        None,
+        &mut out,
+    )
+    .await
+    .unwrap();
+
+    let out: DatasetDefsCommon = serde_json::from_slice(&out).unwrap();
+    let builtin_schema: SerializableSchema = firehose_datasets::evm::tables::all(&network).into();
+
+    assert_eq!(out.network, network);
+    assert_eq!(out.kind, kind);
+    assert_eq!(out.name, name);
+    assert_eq!(out.schema.unwrap(), builtin_schema)
+}
+
+#[tokio::test]
+async fn generate_manifest_substreams() {
+    tracing_helpers::register_logger();
+
+    let network = "mainnet".to_string();
+    let kind = "substreams".to_string();
+    let name = "substreams".to_string();
+    let manifest = "https://spkg.io/pinax-network/weth-v0.1.0.spkg".to_string();
+    let module = "map_events".to_string();
+
+    let mut out = Vec::new();
+
+    let _ = generate_manifest::run(
+        network.clone(),
+        kind.clone(),
+        name.clone(),
+        Some(manifest.clone()),
+        Some(module.clone()),
+        &mut out,
+    )
+    .await
+    .unwrap();
+
+    let out: DatasetDefsCommon = serde_json::from_slice(&out).unwrap();
+    let dataset_def = substreams_datasets::dataset::DatasetDef {
+        kind: kind.clone(),
+        network: network.clone(),
+        name: name.clone(),
+        manifest,
+        module,
+    };
+
+    let schema = substreams_datasets::tables(dataset_def)
+        .await
+        .map(Into::into)
+        .unwrap();
+
+    assert_eq!(out.network, network);
+    assert_eq!(out.kind, kind);
+    assert_eq!(out.name, name);
+    assert_eq!(out.schema.unwrap(), schema);
+}
+
+#[tokio::test]
+async fn generate_manifest_sql() {
+    tracing_helpers::register_logger();
+
+    let network = "mainnet".to_string();
+    let kind = "sql".to_string();
+    let name = "sql_over_eth_firehose".to_string();
+
+    let mut out = Vec::new();
+
+    let err = generate_manifest::run(
+        network.clone(),
+        kind.clone(),
+        name.clone(),
+        None,
+        None,
+        &mut out,
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(err.contains("doesn't support dataset generation"));
+}
+
+#[tokio::test]
+async fn generate_manifest_manifest_builtin() {
+    tracing_helpers::register_logger();
+
+    let network = "mainnet".to_string();
+    let kind = "manifest".to_string();
+    let name = "basic_function".to_string();
+
+    let mut out = Vec::new();
+
+    let err = generate_manifest::run(
+        network.clone(),
+        kind.clone(),
+        name.clone(),
+        None,
+        None,
+        &mut out,
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(err.contains("doesn't support dataset generation"));
+}
+
+#[tokio::test]
+async fn generate_manifest_bad_dataset_kind() {
     tracing_helpers::register_logger();
 
     let network = "mainnet".to_string();
     let bad_kind = "bad_kind".to_string();
     let name = "eth_rpc".to_string();
+    let manifest = Some("https://spkg.io/pinax-network/weth-v0.1.0.spkg".to_string());
+    let module = Some("map_events".to_string());
 
     let mut out = Vec::new();
 
-    let err = generate_manifest::run(network, bad_kind.clone(), name, &mut out).unwrap_err();
+    let err = generate_manifest::run(
+        network.clone(),
+        bad_kind.clone(),
+        name.clone(),
+        manifest,
+        module,
+        &mut out,
+    )
+    .await
+    .unwrap_err();
+
     assert_eq!(
         err.to_string(),
         format!("unsupported dataset kind '{}'", bad_kind)
     );
+}
+
+#[tokio::test]
+async fn sql_dataset_input_batch_size() {
+    tracing_helpers::register_logger();
+
+    // 1. Setup
+    let test_env = TestEnv::temp("sql_dataset_input_batch_size").await.unwrap();
+
+    // 2. First dump eth_firehose dependency on the spot
+    let start = 15_000_000;
+    let end = 15_000_003;
+
+    test_support::dump_dataset(&test_env.config, "eth_firehose", start, end, 1, None)
+        .await
+        .unwrap();
+
+    // 3. Execute dump of sql_stream_ds with microbatch_max_interval=1
+    let dataset_name = "sql_stream_ds";
+
+    test_support::dump_dataset(&test_env.config, dataset_name, start, end, 1, Some(1))
+        .await
+        .unwrap();
+
+    // 4. Get catalog and count files
+    let catalog = test_support::catalog_for_dataset(
+        dataset_name,
+        &test_env.dataset_store,
+        test_env.metadata_db.clone(),
+    )
+    .await
+    .unwrap();
+
+    // Find the even_blocks table
+    let table = catalog
+        .tables()
+        .iter()
+        .find(|t| t.table_name() == "even_blocks")
+        .unwrap();
+
+    let file_count = table.files().await.unwrap().len();
+
+    // 5. With batch size 1 and 4 blocks, we expect 4 files (even if some are empty) since
+    // microbatch_max_interval=1 should create one file per block even_blocks only includes even
+    // block numbers, so we expect 2 files with data for blocks 15000000 and 15000002, plus empty
+    // files for odd blocks
+    assert_eq!(file_count, 4);
 }

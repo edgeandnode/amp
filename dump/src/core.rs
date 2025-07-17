@@ -8,6 +8,7 @@ use common::{
     BlockNum, BoxError,
     catalog::physical::{Catalog, PhysicalTable},
     config::Config,
+    notification_multiplexer::NotificationMultiplexerHandle,
     query_context::{Error as QueryError, QueryContext},
     store::Store as DataStore,
 };
@@ -29,7 +30,7 @@ pub async fn dump_tables(
     tables: &[Arc<PhysicalTable>],
     n_jobs: u16,
     partition_size: u64,
-    input_batch_size_blocks: u64,
+    microbatch_max_interval: u64,
     parquet_opts: &ParquetWriterProperties,
     range: (i64, Option<i64>),
 ) -> Result<(), BoxError> {
@@ -47,7 +48,7 @@ pub async fn dump_tables(
         dump_user_tables(
             ctx,
             tables,
-            input_batch_size_blocks,
+            microbatch_max_interval,
             n_jobs,
             parquet_opts,
             range,
@@ -121,7 +122,7 @@ pub async fn dump_raw_tables(
 pub async fn dump_user_tables(
     ctx: Ctx,
     tables: &[Arc<PhysicalTable>],
-    input_batch_size_blocks: u64,
+    microbatch_max_interval: u64,
     n_jobs: u16,
     parquet_opts: &ParquetWriterProperties,
     range: (i64, Option<i64>),
@@ -161,7 +162,7 @@ pub async fn dump_user_tables(
             &env,
             table.clone(),
             parquet_opts,
-            input_batch_size_blocks,
+            microbatch_max_interval,
             range,
         )
         .await?;
@@ -179,6 +180,8 @@ pub struct Ctx {
     pub metadata_db: Arc<MetadataDb>,
     pub dataset_store: Arc<DatasetStore>,
     pub data_store: Arc<DataStore>,
+    /// Shared notification multiplexer for streaming queries
+    pub notification_multiplexer: Arc<NotificationMultiplexerHandle>,
 }
 
 /// This will check and fix consistency issues when possible. When fixing is not possible, it will
@@ -194,7 +197,7 @@ pub struct Ctx {
 ///
 /// Check: metadata entries do not contain overlapping ranges.
 /// On fail: Return a `CorruptedDataset` error.
-async fn consistency_check(table: &PhysicalTable) -> Result<(), ConsistencyCheckError> {
+pub async fn consistency_check(table: &PhysicalTable) -> Result<(), ConsistencyCheckError> {
     // See also: metadata-consistency
 
     let location_id = table.location_id();
@@ -272,7 +275,7 @@ async fn consistency_check(table: &PhysicalTable) -> Result<(), ConsistencyCheck
 /// Error type for consistency checks
 #[derive(Debug, thiserror::Error)]
 #[error("consistency check error: {0}")]
-enum ConsistencyCheckError {
+pub enum ConsistencyCheckError {
     #[error("internal query error: {0}")]
     QueryError(#[from] QueryError),
 
