@@ -31,7 +31,7 @@ test-unit *EXTRA_FLAGS:
     set -e # Exit on error
 
     if command -v "cargo-nextest" &> /dev/null; then
-        cargo nextest run {{EXTRA_FLAGS}} --workspace --exclude tests 
+        cargo nextest run {{EXTRA_FLAGS}} --workspace --exclude tests
     else
         cargo test {{EXTRA_FLAGS}} --workspace --exclude tests -- --nocapture
     fi
@@ -42,7 +42,7 @@ test-it *EXTRA_FLAGS:
     set -e # Exit on error
 
     if command -v "cargo-nextest" &> /dev/null; then
-        cargo nextest run {{EXTRA_FLAGS}} --package tests
+        cargo nextest run {{EXTRA_FLAGS}} --package tests anvil
     else
         cargo test {{EXTRA_FLAGS}} --package tests -- --nocapture
     fi

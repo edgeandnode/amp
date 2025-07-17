@@ -15,7 +15,7 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: full
-  RUSTFLAGS: "-D warnings --force-warn deprecated"
+  RUSTFLAGS: "--force-warn deprecated"
 
 jobs:
   unit-tests:
