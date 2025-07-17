@@ -74,3 +74,14 @@ curl -X POST http://localhost:1603 --data "select * from eth_rpc.logs limit 10"
 
 The Arrow Flight server requires a specialized client. We currently have a Python client,
 see docs for that [here](https://github.com/edgeandnode/project-nozzle/tree/main/python).
+
+> **Note:**
+> - When streaming data from the `jsonl` server, responses are always sent in uncompressed format, regardless of any `accept-encoding` headers (such as `gzip`, `br`, or `deflate`).
+> - For non-streaming requests, responses will be compressed according to the `accept-encoding` header, if specified.
+
+
+
+
+
+
+

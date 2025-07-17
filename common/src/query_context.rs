@@ -2,6 +2,7 @@ use std::{ops::RangeInclusive, sync::Arc};
 
 use arrow::{array::RecordBatch, compute::concat_batches};
 use async_udf::physical_optimizer::AsyncFuncRule;
+use axum::response::IntoResponse;
 use bincode::{Decode, Encode, config};
 use bytes::Bytes;
 use datafusion::{
@@ -76,6 +77,29 @@ pub enum Error {
 
     #[error("DataFusion configuration error: {0}")]
     ConfigError(DataFusionError),
+}
+
+impl IntoResponse for Error {
+    fn into_response(self) -> axum::response::Response {
+        let err = self.to_string();
+        let status = match self {
+            Error::SqlParseError(_) => axum::http::StatusCode::BAD_REQUEST,
+            Error::InvalidPlan(_) => axum::http::StatusCode::BAD_REQUEST,
+            Error::PlanEncodingError(_) | Error::PlanDecodingError(_) => {
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR
+            }
+            Error::DatasetError(_) => axum::http::StatusCode::BAD_REQUEST,
+            Error::ConfigError(_) => axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            Error::PlanningError(_) => axum::http::StatusCode::BAD_REQUEST,
+            Error::ExecutionError(_) | Error::MetaTableError(_) => {
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR
+            }
+        };
+        let body = serde_json::json!({
+            "error": err,
+        });
+        (status, axum::Json(body)).into_response()
+    }
 }
 
 /// A context for planning SQL queries.
