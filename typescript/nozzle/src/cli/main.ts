@@ -4,14 +4,14 @@ import { Command, Options, ValidationError } from "@effect/cli"
 import { PlatformConfigProvider } from "@effect/platform"
 import { NodeContext, NodeRuntime } from "@effect/platform-node"
 import { Cause, Config, Console, Effect, Layer, Logger, LogLevel, String } from "effect"
-import * as Utils from "../Utils.js"
+import * as Utils from "../Utils.ts"
 
-import { build } from "./commands/build.js"
-import { codegen } from "./commands/codegen.js"
-import { deploy } from "./commands/deploy.js"
-import { dev } from "./commands/dev.js"
-import { proxy } from "./commands/proxy.js"
-import { query } from "./commands/query.js"
+import { build } from "./commands/build.ts"
+import { codegen } from "./commands/codegen.ts"
+import { deploy } from "./commands/deploy.ts"
+import { dev } from "./commands/dev.ts"
+import { proxy } from "./commands/proxy.ts"
+import { query } from "./commands/query.ts"
 
 const levels = LogLevel.allLevels.map((value) => String.toLowerCase(value.label)) as Array<Lowercase<LogLevel.Literal>>
 const nozzle = Command.make("nozzle", {

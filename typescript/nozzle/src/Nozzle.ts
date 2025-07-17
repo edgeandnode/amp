@@ -2,9 +2,9 @@ import { Machine } from "@effect/experimental"
 import { Command as Cmd, FileSystem, Socket } from "@effect/platform"
 import { Context, Data, Effect, Fiber, Layer, Request, Schedule, String } from "effect"
 import * as Net from "node:net"
-import * as EvmRpc from "./EvmRpc.js"
-import * as ManifestDeployer from "./ManifestDeployer.js"
-import type * as Model from "./Model.js"
+import * as EvmRpc from "./EvmRpc.ts"
+import * as ManifestDeployer from "./ManifestDeployer.ts"
+import type * as Model from "./Model.ts"
 
 export class NozzleError extends Data.TaggedError("NozzleError")<{
   readonly cause?: unknown
