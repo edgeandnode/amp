@@ -33,7 +33,7 @@ impl AnvilTestContext<'_> {
             http: reqwest::Client::new(),
             provider: alloy::providers::DynProvider::new(
                 alloy::providers::ProviderBuilder::new()
-                    .connect_anvil_with_config(|anvil| anvil.port(8545 as u16)),
+                    .connect_anvil_with_config(|anvil| anvil.timeout(30_000).port(8545 as u16)),
             ),
             _anvil_lock: anvil_lock,
         }
