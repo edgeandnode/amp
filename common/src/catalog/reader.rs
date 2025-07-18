@@ -79,16 +79,10 @@ impl AsyncFileReader for NozzleReader {
                 .filename()
                 .ok_or(ParquetError::External("File name is not available".into()))?
                 .to_string();
-            let object_size = file_meta.object_meta.size;
-            let object_e_tag = file_meta.object_meta.e_tag.clone();
-            let object_version = file_meta.object_meta.version.clone();
             let footer = metadata_db
                 .get_footer_bytes(
                     location_id,
                     file_name,
-                    object_size,
-                    object_e_tag,
-                    object_version,
                 )
                 .await
                 .map_err(|e| ParquetError::External(e.into()))?;

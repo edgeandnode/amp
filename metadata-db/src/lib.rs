@@ -591,26 +591,18 @@ impl MetadataDb {
         &self,
         location_id: LocationId,
         file_name: String,
-        object_size: u64,
-        object_e_tag: Option<String>,
-        object_version: Option<String>,
     ) -> Result<Vec<u8>, Error> {
         let sql = "
         SELECT footer
           FROM file_metadata
          WHERE location_id = $1 
                AND file_name = $2
-               AND object_size = $3
-               AND object_e_tag = $4
-               AND object_version = $5;
+      ORDER BY id DESC LIMIT 1
         ";
 
         Ok(sqlx::query_scalar(sql)
             .bind(location_id)
             .bind(file_name)
-            .bind(object_size as i64)
-            .bind(object_e_tag)
-            .bind(object_version)
             .fetch_one(&*self.pool)
             .await?)
     }
