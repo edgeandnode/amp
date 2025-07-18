@@ -15,6 +15,7 @@ use axum::{
 };
 use bytes::{BufMut, Bytes, BytesMut};
 use common::{
+    SPECIAL_BLOCK_NUM,
     arrow::{self, ipc::writer::IpcDataGenerator},
     config::Config,
     notification_multiplexer::{self, NotificationMultiplexerHandle},
@@ -204,9 +205,16 @@ impl Service {
             let original_schema = plan.schema().clone();
             let should_transform = should_transform_plan(&plan).map_err(Error::ExecutionError)?;
             let plan = if should_transform {
-                let plan = propagate_block_num(plan).map_err(Error::ExecutionError)?;
-                let plan = unproject_special_block_num_column(plan, original_schema)
-                    .map_err(|e| Error::ExecutionError(e))?;
+                let mut plan = propagate_block_num(plan).map_err(Error::ExecutionError)?;
+                // If the user did not request `_block_num` column, we omit it from the final output.
+                if !original_schema
+                    .fields()
+                    .iter()
+                    .any(|f| f.name() == SPECIAL_BLOCK_NUM)
+                {
+                    plan =
+                        unproject_special_block_num_column(plan).map_err(Error::ExecutionError)?;
+                }
                 plan
             } else {
                 plan

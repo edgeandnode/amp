@@ -43,8 +43,7 @@ use crate::{
     },
     plan_visitors::{
         constrain_by_block_num, extract_table_references_from_plan,
-        forbid_underscore_prefixed_aliases, order_by_block_num, propagate_block_num,
-        unproject_special_block_num_column,
+        forbid_underscore_prefixed_aliases, unproject_special_block_num_column,
     },
     stream_helpers::is_streaming,
 };
@@ -438,18 +437,19 @@ impl QueryContext {
     /// This will:
     /// - Validate that dependencies have synced the required block range.
     /// - Inject block range constraints into the plan.
-    /// - Inject 'order by block_num' into the plan.
     /// - Execute the plan.
+    ///
+    /// This assumes that the `_block_num` column has already been propagated and is therefore
+    ///  present in the schema of `plan`.
     #[instrument(skip_all, err)]
     pub async fn execute_plan_for_range(
         &self,
         plan: LogicalPlan,
         start: BlockNum,
         end: BlockNum,
-        is_sql_dataset: bool,
+        preserve_block_num: bool,
         logical_optimize: bool,
     ) -> Result<SendableRecordBatchStream, BoxError> {
-        let original_schema = plan.schema().clone();
         let tables = extract_table_references_from_plan(&plan)?;
 
         // Validate dependency block ranges
@@ -470,16 +470,11 @@ impl QueryContext {
         }
 
         let plan = {
-            let plan = propagate_block_num(plan)?;
-            let plan = constrain_by_block_num(plan, start, end)?;
-            let plan = order_by_block_num(plan);
-            if is_sql_dataset {
-                // SQL datasets always project the special block number column, because it has
-                // to end up in the file.
-                plan
-            } else {
-                unproject_special_block_num_column(plan, original_schema)?
+            let mut plan = constrain_by_block_num(plan, start, end)?;
+            if !preserve_block_num {
+                plan = unproject_special_block_num_column(plan)?
             }
+            plan
         };
         Ok(self.execute_plan(plan, logical_optimize).await?)
     }
