@@ -13,6 +13,10 @@ static ALLOC: snmalloc_rs::SnMalloc = snmalloc_rs::SnMalloc;
 
 #[derive(Debug, clap::Parser)]
 struct Args {
+    /// The configuration file to use. This file defines where to look for dataset definitions and
+    /// providers, along with many other configuration options.
+    ///
+    /// This argument is optional for the `generate-manifest` command.
     #[arg(long, env = "NOZZLE_CONFIG")]
     config: Option<String>,
     #[command(subcommand)]
