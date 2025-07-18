@@ -35,6 +35,7 @@ pub const DEFAULT_DEAD_WORKER_INTERVAL: Duration = Duration::from_secs(5);
 pub type FileId = i64;
 pub type LocationId = i64;
 pub type JobDatabaseId = i64;
+pub type FooterBytes = Vec<u8>;
 
 #[derive(Debug, FromRow)]
 pub struct FileMetadataRow {
@@ -564,10 +565,11 @@ impl MetadataDb {
         object_e_tag: Option<String>,
         object_version: Option<String>,
         parquet_meta: serde_json::Value,
+        footer_bytes: Vec<u8>,
     ) -> Result<(), Error> {
         let sql = "
-        INSERT INTO file_metadata (location_id, file_name, object_size, object_e_tag, object_version, metadata)
-        VALUES ($1, $2, $3, $4, $5, $6)
+        INSERT INTO file_metadata (location_id, file_name, object_size, object_e_tag, object_version, metadata, footer_bytes)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
         ON CONFLICT DO NOTHING
         ";
 
@@ -578,10 +580,39 @@ impl MetadataDb {
             .bind(object_e_tag)
             .bind(object_version)
             .bind(parquet_meta)
+            .bind(footer_bytes)
             .execute(&*self.pool)
             .await?;
 
         Ok(())
+    }
+
+    pub async fn get_footer_bytes(
+        &self,
+        location_id: LocationId,
+        file_name: String,
+        object_size: u64,
+        object_e_tag: Option<String>,
+        object_version: Option<String>,
+    ) -> Result<Vec<u8>, Error> {
+        let sql = "
+        SELECT footer_bytes
+          FROM file_metadata
+         WHERE location_id = $1 
+               AND file_name = $2
+               AND object_size = $3
+               AND object_e_tag = $4
+               AND object_version = $5;
+        ";
+
+        Ok(sqlx::query_scalar(sql)
+            .bind(location_id)
+            .bind(file_name)
+            .bind(object_size as i64)
+            .bind(object_e_tag)
+            .bind(object_version)
+            .fetch_one(&*self.pool)
+            .await?)
     }
 }
 
