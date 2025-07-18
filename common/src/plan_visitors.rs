@@ -131,7 +131,6 @@ pub fn constrain_by_block_num(
                 BLOCK_NUM
             };
             // `where start <= block_num and block_num <= end`
-            // Is it ok for this to be unqualified? Or should it be `TABLE_NAME.block_num`?
             let mut predicate = col(column_name).lt_eq(lit(end));
             predicate = predicate.and(lit(start).lt_eq(col(column_name)));
 
