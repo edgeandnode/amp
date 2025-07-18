@@ -470,7 +470,6 @@ impl QueryContext {
         }
 
         let plan = {
-            forbid_underscore_prefixed_aliases(&plan)?;
             let plan = propagate_block_num(plan)?;
             let plan = constrain_by_block_num(plan, start, end)?;
             let plan = order_by_block_num(plan);
@@ -498,6 +497,11 @@ async fn sql_to_plan(ctx: &SessionContext, query: parser::Statement) -> Result<L
 }
 
 fn verify_plan(plan: &LogicalPlan) -> Result<(), Error> {
+    forbid_underscore_prefixed_aliases(&plan).map_err(Error::InvalidPlan)?;
+    read_only_check(plan)
+}
+
+fn read_only_check(plan: &LogicalPlan) -> Result<(), Error> {
     SQLOptions::new()
         .with_allow_ddl(false)
         .with_allow_dml(false)
@@ -588,7 +592,7 @@ async fn execute_plan(
 ) -> Result<SendableRecordBatchStream, Error> {
     use datafusion::physical_plan::execute_stream;
 
-    verify_plan(&plan)?;
+    read_only_check(&plan)?;
     debug!("logical plan: {}", plan.to_string().replace('\n', "\\n"));
 
     if logical_optimize {
