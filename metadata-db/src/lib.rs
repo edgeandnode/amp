@@ -565,10 +565,10 @@ impl MetadataDb {
         object_e_tag: Option<String>,
         object_version: Option<String>,
         parquet_meta: serde_json::Value,
-        footer_bytes: Vec<u8>,
+        footer: Vec<u8>,
     ) -> Result<(), Error> {
         let sql = "
-        INSERT INTO file_metadata (location_id, file_name, object_size, object_e_tag, object_version, metadata, footer_bytes)
+        INSERT INTO file_metadata (location_id, file_name, object_size, object_e_tag, object_version, metadata, footer)
         VALUES ($1, $2, $3, $4, $5, $6, $7)
         ON CONFLICT DO NOTHING
         ";
@@ -580,7 +580,7 @@ impl MetadataDb {
             .bind(object_e_tag)
             .bind(object_version)
             .bind(parquet_meta)
-            .bind(footer_bytes)
+            .bind(footer)
             .execute(&*self.pool)
             .await?;
 
@@ -596,7 +596,7 @@ impl MetadataDb {
         object_version: Option<String>,
     ) -> Result<Vec<u8>, Error> {
         let sql = "
-        SELECT footer_bytes
+        SELECT footer
           FROM file_metadata
          WHERE location_id = $1 
                AND file_name = $2
