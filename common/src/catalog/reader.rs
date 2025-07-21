@@ -66,7 +66,10 @@ impl AsyncFileReader for NozzleReader {
         self.inner.get_bytes(range)
     }
 
-    fn get_byte_ranges(&mut self, ranges: Vec<Range<u64>>) -> BoxFuture<'_, ParquetResult<Vec<Bytes>>> {
+    fn get_byte_ranges(
+        &mut self,
+        ranges: Vec<Range<u64>>,
+    ) -> BoxFuture<'_, ParquetResult<Vec<Bytes>>> {
         let total_bytes: u64 = ranges.iter().map(|r| r.end - r.start).sum();
         self.file_metrics.bytes_scanned.add(total_bytes as usize);
         self.inner.get_byte_ranges(ranges)
