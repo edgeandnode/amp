@@ -1,6 +1,6 @@
 use std::sync::Once;
 
-use tracing_subscriber::{filter::LevelFilter, EnvFilter};
+use tracing_subscriber::{EnvFilter, filter::LevelFilter};
 
 static NOZZLE_LOG_ENV_VAR: &str = "NOZZLE_LOG";
 
