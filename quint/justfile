@@ -1,0 +1,9 @@
+check:
+    quint typecheck util.qnt
+    quint typecheck segments.qnt
+
+run:
+    quint run segments.qnt --main=tableInsertModel --max-steps=5 --invariants=inv --backend=rust
+
+debug:
+    quint run segments.qnt --main=tableInsertModel --max-steps=5 --invariants=inv --backend=typescript --verbosity=3
