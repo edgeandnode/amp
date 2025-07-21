@@ -184,11 +184,20 @@ impl RawTableWriter {
             return Ok(parquet_meta);
         }
 
-        let bytes_written = self.current_file.as_ref().unwrap().bytes_written();
-
-        // Check if we need to create a new part file before writing this batch of rows, because the
-        // size of the current row group already exceeds the configured max `partition_size`.
-        if bytes_written >= self.partition_size as usize {
+        // As reorg is detected if the incoming block prev_hash does not match the hash of the
+        // block range previously written. This means we need to split the segment to ensure all
+        // blocks within a segment form a valid chain.
+        let reorg = match (
+            self.current_range.as_ref().map(|r| &r.hash),
+            table_rows.range.prev_hash.as_ref(),
+        ) {
+            (Some(a), Some(b)) => a != b,
+            _ => false,
+        };
+        // We also split the segment if we have reached the configured max `partition_size`.
+        let partition_size_exceeded =
+            self.current_file.as_ref().unwrap().bytes_written() >= self.partition_size as usize;
+        if reorg || partition_size_exceeded {
             // `parquet_meta` would be `Some` if we have had just created a new a file above, so no
             // bytes would have been written yet.
             assert!(parquet_meta.is_none());
