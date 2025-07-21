@@ -1,6 +1,9 @@
 use std::{ops::RangeInclusive, sync::Arc};
 
-use arrow::{array::RecordBatch, compute::concat_batches};
+use arrow::{
+    array::{ArrayRef, RecordBatch},
+    compute::concat_batches,
+};
 use async_udf::physical_optimizer::AsyncFuncRule;
 use axum::response::IntoResponse;
 use bincode::{Decode, Encode, config};
@@ -18,6 +21,7 @@ use datafusion::{
         runtime_env::RuntimeEnv,
     },
     logical_expr::{AggregateUDF, Extension, LogicalPlan, ScalarUDF},
+    physical_plan::stream::RecordBatchStreamAdapter,
     physical_plan::{ExecutionPlan, displayable},
     physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner as _},
     sql::{TableReference, parser},
@@ -28,9 +32,10 @@ use datafusion_proto::{
     },
     logical_plan::LogicalExtensionCodec,
 };
-use futures::{FutureExt as _, TryStreamExt};
+use futures::{FutureExt as _, TryStreamExt, stream};
 use js_runtime::isolate_pool::IsolatePool;
 use metadata_db::{LocationId, TableId};
+use regex::Regex;
 use thiserror::Error;
 use tracing::{debug, instrument};
 
@@ -594,6 +599,8 @@ async fn execute_plan(
         plan = ctx.state().optimize(&plan).map_err(Error::PlanningError)?;
     }
 
+    let is_explain = matches!(plan, LogicalPlan::Explain(_) | LogicalPlan::Analyze(_));
+
     let planner = DefaultPhysicalPlanner::default();
     let physical_plan = planner
         .create_physical_plan(&plan, &ctx.state())
@@ -601,7 +608,56 @@ async fn execute_plan(
         .map_err(Error::PlanningError)?;
     debug!("physical plan: {}", print_physical_plan(&*physical_plan));
 
-    execute_stream(physical_plan, ctx.task_ctx()).map_err(Error::PlanningError)
+    match is_explain {
+        false => execute_stream(physical_plan, ctx.task_ctx()).map_err(Error::PlanningError),
+        true => execute_explain(physical_plan, ctx).await,
+    }
+}
+
+// We do special handling for `Explain` plans to ensure that the output is sanitized from full paths.
+async fn execute_explain(
+    physical_plan: Arc<dyn ExecutionPlan>,
+    ctx: &SessionContext,
+) -> Result<SendableRecordBatchStream, Error> {
+    use datafusion::physical_plan::execution_plan;
+
+    let schema = physical_plan.schema().clone();
+    let output = execution_plan::collect(physical_plan, ctx.task_ctx())
+        .await
+        .map_err(Error::ExecutionError)?;
+
+    let concatenated = concat_batches(&schema, &output).unwrap();
+    let sanitized = sanitize_explain(&concatenated);
+
+    let stream =
+        RecordBatchStreamAdapter::new(schema, stream::iter(std::iter::once(Ok(sanitized))));
+    Ok(Box::pin(stream))
+}
+
+// Sanitize the explain output by removing full paths and and keeping only the filenames.
+fn sanitize_explain(batch: &RecordBatch) -> RecordBatch {
+    use arrow::array::StringArray;
+
+    let plan_idx = batch.schema().index_of("plan").unwrap();
+    let plan_column = batch
+        .column(plan_idx)
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .unwrap();
+
+    // Match full paths to .parquet files and capture just the filename
+    // This handles paths with forward or backward slashes
+    let regex = Regex::new(r"(?:[^\s\[,]+[/\\])?([^\s\[,/\\]+\.parquet)").unwrap();
+
+    let transformed: StringArray = plan_column
+        .iter()
+        .map(|value| value.map(|v| regex.replace_all(v, "$1").into_owned()))
+        .collect();
+
+    let mut columns: Vec<ArrayRef> = batch.columns().to_vec();
+    columns[plan_idx] = Arc::new(transformed);
+
+    RecordBatch::try_new(batch.schema(), columns).unwrap()
 }
 
 pub fn prepend_special_block_num_field(schema: &DFSchema) -> Arc<DFSchema> {

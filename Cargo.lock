@@ -1898,6 +1898,7 @@ dependencies = [
  "metadata-db",
  "object_store",
  "rand 0.9.1",
+ "regex",
  "semver 1.0.26",
  "serde",
  "serde_json",
