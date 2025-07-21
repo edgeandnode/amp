@@ -21,8 +21,7 @@ use datafusion::{
         runtime_env::RuntimeEnv,
     },
     logical_expr::{AggregateUDF, Extension, LogicalPlan, ScalarUDF},
-    physical_plan::stream::RecordBatchStreamAdapter,
-    physical_plan::{ExecutionPlan, displayable},
+    physical_plan::{ExecutionPlan, displayable, stream::RecordBatchStreamAdapter},
     physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner as _},
     sql::{TableReference, parser},
 };
