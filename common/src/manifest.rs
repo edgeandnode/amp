@@ -8,17 +8,21 @@ use datafusion::{
     arrow::datatypes::{DataType, Field as ArrowField, Fields, Schema, SchemaRef},
     common::DFSchemaRef,
 };
+use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 
-use crate::Dataset;
+use crate::{Dataset, JsonSchema};
 
 pub const DATASET_KIND: &str = "manifest";
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Manifest {
+    /// Dataset kind, must be `manifest`.
+    pub kind: String,
+    /// Dataset name.
     pub name: String,
+    /// Network name, e.g., `mainnet`.
     pub network: String,
-    pub version: semver::Version,
+    pub version: Version,
 
     #[serde(default)]
     pub dependencies: BTreeMap<String, Dependency>,
@@ -30,21 +34,23 @@ pub struct Manifest {
     pub functions: BTreeMap<String, Function>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Dependency {
     pub owner: String,
     pub name: String,
-    pub version: semver::VersionReq,
+    pub version: VersionReq,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Table {
+    /// Table input, which can be a View.
     pub input: TableInput,
+    /// Table schema, which is an Arrow Schema.
     pub schema: TableSchema,
     pub network: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Function {
     // TODO: Support SQL type names, see https://datafusion.apache.org/user-guide/sql/data_types.html
@@ -53,39 +59,45 @@ pub struct Function {
     pub source: FunctionSource,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct FunctionSource {
     pub source: Arc<str>,
     pub filename: String,
 }
 
 // TODO: Tagging
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(untagged)]
 pub enum TableInput {
     View(View),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct View {
+    /// SQL query defining the view.
     pub sql: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct TableSchema {
+    /// Arrow schema of the table.
     pub arrow: ArrowSchema,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ArrowSchema {
+    /// List of Fields in the schema.
     pub fields: Vec<Field>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Field {
+    /// Field name.
     pub name: String,
+    /// Data type.
     #[serde(rename = "type")]
     pub type_: DataType,
+    /// Boolean indicating whether the field is nullable.
     pub nullable: bool,
 }
 

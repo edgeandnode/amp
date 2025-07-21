@@ -1,6 +1,6 @@
 use std::sync::Once;
 
-use tracing_subscriber::{EnvFilter, filter::LevelFilter};
+use tracing_subscriber::{filter::LevelFilter, EnvFilter};
 
 static NOZZLE_LOG_ENV_VAR: &str = "NOZZLE_LOG";
 
@@ -17,6 +17,7 @@ const NOZZLE_CRATES: &[&str] = &[
     "generate_manifest",
     "http_common",
     "js_runtime",
+    "json_schema_derive",
     "metadata_db",
     "nozzle",
     "registry_service",

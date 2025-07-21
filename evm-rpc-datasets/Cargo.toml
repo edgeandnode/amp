@@ -15,6 +15,7 @@ futures.workspace = true
 tracing.workspace = true
 async-stream.workspace = true
 serde_json.workspace = true
+json-schema-derive = { path = "../json-schema-derive" }
 
 [dev-dependencies]
 fs-err.workspace = true

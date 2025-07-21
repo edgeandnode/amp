@@ -1,6 +1,6 @@
 mod anvil;
 
-use common::{BoxError, tracing_helpers};
+use common::{BoxError, JsonSchema, tracing_helpers};
 use dataset_store::{DatasetDefsCommon, SerializableSchema};
 use generate_manifest;
 
@@ -356,4 +356,35 @@ async fn sql_dataset_input_batch_size() {
     // block numbers, so we expect 2 files with data for blocks 15000000 and 15000002, plus empty
     // files for odd blocks
     assert_eq!(file_count, 4);
+}
+
+#[test]
+fn generate_json_schemas() {
+    let json_schemas = [
+        ("EvmRpc", evm_rpc_datasets::DatasetDef::json_schema()),
+        (
+            "Substreams",
+            substreams_datasets::dataset::DatasetDef::json_schema(),
+        ),
+        (
+            "Firehose",
+            firehose_datasets::dataset::DatasetDef::json_schema(),
+        ),
+        ("Common", dataset_store::DatasetDefsCommon::json_schema()),
+        (
+            "Sql",
+            dataset_store::sql_datasets::DatasetDef::json_schema(),
+        ),
+        ("Manifest", common::manifest::Manifest::json_schema()),
+    ];
+
+    for (name, mut schema) in json_schemas {
+        schema["$schema"] = serde_json::json!("http://json-schema.org/draft-07/schema#");
+        let schema = serde_json::to_string_pretty(&schema).unwrap();
+        let dir = env!("CARGO_MANIFEST_DIR");
+        let dir = format!("{dir}/../dataset-def-schemas");
+        std::fs::create_dir_all(&dir).expect("Failed to create JSON schema output directory");
+        let path = format!("{}/{}.json", dir, name);
+        std::fs::write(path, schema).unwrap();
+    }
 }

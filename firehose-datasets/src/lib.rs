@@ -34,5 +34,5 @@ pub enum Error {
     Json(#[from] serde_json::Error),
 }
 
-mod dataset;
+pub mod dataset;
 mod proto;

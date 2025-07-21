@@ -5,6 +5,7 @@ version.workspace = true
 
 [dependencies]
 common = { path = "../common" }
+json-schema-derive = { path = "../json-schema-derive" }
 async-stream.workspace = true
 futures.workspace = true
 hex.workspace = true

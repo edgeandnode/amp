@@ -10,8 +10,8 @@ use std::{
 use async_stream::stream;
 use async_udf::functions::AsyncScalarUDF;
 use common::{
-    BlockNum, BlockStreamer, BoxError, Dataset, DatasetValue, LogicalCatalog, QueryContext,
-    RawDatasetRows, SPECIAL_BLOCK_NUM, Store,
+    BlockNum, BlockStreamer, BoxError, Dataset, DatasetValue, JsonSchema, LogicalCatalog,
+    QueryContext, RawDatasetRows, SPECIAL_BLOCK_NUM, Store,
     arrow::datatypes::DataType,
     catalog::physical::{Catalog, PhysicalTable},
     config::Config,
@@ -676,16 +676,20 @@ impl RawDataset {
 }
 
 /// All dataset definitions must have a kind, network and name. The name must match the filename. Schema is optional for TOML dataset format.
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, JsonSchema)]
 pub struct DatasetDefsCommon {
+    /// Dataset kind. See specific dataset definitions for supported values.
     pub kind: String,
+    /// Network name, e.g. "mainnet".
     pub network: String,
+    /// Dataset name.
     pub name: String,
+    /// Dataset schema. Lists the tables defined by this dataset.
     pub schema: Option<SerializableSchema>,
 }
 
 /// A serializable representation of a collection of [`arrow::datatypes::Schema`]s, without any metadata.
-#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 pub struct SerializableSchema(
     std::collections::HashMap<String, std::collections::HashMap<String, DataType>>,
 );

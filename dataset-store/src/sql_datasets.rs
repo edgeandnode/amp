@@ -4,7 +4,7 @@ use std::{
 };
 
 use common::{
-    BoxError, Dataset, DatasetValue, SPECIAL_BLOCK_NUM, Table,
+    BoxError, Dataset, DatasetValue, JsonSchema, SPECIAL_BLOCK_NUM, Table,
     query_context::{parse_sql, prepend_special_block_num_field},
 };
 use datafusion::sql::parser;
@@ -37,10 +37,13 @@ impl SqlDataset {
 
 pub const DATASET_KIND: &str = "sql";
 
-#[derive(Debug, Deserialize)]
-struct DatasetDef {
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct DatasetDef {
+    /// Dataset kind, must be `sql`.
     pub kind: String,
+    /// Network name, e.g., `mainnet`.
     pub network: String,
+    /// Dataset name.
     pub name: String,
 }
 

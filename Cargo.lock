@@ -1895,6 +1895,7 @@ dependencies = [
  "indoc",
  "itertools 0.14.0",
  "js-runtime",
+ "json-schema-derive",
  "metadata-db",
  "object_store",
  "rand 0.9.1",
@@ -2820,6 +2821,7 @@ dependencies = [
  "firehose-datasets",
  "futures",
  "js-runtime",
+ "json-schema-derive",
  "metadata-db",
  "object_store",
  "rand 0.9.1",
@@ -3137,6 +3139,7 @@ dependencies = [
  "common",
  "fs-err",
  "futures",
+ "json-schema-derive",
  "serde",
  "serde_json",
  "serde_with",
@@ -3208,6 +3211,7 @@ dependencies = [
  "fs-err",
  "futures",
  "hex",
+ "json-schema-derive",
  "prost",
  "prost-build",
  "serde",
@@ -4151,6 +4155,18 @@ checksum = "1cfaf33c695fc6e08064efbc1f72ec937429614f25eef83af942d0e227c3a28f"
 dependencies = [
  "once_cell",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "json-schema-derive"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "regex",
+ "serde_json",
+ "syn 2.0.104",
+ "tokio",
 ]
 
 [[package]]
@@ -6626,6 +6642,7 @@ dependencies = [
  "firehose-datasets",
  "fs-err",
  "futures",
+ "json-schema-derive",
  "object_store",
  "prost",
  "prost-build",

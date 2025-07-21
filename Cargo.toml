@@ -16,7 +16,8 @@ members = [
     "registry-service",
     "async-udf",
     "js-runtime",
-    "generate-manifest",
+    "generate-manifest", 
+    "json-schema-derive",
 ]
 
 resolver = "2"
