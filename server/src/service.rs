@@ -15,13 +15,11 @@ use axum::{
 };
 use bytes::{BufMut, Bytes, BytesMut};
 use common::{
+    SPECIAL_BLOCK_NUM,
     arrow::{self, ipc::writer::IpcDataGenerator},
     config::Config,
     notification_multiplexer::{self, NotificationMultiplexerHandle},
-    plan_visitors::{
-        forbid_underscore_prefixed_aliases, is_incremental, propagate_block_num,
-        unproject_special_block_num_column,
-    },
+    plan_visitors::{is_incremental, propagate_block_num, unproject_special_block_num_column},
     query_context::{Error as CoreError, QueryContext, QueryEnv, parse_sql},
     streaming_query::{StreamState, StreamingQuery, watermark_updates},
 };
@@ -206,16 +204,24 @@ impl Service {
         if !is_streaming {
             let original_schema = plan.schema().clone();
             let should_transform = should_transform_plan(&plan).map_err(Error::ExecutionError)?;
-            forbid_underscore_prefixed_aliases(&plan).map_err(Error::ExecutionError)?;
             let plan = if should_transform {
-                let plan = propagate_block_num(plan).map_err(Error::ExecutionError)?;
-                let plan = unproject_special_block_num_column(plan, original_schema)
-                    .map_err(|e| Error::ExecutionError(e))?;
+                let mut plan = propagate_block_num(plan).map_err(Error::ExecutionError)?;
+                // If the user did not request `_block_num` column, we omit it from the final output.
+                if !original_schema
+                    .fields()
+                    .iter()
+                    .any(|f| f.name() == SPECIAL_BLOCK_NUM)
+                {
+                    plan =
+                        unproject_special_block_num_column(plan).map_err(Error::ExecutionError)?;
+                }
                 plan
             } else {
                 plan
             };
-            ctx.execute_plan(plan).await.map_err(|err| Error::from(err))
+            ctx.execute_plan(plan, true)
+                .await
+                .map_err(|err| Error::from(err))
         } else {
             // If streaming, we need to spawn a streaming query.
             let watermark_stream = watermark_updates(ctx.clone(), &self.notification_multiplexer)
