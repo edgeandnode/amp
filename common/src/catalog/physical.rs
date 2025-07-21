@@ -539,6 +539,7 @@ impl PhysicalTable {
         Ok(partitioned_files)
     }
 
+    /// See: https://github.com/apache/datafusion/blob/main/datafusion-examples/examples/advanced_parquet_index.rs
     fn filters_to_predicate(
         &self,
         state: &dyn Session,
