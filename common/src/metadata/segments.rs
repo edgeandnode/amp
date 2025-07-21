@@ -30,37 +30,37 @@ pub struct TableSegmentsDiff {
     pub sub: Vec<Segment>,
 }
 
-/// Segments associated with a table. This incrementally organizes segments into either the
-/// canonical chain or a set of forks. The canonical chain is defined as the set of adjacent
+/// Segments associated with a table. This incrementally organizes segments into either a canonical
+/// chain or a set of non-canonical chains. The canonical chain is defined as the chain of adjacent
 /// segments with the greatest block height.
 // We are assuming single block range per segment, for now.
 #[derive(Default)]
 pub struct TableSegments {
-    canonical: Option<SegmentGroup>,
-    forks: Vec<SegmentGroup>,
+    canonical: Option<Chain>,
+    non_canonical: Vec<Chain>,
 }
 
 impl TableSegments {
     #[cfg(any(test, debug_assertions))]
     fn check_invariants(&self) {
         let canonical = match &self.canonical {
-            Some(group) => group,
+            Some(chain) => chain,
             None => {
-                assert!(self.forks.is_empty());
+                assert!(self.non_canonical.is_empty());
                 return;
             }
         };
         canonical.check_invariants();
-        for r in self.forks.iter() {
-            r.check_invariants();
+        for chain in self.non_canonical.iter() {
+            chain.check_invariants();
         }
 
-        // canonical group contains minimum block number
-        let canonical_min = canonical.start();
-        let forks_min = self.forks.iter().min_by_key(|g| g.start());
-        if let Some(forks_min) = forks_min.map(|g| g.start()) {
-            assert!(canonical_min <= forks_min);
-        }
+        // canonical chain contains minimum block number
+        assert!(
+            self.non_canonical
+                .iter()
+                .all(|c| canonical.start() <= c.start())
+        );
     }
 
     pub fn canonical_segments(&self) -> Vec<Segment> {
@@ -86,43 +86,43 @@ impl TableSegments {
     /// returned ranges are non-overlapping and sorted by their start block number.
     ///
     /// To resolve reorgs, the missing ranges may include blocks already indexed. A reorg is
-    /// detected when there is no missing range between the canonical chain and some fork with a
-    /// greater block height. When a reorg is detected, the missing ranges will include any
-    /// canonical ranges that overlap with the fork minus 1 block.
+    /// detected when there is some fork, which is a non-canonical chain of segments appart from
+    /// the canonical chain which has a greater block height. When a reorg is detected, the missing
+    /// ranges will include any canonical ranges that overlap with the fork minus 1 block.
     pub fn missing_ranges(
         &self,
         desired: RangeInclusive<BlockNum>,
     ) -> Vec<RangeInclusive<BlockNum>> {
         let Some(canonical) = &self.canonical else {
-            assert!(self.forks.is_empty());
+            assert!(self.non_canonical.is_empty());
             return vec![desired];
         };
         let mut missing: Vec<RangeInclusive<BlockNum>> =
             missing_block_ranges(canonical.start()..=canonical.end(), desired.clone());
 
-        // remove overlapping fork ranges
-        for fork in &self.forks {
-            let fork_range = fork.start()..=fork.end();
+        // remove overlapping non-canonical ranges
+        for chain in &self.non_canonical {
+            let chain_range = chain.start()..=chain.end();
             let mut index = 0;
             while index < missing.len() {
-                if block_range_intersection(missing[index].clone(), fork_range.clone()).is_none() {
+                if block_range_intersection(missing[index].clone(), chain_range.clone()).is_none() {
                     index += 1;
                     continue;
                 }
-                let ranges = missing_block_ranges(fork_range.clone(), missing[index].clone());
+                let ranges = missing_block_ranges(chain_range.clone(), missing[index].clone());
                 let next_index = index + ranges.len();
                 missing.splice(index..=index, ranges);
                 index = next_index;
             }
         }
 
-        let max_fork = self.forks.iter().max_by_key(|g| g.end());
+        let fork = self.non_canonical.iter().max_by_key(|g| g.end());
         let reorg_depth = 1;
-        if let Some(max_fork) = max_fork
-            && max_fork.end() > canonical.end()
+        if let Some(fork) = fork
+            && fork.end() > canonical.end()
             && let Some(intersection) = block_range_intersection(
                 canonical.start()..=canonical.end(),
-                max_fork.start().saturating_sub(reorg_depth)..=max_fork.end(),
+                fork.start().saturating_sub(reorg_depth)..=fork.end(),
             )
             && block_range_intersection(intersection.clone(), desired.clone()).is_some()
         {
@@ -169,8 +169,8 @@ impl TableSegments {
             if let Ok(()) = canonical.merge(numbers.clone(), object.clone()) {
                 return Ok(());
             }
-            for fork in &mut self.forks {
-                if let Ok(()) = fork.merge(numbers.clone(), object.clone()) {
+            for chain in &mut self.non_canonical {
+                if let Ok(()) = chain.merge(numbers.clone(), object.clone()) {
                     return Ok(());
                 }
             }
@@ -187,19 +187,19 @@ impl TableSegments {
         let mut diff: TableSegmentsDiff = Default::default();
         match &mut self.canonical {
             None => {
-                self.canonical = Some(SegmentGroup(vec![segment.clone()]));
+                self.canonical = Some(Chain(vec![segment.clone()]));
                 diff.add.push(segment);
                 return diff;
             }
             Some(canonical) => match canonical.insert(&segment) {
                 Ok(()) => {
-                    for index in 0..self.forks.len() {
-                        if !self.forks[index].adjacent_after(canonical.bounds().1) {
+                    for index in 0..self.non_canonical.len() {
+                        if !self.non_canonical[index].adjacent_after(canonical.bounds().1) {
                             continue;
                         }
-                        let mut fork = self.forks.remove(index);
-                        diff.add.append(&mut fork.0.clone());
-                        canonical.0.append(&mut fork.0);
+                        let mut chain = self.non_canonical.remove(index);
+                        diff.add.append(&mut chain.0.clone());
+                        canonical.0.append(&mut chain.0);
                         break;
                     }
                     diff.add.push(segment);
@@ -209,68 +209,72 @@ impl TableSegments {
             },
         };
 
-        let fork_index = self.update_forks(segment);
+        let chain_index = self.update_non_canonical(segment);
         let canonical = self.canonical.as_ref().unwrap();
-        let fork = &self.forks[fork_index];
+        let chain = &self.non_canonical[chain_index];
 
-        if fork.adjacent_after(canonical.bounds().1) {
-            diff.add.append(&mut fork.0.clone());
+        if chain.adjacent_after(canonical.bounds().1) {
+            diff.add.append(&mut chain.0.clone());
             let canonical = self.canonical.as_mut().unwrap();
-            canonical.0.append(&mut self.forks.remove(fork_index).0);
+            canonical
+                .0
+                .append(&mut self.non_canonical.remove(chain_index).0);
             return diff;
         }
 
-        if (fork.start() < canonical.start())
-            || (fork.start() == canonical.start() && fork.end() > canonical.end())
+        if (chain.start() < canonical.start())
+            || (chain.start() == canonical.start() && chain.end() > canonical.end())
         {
-            diff.add.append(&mut fork.0.clone());
+            diff.add.append(&mut chain.0.clone());
             diff.sub.append(&mut canonical.0.clone());
-            self.forks.push(self.canonical.take().unwrap());
-            self.canonical = Some(self.forks.remove(fork_index));
-        } else if let Some(fork_base_index) = canonical
+            self.non_canonical.push(self.canonical.take().unwrap());
+            self.canonical = Some(self.non_canonical.remove(chain_index));
+        } else if let Some(chain_base_index) = canonical
             .0
             .iter()
-            .rposition(|s| fork.adjacent_after(&s.range))
+            .rposition(|s| chain.adjacent_after(&s.range))
         {
-            diff.add.append(&mut fork.0.clone());
+            diff.add.append(&mut chain.0.clone());
             let canonical = self.canonical.as_mut().unwrap();
-            let reorged = canonical.0.split_off(fork_base_index + 1);
+            let reorged = canonical.0.split_off(chain_base_index + 1);
             diff.sub.append(&mut reorged.clone());
-            self.forks.push(SegmentGroup(reorged));
-            canonical.0.append(&mut self.forks.remove(fork_index).0);
+            self.non_canonical.push(Chain(reorged));
+            canonical
+                .0
+                .append(&mut self.non_canonical.remove(chain_index).0);
         }
 
         diff
     }
 
-    fn update_forks(&mut self, segment: Segment) -> usize {
-        for index in 0..self.forks.len() {
-            match self.forks[index].insert(&segment) {
-                Ok(()) => return self.merge_forks(index),
+    fn update_non_canonical(&mut self, segment: Segment) -> usize {
+        for index in 0..self.non_canonical.len() {
+            match self.non_canonical[index].insert(&segment) {
+                Ok(()) => return self.merge_non_canonical(index),
                 Err(()) => continue,
             };
         }
-        self.forks.push(SegmentGroup(vec![segment]));
-        self.forks.len() - 1
+        self.non_canonical.push(Chain(vec![segment]));
+        self.non_canonical.len() - 1
     }
 
-    fn merge_forks(&mut self, mut updated_index: usize) -> usize {
-        for mut index in 0..self.forks.len() {
-            let (start, end) = self.forks[index].bounds();
-            if self.forks[updated_index].adjacent_before(start) {
-                let mut next = self.forks.remove(index);
+    fn merge_non_canonical(&mut self, mut updated_index: usize) -> usize {
+        for mut index in 0..self.non_canonical.len() {
+            let (start, end) = self.non_canonical[index].bounds();
+            if self.non_canonical[updated_index].adjacent_before(start) {
+                let mut next = self.non_canonical.remove(index);
                 if index < updated_index {
                     updated_index -= 1;
                 }
-                self.forks[updated_index].0.append(&mut next.0);
+                self.non_canonical[updated_index].0.append(&mut next.0);
                 return updated_index;
             }
-            if self.forks[updated_index].adjacent_after(end) {
-                let mut next = self.forks.remove(updated_index);
+            if self.non_canonical[updated_index].adjacent_after(end) {
+                let mut next = self.non_canonical.remove(updated_index);
                 if updated_index < index {
                     index -= 1;
                 }
-                self.forks[index].0.append(&mut next.0);
+                self.non_canonical[index].0.append(&mut next.0);
                 return index;
             }
         }
@@ -278,10 +282,11 @@ impl TableSegments {
     }
 }
 
+/// A sequence of adjacent segments.
 #[derive(Debug, PartialEq, Eq)]
-struct SegmentGroup(Vec<Segment>);
+struct Chain(Vec<Segment>);
 
-impl SegmentGroup {
+impl Chain {
     #[cfg(any(test, debug_assertions))]
     fn check_invariants(&self) {
         use itertools::Itertools as _;
