@@ -82,8 +82,13 @@ pub fn propagate_block_num(plan: LogicalPlan) -> Result<LogicalPlan, DataFusionE
 pub fn unproject_special_block_num_column(
     plan: LogicalPlan,
 ) -> Result<LogicalPlan, DataFusionError> {
-    let fields = plan.schema().fields().iter();
+    let fields = plan.schema().fields();
+    if !fields.iter().any(|f| f.name() == SPECIAL_BLOCK_NUM) {
+        // Nothing to do.
+        return Ok(plan);
+    }
     let exprs = fields
+        .iter()
         .filter(|f| f.name() != SPECIAL_BLOCK_NUM)
         .map(|f| col(f.name()))
         .collect();

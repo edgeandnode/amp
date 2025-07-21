@@ -192,7 +192,7 @@ impl Service {
         plan: LogicalPlan,
         is_streaming: bool,
     ) -> Result<SendableRecordBatchStream, Error> {
-        // is_incremental returns an error if query contains EXPLAIN, DML, etc.
+        // is_incremental returns an error if query contains DDL, DML, etc.
         let is_incr = is_incremental(&plan).map_err(|e| Error::InvalidQuery(e.to_string()))?;
         if is_streaming && !is_incr {
             return Err(Error::InvalidQuery(
