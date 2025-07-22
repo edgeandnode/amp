@@ -202,7 +202,7 @@ pub async fn dump_table(
 
         if is_incr {
             ctx.metadata_db
-                .check_and_set_start_block(table.location_id(), start_block)
+                .check_start_block(table.location_id(), start_block)
                 .await?;
             let synced_range = table.synced_range().await?;
             if let Some(range) = synced_range.as_ref() {

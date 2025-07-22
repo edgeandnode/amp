@@ -115,7 +115,7 @@ pub async fn dump(
 ) -> Result<(), BoxError> {
     for table in tables {
         ctx.metadata_db
-            .check_and_set_start_block(table.location_id(), start)
+            .check_start_block(table.location_id(), start)
             .await?;
     }
 

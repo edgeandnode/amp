@@ -2,7 +2,7 @@ use std::ops::RangeInclusive;
 
 use alloy::{
     primitives::BlockHash,
-    providers::{DynProvider, Provider, ext::AnvilApi as _},
+    providers::{DynProvider, Provider, ProviderBuilder, ext::AnvilApi as _},
     transports::http::reqwest,
 };
 use common::{
@@ -145,13 +145,15 @@ async fn persist_start_block_test() -> Result<(), BoxError> {
     let test_env = TestEnv::temp("persist_start_block_test").await?;
     let mut client = TestClient::connect(&test_env).await?;
 
-    // Start Anvil on port 8545 to match the rpc_anvil.toml configuration
-    let provider = alloy::providers::ProviderBuilder::new()
-        .connect_anvil_with_config(|anvil| anvil.port(8545u16));
-    let provider = alloy::providers::DynProvider::new(provider);
-    provider.anvil_mine(Some(10), None).await?;
-    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+    // Start Anvil on the default port 8545 so we don't need to discover the port dynamically.
+    let provider = ProviderBuilder::new().connect_anvil_with_config(|anvil| anvil.port(8545u16));
+    let provider = DynProvider::new(provider);
 
+    // Ensure Anvil is running by calling an API (auto mine) and then mine some blocks.
+    provider.anvil_mine(Some(10), None).await?;
+    tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+
+    // Run the test steps
     for step in load_test_steps("persist-start-block-test.yaml")? {
         step.run(&test_env, &mut client).await?
     }
@@ -171,8 +173,8 @@ async fn anvil_rpc_reorg() {
     let dataset_store = DatasetStore::new(test_env.config.clone(), test_env.metadata_db.clone());
     // Start Anvil on port 8545 to match the rpc_anvil.toml configuration
     let provider = alloy::providers::ProviderBuilder::new()
-        .connect_anvil_with_config(|anvil| anvil.port(8545u16));
-    let provider = DynProvider::new(provider);
+        .connect_anvil_with_config(|anvil| anvil.port(0 as u16));
+    let provider = alloy::providers::DynProvider::new(provider);
 
     #[derive(Debug, PartialEq, Eq, serde::Deserialize)]
     struct BlockRow {

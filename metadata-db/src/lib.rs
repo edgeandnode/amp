@@ -2,7 +2,7 @@ use std::{future::Future, sync::Arc, time::Duration};
 
 use futures::stream::{BoxStream, Stream};
 use sqlx::{
-    Acquire, Executor, FromRow, Postgres,
+    Executor, FromRow, Postgres,
     postgres::{PgListener, PgNotification},
 };
 use thiserror::Error;
@@ -593,40 +593,27 @@ impl MetadataDb {
         Ok(())
     }
 
-    /// Sets the start block for a location if it's not already set.
-    /// If it is already set, it must match the provided start_block.
-    pub async fn check_and_set_start_block(
+    /// If the start block is already set, it must match the provided start_block.
+    pub async fn check_start_block(
         &self,
         location_id: LocationId,
         start_block: i64,
     ) -> Result<(), Error> {
-        let mut conn = self.pool.acquire().await?;
-        let mut tx = conn.begin().await?;
-
         let existing_start_block: Option<i64> =
-            sqlx::query_scalar("SELECT start_block FROM locations WHERE id = $1 FOR UPDATE")
+            sqlx::query_scalar("SELECT start_block FROM locations WHERE id = $1")
                 .bind(location_id)
-                .fetch_one(&mut *tx)
+                .fetch_one(&*self.pool)
                 .await?;
 
-        match existing_start_block {
-            Some(existing) if existing != start_block => {
+        if let Some(existing) = existing_start_block {
+            if existing != start_block {
                 return Err(Error::MismatchedStartBlock {
                     existing,
                     requested: start_block,
                 });
             }
-            Some(_) => {}
-            None => {
-                sqlx::query("UPDATE locations SET start_block = $1 WHERE id = $2")
-                    .bind(start_block)
-                    .bind(location_id)
-                    .execute(&mut *tx)
-                    .await?;
-            }
         }
 
-        tx.commit().await?;
         Ok(())
     }
 }
