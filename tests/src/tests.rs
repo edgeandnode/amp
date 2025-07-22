@@ -3,7 +3,7 @@ mod anvil;
 use alloy::{
     node_bindings::Anvil,
     primitives::BlockHash,
-    providers::{Provider, ProviderBuilder, ext::AnvilApi as _, DynProvider},
+    providers::{DynProvider, Provider, ProviderBuilder, ext::AnvilApi as _},
     transports::http::reqwest,
 };
 use common::{
@@ -148,8 +148,7 @@ async fn persist_start_block_test() -> Result<(), BoxError> {
     let anvil_url = anvil.endpoint_url();
 
     // Set up the test environment with the Anvil provider
-    let test_env =
-        TestEnv::new("persist_start_block_test", true, Some(anvil_url.as_str())).await?;
+    let test_env = TestEnv::new("persist_start_block_test", true, Some(anvil_url.as_str())).await?;
     let mut client = TestClient::connect(&test_env).await?;
 
     // Create a provider and mine 10 blocks
@@ -177,8 +176,12 @@ async fn persist_start_block_set_on_creation() -> Result<(), BoxError> {
     let anvil_url = anvil.endpoint_url();
 
     // Set up the test environment with the Anvil provider
-    let test_env =
-        TestEnv::new("persist_start_block_set_on_creation", true, Some(anvil_url.as_str())).await?;
+    let test_env = TestEnv::new(
+        "persist_start_block_set_on_creation",
+        true,
+        Some(anvil_url.as_str()),
+    )
+    .await?;
     let _client = TestClient::connect(&test_env).await?;
 
     // Mine 10 blocks so the dump has something to process
@@ -187,8 +190,7 @@ async fn persist_start_block_set_on_creation() -> Result<(), BoxError> {
     assert_eq!(provider.get_block_number().await?, 10);
 
     // Perform the initial dump directly
-    test_support::dump_dataset(&test_env.config, "anvil_rpc", 0, 9, 1, None)
-        .await?;
+    test_support::dump_dataset(&test_env.config, "anvil_rpc", 0, 9, 1, None).await?;
 
     // Query the database to verify the start_block was persisted correctly
     let location = test_env
