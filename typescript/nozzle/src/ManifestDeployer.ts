@@ -1,6 +1,6 @@
 import { Data, Effect } from "effect"
-import * as Api from "./Api.js"
-import type * as Model from "./Model.js"
+import * as Api from "./Api.ts"
+import type * as Model from "./Model.ts"
 
 export class ManifestDeployerError extends Data.TaggedError("ManifestDeployerError")<{
   readonly cause: unknown

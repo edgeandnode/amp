@@ -344,12 +344,13 @@ async fn dump_sql_query(
                     hash: range.hash,
                     prev_hash: range.prev_hash,
                 };
-                let (parquet_meta, object_meta) = writer.close(chunk_range).await?;
+                let (parquet_meta, object_meta, footer) = writer.close(chunk_range).await?;
                 commit_metadata(
                     &dataset_store.metadata_db,
                     parquet_meta,
                     object_meta,
                     physical_table.location_id(),
+                    footer,
                 )
                 .await?;
 

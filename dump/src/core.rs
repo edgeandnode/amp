@@ -5,7 +5,7 @@ use std::{
 };
 
 use common::{
-    BlockNum, BoxError,
+    BoxError,
     catalog::physical::{Catalog, PhysicalTable},
     config::Config,
     notification_multiplexer::NotificationMultiplexerHandle,
@@ -206,34 +206,6 @@ pub async fn consistency_check(table: &PhysicalTable) -> Result<(), ConsistencyC
         .files()
         .await
         .map_err(|err| ConsistencyCheckError::CorruptedTable(location_id, err))?;
-
-    // Check that bock ranges do not contain overlapping ranges.
-    let mut ranges: Vec<(BlockNum, BlockNum)> = files
-        .iter()
-        .map(|m| m.parquet_meta.ranges[0].numbers.clone().into_inner())
-        .collect();
-    ranges.sort_by_key(|(start, _)| *start);
-    for window in ranges.windows(2) {
-        let ((a, b), (c, d)) = (window[0], window[1]);
-        if !(b < c) {
-            return Err(ConsistencyCheckError::CorruptedTable(
-                location_id,
-                format!("overlapping block ranges: [{a}-{b}] and [{c}-{d}]").into(),
-            ));
-        }
-        if !(a <= b) {
-            return Err(ConsistencyCheckError::CorruptedTable(
-                location_id,
-                format!("malformed block range: [{a}-{b}]").into(),
-            ));
-        }
-        if !(c <= d) {
-            return Err(ConsistencyCheckError::CorruptedTable(
-                location_id,
-                format!("malformed block range: [{c}-{d}]").into(),
-            ));
-        }
-    }
 
     let registered_files: BTreeSet<String> = files.into_iter().map(|m| m.file_name).collect();
 

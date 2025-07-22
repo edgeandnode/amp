@@ -2,7 +2,7 @@ import { connectNodeAdapter, createGrpcTransport } from "@connectrpc/connect-nod
 import { Command, Options } from "@effect/cli"
 import { Config, Effect, Schema } from "effect"
 import { createServer, type Server } from "node:http"
-import * as ArrowFlight from "../../ArrowFlight.js"
+import * as ArrowFlight from "../../ArrowFlight.ts"
 
 export const proxy = Command.make("proxy", {
   args: {

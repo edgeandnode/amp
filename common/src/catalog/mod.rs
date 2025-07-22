@@ -10,6 +10,7 @@ use crate::Table;
 
 pub mod logical;
 pub mod physical;
+pub mod reader;
 
 pub async fn schema_to_markdown(tables: Vec<Table>) -> String {
     let mut markdown = String::new();

@@ -92,41 +92,66 @@ pub struct TestEnv {
 
     // Drop guard
     _temp_db: TempMetadataDb,
-    _temp_dir: Option<tempfile::TempDir>,
+    _temp_dirs: Vec<tempfile::TempDir>,
 }
 
 impl TestEnv {
     /// Create a new test environment with a temp metadata database and data directory.
     pub async fn temp(test_name: &str) -> Result<Self, BoxError> {
-        Self::new(test_name, true).await
+        Self::new(test_name, true, None).await
     }
 
     /// Create a new test environment with a temp metadata database, but the blessed data directory.
     pub async fn blessed(test_name: &str) -> Result<Self, BoxError> {
-        Self::new(test_name, false).await
+        Self::new(test_name, false, None).await
     }
 
-    pub async fn new(test_name: &str, temp: bool) -> Result<Self, BoxError> {
+    pub async fn new(
+        test_name: &str,
+        temp: bool,
+        anvil_url: Option<&str>,
+    ) -> Result<Self, BoxError> {
         let db = TempMetadataDb::new(*KEEP_TEMP_DIRS).await;
-        let figment = Figment::from(Json::string(&format!(
+        let mut figment = Figment::from(Json::string(&format!(
             r#"{{ "metadata_db_url": "{}" }}"#,
             db.url(),
         )));
+        let mut temp_dirs = vec![];
 
-        let (temp_dir, figment) = if temp {
+        if temp {
             let temp_dir = tempfile::Builder::new()
                 .disable_cleanup(*KEEP_TEMP_DIRS)
                 .tempdir()?;
             let data_path = temp_dir.path();
             info!("Temporary data dir {}", data_path.display());
-            let figment = figment.merge(Figment::from(Json::string(&format!(
+            figment = figment.merge(Figment::from(Json::string(&format!(
                 r#"{{ "data_dir": "{}" }}"#,
                 data_path.display(),
             ))));
-            (Some(temp_dir), figment)
-        } else {
-            (None, figment)
-        };
+            temp_dirs.push(temp_dir);
+        }
+
+        if let Some(anvil_url) = anvil_url {
+            check_provider_file("rpc_anvil.toml").await;
+            let tmp_providers = tempfile::tempdir()?;
+            info!("Temporary provider dir {}", tmp_providers.path().display());
+            for config_base in TEST_CONFIG_BASE_DIRS {
+                let path = format!("{config_base}/providers/rpc_anvil.toml");
+                if !std::fs::exists(&path)? {
+                    continue;
+                }
+                let text = std::fs::read_to_string(&path)?;
+                std::fs::write(
+                    tmp_providers.path().join("rpc_anvil.toml"),
+                    text.replace("http://localhost:8545", anvil_url),
+                )?;
+            }
+            figment = figment.merge(Figment::from(Json::string(&format!(
+                r#"{{ "providers_dir": "{}" }}"#,
+                tmp_providers.path().display(),
+            ))));
+            temp_dirs.push(tmp_providers);
+        }
 
         let config = load_test_config(Some(figment)).await?;
         let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
@@ -157,7 +182,7 @@ impl TestEnv {
             dataset_store,
             server_addrs: bound,
             _temp_db: db,
-            _temp_dir: temp_dir,
+            _temp_dirs: temp_dirs,
         })
     }
 }

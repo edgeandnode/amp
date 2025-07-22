@@ -1,8 +1,9 @@
-use std::ops::RangeInclusive;
+mod anvil;
 
 use alloy::{
+    node_bindings::Anvil,
     primitives::BlockHash,
-    providers::{DynProvider, Provider, ProviderBuilder, ext::AnvilApi as _},
+    providers::{Provider, ProviderBuilder, ext::AnvilApi as _, DynProvider},
     transports::http::reqwest,
 };
 use common::{
@@ -16,7 +17,6 @@ use crate::{
     test_client::TestClient,
     test_support::{
         self, SnapshotContext, TestEnv, check_blocks, check_provider_file, restore_blessed_dataset,
-        table_ranges,
     },
 };
 
@@ -142,20 +142,27 @@ async fn basic_function() -> Result<(), BoxError> {
 #[tokio::test]
 async fn persist_start_block_test() -> Result<(), BoxError> {
     tracing_helpers::register_logger();
-    let test_env = TestEnv::temp("persist_start_block_test").await?;
+
+    // Spawn Anvil on a random port
+    let anvil = Anvil::new().port(0_u16).spawn();
+    let anvil_url = anvil.endpoint_url();
+
+    // Set up the test environment with the Anvil provider
+    let test_env =
+        TestEnv::new("persist_start_block_test", true, Some(anvil_url.as_str())).await?;
     let mut client = TestClient::connect(&test_env).await?;
 
-    // Start Anvil on the default port 8545 so we don't need to discover the port dynamically.
-    let provider = ProviderBuilder::new().connect_anvil_with_config(|anvil| anvil.port(8545u16));
-    let provider = DynProvider::new(provider);
-
-    // Ensure Anvil is running by calling an API (auto mine) and then mine some blocks.
+    // Create a provider and mine 10 blocks
+    let provider = ProviderBuilder::new().connect_http(anvil_url);
     provider.anvil_mine(Some(10), None).await?;
-    tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
 
-    // Run the test steps
+    // Verify that blocks were mined (current block should be 10)
+    let block_number = provider.get_block_number().await?;
+    assert_eq!(block_number, 10, "Expected block number 10 after mining");
+
+    // Run test steps from YAML, which should set and verify the start block
     for step in load_test_steps("persist-start-block-test.yaml")? {
-        step.run(&test_env, &mut client).await?
+        step.run(&test_env, &mut client).await?;
     }
 
     Ok(())
@@ -173,8 +180,8 @@ async fn anvil_rpc_reorg() {
     let dataset_store = DatasetStore::new(test_env.config.clone(), test_env.metadata_db.clone());
     // Start Anvil on port 8545 to match the rpc_anvil.toml configuration
     let provider = alloy::providers::ProviderBuilder::new()
-        .connect_anvil_with_config(|anvil| anvil.port(0 as u16));
-    let provider = alloy::providers::DynProvider::new(provider);
+        .connect_anvil_with_config(|anvil| anvil.port(8545u16));
+    let provider = DynProvider::new(provider);
 
     #[derive(Debug, PartialEq, Eq, serde::Deserialize)]
     struct BlockRow {
@@ -211,7 +218,7 @@ async fn anvil_rpc_reorg() {
         assert_eq!(original_head.block_num, new_head.block_num);
         assert_ne!(original_head.hash, new_head.hash);
     };
-    let query_blocks = async |range: RangeInclusive<BlockNum>| -> Vec<BlockRow> {
+    let query_blocks = async |range: std::ops::RangeInclusive<BlockNum>| -> Vec<BlockRow> {
         let url = format!("http://{}/", test_env.server_addrs.jsonl_addr);
         let sql = format!(
             r#"
@@ -231,7 +238,7 @@ async fn anvil_rpc_reorg() {
         rows.sort_by_key(|r| r.block_num);
         rows
     };
-    let dump = async |range: RangeInclusive<BlockNum>| {
+    let dump = async |range: std::ops::RangeInclusive<BlockNum>| {
         SnapshotContext::temp_dump(&test_env, &dataset_name, *range.start(), *range.end(), 1)
             .await
             .unwrap()
@@ -242,7 +249,7 @@ async fn anvil_rpc_reorg() {
         let ctx = dataset_store.ctx_for_sql(&sql, env).await.unwrap();
         let tables = ctx.catalog().tables();
         let table = tables.iter().find(|t| t.table_name() == "blocks").unwrap();
-        table_ranges(&table).await.unwrap()
+        test_support::table_ranges(&table).await.unwrap()
     };
 
     mine(2).await;

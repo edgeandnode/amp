@@ -2,12 +2,12 @@ import { Command, Options } from "@effect/cli"
 import { Path } from "@effect/platform"
 import { Chunk, Config, Effect, Fiber, Layer, Option, Schema, Stream } from "effect"
 import type * as Viem from "viem"
-import * as Api from "../../Api.js"
-import * as ConfigLoader from "../../ConfigLoader.js"
-import * as EvmRpc from "../../EvmRpc.js"
-import * as ManifestDeployer from "../../ManifestDeployer.js"
-import * as Nozzle from "../../Nozzle.js"
-import * as Utils from "../../Utils.js"
+import * as Api from "../../Api.ts"
+import * as ConfigLoader from "../../ConfigLoader.ts"
+import * as EvmRpc from "../../EvmRpc.ts"
+import * as ManifestDeployer from "../../ManifestDeployer.ts"
+import * as Nozzle from "../../Nozzle.ts"
+import * as Utils from "../../Utils.ts"
 
 export const dev = Command.make("dev", {
   args: {

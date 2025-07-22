@@ -15,10 +15,11 @@ use tokio_util::task::AbortOnDropHandle;
 use tracing::{instrument, warn};
 
 use crate::{
-    BlockNum, BoxError,
+    BlockNum, BoxError, SPECIAL_BLOCK_NUM,
     arrow::{array::RecordBatch, datatypes::SchemaRef},
     catalog::physical::PhysicalTable,
     notification_multiplexer::NotificationMultiplexerHandle,
+    plan_visitors::{order_by_block_num, propagate_block_num},
     query_context::QueryContext,
 };
 
@@ -196,10 +197,10 @@ pub struct StreamingQuery {
     ctx: Arc<QueryContext>,
     plan: LogicalPlan,
     end_block: Option<BlockNum>,
-    is_sql_dataset: bool,
     state: StreamState,
     tx: mpsc::Sender<QueryMessage>,
     microbatch_max_interval: u64,
+    preserve_block_num: bool,
 }
 
 pub struct StreamState {
@@ -231,14 +232,34 @@ impl StreamingQuery {
     ) -> Result<StreamingQueryHandle, BoxError> {
         let schema: SchemaRef = plan.schema().clone().as_ref().clone().into();
         let (tx, rx) = mpsc::channel(10);
+
+        // Preserve `_block_num` for SQL materializaiton or if explicitly selected in the schema.
+        let preserve_block_num = is_sql_dataset
+            || plan
+                .schema()
+                .fields()
+                .iter()
+                .any(|f| f.name() == SPECIAL_BLOCK_NUM);
+
+        // Plan transformations for streaming:
+        // - Propagate the `_block_num` column.
+        // - Enforce `order by _block_num`.
+        // - Run logical optimizations ahead of execution.
+        let plan = {
+            let mut plan = propagate_block_num(plan)?;
+            plan = order_by_block_num(plan);
+            let plan = ctx.optimize_plan(&plan).await?;
+            plan
+        };
+
         let streaming_query = Self {
             ctx,
             plan,
             tx,
             end_block,
-            is_sql_dataset,
             state: initial_state,
             microbatch_max_interval,
+            preserve_block_num,
         };
 
         let join_handle = AbortOnDropHandle::new(tokio::spawn(streaming_query.execute()));
@@ -299,7 +320,8 @@ impl StreamingQuery {
                         self.plan.clone(),
                         microbatch_start,
                         microbatch_end,
-                        self.is_sql_dataset,
+                        self.preserve_block_num,
+                        false,
                     )
                     .await?;
 

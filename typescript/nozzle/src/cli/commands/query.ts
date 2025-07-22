@@ -1,8 +1,8 @@
 import { createGrpcTransport } from "@connectrpc/connect-node"
 import { Args, Command, Options } from "@effect/cli"
 import { Config, Console, Effect, Match, Option, Schema, Stream } from "effect"
-import * as Arrow from "../../Arrow.js"
-import * as ArrowFlight from "../../ArrowFlight.js"
+import * as Arrow from "../../Arrow.ts"
+import * as ArrowFlight from "../../ArrowFlight.ts"
 
 export const query = Command.make("query", {
   args: {

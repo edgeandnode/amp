@@ -2,23 +2,18 @@ use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc};
 
 use datafusion::{
     arrow::datatypes::SchemaRef,
-    catalog::Session,
-    common::Statistics,
+    catalog::{Session, memory::DataSourceExec},
+    common::DFSchema,
     datasource::{
         TableProvider, TableType, create_ordering,
-        file_format::{FileFormat, parquet::ParquetFormat},
         listing::{ListingTableUrl, PartitionedFile},
-        physical_plan::{FileGroup, FileScanConfigBuilder},
+        physical_plan::{FileGroup, FileScanConfigBuilder, ParquetSource},
     },
     error::{DataFusionError, Result as DataFusionResult},
-    execution::{
-        cache::{CacheAccessor, cache_unit::DefaultFileStatisticsCache},
-        object_store::ObjectStoreUrl,
-    },
-    logical_expr::{ScalarUDF, SortExpr, col},
-    parquet::arrow::async_reader::{AsyncFileReader, ParquetObjectReader},
+    execution::object_store::ObjectStoreUrl,
+    logical_expr::{ScalarUDF, SortExpr, col, utils::conjunction},
     physical_expr::LexOrdering,
-    physical_plan::ExecutionPlan,
+    physical_plan::{ExecutionPlan, PhysicalExpr},
     prelude::Expr,
     sql::TableReference,
 };
@@ -31,9 +26,10 @@ use uuid::Uuid;
 
 use crate::{
     BlockNum, BoxError, Dataset, ResolvedTable,
+    catalog::reader::NozzleReaderFactory,
     metadata::{
-        FileMetadata,
-        parquet::{PARQUET_METADATA_KEY, ParquetMeta},
+        FileMetadata, nozzle_metadata_from_parquet_file,
+        parquet::ParquetMeta,
         segments::{Segment, TableSegments},
     },
     store::{Store, infer_object_store},
@@ -97,16 +93,14 @@ pub struct PhysicalTable {
     url: Url,
     /// Path to the data location in the object store.
     path: Path,
-    /// Object store to use for this table.
-    object_store: Arc<dyn ObjectStore>,
 
     /// Location ID in the metadata database.
     location_id: LocationId,
     /// Metadata database to use for this table.
-    pub metadata_db: Arc<MetadataDb>,
+    metadata_db: Arc<MetadataDb>,
 
-    /// Statistics Cache
-    statistics_cache: Arc<dyn CacheAccessor<Path, Arc<Statistics>, Extra = ObjectMeta>>,
+    /// ParquetFileReaderFactory
+    pub reader_factory: Arc<NozzleReaderFactory>,
 }
 
 // Methods for creating and managing PhysicalTable instances
@@ -120,16 +114,20 @@ impl PhysicalTable {
     ) -> Result<Self, BoxError> {
         let path = Path::from_url_path(url.path()).unwrap();
         let (object_store, _) = infer_object_store(&url)?;
-        let statistics_cache = Arc::new(DefaultFileStatisticsCache::default());
+        let reader_factory = NozzleReaderFactory {
+            location_id,
+            object_store: object_store.clone(),
+            metadata_db: metadata_db.clone(),
+        }
+        .into();
 
         Ok(Self {
             table,
             url,
             path,
-            object_store,
             location_id,
             metadata_db,
-            statistics_cache,
+            reader_factory,
         })
     }
 
@@ -171,15 +169,22 @@ impl PhysicalTable {
         }
 
         let path = Path::from_url_path(url.path()).unwrap();
-        let statistics_cache = Arc::new(DefaultFileStatisticsCache::default());
+
+        let object_store = data_store.object_store();
+        let reader_factory = NozzleReaderFactory {
+            location_id,
+            object_store,
+            metadata_db: Arc::clone(&metadata_db),
+        }
+        .into();
+
         let physical_table = Self {
             table: table.clone(),
             url,
             path,
-            object_store: data_store.object_store(),
             location_id,
             metadata_db,
-            statistics_cache,
+            reader_factory,
         };
 
         info!("Created new revision at {}", physical_table.path);
@@ -209,8 +214,8 @@ impl PhysicalTable {
             revisions,
             table,
             &table_id,
-            data_store.clone(),
-            metadata_db.clone(),
+            Arc::clone(&data_store),
+            Arc::clone(&metadata_db),
         )
         .await
     }
@@ -233,16 +238,20 @@ impl PhysicalTable {
 
         let path = Path::from_url_path(url.path()).unwrap();
         let (object_store, _) = infer_object_store(&url)?;
-        let statistics_cache = Arc::new(DefaultFileStatisticsCache::default());
+        let reader_factory = NozzleReaderFactory {
+            location_id,
+            object_store,
+            metadata_db: Arc::clone(&metadata_db),
+        }
+        .into();
 
         Ok(Some(Self {
             table: table.clone(),
             url,
             path,
-            object_store,
             location_id,
-            metadata_db: metadata_db.clone(),
-            statistics_cache,
+            metadata_db,
+            reader_factory,
         }))
     }
 
@@ -289,30 +298,45 @@ impl PhysicalTable {
         let mut file_stream = object_store.list(Some(&path));
 
         while let Some(object_meta) = file_stream.try_next().await? {
-            let (file_name, nozzle_meta) =
-                nozzle_meta_from_object_meta(&object_meta, object_store.clone()).await?;
+            let (file_name, nozzle_meta, footer) =
+                nozzle_metadata_from_parquet_file(&object_meta, object_store.clone()).await?;
+
             let parquet_meta_json = serde_json::to_value(nozzle_meta)?;
+
+            let ObjectMeta {
+                size: object_size,
+                e_tag: object_e_tag,
+                version: object_version,
+                ..
+            } = object_meta;
+
             metadata_db
                 .insert_metadata(
                     location_id,
                     file_name,
-                    object_meta.size,
-                    object_meta.e_tag,
-                    object_meta.version,
+                    object_size,
+                    object_e_tag,
+                    object_version,
                     parquet_meta_json,
+                    footer,
                 )
                 .await?;
         }
-        let statistics_cache = Arc::new(DefaultFileStatisticsCache::default());
+
+        let reader_factory = NozzleReaderFactory {
+            location_id,
+            object_store: Arc::clone(&object_store),
+            metadata_db: Arc::clone(&metadata_db),
+        }
+        .into();
 
         let physical_table = Self {
             table: table.clone(),
             url: url.clone(),
             path: path.clone(),
-            object_store,
             location_id,
             metadata_db,
-            statistics_cache,
+            reader_factory,
         };
 
         Ok(physical_table)
@@ -328,6 +352,7 @@ impl PhysicalTable {
         let num_files = file_locations.len();
         let locations = Box::pin(stream::iter(file_locations.into_iter().map(Ok)));
         let deleted = self
+            .reader_factory
             .object_store
             .delete_stream(locations)
             .try_collect::<Vec<Path>>()
@@ -406,7 +431,7 @@ impl PhysicalTable {
     }
 
     pub fn object_store(&self) -> Arc<dyn ObjectStore> {
-        self.object_store.clone()
+        Arc::clone(&self.reader_factory.object_store)
     }
 
     pub fn table(&self) -> &ResolvedTable {
@@ -482,36 +507,6 @@ impl PhysicalTable {
 // helper methods for implementing `TableProvider` trait
 
 impl PhysicalTable {
-    async fn do_collect_statistics(
-        &self,
-        ctx: &dyn Session,
-        part_file: &PartitionedFile,
-    ) -> DataFusionResult<Arc<Statistics>> {
-        match self
-            .statistics_cache
-            .get_with_extra(&part_file.object_meta.location, &part_file.object_meta)
-        {
-            Some(statistics) => Ok(statistics),
-            None => {
-                let statistics = ParquetFormat::default()
-                    .infer_stats(
-                        ctx,
-                        &self.object_store,
-                        Arc::clone(&self.schema()),
-                        &part_file.object_meta,
-                    )
-                    .await?;
-                let statistics = Arc::new(statistics);
-                self.statistics_cache.put_with_extra(
-                    &part_file.object_meta.location,
-                    Arc::clone(&statistics),
-                    &part_file.object_meta,
-                );
-                Ok(statistics)
-            }
-        }
-    }
-
     fn object_store_url(&self) -> DataFusionResult<ObjectStoreUrl> {
         Ok(ListingTableUrl::try_new(self.url.clone(), None)?.object_store())
     }
@@ -540,9 +535,7 @@ impl PhysicalTable {
             let batch: Vec<Segment> = canonical_segments.drain(0..batch_len).collect();
             let results: Vec<DataFusionResult<(BlockNum, PartitionedFile)>> =
                 join_all(batch.into_iter().map(async |Segment { range, object }| {
-                    let mut partitioned_file = PartitionedFile::from(object);
-                    let statistics = self.do_collect_statistics(ctx, &partitioned_file).await?;
-                    partitioned_file.statistics = Some(statistics);
+                    let partitioned_file = PartitionedFile::from(object);
                     Ok((*range.numbers.start(), partitioned_file))
                 }))
                 .await;
@@ -552,6 +545,22 @@ impl PhysicalTable {
             }
         }
         Ok(partitioned_files)
+    }
+
+    /// See: https://github.com/apache/datafusion/blob/main/datafusion-examples/examples/advanced_parquet_index.rs
+    fn filters_to_predicate(
+        &self,
+        state: &dyn Session,
+        filters: &[Expr],
+    ) -> DataFusionResult<Arc<dyn PhysicalExpr>> {
+        let df_schema = DFSchema::try_from(self.schema())?;
+        let predicate = conjunction(filters.to_vec());
+        let predicate = predicate
+            .map(|predicate| state.create_physical_expr(predicate, &df_schema))
+            .transpose()?
+            .unwrap_or_else(|| datafusion::physical_expr::expressions::lit(true));
+
+        Ok(predicate)
     }
 }
 
@@ -573,8 +582,8 @@ impl TableProvider for PhysicalTable {
         &self,
         state: &dyn Session,
         projection: Option<&Vec<usize>>,
-        _filters: &[Expr],
-        _limit: Option<usize>,
+        filters: &[Expr],
+        limit: Option<usize>,
     ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
         let files = self.fetch_partitioned_files(state).await?;
         if files.is_empty() {
@@ -589,18 +598,25 @@ impl TableProvider for PhysicalTable {
 
         let file_schema = self.schema();
         let object_store_url = self.object_store_url()?;
-        let file_source = ParquetFormat::default().file_source();
+        let predicate = self.filters_to_predicate(state, filters)?;
 
-        ParquetFormat::default()
-            .create_physical_plan(
-                state,
-                FileScanConfigBuilder::new(object_store_url, file_schema, file_source)
-                    .with_file_groups(file_groups)
-                    .with_output_ordering(output_ordering)
-                    .with_projection(projection.cloned())
-                    .build(),
-            )
-            .await
+        let parquet_file_reader_factory = Arc::clone(&self.reader_factory);
+        let table_parquet_options = state.table_options().parquet.clone();
+        let file_source = ParquetSource::new(table_parquet_options)
+            .with_parquet_file_reader_factory(parquet_file_reader_factory)
+            .with_predicate(predicate)
+            .into();
+
+        let data_source = Arc::new(
+            FileScanConfigBuilder::new(object_store_url, file_schema, file_source)
+                .with_file_groups(file_groups)
+                .with_limit(limit)
+                .with_output_ordering(output_ordering)
+                .with_projection(projection.cloned())
+                .build(),
+        );
+
+        Ok(Arc::new(DataSourceExec::new(data_source)))
     }
 }
 
@@ -646,47 +662,6 @@ pub async fn list_revisions(
             Some((revision, (full_path, full_url, full_prefix)))
         })
         .collect())
-}
-
-async fn nozzle_meta_from_object_meta(
-    object_meta: &ObjectMeta,
-    object_store: Arc<dyn ObjectStore>,
-) -> Result<(String, ParquetMeta), BoxError> {
-    let mut reader = ParquetObjectReader::new(object_store.clone(), object_meta.location.clone())
-        .with_file_size(object_meta.size);
-    let parquet_metadata = reader.get_metadata(None).await?;
-    let file_metadata = parquet_metadata.file_metadata();
-    let key_value_metadata =
-        file_metadata
-            .key_value_metadata()
-            .ok_or(crate::ArrowError::ParquetError(format!(
-                "Unable to fetch Key Value metadata for file {}",
-                &object_meta.location
-            )))?;
-    let parquet_meta_key_value_pair = key_value_metadata
-        .into_iter()
-        .find(|key_value| key_value.key.as_str() == PARQUET_METADATA_KEY)
-        .ok_or(crate::ArrowError::ParquetError(format!(
-            "Missing key: {} in file metadata for file {}",
-            PARQUET_METADATA_KEY, &object_meta.location
-        )))?;
-    let parquet_meta_json =
-        parquet_meta_key_value_pair
-            .value
-            .as_ref()
-            .ok_or(crate::ArrowError::ParquetError(format!(
-                "Unable to parse ParquetMeta from empty value in metadata for file {}",
-                &object_meta.location
-            )))?;
-    let parquet_meta: ParquetMeta = serde_json::from_str(parquet_meta_json).map_err(|e| {
-        crate::ArrowError::ParseError(format!(
-            "Unable to parse ParquetMeta from key value metadata for file {}: {}",
-            &object_meta.location, e
-        ))
-    })?;
-    // Unwrap: We know this is a path with valid file name because we just opened it
-    let file_name = object_meta.location.filename().unwrap().to_string();
-    Ok((file_name, parquet_meta))
 }
 
 fn round_robin(files: BTreeMap<u64, PartitionedFile>, target_partitions: usize) -> Vec<FileGroup> {

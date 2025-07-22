@@ -6,12 +6,13 @@ use common::{
     arrow::array::RecordBatch,
     catalog::physical::PhysicalTable,
     metadata::{
+        extract_footer_bytes_from_file,
         parquet::{PARQUET_METADATA_KEY, ParquetMeta},
         segments::BlockRange,
     },
     parquet::{arrow::AsyncArrowWriter, errors::ParquetError, format::KeyValue},
 };
-use metadata_db::MetadataDb;
+use metadata_db::{FooterBytes, MetadataDb};
 use object_store::{ObjectMeta, buffered::BufWriter, path::Path};
 use rand::RngCore as _;
 use tracing::debug;
@@ -53,9 +54,16 @@ impl RawDatasetWriter {
     pub async fn write(&mut self, table_rows: RawTableRows) -> Result<(), BoxError> {
         let table_name = table_rows.table.name();
         let writer = self.writers.get_mut(table_name).unwrap();
-        if let Some((parquet_meta, object_meta)) = writer.write(table_rows).await? {
+        if let Some((parquet_meta, object_meta, footer)) = writer.write(table_rows).await? {
             let location_id = writer.table.location_id();
-            commit_metadata(&self.metadata_db, parquet_meta, object_meta, location_id).await?;
+            commit_metadata(
+                &self.metadata_db,
+                parquet_meta,
+                object_meta,
+                location_id,
+                footer,
+            )
+            .await?;
         }
 
         Ok(())
@@ -65,8 +73,15 @@ impl RawDatasetWriter {
     pub async fn close(self) -> Result<(), BoxError> {
         for (_, writer) in self.writers {
             let location_id = writer.table.location_id();
-            if let Some((parquet_meta, object_meta)) = writer.close().await? {
-                commit_metadata(&self.metadata_db, parquet_meta, object_meta, location_id).await?
+            if let Some((parquet_meta, object_meta, footer)) = writer.close().await? {
+                commit_metadata(
+                    &self.metadata_db,
+                    parquet_meta,
+                    object_meta,
+                    location_id,
+                    footer,
+                )
+                .await?
             }
         }
 
@@ -84,6 +99,7 @@ pub async fn commit_metadata(
         ..
     }: ObjectMeta,
     location_id: i64,
+    footer: FooterBytes,
 ) -> Result<(), BoxError> {
     let file_name = parquet_meta.filename.clone();
     let parquet_meta = serde_json::to_value(parquet_meta)?;
@@ -95,6 +111,7 @@ pub async fn commit_metadata(
             object_e_tag,
             object_version,
             parquet_meta,
+            footer,
         )
         .await?;
 
@@ -147,7 +164,7 @@ impl RawTableWriter {
     pub async fn write(
         &mut self,
         table_rows: RawTableRows,
-    ) -> Result<Option<(ParquetMeta, ObjectMeta)>, BoxError> {
+    ) -> Result<Option<(ParquetMeta, ObjectMeta, FooterBytes)>, BoxError> {
         assert_eq!(table_rows.table.name(), self.table.table_name());
 
         let mut parquet_meta = None;
@@ -184,11 +201,20 @@ impl RawTableWriter {
             return Ok(parquet_meta);
         }
 
-        let bytes_written = self.current_file.as_ref().unwrap().bytes_written();
-
-        // Check if we need to create a new part file before writing this batch of rows, because the
-        // size of the current row group already exceeds the configured max `partition_size`.
-        if bytes_written >= self.partition_size as usize {
+        // A reorg is detected if the incoming block prev_hash does not match the hash of the
+        // block range previously written. This means we need to split the segment to ensure all
+        // blocks within a segment form a valid chain.
+        let reorg = match (
+            self.current_range.as_ref().map(|r| &r.hash),
+            table_rows.range.prev_hash.as_ref(),
+        ) {
+            (Some(a), Some(b)) => a != b,
+            _ => false,
+        };
+        // We also split the segment if we have reached the configured max `partition_size`.
+        let partition_size_exceeded =
+            self.current_file.as_ref().unwrap().bytes_written() >= self.partition_size as usize;
+        if reorg || partition_size_exceeded {
             // `parquet_meta` would be `Some` if we have had just created a new a file above, so no
             // bytes would have been written yet.
             assert!(parquet_meta.is_none());
@@ -228,7 +254,7 @@ impl RawTableWriter {
         Ok(parquet_meta)
     }
 
-    async fn close(mut self) -> Result<Option<(ParquetMeta, ObjectMeta)>, BoxError> {
+    async fn close(mut self) -> Result<Option<(ParquetMeta, ObjectMeta, FooterBytes)>, BoxError> {
         if self.current_file.is_none() {
             assert!(self.ranges_to_write.is_empty());
             return Ok(None);
@@ -238,7 +264,9 @@ impl RawTableWriter {
         self.close_current_file().await.map(Some)
     }
 
-    async fn close_current_file(&mut self) -> Result<(ParquetMeta, ObjectMeta), BoxError> {
+    async fn close_current_file(
+        &mut self,
+    ) -> Result<(ParquetMeta, ObjectMeta, FooterBytes), BoxError> {
         assert!(self.current_file.is_some());
         let file = self.current_file.take().unwrap();
         let range = self.current_range.take().unwrap();
@@ -282,7 +310,10 @@ impl ParquetFileWriter {
     }
 
     #[must_use]
-    pub async fn close(mut self, range: BlockRange) -> Result<(ParquetMeta, ObjectMeta), BoxError> {
+    pub async fn close(
+        mut self,
+        range: BlockRange,
+    ) -> Result<(ParquetMeta, ObjectMeta, FooterBytes), BoxError> {
         self.writer.flush().await?;
 
         debug!(
@@ -308,7 +339,10 @@ impl ParquetFileWriter {
         let location = Path::from_url_path(self.file_url.path())?;
         let object_meta = self.table.object_store().head(&location).await?;
 
-        Ok((parquet_meta, object_meta))
+        let footer =
+            extract_footer_bytes_from_file(&object_meta, self.table.object_store()).await?;
+
+        Ok((parquet_meta, object_meta, footer))
     }
 
     // This is calculate as:
