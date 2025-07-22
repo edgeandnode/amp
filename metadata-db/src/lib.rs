@@ -145,7 +145,7 @@ impl From<conn::ConnError> for Error {
 /// Connection pool to the metadata DB. Clones will refer to the same instance.
 #[derive(Clone, Debug)]
 pub struct MetadataDb {
-    pub(crate) pool: DbConnPool,
+    pub pool: DbConnPool,
     pub(crate) url: Arc<str>,
     dead_worker_interval: Duration,
 }

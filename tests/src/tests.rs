@@ -169,6 +169,51 @@ async fn persist_start_block_test() -> Result<(), BoxError> {
 }
 
 #[tokio::test]
+async fn persist_start_block_set_on_creation() -> Result<(), BoxError> {
+    tracing_helpers::register_logger();
+
+    // Spawn Anvil on a random port
+    let anvil = Anvil::new().port(0_u16).spawn();
+    let anvil_url = anvil.endpoint_url();
+
+    // Set up the test environment with the Anvil provider
+    let test_env =
+        TestEnv::new("persist_start_block_set_on_creation", true, Some(anvil_url.as_str())).await?;
+    let _client = TestClient::connect(&test_env).await?;
+
+    // Mine 10 blocks so the dump has something to process
+    let provider = ProviderBuilder::new().connect_http(anvil_url);
+    provider.anvil_mine(Some(10), None).await?;
+    assert_eq!(provider.get_block_number().await?, 10);
+
+    // Perform the initial dump directly
+    test_support::dump_dataset(&test_env.config, "anvil_rpc", 0, 9, 1, None)
+        .await?;
+
+    // Query the database to verify the start_block was persisted correctly
+    let location = test_env
+        .metadata_db
+        .get_active_location(metadata_db::TableId {
+            dataset: "anvil_rpc",
+            dataset_version: None,
+            table: "blocks",
+        })
+        .await?
+        .ok_or("No active location found for anvil_rpc.blocks")?;
+
+    // The location is a tuple of (Url, LocationId)
+    let location_id = location.1;
+
+    // Verify start_block is 0 via check_start_block API
+    test_env
+        .metadata_db
+        .check_start_block(location_id, 0)
+        .await?;
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn anvil_rpc_reorg() {
     tracing_helpers::register_logger();
 
