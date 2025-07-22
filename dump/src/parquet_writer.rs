@@ -184,7 +184,7 @@ impl RawTableWriter {
             return Ok(parquet_meta);
         }
 
-        // As reorg is detected if the incoming block prev_hash does not match the hash of the
+        // A reorg is detected if the incoming block prev_hash does not match the hash of the
         // block range previously written. This means we need to split the segment to ensure all
         // blocks within a segment form a valid chain.
         let reorg = match (
