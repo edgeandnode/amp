@@ -72,7 +72,7 @@ module segment {
         listValues(c).map(segmentStart).fold(segmentStart(c[0]), (acc, start) => min(acc, start))
     }
     pure def chainEnd(c: Chain): int = {
-        listValues(c).map(segmentEnd).fold(segmentEnd(c[0]), max)
+        listValues(c).map(segmentEnd).fold(segmentEnd(c[0]), (acc, end) => max(acc, end))
     }
     pure def chainFirst(c: Chain): Segment = {
         c[0]
@@ -102,18 +102,18 @@ module segment {
     // There is at most 1 canonical chain. Any table constructed from the same set of segments, in
     // arbitrary order, will have the same canonical chain.
     pure def tableCanonical(t: Table): Set[Chain] = {
-        pure val earliestStart = t.map(chainStart).fold(99, min)
+        pure val earliestStart = t.map(chainStart).fold(99, (acc, start) => min(acc, start))
         pure val chainsFromStart = t.filter(c => chainStart(c) == earliestStart)
 
-        pure val latestEnd = chainsFromStart.map(chainEnd).fold(0, max)
+        pure val latestEnd = chainsFromStart.map(chainEnd).fold(0, (acc, end) => max(acc, end))
         pure val longestChains = chainsFromStart.filter(c => chainEnd(c) == latestEnd)
 
         // Filter by minimum segments to favor compaction
-        pure val minLength = longestChains.map(c => c.length()).fold(99, min)
+        pure val minLength = longestChains.map(c => c.length()).fold(99, (acc, len) => min(acc, len))
         pure val compactChains = longestChains.filter(c => c.length() == minLength)
 
         // Use max hash sum as tiebreaker to ensure at most 1 result
-        pure val maxHashSum = compactChains.map(c => listValues(c).map(s => s.hash).setSum()).fold(0, max)
+        pure val maxHashSum = compactChains.map(c => listValues(c).map(s => s.hash).setSum()).fold(0, (acc, s) => max(acc, s))
         compactChains.filter(c => listValues(c).map(s => s.hash).setSum() == maxHashSum)
     }
     pure def tableNonCanonical(t: Table): Set[Chain] = {
