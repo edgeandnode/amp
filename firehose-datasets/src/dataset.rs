@@ -1,4 +1,5 @@
-use common::{DatasetValue, JsonSchema};
+use common::DatasetValue;
+use schemars::JsonSchema;
 use serde::Deserialize;
 
 use crate::Error;

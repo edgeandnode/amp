@@ -1,6 +1,8 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DatasetDefsCommon",
   "description": "All dataset definitions must have a kind, network and name. The name must match the filename. Schema is optional for TOML dataset format.",
+  "type": "object",
   "properties": {
     "kind": {
       "description": "Dataset kind. See specific dataset definitions for supported values.",
@@ -15,16 +17,36 @@
       "type": "string"
     },
     "schema": {
-      "additionalProperties": {
-        "additionalProperties": {
-          "description": "An Arrow data type, e.g., 'Int64', 'Utf8', etc.",
-          "type": "string"
-        },
-        "type": "object"
-      },
       "description": "Dataset schema. Lists the tables defined by this dataset.",
-      "type": "object"
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SerializableSchema"
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   },
-  "type": "object"
+  "required": [
+    "kind",
+    "network",
+    "name"
+  ],
+  "$defs": {
+    "DataType": {
+      "description": "Arrow data type, e.g. `Int32`, `Utf8`, etc.",
+      "type": "string"
+    },
+    "SerializableSchema": {
+      "description": "A serializable representation of a collection of [`arrow::datatypes::Schema`]s, without any metadata.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": {
+          "$ref": "#/$defs/DataType"
+        }
+      }
+    }
+  }
 }

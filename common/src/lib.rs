@@ -16,10 +16,8 @@ pub mod streaming_query;
 pub mod tracing_helpers;
 
 use std::{
-    collections::{BTreeMap, HashMap},
     future::Future,
     ops::RangeInclusive,
-    sync::Arc,
     time::{Duration, SystemTime},
 };
 
@@ -33,9 +31,9 @@ use datafusion::arrow::{
 };
 pub use datafusion::{arrow, parquet};
 use futures::Stream;
-pub use json_schema_derive::JsonSchema;
 use metadata::segments::BlockRange;
 pub use query_context::QueryContext;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 pub use store::Store;
 
@@ -194,88 +192,21 @@ pub fn block_range_intersection(
     }
 }
 
-pub trait JsonSchema {
-    fn json_schema() -> serde_json::Value;
-}
+/// Wrapper to implement [`JsonSchema`] for [`datafusion::arrow::datatypes::DataType`].
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DataTypeJsonSchema(pub datafusion::arrow::datatypes::DataType);
 
-impl JsonSchema for String {
-    fn json_schema() -> serde_json::Value {
-        serde_json::json!({
-            "type": "string",
-        })
+impl JsonSchema for DataTypeJsonSchema {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "DataType".into()
     }
-}
 
-impl JsonSchema for bool {
-    fn json_schema() -> serde_json::Value {
-        serde_json::json!({
-            "type": "boolean",
-        })
-    }
-}
-
-impl JsonSchema for DataType {
-    fn json_schema() -> serde_json::Value {
-        serde_json::json!({
-            "type": "string",
-            "description": "An Arrow data type, e.g., 'Int64', 'Utf8', etc.",
-        })
-    }
-}
-
-impl JsonSchema for semver::Version {
-    fn json_schema() -> serde_json::Value {
-        serde_json::json!({
-            "type": "string",
-            "description": "A semantic version string, e.g., '1.0.0'.",
-        })
-    }
-}
-
-impl JsonSchema for semver::VersionReq {
-    fn json_schema() -> serde_json::Value {
-        serde_json::json!({
-            "type": "string",
-            "description": "A semantic version requirement string, e.g., '>=1.0.0'.",
-        })
-    }
-}
-
-impl<T: JsonSchema> JsonSchema for BTreeMap<String, T> {
-    fn json_schema() -> serde_json::Value {
-        serde_json::json!({
-            "type": "object",
-            "additionalProperties": T::json_schema(),
-        })
-    }
-}
-
-impl<T: JsonSchema> JsonSchema for HashMap<String, T> {
-    fn json_schema() -> serde_json::Value {
-        serde_json::json!({
-            "type": "object",
-            "additionalProperties": T::json_schema(),
-        })
-    }
-}
-
-impl<T: JsonSchema> JsonSchema for Vec<T> {
-    fn json_schema() -> serde_json::Value {
-        serde_json::json!({
-            "type": "array",
-            "items": T::json_schema(),
-        })
-    }
-}
-
-impl JsonSchema for Arc<str> {
-    fn json_schema() -> serde_json::Value {
-        String::json_schema()
-    }
-}
-
-impl<T: JsonSchema> JsonSchema for Option<T> {
-    fn json_schema() -> serde_json::Value {
-        T::json_schema()
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        let mut schema = String::json_schema(generator);
+        schema.as_object_mut().unwrap().insert(
+            "description".to_string(),
+            serde_json::json!("Arrow data type, e.g. `Int32`, `Utf8`, etc."),
+        );
+        schema
     }
 }

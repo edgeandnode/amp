@@ -12,7 +12,7 @@ js-runtime = { path = "../js-runtime" }
 evm-rpc-datasets = { path = "../evm-rpc-datasets" }
 firehose-datasets = { path = "../firehose-datasets" }
 substreams-datasets = { path = "../substreams-datasets" }
-json-schema-derive = { path = "../json-schema-derive" }
+schemars.workspace = true
 toml.workspace = true
 thiserror.workspace = true
 object_store.workspace = true

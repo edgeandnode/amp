@@ -17,7 +17,6 @@ const NOZZLE_CRATES: &[&str] = &[
     "generate_manifest",
     "http_common",
     "js_runtime",
-    "json_schema_derive",
     "metadata_db",
     "nozzle",
     "registry_service",

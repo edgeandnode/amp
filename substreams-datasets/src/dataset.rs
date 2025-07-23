@@ -1,5 +1,6 @@
-use common::{DatasetValue, JsonSchema};
+use common::DatasetValue;
 use firehose_datasets::Error;
+use schemars::JsonSchema;
 use serde::Deserialize;
 pub const DATASET_KIND: &str = "substreams";
 

@@ -1895,10 +1895,10 @@ dependencies = [
  "indoc",
  "itertools 0.14.0",
  "js-runtime",
- "json-schema-derive",
  "metadata-db",
  "object_store",
  "rand 0.9.1",
+ "schemars 1.0.4",
  "semver 1.0.26",
  "serde",
  "serde_json",
@@ -2821,10 +2821,10 @@ dependencies = [
  "firehose-datasets",
  "futures",
  "js-runtime",
- "json-schema-derive",
  "metadata-db",
  "object_store",
  "rand 0.9.1",
+ "schemars 1.0.4",
  "serde",
  "serde_json",
  "substreams-datasets",
@@ -3139,7 +3139,7 @@ dependencies = [
  "common",
  "fs-err",
  "futures",
- "json-schema-derive",
+ "schemars 1.0.4",
  "serde",
  "serde_json",
  "serde_with",
@@ -3211,9 +3211,9 @@ dependencies = [
  "fs-err",
  "futures",
  "hex",
- "json-schema-derive",
  "prost",
  "prost-build",
+ "schemars 1.0.4",
  "serde",
  "serde_json",
  "thiserror 2.0.12",
@@ -4155,18 +4155,6 @@ checksum = "1cfaf33c695fc6e08064efbc1f72ec937429614f25eef83af942d0e227c3a28f"
 dependencies = [
  "once_cell",
  "wasm-bindgen",
-]
-
-[[package]]
-name = "json-schema-derive"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "regex",
- "serde_json",
- "syn 2.0.104",
- "tokio",
 ]
 
 [[package]]
@@ -5927,8 +5915,21 @@ checksum = "82d20c4491bc164fa2f6c5d44565947a52ad80b9505d8e36f8d54c27c739fcd0"
 dependencies = [
  "dyn-clone",
  "ref-cast",
+ "schemars_derive",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "schemars_derive"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33d020396d1d138dc19f1165df7545479dcd58d93810dc5d646a16e55abefa80"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "serde_derive_internals",
+ "syn 2.0.104",
 ]
 
 [[package]]
@@ -6056,6 +6057,17 @@ name = "serde_derive"
 version = "1.0.219"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5b0276cf7f2c73365f7157c8123c21cd9a50fbbd844757af28ca1f5925fc2a00"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.104",
+]
+
+[[package]]
+name = "serde_derive_internals"
+version = "0.29.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "18d26a20a969b9e3fdf2fc2d9f21eda6c40e2de84c9408bb5d3b05d499aae711"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6642,12 +6654,12 @@ dependencies = [
  "firehose-datasets",
  "fs-err",
  "futures",
- "json-schema-derive",
  "object_store",
  "prost",
  "prost-build",
  "prost-reflect",
  "reqwest",
+ "schemars 1.0.4",
  "serde",
  "serde_json",
  "tokio",
@@ -6782,6 +6794,7 @@ dependencies = [
  "object_store",
  "pretty_assertions",
  "rand 0.9.1",
+ "schemars 1.0.4",
  "serde",
  "serde_json",
  "serde_yaml",

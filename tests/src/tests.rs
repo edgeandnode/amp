@@ -1,8 +1,9 @@
 mod anvil;
 
-use common::{BoxError, JsonSchema, tracing_helpers};
+use common::{BoxError, tracing_helpers};
 use dataset_store::{DatasetDefsCommon, SerializableSchema};
 use generate_manifest;
+use schemars::schema_for;
 
 use crate::{
     steps::load_test_steps,
@@ -361,25 +362,21 @@ async fn sql_dataset_input_batch_size() {
 #[test]
 fn generate_json_schemas() {
     let json_schemas = [
-        ("EvmRpc", evm_rpc_datasets::DatasetDef::json_schema()),
+        ("EvmRpc", schema_for!(evm_rpc_datasets::DatasetDef)),
         (
             "Substreams",
-            substreams_datasets::dataset::DatasetDef::json_schema(),
+            schema_for!(substreams_datasets::dataset::DatasetDef),
         ),
         (
             "Firehose",
-            firehose_datasets::dataset::DatasetDef::json_schema(),
+            schema_for!(firehose_datasets::dataset::DatasetDef),
         ),
-        ("Common", dataset_store::DatasetDefsCommon::json_schema()),
-        (
-            "Sql",
-            dataset_store::sql_datasets::DatasetDef::json_schema(),
-        ),
-        ("Manifest", common::manifest::Manifest::json_schema()),
+        ("Common", schema_for!(dataset_store::DatasetDefsCommon)),
+        ("Sql", schema_for!(dataset_store::sql_datasets::DatasetDef)),
+        ("Manifest", schema_for!(common::manifest::Manifest)),
     ];
 
-    for (name, mut schema) in json_schemas {
-        schema["$schema"] = serde_json::json!("http://json-schema.org/draft-07/schema#");
+    for (name, schema) in json_schemas {
         let schema = serde_json::to_string_pretty(&schema).unwrap();
         let dir = env!("CARGO_MANIFEST_DIR");
         let dir = format!("{dir}/../dataset-def-schemas");

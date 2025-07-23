@@ -5,7 +5,7 @@ version.workspace = true
 
 [dependencies]
 metadata-db = { path = "../metadata-db", features = ["temp-db"] }
-json-schema-derive = { path = "../json-schema-derive" }
+schemars.workspace = true
 alloy.workspace = true
 atty.workspace = true
 bytes.workspace = true

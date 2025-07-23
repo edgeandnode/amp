@@ -4,12 +4,13 @@ use std::{
 };
 
 use common::{
-    BoxError, Dataset, DatasetValue, JsonSchema, SPECIAL_BLOCK_NUM, Table,
+    BoxError, Dataset, DatasetValue, SPECIAL_BLOCK_NUM, Table,
     query_context::{parse_sql, prepend_special_block_num_field},
 };
 use datafusion::sql::parser;
 use futures::StreamExt as _;
 use object_store::ObjectMeta;
+use schemars::JsonSchema;
 use serde::Deserialize;
 
 use crate::DatasetStore;

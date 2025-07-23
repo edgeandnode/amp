@@ -5,13 +5,13 @@
 use std::{collections::BTreeMap, sync::Arc};
 
 use datafusion::{
-    arrow::datatypes::{DataType, Field as ArrowField, Fields, Schema, SchemaRef},
+    arrow::datatypes::{Field as ArrowField, Fields, Schema, SchemaRef},
     common::DFSchemaRef,
 };
-use semver::{Version, VersionReq};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{Dataset, JsonSchema};
+use crate::{DataTypeJsonSchema, Dataset};
 
 pub const DATASET_KIND: &str = "manifest";
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -22,6 +22,7 @@ pub struct Manifest {
     pub name: String,
     /// Network name, e.g., `mainnet`.
     pub network: String,
+    /// Semver version of the dataset, e.g. `1.0.0`.
     pub version: Version,
 
     #[serde(default)]
@@ -34,10 +35,39 @@ pub struct Manifest {
     pub functions: BTreeMap<String, Function>,
 }
 
+/// Wrapper to implement [`JsonSchema`] for [`semver::Version`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Version(pub semver::Version);
+
+impl JsonSchema for Version {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "Version".into()
+    }
+
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        String::json_schema(generator)
+    }
+}
+
+/// Wrapper to implement [`JsonSchema`] for [`semver::VersionReq`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VersionReq(pub semver::VersionReq);
+
+impl JsonSchema for VersionReq {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "VersionReq".into()
+    }
+
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        String::json_schema(generator)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Dependency {
     pub owner: String,
     pub name: String,
+    /// Semver version requirement for the dependency, e.g. `^1.0.0` or `>=1.0.0 <2.0.0`.
     pub version: VersionReq,
 }
 
@@ -54,8 +84,8 @@ pub struct Table {
 #[serde(rename_all = "camelCase")]
 pub struct Function {
     // TODO: Support SQL type names, see https://datafusion.apache.org/user-guide/sql/data_types.html
-    pub input_types: Vec<DataType>,
-    pub output_type: DataType,
+    pub input_types: Vec<DataTypeJsonSchema>,
+    pub output_type: DataTypeJsonSchema,
     pub source: FunctionSource,
 }
 
@@ -96,7 +126,7 @@ pub struct Field {
     pub name: String,
     /// Data type.
     #[serde(rename = "type")]
-    pub type_: DataType,
+    pub type_: DataTypeJsonSchema,
     /// Boolean indicating whether the field is nullable.
     pub nullable: bool,
 }
@@ -125,7 +155,7 @@ impl From<DFSchemaRef> for TableSchema {
                     .iter()
                     .map(|f| Field {
                         name: f.name().clone(),
-                        type_: f.data_type().clone(),
+                        type_: DataTypeJsonSchema(f.data_type().clone()),
                         nullable: f.is_nullable(),
                     })
                     .collect(),
@@ -139,7 +169,7 @@ impl From<ArrowSchema> for SchemaRef {
         let fields = schema
             .fields
             .into_iter()
-            .map(|f| ArrowField::new(f.name, f.type_, f.nullable));
+            .map(|f| ArrowField::new(f.name, f.type_.0, f.nullable));
 
         Arc::new(Schema::new(Fields::from_iter(fields)))
     }
@@ -164,8 +194,8 @@ impl From<Manifest> for Dataset {
                 .into_iter()
                 .map(|(name, f)| LogicalFunction {
                     name,
-                    input_types: f.input_types,
-                    output_type: f.output_type,
+                    input_types: f.input_types.into_iter().map(|dt| dt.0).collect(),
+                    output_type: f.output_type.0,
                     source: LogicalFunctionSource {
                         source: f.source.source,
                         filename: f.source.filename,
