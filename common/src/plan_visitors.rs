@@ -2,12 +2,13 @@ use std::{collections::BTreeSet, sync::Arc};
 
 use datafusion::{
     common::{
-        DFSchema, plan_err,
+        plan_err,
         tree_node::{Transformed, TransformedResult as _, TreeNode as _, TreeNodeRecursion},
     },
     datasource::TableType,
     error::DataFusionError,
     logical_expr::{Filter, LogicalPlan, Projection, Sort, TableScan},
+    optimizer::{OptimizerContext, OptimizerRule, push_down_filter::PushDownFilter},
     prelude::{Expr, col, lit},
     sql::TableReference,
 };
@@ -76,39 +77,32 @@ pub fn propagate_block_num(plan: LogicalPlan) -> Result<LogicalPlan, DataFusionE
     .data()
 }
 
-/// If the original query does not select the `SPECIAL_BLOCK_NUM` column, this will
-/// project the `SPECIAL_BLOCK_NUM` out of the plan. (Essentially, add a projection
-/// on top of the query which selects all columns except `SPECIAL_BLOCK_NUM`.)
+/// This will project the `SPECIAL_BLOCK_NUM` out of the plan by adding a projection on top of the
+/// query which selects all columns except `SPECIAL_BLOCK_NUM`.
 pub fn unproject_special_block_num_column(
     plan: LogicalPlan,
-    original_schema: Arc<DFSchema>,
 ) -> Result<LogicalPlan, DataFusionError> {
-    if original_schema
-        .fields()
-        .iter()
-        .any(|f| f.name() == SPECIAL_BLOCK_NUM)
-    {
-        // If the original schema already contains the `SPECIAL_BLOCK_NUM` column, we don't need to
-        // project it out.
+    let fields = plan.schema().fields();
+    if !fields.iter().any(|f| f.name() == SPECIAL_BLOCK_NUM) {
+        // Nothing to do.
         return Ok(plan);
     }
-
-    let exprs = original_schema
-        .fields()
+    let exprs = fields
         .iter()
+        .filter(|f| f.name() != SPECIAL_BLOCK_NUM)
         .map(|f| col(f.name()))
         .collect();
-    let projection = Projection::try_new_with_schema(exprs, Arc::new(plan), original_schema)
-        .map_err(|e| {
-            internal!(
-                "error while removing {} from projection: {}",
-                SPECIAL_BLOCK_NUM,
-                e
-            )
-        })?;
+    let projection = Projection::try_new(exprs, Arc::new(plan)).map_err(|e| {
+        internal!(
+            "error while removing {} from projection: {}",
+            SPECIAL_BLOCK_NUM,
+            e
+        )
+    })?;
     Ok(LogicalPlan::Projection(projection))
 }
 
+/// Adds `where start <= _block_num and _block_num <= end` to the plan and runs filter pushdown.
 #[instrument(skip_all, err)]
 pub fn constrain_by_block_num(
     plan: LogicalPlan,
@@ -131,12 +125,13 @@ pub fn constrain_by_block_num(
                 BLOCK_NUM
             };
             // `where start <= block_num and block_num <= end`
-            // Is it ok for this to be unqualified? Or should it be `TABLE_NAME.block_num`?
             let mut predicate = col(column_name).lt_eq(lit(end));
             predicate = predicate.and(lit(start).lt_eq(col(column_name)));
 
-            let with_filter = Filter::try_new(predicate, Arc::new(node))?;
-            Ok(Transformed::yes(LogicalPlan::Filter(with_filter)))
+            let with_filter = LogicalPlan::Filter(Filter::try_new(predicate, Arc::new(node))?);
+            let with_pushdown =
+                PushDownFilter::new().rewrite(with_filter, &OptimizerContext::default())?;
+            Ok(Transformed::yes(with_pushdown.data))
         }
         _ => Ok(Transformed::no(node)),
     })

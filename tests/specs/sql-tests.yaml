@@ -491,4 +491,4 @@
 - name: basic_explain
   query: EXPLAIN select block_num FROM eth_rpc.blocks
   results: |
-    [{"plan":"Projection: eth_rpc.blocks.block_num\n  TableScan: eth_rpc.blocks","plan_type":"initial_logical_plan"}]
+    [{"plan":"Projection: _block_num, eth_rpc.blocks.block_num\n  TableScan: eth_rpc.blocks projection=[_block_num, block_num]","plan_type":"logical_plan"},{"plan":"DataSourceExec: file_groups={1 group: [[015000000.parquet]]}, projection=[_block_num, block_num], output_orderings=[[_block_num@0 ASC NULLS LAST], [block_num@1 ASC NULLS LAST]], file_type=parquet, predicate=true\n","plan_type":"physical_plan"}]
