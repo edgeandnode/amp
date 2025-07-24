@@ -47,7 +47,7 @@ pub(crate) fn pb_to_rows(
             if table_changes.is_empty() {
                 return None;
             }
-            let block_num = *range.numbers.start();
+            let block_num = range.start();
             let rows = table_changes_to_rows(&table_changes, table.schema().clone(), block_num);
             if let Err(err) = rows {
                 return Some(Err(err

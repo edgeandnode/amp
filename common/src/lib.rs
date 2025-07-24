@@ -106,11 +106,11 @@ impl RawTableRows {
     }
 
     pub fn block_num(&self) -> BlockNum {
-        *self.range.numbers.start()
+        self.range.start()
     }
 
     fn check_invariants(range: &BlockRange, rows: &RecordBatch) -> Result<(), BoxError> {
-        if range.numbers.start() != range.numbers.end() {
+        if range.start() != range.end() {
             return Err("block range must contain a single block number".into());
         }
         if rows.num_rows() == 0 {
@@ -127,10 +127,10 @@ impl RawTableRows {
         // Unwrap: `rows` is not empty.
         let start = arrow::compute::kernels::aggregate::min(block_nums).unwrap();
         let end = arrow::compute::kernels::aggregate::max(block_nums).unwrap();
-        if start != *range.numbers.start() {
+        if start != range.start() {
             return Err(format!("contains unexpected block_num: {}", start).into());
         };
-        if end != *range.numbers.start() {
+        if end != range.start() {
             return Err(format!("contains unexpected block_num: {}", end).into());
         };
 
