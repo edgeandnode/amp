@@ -91,11 +91,11 @@ impl WorkerMetadataDb {
     ///
     /// This is used by the worker to recover its state after a restart. Retries on connection
     /// errors.
-    pub async fn get_scheduled_jobs_with_details(
+    pub async fn get_scheduled_jobs(
         &self,
         node_id: &WorkerNodeId,
     ) -> Result<Vec<JobMeta>, MetadataDbError> {
-        (|| self.0.get_scheduled_jobs_with_details(node_id))
+        (|| self.0.get_scheduled_jobs(node_id))
             .retry(retry_policy())
             .when(|err| err.is_connection_error())
             .notify(|err, dur| {
@@ -116,11 +116,11 @@ impl WorkerMetadataDb {
     ///
     /// This is used by the worker's reconciliation loop to synchronize its state with the metadata
     /// DB state. Retries on connection errors.
-    pub async fn get_active_jobs_with_details(
+    pub async fn get_active_jobs(
         &self,
         node_id: &WorkerNodeId,
     ) -> Result<Vec<JobMeta>, MetadataDbError> {
-        (|| self.0.get_active_jobs_with_details(node_id))
+        (|| self.0.get_active_jobs(node_id))
             .retry(retry_policy())
             .when(|err| err.is_connection_error())
             .notify(|err, dur| {
