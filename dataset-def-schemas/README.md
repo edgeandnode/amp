@@ -10,3 +10,8 @@ be supported:
 - for `firehose` datasets, see [Firehose.json](./Firehose.json)
 - for `manifest` datasets, see [Manifest.json](./Manifest.json)
 - for `substreams` datasets, see [Substreams.json](./Substreams.json)
+
+The `manifest` datasets are also referred to as "user datasets", whereas the other
+types are also referred to as "raw datasets". Unlike raw datasets, which extract
+blockchain data directly, user datasets execute user-defined SQL queries against
+existing datasets' tables to create derived or transformed datasets.
