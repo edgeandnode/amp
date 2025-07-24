@@ -40,6 +40,26 @@ pub enum Error {
 
     #[error("invalid request: {0}")]
     InvalidRequest(BoxError),
+
+    /// Invalid manifest
+    #[error("invalid manifest: {0}")]
+    InvalidManifest(String),
+
+    /// Manifest validation error
+    #[error("Manifest name '{0}' and version '{1}' do not match with manifest")]
+    ManifestValidationError(String, String),
+
+    /// Manifest registration error
+    #[error("Failed to register manifest: {0}")]
+    ManifestRegistrationError(String),
+
+    /// Manifest is required but not provided
+    #[error("Manifest is required but not provided for dataset '{0}' version '{1}'")]
+    ManifestRequired(String, String),
+
+    /// Dataset already exists
+    #[error("Dataset '{0}' version '{1}' already exists")]
+    DatasetAlreadyExists(String, String),
 }
 
 impl RequestError for Error {
@@ -53,6 +73,11 @@ impl RequestError for Error {
             Error::DatasetDefStoreError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::UnexpectedJobStatus(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::InvalidRequest(_) => StatusCode::BAD_REQUEST,
+            Error::InvalidManifest(_) => StatusCode::BAD_REQUEST,
+            Error::ManifestValidationError(_, _) => StatusCode::BAD_REQUEST,
+            Error::ManifestRegistrationError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::ManifestRequired(_, _) => StatusCode::BAD_REQUEST,
+            Error::DatasetAlreadyExists(_, _) => StatusCode::CONFLICT,
         }
     }
 
@@ -66,6 +91,11 @@ impl RequestError for Error {
             Error::DatasetDefStoreError(_) => "DATASET_DEF_STORE_ERROR",
             Error::UnexpectedJobStatus(_) => "UNEXPECTED_JOB_STATUS",
             Error::InvalidRequest(_) => "INVALID_REQUEST",
+            Error::InvalidManifest(_) => "INVALID_MANIFEST",
+            Error::ManifestValidationError(_, _) => "MANIFEST_VALIDATION_ERROR",
+            Error::ManifestRegistrationError(_) => "MANIFEST_REGISTRATION_ERROR",
+            Error::ManifestRequired(_, _) => "MANIFEST_REQUIRED",
+            Error::DatasetAlreadyExists(_, _) => "DATASET_ALREADY_EXISTS",
         }
     }
 }

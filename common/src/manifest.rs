@@ -14,16 +14,22 @@ use serde::{Deserialize, Serialize};
 use crate::{DataTypeJsonSchema, Dataset};
 
 pub const DATASET_KIND: &str = "manifest";
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum ManifestKind {
+    Manifest,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Manifest {
-    /// Dataset kind, must be `manifest`.
-    pub kind: String,
     /// Dataset name.
     pub name: String,
     /// Network name, e.g., `mainnet`.
     pub network: String,
     /// Semver version of the dataset, e.g. `1.0.0`.
     pub version: Version,
+    pub kind: ManifestKind,
 
     #[serde(default)]
     pub dependencies: BTreeMap<String, Dependency>,
@@ -143,6 +149,11 @@ impl Manifest {
                 )
             })
             .collect()
+    }
+
+    pub fn update_name_field(&mut self, new_name: &str) -> &mut Self {
+        self.name = new_name.to_string();
+        self
     }
 }
 

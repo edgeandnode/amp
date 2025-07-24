@@ -39,7 +39,7 @@ pub async fn serve(
         .route("/jobs/{id}", get(jobs::get_by_id::handler))
         .route("/jobs/{id}/stop", put(jobs::stop::handler))
         .with_state(Ctx {
-            config,
+            _config: config,
             metadata_db,
             store,
             scheduler,
