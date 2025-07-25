@@ -269,6 +269,33 @@ impl MetadataDb {
         Ok(job_id)
     }
 
+    /// Atomically update job status to StopRequested and notify worker
+    ///
+    /// This function performs in a single transaction:
+    ///  1. Updates the job status to StopRequested
+    ///  2. Sends a notification to the worker
+    ///
+    /// Note: This method assumes validation has already been performed by the caller.
+    /// If the transaction steps fail, it is rolled back and no notification is sent.
+    #[instrument(skip(self), err)]
+    pub async fn request_job_stop(
+        &self,
+        job_id: &JobId,
+        node_id: &WorkerNodeId,
+    ) -> Result<(), Error> {
+        // Use transaction for atomic update and notification
+        let mut tx = self.pool.begin().await?;
+
+        // Update job status to StopRequested
+        workers::jobs::update_job_status(&mut *tx, job_id, JobStatus::StopRequested).await?;
+
+        // Send notification to worker
+        workers::events::notify(&mut *tx, JobNotification::stop(node_id.clone(), *job_id)).await?;
+
+        tx.commit().await?;
+        Ok(())
+    }
+
     /// List jobs with cursor-based pagination support
     ///
     /// Uses cursor-based pagination where `last_job_id` is the ID of the last job

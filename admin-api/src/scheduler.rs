@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use common::{BoxError, Dataset, catalog::physical::PhysicalTable, config::Config};
 use dump::worker::JobDesc;
-use metadata_db::{JobId, MetadataDb};
+use metadata_db::{JobId, MetadataDb, WorkerNodeId};
 use rand::seq::IndexedRandom as _;
 
 #[derive(Clone)]
@@ -61,5 +61,14 @@ impl Scheduler {
             .await?;
 
         Ok(job_id)
+    }
+
+    /// Stop a running job
+    ///
+    /// Note: This method assumes validation has already been performed by the caller.
+    /// It directly delegates to the atomic MetadataDb operation.
+    pub async fn stop_job(&self, job_id: &JobId, node_id: &WorkerNodeId) -> Result<(), BoxError> {
+        self.metadata_db.request_job_stop(job_id, node_id).await?;
+        Ok(())
     }
 }
