@@ -9,6 +9,7 @@ async-stream.workspace = true
 chrono.workspace = true
 common = { path = "../common" }
 firehose-datasets = { path = "../firehose-datasets" }
+schemars.workspace = true
 futures.workspace = true
 tracing.workspace = true
 prost-reflect = "0.15.0"

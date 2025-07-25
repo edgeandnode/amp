@@ -5,6 +5,7 @@ version.workspace = true
 
 [dependencies]
 metadata-db = { path = "../metadata-db", features = ["temp-db"] }
+schemars.workspace = true
 alloy.workspace = true
 atty.workspace = true
 bytes.workspace = true

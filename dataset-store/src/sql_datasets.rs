@@ -10,6 +10,7 @@ use common::{
 use datafusion::sql::parser;
 use futures::StreamExt as _;
 use object_store::ObjectMeta;
+use schemars::JsonSchema;
 use serde::Deserialize;
 
 use crate::DatasetStore;
@@ -37,10 +38,13 @@ impl SqlDataset {
 
 pub const DATASET_KIND: &str = "sql";
 
-#[derive(Debug, Deserialize)]
-struct DatasetDef {
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct DatasetDef {
+    /// Dataset kind, must be `sql`.
     pub kind: String,
+    /// Network name, e.g., `mainnet`.
     pub network: String,
+    /// Dataset name.
     pub name: String,
 }
 
