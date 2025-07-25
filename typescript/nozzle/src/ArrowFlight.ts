@@ -6,11 +6,11 @@ import { Template } from "@effect/platform"
 import type { RecordBatch } from "apache-arrow"
 import { RecordBatchReader, Table } from "apache-arrow"
 import { Chunk, Context, Data, Effect, Layer, Option, Stream } from "effect"
-import * as Flight from "./proto/Flight_pb.js"
-import * as FlightSql from "./proto/FlightSql_pb.js"
+import * as Flight from "./proto/Flight_pb.ts"
+import * as FlightSql from "./proto/FlightSql_pb.ts"
 
-export * as Flight from "./proto/Flight_pb.js"
-export * as FlightSql from "./proto/FlightSql_pb.js"
+export * as Flight from "./proto/Flight_pb.ts"
+export * as FlightSql from "./proto/FlightSql_pb.ts"
 
 export class ArrowFlightError extends Data.TaggedError("ArrowFlightError")<{
   cause?: unknown

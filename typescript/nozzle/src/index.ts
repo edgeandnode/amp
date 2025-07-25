@@ -1,7 +1,7 @@
-import type { Context } from "./ConfigLoader.js"
-import type * as Model from "./Model.js"
+import type { Context } from "./ConfigLoader.ts"
+import type * as Model from "./Model.ts"
 
-export type { Context } from "./ConfigLoader.js"
+export type { Context } from "./ConfigLoader.ts"
 
 export * as Api from "./Api.js"
 export * as Arrow from "./Arrow.js"

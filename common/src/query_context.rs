@@ -1,7 +1,11 @@
 use std::{ops::RangeInclusive, sync::Arc};
 
-use arrow::{array::RecordBatch, compute::concat_batches};
+use arrow::{
+    array::{ArrayRef, RecordBatch},
+    compute::concat_batches,
+};
 use async_udf::physical_optimizer::AsyncFuncRule;
+use axum::response::IntoResponse;
 use bincode::{Decode, Encode, config};
 use bytes::Bytes;
 use datafusion::{
@@ -17,7 +21,8 @@ use datafusion::{
         runtime_env::RuntimeEnv,
     },
     logical_expr::{AggregateUDF, Extension, LogicalPlan, ScalarUDF},
-    physical_plan::{ExecutionPlan, displayable},
+    physical_plan::{ExecutionPlan, displayable, stream::RecordBatchStreamAdapter},
+    physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner as _},
     sql::{TableReference, parser},
 };
 use datafusion_proto::{
@@ -26,9 +31,10 @@ use datafusion_proto::{
     },
     logical_plan::LogicalExtensionCodec,
 };
-use futures::{FutureExt as _, TryStreamExt};
+use futures::{FutureExt as _, TryStreamExt, stream};
 use js_runtime::isolate_pool::IsolatePool;
 use metadata_db::{LocationId, TableId};
+use regex::Regex;
 use thiserror::Error;
 use tracing::{debug, instrument};
 
@@ -41,8 +47,7 @@ use crate::{
     },
     plan_visitors::{
         constrain_by_block_num, extract_table_references_from_plan,
-        forbid_underscore_prefixed_aliases, order_by_block_num, propagate_block_num,
-        unproject_special_block_num_column,
+        forbid_underscore_prefixed_aliases, unproject_special_block_num_column,
     },
     stream_helpers::is_streaming,
 };
@@ -76,6 +81,29 @@ pub enum Error {
 
     #[error("DataFusion configuration error: {0}")]
     ConfigError(DataFusionError),
+}
+
+impl IntoResponse for Error {
+    fn into_response(self) -> axum::response::Response {
+        let err = self.to_string();
+        let status = match self {
+            Error::SqlParseError(_) => axum::http::StatusCode::BAD_REQUEST,
+            Error::InvalidPlan(_) => axum::http::StatusCode::BAD_REQUEST,
+            Error::PlanEncodingError(_) | Error::PlanDecodingError(_) => {
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR
+            }
+            Error::DatasetError(_) => axum::http::StatusCode::BAD_REQUEST,
+            Error::ConfigError(_) => axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            Error::PlanningError(_) => axum::http::StatusCode::BAD_REQUEST,
+            Error::ExecutionError(_) | Error::MetaTableError(_) => {
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR
+            }
+        };
+        let body = serde_json::json!({
+            "error": err,
+        });
+        (status, axum::Json(body)).into_response()
+    }
 }
 
 /// A context for planning SQL queries.
@@ -253,7 +281,7 @@ impl QueryContext {
     }
 
     pub async fn plan_sql(&self, query: parser::Statement) -> Result<LogicalPlan, Error> {
-        let ctx = self.datafusion_ctx().await?;
+        let ctx = self.datafusion_ctx()?;
         let plan = sql_to_plan(&ctx, query).await?;
         Ok(plan)
     }
@@ -264,15 +292,15 @@ impl QueryContext {
         debug!("query: {}", query);
 
         let statement = parse_sql(query)?;
-        let ctx = self.datafusion_ctx().await?;
+        let ctx = self.datafusion_ctx()?;
         let plan = sql_to_plan(&ctx, statement).await?;
 
-        execute_plan(&ctx, plan).await
+        execute_plan(&ctx, plan, true).await
     }
 
     /// This will deserialize the plan with empty tables in the `TableScan` nodes.
     pub async fn plan_from_bytes(&self, bytes: &[u8]) -> Result<LogicalPlan, Error> {
-        let ctx = self.datafusion_ctx().await?;
+        let ctx = self.datafusion_ctx()?;
         let plan = logical_plan_from_bytes_with_extension_codec(bytes, &ctx, &TableProviderCodec)
             .map_err(Error::PlanDecodingError)?;
         verify_plan(&plan)?;
@@ -282,7 +310,7 @@ impl QueryContext {
     /// Because `DatasetContext` is read-only, planning and execution can be done on ephemeral
     /// sessions created by this function, and they will behave the same as if they had been run
     /// against a persistent `SessionContext`
-    async fn datafusion_ctx(&self) -> Result<SessionContext, Error> {
+    fn datafusion_ctx(&self) -> Result<SessionContext, Error> {
         let state = SessionStateBuilder::new()
             .with_config(self.session_config.clone())
             .with_runtime_env(self.env.df_env.clone())
@@ -293,7 +321,6 @@ impl QueryContext {
 
         for table in self.catalog.tables() {
             create_physical_table(&ctx, table.clone())
-                .await
                 .map_err(|e| Error::DatasetError(e.into()))?;
         }
 
@@ -314,19 +341,27 @@ impl QueryContext {
         }
     }
 
+    pub async fn optimize_plan(&self, plan: &LogicalPlan) -> Result<LogicalPlan, Error> {
+        self.datafusion_ctx()?
+            .state()
+            .optimize(plan)
+            .map_err(Error::PlanningError)
+    }
+
     pub async fn execute_plan(
         &self,
         plan: LogicalPlan,
+        logical_optimize: bool,
     ) -> Result<SendableRecordBatchStream, Error> {
-        let ctx = self.datafusion_ctx().await?;
-        execute_plan(&ctx, plan).await
+        let ctx = self.datafusion_ctx()?;
+        execute_plan(&ctx, plan, logical_optimize).await
     }
 
     /// This will load the result set entirely in memory, so it should be used with caution.
     pub async fn execute_and_concat(&self, plan: LogicalPlan) -> Result<RecordBatch, Error> {
         let schema = plan.schema().inner().clone();
-        let ctx = self.datafusion_ctx().await?;
-        let batch_stream = execute_plan(&ctx, plan)
+        let ctx = self.datafusion_ctx()?;
+        let batch_stream = execute_plan(&ctx, plan, true)
             .await?
             .try_collect::<Vec<_>>()
             .await
@@ -406,17 +441,19 @@ impl QueryContext {
     /// This will:
     /// - Validate that dependencies have synced the required block range.
     /// - Inject block range constraints into the plan.
-    /// - Inject 'order by block_num' into the plan.
     /// - Execute the plan.
+    ///
+    /// This assumes that the `_block_num` column has already been propagated and is therefore
+    ///  present in the schema of `plan`.
     #[instrument(skip_all, err)]
     pub async fn execute_plan_for_range(
         &self,
         plan: LogicalPlan,
         start: BlockNum,
         end: BlockNum,
-        is_sql_dataset: bool,
+        preserve_block_num: bool,
+        logical_optimize: bool,
     ) -> Result<SendableRecordBatchStream, BoxError> {
-        let original_schema = plan.schema().clone();
         let tables = extract_table_references_from_plan(&plan)?;
 
         // Validate dependency block ranges
@@ -437,19 +474,13 @@ impl QueryContext {
         }
 
         let plan = {
-            forbid_underscore_prefixed_aliases(&plan)?;
-            let plan = propagate_block_num(plan)?;
-            let plan = constrain_by_block_num(plan, start, end)?;
-            let plan = order_by_block_num(plan);
-            if is_sql_dataset {
-                // SQL datasets always project the special block number column, because it has
-                // to end up in the file.
-                plan
-            } else {
-                unproject_special_block_num_column(plan, original_schema)?
+            let mut plan = constrain_by_block_num(plan, start, end)?;
+            if !preserve_block_num {
+                plan = unproject_special_block_num_column(plan)?
             }
+            plan
         };
-        Ok(self.execute_plan(plan).await?)
+        Ok(self.execute_plan(plan, logical_optimize).await?)
     }
 }
 
@@ -465,6 +496,11 @@ async fn sql_to_plan(ctx: &SessionContext, query: parser::Statement) -> Result<L
 }
 
 fn verify_plan(plan: &LogicalPlan) -> Result<(), Error> {
+    forbid_underscore_prefixed_aliases(&plan).map_err(Error::InvalidPlan)?;
+    read_only_check(plan)
+}
+
+fn read_only_check(plan: &LogicalPlan) -> Result<(), Error> {
     SQLOptions::new()
         .with_allow_ddl(false)
         .with_allow_dml(false)
@@ -488,7 +524,7 @@ async fn create_empty_tables(
     Ok(())
 }
 
-async fn create_physical_table(
+fn create_physical_table(
     ctx: &SessionContext,
     provider: Arc<PhysicalTable>,
 ) -> Result<(), DataFusionError> {
@@ -547,23 +583,80 @@ pub fn parse_sql(sql: &str) -> Result<parser::Statement, Error> {
     Ok(statement)
 }
 
+/// `logical_optimize` controls whether logical optimizations should be applied to `plan`.
 async fn execute_plan(
     ctx: &SessionContext,
-    plan: LogicalPlan,
+    mut plan: LogicalPlan,
+    logical_optimize: bool,
 ) -> Result<SendableRecordBatchStream, Error> {
     use datafusion::physical_plan::execute_stream;
 
-    verify_plan(&plan)?;
+    read_only_check(&plan)?;
     debug!("logical plan: {}", plan.to_string().replace('\n', "\\n"));
 
-    let physical_plan = ctx
-        .state()
-        .create_physical_plan(&plan)
+    if logical_optimize {
+        plan = ctx.state().optimize(&plan).map_err(Error::PlanningError)?;
+    }
+
+    let is_explain = matches!(plan, LogicalPlan::Explain(_) | LogicalPlan::Analyze(_));
+
+    let planner = DefaultPhysicalPlanner::default();
+    let physical_plan = planner
+        .create_physical_plan(&plan, &ctx.state())
         .await
         .map_err(Error::PlanningError)?;
     debug!("physical plan: {}", print_physical_plan(&*physical_plan));
 
-    execute_stream(physical_plan, ctx.task_ctx()).map_err(Error::PlanningError)
+    match is_explain {
+        false => execute_stream(physical_plan, ctx.task_ctx()).map_err(Error::PlanningError),
+        true => execute_explain(physical_plan, ctx).await,
+    }
+}
+
+// We do special handling for `Explain` plans to ensure that the output is sanitized from full paths.
+async fn execute_explain(
+    physical_plan: Arc<dyn ExecutionPlan>,
+    ctx: &SessionContext,
+) -> Result<SendableRecordBatchStream, Error> {
+    use datafusion::physical_plan::execution_plan;
+
+    let schema = physical_plan.schema().clone();
+    let output = execution_plan::collect(physical_plan, ctx.task_ctx())
+        .await
+        .map_err(Error::ExecutionError)?;
+
+    let concatenated = concat_batches(&schema, &output).unwrap();
+    let sanitized = sanitize_explain(&concatenated);
+
+    let stream =
+        RecordBatchStreamAdapter::new(schema, stream::iter(std::iter::once(Ok(sanitized))));
+    Ok(Box::pin(stream))
+}
+
+// Sanitize the explain output by removing full paths and and keeping only the filenames.
+fn sanitize_explain(batch: &RecordBatch) -> RecordBatch {
+    use arrow::array::StringArray;
+
+    let plan_idx = batch.schema().index_of("plan").unwrap();
+    let plan_column = batch
+        .column(plan_idx)
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .unwrap();
+
+    // Match full paths to .parquet files and capture just the filename
+    // This handles paths with forward or backward slashes
+    let regex = Regex::new(r"(?:[^\s\[,]+[/\\])?([^\s\[,/\\]+\.parquet)").unwrap();
+
+    let transformed: StringArray = plan_column
+        .iter()
+        .map(|value| value.map(|v| regex.replace_all(v, "$1").into_owned()))
+        .collect();
+
+    let mut columns: Vec<ArrayRef> = batch.columns().to_vec();
+    columns[plan_idx] = Arc::new(transformed);
+
+    RecordBatch::try_new(batch.schema(), columns).unwrap()
 }
 
 pub fn prepend_special_block_num_field(schema: &DFSchema) -> Arc<DFSchema> {

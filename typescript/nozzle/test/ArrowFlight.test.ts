@@ -2,8 +2,8 @@ import { createGrpcTransport } from "@connectrpc/connect-node"
 import { expect, it } from "@effect/vitest"
 import { type Table } from "apache-arrow"
 import { Array, Config, Effect, Layer, Schema } from "effect"
-import * as Arrow from "../src/Arrow.js"
-import * as ArrowFlight from "../src/ArrowFlight.js"
+import * as Arrow from "nozzl/Arrow"
+import * as ArrowFlight from "nozzl/ArrowFlight"
 
 const flight = Config.string("NOZZLE_ARROW_FLIGHT_URL").pipe(
   Effect.map((url) => createGrpcTransport({ baseUrl: url })),
@@ -32,7 +32,7 @@ it.layer(flight)((it) => {
       const flight = yield* ArrowFlight.ArrowFlight
 
       // TODO: Cover all data types.
-      const table = yield* flight.table`SELECT 
+      const table = yield* flight.table`SELECT
         arrow_cast(null, 'Null') AS null_col,
         arrow_cast(true, 'Boolean') AS boolean_col,
         arrow_cast(1, 'Int8') AS int8_col,

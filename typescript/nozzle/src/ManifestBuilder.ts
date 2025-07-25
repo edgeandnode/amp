@@ -1,6 +1,6 @@
 import { Data, Effect } from "effect"
-import * as Api from "./Api.js"
-import * as Model from "./Model.js"
+import * as Api from "./Api.ts"
+import * as Model from "./Model.ts"
 
 export class ManifestBuilderError extends Data.TaggedError("ManifestBuilderError")<{
   readonly cause: unknown
@@ -21,7 +21,7 @@ export class ManifestBuilder extends Effect.Service<ManifestBuilder>()("Nozzle/M
             }))
 
             if (schema.networks.length != 1) {
-              yield* Effect.fail(
+              return yield* Effect.fail(
                 new ManifestBuilderError({
                   cause: undefined,
                   message: `Expected 1 network for SQL query, got ${schema.networks}`,

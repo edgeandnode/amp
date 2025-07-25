@@ -10,9 +10,8 @@ use std::{
 use async_stream::stream;
 use async_udf::functions::AsyncScalarUDF;
 use common::{
-    BlockNum, BlockStreamer, BoxError, Dataset, DatasetValue, LogicalCatalog, QueryContext,
-    RawDatasetRows, SPECIAL_BLOCK_NUM, Store,
-    arrow::datatypes::DataType,
+    BlockNum, BlockStreamer, BoxError, DataTypeJsonSchema, Dataset, DatasetValue, LogicalCatalog,
+    QueryContext, RawDatasetRows, SPECIAL_BLOCK_NUM, Store,
     catalog::physical::{Catalog, PhysicalTable},
     config::Config,
     evm::udfs::EthCall,
@@ -31,6 +30,7 @@ use js_runtime::isolate_pool::IsolatePool;
 use metadata_db::MetadataDb;
 use object_store::ObjectMeta;
 use rand::seq::SliceRandom;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sql_datasets::SqlDataset;
 use thiserror::Error;
@@ -676,18 +676,22 @@ impl RawDataset {
 }
 
 /// All dataset definitions must have a kind, network and name. The name must match the filename. Schema is optional for TOML dataset format.
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, JsonSchema)]
 pub struct DatasetDefsCommon {
+    /// Dataset kind. See specific dataset definitions for supported values.
     pub kind: String,
+    /// Network name, e.g. "mainnet".
     pub network: String,
+    /// Dataset name.
     pub name: String,
+    /// Dataset schema. Lists the tables defined by this dataset.
     pub schema: Option<SerializableSchema>,
 }
 
 /// A serializable representation of a collection of [`arrow::datatypes::Schema`]s, without any metadata.
-#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 pub struct SerializableSchema(
-    std::collections::HashMap<String, std::collections::HashMap<String, DataType>>,
+    std::collections::HashMap<String, std::collections::HashMap<String, DataTypeJsonSchema>>,
 );
 
 /// All providers definitions must have a kind and network.
@@ -785,7 +789,10 @@ impl From<Vec<common::catalog::logical::Table>> for SerializableSchema {
                     .iter()
                     .filter(|&field| field.name() != SPECIAL_BLOCK_NUM)
                     .fold(std::collections::HashMap::new(), |mut acc, field| {
-                        acc.insert(field.name().clone(), field.data_type().clone());
+                        acc.insert(
+                            field.name().clone(),
+                            DataTypeJsonSchema(field.data_type().clone()),
+                        );
                         acc
                     });
                 (table.name().to_string().clone(), inner_map)
@@ -807,7 +814,10 @@ impl From<&[common::catalog::logical::Table]> for SerializableSchema {
                     .iter()
                     .filter(|&field| field.name() != SPECIAL_BLOCK_NUM)
                     .fold(std::collections::HashMap::new(), |mut acc, field| {
-                        acc.insert(field.name().clone(), field.data_type().clone());
+                        acc.insert(
+                            field.name().clone(),
+                            DataTypeJsonSchema(field.data_type().clone()),
+                        );
                         acc
                     });
                 (table.name().to_string().clone(), inner_map)

@@ -6,7 +6,10 @@ use std::{
 
 use arrow_flight::flight_service_server::FlightServiceServer;
 use axum::response::IntoResponse;
-use common::{BoxError, BoxResult, arrow, config::Config};
+use common::{
+    BoxError, BoxResult, arrow, config::Config, query_context::parse_sql,
+    stream_helpers::is_streaming,
+};
 use dump::worker::Worker;
 use futures::{
     FutureExt, StreamExt as _, TryFutureExt as _, TryStreamExt as _, stream::FuturesUnordered,
@@ -163,7 +166,8 @@ async fn run_jsonl_server(
         .layer(
             tower_http::compression::CompressionLayer::new()
                 .br(true)
-                .gzip(true),
+                .gzip(true)
+                .deflate(true),
         );
     http_common::serve_at(addr, app).await
 }
@@ -188,8 +192,17 @@ async fn handle_jsonl_request(
             Ok(String::from_utf8(buf).unwrap())
         })
         .map_err(error_payload);
-    axum::response::Response::builder()
-        .header("content-type", "application/x-ndjson")
+    let mut response =
+        axum::response::Response::builder().header("content-type", "application/x-ndjson");
+    let query = match parse_sql(&request) {
+        Ok(query) => query,
+        Err(err) => return err.into_response(),
+    };
+    // For streaming queries, disable compression
+    if is_streaming(&query) {
+        response = response.header("content-encoding", "identity");
+    }
+    response
         .body(axum::body::Body::from_stream(stream))
         .unwrap()
 }

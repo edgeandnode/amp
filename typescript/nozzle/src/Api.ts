@@ -1,6 +1,6 @@
 import { FetchHttpClient, HttpApi, HttpApiClient, HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "@effect/platform"
 import { Config, Data, Effect, Layer, Schema } from "effect"
-import * as Model from "./Model.js"
+import * as Model from "./Model.ts"
 
 export class RegistryError extends Data.TaggedError("RegistryError")<{
   readonly cause: unknown

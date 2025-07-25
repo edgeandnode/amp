@@ -4,7 +4,7 @@ import { Command, Options, ValidationError } from "@effect/cli"
 import { PlatformConfigProvider } from "@effect/platform"
 import { NodeContext, NodeRuntime } from "@effect/platform-node"
 import { Cause, Config, Console, Effect, Layer, Logger, LogLevel, String } from "effect"
-import * as Utils from "../Utils.js"
+import * as Utils from "../Utils.ts"
 
 import { build } from "./commands/build.js"
 import { codegen } from "./commands/codegen.js"

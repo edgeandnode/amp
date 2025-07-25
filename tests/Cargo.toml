@@ -37,3 +37,5 @@ generate-manifest = { path = "../generate-manifest" }
 substreams-datasets = { path = "../substreams-datasets" }
 evm-rpc-datasets = { path = "../evm-rpc-datasets" }
 firehose-datasets = { path = "../firehose-datasets" }
+rand.workspace = true
+schemars.workspace = true

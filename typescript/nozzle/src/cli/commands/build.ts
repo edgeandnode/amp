@@ -1,9 +1,9 @@
 import { Command, Options } from "@effect/cli"
 import { FileSystem, Path } from "@effect/platform"
 import { Config, Console, Effect, Layer, Option, Schema } from "effect"
-import * as Api from "../../Api.js"
-import * as ManifestContext from "../../ManifestContext.js"
-import * as Model from "../../Model.js"
+import * as Api from "../../Api.ts"
+import * as ManifestContext from "../../ManifestContext.ts"
+import * as Model from "../../Model.ts"
 
 export const build = Command.make("build", {
   args: {

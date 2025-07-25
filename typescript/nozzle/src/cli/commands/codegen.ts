@@ -1,8 +1,8 @@
 import { Command, Options } from "@effect/cli"
 import { Config, Console, Effect, Layer, Option, Schema } from "effect"
-import * as Api from "../../Api.js"
-import * as ManifestContext from "../../ManifestContext.js"
-import * as SchemaGenerator from "../../SchemaGenerator.js"
+import * as Api from "../../Api.ts"
+import * as ManifestContext from "../../ManifestContext.ts"
+import * as SchemaGenerator from "../../SchemaGenerator.ts"
 
 export const codegen = Command.make("codegen", {
   args: {
