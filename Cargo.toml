@@ -83,6 +83,8 @@ regex = "1.10.2"
 blake3 = "1.8.1"
 indoc = "2.0.6"
 schemars = "1.0.4"
+governor = "0.10.0"
+tower = "0.5.2"
 
 # Datafusion and Arrow crates
 arrow-flight = { version = "55", features = ["flight-sql-experimental"] }

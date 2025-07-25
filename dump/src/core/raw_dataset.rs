@@ -79,12 +79,7 @@
 //!   with simultaneous connection requests. Jobs are started with a 1-second delay
 //!   between each spawn to distribute the initial connection load.
 
-use std::{
-    collections::BTreeMap,
-    ops::RangeInclusive,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc, time::Instant};
 
 use common::{
     BlockNum, BlockStreamer, BoxError, catalog::physical::PhysicalTable,
@@ -178,9 +173,6 @@ pub async fn dump(
     let mut join_set = FailFastJoinSet::<Result<(), BoxError>>::new();
     for job in jobs {
         join_set.spawn(job.run());
-
-        // Stagger the start of each job by 1s in an attempt to avoid client rate limits
-        tokio::time::sleep(Duration::from_secs(1)).await;
     }
 
     // Wait for all the jobs to finish, returning an error if any job panics or fails

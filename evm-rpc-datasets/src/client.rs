@@ -1,6 +1,7 @@
 use std::{
     collections::HashMap,
     mem,
+    num::NonZeroU32,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -21,9 +22,12 @@ use alloy::{
 use async_stream::stream;
 use common::{
     BlockNum, BlockStreamer, BoxError, EvmCurrency, RawDatasetRows, Timestamp,
-    evm::tables::{
-        blocks::{Block, BlockRowsBuilder},
-        logs::{Log, LogRowsBuilder},
+    evm::{
+        self,
+        tables::{
+            blocks::{Block, BlockRowsBuilder},
+            logs::{Log, LogRowsBuilder},
+        },
     },
     metadata::segments::BlockRange,
 };
@@ -170,9 +174,10 @@ impl JsonRpcClient {
         network: String,
         request_limit: u16,
         batch_size: usize,
+        rate_limit: Option<NonZeroU32>,
     ) -> Result<Self, BoxError> {
         assert!(request_limit >= 1);
-        let client = alloy::providers::RootProvider::new_http(url);
+        let client = evm::provider::new(url, rate_limit);
         let limiter = tokio::sync::Semaphore::new(request_limit as usize).into();
         Ok(Self {
             client,
@@ -194,6 +199,7 @@ impl JsonRpcClient {
             start_block,
             end_block
         );
+
         stream! {
             for block_num in start_block..=end_block {
                 let client_permit = self.limiter.acquire().await;
@@ -202,7 +208,6 @@ impl JsonRpcClient {
                     .get_block_by_number(BlockNumberOrTag::Number(block_num))
                     .full()
                     .await;
-
                 let block = match block_result {
                     Ok(Some(block)) => block,
                     Ok(None) => {

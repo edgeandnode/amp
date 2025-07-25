@@ -3,6 +3,7 @@ pub mod sql_datasets;
 use core::fmt;
 use std::{
     collections::{BTreeMap, BTreeSet},
+    num::NonZeroU32,
     str::FromStr,
     sync::{Arc, RwLock},
 };
@@ -14,7 +15,7 @@ use common::{
     QueryContext, RawDatasetRows, SPECIAL_BLOCK_NUM, Store,
     catalog::physical::{Catalog, PhysicalTable},
     config::Config,
-    evm::udfs::EthCall,
+    evm::{self, udfs::EthCall},
     manifest::{Manifest, TableInput},
     query_context::{self, PlanningContext, QueryEnv, parse_sql},
     sql_visitors::all_function_names,
@@ -492,6 +493,7 @@ impl DatasetStore {
         #[derive(Deserialize)]
         struct EvmRpcProvider {
             url: Url,
+            rate_limit_per_minute: Option<NonZeroU32>,
         }
 
         if dataset.kind != "evm-rpc" {
@@ -509,7 +511,7 @@ impl DatasetStore {
             .await?;
         let provider: EvmRpcProvider = provider.try_into()?;
         // Cache the provider.
-        let provider = alloy::providers::RootProvider::new_http(provider.url);
+        let provider = evm::provider::new(provider.url, provider.rate_limit_per_minute);
         let udf =
             AsyncScalarUDF::new(Arc::new(EthCall::new(&dataset.name, provider))).into_scalar_udf();
         let udf = Arc::into_inner(udf).unwrap();
