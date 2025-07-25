@@ -1,0 +1,74 @@
+"use client"
+
+import { Tabs } from "@base-ui-components/react/tabs"
+import { PlusIcon } from "@phosphor-icons/react"
+import { useState } from "react"
+
+import { useOSQuery } from "../../hooks/useOSQuery"
+
+import { DatasetQueryResultTable } from "./DatasetQueryResultTable"
+
+export function QueryPlaygroundWrapper() {
+  const { data: os } = useOSQuery()
+
+  const [queryTabs, setQueryTabs] = useState<Array<string>>(["Dataset Query"])
+  const [activeTabIdx, setActiveTabIdx] = useState(0)
+
+  const correctKey = os === "MacOS" ? "CMD" : "CTRL"
+
+  return (
+    <div className="w-full h-full flex flex-col border border-white/10 rounded-lg divide-y divide-white/10">
+      <Tabs.Root
+        className="w-full flex flex-col divide-y divide-white/10"
+        defaultValue={queryTabs[0]}
+        value={activeTabIdx}
+        onValueChange={(idx: number) => setActiveTabIdx(idx)}
+      >
+        <Tabs.List className="w-full flex items-baseline relative bg-slate-900 px-2 pt-2 pb-0">
+          {queryTabs.map((tab, idx) => (
+            <Tabs.Tab
+              key={`queryTab[${tab}:${idx}]`}
+              value={idx}
+              className="inline-flex items-center justify-center px-4 h-8 text-white/80 border-b border-transparent data-[selected]:text-white data-[selected]:border-purple-800 hover:text-white hover:border-purple-400 cursor-pointer text-xs"
+            >
+              {tab}
+            </Tabs.Tab>
+          ))}
+          <Tabs.Tab
+            className="inline-flex items-center justify-center px-4 h-8 gap-x-2 text-white/80 cursor-pointer text-xs hover:text-white border-b border-transparent mb-0 pb-0"
+            onClick={() => {
+              // add a new tab to queryTabs array, set as active
+              const currentTabsLength = queryTabs.length
+              setQueryTabs((curr) => [...curr, "New Query"])
+              setActiveTabIdx(Math.max(currentTabsLength, 0))
+            }}
+          >
+            <PlusIcon className="size-3" aria-hidden="true" />
+            New
+          </Tabs.Tab>
+        </Tabs.List>
+        {queryTabs.map((tab, idx) => (
+          <Tabs.Panel
+            key={`queryPanel[${tab}:${idx}]`}
+            className="w-full h-full overflow-hidden bg-slate-950 p-4"
+          >
+            {tab}
+          </Tabs.Panel>
+        ))}
+      </Tabs.Root>
+      <div className="w-full flex items-center justify-between h-16 px-4">
+        <span className="text-white/65 text-xs font-light">
+          Enter to new line, {correctKey} + ENTER to run
+        </span>
+        {/** @todo turn this into a form submit button */}
+        <button
+          type="button"
+          className="rounded-md bg-white/10 px-2.5 py-1.5 text-xs text-white shadow-xs hover:bg-white/20 cursor-pointer"
+        >
+          Run
+        </button>
+      </div>
+      <DatasetQueryResultTable />
+    </div>
+  )
+}

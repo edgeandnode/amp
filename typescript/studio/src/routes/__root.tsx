@@ -9,10 +9,10 @@ export interface DatasetWorksRouterCtx {
 export const Route = createRootRouteWithContext<DatasetWorksRouterCtx>()({
   component() {
     return (
-      <>
+      <div className="flex flex-col h-full min-h-screen w-screen">
         <Outlet />
         <TanStackRouterDevtools />
-      </>
+      </div>
     )
   },
 })

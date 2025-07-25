@@ -1,40 +1,30 @@
 import { createFileRoute } from "@tanstack/react-router"
 
-import logo from "../logo.svg"
+import { SchemaBrowser } from "@/Components/QueryPlayground/SchemaBrowser"
+
+import { QueryPlaygroundWrapper } from "../Components/QueryPlayground/QueryPlaygroundWrapper"
+import { UDF } from "../Components/QueryPlayground/UDF"
+import { udfQueryOptions } from "../Components/QueryPlayground/useUDFQuery"
+import { osQueryOptions } from "../hooks/useOSQuery"
 
 export const Route = createFileRoute("/")({
-  component: App,
+  component: HomePage,
+  async loader({ context }) {
+    await context.queryClient.ensureQueryData(osQueryOptions)
+    await context.queryClient.ensureQueryData(udfQueryOptions)
+  },
 })
 
-function App() {
+function HomePage() {
   return (
-    <div className="text-center">
-      <header className="min-h-screen flex flex-col items-center justify-center bg-[#282c34] text-white text-[calc(10px+2vmin)]">
-        <img
-          src={logo}
-          className="h-[40vmin] pointer-events-none animate-[spin_20s_linear_infinite]"
-          alt="logo"
-        />
-        <p>
-          Edit <code>src/routes/index.tsx</code> and save to reload.
-        </p>
-        <a
-          className="text-[#61dafb] hover:underline"
-          href="https://reactjs.org"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Learn React
-        </a>
-        <a
-          className="text-[#61dafb] hover:underline"
-          href="https://tanstack.com"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Learn TanStack
-        </a>
-      </header>
+    <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-4 h-full min-h-screen">
+      <div className="md:col-span-2 xl:col-span-3">
+        <QueryPlaygroundWrapper />
+      </div>
+      <div className="h-full border-l border-white/10 flex flex-col gap-y-4 overflow-y-auto">
+        <SchemaBrowser />
+        <UDF />
+      </div>
     </div>
   )
 }
