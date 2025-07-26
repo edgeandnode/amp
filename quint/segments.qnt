@@ -6,14 +6,16 @@ module segment {
 
     // [start, end] block numbers
     type Range = (BlockNum, BlockNum)
-
     pure def rangeIsValid(r: Range): bool = and {
         0 <= r.rangeStart(),
         r.rangeStart() <= r.rangeEnd(),
     }
-
-    pure def rangeStart(r: Range): BlockNum = r._1
-    pure def rangeEnd(r: Range): BlockNum = r._2
+    pure def rangeStart(r: Range): BlockNum = {
+        r._1
+    }
+    pure def rangeEnd(r: Range): BlockNum = {
+        r._2
+    }
     pure def rangeAdjacent(a: Range, b: Range): bool = {
         a.rangeEnd() + 1 == b.rangeStart()
     }
@@ -28,12 +30,10 @@ module segment {
         // hash of block `start - 1`
         parentHash: BlockHash,
     }
-
     pure def segmentIsValid(s: Segment): bool = and {
-        rangeIsValid(s.range),
+        s.range.rangeIsValid(),
         s.hash != s.parentHash,
     }
-
     pure def segmentStart(s: Segment): BlockNum = rangeStart(s.range)
     pure def segmentEnd(s: Segment): BlockNum = rangeEnd(s.range)
     pure def newSegment(r: Range, fork: int): Segment = {
@@ -42,31 +42,28 @@ module segment {
         pure def h(number: BlockNum, fork: int): BlockHash = {
             if (number < 0) 0 else (1000 + (fork * 100) + number)
         }
-        { range: r, hash: h(rangeEnd(r), fork), parentHash: h(rangeStart(r) - 1, fork) }
+        { range: r, hash: h(r.rangeEnd(), fork), parentHash: h(r.rangeStart() - 1, fork) }
     }
     pure def segmentAdjacent(a: Segment, b: Segment): bool = and {
         rangeAdjacent(a.range, b.range),
         a.hash == b.parentHash,
     }
 
-    // Chain types and functions
     // A chain of adjacent segments.
     type Chain = List[Segment]
-
     pure def chainIsValid(c: Chain): bool = and {
         c.length() > 0,
-        listValues(c).forall(segmentIsValid),
-        chainSegmentsAdjacent(c),
+        c.listValues().forall(segmentIsValid),
+        c.chainSegmentsAdjacent(),
     }
     pure def chainSegmentsAdjacent(c: List[Segment]): bool = {
         c.indices().exclude(Set(0)).forall(i => segmentAdjacent(c[i-1], c[i]))
     }
-
     pure def chainStart(c: Chain): int = {
-        listValues(c).map(segmentStart).setMin().unwrapOr(segmentStart(c[0]))
+        c.listValues().map(segmentStart).setMin().unwrapOr(segmentStart(c[0]))
     }
     pure def chainEnd(c: Chain): int = {
-        listValues(c).map(segmentEnd).setMax().unwrapOr(segmentEnd(c[0]))
+        c.listValues().map(segmentEnd).setMax().unwrapOr(segmentEnd(c[0]))
     }
     pure def chainFirst(c: Chain): Segment = {
         c[0]
@@ -80,19 +77,16 @@ module segment {
         else c
     }
 
-    // Table types and functions
     // A table of blockchain data organized as segments. Segments may be added to the table in any
     // order. Some subset of segments form a canonical chain, which is the reader's view of the
     // table.
     type Table = Set[Chain]
-
     pure def tableIsValid(t: Table): bool = and {
         t.forall(c => chainIsValid(c)),
         t.canonical().size() <= 1,
         t.canonical().size() == 0 implies t.nonCanonical().size() == 0,
         t.size() > 0 implies t.canonical().size() == 1,
     }
-
     // There is at most 1 canonical chain. Any table constructed from the same set of segments, in
     // arbitrary order, will have the same canonical chain.
     pure def canonical(t: Table): Set[Chain] = {
@@ -107,7 +101,8 @@ module segment {
         pure val compactChains = longestChains.filter(c => c.length() == minLength)
 
         // Use max hash sum as tiebreaker to ensure at most 1 result
-        pure val maxHashSum = compactChains.map(c => listValues(c).map(s => s.hash).setSum()).setMax().unwrapOr(0)
+        pure val maxHashSum = compactChains
+            .map(c => listValues(c).map(s => s.hash).setSum()).setMax().unwrapOr(0)
         compactChains.filter(c => listValues(c).map(s => s.hash).setSum() == maxHashSum)
     }
     pure def nonCanonical(t: Table): Set[Chain] = {
@@ -161,18 +156,22 @@ module model {
         nondet fork = FORKS.oneOf()
         val s = newSegment((start, end), fork)
         all {
-            assert(segmentIsValid(s)),
+            assert(s.segmentIsValid()),
             segments' = segments.union(Set(s)),
             table' = insert(table, s),
         }
     }
 
     val inv = all {
-        // segments.forall(s => segmentIsValid(s)), // checked by assert in `step`, and by `tableIsValid(table) and tableHasInsertedSegments`
-        tableIsValid(table),
+        // checked by assert in `step`, and by `tableIsValid(table) and tableHasInsertedSegments`
+        // segments.forall(segmentIsValid),
+        table.tableIsValid(),
         tableHasInsertedSegments,
     }
     val tableHasInsertedSegments = {
         segments == table.map(listValues).flatten()
+    }
+    pure def chainHead(s: Set[Segment]): BlockNum = {
+        s.map(segmentEnd).setMax().unwrapOr(0)
     }
 }
