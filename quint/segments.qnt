@@ -1,9 +1,3 @@
-module model {
-    // state space limits
-    pure val BLOCK_NUMBERS = 0.to(16)
-    pure val FORKS = 0.to(3)
-}
-
 module segment {
     import util.* from "util"
 
@@ -69,10 +63,10 @@ module segment {
     }
 
     pure def chainStart(c: Chain): int = {
-        listValues(c).map(segmentStart).fold(segmentStart(c[0]), (acc, start) => min(acc, start))
+        listValues(c).map(segmentStart).setMin().unwrapOr(segmentStart(c[0]))
     }
     pure def chainEnd(c: Chain): int = {
-        listValues(c).map(segmentEnd).fold(segmentEnd(c[0]), (acc, end) => max(acc, end))
+        listValues(c).map(segmentEnd).setMax().unwrapOr(segmentEnd(c[0]))
     }
     pure def chainFirst(c: Chain): Segment = {
         c[0]
@@ -102,18 +96,18 @@ module segment {
     // There is at most 1 canonical chain. Any table constructed from the same set of segments, in
     // arbitrary order, will have the same canonical chain.
     pure def canonical(t: Table): Set[Chain] = {
-        pure val earliestStart = t.map(chainStart).fold(99, (acc, start) => min(acc, start))
+        pure val earliestStart = t.map(chainStart).setMin().unwrapOr(0)
         pure val chainsFromStart = t.filter(c => chainStart(c) == earliestStart)
 
-        pure val latestEnd = chainsFromStart.map(chainEnd).fold(0, (acc, end) => max(acc, end))
+        pure val latestEnd = chainsFromStart.map(chainEnd).setMax().unwrapOr(0)
         pure val longestChains = chainsFromStart.filter(c => chainEnd(c) == latestEnd)
 
         // Filter by minimum segments to favor compaction
-        pure val minLength = longestChains.map(c => c.length()).fold(99, (acc, len) => min(acc, len))
+        pure val minLength = longestChains.map(c => c.length()).setMin().unwrapOr(0)
         pure val compactChains = longestChains.filter(c => c.length() == minLength)
 
         // Use max hash sum as tiebreaker to ensure at most 1 result
-        pure val maxHashSum = compactChains.map(c => listValues(c).map(s => s.hash).setSum()).fold(0, (acc, s) => max(acc, s))
+        pure val maxHashSum = compactChains.map(c => listValues(c).map(s => s.hash).setSum()).setMax().unwrapOr(0)
         compactChains.filter(c => listValues(c).map(s => s.hash).setSum() == maxHashSum)
     }
     pure def nonCanonical(t: Table): Set[Chain] = {
@@ -135,7 +129,7 @@ module segment {
     }
     // The set of non-canonical chains that extend past the canonical chain without a gap in
     // between.
-    pure def tableForks(t: Table): Set[Chain] = {
+    pure def forks(t: Table): Set[Chain] = {
         t.canonical().map(canonicalChain => {
             t.nonCanonical().filter(c => and {
                 chainEnd(c) > chainEnd(canonicalChain), // extends past canonical chain
@@ -146,10 +140,13 @@ module segment {
     }
 }
 
-module tableInsertModel {
-    import model.*
+module model {
     import segment.*
     import util.* from "util"
+
+    // state space limits
+    pure val BLOCK_NUMBERS = 0.to(16)
+    pure val FORKS = 0.to(3)
 
     var segments: Set[Segment]
     var table: Table
@@ -177,49 +174,5 @@ module tableInsertModel {
     }
     val tableHasInsertedSegments = {
         segments == table.map(listValues).flatten()
-    }
-}
-
-module tableReorgModel {
-    import model.*
-    import segment.*
-    import util.* from "util"
-
-    var segments: Set[Segment]
-    var table: Table
-
-    action init = all {
-        segments' = Set(),
-        table' = Set(),
-    }
-    action step = {
-        nondet chainExtension = 0.to(5).oneOf()
-        nondet fork = FORKS.oneOf()
-        val end = chainHead(segments) + chainExtension
-        val newSegments = missingRanges(table, end).map(r => newSegment(r, fork))
-        val nextTable = newSegments.fold(table, (t, s) => insert(t, s))
-        val nextSegments = segments.union(newSegments)
-        all {
-            // check chain head monotonically increases
-            assert(chainHead(nextSegments) >= chainHead(segments)),
-            // check canonical chain head monotonically increases
-            assert(canonicalHead(nextTable) >= canonicalHead(table)),
-
-            segments' = nextSegments,
-            table' = nextTable,
-        }
-    }
-
-    val inv = all {
-        tableIsValid(table),
-    }
-    temporal reorgsResolve = noStuttering implies always(eventually(canonicalHead(table) == chainHead(segments)))
-    temporal noStuttering = always(step.mustChange((segments, table)))
-
-    pure def chainHead(s: Set[Segment]): BlockNum = {
-        s.map(segmentEnd).fold(0, (acc, n) => max(acc, n))
-    }
-    pure def canonicalHead(t: Table): BlockNum = {
-        t.canonical().map(chainEnd).fold(0, (acc, n) => max(acc, n))
     }
 }
