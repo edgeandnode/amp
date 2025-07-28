@@ -11,8 +11,6 @@ mod job;
 mod job_set;
 mod meta;
 
-use crate::Ctx;
-
 pub use self::job::JobDesc;
 use self::{
     job::Job,
@@ -22,6 +20,7 @@ use self::{
         WorkerNodeId,
     },
 };
+use crate::Ctx;
 
 pub struct Worker {
     node_id: WorkerNodeId,
