@@ -6,7 +6,8 @@ run:
     quint run segments.qnt --main=model --invariants=inv --backend=rust
 
 verify:
-    quint verify segments.qnt --main=model --invariants=inv
+    quint verify segments.qnt --main=model --temporal=liveness
+    quint verify segments.qnt --main=model --invariants=safety
 
 debug:
     quint run segments.qnt --main=tableInsertModel --max-steps=5 --invariants=inv --backend=typescript --verbosity=3

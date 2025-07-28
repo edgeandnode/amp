@@ -113,14 +113,15 @@ module segment {
         if (updateChains.exists(c => listValues(c).contains(s))) updateChains
         else t.union(Set(List(s)))
     }
-    pure def missingRanges(t: Table, chainHead: BlockNum): Set[Range] = {
-        if (t.canonical().size() == 0) Set((0, chainHead))
-        else t.canonical().map(c => {
-            pure val canonicalEnd = c.chainEnd()
-            if (canonicalEnd < chainHead) Set((canonicalEnd + 1, chainHead))
-            else Set()
-        })
-        .flatten()
+    pure def missingRanges(t: Table, r: Range): Set[Range] = {
+        Set(r) // TODO
+        // if (t.canonical().size() == 0) Set(range)
+        // else t.canonical().map(c => {
+        //     pure val canonicalEnd = c.chainEnd()
+        //     if (canonicalEnd < range) Set((canonicalEnd + 1, range))
+        //     else Set()
+        // })
+        // .flatten()
     }
     // The set of non-canonical chains that extend past the canonical chain without a gap in
     // between.
@@ -154,24 +155,40 @@ module model {
         nondet start = BLOCK_NUMBERS.oneOf()
         nondet end = BLOCK_NUMBERS.filter(n => n >= start).oneOf()
         nondet fork = FORKS.oneOf()
-        val s = newSegment((start, end), fork)
+        val ranges = table.missingRanges((start, end))
+        val newSegments = ranges.map(r => newSegment(r, fork))
+        val nextSegments = segments.union(newSegments)
+        val nextTable = newSegments.fold(table, (t, s) => insert(t, s))
         all {
-            assert(s.segmentIsValid()),
-            segments' = segments.union(Set(s)),
-            table' = insert(table, s),
+            assert(newSegments.forall(segmentIsValid)),
+            // chain head monotonically increases
+            assert(chainHead(segments) <= chainHead(nextSegments)),
+
+            segments' = nextSegments,
+            table' = nextTable,
         }
     }
 
-    val inv = all {
+    val safety = all {
         // checked by assert in `step`, and by `tableIsValid(table) and tableHasInsertedSegments`
         // segments.forall(segmentIsValid),
         table.tableIsValid(),
         tableHasInsertedSegments,
     }
+    temporal liveness = always(or {
+        canonicalStart(next(table)) < table.canonicalStart(),
+        // table.next().canonicalEnd() == Some(segments.next().chainHead()),
+    })
     val tableHasInsertedSegments = {
         segments == table.map(listValues).flatten()
     }
     pure def chainHead(s: Set[Segment]): BlockNum = {
         s.map(segmentEnd).setMax().unwrapOr(0)
+    }
+    pure def canonicalStart(t: Table): BlockNum = {
+        t.canonical().map(chainStart).setMin().unwrapOr(0)
+    }
+    pure def canonicalEnd(t: Table): Option[BlockNum] = {
+        t.canonical().map(chainEnd).setMax()
     }
 }
