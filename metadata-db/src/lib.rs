@@ -21,7 +21,7 @@ pub use self::temp::{KEEP_TEMP_DIRS, temp_metadata_db};
 pub use self::workers::{
     WorkerNodeId,
     events::{JobNotifAction, JobNotifListener, JobNotifRecvError, JobNotification},
-    jobs::{Job, JobId, JobStatus},
+    jobs::{Job, JobId, JobStatus, JobWithDetails},
 };
 
 /// Frequency on which to send a heartbeat.
@@ -269,6 +269,23 @@ impl MetadataDb {
         Ok(job_id)
     }
 
+    /// List jobs with cursor-based pagination support
+    ///
+    /// Uses cursor-based pagination where `last_job_id` is the ID of the last job
+    /// from the previous page. For the first page, pass `None` for `last_job_id`.
+    pub async fn list_jobs_with_details(
+        &self,
+        limit: i64,
+        last_job_id: Option<JobId>,
+    ) -> Result<Vec<JobWithDetails>, Error> {
+        match last_job_id {
+            Some(job_id) => {
+                Ok(workers::jobs::list_jobs_next_page(&*self.pool, limit, job_id).await?)
+            }
+            None => Ok(workers::jobs::list_jobs_first_page(&*self.pool, limit).await?),
+        }
+    }
+
     /// Given a worker [`WorkerNodeId`], return all the scheduled jobs
     ///
     /// A job is considered scheduled if it's in one of the following non-terminal states:
@@ -276,10 +293,7 @@ impl MetadataDb {
     /// - [`JobStatus::Running`]
     ///
     /// This method is used to fetch all the jobs that the worker should be running after a restart.
-    pub async fn get_scheduled_jobs_with_details(
-        &self,
-        node_id: &WorkerNodeId,
-    ) -> Result<Vec<Job>, Error> {
+    pub async fn get_scheduled_jobs(&self, node_id: &WorkerNodeId) -> Result<Vec<Job>, Error> {
         Ok(workers::jobs::get_jobs_for_node_with_statuses(
             &*self.pool,
             node_id,
@@ -298,10 +312,7 @@ impl MetadataDb {
     /// When connection issues cause the job notification channel to miss notifications, a job reconciliation routine
     /// ensures each worker's job set remains synchronized with the Metadata DB. This method fetches all jobs that a
     /// worker should be tracking, enabling the worker to reconcile its state when notifications are lost.
-    pub async fn get_active_jobs_with_details(
-        &self,
-        node_id: &WorkerNodeId,
-    ) -> Result<Vec<Job>, Error> {
+    pub async fn get_active_jobs(&self, node_id: &WorkerNodeId) -> Result<Vec<Job>, Error> {
         Ok(workers::jobs::get_jobs_for_node_with_statuses(
             &*self.pool,
             node_id,
@@ -317,6 +328,11 @@ impl MetadataDb {
     /// Returns the job with the given ID
     pub async fn get_job(&self, id: &JobId) -> Result<Option<Job>, Error> {
         Ok(workers::jobs::get_job(&*self.pool, id).await?)
+    }
+
+    /// Get a job by ID with full details including timestamps
+    pub async fn get_job_with_details(&self, id: &JobId) -> Result<Option<JobWithDetails>, Error> {
+        Ok(workers::jobs::get_job_with_details(&*self.pool, id).await?)
     }
 
     /// Marks a job as `RUNNING`
@@ -595,7 +611,7 @@ impl MetadataDb {
         let sql = "
         SELECT footer
           FROM file_metadata
-         WHERE location_id = $1 
+         WHERE location_id = $1
                AND file_name = $2
       ORDER BY id DESC LIMIT 1
         ";

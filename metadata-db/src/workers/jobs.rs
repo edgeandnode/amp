@@ -1,6 +1,9 @@
 //! Metadata DB worker nodes job queue
 
-use sqlx::{Postgres, types::JsonValue};
+use sqlx::types::{
+    JsonValue,
+    chrono::{DateTime, Utc},
+};
 
 use super::WorkerNodeId;
 
@@ -14,7 +17,7 @@ pub async fn register_job<'c, E>(
     descriptor: &str,
 ) -> Result<JobId, sqlx::Error>
 where
-    E: sqlx::Executor<'c, Database = Postgres>,
+    E: sqlx::Executor<'c, Database = sqlx::Postgres>,
 {
     let query = indoc::indoc! {r#"
         INSERT INTO jobs (node_id, descriptor, status, created_at, updated_at)
@@ -40,7 +43,7 @@ pub async fn update_job_status<'c, E>(
     status: JobStatus,
 ) -> Result<(), sqlx::Error>
 where
-    E: sqlx::Executor<'c, Database = Postgres>,
+    E: sqlx::Executor<'c, Database = sqlx::Postgres>,
 {
     let query = indoc::indoc! {r#"
         UPDATE jobs 
@@ -58,12 +61,35 @@ where
 /// Get a job by its ID
 pub async fn get_job<'c, E>(exe: E, id: &JobId) -> Result<Option<Job>, sqlx::Error>
 where
-    E: sqlx::Executor<'c, Database = Postgres>,
+    E: sqlx::Executor<'c, Database = sqlx::Postgres>,
 {
     let query = indoc::indoc! {r#"
         SELECT id, node_id, status, descriptor
         FROM jobs
         WHERE id = $1
+    "#};
+    let res = sqlx::query_as(query).bind(id).fetch_optional(exe).await?;
+    Ok(res)
+}
+
+/// Get a job by ID with full details including timestamps
+pub async fn get_job_with_details<'c, E>(
+    exe: E,
+    id: &JobId,
+) -> Result<Option<JobWithDetails>, sqlx::Error>
+where
+    E: sqlx::Executor<'c, Database = sqlx::Postgres>,
+{
+    let query = indoc::indoc! {r#"
+        SELECT 
+            j.id, 
+            j.node_id, 
+            j.status, 
+            j.descriptor,
+            j.created_at,
+            j.updated_at
+        FROM jobs j
+        WHERE j.id = $1
     "#};
     let res = sqlx::query_as(query).bind(id).fetch_optional(exe).await?;
     Ok(res)
@@ -76,7 +102,7 @@ pub async fn get_jobs_for_node_with_statuses<'c, E, const N: usize>(
     statuses: [JobStatus; N],
 ) -> Result<Vec<Job>, sqlx::Error>
 where
-    E: sqlx::Executor<'c, Database = Postgres>,
+    E: sqlx::Executor<'c, Database = sqlx::Postgres>,
 {
     let query = indoc::indoc! {r#"
         SELECT 
@@ -91,6 +117,69 @@ where
     let res = sqlx::query_as(query)
         .bind(node_id)
         .bind(statuses)
+        .fetch_all(exe)
+        .await?;
+    Ok(res)
+}
+
+/// List the first page of jobs
+///
+/// Returns a paginated list of jobs ordered by ID in descending order (newest first).
+/// This function is used to fetch the initial page when no cursor is available.
+pub async fn list_jobs_first_page<'c, E>(
+    exe: E,
+    limit: i64,
+) -> Result<Vec<JobWithDetails>, sqlx::Error>
+where
+    E: sqlx::Executor<'c, Database = sqlx::Postgres>,
+{
+    let query = indoc::indoc! {r#"
+        SELECT 
+            j.id, 
+            j.node_id, 
+            j.status, 
+            j.descriptor,
+            j.created_at,
+            j.updated_at
+        FROM jobs j
+        ORDER BY j.id DESC
+        LIMIT $1
+    "#};
+
+    let res = sqlx::query_as(query).bind(limit).fetch_all(exe).await?;
+    Ok(res)
+}
+
+/// List subsequent pages of jobs using cursor-based pagination
+///
+/// Returns a paginated list of jobs with IDs less than the provided cursor,
+/// ordered by ID in descending order (newest first). This implements cursor-based
+/// pagination for efficient traversal of large job lists.
+pub async fn list_jobs_next_page<'c, E>(
+    exe: E,
+    limit: i64,
+    last_job_id: JobId,
+) -> Result<Vec<JobWithDetails>, sqlx::Error>
+where
+    E: sqlx::Executor<'c, Database = sqlx::Postgres>,
+{
+    let query = indoc::indoc! {r#"
+        SELECT 
+            j.id, 
+            j.node_id, 
+            j.status, 
+            j.descriptor,
+            j.created_at,
+            j.updated_at
+        FROM jobs j
+        WHERE j.id < $2
+        ORDER BY j.id DESC
+        LIMIT $1
+    "#};
+
+    let res = sqlx::query_as(query)
+        .bind(limit)
+        .bind(last_job_id)
         .fetch_all(exe)
         .await?;
     Ok(res)
@@ -111,6 +200,29 @@ pub struct Job {
     /// Job description
     #[sqlx(rename = "descriptor")]
     pub desc: JsonValue,
+}
+
+/// Represents a job with its metadata and associated node.
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct JobWithDetails {
+    /// Unique identifier for the job
+    pub id: JobId,
+
+    /// ID of the worker node this job is scheduled for
+    pub node_id: WorkerNodeId,
+
+    /// Current status of the job
+    pub status: JobStatus,
+
+    /// Job descriptor
+    #[sqlx(rename = "descriptor")]
+    pub desc: JsonValue,
+
+    /// Job creation timestamp
+    pub created_at: DateTime<Utc>,
+
+    /// Job last update timestamp
+    pub updated_at: DateTime<Utc>,
 }
 
 /// A unique identifier for a job

@@ -27,7 +27,6 @@ tracing-subscriber.workspace = true
 url.workspace = true
 uuid.workspace = true
 semver.workspace = true
-async-udf = { path = "../async-udf" }
 async-trait.workspace = true
 backon = { version = "1.5.1", default-features = false, features = [
     "std",

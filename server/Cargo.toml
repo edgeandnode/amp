@@ -4,6 +4,7 @@ edition.workspace = true
 version.workspace = true
 
 [dependencies]
+http-common = { path = "../http-common" }
 metadata-db = { path = "../metadata-db" }
 arrow-flight.workspace = true
 async-trait.workspace = true
@@ -16,6 +17,3 @@ prost.workspace = true
 thiserror.workspace = true
 tonic.workspace = true
 axum.workspace = true
-serde_json.workspace = true
-tokio.workspace = true
-tracing.workspace = true

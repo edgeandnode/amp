@@ -177,8 +177,14 @@ async fn handle_jsonl_request(
     request: String,
 ) -> axum::response::Response {
     fn error_payload(message: impl std::fmt::Display) -> String {
-        format!(r#"{{"error": "{}"}}"#, message)
+        // Use http-common error format
+        serde_json::json!({
+            "error_code": "QUERY_ERROR",
+            "error_message": message.to_string(),
+        })
+        .to_string()
     }
+
     let stream = match service.execute_query(&request).await {
         Ok(stream) => stream,
         Err(err) => return err.into_response(),
