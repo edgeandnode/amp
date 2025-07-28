@@ -6185,13 +6185,11 @@ dependencies = [
  "datafusion",
  "dataset-store",
  "futures",
+ "http-common",
  "metadata-db",
  "prost",
- "serde_json",
  "thiserror 2.0.12",
- "tokio",
  "tonic",
- "tracing",
 ]
 
 [[package]]
