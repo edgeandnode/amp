@@ -239,6 +239,18 @@ impl DatasetStore {
             .map_err(|e| (dataset, e).into())
     }
 
+    pub async fn load_dataset_with_version(
+        self: &Arc<Self>,
+        dataset: &str,
+        version: &str,
+    ) -> Result<Dataset, DatasetError> {
+        let dataset_name = format!("{}__{}", dataset, version);
+        self.clone()
+            .load_dataset_inner(&dataset_name)
+            .await
+            .map_err(|e| (dataset, e).into())
+    }
+
     pub async fn try_load_dataset(
         self: &Arc<Self>,
         dataset: &str,

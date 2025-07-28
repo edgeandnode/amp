@@ -586,6 +586,43 @@ impl MetadataDb {
             .fetch_one(&*self.pool)
             .await?)
     }
+
+    pub async fn save_registry(
+        &self,
+        dataset_name: &str,
+        version: &str,
+        owner: &str,
+    ) -> Result<(), Error> {
+        let sql = "
+        INSERT INTO registry (dataset, version, owner)
+        VALUES ($1, $2, $3)
+        ";
+        sqlx::query(sql)
+            .bind(dataset_name)
+            .bind(version)
+            .bind(owner)
+            .execute(&*self.pool)
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn get_manifest_from_registry(
+        &self,
+        dataset: &str,
+        version: &str,
+    ) -> Result<Option<(String, String)>, Error> {
+        let sql = "
+            SELECT dataset, version FROM registry 
+            WHERE dataset = $1 AND version = $2
+        ";
+        let result = sqlx::query_as(sql)
+            .bind(dataset)
+            .bind(version)
+            .fetch_optional(&*self.pool)
+            .await?;
+        Ok(result)
+    }
 }
 
 /// Generic notification API

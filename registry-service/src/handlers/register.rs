@@ -26,6 +26,8 @@ pub enum RegisterManifestError {
     SerializationError(#[from] serde_json::Error),
     #[error("Dataset store error: {0}")]
     DatasetStoreError(String),
+    #[error("Database error: {0}")]
+    DatabaseError(#[from] metadata_db::Error),
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -65,20 +67,23 @@ pub async fn register_manifest(
     mut manifest: Manifest,
 ) -> Result<Manifest, RegisterManifestError> {
     let dataset_name = manifest.name.clone();
-    let version = manifest.version.to_string();
-    let dataset_with_version = format!("{}__{}", dataset_name, version);
-    match dataset_store.try_load_dataset(&dataset_with_version).await {
-        Ok(Some(_)) => {
-            return Err(RegisterManifestError::DatasetAlreadyExists(
-                dataset_name,
-                version,
-            ));
-        }
-        Ok(None) => {}
-        Err(e) => return Err(RegisterManifestError::DatasetStoreError(e.to_string())),
+    let version = manifest.version.0.to_string();
+
+    // Check if the dataset with the given name and version already exists in the registry.
+    if dataset_store
+        .metadata_db
+        .get_manifest_from_registry(&dataset_name, &version)
+        .await?
+        .is_some()
+    {
+        return Err(RegisterManifestError::DatasetAlreadyExists(
+            dataset_name,
+            version,
+        ));
     }
 
-    // Update the manifest name to include version as manifest name and filename should be the same for deploying
+    let dataset_with_version = format!("{}__{}", dataset_name, version);
+    // Update the manifest name to include version, as manifest name and filename should be the same for deploying
     manifest.update_name_field(&dataset_with_version);
     let updated_manifest_json = serde_json::to_string(&manifest)?;
     let dataset_defs_store = dataset_store.dataset_defs_store();
@@ -89,6 +94,19 @@ pub async fn register_manifest(
         .put(&path, updated_manifest_json.into())
         .await
         .map_err(|e| RegisterManifestError::DatasetStoreError(e.to_string()))?;
+
+    dataset_store
+        .metadata_db
+        .save_registry(
+            &dataset_name,
+            &version,
+            &manifest
+                .dependencies
+                .get(&manifest.network)
+                .map(|d| d.owner.as_str())
+                .unwrap_or("unknown"),
+        )
+        .await?;
 
     tracing::info!(
         "Successfully registered manifest '{}' version '{}'",

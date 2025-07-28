@@ -1,5 +1,4 @@
 //! Dataset deploy handler
-
 use axum::{Json, extract::State, http::StatusCode};
 use common::manifest::Manifest;
 use http_common::BoxRequestError;
@@ -28,32 +27,37 @@ pub async fn handler_inner(
 ) -> Result<(StatusCode, &'static str), Error> {
     validate_dataset_name(&payload.dataset_name)
         .map_err(|e| Error::InvalidRequest(format!("invalid dataset name: {e}").into()))?;
-    let dataset_name_with_version = format!("{}__{}", payload.dataset_name, payload.version);
     let dataset = ctx
-        .store
-        .try_load_dataset(&dataset_name_with_version)
-        .await?;
+        .metadata_db
+        .get_manifest_from_registry(&payload.dataset_name, &payload.version)
+        .await
+        .map_err(|e| Error::InvalidRequest(e.to_string().into()))?;
+
     match (dataset, payload.manifest) {
-        (Some(dataset), None) => {
+        (Some((dataset_name, version)), None) => {
             tracing::info!(
                 "Deploying existing dataset '{}' version '{}'",
-                payload.dataset_name,
-                payload.version
+                dataset_name,
+                version
             );
+            let dataset = ctx
+                .store
+                .load_dataset_with_version(&dataset_name, &version)
+                .await?;
             ctx.scheduler
                 .schedule_dataset_dump(dataset, None)
                 .await
                 .map_err(Error::SchedulerError)?;
         }
-        (None, Some(manifest_json)) => {
-            let manifest: Manifest = serde_json::from_str(&manifest_json)
+        (None, Some(manifest_str)) => {
+            let manifest: Manifest = serde_json::from_str(&manifest_str)
                 .map_err(|e| Error::InvalidManifest(e.to_string()))?;
             if manifest.name != payload.dataset_name
-                || manifest.version.to_string() != payload.version
+                || manifest.version.0.to_string() != payload.version
             {
                 return Err(Error::ManifestValidationError(
                     manifest.name,
-                    manifest.version.to_string(),
+                    manifest.version.0.to_string(),
                 ));
             }
             let manifest = register_manifest(&ctx.store, manifest)
