@@ -98,7 +98,7 @@ impl Worker {
         // set, ensuring the worker is in sync with the Metadata DB's jobs table state.
         let scheduled_jobs = self
             .meta
-            .get_scheduled_jobs_with_details(&self.node_id)
+            .get_scheduled_jobs(&self.node_id)
             .await
             .map_err(WorkerError::ActiveJobsFetchFailed)?;
         for job in scheduled_jobs {
@@ -272,7 +272,7 @@ impl Worker {
     async fn reconcile_jobs(&mut self) -> Result<(), WorkerError> {
         let active_jobs = match self
             .meta
-            .get_active_jobs_with_details(&self.node_id)
+            .get_active_jobs(&self.node_id)
             .await
             .map_err(WorkerError::ActiveJobsFetchFailed)
         {
