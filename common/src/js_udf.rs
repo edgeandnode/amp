@@ -1,13 +1,14 @@
 use std::{any::Any, sync::Arc};
 
 use async_trait::async_trait;
-use datafusion::logical_expr::async_udf::AsyncScalarUDFImpl;
-use datafusion::logical_expr::{ScalarFunctionArgs, ScalarUDFImpl};
 use datafusion::{
     arrow::{array::ArrayRef, datatypes::DataType},
     config::ConfigOptions,
     error::DataFusionError,
-    logical_expr::{ColumnarValue, Signature, TypeSignature, Volatility},
+    logical_expr::{
+        ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, TypeSignature, Volatility,
+        async_udf::AsyncScalarUDFImpl,
+    },
     scalar::ScalarValue,
 };
 use js_runtime::{convert::ToV8, isolate_pool::IsolatePool};
@@ -126,8 +127,10 @@ fn columnar_to_scalar(
 
 #[tokio::test]
 async fn js_udf_smoke_test() {
-    use datafusion::arrow::datatypes::{DataType, Field};
-    use datafusion::logical_expr::ReturnFieldArgs;
+    use datafusion::{
+        arrow::datatypes::{DataType, Field},
+        logical_expr::ReturnFieldArgs,
+    };
 
     pub const TEST_JS: &str = indoc::indoc! { r#"
         function int_in_int_out(i32) {

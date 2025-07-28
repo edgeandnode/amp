@@ -10,8 +10,6 @@ use alloy::{
     transports::RpcError,
 };
 use async_trait::async_trait;
-use datafusion::logical_expr::async_udf::AsyncScalarUDFImpl;
-use datafusion::logical_expr::{ScalarFunctionArgs, ScalarUDFImpl};
 use datafusion::{
     arrow::{
         array::{
@@ -23,7 +21,10 @@ use datafusion::{
     common::{internal_err, plan_err},
     config::ConfigOptions,
     error::DataFusionError,
-    logical_expr::{ColumnarValue, Signature, TypeSignature, Volatility},
+    logical_expr::{
+        ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, TypeSignature, Volatility,
+        async_udf::AsyncScalarUDFImpl,
+    },
 };
 use itertools::izip;
 
