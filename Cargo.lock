@@ -1243,15 +1243,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "async-udf"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "datafusion",
- "futures",
-]
-
-[[package]]
 name = "atoi"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1890,7 +1881,6 @@ version = "0.1.0"
 dependencies = [
  "alloy",
  "async-trait",
- "async-udf",
  "atty",
  "axum 0.8.4",
  "backon",
@@ -2852,7 +2842,6 @@ version = "0.1.0"
 dependencies = [
  "alloy",
  "async-stream",
- "async-udf",
  "common",
  "datafusion",
  "evm-rpc-datasets",

@@ -8,7 +8,6 @@ use std::{
 };
 
 use async_stream::stream;
-use async_udf::functions::AsyncScalarUDF;
 use common::{
     BlockNum, BlockStreamer, BoxError, DataTypeJsonSchema, Dataset, DatasetValue, LogicalCatalog,
     QueryContext, RawDatasetRows, SPECIAL_BLOCK_NUM, Store,
@@ -22,7 +21,7 @@ use common::{
 };
 use datafusion::{
     common::HashMap,
-    logical_expr::ScalarUDF,
+    logical_expr::{ScalarUDF, async_udf::AsyncScalarUDF},
     sql::{TableReference, parser, resolve::resolve_table_references},
 };
 use futures::{FutureExt as _, Stream, TryFutureExt as _, future::BoxFuture};
@@ -512,7 +511,6 @@ impl DatasetStore {
         let provider = alloy::providers::RootProvider::new_http(provider.url);
         let udf =
             AsyncScalarUDF::new(Arc::new(EthCall::new(&dataset.name, provider))).into_scalar_udf();
-        let udf = Arc::into_inner(udf).unwrap();
         self.eth_call_cache
             .write()
             .unwrap()

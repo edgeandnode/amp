@@ -1,7 +1,8 @@
 use std::{any::Any, sync::Arc};
 
 use async_trait::async_trait;
-use async_udf::{async_func::AsyncScalarFunctionArgs, functions::AsyncScalarUDFImpl};
+use datafusion::logical_expr::async_udf::AsyncScalarUDFImpl;
+use datafusion::logical_expr::{ScalarFunctionArgs, ScalarUDFImpl};
 use datafusion::{
     arrow::{array::ArrayRef, datatypes::DataType},
     config::ConfigOptions,
@@ -48,8 +49,7 @@ impl JsUdf {
     }
 }
 
-#[async_trait]
-impl AsyncScalarUDFImpl for JsUdf {
+impl ScalarUDFImpl for JsUdf {
     fn name(&self) -> &str {
         &self.udf_name
     }
@@ -66,9 +66,20 @@ impl AsyncScalarUDFImpl for JsUdf {
         Ok(self.return_type.clone())
     }
 
+    /// Since this is an async UDF, the `invoke_with_args` method will not be called.
+    fn invoke_with_args(
+        &self,
+        _args: ScalarFunctionArgs,
+    ) -> Result<ColumnarValue, DataFusionError> {
+        unreachable!("is only called as async UDF");
+    }
+}
+
+#[async_trait]
+impl AsyncScalarUDFImpl for JsUdf {
     async fn invoke_async_with_args(
         &self,
-        args: AsyncScalarFunctionArgs,
+        args: ScalarFunctionArgs,
         _option: &ConfigOptions,
     ) -> Result<ArrayRef, DataFusionError> {
         // First, transpose the arguments row format
@@ -115,7 +126,8 @@ fn columnar_to_scalar(
 
 #[tokio::test]
 async fn js_udf_smoke_test() {
-    use datafusion::arrow::datatypes::{DataType, Field, Schema};
+    use datafusion::arrow::datatypes::{DataType, Field};
+    use datafusion::logical_expr::ReturnFieldArgs;
 
     pub const TEST_JS: &str = indoc::indoc! { r#"
         function int_in_int_out(i32) {
@@ -138,11 +150,20 @@ async fn js_udf_smoke_test() {
         vec![DataType::Int32],
         DataType::Int32,
     );
-    let args = vec![ColumnarValue::Scalar(ScalarValue::Int32(Some(42)))];
-    let args = AsyncScalarFunctionArgs {
+    let arg_scalar = ScalarValue::Int32(Some(42));
+    let args = vec![ColumnarValue::Scalar(arg_scalar.clone())];
+    let arg_fields = vec![Arc::new(Field::new("js_in", DataType::Int32, false))];
+    let ret_args = ReturnFieldArgs {
+        arg_fields: &arg_fields,
+        scalar_arguments: &[Some(&arg_scalar)],
+    };
+    let return_field = udf.return_field_from_args(ret_args).unwrap();
+
+    let args = ScalarFunctionArgs {
         args: args.into(),
+        arg_fields,
+        return_field,
         number_rows: 1,
-        schema: Schema::new(vec![Field::new("js_in", DataType::Int32, false)]).into(),
     };
     let out = udf
         .invoke_async_with_args(args, &ConfigOptions::default())

@@ -4,7 +4,6 @@ use arrow::{
     array::{ArrayRef, RecordBatch},
     compute::concat_batches,
 };
-use async_udf::physical_optimizer::AsyncFuncRule;
 use axum::response::IntoResponse;
 use bincode::{Decode, Encode, config};
 use bytes::Bytes;
@@ -197,7 +196,6 @@ impl PlanningContext {
             .with_config(self.session_config.clone())
             .with_runtime_env(Default::default())
             .with_default_features()
-            .with_physical_optimizer_rule(Arc::new(AsyncFuncRule))
             .build();
         let ctx = SessionContext::new_with_state(state);
         create_empty_tables(&ctx, self.catalog.tables.iter()).await?;
@@ -310,7 +308,6 @@ impl QueryContext {
             .with_config(self.session_config.clone())
             .with_runtime_env(self.env.df_env.clone())
             .with_default_features()
-            .with_physical_optimizer_rule(Arc::new(AsyncFuncRule))
             .build();
         let ctx = SessionContext::new_with_state(state);
 
