@@ -100,7 +100,18 @@ impl IntoResponse for Error {
             }
         };
         let body = serde_json::json!({
-            "error": err,
+            "error_code": match self {
+                Error::SqlParseError(_) => "SQL_PARSE_ERROR",
+                Error::InvalidPlan(_) => "INVALID_PLAN",
+                Error::PlanEncodingError(_) => "PLAN_ENCODING_ERROR",
+                Error::PlanDecodingError(_) => "PLAN_DECODING_ERROR",
+                Error::DatasetError(_) => "DATASET_ERROR",
+                Error::ConfigError(_) => "CONFIG_ERROR",
+                Error::PlanningError(_) => "PLANNING_ERROR",
+                Error::ExecutionError(_) => "EXECUTION_ERROR",
+                Error::MetaTableError(_) => "META_TABLE_ERROR",
+            },
+            "error_message": err,
         });
         (status, axum::Json(body)).into_response()
     }

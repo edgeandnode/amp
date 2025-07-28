@@ -9,7 +9,6 @@ use arrow_flight::{
     sql::{Any, CommandStatementQuery},
 };
 use axum::{
-    Json,
     http::StatusCode,
     response::{IntoResponse, Response as AxumResponse},
 };
@@ -35,6 +34,7 @@ use datafusion::{
 };
 use dataset_store::{DatasetError, DatasetStore};
 use futures::{Stream, StreamExt as _, TryStreamExt, stream};
+use http_common::{BoxRequestError, RequestError};
 use metadata_db::MetadataDb;
 use prost::Message as _;
 use thiserror::Error;
@@ -82,10 +82,30 @@ fn datafusion_error_to_status(outer: &Error, e: &DataFusionError) -> Status {
     }
 }
 
-impl IntoResponse for Error {
-    fn into_response(self) -> AxumResponse {
-        let error_message = self.to_string();
-        let status = match self {
+impl RequestError for Error {
+    fn error_code(&self) -> &'static str {
+        match self {
+            Error::PbDecodeError(_) => "PB_DECODE_ERROR",
+            Error::UnsupportedFlightDescriptorType(_) => "UNSUPPORTED_FLIGHT_DESCRIPTOR_TYPE",
+            Error::UnsupportedFlightDescriptorCommand(_) => "UNSUPPORTED_FLIGHT_DESCRIPTOR_COMMAND",
+            Error::ExecutionError(_) => "EXECUTION_ERROR",
+            Error::DatasetStoreError(_) => "DATASET_STORE_ERROR",
+            Error::CoreError(CoreError::InvalidPlan(_)) => "INVALID_PLAN",
+            Error::CoreError(CoreError::SqlParseError(_)) => "SQL_PARSE_ERROR",
+            Error::CoreError(CoreError::PlanEncodingError(_)) => "PLAN_ENCODING_ERROR",
+            Error::CoreError(CoreError::PlanDecodingError(_)) => "PLAN_DECODING_ERROR",
+            Error::CoreError(CoreError::DatasetError(_)) => "DATASET_ERROR",
+            Error::CoreError(CoreError::ConfigError(_)) => "CONFIG_ERROR",
+            Error::CoreError(CoreError::PlanningError(_)) => "PLANNING_ERROR",
+            Error::CoreError(CoreError::ExecutionError(_)) => "CORE_EXECUTION_ERROR",
+            Error::CoreError(CoreError::MetaTableError(_)) => "META_TABLE_ERROR",
+            Error::InvalidQuery(_) => "INVALID_QUERY",
+            Error::StreamingExecutionError(_) => "STREAMING_EXECUTION_ERROR",
+        }
+    }
+
+    fn status_code(&self) -> StatusCode {
+        match self {
             Error::CoreError(
                 CoreError::InvalidPlan(_)
                 | CoreError::SqlParseError(_)
@@ -107,11 +127,13 @@ impl IntoResponse for Error {
             Error::UnsupportedFlightDescriptorType(_) => StatusCode::BAD_REQUEST,
             Error::UnsupportedFlightDescriptorCommand(_) => StatusCode::BAD_REQUEST,
             Error::InvalidQuery(_) => StatusCode::BAD_REQUEST,
-        };
-        let body = serde_json::json!({
-            "error": error_message,
-        });
-        (status, Json(body)).into_response()
+        }
+    }
+}
+
+impl IntoResponse for Error {
+    fn into_response(self) -> AxumResponse {
+        BoxRequestError::from(self).into_response()
     }
 }
 
