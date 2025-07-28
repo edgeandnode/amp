@@ -11,9 +11,11 @@ mod job;
 mod job_set;
 mod meta;
 
+use crate::Ctx;
+
 pub use self::job::JobDesc;
 use self::{
-    job::{Job, JobCtx},
+    job::Job,
     job_set::{JobSet, JoinError as JobSetJoinError},
     meta::{
         JobId, JobMeta, JobStatus, NotifAction as Action, NotifRecvError, WorkerMetadataDb,
@@ -26,7 +28,7 @@ pub struct Worker {
     reconcile_interval: Interval,
 
     meta: WorkerMetadataDb,
-    job_ctx: JobCtx,
+    job_ctx: Ctx,
     job_set: JobSet,
 }
 
@@ -47,7 +49,7 @@ impl Worker {
             node_id,
             reconcile_interval,
             meta,
-            job_ctx: JobCtx {
+            job_ctx: Ctx {
                 config,
                 metadata_db,
                 dataset_store,

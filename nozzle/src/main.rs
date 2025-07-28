@@ -64,10 +64,6 @@ enum Command {
         #[arg(long, default_value = "4096", env = "DUMP_PARTITION_SIZE_MB")]
         partition_size_mb: u64,
 
-        /// Whether to disable compression when writing parquet files. Defaults to false.
-        #[arg(long, env = "DUMP_DISABLE_COMPRESSION")]
-        disable_compression: bool,
-
         /// How often to run the dump job in minutes. By default will run once and exit.
         #[arg(long, env = "DUMP_RUN_EVERY_MINS")]
         run_every_mins: Option<u64>,
@@ -164,7 +160,6 @@ async fn main_inner() -> Result<(), BoxError> {
             end_block,
             n_jobs,
             partition_size_mb,
-            disable_compression,
             dataset: datasets,
             ignore_deps,
             run_every_mins,
@@ -182,7 +177,6 @@ async fn main_inner() -> Result<(), BoxError> {
                 end_block,
                 n_jobs,
                 partition_size_mb,
-                disable_compression,
                 run_every_mins,
                 None,
                 location,

@@ -7,6 +7,7 @@ use datafusion::{
         memory_pool::{FairSpillPool, GreedyMemoryPool, MemoryPool},
         runtime_env::RuntimeEnvBuilder,
     },
+    parquet::basic::{Compression, ZstdLevel},
 };
 use figment::{
     Figment,
@@ -29,6 +30,7 @@ pub struct Config {
     pub max_mem_mb: usize,
     pub spill_location: Vec<PathBuf>,
     pub microbatch_max_interval: u64,
+    pub parquet: ParquetConfig,
     /// Addresses to bind the server to. Used during testing.
     pub addrs: Addrs,
     pub config_path: PathBuf,
@@ -40,6 +42,39 @@ pub struct Addrs {
     pub jsonl_addr: SocketAddr,
     pub registry_service_addr: SocketAddr,
     pub admin_api_addr: SocketAddr,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ParquetConfig {
+    #[serde(
+        default = "default_compression",
+        deserialize_with = "deserialize_compression"
+    )]
+    pub compression: Compression,
+    #[serde(default)]
+    pub bloom_filters: bool,
+}
+
+impl Default for ParquetConfig {
+    fn default() -> Self {
+        Self {
+            compression: default_compression(),
+            bloom_filters: false,
+        }
+    }
+}
+
+fn default_compression() -> Compression {
+    Compression::ZSTD(ZstdLevel::try_new(1).unwrap())
+}
+
+fn deserialize_compression<'de, D>(deserializer: D) -> Result<Compression, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use std::str::FromStr;
+    let s = String::deserialize(deserializer)?;
+    Compression::from_str(&s).map_err(serde::de::Error::custom)
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -55,6 +90,8 @@ pub struct ConfigFile {
     pub jsonl_addr: Option<String>,
     pub registry_service_addr: Option<String>,
     pub admin_api_addr: Option<String>,
+    #[serde(default)]
+    pub parquet: ParquetConfig,
 }
 
 pub type FigmentJson = figment::providers::Data<figment::providers::Json>;
@@ -132,6 +169,7 @@ impl Config {
             max_mem_mb: config_file.max_mem_mb,
             spill_location: config_file.spill_location,
             microbatch_max_interval: config_file.microbatch_max_interval.unwrap_or(100_000),
+            parquet: config_file.parquet,
             addrs,
             config_path,
         })

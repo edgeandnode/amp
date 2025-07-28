@@ -22,8 +22,6 @@ mod raw_dataset;
 mod sql_dataset;
 mod tasks;
 
-use crate::parquet_writer::ParquetWriterProperties;
-
 /// Dumps a set of tables. All tables must belong to the same dataset.
 pub async fn dump_tables(
     ctx: Ctx,
@@ -31,7 +29,6 @@ pub async fn dump_tables(
     n_jobs: u16,
     partition_size: u64,
     microbatch_max_interval: u64,
-    parquet_opts: &ParquetWriterProperties,
     range: (i64, Option<i64>),
 ) -> Result<(), BoxError> {
     let mut kinds = BTreeSet::new();
@@ -43,17 +40,9 @@ pub async fn dump_tables(
         if !kinds.iter().all(|k| k.is_raw()) {
             return Err("Cannot mix raw and non-raw datasets in a same dump".into());
         }
-        dump_raw_tables(ctx, tables, n_jobs, partition_size, parquet_opts, range).await
+        dump_raw_tables(ctx, tables, n_jobs, partition_size, range).await
     } else {
-        dump_user_tables(
-            ctx,
-            tables,
-            microbatch_max_interval,
-            n_jobs,
-            parquet_opts,
-            range,
-        )
-        .await
+        dump_user_tables(ctx, tables, microbatch_max_interval, n_jobs, range).await
     }
 }
 
@@ -63,12 +52,13 @@ pub async fn dump_raw_tables(
     tables: &[Arc<PhysicalTable>],
     n_jobs: u16,
     partition_size: u64,
-    parquet_opts: &ParquetWriterProperties,
     range: (i64, Option<i64>),
 ) -> Result<(), BoxError> {
     if tables.is_empty() {
         return Ok(());
     }
+
+    let parquet_opts = crate::parquet_opts(&ctx.config.parquet);
 
     // Check that all tables belong to the same dataset.
     let dataset = {
@@ -100,7 +90,7 @@ pub async fn dump_raw_tables(
                 &dataset.name,
                 tables,
                 partition_size,
-                parquet_opts,
+                &parquet_opts,
                 range,
             )
             .await?;
@@ -124,13 +114,13 @@ pub async fn dump_user_tables(
     tables: &[Arc<PhysicalTable>],
     microbatch_max_interval: u64,
     n_jobs: u16,
-    parquet_opts: &ParquetWriterProperties,
     range: (i64, Option<i64>),
 ) -> Result<(), BoxError> {
     if n_jobs > 1 {
         tracing::warn!("n_jobs > 1 has no effect for SQL datasets");
     }
 
+    let parquet_opts = crate::parquet_opts(&ctx.config.parquet);
     let env = ctx.config.make_query_env()?;
 
     for table in tables {
@@ -161,7 +151,7 @@ pub async fn dump_user_tables(
             dataset,
             &env,
             table.clone(),
-            parquet_opts,
+            &parquet_opts,
             microbatch_max_interval,
             range,
         )
