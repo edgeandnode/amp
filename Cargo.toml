@@ -86,8 +86,8 @@ schemars = "1.0.4"
 
 # Datafusion and Arrow crates
 arrow-flight = { version = "55", features = ["flight-sql-experimental"] }
-datafusion = { version = "48", features = ["serde"] }
-datafusion-proto = { version = "48" }
+datafusion = { version = "49", features = ["serde"] }
+datafusion-proto = { version = "49" }
 object_store = { version = "0.12", features = ["aws", "gcp", "azure"] }
 
 # Crates that should follow the version used by DataFusion and Arrow
