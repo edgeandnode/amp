@@ -40,3 +40,11 @@ spill_location = []
 
 # Admin API server address
 # admin_api_addr = "0.0.0.0:1610"
+
+# Parquet configuration (optional)
+[parquet]
+# Compression algorithm: zstd, lz4, gzip, brotli, snappy, uncompressed (default: zstd(1))
+# compression = "zstd(1)"
+
+# Enable bloom filters for better query performance (default: false)
+# bloom_filters = false
