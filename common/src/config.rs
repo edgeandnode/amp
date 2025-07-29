@@ -83,7 +83,9 @@ pub struct ConfigFile {
     pub providers_dir: String,
     pub dataset_defs_dir: String,
     pub metadata_db_url: Option<String>,
+    #[serde(default)]
     pub max_mem_mb: usize,
+    #[serde(default)]
     pub spill_location: Vec<PathBuf>,
     pub microbatch_max_interval: Option<u64>,
     pub flight_addr: Option<String>,
