@@ -15,7 +15,7 @@ use common::{
 use metadata_db::{FooterBytes, MetadataDb};
 use object_store::{ObjectMeta, buffered::BufWriter, path::Path};
 use rand::RngCore as _;
-use tracing::debug;
+use tracing::{debug, trace};
 use url::Url;
 
 const MAX_PARTITION_BLOCK_RANGE: u64 = 1_000_000;
@@ -116,7 +116,7 @@ pub async fn commit_metadata(
         .await?;
 
     // Notify that the dataset has been changed
-    debug!("notifying location change for location_id: {}", location_id);
+    trace!("notifying location change for location_id: {}", location_id);
     metadata_db.notify_location_change(location_id).await?;
 
     Ok(())
