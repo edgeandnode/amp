@@ -142,7 +142,8 @@ impl RawTableWriter {
         partition_size: u64,
         missing_ranges: Vec<RangeInclusive<BlockNum>>,
     ) -> Result<Self, BoxError> {
-        let ranges_to_write = limit_ranges(missing_ranges, MAX_PARTITION_BLOCK_RANGE);
+        let mut ranges_to_write = limit_ranges(missing_ranges, MAX_PARTITION_BLOCK_RANGE);
+        ranges_to_write.reverse();
         let current_file = match ranges_to_write.last() {
             Some(range) => Some(ParquetFileWriter::new(
                 table.clone(),
@@ -260,7 +261,7 @@ impl RawTableWriter {
             return Ok(None);
         }
         // We should be closing the last range.
-        assert!(self.ranges_to_write.len() == 1);
+        assert_eq!(self.ranges_to_write.len(), 1);
         self.close_current_file().await.map(Some)
     }
 
