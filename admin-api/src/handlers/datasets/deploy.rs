@@ -43,10 +43,7 @@ pub async fn handler_inner(
 
     let dataset = ctx.store.load_dataset(&payload.dataset_name).await?;
 
-    ctx.scheduler
-        .schedule_dataset_dump(dataset, None)
-        .await
-        .map_err(Error::SchedulerError)?;
+    ctx.scheduler.schedule_dataset_dump(dataset, None).await?;
 
     Ok((StatusCode::OK, "DEPLOYMENT_SUCCESSFUL"))
 }
