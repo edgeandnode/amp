@@ -243,7 +243,7 @@ impl RawTableWriter {
             Some(range) => {
                 assert_eq!(&range.network, &table_rows.range.network);
                 Some(BlockRange {
-                    numbers: *range.numbers.start()..=*table_rows.range.numbers.end(),
+                    numbers: range.start()..=table_rows.range.end(),
                     network: range.network,
                     hash: table_rows.range.hash,
                     prev_hash: range.prev_hash,
@@ -319,8 +319,8 @@ impl ParquetFileWriter {
         debug!(
             "wrote {} for range {} to {}",
             self.file_url,
-            range.numbers.start(),
-            range.numbers.end(),
+            range.start(),
+            range.end(),
         );
 
         let parquet_meta = ParquetMeta {

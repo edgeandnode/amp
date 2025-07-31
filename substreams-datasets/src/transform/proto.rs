@@ -39,7 +39,7 @@ pub(crate) fn pb_to_rows(
             }
 
             let table = table.unwrap();
-            let block_num = *range.numbers.start();
+            let block_num = range.start();
             let rows = message_to_rows(list, table.schema().clone(), block_num);
             if let Err(err) = rows {
                 return Some(Err(err.into()));
