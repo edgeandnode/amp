@@ -79,10 +79,14 @@ impl Chain {
     }
 }
 
-/// Return a subset of the given segments that form a canonical chain. The result is independent of
-/// the order of the input `segments`. The canonical chain is constructed starting from the minimum
-/// start block number to the greatest reachable end block number. When multiple segments overlap
-/// on the canonical chain, we select the one with the latest object `last_modified` timestamp.
+/// Returns the canonical chain of segments.
+///
+/// The canonical chain starts from the earliest available block and extends to the greatest block
+/// height reachable through contiguous segments. When multiple segments cover the same block range
+/// (indicating a reorg or compaction), the segment with the most recent `last_modified` timestamp
+/// is chosen.
+///
+/// The input order of `segments` does not affect the result.
 pub fn canonical_chain(segments: Vec<Segment>) -> Option<Chain> {
     chains(segments).map(|Chains { canonical, .. }| canonical)
 }
@@ -90,25 +94,31 @@ pub fn canonical_chain(segments: Vec<Segment>) -> Option<Chain> {
 /// Return the block ranges missing from this table out of the given `desired` range. The
 /// returned ranges are non-overlapping and sorted by their start block number.
 ///
-/// To resolve reorgs, the missing ranges may include blocks already indexed. A reorg is
-/// detected when there is some fork, which is a non-canonical chain of segments which has a
-/// greater block height than the canonical chain. When a reorg is detected, the missing ranges
-/// will include any canonical ranges that overlap with the fork minus 1 block.
+/// To resolve reorgs, the missing ranges may include block ranges already indexed. A reorg is
+/// detected when there is some fork, which is a chain of segments that has a greater block height
+/// than the canonical chain. Divergence from the canonical chain is detected using the `hash` and
+/// `prev_hash` fields on the block range. When a reorg is detected, the missing ranges will
+/// include any canonical ranges that overlap with the fork minus 1 block.
+///
 ///
 /// ```text
-///              ┌───────────────────────────┐
-///   desired:   │ a │ b │ c │ d │ e │ f │ g │
-///              └───────────────────────────┘
-///                  ┌───────────────┐
-///   canonical:     │ b │ c │ d │ e │
-///                  └───────────────┘
-///                          ┌───────────┐
-///   fork:                  │ d'│ e'│ f'│
-///                          └───────────┘
-///              ┌───┐   ┌───┐           ┌───┐
-///   missing:   │ a │   │ c'│           │ g'│
-///              └───┘   └───┘           └───┘
+///                ┌───────────────────────────────────────────────────────┐
+///   desired:     │ 00-02 │ 03-05 │ 06-08 │ 09-11 │ 12-14 │ 15-17 │ 18-20 │
+///                └───────────────────────────────────────────────────────┘
+///                        ┌───────────────────────────────┐
+///   canonical:           │ 03-05 │ 06-08 │ 09-11 │ 12-14 │
+///                        └───────────────────────────────┘
+///                                        ┌───────────────────────┐
+///   fork:                                │ 09-11'│ 12-14'│ 15-17'│
+///                                        └───────────────────────┘
+///                ┌───────┐       ┌───────┐                       ┌───────┐
+///   missing:     │ 00-02 │       │ 06-08 │                       │ 18-20 │
+///                └───────┘       └───────┘                       └───────┘
 /// ```
+///
+/// - Ranges 00-02 and 18-20 are missing due to block range gap.
+/// - Range 06-08 is missing due to reorg. The canonical chan overlaps with the fork,
+///   so we should re-extract the previous segment.
 pub fn missing_ranges(
     segments: Vec<Segment>,
     desired: RangeInclusive<BlockNum>,
