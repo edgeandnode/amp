@@ -592,14 +592,16 @@ impl MetadataDb {
         dataset_name: &str,
         version: &str,
         owner: &str,
+        manifest: &str,
     ) -> Result<(), Error> {
         let sql = "
-        INSERT INTO registry (dataset, version, owner)
-        VALUES ($1, $2, $3)
+        INSERT INTO registry (dataset, version, manifest, owner)
+        VALUES ($1, $2, $3, $4)
         ";
         sqlx::query(sql)
             .bind(dataset_name)
             .bind(version)
+            .bind(manifest)
             .bind(owner)
             .execute(&*self.pool)
             .await?;
@@ -607,16 +609,29 @@ impl MetadataDb {
         Ok(())
     }
 
-    pub async fn get_manifest_from_registry(
+    pub async fn dataset_exists(&self, dataset_name: &str, version: &str) -> Result<bool, Error> {
+        let sql = "
+            SELECT COUNT(*) FROM registry 
+            WHERE dataset = $1 AND version = $2
+        ";
+        let count: i64 = sqlx::query_scalar(sql)
+            .bind(dataset_name)
+            .bind(version)
+            .fetch_one(&*self.pool)
+            .await?;
+        Ok(count > 0)
+    }
+
+    pub async fn get_manifest(
         &self,
         dataset: &str,
         version: &str,
-    ) -> Result<Option<(String, String)>, Error> {
+    ) -> Result<Option<String>, Error> {
         let sql = "
-            SELECT dataset, version FROM registry 
+            SELECT manifest FROM registry 
             WHERE dataset = $1 AND version = $2
         ";
-        let result = sqlx::query_as(sql)
+        let result = sqlx::query_scalar(sql)
             .bind(dataset)
             .bind(version)
             .fetch_optional(&*self.pool)

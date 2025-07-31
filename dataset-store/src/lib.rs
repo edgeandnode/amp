@@ -239,29 +239,6 @@ impl DatasetStore {
             .map_err(|e| (dataset, e).into())
     }
 
-    pub async fn load_dataset_with_version(
-        self: &Arc<Self>,
-        dataset: &str,
-        version: &str,
-    ) -> Result<Dataset, DatasetError> {
-        let dataset_name = format!("{}__{}", dataset, version);
-        self.clone()
-            .load_dataset_inner(&dataset_name)
-            .await
-            .map_err(|e| (dataset, e).into())
-    }
-
-    pub async fn try_load_dataset(
-        self: &Arc<Self>,
-        dataset: &str,
-    ) -> Result<Option<Dataset>, DatasetError> {
-        match self.load_dataset_inner(dataset).await {
-            Ok(dataset) => Ok(Some(dataset)),
-            Err(err) if matches!(&err, Error::FetchError(e) if e.is_not_found()) => Ok(None),
-            Err(err) => Err((dataset, err).into()),
-        }
-    }
-
     pub async fn all_datasets(self: &Arc<Self>) -> Result<Vec<Dataset>, DatasetError> {
         let all_objs = self
             .dataset_defs_store()

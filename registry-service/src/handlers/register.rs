@@ -72,9 +72,8 @@ pub async fn register_manifest(
     // Check if the dataset with the given name and version already exists in the registry.
     if dataset_store
         .metadata_db
-        .get_manifest_from_registry(&dataset_name, &version)
+        .dataset_exists(&dataset_name, &version)
         .await?
-        .is_some()
     {
         return Err(RegisterManifestError::DatasetAlreadyExists(
             dataset_name,
@@ -105,6 +104,7 @@ pub async fn register_manifest(
                 .get(&manifest.network)
                 .map(|d| d.owner.as_str())
                 .unwrap_or("unknown"),
+            &filename,
         )
         .await?;
 

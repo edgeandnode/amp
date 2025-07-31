@@ -27,22 +27,22 @@ pub async fn handler_inner(
 ) -> Result<(StatusCode, &'static str), Error> {
     validate_dataset_name(&payload.dataset_name)
         .map_err(|e| Error::InvalidRequest(format!("invalid dataset name: {e}").into()))?;
-    let dataset = ctx
+    let manifest = ctx
         .metadata_db
-        .get_manifest_from_registry(&payload.dataset_name, &payload.version)
+        .get_manifest(&payload.dataset_name, &payload.version)
         .await
         .map_err(|e| Error::InvalidRequest(e.to_string().into()))?;
 
-    match (dataset, payload.manifest) {
-        (Some((dataset_name, version)), None) => {
+    match (manifest, payload.manifest) {
+        (Some(manifest), None) => {
             tracing::info!(
                 "Deploying existing dataset '{}' version '{}'",
-                dataset_name,
-                version
+                payload.dataset_name,
+                payload.version
             );
             let dataset = ctx
                 .store
-                .load_dataset_with_version(&dataset_name, &version)
+                .load_dataset(&manifest.trim_end_matches(".json"))
                 .await?;
             ctx.scheduler
                 .schedule_dataset_dump(dataset, None)
