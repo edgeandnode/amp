@@ -14,15 +14,23 @@ from ..base import DataLoader, LoadMode, LoadResult
 
 
 class RedisDataStructure(Enum):
-    """Redis data structure types with performance characteristics"""
-
-    HASH = 'hash'  # Best for: key-value access, field queries, general purpose
-    STRING = 'string'  # Best for: JSON storage, full-text search, simple caching
-    STREAM = 'stream'  # Best for: time-series data, event logging, pub/sub
-    SET = 'set'  # Best for: unique values, membership testing, intersections
-    SORTED_SET = 'sorted_set'  # Best for: ranked data, leaderboards, range queries
-    LIST = 'list'  # Best for: ordered data, queues, timeline data
-    JSON = 'json'  # Best for: complex nested data (requires RedisJSON module)
+    """Redis data structure types for different use cases.
+    
+    - HASH: key-value access, field queries, general purpose
+    - STRING: JSON storage, full-text search, simple caching
+    - STREAM: time-series data, event logging, pub/sub
+    - SET: unique values, membership testing, intersections
+    - SORTED_SET: ranked data, leaderboards, range queries
+    - LIST: ordered data, queues, timeline data
+    - JSON: complex nested data (requires RedisJSON module)
+    """
+    HASH = 'hash'
+    STRING = 'string'
+    STREAM = 'stream'
+    SET = 'set'
+    SORTED_SET = 'sorted_set'
+    LIST = 'list'
+    JSON = 'json'
 
 
 @dataclass
@@ -643,86 +651,3 @@ class RedisLoader(DataLoader):
         except Exception as e:
             return {'healthy': False, 'error': str(e)}
 
-
-# Example usage and testing
-def create_comprehensive_test_data() -> pa.Table:
-    """Create comprehensive test data for all Redis data structures"""
-    import random
-    from datetime import datetime, timedelta
-
-    import pandas as pd
-
-    # Create 1000 rows of diverse data
-    base_time = datetime.now()
-
-    data = {
-        'id': range(1000),
-        'user_id': [f'user_{i % 100}' for i in range(1000)],  # 100 unique users
-        'session_id': [f'session_{i % 200}' for i in range(1000)],  # 200 unique sessions
-        'score': [random.randint(1, 1000) for _ in range(1000)],  # For sorted sets
-        'timestamp': [(base_time + timedelta(seconds=i)).timestamp() for i in range(1000)],
-        'event_type': [random.choice(['login', 'purchase', 'view', 'click', 'logout']) for _ in range(1000)],
-        'amount': [round(random.uniform(10.0, 1000.0), 2) for _ in range(1000)],
-        'category': [random.choice(['electronics', 'clothing', 'books', 'sports', 'home']) for _ in range(1000)],
-        'active': [random.choice([True, False]) for _ in range(1000)],
-        'metadata': [json.dumps({'key': f'value_{i}', 'index': i}) for i in range(1000)],
-        'binary_data': [f'binary_data_{i}'.encode('utf-8') for i in range(1000)],
-    }
-
-    df = pd.DataFrame(data)
-    return pa.Table.from_pandas(df)
-
-
-def comprehensive_redis_test():
-    """Comprehensive test of the optimized Redis loader"""
-    import logging
-
-    logging.basicConfig(level=logging.INFO)
-
-    # Test configurations for different data structures
-    test_configs = [{'name': 'Optimized Hash Storage', 'config': {'host': 'localhost', 'port': 6379, 'password': 'mypassword', 'db': 1, 'data_structure': 'hash', 'key_pattern': 'user:{user_id}:event:{id}', 'ttl': 3600, 'batch_size': 100, 'pipeline_size': 500}}, {'name': 'Optimized Stream Storage', 'config': {'host': 'localhost', 'port': 6379, 'password': 'mypassword', 'db': 2, 'data_structure': 'stream', 'ttl': 3600, 'batch_size': 100}}, {'name': 'Optimized Sorted Set Storage', 'config': {'host': 'localhost', 'port': 6379, 'password': 'mypassword', 'db': 3, 'data_structure': 'sorted_set', 'score_field': 'score', 'ttl': 3600, 'batch_size': 100}}]
-
-    # Create comprehensive test data
-    print('📊 Creating comprehensive test data...')
-    test_table = create_comprehensive_test_data()
-    print(f'Created table with {test_table.num_rows} rows and {len(test_table.schema)} columns')
-
-    for test_config in test_configs:
-        print(f'\n🧪 Testing {test_config["name"]}...')
-        print('=' * 60)
-
-        try:
-            loader = RedisLoader(test_config['config'])
-
-            with loader:
-                # Health check
-                health = loader.health_check()
-                print(f'🏥 Health check: {"✅ Healthy" if health["healthy"] else "❌ Unhealthy"}')
-                if health['healthy']:
-                    print(f'   Redis version: {health["redis_version"]}')
-                    print(f'   Memory usage: {health["used_memory_human"]}')
-                    print(f'   Hit rate: {health["hit_rate"]}%')
-
-                # Performance test
-                print('⚡ Performance test...')
-                start_time = time.time()
-                result = loader.load_table(test_table, 'performance_test', mode=LoadMode.OVERWRITE)
-                end_time = time.time()
-
-                print(f'✅ {result}')
-                print(f'   Operations per second: {result.metadata.get("ops_per_second", 0)}')
-                print(f'   Average batch size: {result.metadata.get("avg_batch_size", 0)}')
-
-                # Statistics
-                stats = loader.get_comprehensive_stats('performance_test')
-                print(f'📊 Statistics: {stats}')
-
-        except Exception as e:
-            print(f'❌ {test_config["name"]} failed: {e}')
-            continue
-
-    print('\n🎉 Comprehensive Redis loader testing completed!')
-
-
-if __name__ == '__main__':
-    comprehensive_redis_test()
