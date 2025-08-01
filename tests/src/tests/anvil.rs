@@ -130,7 +130,7 @@ async fn rpc_reorg_simple() {
 
     test.dump(0..=0).await;
     test.mine(2).await;
-    test.dump(1..=2).await;
+    test.dump(0..=2).await;
     let blocks0 = test.query_blocks(0..=2).await;
     test.reorg(1).await;
     test.mine(1).await;

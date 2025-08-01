@@ -612,12 +612,10 @@ impl MetadataDb {
         Ok(())
     }
 
-    /// If the start block is already set, it must match the provided start_block. Otherwise, it
-    /// will be set to the provided `start_block`.
+    /// If the start block is already set, it must match the provided start_block. Otherwise, the
+    /// requested `start_block` is persisted for this location.
     ///
     /// The check and potential update happen in a single transaction.
-    ///
-    /// For the purpose of this check, a `NULL` `start_block` in the database is treated as `0`.
     pub async fn check_start_block(
         &self,
         location_id: LocationId,
@@ -631,24 +629,24 @@ impl MetadataDb {
                 .fetch_one(&mut *tx)
                 .await?;
 
-        // Per business logic, a NULL start_block is treated as 0 for validation.
-        let effective_existing_block = existing_start_block.unwrap_or(0);
-
-        if effective_existing_block != start_block {
-            return Err(Error::MismatchedStartBlock {
-                existing: effective_existing_block,
-                requested: start_block,
-            });
-        }
-
-        // If the start block was not present in the DB, persist it. Since the check above passed,
-        // we know `start_block` is `0` if `existing_start_block` was `None`.
-        if existing_start_block.is_none() {
-            sqlx::query("UPDATE locations SET start_block = $1 WHERE id = $2")
-                .bind(start_block)
-                .bind(location_id)
-                .execute(&mut *tx)
-                .await?;
+        match existing_start_block {
+            // A start block exists. It must match the requested one.
+            Some(existing) => {
+                if existing != start_block {
+                    return Err(Error::MismatchedStartBlock {
+                        existing,
+                        requested: start_block,
+                    });
+                }
+            }
+            // No start block exists. This is the first run, so persist the requested block.
+            None => {
+                sqlx::query("UPDATE locations SET start_block = $1 WHERE id = $2")
+                    .bind(start_block)
+                    .bind(location_id)
+                    .execute(&mut *tx)
+                    .await?;
+            }
         }
 
         tx.commit().await?;
