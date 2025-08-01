@@ -603,22 +603,29 @@ impl MetadataDb {
         Ok(())
     }
 
-    pub async fn get_footer_bytes(
+    pub async fn insert_compacted_metadata(
         &self,
         location_id: LocationId,
-        file_name: String,
-    ) -> Result<Vec<u8>, Error> {
+        file_name: &str,
+        object_size: u64,
+        object_e_tag: Option<String>,
+        object_version: Option<String>,
+        parquet_meta: serde_json::Value,
+        footer: Vec<u8>,
+        component_ids: Vec<FileId>,
+    ) -> Result<FileId, Error> {
+        todo!()
+    }
+
+    pub async fn get_footer_bytes(&self, file_id: FileId) -> Result<Vec<u8>, Error> {
         let sql = "
         SELECT footer
           FROM file_metadata
-         WHERE location_id = $1
-               AND file_name = $2
-      ORDER BY id DESC LIMIT 1
+         WHERE id = $1;
         ";
 
         Ok(sqlx::query_scalar(sql)
-            .bind(location_id)
-            .bind(file_name)
+            .bind(file_id)
             .fetch_one(&*self.pool)
             .await?)
     }
