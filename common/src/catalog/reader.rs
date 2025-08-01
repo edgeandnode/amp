@@ -3,7 +3,7 @@ use std::{ops::Range, sync::Arc};
 use bytes::Bytes;
 use datafusion::{
     datasource::physical_plan::{FileMeta, ParquetFileMetrics, ParquetFileReaderFactory},
-    error::Result as DataFusionResult,
+    error::{DataFusionError, Result as DataFusionResult},
     parquet::{
         arrow::{
             arrow_reader::ArrowReaderOptions,
@@ -15,7 +15,7 @@ use datafusion::{
     physical_plan::metrics::ExecutionPlanMetricsSet,
 };
 use futures::future::BoxFuture;
-use metadata_db::{LocationId, MetadataDb};
+use metadata_db::{FileId, LocationId, MetadataDb};
 use object_store::ObjectStore;
 
 #[derive(Debug, Clone)]
@@ -40,20 +40,31 @@ impl ParquetFileReaderFactory for NozzleReaderFactory {
         let inner = ParquetObjectReader::new(store, path.clone())
             .with_file_size(file_meta.object_meta.size);
         let location_id = self.location_id;
+        let file_id = file_meta
+            .extensions
+            .ok_or(DataFusionError::Execution(format!(
+                "FileMeta missing extensions for location_id: {}",
+                location_id
+            )))?
+            .downcast::<FileId>()
+            .map_err(|_| {
+                DataFusionError::Execution("FileMeta extensions are not of type FileId".to_string())
+            })?;
 
         Ok(Box::new(NozzleReader {
             location_id,
+            file_id: *file_id,
             inner,
             file_metrics,
             metadata_db,
-            file_meta,
         }))
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct NozzleReader {
     pub location_id: LocationId,
-    pub file_meta: FileMeta,
+    pub file_id: FileId,
     pub metadata_db: Arc<MetadataDb>,
     pub file_metrics: ParquetFileMetrics,
     pub inner: ParquetObjectReader,
@@ -80,16 +91,9 @@ impl AsyncFileReader for NozzleReader {
         _options: Option<&'a ArrowReaderOptions>,
     ) -> BoxFuture<'a, ParquetResult<Arc<ParquetMetaData>>> {
         let metadata_db = Arc::clone(&self.metadata_db);
-        let file_meta = &self.file_meta;
-        let location_id = self.location_id;
         Box::pin(async move {
-            let file_name = file_meta
-                .location()
-                .filename()
-                .ok_or(ParquetError::External("File name is not available".into()))?
-                .to_string();
             let footer = metadata_db
-                .get_footer_bytes(location_id, file_name)
+                .get_footer_bytes(self.file_id)
                 .await
                 .map_err(|e| ParquetError::External(e.into()))?;
 

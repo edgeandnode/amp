@@ -1,6 +1,7 @@
 use std::{collections::BTreeMap, fmt::Debug, ops::RangeInclusive};
 
 use alloy::primitives::BlockHash;
+use metadata_db::FileId;
 use object_store::ObjectMeta;
 
 use crate::{BlockNum, block_range_intersection};
@@ -38,6 +39,7 @@ impl BlockRange {
 pub struct Segment {
     pub range: BlockRange,
     pub object: ObjectMeta,
+    pub file_id: Option<FileId>,
 }
 
 /// A sequence of adjacent segments.
@@ -347,7 +349,11 @@ mod test {
             e_tag: None,
             version: None,
         };
-        Segment { range, object }
+        Segment {
+            range,
+            object,
+            file_id: None,
+        }
     }
 
     #[test]

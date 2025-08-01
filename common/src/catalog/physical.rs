@@ -426,6 +426,10 @@ impl PhysicalTable {
         Arc::clone(&self.reader_factory.object_store)
     }
 
+    pub fn metadata_db(&self) -> Arc<MetadataDb> {
+        Arc::clone(&self.metadata_db)
+    }
+
     pub fn table(&self) -> &ResolvedTable {
         &self.table
     }
@@ -455,10 +459,11 @@ impl PhysicalTable {
         Ok(missing_ranges(segments, desired))
     }
 
-    async fn segments(&self) -> Result<Vec<Segment>, BoxError> {
+    pub async fn segments(&self) -> Result<Vec<Segment>, BoxError> {
         self.stream_file_metadata()
             .map(|result| {
                 let FileMetadata {
+                    file_id,
                     file_name,
                     object_meta,
                     parquet_meta: ParquetMeta { mut ranges, .. },
@@ -472,6 +477,7 @@ impl PhysicalTable {
                 Ok(Segment {
                     range: ranges.remove(0),
                     object: object_meta,
+                    file_id: Some(file_id),
                 })
             })
             .try_collect()
@@ -481,7 +487,7 @@ impl PhysicalTable {
 
 // Methods for streaming metadata and file information of PhysicalTable
 impl PhysicalTable {
-    fn stream_file_metadata<'a>(
+    pub fn stream_file_metadata<'a>(
         &'a self,
     ) -> impl Stream<Item = Result<FileMetadata, BoxError>> + 'a {
         self.metadata_db
@@ -519,12 +525,15 @@ impl PhysicalTable {
                 ctx.config_options().execution.meta_fetch_concurrency,
             );
             let batch: Vec<Segment> = canonical_segments.drain(0..batch_len).collect();
-            let results: Vec<DataFusionResult<(BlockNum, PartitionedFile)>> =
-                join_all(batch.into_iter().map(async |Segment { range, object }| {
-                    let partitioned_file = PartitionedFile::from(object);
-                    Ok((range.start(), partitioned_file))
-                }))
-                .await;
+            let results: Vec<DataFusionResult<(BlockNum, PartitionedFile)>> = join_all(
+                batch
+                    .into_iter()
+                    .map(async |Segment { range, object, .. }| {
+                        let partitioned_file = PartitionedFile::from(object);
+                        Ok((range.start(), partitioned_file))
+                    }),
+            )
+            .await;
             for result in results {
                 let (start_block, partitioned_file) = result?;
                 partitioned_files.insert(start_block, partitioned_file);
