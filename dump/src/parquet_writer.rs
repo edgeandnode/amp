@@ -12,11 +12,14 @@ use common::{
     },
     parquet::{arrow::AsyncArrowWriter, errors::ParquetError, format::KeyValue},
 };
-use metadata_db::{FooterBytes, MetadataDb};
+use metadata_db::{FooterBytes, LocationId, MetadataDb};
 use object_store::{ObjectMeta, buffered::BufWriter, path::Path};
 use rand::RngCore as _;
+use tokio::sync::mpsc;
 use tracing::debug;
 use url::Url;
+
+use crate::compaction::Compactor;
 
 const MAX_PARTITION_BLOCK_RANGE: u64 = 1_000_000;
 
@@ -25,6 +28,8 @@ pub struct RawDatasetWriter {
     writers: BTreeMap<String, RawTableWriter>,
 
     metadata_db: Arc<MetadataDb>,
+
+    compaction_trigger: Arc<mpsc::UnboundedSender<Arc<LocationId>>>,
 }
 
 impl RawDatasetWriter {
@@ -38,6 +43,8 @@ impl RawDatasetWriter {
         missing_ranges_by_table: BTreeMap<String, Vec<RangeInclusive<BlockNum>>>,
     ) -> Result<Self, BoxError> {
         let mut writers = BTreeMap::new();
+        let compaction_trigger = Compactor::spawn(dataset_ctx.catalog().tables(), opts.clone());
+
         for table in dataset_ctx.catalog().tables() {
             // Unwrap: `missing_ranges_by_table` contains an entry for each table.
             let table_name = table.table_name();
@@ -48,6 +55,7 @@ impl RawDatasetWriter {
         Ok(RawDatasetWriter {
             writers,
             metadata_db,
+            compaction_trigger,
         })
     }
 
@@ -64,6 +72,7 @@ impl RawDatasetWriter {
                 footer,
             )
             .await?;
+            self.compaction_trigger.send(Arc::new(location_id))?;
         }
 
         Ok(())
@@ -81,7 +90,8 @@ impl RawDatasetWriter {
                     location_id,
                     footer,
                 )
-                .await?
+                .await?;
+                self.compaction_trigger.send(Arc::new(location_id))?;
             }
         }
 

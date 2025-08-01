@@ -131,7 +131,10 @@ use futures::StreamExt as _;
 use tracing::instrument;
 
 use super::{Ctx, block_ranges, tasks::FailFastJoinSet};
-use crate::parquet_writer::{ParquetFileWriter, ParquetWriterProperties, commit_metadata};
+use crate::{
+    compaction::Compactor,
+    parquet_writer::{ParquetFileWriter, ParquetWriterProperties, commit_metadata},
+};
 
 /// Dumps a SQL dataset table
 #[instrument(skip_all, fields(dataset = %dataset.name()), err)]
@@ -319,10 +322,12 @@ async fn dump_sql_query(
         microbatch_start,
     )?;
 
+    let compactor_trigger = Compactor::spawn(&[physical_table.clone()], parquet_opts.clone());
     // Receive data from the query stream, commiting a file on every watermark update received. The
     // `microbatch_max_interval` parameter controls the frequency of these updates.
     while let Some(message) = stream.next().await {
         let message = message?;
+        let trigger = compactor_trigger.clone();
         match message {
             QueryMessage::Data(batch) => {
                 writer.write(&batch).await?;
@@ -336,14 +341,16 @@ async fn dump_sql_query(
                     prev_hash: range.prev_hash,
                 };
                 let (parquet_meta, object_meta, footer) = writer.close(chunk_range).await?;
+                let location_id = physical_table.location_id();
                 commit_metadata(
                     &dataset_store.metadata_db,
                     parquet_meta,
                     object_meta,
-                    physical_table.location_id(),
+                    location_id,
                     footer,
                 )
                 .await?;
+                trigger.send(Arc::new(location_id))?;
 
                 // Open new file for next chunk
                 microbatch_start = microbatch_end + 1;
