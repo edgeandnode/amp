@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     # Core dependencies for all loaders
+    "pandas>=2.3.1",
     "pyarrow>=20.0.0",
     "typer>=0.15.2",
     
@@ -51,11 +52,20 @@ delta_lake = [
     "deltalake>=1.0.2",
 ]
 
+iceberg = [
+    "pyiceberg[sql-sqlite]>=0.9.1",
+]
+
+snowflake = [
+    "snowflake-connector-python>=3.5.0",
+]
+
 all_loaders = [
     "psycopg2-binary>=2.9.0",       # PostgreSQL
     "redis>=4.5.0",                 # Redis
     "deltalake>=1.0.2",             # Delta Lake (consistent version)
     "pyiceberg[sql-sqlite]>=0.9.1", # Apache Iceberg
+    "snowflake-connector-python>=3.5.0",  # Snowflake
 ]
 
 test = [
@@ -68,10 +78,6 @@ test = [
     "testcontainers>=3.7.0",       # Database containers for integration tests
     "docker>=6.0.0",               # Required by testcontainers
     "psutil>=5.9.0",               # Memory usage monitoring
-]
-
-iceberg = [
-    "pyiceberg[sql-sqlite]>=0.9.1",
 ]
 
 [build-system]
@@ -87,6 +93,10 @@ addopts = [
     "--tb=short",
     "--strict-markers",
 ]
+# Timeout configuration for longer-running integration tests
+timeout = 300  # 5 minutes per test
+timeout_method = "thread"
+
 markers = [
     "unit: Unit tests (fast, no external dependencies)",
     "integration: Integration tests (require databases)",
@@ -96,6 +106,7 @@ markers = [
     "redis: Tests requiring Redis",
     "delta_lake: Tests requiring Delta Lake",
     "iceberg: Tests requiring Apache Iceberg",
+    "snowflake: Tests requiring Snowflake",
     "cloud: Tests requiring cloud storage access",
 ]
 
