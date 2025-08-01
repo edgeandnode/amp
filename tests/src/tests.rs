@@ -197,29 +197,19 @@ async fn persist_start_block_test() -> Result<(), BoxError> {
 async fn persist_start_block_set_on_creation() -> Result<(), BoxError> {
     tracing_helpers::register_logger();
 
-    // Spawn Anvil on a random port
-    let anvil = Anvil::new().port(0_u16).spawn();
-    let anvil_url = anvil.endpoint_url();
-
-    // Set up the test environment with the Anvil provider
-    let test_env = TestEnv::new(
-        "persist_start_block_set_on_creation",
-        true,
-        Some(anvil_url.as_str()),
-    )
-    .await?;
-    let _client = TestClient::connect(&test_env).await?;
+    // Set up the Anvil test environment from the `anvil.rs` test helpers
+    let test = anvil::AnvilTestContext::setup("persist_start_block_set_on_creation").await;
 
     // Mine 10 blocks so the dump has something to process
-    let provider = ProviderBuilder::new().connect_http(anvil_url);
-    provider.anvil_mine(Some(10), None).await?;
-    assert_eq!(provider.get_block_number().await?, 10);
+    test.mine(10).await;
+    assert_eq!(test.latest_block().await.block_num, 10);
 
-    // Perform the initial dump directly
-    test_support::dump_dataset(&test_env.config, "anvil_rpc", 0, 9, 1, None).await?;
+    // Perform the initial dump from block 0. This should succeed and persist `start_block = 0`.
+    test_support::dump_dataset(&test.env.config, "anvil_rpc", 0, 9, 1, None).await?;
 
-    // Query the database to verify the start_block was persisted correctly
-    let location = test_env
+    // Query the database to verify that the start_block was persisted correctly as 0.
+    let location = test
+        .env
         .metadata_db
         .get_active_location(metadata_db::TableId {
             dataset: "anvil_rpc",
@@ -228,15 +218,26 @@ async fn persist_start_block_set_on_creation() -> Result<(), BoxError> {
         })
         .await?
         .ok_or("No active location found for anvil_rpc.blocks")?;
-
-    // The location is a tuple of (Url, LocationId)
     let location_id = location.1;
 
-    // Verify start_block is 0 via check_start_block API
-    test_env
+    test.env
         .metadata_db
         .check_start_block(location_id, 0)
         .await?;
+
+    // Now, attempt to dump again with a *different* start_block. This must fail.
+    let result = test_support::dump_dataset(&test.env.config, "anvil_rpc", 1, 9, 1, None).await;
+
+    assert!(result.is_err(), "Expected dump to fail but it succeeded");
+    let err_msg = result.unwrap_err().to_string();
+    let expected_err =
+        "Cannot start dump: location has existing start_block=0, but requested start_block=1";
+    assert!(
+        err_msg.contains(expected_err),
+        "Error message did not match.\nGot: '{}'\nExpected to contain: '{}'",
+        err_msg,
+        expected_err
+    );
 
     Ok(())
 }

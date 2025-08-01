@@ -14,15 +14,15 @@ use crate::test_support::{SnapshotContext, TestEnv, table_ranges};
 
 const DATASET_NAME: &str = "anvil_rpc";
 
-struct AnvilTestContext {
-    env: TestEnv,
+pub(crate) struct AnvilTestContext {
+    pub(crate) env: TestEnv,
     http: reqwest::Client,
     provider: alloy::providers::DynProvider,
     _anvil: AnvilInstance,
 }
 
 impl AnvilTestContext {
-    async fn setup(test_name: &str) -> Self {
+    pub(crate) async fn setup(test_name: &str) -> Self {
         tracing_helpers::register_logger();
         let http = reqwest::Client::new();
         let anvil = Anvil::new().port(0_u16).spawn();
@@ -43,7 +43,7 @@ impl AnvilTestContext {
         DatasetStore::new(self.env.config.clone(), self.env.metadata_db.clone())
     }
 
-    async fn mine(&self, blocks: u64) {
+    pub(crate) async fn mine(&self, blocks: u64) {
         tracing::info!(blocks, "mine");
         self.provider.anvil_mine(Some(blocks), None).await.unwrap()
     }
@@ -80,7 +80,7 @@ impl AnvilTestContext {
         table_ranges(&table).await.unwrap()
     }
 
-    async fn latest_block(&self) -> BlockRow {
+    pub(crate) async fn latest_block(&self) -> BlockRow {
         let block = self
             .provider
             .get_block(alloy::eips::BlockId::latest())
@@ -118,8 +118,8 @@ impl AnvilTestContext {
 }
 
 #[derive(Debug, PartialEq, Eq, serde::Deserialize)]
-struct BlockRow {
-    block_num: BlockNum,
+pub(crate) struct BlockRow {
+    pub(crate) block_num: BlockNum,
     hash: BlockHash,
     parent_hash: BlockHash,
 }

@@ -612,27 +612,46 @@ impl MetadataDb {
         Ok(())
     }
 
-    /// If the start block is already set, it must match the provided start_block.
+    /// If the start block is already set, it must match the provided start_block. Otherwise, it
+    /// will be set to the provided `start_block`.
+    ///
+    /// The check and potential update happen in a single transaction.
+    ///
+    /// For the purpose of this check, a `NULL` `start_block` in the database is treated as `0`.
     pub async fn check_start_block(
         &self,
         location_id: LocationId,
         start_block: i64,
     ) -> Result<(), Error> {
+        let mut tx = self.pool.begin().await?;
+
         let existing_start_block: Option<i64> =
             sqlx::query_scalar("SELECT start_block FROM locations WHERE id = $1")
                 .bind(location_id)
-                .fetch_one(&*self.pool)
+                .fetch_one(&mut *tx)
                 .await?;
 
-        if let Some(existing) = existing_start_block {
-            if existing != start_block {
-                return Err(Error::MismatchedStartBlock {
-                    existing,
-                    requested: start_block,
-                });
-            }
+        // Per business logic, a NULL start_block is treated as 0 for validation.
+        let effective_existing_block = existing_start_block.unwrap_or(0);
+
+        if effective_existing_block != start_block {
+            return Err(Error::MismatchedStartBlock {
+                existing: effective_existing_block,
+                requested: start_block,
+            });
         }
 
+        // If the start block was not present in the DB, persist it. Since the check above passed,
+        // we know `start_block` is `0` if `existing_start_block` was `None`.
+        if existing_start_block.is_none() {
+            sqlx::query("UPDATE locations SET start_block = $1 WHERE id = $2")
+                .bind(start_block)
+                .bind(location_id)
+                .execute(&mut *tx)
+                .await?;
+        }
+
+        tx.commit().await?;
         Ok(())
     }
 
