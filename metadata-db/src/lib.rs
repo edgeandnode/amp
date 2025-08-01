@@ -1,5 +1,6 @@
 use std::{future::Future, sync::Arc, time::Duration};
 
+use chrono::NaiveDateTime;
 use futures::stream::{BoxStream, Stream};
 use sqlx::{
     Executor, FromRow, Postgres,
@@ -33,6 +34,7 @@ pub const DEFAULT_DEAD_WORKER_INTERVAL: Duration = Duration::from_secs(5);
 
 /// Row ids, always non-negative.
 pub type FileId = i64;
+pub type FileLeaseId = i64;
 pub type LocationId = i64;
 pub type JobDatabaseId = i64;
 pub type FooterBytes = Vec<u8>;
@@ -55,6 +57,31 @@ pub struct FileMetadataRow {
     pub object_version: Option<String>,
     /// file_metadata.metadata
     pub metadata: serde_json::Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, sqlx::Type)]
+#[sqlx(type_name = "gc_status_kind", rename_all = "lowercase")]
+pub enum GcStatus {
+    Pending,
+    Deleted,
+}
+
+#[derive(Debug, FromRow)]
+pub struct FileLeaseRow {
+    /// file_leases.id
+    pub id: FileLeaseId,
+    /// file_leases.gc_status
+    pub gc_status: GcStatus,
+    /// file_leases.location_id
+    pub location_id: LocationId,
+    /// file_leases.file_id
+    pub file_id: FileId,
+    /// file_leases.file_path
+    pub file_path: String,
+    /// file_leases.created_at
+    pub created_at: Option<NaiveDateTime>,
+    /// file_leases.expires_at
+    pub expires_at: Option<NaiveDateTime>,
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -603,18 +630,58 @@ impl MetadataDb {
         Ok(())
     }
 
-    pub async fn insert_compacted_metadata(
+    pub fn stream_expired_file_leases(
         &self,
         location_id: LocationId,
-        file_name: &str,
-        object_size: u64,
-        object_e_tag: Option<String>,
-        object_version: Option<String>,
-        parquet_meta: serde_json::Value,
-        footer: Vec<u8>,
-        component_ids: Vec<FileId>,
-    ) -> Result<FileId, Error> {
-        todo!()
+    ) -> BoxStream<'_, Result<FileLeaseRow, sqlx::Error>> {
+        let sql = "
+        SELECT fl.id
+             , 'pending'::gc_status_kind AS gc_status,
+             , fl.location_id
+             , fl.file_id
+             , fl.file_path
+             , NULL AS created_at
+             , expires_at
+          FROM fl.file_leases fl
+         WHERE fllocation_id = $1
+               AND expires_at IS NOT NULL
+               AND expires_at < NOW()
+               AND fl.id NOT IN (
+                   SELECT file_leases.id FROM file_leases
+                    WHERE file_leases.location_id = $1 
+                          AND file_leases.expires_at IS NULL );
+        ";
+
+        sqlx::query_as(sql).bind(location_id).fetch(&*self.pool)
+    }
+
+    pub async fn create_leases(
+        &self,
+        gc_status: GcStatus,
+        location_id: LocationId,
+        component_ids: &[FileId],
+    ) -> Result<(), Error> {
+        let sql = "
+        INSERT INTO file_leases (gc_status, location_id, file_path, expires_at)
+        VALUES SELECT $1, $2, l.url || fm.file_name, NOW() + INTERVAL '1 hour'
+          FROM file_metadata fm
+          JOIN locations l ON fm.location_id = l.id
+          JOIN (
+              SELECT unnest($3::bigint[]) AS file_id
+          ) AS ids ON ids.file_id = fm.id
+         WHERE NOT EXISTS (
+               SELECT 1 FROM file_leases fl
+                WHERE fl.file_id = fm.id AND fl.expires_at IS NULL
+           )
+        ";
+        sqlx::query(sql)
+            .bind(gc_status)
+            .bind(location_id)
+            .bind(component_ids)
+            .execute(&*self.pool)
+            .await?;
+
+        Ok(())
     }
 
     pub async fn get_footer_bytes(&self, file_id: FileId) -> Result<Vec<u8>, Error> {

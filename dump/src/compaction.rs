@@ -1,7 +1,7 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use common::{
-    BoxError,
+    BoxError, Timestamp,
     catalog::physical::PhysicalTable,
     metadata::segments::{Segment, canonical_chain},
     parquet::{
@@ -16,11 +16,61 @@ use datafusion::{
     physical_plan::metrics::ExecutionPlanMetricsSet,
 };
 use futures::{StreamExt, TryStreamExt, stream};
-use metadata_db::{FileId, FooterBytes, LocationId, MetadataDb};
-use object_store::{ObjectMeta, path::Path};
+use metadata_db::{
+    FileId, FileLeaseId, FileLeaseRow, FooterBytes, GcStatus, LocationId, MetadataDb,
+};
+use object_store::{Error as ObjectStoreError, ObjectMeta, path::Path};
 use tokio::{sync::mpsc, task::JoinSet};
 
 use crate::parquet_writer::ParquetFileWriter;
+
+struct FileLease {
+    _id: FileLeaseId,
+    _gc_status: GcStatus,
+    _location_id: LocationId,
+    file_id: FileId,
+    location: Path,
+    _created_at: Option<Timestamp>,
+    _expires_at: Option<Timestamp>,
+}
+
+impl From<FileLeaseRow> for FileLease {
+    fn from(
+        FileLeaseRow {
+            id,
+            location_id,
+            gc_status,
+            file_id,
+            file_path,
+            created_at,
+            expires_at,
+        }: FileLeaseRow,
+    ) -> Self {
+        let location = Path::from(file_path);
+
+        let created_at = created_at.map(|ts| {
+            Timestamp(Duration::from_micros(
+                ts.and_utc().timestamp_micros().abs() as u64
+            ))
+        });
+
+        let expires_at = expires_at.map(|ts| {
+            Timestamp(Duration::from_micros(
+                ts.and_utc().timestamp_micros().abs() as u64
+            ))
+        });
+
+        FileLease {
+            _id: id,
+            _location_id: location_id,
+            _gc_status: gc_status,
+            file_id,
+            location,
+            _created_at: created_at,
+            _expires_at: expires_at,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 struct CompactionOutput {
@@ -36,17 +86,18 @@ struct CompactionOutput {
 }
 
 impl CompactionOutput {
-    async fn update_metadata(&self, metadata_db: Arc<MetadataDb>) -> Result<FileId, BoxError> {
+    async fn update_metadata(&self, metadata_db: Arc<MetadataDb>) -> Result<(), BoxError> {
         let location_id = self.location_id;
-        let file_name = &self.file_name;
+        let file_name = self.file_name.clone();
         let object_size = self.object_size;
         let object_e_tag = self.object_e_tag.clone();
         let object_version = self.object_version.clone();
         let parquet_meta = self.parquet_meta.clone();
         let footer = self.footer.clone();
-        let component_ids = self.file_ids.clone();
-        let file_id = metadata_db
-            .insert_compacted_metadata(
+        let component_ids = self.file_ids.as_slice();
+
+        metadata_db
+            .insert_metadata(
                 location_id,
                 file_name,
                 object_size,
@@ -54,10 +105,16 @@ impl CompactionOutput {
                 object_version,
                 parquet_meta,
                 footer,
-                component_ids,
             )
             .await?;
-        Ok(file_id)
+
+        let gc_status = GcStatus::Pending;
+
+        metadata_db
+            .create_leases(gc_status, location_id, component_ids)
+            .await?;
+
+        Ok(())
     }
 
     async fn revert_changes(&self, object_store: Arc<dyn object_store::ObjectStore>) {
@@ -120,7 +177,8 @@ impl Compactor {
 
             while let Some(location_id) = receiver.recv().await {
                 compactor.compact(*location_id).await?;
-                compactor.delete().await?;
+                compactor.set_lease().await?;
+                compactor.delete_expired_files().await?;
             }
 
             Ok::<(), BoxError>(())
@@ -259,7 +317,7 @@ impl Compactor {
         Ok(())
     }
 
-    pub async fn delete(&self) -> Result<(), BoxError> {
+    async fn set_lease(&self) -> Result<(), BoxError> {
         stream::iter(self.tables.iter())
             .for_each_concurrent(2, |(location_id, table)| async move {
                 let metadata_db = table.metadata_db();
@@ -285,6 +343,55 @@ impl Compactor {
                 }
             })
             .await;
+
+        Ok(())
+    }
+
+    async fn delete_expired_files(&self) -> Result<(), BoxError> {
+        stream::iter(self.tables.iter())
+            .map(Ok)
+            .try_for_each_concurrent(10, |(location_id, table)| async move {
+                let metadata_db = table.metadata_db();
+                let object_store = &table.object_store();
+
+                metadata_db
+                    .stream_expired_file_leases(*location_id)
+                    .map_err(BoxError::from)
+                    .try_for_each(|file_lease| async move {
+                        let FileLease {
+                            ref location,
+                            ref file_id,
+                            ..
+                        } = FileLease::from(file_lease);
+
+                        match object_store.delete(location).await {
+                            Ok(..) => {
+                                tracing::info!(
+                                    "Deleted expired file {} from location {}",
+                                    location,
+                                    location_id
+                                );
+
+                                let component_ids = vec![file_id.clone()];
+
+                                table
+                                    .metadata_db()
+                                    .create_leases(
+                                        GcStatus::Pending,
+                                        *location_id,
+                                        component_ids.as_slice(),
+                                    )
+                                    .await?;
+
+                                Ok(())
+                            }
+                            Err(ObjectStoreError::NotFound { .. }) => Ok(()),
+                            Err(err) => Err(BoxError::from(err)),
+                        }
+                    })
+                    .await
+            })
+            .await?;
 
         Ok(())
     }
