@@ -5,12 +5,16 @@ use std::{
     task::{Context, Poll},
 };
 
-use alloy::{providers::ProviderBuilder, rpc::client::ClientBuilder};
+use alloy::{
+    network::AnyNetwork,
+    providers::{ProviderBuilder, RootProvider},
+    rpc::client::ClientBuilder,
+};
 use governor::{DefaultDirectRateLimiter, Quota, RateLimiter};
 use tower::{Layer, Service};
 use url::Url;
 
-pub fn new(url: Url, rate_limit: Option<NonZeroU32>) -> alloy::providers::RootProvider {
+pub fn new(url: Url, rate_limit: Option<NonZeroU32>) -> RootProvider<AnyNetwork> {
     let client_builder = ClientBuilder::default();
 
     let client = match rate_limit {
@@ -20,7 +24,10 @@ pub fn new(url: Url, rate_limit: Option<NonZeroU32>) -> alloy::providers::RootPr
         None => client_builder.http(url),
     };
 
-    ProviderBuilder::default().connect_client(client)
+    ProviderBuilder::new()
+        .disable_recommended_fillers()
+        .network::<AnyNetwork>()
+        .connect_client(client)
 }
 
 struct RateLimitLayer {
