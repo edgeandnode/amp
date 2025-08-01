@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DatasetDef",
+  "type": "object",
+  "properties": {
+    "kind": {
+      "description": "Dataset kind, must be `substreams`.",
+      "type": "string"
+    },
+    "manifest": {
+      "description": "Substreams package manifest URL.",
+      "type": "string"
+    },
+    "module": {
+      "description": "Substreams output module name.",
+      "type": "string"
+    },
+    "name": {
+      "description": "Dataset name.",
+      "type": "string"
+    },
+    "network": {
+      "description": "Network name, e.g., `mainnet`.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "kind",
+    "network",
+    "name",
+    "manifest",
+    "module"
+  ]
+}

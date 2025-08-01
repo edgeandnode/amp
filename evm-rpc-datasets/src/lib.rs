@@ -1,13 +1,15 @@
 mod client;
 pub mod tables;
 
+use std::num::NonZeroU32;
+
 use alloy::transports::http::reqwest::Url;
 pub use client::JsonRpcClient;
 use common::{BoxError, Dataset, DatasetValue, store::StoreError};
+use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json;
 use serde_with::serde_as;
-
 pub const DATASET_KIND: &str = "evm-rpc";
 
 #[derive(thiserror::Error, Debug)]
@@ -22,10 +24,13 @@ pub enum Error {
     Json(#[from] serde_json::Error),
 }
 
-#[derive(Debug, Deserialize)]
-pub(crate) struct DatasetDef {
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct DatasetDef {
+    /// Dataset kind, must be `evm-rpc`.
     pub kind: String,
+    /// Dataset name.
     pub name: String,
+    /// Network name, e.g., `mainnet`.
     pub network: String,
 }
 
@@ -47,6 +52,7 @@ pub(crate) struct EvmRpcProvider {
     /// Maximum number of json-rpc requests to batch together.
     #[serde(default = "default_rpc_batch_size")]
     pub rpc_batch_size: usize,
+    pub rate_limit_per_minute: Option<NonZeroU32>,
 }
 
 fn default_rpc_batch_size() -> usize {
@@ -73,6 +79,7 @@ pub async fn client(provider: toml::Value, network: String) -> Result<JsonRpcCli
         network,
         request_limit,
         provider.rpc_batch_size,
+        provider.rate_limit_per_minute,
     )
     .map_err(Error::Client)?;
     Ok(client)

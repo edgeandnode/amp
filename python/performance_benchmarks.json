@@ -1,0 +1,112 @@
+{
+  "postgresql_large_table_loading_performance": {
+    "test_name": "large_table_loading_performance",
+    "loader_type": "postgresql",
+    "throughput_rows_per_sec": 58891.65899567373,
+    "memory_mb": 325.55859375,
+    "duration_seconds": 0.8490166664123535,
+    "dataset_size": 50000,
+    "timestamp": "2025-07-30T16:58:07.629305",
+    "git_commit": "981a0430",
+    "environment": "local"
+  },
+  "redis_pipeline_performance": {
+    "test_name": "pipeline_performance",
+    "loader_type": "redis",
+    "throughput_rows_per_sec": 13335.732785783372,
+    "memory_mb": 0,
+    "duration_seconds": 0,
+    "dataset_size": 50000,
+    "timestamp": "2025-07-30T16:59:14.383306",
+    "git_commit": "981a0430",
+    "environment": "local"
+  },
+  "redis_data_structure_performance_hash": {
+    "test_name": "data_structure_performance_hash",
+    "loader_type": "redis",
+    "throughput_rows_per_sec": 13494.188010539761,
+    "memory_mb": 0,
+    "duration_seconds": 0,
+    "dataset_size": 50000,
+    "timestamp": "2025-07-30T16:59:23.160852",
+    "git_commit": "981a0430",
+    "environment": "local"
+  },
+  "redis_data_structure_performance_string": {
+    "test_name": "data_structure_performance_string",
+    "loader_type": "redis",
+    "throughput_rows_per_sec": 18530.85942052715,
+    "memory_mb": 0,
+    "duration_seconds": 0,
+    "dataset_size": 50000,
+    "timestamp": "2025-07-30T16:59:23.196971",
+    "git_commit": "981a0430",
+    "environment": "local"
+  },
+  "redis_data_structure_performance_sorted_set": {
+    "test_name": "data_structure_performance_sorted_set",
+    "loader_type": "redis",
+    "throughput_rows_per_sec": 24177.67005256331,
+    "memory_mb": 0,
+    "duration_seconds": 0,
+    "dataset_size": 50000,
+    "timestamp": "2025-07-30T16:59:23.233025",
+    "git_commit": "981a0430",
+    "environment": "local"
+  },
+  "postgresql_throughput_comparison": {
+    "test_name": "throughput_comparison",
+    "loader_type": "postgresql",
+    "throughput_rows_per_sec": 52245.809053789104,
+    "memory_mb": 0,
+    "duration_seconds": 0,
+    "dataset_size": 10000,
+    "timestamp": "2025-07-30T16:59:29.441892",
+    "git_commit": "981a0430",
+    "environment": "local"
+  },
+  "redis_throughput_comparison": {
+    "test_name": "throughput_comparison",
+    "loader_type": "redis",
+    "throughput_rows_per_sec": 14749.895907182967,
+    "memory_mb": 0,
+    "duration_seconds": 0,
+    "dataset_size": 10000,
+    "timestamp": "2025-07-30T16:59:29.493438",
+    "git_commit": "981a0430",
+    "environment": "local"
+  },
+  "redis_memory_efficiency": {
+    "test_name": "memory_efficiency",
+    "loader_type": "redis",
+    "throughput_rows_per_sec": 14172.407923025006,
+    "memory_mb": 16.841224670410156,
+    "duration_seconds": 3.527981996536255,
+    "dataset_size": 50000,
+    "timestamp": "2025-07-30T16:59:26.987930",
+    "git_commit": "981a0430",
+    "environment": "local"
+  },
+  "delta_lake_large_file_write_performance": {
+    "test_name": "large_file_write_performance",
+    "loader_type": "delta_lake",
+    "throughput_rows_per_sec": 624304.7410379914,
+    "memory_mb": 372.625,
+    "duration_seconds": 0.08008909225463867,
+    "dataset_size": 50000,
+    "timestamp": "2025-07-30T16:59:27.299688",
+    "git_commit": "981a0430",
+    "environment": "local"
+  },
+  "delta_lake_throughput_comparison": {
+    "test_name": "throughput_comparison",
+    "loader_type": "delta_lake",
+    "throughput_rows_per_sec": 51024.851218717,
+    "memory_mb": 0,
+    "duration_seconds": 0,
+    "dataset_size": 10000,
+    "timestamp": "2025-07-30T16:59:29.536679",
+    "git_commit": "981a0430",
+    "environment": "local"
+  }
+}

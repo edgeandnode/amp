@@ -5,13 +5,13 @@ version.workspace = true
 
 [dependencies]
 async-stream.workspace = true
-async-udf = { path = "../async-udf" }
 metadata-db = { path = "../metadata-db" }
 common = { path = "../common" }
 js-runtime = { path = "../js-runtime" }
 evm-rpc-datasets = { path = "../evm-rpc-datasets" }
 firehose-datasets = { path = "../firehose-datasets" }
 substreams-datasets = { path = "../substreams-datasets" }
+schemars.workspace = true
 toml.workspace = true
 thiserror.workspace = true
 object_store.workspace = true

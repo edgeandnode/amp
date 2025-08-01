@@ -1,3 +1,4 @@
+SHELL := /bin/bash
 .PHONY: test test-unit test-integration test-all clean setup lint format
 
 # Use UV for all commands
@@ -11,7 +12,7 @@ test-unit:
 # Integration tests (requires databases)
 test-integration:
 	@echo "🔗 Running integration tests..."
-	TEST_INTEGRATION=1 $(PYTHON) pytest tests/integration/ -m "integration" -v
+	@bash -c 'source .env.test && $(PYTHON) pytest tests/integration/ -m "integration" -v --log-cli-level=CRITICAL'
 
 # All tests with coverage
 test-all:
@@ -21,16 +22,16 @@ test-all:
 # Specific loader tests
 test-postgresql:
 	@echo "🐘 Running PostgreSQL tests..."
-	TEST_INTEGRATION=1 $(PYTHON) pytest tests/ -m "postgresql" -v
+	@bash -c 'source .env.test && export POSTGRES_HOST POSTGRES_PORT POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD && $(PYTHON) pytest tests/ -m "postgresql" -v --log-cli-level=ERROR'
 
 test-redis:
 	@echo "🔴 Running Redis tests..."
-	TEST_INTEGRATION=1 $(PYTHON) pytest tests/ -m "redis" -v
+	@bash -c 'source .env.test && export REDIS_HOST REDIS_PORT REDIS_DB REDIS_PASSWORD && $(PYTHON) pytest tests/ -m "redis" -v --log-cli-level=ERROR'
 
 # Performance tests
 test-performance:
 	@echo "⚡ Running performance tests..."
-	TEST_PERFORMANCE=1 $(PYTHON) pytest tests/performance/ -m "performance" -v
+	@bash -c 'source .env.test && $(PYTHON) pytest tests/performance/ -m "performance" -v --log-cli-level=ERROR'
 
 # Code quality (using your ruff config)
 lint:
@@ -94,6 +95,7 @@ help:
 	@echo "  make test-all         - Run all tests with coverage"
 	@echo "  make test-postgresql  - Run PostgreSQL tests"
 	@echo "  make test-redis       - Run Redis tests"
+	@echo "  make test-performance - Run performance tests"
 	@echo "  make lint             - Lint code with ruff"
 	@echo "  make format           - Format code with ruff"
 	@echo "  make test-setup       - Start test databases"

@@ -33,6 +33,7 @@ pub use datafusion::{arrow, parquet};
 use futures::Stream;
 use metadata::segments::BlockRange;
 pub use query_context::QueryContext;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 pub use store::Store;
 
@@ -105,11 +106,11 @@ impl RawTableRows {
     }
 
     pub fn block_num(&self) -> BlockNum {
-        *self.range.numbers.start()
+        self.range.start()
     }
 
     fn check_invariants(range: &BlockRange, rows: &RecordBatch) -> Result<(), BoxError> {
-        if range.numbers.start() != range.numbers.end() {
+        if range.start() != range.end() {
             return Err("block range must contain a single block number".into());
         }
         if rows.num_rows() == 0 {
@@ -126,10 +127,10 @@ impl RawTableRows {
         // Unwrap: `rows` is not empty.
         let start = arrow::compute::kernels::aggregate::min(block_nums).unwrap();
         let end = arrow::compute::kernels::aggregate::max(block_nums).unwrap();
-        if start != *range.numbers.start() {
+        if start != range.start() {
             return Err(format!("contains unexpected block_num: {}", start).into());
         };
-        if end != *range.numbers.start() {
+        if end != range.start() {
             return Err(format!("contains unexpected block_num: {}", end).into());
         };
 
@@ -188,5 +189,24 @@ pub fn block_range_intersection(
         Some(start..=end)
     } else {
         None
+    }
+}
+
+/// Wrapper to implement [`JsonSchema`] for [`datafusion::arrow::datatypes::DataType`].
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DataTypeJsonSchema(pub datafusion::arrow::datatypes::DataType);
+
+impl JsonSchema for DataTypeJsonSchema {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "DataType".into()
+    }
+
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        let mut schema = String::json_schema(generator);
+        schema.as_object_mut().unwrap().insert(
+            "description".to_string(),
+            serde_json::json!("Arrow data type, e.g. `Int32`, `Utf8`, etc."),
+        );
+        schema
     }
 }

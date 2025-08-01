@@ -71,13 +71,12 @@ class PostgreSQLLoader(DataLoader):
             conn = self.pool.getconn()
             try:
                 with conn.cursor() as cur:
-                    # Create table only once per table per loader instance
                     if kwargs.get('create_table', True) and table_name not in self._created_tables:
                         self._create_table_from_schema(cur, batch.schema, table_name)
                         self._created_tables.add(table_name)
                         conn.commit()
 
-                    self._copy_arrow_batch(cur, batch, table_name, kwargs.get('mode', LoadMode.APPEND))
+                    self._copy_arrow_data(cur, batch, table_name, kwargs.get('mode', LoadMode.APPEND))
 
                     conn.commit()
 
@@ -100,13 +99,12 @@ class PostgreSQLLoader(DataLoader):
             conn = self.pool.getconn()
             try:
                 with conn.cursor() as cur:
-                    # Create table only once per table per loader instance
                     if kwargs.get('create_table', True) and table_name not in self._created_tables:
                         self._create_table_from_schema(cur, table.schema, table_name)
                         self._created_tables.add(table_name)
                         conn.commit()
 
-                    self._copy_arrow_table(cur, table, table_name, kwargs.get('mode', LoadMode.APPEND))
+                    self._copy_arrow_data(cur, table, table_name, kwargs.get('mode', LoadMode.APPEND))
 
                     conn.commit()
 
@@ -121,50 +119,35 @@ class PostgreSQLLoader(DataLoader):
             self.logger.error(f'Failed to load table: {str(e)}')
             return LoadResult(rows_loaded=0, duration=time.time() - start_time, table_name=table_name, loader_type='postgresql', success=False, error=str(e))
 
-    def _copy_arrow_batch(self, cursor: Any, batch: pa.RecordBatch, table_name: str, mode: LoadMode) -> None:
-        """Use PostgreSQL COPY for efficient data loading directly from Arrow RecordBatch"""
-        self._copy_arrow_data(cursor, batch, table_name, mode)
-
-    def _copy_arrow_table(self, cursor: Any, table: pa.Table, table_name: str, mode: LoadMode) -> None:
-        """Use PostgreSQL COPY for efficient data loading directly from Arrow Table"""
-        self._copy_arrow_data(cursor, table, table_name, mode)
-
     def _copy_arrow_data(self, cursor: Any, data: Union[pa.RecordBatch, pa.Table], table_name: str, mode: LoadMode) -> None:
-        """Common method for copying Arrow data to PostgreSQL."""
-        # Handle different load modes
+        """Copy Arrow data to PostgreSQL using optimal method based on data types."""
         if mode == LoadMode.OVERWRITE:
             cursor.execute(f'TRUNCATE TABLE {table_name}')
 
-        # Check if we have binary columns that need special handling
         if has_binary_columns(data.schema):
-            # Use INSERT statements for binary data
             self._insert_arrow_data(cursor, data, table_name)
         else:
-            # Use efficient CSV COPY for non-binary data
             self._csv_copy_arrow_data(cursor, data, table_name)
 
     def _csv_copy_arrow_data(self, cursor: Any, data: Union[pa.RecordBatch, pa.Table], table_name: str) -> None:
-        """Use CSV COPY for non-binary data (most efficient)."""
+        """Use CSV COPY for non-binary data."""
         csv_buffer, column_names = prepare_csv_data(data)
-
-        # Use PostgreSQL COPY command for maximum efficiency
+        
         try:
             cursor.copy_from(csv_buffer, table_name, columns=column_names, sep='\t', null='\\N')
         except Exception as e:
-            # Provide helpful error message for common issues
             if 'does not exist' in str(e):
-                raise RuntimeError(f"Table '{table_name}' does not exist. Set create_table=True to auto-create. error: {e}")
+                raise RuntimeError(f"Table '{table_name}' does not exist. Set create_table=True to auto-create. error: {e}") from e
             elif 'permission denied' in str(e).lower():
-                raise RuntimeError(f"Permission denied writing to table '{table_name}'. Check user permissions.")
+                raise RuntimeError(f"Permission denied writing to table '{table_name}'. Check user permissions.") from e
             else:
-                raise RuntimeError(f'COPY operation failed: {str(e)}')
+                raise RuntimeError(f'COPY operation failed: {str(e)}') from e
 
     def _insert_arrow_data(self, cursor: Any, data: Union[pa.RecordBatch, pa.Table], table_name: str) -> None:
         """Use INSERT statements for data with binary columns."""
         insert_sql_template, rows = prepare_insert_data(data)
         insert_sql = f'INSERT INTO {table_name} {insert_sql_template}'
-
-        # Use executemany for efficiency
+        
         try:
             cursor.executemany(insert_sql, rows)
         except Exception as e:

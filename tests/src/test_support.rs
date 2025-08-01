@@ -291,7 +291,6 @@ pub(crate) async fn dump_dataset(
         Some(end.to_string()),
         n_jobs,
         partition_size_mb,
-        false,
         None,
         microbatch_max_interval,
         None,

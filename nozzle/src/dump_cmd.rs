@@ -6,13 +6,10 @@ use std::{
 };
 
 use common::{
-    BoxError, Store,
-    catalog::physical::PhysicalTable,
-    config::Config,
-    manifest, notification_multiplexer,
-    parquet::basic::{Compression, ZstdLevel},
+    BoxError, Store, catalog::physical::PhysicalTable, config::Config, manifest,
+    notification_multiplexer,
 };
-use datafusion::{parquet, sql::resolve::resolve_table_references};
+use datafusion::sql::resolve::resolve_table_references;
 use dataset_store::{DatasetStore, sql_datasets};
 use metadata_db::MetadataDb;
 use tracing::info;
@@ -26,7 +23,6 @@ pub async fn dump(
     end_block: Option<String>,
     n_jobs: u16,
     partition_size_mb: u64,
-    disable_compression: bool,
     run_every_mins: Option<u64>,
     microbatch_max_interval_override: Option<u64>,
     new_location: Option<String>,
@@ -43,12 +39,6 @@ pub async fn dump(
     };
     let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
     let partition_size = partition_size_mb * 1024 * 1024;
-    let compression = if disable_compression {
-        parquet::basic::Compression::UNCOMPRESSED
-    } else {
-        Compression::ZSTD(ZstdLevel::try_new(1).unwrap())
-    };
-    let parquet_opts = dump::parquet_opts(compression, true);
     let end_block = end_block.map(|e| resolve_end_block(start, e)).transpose()?;
     let run_every = run_every_mins.map(|s| tokio::time::interval(Duration::from_secs(s * 60)));
 
@@ -115,7 +105,6 @@ pub async fn dump(
                     n_jobs,
                     partition_size,
                     microbatch_max_interval_override.unwrap_or(config.microbatch_max_interval),
-                    &parquet_opts,
                     (start, end_block),
                 )
                 .await?
@@ -131,7 +120,6 @@ pub async fn dump(
                     n_jobs,
                     partition_size,
                     microbatch_max_interval_override.unwrap_or(config.microbatch_max_interval),
-                    &parquet_opts,
                     (start, end_block),
                 )
                 .await?;

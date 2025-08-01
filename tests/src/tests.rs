@@ -11,6 +11,7 @@ use common::{
 };
 use dataset_store::{DatasetDefsCommon, DatasetStore, SerializableSchema};
 use generate_manifest;
+use schemars::schema_for;
 
 use crate::{
     steps::load_test_steps,
@@ -40,6 +41,31 @@ async fn evm_rpc_single_dump() {
 
     // Now dump the dataset to a temporary directory and check it again against the blessed files.
     let temp_dump = SnapshotContext::temp_dump(&test_env, &dataset_name, 15_000_000, 15_000_000, 1)
+        .await
+        .expect("temp dump failed");
+    temp_dump.assert_eq(&blessed).await.unwrap();
+}
+
+#[tokio::test]
+async fn evm_rpc_base_single_dump() {
+    tracing_helpers::register_logger();
+
+    let dataset_name = "base";
+    check_provider_file("rpc_eth_base.toml").await;
+
+    let test_env = TestEnv::temp("evm_rpc_base_single_dump").await.unwrap();
+
+    let blessed = SnapshotContext::blessed(&test_env, &dataset_name)
+        .await
+        .unwrap();
+
+    // Check the dataset directly against the RPC provider with `check_blocks`.
+    check_blocks(&test_env, dataset_name, 33_411_770, 33_411_770)
+        .await
+        .expect("blessed data differed from provider");
+
+    // Now dump the dataset to a temporary directory and check it again against the blessed files.
+    let temp_dump = SnapshotContext::temp_dump(&test_env, &dataset_name, 33_411_770, 33_411_770, 1)
         .await
         .expect("temp dump failed");
     temp_dump.assert_eq(&blessed).await.unwrap();
@@ -552,4 +578,31 @@ async fn sql_dataset_input_batch_size() {
     // block numbers, so we expect 2 files with data for blocks 15000000 and 15000002, plus empty
     // files for odd blocks
     assert_eq!(file_count, 4);
+}
+
+#[test]
+fn generate_json_schemas() {
+    let json_schemas = [
+        ("EvmRpc", schema_for!(evm_rpc_datasets::DatasetDef)),
+        (
+            "Substreams",
+            schema_for!(substreams_datasets::dataset::DatasetDef),
+        ),
+        (
+            "Firehose",
+            schema_for!(firehose_datasets::dataset::DatasetDef),
+        ),
+        ("Common", schema_for!(dataset_store::DatasetDefsCommon)),
+        ("Sql", schema_for!(dataset_store::sql_datasets::DatasetDef)),
+        ("Manifest", schema_for!(common::manifest::Manifest)),
+    ];
+
+    for (name, schema) in json_schemas {
+        let schema = serde_json::to_string_pretty(&schema).unwrap();
+        let dir = env!("CARGO_MANIFEST_DIR");
+        let dir = format!("{dir}/../dataset-def-schemas");
+        std::fs::create_dir_all(&dir).expect("Failed to create JSON schema output directory");
+        let path = format!("{}/{}.json", dir, name);
+        std::fs::write(path, schema).unwrap();
+    }
 }

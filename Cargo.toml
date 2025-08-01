@@ -14,7 +14,6 @@ members = [
     "admin-api",
     "http-common",
     "registry-service",
-    "async-udf",
     "js-runtime",
     "generate-manifest",
 ]
@@ -82,11 +81,14 @@ bincode = "2.0.1"
 regex = "1.10.2"
 blake3 = "1.8.1"
 indoc = "2.0.6"
+schemars = "1.0.4"
+governor = "0.10.0"
+tower = "0.5.2"
 
 # Datafusion and Arrow crates
 arrow-flight = { version = "55", features = ["flight-sql-experimental"] }
-datafusion = { version = "48", features = ["serde"] }
-datafusion-proto = { version = "48" }
+datafusion = { version = "49", features = ["serde"] }
+datafusion-proto = { version = "49" }
 object_store = { version = "0.12", features = ["aws", "gcp", "azure"] }
 
 # Crates that should follow the version used by DataFusion and Arrow

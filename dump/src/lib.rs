@@ -1,9 +1,6 @@
 //! # Dump
 
-use common::parquet::{
-    basic::{Compression, ZstdLevel},
-    file::properties::WriterProperties as ParquetWriterProperties,
-};
+use common::parquet::file::properties::WriterProperties as ParquetWriterProperties;
 
 mod core;
 mod metrics; // unused for now
@@ -16,15 +13,7 @@ pub fn default_partition_size() -> u64 {
     4096 * 1024 * 1024 // 4 GB
 }
 
-pub fn default_microbatch_max_interval() -> u64 {
-    100_000
-}
-
-pub fn default_parquet_opts() -> ParquetWriterProperties {
-    parquet_opts(Compression::ZSTD(ZstdLevel::try_new(1).unwrap()), true)
-}
-
-pub fn parquet_opts(compression: Compression, bloom_filters: bool) -> ParquetWriterProperties {
+pub fn parquet_opts(config: &common::config::ParquetConfig) -> ParquetWriterProperties {
     // We have not done our own benchmarking, but the default 1_000_000 value for this adds about a
     // megabyte of storage per column, per row group. This analysis by InfluxData suggests that
     // smaller NDV values may be equally effective:
@@ -38,8 +27,8 @@ pub fn parquet_opts(compression: Compression, bloom_filters: bool) -> ParquetWri
     // Datafusion doesn't actually read that metadata info anywhere and just reiles on the
     // `file_sort_order` set on the reader configuration.
     ParquetWriterProperties::builder()
-        .set_compression(compression)
+        .set_compression(config.compression)
         .set_bloom_filter_ndv(bloom_filter_ndv)
-        .set_bloom_filter_enabled(bloom_filters)
+        .set_bloom_filter_enabled(config.bloom_filters)
         .build()
 }

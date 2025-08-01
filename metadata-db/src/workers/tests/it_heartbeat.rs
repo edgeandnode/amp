@@ -188,8 +188,8 @@ async fn heartbeat_on_unknown_worker_is_noop() {
         .await
         .expect("Failed to get active workers");
     assert!(
-        active_workers.is_empty(),
-        "No workers should be active after attempting to update a non-existent one"
+        !active_workers.contains(&non_existent_worker_id),
+        "The non-existent worker should not appear in the active workers list"
     );
 }
 

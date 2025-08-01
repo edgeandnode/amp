@@ -301,19 +301,18 @@ async fn dump_sql_query(
     microbatch_max_interval: u64,
     notification_multiplexer: &Arc<NotificationMultiplexerHandle>,
 ) -> Result<(), BoxError> {
-    let (start, end) = range.numbers.clone().into_inner();
     let mut stream = {
         let ctx = Arc::new(dataset_store.ctx_for_sql(&query, env.clone()).await?);
         let plan = ctx.plan_sql(query.clone()).await?;
         let initial_state = StreamState::new(
             watermark_updates(ctx.clone(), notification_multiplexer).await?,
-            start,
+            range.start(),
         );
         StreamingQuery::spawn(
             initial_state,
             ctx,
             plan,
-            Some(end),
+            Some(range.end()),
             true,
             microbatch_max_interval,
         )
@@ -321,7 +320,7 @@ async fn dump_sql_query(
         .as_stream()
     };
 
-    let mut microbatch_start = start;
+    let mut microbatch_start = range.start();
     let mut writer = ParquetFileWriter::new(
         physical_table.clone(),
         parquet_opts.clone(),
@@ -364,7 +363,7 @@ async fn dump_sql_query(
             }
         }
     }
-    assert!(microbatch_start == end + 1);
+    assert!(microbatch_start == range.end() + 1);
 
     Ok(())
 }

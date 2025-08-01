@@ -1,37 +1,72 @@
 [project]
 name = "nozzle"
 version = "0.1.0"
-description = "Add your description here"
+description = "Flight SQL client with comprehensive data loading capabilities"
 readme = "README.md"
 authors = [
     { name = "Ford", email = "ford@edgeandnode.com" }
 ]
 requires-python = ">=3.12"
 dependencies = [
+    # Core dependencies for all loaders
+    "pyarrow>=20.0.0",
+    "typer>=0.15.2",
+    
+    # Flight SQL support
     "adbc-driver-manager>=1.5.0",
     "adbc-driver-postgresql>=1.5.0",
+    "protobuf>=4.21.0",
+    
+    # Ethereum/blockchain utilities
     "base58>=2.1.1",
     "eth-hash[pysha3]>=0.7.1",
     "eth-utils>=5.2.0",
+    
+    # Google Cloud support
     "google-cloud-bigquery>=3.30.0",
     "google-cloud-storage>=3.1.0",
-    "pandas>=2.2.3",
-    "pyarrow>=20.0.0",
-    "psycopg2-binary>=2.9.0",
-    "protobuf>=4.21.0",
-    "typer>=0.15.2",
-    "redis>=6.2.0",
+    
+    # Arro3 for enhanced PyArrow operations
+    "arro3-core>=0.5.1",
+    "arro3-compute>=0.5.1",
 ]
 
 [dependency-groups]
 dev = [
-    "altair>=5.5.0",
-    "marimo>=0.11.31",
+    "altair>=5.5.0",                # Data visualization for notebooks
+    "marimo>=0.11.31",              # Interactive notebooks
+    "ruff>=0.8.0",                  # Linting and formatting
+]
+
+# Optional dependency groups for specific loaders
+postgresql = [
+    "psycopg2-binary>=2.9.0",
+]
+
+redis = [
+    "redis>=4.5.0",
+]
+
+delta_lake = [
+    "deltalake>=1.0.2",
+]
+
+all_loaders = [
+    "psycopg2-binary>=2.9.0",       # PostgreSQL
+    "redis>=4.5.0",                 # Redis
+    "deltalake>=1.0.2",             # Delta Lake (consistent version)
+]
+
+test = [
     "pytest>=8.3.5",
     "pytest-asyncio>=0.21.0",
     "pytest-mock>=3.10.0",
     "pytest-cov>=4.0.0",
-    "testcontainers>=3.7.0",
+    "pytest-xdist>=3.0.0",         # Parallel test execution
+    "pytest-benchmark>=4.0.0",     # Performance benchmarking
+    "testcontainers>=3.7.0",       # Database containers for integration tests
+    "docker>=6.0.0",               # Required by testcontainers
+    "psutil>=5.9.0",               # Memory usage monitoring
 ]
 
 [build-system]
@@ -41,22 +76,67 @@ build-backend = "hatchling.build"
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+asyncio_default_fixture_loop_scope = "function"
+addopts = [
+    "-v",
+    "--tb=short",
+    "--strict-markers",
+]
+markers = [
+    "unit: Unit tests (fast, no external dependencies)",
+    "integration: Integration tests (require databases)",
+    "performance: Performance and benchmark tests",
+    "slow: Slow tests (> 30 seconds)",
+    "postgresql: Tests requiring PostgreSQL",
+    "redis: Tests requiring Redis",
+    "delta_lake: Tests requiring Delta Lake",
+    "iceberg: Tests requiring Apache Iceberg",
+    "cloud: Tests requiring cloud storage access",
+]
 
 [tool.ruff]
-line-length = 20000
+line-length = 120
 target-version = "py312"
+exclude = [
+    "notebooks/",
+    "*.ipynb",
+]
 
 [tool.ruff.lint]
 select = [
-    "E", # pycodestyle
-    "F", # pyflakes
-    "I", # isort
-    "B", # flake8-bugbear
+    "E",    # pycodestyle
+    "F",    # pyflakes
+    "I",    # isort
+    "B",    # flake8-bugbear
 ]
-exclude = ["src/nozzle/FlightSql_pb2.py"]
+exclude = [
+    "src/nozzle/FlightSql_pb2.py",     # Generated protobuf file
+]
 
 [tool.ruff.lint.per-file-ignores]
-"*_nb.py" = ["B018"]
+"*_nb.py" = ["B018"]                    # Notebook files
+"tests/*" = ["B018", "E712"]            # Test files
 
 [tool.ruff.format]
 quote-style = "single"
+exclude = [
+    "notebooks/**",
+    "**/*.ipynb",
+]
+
+[tool.coverage.run]
+source = ["src/nozzle"]
+omit = [
+    "src/nozzle/FlightSql_pb2.py",
+    "tests/*",
+    "notebooks/*"
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+]

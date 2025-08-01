@@ -88,7 +88,7 @@ use std::{
 
 use common::{
     BlockNum, BlockStreamer, BoxError, catalog::physical::PhysicalTable,
-    query_context::QueryContext,
+    metadata::segments::merge_ranges, query_context::QueryContext,
 };
 use futures::TryStreamExt as _;
 use metadata_db::MetadataDb;
@@ -362,23 +362,6 @@ impl<S: BlockStreamer> DumpPartition<S> {
     }
 }
 
-fn merge_ranges(mut ranges: Vec<RangeInclusive<BlockNum>>) -> Vec<RangeInclusive<BlockNum>> {
-    ranges.sort_by_key(|r| *r.start());
-    let mut index = 1;
-    while index < ranges.len() {
-        let current_range = ranges[index - 1].clone();
-        let next_range = ranges[index].clone();
-        if *next_range.start() <= (*current_range.end() + 1) {
-            ranges[index - 1] =
-                *current_range.start()..=BlockNum::max(*current_range.end(), *next_range.end());
-            ranges.remove(index);
-        } else {
-            index += 1;
-        }
-    }
-    ranges
-}
-
 #[cfg(test)]
 mod test {
     #[test]
@@ -418,40 +401,6 @@ mod test {
         assert_eq!(
             super::split_and_partition(vec![1..=100], 4, 10),
             vec![[1..=25], [26..=50], [51..=75], [76..=100]],
-        );
-    }
-
-    #[test]
-    fn merge_ranges() {
-        assert_eq!(super::merge_ranges(vec![]), vec![]);
-        assert_eq!(super::merge_ranges(vec![1..=5]), vec![1..=5]);
-        assert_eq!(
-            super::merge_ranges(vec![1..=3, 5..=7, 9..=10]),
-            vec![1..=3, 5..=7, 9..=10]
-        );
-        assert_eq!(super::merge_ranges(vec![1..=5, 3..=8]), vec![1..=8]);
-        assert_eq!(super::merge_ranges(vec![1..=5, 5..=10]), vec![1..=10]);
-        assert_eq!(super::merge_ranges(vec![1..=10, 3..=7]), vec![1..=10]);
-        assert_eq!(
-            super::merge_ranges(vec![1..=3, 2..=5, 4..=8, 7..=10]),
-            vec![1..=10]
-        );
-        assert_eq!(
-            super::merge_ranges(vec![10..=15, 1..=5, 3..=8]),
-            vec![1..=8, 10..=15]
-        );
-        assert_eq!(
-            super::merge_ranges(vec![1..=3, 2..=6, 8..=10, 9..=12, 15..=18]),
-            vec![1..=6, 8..=12, 15..=18]
-        );
-        assert_eq!(
-            super::merge_ranges(vec![5..=10, 5..=10, 5..=10]),
-            vec![5..=10]
-        );
-        assert_eq!(super::merge_ranges(vec![1..=1, 2..=2, 3..=3]), vec![1..=3]);
-        assert_eq!(
-            super::merge_ranges(vec![1..=5, 7..=10]),
-            vec![1..=5, 7..=10]
         );
     }
 }

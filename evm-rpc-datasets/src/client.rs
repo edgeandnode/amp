@@ -1,6 +1,7 @@
 use std::{
     collections::HashMap,
-    mem,
+    num::NonZeroU32,
+    ops::Deref,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -9,9 +10,14 @@ use alloy::{
     consensus::{EthereumTxEnvelope, Transaction as _},
     eips::{BlockNumberOrTag, Typed2718},
     hex::{self, ToHexExt},
+    network::{
+        AnyHeader, AnyNetwork, AnyReceiptEnvelope, AnyRpcBlock, AnyRpcTransaction, AnyTxEnvelope,
+        TransactionResponse,
+    },
     primitives::FixedBytes,
     providers::Provider as _,
     rpc::{
+        self,
         client::BatchRequest,
         json_rpc::{RpcRecv, RpcSend},
         types::{Header, Log as RpcLog, TransactionReceipt},
@@ -21,9 +27,12 @@ use alloy::{
 use async_stream::stream;
 use common::{
     BlockNum, BlockStreamer, BoxError, EvmCurrency, RawDatasetRows, Timestamp,
-    evm::tables::{
-        blocks::{Block, BlockRowsBuilder},
-        logs::{Log, LogRowsBuilder},
+    evm::{
+        self,
+        tables::{
+            blocks::{Block, BlockRowsBuilder},
+            logs::{self, LogRowsBuilder},
+        },
     },
     metadata::segments::BlockRange,
 };
@@ -33,6 +42,9 @@ use tracing::{error, warn};
 
 use crate::tables::transactions::{Transaction, TransactionRowsBuilder};
 
+type AnyTxReceipt =
+    alloy::serde::WithOtherFields<TransactionReceipt<AnyReceiptEnvelope<rpc::types::Log>>>;
+
 #[derive(Error, Debug)]
 pub enum ToRowError {
     #[error("missing field: {0}")]
@@ -41,7 +53,7 @@ pub enum ToRowError {
     Overflow(&'static str, BoxError),
 }
 pub struct BatchingRpcWrapper {
-    client: alloy::providers::RootProvider,
+    client: alloy::providers::RootProvider<AnyNetwork>,
     batch_size: usize,
     retries: usize,
     limiter: Arc<tokio::sync::Semaphore>,
@@ -49,7 +61,7 @@ pub struct BatchingRpcWrapper {
 
 impl BatchingRpcWrapper {
     pub fn new(
-        client: alloy::providers::RootProvider,
+        client: alloy::providers::RootProvider<AnyNetwork>,
         batch_size: usize,
         retries: usize,
         limiter: Arc<tokio::sync::Semaphore>,
@@ -158,7 +170,7 @@ impl BatchingRpcWrapper {
 
 #[derive(Clone)]
 pub struct JsonRpcClient {
-    client: alloy::providers::RootProvider,
+    client: alloy::providers::RootProvider<AnyNetwork>,
     network: String,
     limiter: Arc<tokio::sync::Semaphore>,
     batch_size: usize,
@@ -170,9 +182,10 @@ impl JsonRpcClient {
         network: String,
         request_limit: u16,
         batch_size: usize,
+        rate_limit: Option<NonZeroU32>,
     ) -> Result<Self, BoxError> {
         assert!(request_limit >= 1);
-        let client = alloy::providers::RootProvider::new_http(url);
+        let client = evm::provider::new(url, rate_limit);
         let limiter = tokio::sync::Semaphore::new(request_limit as usize).into();
         Ok(Self {
             client,
@@ -194,6 +207,7 @@ impl JsonRpcClient {
             start_block,
             end_block
         );
+
         stream! {
             for block_num in start_block..=end_block {
                 let client_permit = self.limiter.acquire().await;
@@ -202,7 +216,6 @@ impl JsonRpcClient {
                     .get_block_by_number(BlockNumberOrTag::Number(block_num))
                     .full()
                     .await;
-
                 let block = match block_result {
                     Ok(Some(block)) => block,
                     Ok(None) => {
@@ -271,7 +284,7 @@ impl JsonRpcClient {
             for batch_calls in block_calls {
                 let start = Instant::now();
                 // Collect blocks and their transaction hashes together
-                let blocks_result: Result<Vec<alloy::rpc::types::Block>, BoxError> = batching_client.execute(batch_calls).await;
+                let blocks_result: Result<Vec<AnyRpcBlock>, BoxError> = batching_client.execute(batch_calls).await;
                 let blocks = match blocks_result {
                     Ok(blocks) => blocks,
                     Err(err) => {
@@ -299,7 +312,7 @@ impl JsonRpcClient {
                         ))
                         .collect();
 
-                    let receipts_result: Result<Vec<Option<TransactionReceipt>>, BoxError> = batching_client.execute(receipt_calls).await;
+                    let receipts_result = batching_client.execute(receipt_calls).await;
                     let receipts = match receipts_result {
                         Ok(receipts) => receipts,
                         Err(err) => {
@@ -353,8 +366,8 @@ impl JsonRpcClient {
     }
 }
 
-impl AsRef<alloy::providers::RootProvider> for JsonRpcClient {
-    fn as_ref(&self) -> &alloy::providers::RootProvider {
+impl AsRef<alloy::providers::RootProvider<AnyNetwork>> for JsonRpcClient {
+    fn as_ref(&self) -> &alloy::providers::RootProvider<AnyNetwork> {
         &self.client
     }
 }
@@ -392,16 +405,17 @@ impl BlockStreamer for JsonRpcClient {
 }
 
 fn rpc_to_rows(
-    block: alloy::rpc::types::Block,
-    receipts: Vec<Option<TransactionReceipt>>,
+    block: AnyRpcBlock,
+    receipts: Vec<Option<AnyTxReceipt>>,
     network: &str,
 ) -> Result<RawDatasetRows, BoxError> {
-    let header = rpc_header_to_row(block.header)?;
+    let header = rpc_header_to_row(block.header.clone())?;
     let mut logs = Vec::new();
     let mut transactions = Vec::new();
 
     for (idx, (tx, receipt)) in block
         .transactions
+        .clone()
         .into_transactions()
         .zip(receipts)
         .enumerate()
@@ -413,23 +427,7 @@ fn rpc_to_rows(
             )
         })?;
         // Move the logs out of the nested structure.
-        let receipt_logs = match &mut receipt.inner {
-            alloy::consensus::ReceiptEnvelope::Legacy(receipt_with_bloom) => {
-                mem::take(&mut receipt_with_bloom.receipt.logs)
-            }
-            alloy::consensus::ReceiptEnvelope::Eip2930(receipt_with_bloom) => {
-                mem::take(&mut receipt_with_bloom.receipt.logs)
-            }
-            alloy::consensus::ReceiptEnvelope::Eip1559(receipt_with_bloom) => {
-                mem::take(&mut receipt_with_bloom.receipt.logs)
-            }
-            alloy::consensus::ReceiptEnvelope::Eip4844(receipt_with_bloom) => {
-                mem::take(&mut receipt_with_bloom.receipt.logs)
-            }
-            alloy::consensus::ReceiptEnvelope::Eip7702(receipt_with_bloom) => {
-                mem::take(&mut receipt_with_bloom.receipt.logs)
-            }
-        };
+        let receipt_logs = std::mem::take(&mut receipt.inner.inner.inner.receipt.logs);
         for log in receipt_logs {
             logs.push(rpc_log_to_row(log, header.timestamp)?);
         }
@@ -474,7 +472,7 @@ fn rpc_to_rows(
     ]))
 }
 
-fn rpc_header_to_row(header: Header) -> Result<Block, ToRowError> {
+fn rpc_header_to_row(header: Header<AnyHeader>) -> Result<Block, ToRowError> {
     Ok(Block {
         block_num: header.number,
         timestamp: Timestamp(Duration::from_secs(header.timestamp)),
@@ -493,8 +491,8 @@ fn rpc_header_to_row(header: Header) -> Result<Block, ToRowError> {
         gas_used: u64::try_from(header.gas_used)
             .map_err(|e| ToRowError::Overflow("gas_used", e.into()))?,
         extra_data: header.extra_data.0.to_vec(),
-        mix_hash: header.mix_hash.into(),
-        nonce: header.nonce.into(),
+        mix_hash: *header.mix_hash.unwrap_or_default(),
+        nonce: u64::from(header.nonce.unwrap_or_default()),
         base_fee_per_gas: header
             .base_fee_per_gas
             .map(|b| {
@@ -509,8 +507,8 @@ fn rpc_header_to_row(header: Header) -> Result<Block, ToRowError> {
     })
 }
 
-fn rpc_log_to_row(log: RpcLog, timestamp: Timestamp) -> Result<Log, ToRowError> {
-    Ok(Log {
+fn rpc_log_to_row(log: RpcLog, timestamp: Timestamp) -> Result<logs::Log, ToRowError> {
+    Ok(logs::Log {
         block_hash: log
             .block_hash
             .ok_or(ToRowError::Missing("block_hash"))?
@@ -541,16 +539,21 @@ fn rpc_log_to_row(log: RpcLog, timestamp: Timestamp) -> Result<Log, ToRowError> 
 
 fn rpc_transaction_to_row(
     block: &Block,
-    tx: alloy::rpc::types::Transaction,
-    receipt: TransactionReceipt,
+    tx: AnyRpcTransaction,
+    receipt: AnyTxReceipt,
     tx_index: usize,
 ) -> Result<Option<Transaction>, ToRowError> {
-    let sig = match &*tx.inner {
-        EthereumTxEnvelope::Legacy(signed) => signed.signature(),
-        EthereumTxEnvelope::Eip2930(signed) => signed.signature(),
-        EthereumTxEnvelope::Eip1559(signed) => signed.signature(),
-        EthereumTxEnvelope::Eip4844(signed) => signed.signature(),
-        EthereumTxEnvelope::Eip7702(signed) => signed.signature(),
+    let sig = match tx.inner.inner.deref() {
+        AnyTxEnvelope::Ethereum(envelope) => match envelope {
+            EthereumTxEnvelope::Legacy(signed) => signed.signature(),
+            EthereumTxEnvelope::Eip2930(signed) => signed.signature(),
+            EthereumTxEnvelope::Eip1559(signed) => signed.signature(),
+            EthereumTxEnvelope::Eip4844(signed) => signed.signature(),
+            EthereumTxEnvelope::Eip7702(signed) => signed.signature(),
+        },
+        AnyTxEnvelope::Unknown(_) => {
+            &alloy::primitives::Signature::from_raw(&[0u8; 65]).expect("invalid raw signature")
+        }
     };
     Ok(Some(Transaction {
         block_hash: block.hash,
@@ -561,8 +564,7 @@ fn rpc_transaction_to_row(
         tx_hash: tx.inner.tx_hash().0,
         to: tx.to().map(|addr| addr.0.0).unwrap_or_default(),
         nonce: tx.nonce(),
-        gas_price: tx
-            .gas_price()
+        gas_price: TransactionResponse::gas_price(&tx.0.inner)
             .map(i128::try_from)
             .transpose()
             .map_err(|e| ToRowError::Overflow("gas_price", e.into()))?,
@@ -572,10 +574,10 @@ fn rpc_transaction_to_row(
         v: if sig.v() { vec![1] } else { vec![] },
         r: sig.r().to_be_bytes_vec(),
         s: sig.s().to_be_bytes_vec(),
-        receipt_cumulative_gas_used: u64::try_from(receipt.inner.cumulative_gas_used())
+        receipt_cumulative_gas_used: u64::try_from(receipt.inner.inner.cumulative_gas_used())
             .map_err(|e| ToRowError::Overflow("cumulative_gas_used", e.into()))?,
         r#type: tx.ty().into(),
-        max_fee_per_gas: i128::try_from(tx.max_fee_per_gas())
+        max_fee_per_gas: i128::try_from(tx.inner().inner.max_fee_per_gas())
             .map_err(|e| ToRowError::Overflow("max_fee_per_gas", e.into()))?,
         max_priority_fee_per_gas: tx
             .max_priority_fee_per_gas()
@@ -588,6 +590,6 @@ fn rpc_transaction_to_row(
             .transpose()
             .map_err(|e| ToRowError::Overflow("max_fee_per_blob_gas", e.into()))?,
         from: tx.as_recovered().signer().into(),
-        status: receipt.status().into(),
+        status: receipt.inner.inner.status().into(),
     }))
 }

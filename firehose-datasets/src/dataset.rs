@@ -1,14 +1,18 @@
 use common::DatasetValue;
+use schemars::JsonSchema;
 use serde::Deserialize;
 
 use crate::Error;
 
 pub const DATASET_KIND: &str = "firehose";
 
-#[derive(Debug, Deserialize)]
-pub(crate) struct DatasetDef {
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct DatasetDef {
+    /// Dataset kind, must be `firehose`.
     pub kind: String,
+    /// Dataset name.
     pub name: String,
+    /// Network name, e.g., `mainnet`.
     pub network: String,
 }
 

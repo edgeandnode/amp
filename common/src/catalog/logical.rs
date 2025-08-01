@@ -1,9 +1,8 @@
 use std::{fmt, sync::Arc};
 
-use async_udf::functions::AsyncScalarUDF;
 use datafusion::{
     arrow::datatypes::{DataType, SchemaRef},
-    logical_expr::ScalarUDF,
+    logical_expr::{ScalarUDF, async_udf::AsyncScalarUDF},
     sql::TableReference,
 };
 use js_runtime::isolate_pool::IsolatePool;
