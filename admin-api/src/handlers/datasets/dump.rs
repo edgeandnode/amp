@@ -46,7 +46,9 @@ pub async fn handler(
     if options.wait_for_completion {
         if options.end_block.is_none() {
             return Err(Error::InvalidRequest(
-                format!("end_block must be specified for wait_for_completion",).into(),
+                "end_block must be specified for wait_for_completion"
+                    .to_string()
+                    .into(),
             )
             .into());
         }
@@ -60,7 +62,7 @@ pub async fn handler(
                 .get_job(&job_id)
                 .await
                 .map_err(|e| BoxRequestError::from(Error::from(e)))?
-                .ok_or_else(|| Error::SchedulerError(format!("job {job_id} not found").into()))?;
+                .ok_or_else(|| Error::InvalidRequest(format!("job {job_id} not found").into()))?;
 
             match job.status {
                 JobStatus::Completed => break,

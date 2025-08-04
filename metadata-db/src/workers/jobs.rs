@@ -46,8 +46,8 @@ where
     E: sqlx::Executor<'c, Database = sqlx::Postgres>,
 {
     let query = indoc::indoc! {r#"
-        UPDATE jobs 
-        SET status = $1, updated_at = (timezone('UTC', now())) 
+        UPDATE jobs
+        SET status = $1, updated_at = (timezone('UTC', now()))
         WHERE id = $2
     "#};
     sqlx::query(query)
@@ -56,6 +56,86 @@ where
         .execute(exe)
         .await?;
     Ok(())
+}
+
+/// Update the status of a job with multiple possible expected original states
+///
+/// This function will only update the job status if the job exists and currently has
+/// one of the expected original statuses. If the job doesn't exist, returns `UpdateJobStatusError::NotFound`.
+/// If the job exists but has a different status than any of the expected ones, returns `UpdateJobStatusError::StateConflict`.
+pub async fn update_job_status_if_any_state<'c, E>(
+    exe: E,
+    id: &JobId,
+    expected_statuses: &[JobStatus],
+    new_status: JobStatus,
+) -> Result<(), JobStatusUpdateError>
+where
+    E: sqlx::Executor<'c, Database = sqlx::Postgres>,
+{
+    /// Internal structure to hold the result of the update operation
+    #[derive(Debug, sqlx::FromRow)]
+    struct UpdateResult {
+        updated_id: Option<JobId>,
+        original_status: Option<JobStatus>,
+    }
+
+    let query = indoc::indoc! {r#"
+        WITH target_job AS (
+            SELECT id, status
+            FROM jobs
+            WHERE id = $1
+        ),
+        target_job_update AS (
+            UPDATE jobs
+            SET status = $3, updated_at = timezone('UTC', now())
+            WHERE id = $1 AND status = ANY($2)
+            RETURNING id
+        )
+        SELECT
+            target_job_update.id AS updated_id,
+            target_job.status AS original_status
+        FROM target_job
+        LEFT JOIN target_job_update ON target_job.id = target_job_update.id
+    "#};
+
+    let result: Option<UpdateResult> = sqlx::query_as(query)
+        .bind(id)
+        .bind(expected_statuses)
+        .bind(new_status)
+        .fetch_optional(exe)
+        .await
+        .map_err(JobStatusUpdateError::Database)?;
+
+    match result {
+        Some(UpdateResult {
+            updated_id: Some(_),
+            ..
+        }) => Ok(()),
+        Some(UpdateResult {
+            updated_id: None,
+            original_status: Some(status),
+        }) => Err(JobStatusUpdateError::StateConflict {
+            expected: expected_statuses.to_vec(),
+            actual: status,
+        }),
+        _ => Err(JobStatusUpdateError::NotFound),
+    }
+}
+
+/// Error type for conditional job status updates
+#[derive(Debug, thiserror::Error)]
+pub enum JobStatusUpdateError {
+    #[error("Job not found")]
+    NotFound,
+
+    #[error("Job state conflict: expected one of {expected:?}, but found {actual}")]
+    StateConflict {
+        expected: Vec<JobStatus>,
+        actual: JobStatus,
+    },
+
+    #[error("Database error: {0}")]
+    Database(#[from] sqlx::Error),
 }
 
 /// Get a job by its ID
@@ -81,10 +161,10 @@ where
     E: sqlx::Executor<'c, Database = sqlx::Postgres>,
 {
     let query = indoc::indoc! {r#"
-        SELECT 
-            j.id, 
-            j.node_id, 
-            j.status, 
+        SELECT
+            j.id,
+            j.node_id,
+            j.status,
             j.descriptor,
             j.created_at,
             j.updated_at
@@ -105,10 +185,10 @@ where
     E: sqlx::Executor<'c, Database = sqlx::Postgres>,
 {
     let query = indoc::indoc! {r#"
-        SELECT 
-            id, 
-            node_id, 
-            status, 
+        SELECT
+            id,
+            node_id,
+            status,
             descriptor
         FROM jobs
         WHERE node_id = $1 AND status = ANY($2)
@@ -134,10 +214,10 @@ where
     E: sqlx::Executor<'c, Database = sqlx::Postgres>,
 {
     let query = indoc::indoc! {r#"
-        SELECT 
-            j.id, 
-            j.node_id, 
-            j.status, 
+        SELECT
+            j.id,
+            j.node_id,
+            j.status,
             j.descriptor,
             j.created_at,
             j.updated_at
