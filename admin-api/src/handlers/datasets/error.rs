@@ -3,6 +3,8 @@ use common::BoxError;
 use http_common::RequestError;
 use metadata_db::JobStatus;
 
+use crate::scheduler::ScheduleJobError;
+
 /// Dataset handler errors
 ///
 /// Unified error type for all dataset handlers.
@@ -26,7 +28,7 @@ pub enum Error {
 
     /// Scheduler error
     #[error("scheduler error: {0}")]
-    SchedulerError(#[source] BoxError),
+    SchedulerError(#[from] ScheduleJobError),
 
     /// Dataset definition store write error
     #[error("dataset definition store error: {0}")]

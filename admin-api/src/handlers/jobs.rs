@@ -2,5 +2,4 @@
 
 pub mod get_all;
 pub mod get_by_id;
-
-mod error;
+pub mod stop;

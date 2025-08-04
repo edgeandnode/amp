@@ -21,7 +21,7 @@ pub use self::temp::{KEEP_TEMP_DIRS, temp_metadata_db};
 pub use self::workers::{
     WorkerNodeId,
     events::{JobNotifAction, JobNotifListener, JobNotifRecvError, JobNotification},
-    jobs::{Job, JobId, JobStatus, JobWithDetails},
+    jobs::{Job, JobId, JobStatus, JobStatusUpdateError, JobWithDetails},
 };
 
 /// Frequency on which to send a heartbeat.
@@ -69,7 +69,7 @@ pub struct Location {
     #[sqlx(try_from = "&'a str")]
     pub url: Url,
     /// location.start_block
-    pub start_block: Option<i64>,
+    pub start_block: i64,
 }
 
 #[derive(Error, Debug)]
@@ -101,6 +101,9 @@ pub enum Error {
         "Cannot start dump: location has existing start_block={existing}, but requested start_block={requested}"
     )]
     MismatchedStartBlock { existing: i64, requested: i64 },
+
+    #[error("Job status update error: {0}")]
+    JobStatusUpdateError(#[from] workers::jobs::JobStatusUpdateError),
 }
 
 impl Error {
@@ -228,13 +231,6 @@ impl MetadataDb {
 
 /// Job-related API
 impl MetadataDb {
-    /// Send a notification over the worker actions notification channel
-    pub async fn send_job_notification(&self, payload: JobNotification) -> Result<(), Error> {
-        workers::events::notify(&*self.pool, payload)
-            .await
-            .map_err(Into::into)
-    }
-
     /// Listen to the worker actions notification channel for job notifications
     pub async fn listen_for_job_notifications(&self) -> Result<JobNotifListener, Error> {
         workers::events::listen_url(&self.url)
@@ -274,6 +270,54 @@ impl MetadataDb {
         tx.commit().await?;
 
         Ok(job_id)
+    }
+
+    /// Atomically update job status to StopRequested and notify worker
+    ///
+    /// This function will only update the job status if it's currently in a valid state
+    /// to be stopped (Scheduled or Running). If the job is already stopping, this is
+    /// considered success (idempotent behavior). If the job is in a terminal state
+    /// (Stopped, Completed, Failed), this returns a conflict error.
+    ///
+    /// This function performs in a single transaction:
+    ///  1. Conditionally updates the job status to StopRequested
+    ///  2. Sends a notification to the worker if the update succeeded
+    ///
+    /// Returns an error if the job doesn't exist, is in a terminal state, or if there's a database error.
+    #[instrument(skip(self), err)]
+    pub async fn request_job_stop(
+        &self,
+        job_id: &JobId,
+        node_id: &WorkerNodeId,
+    ) -> Result<(), Error> {
+        // Use transaction for atomic update and notification
+        let mut tx = self.pool.begin().await?;
+
+        // Try to update job status
+        match workers::jobs::update_job_status_if_any_state(
+            &mut *tx,
+            job_id,
+            &[JobStatus::Running, JobStatus::Scheduled],
+            JobStatus::StopRequested,
+        )
+        .await
+        {
+            Ok(()) => {} // OK!
+            // Check if the job is already stopping (idempotent behavior)
+            Err(JobStatusUpdateError::StateConflict {
+                actual: JobStatus::StopRequested | JobStatus::Stopping,
+                ..
+            }) => {
+                return Ok(());
+            }
+            Err(other) => return Err(other.into()),
+        }
+
+        // Send notification to worker
+        workers::events::notify(&mut *tx, JobNotification::stop(node_id.clone(), *job_id)).await?;
+
+        tx.commit().await?;
+        Ok(())
     }
 
     /// List jobs with cursor-based pagination support
@@ -342,34 +386,70 @@ impl MetadataDb {
         Ok(workers::jobs::get_job_with_details(&*self.pool, id).await?)
     }
 
-    /// Marks a job as `RUNNING`
+    /// Conditionally marks a job as `RUNNING` only if it's currently `SCHEDULED`
+    ///
+    /// This provides idempotent behavior - if the job is already running, completed, or failed,
+    /// the appropriate error will be returned indicating the state conflict.
     pub async fn mark_job_running(&self, id: &JobId) -> Result<(), Error> {
-        Ok(workers::jobs::update_job_status(&*self.pool, id, JobStatus::Running).await?)
+        Ok(workers::jobs::update_job_status_if_any_state(
+            &*self.pool,
+            id,
+            &[JobStatus::Scheduled],
+            JobStatus::Running,
+        )
+        .await?)
     }
 
-    /// Marks a job as `COMPLETED`
-    pub async fn mark_job_completed(&self, id: &JobId) -> Result<(), Error> {
-        Ok(workers::jobs::update_job_status(&*self.pool, id, JobStatus::Completed).await?)
-    }
-
-    /// Marks a job as `STOPPED`
-    pub async fn mark_job_stopped(&self, id: &JobId) -> Result<(), Error> {
-        Ok(workers::jobs::update_job_status(&*self.pool, id, JobStatus::Stopped).await?)
-    }
-
-    /// Marks a job as `STOP_REQUESTED`
-    pub async fn mark_job_as_stop_requested(&self, id: &JobId) -> Result<(), Error> {
-        Ok(workers::jobs::update_job_status(&*self.pool, id, JobStatus::StopRequested).await?)
-    }
-
-    /// Marks a job as `STOPPING`
+    /// Conditionally marks a job as `STOPPING` only if it's currently `STOP_REQUESTED`
+    ///
+    /// This is typically used by workers to acknowledge a stop request.
     pub async fn mark_job_stopping(&self, id: &JobId) -> Result<(), Error> {
-        Ok(workers::jobs::update_job_status(&*self.pool, id, JobStatus::Stopping).await?)
+        Ok(workers::jobs::update_job_status_if_any_state(
+            &*self.pool,
+            id,
+            &[JobStatus::StopRequested],
+            JobStatus::Stopping,
+        )
+        .await?)
     }
 
-    /// Marks a job as `FAILED`
+    /// Conditionally marks a job as `STOPPED` only if it's currently `STOPPING`
+    ///
+    /// This provides proper state transition from stopping to stopped.
+    pub async fn mark_job_stopped(&self, id: &JobId) -> Result<(), Error> {
+        Ok(workers::jobs::update_job_status_if_any_state(
+            &*self.pool,
+            id,
+            &[JobStatus::Stopping],
+            JobStatus::Stopped,
+        )
+        .await?)
+    }
+
+    /// Conditionally marks a job as `COMPLETED` only if it's currently `RUNNING`
+    ///
+    /// This ensures jobs can only be completed from a running state.
+    pub async fn mark_job_completed(&self, id: &JobId) -> Result<(), Error> {
+        Ok(workers::jobs::update_job_status_if_any_state(
+            &*self.pool,
+            id,
+            &[JobStatus::Running],
+            JobStatus::Completed,
+        )
+        .await?)
+    }
+
+    /// Conditionally marks a job as `FAILED` from either `RUNNING` or `SCHEDULED` states
+    ///
+    /// Jobs can fail from either scheduled (startup failure) or running (runtime failure) states.
     pub async fn mark_job_failed(&self, id: &JobId) -> Result<(), Error> {
-        Ok(workers::jobs::update_job_status(&*self.pool, id, JobStatus::Failed).await?)
+        Ok(workers::jobs::update_job_status_if_any_state(
+            &*self.pool,
+            id,
+            &[JobStatus::Scheduled, JobStatus::Running],
+            JobStatus::Failed,
+        )
+        .await?)
     }
 }
 
@@ -408,7 +488,7 @@ impl MetadataDb {
             .bind(path)
             .bind(url.to_string())
             .bind(active)
-            .bind(start_block)
+            .bind(start_block.unwrap_or(0))
             .execute(&mut *tx)
             .await?;
 
@@ -428,6 +508,14 @@ impl MetadataDb {
 
         tx.commit().await?;
         Ok(location_id)
+    }
+
+    pub async fn get_location_by_id(&self, id: LocationId) -> Result<Option<Location>, Error> {
+        sqlx::query_as("SELECT * FROM locations WHERE id = $1")
+            .bind(id)
+            .fetch_optional(&*self.pool)
+            .await
+            .map_err(Error::from)
     }
 
     pub async fn url_to_location_id(&self, url: &Url) -> Result<Option<LocationId>, Error> {
@@ -612,44 +700,25 @@ impl MetadataDb {
         Ok(())
     }
 
-    /// If the start block is already set, it must match the provided start_block. Otherwise, the
-    /// requested `start_block` is persisted for this location.
-    ///
-    /// The check and potential update happen in a single transaction.
+    /// If the start block is already set, it must match the provided start_block.
     pub async fn check_start_block(
         &self,
         location_id: LocationId,
         start_block: i64,
     ) -> Result<(), Error> {
-        let mut tx = self.pool.begin().await?;
-
-        let existing_start_block: Option<i64> =
+        let existing_start_block: i64 =
             sqlx::query_scalar("SELECT start_block FROM locations WHERE id = $1")
                 .bind(location_id)
-                .fetch_one(&mut *tx)
+                .fetch_one(&*self.pool)
                 .await?;
 
-        match existing_start_block {
-            // A start block exists. It must match the requested one.
-            Some(existing) => {
-                if existing != start_block {
-                    return Err(Error::MismatchedStartBlock {
-                        existing,
-                        requested: start_block,
-                    });
-                }
-            }
-            // No start block exists. This is the first run, so persist the requested block.
-            None => {
-                sqlx::query("UPDATE locations SET start_block = $1 WHERE id = $2")
-                    .bind(start_block)
-                    .bind(location_id)
-                    .execute(&mut *tx)
-                    .await?;
-            }
+        if existing_start_block != start_block {
+            return Err(Error::MismatchedStartBlock {
+                existing: existing_start_block,
+                requested: start_block,
+            });
         }
 
-        tx.commit().await?;
         Ok(())
     }
 

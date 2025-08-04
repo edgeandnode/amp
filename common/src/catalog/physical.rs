@@ -447,7 +447,30 @@ impl PhysicalTable {
     /// returned if no block range has been synced.
     pub async fn synced_range(&self) -> Result<Option<RangeInclusive<BlockNum>>, BoxError> {
         let chain = self.segments().await.map(canonical_chain)?;
-        Ok(chain.map(|c| c.start()..=c.end()))
+
+        let location = self
+            .metadata_db
+            .get_location_by_id(self.location_id)
+            .await?
+            // A location should always exist for a physical table.
+            .ok_or_else(|| {
+                DataFusionError::Internal(format!(
+                    "Location with id {} not found",
+                    self.location_id
+                ))
+            })?;
+
+        let location_start_block = location.start_block;
+
+        if let Some(chain) = chain {
+            if chain.start() as i64 == location_start_block {
+                Ok(Some(chain.start()..=chain.end()))
+            } else {
+                Ok(None)
+            }
+        } else {
+            Ok(None)
+        }
     }
 
     /// Return the most recent block number that has been synced for this table.

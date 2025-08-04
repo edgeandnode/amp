@@ -3,12 +3,13 @@
 use axum::{
     Json,
     extract::{Query, State},
+    http::StatusCode,
 };
-use http_common::BoxRequestError;
+use common::BoxError;
+use http_common::{BoxRequestError, RequestError};
 use metadata_db::{JobId, JobWithDetails};
 use serde::{Deserialize, Serialize};
 
-use super::error::Error;
 use crate::ctx::Ctx;
 
 /// Query parameters for the jobs listing endpoint
@@ -106,6 +107,33 @@ impl From<JobWithDetails> for JobInfo {
             descriptor: job.desc,
             created_at: job.created_at.to_rfc3339(),
             updated_at: job.updated_at.to_rfc3339(),
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    /// Metadata DB error
+    #[error("metadata db error: {0}")]
+    MetadataDbError(#[from] metadata_db::Error),
+
+    /// Invalid request
+    #[error("invalid request: {0}")]
+    InvalidRequest(BoxError),
+}
+
+impl RequestError for Error {
+    fn error_code(&self) -> &'static str {
+        match self {
+            Error::MetadataDbError(_) => "METADATA_DB_ERROR",
+            Error::InvalidRequest(_) => "INVALID_REQUEST",
+        }
+    }
+
+    fn status_code(&self) -> StatusCode {
+        match self {
+            Error::MetadataDbError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::InvalidRequest(_) => StatusCode::BAD_REQUEST,
         }
     }
 }
