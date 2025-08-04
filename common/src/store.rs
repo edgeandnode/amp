@@ -30,11 +30,9 @@ pub enum StoreError {
 
 impl StoreError {
     pub fn is_not_found(&self) -> bool {
-        // GCS will sometimes report a permission denied error when the object is not found.
         matches!(
             self,
             StoreError::ObjectStore(object_store::Error::NotFound { .. })
-                | StoreError::ObjectStore(object_store::Error::PermissionDenied { .. })
         )
     }
 }
