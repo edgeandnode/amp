@@ -150,33 +150,42 @@ pub(crate) struct TransactionRowsBuilder {
 }
 
 impl TransactionRowsBuilder {
-    pub(crate) fn with_capacity(capacity: usize) -> Self {
+    pub(crate) fn with_capacity(
+        count: usize,
+        total_to_size: usize,
+        total_input_size: usize,
+        total_v_size: usize,
+        total_r_size: usize,
+        total_s_size: usize,
+        total_return_data_size: usize,
+        total_public_key_size: usize,
+    ) -> Self {
         Self {
-            special_block_num: UInt64Builder::with_capacity(capacity),
-            block_hash: Bytes32ArrayBuilder::with_capacity(capacity),
-            block_num: UInt64Builder::with_capacity(capacity),
-            timestamp: TimestampArrayBuilder::with_capacity(capacity),
-            tx_index: UInt32Builder::with_capacity(capacity),
-            tx_hash: Bytes32ArrayBuilder::with_capacity(capacity),
-            to: BinaryBuilder::with_capacity(capacity, 0),
-            nonce: UInt64Builder::with_capacity(capacity),
-            gas_price: EvmCurrencyArrayBuilder::with_capacity(capacity),
-            gas_limit: UInt64Builder::with_capacity(capacity),
-            value: EvmCurrencyArrayBuilder::with_capacity(capacity),
-            input: BinaryBuilder::with_capacity(capacity, 0),
-            v: BinaryBuilder::with_capacity(capacity, 0),
-            r: BinaryBuilder::with_capacity(capacity, 0),
-            s: BinaryBuilder::with_capacity(capacity, 0),
-            gas_used: UInt64Builder::with_capacity(capacity),
-            r#type: Int32Builder::with_capacity(capacity),
-            max_fee_per_gas: EvmCurrencyArrayBuilder::with_capacity(capacity),
-            max_priority_fee_per_gas: EvmCurrencyArrayBuilder::with_capacity(capacity),
-            from: EvmAddressArrayBuilder::with_capacity(capacity),
-            status: Int32Builder::with_capacity(capacity),
-            return_data: BinaryBuilder::with_capacity(capacity, 0),
-            public_key: BinaryBuilder::with_capacity(capacity, 0),
-            begin_ordinal: UInt64Builder::with_capacity(capacity),
-            end_ordinal: UInt64Builder::with_capacity(capacity),
+            special_block_num: UInt64Builder::with_capacity(count),
+            block_hash: Bytes32ArrayBuilder::with_capacity(count),
+            block_num: UInt64Builder::with_capacity(count),
+            timestamp: TimestampArrayBuilder::with_capacity(count),
+            tx_index: UInt32Builder::with_capacity(count),
+            tx_hash: Bytes32ArrayBuilder::with_capacity(count),
+            to: BinaryBuilder::with_capacity(count, total_to_size),
+            nonce: UInt64Builder::with_capacity(count),
+            gas_price: EvmCurrencyArrayBuilder::with_capacity(count),
+            gas_limit: UInt64Builder::with_capacity(count),
+            value: EvmCurrencyArrayBuilder::with_capacity(count),
+            input: BinaryBuilder::with_capacity(count, total_input_size),
+            v: BinaryBuilder::with_capacity(count, total_v_size),
+            r: BinaryBuilder::with_capacity(count, total_r_size),
+            s: BinaryBuilder::with_capacity(count, total_s_size),
+            gas_used: UInt64Builder::with_capacity(count),
+            r#type: Int32Builder::with_capacity(count),
+            max_fee_per_gas: EvmCurrencyArrayBuilder::with_capacity(count),
+            max_priority_fee_per_gas: EvmCurrencyArrayBuilder::with_capacity(count),
+            from: EvmAddressArrayBuilder::with_capacity(count),
+            status: Int32Builder::with_capacity(count),
+            return_data: BinaryBuilder::with_capacity(count, total_return_data_size),
+            public_key: BinaryBuilder::with_capacity(count, total_public_key_size),
+            begin_ordinal: UInt64Builder::with_capacity(count),
+            end_ordinal: UInt64Builder::with_capacity(count),
         }
     }
 
@@ -301,7 +310,16 @@ impl TransactionRowsBuilder {
 fn default_to_arrow() {
     let tx = Transaction::default();
     let rows = {
-        let mut builder = TransactionRowsBuilder::with_capacity(1);
+        let mut builder = TransactionRowsBuilder::with_capacity(
+            1,
+            tx.to.len(),
+            tx.input.len(),
+            tx.v.len(),
+            tx.r.len(),
+            tx.s.len(),
+            tx.return_data.len(),
+            tx.public_key.len(),
+        );
         builder.append(&tx);
         builder
             .build(BlockRange {

@@ -92,21 +92,21 @@ pub struct LogRowsBuilder {
 }
 
 impl LogRowsBuilder {
-    pub fn with_capacity(capacity: usize) -> Self {
+    pub fn with_capacity(count: usize, total_data_size: usize) -> Self {
         Self {
-            special_block_num: UInt64Builder::with_capacity(capacity),
-            block_hash: Bytes32ArrayBuilder::with_capacity(capacity),
-            block_num: UInt64Builder::with_capacity(capacity),
-            timestamp: TimestampArrayBuilder::with_capacity(capacity),
-            tx_index: UInt32Builder::with_capacity(capacity),
-            tx_hash: Bytes32ArrayBuilder::with_capacity(capacity),
-            address: EvmAddressArrayBuilder::with_capacity(capacity),
-            topic0: Bytes32ArrayBuilder::with_capacity(capacity),
-            topic1: Bytes32ArrayBuilder::with_capacity(capacity),
-            topic2: Bytes32ArrayBuilder::with_capacity(capacity),
-            topic3: Bytes32ArrayBuilder::with_capacity(capacity),
-            data: BinaryBuilder::with_capacity(capacity, 0),
-            log_index: UInt32Builder::with_capacity(capacity),
+            special_block_num: UInt64Builder::with_capacity(count),
+            block_hash: Bytes32ArrayBuilder::with_capacity(count),
+            block_num: UInt64Builder::with_capacity(count),
+            timestamp: TimestampArrayBuilder::with_capacity(count),
+            tx_index: UInt32Builder::with_capacity(count),
+            tx_hash: Bytes32ArrayBuilder::with_capacity(count),
+            address: EvmAddressArrayBuilder::with_capacity(count),
+            topic0: Bytes32ArrayBuilder::with_capacity(count),
+            topic1: Bytes32ArrayBuilder::with_capacity(count),
+            topic2: Bytes32ArrayBuilder::with_capacity(count),
+            topic3: Bytes32ArrayBuilder::with_capacity(count),
+            data: BinaryBuilder::with_capacity(count, total_data_size),
+            log_index: UInt32Builder::with_capacity(count),
         }
     }
 
@@ -182,7 +182,7 @@ impl LogRowsBuilder {
 fn default_to_arrow() {
     let log = Log::default();
     let rows = {
-        let mut builder = LogRowsBuilder::with_capacity(1);
+        let mut builder = LogRowsBuilder::with_capacity(1, log.data.len());
         builder.append(&log);
         builder
             .build(BlockRange {

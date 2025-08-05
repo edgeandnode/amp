@@ -119,7 +119,7 @@ use std::{collections::BTreeSet, sync::Arc};
 use common::{
     BlockNum, BoxError, Dataset,
     catalog::physical::PhysicalTable,
-    metadata::segments::{BlockRange, missing_block_ranges},
+    metadata::segments::BlockRange,
     notification_multiplexer::NotificationMultiplexerHandle,
     plan_visitors::is_incremental,
     query_context::{QueryContext, QueryEnv, parse_sql},
@@ -204,19 +204,8 @@ pub async fn dump_table(
             ctx.metadata_db
                 .check_start_block(table.location_id(), start_block)
                 .await?;
-            let synced_range = table.synced_range().await?;
-            if let Some(range) = synced_range.as_ref() {
-                tracing::info!(
-                    "table `{}` has scanned block range [{}-{}]",
-                    table_name,
-                    range.start(),
-                    range.end(),
-                );
-            }
-            let ranges_to_scan = synced_range
-                .map(|synced| missing_block_ranges(synced, start..=end))
-                .unwrap_or(vec![start..=end]);
-            for range in ranges_to_scan {
+            
+            for range in table.missing_ranges(start..=end).await? {
                 let (start, end) = range.into_inner();
                 tracing::info!("dumping {table_name} between blocks {start} and {end}");
 
