@@ -457,20 +457,10 @@ fn rpc_to_rows(
     };
 
     let transactions_row = {
-        let mut total_input_size = 0;
-        let mut total_v_size = 0;
-        let mut total_r_size = 0;
-        let mut total_s_size = 0;
-
-        // Calculate total sizes first
-        for tx in &transactions {
-            if let Some(tx) = tx {
-                total_input_size += tx.input.len();
-                total_v_size += tx.v.len();
-                total_r_size += tx.r.len();
-                total_s_size += tx.s.len();
-            }
-        }
+        let total_input_size: usize = transactions.iter().map(|t| t.input.len()).sum();
+        let total_v_size: usize = transactions.iter().map(|tx| tx.v.len()).sum();
+        let total_r_size: usize = transactions.iter().map(|tx| tx.r.len()).sum();
+        let total_s_size: usize = transactions.iter().map(|tx| tx.s.len()).sum();
 
         let mut builder = TransactionRowsBuilder::with_capacity(
             transactions.len(),
@@ -480,9 +470,7 @@ fn rpc_to_rows(
             total_s_size,
         );
         for tx in transactions {
-            if let Some(tx) = tx {
-                builder.append(&tx);
-            }
+            builder.append(&tx);
         }
         builder.build(block.clone())?
     };
@@ -564,7 +552,7 @@ fn rpc_transaction_to_row(
     tx: AnyRpcTransaction,
     receipt: AnyTxReceipt,
     tx_index: usize,
-) -> Result<Option<Transaction>, ToRowError> {
+) -> Result<Transaction, ToRowError> {
     let sig = match tx.inner.inner.deref() {
         AnyTxEnvelope::Ethereum(envelope) => match envelope {
             EthereumTxEnvelope::Legacy(signed) => signed.signature(),
@@ -577,7 +565,7 @@ fn rpc_transaction_to_row(
             &alloy::primitives::Signature::from_raw(&[0u8; 65]).expect("invalid raw signature")
         }
     };
-    Ok(Some(Transaction {
+    Ok(Transaction {
         block_hash: block.hash,
         block_num: block.block_num,
         timestamp: block.timestamp,
@@ -613,5 +601,5 @@ fn rpc_transaction_to_row(
             .map_err(|e| ToRowError::Overflow("max_fee_per_blob_gas", e.into()))?,
         from: tx.as_recovered().signer().into(),
         status: receipt.inner.inner.status().into(),
-    }))
+    })
 }
