@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, pin::Pin, sync::Arc};
+use std::{ops::RangeInclusive, pin::Pin, sync::Arc};
 
 use datafusion::{
     error::DataFusionError, execution::SendableRecordBatchStream, logical_expr::LogicalPlan,
@@ -12,80 +12,105 @@ use metadata_db::LocationId;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream, WatchStream};
 use tokio_util::task::AbortOnDropHandle;
-use tracing::{instrument, warn};
+use tracing::instrument;
 
 use crate::{
     BlockNum, BoxError, SPECIAL_BLOCK_NUM,
     arrow::{array::RecordBatch, datatypes::SchemaRef},
     catalog::physical::PhysicalTable,
+    metadata::segments::{BlockRange, Chain},
     notification_multiplexer::NotificationMultiplexerHandle,
     plan_visitors::{order_by_block_num, propagate_block_num},
     query_context::QueryContext,
 };
 
-// Tracks watermarks for a set of tables
-struct Watermarks {
-    table_by_id: BTreeMap<LocationId, Arc<PhysicalTable>>,
-    watermarks: BTreeMap<LocationId, Option<BlockNum>>,
+pub type BlockRangeStream = Pin<
+    Box<
+        dyn Stream<Item = Result<Option<RangeInclusive<BlockNum>>, BoxError>>
+            + Send
+            + Sync
+            + 'static,
+    >,
+>;
+
+struct ExecutionRanges {
+    tables: Vec<Arc<PhysicalTable>>,
+    stream_chain: Option<Chain>,
 }
 
-impl Watermarks {
-    async fn new(tables: &[Arc<PhysicalTable>]) -> Result<Self, BoxError> {
-        let mut watermarks = BTreeMap::new();
-        let mut table_by_id = BTreeMap::new();
-        for table in tables {
-            let watermark = table.watermark().await?;
-            watermarks.insert(table.location_id(), watermark);
-            table_by_id.insert(table.location_id(), table.clone());
+impl ExecutionRanges {
+    fn new(tables: Vec<Arc<PhysicalTable>>) -> Self {
+        Self {
+            tables,
+            stream_chain: None,
         }
-        Ok(Watermarks {
-            watermarks,
-            table_by_id,
-        })
     }
 
-    /// Updates and returns the watermark for a specific location.
-    ///
-    /// Errors if the new watermark is less than the current one.
-    /// Panics if the location was not provided in the constructor.
-    async fn update(&mut self, location: LocationId) -> Result<(), BoxError> {
-        let table = self.table_by_id.get(&location).unwrap();
-        let current = self.watermarks.get(&location).unwrap();
-        let watermark = table.watermark().await?;
-        if watermark < *current {
-            return Err(format!(
-                "New watermark {:?} is less than current {:?} for location {}",
-                watermark,
-                current,
-                table.location_id()
-            )
-            .into());
+    async fn next(&mut self) -> Result<Option<RangeInclusive<BlockNum>>, BoxError> {
+        let mut src_chains: Vec<Chain> = Default::default();
+        for table in &self.tables {
+            match table.canonical_chain().await? {
+                Some(canonical) => src_chains.push(canonical),
+                None => return Ok(None),
+            };
         }
-        self.watermarks.insert(location, watermark);
-        Ok(())
-    }
+        // sort by end block number, in ascending order.
+        src_chains.sort_unstable_by_key(|c| c.end());
+        if src_chains.is_empty() {
+            return Ok(None);
+        }
+        let mut shortest_chain = src_chains.remove(0);
 
-    /// Returns the minimum watermark across all tables
-    fn common_watermark(&self) -> Option<BlockNum> {
-        self.watermarks.values().min().and_then(|w| *w)
+        fn watermark_eq(a: &BlockRange, b: &BlockRange) -> bool {
+            a.network == b.network && a.numbers.end() == b.numbers.end() && a.hash == b.hash
+        }
+        fn contains_watermark(chain: &Chain, range: &BlockRange) -> bool {
+            chain.0.iter().rev().any(|s| watermark_eq(&s.range, range))
+        }
+
+        // Remove the latest segments that don't have matching watermarks on all other chains.
+        while !shortest_chain.0.is_empty() {
+            let last_range = shortest_chain.last();
+            if src_chains.iter().all(|c| contains_watermark(c, last_range)) {
+                break;
+            }
+            shortest_chain.0.pop();
+        }
+        if shortest_chain.0.is_empty() {
+            return Ok(None);
+        }
+
+        let range = if let Some(mut stream_chain) = self.stream_chain.take() {
+            // Remove latest segments that don't have matching watermarks on the shortest chain.
+            while !stream_chain.0.is_empty() {
+                let last_range = stream_chain.last();
+                if contains_watermark(&shortest_chain, last_range) {
+                    break;
+                }
+                stream_chain.0.pop();
+            }
+            if stream_chain.0.is_empty() {
+                shortest_chain.start()..=shortest_chain.end()
+            } else {
+                (stream_chain.end() + 1)..=shortest_chain.end()
+            }
+        } else {
+            shortest_chain.start()..=shortest_chain.end()
+        };
+        self.stream_chain = Some(shortest_chain);
+        Ok(Some(range))
     }
 }
 
-pub type WatermarkStream =
-    Pin<Box<dyn Stream<Item = Result<Option<BlockNum>, BoxError>> + Send + Sync + 'static>>;
-
-/// Creates a stream of watermark updates for the tables in the context.
+/// Creates a stream of block range updates for the tables in the context.
 ///
 /// `end_block` can be used to force the stream to end once a specific block number is reached.
 #[instrument(skip_all, err)]
-pub async fn watermark_updates(
+async fn block_range_updates(
     ctx: Arc<QueryContext>,
     multiplexer_handle: &NotificationMultiplexerHandle,
-) -> Result<WatermarkStream, BoxError> {
+) -> Result<BlockRangeStream, BoxError> {
     let tables = ctx.catalog().tables().to_vec();
-
-    // The most recent watermark we have seen for each input table
-    let mut watermarks = Watermarks::new(&tables).await?;
 
     // Set up change notifications
     let locations = ctx.catalog().tables().iter().map(|t| t.location_id());
@@ -96,31 +121,23 @@ pub async fn watermark_updates(
         notification_streams.push(stream);
     }
 
-    let notifications = futures::stream::select_all(notification_streams);
+    let mut notifications = futures::stream::select_all(notification_streams);
 
     // Create the stream channel. This is unbounded because we never want to put backpressure on the
     // PG notification queue.
     let (tx, rx) = mpsc::unbounded_channel();
-
-    // Send initial watermark
-    tx.send(Ok(watermarks.common_watermark())).unwrap();
+    let mut execution_ranges = ExecutionRanges::new(tables);
+    tx.send(execution_ranges.next().await).unwrap();
 
     // Spawn task to handle new ranges from notifications
     tokio::spawn(async move {
-        let mut notifications = notifications;
-        while let Some(Ok(location)) = notifications.next().await {
-            let watermark = watermarks.update(location).await;
-
-            let res = match watermark {
-                Ok(()) => Ok(watermarks.common_watermark()),
-                Err(e) => Err(e),
-            };
-
-            if tx.send(res).is_err() {
+        while let Some(Ok(_)) = notifications.next().await {
+            let result = execution_ranges.next().await;
+            if tx.send(result).is_err() {
                 break; // Receiver dropped
             }
         }
-        warn!("notification stream ended");
+        tracing::warn!("notification stream ended");
     });
 
     Ok(Box::pin(UnboundedReceiverStream::new(rx)))
@@ -192,29 +209,17 @@ impl StreamingQueryHandle {
 
 /// A streaming query that continuously listens for new blocks and emits incremental results.
 ///
-/// This follows a 'microbatch' model where it processes data in chunks based on watermarks.
+/// This follows a 'microbatch' model where it processes data in chunks based on a block range
+/// stream.
 pub struct StreamingQuery {
     ctx: Arc<QueryContext>,
     plan: LogicalPlan,
+    start_block: BlockNum,
     end_block: Option<BlockNum>,
-    state: StreamState,
+    block_range_stream: BlockRangeStream,
     tx: mpsc::Sender<QueryMessage>,
     microbatch_max_interval: u64,
     preserve_block_num: bool,
-}
-
-pub struct StreamState {
-    watermark_stream: WatermarkStream,
-    next_start: BlockNum,
-}
-
-impl StreamState {
-    pub fn new(watermark_stream: WatermarkStream, next_start: BlockNum) -> Self {
-        Self {
-            watermark_stream,
-            next_start,
-        }
-    }
 }
 
 impl StreamingQuery {
@@ -223,10 +228,11 @@ impl StreamingQuery {
     ///
     /// The query execution loop will run in its own task.
     pub async fn spawn(
-        initial_state: StreamState,
         ctx: Arc<QueryContext>,
         plan: LogicalPlan,
+        start_block: BlockNum,
         end_block: Option<BlockNum>,
+        multiplexer_handle: &NotificationMultiplexerHandle,
         is_sql_dataset: bool,
         microbatch_max_interval: u64,
     ) -> Result<StreamingQueryHandle, BoxError> {
@@ -252,12 +258,14 @@ impl StreamingQuery {
             plan
         };
 
+        let block_range_stream = block_range_updates(ctx.clone(), multiplexer_handle).await?;
         let streaming_query = Self {
             ctx,
             plan,
             tx,
+            start_block,
             end_block,
-            state: initial_state,
+            block_range_stream,
             microbatch_max_interval,
             preserve_block_num,
         };
@@ -272,45 +280,39 @@ impl StreamingQuery {
     }
 
     /// The loop:
-    /// 1. Get new input watermark
-    /// 2. Start executing microbatch up to that watermark
+    /// 1. Get new input range
+    /// 2. Start executing microbatch for the range
     /// 3. Stream out time-ordered results
     /// 4. Once execution of batch is exhausted, send completion trigger
     #[instrument(skip_all, err)]
     async fn execute(mut self) -> Result<(), BoxError> {
         loop {
-            // Get the next watermark
-            let watermark = {
-                let Some(watermark) = self.state.watermark_stream.next().await else {
-                    // Watermark stream ended, no more data ever?
+            // Get the next execution range
+            let range = {
+                let Some(range) = self.block_range_stream.next().await else {
+                    // Stream ended
                     return Ok(());
                 };
-
-                let watermark = watermark?;
-
-                match watermark {
-                    // Duplicate watermark, nothing to do
-                    Some(watermark) if watermark < self.state.next_start => continue,
-
-                    Some(watermark) => match self.end_block {
-                        None => watermark,
-                        Some(end) => watermark.min(end),
-                    },
-
+                let Some(range) = range? else {
                     // Tables seem empty, lets wait for some data
-                    None => continue,
+                    continue;
+                };
+
+                let (start, end) = range.into_inner();
+                let range =
+                    start.max(self.start_block)..=self.end_block.map(|e| e.min(end)).unwrap_or(end);
+                if range.start() > range.end() {
+                    continue;
                 }
+                range
             };
 
-            let start = self.state.next_start;
-            self.state.next_start = watermark + 1;
-
             // Process in chunks based on microbatch_max_interval
-            let mut microbatch_start = start;
-            while microbatch_start <= watermark {
-                let microbatch_end = std::cmp::min(
+            let mut microbatch_start = *range.start();
+            while microbatch_start <= *range.end() {
+                let microbatch_end = BlockNum::min(
                     microbatch_start + self.microbatch_max_interval - 1,
-                    watermark,
+                    *range.end(),
                 );
 
                 // Start microbatch execution for this chunk
@@ -340,7 +342,7 @@ impl StreamingQuery {
                 microbatch_start = microbatch_end + 1;
             }
 
-            if Some(watermark) == self.end_block {
+            if Some(*range.end()) == self.end_block {
                 // If we reached the end block, we are done
                 return Ok(());
             }

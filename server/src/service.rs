@@ -20,7 +20,7 @@ use common::{
     notification_multiplexer::{self, NotificationMultiplexerHandle},
     plan_visitors::{is_incremental, propagate_block_num, unproject_special_block_num_column},
     query_context::{Error as CoreError, QueryContext, QueryEnv, parse_sql},
-    streaming_query::{StreamState, StreamingQuery, watermark_updates},
+    streaming_query::StreamingQuery,
 };
 use datafusion::{
     common::{
@@ -245,11 +245,6 @@ impl Service {
                 .await
                 .map_err(|err| Error::from(err))
         } else {
-            // If streaming, we need to spawn a streaming query.
-            let watermark_stream = watermark_updates(ctx.clone(), &self.notification_multiplexer)
-                .await
-                .map_err(|e| Error::StreamingExecutionError(e.to_string()))?;
-
             // As an optimization, start the stream from the minimum start block across all tables.
             // Otherwise starting from `0` would spend time scanning ranges known to be empty.
             let earliest_block = ctx
@@ -268,12 +263,12 @@ impl Service {
                 return Ok(empty_stream);
             };
 
-            let initial_state = StreamState::new(watermark_stream, earliest_block);
             let query = StreamingQuery::spawn(
-                initial_state,
                 ctx.clone(),
                 plan,
+                earliest_block,
                 None,
+                &self.notification_multiplexer,
                 false,
                 self.config.microbatch_max_interval,
             )

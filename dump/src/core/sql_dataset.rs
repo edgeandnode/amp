@@ -123,7 +123,7 @@ use common::{
     notification_multiplexer::NotificationMultiplexerHandle,
     plan_visitors::is_incremental,
     query_context::{QueryContext, QueryEnv, parse_sql},
-    streaming_query::{QueryMessage, StreamState, StreamingQuery, watermark_updates},
+    streaming_query::{QueryMessage, StreamingQuery},
 };
 use datafusion::{common::cast::as_fixed_size_binary_array, sql::parser::Statement};
 use dataset_store::{DatasetStore, sql_datasets::SqlDataset};
@@ -284,15 +284,12 @@ async fn dump_sql_query(
     let mut stream = {
         let ctx = Arc::new(dataset_store.ctx_for_sql(&query, env.clone()).await?);
         let plan = ctx.plan_sql(query.clone()).await?;
-        let initial_state = StreamState::new(
-            watermark_updates(ctx.clone(), notification_multiplexer).await?,
-            range.start(),
-        );
         StreamingQuery::spawn(
-            initial_state,
             ctx,
             plan,
+            range.start(),
             Some(range.end()),
+            notification_multiplexer,
             true,
             microbatch_max_interval,
         )
