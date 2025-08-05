@@ -265,7 +265,7 @@ fn chains(segments: Vec<Segment>) -> Option<Chains> {
     Some(Chains { canonical, fork })
 }
 
-pub fn missing_block_ranges(
+fn missing_block_ranges(
     synced: RangeInclusive<BlockNum>,
     desired: RangeInclusive<BlockNum>,
 ) -> Vec<RangeInclusive<BlockNum>> {
