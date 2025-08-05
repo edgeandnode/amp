@@ -442,13 +442,14 @@ fn rpc_to_rows(
     };
 
     let header_row = {
-        let mut builder = BlockRowsBuilder::with_capacity(1);
+        let mut builder = BlockRowsBuilder::with_capacity_for(&header);
         builder.append(&header);
         builder.build(block.clone())?
     };
 
     let logs_row = {
-        let mut builder = LogRowsBuilder::with_capacity(logs.len());
+        let total_data_size = logs.iter().map(|log| log.data.len()).sum();
+        let mut builder = LogRowsBuilder::with_capacity(logs.len(), total_data_size);
         for log in logs {
             builder.append(&log);
         }
@@ -456,7 +457,28 @@ fn rpc_to_rows(
     };
 
     let transactions_row = {
-        let mut builder = TransactionRowsBuilder::with_capacity(transactions.len());
+        let mut total_input_size = 0;
+        let mut total_v_size = 0;
+        let mut total_r_size = 0;
+        let mut total_s_size = 0;
+
+        // Calculate total sizes first
+        for tx in &transactions {
+            if let Some(tx) = tx {
+                total_input_size += tx.input.len();
+                total_v_size += tx.v.len();
+                total_r_size += tx.r.len();
+                total_s_size += tx.s.len();
+            }
+        }
+
+        let mut builder = TransactionRowsBuilder::with_capacity(
+            transactions.len(),
+            total_input_size,
+            total_v_size,
+            total_r_size,
+            total_s_size,
+        );
         for tx in transactions {
             if let Some(tx) = tx {
                 builder.append(&tx);
