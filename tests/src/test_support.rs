@@ -80,7 +80,7 @@ pub async fn bless(
     }
 
     clear_dataset(&test_env.config, dataset_name).await?;
-    dump_dataset(&config, dataset_name, start, end, 1, None).await?;
+    dump_dataset(&config, dataset_name, start, end, 1, None, true).await?;
     Ok(())
 }
 
@@ -208,7 +208,16 @@ impl SnapshotContext {
         end: u64,
         n_jobs: u16,
     ) -> Result<SnapshotContext, BoxError> {
-        dump_dataset(&test_env.config, dataset_name, start, end, n_jobs, None).await?;
+        dump_dataset(
+            &test_env.config,
+            dataset_name,
+            start,
+            end,
+            n_jobs,
+            None,
+            true, // Always do a fresh dump for tests
+        )
+        .await?;
         let catalog = catalog_for_dataset(
             dataset_name,
             &test_env.dataset_store,
@@ -277,6 +286,7 @@ pub(crate) async fn dump_dataset(
     end: u64,
     n_jobs: u16,
     microbatch_max_interval: Option<u64>,
+    fresh: bool,
 ) -> Result<(), BoxError> {
     // dump the dataset
     let partition_size_mb = 100;
@@ -294,7 +304,7 @@ pub(crate) async fn dump_dataset(
         None,
         microbatch_max_interval,
         None,
-        false,
+        fresh,
     )
     .await?;
 

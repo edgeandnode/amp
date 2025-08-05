@@ -46,6 +46,8 @@ pub struct DumpStep {
     pub end: u64,
     #[serde(default)]
     pub expect_fail: bool,
+    #[serde(default)]
+    pub fresh: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -132,7 +134,7 @@ impl TestStep {
             TestStep::Dump(step) => {
                 let config = test_env.config.clone();
                 let result =
-                    dump_dataset(&config, &step.dataset, step.start, step.end, 1, None).await;
+                    dump_dataset(&config, &step.dataset, step.start, step.end, 1, None, step.fresh).await;
                 if step.expect_fail {
                     assert!(result.is_err(), "Expected dump to fail, but it succeeded");
                     Ok(())
