@@ -204,7 +204,7 @@ pub async fn dump_table(
             ctx.metadata_db
                 .check_start_block(table.location_id(), start_block)
                 .await?;
-            
+
             for range in table.missing_ranges(start..=end).await? {
                 let (start, end) = range.into_inner();
                 tracing::info!("dumping {table_name} between blocks {start} and {end}");

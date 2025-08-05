@@ -607,19 +607,23 @@ pub async fn restore_blessed_dataset(
     };
 
     for table in Arc::new(dataset).resolved_tables() {
-        let physical_table =
-            PhysicalTable::restore_latest_revision(&table, data_store.clone(), metadata_db.clone(), start_block)
-                .await?
-                .expect(
-                    format!(
-                        "Failed to restore blessed table {dataset_name}.{}. This is likely due to \
+        let physical_table = PhysicalTable::restore_latest_revision(
+            &table,
+            data_store.clone(),
+            metadata_db.clone(),
+            start_block,
+        )
+        .await?
+        .expect(
+            format!(
+                "Failed to restore blessed table {dataset_name}.{}. This is likely due to \
                         the dataset or table being deleted. \n\
                         Bless the dataset again with by running \
                         `cargo run -p tests -- bless {dataset_name} <start_block> <end_block>`",
-                        table.name()
-                    )
-                    .as_str(),
-                );
+                table.name()
+            )
+            .as_str(),
+        );
         tables.push(physical_table.into());
     }
 

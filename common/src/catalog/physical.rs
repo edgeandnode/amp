@@ -198,7 +198,7 @@ impl PhysicalTable {
         table: &ResolvedTable,
         data_store: Arc<Store>,
         metadata_db: Arc<MetadataDb>,
-        start_block: Option<i64>
+        start_block: Option<i64>,
     ) -> Result<Option<Self>, BoxError> {
         let dataset_name = &table.dataset().name;
         let table_id = TableId {
@@ -271,9 +271,18 @@ impl PhysicalTable {
         start_block: Option<i64>,
     ) -> Result<Option<Self>, BoxError> {
         if let Some((path, url, prefix)) = revisions.values().last() {
-            Self::restore(table, table_id, prefix, path, url, data_store, metadata_db, start_block)
-                .await
-                .map(Some)
+            Self::restore(
+                table,
+                table_id,
+                prefix,
+                path,
+                url,
+                data_store,
+                metadata_db,
+                start_block,
+            )
+            .await
+            .map(Some)
         } else {
             Ok(None)
         }
@@ -291,7 +300,14 @@ impl PhysicalTable {
         start_block: Option<i64>,
     ) -> Result<Self, BoxError> {
         let location_id = metadata_db
-            .register_location(*table_id, data_store.bucket(), prefix, url, false, start_block)
+            .register_location(
+                *table_id,
+                data_store.bucket(),
+                prefix,
+                url,
+                false,
+                start_block,
+            )
             .await?;
 
         metadata_db
