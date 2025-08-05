@@ -80,7 +80,7 @@ pub async fn bless(
     }
 
     clear_dataset(&test_env.config, dataset_name).await?;
-    dump_dataset(&config, dataset_name, start, end, 1, None, true).await?;
+    dump_dataset(&config, dataset_name, start, end, 1, None).await?;
     Ok(())
 }
 
@@ -208,16 +208,7 @@ impl SnapshotContext {
         end: u64,
         n_jobs: u16,
     ) -> Result<SnapshotContext, BoxError> {
-        dump_dataset(
-            &test_env.config,
-            dataset_name,
-            start,
-            end,
-            n_jobs,
-            None,
-            true, // Always do a fresh dump for tests
-        )
-        .await?;
+        dump_dataset(&test_env.config, dataset_name, start, end, n_jobs, None).await?;
         let catalog = catalog_for_dataset(
             dataset_name,
             &test_env.dataset_store,
@@ -286,7 +277,6 @@ pub(crate) async fn dump_dataset(
     end: u64,
     n_jobs: u16,
     microbatch_max_interval: Option<u64>,
-    fresh: bool,
 ) -> Result<(), BoxError> {
     // dump the dataset
     let partition_size_mb = 100;
@@ -304,7 +294,7 @@ pub(crate) async fn dump_dataset(
         None,
         microbatch_max_interval,
         None,
-        fresh,
+        false,
     )
     .await?;
 
@@ -607,10 +597,18 @@ pub async fn restore_blessed_dataset(
     let dataset = dataset_store.load_dataset(dataset).await?;
     let dataset_name = dataset.name.clone();
     let data_store = config.data_store.clone();
-    let mut tables = Vec::new();
+    let mut tables = Vec::<Arc<PhysicalTable>>::new();
+
+    // Determine the start_block for known datasets
+    let start_block: Option<i64> = match dataset.name.as_str() {
+        "eth_firehose" | "eth_rpc" | "sql_over_eth_firehose" => Some(15000000),
+        "base" => Some(33411770),
+        _ => None,
+    };
+
     for table in Arc::new(dataset).resolved_tables() {
         let physical_table =
-            PhysicalTable::restore_latest_revision(&table, data_store.clone(), metadata_db.clone())
+            PhysicalTable::restore_latest_revision(&table, data_store.clone(), metadata_db.clone(), start_block)
                 .await?
                 .expect(
                     format!(
@@ -624,5 +622,6 @@ pub async fn restore_blessed_dataset(
                 );
         tables.push(physical_table.into());
     }
+
     Ok(tables)
 }

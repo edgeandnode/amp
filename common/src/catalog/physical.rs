@@ -132,7 +132,7 @@ impl PhysicalTable {
     }
 
     /// Create a new physical table with the given dataset name, table, URL, and object store.
-    /// This is used for creating a new location (revision) for a new or  existing table in
+    /// This is used for creating a new location (revision) for a new or existing table in
     /// the metadata database.
     #[tracing::instrument(skip_all, fields(table = %table, active = %set_active), err)]
     pub async fn next_revision(
@@ -198,6 +198,7 @@ impl PhysicalTable {
         table: &ResolvedTable,
         data_store: Arc<Store>,
         metadata_db: Arc<MetadataDb>,
+        start_block: Option<i64>
     ) -> Result<Option<Self>, BoxError> {
         let dataset_name = &table.dataset().name;
         let table_id = TableId {
@@ -216,6 +217,7 @@ impl PhysicalTable {
             &table_id,
             Arc::clone(&data_store),
             Arc::clone(&metadata_db),
+            start_block,
         )
         .await
     }
@@ -266,9 +268,10 @@ impl PhysicalTable {
         table_id: &TableId<'_>,
         data_store: Arc<Store>,
         metadata_db: Arc<MetadataDb>,
+        start_block: Option<i64>,
     ) -> Result<Option<Self>, BoxError> {
         if let Some((path, url, prefix)) = revisions.values().last() {
-            Self::restore(table, table_id, prefix, path, url, data_store, metadata_db)
+            Self::restore(table, table_id, prefix, path, url, data_store, metadata_db, start_block)
                 .await
                 .map(Some)
         } else {
@@ -285,9 +288,10 @@ impl PhysicalTable {
         url: &Url,
         data_store: Arc<Store>,
         metadata_db: Arc<MetadataDb>,
+        start_block: Option<i64>,
     ) -> Result<Self, BoxError> {
         let location_id = metadata_db
-            .register_location(*table_id, data_store.bucket(), prefix, url, false, None)
+            .register_location(*table_id, data_store.bucket(), prefix, url, false, start_block)
             .await?;
 
         metadata_db

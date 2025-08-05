@@ -205,7 +205,7 @@ async fn persist_start_block_set_on_creation() -> Result<(), BoxError> {
     assert_eq!(test.latest_block().await.block_num, 10);
 
     // Perform the initial dump from block 0. This should succeed and persist `start_block = 0`.
-    test_support::dump_dataset(&test.env.config, "anvil_rpc", 0, 9, 1, None, true).await?;
+    test_support::dump_dataset(&test.env.config, "anvil_rpc", 0, 9, 1, None).await?;
 
     // Query the database to verify that the start_block was persisted correctly as 0.
     let location = test
@@ -226,7 +226,7 @@ async fn persist_start_block_set_on_creation() -> Result<(), BoxError> {
         .await?;
 
     // Now, attempt to dump again with a *different* start_block. This must fail.
-    let result = test_support::dump_dataset(&test.env.config, "anvil_rpc", 1, 9, 1, None, false).await;
+    let result = test_support::dump_dataset(&test.env.config, "anvil_rpc", 1, 9, 1, None).await;
 
     assert!(result.is_err(), "Expected dump to fail but it succeeded");
     let err_msg = result.unwrap_err().to_string();
@@ -545,14 +545,14 @@ async fn sql_dataset_input_batch_size() {
     let start = 15_000_000;
     let end = 15_000_003;
 
-    test_support::dump_dataset(&test_env.config, "eth_firehose", start, end, 1, None, true)
+    test_support::dump_dataset(&test_env.config, "eth_firehose", start, end, 1, None)
         .await
         .unwrap();
 
     // 3. Execute dump of sql_stream_ds with microbatch_max_interval=1
     let dataset_name = "sql_stream_ds";
 
-    test_support::dump_dataset(&test_env.config, dataset_name, start, end, 1, Some(1), true)
+    test_support::dump_dataset(&test_env.config, dataset_name, start, end, 1, Some(1))
         .await
         .unwrap();
 
