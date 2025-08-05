@@ -128,29 +128,33 @@ pub(crate) struct CallRowsBuilder {
 }
 
 impl CallRowsBuilder {
-    pub fn with_capacity(capacity: usize) -> Self {
+    pub fn with_capacity(
+        count: usize,
+        total_return_data_size: usize,
+        total_input_size: usize,
+    ) -> Self {
         Self {
-            special_block_num: UInt64Builder::with_capacity(capacity),
-            block_hash: Bytes32ArrayBuilder::with_capacity(capacity),
-            block_num: UInt64Builder::with_capacity(capacity),
-            timestamp: TimestampArrayBuilder::with_capacity(capacity),
-            tx_index: UInt32Builder::with_capacity(capacity),
-            tx_hash: Bytes32ArrayBuilder::with_capacity(capacity),
-            index: UInt32Builder::with_capacity(capacity),
-            parent_index: UInt32Builder::with_capacity(capacity),
-            depth: UInt32Builder::with_capacity(capacity),
-            call_type: Int32Builder::with_capacity(capacity),
-            caller: EvmAddressArrayBuilder::with_capacity(capacity),
-            address: EvmAddressArrayBuilder::with_capacity(capacity),
-            value: EvmCurrencyArrayBuilder::with_capacity(capacity),
-            gas_limit: UInt64Builder::with_capacity(capacity),
-            gas_consumed: UInt64Builder::with_capacity(capacity),
-            return_data: BinaryBuilder::with_capacity(capacity, 0),
-            input: BinaryBuilder::with_capacity(capacity, 0),
-            selfdestruct: BooleanBuilder::with_capacity(capacity),
-            executed_code: BooleanBuilder::with_capacity(capacity),
-            begin_ordinal: UInt64Builder::with_capacity(capacity),
-            end_ordinal: UInt64Builder::with_capacity(capacity),
+            special_block_num: UInt64Builder::with_capacity(count),
+            block_hash: Bytes32ArrayBuilder::with_capacity(count),
+            block_num: UInt64Builder::with_capacity(count),
+            timestamp: TimestampArrayBuilder::with_capacity(count),
+            tx_index: UInt32Builder::with_capacity(count),
+            tx_hash: Bytes32ArrayBuilder::with_capacity(count),
+            index: UInt32Builder::with_capacity(count),
+            parent_index: UInt32Builder::with_capacity(count),
+            depth: UInt32Builder::with_capacity(count),
+            call_type: Int32Builder::with_capacity(count),
+            caller: EvmAddressArrayBuilder::with_capacity(count),
+            address: EvmAddressArrayBuilder::with_capacity(count),
+            value: EvmCurrencyArrayBuilder::with_capacity(count),
+            gas_limit: UInt64Builder::with_capacity(count),
+            gas_consumed: UInt64Builder::with_capacity(count),
+            return_data: BinaryBuilder::with_capacity(count, total_return_data_size),
+            input: BinaryBuilder::with_capacity(count, total_input_size),
+            selfdestruct: BooleanBuilder::with_capacity(count),
+            executed_code: BooleanBuilder::with_capacity(count),
+            begin_ordinal: UInt64Builder::with_capacity(count),
+            end_ordinal: UInt64Builder::with_capacity(count),
         }
     }
 
@@ -258,7 +262,8 @@ impl CallRowsBuilder {
 fn default_to_arrow() {
     let call = Call::default();
     let rows = {
-        let mut builder = CallRowsBuilder::with_capacity(1);
+        let mut builder =
+            CallRowsBuilder::with_capacity(1, call.return_data.len(), call.input.len());
         builder.append(&call);
         builder
             .build(BlockRange {

@@ -103,30 +103,30 @@ pub struct BlockRowsBuilder {
 }
 
 impl BlockRowsBuilder {
-    pub fn with_capacity(capacity: usize) -> Self {
+    pub fn with_capacity_for(header: &Block) -> Self {
         Self {
-            special_block_num: UInt64Builder::with_capacity(capacity),
-            block_num: UInt64Builder::with_capacity(capacity),
-            timestamp: TimestampArrayBuilder::with_capacity(capacity),
-            hash: Bytes32ArrayBuilder::with_capacity(capacity),
-            parent_hash: Bytes32ArrayBuilder::with_capacity(capacity),
-            ommers_hash: Bytes32ArrayBuilder::with_capacity(capacity),
-            miner: EvmAddressArrayBuilder::with_capacity(capacity),
-            state_root: Bytes32ArrayBuilder::with_capacity(capacity),
-            transactions_root: Bytes32ArrayBuilder::with_capacity(capacity),
-            receipt_root: Bytes32ArrayBuilder::with_capacity(capacity),
-            logs_bloom: BinaryBuilder::with_capacity(capacity, 0),
-            difficulty: EvmCurrencyArrayBuilder::with_capacity(capacity),
-            gas_limit: UInt64Builder::with_capacity(capacity),
-            gas_used: UInt64Builder::with_capacity(capacity),
-            extra_data: BinaryBuilder::with_capacity(capacity, 0),
-            mix_hash: Bytes32ArrayBuilder::with_capacity(capacity),
-            nonce: UInt64Builder::with_capacity(capacity),
-            base_fee_per_gas: EvmCurrencyArrayBuilder::with_capacity(capacity),
-            withdrawals_root: Bytes32ArrayBuilder::with_capacity(capacity),
-            blob_gas_used: UInt64Builder::with_capacity(capacity),
-            excess_blob_gas: UInt64Builder::with_capacity(capacity),
-            parent_beacon_root: Bytes32ArrayBuilder::with_capacity(capacity),
+            special_block_num: UInt64Builder::with_capacity(1),
+            block_num: UInt64Builder::with_capacity(1),
+            timestamp: TimestampArrayBuilder::with_capacity(1),
+            hash: Bytes32ArrayBuilder::with_capacity(1),
+            parent_hash: Bytes32ArrayBuilder::with_capacity(1),
+            ommers_hash: Bytes32ArrayBuilder::with_capacity(1),
+            miner: EvmAddressArrayBuilder::with_capacity(1),
+            state_root: Bytes32ArrayBuilder::with_capacity(1),
+            transactions_root: Bytes32ArrayBuilder::with_capacity(1),
+            receipt_root: Bytes32ArrayBuilder::with_capacity(1),
+            logs_bloom: BinaryBuilder::with_capacity(1, header.logs_bloom.len()),
+            difficulty: EvmCurrencyArrayBuilder::with_capacity(1),
+            gas_limit: UInt64Builder::with_capacity(1),
+            gas_used: UInt64Builder::with_capacity(1),
+            extra_data: BinaryBuilder::with_capacity(1, header.extra_data.len()),
+            mix_hash: Bytes32ArrayBuilder::with_capacity(1),
+            nonce: UInt64Builder::with_capacity(1),
+            base_fee_per_gas: EvmCurrencyArrayBuilder::with_capacity(1),
+            withdrawals_root: Bytes32ArrayBuilder::with_capacity(1),
+            blob_gas_used: UInt64Builder::with_capacity(1),
+            excess_blob_gas: UInt64Builder::with_capacity(1),
+            parent_beacon_root: Bytes32ArrayBuilder::with_capacity(1),
         }
     }
 
@@ -238,7 +238,7 @@ impl BlockRowsBuilder {
 fn default_to_arrow() {
     let block = Block::default();
     let rows = {
-        let mut builder = BlockRowsBuilder::with_capacity(1);
+        let mut builder = BlockRowsBuilder::with_capacity_for(&block);
         builder.append(&block);
         builder
             .build(BlockRange {

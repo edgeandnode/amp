@@ -36,23 +36,68 @@ pub fn protobufs_to_rows(
 ) -> Result<RawDatasetRows, ProtobufToRowError> {
     use ProtobufToRowError::*;
 
+    fn logs_iter(block: &pbethereum::Block) -> impl Iterator<Item = &pbethereum::Log> {
+        block
+            .transaction_traces
+            .iter()
+            .flat_map(|tx| tx.calls.iter().flat_map(|call| call.logs.iter()))
+    }
+
     let transaction_count = block.transaction_traces.len();
-    let mut transactions: TransactionRowsBuilder =
-        TransactionRowsBuilder::with_capacity(transaction_count);
+    let total_to_size: usize = block.transaction_traces.iter().map(|tx| tx.to.len()).sum();
+    let total_input_size: usize = block
+        .transaction_traces
+        .iter()
+        .map(|tx| tx.input.len())
+        .sum();
+    let total_v_size: usize = block.transaction_traces.iter().map(|tx| tx.v.len()).sum();
+    let total_r_size: usize = block.transaction_traces.iter().map(|tx| tx.r.len()).sum();
+    let total_s_size: usize = block.transaction_traces.iter().map(|tx| tx.s.len()).sum();
+    let total_return_data_size: usize = block
+        .transaction_traces
+        .iter()
+        .map(|tx| tx.return_data.len())
+        .sum();
+    let total_public_key_size: usize = block
+        .transaction_traces
+        .iter()
+        .map(|tx| tx.public_key.len())
+        .sum();
+    let mut transactions: TransactionRowsBuilder = TransactionRowsBuilder::with_capacity(
+        transaction_count,
+        total_to_size,
+        total_input_size,
+        total_v_size,
+        total_r_size,
+        total_s_size,
+        total_return_data_size,
+        total_public_key_size,
+    );
 
     let call_count = block
         .transaction_traces
         .iter()
         .map(|tx| tx.calls.len())
         .sum();
-    let mut calls: CallRowsBuilder = CallRowsBuilder::with_capacity(call_count);
-
-    let log_count = block
+    let total_return_data_size: usize = block
         .transaction_traces
         .iter()
-        .map(|tx| tx.calls.iter().map(|call| call.logs.len()).sum::<usize>())
+        .flat_map(|tx| tx.calls.iter())
+        .map(|call| call.return_data.len())
         .sum();
-    let mut logs: LogRowsBuilder = LogRowsBuilder::with_capacity(log_count);
+    let total_input_size: usize = block
+        .transaction_traces
+        .iter()
+        .flat_map(|tx| tx.calls.iter())
+        .map(|call| call.input.len())
+        .sum();
+    let mut calls: CallRowsBuilder =
+        CallRowsBuilder::with_capacity(call_count, total_return_data_size, total_input_size);
+
+    let logs_count = logs_iter(&block).count();
+    let total_data_size = logs_iter(&block).map(|log| log.data.len()).sum();
+
+    let mut logs: LogRowsBuilder = LogRowsBuilder::with_capacity(logs_count, total_data_size);
 
     let header = header_from_pb(block.header.ok_or(Missing("header"))?)?;
 
@@ -203,7 +248,7 @@ pub fn protobufs_to_rows(
         prev_hash: Some(header.parent_hash.into()),
     };
     let header_row = {
-        let mut builder = BlockRowsBuilder::with_capacity(1);
+        let mut builder = BlockRowsBuilder::with_capacity_for(&header);
         builder.append(&header);
         builder
             .build(block.clone())
