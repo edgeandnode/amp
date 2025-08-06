@@ -86,10 +86,15 @@ indoc = "2.0.6"
 schemars = "1.0.4"
 governor = "0.10.0"
 tower = "0.5.2"
+opentelemetry = { version = "0.30", features = ["trace"] }
+opentelemetry-otlp = { version = "0.30", features = ["grpc-tonic"] }
+opentelemetry_sdk = { version = "0.30" }
+tracing-opentelemetry = { version = "0.31", features = ["default"] }
 
 # Datafusion and Arrow crates
 arrow-flight = { version = "55", features = ["flight-sql-experimental"] }
 datafusion = { version = "49", features = ["serde"] }
+datafusion-tracing = { version = "49" }
 datafusion-proto = { version = "49" }
 object_store = { version = "0.12", features = ["aws", "gcp", "azure"] }
 
