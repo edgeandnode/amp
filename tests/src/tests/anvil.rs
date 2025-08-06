@@ -5,7 +5,6 @@ use alloy::{
     primitives::BlockHash,
     providers::{Provider as _, ext::AnvilApi as _},
     rpc::types::anvil::ReorgOptions,
-    transports::http::reqwest,
 };
 use common::{BlockNum, metadata::segments::BlockRange, query_context::parse_sql, tracing_helpers};
 use dataset_store::DatasetStore;
