@@ -1,5 +1,14 @@
 use std::{ops::RangeInclusive, pin::Pin, sync::Arc};
 
+use common::{
+    BlockNum, BoxError, SPECIAL_BLOCK_NUM,
+    arrow::{array::RecordBatch, datatypes::SchemaRef},
+    catalog::physical::PhysicalTable,
+    metadata::segments::{BlockRange, Chain},
+    notification_multiplexer::NotificationMultiplexerHandle,
+    plan_visitors::{order_by_block_num, propagate_block_num},
+    query_context::QueryContext,
+};
 use datafusion::{
     error::DataFusionError, execution::SendableRecordBatchStream, logical_expr::LogicalPlan,
     physical_plan::stream::RecordBatchStreamAdapter,
@@ -13,16 +22,6 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream, WatchStream};
 use tokio_util::task::AbortOnDropHandle;
 use tracing::instrument;
-
-use crate::{
-    BlockNum, BoxError, SPECIAL_BLOCK_NUM,
-    arrow::{array::RecordBatch, datatypes::SchemaRef},
-    catalog::physical::PhysicalTable,
-    metadata::segments::{BlockRange, Chain},
-    notification_multiplexer::NotificationMultiplexerHandle,
-    plan_visitors::{order_by_block_num, propagate_block_num},
-    query_context::QueryContext,
-};
 
 pub type BlockRangeStream = Pin<
     Box<

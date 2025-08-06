@@ -20,7 +20,6 @@ use common::{
     notification_multiplexer::{self, NotificationMultiplexerHandle},
     plan_visitors::{is_incremental, propagate_block_num, unproject_special_block_num_column},
     query_context::{Error as CoreError, QueryContext, QueryEnv, parse_sql},
-    streaming_query::StreamingQuery,
 };
 use datafusion::{
     common::{
@@ -33,6 +32,7 @@ use datafusion::{
     physical_plan::stream::RecordBatchStreamAdapter,
 };
 use dataset_store::{DatasetError, DatasetStore};
+use dump::streaming_query::StreamingQuery;
 use futures::{Stream, StreamExt as _, TryStreamExt, stream};
 use http_common::{BoxRequestError, RequestError};
 use metadata_db::MetadataDb;

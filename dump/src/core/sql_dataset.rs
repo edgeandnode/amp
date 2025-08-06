@@ -123,7 +123,6 @@ use common::{
     notification_multiplexer::NotificationMultiplexerHandle,
     plan_visitors::is_incremental,
     query_context::{QueryContext, QueryEnv, parse_sql},
-    streaming_query::{QueryMessage, StreamingQuery},
 };
 use datafusion::{common::cast::as_fixed_size_binary_array, sql::parser::Statement};
 use dataset_store::{DatasetStore, sql_datasets::SqlDataset};
@@ -131,7 +130,10 @@ use futures::StreamExt as _;
 use tracing::instrument;
 
 use super::{Ctx, block_ranges, tasks::FailFastJoinSet};
-use crate::parquet_writer::{ParquetFileWriter, ParquetWriterProperties, commit_metadata};
+use crate::{
+    parquet_writer::{ParquetFileWriter, ParquetWriterProperties, commit_metadata},
+    streaming_query::{QueryMessage, StreamingQuery},
+};
 
 /// Dumps a SQL dataset table
 #[instrument(skip_all, fields(dataset = %dataset.name()), err)]

@@ -12,6 +12,7 @@ bytes.workspace = true
 common = { path = "../common" }
 datafusion.workspace = true
 dataset-store = { path = "../dataset-store" }
+dump = { path = "../dump" }
 futures.workspace = true
 prost.workspace = true
 thiserror.workspace = true
