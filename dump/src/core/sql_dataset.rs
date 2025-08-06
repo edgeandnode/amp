@@ -132,7 +132,7 @@ use tracing::instrument;
 
 use super::{Ctx, block_ranges, tasks::FailFastJoinSet};
 use crate::{
-    compaction::Compactor,
+    compactor::{FileSizeLimit, NozzleCompactor},
     parquet_writer::{ParquetFileWriter, ParquetWriterProperties, commit_metadata},
 };
 
@@ -322,12 +322,17 @@ async fn dump_sql_query(
         microbatch_start,
     )?;
 
-    let compactor_trigger = Compactor::spawn(&[physical_table.clone()], parquet_opts.clone());
+    let mut compactor = NozzleCompactor::start(
+        physical_table.clone(),
+        physical_table.metadata_db(),
+        &parquet_opts,
+        FileSizeLimit::Block,
+    );
+
     // Receive data from the query stream, commiting a file on every watermark update received. The
     // `microbatch_max_interval` parameter controls the frequency of these updates.
     while let Some(message) = stream.next().await {
         let message = message?;
-        let trigger = compactor_trigger.clone();
         match message {
             QueryMessage::Data(batch) => {
                 writer.write(&batch).await?;
@@ -350,7 +355,8 @@ async fn dump_sql_query(
                     footer,
                 )
                 .await?;
-                trigger.send(Arc::new(location_id))?;
+
+                compactor.try_run().await;
 
                 // Open new file for next chunk
                 microbatch_start = microbatch_end + 1;

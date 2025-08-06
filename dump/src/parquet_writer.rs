@@ -12,14 +12,14 @@ use common::{
     },
     parquet::{arrow::AsyncArrowWriter, errors::ParquetError, format::KeyValue},
 };
-use metadata_db::{FooterBytes, LocationId, MetadataDb};
+use futures::TryFutureExt;
+use metadata_db::{FooterBytes, MetadataDb};
 use object_store::{ObjectMeta, buffered::BufWriter, path::Path};
 use rand::RngCore as _;
-use tokio::sync::mpsc;
 use tracing::debug;
 use url::Url;
 
-use crate::compaction::Compactor;
+use crate::compactor::{FileSizeLimit, NozzleCompactor};
 
 const MAX_PARTITION_BLOCK_RANGE: u64 = 1_000_000;
 
@@ -28,8 +28,6 @@ pub struct RawDatasetWriter {
     writers: BTreeMap<String, RawTableWriter>,
 
     metadata_db: Arc<MetadataDb>,
-
-    compaction_trigger: Arc<mpsc::UnboundedSender<Arc<LocationId>>>,
 }
 
 impl RawDatasetWriter {
@@ -43,7 +41,6 @@ impl RawDatasetWriter {
         missing_ranges_by_table: BTreeMap<String, Vec<RangeInclusive<BlockNum>>>,
     ) -> Result<Self, BoxError> {
         let mut writers = BTreeMap::new();
-        let compaction_trigger = Compactor::spawn(dataset_ctx.catalog().tables(), opts.clone());
 
         for table in dataset_ctx.catalog().tables() {
             // Unwrap: `missing_ranges_by_table` contains an entry for each table.
@@ -55,7 +52,6 @@ impl RawDatasetWriter {
         Ok(RawDatasetWriter {
             writers,
             metadata_db,
-            compaction_trigger,
         })
     }
 
@@ -72,7 +68,6 @@ impl RawDatasetWriter {
                 footer,
             )
             .await?;
-            self.compaction_trigger.send(Arc::new(location_id))?;
         }
 
         Ok(())
@@ -91,7 +86,6 @@ impl RawDatasetWriter {
                     footer,
                 )
                 .await?;
-                self.compaction_trigger.send(Arc::new(location_id))?;
             }
         }
 
@@ -143,6 +137,8 @@ struct RawTableWriter {
 
     current_file: Option<ParquetFileWriter>,
     current_range: Option<BlockRange>,
+
+    compaction_tasks: NozzleCompactor,
 }
 
 impl RawTableWriter {
@@ -162,6 +158,14 @@ impl RawTableWriter {
             )?),
             None => None,
         };
+
+        let compaction_tasks = NozzleCompactor::start(
+            table.clone(),
+            table.metadata_db(),
+            &opts,
+            FileSizeLimit::Byte,
+        );
+
         Ok(Self {
             table,
             opts,
@@ -169,6 +173,7 @@ impl RawTableWriter {
             partition_size,
             current_file,
             current_range: None,
+            compaction_tasks,
         })
     }
 
@@ -281,7 +286,17 @@ impl RawTableWriter {
         assert!(self.current_file.is_some());
         let file = self.current_file.take().unwrap();
         let range = self.current_range.take().unwrap();
-        file.close(range).await
+
+        file.close(range)
+            .and_then(|result| async move {
+                self.try_run_compaction().await;
+                Ok(result)
+            })
+            .await
+    }
+
+    async fn try_run_compaction(&mut self) {
+        self.compaction_tasks.try_run().await
     }
 }
 
@@ -307,7 +322,9 @@ impl ParquetFileWriter {
         let file_url = table.url().join(&filename)?;
         let file_path = Path::from_url_path(file_url.path())?;
         let object_writer = BufWriter::new(table.object_store(), file_path);
+
         let writer = AsyncArrowWriter::try_new(object_writer, table.schema(), Some(opts.clone()))?;
+
         Ok(ParquetFileWriter {
             writer,
             file_url,

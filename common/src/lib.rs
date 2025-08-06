@@ -61,7 +61,7 @@ pub type EvmAddressArrayType = FixedSizeBinaryArray;
 /// Payment amount in the EVM. Used for gas or value transfers.
 pub const EVM_CURRENCY_TYPE: DataType = DataType::Decimal128(DECIMAL128_MAX_PRECISION, 0);
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Timestamp(pub Duration);
 
 impl Timestamp {

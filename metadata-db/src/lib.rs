@@ -1,6 +1,6 @@
 use std::{future::Future, sync::Arc, time::Duration};
 
-use chrono::NaiveDateTime;
+use chrono::{DateTime, NaiveDateTime, Utc};
 use futures::stream::{BoxStream, Stream};
 use sqlx::{
     Executor, FromRow, Postgres,
@@ -60,28 +60,22 @@ pub struct FileMetadataRow {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, sqlx::Type)]
-#[sqlx(type_name = "gc_status_kind", rename_all = "lowercase")]
+#[sqlx(type_name = "gc_status", rename_all = "lowercase")]
 pub enum GcStatus {
     Pending,
     Deleted,
 }
 
 #[derive(Debug, FromRow)]
-pub struct FileLeaseRow {
-    /// file_leases.id
-    pub id: FileLeaseId,
-    /// file_leases.gc_status
-    pub gc_status: GcStatus,
-    /// file_leases.location_id
+pub struct GcManifestRow {
+    /// gc_manifest.location_id
     pub location_id: LocationId,
-    /// file_leases.file_id
+    /// gc_manifest.file_id
     pub file_id: FileId,
-    /// file_leases.file_path
+    /// gc_manifest.file_path
     pub file_path: String,
-    /// file_leases.created_at
-    pub created_at: Option<NaiveDateTime>,
-    /// file_leases.expires_at
-    pub expires_at: Option<NaiveDateTime>,
+    /// gc_manifest.expiration
+    pub expiration: NaiveDateTime,
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -630,60 +624,6 @@ impl MetadataDb {
         Ok(())
     }
 
-    pub fn stream_expired_file_leases(
-        &self,
-        location_id: LocationId,
-    ) -> BoxStream<'_, Result<FileLeaseRow, sqlx::Error>> {
-        let sql = "
-        SELECT fl.id
-             , 'pending'::gc_status_kind AS gc_status,
-             , fl.location_id
-             , fl.file_id
-             , fl.file_path
-             , NULL AS created_at
-             , expires_at
-          FROM fl.file_leases fl
-         WHERE fllocation_id = $1
-               AND expires_at IS NOT NULL
-               AND expires_at < NOW()
-               AND fl.id NOT IN (
-                   SELECT file_leases.id FROM file_leases
-                    WHERE file_leases.location_id = $1 
-                          AND file_leases.expires_at IS NULL );
-        ";
-
-        sqlx::query_as(sql).bind(location_id).fetch(&*self.pool)
-    }
-
-    pub async fn create_leases(
-        &self,
-        gc_status: GcStatus,
-        location_id: LocationId,
-        component_ids: &[FileId],
-    ) -> Result<(), Error> {
-        let sql = "
-        INSERT INTO file_leases (gc_status, location_id, file_path, expires_at)
-        VALUES SELECT $1, $2, l.url || fm.file_name, NOW() + INTERVAL '1 hour'
-          FROM file_metadata fm
-          JOIN locations l ON fm.location_id = l.id
-          JOIN (
-              SELECT unnest($3::bigint[]) AS file_id
-          ) AS ids ON ids.file_id = fm.id
-         WHERE NOT EXISTS (
-               SELECT 1 FROM file_leases fl
-                WHERE fl.file_id = fm.id AND fl.expires_at IS NULL
-           )
-        ";
-        sqlx::query(sql)
-            .bind(gc_status)
-            .bind(location_id)
-            .bind(component_ids)
-            .execute(&*self.pool)
-            .await?;
-
-        Ok(())
-    }
-
     pub async fn get_footer_bytes(&self, file_id: FileId) -> Result<Vec<u8>, Error> {
         let sql = "
         SELECT footer
@@ -695,6 +635,76 @@ impl MetadataDb {
             .bind(file_id)
             .fetch_one(&*self.pool)
             .await?)
+    }
+}
+
+/// File Garbage Collection API
+impl MetadataDb {
+    pub async fn delete_file_ids(&self, file_ids: &[FileId]) -> Result<(), Error> {
+        let sql = "
+        DELETE FROM gc_manifest
+         WHERE file_id = ANY($1);
+        ";
+
+        sqlx::query(sql).bind(file_ids).execute(&*self.pool).await?;
+
+        Ok(())
+    }
+
+    /// Inserts or updates the GC manifest for the given file IDs.
+    /// If a file ID already exists, it updates the expiration time.
+    /// The expiration time is set to the current time plus the given duration.
+    /// If the file ID does not exist, it inserts a new row.
+    pub async fn upsert_gc_manifest(
+        &self,
+        location_id: LocationId,
+        file_ids: &[FileId],
+        duration: Duration,
+    ) -> Result<(), Error> {
+        let sql = "
+            INSERT INTO gc_manifest (location_id, file_id, file_path, expiration)
+            SELECT $1
+                  , file.id
+                  , locations.url || file_metadata.file_name
+                  , NOW() + INTERVAL $3
+               FROM UNNEST ($2) AS file(id)
+         INNER JOIN file_metadata ON file_metadata.id = file.id
+         INNER JOIN locations ON file_metadata.location_id = locations.id
+        ON CONFLICT (file_id) DO UPDATE SET expiration = EXCLUDED.expiration;
+        ";
+
+        sqlx::query(sql)
+            .bind(location_id)
+            .bind(file_ids.as_ref())
+            .bind(duration)
+            .execute(&*self.pool)
+            .await?;
+
+        Ok(())
+    }
+
+    pub fn stream_expired_files(
+        &self,
+        location_id: LocationId,
+        secs: i64,
+        nsecs: u32,
+    ) -> BoxStream<Result<GcManifestRow, sqlx::Error>> {
+        let sql = "
+        SELECT location_id
+             , file_id
+             , file_path
+             , expiration
+          FROM gc_manifest
+         WHERE location_id = $1
+               AND expiration <= $1;
+        ";
+
+        let expiration = DateTime::<Utc>::from_timestamp(secs, nsecs);
+
+        sqlx::query_as(sql)
+            .bind(location_id)
+            .bind(expiration)
+            .fetch(&*self.pool)
     }
 }
 
