@@ -44,9 +44,9 @@ impl BlockRange {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Watermark {
     /// The segment end block
-    number: BlockNum,
+    pub number: BlockNum,
     /// The hash associated with the segment end block
-    hash: BlockHash,
+    pub hash: BlockHash,
 }
 
 /// A block range associated with the matadata from a file in object storage.

@@ -229,7 +229,7 @@ pub struct QueryEnv {
 
 /// A context for executing queries against a catalog.
 pub struct QueryContext {
-    env: QueryEnv,
+    pub env: QueryEnv,
     session_config: SessionConfig,
     catalog: Catalog,
 }

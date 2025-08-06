@@ -827,3 +827,50 @@ impl From<&[common::catalog::logical::Table]> for SerializableSchema {
         Self(inner)
     }
 }
+
+/// Return a table identifier, in the form `{dataset}.blocks`, for the given network.
+pub async fn resolve_blocks_table(
+    dataset_store: &Arc<DatasetStore>,
+    src_datasets: &BTreeSet<&str>,
+    network: &str,
+) -> Result<String, BoxError> {
+    let dataset = {
+        fn is_raw_dataset(kind: &str) -> bool {
+            ["evm-rpc", "firehose"].contains(&kind)
+        }
+
+        let mut datasets: Vec<Dataset> = dataset_store
+            .all_datasets()
+            .await?
+            .into_iter()
+            .filter(|d| d.network == network)
+            .filter(|d| is_raw_dataset(d.kind.as_str()))
+            .collect();
+
+        if datasets.is_empty() {
+            return Err(format!("no provider found for network {network}").into());
+        }
+
+        match datasets
+            .iter()
+            .position(|d| src_datasets.contains(d.name.as_str()))
+        {
+            Some(index) => datasets.remove(index),
+            None => {
+                // Make sure fallback provider selection is deterministic.
+                datasets.sort_by(|a, b| a.name.cmp(&b.name));
+                if datasets.len() > 1 {
+                    tracing::debug!(
+                        "selecting provider {} for network {}",
+                        datasets[0].name,
+                        network
+                    );
+                }
+                datasets.remove(0)
+            }
+        }
+    };
+
+    assert!(dataset.tables.iter().any(|t| t.name() == "blocks"));
+    Ok(format!("{}.blocks", dataset.name))
+}

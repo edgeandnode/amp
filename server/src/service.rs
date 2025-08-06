@@ -193,8 +193,8 @@ impl Service {
 
     pub async fn execute_query(&self, sql: &str) -> Result<SendableRecordBatchStream, Error> {
         let query = parse_sql(sql).map_err(|err| Error::from(err))?;
-        let ctx = self
-            .dataset_store
+        let dataset_store = self.dataset_store.clone();
+        let ctx = dataset_store
             .ctx_for_sql(&query, self.env.clone())
             .await
             .map_err(|err| Error::DatasetStoreError(err))?;
@@ -205,12 +205,14 @@ impl Service {
         let is_streaming = common::stream_helpers::is_streaming(&query);
 
         let ctx = Arc::new(ctx);
-        self.execute_plan(ctx, plan, is_streaming).await
+        self.execute_plan(ctx, dataset_store, plan, is_streaming)
+            .await
     }
 
     pub async fn execute_plan(
         &self,
         ctx: Arc<QueryContext>,
+        dataset_store: Arc<DatasetStore>,
         plan: LogicalPlan,
         is_streaming: bool,
     ) -> Result<SendableRecordBatchStream, Error> {
@@ -265,6 +267,7 @@ impl Service {
 
             let query = StreamingQuery::spawn(
                 ctx.clone(),
+                dataset_store,
                 plan,
                 earliest_block,
                 None,
@@ -463,8 +466,9 @@ impl Service {
             .await?;
 
         let query_ctx = Arc::new(query_ctx);
+        let dataset_store = self.dataset_store.clone();
         let stream = self
-            .execute_plan(query_ctx, plan, remote_plan.is_streaming)
+            .execute_plan(query_ctx, dataset_store, plan, remote_plan.is_streaming)
             .await?;
 
         Ok(FlightDataEncoderBuilder::new()

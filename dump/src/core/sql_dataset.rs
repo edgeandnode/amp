@@ -117,7 +117,7 @@
 use std::{collections::BTreeSet, sync::Arc};
 
 use common::{
-    BlockNum, BoxError, Dataset,
+    BlockNum, BoxError,
     catalog::physical::PhysicalTable,
     metadata::segments::BlockRange,
     notification_multiplexer::NotificationMultiplexerHandle,
@@ -125,7 +125,7 @@ use common::{
     query_context::{QueryContext, QueryEnv, parse_sql},
 };
 use datafusion::{common::cast::as_fixed_size_binary_array, sql::parser::Statement};
-use dataset_store::{DatasetStore, sql_datasets::SqlDataset};
+use dataset_store::{DatasetStore, resolve_blocks_table, sql_datasets::SqlDataset};
 use futures::StreamExt as _;
 use tracing::instrument;
 
@@ -198,6 +198,9 @@ pub async fn dump_table(
             }
         };
 
+        let blocks_table =
+            resolve_blocks_table(&dataset_store, &src_datasets, table.network()).await?;
+
         if is_incr {
             for range in table.missing_ranges(start..=end).await? {
                 let (start, end) = range.into_inner();
@@ -206,8 +209,8 @@ pub async fn dump_table(
                 let range = resolve_block_range(
                     env.clone(),
                     &dataset_store,
-                    &src_datasets,
                     table.network().to_string(),
+                    &blocks_table,
                     start,
                     end,
                 )
@@ -241,8 +244,8 @@ pub async fn dump_table(
             let range = resolve_block_range(
                 env.clone(),
                 &dataset_store,
-                &src_datasets,
                 physical_table.network().to_string(),
+                &blocks_table,
                 start,
                 end,
             )
@@ -288,6 +291,7 @@ async fn dump_sql_query(
         let plan = ctx.plan_sql(query.clone()).await?;
         StreamingQuery::spawn(
             ctx,
+            dataset_store.clone(),
             plan,
             range.start(),
             Some(range.end()),
@@ -353,45 +357,11 @@ async fn dump_sql_query(
 async fn resolve_block_range(
     env: QueryEnv,
     dataset_store: &Arc<DatasetStore>,
-    src_datasets: &BTreeSet<&str>,
     network: String,
+    blocks_table: &str,
     start: BlockNum,
     end: BlockNum,
 ) -> Result<BlockRange, BoxError> {
-    let dataset = {
-        let mut datasets: Vec<Dataset> = dataset_store
-            .all_datasets()
-            .await?
-            .into_iter()
-            .filter(|d| d.network == network)
-            .collect();
-
-        if datasets.is_empty() {
-            return Err(format!("no provider found for network {network}").into());
-        }
-
-        match datasets
-            .iter()
-            .position(|d| src_datasets.contains(d.name.as_str()))
-        {
-            Some(index) => datasets.remove(index),
-            None => {
-                // Make sure fallback provider selection is deterministic.
-                datasets.sort_by(|a, b| a.name.cmp(&b.name));
-                if datasets.len() > 1 {
-                    tracing::debug!(
-                        "selecting provider {} for network {}",
-                        datasets[0].name,
-                        network
-                    );
-                }
-                datasets.remove(0)
-            }
-        }
-    };
-
-    assert!(dataset.tables.iter().any(|t| t.name() == "blocks"));
-    let blocks_table = format!("{}.blocks", dataset.name);
     let query = parse_sql(&format!(
         r#"
         SELECT * FROM
