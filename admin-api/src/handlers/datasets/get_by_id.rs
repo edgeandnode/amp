@@ -54,10 +54,14 @@ pub async fn handler(
 /// Transforms a dataset object into a response type with location information
 async fn try_into_dataset_response(ctx: &Ctx, dataset: Dataset) -> Result<DatasetInfo, Error> {
     let mut table_infos = Vec::with_capacity(dataset.tables.len());
+    let dataset_version = match dataset.kind.as_str() {
+        "manifest" => dataset.dataset_version(),
+        _ => None,
+    };
     for table in dataset.tables {
         let table_id = TableId {
             dataset: &dataset.name,
-            dataset_version: None,
+            dataset_version: dataset_version.as_deref(),
             table: table.name(),
         };
 

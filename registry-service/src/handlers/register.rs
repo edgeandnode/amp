@@ -64,7 +64,7 @@ pub async fn register_handler(
 #[instrument(skip_all)]
 pub async fn register_manifest(
     dataset_store: &Arc<DatasetStore>,
-    mut manifest: Manifest,
+    manifest: Manifest,
 ) -> Result<Manifest, RegisterManifestError> {
     let dataset_name = manifest.name.clone();
     let version = manifest.version.0.to_string();
@@ -82,15 +82,13 @@ pub async fn register_manifest(
     }
 
     let dataset_with_version = format!("{}__{}", dataset_name, version);
-    // Update the manifest name to include version, as manifest name and filename should be the same for deploying
-    manifest.update_name_field(&dataset_with_version);
-    let updated_manifest_json = serde_json::to_string(&manifest)?;
+    let manifest_json = serde_json::to_string(&manifest)?;
     let dataset_defs_store = dataset_store.dataset_defs_store();
     let filename = format!("{}.json", dataset_with_version);
     let path = object_store::path::Path::from(filename.clone());
     dataset_defs_store
         .prefixed_store()
-        .put(&path, updated_manifest_json.into())
+        .put(&path, manifest_json.into())
         .await
         .map_err(|e| RegisterManifestError::DatasetStoreError(e.to_string()))?;
 

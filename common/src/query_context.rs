@@ -373,7 +373,7 @@ impl QueryContext {
             dataset_version: None,
             table: table_ref.table(),
         };
-
+        // 23070000
         self.catalog
             .tables()
             .iter()

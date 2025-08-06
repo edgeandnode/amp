@@ -48,6 +48,9 @@ pub enum Error {
     #[error("JSON parse error: {0}")]
     Json(#[from] serde_json::Error),
 
+    #[error("Metadata db error: {0}")]
+    MetadataDbError(#[from] metadata_db::Error),
+
     #[error("unsupported dataset kind '{0}'")]
     UnsupportedKind(String),
 
@@ -297,7 +300,7 @@ impl DatasetStore {
                 if !err.is_not_found() {
                     return Err(err);
                 }
-
+                println!("dataset_name from store: {}", dataset_name);
                 self.dataset_defs_store()
                     .get_string(format!("{}.json", dataset_name))
                     .await
@@ -313,7 +316,7 @@ impl DatasetStore {
             RawDataset::Json(ref raw) => serde_json::from_str::<DatasetDefsCommon>(raw)?.into(),
         };
 
-        if common.name != dataset_name {
+        if common.name != dataset_name && common.kind != "manifest" {
             return Err(NameMismatch(common.name, dataset_name.to_string()));
         }
 
@@ -339,6 +342,16 @@ impl DatasetStore {
     }
 
     async fn load_dataset_inner(self: &Arc<Self>, dataset_name: &str) -> Result<Dataset, Error> {
+        // let latest_version = self
+        //     .metadata_db
+        //     .get_latest_dataset_version(dataset_name)
+        //     .await
+        //     .map_err(|e| Error::MetadataDbError(e))?;
+        // let dataset_name = match latest_version {
+        //     Some(version) => version,
+        //     None => "nothing".to_string(),
+        // };
+        println!("dataset_name in load_dataset_inner: {}", dataset_name);
         if let Some(dataset) = self.dataset_cache.read().unwrap().get(dataset_name) {
             return Ok(dataset.clone());
         }

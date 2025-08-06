@@ -142,9 +142,13 @@ impl PhysicalTable {
         set_active: bool,
     ) -> Result<Self, BoxError> {
         let dataset_name = &table.dataset().name;
+        let dataset_version = match table.dataset().kind.as_str() {
+            "manifest" => table.dataset_version(),
+            _ => None,
+        };
         let table_id = TableId {
             dataset: dataset_name,
-            dataset_version: None,
+            dataset_version: dataset_version.as_deref(),
             table: &table.name(),
         };
 
@@ -190,9 +194,13 @@ impl PhysicalTable {
         metadata_db: Arc<MetadataDb>,
     ) -> Result<Option<Self>, BoxError> {
         let dataset_name = &table.dataset().name;
+        let dataset_version = match table.dataset().kind.as_str() {
+            "manifest" => table.dataset_version(),
+            _ => None,
+        };
         let table_id = TableId {
             dataset: &table.dataset().name,
-            dataset_version: None,
+            dataset_version: dataset_version.as_deref(),
             table: &table.name(),
         };
 
@@ -216,9 +224,13 @@ impl PhysicalTable {
         metadata_db: Arc<MetadataDb>,
     ) -> Result<Option<Self>, BoxError> {
         let dataset_name = &table.dataset().name;
+        let dataset_version = match table.dataset().kind.as_str() {
+            "manifest" => table.dataset_version(),
+            _ => None,
+        };
         let table_id = TableId {
             dataset: dataset_name,
-            dataset_version: None,
+            dataset_version: dataset_version.as_deref(),
             table: &table.name(),
         };
 

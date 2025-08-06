@@ -150,11 +150,6 @@ impl Manifest {
             })
             .collect()
     }
-
-    pub fn update_name_field(&mut self, new_name: &str) -> &mut Self {
-        self.name = new_name.to_string();
-        self
-    }
 }
 
 impl From<DFSchemaRef> for TableSchema {
@@ -199,6 +194,7 @@ impl From<Manifest> for Dataset {
             kind: DATASET_KIND.to_string(),
             network: manifest.network,
             name: manifest.name,
+            version: Some(manifest.version),
             tables,
             functions: manifest
                 .functions

@@ -64,6 +64,7 @@ pub fn dataset(dataset_cfg: common::DatasetValue) -> Result<Dataset, Error> {
     Ok(Dataset {
         kind: def.kind,
         name: def.name,
+        version: None,
         tables: tables::all(&def.network),
         network: def.network,
         functions: vec![],

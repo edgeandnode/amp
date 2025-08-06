@@ -27,11 +27,14 @@ pub async fn dump_check(
     let client = dataset_store.load_client(&dataset_name).await?;
     let total_blocks = end_block - start + 1;
     let mut tables = Vec::with_capacity(dataset.tables.len());
-
+    let dataset_version = match dataset.kind.as_str() {
+        "manifest" => dataset.dataset_version(),
+        _ => None,
+    };
     for table in Arc::new(dataset.clone()).resolved_tables() {
         let table_id = TableId {
             dataset: dataset_name,
-            dataset_version: None,
+            dataset_version: dataset_version.as_deref(),
             table: &table.name(),
         };
         let (url, location_id) = metadata_db

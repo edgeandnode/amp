@@ -638,6 +638,30 @@ impl MetadataDb {
             .await?;
         Ok(result)
     }
+
+    #[instrument(skip(self), err)]
+    pub async fn get_latest_dataset_version(
+        &self,
+        dataset_name: &str,
+    ) -> Result<Option<String>, Error> {
+        let sql = "
+            SELECT version FROM registry 
+            WHERE dataset = $1
+            ORDER BY version DESC
+            LIMIT 1
+        ";
+
+        println!("dataset_name from db: {}", dataset_name);
+        let version: Option<String> = sqlx::query_scalar(sql)
+            .bind(&dataset_name)
+            .fetch_optional(&*self.pool)
+            .await?;
+        println!("version from db: {:?}", version);
+        match version {
+            Some(version) => Ok(Some(format!("{}__{}", dataset_name, version))),
+            None => Ok(None),
+        }
+    }
 }
 
 /// Generic notification API
