@@ -4,6 +4,7 @@ use alloy::{
     node_bindings::{Anvil, AnvilInstance},
     primitives::BlockHash,
     providers::{Provider as _, ext::AnvilApi as _},
+    rpc::types::anvil::ReorgOptions,
     transports::http::reqwest,
 };
 use common::{BlockNum, metadata::segments::BlockRange, query_context::parse_sql, tracing_helpers};
@@ -53,7 +54,7 @@ impl AnvilTestContext {
         assert_ne!(depth, 0);
         let original_head = self.latest_block().await;
         self.provider
-            .anvil_reorg(alloy_rpc_types_anvil::ReorgOptions {
+            .anvil_reorg(ReorgOptions {
                 depth,
                 tx_block_pairs: vec![],
             })
