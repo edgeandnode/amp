@@ -24,6 +24,14 @@ impl BlockRange {
         *self.numbers.end()
     }
 
+    #[inline]
+    pub fn watermark(&self) -> Watermark {
+        Watermark {
+            number: self.end(),
+            hash: self.hash,
+        }
+    }
+
     /// Return true iff `self` is sequenced immediately before `other`.
     #[inline]
     fn adjacent(&self, other: &Self) -> bool {
@@ -31,6 +39,14 @@ impl BlockRange {
             && (self.end() + 1) == other.start()
             && other.prev_hash.map(|h| h == self.hash).unwrap_or(true)
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Watermark {
+    /// The segment end block
+    number: BlockNum,
+    /// The hash associated with the segment end block
+    hash: BlockHash,
 }
 
 /// A block range associated with the matadata from a file in object storage.

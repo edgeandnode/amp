@@ -33,8 +33,12 @@ pub type BlockRangeStream = Pin<
     >,
 >;
 
+/// Calculates ranges for the next batch of SQL execution. The result is based on the set of
+/// physical tables the query executes over and the sequence of segments already processed.
 struct ExecutionRanges {
+    /// physical tables used for SQL execution
     tables: Vec<Arc<PhysicalTable>>,
+    /// previously processed chain state
     stream_chain: Option<Chain>,
 }
 
@@ -46,58 +50,69 @@ impl ExecutionRanges {
         }
     }
 
+    /// Determines the block range for the next batch SQL query. This returns the range starting
+    /// from the latest processed segments up to the latest common watermark across all relevant
+    /// tables. The resulting range may overlap with previous ranges to re-execute over segments
+    /// that have been reorganized out of the canonical chain.
     async fn next(&mut self) -> Result<Option<RangeInclusive<BlockNum>>, BoxError> {
-        let mut src_chains: Vec<Chain> = Default::default();
-        for table in &self.tables {
-            match table.canonical_chain().await? {
-                Some(canonical) => src_chains.push(canonical),
-                None => return Ok(None),
-            };
-        }
-        // sort by end block number, in ascending order.
-        src_chains.sort_unstable_by_key(|c| c.end());
-        if src_chains.is_empty() {
-            return Ok(None);
-        }
-        let mut shortest_chain = src_chains.remove(0);
+        // This function assumes that we can expect segment watermarks to line up across tables
+        // derived from the same raw table. It also facilitates this assumption by rewinding
+        // execution back to a segment watermark when handling reorgs.
 
-        fn watermark_eq(a: &BlockRange, b: &BlockRange) -> bool {
-            a.network == b.network && a.numbers.end() == b.numbers.end() && a.hash == b.hash
-        }
         fn contains_watermark(chain: &Chain, range: &BlockRange) -> bool {
-            chain.0.iter().rev().any(|s| watermark_eq(&s.range, range))
+            let w = range.watermark();
+            chain.0.iter().rev().any(|s| s.range.watermark() == w)
         }
 
-        // Remove the latest segments that don't have matching watermarks on all other chains.
-        while !shortest_chain.0.is_empty() {
-            let last_range = shortest_chain.last();
-            if src_chains.iter().all(|c| contains_watermark(c, last_range)) {
-                break;
+        // Create a single chain that represents the common state between the physical tables.
+        let src_chain = {
+            let mut src_chains: Vec<Chain> = Default::default();
+            for table in &self.tables {
+                match table.canonical_chain().await? {
+                    Some(canonical) => src_chains.push(canonical),
+                    None => return Ok(None),
+                };
             }
-            shortest_chain.0.pop();
-        }
-        if shortest_chain.0.is_empty() {
-            return Ok(None);
-        }
+            // sort by end block number, in ascending order.
+            src_chains.sort_unstable_by_key(|c| c.end());
+            if src_chains.is_empty() {
+                return Ok(None);
+            }
+            let mut shortest_chain = src_chains.remove(0);
 
-        let range = if let Some(mut stream_chain) = self.stream_chain.take() {
-            // Remove latest segments that don't have matching watermarks on the shortest chain.
-            while !stream_chain.0.is_empty() {
-                let last_range = stream_chain.last();
-                if contains_watermark(&shortest_chain, last_range) {
+            // Remove the latest segments that don't have matching watermarks on all other chains.
+            while !shortest_chain.0.is_empty() {
+                let last_range = shortest_chain.last();
+                if src_chains.iter().all(|c| contains_watermark(c, last_range)) {
                     break;
                 }
-                stream_chain.0.pop();
+                shortest_chain.0.pop();
             }
-            if stream_chain.0.is_empty() {
-                shortest_chain.start()..=shortest_chain.end()
-            } else {
-                (stream_chain.end() + 1)..=shortest_chain.end()
+            if shortest_chain.0.is_empty() {
+                return Ok(None);
             }
-        } else {
-            shortest_chain.start()..=shortest_chain.end()
+            shortest_chain
         };
-        self.stream_chain = Some(shortest_chain);
+
+        let range = match self.stream_chain.take() {
+            None => src_chain.start()..=src_chain.end(),
+            Some(mut stream_chain) => {
+                // Remove latest segments that don't have matching watermarks on the source chain.
+                while !stream_chain.0.is_empty() {
+                    let last_range = stream_chain.last();
+                    if contains_watermark(&src_chain, last_range) {
+                        break;
+                    }
+                    stream_chain.0.pop();
+                }
+                if stream_chain.0.is_empty() {
+                    src_chain.start()..=src_chain.end()
+                } else {
+                    (stream_chain.end() + 1)..=src_chain.end()
+                }
+            }
+        };
+        self.stream_chain = Some(src_chain);
         Ok(Some(range))
     }
 }
