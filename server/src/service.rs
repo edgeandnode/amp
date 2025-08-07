@@ -20,7 +20,6 @@ use common::{
     notification_multiplexer::{self, NotificationMultiplexerHandle},
     plan_visitors::{is_incremental, propagate_block_num, unproject_special_block_num_column},
     query_context::{Error as CoreError, QueryContext, QueryEnv, parse_sql},
-    streaming_query::{StreamState, StreamingQuery, watermark_updates},
 };
 use datafusion::{
     common::{
@@ -33,6 +32,7 @@ use datafusion::{
     physical_plan::stream::RecordBatchStreamAdapter,
 };
 use dataset_store::{DatasetError, DatasetStore};
+use dump::streaming_query::StreamingQuery;
 use futures::{Stream, StreamExt as _, TryStreamExt, stream};
 use http_common::{BoxRequestError, RequestError};
 use metadata_db::MetadataDb;
@@ -193,8 +193,8 @@ impl Service {
 
     pub async fn execute_query(&self, sql: &str) -> Result<SendableRecordBatchStream, Error> {
         let query = parse_sql(sql).map_err(|err| Error::from(err))?;
-        let ctx = self
-            .dataset_store
+        let dataset_store = self.dataset_store.clone();
+        let ctx = dataset_store
             .ctx_for_sql(&query, self.env.clone())
             .await
             .map_err(|err| Error::DatasetStoreError(err))?;
@@ -205,12 +205,14 @@ impl Service {
         let is_streaming = common::stream_helpers::is_streaming(&query);
 
         let ctx = Arc::new(ctx);
-        self.execute_plan(ctx, plan, is_streaming).await
+        self.execute_plan(ctx, dataset_store, plan, is_streaming)
+            .await
     }
 
     pub async fn execute_plan(
         &self,
         ctx: Arc<QueryContext>,
+        dataset_store: Arc<DatasetStore>,
         plan: LogicalPlan,
         is_streaming: bool,
     ) -> Result<SendableRecordBatchStream, Error> {
@@ -245,11 +247,6 @@ impl Service {
                 .await
                 .map_err(|err| Error::from(err))
         } else {
-            // If streaming, we need to spawn a streaming query.
-            let watermark_stream = watermark_updates(ctx.clone(), &self.notification_multiplexer)
-                .await
-                .map_err(|e| Error::StreamingExecutionError(e.to_string()))?;
-
             // As an optimization, start the stream from the minimum start block across all tables.
             // Otherwise starting from `0` would spend time scanning ranges known to be empty.
             let earliest_block = ctx
@@ -268,12 +265,13 @@ impl Service {
                 return Ok(empty_stream);
             };
 
-            let initial_state = StreamState::new(watermark_stream, earliest_block);
             let query = StreamingQuery::spawn(
-                initial_state,
                 ctx.clone(),
+                dataset_store,
                 plan,
+                earliest_block,
                 None,
+                &self.notification_multiplexer,
                 false,
                 self.config.microbatch_max_interval,
             )
@@ -468,8 +466,9 @@ impl Service {
             .await?;
 
         let query_ctx = Arc::new(query_ctx);
+        let dataset_store = self.dataset_store.clone();
         let stream = self
-            .execute_plan(query_ctx, plan, remote_plan.is_streaming)
+            .execute_plan(query_ctx, dataset_store, plan, remote_plan.is_streaming)
             .await?;
 
         Ok(FlightDataEncoderBuilder::new()
