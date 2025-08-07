@@ -600,10 +600,10 @@ pub async fn restore_blessed_dataset(
     let mut tables = Vec::<Arc<PhysicalTable>>::new();
 
     // Determine the start_block for known datasets
-    let start_block: Option<i64> = match dataset.name.as_str() {
-        "eth_firehose" | "eth_rpc" | "sql_over_eth_firehose" => Some(15000000),
-        "base" => Some(33411770),
-        _ => None,
+    let start_block: i64 = match dataset.name.as_str() {
+        "eth_firehose" | "eth_rpc" | "sql_over_eth_firehose" => 15_000_000,
+        "base" => 33411770,
+        _ => 0,
     };
 
     for table in Arc::new(dataset).resolved_tables() {

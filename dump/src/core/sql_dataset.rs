@@ -240,7 +240,7 @@ pub async fn dump_table(
                 &data_store,
                 dataset_store.metadata_db.clone(),
                 false,
-                Some(start_block as i64),
+                start_block as i64,
             )
             .await?
             .into();

@@ -60,7 +60,7 @@ pub async fn dump(
                     data_store.as_ref(),
                     metadata_db.clone(),
                     true,
-                    Some(start),
+                    start,
                 )
                 .await?
             } else {
@@ -72,7 +72,7 @@ pub async fn dump(
                             data_store.as_ref(),
                             metadata_db.clone(),
                             true,
-                            Some(start),
+                            start,
                         )
                         .await?
                     }

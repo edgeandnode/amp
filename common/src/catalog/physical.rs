@@ -101,6 +101,7 @@ pub struct PhysicalTable {
 
     /// ParquetFileReaderFactory
     pub reader_factory: Arc<NozzleReaderFactory>,
+    start_block: i64,
 }
 
 // Methods for creating and managing PhysicalTable instances
@@ -111,6 +112,7 @@ impl PhysicalTable {
         url: Url,
         location_id: LocationId,
         metadata_db: Arc<MetadataDb>,
+        start_block: i64,
     ) -> Result<Self, BoxError> {
         let path = Path::from_url_path(url.path()).unwrap();
         let (object_store, _) = infer_object_store(&url)?;
@@ -128,6 +130,7 @@ impl PhysicalTable {
             location_id,
             metadata_db,
             reader_factory,
+            start_block,
         })
     }
 
@@ -140,7 +143,7 @@ impl PhysicalTable {
         data_store: &Store,
         metadata_db: Arc<MetadataDb>,
         set_active: bool,
-        start_block: Option<i64>,
+        start_block: i64,
     ) -> Result<Self, BoxError> {
         let dataset_name = &table.dataset().name;
         let table_id = TableId {
@@ -158,7 +161,7 @@ impl PhysicalTable {
                 &path,
                 &url,
                 false,
-                start_block,
+                Some(start_block),
             )
             .await?;
 
@@ -185,6 +188,7 @@ impl PhysicalTable {
             location_id,
             metadata_db,
             reader_factory,
+            start_block,
         };
 
         info!("Created new revision at {}", physical_table.path);
@@ -198,7 +202,7 @@ impl PhysicalTable {
         table: &ResolvedTable,
         data_store: Arc<Store>,
         metadata_db: Arc<MetadataDb>,
-        start_block: Option<i64>,
+        start_block: i64,
     ) -> Result<Option<Self>, BoxError> {
         let dataset_name = &table.dataset().name;
         let table_id = TableId {
@@ -240,6 +244,15 @@ impl PhysicalTable {
 
         let path = Path::from_url_path(url.path()).unwrap();
         let (object_store, _) = infer_object_store(&url)?;
+
+        let location = metadata_db
+            .get_location_by_id(location_id)
+            .await?
+            .ok_or_else(|| {
+                DataFusionError::Internal(format!("Location with id {location_id} not found"))
+            })?;
+        let start_block = location.start_block;
+
         let reader_factory = NozzleReaderFactory {
             location_id,
             object_store,
@@ -254,6 +267,7 @@ impl PhysicalTable {
             location_id,
             metadata_db,
             reader_factory,
+            start_block,
         }))
     }
 
@@ -268,7 +282,7 @@ impl PhysicalTable {
         table_id: &TableId<'_>,
         data_store: Arc<Store>,
         metadata_db: Arc<MetadataDb>,
-        start_block: Option<i64>,
+        start_block: i64,
     ) -> Result<Option<Self>, BoxError> {
         if let Some((path, url, prefix)) = revisions.values().last() {
             Self::restore(
@@ -297,7 +311,7 @@ impl PhysicalTable {
         url: &Url,
         data_store: Arc<Store>,
         metadata_db: Arc<MetadataDb>,
-        start_block: Option<i64>,
+        start_block: i64,
     ) -> Result<Self, BoxError> {
         let location_id = metadata_db
             .register_location(
@@ -306,7 +320,7 @@ impl PhysicalTable {
                 prefix,
                 url,
                 false,
-                start_block,
+                Some(start_block),
             )
             .await?;
 
@@ -357,6 +371,7 @@ impl PhysicalTable {
             location_id,
             metadata_db,
             reader_factory,
+            start_block,
         };
 
         Ok(physical_table)
@@ -467,7 +482,15 @@ impl PhysicalTable {
     /// returned if no block range has been synced.
     pub async fn synced_range(&self) -> Result<Option<RangeInclusive<BlockNum>>, BoxError> {
         let chain = self.canonical_chain().await?;
-        Ok(chain.map(|c| c.start()..=c.end()))
+        if let Some(chain) = chain {
+            if chain.start() as i64 == self.start_block {
+                Ok(Some(chain.start()..=chain.end()))
+            } else {
+                Ok(None)
+            }
+        } else {
+            Ok(None)
+        }
     }
 
     pub async fn missing_ranges(

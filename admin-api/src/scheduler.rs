@@ -48,7 +48,7 @@ impl Scheduler {
                     Some(physical_table) => physical_table,
                     None => {
                         let store = &self.config.data_store;
-                        PhysicalTable::next_revision(&table, store, metadata_db.clone(), true, None)
+                        PhysicalTable::next_revision(&table, store, metadata_db.clone(), true, 0)
                             .await?
                     }
                 };
