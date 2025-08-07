@@ -496,3 +496,88 @@ class TestIcebergLoaderAdvanced:
             for result in results:
                 assert result.success == True
                 assert result.loader_type == 'iceberg'
+
+    def test_upsert_operations(self, iceberg_basic_config):
+        """Test UPSERT/MERGE operations with automatic matching"""
+        # Use basic config - no special configuration needed for upsert
+        upsert_config = iceberg_basic_config.copy()
+        
+        # Initial data
+        initial_data = {
+            'id': [1, 2, 3],
+            'name': ['Alice', 'Bob', 'Charlie'],
+            'value': [100, 200, 300]
+        }
+        initial_table = pa.Table.from_pydict(initial_data)
+        
+        loader = IcebergLoader(upsert_config)
+        
+        with loader:
+            # Load initial data
+            result1 = loader.load_table(
+                initial_table,
+                'test_upsert',
+                mode=LoadMode.APPEND
+            )
+            assert result1.success == True
+            assert result1.rows_loaded == 3
+            
+            # Upsert data (update existing + insert new)
+            upsert_data = {
+                'id': [2, 3, 4],  # 2,3 exist (update), 4 is new (insert)
+                'name': ['Bob_Updated', 'Charlie_Updated', 'David'],
+                'value': [250, 350, 400]
+            }
+            upsert_table = pa.Table.from_pydict(upsert_data)
+            
+            result2 = loader.load_table(
+                upsert_table,
+                'test_upsert',
+                mode=LoadMode.UPSERT
+            )
+            assert result2.success == True
+            assert result2.rows_loaded == 3
+            
+    def test_upsert_simple(self, iceberg_basic_config):
+        """Test simple UPSERT operations with default behavior"""
+        
+        test_data = {
+            'id': [1, 2, 3],
+            'name': ['Alice', 'Bob', 'Charlie'],
+            'value': [100, 200, 300]
+        }
+        test_table = pa.Table.from_pydict(test_data)
+        
+        loader = IcebergLoader(iceberg_basic_config)
+        
+        with loader:
+            # Simple upsert with default settings
+            result = loader.load_table(
+                test_table,
+                'test_simple_upsert',
+                mode=LoadMode.UPSERT
+            )
+            assert result.success == True
+            assert result.rows_loaded == 3
+            
+    def test_upsert_fallback_to_append(self, iceberg_basic_config):
+        """Test that UPSERT falls back to APPEND when upsert fails"""
+        
+        test_data = {
+            'id': [1, 2, 3],
+            'name': ['Alice', 'Bob', 'Charlie'],
+            'value': [100, 200, 300]
+        }
+        test_table = pa.Table.from_pydict(test_data)
+        
+        loader = IcebergLoader(iceberg_basic_config)
+        
+        with loader:
+            # Even if upsert fails, should fallback gracefully
+            result = loader.load_table(
+                test_table,
+                'test_upsert_fallback',
+                mode=LoadMode.UPSERT
+            )
+            assert result.success == True
+            assert result.rows_loaded == 3

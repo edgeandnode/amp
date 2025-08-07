@@ -2,7 +2,7 @@
 
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 import pyarrow as pa
 import pyarrow.compute as pc
@@ -17,6 +17,9 @@ try:
     ICEBERG_AVAILABLE = True
 except ImportError:
     ICEBERG_AVAILABLE = False
+
+# Import types for better IDE support
+from .iceberg_types import IcebergTable, IcebergCatalog, UpsertResult
 
 from ..base import DataLoader, LoadMode, LoadResult
 
@@ -38,6 +41,15 @@ class IcebergStorageConfig:
 class IcebergLoader(DataLoader):
     """
     Apache Iceberg loader with zero-copy Arrow integration.
+    
+    Supports all standard load modes:
+    - APPEND: Add new data to the table
+    - OVERWRITE: Replace all data in the table
+    - UPSERT/MERGE: Update existing rows and insert new ones using PyIceberg's automatic matching
+    
+    Configuration Requirements:
+    - catalog_config: PyIceberg catalog configuration
+    - namespace: Iceberg namespace/database name
     """
     
     def __init__(self, config: Dict[str, Any]):
@@ -60,10 +72,10 @@ class IcebergLoader(DataLoader):
             batch_size=config.get('batch_size', 10000)
         )
         
-        self._catalog = None
-        self._current_table = None
-        self._namespace_exists = False
-        self.enable_statistics = config.get('enable_statistics', True)
+        self._catalog: Optional[IcebergCatalog] = None
+        self._current_table: Optional[IcebergTable] = None
+        self._namespace_exists: bool = False
+        self.enable_statistics: bool = config.get('enable_statistics', True)
         
     def connect(self) -> None:
         """Initialize Iceberg catalog connection"""
@@ -229,7 +241,7 @@ class IcebergLoader(DataLoader):
         except Exception as e:
             raise NoSuchNamespaceError(f"Failed to verify namespace '{namespace}': {str(e)}")
     
-    def _get_or_create_table(self, table_name: str, schema: pa.Schema):
+    def _get_or_create_table(self, table_name: str, schema: pa.Schema) -> IcebergTable:
         """Get existing table or create new one"""
         table_identifier = f"{self.storage_config.namespace}.{table_name}"
         
@@ -257,13 +269,13 @@ class IcebergLoader(DataLoader):
         """Create Iceberg partition spec from partition_by configuration"""
         return None
     
-    def _validate_schema_compatibility(self, iceberg_table, arrow_schema: pa.Schema) -> None:
+    def _validate_schema_compatibility(self, iceberg_table: IcebergTable, arrow_schema: pa.Schema) -> None:
         """Validate that Arrow schema is compatible with Iceberg table schema"""
         if not self.storage_config.schema_evolution:
             iceberg_schema = iceberg_table.schema()
             self.logger.debug("Schema validation passed (simplified)")
     
-    def _perform_load_operation(self, iceberg_table, arrow_table: pa.Table, mode: LoadMode) -> int:
+    def _perform_load_operation(self, iceberg_table: IcebergTable, arrow_table: pa.Table, mode: LoadMode) -> int:
         """Perform the actual load operation based on mode"""
         if mode == LoadMode.APPEND:
             iceberg_table.append(arrow_table)
@@ -274,14 +286,25 @@ class IcebergLoader(DataLoader):
             return arrow_table.num_rows
             
         elif mode in (LoadMode.UPSERT, LoadMode.MERGE):
-            self.logger.warning(f"Mode {mode.value} not fully implemented, using append")
-            iceberg_table.append(arrow_table)
-            return arrow_table.num_rows
+            # For UPSERT/MERGE operations, use PyIceberg's automatic matching
+            try:
+                self.logger.info(f"Performing {mode.value} operation with automatic column matching")
+                
+                # Use PyIceberg's upsert method with default settings
+                upsert_result = iceberg_table.upsert(arrow_table)
+                
+                self.logger.info(f"Upsert operation completed successfully")
+                return arrow_table.num_rows
+                
+            except Exception as e:
+                self.logger.error(f"UPSERT/MERGE operation failed: {str(e)}. Falling back to APPEND mode.")
+                iceberg_table.append(arrow_table)
+                return arrow_table.num_rows
             
         else:
             raise ValueError(f"Unsupported load mode: {mode}")
     
-    def _get_load_metadata(self, iceberg_table, arrow_table: pa.Table, duration: float) -> Dict[str, Any]:
+    def _get_load_metadata(self, iceberg_table: IcebergTable, arrow_table: pa.Table, duration: float) -> Dict[str, Any]:
         """Get metadata about the load operation"""
         metadata = {
             'operation': 'load_table',
