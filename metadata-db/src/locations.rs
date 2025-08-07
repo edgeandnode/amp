@@ -8,71 +8,6 @@ use crate::{TableId, workers::jobs::JobId};
 /// Unique identifier for location records tracking dataset table storage locations (non-negative).
 pub type LocationId = i64;
 
-/// List all locations from the database ordered by dataset, table, and creation date
-pub async fn list_all<'c, E>(exe: E) -> Result<Vec<Location>, sqlx::Error>
-where
-    E: Executor<'c, Database = Postgres>,
-{
-    let query = indoc::indoc! {"
-        SELECT 
-            id,
-            dataset,
-            dataset_version,
-            tbl,
-            url,
-            active
-        FROM locations
-        ORDER BY dataset, tbl, created_at DESC
-    "};
-
-    let locations = sqlx::query_as(query).fetch_all(exe).await?;
-    Ok(locations)
-}
-
-/// List all active locations ordered by dataset and table
-pub async fn list_all_active<'c, E>(exe: E) -> Result<Vec<Location>, sqlx::Error>
-where
-    E: Executor<'c, Database = Postgres>,
-{
-    let query = indoc::indoc! {"
-        SELECT 
-            id,
-            dataset,
-            dataset_version,
-            tbl,
-            url,
-            active
-        FROM locations
-        WHERE active = true
-        ORDER BY dataset, tbl
-    "};
-
-    let locations = sqlx::query_as(query).fetch_all(exe).await?;
-    Ok(locations)
-}
-
-/// List all locations for a specific dataset ordered by table and creation date
-pub async fn list_by_dataset<'c, E>(exe: E, dataset: &str) -> Result<Vec<Location>, sqlx::Error>
-where
-    E: Executor<'c, Database = Postgres>,
-{
-    let query = indoc::indoc! {"
-        SELECT 
-            id,
-            dataset,
-            dataset_version,
-            tbl,
-            url,
-            active
-        FROM locations
-        WHERE dataset = $1
-        ORDER BY tbl, created_at DESC
-    "};
-
-    let locations = sqlx::query_as(query).bind(dataset).fetch_all(exe).await?;
-    Ok(locations)
-}
-
 /// Insert a location into the database and return its ID (idempotent operation)
 #[tracing::instrument(skip(exe), err)]
 pub async fn insert<'c, E>(
@@ -102,36 +37,8 @@ where
         .bind(table.table)
         .bind(bucket)
         .bind(path)
-        .bind(url.to_string())
+        .bind(url.as_str())
         .bind(active)
-        .fetch_one(exe)
-        .await?;
-    Ok(location_id)
-}
-
-/// Get location ID by table identifier and URL
-#[tracing::instrument(skip(exe), err)]
-pub async fn get_by_id<'c, E>(
-    exe: E,
-    table: TableId<'_>,
-    url: &Url,
-) -> Result<LocationId, sqlx::Error>
-where
-    E: Executor<'c, Database = Postgres>,
-{
-    let dataset_version = table.dataset_version.unwrap_or("");
-
-    let query = indoc::indoc! {"
-        SELECT id
-        FROM locations
-        WHERE dataset = $1 AND dataset_version = $2 AND tbl = $3 AND url = $4
-    "};
-
-    let location_id: LocationId = sqlx::query_scalar(query)
-        .bind(table.dataset)
-        .bind(dataset_version)
-        .bind(table.table)
-        .bind(url.to_string())
         .fetch_one(exe)
         .await?;
     Ok(location_id)
@@ -150,7 +57,7 @@ where
     "};
 
     let location_id: Option<LocationId> = sqlx::query_scalar(query)
-        .bind(url.to_string())
+        .bind(url.as_str())
         .fetch_optional(exe)
         .await?;
     Ok(location_id)

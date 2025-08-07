@@ -19,7 +19,7 @@ pub use self::temp::{KEEP_TEMP_DIRS, temp_metadata_db};
 pub use self::{
     locations::{Location, LocationId},
     workers::{
-        WorkerNodeId,
+        Worker, WorkerNodeId,
         events::{JobNotifAction, JobNotifListener, JobNotifRecvError, JobNotification},
         jobs::{Job, JobId, JobStatus, JobStatusUpdateError, JobWithDetails},
     },
