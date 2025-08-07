@@ -278,8 +278,15 @@ impl DatasetStore {
         self: &Arc<Self>,
         dataset: &str,
     ) -> Result<SqlDataset, DatasetError> {
+        let dataset_name_with_version = self
+            .metadata_db
+            .get_latest_dataset_version(dataset)
+            .await
+            .map_err(|e| Error::MetadataDbError(e))
+            .unwrap()
+            .unwrap();
         self.clone()
-            .load_manifest_dataset_inner(dataset)
+            .load_manifest_dataset_inner(&dataset_name_with_version)
             .await
             .map_err(|e| (dataset, e).into())
     }
@@ -291,7 +298,6 @@ impl DatasetStore {
         dataset_name: &str,
     ) -> Result<(DatasetDefsCommon, RawDataset), Error> {
         use Error::*;
-
         let raw_dataset = self
             .dataset_defs_store()
             .get_string(format!("{}.toml", dataset_name))
@@ -300,7 +306,6 @@ impl DatasetStore {
                 if !err.is_not_found() {
                     return Err(err);
                 }
-                println!("dataset_name from store: {}", dataset_name);
                 self.dataset_defs_store()
                     .get_string(format!("{}.json", dataset_name))
                     .await
@@ -342,16 +347,6 @@ impl DatasetStore {
     }
 
     async fn load_dataset_inner(self: &Arc<Self>, dataset_name: &str) -> Result<Dataset, Error> {
-        // let latest_version = self
-        //     .metadata_db
-        //     .get_latest_dataset_version(dataset_name)
-        //     .await
-        //     .map_err(|e| Error::MetadataDbError(e))?;
-        // let dataset_name = match latest_version {
-        //     Some(version) => version,
-        //     None => "nothing".to_string(),
-        // };
-        println!("dataset_name in load_dataset_inner: {}", dataset_name);
         if let Some(dataset) = self.dataset_cache.read().unwrap().get(dataset_name) {
             return Ok(dataset.clone());
         }
@@ -633,7 +628,9 @@ impl DatasetStore {
                 udfs.push(udf.into());
             }
 
-            for table in Arc::new(dataset).resolved_tables() {
+            for mut table in Arc::new(dataset).resolved_tables() {
+                let table_ref = TableReference::partial(dataset_name.clone(), table.name());
+                table.update_table_ref(table_ref);
                 resolved_tables.push(table);
             }
         }

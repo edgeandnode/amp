@@ -39,8 +39,14 @@ impl Job {
             JobDesc::Dump { end_block } => {
                 let mut tables = vec![];
                 for location in output_locations {
-                    let dataset =
-                        Arc::new(ctx.dataset_store.load_dataset(&location.dataset).await?);
+                    let dataset = Arc::new(
+                        ctx.dataset_store
+                            .load_dataset(&format!(
+                                "{}__{}",
+                                location.dataset, location.dataset_version
+                            ))
+                            .await?,
+                    );
                     let mut resolved_tables = dataset.resolved_tables();
                     let Some(table) = resolved_tables.find(|t| t.name() == location.tbl) else {
                         return Err(format!(

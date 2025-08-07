@@ -140,6 +140,11 @@ impl ResolvedTable {
         &self.table_ref
     }
 
+    pub fn update_table_ref(&mut self, table_ref: TableReference) -> &mut Self {
+        self.table_ref = table_ref;
+        self
+    }
+
     /// Bare table name
     pub fn name(&self) -> &str {
         &self.table.name

@@ -80,7 +80,6 @@ pub(super) async fn dataset(
         let Some(table_name) = filename.strip_suffix(".sql") else {
             continue;
         };
-
         let raw_query = defs_store.get_string(file.location.clone()).await?;
         let query = parse_sql(&raw_query)?;
         let ctx = store.clone().planning_ctx_for_sql(&query).await?;
