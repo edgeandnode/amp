@@ -43,7 +43,10 @@ pub fn register_logger() {
     });
 }
 
-pub fn register_logger_with_telemetry(url: String) -> datafusion::error::Result<()> {
+pub fn register_logger_with_telemetry(
+    url: String,
+    trace_ratio: f64,
+) -> datafusion::error::Result<()> {
     let (env_filter, nozzle_log_level) = env_filter_and_log_level();
 
     // Initialize OpenTelemetry tracing infrastructure to enable tracing of query execution.
@@ -64,7 +67,9 @@ pub fn register_logger_with_telemetry(url: String) -> datafusion::error::Result<
         let tracer_provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
             .with_batch_exporter(exporter)
             .with_resource(resource)
-            .with_sampler(opentelemetry_sdk::trace::Sampler::AlwaysOn)
+            .with_sampler(opentelemetry_sdk::trace::Sampler::TraceIdRatioBased(
+                trace_ratio,
+            ))
             .build();
 
         let tracer = tracer_provider.tracer("nozzle-datafusion-tracing-query");

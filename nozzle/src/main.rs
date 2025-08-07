@@ -95,6 +95,9 @@ enum Command {
         /// This URL is used to send OpenTelemetry traces to a remote collector. OpenTelemetry collector must be running and configured to accept traces at this endpoint. If not specified, tracing will be initialized without telemetry.
         #[arg(long, env = "OPENTELEMETRY_RECEIVER_URL_SERVER")]
         opentelemetry_receiver_url: Option<String>,
+        /// The ratio of traces to sample (f64). Samples all traces by default (equivalent to 1.0).
+        #[arg(long, env = "OPENTELEMETRY_TRACE_RATIO")]
+        opentelemetry_trace_ratio: Option<f64>,
     },
     Worker {
         /// The node id of the worker.
@@ -195,9 +198,13 @@ async fn main_inner() -> Result<(), BoxError> {
             mut registry_server,
             mut admin_server,
             opentelemetry_receiver_url,
+            opentelemetry_trace_ratio,
         } => {
             if let Some(url) = opentelemetry_receiver_url {
-                tracing_helpers::register_logger_with_telemetry(url)?;
+                tracing_helpers::register_logger_with_telemetry(
+                    url,
+                    opentelemetry_trace_ratio.unwrap_or(1.0),
+                )?;
             } else {
                 tracing_helpers::register_logger();
             }
