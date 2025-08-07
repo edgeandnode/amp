@@ -1,4 +1,4 @@
-use std::{pin::Pin, sync::Arc};
+use std::{collections::BTreeMap, sync::Arc};
 
 use common::{
     BlockNum, BoxError, SPECIAL_BLOCK_NUM,
@@ -21,8 +21,9 @@ use futures::{
     FutureExt, Stream, TryStreamExt as _,
     stream::{self, StreamExt},
 };
+use metadata_db::LocationId;
 use tokio::sync::{mpsc, watch};
-use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
+use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::task::AbortOnDropHandle;
 use tracing::instrument;
 
@@ -31,9 +32,6 @@ struct Watermarks {
     start: Watermark,
     end: Watermark,
 }
-
-type WatermarksStream =
-    Pin<Box<dyn Stream<Item = Result<Option<Watermarks>, BoxError>> + Send + Sync + 'static>>;
 
 /// Calculates the watermarks for the next batch of SQL execution. The result is based on the set
 /// of physical tables the query executes over and the sequence of segments already processed.
@@ -213,61 +211,49 @@ impl ExecutionWatermarks {
     }
 }
 
-/// Creates a stream of block range updates for the tables in the context.
-///
-/// `end_block` can be used to force the stream to end once a specific block number is reached.
-#[instrument(skip_all, err)]
-async fn watermarks_updates(
-    ctx: Arc<QueryContext>,
-    dataset_store: Arc<DatasetStore>,
-    multiplexer_handle: &NotificationMultiplexerHandle,
-) -> Result<WatermarksStream, BoxError> {
-    let tables = ctx.catalog().tables().to_vec();
+/// Awaits any update for tables in a query context catalog.
+struct TableUpdates {
+    subscriptions: BTreeMap<LocationId, watch::Receiver<()>>,
+    first_call: bool,
+}
 
-    // Set up change notifications
-    let mut subscriptions: Vec<watch::Receiver<()>> = Default::default();
-    for location in ctx.catalog().tables().iter().map(|t| t.location_id()) {
-        subscriptions.push(multiplexer_handle.subscribe(location).await);
+impl TableUpdates {
+    async fn new(ctx: &QueryContext, multiplexer_handle: &NotificationMultiplexerHandle) -> Self {
+        let mut subscriptions: BTreeMap<LocationId, watch::Receiver<()>> = Default::default();
+        for table in ctx.catalog().tables() {
+            let location = table.location_id();
+            subscriptions.insert(location, multiplexer_handle.subscribe(location).await);
+        }
+        Self {
+            subscriptions,
+            first_call: true,
+        }
     }
 
-    // Create the stream channel. This is unbounded because we never want to put backpressure on the
-    // PG notification queue.
-    let (tx, rx) = mpsc::unbounded_channel();
-
-    let network = tables.iter().map(|t| t.network()).next().unwrap();
-    let src_datasets = tables.iter().map(|t| t.dataset().name.as_str()).collect();
-    let blocks_table = resolve_blocks_table(&dataset_store, &src_datasets, network).await?;
-    let mut watermarks = ExecutionWatermarks {
-        tables,
-        // TODO: Set from client to resume a stream after dropping a connection.
-        prev_watermarks: None,
-        blocks_table,
-        dataset_store,
-        env: ctx.env.clone(),
-    };
-
-    tx.send(watermarks.next().await).unwrap();
-
-    // Spawn task to handle new ranges from notifications
-    tokio::spawn(async move {
-        loop {
-            let notifications = subscriptions
-                .iter_mut()
-                .map(|rx| Box::pin(rx.changed()))
-                .collect::<Vec<_>>();
-            let notification = futures::future::select_all(notifications);
-            if let (Ok(_), _, _) = notification.await {
-                let result = watermarks.next().await;
-                if tx.send(result).is_ok() {
-                    continue;
-                }
-            }
-            break;
+    async fn changed(&mut self) {
+        if self.first_call {
+            self.first_call = false;
+            return;
         }
-        tracing::warn!("watermarks stream ended");
-    });
 
-    Ok(Box::pin(UnboundedReceiverStream::new(rx)))
+        // Never return if there are no remaining subscriptions.
+        if self.subscriptions.is_empty() {
+            std::future::pending::<()>().await;
+        }
+
+        let notifications = self
+            .subscriptions
+            .iter_mut()
+            .map(|(location, rx)| {
+                Box::pin(async move { rx.changed().await.map_err(|_| *location) })
+            })
+            .collect::<Vec<_>>();
+        let result = futures::future::select_all(notifications).await.0;
+        if let Err(location) = result {
+            tracing::warn!("notifications ended for location {location}");
+            self.subscriptions.remove(&location);
+        }
+    }
 }
 
 /// Represents a message from the streaming query, which can be either data or a completion signal.
@@ -343,7 +329,8 @@ pub struct StreamingQuery {
     plan: LogicalPlan,
     start_block: BlockNum,
     end_block: Option<BlockNum>,
-    watermarks_stream: WatermarksStream,
+    table_updates: TableUpdates,
+    watermarks: ExecutionWatermarks,
     tx: mpsc::Sender<QueryMessage>,
     microbatch_max_interval: u64,
     preserve_block_num: bool,
@@ -386,15 +373,27 @@ impl StreamingQuery {
             plan
         };
 
-        let watermarks_stream =
-            watermarks_updates(ctx.clone(), dataset_store, multiplexer_handle).await?;
+        let tables: Vec<Arc<PhysicalTable>> = ctx.catalog().tables().iter().cloned().collect();
+        let network = tables.iter().map(|t| t.network()).next().unwrap();
+        let src_datasets = tables.iter().map(|t| t.dataset().name.as_str()).collect();
+        let blocks_table = resolve_blocks_table(&dataset_store, &src_datasets, network).await?;
+        let watermarks = ExecutionWatermarks {
+            tables,
+            // TODO: Set from client to resume a stream after dropping a connection.
+            prev_watermarks: None,
+            blocks_table,
+            dataset_store,
+            env: ctx.env.clone(),
+        };
+        let table_updates = TableUpdates::new(&ctx, multiplexer_handle).await;
         let streaming_query = Self {
             ctx,
             plan,
             tx,
             start_block,
             end_block,
-            watermarks_stream,
+            table_updates,
+            watermarks,
             microbatch_max_interval,
             preserve_block_num,
         };
@@ -418,11 +417,8 @@ impl StreamingQuery {
         loop {
             // Get the next execution range
             let (start, end) = {
-                let Some(watermarks) = self.watermarks_stream.next().await else {
-                    // Stream ended
-                    return Ok(());
-                };
-                let Some(watermarks) = watermarks? else {
+                self.table_updates.changed().await;
+                let Some(watermarks) = self.watermarks.next().await? else {
                     // Tables seem empty, lets wait for some data
                     continue;
                 };
