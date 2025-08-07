@@ -155,9 +155,7 @@ impl PhysicalTable {
             .await?;
 
         if set_active {
-            metadata_db
-                .set_active_location(table_id, url.as_str())
-                .await?;
+            metadata_db.set_active_location(table_id, &url).await?;
         }
 
         let path = Path::from_url_path(url.path()).unwrap();
@@ -282,9 +280,7 @@ impl PhysicalTable {
             .register_location(*table_id, data_store.bucket(), prefix, url, false)
             .await?;
 
-        metadata_db
-            .set_active_location(*table_id, url.as_str())
-            .await?;
+        metadata_db.set_active_location(*table_id, &url).await?;
 
         let object_store = data_store.object_store();
         let mut file_stream = object_store.list(Some(&path));

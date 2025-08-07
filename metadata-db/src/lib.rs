@@ -1,27 +1,28 @@
 use std::{future::Future, sync::Arc, time::Duration};
 
 use futures::stream::{BoxStream, Stream};
-use sqlx::{
-    Executor, FromRow, Postgres,
-    postgres::{PgListener, PgNotification},
-};
+use sqlx::postgres::{PgListener, PgNotification};
 use thiserror::Error;
 use tokio::time::MissedTickBehavior;
 use tracing::instrument;
 use url::Url;
 
 mod conn;
+mod locations;
 #[cfg(feature = "temp-db")]
 pub mod temp;
-pub mod workers;
+mod workers;
 
 use self::conn::{DbConn, DbConnPool};
 #[cfg(feature = "temp-db")]
 pub use self::temp::{KEEP_TEMP_DIRS, temp_metadata_db};
-pub use self::workers::{
-    WorkerNodeId,
-    events::{JobNotifAction, JobNotifListener, JobNotifRecvError, JobNotification},
-    jobs::{Job, JobId, JobStatus, JobStatusUpdateError, JobWithDetails},
+pub use self::{
+    locations::{Location, LocationId},
+    workers::{
+        Worker, WorkerNodeId,
+        events::{JobNotifAction, JobNotifListener, JobNotifRecvError, JobNotification},
+        jobs::{Job, JobId, JobStatus, JobStatusUpdateError, JobWithDetails},
+    },
 };
 
 /// Frequency on which to send a heartbeat.
@@ -33,11 +34,9 @@ pub const DEFAULT_DEAD_WORKER_INTERVAL: Duration = Duration::from_secs(5);
 
 /// Row ids, always non-negative.
 pub type FileId = i64;
-pub type LocationId = i64;
-pub type JobDatabaseId = i64;
 pub type FooterBytes = Vec<u8>;
 
-#[derive(Debug, FromRow)]
+#[derive(Debug, sqlx::FromRow)]
 pub struct FileMetadataRow {
     /// file_metadata.id
     pub id: FileId,
@@ -55,19 +54,6 @@ pub struct FileMetadataRow {
     pub object_version: Option<String>,
     /// file_metadata.metadata
     pub metadata: serde_json::Value,
-}
-
-#[derive(Debug, Clone, sqlx::FromRow)]
-pub struct Location {
-    /// location.id
-    pub id: LocationId,
-    /// location.dataset
-    pub dataset: String,
-    /// location.tbl
-    pub tbl: String,
-    /// location.url
-    #[sqlx(try_from = "&'a str")]
-    pub url: Url,
 }
 
 #[derive(Error, Debug)]
@@ -253,10 +239,13 @@ impl MetadataDb {
         // successfully locked.
         let mut tx = self.pool.begin().await?;
 
+        // Register the job in the workers job queue
         let job_id = workers::jobs::register_job(&mut *tx, node_id, job_desc).await?;
 
-        lock_locations(&mut *tx, job_id, locations).await?;
+        // Lock the locations for this job by assigning the job ID as the writer
+        locations::assign_job_writer(&mut *tx, locations, job_id).await?;
 
+        // Notify the worker about the new job
         workers::events::notify(&mut *tx, JobNotification::start(node_id.to_owned(), job_id))
             .await?;
 
@@ -461,60 +450,15 @@ impl MetadataDb {
         path: &str,
         url: &Url,
         active: bool,
-    ) -> Result<LocationId, sqlx::Error> {
-        // An empty `dataset_version` is represented as an empty string in the DB.
-        let dataset_version = table.dataset_version.unwrap_or("");
-        let mut tx = self.pool.begin().await?;
-
-        let query = "
-            INSERT INTO locations (dataset, dataset_version, tbl, bucket, path, url, active)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
-            ON CONFLICT DO NOTHING;
-        ";
-
-        sqlx::query(query)
-            .bind(table.dataset)
-            .bind(dataset_version)
-            .bind(table.table)
-            .bind(bucket)
-            .bind(path)
-            .bind(url.to_string())
-            .bind(active)
-            .execute(&mut *tx)
-            .await?;
-
-        let query = "
-            SELECT id
-            FROM locations
-            WHERE dataset = $1 AND dataset_version = $2 AND tbl = $3 AND url = $4
-        ";
-
-        let location_id: LocationId = sqlx::query_scalar(query)
-            .bind(table.dataset)
-            .bind(dataset_version)
-            .bind(table.table)
-            .bind(url.to_string())
-            .fetch_one(&mut *tx)
-            .await?;
-
-        tx.commit().await?;
-        Ok(location_id)
+    ) -> Result<LocationId, Error> {
+        Ok(locations::insert(&*self.pool, table, bucket, path, url, active).await?)
     }
 
+    /// Find a location ID by its URL.
+    ///
+    /// Returns the location ID if a location with the given URL exists, or None if not found.
     pub async fn url_to_location_id(&self, url: &Url) -> Result<Option<LocationId>, Error> {
-        let query = "
-            SELECT id
-            FROM locations
-            WHERE url = $1
-            LIMIT 1
-        ";
-
-        let location_id: Option<LocationId> = sqlx::query_scalar(query)
-            .bind(url.to_string())
-            .fetch_optional(&*self.pool)
-            .await?;
-
-        Ok(location_id)
+        Ok(locations::url_to_location_id(&*self.pool, url).await?)
     }
 
     /// Returns the active location. The active location has meaning on both the write and read side:
@@ -525,113 +469,51 @@ impl MetadataDb {
         &self,
         table: TableId<'_>,
     ) -> Result<Option<(Url, LocationId)>, Error> {
-        let TableId {
-            dataset,
-            dataset_version,
-            table,
-        } = table;
-        let dataset_version = dataset_version.unwrap_or("");
+        let active_locations = locations::get_active_by_table_id(&*self.pool, table).await?;
 
-        let query = "
-        SELECT url, id
-        FROM locations
-        WHERE dataset = $1 AND dataset_version = $2 AND tbl = $3 AND active
-        ";
-
-        let tuples: Vec<(String, LocationId)> = sqlx::query_as(query)
-            .bind(dataset)
-            .bind(dataset_version)
-            .bind(table)
-            .fetch_all(&*self.pool)
-            .await?;
-
-        let mut urls = tuples
-            .into_iter()
-            .map(|(url, id)| Ok((Url::parse(&url)?, id)))
-            .collect::<Result<Vec<_>, Error>>()?;
-
-        match urls.len() {
-            0 => Ok(None),
-            1 => Ok(Some(urls.pop().unwrap())),
-
-            // Currently unreachable thanks to DB constraints.
-            _ => Err(Error::MultipleActiveLocations(
-                dataset.to_string(),
-                dataset_version.to_string(),
-                table.to_string(),
-                urls.iter().map(|(url, _)| url.to_string()).collect(),
+        match active_locations.as_slice() {
+            [] => Ok(None),
+            [(url, location_id)] => {
+                let url = Url::parse(url)?;
+                Ok(Some((url, *location_id)))
+            }
+            multiple => Err(Error::MultipleActiveLocations(
+                table.dataset.to_string(),
+                table.dataset_version.unwrap_or("").to_string(),
+                table.table.to_string(),
+                multiple.iter().map(|(url, _)| url.clone()).collect(),
             )),
         }
     }
 
-    /// Set a location as the active materialization for a table. If there was a previously active
-    /// location, it will be made inactive in the same transaction, achieving an atomic switch.
+    /// Set a location as the active materialization for a table.
+    ///
+    /// If there was a previously active location, it will be made inactive in the
+    /// same transaction, achieving an atomic switch.
     #[instrument(skip(self), err)]
     pub async fn set_active_location(
         &self,
         table: TableId<'_>,
-        location: &str,
+        location: &Url,
     ) -> Result<(), Error> {
-        let TableId {
-            dataset,
-            dataset_version,
-            table,
-        } = table;
-        let dataset_version = dataset_version.unwrap_or("");
-
-        // Transactionally update the active location.
         let mut tx = self.pool.begin().await?;
-
-        // First, set the existing active location to inactive.
-        let query = "
-        UPDATE locations
-        SET active = false
-        WHERE dataset = $1 AND dataset_version = $2 AND tbl = $3 AND active
-        ";
-
-        sqlx::query(query)
-            .bind(dataset)
-            .bind(dataset_version)
-            .bind(table)
-            .execute(&mut *tx)
-            .await?;
-
-        // Then, set the new active location to active.
-        let query = "
-        UPDATE locations
-        SET active = true
-        WHERE dataset = $1 AND dataset_version = $2 AND tbl = $3 AND url = $4
-        ";
-
-        sqlx::query(query)
-            .bind(dataset)
-            .bind(dataset_version)
-            .bind(table)
-            .bind(location)
-            .execute(&mut *tx)
-            .await?;
-
+        locations::mark_inactive_by_table_id(&mut *tx, table).await?;
+        locations::mark_active_by_url(&mut *tx, table, location).await?;
         tx.commit().await?;
-
         Ok(())
     }
 
-    /// Returns tuples of `(location_id, table_name, url)`.
-    pub async fn output_locations(&self, id: &JobId) -> Result<Vec<Location>, Error> {
-        let query = indoc::indoc! {r#"
-            SELECT id, dataset, tbl, url
-            FROM locations
-            WHERE writer = $1
-        "#};
-
-        let tuples = sqlx::query_as(query)
-            .bind(id)
-            .fetch_all(&*self.pool)
-            .await?;
-
-        Ok(tuples)
+    /// Returns locations that were written by a specific job.
+    ///
+    /// This method queries the `locations` table for all locations where the given job
+    /// was assigned as the writer, converting them to [`Location`] type.
+    pub async fn output_locations(&self, id: JobId) -> Result<Vec<Location>, Error> {
+        Ok(locations::get_by_job_id(&*self.pool, id).await?)
     }
+}
 
+/// File metadata-related API
+impl MetadataDb {
     pub fn stream_file_metadata(
         &self,
         location_id: LocationId,
@@ -749,19 +631,4 @@ impl MetadataDb {
         channel.listen(channel_name).await.map_err(Error::DbError)?;
         Ok(channel.into_stream())
     }
-}
-
-#[instrument(skip(executor), err)]
-async fn lock_locations(
-    executor: impl Executor<'_, Database = Postgres>,
-    job_id: JobId,
-    locations: &[LocationId],
-) -> Result<(), Error> {
-    let query = "UPDATE locations SET writer = $1 WHERE id = ANY($2)";
-    sqlx::query(query)
-        .bind(job_id)
-        .bind(locations)
-        .execute(executor)
-        .await?;
-    Ok(())
 }

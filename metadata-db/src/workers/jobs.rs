@@ -33,31 +33,6 @@ where
     Ok(res)
 }
 
-/// Update the status of a job
-///
-/// This function will set the job status to the given [`JobStatus`] and update the
-/// `updated_at` timestamp.
-pub async fn update_job_status<'c, E>(
-    exe: E,
-    id: &JobId,
-    status: JobStatus,
-) -> Result<(), sqlx::Error>
-where
-    E: sqlx::Executor<'c, Database = sqlx::Postgres>,
-{
-    let query = indoc::indoc! {r#"
-        UPDATE jobs
-        SET status = $1, updated_at = (timezone('UTC', now()))
-        WHERE id = $2
-    "#};
-    sqlx::query(query)
-        .bind(status)
-        .bind(id)
-        .execute(exe)
-        .await?;
-    Ok(())
-}
-
 /// Update the status of a job with multiple possible expected original states
 ///
 /// This function will only update the job status if the job exists and currently has
