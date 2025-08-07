@@ -34,7 +34,7 @@ impl Job {
         job_id: JobId,
         job_desc: JobDesc,
     ) -> Result<Job, BoxError> {
-        let output_locations = ctx.metadata_db.output_locations(&job_id).await?;
+        let output_locations = ctx.metadata_db.output_locations(job_id).await?;
         match job_desc {
             JobDesc::Dump { end_block } => {
                 let mut tables = vec![];
