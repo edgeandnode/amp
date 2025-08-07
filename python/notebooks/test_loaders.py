@@ -1,7 +1,7 @@
 import marimo
 
-__generated_with = '0.11.31'
-app = marimo.App(width='full')
+__generated_with = "0.14.16"
+app = marimo.App(width="full")
 
 
 @app.cell(hide_code=True)
@@ -192,6 +192,75 @@ def _(a):
 @app.cell
 def _(a):
     a.count_rows()
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""# Iceberg""")
+    return
+
+
+@app.cell
+def _(client):
+    # Configure Iceberg with local SQLite catalog
+    client.configure_connection(
+        'my_iceberg', 
+        'iceberg', 
+        {
+            'catalog_config': {
+                'type': 'sql',
+                'uri': 'sqlite:///./.data/iceberg/catalog.db',
+                'warehouse': './.data/iceberg/warehouse'
+            },
+            'namespace': 'nozzle_test',
+            'create_namespace': True,
+            'create_table': True,
+            'schema_evolution': True,
+            'batch_size': 5000
+        }
+    )
+    return
+
+
+@app.cell
+def _(client):
+    # Load data to Iceberg table
+    iceberg_load_results = client.sql('select * from eth_firehose.logs limit 5000').load(
+        'my_iceberg',
+        'test_logs',
+        create_table=True,
+    )
+    return (iceberg_load_results,)
+
+
+@app.cell
+def _(iceberg_load_results):
+    # Check the Iceberg loading results
+    for i_result in iceberg_load_results:
+        print(f'Iceberg batch: {i_result.rows_loaded} rows loaded, execution time: {i_result.duration:.2f}s')
+        if hasattr(i_result, 'metadata') and i_result.metadata:
+            print(f'Table location: {i_result.metadata.get("table_location", "N/A")}')
+            print(f'Schema: {i_result.metadata.get("schema_summary", "N/A")}')
+    return
+
+
+@app.cell
+def _():
+    # Query the Iceberg table
+    from pyiceberg.catalog import load_catalog
+
+    iceberg_catalog = load_catalog(
+        type='sql',
+        uri='sqlite:///./.data/iceberg/catalog.db',
+        warehouse='./.data/iceberg/warehouse'
+    )
+
+    iceberg_table = iceberg_catalog.load_table('nozzle_test.test_logs')
+    result_table = iceberg_table.scan().to_arrow()
+
+    print(f"Rows: {len(result_table)}")
+    result_table.slice(0, 10)
     return
 
 
