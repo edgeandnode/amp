@@ -318,15 +318,10 @@ async fn dump_sql_query(
             QueryMessage::Data(batch) => {
                 writer.write(&batch).await?;
             }
-            QueryMessage::Completed(microbatch_end) => {
+            QueryMessage::Completed(microbatch_range) => {
+                let microbatch_end = microbatch_range.end();
                 // Close current file and commit metadata
-                let chunk_range = BlockRange {
-                    numbers: microbatch_start..=microbatch_end,
-                    network: range.network.clone(),
-                    hash: range.hash,
-                    prev_hash: range.prev_hash,
-                };
-                let (parquet_meta, object_meta, footer) = writer.close(chunk_range).await?;
+                let (parquet_meta, object_meta, footer) = writer.close(microbatch_range).await?;
                 commit_metadata(
                     &dataset_store.metadata_db,
                     parquet_meta,
