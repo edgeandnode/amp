@@ -20,7 +20,7 @@ import { createServer } from "node:http"
 import { fileURLToPath } from "node:url"
 import open, { type AppName, apps } from "open"
 
-import { FoundryQueryableEventResolver } from "../../Studio/index.js"
+import { FoundryQueryableEventResolver, Model as StudioModel } from "../../Studio/index.js"
 
 class NozzleStudioApiRouter extends HttpApiGroup.make("NozzleStudioApi").add(
   HttpApiEndpoint.get("QueryableEventStream")`/events/stream`
@@ -37,6 +37,15 @@ class NozzleStudioApiRouter extends HttpApiGroup.make("NozzleStudioApi").add(
       description:
         "Listens to file changes on the smart contracts/abis and emits updates of the available events to query",
     })),
+).add(
+  HttpApiEndpoint.get("Metadata")`/metadata`.addSuccess(StudioModel.DatasetMetadata).annotateContext(
+    OpenApi.annotations({
+      title: "Metadata about the nozzle dataset",
+      version: "v1",
+      description:
+        "Provides metadata about how to query the dataset. Things like metadata columns and the event source to query",
+    }),
+  ),
 ).prefix("/v1") {}
 
 class NozzleStudioApi extends HttpApi.make("NozzleStudioApi").add(NozzleStudioApiRouter).prefix("/api") {}
@@ -45,25 +54,27 @@ const NozzleStudioApiLive = HttpApiBuilder.group(
   NozzleStudioApi,
   "NozzleStudioApi",
   (handlers) =>
-    handlers.handle(
-      "QueryableEventStream",
-      () =>
-        Effect.gen(function*() {
-          const resolver = yield* FoundryQueryableEventResolver.FoundryQueryableEventResolver
+    Effect.gen(function*() {
+      const resolver = yield* FoundryQueryableEventResolver.FoundryQueryableEventResolver
 
-          const stream = yield* resolver.queryableEventsStream().pipe(
-            Effect.catchAll(() => new HttpApiError.InternalServerError()),
-          )
+      return handlers.handle(
+        "QueryableEventStream",
+        () =>
+          Effect.gen(function*() {
+            const stream = yield* resolver.queryableEventsStream().pipe(
+              Effect.catchAll(() => new HttpApiError.InternalServerError()),
+            )
 
-          return yield* HttpServerResponse.stream(stream, { contentType: "text/event-stream" }).pipe(
-            HttpServerResponse.setHeaders({
-              "Content-Type": "text/event-stream",
-              "Cache-Control": "no-cache",
-              "Connection": "keep-alive",
-            }),
-          )
-        }),
-    ),
+            return yield* HttpServerResponse.stream(stream, { contentType: "text/event-stream" }).pipe(
+              HttpServerResponse.setHeaders({
+                "Content-Type": "text/event-stream",
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+              }),
+            )
+          }),
+      ).handle("Metadata", () => resolver.metadata())
+    }),
 )
 const NozzleStudioApiLayer = Layer.merge(HttpApiBuilder.middlewareCors(), HttpApiScalar.layer({ path: "/api/docs" }))
   .pipe(
@@ -75,7 +86,7 @@ const ApiLive = HttpApiBuilder.httpApp.pipe(
   Effect.provide(Layer.mergeAll(NozzleStudioApiLayer, HttpApiBuilder.Router.Live, HttpApiBuilder.Middleware.layer)),
 )
 
-const DatasetWorksFileRouter = Effect.gen(function*() {
+const StudioFileRouter = Effect.gen(function*() {
   const path = yield* Path.Path
 
   const __filename = fileURLToPath(import.meta.url)
@@ -88,14 +99,14 @@ const DatasetWorksFileRouter = Effect.gen(function*() {
    * @todo clean this up and figure out a better way to derive
    */
   const isLocal = EffectString.endsWith("commands")(__dirname)
-  const datasetWorksClientDist = isLocal
+  const studioClientDist = isLocal
     ? path.resolve(__dirname, "..", "..", "..", "..", "studio", "dist")
     : path.resolve(__dirname, "studio", "dist")
 
   return HttpRouter.empty.pipe(
     HttpRouter.get(
       "/",
-      HttpServerResponse.file(path.join(datasetWorksClientDist, "index.html")).pipe(
+      HttpServerResponse.file(path.join(studioClientDist, "index.html")).pipe(
         Effect.orElse(() => HttpServerResponse.empty({ status: 404 })),
       ),
     ),
@@ -108,7 +119,7 @@ const DatasetWorksFileRouter = Effect.gen(function*() {
           return HttpServerResponse.empty({ status: 404 })
         }
 
-        const assets = path.join(datasetWorksClientDist, "assets")
+        const assets = path.join(studioClientDist, "assets")
         const normalized = path.normalize(path.join(assets, ...file.value.split("/")))
         if (!normalized.startsWith(assets)) {
           return HttpServerResponse.empty({ status: 404 })
@@ -122,7 +133,7 @@ const DatasetWorksFileRouter = Effect.gen(function*() {
 
 const Server = Effect.all({
   api: ApiLive,
-  files: DatasetWorksFileRouter,
+  files: StudioFileRouter,
 }).pipe(
   Effect.map(({ api, files }) =>
     HttpRouter.empty.pipe(HttpRouter.mount("/", files), HttpRouter.mountApp("/api", api, { includePrefix: true }))

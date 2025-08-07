@@ -1,6 +1,5 @@
 {
-  "extends": "../tsconfig.base.json",
-
+  "extends": "../tsconfig.base.jsonc",
   "include": [
     "**/*.ts",
     "**/*.tsx",
@@ -8,7 +7,6 @@
     "prettier.config.js",
     "vite.config.js"
   ],
-
   "compilerOptions": {
     "target": "ES2022",
     "jsx": "react-jsx",
@@ -30,6 +28,7 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true,
     "composite": false,
+    "declarationMap": false,
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"]

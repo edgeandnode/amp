@@ -14,53 +14,59 @@ const FoundryTomlConfig = Schema.Struct({
       libs: Schema.Array(Schema.NonEmptyTrimmedString),
       test: Schema.optional(Schema.NullishOr(Schema.NonEmptyTrimmedString)),
       script: Schema.optional(Schema.NullishOr(Schema.NonEmptyTrimmedString)),
-      cache_path: Schema.optional(Schema.NullishOr(Schema.NonEmptyTrimmedString)),
+      cache_path: Schema.optional(
+        Schema.NullishOr(Schema.NonEmptyTrimmedString),
+      ),
     }),
   }),
 })
 type FoundryTomlConfig = typeof FoundryTomlConfig.Type
 const FoundryTomlConfigDecoder = Schema.decodeUnknownEither(FoundryTomlConfig)
 
-class FoundryOutputAbiFunction
-  extends Schema.Class<FoundryOutputAbiFunction>("Nozzle/cli/studio/models/FoundryOutputAbiFunction")({
-    type: Schema.Literal("function"),
-    name: Schema.NonEmptyTrimmedString,
-    inputs: Schema.Array(
-      Schema.Struct({
-        name: Schema.String,
-        type: Schema.String,
-        internalType: Schema.String,
-      }),
-    ),
-    outputs: Schema.Array(
-      Schema.Struct({
-        name: Schema.String,
-        type: Schema.String,
-        internalType: Schema.String,
-      }),
-    ),
-    stateMutability: Schema.String,
-  })
-{}
-class FoundryOutputAbiEvent
-  extends Schema.Class<FoundryOutputAbiEvent>("Nozzle/cli/studio/models/FoundryOutputAbiEvent")({
-    type: Schema.Literal("event"),
-    name: Schema.NonEmptyTrimmedString,
-    inputs: Schema.Array(
-      Schema.Struct({
-        name: Schema.NonEmptyTrimmedString,
-        type: Schema.NonEmptyTrimmedString,
-        indexed: Schema.Boolean,
-        internalType: Schema.String,
-      }),
-    ),
-    anonymous: Schema.Boolean,
-  })
-{
+class FoundryOutputAbiFunction extends Schema.Class<FoundryOutputAbiFunction>(
+  "Nozzle/cli/studio/models/FoundryOutputAbiFunction",
+)({
+  type: Schema.Literal("function"),
+  name: Schema.NonEmptyTrimmedString,
+  inputs: Schema.Array(
+    Schema.Struct({
+      name: Schema.String,
+      type: Schema.String,
+      internalType: Schema.String,
+    }),
+  ),
+  outputs: Schema.Array(
+    Schema.Struct({
+      name: Schema.String,
+      type: Schema.String,
+      internalType: Schema.String,
+    }),
+  ),
+  stateMutability: Schema.String,
+}) {}
+class FoundryOutputAbiEvent extends Schema.Class<FoundryOutputAbiEvent>(
+  "Nozzle/cli/studio/models/FoundryOutputAbiEvent",
+)({
+  type: Schema.Literal("event"),
+  name: Schema.NonEmptyTrimmedString,
+  inputs: Schema.Array(
+    Schema.Struct({
+      name: Schema.NonEmptyTrimmedString,
+      type: Schema.NonEmptyTrimmedString,
+      indexed: Schema.Boolean,
+      internalType: Schema.String,
+    }),
+  ),
+  anonymous: Schema.Boolean,
+}) {
   get signature(): string {
     const params = pipe(
       this.inputs,
-      Array.map((input) => input.indexed ? `${input.type} indexed ${input.name}` : `${input.type} ${input.name}`),
+      Array.map((input) =>
+        input.indexed
+          ? `${input.type} indexed ${input.name}`
+          : `${input.type} ${input.name}`
+      ),
       Array.join(", "),
     )
     return `${this.name}(${params})`
@@ -72,7 +78,9 @@ const FoundOuputAbiObject = Schema.Union(
   // handle unknown types
   Schema.Record({ key: Schema.String, value: Schema.Any }),
 )
-class FoundryOutput extends Schema.Class<FoundryOutput>("Nozzle/cli/studio/models/FoundryOutput")({
+class FoundryOutput extends Schema.Class<FoundryOutput>(
+  "Nozzle/cli/studio/models/FoundryOutput",
+)({
   abi: Schema.Array(FoundOuputAbiObject),
   // parse the metadata to get the contract source
   metadata: Schema.Struct({
@@ -102,7 +110,9 @@ class FoundryOutput extends Schema.Class<FoundryOutput>("Nozzle/cli/studio/model
     }),
   }),
 }) {}
-const FoundryOutputDecoder = Schema.decodeUnknownEither(Schema.parseJson(FoundryOutput))
+const FoundryOutputDecoder = Schema.decodeUnknownEither(
+  Schema.parseJson(FoundryOutput),
+)
 
 function abiOutputIsEvent(item: any): item is FoundryOutputAbiEvent {
   if (typeof item !== "object") {
@@ -115,8 +125,9 @@ function abiOutputIsEvent(item: any): item is FoundryOutputAbiEvent {
   return type === "event"
 }
 
-export class FoundryQueryableEventResolver
-  extends Effect.Service<FoundryQueryableEventResolver>()("Nozzle/studio/services/FoundryQueryableEventResolver", {
+export class FoundryQueryableEventResolver extends Effect.Service<FoundryQueryableEventResolver>()(
+  "Nozzle/studio/services/FoundryQueryableEventResolver",
+  {
     dependencies: [NodeFileSystem.layer],
     effect: Effect.gen(function*() {
       const fs = yield* FileSystem.FileSystem
@@ -126,8 +137,12 @@ export class FoundryQueryableEventResolver
        * Check if the directory the cli tool is being ran in has a foundry.toml config file.
        * If true, then the QueryableEvents will be resolved by introspecting the foundry output ABIs.
        */
-      const modeIsLocalFoundry = Effect.fnUntraced(function*(cwd: string = ".") {
-        return yield* fs.exists(path.resolve(cwd, "foundry.toml")).pipe(Effect.orElseSucceed(() => false))
+      const modeIsLocalFoundry = Effect.fnUntraced(function*(
+        cwd: string = ".",
+      ) {
+        return yield* fs
+          .exists(path.resolve(cwd, "foundry.toml"))
+          .pipe(Effect.orElseSucceed(() => false))
       })
       /**
        * If the cli is running in local foundy mode, this reads the foundry.toml config and parses it.
@@ -139,10 +154,12 @@ export class FoundryQueryableEventResolver
           if (!isLocalFoundry) {
             return Option.none<FoundryTomlConfig>()
           }
-          const config = yield* fs.readFileString(path.resolve(cwd, "foundry.toml")).pipe(
-            Effect.map((config) => Option.some(config)),
-            Effect.orElseSucceed(() => Option.none<string>()),
-          )
+          const config = yield* fs
+            .readFileString(path.resolve(cwd, "foundry.toml"))
+            .pipe(
+              Effect.map((config) => Option.some(config)),
+              Effect.orElseSucceed(() => Option.none<string>()),
+            )
 
           return Option.match(config, {
             onNone() {
@@ -203,11 +220,15 @@ export class FoundryQueryableEventResolver
        * @returns a stream of [QueryableEvent](./Model.js)
        */
       const currentEventsStream = (outpath: string) =>
-        Stream.fromIterableEffect(fs.readDirectory(outpath, { recursive: true })).pipe(
+        Stream.fromIterableEffect(
+          fs.readDirectory(outpath, { recursive: true }),
+        ).pipe(
           Stream.filter((filepath) => Utils.foundryOutputPathIncluded(filepath)),
           Stream.mapEffect((filepath) => decodeEventsFromAbi(outpath, filepath)),
           Stream.tapErrorCause((cause) =>
-            Console.error("failure deriving current events stream", { cause: Cause.pretty(cause) })
+            Console.error("failure deriving current events stream", {
+              cause: Cause.pretty(cause),
+            })
           ),
         )
       /**
@@ -222,7 +243,9 @@ export class FoundryQueryableEventResolver
           Stream.filter((filepath) => Utils.foundryOutputPathIncluded(filepath)),
           Stream.mapEffect((filepath) => decodeEventsFromAbi(outpath, filepath)),
           Stream.tapErrorCause((cause) =>
-            Console.error("failure deriving watch events stream", { cause: Cause.pretty(cause) })
+            Console.error("failure deriving watch events stream", {
+              cause: Cause.pretty(cause),
+            })
           ),
         )
 
@@ -238,7 +261,11 @@ export class FoundryQueryableEventResolver
           return currentEventsStream(outpath).pipe(
             Stream.concat(watchEventStreamUpdates(outpath)),
             Stream.filter((events) => Array.isNonEmptyArray(events)),
-            Stream.map((events) => Model.QueryableEventStream.make({ events })),
+            Stream.map((events) =>
+              Model.QueryableEventStream.make({
+                events,
+              })
+            ),
             Stream.map((stream) => {
               const jsonData = JSON.stringify(stream)
               const sseData = `data: ${jsonData}\n\n`
@@ -247,8 +274,24 @@ export class FoundryQueryableEventResolver
           )
         })
 
-      return { queryableEventsStream } as const
+      return {
+        queryableEventsStream,
+        metadata() {
+          return Effect.succeed(Model.DatasetMetadata.make({
+            metadata_columns: [
+              { name: "address", description: "The 0x address that invoked the transaction", dataType: "address" },
+              { name: "block_num", description: "The block # when the transaction occurred", dataType: "bigint" },
+              {
+                name: "timestamp",
+                description: "The timestamp, in unix-seconds, when the transaction occurred",
+                dataType: "bigint",
+              },
+            ],
+            source: "anvil.logs",
+          }))
+        },
+      } as const
     }),
-  })
-{}
+  },
+) {}
 export const layer = FoundryQueryableEventResolver.Default

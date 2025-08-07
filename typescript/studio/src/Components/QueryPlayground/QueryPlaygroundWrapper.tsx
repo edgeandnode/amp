@@ -2,11 +2,33 @@
 
 import { Tabs } from "@base-ui-components/react/tabs"
 import { PlusIcon } from "@phosphor-icons/react"
+import { createFormHook } from "@tanstack/react-form"
+import { Schema } from "effect"
 import { useState } from "react"
 
 import { useOSQuery } from "../../hooks/useOSQuery"
+import { fieldContext, formContext } from "../Form/form"
 
 import { DatasetQueryResultTable } from "./DatasetQueryResultTable"
+import { Editor } from "./Editor"
+
+export const { useAppForm } = createFormHook({
+  fieldComponents: {
+    Editor,
+  },
+  formComponents: {},
+  fieldContext,
+  formContext,
+})
+
+const NozzleStudioQueryEditorForm = Schema.Struct({
+  editor: Schema.String,
+})
+type NozzleStudioQueryEditorForm = typeof NozzleStudioQueryEditorForm.Type
+
+const defaultValues: NozzleStudioQueryEditorForm = {
+  editor: "SELECT * FROM example.counts",
+}
 
 export function QueryPlaygroundWrapper() {
   const { data: os } = useOSQuery()
@@ -15,6 +37,15 @@ export function QueryPlaygroundWrapper() {
   const [activeTabIdx, setActiveTabIdx] = useState(0)
 
   const correctKey = os === "MacOS" ? "CMD" : "CTRL"
+
+  const form = useAppForm({
+    defaultValues,
+    validators: {
+      onChangeAsyncDebounceMs: 100,
+      onChange: Schema.standardSchemaV1(NozzleStudioQueryEditorForm),
+    },
+    async onSubmit({ formApi, value }) {},
+  })
 
   return (
     <div className="w-full h-full flex flex-col border border-white/10 rounded-lg divide-y divide-white/10">
@@ -52,7 +83,9 @@ export function QueryPlaygroundWrapper() {
             key={`queryPanel[${tab}:${idx}]`}
             className="w-full h-full overflow-hidden bg-slate-950 p-4"
           >
-            {tab}
+            <form.AppField name="editor">
+              {(field) => <field.Editor id="editor" />}
+            </form.AppField>
           </Tabs.Panel>
         ))}
       </Tabs.Root>

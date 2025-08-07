@@ -2,7 +2,7 @@
   "name": "nozzle-datasets",
   "private": true,
   "dependencies": {
-    "effect": "^3.16.16",
+    "effect": "^3.17.6",
     "nozzl": "link:../../typescript/nozzle"
   },
   "devDependencies": {

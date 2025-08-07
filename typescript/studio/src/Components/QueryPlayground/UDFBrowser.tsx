@@ -3,11 +3,11 @@
 import { Accordion } from "@base-ui-components/react/accordion"
 import { FolderIcon, FolderOpenIcon } from "@phosphor-icons/react"
 
-import { useUDFSuspenseQuery } from "./useUDFQuery"
+import { useUDFSuspenseQuery } from "../../hooks/useUDFQuery"
 
 /** @todo define way to add UDF to playground input */
-export type UDFProps = {}
-export function UDF() {
+export type UDFBrowserProps = {}
+export function UDFBrowser() {
   const { data: userDefinedFunctions } = useUDFSuspenseQuery()
 
   return (

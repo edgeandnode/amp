@@ -71,3 +71,31 @@ export class QueryableEventStream extends Schema.Class<QueryableEventStream>(
 )({
   events: Schema.Array(QueryableEvent),
 }) {}
+
+export class DatasetMetadata extends Schema.Class<DatasetMetadata>("Nozzle/studio/models/DatasetMetadata")({
+  metadata_columns: Schema.Array(Schema.Struct({
+    name: Schema.NonEmptyTrimmedString,
+    description: Schema.NullishOr(Schema.NonEmptyTrimmedString),
+    dataType: Schema.Literal("address", "bigint"),
+  })).annotations({
+    identifier: "QueryableEventStream.metadata_columns",
+    description:
+      "Default columns that come with the event source and are availabe on every table to query. They are data points parsed from the EVM call logs",
+    examples: [
+      [
+        { name: "address", description: "The 0x address that invoked the transaction", dataType: "address" },
+        { name: "block_num", description: "The block # when the transaction occurred", dataType: "bigint" },
+        {
+          name: "timestamp",
+          description: "The timestamp, in unix-seconds, when the transaction occurred",
+          dataType: "bigint",
+        },
+      ],
+    ],
+  }),
+  source: Schema.Literal("anvil.logs").annotations({
+    identifier: "QueryableEventStream.source",
+    description: "Defines the queryable source of the data. Ex: for foundry events, this is the anvil logs.",
+    examples: ["anvil.logs"],
+  }),
+}) {}

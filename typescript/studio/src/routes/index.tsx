@@ -1,17 +1,19 @@
 import { createFileRoute } from "@tanstack/react-router"
 
-import { SchemaBrowser } from "@/Components/QueryPlayground/SchemaBrowser"
-
+import { MetadataBrowser } from "../Components/QueryPlayground/MetadataBrowser"
 import { QueryPlaygroundWrapper } from "../Components/QueryPlayground/QueryPlaygroundWrapper"
-import { UDF } from "../Components/QueryPlayground/UDF"
-import { udfQueryOptions } from "../Components/QueryPlayground/useUDFQuery"
+import { SchemaBrowser } from "../Components/QueryPlayground/SchemaBrowser"
+import { UDFBrowser } from "../Components/QueryPlayground/UDFBrowser"
+import { metadataQueryOptions } from "../hooks/useMetadataQuery"
 import { osQueryOptions } from "../hooks/useOSQuery"
+import { udfQueryOptions } from "../hooks/useUDFQuery"
 
 export const Route = createFileRoute("/")({
   component: HomePage,
   async loader({ context }) {
     await context.queryClient.ensureQueryData(osQueryOptions)
     await context.queryClient.ensureQueryData(udfQueryOptions)
+    await context.queryClient.ensureQueryData(metadataQueryOptions)
   },
 })
 
@@ -23,7 +25,8 @@ function HomePage() {
       </div>
       <div className="h-full border-l border-white/10 flex flex-col gap-y-4 overflow-y-auto">
         <SchemaBrowser />
-        <UDF />
+        <MetadataBrowser />
+        <UDFBrowser />
       </div>
     </div>
   )
