@@ -55,6 +55,10 @@ impl ExecutionWatermarks {
     /// tables. The resulting range may overlap with previous ranges to re-execute over segments
     /// that have been reorganized out of the canonical chain.
     async fn next(&mut self) -> Result<Option<Watermarks>, BoxError> {
+        // In the context of this function there are 2 meanings of "canonical chain":
+        //   1. The canonical chain of a table.
+        //   2. The reference canonical chain of the blocks table for the network.
+
         let mut chains: Vec<Chain> = Default::default();
         for table in &self.tables {
             let Some(chain) = table.canonical_chain().await? else {
@@ -63,12 +67,24 @@ impl ExecutionWatermarks {
             chains.push(chain);
         }
 
+        // Use a single context for all queries against the blocks table. This is to keep a
+        // consistent reference chain within the scope of this function.
+        let ctx = {
+            let query = parse_sql(&format!(
+                "SELECT block_num, hash FROM {}",
+                self.blocks_table,
+            ))?;
+            self.dataset_store
+                .ctx_for_sql(&query, self.env.clone())
+                .await?
+        };
+
         // For each chain, collect the latest segment
         let mut latest_src_watermarks: Vec<Watermark> = Default::default();
         'chain_loop: for chain in &chains {
             for segment in chain.0.iter().rev() {
                 let watermark = segment.range.watermark();
-                if self.canonical_chain_contains(&watermark).await? {
+                if self.canonical_chain_contains(&ctx, &watermark).await? {
                     latest_src_watermarks.push(watermark);
                     continue 'chain_loop;
                 }
@@ -86,19 +102,19 @@ impl ExecutionWatermarks {
 
         let watermarks = match &self.prev_watermarks {
             None => {
-                let Some(start) = self.canonical_chain_start().await? else {
+                let Some(start) = self.canonical_chain_start(&ctx).await? else {
                     return Ok(None);
                 };
                 Watermarks { start, end }
             }
-            Some(previous) if self.canonical_chain_contains(&previous.end).await? => {
+            Some(previous) if self.canonical_chain_contains(&ctx, &previous.end).await? => {
                 let start_number = previous.end.number + 1;
-                let Some(start) = self.canonical_chain_watermark(start_number).await? else {
+                let Some(start) = self.canonical_chain_watermark(&ctx, start_number).await? else {
                     return Ok(None);
                 };
                 Watermarks { start, end }
             }
-            Some(previous) if self.canonical_chain_contains(&previous.start).await? => {
+            Some(previous) if self.canonical_chain_contains(&ctx, &previous.start).await? => {
                 // Reorg between previous start and end
                 let start = previous.start.clone();
                 Watermarks { start, end }
@@ -112,15 +128,15 @@ impl ExecutionWatermarks {
                     if previous.end.number > segment.range.end() {
                         continue;
                     }
-                    let segment_watermark = segment.range.watermark();
-                    if self.canonical_chain_contains(&segment_watermark).await? {
+                    let watermark = segment.range.watermark();
+                    if self.canonical_chain_contains(&ctx, &watermark).await? {
                         start = Some(segment.range.start());
                         break;
                     }
                 }
                 match start {
                     None => return Ok(None),
-                    Some(number) => match self.canonical_chain_watermark(number).await? {
+                    Some(number) => match self.canonical_chain_watermark(&ctx, number).await? {
                         None => return Ok(None),
                         Some(start) => Watermarks { start, end },
                     },
@@ -131,15 +147,14 @@ impl ExecutionWatermarks {
         Ok(Some(watermarks))
     }
 
-    async fn canonical_chain_start(&self) -> Result<Option<Watermark>, BoxError> {
+    async fn canonical_chain_start(
+        &self,
+        ctx: &QueryContext,
+    ) -> Result<Option<Watermark>, BoxError> {
         let query = parse_sql(&format!(
             "SELECT block_num, hash FROM {} ORDER BY block_num ASC LIMIT 1",
             self.blocks_table,
         ))?;
-        let ctx = self
-            .dataset_store
-            .ctx_for_sql(&query, self.env.clone())
-            .await?;
         let plan = ctx.plan_sql(query).await?;
         let results = ctx.execute_and_concat(plan).await?;
         assert!(results.num_rows() <= 1);
@@ -159,15 +174,15 @@ impl ExecutionWatermarks {
         Ok(Some(Watermark { number, hash }))
     }
 
-    async fn canonical_chain_contains(&self, watermark: &Watermark) -> Result<bool, BoxError> {
+    async fn canonical_chain_contains(
+        &self,
+        ctx: &QueryContext,
+        watermark: &Watermark,
+    ) -> Result<bool, BoxError> {
         let query = parse_sql(&format!(
             "SELECT 1 FROM {} WHERE block_num = {} AND hash = {}",
             self.blocks_table, watermark.number, watermark.hash,
         ))?;
-        let ctx = self
-            .dataset_store
-            .ctx_for_sql(&query, self.env.clone())
-            .await?;
         let plan = ctx.plan_sql(query).await?;
         let results = ctx.execute_and_concat(plan).await?;
         assert!(results.num_rows() <= 1);
@@ -176,16 +191,13 @@ impl ExecutionWatermarks {
 
     async fn canonical_chain_watermark(
         &self,
+        ctx: &QueryContext,
         number: BlockNum,
     ) -> Result<Option<Watermark>, BoxError> {
         let query = parse_sql(&format!(
             "SELECT hash FROM {} WHERE block_num = {}",
             self.blocks_table, number,
         ))?;
-        let ctx = self
-            .dataset_store
-            .ctx_for_sql(&query, self.env.clone())
-            .await?;
         let plan = ctx.plan_sql(query).await?;
         let results = ctx.execute_and_concat(plan).await?;
         assert!(results.num_rows() <= 1);
