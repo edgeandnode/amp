@@ -30,7 +30,7 @@ use crate::{
     metadata::{
         FileMetadata, nozzle_metadata_from_parquet_file,
         parquet::ParquetMeta,
-        segments::{Segment, canonical_chain, missing_ranges},
+        segments::{Chain, Segment, canonical_chain, missing_ranges},
     },
     store::{Store, infer_object_store},
 };
@@ -466,36 +466,8 @@ impl PhysicalTable {
     /// contiguous range of block numbers starting from the lowest start block. Ok(None) is
     /// returned if no block range has been synced.
     pub async fn synced_range(&self) -> Result<Option<RangeInclusive<BlockNum>>, BoxError> {
-        let chain = self.segments().await.map(canonical_chain)?;
-
-        let location = self
-            .metadata_db
-            .get_location_by_id(self.location_id)
-            .await?
-            // A location should always exist for a physical table.
-            .ok_or_else(|| {
-                DataFusionError::Internal(format!(
-                    "Location with id {} not found",
-                    self.location_id
-                ))
-            })?;
-
-        let location_start_block = location.start_block;
-
-        if let Some(chain) = chain {
-            if chain.start() as i64 == location_start_block {
-                Ok(Some(chain.start()..=chain.end()))
-            } else {
-                Ok(None)
-            }
-        } else {
-            Ok(None)
-        }
-    }
-
-    /// Return the most recent block number that has been synced for this table.
-    pub async fn watermark(&self) -> Result<Option<BlockNum>, BoxError> {
-        Ok(self.synced_range().await?.map(|range| *range.end()))
+        let chain = self.canonical_chain().await?;
+        Ok(chain.map(|c| c.start()..=c.end()))
     }
 
     pub async fn missing_ranges(
@@ -504,6 +476,10 @@ impl PhysicalTable {
     ) -> Result<Vec<RangeInclusive<BlockNum>>, BoxError> {
         let segments = self.segments().await?;
         Ok(missing_ranges(segments, desired))
+    }
+
+    pub async fn canonical_chain(&self) -> Result<Option<Chain>, BoxError> {
+        self.segments().await.map(canonical_chain)
     }
 
     async fn segments(&self) -> Result<Vec<Segment>, BoxError> {
@@ -558,11 +534,11 @@ impl PhysicalTable {
         &self,
         ctx: &dyn Session,
     ) -> DataFusionResult<BTreeMap<BlockNum, PartitionedFile>> {
-        let mut canonical_segments = self
-            .segments()
+        let canonical_chain = self
+            .canonical_chain()
             .await
-            .map(|segments| canonical_chain(segments).map(|c| c.0).unwrap_or_default())
             .map_err(DataFusionError::from)?;
+        let mut canonical_segments = canonical_chain.map(|c| c.0).unwrap_or_default();
         let mut partitioned_files: BTreeMap<BlockNum, PartitionedFile> = Default::default();
         while !canonical_segments.is_empty() {
             let batch_len = usize::min(

@@ -1,4 +1,4 @@
-use common::{BoxError, arrow::json};
+use common::BoxError;
 use fs_err as fs;
 use serde::Deserialize;
 
@@ -66,18 +66,8 @@ pub struct StreamTakeStep {
 
 impl StreamTakeStep {
     pub async fn run(&self, client: &mut TestClient) -> Result<(), BoxError> {
-        let actual_result = {
-            let batch = client.take_from_stream(&self.stream, self.take).await;
-
-            let mut buf = Vec::new();
-            let mut writer = json::ArrayWriter::new(&mut buf);
-            writer.write(&batch?)?;
-            writer.finish()?;
-            Ok(serde_json::from_slice(&buf)?)
-        };
-
-        self.results.assert_eq(actual_result)?;
-        Ok(())
+        let actual_result = client.take_from_stream(&self.stream, self.take).await;
+        self.results.assert_eq(actual_result)
     }
 }
 

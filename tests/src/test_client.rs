@@ -89,12 +89,16 @@ impl TestClient {
         &mut self,
         name: &str,
         n: usize,
-    ) -> Result<RecordBatch, BoxError> {
-        if let Some(stream) = self.streams.get_mut(name) {
-            stream.take(n).await
-        } else {
-            Err(Box::from(format!("Stream \"{name}\" not found")))
-        }
+    ) -> Result<serde_json::Value, BoxError> {
+        let Some(stream) = self.streams.get_mut(name) else {
+            return Err(Box::from(format!("Stream \"{name}\" not found")));
+        };
+        let mut buf = Vec::new();
+        let mut writer = common::arrow::json::ArrayWriter::new(&mut buf);
+        let batch = stream.take(n).await?;
+        writer.write(&batch)?;
+        writer.finish()?;
+        Ok(serde_json::from_slice(&buf)?)
     }
 }
 

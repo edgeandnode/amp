@@ -48,15 +48,9 @@ pub struct FileDescriptorProto {
     /// The supported values are "proto2", "proto3", and "editions".
     ///
     /// If `edition` is present, this value must be "editions".
-    /// WARNING: This field should only be used by protobuf plugins or special
-    /// cases like the proto compiler. Other uses are discouraged and
-    /// developers should rely on the protoreflect APIs for their client language.
     #[prost(string, optional, tag = "12")]
     pub syntax: ::core::option::Option<::prost::alloc::string::String>,
     /// The edition of the proto file.
-    /// WARNING: This field should only be used by protobuf plugins or special
-    /// cases like the proto compiler. Other uses are discouraged and
-    /// developers should rely on the protoreflect APIs for their client language.
     #[prost(enumeration = "Edition", optional, tag = "14")]
     pub edition: ::core::option::Option<i32>,
 }
@@ -627,9 +621,6 @@ pub struct FileOptions {
     #[prost(string, optional, tag = "45")]
     pub ruby_package: ::core::option::Option<::prost::alloc::string::String>,
     /// Any features defined in the specific edition.
-    /// WARNING: This field should only be used by protobuf plugins or special
-    /// cases like the proto compiler. Other uses are discouraged and
-    /// developers should rely on the protoreflect APIs for their client language.
     #[prost(message, optional, tag = "50")]
     pub features: ::core::option::Option<FeatureSet>,
     /// The parser stores options it doesn't recognize here.
@@ -757,9 +748,6 @@ pub struct MessageOptions {
     #[prost(bool, optional, tag = "11")]
     pub deprecated_legacy_json_field_conflicts: ::core::option::Option<bool>,
     /// Any features defined in the specific edition.
-    /// WARNING: This field should only be used by protobuf plugins or special
-    /// cases like the proto compiler. Other uses are discouraged and
-    /// developers should rely on the protoreflect APIs for their client language.
     #[prost(message, optional, tag = "12")]
     pub features: ::core::option::Option<FeatureSet>,
     /// The parser stores options it doesn't recognize here. See above.
@@ -864,9 +852,6 @@ pub struct FieldOptions {
     #[prost(message, repeated, tag = "20")]
     pub edition_defaults: ::prost::alloc::vec::Vec<field_options::EditionDefault>,
     /// Any features defined in the specific edition.
-    /// WARNING: This field should only be used by protobuf plugins or special
-    /// cases like the proto compiler. Other uses are discouraged and
-    /// developers should rely on the protoreflect APIs for their client language.
     #[prost(message, optional, tag = "21")]
     pub features: ::core::option::Option<FeatureSet>,
     #[prost(message, optional, tag = "22")]
@@ -1109,9 +1094,6 @@ pub mod field_options {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OneofOptions {
     /// Any features defined in the specific edition.
-    /// WARNING: This field should only be used by protobuf plugins or special
-    /// cases like the proto compiler. Other uses are discouraged and
-    /// developers should rely on the protoreflect APIs for their client language.
     #[prost(message, optional, tag = "1")]
     pub features: ::core::option::Option<FeatureSet>,
     /// The parser stores options it doesn't recognize here. See above.
@@ -1141,9 +1123,6 @@ pub struct EnumOptions {
     #[prost(bool, optional, tag = "6")]
     pub deprecated_legacy_json_field_conflicts: ::core::option::Option<bool>,
     /// Any features defined in the specific edition.
-    /// WARNING: This field should only be used by protobuf plugins or special
-    /// cases like the proto compiler. Other uses are discouraged and
-    /// developers should rely on the protoreflect APIs for their client language.
     #[prost(message, optional, tag = "7")]
     pub features: ::core::option::Option<FeatureSet>,
     /// The parser stores options it doesn't recognize here. See above.
@@ -1160,9 +1139,6 @@ pub struct EnumValueOptions {
     #[prost(bool, optional, tag = "1", default = "false")]
     pub deprecated: ::core::option::Option<bool>,
     /// Any features defined in the specific edition.
-    /// WARNING: This field should only be used by protobuf plugins or special
-    /// cases like the proto compiler. Other uses are discouraged and
-    /// developers should rely on the protoreflect APIs for their client language.
     #[prost(message, optional, tag = "2")]
     pub features: ::core::option::Option<FeatureSet>,
     /// Indicate that fields annotated with this enum value should not be printed
@@ -1181,9 +1157,6 @@ pub struct EnumValueOptions {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ServiceOptions {
     /// Any features defined in the specific edition.
-    /// WARNING: This field should only be used by protobuf plugins or special
-    /// cases like the proto compiler. Other uses are discouraged and
-    /// developers should rely on the protoreflect APIs for their client language.
     #[prost(message, optional, tag = "34")]
     pub features: ::core::option::Option<FeatureSet>,
     /// Is this service deprecated?
@@ -1213,9 +1186,6 @@ pub struct MethodOptions {
     )]
     pub idempotency_level: ::core::option::Option<i32>,
     /// Any features defined in the specific edition.
-    /// WARNING: This field should only be used by protobuf plugins or special
-    /// cases like the proto compiler. Other uses are discouraged and
-    /// developers should rely on the protoreflect APIs for their client language.
     #[prost(message, optional, tag = "35")]
     pub features: ::core::option::Option<FeatureSet>,
     /// The parser stores options it doesn't recognize here. See above.
@@ -1333,8 +1303,6 @@ pub struct FeatureSet {
     pub message_encoding: ::core::option::Option<i32>,
     #[prost(enumeration = "feature_set::JsonFormat", optional, tag = "6")]
     pub json_format: ::core::option::Option<i32>,
-    #[prost(enumeration = "feature_set::EnforceNamingStyle", optional, tag = "7")]
-    pub enforce_naming_style: ::core::option::Option<i32>,
 }
 /// Nested message and enum types in `FeatureSet`.
 pub mod feature_set {
@@ -1577,46 +1545,6 @@ pub mod feature_set {
                 "JSON_FORMAT_UNKNOWN" => Some(Self::Unknown),
                 "ALLOW" => Some(Self::Allow),
                 "LEGACY_BEST_EFFORT" => Some(Self::LegacyBestEffort),
-                _ => None,
-            }
-        }
-    }
-    #[derive(serde::Serialize, serde::Deserialize)]
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash,
-        PartialOrd,
-        Ord,
-        ::prost::Enumeration
-    )]
-    #[repr(i32)]
-    pub enum EnforceNamingStyle {
-        Unknown = 0,
-        Style2024 = 1,
-        StyleLegacy = 2,
-    }
-    impl EnforceNamingStyle {
-        /// String value of the enum field names used in the ProtoBuf definition.
-        ///
-        /// The values are not transformed in any way and thus are considered stable
-        /// (if the ProtoBuf definition does not change) and safe for programmatic use.
-        pub fn as_str_name(&self) -> &'static str {
-            match self {
-                Self::Unknown => "ENFORCE_NAMING_STYLE_UNKNOWN",
-                Self::Style2024 => "STYLE2024",
-                Self::StyleLegacy => "STYLE_LEGACY",
-            }
-        }
-        /// Creates an enum from field names used in the ProtoBuf definition.
-        pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
-            match value {
-                "ENFORCE_NAMING_STYLE_UNKNOWN" => Some(Self::Unknown),
-                "STYLE2024" => Some(Self::Style2024),
-                "STYLE_LEGACY" => Some(Self::StyleLegacy),
                 _ => None,
             }
         }

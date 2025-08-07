@@ -282,7 +282,7 @@ async fn anvil_rpc_reorg() {
         let original_head = latest_block().await;
         tracing::info!(depth, "reorg");
         provider
-            .anvil_reorg(alloy_rpc_types_anvil::ReorgOptions {
+            .anvil_reorg(alloy::rpc::types::anvil::ReorgOptions {
                 depth,
                 tx_block_pairs: vec![],
             })
