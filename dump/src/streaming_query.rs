@@ -21,9 +21,8 @@ use futures::{
     FutureExt, Stream, TryStreamExt as _,
     stream::{self, StreamExt},
 };
-use metadata_db::LocationId;
-use tokio::sync::mpsc;
-use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream, WatchStream};
+use tokio::sync::{mpsc, watch};
+use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
 use tokio_util::task::AbortOnDropHandle;
 use tracing::instrument;
 
@@ -214,15 +213,10 @@ async fn watermarks_updates(
     let tables = ctx.catalog().tables().to_vec();
 
     // Set up change notifications
-    let locations = ctx.catalog().tables().iter().map(|t| t.location_id());
-    let mut notification_streams = Vec::new();
-    for location in locations {
-        let receiver = multiplexer_handle.subscribe(location).await;
-        let stream = WatchStream::new(receiver).map(move |_| Ok::<LocationId, BoxError>(location));
-        notification_streams.push(stream);
+    let mut subscriptions: Vec<watch::Receiver<()>> = Default::default();
+    for location in ctx.catalog().tables().iter().map(|t| t.location_id()) {
+        subscriptions.push(multiplexer_handle.subscribe(location).await);
     }
-
-    let mut notifications = futures::stream::select_all(notification_streams);
 
     // Create the stream channel. This is unbounded because we never want to put backpressure on the
     // PG notification queue.
@@ -244,13 +238,21 @@ async fn watermarks_updates(
 
     // Spawn task to handle new ranges from notifications
     tokio::spawn(async move {
-        while let Some(Ok(_)) = notifications.next().await {
-            let result = watermarks.next().await;
-            if tx.send(result).is_err() {
-                break; // Receiver dropped
+        loop {
+            let notifications = subscriptions
+                .iter_mut()
+                .map(|rx| Box::pin(rx.changed()))
+                .collect::<Vec<_>>();
+            let notification = futures::future::select_all(notifications);
+            if let (Ok(_), _, _) = notification.await {
+                let result = watermarks.next().await;
+                if tx.send(result).is_ok() {
+                    continue;
+                }
             }
+            break;
         }
-        tracing::warn!("notification stream ended");
+        tracing::warn!("watermarks stream ended");
     });
 
     Ok(Box::pin(UnboundedReceiverStream::new(rx)))
