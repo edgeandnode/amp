@@ -196,3 +196,6 @@ pub struct Location {
     /// Whether this location is currently active for queries
     pub active: bool,
 }
+
+#[cfg(test)]
+mod tests;
