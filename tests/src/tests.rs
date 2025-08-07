@@ -39,6 +39,31 @@ async fn evm_rpc_single_dump() {
 }
 
 #[tokio::test]
+async fn evm_rpc_base_single_dump() {
+    tracing_helpers::register_logger();
+
+    let dataset_name = "base";
+    check_provider_file("rpc_eth_base.toml").await;
+
+    let test_env = TestEnv::temp("evm_rpc_base_single_dump").await.unwrap();
+
+    let blessed = SnapshotContext::blessed(&test_env, &dataset_name)
+        .await
+        .unwrap();
+
+    // Check the dataset directly against the RPC provider with `check_blocks`.
+    check_blocks(&test_env, dataset_name, 33_411_770, 33_411_770)
+        .await
+        .expect("blessed data differed from provider");
+
+    // Now dump the dataset to a temporary directory and check it again against the blessed files.
+    let temp_dump = SnapshotContext::temp_dump(&test_env, &dataset_name, 33_411_770, 33_411_770, 1)
+        .await
+        .expect("temp dump failed");
+    temp_dump.assert_eq(&blessed).await.unwrap();
+}
+
+#[tokio::test]
 async fn eth_firehose_single_dump() {
     tracing_helpers::register_logger();
 

@@ -11,7 +11,7 @@ use crate::{
 };
 
 #[tokio::test]
-async fn schedule_and_retrieve_job() {
+async fn register_job_creates_with_scheduled_status() {
     //* Given
     let temp_db = PgTempDB::new();
     let mut conn = DbConn::connect(&temp_db.connection_uri())
@@ -21,13 +21,11 @@ async fn schedule_and_retrieve_job() {
         .await
         .expect("Failed to run migrations");
 
-    // Pre-register the worker
     let worker_id = "test-worker-id".parse().expect("Invalid worker ID");
     heartbeat::register_worker(&mut *conn, &worker_id)
         .await
         .expect("Failed to pre-register the worker");
 
-    // Specify the job descriptor
     let job_desc = serde_json::json!({
         "dataset": "test-dataset",
         "dataset_version": "test-dataset-version",
@@ -37,18 +35,15 @@ async fn schedule_and_retrieve_job() {
     let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize job desc");
 
     //* When
-    // Register the job
     let job_id = jobs::register_job(&mut *conn, &worker_id, &job_desc_str)
         .await
         .expect("Failed to schedule job");
 
-    // Get the job
+    //* Then
     let job = jobs::get_job(&mut *conn, &job_id)
         .await
         .expect("Failed to get job")
         .expect("Job not found");
-
-    //* Then
     assert_eq!(job.id, job_id);
     assert_eq!(job.status, JobStatus::Scheduled);
     assert_eq!(job.node_id, worker_id);
@@ -56,7 +51,7 @@ async fn schedule_and_retrieve_job() {
 }
 
 #[tokio::test]
-async fn update_job_status_modifies_status() {
+async fn update_job_status_changes_status() {
     //* Given
     let temp_db = PgTempDB::new();
     let mut conn = DbConn::connect(&temp_db.connection_uri())
@@ -95,7 +90,7 @@ async fn update_job_status_modifies_status() {
 }
 
 #[tokio::test]
-async fn get_jobs_for_node_with_statuses_filters_by_node_id() {
+async fn get_jobs_for_node_filters_by_node_id() {
     //* Given
     let temp_db = PgTempDB::new();
     let mut conn = DbConn::connect(&temp_db.connection_uri())
@@ -159,7 +154,7 @@ async fn get_jobs_for_node_with_statuses_filters_by_node_id() {
 }
 
 #[tokio::test]
-async fn get_jobs_for_node_with_statuses_filters_by_status() {
+async fn get_jobs_for_node_filters_by_status() {
     //* Given
     let temp_db = PgTempDB::new();
 
@@ -249,4 +244,219 @@ async fn get_jobs_for_node_with_statuses_filters_by_status() {
         "stop requested job not found in active jobs: {:?}",
         active_jobs
     );
+}
+
+#[tokio::test]
+async fn get_job_by_id_returns_job() {
+    //* Given
+    let temp_db = PgTempDB::new();
+    let mut conn = DbConn::connect(&temp_db.connection_uri())
+        .await
+        .expect("Failed to connect to metadata db");
+    conn.run_migrations()
+        .await
+        .expect("Failed to run migrations");
+
+    let worker_id = "test-worker-get".parse().expect("Invalid worker ID");
+    heartbeat::register_worker(&mut *conn, &worker_id)
+        .await
+        .expect("Failed to register worker");
+
+    let job_desc = serde_json::json!({
+        "dataset": "test-dataset",
+        "table": "test-table",
+        "operation": "dump"
+    });
+    let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
+
+    let job_id = jobs::register_job(&mut *conn, &worker_id, &job_desc_str)
+        .await
+        .expect("Failed to register job");
+
+    //* When
+    let job = jobs::get_job(&mut *conn, &job_id)
+        .await
+        .expect("Failed to get job")
+        .expect("Job not found");
+
+    //* Then
+    assert_eq!(job.id, job_id);
+    assert_eq!(job.node_id, worker_id);
+    assert_eq!(job.status, JobStatus::Scheduled);
+    assert_eq!(job.desc, job_desc);
+}
+
+#[tokio::test]
+async fn get_job_with_details_includes_timestamps() {
+    //* Given
+    let temp_db = PgTempDB::new();
+    let mut conn = DbConn::connect(&temp_db.connection_uri())
+        .await
+        .expect("Failed to connect to metadata db");
+    conn.run_migrations()
+        .await
+        .expect("Failed to run migrations");
+
+    let worker_id = "test-worker-details".parse().expect("Invalid worker ID");
+    heartbeat::register_worker(&mut *conn, &worker_id)
+        .await
+        .expect("Failed to register worker");
+
+    let job_desc = serde_json::json!({
+        "dataset": "detailed-dataset",
+        "table": "detailed-table",
+    });
+    let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
+
+    let job_id = jobs::register_job(&mut *conn, &worker_id, &job_desc_str)
+        .await
+        .expect("Failed to register job");
+
+    //* When
+    let job_details = jobs::get_job_with_details(&mut *conn, &job_id)
+        .await
+        .expect("Failed to get job with details")
+        .expect("Job not found");
+
+    //* Then
+    assert_eq!(job_details.id, job_id);
+    assert_eq!(job_details.node_id, worker_id);
+    assert_eq!(job_details.status, JobStatus::Scheduled);
+    assert_eq!(job_details.desc, job_desc);
+    assert!(job_details.created_at <= job_details.updated_at);
+}
+
+#[tokio::test]
+async fn list_jobs_first_page_when_empty() {
+    //* Given
+    let temp_db = PgTempDB::new();
+    let mut conn = DbConn::connect(&temp_db.connection_uri())
+        .await
+        .expect("Failed to connect to metadata db");
+    conn.run_migrations()
+        .await
+        .expect("Failed to run migrations");
+
+    //* When
+    let jobs = jobs::list_jobs_first_page(&mut *conn, 10)
+        .await
+        .expect("Failed to list jobs");
+
+    //* Then
+    assert!(jobs.is_empty());
+}
+
+#[tokio::test]
+async fn list_jobs_first_page_respects_limit() {
+    //* Given
+    let temp_db = PgTempDB::new();
+    let mut conn = DbConn::connect(&temp_db.connection_uri())
+        .await
+        .expect("Failed to connect to metadata db");
+    conn.run_migrations()
+        .await
+        .expect("Failed to run migrations");
+
+    // Create workers and jobs
+    let mut job_ids = Vec::new();
+    for i in 0..5 {
+        let worker_id = format!("test-worker-{}", i)
+            .parse()
+            .expect("Invalid worker ID");
+        heartbeat::register_worker(&mut *conn, &worker_id)
+            .await
+            .expect("Failed to register worker");
+
+        let job_desc = serde_json::json!({
+            "dataset": format!("dataset-{}", i),
+            "table": "test-table",
+        });
+        let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
+
+        let job_id = jobs::register_job(&mut *conn, &worker_id, &job_desc_str)
+            .await
+            .expect("Failed to register job");
+        job_ids.push(job_id);
+
+        // Small delay to ensure different timestamps
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+    }
+
+    //* When
+    let jobs = jobs::list_jobs_first_page(&mut *conn, 3)
+        .await
+        .expect("Failed to list jobs");
+
+    //* Then
+    assert_eq!(jobs.len(), 3);
+    assert!(jobs[0].id > jobs[1].id);
+    assert!(jobs[1].id > jobs[2].id);
+    for job in &jobs {
+        assert_eq!(job.status, JobStatus::Scheduled);
+        assert!(job.created_at <= job.updated_at);
+    }
+}
+
+#[tokio::test]
+async fn list_jobs_next_page_uses_cursor() {
+    //* Given
+    let temp_db = PgTempDB::new();
+    let mut conn = DbConn::connect(&temp_db.connection_uri())
+        .await
+        .expect("Failed to connect to metadata db");
+    conn.run_migrations()
+        .await
+        .expect("Failed to run migrations");
+
+    // Create 10 jobs
+    let mut all_job_ids = Vec::new();
+    for i in 0..10 {
+        let worker_id = format!("test-worker-page-{}", i)
+            .parse()
+            .expect("Invalid worker ID");
+        heartbeat::register_worker(&mut *conn, &worker_id)
+            .await
+            .expect("Failed to register worker");
+
+        let job_desc = serde_json::json!({
+            "dataset": format!("dataset-{}", i),
+            "table": "test-table",
+        });
+        let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
+
+        let job_id = jobs::register_job(&mut *conn, &worker_id, &job_desc_str)
+            .await
+            .expect("Failed to register job");
+        all_job_ids.push(job_id);
+
+        // Small delay to ensure different timestamps
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+    }
+
+    // Get the first page to establish cursor
+    let first_page = jobs::list_jobs_first_page(&mut *conn, 3)
+        .await
+        .expect("Failed to list first page");
+    let cursor = first_page
+        .last()
+        .expect("First page should not be empty")
+        .id;
+
+    //* When
+    let second_page = jobs::list_jobs_next_page(&mut *conn, 3, cursor)
+        .await
+        .expect("Failed to list second page");
+
+    //* Then
+    assert_eq!(second_page.len(), 3);
+    // Verify no overlap with first page
+    let first_page_ids: Vec<_> = first_page.iter().map(|j| j.id).collect();
+    for job in &second_page {
+        assert!(!first_page_ids.contains(&job.id));
+    }
+    // Verify ordering
+    assert!(second_page[0].id > second_page[1].id);
+    assert!(second_page[1].id > second_page[2].id);
+    // Verify cursor worked correctly
+    assert!(cursor > second_page[0].id);
 }

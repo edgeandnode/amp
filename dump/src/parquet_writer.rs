@@ -15,7 +15,7 @@ use common::{
 use metadata_db::{FooterBytes, MetadataDb};
 use object_store::{ObjectMeta, buffered::BufWriter, path::Path};
 use rand::RngCore as _;
-use tracing::debug;
+use tracing::{debug, trace};
 use url::Url;
 
 const MAX_PARTITION_BLOCK_RANGE: u64 = 1_000_000;
@@ -116,7 +116,7 @@ pub async fn commit_metadata(
         .await?;
 
     // Notify that the dataset has been changed
-    debug!("notifying location change for location_id: {}", location_id);
+    trace!("notifying location change for location_id: {}", location_id);
     metadata_db.notify_location_change(location_id).await?;
 
     Ok(())
@@ -142,7 +142,8 @@ impl RawTableWriter {
         partition_size: u64,
         missing_ranges: Vec<RangeInclusive<BlockNum>>,
     ) -> Result<Self, BoxError> {
-        let ranges_to_write = limit_ranges(missing_ranges, MAX_PARTITION_BLOCK_RANGE);
+        let mut ranges_to_write = limit_ranges(missing_ranges, MAX_PARTITION_BLOCK_RANGE);
+        ranges_to_write.reverse();
         let current_file = match ranges_to_write.last() {
             Some(range) => Some(ParquetFileWriter::new(
                 table.clone(),
@@ -243,7 +244,7 @@ impl RawTableWriter {
             Some(range) => {
                 assert_eq!(&range.network, &table_rows.range.network);
                 Some(BlockRange {
-                    numbers: *range.numbers.start()..=*table_rows.range.numbers.end(),
+                    numbers: range.start()..=table_rows.range.end(),
                     network: range.network,
                     hash: table_rows.range.hash,
                     prev_hash: range.prev_hash,
@@ -260,7 +261,7 @@ impl RawTableWriter {
             return Ok(None);
         }
         // We should be closing the last range.
-        assert!(self.ranges_to_write.len() == 1);
+        assert_eq!(self.ranges_to_write.len(), 1);
         self.close_current_file().await.map(Some)
     }
 
@@ -319,8 +320,8 @@ impl ParquetFileWriter {
         debug!(
             "wrote {} for range {} to {}",
             self.file_url,
-            range.numbers.start(),
-            range.numbers.end(),
+            range.start(),
+            range.end(),
         );
 
         let parquet_meta = ParquetMeta {

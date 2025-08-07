@@ -3,14 +3,13 @@ use std::{any::Any, str::FromStr};
 use alloy::{
     eips::BlockNumberOrTag,
     hex,
-    network::Ethereum,
+    network::{AnyNetwork, Ethereum},
     primitives::{Address, Bytes, TxKind},
     providers::Provider,
     rpc::{json_rpc::ErrorPayload, types::TransactionInput},
     transports::RpcError,
 };
 use async_trait::async_trait;
-use async_udf::{async_func::AsyncScalarFunctionArgs, functions::AsyncScalarUDFImpl};
 use datafusion::{
     arrow::{
         array::{
@@ -19,9 +18,13 @@ use datafusion::{
         },
         datatypes::{DataType, Field, Fields},
     },
-    common::{config::ConfigOptions, internal_err, plan_err},
+    common::{internal_err, plan_err},
+    config::ConfigOptions,
     error::DataFusionError,
-    logical_expr::{ColumnarValue, Signature, Volatility},
+    logical_expr::{
+        ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, TypeSignature, Volatility,
+        async_udf::AsyncScalarUDFImpl,
+    },
 };
 use itertools::izip;
 
@@ -30,18 +33,18 @@ type TransactionRequest = <Ethereum as alloy::network::Network>::TransactionRequ
 #[derive(Debug, Clone)]
 pub struct EthCall {
     name: String,
-    client: alloy::providers::RootProvider,
+    client: alloy::providers::RootProvider<AnyNetwork>,
     signature: Signature,
     fields: Fields,
 }
 
 impl EthCall {
-    pub fn new(dataset_name: &str, client: alloy::providers::RootProvider) -> Self {
+    pub fn new(dataset_name: &str, client: alloy::providers::RootProvider<AnyNetwork>) -> Self {
         EthCall {
             name: format!("{dataset_name}.eth_call"),
             client,
-            signature: Signature::exact(
-                vec![
+            signature: Signature {
+                type_signature: TypeSignature::Exact(vec![
                     // from (optional)
                     DataType::FixedSizeBinary(20),
                     // to
@@ -50,9 +53,9 @@ impl EthCall {
                     DataType::Binary,
                     // block
                     DataType::Utf8,
-                ],
-                Volatility::Volatile,
-            ),
+                ]),
+                volatility: Volatility::Volatile,
+            },
             fields: Fields::from_iter([
                 Field::new("data", DataType::Binary, true),
                 Field::new("message", DataType::Utf8, true),
@@ -61,8 +64,7 @@ impl EthCall {
     }
 }
 
-#[async_trait]
-impl AsyncScalarUDFImpl for EthCall {
+impl ScalarUDFImpl for EthCall {
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -75,15 +77,26 @@ impl AsyncScalarUDFImpl for EthCall {
         &self.signature
     }
 
-    fn return_type(&self, _arg_types: &[DataType]) -> datafusion::error::Result<DataType> {
+    fn return_type(&self, _arg_types: &[DataType]) -> Result<DataType, DataFusionError> {
         Ok(DataType::Struct(self.fields.clone()))
     }
 
+    /// Since this is an async UDF, the `invoke_with_args` method will not be called.
+    fn invoke_with_args(
+        &self,
+        _args: ScalarFunctionArgs,
+    ) -> Result<ColumnarValue, DataFusionError> {
+        unreachable!("is only called as async UDF");
+    }
+}
+
+#[async_trait]
+impl AsyncScalarUDFImpl for EthCall {
     async fn invoke_async_with_args(
         &self,
-        args: AsyncScalarFunctionArgs,
+        args: ScalarFunctionArgs,
         _option: &ConfigOptions,
-    ) -> datafusion::error::Result<ArrayRef> {
+    ) -> Result<ArrayRef, DataFusionError> {
         let name = self.name().to_string();
         let client = self.client.clone();
         let fields = self.fields.clone();
@@ -220,12 +233,12 @@ impl AsyncScalarUDFImpl for EthCall {
 }
 
 async fn eth_call_retry(
-    client: &alloy::providers::RootProvider,
+    client: &alloy::providers::RootProvider<AnyNetwork>,
     block: BlockNumberOrTag,
     req: TransactionRequest,
 ) -> Result<Bytes, EthCallRetryError> {
     for _ in 0..3 {
-        let result = client.call(req.clone()).block(block.into()).await;
+        let result = client.call(req.clone().into()).block(block.into()).await;
         match result {
             Ok(bytes) => {
                 return Ok(bytes);

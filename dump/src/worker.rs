@@ -13,20 +13,21 @@ mod meta;
 
 pub use self::job::JobDesc;
 use self::{
-    job::{Job, JobCtx},
+    job::Job,
     job_set::{JobSet, JoinError as JobSetJoinError},
     meta::{
         JobId, JobMeta, JobStatus, NotifAction as Action, NotifRecvError, WorkerMetadataDb,
         WorkerNodeId,
     },
 };
+use crate::Ctx;
 
 pub struct Worker {
     node_id: WorkerNodeId,
     reconcile_interval: Interval,
 
     meta: WorkerMetadataDb,
-    job_ctx: JobCtx,
+    job_ctx: Ctx,
     job_set: JobSet,
 }
 
@@ -47,7 +48,7 @@ impl Worker {
             node_id,
             reconcile_interval,
             meta,
-            job_ctx: JobCtx {
+            job_ctx: Ctx {
                 config,
                 metadata_db,
                 dataset_store,
@@ -98,7 +99,7 @@ impl Worker {
         // set, ensuring the worker is in sync with the Metadata DB's jobs table state.
         let scheduled_jobs = self
             .meta
-            .get_scheduled_jobs_with_details(&self.node_id)
+            .get_scheduled_jobs(&self.node_id)
             .await
             .map_err(WorkerError::ActiveJobsFetchFailed)?;
         for job in scheduled_jobs {
@@ -272,7 +273,7 @@ impl Worker {
     async fn reconcile_jobs(&mut self) -> Result<(), WorkerError> {
         let active_jobs = match self
             .meta
-            .get_active_jobs_with_details(&self.node_id)
+            .get_active_jobs(&self.node_id)
             .await
             .map_err(WorkerError::ActiveJobsFetchFailed)
         {

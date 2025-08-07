@@ -4,7 +4,7 @@ use std::{future::Future, net::SocketAddr, sync::Arc};
 
 use axum::{
     Router,
-    routing::{get, post},
+    routing::{get, post, put},
 };
 use common::{BoxResult, config::Config};
 use dataset_store::DatasetStore;
@@ -14,7 +14,7 @@ mod handlers;
 mod scheduler;
 
 use ctx::Ctx;
-use handlers::datasets;
+use handlers::{datasets, jobs};
 use scheduler::Scheduler;
 
 pub async fn serve(
@@ -35,6 +35,9 @@ pub async fn serve(
         )
         .route("/datasets/{id}", get(datasets::get_by_id::handler))
         .route("/datasets/{id}/dump", post(datasets::dump::handler))
+        .route("/jobs", get(jobs::get_all::handler))
+        .route("/jobs/{id}", get(jobs::get_by_id::handler))
+        .route("/jobs/{id}/stop", put(jobs::stop::handler))
         .with_state(Ctx {
             config,
             metadata_db,

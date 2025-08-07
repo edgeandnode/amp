@@ -14,6 +14,11 @@ try:
 except ImportError:
     RedisLoader = None
 
+try:
+    from .deltalake_loader import DeltaLakeLoader
+except ImportError:
+    DeltaLakeLoader = None
+
 # Add any other loaders here
 # try:
 #     from .snowflake_loader import SnowflakeLoader
@@ -27,3 +32,5 @@ if PostgreSQLLoader:
     __all__.append('PostgreSQLLoader')
 if RedisLoader:
     __all__.append('RedisLoader')
+if DeltaLakeLoader:
+    __all__.append('DeltaLakeLoader')

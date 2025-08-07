@@ -1,6 +1,9 @@
 //! Metadata DB worker nodes job queue
 
-use sqlx::{Postgres, types::JsonValue};
+use sqlx::types::{
+    JsonValue,
+    chrono::{DateTime, Utc},
+};
 
 use super::WorkerNodeId;
 
@@ -14,7 +17,7 @@ pub async fn register_job<'c, E>(
     descriptor: &str,
 ) -> Result<JobId, sqlx::Error>
 where
-    E: sqlx::Executor<'c, Database = Postgres>,
+    E: sqlx::Executor<'c, Database = sqlx::Postgres>,
 {
     let query = indoc::indoc! {r#"
         INSERT INTO jobs (node_id, descriptor, status, created_at, updated_at)
@@ -40,11 +43,11 @@ pub async fn update_job_status<'c, E>(
     status: JobStatus,
 ) -> Result<(), sqlx::Error>
 where
-    E: sqlx::Executor<'c, Database = Postgres>,
+    E: sqlx::Executor<'c, Database = sqlx::Postgres>,
 {
     let query = indoc::indoc! {r#"
-        UPDATE jobs 
-        SET status = $1, updated_at = (timezone('UTC', now())) 
+        UPDATE jobs
+        SET status = $1, updated_at = (timezone('UTC', now()))
         WHERE id = $2
     "#};
     sqlx::query(query)
@@ -55,15 +58,118 @@ where
     Ok(())
 }
 
+/// Update the status of a job with multiple possible expected original states
+///
+/// This function will only update the job status if the job exists and currently has
+/// one of the expected original statuses. If the job doesn't exist, returns `UpdateJobStatusError::NotFound`.
+/// If the job exists but has a different status than any of the expected ones, returns `UpdateJobStatusError::StateConflict`.
+pub async fn update_job_status_if_any_state<'c, E>(
+    exe: E,
+    id: &JobId,
+    expected_statuses: &[JobStatus],
+    new_status: JobStatus,
+) -> Result<(), JobStatusUpdateError>
+where
+    E: sqlx::Executor<'c, Database = sqlx::Postgres>,
+{
+    /// Internal structure to hold the result of the update operation
+    #[derive(Debug, sqlx::FromRow)]
+    struct UpdateResult {
+        updated_id: Option<JobId>,
+        original_status: Option<JobStatus>,
+    }
+
+    let query = indoc::indoc! {r#"
+        WITH target_job AS (
+            SELECT id, status
+            FROM jobs
+            WHERE id = $1
+        ),
+        target_job_update AS (
+            UPDATE jobs
+            SET status = $3, updated_at = timezone('UTC', now())
+            WHERE id = $1 AND status = ANY($2)
+            RETURNING id
+        )
+        SELECT
+            target_job_update.id AS updated_id,
+            target_job.status AS original_status
+        FROM target_job
+        LEFT JOIN target_job_update ON target_job.id = target_job_update.id
+    "#};
+
+    let result: Option<UpdateResult> = sqlx::query_as(query)
+        .bind(id)
+        .bind(expected_statuses)
+        .bind(new_status)
+        .fetch_optional(exe)
+        .await
+        .map_err(JobStatusUpdateError::Database)?;
+
+    match result {
+        Some(UpdateResult {
+            updated_id: Some(_),
+            ..
+        }) => Ok(()),
+        Some(UpdateResult {
+            updated_id: None,
+            original_status: Some(status),
+        }) => Err(JobStatusUpdateError::StateConflict {
+            expected: expected_statuses.to_vec(),
+            actual: status,
+        }),
+        _ => Err(JobStatusUpdateError::NotFound),
+    }
+}
+
+/// Error type for conditional job status updates
+#[derive(Debug, thiserror::Error)]
+pub enum JobStatusUpdateError {
+    #[error("Job not found")]
+    NotFound,
+
+    #[error("Job state conflict: expected one of {expected:?}, but found {actual}")]
+    StateConflict {
+        expected: Vec<JobStatus>,
+        actual: JobStatus,
+    },
+
+    #[error("Database error: {0}")]
+    Database(#[from] sqlx::Error),
+}
+
 /// Get a job by its ID
 pub async fn get_job<'c, E>(exe: E, id: &JobId) -> Result<Option<Job>, sqlx::Error>
 where
-    E: sqlx::Executor<'c, Database = Postgres>,
+    E: sqlx::Executor<'c, Database = sqlx::Postgres>,
 {
     let query = indoc::indoc! {r#"
         SELECT id, node_id, status, descriptor
         FROM jobs
         WHERE id = $1
+    "#};
+    let res = sqlx::query_as(query).bind(id).fetch_optional(exe).await?;
+    Ok(res)
+}
+
+/// Get a job by ID with full details including timestamps
+pub async fn get_job_with_details<'c, E>(
+    exe: E,
+    id: &JobId,
+) -> Result<Option<JobWithDetails>, sqlx::Error>
+where
+    E: sqlx::Executor<'c, Database = sqlx::Postgres>,
+{
+    let query = indoc::indoc! {r#"
+        SELECT
+            j.id,
+            j.node_id,
+            j.status,
+            j.descriptor,
+            j.created_at,
+            j.updated_at
+        FROM jobs j
+        WHERE j.id = $1
     "#};
     let res = sqlx::query_as(query).bind(id).fetch_optional(exe).await?;
     Ok(res)
@@ -76,13 +182,13 @@ pub async fn get_jobs_for_node_with_statuses<'c, E, const N: usize>(
     statuses: [JobStatus; N],
 ) -> Result<Vec<Job>, sqlx::Error>
 where
-    E: sqlx::Executor<'c, Database = Postgres>,
+    E: sqlx::Executor<'c, Database = sqlx::Postgres>,
 {
     let query = indoc::indoc! {r#"
-        SELECT 
-            id, 
-            node_id, 
-            status, 
+        SELECT
+            id,
+            node_id,
+            status,
             descriptor
         FROM jobs
         WHERE node_id = $1 AND status = ANY($2)
@@ -91,6 +197,69 @@ where
     let res = sqlx::query_as(query)
         .bind(node_id)
         .bind(statuses)
+        .fetch_all(exe)
+        .await?;
+    Ok(res)
+}
+
+/// List the first page of jobs
+///
+/// Returns a paginated list of jobs ordered by ID in descending order (newest first).
+/// This function is used to fetch the initial page when no cursor is available.
+pub async fn list_jobs_first_page<'c, E>(
+    exe: E,
+    limit: i64,
+) -> Result<Vec<JobWithDetails>, sqlx::Error>
+where
+    E: sqlx::Executor<'c, Database = sqlx::Postgres>,
+{
+    let query = indoc::indoc! {r#"
+        SELECT
+            j.id,
+            j.node_id,
+            j.status,
+            j.descriptor,
+            j.created_at,
+            j.updated_at
+        FROM jobs j
+        ORDER BY j.id DESC
+        LIMIT $1
+    "#};
+
+    let res = sqlx::query_as(query).bind(limit).fetch_all(exe).await?;
+    Ok(res)
+}
+
+/// List subsequent pages of jobs using cursor-based pagination
+///
+/// Returns a paginated list of jobs with IDs less than the provided cursor,
+/// ordered by ID in descending order (newest first). This implements cursor-based
+/// pagination for efficient traversal of large job lists.
+pub async fn list_jobs_next_page<'c, E>(
+    exe: E,
+    limit: i64,
+    last_job_id: JobId,
+) -> Result<Vec<JobWithDetails>, sqlx::Error>
+where
+    E: sqlx::Executor<'c, Database = sqlx::Postgres>,
+{
+    let query = indoc::indoc! {r#"
+        SELECT 
+            j.id, 
+            j.node_id, 
+            j.status, 
+            j.descriptor,
+            j.created_at,
+            j.updated_at
+        FROM jobs j
+        WHERE j.id < $2
+        ORDER BY j.id DESC
+        LIMIT $1
+    "#};
+
+    let res = sqlx::query_as(query)
+        .bind(limit)
+        .bind(last_job_id)
         .fetch_all(exe)
         .await?;
     Ok(res)
@@ -111,6 +280,29 @@ pub struct Job {
     /// Job description
     #[sqlx(rename = "descriptor")]
     pub desc: JsonValue,
+}
+
+/// Represents a job with its metadata and associated node.
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct JobWithDetails {
+    /// Unique identifier for the job
+    pub id: JobId,
+
+    /// ID of the worker node this job is scheduled for
+    pub node_id: WorkerNodeId,
+
+    /// Current status of the job
+    pub status: JobStatus,
+
+    /// Job descriptor
+    #[sqlx(rename = "descriptor")]
+    pub desc: JsonValue,
+
+    /// Job creation timestamp
+    pub created_at: DateTime<Utc>,
+
+    /// Job last update timestamp
+    pub updated_at: DateTime<Utc>,
 }
 
 /// A unique identifier for a job

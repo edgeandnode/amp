@@ -5,11 +5,8 @@ use metadata_db::JobId;
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
-pub use crate::core::Ctx as JobCtx;
-use crate::{
-    core::dump_tables, default_microbatch_max_interval, default_parquet_opts,
-    default_partition_size,
-};
+pub use crate::core::Ctx;
+use crate::{core::dump_tables, default_partition_size};
 
 /// The kind of job is inferred from the location and associated dataset information.
 ///
@@ -21,7 +18,7 @@ use crate::{
 #[derive(Clone)]
 pub enum Job {
     DumpTables {
-        ctx: JobCtx,
+        ctx: Ctx,
         /// All tables must belong to the same dataset.
         tables: Vec<Arc<PhysicalTable>>,
         /// The end block to dump, or `None` for the latest block.
@@ -33,7 +30,7 @@ impl Job {
     /// Try to build a job from a job ID and descriptor.
     #[instrument(skip(ctx, job_id, job_desc), err)]
     pub async fn try_from_descriptor(
-        ctx: JobCtx,
+        ctx: Ctx,
         job_id: JobId,
         job_desc: JobDesc,
     ) -> Result<Job, BoxError> {
@@ -80,12 +77,11 @@ impl Job {
                 end_block,
             } => {
                 dump_tables(
-                    ctx,
+                    ctx.clone(),
                     &tables,
                     1,
                     default_partition_size(),
-                    default_microbatch_max_interval(),
-                    &default_parquet_opts(),
+                    ctx.config.microbatch_max_interval,
                     (0, end_block),
                 )
                 .await

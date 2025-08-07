@@ -1,6 +1,8 @@
 mod client;
 pub mod tables;
 
+use std::num::NonZeroU32;
+
 use alloy::transports::http::reqwest::Url;
 pub use client::JsonRpcClient;
 use common::{BoxError, Dataset, DatasetValue, store::StoreError};
@@ -50,6 +52,7 @@ pub(crate) struct EvmRpcProvider {
     /// Maximum number of json-rpc requests to batch together.
     #[serde(default = "default_rpc_batch_size")]
     pub rpc_batch_size: usize,
+    pub rate_limit_per_minute: Option<NonZeroU32>,
 }
 
 fn default_rpc_batch_size() -> usize {
@@ -76,6 +79,7 @@ pub async fn client(provider: toml::Value, network: String) -> Result<JsonRpcCli
         network,
         request_limit,
         provider.rpc_batch_size,
+        provider.rate_limit_per_minute,
     )
     .map_err(Error::Client)?;
     Ok(client)

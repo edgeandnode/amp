@@ -1,396 +1,271 @@
-use std::ops::RangeInclusive;
+use std::{collections::BTreeMap, fmt::Debug, ops::RangeInclusive};
 
 use alloy::primitives::BlockHash;
 use object_store::ObjectMeta;
 
 use crate::{BlockNum, block_range_intersection};
 
-/// A BlockRange associated with the matadata from a file in object storage.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub struct BlockRange {
+    pub numbers: RangeInclusive<BlockNum>,
+    pub network: String,
+    pub hash: BlockHash,
+    pub prev_hash: Option<BlockHash>,
+}
+
+impl BlockRange {
+    #[inline]
+    pub fn start(&self) -> BlockNum {
+        *self.numbers.start()
+    }
+
+    #[inline]
+    pub fn end(&self) -> BlockNum {
+        *self.numbers.end()
+    }
+
+    /// Return true iff `self` is sequenced immediately before `other`.
+    #[inline]
+    fn adjacent(&self, other: &Self) -> bool {
+        self.network == other.network
+            && (self.end() + 1) == other.start()
+            && other.prev_hash.map(|h| h == self.hash).unwrap_or(true)
+    }
+}
+
+/// A block range associated with the matadata from a file in object storage.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Segment {
     pub range: BlockRange,
     pub object: ObjectMeta,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
-pub struct BlockRange {
-    pub numbers: RangeInclusive<BlockNum>,
-    pub network: String,
-    pub hash: BlockHash,
-    /// If `prev_hash` is not present, conflicting ranges at the same numbers will be chosen based
-    /// on last-write-wins.
-    pub prev_hash: Option<BlockHash>,
-}
-
-#[derive(Debug, Default)]
-pub struct TableSegmentsDiff {
-    /// segments added to the canonical chain
-    pub add: Vec<Segment>,
-    /// segments removed from the canonical chain
-    pub sub: Vec<Segment>,
-}
-
-/// Segments associated with a table. This incrementally organizes segments into either a canonical
-/// chain or a set of non-canonical chains. The canonical chain is defined as the chain of adjacent
-/// segments with the greatest block height.
-// We are assuming single block range per segment, for now.
-#[derive(Default)]
-pub struct TableSegments {
-    canonical: Option<Chain>,
-    non_canonical: Vec<Chain>,
-}
-
-impl TableSegments {
-    #[cfg(any(test, debug_assertions))]
-    fn check_invariants(&self) {
-        let canonical = match &self.canonical {
-            Some(chain) => chain,
-            None => {
-                assert!(self.non_canonical.is_empty());
-                return;
-            }
-        };
-        canonical.check_invariants();
-        for chain in self.non_canonical.iter() {
-            chain.check_invariants();
-        }
-
-        // canonical chain contains minimum block number
-        assert!(
-            self.non_canonical
-                .iter()
-                .all(|c| canonical.start() <= c.start())
-        );
-    }
-
-    pub fn canonical_segments(&self) -> Vec<Segment> {
-        self.canonical
-            .as_ref()
-            .map(|c| c.0.clone())
-            .unwrap_or_default()
-    }
-
-    pub fn canonical_range(&self) -> Option<BlockRange> {
-        let canonical_ranges = &self.canonical.as_ref()?.0;
-        let start = &canonical_ranges.first()?.range;
-        let end = &canonical_ranges.last()?.range;
-        Some(BlockRange {
-            numbers: *start.numbers.start()..=*end.numbers.end(),
-            network: start.network.clone(),
-            hash: end.hash,
-            prev_hash: start.prev_hash,
-        })
-    }
-
-    /// Return the block ranges missing from this table out of the given `desired` range. The
-    /// returned ranges are non-overlapping and sorted by their start block number.
-    ///
-    /// To resolve reorgs, the missing ranges may include blocks already indexed. A reorg is
-    /// detected when there is some fork, which is a non-canonical chain of segments appart from
-    /// the canonical chain which has a greater block height. When a reorg is detected, the missing
-    /// ranges will include any canonical ranges that overlap with the fork minus 1 block.
-    pub fn missing_ranges(
-        &self,
-        desired: RangeInclusive<BlockNum>,
-    ) -> Vec<RangeInclusive<BlockNum>> {
-        let Some(canonical) = &self.canonical else {
-            assert!(self.non_canonical.is_empty());
-            return vec![desired];
-        };
-        let mut missing: Vec<RangeInclusive<BlockNum>> =
-            missing_block_ranges(canonical.start()..=canonical.end(), desired.clone());
-
-        // remove overlapping non-canonical ranges
-        for chain in &self.non_canonical {
-            let chain_range = chain.start()..=chain.end();
-            let mut index = 0;
-            while index < missing.len() {
-                if block_range_intersection(missing[index].clone(), chain_range.clone()).is_none() {
-                    index += 1;
-                    continue;
-                }
-                let ranges = missing_block_ranges(chain_range.clone(), missing[index].clone());
-                let next_index = index + ranges.len();
-                missing.splice(index..=index, ranges);
-                index = next_index;
-            }
-        }
-
-        let fork = self.non_canonical.iter().max_by_key(|g| g.end());
-        let reorg_depth = 1;
-        if let Some(fork) = fork
-            && fork.end() > canonical.end()
-            && let Some(intersection) = block_range_intersection(
-                canonical.start()..=canonical.end(),
-                fork.start().saturating_sub(reorg_depth)..=fork.end(),
-            )
-            && block_range_intersection(intersection.clone(), desired.clone()).is_some()
-        {
-            let reorg_range_start: BlockNum = canonical
-                .0
-                .iter()
-                .map(|s| &s.range.numbers)
-                .filter(|r| block_range_intersection((*r).clone(), intersection.clone()).is_some())
-                .map(|r| *r.start())
-                .min()
-                .unwrap();
-            let reorg_range =
-                reorg_range_start..=intersection.start().saturating_sub(reorg_depth - 1);
-            if let Some(range) = block_range_intersection(reorg_range, desired) {
-                missing.push(range);
-                missing.sort_by_key(|r| *r.start());
-            }
-        }
-
-        // check ranges are non-overlapping and sorted
-        for windows in missing.windows(2) {
-            let ((a, b), (c, d)) = (
-                windows[0].clone().into_inner(),
-                windows[1].clone().into_inner(),
-            );
-            debug_assert!((a <= b) && (b < c) && (c <= d));
-        }
-
-        missing
-    }
-
-    /// Merge known block ranges. This fails if the given block numbers do not correspond to a set
-    /// of adjacent and complete block ranges. This should be done after the associated files have
-    /// been merged, and the merged files have been committed to the metadata DB.
-    pub fn merge(
-        &mut self,
-        numbers: RangeInclusive<BlockNum>,
-        object: ObjectMeta,
-    ) -> Result<(), ()> {
-        #[cfg(any(test, debug_assertions))]
-        self.check_invariants();
-
-        if let Some(canonical) = &mut self.canonical {
-            if let Ok(()) = canonical.merge(numbers.clone(), object.clone()) {
-                return Ok(());
-            }
-            for chain in &mut self.non_canonical {
-                if let Ok(()) = chain.merge(numbers.clone(), object.clone()) {
-                    return Ok(());
-                }
-            }
-        }
-        Err(())
-    }
-
-    /// Insert a segment, returning a diff of the canonical chain.
-    /// Segments may be inserted in any order.
-    pub fn insert(&mut self, segment: Segment) -> TableSegmentsDiff {
-        #[cfg(any(test, debug_assertions))]
-        self.check_invariants();
-
-        let mut diff: TableSegmentsDiff = Default::default();
-        match &mut self.canonical {
-            None => {
-                self.canonical = Some(Chain(vec![segment.clone()]));
-                diff.add.push(segment);
-                return diff;
-            }
-            Some(canonical) => match canonical.insert(&segment) {
-                Ok(()) => {
-                    for index in 0..self.non_canonical.len() {
-                        if !self.non_canonical[index].adjacent_after(canonical.bounds().1) {
-                            continue;
-                        }
-                        let mut chain = self.non_canonical.remove(index);
-                        diff.add.append(&mut chain.0.clone());
-                        canonical.0.append(&mut chain.0);
-                        break;
-                    }
-                    diff.add.push(segment);
-                    return diff;
-                }
-                Err(()) => (),
-            },
-        };
-
-        let chain_index = self.update_non_canonical(segment);
-        let canonical = self.canonical.as_ref().unwrap();
-        let chain = &self.non_canonical[chain_index];
-
-        if chain.adjacent_after(canonical.bounds().1) {
-            diff.add.append(&mut chain.0.clone());
-            let canonical = self.canonical.as_mut().unwrap();
-            canonical
-                .0
-                .append(&mut self.non_canonical.remove(chain_index).0);
-            return diff;
-        }
-
-        if (chain.start() < canonical.start())
-            || (chain.start() == canonical.start() && chain.end() > canonical.end())
-        {
-            diff.add.append(&mut chain.0.clone());
-            diff.sub.append(&mut canonical.0.clone());
-            self.non_canonical.push(self.canonical.take().unwrap());
-            self.canonical = Some(self.non_canonical.remove(chain_index));
-        } else if let Some(chain_base_index) = canonical
-            .0
-            .iter()
-            .rposition(|s| chain.adjacent_after(&s.range))
-        {
-            diff.add.append(&mut chain.0.clone());
-            let canonical = self.canonical.as_mut().unwrap();
-            let reorged = canonical.0.split_off(chain_base_index + 1);
-            diff.sub.append(&mut reorged.clone());
-            self.non_canonical.push(Chain(reorged));
-            canonical
-                .0
-                .append(&mut self.non_canonical.remove(chain_index).0);
-        }
-
-        diff
-    }
-
-    fn update_non_canonical(&mut self, segment: Segment) -> usize {
-        for index in 0..self.non_canonical.len() {
-            match self.non_canonical[index].insert(&segment) {
-                Ok(()) => return self.merge_non_canonical(index),
-                Err(()) => continue,
-            };
-        }
-        self.non_canonical.push(Chain(vec![segment]));
-        self.non_canonical.len() - 1
-    }
-
-    fn merge_non_canonical(&mut self, mut updated_index: usize) -> usize {
-        for mut index in 0..self.non_canonical.len() {
-            let (start, end) = self.non_canonical[index].bounds();
-            if self.non_canonical[updated_index].adjacent_before(start) {
-                let mut next = self.non_canonical.remove(index);
-                if index < updated_index {
-                    updated_index -= 1;
-                }
-                self.non_canonical[updated_index].0.append(&mut next.0);
-                return updated_index;
-            }
-            if self.non_canonical[updated_index].adjacent_after(end) {
-                let mut next = self.non_canonical.remove(updated_index);
-                if updated_index < index {
-                    index -= 1;
-                }
-                self.non_canonical[index].0.append(&mut next.0);
-                return index;
-            }
-        }
-        updated_index
-    }
-}
-
 /// A sequence of adjacent segments.
-#[derive(Debug, PartialEq, Eq)]
-struct Chain(Vec<Segment>);
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Chain(pub Vec<Segment>);
 
 impl Chain {
-    #[cfg(any(test, debug_assertions))]
+    #[cfg(test)]
     fn check_invariants(&self) {
-        use itertools::Itertools as _;
         assert!(!self.0.is_empty());
-        for (a, b) in self.0.iter().tuple_windows() {
-            assert!((*a.range.numbers.end() + 1) == *b.range.numbers.start());
-            assert!(a.range.network == b.range.network);
-            assert!(b.range.prev_hash.map(|h| h == a.range.hash).unwrap_or(true));
+        for w in self.0.windows(2) {
+            assert!(BlockRange::adjacent(&w[0].range, &w[1].range));
         }
     }
 
-    fn bounds(&self) -> (&BlockRange, &BlockRange) {
-        let first = &self.0.first().unwrap().range;
-        let last = &self.0.last().unwrap().range;
-        (first, last)
+    pub fn start(&self) -> BlockNum {
+        self.first().start()
     }
 
-    fn start(&self) -> BlockNum {
-        *self.0.first().unwrap().range.numbers.start()
+    pub fn end(&self) -> BlockNum {
+        self.last().end()
     }
 
-    fn end(&self) -> BlockNum {
-        *self.0.last().unwrap().range.numbers.end()
+    pub fn first(&self) -> &BlockRange {
+        &self.0.first().unwrap().range
     }
 
-    fn adjacent_before(&self, range: &BlockRange) -> bool {
-        let (_, last) = self.bounds();
-        if range.network != last.network {
-            return false;
-        }
-        if *range.numbers.start() != (*last.numbers.end() + 1) {
-            return false;
-        }
-        match &range.prev_hash {
-            None => true,
-            Some(prev_hash) => prev_hash == &last.hash,
-        }
+    pub fn last(&self) -> &BlockRange {
+        &self.0.last().unwrap().range
     }
 
-    fn adjacent_after(&self, range: &BlockRange) -> bool {
-        let (first, _) = self.bounds();
-        if range.network != first.network {
-            return false;
+    pub fn range(&self) -> BlockRange {
+        BlockRange {
+            numbers: self.start()..=self.end(),
+            network: self.first().network.clone(),
+            hash: self.last().hash,
+            prev_hash: self.first().prev_hash,
         }
-        if (*range.numbers.end() + 1) != *first.numbers.start() {
-            return false;
-        }
-        match &first.prev_hash {
-            None => true,
-            Some(prev_hash) => prev_hash == &range.hash,
-        }
-    }
-
-    fn insert(&mut self, segment: &Segment) -> Result<(), ()> {
-        if self.adjacent_before(&segment.range) {
-            self.0.push(segment.clone());
-            return Ok(());
-        }
-        if self.adjacent_after(&segment.range) {
-            self.0.insert(0, segment.clone());
-            return Ok(());
-        }
-        if let Some(index) = self.0.iter().position(|s| {
-            (s.range.network == segment.range.network) && (s.range.numbers == segment.range.numbers)
-        }) {
-            if &self.0[index] == segment {
-                return Ok(());
-            }
-            if self.0[index].range.prev_hash.is_none() && segment.range.prev_hash.is_none() {
-                self.0[index] = segment.clone();
-                return Ok(());
-            }
-        }
-        Err(())
-    }
-
-    fn merge(&mut self, numbers: RangeInclusive<BlockNum>, object: ObjectMeta) -> Result<(), ()> {
-        let end = self
-            .0
-            .iter()
-            .position(|s| s.range.numbers.end() == numbers.end())
-            .ok_or(())?;
-        let end = self.0.remove(end).range;
-        let index = self
-            .0
-            .iter()
-            .position(|s| s.range.numbers.start() == numbers.start())
-            .ok_or(())?;
-        let start = self.0.remove(index).range;
-        let segment = Segment {
-            range: BlockRange {
-                numbers: *start.numbers.start()..=*end.numbers.end(),
-                network: start.network,
-                hash: end.hash,
-                prev_hash: start.prev_hash,
-            },
-            object,
-        };
-        self.0.insert(index, segment);
-        Ok(())
     }
 }
 
-pub fn missing_block_ranges(
+/// Returns the canonical chain of segments.
+///
+/// The canonical chain starts from the earliest available block and extends to the greatest block
+/// height reachable through contiguous segments. When multiple segments cover the same block range
+/// (indicating a reorg or compaction), the segment with the most recent `last_modified` timestamp
+/// is chosen.
+///
+/// The input order of `segments` does not affect the result.
+pub fn canonical_chain(segments: Vec<Segment>) -> Option<Chain> {
+    chains(segments).map(|Chains { canonical, .. }| canonical)
+}
+
+/// Return the block ranges missing from this table out of the given `desired` range. The
+/// returned ranges are non-overlapping and sorted by their start block number.
+///
+/// To resolve reorgs, the missing ranges may include block ranges already indexed. A reorg is
+/// detected when there is some fork, which is a chain of segments that has a greater block height
+/// than the canonical chain. Divergence from the canonical chain is detected using the `hash` and
+/// `prev_hash` fields on the block range. When a reorg is detected, the missing ranges will
+/// include any canonical ranges that overlap with the fork minus 1 block.
+///
+///
+/// ```text
+///                ┌───────────────────────────────────────────────────────┐
+///   desired:     │ 00-02 │ 03-05 │ 06-08 │ 09-11 │ 12-14 │ 15-17 │ 18-20 │
+///                └───────────────────────────────────────────────────────┘
+///                        ┌───────────────────────────────┐
+///   canonical:           │ 03-05 │ 06-08 │ 09-11 │ 12-14 │
+///                        └───────────────────────────────┘
+///                                        ┌───────────────────────┐
+///   fork:                                │ 09-11'│ 12-14'│ 15-17'│
+///                                        └───────────────────────┘
+///                ┌───────┐       ┌───────┐                       ┌───────┐
+///   missing:     │ 00-02 │       │ 06-08 │                       │ 18-20 │
+///                └───────┘       └───────┘                       └───────┘
+/// ```
+///
+/// - Ranges 00-02 and 18-20 are missing due to block range gap.
+/// - Range 06-08 is missing due to reorg. The canonical chan overlaps with the fork,
+///   so we should re-extract the previous segment.
+pub fn missing_ranges(
+    segments: Vec<Segment>,
+    desired: RangeInclusive<BlockNum>,
+) -> Vec<RangeInclusive<BlockNum>> {
+    let mut missing = vec![desired.clone()];
+
+    // remove overlapping ranges from each segment
+    for segment in &segments {
+        let segment_range = segment.range.numbers.clone();
+        let mut index = 0;
+        while index < missing.len() {
+            if block_range_intersection(missing[index].clone(), segment_range.clone()).is_none() {
+                index += 1;
+                continue;
+            }
+            let ranges = missing_block_ranges(segment_range.clone(), missing[index].clone());
+            let next_index = index + ranges.len();
+            missing.splice(index..=index, ranges);
+            index = next_index;
+        }
+    }
+
+    // add canonical range overlapping with reorg
+    if let Some(chains) = chains(segments)
+        && let Some(fork) = chains.fork
+    {
+        let reorg_block = fork.start() - 1;
+        let canonical_segments = &chains.canonical.0;
+        let canonical_range = canonical_segments
+            .iter()
+            .map(|s| s.range.numbers.clone())
+            .rfind(|r| r.contains(&reorg_block));
+        if let Some(canonical_range) = canonical_range {
+            let reorg_range = *canonical_range.start()..=reorg_block;
+            if let Some(missing_range) = block_range_intersection(reorg_range, desired.clone()) {
+                missing.push(missing_range);
+            }
+        }
+    }
+
+    merge_ranges(missing)
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct Chains {
+    /// See `canonical_segments`.
+    canonical: Chain,
+    /// The chain with the greatest block height past the canonical chain, where there is no gap
+    /// between the canonical chain and the fork.
+    ///
+    /// ```text
+    ///              ┌───────────────┐
+    ///   canonical: │ a │ b │ c │ d │
+    ///              └───────────────┘
+    ///                      ┌────────────┐
+    ///   fork:              │ c'│ d'│ e' │
+    ///                      └────────────┘
+    /// ```
+    fork: Option<Chain>,
+}
+
+/// Find the canonical and fork chain from a sequence of segments. The result is independent of the
+/// input order.
+// The implementation uses depth-first from the segment with the greatest end block number,
+// favoring segments with the latest object `last_modified` timestamp.
+#[inline]
+fn chains(segments: Vec<Segment>) -> Option<Chains> {
+    let min_start = segments.iter().map(|s| s.range.start()).min()?;
+    let mut by_end: BTreeMap<BlockNum, Vec<Segment>> = Default::default();
+    for s in segments {
+        by_end.entry(s.range.end()).or_default().push(s);
+    }
+
+    fn pick_segment(
+        by_end: &mut BTreeMap<BlockNum, Vec<Segment>>,
+        end: BlockNum,
+        next: Option<&BlockRange>,
+    ) -> Option<Segment> {
+        let segments = by_end.get_mut(&end)?;
+        segments.sort_unstable_by_key(|s| s.object.last_modified);
+        let index = segments.iter().rposition(|s| {
+            next.map(|next| BlockRange::adjacent(&s.range, next))
+                .unwrap_or(true)
+        })?;
+        let segment = segments.remove(index);
+        if segments.is_empty() {
+            by_end.remove(&end);
+        }
+        Some(segment)
+    }
+    fn pick_chain(by_end: &mut BTreeMap<BlockNum, Vec<Segment>>) -> Chain {
+        assert!(!by_end.is_empty());
+        let latest = {
+            let end = *by_end.last_key_value().unwrap().0;
+            pick_segment(by_end, end, None).unwrap()
+        };
+        let mut chain = vec![latest];
+        loop {
+            let next = &chain.last().unwrap().range;
+            if next.start() == 0 {
+                break;
+            }
+            match pick_segment(by_end, next.start() - 1, Some(next)) {
+                Some(segment) => chain.push(segment),
+                None => break,
+            };
+        }
+        chain.reverse();
+        Chain(chain)
+    }
+
+    let latest = pick_chain(&mut by_end);
+    if latest.start() == min_start {
+        #[cfg(test)]
+        latest.check_invariants();
+
+        return Some(Chains {
+            canonical: latest,
+            fork: None,
+        });
+    }
+
+    let mut chains = vec![latest];
+    while chains.last().unwrap().start() != min_start {
+        chains.push(pick_chain(&mut by_end));
+    }
+
+    let canonical = chains.pop().unwrap();
+    let fork_min = canonical.end() + 1;
+    let fork = chains
+        .iter()
+        .filter(|c| c.end() > canonical.end())
+        .position(|c| c.start() <= fork_min)
+        .map(|index| chains.remove(index));
+
+    #[cfg(test)]
+    {
+        canonical.check_invariants();
+        if let Some(fork) = &fork {
+            fork.check_invariants();
+        }
+    }
+
+    Some(Chains { canonical, fork })
+}
+
+fn missing_block_ranges(
     synced: RangeInclusive<BlockNum>,
     desired: RangeInclusive<BlockNum>,
 ) -> Vec<RangeInclusive<BlockNum>> {
@@ -413,155 +288,355 @@ pub fn missing_block_ranges(
     result
 }
 
+pub fn merge_ranges(mut ranges: Vec<RangeInclusive<BlockNum>>) -> Vec<RangeInclusive<BlockNum>> {
+    ranges.sort_by_key(|r| *r.start());
+    let mut index = 1;
+    while index < ranges.len() {
+        let current_range = ranges[index - 1].clone();
+        let next_range = ranges[index].clone();
+        if *next_range.start() <= (*current_range.end() + 1) {
+            ranges[index - 1] =
+                *current_range.start()..=BlockNum::max(*current_range.end(), *next_range.end());
+            ranges.remove(index);
+        } else {
+            index += 1;
+        }
+    }
+    ranges
+}
+
 #[cfg(test)]
 mod test {
-    use std::{
-        collections::BTreeMap,
-        ops::{Range, RangeInclusive},
-    };
+    use std::ops::RangeInclusive;
 
     use alloy::primitives::BlockHash;
+    use chrono::DateTime;
     use object_store::ObjectMeta;
-    use rand::{Rng as _, RngCore, SeedableRng, rngs::StdRng, seq::SliceRandom};
+    use rand::{Rng as _, RngCore as _, SeedableRng as _, rngs::StdRng, seq::SliceRandom};
 
-    use super::{BlockRange, TableSegments};
-    use crate::{BlockNum, metadata::segments::Segment};
+    use crate::{
+        BlockNum, BlockRange,
+        metadata::segments::{Chain, Chains, Segment},
+    };
 
-    #[test]
-    fn canonical_segments() {
-        let seed = rand::rng().next_u64();
-        println!("seed: {seed}");
-        let mut rng = StdRng::seed_from_u64(seed);
-
-        let segments = gen_segments(&mut rng);
-        println!(
-            "{:?}",
-            segments
-                .iter()
-                .map(|s| format!("({:?}, {})", s.range.numbers, s.range.hash.0[31]))
-                .collect::<Vec<_>>()
-        );
-        let mut model: Vec<BlockRange> = Default::default();
-        let mut table: TableSegments = Default::default();
-        for segment in {
-            let mut segments = segments.clone();
-            segments.shuffle(&mut rng);
-            segments
-        } {
-            println!(
-                "insert ({:?}, {})",
-                segment.range.numbers, segment.range.hash.0[31]
-            );
-            let diff = table.insert(segment);
-            for segment in diff.sub {
-                let index = model.iter().position(|r| r == &segment.range).unwrap();
-                model.remove(index);
-            }
-            for segment in diff.add {
-                model.push(segment.range);
-            }
-        }
-        table.check_invariants();
-
-        model.sort_by_key(|r| *r.numbers.start());
-        let expected_model = segments
-            .iter()
-            .map(|s| &s.range)
-            .filter(|r| r.hash[31] == 0)
-            .cloned()
-            .collect::<Vec<BlockRange>>();
-        assert_eq!(model, expected_model);
-    }
-
-    #[test]
-    fn canonical_segments_no_prev_hash() {
-        let seed = rand::rng().next_u64();
-        println!("seed: {seed}");
-        let mut rng = StdRng::seed_from_u64(seed);
-
-        let mut segments = gen_segments(&mut rng);
-        for segment in &mut segments {
-            segment.range.prev_hash = None;
-        }
-        println!(
-            "{:?}",
-            segments
-                .iter()
-                .map(|s| format!("({:?}, {})", s.range.numbers, s.range.hash.0[31]))
-                .collect::<Vec<_>>()
-        );
-        let mut model: BTreeMap<BlockNum, BlockRange> = Default::default();
-        let mut expected: BTreeMap<BlockNum, BlockRange> = Default::default();
-        let mut table: TableSegments = Default::default();
-        for segment in {
-            let mut segments = segments.clone();
-            segments.shuffle(&mut rng);
-            segments
-        } {
-            println!(
-                "insert ({:?}, {})",
-                segment.range.numbers, segment.range.hash.0[31]
-            );
-            expected.insert(*segment.range.numbers.start(), segment.range.clone());
-            let diff = table.insert(segment);
-            for segment in diff.sub {
-                model.remove(segment.range.numbers.start());
-            }
-            for segment in diff.add {
-                model.insert(*segment.range.numbers.start(), segment.range);
-            }
-        }
-        table.check_invariants();
-
-        assert_eq!(expected, model);
-    }
-
-    fn gen_segments(rng: &mut StdRng) -> Vec<Segment> {
-        let hash = |number: u8, fork_index: u8| -> BlockHash {
+    fn test_range(numbers: RangeInclusive<BlockNum>, fork: (u8, u8)) -> BlockRange {
+        fn test_hash(number: u8, fork: u8) -> BlockHash {
             let mut hash: BlockHash = Default::default();
             hash.0[0] = number;
-            hash.0[31] = fork_index;
+            hash.0[31] = fork;
             hash
-        };
-        let gen_ranges = |numbers: Range<u8>, fork_index: u8| -> Vec<BlockRange> {
-            numbers
-                .map(|n| BlockRange {
-                    numbers: (n as u64)..=(n as u64),
-                    network: "test".to_string(),
-                    hash: hash(n, fork_index),
-                    prev_hash: Some(hash(n.checked_sub(1).unwrap_or(0), fork_index)),
-                })
-                .collect()
-        };
-
-        let mut ranges: Vec<BlockRange> = Default::default();
-        let canonical_chain_depth = 10;
-        let max_fork_depth = 2;
-        ranges.append(&mut gen_ranges(0..canonical_chain_depth, 0));
-        // generate forks
-        for fork_index in 1..(1 + rng.random_range(0..3)) {
-            let start = rng.random_range(0..(canonical_chain_depth - max_fork_depth));
-            let end = rng.random_range((start + 1)..(start + 3));
-            ranges.append(&mut gen_ranges(start..end, fork_index));
         }
-        assert!(
-            ranges
-                .iter()
-                .all(|r| *r.numbers.end() < canonical_chain_depth as u64)
-        );
-        ranges
-            .into_iter()
-            .map(|range| Segment {
-                object: ObjectMeta {
-                    location: format!("{:?}", range.hash).into(),
-                    last_modified: Default::default(),
-                    size: 0,
-                    e_tag: None,
-                    version: None,
-                },
-                range,
+        BlockRange {
+            numbers: numbers.clone(),
+            network: "test".to_string(),
+            hash: test_hash(*numbers.end() as u8, fork.1),
+            prev_hash: if *numbers.start() == 0 {
+                Some(Default::default())
+            } else {
+                Some(test_hash(*numbers.start() as u8 - 1, fork.0))
+            },
+        }
+    }
+
+    fn test_segment(numbers: RangeInclusive<BlockNum>, fork: (u8, u8), timestamp: i64) -> Segment {
+        let range = test_range(numbers.clone(), fork);
+        let object = ObjectMeta {
+            location: Default::default(),
+            last_modified: DateTime::from_timestamp_millis(timestamp).unwrap(),
+            size: 0,
+            e_tag: None,
+            version: None,
+        };
+        Segment { range, object }
+    }
+
+    #[test]
+    fn chains() {
+        // empty input
+        assert_eq!(super::chains(vec![]), None);
+
+        // single segment
+        assert_eq!(
+            super::chains(vec![test_segment(0..=0, (0, 0), 0)]),
+            Some(Chains {
+                canonical: Chain(vec![test_segment(0..=0, (0, 0), 0)]),
+                fork: None,
             })
-            .collect()
+        );
+
+        // 2 adjacent segments forming a canonical chain
+        assert_eq!(
+            super::chains(vec![
+                test_segment(0..=2, (0, 0), 0),
+                test_segment(3..=5, (0, 0), 0),
+            ]),
+            Some(Chains {
+                canonical: Chain(vec![
+                    test_segment(0..=2, (0, 0), 0),
+                    test_segment(3..=5, (0, 0), 0),
+                ]),
+                fork: None,
+            })
+        );
+
+        // 3 adjacent segments forming a canonical chain
+        assert_eq!(
+            super::chains(vec![
+                test_segment(0..=1, (0, 0), 0),
+                test_segment(2..=3, (0, 0), 0),
+                test_segment(4..=5, (0, 0), 0),
+            ]),
+            Some(Chains {
+                canonical: Chain(vec![
+                    test_segment(0..=1, (0, 0), 0),
+                    test_segment(2..=3, (0, 0), 0),
+                    test_segment(4..=5, (0, 0), 0),
+                ]),
+                fork: None,
+            })
+        );
+
+        // non-adjacent segments
+        assert_eq!(
+            super::chains(vec![
+                test_segment(0..=2, (0, 0), 0),
+                test_segment(5..=7, (0, 0), 0),
+            ]),
+            Some(Chains {
+                canonical: Chain(vec![test_segment(0..=2, (0, 0), 0)]),
+                fork: None,
+            })
+        );
+
+        // multiple non-adjacent segments
+        assert_eq!(
+            super::chains(vec![
+                test_segment(5..=7, (0, 0), 0),
+                test_segment(0..=2, (0, 0), 0),
+                test_segment(10..=12, (0, 0), 0),
+            ]),
+            Some(Chains {
+                canonical: Chain(vec![test_segment(0..=2, (0, 0), 0)]),
+                fork: None,
+            })
+        );
+
+        // overlapping segments outside canonical
+        assert_eq!(
+            super::chains(vec![
+                test_segment(0..=2, (0, 0), 0),
+                test_segment(3..=5, (0, 0), 0),
+                test_segment(4..=5, (0, 0), 0),
+                test_segment(4..=6, (0, 0), 0),
+                test_segment(3..=6, (0, 0), 0),
+            ]),
+            Some(Chains {
+                canonical: Chain(vec![
+                    test_segment(0..=2, (0, 0), 0),
+                    test_segment(3..=6, (0, 0), 0),
+                ]),
+                fork: None,
+            })
+        );
+
+        // simple fork at start block
+        assert_eq!(
+            super::chains(vec![
+                test_segment(0..=2, (0, 0), 0),
+                test_segment(3..=5, (0, 0), 0),
+                test_segment(3..=6, (1, 0), 0),
+            ]),
+            Some(Chains {
+                canonical: Chain(vec![
+                    test_segment(0..=2, (0, 0), 0),
+                    test_segment(3..=5, (0, 0), 0),
+                ]),
+                fork: Some(Chain(vec![test_segment(3..=6, (1, 0), 0)])),
+            })
+        );
+
+        // reorg of multiple segments
+        assert_eq!(
+            super::chains(vec![
+                test_segment(0..=2, (0, 0), 0),
+                test_segment(3..=5, (0, 0), 0),
+                test_segment(3..=5, (1, 1), 0),
+                test_segment(6..=8, (1, 0), 0),
+                test_segment(6..=8, (0, 0), 0),
+            ]),
+            Some(Chains {
+                canonical: Chain(vec![
+                    test_segment(0..=2, (0, 0), 0),
+                    test_segment(3..=5, (0, 0), 0),
+                    test_segment(6..=8, (0, 0), 0),
+                ]),
+                fork: None,
+            })
+        );
+
+        // fork of multiple segments
+        assert_eq!(
+            super::chains(vec![
+                test_segment(0..=2, (0, 0), 0),
+                test_segment(3..=5, (0, 0), 0),
+                test_segment(3..=5, (1, 1), 0),
+                test_segment(6..=9, (1, 0), 0),
+                test_segment(6..=8, (0, 0), 0),
+            ]),
+            Some(Chains {
+                canonical: Chain(vec![
+                    test_segment(0..=2, (0, 0), 0),
+                    test_segment(3..=5, (0, 0), 0),
+                    test_segment(6..=8, (0, 0), 0),
+                ]),
+                fork: Some(Chain(vec![
+                    test_segment(3..=5, (1, 1), 0),
+                    test_segment(6..=9, (1, 0), 0),
+                ])),
+            })
+        );
+
+        // simple reorg at timestamp
+        assert_eq!(
+            super::chains(vec![
+                test_segment(0..=2, (0, 0), 0),
+                test_segment(3..=5, (0, 1), 1),
+                test_segment(3..=5, (0, 0), 0),
+            ]),
+            Some(Chains {
+                canonical: Chain(vec![
+                    test_segment(0..=2, (0, 0), 0),
+                    test_segment(3..=5, (0, 1), 1),
+                ]),
+                fork: None,
+            })
+        );
+
+        // multiple reorgs past canonical
+        assert_eq!(
+            super::chains(vec![
+                test_segment(0..=3, (0, 0), 0),
+                test_segment(4..=6, (1, 1), 0),
+                test_segment(4..=8, (0, 0), 0),
+                test_segment(7..=9, (1, 1), 0),
+                test_segment(4..=9, (2, 2), 0),
+            ]),
+            Some(Chains {
+                canonical: Chain(vec![
+                    test_segment(0..=3, (0, 0), 0),
+                    test_segment(4..=8, (0, 0), 0),
+                ]),
+                fork: Some(Chain(vec![test_segment(4..=9, (2, 2), 0)])),
+            })
+        );
+    }
+
+    #[test]
+    fn missing_ranges() {
+        fn missing_ranges(
+            ranges: &[RangeInclusive<BlockNum>],
+            desired: RangeInclusive<BlockNum>,
+        ) -> Vec<RangeInclusive<BlockNum>> {
+            let segments = ranges
+                .iter()
+                .enumerate()
+                .map(|(fork, range)| test_segment(range.clone(), (fork as u8, fork as u8), 0))
+                .collect();
+            super::missing_ranges(segments, desired)
+        }
+
+        assert_eq!(missing_ranges(&[], 0..=10), vec![0..=10]);
+        // just canonical ranges
+        assert_eq!(missing_ranges(&[0..=10], 0..=10), vec![]);
+        assert_eq!(missing_ranges(&[0..=5], 10..=15), vec![10..=15]);
+        assert_eq!(missing_ranges(&[3..=7], 0..=10), vec![0..=2, 8..=10]);
+        assert_eq!(missing_ranges(&[0..=15], 5..=10), vec![]);
+        assert_eq!(missing_ranges(&[5..=15], 0..=10), vec![0..=4]);
+        assert_eq!(missing_ranges(&[0..=5], 0..=10), vec![6..=10]);
+        // non-overlapping segment groups
+        assert_eq!(missing_ranges(&[0..=5, 8..=8], 0..=10), vec![6..=7, 9..=10]);
+        assert_eq!(
+            missing_ranges(&[1..=2, 4..=4, 8..=9], 0..=10),
+            vec![0..=0, 3..=3, 5..=7, 10..=10],
+        );
+        // overlapping segment groups, no reorg
+        assert_eq!(missing_ranges(&[0..=8, 2..=4], 0..=10), vec![9..=10]);
+        assert_eq!(missing_ranges(&[0..=3, 5..=7], 0..=10), vec![4..=4, 8..=10]);
+        // overlapping segment groups, reorg
+        assert_eq!(
+            missing_ranges(&[0..=3, 2..=5, 4..=7], 0..=10),
+            vec![0..=3, 8..=10]
+        );
+        assert_eq!(missing_ranges(&[0..=2, 1..=3], 0..=3), vec![0..=0]);
+        assert_eq!(missing_ranges(&[0..=2, 2..=3], 0..=2), vec![0..=1]);
+        assert_eq!(
+            missing_ranges(&[0..=3, 5..=7, 2..=12], 0..=15),
+            vec![0..=1, 13..=15]
+        );
+        assert_eq!(missing_ranges(&[0..=5, 3..=8], 0..=7), vec![0..=2]);
+        assert_eq!(missing_ranges(&[0..=20, 10..=30], 12..=18), vec![]);
+        // reorg intersection with desired range
+        assert_eq!(missing_ranges(&[0..=5, 3..=8], 2..=7), vec![2..=2]);
+    }
+
+    #[test]
+    fn chains_prop() {
+        const MAX_BLOCK: BlockNum = 15;
+        const MAX_FORK: u8 = 3;
+        const SAMPLES: usize = 10_000;
+        const MAX_REORGS: usize = 5;
+
+        fn gen_chain(rng: &mut StdRng, numbers: RangeInclusive<BlockNum>, fork: u8) -> Chain {
+            assert!(numbers.start() <= numbers.end());
+            let mut segments: Vec<Segment> = Default::default();
+            loop {
+                let start = segments
+                    .last()
+                    .map(|s| s.range.end() + 1)
+                    .unwrap_or(*numbers.start());
+                let end = rng.random_range(start..=*numbers.end());
+                segments.push(test_segment(start..=end, (fork, fork), 0));
+                if end == *numbers.end() {
+                    break;
+                }
+            }
+            let chain = Chain(segments);
+            chain.check_invariants();
+            chain
+        }
+
+        for _ in 0..SAMPLES {
+            let seed = rand::rng().next_u64();
+            println!("seed: {seed}");
+            let mut rng = StdRng::seed_from_u64(seed);
+
+            let chain_head = rng.random_range(1..=MAX_BLOCK);
+            let canonical = gen_chain(&mut rng, 0..=chain_head, 0);
+            let other_chains: Vec<Chain> = (0..rng.random_range(0..MAX_REORGS))
+                .map(|_| {
+                    let start = rng.random_range(1..=chain_head);
+                    let end = rng.random_range(start..=chain_head);
+                    let fork = rng.random_range(1..=MAX_FORK);
+                    gen_chain(&mut rng, start..=end, fork)
+                })
+                .collect();
+
+            let mut segments = canonical.0.clone();
+            for chain in &other_chains {
+                segments.append(&mut chain.0.clone());
+            }
+            segments.shuffle(&mut rng);
+
+            let chains = super::chains(segments).unwrap();
+            assert_eq!(chains.canonical, canonical);
+            if let Some(fork) = chains.fork {
+                assert!(fork.end() > canonical.end());
+                assert!(fork.start() > canonical.start());
+                assert!(fork.start() <= canonical.end() + 1);
+            } else {
+                assert!(other_chains.iter().all(|c| c.end() <= canonical.end()));
+            }
+        }
     }
 
     #[test]
@@ -605,69 +680,36 @@ mod test {
     }
 
     #[test]
-    fn missing_ranges() {
-        fn missing_ranges(
-            ranges: Vec<RangeInclusive<BlockNum>>,
-            desired: RangeInclusive<BlockNum>,
-        ) -> Vec<RangeInclusive<BlockNum>> {
-            let mut table: TableSegments = Default::default();
-            for numbers in ranges {
-                table.insert(Segment {
-                    range: BlockRange {
-                        numbers,
-                        network: "test".to_string(),
-                        hash: Default::default(),
-                        prev_hash: None,
-                    },
-                    object: ObjectMeta {
-                        location: Default::default(),
-                        last_modified: Default::default(),
-                        size: 0,
-                        e_tag: None,
-                        version: None,
-                    },
-                });
-            }
-            table.missing_ranges(desired)
-        }
-
-        assert_eq!(missing_ranges(vec![], 0..=10), vec![0..=10]);
-        // just canonical ranges
-        assert_eq!(missing_ranges(vec![0..=10], 0..=10), vec![]);
-        assert_eq!(missing_ranges(vec![0..=5], 10..=15), vec![10..=15]);
-        assert_eq!(missing_ranges(vec![3..=7], 0..=10), vec![0..=2, 8..=10]);
-        assert_eq!(missing_ranges(vec![0..=15], 5..=10), vec![]);
-        assert_eq!(missing_ranges(vec![5..=15], 0..=10), vec![0..=4]);
-        assert_eq!(missing_ranges(vec![0..=5], 0..=10), vec![6..=10]);
-        // non-overlapping segment groups
+    fn merge_ranges() {
+        assert_eq!(super::merge_ranges(vec![]), vec![]);
+        assert_eq!(super::merge_ranges(vec![1..=5]), vec![1..=5]);
         assert_eq!(
-            missing_ranges(vec![0..=5, 8..=8], 0..=10),
-            vec![6..=7, 9..=10],
+            super::merge_ranges(vec![1..=3, 5..=7, 9..=10]),
+            vec![1..=3, 5..=7, 9..=10]
+        );
+        assert_eq!(super::merge_ranges(vec![1..=5, 3..=8]), vec![1..=8]);
+        assert_eq!(super::merge_ranges(vec![1..=5, 5..=10]), vec![1..=10]);
+        assert_eq!(super::merge_ranges(vec![1..=10, 3..=7]), vec![1..=10]);
+        assert_eq!(
+            super::merge_ranges(vec![1..=3, 2..=5, 4..=8, 7..=10]),
+            vec![1..=10]
         );
         assert_eq!(
-            missing_ranges(vec![1..=2, 4..=4, 8..=9], 0..=10),
-            vec![0..=0, 3..=3, 5..=7, 10..=10],
-        );
-        // overlapping segment groups, no reorg
-        assert_eq!(missing_ranges(vec![0..=8, 2..=4], 0..=10), vec![9..=10]);
-        assert_eq!(
-            missing_ranges(vec![0..=3, 5..=7], 0..=10),
-            vec![4..=4, 8..=10]
+            super::merge_ranges(vec![10..=15, 1..=5, 3..=8]),
+            vec![1..=8, 10..=15]
         );
         assert_eq!(
-            missing_ranges(vec![0..=3, 2..=5, 4..=7], 0..=10),
-            vec![8..=10]
+            super::merge_ranges(vec![1..=3, 2..=6, 8..=10, 9..=12, 15..=18]),
+            vec![1..=6, 8..=12, 15..=18]
         );
-        // overlapping segment groups, reorg
-        assert_eq!(missing_ranges(vec![0..=2, 1..=3], 0..=3), vec![0..=0]);
-        assert_eq!(missing_ranges(vec![0..=2, 2..=3], 0..=2), vec![0..=1]);
         assert_eq!(
-            missing_ranges(vec![0..=3, 5..=7, 2..=12], 0..=15),
-            vec![0..=1, 13..=15]
+            super::merge_ranges(vec![5..=10, 5..=10, 5..=10]),
+            vec![5..=10]
         );
-        assert_eq!(missing_ranges(vec![0..=5, 3..=8], 0..=7), vec![0..=2]);
-        assert_eq!(missing_ranges(vec![0..=20, 10..=30], 12..=18), vec![]);
-        // reorg intersection with desired range
-        assert_eq!(missing_ranges(vec![0..=5, 3..=8], 2..=7), vec![2..=2]);
+        assert_eq!(super::merge_ranges(vec![1..=1, 2..=2, 3..=3]), vec![1..=3]);
+        assert_eq!(
+            super::merge_ranges(vec![1..=5, 7..=10]),
+            vec![1..=5, 7..=10]
+        );
     }
 }

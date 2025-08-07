@@ -7,7 +7,6 @@ import random
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 
-import pandas as pd
 import pyarrow as pa
 
 
@@ -57,9 +56,8 @@ def create_test_arrow_table(num_rows: int = 1000, include_nulls: bool = True, in
             }
         )
 
-    # Create Arrow table with explicit schema
-    df = pd.DataFrame(data)
-    return pa.Table.from_pandas(df)
+    # Create Arrow table directly
+    return pa.Table.from_pydict(data)
 
 
 def create_large_test_table(num_rows: int = 100000) -> pa.Table:
@@ -79,8 +77,7 @@ def create_large_test_table(num_rows: int = 100000) -> pa.Table:
             'category': random.choices(['X', 'Y', 'Z'], k=(end - start)),
         }
 
-        chunk_df = pd.DataFrame(chunk_data)
-        chunk_table = pa.Table.from_pandas(chunk_df)
+        chunk_table = pa.Table.from_pydict(chunk_data)
         chunks.append(chunk_table)
 
     return pa.concat_tables(chunks)
@@ -94,8 +91,7 @@ def create_streaming_test_data(num_batches: int = 10, batch_size: int = 1000) ->
         start_id = batch_num * batch_size
         data = {'batch_id': [batch_num] * batch_size, 'row_id': list(range(start_id, start_id + batch_size)), 'value': [random.random() for _ in range(batch_size)], 'timestamp': [datetime.now() for _ in range(batch_size)]}
 
-        df = pd.DataFrame(data)
-        table = pa.Table.from_pandas(df)
+        table = pa.Table.from_pydict(data)
         batches.append(table.to_batches()[0])
 
     return batches

@@ -1,9 +1,0 @@
-[package]
-name = "async-udf"
-edition.workspace = true
-version.workspace = true
-
-[dependencies]
-datafusion.workspace = true
-async-trait.workspace = true
-futures.workspace = true
