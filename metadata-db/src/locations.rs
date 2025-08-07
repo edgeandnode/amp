@@ -27,7 +27,7 @@ where
     let query = indoc::indoc! {"
         INSERT INTO locations (dataset, dataset_version, tbl, bucket, path, url, active)
         VALUES ($1, $2, $3, $4, $5, $6, $7)
-        ON CONFLICT (dataset, dataset_version, tbl, url) DO UPDATE SET dataset = EXCLUDED.dataset
+        ON CONFLICT (url) DO UPDATE SET dataset = EXCLUDED.dataset
         RETURNING id
     "};
 
