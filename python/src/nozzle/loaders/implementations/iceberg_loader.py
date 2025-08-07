@@ -14,6 +14,22 @@ try:
         NoSuchTableError,
         NoSuchIcebergTableError
     )
+    from pyiceberg.schema import Schema as IcebergSchema
+    from pyiceberg.types import (
+        NestedField,
+        StringType,
+        IntegerType,
+        LongType,
+        FloatType,
+        DoubleType,
+        BooleanType,
+        DecimalType,
+        DateType,
+        TimestampType,
+        BinaryType,
+        ListType,
+        StructType
+    )
     ICEBERG_AVAILABLE = True
 except ImportError:
     ICEBERG_AVAILABLE = False
@@ -34,7 +50,10 @@ class IcebergStorageConfig:
     create_namespace: bool = True
     create_table: bool = True
     partition_by: Optional[List[str]] = None
+    
+    # Schema evolution settings
     schema_evolution: bool = True
+    
     batch_size: int = 10000
 
 
@@ -50,6 +69,7 @@ class IcebergLoader(DataLoader):
     Configuration Requirements:
     - catalog_config: PyIceberg catalog configuration
     - namespace: Iceberg namespace/database name
+    - schema_evolution: Enable automatic schema evolution (default: True)
     """
     
     def __init__(self, config: Dict[str, Any]):
@@ -61,6 +81,9 @@ class IcebergLoader(DataLoader):
                 "Install with: pip install pyiceberg"
             )
         
+        # Handle schema evolution configuration
+        schema_evolution = config.get('schema_evolution', True)
+        
         self.storage_config = IcebergStorageConfig(
             catalog_config=config['catalog_config'],
             namespace=config['namespace'],
@@ -68,7 +91,7 @@ class IcebergLoader(DataLoader):
             create_namespace=config.get('create_namespace', True),
             create_table=config.get('create_table', True),
             partition_by=config.get('partition_by'),
-            schema_evolution=config.get('schema_evolution', True),
+            schema_evolution=schema_evolution,
             batch_size=config.get('batch_size', 10000)
         )
         
@@ -267,13 +290,108 @@ class IcebergLoader(DataLoader):
     
     def _create_partition_spec(self, schema: pa.Schema):
         """Create Iceberg partition spec from partition_by configuration"""
+        # TODO: Implement this
         return None
     
     def _validate_schema_compatibility(self, iceberg_table: IcebergTable, arrow_schema: pa.Schema) -> None:
-        """Validate that Arrow schema is compatible with Iceberg table schema"""
+        """Validate that Arrow schema is compatible with Iceberg table schema and perform schema evolution if enabled"""
+        iceberg_schema = iceberg_table.schema()
+        
         if not self.storage_config.schema_evolution:
-            iceberg_schema = iceberg_table.schema()
-            self.logger.debug("Schema validation passed (simplified)")
+            # Strict mode: schema must match exactly
+            self._validate_schema_strict(iceberg_schema, arrow_schema)
+        else:
+            # Evolution mode: evolve schema to accommodate new fields
+            self._evolve_schema_if_needed(iceberg_table, iceberg_schema, arrow_schema)
+    
+    def _validate_schema_strict(self, iceberg_schema: IcebergSchema, arrow_schema: pa.Schema) -> None:
+        """Validate schema compatibility in strict mode (no evolution)"""
+        iceberg_field_names = {field.name for field in iceberg_schema.fields}
+        arrow_field_names = {field.name for field in arrow_schema}
+        
+        # Check for missing columns in Arrow schema
+        missing_in_arrow = iceberg_field_names - arrow_field_names
+        if missing_in_arrow:
+            self.logger.warning(f"Arrow schema missing columns present in Iceberg table: {missing_in_arrow}")
+        
+        # Check for extra columns in Arrow schema 
+        extra_in_arrow = arrow_field_names - iceberg_field_names
+        if extra_in_arrow:
+            raise ValueError(f"Arrow schema contains columns not present in Iceberg table: {extra_in_arrow}. "
+                           f"Enable schema_evolution=True to automatically add new columns.")
+        
+        self.logger.debug("Schema validation passed in strict mode")
+    
+    def _evolve_schema_if_needed(self, iceberg_table: IcebergTable, iceberg_schema: IcebergSchema, arrow_schema: pa.Schema) -> None:
+        """Evolve the Iceberg table schema to accommodate new Arrow schema fields"""
+        try:
+            iceberg_field_names = {field.name for field in iceberg_schema.fields}
+            arrow_field_names = {field.name for field in arrow_schema}
+            
+            # Find new columns in Arrow schema
+            new_columns = arrow_field_names - iceberg_field_names
+            
+            if not new_columns:
+                self.logger.debug("No schema changes needed - schemas are compatible")
+                return
+            
+            self.logger.info(f"Evolving schema to add {len(new_columns)} new columns: {new_columns}")
+            
+            # Use Iceberg's update schema API
+            with iceberg_table.update_schema() as update:
+                for field_name in new_columns:
+                    arrow_field = arrow_schema.field(field_name)
+                    iceberg_type = self._convert_arrow_type_to_iceberg(arrow_field.type)
+                    
+                    # Add new column (always optional in schema evolution to maintain compatibility)
+                    update.add_column(
+                        field_name, 
+                        iceberg_type, 
+                        doc=f"Added by schema evolution from Arrow field",
+                        required=False
+                    )
+                    self.logger.debug(f"Added column '{field_name}' with type {iceberg_type}")
+                    
+            self.logger.info(f"Successfully evolved schema - added columns: {new_columns}")
+            
+        except Exception as e:
+            raise RuntimeError(f"Failed to evolve table schema: {str(e)}")
+    
+    def _convert_arrow_type_to_iceberg(self, arrow_type: pa.DataType) -> Any:
+        """Convert Arrow data type to equivalent Iceberg type"""
+        if pa.types.is_string(arrow_type) or pa.types.is_large_string(arrow_type):
+            return StringType()
+        elif pa.types.is_int32(arrow_type):
+            return IntegerType()
+        elif pa.types.is_int64(arrow_type):
+            return LongType()
+        elif pa.types.is_float32(arrow_type):
+            return FloatType()
+        elif pa.types.is_float64(arrow_type):
+            return DoubleType()
+        elif pa.types.is_boolean(arrow_type):
+            return BooleanType()
+        elif pa.types.is_decimal(arrow_type):
+            return DecimalType(arrow_type.precision, arrow_type.scale)
+        elif pa.types.is_date32(arrow_type) or pa.types.is_date64(arrow_type):
+            return DateType()
+        elif pa.types.is_timestamp(arrow_type):
+            return TimestampType()
+        elif pa.types.is_binary(arrow_type) or pa.types.is_large_binary(arrow_type):
+            return BinaryType()
+        elif pa.types.is_list(arrow_type):
+            element_type = self._convert_arrow_type_to_iceberg(arrow_type.value_type)
+            return ListType(1, element_type, element_required=False)
+        elif pa.types.is_struct(arrow_type):
+            nested_fields = []
+            for i, field in enumerate(arrow_type):
+                field_type = self._convert_arrow_type_to_iceberg(field.type)
+                nested_fields.append(NestedField(i + 1, field.name, field_type, required=not field.nullable))
+            return StructType(nested_fields)
+        else:
+            # Fallback to string for unsupported types
+            self.logger.warning(f"Unsupported Arrow type {arrow_type}, converting to StringType")
+            return StringType()
     
     def _perform_load_operation(self, iceberg_table: IcebergTable, arrow_table: pa.Table, mode: LoadMode) -> int:
         """Perform the actual load operation based on mode"""

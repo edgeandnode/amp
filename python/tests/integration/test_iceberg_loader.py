@@ -291,9 +291,14 @@ class TestIcebergLoaderIntegration:
                 mode=LoadMode.APPEND
             )
             
-            # Schema evolution is not fully implemented, expect failure for now
-            assert result.success == False
-            assert 'more columns' in result.error
+            # Schema evolution should work successfully
+            assert result.success == True
+            assert result.rows_written > 0
+            
+            # Verify that the new columns were added to the schema
+            table_info = loader.get_table_info('test_schema_evolution')
+            assert 'new_column' in table_info['columns']
+            assert 'another_field' in table_info['columns']
 
     def test_error_handling_invalid_catalog(self):
         """Test error handling with invalid catalog configuration"""
