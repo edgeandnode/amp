@@ -80,18 +80,24 @@ enum Command {
         /// Run in dev mode, which starts a worker in the same process.
         #[arg(long, env = "SERVER_DEV")]
         dev: bool,
-        /// Enable Arrow Flight RPC Server
+        /// Enable Arrow Flight RPC Server.
         #[arg(long, env = "FLIGHT_SERVER")]
         flight_server: bool,
-        /// Enable JSON Lines Server
+        /// Enable JSON Lines Server.
         #[arg(long, env = "JSONL_SERVER")]
         jsonl_server: bool,
-        /// Enable Registry Server
+        /// Enable Registry Server.
         #[arg(long, env = "REGISTRY_SERVER")]
         registry_server: bool,
-        /// Enable Admin API Server
+        /// Enable Admin API Server.
         #[arg(long, env = "ADMIN_SERVER")]
         admin_server: bool,
+        /// This URL is used to send OpenTelemetry traces to a remote collector. OpenTelemetry collector must be running and configured to accept traces at this endpoint. If not specified, tracing will be initialized without telemetry.
+        #[arg(long, env = "OPENTELEMETRY_RECEIVER_URL_SERVER")]
+        opentelemetry_receiver_url: Option<String>,
+        /// The ratio of traces to sample (f64). Samples all traces by default (equivalent to 1.0).
+        #[arg(long, env = "OPENTELEMETRY_TRACE_RATIO")]
+        opentelemetry_trace_ratio: Option<f64>,
     },
     Worker {
         /// The node id of the worker.
@@ -141,8 +147,6 @@ async fn main() {
 }
 
 async fn main_inner() -> Result<(), BoxError> {
-    tracing_helpers::register_logger();
-
     // Log version info
     info!(
         "built on {}, git describe {}",
@@ -166,6 +170,8 @@ async fn main_inner() -> Result<(), BoxError> {
             location,
             fresh,
         } => {
+            tracing_helpers::register_logger();
+
             let (config, metadata_db) =
                 construct_confing_and_metadatadb(config_path.as_ref(), &command).await?;
             dump_cmd::dump(
@@ -191,7 +197,17 @@ async fn main_inner() -> Result<(), BoxError> {
             mut jsonl_server,
             mut registry_server,
             mut admin_server,
+            opentelemetry_receiver_url,
+            opentelemetry_trace_ratio,
         } => {
+            if let Some(url) = opentelemetry_receiver_url {
+                tracing_helpers::register_logger_with_telemetry(
+                    url,
+                    opentelemetry_trace_ratio.unwrap_or(1.0),
+                )?;
+            } else {
+                tracing_helpers::register_logger();
+            }
             let (config, metadata_db) =
                 construct_confing_and_metadatadb(config_path.as_ref(), &command).await?;
             if !flight_server && !jsonl_server && !registry_server && !admin_server {
@@ -214,6 +230,8 @@ async fn main_inner() -> Result<(), BoxError> {
             server.await
         }
         Command::Worker { node_id } => {
+            tracing_helpers::register_logger();
+
             let (config, metadata_db) =
                 construct_confing_and_metadatadb(config_path.as_ref(), &command).await?;
             let worker = Worker::new(config.clone(), metadata_db, node_id.parse()?);
@@ -227,6 +245,8 @@ async fn main_inner() -> Result<(), BoxError> {
             manifest,
             module,
         } => {
+            tracing_helpers::register_logger();
+
             if let Some(mut out) = out {
                 if out.is_dir() {
                     out.push(format!("{}.json", &kind));

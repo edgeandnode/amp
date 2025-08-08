@@ -11,6 +11,7 @@ atty.workspace = true
 bytes.workspace = true
 datafusion-proto.workspace = true
 datafusion.workspace = true
+datafusion-tracing.workspace = true
 figment.workspace = true
 fs-err.workspace = true
 futures.workspace = true
@@ -41,6 +42,10 @@ axum.workspace = true
 regex.workspace = true
 governor.workspace = true
 tower.workspace = true
+opentelemetry.workspace = true
+opentelemetry-otlp.workspace = true
+opentelemetry_sdk.workspace = true
+tracing-opentelemetry.workspace = true
 
 [dev-dependencies]
 cargo_metadata = "0.19.0"
