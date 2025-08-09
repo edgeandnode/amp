@@ -588,7 +588,57 @@ impl MetadataDb {
             .fetch_one(&*self.pool)
             .await?)
     }
+}
 
+/// Generic notification API
+impl MetadataDb {
+    #[instrument(skip(self), err)]
+    pub async fn notify(&self, channel_name: &str, payload: &str) -> Result<(), Error> {
+        sqlx::query("SELECT pg_notify($1, $2)")
+            .bind(channel_name)
+            .bind(payload)
+            .execute(&*self.pool)
+            .await?;
+        Ok(())
+    }
+
+    #[instrument(skip(self), err)]
+    pub async fn notify_location_change(&self, location_id: LocationId) -> Result<(), Error> {
+        self.notify("change-tracking", &location_id.to_string())
+            .await
+    }
+
+    /// Listens on a PostgreSQL notification channel using LISTEN.
+    ///
+    /// # Connection management
+    ///
+    /// This does not take a connection from the pool, but instead establishes a new connection
+    /// to the database. This connection is maintained for the lifetime of the stream.
+    ///
+    /// # Error cases
+    ///
+    /// This stream will generally not return `Err`, except on failure to estabilish the intial
+    /// connection, because connection errors are retried.
+    ///
+    /// # Delivery Guarantees
+    ///
+    /// - Notifications sent before the LISTEN command is issued will not be delivered.
+    /// - Notifications may be lost during automatic retry of a closed DB connection.
+    #[instrument(skip(self), err)]
+    pub async fn listen(
+        &self,
+        channel_name: &str,
+    ) -> Result<impl Stream<Item = Result<PgNotification, sqlx::Error>> + use<>, Error> {
+        let mut channel = PgListener::connect(&self.url)
+            .await
+            .map_err(Error::ConnectionError)?;
+        channel.listen(channel_name).await.map_err(Error::DbError)?;
+        Ok(channel.into_stream())
+    }
+}
+
+/// Registry API
+impl MetadataDb {
     pub async fn register_dataset(&self, registry: Registry) -> Result<(), Error> {
         let mut tx = self.pool.begin().await?;
         insert_dataset_to_registry(&mut *tx, registry).await?;
@@ -670,51 +720,18 @@ impl MetadataDb {
             None => Ok(None),
         }
     }
-}
 
-/// Generic notification API
-impl MetadataDb {
-    #[instrument(skip(self), err)]
-    pub async fn notify(&self, channel_name: &str, payload: &str) -> Result<(), Error> {
-        sqlx::query("SELECT pg_notify($1, $2)")
-            .bind(channel_name)
-            .bind(payload)
-            .execute(&*self.pool)
-            .await?;
-        Ok(())
-    }
-
-    #[instrument(skip(self), err)]
-    pub async fn notify_location_change(&self, location_id: LocationId) -> Result<(), Error> {
-        self.notify("change-tracking", &location_id.to_string())
-            .await
-    }
-
-    /// Listens on a PostgreSQL notification channel using LISTEN.
-    ///
-    /// # Connection management
-    ///
-    /// This does not take a connection from the pool, but instead establishes a new connection
-    /// to the database. This connection is maintained for the lifetime of the stream.
-    ///
-    /// # Error cases
-    ///
-    /// This stream will generally not return `Err`, except on failure to estabilish the intial
-    /// connection, because connection errors are retried.
-    ///
-    /// # Delivery Guarantees
-    ///
-    /// - Notifications sent before the LISTEN command is issued will not be delivered.
-    /// - Notifications may be lost during automatic retry of a closed DB connection.
-    #[instrument(skip(self), err)]
-    pub async fn listen(
+    pub async fn get_registry_info(
         &self,
-        channel_name: &str,
-    ) -> Result<impl Stream<Item = Result<PgNotification, sqlx::Error>> + use<>, Error> {
-        let mut channel = PgListener::connect(&self.url)
-            .await
-            .map_err(Error::ConnectionError)?;
-        channel.listen(channel_name).await.map_err(Error::DbError)?;
-        Ok(channel.into_stream())
+        dataset_name: &str,
+        version: &str,
+    ) -> Result<Registry, sqlx::Error> {
+        let sql = "SELECT owner, dataset, version, manifest FROM registry WHERE dataset = $1 AND version = $2";
+        let dataset = sqlx::query_as(sql)
+            .bind(&dataset_name)
+            .bind(&version)
+            .fetch_one(&*self.pool)
+            .await?;
+        Ok(dataset)
     }
 }

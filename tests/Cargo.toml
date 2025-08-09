@@ -39,3 +39,6 @@ firehose-datasets = { path = "../firehose-datasets" }
 rand.workspace = true
 schemars.workspace = true
 monitoring = { path = "../monitoring" }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+registry-service = { path = "../registry-service" }
+sqlx.workspace = true

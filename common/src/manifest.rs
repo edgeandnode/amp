@@ -173,12 +173,12 @@ impl Manifest {
         let version = self.version.0.to_string();
         let dataset_with_version = format!("{}__{}", dataset, version);
         let filename = format!("{}.json", dataset_with_version);
-        let manifest_path = object_store::path::Path::from(filename.clone());
+        let manifest_path = object_store::path::Path::from(filename.clone()).to_string();
         Registry {
             owner,
             dataset,
             version,
-            manifest_path,
+            manifest: manifest_path,
         }
     }
 }

@@ -10,12 +10,12 @@ use crate::ServiceState;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct RegisterRequest {
-    manifest: String,
+    pub manifest: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RegisterResponse {
-    success: bool,
+    pub success: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -83,9 +83,10 @@ pub async fn register_manifest(
     let registry_info = manifest.extract_registry_info();
     let manifest_json = serde_json::to_string(&manifest)?;
     let dataset_defs_store = dataset_store.dataset_defs_store();
+    let manifest_path = object_store::path::Path::from(registry_info.manifest.clone());
     dataset_defs_store
         .prefixed_store()
-        .put(&registry_info.manifest_path, manifest_json.into())
+        .put(&manifest_path, manifest_json.into())
         .await
         .map_err(|e| RegisterManifestError::DatasetStoreError(e.to_string()))?;
     dataset_store

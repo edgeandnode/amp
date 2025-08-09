@@ -1,4 +1,3 @@
-use object_store::path::Path;
 use sqlx::{Executor, Postgres};
 
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -6,7 +5,7 @@ pub struct Registry {
     pub owner: String,
     pub dataset: String,
     pub version: String,
-    pub manifest_path: Path,
+    pub manifest: String,
 }
 
 #[tracing::instrument(skip(exe), err)]
@@ -24,7 +23,7 @@ where
     sqlx::query(sql)
         .bind(registry_info.dataset)
         .bind(registry_info.version)
-        .bind(registry_info.manifest_path.to_string())
+        .bind(registry_info.manifest.to_string())
         .bind(registry_info.owner)
         .execute(exe)
         .await?;
