@@ -9,6 +9,7 @@ use url::Url;
 
 mod conn;
 mod locations;
+pub mod registry;
 #[cfg(feature = "temp-db")]
 pub mod temp;
 mod workers;
@@ -26,6 +27,7 @@ pub use self::{
         jobs::{Job, JobId, JobStatus, JobStatusUpdateError, JobWithDetails},
     },
 };
+use crate::registry::{Registry, insert_dataset_to_registry};
 
 /// Frequency on which to send a heartbeat.
 pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
@@ -587,25 +589,10 @@ impl MetadataDb {
             .await?)
     }
 
-    pub async fn save_registry(
-        &self,
-        dataset_name: &str,
-        version: &str,
-        owner: &str,
-        manifest: &str,
-    ) -> Result<(), Error> {
-        let sql = "
-        INSERT INTO registry (dataset, version, manifest, owner)
-        VALUES ($1, $2, $3, $4)
-        ";
-        sqlx::query(sql)
-            .bind(dataset_name)
-            .bind(version)
-            .bind(manifest)
-            .bind(owner)
-            .execute(&*self.pool)
-            .await?;
-
+    pub async fn register_dataset(&self, registry: Registry) -> Result<(), Error> {
+        let mut tx = self.pool.begin().await?;
+        insert_dataset_to_registry(&mut *tx, registry).await?;
+        tx.commit().await?;
         Ok(())
     }
 

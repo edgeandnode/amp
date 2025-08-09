@@ -4527,6 +4527,7 @@ version = "0.1.0"
 dependencies = [
  "futures",
  "indoc",
+ "object_store",
  "pgtemp",
  "serde",
  "serde_json",

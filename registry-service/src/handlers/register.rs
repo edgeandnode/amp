@@ -80,27 +80,18 @@ pub async fn register_manifest(
             version,
         ));
     }
-
-    let dataset_with_version = format!("{}__{}", dataset_name, version);
+    let registry_info = manifest.extract_registry_info();
     let manifest_json = serde_json::to_string(&manifest)?;
     let dataset_defs_store = dataset_store.dataset_defs_store();
-    let filename = format!("{}.json", dataset_with_version);
-    let path = object_store::path::Path::from(filename.clone());
     dataset_defs_store
         .prefixed_store()
-        .put(&path, manifest_json.into())
+        .put(&registry_info.manifest_path, manifest_json.into())
         .await
         .map_err(|e| RegisterManifestError::DatasetStoreError(e.to_string()))?;
-    let owner = manifest
-        .dependencies
-        .first_key_value()
-        .map(|d| d.1.owner.as_str())
-        .unwrap_or("unknown");
     dataset_store
         .metadata_db
-        .save_registry(&dataset_name, &version, owner, &filename)
+        .register_dataset(registry_info)
         .await?;
-
     tracing::info!(
         "Successfully registered manifest '{}' version '{}'",
         dataset_name,

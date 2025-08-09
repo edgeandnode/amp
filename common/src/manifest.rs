@@ -8,6 +8,7 @@ use datafusion::{
     arrow::datatypes::{Field as ArrowField, Fields, Schema, SchemaRef},
     common::DFSchemaRef,
 };
+use metadata_db::registry::Registry;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -164,6 +165,21 @@ impl Manifest {
                 )
             })
             .collect()
+    }
+
+    pub fn extract_registry_info(&self) -> Registry {
+        let owner = self.dependencies.first_key_value().unwrap().1.owner.clone();
+        let dataset = self.name.clone();
+        let version = self.version.0.to_string();
+        let dataset_with_version = format!("{}__{}", dataset, version);
+        let filename = format!("{}.json", dataset_with_version);
+        let manifest_path = object_store::path::Path::from(filename.clone());
+        Registry {
+            owner,
+            dataset,
+            version,
+            manifest_path,
+        }
     }
 }
 
