@@ -651,14 +651,35 @@ impl MetadataDb {
             LIMIT 1
         ";
 
-        println!("dataset_name from db: {}", dataset_name);
         let version: Option<String> = sqlx::query_scalar(sql)
             .bind(&dataset_name)
             .fetch_optional(&*self.pool)
             .await?;
-        println!("version from db: {:?}", version);
         match version {
             Some(version) => Ok(Some(format!("{}__{}", dataset_name, version))),
+            None => Ok(None),
+        }
+    }
+
+    #[instrument(skip(self), err)]
+    pub async fn get_dataset(
+        &self,
+        dataset_name: &str,
+        version: &str,
+    ) -> Result<Option<String>, Error> {
+        let sql = "
+            SELECT manifest FROM registry 
+            WHERE dataset = $1 AND version = $2
+            LIMIT 1
+        ";
+
+        let dataset: Option<String> = sqlx::query_scalar(sql)
+            .bind(&dataset_name)
+            .bind(&version)
+            .fetch_optional(&*self.pool)
+            .await?;
+        match dataset {
+            Some(dataset) => Ok(Some(dataset.trim_end_matches(".json").to_string())),
             None => Ok(None),
         }
     }

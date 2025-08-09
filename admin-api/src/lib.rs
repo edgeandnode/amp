@@ -28,7 +28,7 @@ pub async fn serve(
 
     // Register the routes
     let app = Router::new()
-        .route("/deploy", post(datasets::deploy::handler)) // TODO: Remove. Deprecated in favor of POST /datasets
+        .route("/deploy", post(datasets::deploy::handler))
         .route(
             "/datasets",
             get(datasets::get_all::handler).post(datasets::deploy::handler),

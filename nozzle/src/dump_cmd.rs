@@ -51,7 +51,7 @@ pub async fn dump(
 
     let mut physical_datasets = vec![];
     for dataset_name in datasets {
-        let dataset = dataset_store.load_dataset(&dataset_name).await?;
+        let dataset = dataset_store.load_dataset(&dataset_name, None).await?;
         let mut tables = Vec::with_capacity(dataset.tables.len());
         for table in Arc::new(dataset).resolved_tables() {
             let physical_table = if fresh {
@@ -156,10 +156,14 @@ pub async fn datasets_and_dependencies(
 ) -> Result<Vec<String>, BoxError> {
     let mut deps: BTreeMap<String, Vec<String>> = Default::default();
     while !datasets.is_empty() {
-        let dataset = store.load_dataset(&datasets.pop().unwrap()).await?;
+        let dataset = store.load_dataset(&datasets.pop().unwrap(), None).await?;
         let sql_dataset = match dataset.kind.as_str() {
             sql_datasets::DATASET_KIND => store.load_sql_dataset(&dataset.name).await?,
-            manifest::DATASET_KIND => store.load_manifest_dataset(&dataset.name).await?,
+            manifest::DATASET_KIND => {
+                store
+                    .load_manifest_dataset(&dataset.name, dataset.version.as_ref().unwrap())
+                    .await?
+            }
             _ => {
                 deps.insert(dataset.name.clone(), vec![]);
                 continue;

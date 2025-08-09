@@ -55,6 +55,21 @@ impl JsonSchema for Version {
     }
 }
 
+impl std::fmt::Display for Version {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::str::FromStr for Version {
+    type Err = semver::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let version = semver::Version::from_str(s)?;
+        Ok(Version(version))
+    }
+}
+
 /// Wrapper to implement [`JsonSchema`] for [`semver::VersionReq`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VersionReq(pub semver::VersionReq);

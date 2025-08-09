@@ -91,19 +91,14 @@ pub async fn register_manifest(
         .put(&path, manifest_json.into())
         .await
         .map_err(|e| RegisterManifestError::DatasetStoreError(e.to_string()))?;
-
+    let owner = manifest
+        .dependencies
+        .first_key_value()
+        .map(|d| d.1.owner.as_str())
+        .unwrap_or("unknown");
     dataset_store
         .metadata_db
-        .save_registry(
-            &dataset_name,
-            &version,
-            &manifest
-                .dependencies
-                .get(&manifest.network)
-                .map(|d| d.owner.as_str())
-                .unwrap_or("unknown"),
-            &filename,
-        )
+        .save_registry(&dataset_name, &version, owner, &filename)
         .await?;
 
     tracing::info!(

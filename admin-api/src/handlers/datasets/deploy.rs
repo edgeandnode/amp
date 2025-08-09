@@ -1,6 +1,8 @@
 //! Dataset deploy handler
+use std::str::FromStr;
+
 use axum::{Json, extract::State, http::StatusCode};
-use common::manifest::Manifest;
+use common::manifest::{Manifest, Version};
 use http_common::BoxRequestError;
 use registry_service::handlers::register::register_manifest;
 
@@ -27,23 +29,20 @@ pub async fn handler_inner(
 ) -> Result<(StatusCode, &'static str), Error> {
     validate_dataset_name(&payload.dataset_name)
         .map_err(|e| Error::InvalidRequest(format!("invalid dataset name: {e}").into()))?;
-    let manifest = ctx
-        .metadata_db
-        .get_manifest(&payload.dataset_name, &payload.version)
-        .await
-        .map_err(|e| Error::InvalidRequest(e.to_string().into()))?;
+    let dataset_version = Version::from_str(&payload.version)
+        .map_err(|e| Error::InvalidRequest(format!("invalid dataset version: {e}").into()))?;
+    let dataset = ctx
+        .store
+        .try_load_dataset(&payload.dataset_name, Some(&dataset_version))
+        .await?;
 
-    match (manifest, payload.manifest) {
-        (Some(manifest), None) => {
+    match (dataset, payload.manifest) {
+        (Some(dataset), None) => {
             tracing::info!(
                 "Deploying existing dataset '{}' version '{}'",
                 payload.dataset_name,
                 payload.version
             );
-            let dataset = ctx
-                .store
-                .load_dataset(&manifest.trim_end_matches(".json"))
-                .await?;
             ctx.scheduler
                 .schedule_dataset_dump(dataset, None)
                 .await

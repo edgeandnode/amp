@@ -37,7 +37,7 @@ pub async fn handler(
         .into());
     }
 
-    let dataset = ctx.store.load_dataset(&id).await.map_err(|err| {
+    let dataset = ctx.store.load_dataset(&id, None).await.map_err(|err| {
         tracing::debug!(id=%id, error=?err, "failed to load dataset");
         if err.is_not_found() {
             Error::NotFound { name: id }

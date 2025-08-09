@@ -24,6 +24,10 @@ struct Args {
     #[arg(long, env = "DUMP_DATASET")]
     dataset: String,
 
+    /// The version of the dataset to dump.
+    #[arg(long, env = "DUMP_DATASET_VERSION")]
+    version: Option<String>,
+
     /// The block number to start from, inclusive.
     #[arg(long, short, default_value = "0", env = "DUMP_START_BLOCK")]
     start: u64,
@@ -58,6 +62,7 @@ async fn main() -> Result<(), BoxError> {
     let Args {
         config: config_path,
         dataset: dataset_name,
+        version: dataset_version,
         start,
         end_block,
         batch_size,
@@ -90,6 +95,7 @@ async fn main() -> Result<(), BoxError> {
 
     dump_check::dump_check(
         &dataset_name,
+        dataset_version.as_deref(),
         &dataset_store,
         metadata_db,
         &env,

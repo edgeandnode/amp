@@ -42,12 +42,3 @@ ON file_metadata (location_id, file_name);
 
 CREATE UNIQUE INDEX unique_range_boundaries_per_dataset_version_table
 ON file_metadata (location_id, (metadata->>'range_start'), (metadata->>'range_end'));
-
-CREATE TABLE IF NOT EXISTS registry (
-    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    dataset TEXT NOT NULL,
-    version TEXT NOT NULL,
-    manifest TEXT NOT NULL,
-    owner TEXT NOT NULL,
-    UNIQUE(dataset, version)
-);
