@@ -6,13 +6,16 @@ use std::{
 };
 
 use common::{
-    BoxError, Store, catalog::physical::PhysicalTable, config::Config, manifest,
+    BoxError, Store,
+    catalog::physical::PhysicalTable,
+    config::Config,
+    manifest::{self, Version},
     notification_multiplexer,
 };
 use datafusion::sql::resolve::resolve_table_references;
 use dataset_store::{DatasetStore, sql_datasets};
 use metadata_db::MetadataDb;
-use tracing::info;
+use tracing::{info, warn};
 
 pub async fn dump(
     config: Arc<Config>,
@@ -51,7 +54,24 @@ pub async fn dump(
 
     let mut physical_datasets = vec![];
     for dataset_name in datasets {
-        let dataset = dataset_store.load_dataset(&dataset_name, None).await?;
+        let (dataset_name, version) =
+            if let Some((name, version_str)) = dataset_name.split_once("__") {
+                match version_str.parse::<Version>() {
+                    Ok(v) => (name, Some(v)),
+                    Err(e) => {
+                        warn!(
+                            "Skipping dataset {} due to invalid version: {}",
+                            dataset_name, e
+                        );
+                        continue;
+                    }
+                }
+            } else {
+                (dataset_name.as_str(), None)
+            };
+        let dataset = dataset_store
+            .load_dataset(&dataset_name, version.as_ref())
+            .await?;
         let mut tables = Vec::with_capacity(dataset.tables.len());
         for table in Arc::new(dataset).resolved_tables() {
             let physical_table = if fresh {
