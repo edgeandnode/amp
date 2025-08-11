@@ -1,8 +1,15 @@
-import { FileSystem, Path } from "@effect/platform"
-import type { Cause } from "effect"
-import { Data, Effect, Either, Match, Predicate, Schema, Stream } from "effect"
-import * as fs from "fs"
-import * as path from "path"
+import * as FileSystem from "@effect/platform/FileSystem"
+import * as Path from "@effect/platform/Path"
+import type * as Cause from "effect/Cause"
+import * as Data from "effect/Data"
+import * as Effect from "effect/Effect"
+import * as Either from "effect/Either"
+import * as Match from "effect/Match"
+import * as Predicate from "effect/Predicate"
+import * as Schema from "effect/Schema"
+import * as Stream from "effect/Stream"
+import * as fs from "node:fs"
+import * as path from "node:path"
 import * as ManifestBuilder from "./ManifestBuilder.js"
 import * as Model from "./Model.js"
 
@@ -25,10 +32,7 @@ export class Context {
       throw new Error(`Failed to read function source at ${fullPath}: ${err.message}`)
     }
 
-    const func = new Model.FunctionSource({
-      source,
-      filename: path.basename(fullPath),
-    })
+    const func = new Model.FunctionSource({ source, filename: path.basename(fullPath) })
     return func
   }
 }
@@ -53,7 +57,7 @@ export class ConfigLoader extends Effect.Service<ConfigLoader>()("Nozzle/ConfigL
 
     const loadTypeScript = Effect.fnUntraced(function*(file: string) {
       return yield* Effect.tryMapPromise(jiti, {
-        try: (jiti) => jiti.import<((context: Context) => Model.DatasetDefinition)>(file, { default: true }),
+        try: (jiti) => jiti.import<(context: Context) => Model.DatasetDefinition>(file, { default: true }),
         catch: (cause) => cause,
       }).pipe(
         Effect.map((callback) => callback(new Context(file))),
@@ -113,9 +117,10 @@ export class ConfigLoader extends Effect.Service<ConfigLoader>()("Nozzle/ConfigL
       return yield* Effect.findFirst(candidates, (_) => fs.exists(_).pipe(Effect.orElseSucceed(() => false)))
     })
 
-    const watch = <E, R>(file: string, options?: {
-      onError?: (cause: Cause.Cause<ConfigLoaderError>) => Effect.Effect<void, E, R>
-    }): Stream.Stream<Model.DatasetManifest, ConfigLoaderError | E, R> => {
+    const watch = <E, R>(
+      file: string,
+      options?: { onError?: (cause: Cause.Cause<ConfigLoaderError>) => Effect.Effect<void, E, R> },
+    ): Stream.Stream<Model.DatasetManifest, ConfigLoaderError | E, R> => {
       const resolved = path.resolve(file)
       const open = load(resolved).pipe(Effect.tapErrorCause(options?.onError ?? (() => Effect.void)), Effect.either)
 
@@ -128,9 +133,12 @@ export class ConfigLoader extends Effect.Service<ConfigLoader>()("Nozzle/ConfigL
 
       const build = (config: Model.DatasetDefinition) =>
         builder.build(config).pipe(
-          Effect.mapError((cause) => new ConfigLoaderError({ cause, message: `Failed to build config file ${file}` })),
+          Effect.mapError(
+            (cause) => new ConfigLoaderError({ cause, message: `Failed to build config file ${file}` }),
+          ),
           Effect.tapErrorCause(options?.onError ?? (() => Effect.void)),
-        ).pipe(Effect.either)
+          Effect.either,
+        )
 
       return Stream.fromEffect(open).pipe(
         Stream.concat(updates),

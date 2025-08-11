@@ -1,9 +1,19 @@
 #!/usr/bin/env node
 
-import { Command, Options, ValidationError } from "@effect/cli"
-import { PlatformConfigProvider } from "@effect/platform"
-import { NodeContext, NodeRuntime } from "@effect/platform-node"
-import { Cause, Config, Console, Effect, Layer, Logger, LogLevel, String } from "effect"
+import * as Command from "@effect/cli/Command"
+import * as Options from "@effect/cli/Options"
+import * as ValidationError from "@effect/cli/ValidationError"
+import * as NodeContext from "@effect/platform-node/NodeContext"
+import * as NodeRuntime from "@effect/platform-node/NodeRuntime"
+import * as PlatformConfigProvider from "@effect/platform/PlatformConfigProvider"
+import * as Cause from "effect/Cause"
+import * as Config from "effect/Config"
+import * as Console from "effect/Console"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import * as Logger from "effect/Logger"
+import * as LogLevel from "effect/LogLevel"
+import * as String from "effect/String"
 import * as Utils from "../Utils.ts"
 
 import { build } from "./commands/build.ts"
@@ -28,15 +38,9 @@ const nozzle = Command.make("nozzle", {
   Command.provide(({ args }) => Logger.minimumLogLevel(args.logs)),
 )
 
-const cli = Command.run(nozzle, {
-  name: "Nozzle",
-  version: "v0.0.1",
-})
+const cli = Command.run(nozzle, { name: "Nozzle", version: "v0.0.1" })
 
-const layer = Layer.provideMerge(
-  PlatformConfigProvider.layerDotEnvAdd(".env"),
-  NodeContext.layer,
-)
+const layer = Layer.provideMerge(PlatformConfigProvider.layerDotEnvAdd(".env"), NodeContext.layer)
 
 const runnable = Effect.suspend(() => cli(process.argv)).pipe(
   Effect.provide(layer),

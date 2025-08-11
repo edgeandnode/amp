@@ -1,7 +1,14 @@
-import { Command, Options } from "@effect/cli"
-import { FileSystem, Path } from "@effect/platform"
-import { Config, Console, Effect, Layer, Option, Schema } from "effect"
-import * as Api from "../../Api.ts"
+import * as Command from "@effect/cli/Command"
+import * as Options from "@effect/cli/Options"
+import * as FileSystem from "@effect/platform/FileSystem"
+import * as Path from "@effect/platform/Path"
+import * as Config from "effect/Config"
+import * as Console from "effect/Console"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
+import * as Schema from "effect/Schema"
+import * as Registry from "../../api/Registry.ts"
 import * as ManifestContext from "../../ManifestContext.ts"
 import * as Model from "../../Model.ts"
 
@@ -27,8 +34,8 @@ export const build = Command.make("build", {
   },
 }).pipe(
   Command.withDescription("Build a manifest from a dataset definition"),
-  Command.withHandler(({ args }) =>
-    Effect.gen(function*() {
+  Command.withHandler(
+    Effect.fn(function*({ args }) {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const json = yield* ManifestContext.ManifestContext.pipe(
@@ -39,15 +46,13 @@ export const build = Command.make("build", {
       yield* Option.match(args.output, {
         onNone: () => Console.log(json),
         onSome: (output) =>
-          fs.writeFileString(path.resolve(output), json).pipe(
-            Effect.tap(() => Console.log(`Manifest written to ${output}`)),
-          ),
+          fs
+            .writeFileString(path.resolve(output), json)
+            .pipe(Effect.tap(() => Console.log(`Manifest written to ${output}`))),
       })
-    })
+    }),
   ),
   Command.provide(({ args }) =>
-    ManifestContext.layerFromConfigFile(args.config).pipe(
-      Layer.provide(Api.Registry.withUrl(`${args.registry}`)),
-    )
+    ManifestContext.layerFromConfigFile(args.config).pipe(Layer.provide(Registry.layer(`${args.registry}`)))
   ),
 )

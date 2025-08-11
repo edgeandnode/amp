@@ -1,7 +1,7 @@
 import type { Field as ArrowField, Schema as ArrowSchema } from "apache-arrow"
 import { DataType, TimeUnit } from "apache-arrow"
-import type { Types } from "effect"
-import { Schema } from "effect"
+import * as Schema from "effect/Schema"
+import type * as Types from "effect/Types"
 
 export const generateSchema = (schema: ArrowSchema): Schema.Schema.AnyNoContext => {
   return Schema.Struct(generateFields(schema.fields)) as any

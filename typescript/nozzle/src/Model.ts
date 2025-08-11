@@ -1,4 +1,4 @@
-import { Schema } from "effect"
+import * as Schema from "effect/Schema"
 
 export class Dependency extends Schema.Class<Dependency>("Dependency")({
   owner: Schema.String,
@@ -18,11 +18,19 @@ export const DatasetName = Schema.Lowercase.pipe(
   }),
 )
 
-export const DatasetNetwork = Schema.Lowercase.pipe(
+export const Network = Schema.Lowercase.pipe(
   Schema.annotations({
     title: "Network",
-    description: "the network that this dataset is for",
+    description: "the network of a dataset or provider",
     examples: ["mainnet"],
+  }),
+)
+
+export const DatasetKind = Schema.Literal("manifest", "sql", "substreams", "firehose", "evm-rpc").pipe(
+  Schema.annotations({
+    title: "Kind",
+    description: "the kind of dataset",
+    examples: ["manifest", "sql", "substreams", "firehose", "evm-rpc"],
   }),
 )
 
@@ -63,22 +71,25 @@ export class FunctionDefinition extends Schema.Class<FunctionDefinition>("Functi
 
 export class DatasetDefinition extends Schema.Class<DatasetDefinition>("DatasetDefinition")({
   name: DatasetName,
-  network: DatasetNetwork,
+  network: Network,
   version: DatasetVersion,
   readme: DatasetReadme.pipe(Schema.optional),
   repository: DatasetRepository.pipe(Schema.optional),
-  dependencies: Schema.Record({
-    key: Schema.String,
-    value: Dependency,
-  }),
-  tables: Schema.Record({
-    key: Schema.String,
-    value: TableDefinition,
-  }).pipe(Schema.optional),
-  functions: Schema.Record({
-    key: Schema.String,
-    value: FunctionDefinition,
-  }).pipe(Schema.optional),
+  dependencies: Schema.Record({ key: Schema.String, value: Dependency }),
+  tables: Schema.Record({ key: Schema.String, value: TableDefinition }).pipe(Schema.optional),
+  functions: Schema.Record({ key: Schema.String, value: FunctionDefinition }).pipe(Schema.optional),
+}) {}
+
+export class TableInfo extends Schema.Class<TableInfo>("TableInfo")({
+  name: Schema.String,
+  network: Network,
+  activeLocation: Schema.String.pipe(Schema.optional, Schema.fromKey("active_location")),
+}) {}
+
+export class DatasetInfo extends Schema.Class<DatasetInfo>("DatasetInfo")({
+  name: DatasetName,
+  kind: DatasetKind,
+  tables: Schema.Array(TableInfo),
 }) {}
 
 export class ArrowField extends Schema.Class<ArrowField>("ArrowField")({
@@ -88,9 +99,7 @@ export class ArrowField extends Schema.Class<ArrowField>("ArrowField")({
 }) {}
 
 export class ArrowSchema extends Schema.Class<ArrowSchema>("ArrowSchema")({
-  fields: Schema.Array(
-    ArrowField,
-  ),
+  fields: Schema.Array(ArrowField),
 }) {}
 
 export class TableSchema extends Schema.Class<TableSchema>("TableSchema")({
@@ -104,7 +113,12 @@ export class TableInput extends Schema.Class<TableInput>("TableInput")({
 export class Table extends Schema.Class<Table>("Table")({
   input: TableInput,
   schema: TableSchema,
-  network: Schema.String,
+  network: Network,
+}) {}
+
+export class OutputSchema extends Schema.Class<OutputSchema>("OutputSchema")({
+  schema: TableSchema,
+  networks: Schema.Array(Schema.String),
 }) {}
 
 export class FunctionManifest extends Schema.Class<FunctionManifest>("FunctionManifest")({
@@ -116,19 +130,30 @@ export class FunctionManifest extends Schema.Class<FunctionManifest>("FunctionMa
 
 export class DatasetManifest extends Schema.Class<DatasetManifest>("DatasetManifest")({
   kind: Schema.Literal("manifest"),
-  network: DatasetNetwork,
+  network: Network,
   name: DatasetName,
   version: DatasetVersion,
-  dependencies: Schema.Record({
-    key: Schema.String,
-    value: Dependency,
-  }),
-  tables: Schema.Record({
-    key: Schema.String,
-    value: Table,
-  }),
-  functions: Schema.Record({
-    key: Schema.String,
-    value: FunctionManifest,
-  }),
+  dependencies: Schema.Record({ key: Schema.String, value: Dependency }),
+  tables: Schema.Record({ key: Schema.String, value: Table }),
+  functions: Schema.Record({ key: Schema.String, value: FunctionManifest }),
 }) {}
+
+export class DatasetRpc extends Schema.Class<DatasetRpc>("DatasetRpc")({
+  kind: Schema.Literal("evm-rpc"),
+  network: Network,
+  name: DatasetName,
+  schema: Schema.Record({ key: Schema.String, value: Schema.Any }),
+}) {}
+
+export class EvmRpcProvider extends Schema.Class<EvmRpcProvider>("EvmRpcProvider")({
+  kind: Schema.Literal("evm-rpc"),
+  network: Network,
+  url: Schema.URL,
+}) {}
+
+export const Provider = Schema.Union(EvmRpcProvider).pipe(
+  Schema.annotations({
+    title: "Provider",
+    description: "a provider definition",
+  }),
+)
