@@ -32,6 +32,7 @@ use crate::{
         parquet::ParquetMeta,
         segments::{Chain, Segment, canonical_chain, missing_ranges},
     },
+    query_context::NozzleSessionConfig,
     store::{Store, infer_object_store},
 };
 
@@ -547,14 +548,32 @@ impl TableProvider for PhysicalTable {
         filters: &[Expr],
         limit: Option<usize>,
     ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
-        let files = self.fetch_partitioned_files(state).await?;
-        if files.is_empty() {
-            return Ok(Arc::new(datafusion::physical_plan::empty::EmptyExec::new(
-                self.schema(),
-            )));
-        }
-        let target_partitions = state.config_options().execution.target_partitions;
-        let file_groups = round_robin(files, target_partitions);
+        let NozzleSessionConfig {
+            ignore_canonical_segments,
+        } = state
+            .config_options()
+            .extensions
+            .get()
+            .cloned()
+            .unwrap_or_default();
+
+        let file_groups = if ignore_canonical_segments {
+            let segments = self.segments().await.map_err(DataFusionError::from)?;
+            let files = segments
+                .into_iter()
+                .map(|Segment { object, .. }| PartitionedFile::from(object))
+                .collect();
+            vec![FileGroup::new(files)]
+        } else {
+            let files = self.fetch_partitioned_files(state).await?;
+            if files.is_empty() {
+                return Ok(Arc::new(datafusion::physical_plan::empty::EmptyExec::new(
+                    self.schema(),
+                )));
+            }
+            let target_partitions = state.config_options().execution.target_partitions;
+            round_robin(files, target_partitions)
+        };
 
         let output_ordering = self.output_ordering()?;
 

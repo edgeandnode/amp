@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, sync::Arc};
 
-use alloy::primitives::BlockHash;
+use alloy::{hex::ToHexExt as _, primitives::BlockHash};
 use common::{
     BlockNum, BoxError, SPECIAL_BLOCK_NUM,
     arrow::{array::RecordBatch, datatypes::SchemaRef},
@@ -8,7 +8,7 @@ use common::{
     metadata::segments::{BlockRange, Chain, Watermark},
     notification_multiplexer::NotificationMultiplexerHandle,
     plan_visitors::{order_by_block_num, propagate_block_num},
-    query_context::{QueryContext, parse_sql},
+    query_context::{NozzleSessionConfig, QueryContext, parse_sql},
 };
 use datafusion::{
     common::cast::as_fixed_size_binary_array, error::DataFusionError,
@@ -245,6 +245,7 @@ impl StreamingQuery {
             let Some(range) = self.next_microbatch_range().await? else {
                 continue;
             };
+            tracing::debug!("execute range [{}-{}]", range.start(), range.end());
 
             // Start microbatch execution for this chunk
             let mut stream = self
@@ -335,39 +336,23 @@ impl StreamingQuery {
     async fn next_microbatch_start(
         &self,
         ctx: &QueryContext,
-    ) -> Result<Option<RangeStart>, BoxError> {
+    ) -> Result<Option<BlockRow>, BoxError> {
         match &self.prev_range {
             // start stream
-            None => self.blocks_table_start(&ctx, self.start_block).await,
+            None => self.blocks_table_fetch_single(&ctx, self.start_block).await,
             // continue stream
             Some(prev) if self.blocks_table_contains(ctx, &prev.watermark()).await? => {
-                self.blocks_table_start(&ctx, prev.end() + 1).await
+                self.blocks_table_fetch_single(&ctx, prev.end() + 1).await
             }
             // rewind stream due to reorg
-            Some(prev) => {
-                // Check for a quick rewind from 1 block before the previous range.
-                let quick_rewind_base = Watermark {
-                    number: prev.start().saturating_sub(1),
-                    hash: prev.prev_hash.unwrap(),
-                };
-                if self.blocks_table_contains(ctx, &quick_rewind_base).await? {
-                    Ok(Some(RangeStart {
-                        number: prev.start(),
-                        prev_hash: prev.prev_hash,
-                    }))
-                } else {
-                    // TODO: we need to inspect reorganized blocks to determine where the last
-                    // range and the canonical chain diverge.
-                    todo!("rewind before last range")
-                }
-            }
+            Some(prev) => self.reorg_base(ctx, prev).await,
         }
     }
 
     async fn next_microbatch_end(
         &mut self,
         ctx: &QueryContext,
-        start: &RangeStart,
+        start: &BlockRow,
         common_watermark: Watermark,
     ) -> Result<Option<Watermark>, BoxError> {
         let number = {
@@ -392,7 +377,9 @@ impl StreamingQuery {
         if number == common_watermark.number {
             Ok(Some(common_watermark))
         } else {
-            self.blocks_table_watermark(&ctx, number).await
+            self.blocks_table_fetch_single(&ctx, number)
+                .await
+                .map(|r| r.map(Into::into))
         }
     }
 
@@ -420,73 +407,123 @@ impl StreamingQuery {
             .cloned())
     }
 
+    async fn reorg_base(
+        &self,
+        ctx: &QueryContext,
+        prev_range: &BlockRange,
+    ) -> Result<Option<BlockRow>, BoxError> {
+        // context for querying forked blocks
+        let fork_ctx = {
+            let mut settings = NozzleSessionConfig::default();
+            settings.ignore_canonical_segments = true;
+            ctx.with_custom_settings(settings)
+        };
+
+        // DFS to find minimum fork block that converges with the canonical chain.
+        let mut min_fork_block_num = prev_range.end();
+        let mut forks: Vec<BlockRow> = self
+            .blocks_table_fetch(&fork_ctx, prev_range.end(), Some(&prev_range.hash))
+            .await?;
+        while !forks.is_empty() {
+            let block = forks.pop().unwrap();
+            let mut parents = self
+                .blocks_table_fetch(
+                    &fork_ctx,
+                    block.number.saturating_sub(1),
+                    block.prev_hash.as_ref(),
+                )
+                .await?;
+
+            let mut index = 0;
+            while index < parents.len() {
+                let watermark = Watermark {
+                    number: parents[index].number,
+                    hash: parents[index].hash,
+                };
+                min_fork_block_num = BlockNum::min(min_fork_block_num, watermark.number);
+                if self.blocks_table_contains(ctx, &watermark).await? {
+                    parents.remove(index);
+                } else {
+                    index += 1;
+                }
+            }
+
+            forks.append(&mut parents);
+        }
+
+        self.blocks_table_fetch_single(ctx, min_fork_block_num)
+            .await
+    }
+
     async fn blocks_table_contains(
         &self,
         ctx: &QueryContext,
         watermark: &Watermark,
     ) -> Result<bool, BoxError> {
-        let query = parse_sql(&format!(
-            "SELECT 1 FROM {} WHERE block_num = {} AND hash = {}",
-            self.blocks_table, watermark.number, watermark.hash,
-        ))?;
-        let plan = ctx.plan_sql(query).await?;
-        let results = ctx.execute_and_concat(plan).await?;
-        assert!(results.num_rows() <= 1);
-        Ok(results.num_rows() == 1)
+        match self
+            .blocks_table_fetch_single(ctx, watermark.number)
+            .await?
+        {
+            None => Ok(false),
+            Some(block) => Ok(watermark == &block.into()),
+        }
     }
 
-    async fn blocks_table_watermark(
+    async fn blocks_table_fetch_single(
         &self,
         ctx: &QueryContext,
         number: BlockNum,
-    ) -> Result<Option<Watermark>, BoxError> {
-        let query = parse_sql(&format!(
-            "SELECT hash FROM {} WHERE block_num = {}",
-            self.blocks_table, number,
-        ))?;
-        let plan = ctx.plan_sql(query).await?;
-        let results = ctx.execute_and_concat(plan).await?;
-        assert!(results.num_rows() <= 1);
-        if results.num_rows() == 0 {
-            return Ok(None);
-        }
-        let hash = as_fixed_size_binary_array(results.column_by_name("hash").unwrap())
-            .unwrap()
-            .value(0)
-            .try_into()
-            .unwrap();
-        Ok(Some(Watermark { number, hash }))
+    ) -> Result<Option<BlockRow>, BoxError> {
+        let rows = self.blocks_table_fetch(ctx, number, None).await?;
+        assert!(rows.len() <= 1);
+        Ok(rows.into_iter().next())
     }
 
-    async fn blocks_table_start(
+    /// This should only return multiple rows when using a context where
+    /// `ignore_canonical_segments = true`.
+    async fn blocks_table_fetch(
         &self,
         ctx: &QueryContext,
         number: BlockNum,
-    ) -> Result<Option<RangeStart>, BoxError> {
+        hash: Option<&BlockHash>,
+    ) -> Result<Vec<BlockRow>, BoxError> {
+        let hash_constraint = hash
+            .map(|h| {
+                format!(
+                    "AND hash = arrow_cast(x'{}', 'FixedSizeBinary(32)')",
+                    h.encode_hex()
+                )
+            })
+            .unwrap_or_default();
         let query = parse_sql(&format!(
-            "SELECT parent_hash FROM {} WHERE block_num = {}",
-            self.blocks_table, number,
+            "SELECT hash, parent_hash FROM {} WHERE block_num = {} {}",
+            self.blocks_table, number, hash_constraint,
         ))?;
         let plan = ctx.plan_sql(query).await?;
         let results = ctx.execute_and_concat(plan).await?;
-        assert!(results.num_rows() <= 1);
-        if results.num_rows() == 0 {
-            return Ok(None);
+        let mut blocks: Vec<BlockRow> = Default::default();
+        let get_column =
+            |name| as_fixed_size_binary_array(results.column_by_name(name).unwrap()).unwrap();
+        for (hash, prev_hash) in std::iter::zip(get_column("hash"), get_column("parent_hash")) {
+            blocks.push(BlockRow {
+                number,
+                hash: hash.unwrap().try_into().unwrap(),
+                prev_hash: prev_hash.map(|h| h.try_into().unwrap()),
+            });
         }
-        let parent_hash =
-            as_fixed_size_binary_array(results.column_by_name("parent_hash").unwrap())
-                .unwrap()
-                .value(0)
-                .try_into()
-                .unwrap();
-        Ok(Some(RangeStart {
-            number,
-            prev_hash: Some(parent_hash),
-        }))
+        Ok(blocks)
     }
 }
 
-struct RangeStart {
+#[derive(Debug)] // TODO: rm
+struct BlockRow {
     number: BlockNum,
+    hash: BlockHash,
     prev_hash: Option<BlockHash>,
+}
+
+impl From<BlockRow> for Watermark {
+    fn from(BlockRow { number, hash, .. }: BlockRow) -> Self {
+        Self { number, hash }
+    }
 }
