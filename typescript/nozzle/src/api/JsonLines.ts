@@ -39,6 +39,7 @@ export class JsonLines extends Context.Tag("Nozzle/JsonLines")<JsonLines, {
       schema: Schema.Schema<A, I, R>,
     ): (sql: string) => Stream.Stream<A, HttpClientError.HttpClientError | JsonLinesError, R>
   }
+
   /**
    * Queries the json lines api and returns the results.
    *

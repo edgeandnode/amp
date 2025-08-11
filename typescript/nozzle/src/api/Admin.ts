@@ -123,13 +123,13 @@ export interface DumpDatasetOptions {
   /**
    * The block up to which to dump.
    */
-  endBlock: number
+  readonly endBlock: number
   /**
    * Whether to wait for the dump to complete before returning.
    *
    * @default false
    */
-  waitForCompletion?: boolean
+  readonly waitForCompletion?: boolean
 }
 
 /**

@@ -30,32 +30,32 @@ export class NozzleError extends Schema.TaggedError<NozzleError>("NozzleError")(
 /**
  * Service definition for the nozzle service.
  */
-export class Nozzle extends Context.Tag("Nozzle/Nozzle")<
-  Nozzle,
-  {
-    /**
-     * The stdout stream of the nozzle process.
-     */
-    readonly stdout: Stream.Stream<string, NozzleError>
-    /**
-     * The stderr stream of the nozzle process.
-     */
-    readonly stderr: Stream.Stream<string, NozzleError>
-    /**
-     * Kills the nozzle process.
-     *
-     * @param signal - The signal to send to the process.
-     * @returns An effect that completes when the process is killed.
-     */
-    readonly kill: (signal?: CommandExecutor.Signal) => Effect.Effect<void>
-    /**
-     * Joins the fiber that runs the nozzle process.
-     *
-     * @returns An effect that completes when the process exits.
-     */
-    readonly join: () => Effect.Effect<void, NozzleError>
-  }
->() {}
+export class Nozzle extends Context.Tag("Nozzle/Nozzle")<Nozzle, {
+  /**
+   * The stdout stream of the nozzle process.
+   */
+  readonly stdout: Stream.Stream<string, NozzleError>
+
+  /**
+   * The stderr stream of the nozzle process.
+   */
+  readonly stderr: Stream.Stream<string, NozzleError>
+
+  /**
+   * Kills the nozzle process.
+   *
+   * @param signal - The signal to send to the process.
+   * @returns An effect that completes when the process is killed.
+   */
+  readonly kill: (signal?: CommandExecutor.Signal) => Effect.Effect<void>
+
+  /**
+   * Joins the fiber that runs the nozzle process.
+   *
+   * @returns An effect that completes when the process exits.
+   */
+  readonly join: () => Effect.Effect<void, NozzleError>
+}>() {}
 
 /**
  * The configuration for the nozzle instance.
@@ -67,6 +67,7 @@ export interface NozzleOptions {
    * @default "nozzle"
    */
   readonly nozzleExecutable?: string | undefined
+
   /**
    * Additional arguments to pass to the nozzle executable.
    *
@@ -74,44 +75,52 @@ export interface NozzleOptions {
    * directly from source e.g. during development or testing.
    */
   readonly nozzleArgs?: Array<string> | undefined
+
   /**
    * The provider definitions to configure nozzle with.
    */
   readonly providerDefinitions?: Record<string, typeof Model.Provider.Type>
+
   /**
    * The temporary directory to store data and configuration.
    */
   readonly tempDirectory?: string | undefined
+
   /**
    * The logging level to use for nozzle.
    *
    * @default "info"
    */
   readonly loggingLevel?: "error" | "warn" | "info" | "debug" | "trace" | undefined
+
   /**
    * Whether to print the stdout and stderr output of nozzle to the console.
    *
    * @default "none"
    */
   readonly printOutput?: "stdout" | "stderr" | "both" | "none" | undefined
+
   /**
    * The port to run the admin service on.
    *
    * @default 1610
    */
   readonly adminPort?: number | undefined
+
   /**
    * The port to run the registry service on.
    *
    * @default 1611
    */
   readonly registryPort?: number | undefined
+
   /**
    * The port to run the json-lines service on.
    *
    * @default 1603
    */
   readonly jsonLinesPort?: number | undefined
+
   /**
    * The port to run the arrow-flight service on.
    *

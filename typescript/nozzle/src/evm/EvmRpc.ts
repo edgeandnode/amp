@@ -19,6 +19,7 @@ export class EvmRpc extends Context.Tag("Nozzle/EvmRpc")<EvmRpc, {
    * The URL of the RPC server.
    */
   readonly url: string
+
   /**
    * Get a block by number.
    *
@@ -26,10 +27,12 @@ export class EvmRpc extends Context.Tag("Nozzle/EvmRpc")<EvmRpc, {
    * @returns The block.
    */
   readonly getBlockByNumber: (number: bigint) => Effect.Effect<Viem.Block<bigint, false, "latest">, EvmRpcError>
+
   /**
    * Get the latest block number.
    */
   readonly getLatestBlockNumber: Effect.Effect<bigint, EvmRpcError>
+
   /**
    * Stream blocks monotonically increasing in block number.
    *
