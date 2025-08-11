@@ -2,7 +2,7 @@
 
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Dict, Optional
 
 import pyarrow as pa
 import pyarrow.compute as pc
@@ -30,6 +30,7 @@ try:
         ListType,
         StructType
     )
+    from pyiceberg.partitioning import PartitionSpec
     ICEBERG_AVAILABLE = True
 except ImportError:
     ICEBERG_AVAILABLE = False
@@ -49,7 +50,7 @@ class IcebergStorageConfig:
     default_table_name: Optional[str] = None
     create_namespace: bool = True
     create_table: bool = True
-    partition_by: Optional[List[str]] = None
+    partition_spec: Optional['PartitionSpec'] = None  # Direct PartitionSpec object
     
     # Schema evolution settings
     schema_evolution: bool = True
@@ -69,6 +70,7 @@ class IcebergLoader(DataLoader):
     Configuration Requirements:
     - catalog_config: PyIceberg catalog configuration
     - namespace: Iceberg namespace/database name
+    - partition_spec: Optional PartitionSpec object for table partitioning
     - schema_evolution: Enable automatic schema evolution (default: True)
     """
     
@@ -90,7 +92,7 @@ class IcebergLoader(DataLoader):
             default_table_name=config.get('default_table_name'),
             create_namespace=config.get('create_namespace', True),
             create_table=config.get('create_table', True),
-            partition_by=config.get('partition_by'),
+            partition_spec=config.get('partition_spec'),  # Accept PartitionSpec directly
             schema_evolution=schema_evolution,
             batch_size=config.get('batch_size', 10000)
         )
@@ -278,20 +280,25 @@ class IcebergLoader(DataLoader):
                 raise NoSuchTableError(f"Table '{table_identifier}' not found and create_table=False")
             
             try:
-                table = self._catalog.create_table(
-                    identifier=table_identifier,
-                    schema=schema
-                )
+                # Use partition_spec if provided
+                if self.storage_config.partition_spec:
+                    table = self._catalog.create_table(
+                        identifier=table_identifier,
+                        schema=schema,
+                        partition_spec=self.storage_config.partition_spec
+                    )
+                else:
+                    # Create table without partitioning
+                    table = self._catalog.create_table(
+                        identifier=table_identifier,
+                        schema=schema
+                    )
                 self.logger.info(f"Created new table: {table_identifier}")
                 return table
                 
             except Exception as e:
                 raise RuntimeError(f"Failed to create table '{table_identifier}': {str(e)}")
     
-    def _create_partition_spec(self, schema: pa.Schema):
-        """Create Iceberg partition spec from partition_by configuration"""
-        # TODO: Implement this
-        return None
     
     def _validate_schema_compatibility(self, iceberg_table: IcebergTable, arrow_schema: pa.Schema) -> None:
         """Validate that Arrow schema is compatible with Iceberg table schema and perform schema evolution if enabled"""

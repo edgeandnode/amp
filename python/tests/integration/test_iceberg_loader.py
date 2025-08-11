@@ -53,6 +53,8 @@ def iceberg_basic_config(iceberg_test_env):
 @pytest.fixture
 def iceberg_partitioned_config(iceberg_test_env):
     """Get partitioned Iceberg configuration"""
+    # Note: partition_spec should be created with actual PartitionSpec when needed
+    # For now, return config without partitioning since we need schema first
     return {
         'catalog_config': {
             'type': 'sql',
@@ -62,7 +64,7 @@ def iceberg_partitioned_config(iceberg_test_env):
         'namespace': 'partitioned_data',
         'create_namespace': True,
         'create_table': True,
-        'partition_by': ['year', 'month'],
+        'partition_spec': None,  # Will be set in test if needed
         'schema_evolution': True,
         'batch_size': 500
     }
@@ -236,7 +238,7 @@ class TestIcebergLoaderIntegration:
             )
 
             assert result.success == True
-            # Note: Partitioning is temporarily disabled in the implementation
+            # Note: Partitioning requires creating PartitionSpec objects now
             assert result.metadata['partition_columns'] == []
             assert result.metadata['namespace'] == iceberg_partitioned_config['namespace']
 
