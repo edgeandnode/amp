@@ -4,4 +4,5 @@ onlyBuiltDependencies:
   - '@bufbuild/buf'
   - '@tailwindcss/oxide'
   - core-js-pure
+  - esbuild
   - unrs-resolver

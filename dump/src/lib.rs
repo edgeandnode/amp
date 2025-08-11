@@ -5,6 +5,7 @@ use common::parquet::file::properties::WriterProperties as ParquetWriterProperti
 mod core;
 mod metrics; // unused for now
 mod parquet_writer;
+pub mod streaming_query;
 pub mod worker;
 
 pub use core::*;

@@ -1,0 +1,16 @@
+{
+  "kind": "sql",
+  "name": "sql_over_anvil_2",
+  "network": "anvil",
+  "schema": {
+    "blocks": {
+      "block_num": "UInt64",
+      "hash": {
+        "FixedSizeBinary": 32
+      },
+      "parent_hash": {
+        "FixedSizeBinary": 32
+      }
+    }
+  }
+}

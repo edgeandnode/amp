@@ -1,6 +1,12 @@
-import { Command, Options } from "@effect/cli"
-import { Config, Console, Effect, Layer, Schema } from "effect"
-import * as Api from "../../Api.ts"
+import * as Command from "@effect/cli/Command"
+import * as Options from "@effect/cli/Options"
+import * as Config from "effect/Config"
+import * as Console from "effect/Console"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import * as Schema from "effect/Schema"
+import * as Admin from "../../api/Admin.ts"
+import * as Registry from "../../api/Registry.ts"
 import * as ManifestContext from "../../ManifestContext.ts"
 import * as ManifestDeployer from "../../ManifestDeployer.ts"
 
@@ -17,9 +23,7 @@ export const deploy = Command.make("deploy", {
       Options.withDescription("The dataset manifest file to deploy"),
     ),
     admin: Options.text("admin-url").pipe(
-      Options.withFallbackConfig(
-        Config.string("NOZZLE_ADMIN_URL").pipe(Config.withDefault("http://localhost:1610")),
-      ),
+      Options.withFallbackConfig(Config.string("NOZZLE_ADMIN_URL").pipe(Config.withDefault("http://localhost:1610"))),
       Options.withDescription("The url of the Nozzle admin server"),
       Options.withSchema(Schema.URL),
     ),
@@ -33,19 +37,19 @@ export const deploy = Command.make("deploy", {
   },
 }).pipe(
   Command.withDescription("Deploy a dataset definition or manifest to Nozzle"),
-  Command.withHandler(() =>
-    Effect.gen(function*() {
+  Command.withHandler(
+    Effect.fn(function*() {
       const manifest = yield* ManifestContext.ManifestContext
       const deployer = yield* ManifestDeployer.ManifestDeployer
       const result = yield* deployer.deploy(manifest)
       yield* Console.log(result)
-    })
+    }),
   ),
   Command.provide(({ args }) =>
     ManifestContext.layerFromFile({ manifest: args.manifest, config: args.config }).pipe(
       Layer.merge(ManifestDeployer.ManifestDeployer.Default),
-      Layer.provide(Api.Admin.withUrl(`${args.admin}`)),
-      Layer.provide(Api.Registry.withUrl(`${args.registry}`)),
+      Layer.provide(Admin.layer(`${args.admin}`)),
+      Layer.provide(Registry.layer(`${args.registry}`)),
     )
   ),
 )

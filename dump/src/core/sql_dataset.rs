@@ -117,21 +117,23 @@
 use std::{collections::BTreeSet, sync::Arc};
 
 use common::{
-    BlockNum, BoxError, Dataset,
+    BlockNum, BoxError,
     catalog::physical::PhysicalTable,
     metadata::segments::BlockRange,
     notification_multiplexer::NotificationMultiplexerHandle,
     plan_visitors::is_incremental,
     query_context::{QueryContext, QueryEnv, parse_sql},
-    streaming_query::{QueryMessage, StreamState, StreamingQuery, watermark_updates},
 };
 use datafusion::{common::cast::as_fixed_size_binary_array, sql::parser::Statement};
-use dataset_store::{DatasetStore, sql_datasets::SqlDataset};
+use dataset_store::{DatasetStore, resolve_blocks_table, sql_datasets::SqlDataset};
 use futures::StreamExt as _;
 use tracing::instrument;
 
 use super::{Ctx, block_ranges, tasks::FailFastJoinSet};
-use crate::parquet_writer::{ParquetFileWriter, ParquetWriterProperties, commit_metadata};
+use crate::{
+    parquet_writer::{ParquetFileWriter, ParquetWriterProperties, commit_metadata},
+    streaming_query::{QueryMessage, StreamingQuery},
+};
 
 /// Dumps a SQL dataset table
 #[instrument(skip_all, fields(dataset = %dataset.name()), err)]
@@ -196,6 +198,9 @@ pub async fn dump_table(
             }
         };
 
+        let blocks_table =
+            resolve_blocks_table(&dataset_store, &src_datasets, table.network()).await?;
+
         if is_incr {
             for range in table.missing_ranges(start..=end).await? {
                 let (start, end) = range.into_inner();
@@ -204,8 +209,8 @@ pub async fn dump_table(
                 let range = resolve_block_range(
                     env.clone(),
                     &dataset_store,
-                    &src_datasets,
                     table.network().to_string(),
+                    &blocks_table,
                     start,
                     end,
                 )
@@ -239,8 +244,8 @@ pub async fn dump_table(
             let range = resolve_block_range(
                 env.clone(),
                 &dataset_store,
-                &src_datasets,
                 physical_table.network().to_string(),
+                &blocks_table,
                 start,
                 end,
             )
@@ -284,15 +289,13 @@ async fn dump_sql_query(
     let mut stream = {
         let ctx = Arc::new(dataset_store.ctx_for_sql(&query, env.clone()).await?);
         let plan = ctx.plan_sql(query.clone()).await?;
-        let initial_state = StreamState::new(
-            watermark_updates(ctx.clone(), notification_multiplexer).await?,
-            range.start(),
-        );
         StreamingQuery::spawn(
-            initial_state,
             ctx,
+            dataset_store.clone(),
             plan,
+            range.start(),
             Some(range.end()),
+            notification_multiplexer,
             true,
             microbatch_max_interval,
         )
@@ -315,15 +318,10 @@ async fn dump_sql_query(
             QueryMessage::Data(batch) => {
                 writer.write(&batch).await?;
             }
-            QueryMessage::Completed(microbatch_end) => {
+            QueryMessage::Completed(microbatch_range) => {
+                let microbatch_end = microbatch_range.end();
                 // Close current file and commit metadata
-                let chunk_range = BlockRange {
-                    numbers: microbatch_start..=microbatch_end,
-                    network: range.network.clone(),
-                    hash: range.hash,
-                    prev_hash: range.prev_hash,
-                };
-                let (parquet_meta, object_meta, footer) = writer.close(chunk_range).await?;
+                let (parquet_meta, object_meta, footer) = writer.close(microbatch_range).await?;
                 commit_metadata(
                     &dataset_store.metadata_db,
                     parquet_meta,
@@ -354,45 +352,11 @@ async fn dump_sql_query(
 async fn resolve_block_range(
     env: QueryEnv,
     dataset_store: &Arc<DatasetStore>,
-    src_datasets: &BTreeSet<&str>,
     network: String,
+    blocks_table: &str,
     start: BlockNum,
     end: BlockNum,
 ) -> Result<BlockRange, BoxError> {
-    let dataset = {
-        let mut datasets: Vec<Dataset> = dataset_store
-            .all_datasets()
-            .await?
-            .into_iter()
-            .filter(|d| d.network == network)
-            .collect();
-
-        if datasets.is_empty() {
-            return Err(format!("no provider found for network {network}").into());
-        }
-
-        match datasets
-            .iter()
-            .position(|d| src_datasets.contains(d.name.as_str()))
-        {
-            Some(index) => datasets.remove(index),
-            None => {
-                // Make sure fallback provider selection is deterministic.
-                datasets.sort_by(|a, b| a.name.cmp(&b.name));
-                if datasets.len() > 1 {
-                    tracing::debug!(
-                        "selecting provider {} for network {}",
-                        datasets[0].name,
-                        network
-                    );
-                }
-                datasets.remove(0)
-            }
-        }
-    };
-
-    assert!(dataset.tables.iter().any(|t| t.name() == "blocks"));
-    let blocks_table = format!("{}.blocks", dataset.name);
     let query = parse_sql(&format!(
         r#"
         SELECT * FROM

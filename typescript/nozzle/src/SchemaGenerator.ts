@@ -1,5 +1,7 @@
-import { Data, Effect, String } from "effect"
-import * as Api from "./Api.ts"
+import * as Data from "effect/Data"
+import * as Effect from "effect/Effect"
+import * as String from "effect/String"
+import * as Registry from "./api/Registry.ts"
 import type * as Model from "./Model.ts"
 
 export class SchemaGeneratorError extends Data.TaggedError("SchemaGeneratorError")<{
@@ -9,7 +11,7 @@ export class SchemaGeneratorError extends Data.TaggedError("SchemaGeneratorError
 
 export class SchemaGenerator extends Effect.Service<SchemaGenerator>()("Nozzle/SchemaGenerator", {
   effect: Effect.gen(function*() {
-    const api = yield* Api.Registry
+    const api = yield* Registry.Registry
 
     const fromTable = (schema: Model.TableSchema, name: string) => {
       const output: Array<string> = []
@@ -26,27 +28,25 @@ export class SchemaGenerator extends Effect.Service<SchemaGenerator>()("Nozzle/S
       return output.join("")
     }
 
-    const fromManifest = (manifest: Model.DatasetManifest) =>
-      Effect.gen(function*() {
-        const output: Array<string> = []
-        output.push(`import { Schema } from "effect";\n`)
-        for (const [name, table] of Object.entries(manifest.tables)) {
-          output.push(`\n${fromTable(table.schema, String.capitalize(String.snakeToCamel(name)))}`)
-        }
-        return output.join("")
-      })
+    const fromManifest = (manifest: Model.DatasetManifest) => {
+      const output: Array<string> = []
+      output.push(`import { Schema } from "effect";\n`)
+      for (const [name, table] of Object.entries(manifest.tables)) {
+        output.push(`\n${fromTable(table.schema, String.capitalize(String.snakeToCamel(name)))}`)
+      }
+      return output.join("")
+    }
 
-    const fromSql = (sql: string, name = "Table") =>
-      Effect.gen(function*() {
-        const schema = yield* api.schema(sql).pipe(
-          Effect.mapError((cause) => new SchemaGeneratorError({ cause, message: cause.message })),
-        )
+    const fromSql = Effect.fn(function*(sql: string, name = "Table") {
+      const schema = yield* api
+        .getOutputSchema(sql, { isSqlDataset: true })
+        .pipe(Effect.mapError((cause) => new SchemaGeneratorError({ cause, message: cause.message })))
 
-        const output: Array<string> = []
-        output.push(`import { Schema } from "effect";\n\n`)
-        output.push(fromTable(schema.schema, name))
-        return output.join("")
-      })
+      const output: Array<string> = []
+      output.push(`import { Schema } from "effect";\n\n`)
+      output.push(fromTable(schema.schema, name))
+      return output.join("")
+    })
 
     return { fromSql, fromTable, fromManifest }
   }),

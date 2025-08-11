@@ -382,6 +382,13 @@ async fn sql_dataset_input_batch_size() {
     // block numbers, so we expect 2 files with data for blocks 15000000 and 15000002, plus empty
     // files for odd blocks
     assert_eq!(file_count, 4);
+
+    let mut test_client = TestClient::connect(&test_env).await.unwrap();
+    let res = test_client
+        .run_query("select count(*) from sql_stream_ds.even_blocks", None)
+        .await
+        .unwrap();
+    assert_eq!(res, serde_json::json!([{"count(*)": 2}]));
 }
 
 #[test]

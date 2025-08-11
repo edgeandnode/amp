@@ -1,14 +1,15 @@
 use std::{ops::RangeInclusive, sync::Arc};
 
-use arrow::{
-    array::{ArrayRef, RecordBatch},
-    compute::concat_batches,
-};
+use arrow::{array::ArrayRef, compute::concat_batches};
 use axum::response::IntoResponse;
 use bincode::{Decode, Encode, config};
 use bytes::Bytes;
 use datafusion::{
-    arrow::datatypes::{DataType, Field, Fields, SchemaRef},
+    self,
+    arrow::{
+        array::RecordBatch,
+        datatypes::{DataType, Field, Fields, SchemaRef},
+    },
     catalog::{MemorySchemaProvider, TableProvider},
     common::{DFSchema, DFSchemaRef, not_impl_err},
     datasource::MemTable,
@@ -20,6 +21,7 @@ use datafusion::{
         runtime_env::RuntimeEnv,
     },
     logical_expr::{AggregateUDF, Extension, LogicalPlan, ScalarUDF},
+    physical_optimizer::PhysicalOptimizerRule,
     physical_plan::{ExecutionPlan, displayable, stream::RecordBatchStreamAdapter},
     physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner as _},
     sql::{TableReference, parser},
@@ -30,12 +32,15 @@ use datafusion_proto::{
     },
     logical_plan::LogicalExtensionCodec,
 };
+use datafusion_tracing::{
+    InstrumentationOptions, instrument_with_info_spans, pretty_format_compact_batch,
+};
 use futures::{FutureExt as _, TryStreamExt, stream};
 use js_runtime::isolate_pool::IsolatePool;
 use metadata_db::{LocationId, TableId};
 use regex::Regex;
 use thiserror::Error;
-use tracing::{debug, instrument};
+use tracing::{debug, field, instrument};
 
 use crate::{
     BlockNum, BoxError, LogicalCatalog, ResolvedTable, SPECIAL_BLOCK_NUM, arrow, attestation,
@@ -229,7 +234,7 @@ pub struct QueryEnv {
 
 /// A context for executing queries against a catalog.
 pub struct QueryContext {
-    env: QueryEnv,
+    pub env: QueryEnv,
     session_config: SessionConfig,
     catalog: Catalog,
 }
@@ -308,6 +313,7 @@ impl QueryContext {
             .with_config(self.session_config.clone())
             .with_runtime_env(self.env.df_env.clone())
             .with_default_features()
+            .with_physical_optimizer_rule(create_instrumentation_rule())
             .build();
         let ctx = SessionContext::new_with_state(state);
 
@@ -708,4 +714,20 @@ impl LogicalExtensionCodec for TableProviderCodec {
         // No-op, the only thing we need for table scans is the table name.
         Ok(())
     }
+}
+
+/// Creates an instrumentation rule that captures metrics and provides previews of data during execution.
+pub fn create_instrumentation_rule() -> Arc<dyn PhysicalOptimizerRule + Send + Sync> {
+    let options_builder = InstrumentationOptions::builder()
+        .record_metrics(true)
+        .preview_limit(5)
+        .preview_fn(Arc::new(|batch: &RecordBatch| {
+            pretty_format_compact_batch(batch, 64, 3, 10).map(|fmt| fmt.to_string())
+        }));
+
+    instrument_with_info_spans!(
+        options: options_builder.build(),
+        env = field::Empty,
+        region = field::Empty,
+    )
 }

@@ -1,23 +1,23 @@
-use std::{ops::RangeInclusive, sync::Arc};
+use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc};
 
 use alloy::{
     node_bindings::{Anvil, AnvilInstance},
     primitives::BlockHash,
     providers::{Provider as _, ext::AnvilApi as _},
     rpc::types::anvil::ReorgOptions,
-    transports::http::reqwest,
 };
 use common::{BlockNum, metadata::segments::BlockRange, query_context::parse_sql, tracing_helpers};
 use dataset_store::DatasetStore;
 use rand::{Rng, RngCore, SeedableRng as _, rngs::StdRng};
 
-use crate::test_support::{SnapshotContext, TestEnv, table_ranges};
-
-const DATASET_NAME: &str = "anvil_rpc";
+use crate::{
+    test_client::TestClient,
+    test_support::{SnapshotContext, TestEnv, table_ranges},
+};
 
 struct AnvilTestContext {
     env: TestEnv,
-    http: reqwest::Client,
+    client: TestClient,
     provider: alloy::providers::DynProvider,
     _anvil: AnvilInstance,
 }
@@ -25,16 +25,16 @@ struct AnvilTestContext {
 impl AnvilTestContext {
     async fn setup(test_name: &str) -> Self {
         tracing_helpers::register_logger();
-        let http = reqwest::Client::new();
         let anvil = Anvil::new().port(0_u16).spawn();
         let url = anvil.endpoint_url();
         let env = TestEnv::new(test_name, true, Some(url.as_str()))
             .await
             .unwrap();
-        let provider = alloy::providers::ProviderBuilder::new().connect_reqwest(http.clone(), url);
+        let client = TestClient::connect(&env).await.unwrap();
+        let provider = alloy::providers::ProviderBuilder::new().connect_http(url);
         Self {
             env,
-            http,
+            client,
             provider: provider.erased(),
             _anvil: anvil,
         }
@@ -65,14 +65,14 @@ impl AnvilTestContext {
         assert_ne!(original_head.hash, new_head.hash);
     }
 
-    async fn dump(&self, range: RangeInclusive<BlockNum>) -> SnapshotContext {
-        SnapshotContext::temp_dump(&self.env, DATASET_NAME, *range.start(), *range.end(), 1)
+    async fn dump(&self, dataset: &str, range: RangeInclusive<BlockNum>) -> SnapshotContext {
+        SnapshotContext::temp_dump(&self.env, dataset, *range.start(), *range.end(), 1)
             .await
             .unwrap()
     }
 
-    async fn metadata_ranges(&self) -> Vec<BlockRange> {
-        let sql = parse_sql(&format!("select * from {}.blocks", DATASET_NAME)).unwrap();
+    async fn metadata_ranges(&self, dataset: &str) -> Vec<BlockRange> {
+        let sql = parse_sql(&format!("select * from {}.blocks", dataset)).unwrap();
         let env = self.env.config.make_query_env().unwrap();
         let dataset_store = self.dataset_store().await;
         let ctx = dataset_store.ctx_for_sql(&sql, env).await.unwrap();
@@ -95,25 +95,16 @@ impl AnvilTestContext {
         }
     }
 
-    async fn query_blocks(&self, range: RangeInclusive<BlockNum>) -> Vec<BlockRow> {
-        let url = format!("http://{}/", self.env.server_addrs.jsonl_addr);
-        let sql = format!(
+    async fn query_blocks(&mut self, dataset: &str, take: Option<usize>) -> Vec<BlockRow> {
+        let query = format!(
             r#"
-            select block_num, hash, parent_hash
-            from anvil_rpc.blocks
-            where block_num >= {} and block_num <= {}
-            order by block_num asc
+            SELECT block_num, hash, parent_hash
+            FROM {dataset}.blocks
+            ORDER BY block_num ASC
             "#,
-            range.start(),
-            range.end(),
         );
-        let response = self.http.post(url).body(sql).send().await.unwrap();
-        let buffer = response.text().await.unwrap();
-        let mut rows: Vec<BlockRow> = Default::default();
-        for line in buffer.lines() {
-            rows.push(serde_json::from_str(line).unwrap());
-        }
-        rows.sort_by_key(|r| r.block_num);
+        let response = self.client.run_query(&query, take).await.unwrap();
+        let rows: Vec<BlockRow> = serde_json::from_value(response).unwrap();
         rows
     }
 }
@@ -127,18 +118,18 @@ struct BlockRow {
 
 #[tokio::test]
 async fn rpc_reorg_simple() {
-    let test = AnvilTestContext::setup("rpc_reorg_simple").await;
+    let mut test = AnvilTestContext::setup("rpc_reorg_simple").await;
 
-    test.dump(0..=0).await;
+    test.dump("anvil_rpc", 0..=0).await;
     test.mine(2).await;
-    test.dump(1..=2).await;
-    let blocks0 = test.query_blocks(0..=2).await;
+    test.dump("anvil_rpc", 1..=2).await;
+    let blocks0 = test.query_blocks("anvil_rpc", None).await;
     test.reorg(1).await;
     test.mine(1).await;
-    test.dump(0..=3).await;
-    let blocks1 = test.query_blocks(0..=3).await;
-    test.dump(0..=3).await;
-    let blocks2 = test.query_blocks(0..=3).await;
+    test.dump("anvil_rpc", 0..=3).await;
+    let blocks1 = test.query_blocks("anvil_rpc", None).await;
+    test.dump("anvil_rpc", 0..=3).await;
+    let blocks2 = test.query_blocks("anvil_rpc", None).await;
 
     // At this point, the chain looks like this:
     //   0, 1, 2
@@ -153,7 +144,7 @@ async fn rpc_reorg_simple() {
     for window in blocks2.windows(2) {
         assert_eq!(window[0].hash, window[1].parent_hash);
     }
-    let mut ranges = test.metadata_ranges().await;
+    let mut ranges = test.metadata_ranges("anvil_rpc").await;
     ranges.sort_by_key(|r| *r.numbers.start());
     assert_eq!(
         ranges.iter().map(|r| r.numbers.clone()).collect::<Vec<_>>(),
@@ -169,7 +160,7 @@ async fn rpc_reorg_simple() {
 
 #[tokio::test]
 async fn rpc_reorg_prop() {
-    let test = AnvilTestContext::setup("rpc_reorg_prop").await;
+    let mut test = AnvilTestContext::setup("rpc_reorg_prop").await;
 
     let seed = rand::rng().next_u64();
     println!("seed: {seed}");
@@ -185,8 +176,9 @@ async fn rpc_reorg_prop() {
 
     for _ in 0..3 {
         test.mine(rng.random_range(1..=3)).await;
-        test.dump(0..=test.latest_block().await.block_num).await;
-        let blocks0 = test.query_blocks(0..=1_000).await;
+        test.dump("anvil_rpc", 0..=test.latest_block().await.block_num)
+            .await;
+        let blocks0 = test.query_blocks("anvil_rpc", None).await;
         eprintln!("blocks0 = {:#?}", blocks0);
         check_blocks(&blocks0);
         assert_eq!(
@@ -196,29 +188,138 @@ async fn rpc_reorg_prop() {
 
         let reorg_depth = u64::min(rng.random_range(1..=3), test.latest_block().await.block_num);
         test.reorg(reorg_depth).await;
-        test.dump(0..=test.latest_block().await.block_num).await;
+        test.dump("anvil_rpc", 0..=test.latest_block().await.block_num)
+            .await;
         // no reorg detected, since dumped block height has not increased
-        assert_eq!(blocks0, test.query_blocks(0..=1_000).await);
+        assert_eq!(blocks0, test.query_blocks("anvil_rpc", None).await);
 
         // mine at least one block to detect reorg
         test.mine(rng.random_range(1..=3)).await;
-        test.dump(0..=test.latest_block().await.block_num).await;
+        test.dump("anvil_rpc", 0..=test.latest_block().await.block_num)
+            .await;
 
         // the canonical chain must be resolved in at most reorg_depth dumps
         for _ in 0..reorg_depth {
             test.mine(rng.random_range(0..=3)).await;
-            test.dump(0..=test.latest_block().await.block_num).await;
+            test.dump("anvil_rpc", 0..=test.latest_block().await.block_num)
+                .await;
         }
 
         let latest = test.latest_block().await;
         eprintln!("latest = {:#?}", latest);
-        let blocks1 = test.query_blocks(0..=1_000).await;
+        let blocks1 = test.query_blocks("anvil_rpc", None).await;
         eprintln!("blocks1 = {:#?}", blocks1);
         check_blocks(&blocks1);
-        let mut ranges = test.metadata_ranges().await;
+        let mut ranges = test.metadata_ranges("anvil_rpc").await;
         ranges.sort_by_key(|r| *r.numbers.start());
         eprintln!("ranges = {:#?}", ranges);
         assert_eq!(blocks1.len(), latest.block_num as usize + 1);
         assert_eq!(blocks1.last().unwrap().hash, latest.hash);
     }
+}
+
+#[tokio::test]
+async fn streaming_reorg_desync() {
+    let mut test = AnvilTestContext::setup("streaming_reorg_desync").await;
+
+    test.dump("anvil_rpc", 0..=0).await;
+    test.dump("sql_over_anvil_1", 0..=0).await;
+    test.dump("sql_over_anvil_2", 0..=0).await;
+
+    let streaming_query = r#"
+        SELECT block_num, hash, parent_hash FROM sql_over_anvil_1.blocks
+        UNION ALL
+        SELECT block_num, hash, parent_hash FROM sql_over_anvil_2.blocks
+        SETTINGS stream = true
+    "#;
+    test.client
+        .register_stream("stream", streaming_query)
+        .await
+        .unwrap();
+
+    async fn check_batch(client: &mut TestClient, take: usize) {
+        let blocks = client.take_from_stream("stream", take).await.unwrap();
+        let blocks: Vec<BlockRow> = serde_json::from_value(blocks).unwrap();
+        let mut by_number: BTreeMap<BlockNum, Vec<BlockRow>> = Default::default();
+        for block in blocks {
+            by_number.entry(block.block_num).or_default().push(block);
+        }
+        eprintln!("stream blocks = {:#?}", by_number);
+        for blocks in by_number.values() {
+            assert_eq!(blocks.len(), 2);
+            assert_eq!(blocks[0], blocks[1]);
+        }
+    }
+
+    check_batch(&mut test.client, 2).await;
+
+    test.mine(2).await;
+    test.dump("anvil_rpc", 1..=2).await;
+    test.dump("sql_over_anvil_1", 1..=2).await;
+    test.reorg(1).await;
+    test.mine(2).await;
+    test.dump("anvil_rpc", 1..=4).await;
+    test.dump("anvil_rpc", 1..=4).await;
+    test.dump("sql_over_anvil_2", 1..=4).await;
+
+    assert_ne!(
+        test.query_blocks("sql_over_anvil_1", None).await,
+        test.query_blocks("sql_over_anvil_2", None).await,
+    );
+
+    test.dump("sql_over_anvil_1", 1..=4).await;
+    test.dump("sql_over_anvil_1", 1..=4).await;
+
+    check_batch(&mut test.client, 8).await;
+}
+
+#[tokio::test]
+async fn streaming_reorg_rewind() {
+    let mut test = AnvilTestContext::setup("streaming_reorg_rewind").await;
+
+    test.dump("anvil_rpc", 0..=0).await;
+    test.dump("sql_over_anvil_1", 0..=0).await;
+
+    let streaming_query = r#"
+        SELECT block_num, hash, parent_hash
+        FROM sql_over_anvil_1.blocks
+        SETTINGS stream = true
+    "#;
+    test.client
+        .register_stream("stream", streaming_query)
+        .await
+        .unwrap();
+
+    async fn take_blocks(client: &mut TestClient, take: usize) -> Vec<BlockRow> {
+        let blocks = client.take_from_stream("stream", take).await.unwrap();
+        let mut blocks: Vec<BlockRow> = serde_json::from_value(blocks).unwrap();
+        blocks.sort_by_key(|b| b.block_num);
+        blocks
+    }
+
+    assert_eq!(
+        take_blocks(&mut test.client, 1).await,
+        test.query_blocks("anvil_rpc", None).await,
+    );
+
+    test.mine(2).await;
+    test.dump("anvil_rpc", 1..=2).await;
+    test.dump("sql_over_anvil_1", 1..=2).await;
+
+    assert_eq!(
+        &take_blocks(&mut test.client, 2).await,
+        &test.query_blocks("anvil_rpc", None).await[1..=2],
+    );
+
+    test.reorg(1).await;
+    test.mine(2).await;
+    test.dump("anvil_rpc", 1..=4).await;
+    test.dump("anvil_rpc", 1..=4).await;
+    test.dump("sql_over_anvil_1", 1..=4).await;
+    test.dump("sql_over_anvil_1", 1..=4).await;
+
+    assert_eq!(
+        &take_blocks(&mut test.client, 4).await,
+        &test.query_blocks("anvil_rpc", None).await[1..=4],
+    );
 }

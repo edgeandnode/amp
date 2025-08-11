@@ -14,6 +14,7 @@ object_store.workspace = true
 prometheus.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+tokio-stream.workspace = true
 url.workspace = true
 serde_json.workspace = true
 serde.workspace = true
@@ -23,3 +24,4 @@ backon = { version = "1.5.1", default-features = false, features = [
 ] }
 rand.workspace = true
 tokio-util.workspace = true
+alloy.workspace = true
