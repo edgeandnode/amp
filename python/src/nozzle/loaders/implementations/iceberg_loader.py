@@ -201,24 +201,24 @@ class IcebergLoader(DataLoader):
     
     def _fix_timestamps(self, arrow_table: pa.Table) -> pa.Table:
         """Convert nanosecond timestamps to microseconds for Iceberg compatibility"""
-        columns_to_fix = []
-        for i, field in enumerate(arrow_table.schema):
-            if pa.types.is_timestamp(field.type) and field.type.unit == 'ns':
-                columns_to_fix.append((i, field.name))
-        
-        if not columns_to_fix:
+        # Check if conversion is needed
+        if not any(pa.types.is_timestamp(f.type) and f.type.unit == 'ns' 
+                   for f in arrow_table.schema):
             return arrow_table
         
+        # Build new table with converted timestamps
         columns = []
         new_fields = []
         
         for i, field in enumerate(arrow_table.schema):
-            if any(idx == i for idx, _ in columns_to_fix):
+            if pa.types.is_timestamp(field.type) and field.type.unit == 'ns':
+                # Convert nanosecond timestamp to microsecond
                 timestamp_col = arrow_table.column(i)
                 timestamp_us = pc.cast(timestamp_col, pa.timestamp('us', tz=field.type.tz))
                 columns.append(timestamp_us)
                 new_fields.append(pa.field(field.name, pa.timestamp('us', tz=field.type.tz)))
             else:
+                # Keep column as-is
                 columns.append(arrow_table.column(i))
                 new_fields.append(field)
         
