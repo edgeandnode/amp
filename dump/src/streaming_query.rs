@@ -11,10 +11,8 @@ use common::{
     query_context::{QueryContext, parse_sql},
 };
 use datafusion::{
-    common::cast::{as_fixed_size_binary_array, as_uint64_array},
-    error::DataFusionError,
-    execution::SendableRecordBatchStream,
-    logical_expr::LogicalPlan,
+    common::cast::as_fixed_size_binary_array, error::DataFusionError,
+    execution::SendableRecordBatchStream, logical_expr::LogicalPlan,
     physical_plan::stream::RecordBatchStreamAdapter,
 };
 use dataset_store::{DatasetStore, resolve_blocks_table};
@@ -344,19 +342,10 @@ impl StreamingQuery {
                     Some(start) => start,
                     None => return Ok(None),
                 },
-                None => {
-                    let Some(min_block) = self.blocks_table_min(&ctx).await? else {
-                        return Ok(None);
-                    };
-                    if min_block.number < self.start_block {
-                        match self.blocks_table_start(&ctx, self.start_block).await? {
-                            Some(start) => start,
-                            None => return Ok(None),
-                        }
-                    } else {
-                        min_block
-                    }
-                }
+                None => match self.blocks_table_start(&ctx, self.start_block).await? {
+                    Some(start) => start,
+                    None => return Ok(None),
+                },
             }
         };
 
@@ -472,34 +461,6 @@ impl StreamingQuery {
         if results.num_rows() == 0 {
             return Ok(None);
         }
-        let parent_hash =
-            as_fixed_size_binary_array(results.column_by_name("parent_hash").unwrap())
-                .unwrap()
-                .value(0)
-                .try_into()
-                .unwrap();
-        Ok(Some(RangeStart {
-            number,
-            prev_hash: Some(parent_hash),
-        }))
-    }
-
-    async fn blocks_table_min(&self, ctx: &QueryContext) -> Result<Option<RangeStart>, BoxError> {
-        let query = parse_sql(&format!(
-            "SELECT block_num, parent_hash FROM {} ORDER BY block_num ASC LIMIT 1",
-            self.blocks_table,
-        ))?;
-        let plan = ctx.plan_sql(query).await?;
-        let results = ctx.execute_and_concat(plan).await?;
-        assert!(results.num_rows() <= 1);
-        if results.num_rows() == 0 {
-            return Ok(None);
-        }
-        let number = as_uint64_array(results.column_by_name("block_num").unwrap())
-            .unwrap()
-            .value(0)
-            .try_into()
-            .unwrap();
         let parent_hash =
             as_fixed_size_binary_array(results.column_by_name("parent_hash").unwrap())
                 .unwrap()
