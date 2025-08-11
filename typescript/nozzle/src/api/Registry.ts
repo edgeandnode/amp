@@ -51,7 +51,7 @@ export interface GetSchemaOptions {
    *
    * @default true
    */
-  isSqlDataset?: boolean
+  readonly isSqlDataset?: boolean
 }
 
 /**

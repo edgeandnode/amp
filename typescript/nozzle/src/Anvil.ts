@@ -35,12 +35,14 @@ export class Anvil extends Context.Tag("Nozzle/Anvil")<Anvil, {
    * @returns An effect that completes when the process is killed.
    */
   readonly kill: (signal?: CommandExecutor.Signal) => Effect.Effect<void>
+
   /**
    * Joins the fiber that runs the anvil process.
    *
    * @returns An effect that completes when the process exits.
    */
   readonly join: () => Effect.Effect<void, AnvilError>
+
   /**
    * Runs a script on the anvil instance.
    *
@@ -58,12 +60,14 @@ export interface AnvilOptions {
    * The port to run the anvil instance on.
    */
   readonly httpPort?: number | undefined
+
   /**
    * Whether to print the stdout and stderr output of anvil to the console.
    *
    * @default "none"
    */
   readonly printOutput?: "stdout" | "stderr" | "both" | "none" | undefined
+
   /**
    * The working directory to run the anvil instance in.
    */
@@ -78,6 +82,7 @@ export interface ScriptOptions {
    * The private key to use for the script.
    */
   readonly privateKey?: string | undefined
+
   /**
    * The working directory to run the script in.
    */

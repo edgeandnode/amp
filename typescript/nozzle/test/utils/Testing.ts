@@ -8,75 +8,84 @@ import * as Model from "nozzl/Model"
 import * as Nozzle from "nozzl/Nozzle"
 import * as Fixtures from "./Fixtures.ts"
 
+export interface TestingOptions {
+  /**
+   * The path to the nozzle executable.
+   *
+   * @default "nozzle"
+   */
+  readonly nozzleExecutable?: string | undefined
+
+  /**
+   * Additional arguments to pass to the nozzle executable.
+   *
+   * This can be useful when running the nozzle server through cargo
+   * directly from source e.g. during development or testing.
+   */
+  readonly nozzleArgs?: Array<string> | undefined
+
+  /**
+   * The working directory to run the anvil instance in.
+   */
+  readonly anvilWorkingDirectory?: string | undefined
+
+  /**
+   * The port to run the anvil instance on.
+   *
+   * @default 8545
+   */
+  readonly anvilPort?: number | undefined
+
+  /**
+   * Whether to print the stdout and stderr output of anvil to the console.
+   *
+   * @default "both"
+   */
+  readonly anvilOutput?: "stdout" | "stderr" | "both" | "none" | undefined
+
+  /**
+   * Whether to print the stdout and stderr output of nozzle to the console.
+   *
+   * @default "both"
+   */
+  readonly nozzleOutput?: "stdout" | "stderr" | "both" | "none" | undefined
+
+  /**
+   * The port to run the admin service on.
+   *
+   * @default 1610
+   */
+  readonly adminPort?: number | undefined
+
+  /**
+   * The port to run the registry service on.
+   *
+   * @default 1611
+   */
+  readonly registryPort?: number | undefined
+
+  /**
+   * The port to run the json-lines service on.
+   *
+   * @default 1603
+   */
+  readonly jsonLinesPort?: number | undefined
+
+  /**
+   * The port to run the arrow-flight service on.
+   *
+   * @default 1604
+   */
+  readonly arrowFlightPort?: number | undefined
+}
+
 /**
  * Creates a test environment layer.
  *
  * @param config - The configuration for the test environment.
  * @returns A layer for the test environment.
  */
-export const layer = (
-  config: {
-    /**
-     * The path to the nozzle executable.
-     *
-     * @default "nozzle"
-     */
-    nozzleExecutable?: string | undefined
-    /**
-     * Additional arguments to pass to the nozzle executable.
-     *
-     * This can be useful when running the nozzle server through cargo
-     * directly from source e.g. during development or testing.
-     */
-    nozzleArgs?: Array<string> | undefined
-    /**
-     * The working directory to run the anvil instance in.
-     */
-    anvilWorkingDirectory?: string | undefined
-    /**
-     * The port to run the anvil instance on.
-     *
-     * @default 8545
-     */
-    anvilPort?: number | undefined
-    /**
-     * Whether to print the stdout and stderr output of anvil to the console.
-     *
-     * @default "both"
-     */
-    anvilOutput?: "stdout" | "stderr" | "both" | "none" | undefined
-    /**
-     * Whether to print the stdout and stderr output of nozzle to the console.
-     *
-     * @default "both"
-     */
-    nozzleOutput?: "stdout" | "stderr" | "both" | "none" | undefined
-    /**
-     * The port to run the admin service on.
-     *
-     * @default 1610
-     */
-    adminPort?: number | undefined
-    /**
-     * The port to run the registry service on.
-     *
-     * @default 1611
-     */
-    registryPort?: number | undefined
-    /**
-     * The port to run the json-lines service on.
-     *
-     * @default 1603
-     */
-    jsonLinesPort?: number | undefined
-    /**
-     * The port to run the arrow-flight service on.
-     *
-     * @default 1604
-     */
-    arrowFlightPort?: number | undefined
-  } = {},
-) =>
+export const layer = (config: TestingOptions = {}) =>
   Effect.gen(function*() {
     const path = yield* Path.Path
 

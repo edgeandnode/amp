@@ -28,35 +28,34 @@ export class ArrowFlightError extends Data.TaggedError("ArrowFlightError")<{
 /**
  * Service definition for the Arrow Flight api.
  */
-export class ArrowFlight extends Context.Tag("Nozzle/ArrowFlight")<
-  ArrowFlight,
-  {
-    /**
-     * The client for the Arrow Flight service.
-     */
-    readonly client: Client<typeof Flight.FlightService>
-    /**
-     * A stream of record batches from a sql query.
-     *
-     * @param sql - The sql query to execute.
-     * @returns A stream of record batches.
-     */
-    readonly stream: {
-      (sql: TemplateStringsArray): Stream.Stream<RecordBatch, ArrowFlightError>
-      (sql: string): Stream.Stream<RecordBatch, ArrowFlightError>
-    }
-    /**
-     * A table representation of the results from a sql query.
-     *
-     * @param sql - The sql query to execute.
-     * @returns A table representation of the results.
-     */
-    readonly table: {
-      (sql: TemplateStringsArray): Effect.Effect<Table, ArrowFlightError>
-      (sql: string): Effect.Effect<Table, ArrowFlightError>
-    }
+export class ArrowFlight extends Context.Tag("Nozzle/ArrowFlight")<ArrowFlight, {
+  /**
+   * The client for the Arrow Flight service.
+   */
+  readonly client: Client<typeof Flight.FlightService>
+
+  /**
+   * A stream of record batches from a sql query.
+   *
+   * @param sql - The sql query to execute.
+   * @returns A stream of record batches.
+   */
+  readonly stream: {
+    (sql: TemplateStringsArray): Stream.Stream<RecordBatch, ArrowFlightError>
+    (sql: string): Stream.Stream<RecordBatch, ArrowFlightError>
   }
->() {}
+
+  /**
+   * A table representation of the results from a sql query.
+   *
+   * @param sql - The sql query to execute.
+   * @returns A table representation of the results.
+   */
+  readonly table: {
+    (sql: TemplateStringsArray): Effect.Effect<Table, ArrowFlightError>
+    (sql: string): Effect.Effect<Table, ArrowFlightError>
+  }
+}>() {}
 
 /**
  * Creates a new Arrow Flight service instance.
