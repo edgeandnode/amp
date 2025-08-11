@@ -10,7 +10,7 @@ use common::{BoxResult, config::Config};
 use dataset_store::DatasetStore;
 
 mod ctx;
-mod handlers;
+pub mod handlers;
 mod scheduler;
 
 use ctx::Ctx;

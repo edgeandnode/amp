@@ -54,7 +54,9 @@ pub enum Error {
     ManifestRegistrationError(String),
 
     /// Manifest is required but not provided
-    #[error("Manifest is required but not provided for dataset '{0}' version '{1}'")]
+    #[error(
+        "Dataset not found in registry and manifest is not provided with request for dataset '{0}' version '{1}'"
+    )]
     ManifestRequired(String, String),
 
     /// Dataset already exists

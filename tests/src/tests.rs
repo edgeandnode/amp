@@ -1,4 +1,5 @@
 mod anvil;
+mod deploy;
 mod registry;
 
 use common::BoxError;

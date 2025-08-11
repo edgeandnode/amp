@@ -80,7 +80,8 @@ impl RegistryTestContext {
 async fn test_register_success() {
     let ctx = RegistryTestContext::setup("test_register_success").await;
 
-    let manifest = RegistryTestContext::create_test_manifest("test_dataset", "1.0.0", "test_owner");
+    let manifest =
+        RegistryTestContext::create_test_manifest("register_test_dataset", "1.0.0", "test_owner");
     let manifest_json = serde_json::to_string(&manifest).unwrap();
     let response = ctx.test_register(manifest_json).await;
 
@@ -88,20 +89,23 @@ async fn test_register_success() {
     let response_body: RegisterResponse = response.json().await.unwrap();
     assert!(response_body.success);
 
-    assert!(ctx.verify_dataset_registered("test_dataset", "1.0.0").await);
+    assert!(
+        ctx.verify_dataset_registered("register_test_dataset", "1.0.0")
+            .await
+    );
     let registry_info = ctx
         .env
         .metadata_db
-        .get_registry_info("test_dataset", "1.0.0")
+        .get_registry_info("register_test_dataset", "1.0.0")
         .await
         .expect("Registry info should exist");
 
-    assert_eq!(registry_info.dataset, "test_dataset");
+    assert_eq!(registry_info.dataset, "register_test_dataset");
     assert_eq!(registry_info.version, "1.0.0");
     assert_eq!(registry_info.owner, "test_owner");
     assert_eq!(
         registry_info.manifest.to_string(),
-        "test_dataset__1.0.0.json"
+        "register_test_dataset__1.0.0.json"
     );
 }
 
@@ -109,8 +113,11 @@ async fn test_register_success() {
 async fn test_register_duplicate_dataset() {
     let ctx = RegistryTestContext::setup("test_register_duplicate").await;
 
-    let manifest =
-        RegistryTestContext::create_test_manifest("duplicate_dataset", "1.0.0", "test_owner");
+    let manifest = RegistryTestContext::create_test_manifest(
+        "register_test_duplicate_dataset",
+        "1.0.0",
+        "test_owner",
+    );
     let manifest_json = serde_json::to_string(&manifest).unwrap();
 
     let response1 = ctx.test_register(manifest_json.clone()).await;
@@ -124,7 +131,7 @@ async fn test_register_duplicate_dataset() {
     let error_response: serde_json::Value = response2.json().await.unwrap();
     let error_message = error_response["error"].as_str().unwrap();
     assert!(error_message.contains("Dataset already exists"));
-    assert!(error_message.contains("duplicate_dataset"));
+    assert!(error_message.contains("register_test_duplicate_dataset"));
     assert!(error_message.contains("1.0.0"));
 }
 
@@ -186,8 +193,11 @@ async fn test_register_multiple_versions() {
 
     // Register all versions
     for (version, owner) in &test_cases {
-        let manifest =
-            RegistryTestContext::create_test_manifest("multi_version_dataset", version, owner);
+        let manifest = RegistryTestContext::create_test_manifest(
+            "register_test_multi_version_dataset",
+            version,
+            owner,
+        );
         let manifest_json = serde_json::to_string(&manifest).unwrap();
         let response = ctx.test_register(manifest_json).await;
         assert_eq!(response.status(), StatusCode::OK);
@@ -198,18 +208,18 @@ async fn test_register_multiple_versions() {
     // Verify all versions are registered and check registry info
     for (version, owner) in &test_cases {
         assert!(
-            ctx.verify_dataset_registered("multi_version_dataset", version)
+            ctx.verify_dataset_registered("register_test_multi_version_dataset", version)
                 .await
         );
         let registry_info = ctx
             .env
             .metadata_db
-            .get_registry_info("multi_version_dataset", version)
+            .get_registry_info("register_test_multi_version_dataset", version)
             .await
             .expect("Registry info should exist");
         assert_eq!(
             registry_info.manifest.to_string(),
-            format!("multi_version_dataset__{}.json", version)
+            format!("register_test_multi_version_dataset__{}.json", version)
         );
         assert_eq!(registry_info.owner, *owner);
     }

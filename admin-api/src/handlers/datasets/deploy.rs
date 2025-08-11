@@ -93,14 +93,14 @@ pub async fn handler_inner(
 ///
 /// Contains the dataset name, version, and optionally a manifest.
 /// If manifest is provided, it will be registered before deployment.
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, serde::Serialize)]
 pub struct DeployRequest {
     /// Name of the dataset to be deployed
-    dataset_name: String,
+    pub dataset_name: String,
     /// Version of the dataset to deploy
-    version: String,
+    pub version: String,
     /// Optional JSON string representation of the dataset manifest
     /// If provided, it will be registered before deployment
     #[serde(default)]
-    manifest: Option<String>,
+    pub manifest: Option<String>,
 }
