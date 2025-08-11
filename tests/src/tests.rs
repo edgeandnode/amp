@@ -388,7 +388,7 @@ async fn sql_dataset_input_batch_size() {
         .run_query("select count(*) from sql_stream_ds.even_blocks", None)
         .await
         .unwrap();
-    assert_eq!(res, serde_json::json!([2]));
+    assert_eq!(res, serde_json::json!([{"count(*)": 2}]));
 }
 
 #[test]
