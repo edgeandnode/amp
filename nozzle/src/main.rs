@@ -29,18 +29,12 @@ struct Args {
 #[derive(Debug, clap::Subcommand, Clone)]
 enum Command {
     Dump {
-        /// The name of the dataset to dump. This will be looked up in the dataset definition directory.
+        /// The name or path of the dataset to dump. This will be looked up in the dataset definition directory.
         /// Will also be used as a subdirectory in the output path, `<data_dir>/<dataset>`.
         ///
         /// Also accepts a comma-separated list of datasets, which will be dumped in the provided order.
         #[arg(long, required = true, env = "DUMP_DATASET", value_delimiter = ',')]
         dataset: Vec<String>,
-
-        /// The path of manifest file to dump. If passed, manifests will be registered first, then starts the dump process.
-        ///
-        /// Also accepts a comma-separated list of manifests.
-        #[arg(long, env = "DUMP_MANIFEST", value_delimiter = ',')]
-        manifest: Option<Vec<String>>,
 
         /// If set to true, only the listed datasets will be dumped in the order they are listed.
         /// By default dump listed datasets and their dependencies, ordered such that each dataset
@@ -177,7 +171,6 @@ async fn main_inner() -> Result<(), BoxError> {
             n_jobs,
             partition_size_mb,
             dataset: datasets,
-            manifest: manifests,
             ignore_deps,
             run_every_mins,
             location,
@@ -187,19 +180,25 @@ async fn main_inner() -> Result<(), BoxError> {
 
             let (config, metadata_db) =
                 construct_confing_and_metadatadb(config_path.as_ref(), &command).await?;
-            if let Some(manifests) = manifests {
-                let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
-                for manifest in manifests {
-                    info!("Registering manifest: {}", manifest);
-                    let manifest = std::fs::read_to_string(manifest)?;
+            let mut datasets_to_dump = Vec::new();
+            let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
+
+            for dataset in datasets {
+                if dataset.ends_with(".json") {
+                    info!("Registering manifest: {}", dataset);
+                    let manifest = std::fs::read_to_string(&dataset)?;
                     let manifest: Manifest = serde_json::from_str(&manifest)?;
-                    register_manifest(&dataset_store, manifest).await?;
+                    register_manifest(&dataset_store, &manifest).await?;
+                    datasets_to_dump.push(manifest.to_identifier());
+                } else {
+                    datasets_to_dump.push(dataset);
                 }
             }
+
             dump_cmd::dump(
                 config,
                 metadata_db,
-                datasets,
+                datasets_to_dump,
                 ignore_deps,
                 start,
                 end_block,

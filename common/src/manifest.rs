@@ -171,8 +171,7 @@ impl Manifest {
         let owner = self.dependencies.first_key_value().unwrap().1.owner.clone();
         let dataset = self.name.clone();
         let version = self.version.0.to_string();
-        let dataset_with_version = format!("{}__{}", dataset, version);
-        let filename = format!("{}.json", dataset_with_version);
+        let filename = self.to_filename();
         let manifest_path = object_store::path::Path::from(filename.clone()).to_string();
         Registry {
             owner,
@@ -180,6 +179,14 @@ impl Manifest {
             version,
             manifest: manifest_path,
         }
+    }
+
+    pub fn to_identifier(&self) -> String {
+        format!("{}__{}", self.name, self.version.0)
+    }
+
+    pub fn to_filename(&self) -> String {
+        format!("{}.json", self.to_identifier())
     }
 }
 

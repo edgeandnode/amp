@@ -57,15 +57,15 @@ pub async fn register_handler(
     Json(payload): Json<RegisterRequest>,
 ) -> Result<Json<RegisterResponse>, RegisterError> {
     let manifest: Manifest = serde_json::from_str(&payload.manifest)?;
-    register_manifest(&state.dataset_store, manifest).await?;
+    register_manifest(&state.dataset_store, &manifest).await?;
     Ok(Json(RegisterResponse { success: true }))
 }
 
 #[instrument(skip_all)]
 pub async fn register_manifest(
     dataset_store: &Arc<DatasetStore>,
-    manifest: Manifest,
-) -> Result<Manifest, RegisterManifestError> {
+    manifest: &Manifest,
+) -> Result<(), RegisterManifestError> {
     let dataset_name = manifest.name.clone();
     let version = manifest.version.0.to_string();
 
@@ -98,5 +98,5 @@ pub async fn register_manifest(
         dataset_name,
         version
     );
-    Ok(manifest)
+    Ok(())
 }

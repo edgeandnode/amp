@@ -59,7 +59,7 @@ pub async fn handler_inner(
                     manifest.version.0.to_string(),
                 ));
             }
-            let manifest = register_manifest(&ctx.store, manifest)
+            register_manifest(&ctx.store, &manifest)
                 .await
                 .map_err(|e| Error::ManifestRegistrationError(e.to_string()))?;
             tracing::info!(
