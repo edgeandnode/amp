@@ -279,10 +279,12 @@ impl StreamingQuery {
     }
 
     async fn next_microbatch_range(&mut self) -> Result<Option<BlockRange>, BoxError> {
+        // Load the canonical chains for each source table.
         let chains = {
             let mut chains: Vec<Chain> = Default::default();
             for table in &self.tables {
                 let Some(chain) = table.canonical_chain().await? else {
+                    // No canonical chain available for source table.
                     return Ok(None);
                 };
                 chains.push(chain);
@@ -304,84 +306,94 @@ impl StreamingQuery {
 
         // The latest common watermark across the source tables.
         let Some(common_watermark) = self.latest_src_watermark(&ctx, &chains).await? else {
+            // No common watermark across source tables.
             return Ok(None);
         };
 
         if common_watermark.number < self.start_block {
+            // Common watermark hasn't reached the requested start block yet.
             return Ok(None);
         }
 
-        let start: RangeStart = if let Some(prev) = &self.prev_range
-            && !self.blocks_table_contains(&ctx, &prev.watermark()).await?
-        {
-            // reorg
-            if let Some(prev) = &self.prev_range
-                && self
-                    .blocks_table_contains(
-                        &ctx,
-                        &Watermark {
-                            number: prev.start().saturating_sub(1),
-                            hash: prev.prev_hash.unwrap(),
-                        },
-                    )
-                    .await?
-            {
-                RangeStart {
-                    number: prev.start(),
-                    prev_hash: prev.prev_hash,
-                }
-            } else {
-                // TODO: we need to inspect reorganized blocks to determine where the last range
-                // and the canonical chain diverge.
-                todo!("rewind before last range")
-            }
-        } else {
-            // no reorg
-            match &self.prev_range {
-                Some(prev) => match self.blocks_table_start(&ctx, prev.end() + 1).await? {
-                    Some(start) => start,
-                    None => return Ok(None),
-                },
-                None => match self.blocks_table_start(&ctx, self.start_block).await? {
-                    Some(start) => start,
-                    None => return Ok(None),
-                },
-            }
-        };
-
-        let end_block = {
-            let end_block = self
-                .end_block
-                .map(|end_block| BlockNum::min(common_watermark.number, end_block))
-                .unwrap_or(common_watermark.number);
-            let limit = start.number + self.microbatch_max_interval - 1;
-            if end_block > limit {
-                // We're limiting this batch, so make sure we can immediately continue to the next
-                // range regardless of source table updates.
-                self.table_updates.set_ready();
-                limit
-            } else {
-                end_block
-            }
-        };
-        if end_block < start.number {
+        let Some(start) = self.next_microbatch_start(&ctx).await? else {
             return Ok(None);
-        }
-        let end = if end_block == common_watermark.number {
-            common_watermark
-        } else {
-            match self.blocks_table_watermark(&ctx, end_block).await? {
-                Some(end_watermark) => end_watermark,
-                None => return Ok(None),
-            }
         };
-
+        let Some(end) = self
+            .next_microbatch_end(&ctx, &start, common_watermark)
+            .await?
+        else {
+            return Ok(None);
+        };
         Ok(Some(BlockRange {
             numbers: start.number..=end.number,
             network: self.network.clone(),
             hash: end.hash,
             prev_hash: start.prev_hash,
         }))
+    }
+
+    async fn next_microbatch_start(
+        &self,
+        ctx: &QueryContext,
+    ) -> Result<Option<RangeStart>, BoxError> {
+        match &self.prev_range {
+            // start stream
+            None => self.blocks_table_start(&ctx, self.start_block).await,
+            // continue stream
+            Some(prev) if self.blocks_table_contains(ctx, &prev.watermark()).await? => {
+                self.blocks_table_start(&ctx, prev.end() + 1).await
+            }
+            // rewind stream due to reorg
+            Some(prev) => {
+                // Check for a quick rewind from 1 block before the previous range.
+                let quick_rewind_base = Watermark {
+                    number: prev.start().saturating_sub(1),
+                    hash: prev.prev_hash.unwrap(),
+                };
+                if self.blocks_table_contains(ctx, &quick_rewind_base).await? {
+                    Ok(Some(RangeStart {
+                        number: prev.start(),
+                        prev_hash: prev.prev_hash,
+                    }))
+                } else {
+                    // TODO: we need to inspect reorganized blocks to determine where the last
+                    // range and the canonical chain diverge.
+                    todo!("rewind before last range")
+                }
+            }
+        }
+    }
+
+    async fn next_microbatch_end(
+        &mut self,
+        ctx: &QueryContext,
+        start: &RangeStart,
+        common_watermark: Watermark,
+    ) -> Result<Option<Watermark>, BoxError> {
+        let number = {
+            let end = self
+                .end_block
+                .map(|end_block| BlockNum::min(common_watermark.number, end_block))
+                .unwrap_or(common_watermark.number);
+            let limit = start.number + self.microbatch_max_interval - 1;
+            if end > limit {
+                // We're limiting this batch, so make sure we can immediately continue to the next
+                // range regardless of source table updates.
+                self.table_updates.set_ready();
+                limit
+            } else {
+                end
+            }
+        };
+        if number < start.number {
+            // Invalid range: end block is before start block.
+            return Ok(None);
+        }
+        if number == common_watermark.number {
+            Ok(Some(common_watermark))
+        } else {
+            self.blocks_table_watermark(&ctx, number).await
+        }
     }
 
     async fn latest_src_watermark(
