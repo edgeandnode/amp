@@ -305,11 +305,11 @@ impl StreamingQuery {
         };
 
         // The latest common watermark across the source tables.
-        let Some(high_watermark) = self.latest_src_watermark(&ctx, &chains).await? else {
+        let Some(common_watermark) = self.latest_src_watermark(&ctx, &chains).await? else {
             return Ok(None);
         };
 
-        if high_watermark.number < self.start_block {
+        if common_watermark.number < self.start_block {
             return Ok(None);
         }
 
@@ -363,8 +363,8 @@ impl StreamingQuery {
         let end_block = {
             let end_block = self
                 .end_block
-                .map(|end_block| BlockNum::min(high_watermark.number, end_block))
-                .unwrap_or(high_watermark.number);
+                .map(|end_block| BlockNum::min(common_watermark.number, end_block))
+                .unwrap_or(common_watermark.number);
             let limit = start.number + self.microbatch_max_interval - 1;
             if end_block > limit {
                 // We're limiting this batch, so make sure we can immediately continue to the next
@@ -378,8 +378,8 @@ impl StreamingQuery {
         if end_block < start.number {
             return Ok(None);
         }
-        let end = if end_block == high_watermark.number {
-            high_watermark
+        let end = if end_block == common_watermark.number {
+            common_watermark
         } else {
             match self.blocks_table_watermark(&ctx, end_block).await? {
                 Some(end_watermark) => end_watermark,
