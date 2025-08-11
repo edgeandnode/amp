@@ -444,3 +444,89 @@ class IcebergLoader(DataLoader):
                 self.logger.debug(f"Failed to get table statistics: {str(e)}")
         
         return metadata
+
+    def get_table_info(self, table_name: str) -> Dict[str, Any]:
+        """Get comprehensive table information including schema, files, and metadata"""
+        try:
+            # Load the table
+            table_identifier = f"{self.storage_config.namespace}.{table_name}"
+            try:
+                iceberg_table = self._catalog.load_table(table_identifier)
+            except (NoSuchTableError, NoSuchIcebergTableError):
+                return {
+                    'exists': False,
+                    'error': f'Table {table_name} not found'
+                }
+            
+            # Get basic table info
+            info = {
+                'exists': True,
+                'table_name': table_name,
+                'namespace': self.storage_config.namespace,
+                'columns': [],
+                'partition_columns': [],
+                'num_files': 0,
+                'size_bytes': 0,
+                'snapshot_id': None,
+                'schema': None
+            }
+            
+            # Cache schema and spec to avoid redundant calls
+            schema = iceberg_table.schema()
+            spec = iceberg_table.spec()
+            
+            # Get schema information
+            if schema:
+                arrow_schema = schema.as_arrow()
+                info['schema'] = arrow_schema
+                info['columns'] = [field.name for field in arrow_schema]
+            
+            # Get partition information
+            if spec:
+                partition_fields = []
+                for partition_field in spec.fields:
+                    # Map source_id to actual column name using schema
+                    try:
+                        source_field = schema.find_field(partition_field.source_id)
+                        partition_fields.append(source_field.name)
+                    except Exception as e:
+                        self.logger.warning(f"Could not find source field for partition {partition_field.name}: {e}")
+                        # Skip this partition field if we can't resolve it
+                        continue
+                info['partition_columns'] = partition_fields
+            
+            # Get snapshot information
+            current_snapshot = iceberg_table.current_snapshot()
+            if current_snapshot:
+                info['snapshot_id'] = current_snapshot.snapshot_id
+                
+                # Get file count and size if statistics are enabled
+                if self.enable_statistics:
+                    try:
+                        manifests = current_snapshot.data_manifests if hasattr(current_snapshot, 'data_manifests') else []
+                        total_files = 0
+                        total_size = 0
+                        
+                        for manifest in manifests:
+                            if hasattr(manifest, 'added_files_count'):
+                                total_files += manifest.added_files_count or 0
+                            if hasattr(manifest, 'file_size_in_bytes'):
+                                total_size += manifest.file_size_in_bytes or 0
+                        
+                        info['num_files'] = total_files
+                        info['size_bytes'] = total_size
+                        
+                    except Exception as e:
+                        self.logger.debug(f"Could not get file statistics: {e}")
+                        info['num_files'] = 0
+                        info['size_bytes'] = 0
+            
+            return info
+            
+        except Exception as e:
+            self.logger.error(f"Failed to get table info for {table_name}: {e}")
+            return {
+                'exists': False,
+                'error': str(e),
+                'table_name': table_name
+            }

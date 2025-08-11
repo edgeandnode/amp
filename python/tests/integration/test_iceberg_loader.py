@@ -293,10 +293,11 @@ class TestIcebergLoaderIntegration:
             
             # Schema evolution should work successfully
             assert result.success == True
-            assert result.rows_written > 0
+            assert result.rows_loaded > 0
             
             # Verify that the new columns were added to the schema
             table_info = loader.get_table_info('test_schema_evolution')
+            assert table_info['exists'] == True
             assert 'new_column' in table_info['columns']
             assert 'another_field' in table_info['columns']
 
