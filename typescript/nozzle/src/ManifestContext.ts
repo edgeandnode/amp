@@ -1,5 +1,11 @@
-import { FileSystem, Path } from "@effect/platform"
-import { Context, Data, Effect, Layer, Option, Schema } from "effect"
+import * as FileSystem from "@effect/platform/FileSystem"
+import * as Path from "@effect/platform/Path"
+import * as Context from "effect/Context"
+import * as Data from "effect/Data"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
+import * as Schema from "effect/Schema"
 import * as ConfigLoader from "./ConfigLoader.ts"
 import * as Model from "./Model.ts"
 
@@ -9,9 +15,7 @@ export class ManifestContextError extends Data.TaggedError("ManifestContextError
   readonly file?: string
 }> {}
 
-export const ManifestContext = Context.GenericTag<Model.DatasetManifest>(
-  "Nozzle/ManifestContext",
-)
+export const ManifestContext = Context.GenericTag<Model.DatasetManifest>("Nozzle/ManifestContext")
 
 const fromManifest = (file: string) =>
   Effect.gen(function*() {

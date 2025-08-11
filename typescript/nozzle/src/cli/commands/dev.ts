@@ -1,13 +1,8 @@
-import { Command, Options } from "@effect/cli"
-import { Path } from "@effect/platform"
-import { Chunk, Config, Effect, Fiber, Layer, Option, Schema, Stream } from "effect"
-import type * as Viem from "viem"
-import * as Api from "../../Api.ts"
-import * as ConfigLoader from "../../ConfigLoader.ts"
-import * as EvmRpc from "../../EvmRpc.ts"
-import * as ManifestDeployer from "../../ManifestDeployer.ts"
-import * as Nozzle from "../../Nozzle.ts"
-import * as Utils from "../../Utils.ts"
+import * as Command from "@effect/cli/Command"
+import * as Options from "@effect/cli/Options"
+import * as Config from "effect/Config"
+import * as Effect from "effect/Effect"
+import * as Schema from "effect/Schema"
 
 export const dev = Command.make("dev", {
   args: {
@@ -21,12 +16,6 @@ export const dev = Command.make("dev", {
       Options.withDescription("The url of the chain RPC server"),
       Options.withSchema(Schema.URL),
     ),
-    directory: Options.directory("directory", { exists: "no" }).pipe(
-      Options.withDefault(".nozzle"),
-      Options.withAlias("d"),
-      Options.withDescription("The directory to run the dev server in"),
-      Options.mapEffect((dir) => Effect.map(Path.Path, (path) => path.resolve(dir))),
-    ),
     nozzle: Options.text("nozzle").pipe(
       Options.withDefault("nozzle"),
       Options.withAlias("n"),
@@ -35,79 +24,9 @@ export const dev = Command.make("dev", {
   },
 }).pipe(
   Command.withDescription("Run a dev server"),
-  Command.withHandler(({ args }) =>
-    Effect.gen(function*() {
-      const config = yield* ConfigLoader.ConfigLoader
-      const file = yield* Option.match(args.config, {
-        onSome: (file) => Effect.succeed(file),
-        onNone: () =>
-          config.find().pipe(
-            Effect.flatMap(Option.match({
-              onSome: (file) => Effect.succeed(file),
-              onNone: () => Effect.dieMessage("No config file provided"),
-            })),
-          ),
-      })
-
-      const nozzle = yield* Nozzle.Nozzle
-      const deploy = yield* config.watch(file, {
-        onError: Utils.logCauseWith("Failed to load config"),
-      }).pipe(
-        Stream.buffer({ capacity: 1, strategy: "sliding" }),
-        Stream.tap((manifest) =>
-          nozzle.deploy(manifest).pipe(Effect.catchAllCause(Utils.logCauseWith("Failed to deploy manifest")))
-        ),
-        Stream.orDie,
-        Stream.runDrain,
-        Effect.forkScoped,
-      )
-
-      const rpc = yield* EvmRpc.EvmRpc
-      const dump = yield* rpc.blocks.pipe(
-        Stream.chunks,
-        Stream.filter(Chunk.isNonEmpty),
-        Stream.mapAccumEffect(Option.none<Viem.Hash>(), (state, chunk) => {
-          // Reset nozzle if there's no previous block hash or if a reorg is detected.
-          const reset = Option.isNone(state) || hasReorg(state.value, chunk)
-          const last = Chunk.lastNonEmpty(chunk)
-          return nozzle.dump(last.number, reset).pipe(
-            Effect.catchAllCause(Utils.logCauseWith("Failed to dump block")),
-            Effect.as([Option.some(last.hash), void 0] as const),
-          )
-        }),
-        Stream.orDie,
-        Stream.runDrain,
-        Effect.forkScoped,
-      )
-
-      yield* Effect.raceFirst(Fiber.joinAll([dump, deploy]), nozzle.join)
-    }).pipe(Effect.scoped)
-  ),
-  Command.provide(({ args }) =>
-    Nozzle.Nozzle.layer({
-      executable: args.nozzle,
-      directory: args.directory,
-    }).pipe(
-      Layer.provideMerge(EvmRpc.EvmRpc.withUrl(`${args.rpc}`)),
-      Layer.provide(ManifestDeployer.ManifestDeployer.Default.pipe(
-        Layer.provide(Api.Admin.withUrl("http://localhost:1610")),
-      )),
-    ).pipe(
-      Layer.merge(ConfigLoader.ConfigLoader.Default.pipe(
-        Layer.provide(Api.Registry.withUrl("http://localhost:1611")),
-      )),
-    )
+  Command.withHandler(
+    Effect.fn(function*() {
+      return yield* Effect.dieMessage("Not implemented")
+    }),
   ),
 )
-
-const hasReorg = (parent: Viem.Hash, chunk: Chunk.Chunk<Viem.Block<bigint, false, "latest">>) => {
-  let previous = parent
-  for (const block of chunk) {
-    if (block.parentHash !== previous) {
-      return true
-    }
-    previous = block.hash
-  }
-
-  return false
-}

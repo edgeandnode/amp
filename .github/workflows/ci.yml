@@ -152,16 +152,65 @@ jobs:
         run: just check --release
 
   typescript:
-    name: TypeScript
+    name: TypeScript code style & types
     runs-on: namespace-profile-default
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+
       - name: Install pnpm
         uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4
+
       - name: Install dependencies
         run: pnpm install
+
       - name: Check formatting
         run: pnpm lint
+
       - name: Check types
         run: pnpm check
+
+  typescript-tests:
+    name: TypeScript tests
+    runs-on: nscloud-ubuntu-22.04-amd64-16x32
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          submodules: recursive
+
+      - name: Setup dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler postgresql
+
+      - name: Add PostgreSQL binaries to PATH
+        run: |
+          echo "/usr/lib/postgresql/$(pg_lsclusters | awk 'NR==2 {print $1}')/bin" >> $GITHUB_PATH
+
+      - uses: actions-rust-lang/setup-rust-toolchain@fb51252c7ba57d633bc668f941da052e410add48 # v1
+        with:
+          cache: false
+          rustflags: ""
+
+      - name: Setup just
+        uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v3
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@82dee4ba654bd2146511f85f0d013af94670c4de #v1.4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4
+
+      - name: Install dependencies
+        run: pnpm install
+
+      # TODO: Ideally we'd be using a binary built in a previous step here.
+      - name: Build binary
+        run: cargo build --release -p nozzle
+
+      - name: Add Nozzle binaries to PATH
+        run: echo "$(pwd)/target/release" >> $GITHUB_PATH
+
+      - name: Run tests
+        run: pnpm test

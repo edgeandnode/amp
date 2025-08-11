@@ -1,8 +1,11 @@
 import { connectNodeAdapter, createGrpcTransport } from "@connectrpc/connect-node"
-import { Command, Options } from "@effect/cli"
-import { Config, Effect, Schema } from "effect"
+import * as Command from "@effect/cli/Command"
+import * as Options from "@effect/cli/Options"
+import * as Config from "effect/Config"
+import * as Effect from "effect/Effect"
+import * as Schema from "effect/Schema"
 import { createServer, type Server } from "node:http"
-import * as ArrowFlight from "../../ArrowFlight.ts"
+import * as ArrowFlight from "../../api/ArrowFlight.ts"
 
 export const proxy = Command.make("proxy", {
   args: {
@@ -12,9 +15,7 @@ export const proxy = Command.make("proxy", {
       Options.withDescription("The port to listen on"),
     ),
     admin: Options.text("admin-url").pipe(
-      Options.withFallbackConfig(
-        Config.string("NOZZLE_ADMIN_URL").pipe(Config.withDefault("http://localhost:1610")),
-      ),
+      Options.withFallbackConfig(Config.string("NOZZLE_ADMIN_URL").pipe(Config.withDefault("http://localhost:1610"))),
       Options.withDescription("The admin URL to use for the proxy"),
       Options.withSchema(Schema.URL),
     ),
@@ -28,8 +29,8 @@ export const proxy = Command.make("proxy", {
   },
 }).pipe(
   Command.withDescription("Launches a Connect proxy for the Arrow Flight server"),
-  Command.withHandler(({ args }) =>
-    Effect.gen(function*() {
+  Command.withHandler(
+    Effect.fn(function*({ args }) {
       const flight = yield* ArrowFlight.ArrowFlight
       const adapter = connectNodeAdapter({
         routes: (router) => {
@@ -50,21 +51,15 @@ export const proxy = Command.make("proxy", {
       const acquire = Effect.async<Server>((resume) => {
         const server = createServer(adapter)
         server.listen(args.port, () => resume(Effect.succeed(server)))
-      }).pipe(
-        Effect.tap(() => Effect.log(`Proxy server listening on port ${args.port}`)),
-      )
+      }).pipe(Effect.tap(() => Effect.log(`Proxy server listening on port ${args.port}`)))
 
       const release = (server: Server) =>
         Effect.async((resume) => {
           server.close(() => resume(Effect.void))
-        }).pipe(
-          Effect.tap(() => Effect.log(`Proxy server closed on port ${args.port}`)),
-        )
+        }).pipe(Effect.tap(() => Effect.log(`Proxy server closed on port ${args.port}`)))
 
       yield* Effect.acquireRelease(acquire, release).pipe(Effect.zip(Effect.never))
-    }).pipe(Effect.scoped)
+    }, Effect.scoped),
   ),
-  Command.provide(({ args }) =>
-    ArrowFlight.ArrowFlight.withTransport(createGrpcTransport({ baseUrl: `${args.flight}` }))
-  ),
+  Command.provide(({ args }) => ArrowFlight.layer(createGrpcTransport({ baseUrl: `${args.flight}` }))),
 )

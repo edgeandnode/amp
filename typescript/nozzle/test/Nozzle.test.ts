@@ -1,0 +1,152 @@
+import * as Path from "@effect/platform/Path"
+import { layer } from "@effect/vitest"
+import { assertEquals, assertInstanceOf, assertSome, deepStrictEqual } from "@effect/vitest/utils"
+import * as Array from "effect/Array"
+import * as Duration from "effect/Duration"
+import * as Effect from "effect/Effect"
+import * as Option from "effect/Option"
+import * as Schema from "effect/Schema"
+import * as Struct from "effect/Struct"
+import * as Anvil from "nozzl/Anvil"
+import * as Admin from "nozzl/api/Admin"
+import * as JsonLines from "nozzl/api/JsonLines"
+import * as Registry from "nozzl/api/Registry"
+import * as EvmRpc from "nozzl/evm/EvmRpc"
+import * as Model from "nozzl/Model"
+import * as Fixtures from "./utils/Fixtures.ts"
+import * as Testing from "./utils/Testing.ts"
+
+const environment = Testing.layer({
+  nozzleOutput: "both",
+  anvilOutput: "both",
+  adminPort: 1610,
+  registryPort: 1611,
+  jsonLinesPort: 1603,
+  arrowFlightPort: 1604,
+  anvilPort: 8545,
+  // nozzleExecutable: "cargo",
+  // nozzleArgs: ["run", "--bin", "nozzle", "--"],
+})
+
+layer(environment, {
+  excludeTestServices: true,
+  timeout: Duration.toMillis("10 minutes"),
+})((it) => {
+  it.effect(
+    "run the counter script",
+    Effect.fn(function*() {
+      const path = yield* Path.Path
+      const anvil = yield* Anvil.Anvil
+
+      // Run the counter script to deploy the `Counter.sol` contract and generate some events.
+      yield* anvil.runScript(path.join("contracts", "script", "Counter.s.sol:CounterScript"))
+    }),
+    { sequential: true, timeout: Duration.toMillis("10 seconds") },
+  )
+
+  it.effect(
+    "deploy and dump the root dataset",
+    Effect.fn(function*() {
+      const admin = yield* Admin.Admin
+      const rpc = yield* EvmRpc.EvmRpc
+      const block = yield* rpc.getLatestBlockNumber
+      const fixtures = yield* Fixtures.Fixtures
+
+      // Deploy and dump the root dataset.
+      const dataset = yield* fixtures.load("anvil.json", Model.DatasetRpc)
+      yield* admin.deployDataset(dataset)
+      yield* admin.dumpDataset(dataset.name, {
+        endBlock: Number(block),
+        waitForCompletion: true,
+      })
+
+      const response = yield* admin.getDatasetById(dataset.name)
+      assertInstanceOf(response, Model.DatasetInfo)
+      deepStrictEqual(response.name, dataset.name)
+    }),
+    { sequential: true, timeout: Duration.toMillis("10 seconds") },
+  )
+
+  it.effect(
+    "can fetch a root dataset",
+    Effect.fn(function*() {
+      const api = yield* Admin.Admin
+      const result = yield* api.getDatasetById("anvil")
+      assertInstanceOf(result, Model.DatasetInfo)
+      assertEquals(result.kind, "evm-rpc")
+      assertEquals(result.name, "anvil")
+    }),
+    { sequential: true, timeout: Duration.toMillis("10 seconds") },
+  )
+
+  it.effect(
+    "can fetch the output schema of a root dataset",
+    Effect.fn(function*() {
+      const api = yield* Registry.Registry
+      const result = yield* api.getOutputSchema("SELECT * FROM anvil.transactions")
+      assertInstanceOf(result, Model.OutputSchema)
+    }),
+    { sequential: true, timeout: Duration.toMillis("10 seconds") },
+  )
+
+  it.effect(
+    "deploy and dump the example dataset",
+    Effect.fn(function*() {
+      const admin = yield* Admin.Admin
+      const rpc = yield* EvmRpc.EvmRpc
+      const block = yield* rpc.getLatestBlockNumber
+      const fixtures = yield* Fixtures.Fixtures
+
+      // Deploy and dump the example manifest.
+      const dataset = yield* fixtures.load("manifest.json", Model.DatasetManifest)
+      yield* admin.deployDataset(dataset)
+      yield* admin.dumpDataset(dataset.name, {
+        endBlock: Number(block),
+        waitForCompletion: true,
+      })
+
+      const response = yield* admin.getDatasetById(dataset.name)
+      assertInstanceOf(response, Model.DatasetInfo)
+      deepStrictEqual(response.name, dataset.name)
+    }),
+    { sequential: true, timeout: Duration.toMillis("10 seconds") },
+  )
+
+  it.effect(
+    "can fetch a list of datasets",
+    Effect.fn(function*() {
+      const api = yield* Admin.Admin
+      const result = yield* api.getDatasets()
+      const example = result.find((dataset) => dataset.name === "example")
+      assertInstanceOf(example, Model.DatasetInfo)
+      const anvil = result.find((dataset) => dataset.name === "anvil")
+      assertInstanceOf(anvil, Model.DatasetInfo)
+    }),
+    { sequential: true, timeout: Duration.toMillis("10 seconds") },
+  )
+
+  it.effect(
+    "query the example dataset",
+    Effect.fn(function*() {
+      const jsonl = yield* JsonLines.JsonLines
+      const schema = Schema.Struct({
+        blockHash: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("block_hash")),
+        blockNumber: Schema.Number.pipe(Schema.propertySignature, Schema.fromKey("block_num")),
+        txHash: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("tx_hash")),
+        address: Schema.String,
+        count: Schema.NumberFromString,
+      })
+
+      // Query the example dataset.
+      const response = yield* jsonl.query(schema)`
+        SELECT tx_hash, block_hash, block_num, address, count
+        FROM example.counts
+        ORDER BY block_num ASC
+        LIMIT 10
+      `
+
+      assertSome(Array.last(response).pipe(Option.map(Struct.get("count"))), 3)
+    }),
+    { sequential: true, timeout: Duration.toMillis("10 seconds") },
+  )
+})

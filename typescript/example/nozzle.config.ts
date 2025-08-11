@@ -2,7 +2,7 @@ import { defineDataset } from "nozzl"
 
 const event = (event: string) => {
   return `
-    SELECT block_num, timestamp, address, evm_decode_log(topic1, topic2, topic3, data, '${event}') as event
+    SELECT block_hash, tx_hash, block_num, timestamp, address, evm_decode_log(topic1, topic2, topic3, data, '${event}') as event
     FROM anvil.logs
     WHERE topic0 = evm_topic('${event}')
   `
@@ -19,7 +19,7 @@ export default defineDataset(() => ({
   tables: {
     counts: {
       sql: `
-        SELECT c.address, c.block_num, c.timestamp, c.event['count'] as count
+        SELECT c.block_hash, c.tx_hash, c.address, c.block_num, c.timestamp, c.event['count'] as count
         FROM (${count}) as c
       `,
     },

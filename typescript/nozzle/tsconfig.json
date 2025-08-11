@@ -1,8 +1,5 @@
 {
   "extends": "../tsconfig.base.jsonc",
   "include": [],
-  "references": [
-    { "path": "tsconfig.src.json" },
-    { "path": "tsconfig.test.json" }
-  ]
+  "references": [{ "path": "tsconfig.src.json" }, { "path": "tsconfig.test.json" }]
 }
