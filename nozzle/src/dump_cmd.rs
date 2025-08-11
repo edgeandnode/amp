@@ -206,7 +206,7 @@ pub async fn datasets_and_dependencies(
             .cloned()
             .collect();
         datasets.append(&mut untracked_refs);
-        deps.insert(dataset.name, refs);
+        deps.insert(dataset.to_identifier(), refs);
     }
 
     dependency_sort(deps)

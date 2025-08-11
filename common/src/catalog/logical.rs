@@ -54,6 +54,20 @@ impl Dataset {
     pub fn dataset_version(&self) -> Option<String> {
         self.version.as_ref().map(|v| v.0.to_string())
     }
+
+    pub fn to_identifier(&self) -> String {
+        match self.kind.as_str() {
+            "manifest" => format!(
+                "{}__{}",
+                self.name,
+                self.version
+                    .as_ref()
+                    .map(|v| v.0.to_string())
+                    .unwrap_or_default()
+            ),
+            _ => self.name.clone(),
+        }
+    }
 }
 
 #[derive(Clone, Hash, PartialEq, Eq, Debug)]
