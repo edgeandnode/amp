@@ -108,5 +108,16 @@
     "timestamp": "2025-07-30T16:59:29.536679",
     "git_commit": "981a0430",
     "environment": "local"
+  },
+  "iceberg_large_file_write_performance": {
+    "test_name": "large_file_write_performance",
+    "loader_type": "iceberg",
+    "throughput_rows_per_sec": 329394.39488965226,
+    "memory_mb": 144.953125,
+    "duration_seconds": 0.1517937183380127,
+    "dataset_size": 50000,
+    "timestamp": "2025-08-12T13:58:39.812449",
+    "git_commit": "0ef7510b",
+    "environment": "local"
   }
 }
