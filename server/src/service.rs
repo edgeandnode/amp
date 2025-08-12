@@ -454,7 +454,7 @@ impl Service {
         Ok(info)
     }
 
-    #[instrument(skip(self))]
+    #[instrument(skip_all)]
     async fn do_get(&self, ticket: arrow_flight::Ticket) -> Result<TonicStream<FlightData>, Error> {
         let remote_plan = common::query_context::remote_plan_from_bytes(&ticket.ticket)?;
         let table_refs = remote_plan.table_refs.into_iter().map(|t| t.into());
