@@ -47,5 +47,5 @@ metadata_db_url = "postgres://<pg_url>"
 # Compression algorithm: zstd, lz4, gzip, brotli, snappy, uncompressed (default: zstd(1))
 # compression = "zstd(1)"
 
-# Enable bloom filters for better query performance (default: false)
+# Enable bloom filters (default: false)
 # bloom_filters = false

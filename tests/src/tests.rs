@@ -411,7 +411,7 @@ fn generate_json_schemas() {
     for (name, schema) in json_schemas {
         let schema = serde_json::to_string_pretty(&schema).unwrap();
         let dir = env!("CARGO_MANIFEST_DIR");
-        let dir = format!("{dir}/../dataset-def-schemas");
+        let dir = format!("{dir}/../docs/dataset-def-schemas");
         std::fs::create_dir_all(&dir).expect("Failed to create JSON schema output directory");
         let path = format!("{}/{}.json", dir, name);
         std::fs::write(path, schema).unwrap();

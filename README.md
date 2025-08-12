@@ -14,7 +14,7 @@ To quickly dive into the power of Nozzle with Python, best is to run the [`marim
 
 ## Components
 
-See [config.md](config.md) for how to configure nozzle.
+See [config.md](docs/config.md) for how to configure nozzle.
 
 ### Prerequisites
 
