@@ -1,7 +1,10 @@
 use std::{future::Future, sync::Arc, time::Duration};
 
 use chrono::{DateTime, NaiveDateTime, Utc};
-use futures::stream::{BoxStream, Stream};
+use futures::{
+    StreamExt, TryStreamExt,
+    stream::{BoxStream, Stream},
+};
 use sqlx::{
     Executor, FromRow, Postgres,
     postgres::{PgListener, PgNotification},
@@ -688,7 +691,7 @@ impl MetadataDb {
         location_id: LocationId,
         secs: i64,
         nsecs: u32,
-    ) -> BoxStream<Result<GcManifestRow, sqlx::Error>> {
+    ) -> BoxStream<Result<GcManifestRow, Error>> {
         let sql = "
         SELECT location_id
              , file_id
@@ -705,6 +708,8 @@ impl MetadataDb {
             .bind(location_id)
             .bind(expiration)
             .fetch(&*self.pool)
+            .map_err(Error::DbError)
+            .boxed()
     }
 }
 

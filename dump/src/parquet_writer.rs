@@ -19,7 +19,7 @@ use rand::RngCore as _;
 use tracing::debug;
 use url::Url;
 
-use crate::compactor::{FileSizeLimit, NozzleCompactor};
+use crate::compaction::{FILE_SIZE_LIMIT_BYTES, NozzleCompactor};
 
 const MAX_PARTITION_BLOCK_RANGE: u64 = 1_000_000;
 
@@ -138,7 +138,7 @@ struct RawTableWriter {
     current_file: Option<ParquetFileWriter>,
     current_range: Option<BlockRange>,
 
-    compaction_tasks: NozzleCompactor,
+    nozzle_compactor: NozzleCompactor,
 }
 
 impl RawTableWriter {
@@ -153,17 +153,17 @@ impl RawTableWriter {
         let current_file = match ranges_to_write.last() {
             Some(range) => Some(ParquetFileWriter::new(
                 table.clone(),
-                opts.clone(),
+                &opts,
                 *range.start(),
             )?),
             None => None,
         };
 
-        let compaction_tasks = NozzleCompactor::start(
+        let nozzle_compactor = NozzleCompactor::start(
             table.clone(),
             table.metadata_db(),
             &opts,
-            FileSizeLimit::Byte,
+            FILE_SIZE_LIMIT_BYTES,
         );
 
         Ok(Self {
@@ -173,7 +173,7 @@ impl RawTableWriter {
             partition_size,
             current_file,
             current_range: None,
-            compaction_tasks,
+            nozzle_compactor,
         })
     }
 
@@ -198,7 +198,7 @@ impl RawTableWriter {
             self.current_file = match self.ranges_to_write.last() {
                 Some(range) => Some(ParquetFileWriter::new(
                     self.table.clone(),
-                    self.opts.clone(),
+                    &self.opts,
                     *range.start(),
                 )?),
                 None => None,
@@ -247,7 +247,7 @@ impl RawTableWriter {
             self.ranges_to_write.push(block_num..=*range.end());
             self.current_file = Some(ParquetFileWriter::new(
                 self.table.clone(),
-                self.opts.clone(),
+                &self.opts,
                 block_num,
             )?);
         }
@@ -296,7 +296,7 @@ impl RawTableWriter {
     }
 
     async fn try_run_compaction(&mut self) {
-        self.compaction_tasks.try_run().await
+        self.nozzle_compactor.try_run().await
     }
 }
 
@@ -310,7 +310,7 @@ pub struct ParquetFileWriter {
 impl ParquetFileWriter {
     pub fn new(
         table: Arc<PhysicalTable>,
-        opts: ParquetWriterProperties,
+        opts: &ParquetWriterProperties,
         start: BlockNum,
     ) -> Result<ParquetFileWriter, BoxError> {
         // TODO: We need to make file names unique when we start handling non-finalized blocks.

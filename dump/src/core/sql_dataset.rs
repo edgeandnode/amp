@@ -132,7 +132,7 @@ use tracing::instrument;
 
 use super::{Ctx, block_ranges, tasks::FailFastJoinSet};
 use crate::{
-    compactor::{FileSizeLimit, NozzleCompactor},
+    compaction::{FILE_SIZE_LIMIT_BLOCKS, NozzleCompactor},
     parquet_writer::{ParquetFileWriter, ParquetWriterProperties, commit_metadata},
 };
 
@@ -316,17 +316,14 @@ async fn dump_sql_query(
     };
 
     let mut microbatch_start = range.start();
-    let mut writer = ParquetFileWriter::new(
-        physical_table.clone(),
-        parquet_opts.clone(),
-        microbatch_start,
-    )?;
+    let mut writer =
+        ParquetFileWriter::new(physical_table.clone(), parquet_opts, microbatch_start)?;
 
     let mut compactor = NozzleCompactor::start(
         physical_table.clone(),
         physical_table.metadata_db(),
         &parquet_opts,
-        FileSizeLimit::Block,
+        FILE_SIZE_LIMIT_BLOCKS,
     );
 
     // Receive data from the query stream, commiting a file on every watermark update received. The
@@ -360,11 +357,8 @@ async fn dump_sql_query(
 
                 // Open new file for next chunk
                 microbatch_start = microbatch_end + 1;
-                writer = ParquetFileWriter::new(
-                    physical_table.clone(),
-                    parquet_opts.clone(),
-                    microbatch_start,
-                )?;
+                writer =
+                    ParquetFileWriter::new(physical_table.clone(), parquet_opts, microbatch_start)?;
             }
         }
     }
