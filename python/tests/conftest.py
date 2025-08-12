@@ -137,6 +137,31 @@ def iceberg_basic_config(iceberg_test_env):
 
 
 @pytest.fixture
+def lmdb_test_env():
+    """Create LMDB test environment for the session"""
+    temp_dir = tempfile.mkdtemp(prefix='lmdb_test_')
+
+    yield temp_dir
+
+    shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+@pytest.fixture
+def lmdb_perf_config(lmdb_test_env):
+    """LMDB configuration optimized for performance testing"""
+    return {
+        'db_path': str(Path(lmdb_test_env) / 'perf_test.lmdb'),
+        'map_size': 1024 * 1024**2,  # 1GB for performance tests
+        'transaction_size': 10000,
+        'writemap': True,
+        'sync': False,  # Faster for tests, less durable
+        'readahead': False,
+        'max_readers': 16,
+        'create_if_missing': True
+    }
+
+
+@pytest.fixture
 def small_test_table():
     """Small Arrow table for quick tests"""
     data = {'id': range(100), 'name': [f'user_{i}' for i in range(100)], 'value': [i * 0.1 for i in range(100)], 'active': [i % 2 == 0 for i in range(100)], 'created_at': [datetime.now() - timedelta(hours=i) for i in range(100)]}
@@ -203,6 +228,7 @@ def pytest_configure(config):
     config.addinivalue_line('markers', 'delta_lake: Tests requiring Delta Lake')
     config.addinivalue_line('markers', 'iceberg: Tests requiring Apache Iceberg')
     config.addinivalue_line('markers', 'snowflake: Tests requiring Snowflake')
+    config.addinivalue_line('markers', 'lmdb: Tests requiring LMDB')
     config.addinivalue_line('markers', 'slow: Slow tests (> 30 seconds)')
 
 

@@ -36,9 +36,13 @@ test-snowflake:
 	@echo "❄️ Running Snowflake tests..."
 	$(PYTHON) pytest tests/ -m "snowflake" -v --log-cli-level=ERROR
 
+test-lmdb:
+	@echo "⚡ Running LMDB tests..."
+	$(PYTHON) pytest tests/ -m "lmdb" -v --log-cli-level=ERROR
+
 # Performance tests
 test-performance:
-	@echo "⚡ Running performance tests..."
+	@echo "🏇 Running performance tests..."
 	$(PYTHON) pytest tests/performance/ -m "performance" -v --log-cli-level=ERROR
 
 # Code quality (using your ruff config)
