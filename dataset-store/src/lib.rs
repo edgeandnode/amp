@@ -642,7 +642,8 @@ impl DatasetStore {
         function_names: impl IntoIterator<Item = String>,
         isolate_pool: &IsolatePool,
     ) -> Result<LogicalCatalog, DatasetError> {
-        let mut dataset_names = datasets_from_table_refs(table_refs.into_iter())?;
+        let table_refs: Vec<_> = table_refs.into_iter().collect();
+        let mut dataset_names = datasets_from_table_refs(table_refs.iter().cloned())?;
         for func_name in function_names {
             match func_name.split('.').collect::<Vec<_>>().as_slice() {
                 // Simple name assumed to be Datafusion built-in function.
@@ -674,10 +675,20 @@ impl DatasetStore {
                 udfs.push(udf.into());
             }
 
-            for mut table in Arc::new(dataset).resolved_tables() {
-                let table_ref = TableReference::partial(dataset_name.clone(), table.name());
-                table.update_table_ref(table_ref);
-                resolved_tables.push(table);
+            for table in Arc::new(dataset).resolved_tables() {
+                // Only include tables that are actually referenced in the query
+                let is_referenced = table_refs.iter().any(|table_ref| {
+                    match (table_ref.schema(), table_ref.table()) {
+                        (Some(schema), table_name) => {
+                            schema == &dataset_name && table_name == table.name()
+                        }
+                        _ => false, // Unqualified table
+                    }
+                });
+
+                if is_referenced {
+                    resolved_tables.push(table);
+                }
             }
         }
         Ok(LogicalCatalog {
