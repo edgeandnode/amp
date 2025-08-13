@@ -9,7 +9,7 @@ use common::{
     catalog::physical::{Catalog, PhysicalTable},
     config::Config,
     notification_multiplexer::NotificationMultiplexerHandle,
-    query_context::{Error as QueryError, QueryContext},
+    query_context::Error as QueryError,
     store::Store as DataStore,
 };
 use dataset_store::{DatasetKind, DatasetStore};
@@ -71,9 +71,7 @@ pub async fn dump_raw_tables(
         ds
     };
 
-    let catalog = Catalog::new(tables.to_vec(), vec![]);
-    let env = ctx.config.make_query_env()?;
-    let query_ctx = Arc::new(QueryContext::for_catalog(catalog, env.clone())?);
+    let catalog = Arc::new(Catalog::new(tables.to_vec(), vec![]));
 
     // Ensure consistency before starting the dump procedure.
     for table in tables {
@@ -86,7 +84,7 @@ pub async fn dump_raw_tables(
             raw_dataset::dump(
                 ctx,
                 n_jobs,
-                query_ctx,
+                catalog,
                 &dataset.name,
                 tables,
                 partition_size,

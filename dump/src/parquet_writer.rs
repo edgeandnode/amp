@@ -2,9 +2,9 @@ use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc};
 
 pub use common::parquet::file::properties::WriterProperties as ParquetWriterProperties;
 use common::{
-    BlockNum, BoxError, QueryContext, RawTableRows, Timestamp,
+    BlockNum, BoxError, RawTableRows, Timestamp,
     arrow::array::RecordBatch,
-    catalog::physical::PhysicalTable,
+    catalog::physical::{Catalog, PhysicalTable},
     metadata::{
         extract_footer_bytes_from_file,
         parquet::{PARQUET_METADATA_KEY, ParquetMeta},
@@ -31,14 +31,14 @@ impl RawDatasetWriter {
     /// Expects `dataset_ctx` to contain a single dataset and `block_ranges_by_table` to contain
     /// one entry per table in that dataset.
     pub fn new(
-        dataset_ctx: Arc<QueryContext>,
+        catalog: Arc<Catalog>,
         metadata_db: Arc<MetadataDb>,
         opts: ParquetWriterProperties,
         partition_size: u64,
         missing_ranges_by_table: BTreeMap<String, Vec<RangeInclusive<BlockNum>>>,
     ) -> Result<Self, BoxError> {
         let mut writers = BTreeMap::new();
-        for table in dataset_ctx.catalog().tables() {
+        for table in catalog.tables() {
             // Unwrap: `missing_ranges_by_table` contains an entry for each table.
             let table_name = table.table_name();
             let ranges = missing_ranges_by_table.get(table_name).unwrap().clone();
