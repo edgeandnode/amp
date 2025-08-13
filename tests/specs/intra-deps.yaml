@@ -1,0 +1,61 @@
+- name: dump_eth_firehose
+  dataset: eth_firehose
+  start: 0
+  end: 20
+
+- name: deploy_intra_deps
+  deploy: intra_deps
+  start: 0
+  end: 20
+
+- name: query_blocks_base
+  query: SELECT * from intra_deps.zz_blocks_base order by block_num limit 1
+  results: |
+    [
+      {"_block_num":0,"block_num":0,"gas_limit":5000,"gas_used":0,"hash":"d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3","miner":"0000000000000000000000000000000000000000","nonce":66,"parent_hash":"0000000000000000000000000000000000000000000000000000000000000000"}
+    ]
+
+- name: query_aa_blocks_derived
+  query: SELECT * from intra_deps.aa_blocks_derived order by block_num limit 1
+  results: |
+    [
+      {"_block_num":0,"block_num":0,"gas_limit":5000,"gas_used":0,"hash":"d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3","miner":"0000000000000000000000000000000000000000","parent_hash":"0000000000000000000000000000000000000000000000000000000000000000"}
+    ]
+
+- name: query_mm_blocks_derived
+  query: SELECT * from intra_deps.mm_blocks_derived order by block_num limit 1
+  results: |
+    [
+      {"_block_num":0,"block_num":0,"miner":"0000000000000000000000000000000000000000","hash":"d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3","parent_hash":"0000000000000000000000000000000000000000000000000000000000000000"}
+    ]
+
+- name: query_count_blocks_base
+  query: SELECT count(*) as total_blocks from intra_deps.zz_blocks_base
+  results: |
+    [
+      {"total_blocks":21}
+    ]
+
+- name: query_count_blocks_derived
+  query: SELECT count(*) as total_blocks from intra_deps.aa_blocks_derived
+  results: |
+    [
+      {"total_blocks":21}
+    ]
+
+- name: query_count_mm_blocks_derived
+  query: SELECT count(*) as total_blocks from intra_deps.mm_blocks_derived
+  results: |
+    [
+      {"total_blocks":21}
+    ]
+
+- name: query_non_existent_field_aa_blocks_derived
+  query: SELECT nonce from intra_deps.aa_blocks_derived
+  failure: |
+    No field named nonce. Valid fields are intra_deps.aa_blocks_derived._block_num, intra_deps.aa_blocks_derived.block_num, intra_deps.aa_blocks_derived.gas_limit, intra_deps.aa_blocks_derived.gas_used, intra_deps.aa_blocks_derived.miner, intra_deps.aa_blocks_derived.hash, intra_deps.aa_blocks_derived.parent_hash
+
+- name: query_non_existent_field_mm_blocks_derived
+  query: SELECT gas_limit from intra_deps.mm_blocks_derived
+  failure: |
+    No field named gas_limit. Valid fields are intra_deps.mm_blocks_derived._block_num, intra_deps.mm_blocks_derived.block_num, intra_deps.mm_blocks_derived.miner, intra_deps.mm_blocks_derived.hash, intra_deps.mm_blocks_derived.parent_hash
