@@ -4,7 +4,7 @@ use alloy::primitives::BlockHash;
 use common::{
     BlockNum, BoxError, SPECIAL_BLOCK_NUM,
     arrow::{array::RecordBatch, datatypes::SchemaRef},
-    catalog::physical::PhysicalTable,
+    catalog::physical::{Catalog, PhysicalTable},
     metadata::segments::{BlockRange, Chain, Watermark},
     notification_multiplexer::NotificationMultiplexerHandle,
     plan_visitors::{order_by_block_num, propagate_block_num},
@@ -33,9 +33,9 @@ struct TableUpdates {
 }
 
 impl TableUpdates {
-    async fn new(ctx: &QueryContext, multiplexer_handle: &NotificationMultiplexerHandle) -> Self {
+    async fn new(catalog: &Catalog, multiplexer_handle: &NotificationMultiplexerHandle) -> Self {
         let mut subscriptions: BTreeMap<LocationId, watch::Receiver<()>> = Default::default();
-        for table in ctx.catalog().tables() {
+        for table in catalog.tables() {
             let location = table.location_id();
             subscriptions.insert(location, multiplexer_handle.subscribe(location).await);
         }
@@ -203,7 +203,7 @@ impl StreamingQuery {
         let network = tables.iter().map(|t| t.network()).next().unwrap();
         let src_datasets = tables.iter().map(|t| t.dataset().name.as_str()).collect();
         let blocks_table = resolve_blocks_table(&dataset_store, &src_datasets, network).await?;
-        let table_updates = TableUpdates::new(&ctx, multiplexer_handle).await;
+        let table_updates = TableUpdates::new(&ctx.catalog(), multiplexer_handle).await;
         let streaming_query = Self {
             ctx,
             dataset_store,
