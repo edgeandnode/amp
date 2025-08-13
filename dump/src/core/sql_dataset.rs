@@ -118,12 +118,12 @@ use std::{ops::RangeInclusive, sync::Arc};
 
 use common::{
     BlockNum, BoxError,
-    catalog::physical::PhysicalTable,
+    catalog::physical::{Catalog, PhysicalTable},
     notification_multiplexer::NotificationMultiplexerHandle,
     plan_visitors::is_incremental,
     query_context::{QueryContext, QueryEnv},
 };
-use datafusion::sql::parser::Statement;
+use datafusion::logical_expr::LogicalPlan;
 use dataset_store::{DatasetStore, sql_datasets::SqlDataset};
 use futures::StreamExt as _;
 use tracing::instrument;
@@ -165,18 +165,18 @@ pub async fn dump_table(
     let parquet_opts = parquet_opts.clone();
 
     join_set.spawn(async move {
-        let src_ctx: Arc<QueryContext> = dataset_store
+        let catalog = dataset_store
             .clone()
-            .ctx_for_sql(&query, env.clone())
-            .await?
-            .into();
+            .catalog_for_sql(&query, env.clone())
+            .await?;
+        let planning_ctx = QueryContext::for_catalog(catalog.clone(), env.clone())?;
 
-        let plan = src_ctx.plan_sql(query.clone()).await?;
+        let plan = planning_ctx.plan_sql(query.clone()).await?;
         let is_incr = is_incremental(&plan)?;
         let (start, end) = match (start, end) {
             (start, Some(end)) if start >= 0 && end >= 0 => (start as BlockNum, end as BlockNum),
             _ => {
-                match src_ctx.max_end_block(&plan).await? {
+                match planning_ctx.max_end_block(&plan).await? {
                     Some(max_end_block) => {
                         block_ranges::resolve_relative(start, end, max_end_block)?
                     }
@@ -195,8 +195,9 @@ pub async fn dump_table(
             for range in table.missing_ranges(start..=end).await? {
                 dump_sql_query(
                     &dataset_store,
-                    &query,
                     &env,
+                    &catalog,
+                    plan.clone(),
                     range,
                     table.clone(),
                     &parquet_opts,
@@ -216,8 +217,9 @@ pub async fn dump_table(
             .into();
             dump_sql_query(
                 &dataset_store,
-                &query,
                 &env,
+                &catalog,
+                plan.clone(),
                 start..=end,
                 physical_table,
                 &parquet_opts,
@@ -242,8 +244,9 @@ pub async fn dump_table(
 #[instrument(skip_all, err)]
 async fn dump_sql_query(
     dataset_store: &Arc<DatasetStore>,
-    query: &Statement,
     env: &QueryEnv,
+    catalog: &Catalog,
+    query: LogicalPlan,
     range: RangeInclusive<BlockNum>,
     physical_table: Arc<PhysicalTable>,
     parquet_opts: &ParquetWriterProperties,
@@ -257,12 +260,11 @@ async fn dump_sql_query(
         range.end(),
     );
     let mut stream = {
-        let ctx = Arc::new(dataset_store.ctx_for_sql(&query, env.clone()).await?);
-        let plan = ctx.plan_sql(query.clone()).await?;
         StreamingQuery::spawn(
-            ctx,
+            env.clone(),
+            catalog.clone(),
             dataset_store.clone(),
-            plan,
+            query,
             *range.start(),
             Some(*range.end()),
             notification_multiplexer,

@@ -71,7 +71,7 @@ pub async fn dump_raw_tables(
         ds
     };
 
-    let catalog = Arc::new(Catalog::new(tables.to_vec(), vec![]));
+    let catalog = Catalog::new(tables.to_vec(), vec![]);
 
     // Ensure consistency before starting the dump procedure.
     for table in tables {
