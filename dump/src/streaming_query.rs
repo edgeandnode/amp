@@ -1,4 +1,7 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashSet},
+    sync::Arc,
+};
 
 use alloy::{hex::ToHexExt as _, primitives::BlockHash};
 use common::{
@@ -501,21 +504,22 @@ impl StreamingQuery {
         ))?;
         let plan = ctx.plan_sql(query).await?;
         let results = ctx.execute_and_concat(plan).await?;
-        let mut blocks: Vec<BlockRow> = Default::default();
+        // use set to deduplicate entries
+        let mut blocks: HashSet<BlockRow> = Default::default();
         let get_column =
             |name| as_fixed_size_binary_array(results.column_by_name(name).unwrap()).unwrap();
         for (hash, prev_hash) in std::iter::zip(get_column("hash"), get_column("parent_hash")) {
-            blocks.push(BlockRow {
+            blocks.insert(BlockRow {
                 number,
                 hash: hash.unwrap().try_into().unwrap(),
                 prev_hash: prev_hash.map(|h| h.try_into().unwrap()),
             });
         }
-        Ok(blocks)
+        Ok(blocks.into_iter().collect())
     }
 }
 
-#[derive(Debug)] // TODO: rm
+#[derive(Hash, PartialEq, Eq)]
 struct BlockRow {
     number: BlockNum,
     hash: BlockHash,
