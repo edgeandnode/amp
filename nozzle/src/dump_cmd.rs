@@ -6,11 +6,8 @@ use std::{
 };
 
 use common::{
-    BoxError, Store,
-    catalog::physical::PhysicalTable,
-    config::Config,
-    manifest::{self, Version},
-    notification_multiplexer,
+    BoxError, Store, catalog::physical::PhysicalTable, config::Config, manifest,
+    notification_multiplexer, utils::dfs,
 };
 use datafusion::sql::resolve::resolve_table_references;
 use dataset_store::{DatasetStore, sql_datasets};
@@ -73,6 +70,15 @@ pub async fn dump(
             .load_dataset(&dataset_name, version.as_ref())
             .await?;
         let mut tables = Vec::with_capacity(dataset.tables.len());
+
+        if matches!(dataset.kind.as_str(), "sql" | "manifest") {
+            let table_names: Vec<&str> = dataset.tables.iter().map(|t| t.name()).collect();
+            info!(
+                "Table dump order for dataset {}: {:?}",
+                dataset_name, table_names
+            );
+        }
+
         for table in Arc::new(dataset).resolved_tables() {
             let physical_table = if fresh {
                 PhysicalTable::next_revision(&table, data_store.as_ref(), metadata_db.clone(), true)
@@ -196,6 +202,7 @@ pub async fn datasets_and_dependencies(
                 &mut tables
                     .iter()
                     .filter_map(|t| t.schema())
+                    .filter(|schema| schema != &dataset.name)
                     .map(ToString::to_string)
                     .collect(),
             );
@@ -222,28 +229,6 @@ fn dependency_sort(deps: BTreeMap<String, Vec<String>>) -> Result<Vec<String>, B
     let mut ordered: Vec<String> = Default::default();
     let mut visited: BTreeSet<&String> = Default::default();
     let mut visited_cycle: BTreeSet<&String> = Default::default();
-    fn dfs<'a>(
-        node: &'a String,
-        deps: &'a BTreeMap<String, Vec<String>>,
-        ordered: &mut Vec<String>,
-        visited: &mut BTreeSet<&'a String>,
-        visited_cycle: &mut BTreeSet<&'a String>,
-    ) -> Result<(), BoxError> {
-        if visited_cycle.contains(node) {
-            return Err(format!("dependency cycle detected on dataset {node}").into());
-        }
-        if visited.contains(node) {
-            return Ok(());
-        }
-        visited_cycle.insert(node);
-        for dep in deps.get(node).into_iter().flatten() {
-            dfs(dep, deps, ordered, visited, visited_cycle)?;
-        }
-        visited_cycle.remove(node);
-        visited.insert(node);
-        ordered.push(node.to_string());
-        Ok(())
-    }
     for node in nodes {
         if !visited.contains(node) {
             dfs(node, &deps, &mut ordered, &mut visited, &mut visited_cycle)?;
