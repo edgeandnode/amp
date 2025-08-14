@@ -53,6 +53,7 @@ const deployDataset = HttpApiEndpoint.post("deployDataset")`/datasets`
   .setPayload(
     Schema.Struct({
       datasetName: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("dataset_name")),
+      version: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("version")),
       manifest: Schema.parseJson(Schema.Union(Model.DatasetManifest, Model.DatasetRpc)),
     }),
   )
@@ -195,6 +196,7 @@ export const make = Effect.fn(function*(url: string) {
       payload: {
         manifest: dataset,
         datasetName: dataset.name,
+        version: dataset.version,
       },
     })
 
