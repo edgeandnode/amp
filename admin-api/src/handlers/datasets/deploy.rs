@@ -2,8 +2,13 @@
 use std::str::FromStr;
 
 use axum::{Json, extract::State, http::StatusCode};
-use common::manifest::{Manifest, Version};
+use common::{
+    Dataset,
+    manifest::{Manifest, Version},
+};
+use dataset_store::DatasetDefsCommon;
 use http_common::BoxRequestError;
+use object_store::path::Path;
 use registry_service::handlers::register::register_manifest;
 
 use super::error::Error;
@@ -49,28 +54,53 @@ pub async fn handler_inner(
                 .map_err(Error::SchedulerError)?;
         }
         (None, Some(manifest_str)) => {
-            let manifest: Manifest = serde_json::from_str(&manifest_str)
-                .map_err(|e| Error::InvalidManifest(e.to_string()))?;
-            if manifest.name != payload.dataset_name
-                || manifest.version.0.to_string() != payload.version
-            {
-                return Err(Error::ManifestValidationError(
-                    manifest.name,
-                    manifest.version.0.to_string(),
-                ));
+            let common: DatasetDefsCommon =
+                serde_json::from_str::<DatasetDefsCommon>(&manifest_str)
+                    .map_err(|e| Error::InvalidManifest(e.to_string()))?;
+
+            match common.kind.as_str() {
+                "manifest" => {
+                    let manifest: Manifest = serde_json::from_str(&manifest_str)
+                        .map_err(|e| Error::InvalidManifest(e.to_string()))?;
+                    if manifest.name != payload.dataset_name
+                        || manifest.version.0.to_string() != payload.version
+                    {
+                        return Err(Error::ManifestValidationError(
+                            manifest.name,
+                            manifest.version.0.to_string(),
+                        ));
+                    }
+                    register_manifest(&ctx.store, &manifest)
+                        .await
+                        .map_err(|e| Error::ManifestRegistrationError(e.to_string()))?;
+                    tracing::info!(
+                        "Registered manifest for dataset '{}' version '{}'",
+                        payload.dataset_name,
+                        payload.version
+                    );
+
+                    let dataset = Dataset::from(manifest);
+                    ctx.scheduler.schedule_dataset_dump(dataset, None).await?;
+                }
+                _ => {
+                    let format_extension = if manifest_str.starts_with('{') {
+                        "json"
+                    } else {
+                        "toml"
+                    };
+                    let path = Path::from(format!("{}.{}", payload.dataset_name, format_extension));
+                    ctx.config
+                        .dataset_defs_store
+                        .prefixed_store()
+                        .put(&path, manifest_str.into())
+                        .await
+                        .map_err(Error::DatasetDefStoreError)?;
+
+                    let dataset = ctx.store.load_dataset(&payload.dataset_name, None).await?;
+
+                    ctx.scheduler.schedule_dataset_dump(dataset, None).await?;
+                }
             }
-            register_manifest(&ctx.store, &manifest)
-                .await
-                .map_err(|e| Error::ManifestRegistrationError(e.to_string()))?;
-            tracing::info!(
-                "Registered manifest for dataset '{}' version '{}'",
-                payload.dataset_name,
-                payload.version
-            );
-            ctx.scheduler
-                .schedule_dataset_dump(manifest.into(), None)
-                .await
-                .map_err(Error::SchedulerError)?;
         }
         (None, None) => {
             return Err(Error::ManifestRequired(

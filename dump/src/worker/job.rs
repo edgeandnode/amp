@@ -39,13 +39,10 @@ impl Job {
             JobDesc::Dump { end_block } => {
                 let mut tables = vec![];
                 for location in output_locations {
-                    let dataset_version =
-                        Version::from_str(&location.dataset_version).map_err(|e| {
-                            format!("Invalid version '{}': {}", location.dataset_version, e)
-                        })?;
+                    let dataset_version = Version::from_str(&location.dataset_version).ok();
                     let dataset = Arc::new(
                         ctx.dataset_store
-                            .load_dataset(&location.dataset, Some(&dataset_version))
+                            .load_dataset(&location.dataset, dataset_version.as_ref())
                             .await?,
                     );
                     let mut resolved_tables = dataset.resolved_tables();

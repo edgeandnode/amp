@@ -6,11 +6,12 @@ use datafusion::{
     sql::TableReference,
 };
 use js_runtime::isolate_pool::IsolatePool;
+use serde::Deserialize;
 
 use crate::{BLOCK_NUM, BoxError, SPECIAL_BLOCK_NUM, js_udf::JsUdf, manifest::Version};
 
 /// Identifies a dataset and its data schema.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct Dataset {
     pub kind: String,
     pub network: String,
@@ -70,7 +71,7 @@ impl Dataset {
     }
 }
 
-#[derive(Clone, Hash, PartialEq, Eq, Debug)]
+#[derive(Clone, Hash, PartialEq, Eq, Debug, Deserialize)]
 pub struct Table {
     /// Bare table name.
     name: String,
@@ -178,7 +179,7 @@ impl ResolvedTable {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct Function {
     pub name: String,
 
@@ -188,7 +189,7 @@ pub struct Function {
     pub source: FunctionSource,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct FunctionSource {
     pub source: Arc<str>,
     pub filename: String,
