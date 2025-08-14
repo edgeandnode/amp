@@ -95,6 +95,15 @@ impl Chain {
     }
 }
 
+impl IntoIterator for Chain {
+    type Item = Segment;
+    type IntoIter = std::vec::IntoIter<Segment>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
 /// Returns the canonical chain of segments.
 ///
 /// The canonical chain starts from the earliest available block and extends to the greatest block
