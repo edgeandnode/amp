@@ -46,9 +46,9 @@ export const build = Command.make("build", {
       yield* Option.match(args.output, {
         onNone: () => Console.log(json),
         onSome: (output) =>
-          fs
-            .writeFileString(path.resolve(output), json)
-            .pipe(Effect.tap(() => Console.log(`Manifest written to ${output}`))),
+          fs.writeFileString(path.resolve(output), json).pipe(
+            Effect.tap(() => Console.log(`Manifest written to ${output}`)),
+          ),
       })
     }),
   ),

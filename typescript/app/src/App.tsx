@@ -1,9 +1,13 @@
 import { createConnectTransport } from "@connectrpc/connect-web"
-import { Effect, Exit, Schema } from "effect"
+import { Atom, Result, useAtomValue } from "@effect-atom/atom-react"
+import { Cause, Effect, Schedule, Schema, Stream } from "effect"
 import { Arrow, ArrowFlight } from "nozzl"
-import { useEffect, useState } from "react"
 
-const program = Effect.gen(function*() {
+// TODO: Type resolution issue here.
+const transport = createConnectTransport({ baseUrl: "/nozzle" }) as any
+const runtime = Atom.runtime(ArrowFlight.layer(transport))
+
+const fetch = Effect.gen(function*() {
   const flight = yield* ArrowFlight.ArrowFlight
   const table = yield* flight.table`SELECT * FROM example.counts ORDER BY block_num DESC LIMIT 100`
   const schema = Arrow.generateSchema(table.schema)
@@ -11,30 +15,21 @@ const program = Effect.gen(function*() {
   return result
 })
 
-// TODO: Type resolution issue here.
-const transport = createConnectTransport({ baseUrl: "/nozzle" }) as any
-const runnable = program.pipe(Effect.provide(ArrowFlight.layer(transport)))
+const poll = runtime.atom(Stream.repeatEffectWithSchedule(fetch, Schedule.spaced("1 second")))
 
-function App() {
-  const [rows, setRows] = useState<ReadonlyArray<any>>([])
-
-  useEffect(() => {
-    const controller = new AbortController()
-    Effect.runPromiseExit(runnable, { signal: controller.signal }).then((exit) => {
-      if (Exit.isSuccess(exit)) {
-        setRows(exit.value)
-      } else if (!Exit.isInterrupted(exit)) {
-        console.error(exit.cause)
-      }
-    })
-    return () => controller.abort()
-  }, [setRows])
-
-  return (
-    <ul>
-      {rows.map((row, id) => <li key={id}>{JSON.stringify(row)}</li>)}
-    </ul>
-  )
+const App = () => {
+  const atom = useAtomValue(poll)
+  return Result.match(atom, {
+    onInitial: () => <div>Loading ...</div>,
+    onFailure: (error) => <div>Error: {Cause.pretty(error.cause)}</div>,
+    onSuccess: (success) => (
+      <div>
+        <ul>
+          {success.value.map((row) => <li key={row.id}>{JSON.stringify(row)}</li>)}
+        </ul>
+      </div>
+    ),
+  })
 }
 
 export default App

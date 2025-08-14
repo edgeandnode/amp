@@ -74,9 +74,25 @@ export interface TestingOptions {
   /**
    * The port to run the arrow-flight service on.
    *
-   * @default 1604
+   * @default 1602
    */
   readonly arrowFlightPort?: number | undefined
+}
+
+/**
+ * The default options for the testing layer.
+ */
+export const defaultOptions: TestingOptions = {
+  anvilOutput: "both",
+  anvilPort: 8545,
+  adminPort: 1610,
+  arrowFlightPort: 1602,
+  jsonLinesPort: 1603,
+  nozzleOutput: "both",
+  registryPort: 1611,
+  nozzleArgs: [],
+  nozzleExecutable: "nozzle",
+  anvilWorkingDirectory: undefined,
 }
 
 /**
@@ -90,14 +106,14 @@ export const layer = (config: TestingOptions = {}) =>
     const path = yield* Path.Path
 
     const {
-      adminPort = 1610,
-      anvilOutput = "both",
-      anvilPort = 8545,
-      arrowFlightPort = 1604,
-      jsonLinesPort = 1603,
-      nozzleOutput = "both",
-      registryPort = 1611,
-    } = config
+      adminPort,
+      anvilOutput,
+      anvilPort,
+      arrowFlightPort,
+      jsonLinesPort,
+      nozzleOutput,
+      registryPort,
+    } = { ...defaultOptions, ...config }
 
     const anvil = Anvil.layer({
       httpPort: anvilPort,
