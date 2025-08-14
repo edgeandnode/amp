@@ -393,3 +393,40 @@ class TestCrossLoaderPerformance:
         # Memory usage should be reasonable (< 100MB for small dataset)
         for loader_name, memory_mb in results.items():
             assert memory_mb < 100, f'{loader_name} using too much memory: {memory_mb:.1f}MB'
+
+
+@pytest.mark.performance
+@pytest.mark.iceberg
+class TestIcebergPerformance:
+    """Performance tests for Apache Iceberg loader"""
+
+    def test_large_file_write_performance(self, iceberg_basic_config, performance_test_data, memory_monitor):
+        """Test Iceberg write performance for large files"""
+        try:
+            from src.nozzle.loaders.implementations.iceberg_loader import ICEBERG_AVAILABLE, IcebergLoader
+            # Skip all tests if iceberg is not available
+            if not ICEBERG_AVAILABLE:
+                pytest.skip('Apache Iceberg not available', allow_module_level=True)
+        except ImportError:
+            pytest.skip('nozzle modules not available', allow_module_level=True)
+
+        loader = IcebergLoader(iceberg_basic_config)
+
+        with loader:
+            start_time = time.time()
+            result = loader.load_table(performance_test_data, 'large_perf_test')
+            duration = time.time() - start_time
+
+            # Performance assertions - Iceberg should be fast due to zero-copy Arrow
+            rows_per_second = result.rows_loaded / duration
+            assert rows_per_second > 10000, f'Iceberg throughput too low: {rows_per_second:.0f} rows/sec'
+            assert duration < 20, f'Write took too long: {duration:.2f}s'
+
+            # Record benchmark
+            memory_mb = memory_monitor.get('initial_mb', 0)
+            record_benchmark('large_file_write_performance', 'iceberg', {
+                'throughput': rows_per_second,
+                'memory_mb': memory_mb,
+                'duration': duration,
+                'dataset_size': result.rows_loaded
+            })

@@ -19,6 +19,11 @@ try:
 except ImportError:
     DeltaLakeLoader = None
 
+try:
+    from .iceberg_loader import IcebergLoader
+except ImportError:
+    IcebergLoader = None
+
 # Add any other loaders here
 # try:
 #     from .snowflake_loader import SnowflakeLoader
@@ -34,3 +39,5 @@ if RedisLoader:
     __all__.append('RedisLoader')
 if DeltaLakeLoader:
     __all__.append('DeltaLakeLoader')
+if IcebergLoader:
+    __all__.append('IcebergLoader')

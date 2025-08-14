@@ -83,6 +83,35 @@ def delta_temp_config(delta_test_env):
     return {'table_path': unique_path, 'partition_by': ['year', 'month'], 'optimize_after_write': False, 'vacuum_after_write': False, 'schema_evolution': True, 'merge_schema': True, 'storage_options': {}}
 
 
+@pytest.fixture(scope='session')
+def iceberg_test_env():
+    """Create Iceberg test environment for the session"""
+    # Create temporary directory for Iceberg tests
+    temp_dir = tempfile.mkdtemp(prefix='iceberg_test_')
+    
+    yield temp_dir
+    
+    # Cleanup
+    shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+@pytest.fixture
+def iceberg_basic_config(iceberg_test_env):
+    """Basic Iceberg configuration for testing"""
+    return {
+        'catalog_config': {
+            'type': 'sql',
+            'uri': f'sqlite:///{iceberg_test_env}/catalog.db',
+            'warehouse': f'file://{iceberg_test_env}/warehouse'
+        },
+        'namespace': 'test_data',
+        'create_namespace': True,
+        'create_table': True,
+        'schema_evolution': True,
+        'batch_size': 10000
+    }
+
+
 @pytest.fixture
 def small_test_table():
     """Small Arrow table for quick tests"""
@@ -148,6 +177,7 @@ def pytest_configure(config):
     config.addinivalue_line('markers', 'postgresql: Tests requiring PostgreSQL')
     config.addinivalue_line('markers', 'redis: Tests requiring Redis')
     config.addinivalue_line('markers', 'delta_lake: Tests requiring Delta Lake')
+    config.addinivalue_line('markers', 'iceberg: Tests requiring Apache Iceberg')
     config.addinivalue_line('markers', 'slow: Slow tests (> 30 seconds)')
 
 
