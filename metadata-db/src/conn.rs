@@ -28,8 +28,9 @@ pub struct DbConnPool(Pool<Postgres>);
 impl DbConnPool {
     /// Set up a connection pool to the metadata DB.
     #[instrument(skip_all, err)]
-    pub async fn connect(url: &str) -> Result<Self, ConnError> {
+    pub async fn connect(url: &str, pool_size: u32) -> Result<Self, ConnError> {
         PgPoolOptions::new()
+            .max_connections(pool_size)
             .acquire_timeout(Duration::from_secs(5))
             .connect(url)
             .await

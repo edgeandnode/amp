@@ -32,6 +32,9 @@ pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
 /// schedule new jobs only on active workers.
 pub const DEFAULT_DEAD_WORKER_INTERVAL: Duration = Duration::from_secs(5);
 
+/// Default pool size for the metadata DB.
+pub const DEFAULT_POOL_SIZE: u32 = 10;
+
 /// Row ids, always non-negative.
 pub type FileId = i64;
 pub type FooterBytes = Vec<u8>;
@@ -146,8 +149,8 @@ impl MetadataDb {
     ///
     /// Runs migrations if necessary.
     #[instrument(skip_all, err)]
-    pub async fn connect(url: &str) -> Result<Self, Error> {
-        let pool = DbConnPool::connect(url).await?;
+    pub async fn connect(url: &str, pool_size: u32) -> Result<Self, Error> {
+        let pool = DbConnPool::connect(url, pool_size).await?;
         pool.run_migrations().await?;
         Ok(Self {
             pool,
@@ -163,6 +166,10 @@ impl MetadataDb {
             url: self.url,
             dead_worker_interval,
         }
+    }
+
+    pub fn default_pool_size() -> u32 {
+        DEFAULT_POOL_SIZE
     }
 }
 
