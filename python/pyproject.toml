@@ -55,6 +55,7 @@ all_loaders = [
     "psycopg2-binary>=2.9.0",       # PostgreSQL
     "redis>=4.5.0",                 # Redis
     "deltalake>=1.0.2",             # Delta Lake (consistent version)
+    "pyiceberg[sql-sqlite]>=0.9.1", # Apache Iceberg
 ]
 
 test = [
@@ -67,6 +68,10 @@ test = [
     "testcontainers>=3.7.0",       # Database containers for integration tests
     "docker>=6.0.0",               # Required by testcontainers
     "psutil>=5.9.0",               # Memory usage monitoring
+]
+
+iceberg = [
+    "pyiceberg[sql-sqlite]>=0.9.1",
 ]
 
 [build-system]
