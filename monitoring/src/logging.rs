@@ -35,7 +35,7 @@ pub fn init_with_telemetry(url: String, trace_ratio: f64) -> telemetry::traces::
     // Initialize OpenTelemetry tracing infrastructure to enable tracing of query execution.
     let (telemetry_layer, traces_provider) = {
         let tracer_provider = telemetry::traces::provider(url, trace_ratio)?;
-        let tracer = tracer_provider.tracer("nozzle-datafusion-tracer");
+        let tracer = tracer_provider.tracer("nozzle-tracer");
         let telemetry_layer = tracing_opentelemetry::layer().with_tracer(tracer);
 
         (telemetry_layer, tracer_provider)
