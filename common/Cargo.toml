@@ -24,7 +24,6 @@ stable-hash = { git = "https://github.com/graphprotocol/stable-hash" }
 thiserror.workspace = true
 tokio.workspace = true
 toml.workspace = true
-tracing-subscriber.workspace = true
 url.workspace = true
 uuid.workspace = true
 semver.workspace = true
@@ -42,12 +41,7 @@ axum.workspace = true
 regex.workspace = true
 governor.workspace = true
 tower.workspace = true
-opentelemetry.workspace = true
-opentelemetry-otlp.workspace = true
-opentelemetry_sdk.workspace = true
-tracing-opentelemetry.workspace = true
 
 [dev-dependencies]
-cargo_metadata = "0.19.0"
 chrono.workspace = true
 rand = "0.9.0"

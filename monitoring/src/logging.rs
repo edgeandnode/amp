@@ -1,35 +1,20 @@
+//! A set of utilities to enable logging configuration using tracing_subscriber.
+
 use std::sync::Once;
 
-use datafusion::common::internal_datafusion_err;
 use opentelemetry::trace::TracerProvider;
-use opentelemetry_otlp::WithExportConfig;
 use tracing_subscriber::{
-    EnvFilter, filter::LevelFilter, layer::SubscriberExt, util::SubscriberInitExt,
+    self, EnvFilter, filter::LevelFilter, layer::SubscriberExt, util::SubscriberInitExt,
 };
+
+use crate::telemetry;
 
 static NOZZLE_LOG_ENV_VAR: &str = "NOZZLE_LOG";
 
-/// List of crates in the workspace.
-const NOZZLE_CRATES: &[&str] = &[
-    "admin_api",
-    "common",
-    "dataset_store",
-    "dump",
-    "dump_check",
-    "evm_rpc_datasets",
-    "firehose_datasets",
-    "generate_manifest",
-    "http_common",
-    "js_runtime",
-    "metadata_db",
-    "nozzle",
-    "registry_service",
-    "server",
-    "substreams_datasets",
-    "tests",
-];
-
-pub fn register_logger() {
+/// Initializes a tracing subscriber for logging.
+pub fn init() {
+    // Since we also use this function to enable logging in tests, wrap it in `Once` to prevent
+    // multiple initializations.
     static INIT: Once = Once::new();
     INIT.call_once(|| {
         let (env_filter, nozzle_log_level) = env_filter_and_log_level();
@@ -43,37 +28,14 @@ pub fn register_logger() {
     });
 }
 
-pub fn register_logger_with_telemetry(
-    url: String,
-    trace_ratio: f64,
-) -> datafusion::error::Result<()> {
+/// Initializes a tracing subscriber for logging with OpenTelemetry tracing support.
+pub fn init_with_telemetry(url: String, trace_ratio: f64) -> telemetry::traces::Result {
     let (env_filter, nozzle_log_level) = env_filter_and_log_level();
 
     // Initialize OpenTelemetry tracing infrastructure to enable tracing of query execution.
-    let (telemetry_layer, _telemetry_tracing_provider) = {
-        let resource = opentelemetry_sdk::Resource::builder()
-            .with_attribute(opentelemetry::KeyValue::new(
-                "service.name",
-                "datafusion-tracing",
-            ))
-            .build();
-
-        let exporter = opentelemetry_otlp::SpanExporter::builder()
-            .with_tonic()
-            .with_endpoint(url)
-            .build()
-            .map_err(|e| internal_datafusion_err!("OTLP exporter error: {}", e))?;
-
-        let tracer_provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
-            .with_batch_exporter(exporter)
-            .with_resource(resource)
-            .with_sampler(opentelemetry_sdk::trace::Sampler::TraceIdRatioBased(
-                trace_ratio,
-            ))
-            .build();
-
-        let tracer = tracer_provider.tracer("nozzle-datafusion-tracing-query");
-
+    let (telemetry_layer, traces_provider) = {
+        let tracer_provider = telemetry::traces::provider(url, trace_ratio)?;
+        let tracer = tracer_provider.tracer("nozzle-datafusion-tracer");
         let telemetry_layer = tracing_opentelemetry::layer().with_tracer(tracer);
 
         (telemetry_layer, tracer_provider)
@@ -89,8 +51,29 @@ pub fn register_logger_with_telemetry(
 
     tracing::info!("log level: {}", nozzle_log_level);
 
-    Ok(())
+    Ok(traces_provider)
 }
+
+/// List of crates in the workspace.
+const NOZZLE_CRATES: &[&str] = &[
+    "admin_api",
+    "common",
+    "dataset_store",
+    "dump",
+    "dump_check",
+    "evm_rpc_datasets",
+    "firehose_datasets",
+    "generate_manifest",
+    "http_common",
+    "js_runtime",
+    "metadata_db",
+    "monitoring",
+    "nozzle",
+    "registry_service",
+    "server",
+    "substreams_datasets",
+    "tests",
+];
 
 fn env_filter_and_log_level() -> (EnvFilter, String) {
     // Parse directives from RUST_LOG

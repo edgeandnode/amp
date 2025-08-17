@@ -115,7 +115,7 @@ pub async fn run_job(job: Job<impl BlockStreamer>) -> Result<(), BoxError> {
                 .iter()
                 .map(|c| c.to_data().get_slice_memory_size().unwrap())
                 .sum::<usize>();
-            METRICS.bytes_read.inc_by(bytes as f64);
+            METRICS.bytes_read.inc_by(bytes as u64);
 
             table_map
                 .entry(format!("{}.{}", job.dataset.name, table_rows.table.name()))

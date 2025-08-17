@@ -1,8 +1,9 @@
 mod anvil;
 
-use common::{BoxError, tracing_helpers};
+use common::BoxError;
 use dataset_store::{DatasetDefsCommon, SerializableSchema};
 use generate_manifest;
+use monitoring::logging;
 use schemars::schema_for;
 
 use crate::{
@@ -15,7 +16,7 @@ use crate::{
 
 #[tokio::test]
 async fn evm_rpc_single_dump() {
-    tracing_helpers::register_logger();
+    logging::init();
 
     let dataset_name = "eth_rpc";
     check_provider_file("rpc_eth_mainnet.toml").await;
@@ -40,7 +41,7 @@ async fn evm_rpc_single_dump() {
 
 #[tokio::test]
 async fn evm_rpc_base_single_dump() {
-    tracing_helpers::register_logger();
+    logging::init();
 
     let dataset_name = "base";
     check_provider_file("rpc_eth_base.toml").await;
@@ -65,7 +66,7 @@ async fn evm_rpc_base_single_dump() {
 
 #[tokio::test]
 async fn eth_firehose_single_dump() {
-    tracing_helpers::register_logger();
+    logging::init();
 
     let dataset_name = "eth_firehose";
     check_provider_file("firehose_eth_mainnet.toml").await;
@@ -88,7 +89,7 @@ async fn eth_firehose_single_dump() {
 
 #[tokio::test]
 async fn sql_over_eth_firehose_dump() {
-    tracing_helpers::register_logger();
+    logging::init();
     let dataset_name = "sql_over_eth_firehose";
 
     let test_env = TestEnv::temp("sql_over_eth_firehose").await.unwrap();
@@ -110,7 +111,7 @@ async fn sql_over_eth_firehose_dump() {
 
 #[tokio::test]
 async fn sql_tests() {
-    tracing_helpers::register_logger();
+    logging::init();
     let test_env = TestEnv::temp("sql_tests").await.unwrap();
     let mut client = TestClient::connect(&test_env).await.unwrap();
 
@@ -121,7 +122,7 @@ async fn sql_tests() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn streaming_tests_basic() {
-    tracing_helpers::register_logger();
+    logging::init();
     let test_env = TestEnv::temp("sql_streaming_tests_basic").await.unwrap();
     let mut client = TestClient::connect(&test_env).await.unwrap();
 
@@ -132,7 +133,7 @@ async fn streaming_tests_basic() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn streaming_tests_with_sql_datasets() {
-    tracing_helpers::register_logger();
+    logging::init();
     let test_env = TestEnv::temp("sql_streaming_tests_with_sql_datasets")
         .await
         .unwrap();
@@ -145,7 +146,7 @@ async fn streaming_tests_with_sql_datasets() {
 
 #[tokio::test]
 async fn basic_function() -> Result<(), BoxError> {
-    tracing_helpers::register_logger();
+    logging::init();
 
     let test_env = TestEnv::temp("basic_function").await.unwrap();
     let mut client = TestClient::connect(&test_env).await.unwrap();
@@ -159,7 +160,7 @@ async fn basic_function() -> Result<(), BoxError> {
 
 #[tokio::test]
 async fn generate_manifest_evm_rpc_builtin() {
-    tracing_helpers::register_logger();
+    logging::init();
 
     let network = "mainnet".to_string();
     let kind = "evm-rpc".to_string();
@@ -189,7 +190,7 @@ async fn generate_manifest_evm_rpc_builtin() {
 
 #[tokio::test]
 async fn generate_manifest_firehose_builtin() {
-    tracing_helpers::register_logger();
+    logging::init();
 
     let network = "mainnet".to_string();
     let kind = "firehose".to_string();
@@ -219,7 +220,7 @@ async fn generate_manifest_firehose_builtin() {
 
 #[tokio::test]
 async fn generate_manifest_substreams() {
-    tracing_helpers::register_logger();
+    logging::init();
 
     let network = "mainnet".to_string();
     let kind = "substreams".to_string();
@@ -262,7 +263,7 @@ async fn generate_manifest_substreams() {
 
 #[tokio::test]
 async fn generate_manifest_sql() {
-    tracing_helpers::register_logger();
+    logging::init();
 
     let network = "mainnet".to_string();
     let kind = "sql".to_string();
@@ -286,7 +287,7 @@ async fn generate_manifest_sql() {
 
 #[tokio::test]
 async fn generate_manifest_manifest_builtin() {
-    tracing_helpers::register_logger();
+    logging::init();
 
     let network = "mainnet".to_string();
     let kind = "manifest".to_string();
@@ -310,7 +311,7 @@ async fn generate_manifest_manifest_builtin() {
 
 #[tokio::test]
 async fn generate_manifest_bad_dataset_kind() {
-    tracing_helpers::register_logger();
+    logging::init();
 
     let network = "mainnet".to_string();
     let bad_kind = "bad_kind".to_string();
@@ -339,7 +340,7 @@ async fn generate_manifest_bad_dataset_kind() {
 
 #[tokio::test]
 async fn sql_dataset_input_batch_size() {
-    tracing_helpers::register_logger();
+    logging::init();
 
     // 1. Setup
     let test_env = TestEnv::temp("sql_dataset_input_batch_size").await.unwrap();

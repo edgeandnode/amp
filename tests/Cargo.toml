@@ -38,3 +38,4 @@ evm-rpc-datasets = { path = "../evm-rpc-datasets" }
 firehose-datasets = { path = "../firehose-datasets" }
 rand.workspace = true
 schemars.workspace = true
+monitoring = { path = "../monitoring" }

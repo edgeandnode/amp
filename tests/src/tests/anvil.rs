@@ -6,8 +6,9 @@ use alloy::{
     providers::{Provider as _, ext::AnvilApi as _},
     rpc::types::anvil::ReorgOptions,
 };
-use common::{BlockNum, metadata::segments::BlockRange, query_context::parse_sql, tracing_helpers};
+use common::{BlockNum, metadata::segments::BlockRange, query_context::parse_sql};
 use dataset_store::DatasetStore;
+use monitoring::logging;
 use rand::{Rng, RngCore, SeedableRng as _, rngs::StdRng};
 
 use crate::{
@@ -24,7 +25,7 @@ struct AnvilTestContext {
 
 impl AnvilTestContext {
     async fn setup(test_name: &str) -> Self {
-        tracing_helpers::register_logger();
+        logging::init();
         let anvil = Anvil::new().port(0_u16).spawn();
         let url = anvil.endpoint_url();
         let env = TestEnv::new(test_name, true, Some(url.as_str()))
