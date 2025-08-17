@@ -6,7 +6,10 @@ use clap::Parser;
 use common::{BoxError, config::Config};
 use dataset_store::DatasetStore;
 use metadata_db::MetadataDb;
-use monitoring::{logging, telemetry};
+use monitoring::{
+    logging,
+    telemetry::{self, metrics::provider_flush_shutdown},
+};
 
 /// Checks the output of `dump` against a provider.
 #[derive(Parser, Debug)]
@@ -100,10 +103,7 @@ async fn main() -> Result<(), BoxError> {
     ui_handle.await?;
 
     telemetry_metrics_provider
-        .map(|provider| {
-            provider.force_flush()?;
-            provider.shutdown()
-        })
+        .map(provider_flush_shutdown)
         .transpose()?;
 
     Ok(())

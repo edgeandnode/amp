@@ -4,7 +4,7 @@ use clap::Parser as _;
 use common::{BoxError, config::Config};
 use dump::worker::Worker;
 use metadata_db::MetadataDb;
-use monitoring::logging;
+use monitoring::{logging, telemetry::traces::provider_flush_shutdown};
 use nozzle::dump_cmd;
 use tracing::info;
 
@@ -235,10 +235,7 @@ async fn main_inner() -> Result<(), BoxError> {
             .await?;
             server.await.and_then(move |_| {
                 telemetry_tracing_provider
-                    .map(|provider| {
-                        provider.force_flush()?;
-                        provider.shutdown()
-                    })
+                    .map(provider_flush_shutdown)
                     .transpose()?;
 
                 Ok(())

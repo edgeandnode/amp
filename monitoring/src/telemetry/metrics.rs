@@ -103,3 +103,13 @@ impl ReadableCounter {
         self.copy.load(Ordering::Relaxed)
     }
 }
+
+/// Flushes the OpenTelemetry metrics provider and shuts it down. This ensures that all
+/// metrics are sent before the application exits. Note that during normal operation, metrics
+/// are sent periodically.
+pub fn provider_flush_shutdown(
+    provider: SdkMeterProvider,
+) -> std::result::Result<(), opentelemetry_sdk::error::OTelSdkError> {
+    provider.force_flush()?;
+    provider.shutdown()
+}
