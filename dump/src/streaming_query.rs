@@ -491,12 +491,7 @@ impl StreamingQuery {
         hash: Option<&BlockHash>,
     ) -> Result<Vec<BlockRow>, BoxError> {
         let hash_constraint = hash
-            .map(|h| {
-                format!(
-                    "AND hash = arrow_cast(x'{}', 'FixedSizeBinary(32)')",
-                    h.encode_hex()
-                )
-            })
+            .map(|h| format!("AND hash = x'{}'", h.encode_hex()))
             .unwrap_or_default();
         let query = parse_sql(&format!(
             "SELECT hash, parent_hash FROM {} WHERE block_num = {} {}",
