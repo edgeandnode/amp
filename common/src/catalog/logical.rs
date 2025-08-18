@@ -6,15 +6,17 @@ use datafusion::{
     sql::TableReference,
 };
 use js_runtime::isolate_pool::IsolatePool;
+use serde::Deserialize;
 
-use crate::{BLOCK_NUM, BoxError, SPECIAL_BLOCK_NUM, js_udf::JsUdf};
+use crate::{BLOCK_NUM, BoxError, SPECIAL_BLOCK_NUM, js_udf::JsUdf, manifest::Version};
 
 /// Identifies a dataset and its data schema.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct Dataset {
     pub kind: String,
     pub network: String,
     pub name: String,
+    pub version: Option<Version>,
     pub tables: Vec<Table>,
     pub functions: Vec<Function>,
 }
@@ -49,9 +51,27 @@ impl Dataset {
             )))
         })
     }
+
+    pub fn dataset_version(&self) -> Option<String> {
+        self.version.as_ref().map(|v| v.0.to_string())
+    }
+
+    pub fn to_identifier(&self) -> String {
+        match self.kind.as_str() {
+            "manifest" => format!(
+                "{}__{}",
+                self.name,
+                self.version
+                    .as_ref()
+                    .map(|v| v.0.to_string())
+                    .unwrap_or_default()
+            ),
+            _ => self.name.clone(),
+        }
+    }
 }
 
-#[derive(Clone, Hash, PartialEq, Eq, Debug)]
+#[derive(Clone, Hash, PartialEq, Eq, Debug, Deserialize)]
 pub struct Table {
     /// Bare table name.
     name: String,
@@ -127,8 +147,17 @@ impl ResolvedTable {
         &self.dataset
     }
 
+    pub fn dataset_version(&self) -> Option<String> {
+        self.dataset.dataset_version()
+    }
+
     pub fn table_ref(&self) -> &TableReference {
         &self.table_ref
+    }
+
+    pub fn update_table_ref(&mut self, table_ref: TableReference) -> &mut Self {
+        self.table_ref = table_ref;
+        self
     }
 
     /// Bare table name
@@ -150,7 +179,7 @@ impl ResolvedTable {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct Function {
     pub name: String,
 
@@ -160,7 +189,7 @@ pub struct Function {
     pub source: FunctionSource,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct FunctionSource {
     pub source: Arc<str>,
     pub filename: String,

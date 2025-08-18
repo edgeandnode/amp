@@ -10,7 +10,7 @@ use common::{BoxResult, config::Config};
 use dataset_store::DatasetStore;
 
 mod ctx;
-mod handlers;
+pub mod handlers;
 mod scheduler;
 
 use ctx::Ctx;
@@ -28,7 +28,7 @@ pub async fn serve(
 
     // Register the routes
     let app = Router::new()
-        .route("/deploy", post(datasets::deploy::handler)) // TODO: Remove. Deprecated in favor of POST /datasets
+        .route("/deploy", post(datasets::deploy::handler))
         .route(
             "/datasets",
             get(datasets::get_all::handler).post(datasets::deploy::handler),
@@ -39,7 +39,7 @@ pub async fn serve(
         .route("/jobs/{id}", get(jobs::get_by_id::handler))
         .route("/jobs/{id}/stop", put(jobs::stop::handler))
         .with_state(Ctx {
-            config,
+            config: config,
             metadata_db,
             store,
             scheduler,

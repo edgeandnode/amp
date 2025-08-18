@@ -6,13 +6,16 @@ use std::{
 };
 
 use common::{
-    BoxError, Store, catalog::physical::PhysicalTable, config::Config, manifest,
+    BoxError, Store,
+    catalog::physical::PhysicalTable,
+    config::Config,
+    manifest::{self, Version},
     notification_multiplexer,
 };
 use datafusion::sql::resolve::resolve_table_references;
 use dataset_store::{DatasetStore, sql_datasets};
 use metadata_db::MetadataDb;
-use tracing::info;
+use tracing::{info, warn};
 
 pub async fn dump(
     config: Arc<Config>,
@@ -51,7 +54,24 @@ pub async fn dump(
 
     let mut physical_datasets = vec![];
     for dataset_name in datasets {
-        let dataset = dataset_store.load_dataset(&dataset_name).await?;
+        let (dataset_name, version) =
+            if let Some((name, version_str)) = dataset_name.split_once("__") {
+                match version_str.parse::<Version>() {
+                    Ok(v) => (name, Some(v)),
+                    Err(e) => {
+                        warn!(
+                            "Skipping dataset {} due to invalid version: {}",
+                            dataset_name, e
+                        );
+                        continue;
+                    }
+                }
+            } else {
+                (dataset_name.as_str(), None)
+            };
+        let dataset = dataset_store
+            .load_dataset(&dataset_name, version.as_ref())
+            .await?;
         let mut tables = Vec::with_capacity(dataset.tables.len());
         for table in Arc::new(dataset).resolved_tables() {
             let physical_table = if fresh {
@@ -156,10 +176,14 @@ pub async fn datasets_and_dependencies(
 ) -> Result<Vec<String>, BoxError> {
     let mut deps: BTreeMap<String, Vec<String>> = Default::default();
     while !datasets.is_empty() {
-        let dataset = store.load_dataset(&datasets.pop().unwrap()).await?;
+        let dataset = store.load_dataset(&datasets.pop().unwrap(), None).await?;
         let sql_dataset = match dataset.kind.as_str() {
             sql_datasets::DATASET_KIND => store.load_sql_dataset(&dataset.name).await?,
-            manifest::DATASET_KIND => store.load_manifest_dataset(&dataset.name).await?,
+            manifest::DATASET_KIND => {
+                store
+                    .load_manifest_dataset(&dataset.name, dataset.version.as_ref().unwrap())
+                    .await?
+            }
             _ => {
                 deps.insert(dataset.name.clone(), vec![]);
                 continue;
@@ -182,7 +206,7 @@ pub async fn datasets_and_dependencies(
             .cloned()
             .collect();
         datasets.append(&mut untracked_refs);
-        deps.insert(dataset.name, refs);
+        deps.insert(dataset.to_identifier(), refs);
     }
 
     dependency_sort(deps)

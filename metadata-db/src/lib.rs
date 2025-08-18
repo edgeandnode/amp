@@ -9,6 +9,7 @@ use url::Url;
 
 mod conn;
 mod locations;
+pub mod registry;
 #[cfg(feature = "temp-db")]
 pub mod temp;
 mod workers;
@@ -26,6 +27,7 @@ pub use self::{
         jobs::{Job, JobId, JobStatus, JobStatusUpdateError, JobWithDetails},
     },
 };
+use crate::registry::{Registry, insert_dataset_to_registry};
 
 /// Frequency on which to send a heartbeat.
 pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
@@ -632,5 +634,104 @@ impl MetadataDb {
             .map_err(Error::ConnectionError)?;
         channel.listen(channel_name).await.map_err(Error::DbError)?;
         Ok(channel.into_stream())
+    }
+}
+
+/// Registry API
+impl MetadataDb {
+    pub async fn register_dataset(&self, registry: Registry) -> Result<(), Error> {
+        let mut tx = self.pool.begin().await?;
+        insert_dataset_to_registry(&mut *tx, registry).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn dataset_exists(&self, dataset_name: &str, version: &str) -> Result<bool, Error> {
+        let sql = "
+            SELECT COUNT(*) FROM registry 
+            WHERE dataset = $1 AND version = $2
+        ";
+        let count: i64 = sqlx::query_scalar(sql)
+            .bind(dataset_name)
+            .bind(version)
+            .fetch_one(&*self.pool)
+            .await?;
+        Ok(count > 0)
+    }
+
+    pub async fn get_manifest(
+        &self,
+        dataset: &str,
+        version: &str,
+    ) -> Result<Option<String>, Error> {
+        let sql = "
+            SELECT manifest FROM registry 
+            WHERE dataset = $1 AND version = $2
+        ";
+        let result = sqlx::query_scalar(sql)
+            .bind(dataset)
+            .bind(version)
+            .fetch_optional(&*self.pool)
+            .await?;
+        Ok(result)
+    }
+
+    #[instrument(skip(self), err)]
+    pub async fn get_latest_dataset_version(
+        &self,
+        dataset_name: &str,
+    ) -> Result<Option<String>, Error> {
+        let sql = "
+            SELECT version FROM registry 
+            WHERE dataset = $1
+            ORDER BY version DESC
+            LIMIT 1
+        ";
+
+        let version: Option<String> = sqlx::query_scalar(sql)
+            .bind(&dataset_name)
+            .fetch_optional(&*self.pool)
+            .await?;
+        match version {
+            Some(version) => Ok(Some(format!("{}__{}", dataset_name, version))),
+            None => Ok(None),
+        }
+    }
+
+    #[instrument(skip(self), err)]
+    pub async fn get_dataset(
+        &self,
+        dataset_name: &str,
+        version: &str,
+    ) -> Result<Option<String>, Error> {
+        let sql = "
+            SELECT manifest FROM registry 
+            WHERE dataset = $1 AND version = $2
+            LIMIT 1
+        ";
+
+        let dataset: Option<String> = sqlx::query_scalar(sql)
+            .bind(&dataset_name)
+            .bind(&version)
+            .fetch_optional(&*self.pool)
+            .await?;
+        match dataset {
+            Some(dataset) => Ok(Some(dataset.trim_end_matches(".json").to_string())),
+            None => Ok(None),
+        }
+    }
+
+    pub async fn get_registry_info(
+        &self,
+        dataset_name: &str,
+        version: &str,
+    ) -> Result<Registry, sqlx::Error> {
+        let sql = "SELECT owner, dataset, version, manifest FROM registry WHERE dataset = $1 AND version = $2";
+        let dataset = sqlx::query_as(sql)
+            .bind(&dataset_name)
+            .bind(&version)
+            .fetch_one(&*self.pool)
+            .await?;
+        Ok(dataset)
     }
 }

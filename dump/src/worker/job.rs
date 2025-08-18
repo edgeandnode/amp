@@ -1,6 +1,6 @@
-use std::sync::Arc;
+use std::{str::FromStr, sync::Arc};
 
-use common::{BoxError, catalog::physical::PhysicalTable};
+use common::{BoxError, catalog::physical::PhysicalTable, manifest::Version};
 use metadata_db::JobId;
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
@@ -39,8 +39,12 @@ impl Job {
             JobDesc::Dump { end_block } => {
                 let mut tables = vec![];
                 for location in output_locations {
-                    let dataset =
-                        Arc::new(ctx.dataset_store.load_dataset(&location.dataset).await?);
+                    let dataset_version = Version::from_str(&location.dataset_version).ok();
+                    let dataset = Arc::new(
+                        ctx.dataset_store
+                            .load_dataset(&location.dataset, dataset_version.as_ref())
+                            .await?,
+                    );
                     let mut resolved_tables = dataset.resolved_tables();
                     let Some(table) = resolved_tables.find(|t| t.name() == location.tbl) else {
                         return Err(format!(

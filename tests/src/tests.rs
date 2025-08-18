@@ -1,4 +1,6 @@
 mod anvil;
+mod deploy;
+mod registry;
 
 use common::BoxError;
 use dataset_store::{DatasetDefsCommon, SerializableSchema};

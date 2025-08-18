@@ -30,7 +30,7 @@ pub async fn handler(
 ) -> Result<(StatusCode, &'static str), BoxRequestError> {
     let dataset = ctx
         .store
-        .load_dataset(&id)
+        .load_dataset(&id, None) // TODO: add version handling from the request
         .await
         .map_err(Error::StoreError)?;
 

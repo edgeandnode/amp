@@ -204,7 +204,6 @@ impl Service {
             .await
             .map_err(|err| Error::from(err))?;
         let is_streaming = common::stream_helpers::is_streaming(&query);
-
         let ctx = Arc::new(ctx);
         self.execute_plan(ctx, dataset_store, plan, is_streaming)
             .await

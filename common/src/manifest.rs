@@ -8,22 +8,29 @@ use datafusion::{
     arrow::datatypes::{Field as ArrowField, Fields, Schema, SchemaRef},
     common::DFSchemaRef,
 };
+use metadata_db::registry::Registry;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{DataTypeJsonSchema, Dataset};
 
 pub const DATASET_KIND: &str = "manifest";
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum ManifestKind {
+    Manifest,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Manifest {
-    /// Dataset kind, must be `manifest`.
-    pub kind: String,
     /// Dataset name.
     pub name: String,
     /// Network name, e.g., `mainnet`.
     pub network: String,
     /// Semver version of the dataset, e.g. `1.0.0`.
     pub version: Version,
+    pub kind: ManifestKind,
 
     #[serde(default)]
     pub dependencies: BTreeMap<String, Dependency>,
@@ -46,6 +53,21 @@ impl JsonSchema for Version {
 
     fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
         String::json_schema(generator)
+    }
+}
+
+impl std::fmt::Display for Version {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::str::FromStr for Version {
+    type Err = semver::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let version = semver::Version::from_str(s)?;
+        Ok(Version(version))
     }
 }
 
@@ -144,6 +166,28 @@ impl Manifest {
             })
             .collect()
     }
+
+    pub fn extract_registry_info(&self) -> Registry {
+        let owner = self.dependencies.first_key_value().unwrap().1.owner.clone();
+        let dataset = self.name.clone();
+        let version = self.version.0.to_string();
+        let filename = self.to_filename();
+        let manifest_path = object_store::path::Path::from(filename.clone()).to_string();
+        Registry {
+            owner,
+            dataset,
+            version,
+            manifest: manifest_path,
+        }
+    }
+
+    pub fn to_identifier(&self) -> String {
+        format!("{}__{}", self.name, self.version.0)
+    }
+
+    pub fn to_filename(&self) -> String {
+        format!("{}.json", self.to_identifier())
+    }
 }
 
 impl From<DFSchemaRef> for TableSchema {
@@ -188,6 +232,7 @@ impl From<Manifest> for Dataset {
             kind: DATASET_KIND.to_string(),
             network: manifest.network,
             name: manifest.name,
+            version: Some(manifest.version),
             tables,
             functions: manifest
                 .functions

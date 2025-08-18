@@ -131,7 +131,7 @@ pub async fn dump_user_tables(
             DatasetKind::Sql => ctx.dataset_store.load_sql_dataset(&dataset.name).await?,
             DatasetKind::Manifest => {
                 ctx.dataset_store
-                    .load_manifest_dataset(&dataset.name)
+                    .load_manifest_dataset(&dataset.name, dataset.version.as_ref().unwrap())
                     .await?
             }
             _ => {

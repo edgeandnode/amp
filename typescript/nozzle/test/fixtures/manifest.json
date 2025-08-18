@@ -3,7 +3,13 @@
   "network": "mainnet",
   "name": "example",
   "version": "0.1.0",
-  "dependencies": {},
+  "dependencies": {
+    "anvil": {
+      "name": "anvil",
+      "version": "0.1.0",
+      "owner": "testing"
+    }
+  },
   "tables": {
     "counts": {
       "input": {
