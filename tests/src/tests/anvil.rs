@@ -275,7 +275,7 @@ async fn streaming_reorg_desync() {
 }
 
 #[tokio::test]
-async fn streaming_reorg_rewind() {
+async fn streaming_reorg_rewind_shallow() {
     let mut test = AnvilTestContext::setup("streaming_reorg_rewind").await;
 
     test.dump("anvil_rpc", 0..=0).await;
@@ -322,5 +322,60 @@ async fn streaming_reorg_rewind() {
     assert_eq!(
         &take_blocks(&mut test.client, 4).await,
         &test.query_blocks("anvil_rpc", None).await[1..=4],
+    );
+}
+
+#[tokio::test]
+async fn streaming_reorg_rewind_deep() {
+    let mut test = AnvilTestContext::setup("streaming_reorg_rewind").await;
+
+    test.dump("anvil_rpc", 0..=0).await;
+    test.dump("sql_over_anvil_1", 0..=0).await;
+
+    let streaming_query = r#"
+        SELECT block_num, hash, parent_hash
+        FROM sql_over_anvil_1.blocks
+        SETTINGS stream = true
+    "#;
+    test.client
+        .register_stream("stream", streaming_query)
+        .await
+        .unwrap();
+
+    async fn take_blocks(client: &mut TestClient, take: usize) -> Vec<BlockRow> {
+        let blocks = client.take_from_stream("stream", take).await.unwrap();
+        let mut blocks: Vec<BlockRow> = serde_json::from_value(blocks).unwrap();
+        blocks.sort_by_key(|b| b.block_num);
+        blocks
+    }
+
+    assert_eq!(
+        take_blocks(&mut test.client, 1).await,
+        test.query_blocks("anvil_rpc", None).await,
+    );
+
+    test.mine(6).await;
+    test.dump("anvil_rpc", 1..=6).await;
+    test.dump("sql_over_anvil_1", 1..=2).await;
+    test.dump("sql_over_anvil_1", 3..=4).await;
+    test.dump("sql_over_anvil_1", 5..=6).await;
+
+    assert_eq!(
+        &take_blocks(&mut test.client, 6).await,
+        &test.query_blocks("anvil_rpc", None).await[1..=6],
+    );
+
+    test.reorg(5).await;
+    test.mine(2).await;
+    test.dump("anvil_rpc", 1..=8).await;
+    test.dump("anvil_rpc", 1..=8).await;
+    test.dump("sql_over_anvil_1", 1..=8).await;
+    test.dump("sql_over_anvil_1", 1..=8).await;
+    test.dump("sql_over_anvil_1", 1..=8).await;
+    test.dump("sql_over_anvil_1", 1..=8).await;
+
+    assert_eq!(
+        &take_blocks(&mut test.client, 8).await,
+        &test.query_blocks("anvil_rpc", None).await[1..=8],
     );
 }

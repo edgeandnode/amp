@@ -11,7 +11,8 @@ use datafusion::{
         datatypes::{DataType, Field, Fields, SchemaRef},
     },
     catalog::{MemorySchemaProvider, TableProvider},
-    common::{DFSchema, DFSchemaRef, not_impl_err},
+    common::{DFSchema, DFSchemaRef, extensions_options, not_impl_err},
+    config::ConfigExtension,
     datasource::MemTable,
     error::DataFusionError,
     execution::{
@@ -127,6 +128,18 @@ pub struct PlanningContext {
     catalog: LogicalCatalog,
 }
 
+extensions_options! {
+    /// Nozzle-specific session configuration options.
+    pub struct NozzleSessionConfig {
+        /// By default, SQL execution only scans canonical chain segments. When this is set to
+        /// `true`, table scans will include data associated with forked blocks.
+        pub ignore_canonical_segments: bool, default = false
+    }
+}
+impl ConfigExtension for NozzleSessionConfig {
+    const PREFIX: &'static str = "nozzle";
+}
+
 // Serialized plan with additional options
 #[derive(Encode, Decode)]
 pub struct RemotePlan {
@@ -233,6 +246,7 @@ pub struct QueryEnv {
 }
 
 /// A context for executing queries against a catalog.
+#[derive(Clone)]
 pub struct QueryContext {
     pub env: QueryEnv,
     session_config: SessionConfig,
@@ -272,6 +286,19 @@ impl QueryContext {
             session_config,
             catalog,
         })
+    }
+
+    /// Create a clone of this QueryContext that scans all se.
+    /// This allows physical tables to scan all segments instead of just canonical ones,
+    /// which is needed for reorg handling in streaming queries.
+    pub fn with_custom_settings(&self, settings: NozzleSessionConfig) -> Self {
+        let mut new_context = self.clone();
+        new_context
+            .session_config
+            .options_mut()
+            .extensions
+            .insert(settings);
+        new_context
     }
 
     pub fn catalog(&self) -> &Catalog {
