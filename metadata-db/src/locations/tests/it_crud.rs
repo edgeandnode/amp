@@ -1,4 +1,4 @@
-//! In-tree DB integration tests for locations
+//! Core location operations tests
 
 use pgtemp::PgTempDB;
 use url::Url;
@@ -587,6 +587,73 @@ async fn assign_job_writer_assigns_job_to_multiple_locations() {
     assert_eq!(writer2, Some(job_id));
     assert_eq!(writer3, Some(job_id));
     assert_eq!(writer_unassigned, None);
+}
+
+#[tokio::test]
+async fn get_by_id_returns_existing_location() {
+    //* Given
+    let temp_db = PgTempDB::new();
+    let mut conn = DbConn::connect(&temp_db.connection_uri())
+        .await
+        .expect("Failed to connect to metadata db");
+    conn.run_migrations()
+        .await
+        .expect("Failed to run migrations");
+
+    let table = TableId {
+        dataset: "test-dataset",
+        dataset_version: Some("v1.0"),
+        table: "test-table",
+    };
+    let url = Url::parse("s3://bucket/get-by-id.parquet").expect("Failed to parse URL");
+
+    let inserted_id = locations::insert(
+        &mut *conn,
+        table,
+        Some("bucket"),
+        "/get-by-id.parquet",
+        &url,
+        true,
+    )
+    .await
+    .expect("Failed to insert location");
+
+    //* When
+    let location = locations::get_by_id(&mut *conn, inserted_id)
+        .await
+        .expect("Failed to get location by id");
+
+    //* Then
+    assert!(location.is_some());
+    let location = location.unwrap();
+    assert_eq!(location.id, inserted_id);
+    assert_eq!(location.dataset, "test-dataset");
+    assert_eq!(location.dataset_version, "v1.0");
+    assert_eq!(location.tbl, "test-table");
+    assert_eq!(location.url, url);
+    assert_eq!(location.active, true);
+}
+
+#[tokio::test]
+async fn get_by_id_returns_none_for_nonexistent_location() {
+    //* Given
+    let temp_db = PgTempDB::new();
+    let mut conn = DbConn::connect(&temp_db.connection_uri())
+        .await
+        .expect("Failed to connect to metadata db");
+    conn.run_migrations()
+        .await
+        .expect("Failed to run migrations");
+
+    let nonexistent_id = LocationId::try_from(999999_i64).expect("Failed to create LocationId");
+
+    //* When
+    let location = locations::get_by_id(&mut *conn, nonexistent_id)
+        .await
+        .expect("Failed to get location by id");
+
+    //* Then
+    assert!(location.is_none());
 }
 
 // Helper functions for tests
