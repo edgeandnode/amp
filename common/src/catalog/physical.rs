@@ -9,7 +9,7 @@ use datafusion::{
         listing::{ListingTableUrl, PartitionedFile},
         physical_plan::{FileGroup, FileScanConfigBuilder, ParquetSource},
     },
-    error::Result as DataFusionResult,
+    error::{DataFusionError, Result as DataFusionResult},
     execution::object_store::ObjectStoreUrl,
     logical_expr::{ScalarUDF, SortExpr, col, utils::conjunction},
     physical_expr::LexOrdering,
