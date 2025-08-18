@@ -1,6 +1,7 @@
 use std::{ops::RangeInclusive, sync::Arc};
 
 use arrow::{array::ArrayRef, compute::concat_batches};
+use async_trait::async_trait;
 use axum::response::IntoResponse;
 use bincode::{Decode, Encode, config};
 use bytes::Bytes;
@@ -10,10 +11,10 @@ use datafusion::{
         array::RecordBatch,
         datatypes::{DataType, Field, Fields, SchemaRef},
     },
-    catalog::{MemorySchemaProvider, TableProvider},
+    catalog::{MemorySchemaProvider, Session, TableProvider},
     common::{DFSchema, DFSchemaRef, extensions_options, not_impl_err},
     config::ConfigExtension,
-    datasource::MemTable,
+    datasource::TableType,
     error::DataFusionError,
     execution::{
         SendableRecordBatchStream, SessionStateBuilder,
@@ -25,6 +26,7 @@ use datafusion::{
     physical_optimizer::PhysicalOptimizerRule,
     physical_plan::{ExecutionPlan, displayable, stream::RecordBatchStreamAdapter},
     physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner as _},
+    prelude::Expr,
     sql::{TableReference, parser},
 };
 use datafusion_proto::{
@@ -216,7 +218,13 @@ impl PlanningContext {
             .with_default_features()
             .build();
         let ctx = SessionContext::new_with_state(state);
-        create_empty_tables(&ctx, self.catalog.tables.iter()).await?;
+        for table in &self.catalog.tables {
+            // The catalog schema needs to be explicitly created or table creation will fail.
+            create_catalog_schema(&ctx, table.catalog_schema().to_string());
+            let planning_table = PlanningTable(table.clone());
+            ctx.register_table(table.table_ref().clone(), Arc::new(planning_table))
+                .map_err(|e| Error::DatasetError(e.into()))?;
+        }
         self.register_udfs(&ctx);
         Ok(ctx)
     }
@@ -235,6 +243,34 @@ impl PlanningContext {
 
     pub fn catalog(&self) -> &[ResolvedTable] {
         &self.catalog.tables
+    }
+}
+
+#[derive(Clone, Debug)]
+struct PlanningTable(ResolvedTable);
+
+#[async_trait]
+impl TableProvider for PlanningTable {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn schema(&self) -> SchemaRef {
+        self.0.schema().clone()
+    }
+
+    fn table_type(&self) -> TableType {
+        TableType::Base
+    }
+
+    async fn scan(
+        &self,
+        _state: &dyn Session,
+        _projection: Option<&Vec<usize>>,
+        _filters: &[Expr],
+        _limit: Option<usize>,
+    ) -> Result<Arc<dyn ExecutionPlan>, DataFusionError> {
+        unreachable!("PlanningTable should never be scanned")
     }
 }
 
@@ -531,21 +567,6 @@ fn read_only_check(plan: &LogicalPlan) -> Result<(), Error> {
         .with_allow_statements(false)
         .verify_plan(plan)
         .map_err(Error::InvalidPlan)
-}
-
-async fn create_empty_tables(
-    ctx: &SessionContext,
-    tables: impl Iterator<Item = &ResolvedTable>,
-) -> Result<(), Error> {
-    for table in tables {
-        // The catalog schema needs to be explicitly created or table creation will fail.
-        create_catalog_schema(ctx, table.catalog_schema().to_string());
-        let schema = table.schema().clone();
-        let mem_table = MemTable::try_new(schema, vec![vec![]]).unwrap();
-        ctx.register_table(table.table_ref().clone(), Arc::new(mem_table))
-            .map_err(|e| Error::DatasetError(e.into()))?;
-    }
-    Ok(())
 }
 
 fn create_physical_table(
