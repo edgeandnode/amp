@@ -1,7 +1,4 @@
-use std::{
-    collections::{BTreeMap, HashSet},
-    sync::Arc,
-};
+use std::{collections::BTreeMap, sync::Arc};
 
 use alloy::{hex::ToHexExt as _, primitives::BlockHash};
 use common::{
@@ -342,10 +339,10 @@ impl StreamingQuery {
     ) -> Result<Option<BlockRow>, BoxError> {
         match &self.prev_range {
             // start stream
-            None => self.blocks_table_fetch_single(&ctx, self.start_block).await,
+            None => self.blocks_table_fetch(&ctx, self.start_block, None).await,
             // continue stream
             Some(prev) if self.blocks_table_contains(ctx, &prev.watermark()).await? => {
-                self.blocks_table_fetch_single(&ctx, prev.end() + 1).await
+                self.blocks_table_fetch(&ctx, prev.end() + 1, None).await
             }
             // rewind stream due to reorg
             Some(prev) => self.reorg_base(ctx, prev).await,
@@ -380,9 +377,9 @@ impl StreamingQuery {
         if number == common_watermark.number {
             Ok(Some(common_watermark))
         } else {
-            self.blocks_table_fetch_single(&ctx, number)
+            self.blocks_table_fetch(&ctx, number, None)
                 .await
-                .map(|r| r.map(Into::into))
+                .map(|r| r.map(|r| r.watermark()))
         }
     }
 
@@ -422,40 +419,27 @@ impl StreamingQuery {
             ctx.with_custom_settings(settings)
         };
 
-        // DFS to find minimum fork block that converges with the canonical chain.
         let mut min_fork_block_num = prev_range.end();
-        let mut forks: Vec<BlockRow> = self
+        let mut fork: Option<BlockRow> = self
             .blocks_table_fetch(&fork_ctx, prev_range.end(), Some(&prev_range.hash))
             .await?;
-        while !forks.is_empty() {
-            let block = forks.pop().unwrap();
-            let mut parents = self
+        while let Some(block) = fork.take() {
+            assert!(block.number <= min_fork_block_num);
+            min_fork_block_num = block.number;
+
+            if self.blocks_table_contains(ctx, &block.watermark()).await? {
+                break;
+            }
+            fork = self
                 .blocks_table_fetch(
                     &fork_ctx,
                     block.number.saturating_sub(1),
                     block.prev_hash.as_ref(),
                 )
                 .await?;
-
-            let mut index = 0;
-            while index < parents.len() {
-                let watermark = Watermark {
-                    number: parents[index].number,
-                    hash: parents[index].hash,
-                };
-                min_fork_block_num = BlockNum::min(min_fork_block_num, watermark.number);
-                if self.blocks_table_contains(ctx, &watermark).await? {
-                    parents.remove(index);
-                } else {
-                    index += 1;
-                }
-            }
-
-            forks.append(&mut parents);
         }
 
-        self.blocks_table_fetch_single(ctx, min_fork_block_num)
-            .await
+        self.blocks_table_fetch(ctx, min_fork_block_num, None).await
     }
 
     async fn blocks_table_contains(
@@ -463,66 +447,54 @@ impl StreamingQuery {
         ctx: &QueryContext,
         watermark: &Watermark,
     ) -> Result<bool, BoxError> {
-        match self
-            .blocks_table_fetch_single(ctx, watermark.number)
-            .await?
-        {
-            None => Ok(false),
-            Some(block) => Ok(watermark == &block.into()),
-        }
+        self.blocks_table_fetch(ctx, watermark.number, Some(&watermark.hash))
+            .await
+            .map(|row| row.is_some())
     }
 
-    async fn blocks_table_fetch_single(
-        &self,
-        ctx: &QueryContext,
-        number: BlockNum,
-    ) -> Result<Option<BlockRow>, BoxError> {
-        let rows = self.blocks_table_fetch(ctx, number, None).await?;
-        assert!(rows.len() <= 1);
-        Ok(rows.into_iter().next())
-    }
-
-    /// This should only return multiple rows when using a context where
-    /// `ignore_canonical_segments = true`.
     async fn blocks_table_fetch(
         &self,
         ctx: &QueryContext,
         number: BlockNum,
         hash: Option<&BlockHash>,
-    ) -> Result<Vec<BlockRow>, BoxError> {
+    ) -> Result<Option<BlockRow>, BoxError> {
         let hash_constraint = hash
             .map(|h| format!("AND hash = x'{}'", h.encode_hex()))
             .unwrap_or_default();
         let query = parse_sql(&format!(
-            "SELECT hash, parent_hash FROM {} WHERE block_num = {} {}",
+            "SELECT hash, parent_hash FROM {} WHERE block_num = {} {} LIMIT 1",
             self.blocks_table, number, hash_constraint,
         ))?;
         let plan = ctx.plan_sql(query).await?;
         let results = ctx.execute_and_concat(plan).await?;
-        // use set to deduplicate entries
-        let mut blocks: HashSet<BlockRow> = Default::default();
-        let get_column =
-            |name| as_fixed_size_binary_array(results.column_by_name(name).unwrap()).unwrap();
-        for (hash, prev_hash) in std::iter::zip(get_column("hash"), get_column("parent_hash")) {
-            blocks.insert(BlockRow {
-                number,
-                hash: hash.unwrap().try_into().unwrap(),
-                prev_hash: prev_hash.map(|h| h.try_into().unwrap()),
-            });
+        if results.num_rows() == 0 {
+            return Ok(None);
         }
-        Ok(blocks.into_iter().collect())
+        let get_hash_value = |column_name: &str| -> Option<BlockHash> {
+            let column =
+                as_fixed_size_binary_array(results.column_by_name(column_name).unwrap()).unwrap();
+            let bytes = column.iter().flatten().next();
+            bytes.map(|b| b.try_into().unwrap())
+        };
+        Ok(Some(BlockRow {
+            number,
+            hash: get_hash_value("hash").unwrap(),
+            prev_hash: get_hash_value("parent_hash"),
+        }))
     }
 }
 
-#[derive(Hash, PartialEq, Eq)]
 struct BlockRow {
     number: BlockNum,
     hash: BlockHash,
     prev_hash: Option<BlockHash>,
 }
 
-impl From<BlockRow> for Watermark {
-    fn from(BlockRow { number, hash, .. }: BlockRow) -> Self {
-        Self { number, hash }
+impl BlockRow {
+    fn watermark(&self) -> Watermark {
+        Watermark {
+            number: self.number,
+            hash: self.hash,
+        }
     }
 }
