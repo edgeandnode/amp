@@ -12,7 +12,7 @@ use common::{
     },
     parquet::{arrow::AsyncArrowWriter, errors::ParquetError, format::KeyValue},
 };
-use metadata_db::{FooterBytes, MetadataDb};
+use metadata_db::{FooterBytes, LocationId, MetadataDb};
 use object_store::{ObjectMeta, buffered::BufWriter, path::Path};
 use rand::RngCore as _;
 use tracing::{debug, trace};
@@ -98,7 +98,7 @@ pub async fn commit_metadata(
         version: object_version,
         ..
     }: ObjectMeta,
-    location_id: i64,
+    location_id: LocationId,
     footer: FooterBytes,
 ) -> Result<(), BoxError> {
     let file_name = parquet_meta.filename.clone();
