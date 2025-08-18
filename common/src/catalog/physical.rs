@@ -9,7 +9,7 @@ use datafusion::{
         listing::{ListingTableUrl, PartitionedFile},
         physical_plan::{FileGroup, FileScanConfigBuilder, ParquetSource},
     },
-    error::{DataFusionError, Result as DataFusionResult},
+    error::Result as DataFusionResult,
     execution::object_store::ObjectStoreUrl,
     logical_expr::{ScalarUDF, SortExpr, col, utils::conjunction},
     physical_expr::LexOrdering,
@@ -17,7 +17,7 @@ use datafusion::{
     prelude::Expr,
     sql::TableReference,
 };
-use futures::{Stream, StreamExt, TryStreamExt, future::join_all, stream};
+use futures::{Stream, StreamExt, TryStreamExt, stream};
 use metadata_db::{LocationId, MetadataDb, TableId};
 use object_store::{ObjectMeta, ObjectStore, path::Path};
 use tracing::info;
@@ -498,34 +498,15 @@ impl PhysicalTable {
         create_ordering(&schema, &sort_order)
     }
 
+    #[tracing::instrument(skip_all, err)]
     async fn fetch_partitioned_files(
         &self,
-        ctx: &dyn Session,
+        _ctx: &dyn Session,
     ) -> DataFusionResult<BTreeMap<BlockNum, PartitionedFile>> {
-        let canonical_chain = self
-            .canonical_chain()
-            .await
-            .map_err(DataFusionError::from)?;
-        let mut canonical_segments = canonical_chain.map(|c| c.0).unwrap_or_default();
-        let mut partitioned_files: BTreeMap<BlockNum, PartitionedFile> = Default::default();
-        while !canonical_segments.is_empty() {
-            let batch_len = usize::min(
-                canonical_segments.len(),
-                ctx.config_options().execution.meta_fetch_concurrency,
-            );
-            let batch: Vec<Segment> = canonical_segments.drain(0..batch_len).collect();
-            let results: Vec<DataFusionResult<(BlockNum, PartitionedFile)>> =
-                join_all(batch.into_iter().map(async |Segment { range, object }| {
-                    let partitioned_file = PartitionedFile::from(object);
-                    Ok((range.start(), partitioned_file))
-                }))
-                .await;
-            for result in results {
-                let (start_block, partitioned_file) = result?;
-                partitioned_files.insert(start_block, partitioned_file);
-            }
-        }
-        Ok(partitioned_files)
+        let segments = self.canonical_chain().await?.into_iter().flatten();
+        Ok(segments
+            .map(|s| (s.range.start(), PartitionedFile::from(s.object)))
+            .collect())
     }
 
     /// See: https://github.com/apache/datafusion/blob/main/datafusion-examples/examples/advanced_parquet_index.rs
