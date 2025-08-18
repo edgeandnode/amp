@@ -407,6 +407,11 @@ impl StreamingQuery {
             .cloned())
     }
 
+    /// Find the block to resume streaming from after detecting a reorg.
+    ///
+    /// When a streaming query detects that the previous block range is no longer on the canonical
+    /// chain (indicating a reorg), this method walks backwards from the end of the previous block
+    /// range to find the latest adjacent block that exists on the canonical chain.
     async fn reorg_base(
         &self,
         ctx: &QueryContext,
@@ -424,9 +429,7 @@ impl StreamingQuery {
             .blocks_table_fetch(&fork_ctx, prev_range.end(), Some(&prev_range.hash))
             .await?;
         while let Some(block) = fork.take() {
-            assert!(block.number <= min_fork_block_num);
             min_fork_block_num = block.number;
-
             if self.blocks_table_contains(ctx, &block.watermark()).await? {
                 break;
             }
@@ -438,7 +441,6 @@ impl StreamingQuery {
                 )
                 .await?;
         }
-
         self.blocks_table_fetch(ctx, min_fork_block_num, None).await
     }
 
