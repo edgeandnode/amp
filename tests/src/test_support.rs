@@ -28,7 +28,9 @@ use figment::{
 };
 use fs_err as fs;
 use futures::{StreamExt as _, stream::TryStreamExt};
-use metadata_db::{KEEP_TEMP_DIRS, MetadataDb, WorkerNodeId, temp::TempMetadataDb};
+use metadata_db::{
+    DEFAULT_POOL_SIZE, KEEP_TEMP_DIRS, MetadataDb, WorkerNodeId, temp::TempMetadataDb,
+};
 use nozzle::{
     dump_cmd::{datasets_and_dependencies, dump},
     server::BoundAddrs,
@@ -111,7 +113,7 @@ impl TestEnv {
         temp: bool,
         anvil_url: Option<&str>,
     ) -> Result<Self, BoxError> {
-        let db = TempMetadataDb::new(*KEEP_TEMP_DIRS).await;
+        let db = TempMetadataDb::new(*KEEP_TEMP_DIRS, DEFAULT_POOL_SIZE).await;
         let mut figment = Figment::from(Json::string(&format!(
             r#"{{ "metadata_db_url": "{}" }}"#,
             db.url(),

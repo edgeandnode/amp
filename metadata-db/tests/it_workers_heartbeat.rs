@@ -10,9 +10,10 @@ async fn register_worker() {
     //* Given
     let temp_db = PgTempDB::new();
 
-    let metadata_db = MetadataDb::connect(&temp_db.connection_uri())
-        .await
-        .expect("Failed to connect to metadata db");
+    let metadata_db =
+        MetadataDb::connect(&temp_db.connection_uri(), MetadataDb::default_pool_size())
+            .await
+            .expect("Failed to connect to metadata db");
 
     let worker_id = "test-worker-id".parse().expect("Invalid worker ID");
 
@@ -41,10 +42,11 @@ async fn detect_inactive_worker() {
 
     let temp_db = PgTempDB::new();
 
-    let metadata_db = MetadataDb::connect(&temp_db.connection_uri())
-        .await
-        .expect("Failed to connect to metadata db")
-        .with_dead_worker_interval(ACTIVE_INTERVAL);
+    let metadata_db =
+        MetadataDb::connect(&temp_db.connection_uri(), MetadataDb::default_pool_size())
+            .await
+            .expect("Failed to connect to metadata db")
+            .with_dead_worker_interval(ACTIVE_INTERVAL);
 
     // Pre-register a worker
     let worker_id = "test-worker-id".parse().expect("Invalid worker ID");

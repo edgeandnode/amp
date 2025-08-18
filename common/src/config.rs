@@ -15,7 +15,7 @@ use figment::{
 };
 use fs_err as fs;
 use js_runtime::isolate_pool::IsolatePool;
-use metadata_db::{KEEP_TEMP_DIRS, MetadataDb, temp_metadata_db};
+use metadata_db::{DEFAULT_POOL_SIZE, KEEP_TEMP_DIRS, MetadataDb, temp_metadata_db};
 use serde::Deserialize;
 use thiserror::Error;
 
@@ -26,7 +26,7 @@ pub struct Config {
     pub data_store: Arc<Store>,
     pub providers_store: Arc<Store>,
     pub dataset_defs_store: Arc<Store>,
-    pub metadata_db_url: String,
+    pub metadata_db: MetadataDbConfig,
     pub max_mem_mb: usize,
     pub spill_location: Vec<PathBuf>,
     pub microbatch_max_interval: u64,
@@ -42,6 +42,26 @@ pub struct Addrs {
     pub jsonl_addr: SocketAddr,
     pub registry_service_addr: SocketAddr,
     pub admin_api_addr: SocketAddr,
+}
+
+fn default_pool_size() -> u32 {
+    DEFAULT_POOL_SIZE
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct MetadataDbConfig {
+    pub url: Option<String>,
+    #[serde(default = "default_pool_size")]
+    pub pool_size: u32,
+}
+
+impl Default for MetadataDbConfig {
+    fn default() -> Self {
+        Self {
+            url: None,
+            pool_size: DEFAULT_POOL_SIZE,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -83,6 +103,8 @@ pub struct ConfigFile {
     pub providers_dir: String,
     pub dataset_defs_dir: String,
     pub metadata_db_url: Option<String>,
+    #[serde(default)]
+    pub metadata_db: MetadataDbConfig,
     #[serde(default)]
     pub max_mem_mb: usize,
     #[serde(default)]
@@ -152,22 +174,36 @@ impl Config {
         let dataset_defs_store = Store::new(config_file.dataset_defs_dir, base)
             .map_err(|e| ConfigError::Store(config_path.clone(), e))?;
 
-        let metadata_db_url = match (config_file.metadata_db_url, allow_temp_db) {
-            (Some(url), _) => url,
-            (None, true) => temp_metadata_db(*KEEP_TEMP_DIRS).await.url().to_string(),
-            (None, false) => {
-                return Err(ConfigError::MissingConfig(
-                    config_path.clone(),
-                    "metadata_db_url",
-                ));
+        let metadata_db = if config_file.metadata_db.url.is_some() {
+            let db_config = config_file.metadata_db.clone();
+            db_config
+        } else if let Some(url) = config_file.metadata_db_url {
+            MetadataDbConfig {
+                url: Some(url),
+                pool_size: config_file.metadata_db.pool_size,
             }
+        } else if allow_temp_db {
+            MetadataDbConfig {
+                url: Some(
+                    temp_metadata_db(*KEEP_TEMP_DIRS, config_file.metadata_db.pool_size)
+                        .await
+                        .url()
+                        .to_string(),
+                ),
+                pool_size: config_file.metadata_db.pool_size,
+            }
+        } else {
+            return Err(ConfigError::MissingConfig(
+                config_path.clone(),
+                "metadata_db_url or metadata_db.url",
+            ));
         };
 
         Ok(Self {
             data_store: Arc::new(data_store),
             providers_store: Arc::new(providers_store),
             dataset_defs_store: Arc::new(dataset_defs_store),
-            metadata_db_url,
+            metadata_db,
             max_mem_mb: config_file.max_mem_mb,
             spill_location: config_file.spill_location,
             microbatch_max_interval: config_file.microbatch_max_interval.unwrap_or(100_000),
@@ -224,7 +260,10 @@ impl Config {
     }
 
     pub async fn metadata_db(&self) -> Result<MetadataDb, ConfigError> {
-        MetadataDb::connect(&self.metadata_db_url)
+        let url = self.metadata_db.url.as_ref().ok_or_else(|| {
+            ConfigError::MissingConfig(self.config_path.clone(), "metadata_db.url")
+        })?;
+        MetadataDb::connect(url, self.metadata_db.pool_size)
             .await
             .map_err(|e| ConfigError::MetadataDb(self.config_path.clone(), e))
     }
