@@ -605,7 +605,7 @@ impl DatasetStore {
             .await?;
 
         let mut tables = Vec::new();
-        for table in logical_catalog.tables {
+        for table in &logical_catalog.tables {
             let physical_table = PhysicalTable::get_active(&table, self.metadata_db.clone())
                 .await
                 .map_err(DatasetError::unknown)?
@@ -615,7 +615,7 @@ impl DatasetStore {
                 )))?;
             tables.push(physical_table.into());
         }
-        Ok(Catalog::new(tables, logical_catalog.udfs))
+        Ok(Catalog::new(tables, logical_catalog))
     }
 
     /// Similar to `catalog_for_sql`, but only for planning and not execution. This does not require a
