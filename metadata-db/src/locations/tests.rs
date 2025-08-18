@@ -41,7 +41,7 @@ async fn insert_creates_location_and_returns_id() {
         .expect("Failed to insert location");
 
     //* Then
-    assert!(location_id > 0);
+    assert!(*location_id > 0);
 
     // Verify the location was created correctly
     let (
