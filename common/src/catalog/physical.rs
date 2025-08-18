@@ -9,7 +9,7 @@ use datafusion::{
         listing::{ListingTableUrl, PartitionedFile},
         physical_plan::{FileGroup, FileScanConfigBuilder, ParquetSource},
     },
-    error::{DataFusionError, Result as DataFusionResult},
+    error::Result as DataFusionResult,
     execution::object_store::ObjectStoreUrl,
     logical_expr::{ScalarUDF, SortExpr, col, utils::conjunction},
     physical_expr::LexOrdering,
@@ -499,17 +499,6 @@ impl PhysicalTable {
         create_ordering(&schema, &sort_order)
     }
 
-    #[tracing::instrument(skip_all, err)]
-    async fn fetch_partitioned_files(
-        &self,
-        _ctx: &dyn Session,
-    ) -> DataFusionResult<BTreeMap<BlockNum, PartitionedFile>> {
-        let segments = self.canonical_chain().await?.into_iter().flatten();
-        Ok(segments
-            .map(|s| (s.range.start(), PartitionedFile::from(s.object)))
-            .collect())
-    }
-
     /// See: https://github.com/apache/datafusion/blob/main/datafusion-examples/examples/advanced_parquet_index.rs
     fn filters_to_predicate(
         &self,
@@ -541,6 +530,7 @@ impl TableProvider for PhysicalTable {
         self.schema()
     }
 
+    #[tracing::instrument(skip_all, err)]
     async fn scan(
         &self,
         state: &dyn Session,
@@ -557,23 +547,17 @@ impl TableProvider for PhysicalTable {
             .cloned()
             .unwrap_or_default();
 
-        let file_groups = if ignore_canonical_segments {
-            let segments = self.segments().await.map_err(DataFusionError::from)?;
-            let files = segments
-                .into_iter()
-                .map(|Segment { object, .. }| PartitionedFile::from(object))
-                .collect();
-            vec![FileGroup::new(files)]
+        let segments = if ignore_canonical_segments {
+            self.segments().await?
         } else {
-            let files = self.fetch_partitioned_files(state).await?;
-            if files.is_empty() {
-                return Ok(Arc::new(datafusion::physical_plan::empty::EmptyExec::new(
-                    self.schema(),
-                )));
-            }
-            let target_partitions = state.config_options().execution.target_partitions;
-            round_robin(files, target_partitions)
+            self.canonical_chain()
+                .await?
+                .into_iter()
+                .flatten()
+                .collect()
         };
+        let target_partitions = state.config_options().execution.target_partitions;
+        let file_groups = round_robin(segments, target_partitions);
 
         let output_ordering = self.output_ordering()?;
 
@@ -645,13 +629,14 @@ pub async fn list_revisions(
         .collect())
 }
 
-fn round_robin(files: BTreeMap<u64, PartitionedFile>, target_partitions: usize) -> Vec<FileGroup> {
-    let size = files.len().min(target_partitions);
-    if size <= 0 {
+fn round_robin(segments: Vec<Segment>, target_partitions: usize) -> Vec<FileGroup> {
+    let size = segments.len().min(target_partitions);
+    if size == 0 {
         return vec![];
     }
     let mut groups = vec![FileGroup::default(); size];
-    for (idx, (_, file)) in files.into_iter().enumerate() {
+    for (idx, segment) in segments.into_iter().enumerate() {
+        let file = PartitionedFile::from(segment.object);
         groups[idx % size].push(file);
     }
     groups
