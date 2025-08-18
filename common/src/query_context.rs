@@ -129,7 +129,10 @@ pub struct PlanningContext {
 }
 
 extensions_options! {
+    /// Nozzle-specific session configuration options.
     pub struct NozzleSessionConfig {
+        /// By default, SQL execution only scans canonical chain segments. When this is set to
+        /// `true`, table scans will include data associated with forked blocks.
         pub ignore_canonical_segments: bool, default = false
     }
 }
