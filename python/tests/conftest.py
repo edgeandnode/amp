@@ -31,6 +31,30 @@ def redis_config():
 
 
 @pytest.fixture(scope='session')
+def snowflake_config():
+    """Snowflake configuration from environment or defaults"""
+    config = {
+        'account': os.getenv('SNOWFLAKE_ACCOUNT', 'test_account'),
+        'user': os.getenv('SNOWFLAKE_USER', 'test_user'),
+        'warehouse': os.getenv('SNOWFLAKE_WAREHOUSE', 'test_warehouse'),
+        'database': os.getenv('SNOWFLAKE_DATABASE', 'test_database'),
+        'schema': os.getenv('SNOWFLAKE_SCHEMA', 'PUBLIC'),
+        'batch_size': 10000,
+        'use_stage': True
+    }
+
+    # Add optional parameters if they exist
+    if os.getenv('SNOWFLAKE_PASSWORD'):
+        config['password'] = os.getenv('SNOWFLAKE_PASSWORD')
+    if os.getenv('SNOWFLAKE_ROLE'):
+        config['role'] = os.getenv('SNOWFLAKE_ROLE')
+    if os.getenv('SNOWFLAKE_AUTHENTICATOR'):
+        config['authenticator'] = os.getenv('SNOWFLAKE_AUTHENTICATOR')
+
+    return config
+
+
+@pytest.fixture(scope='session')
 def test_config():
     """Test configuration that can be overridden by environment variables"""
     return {
@@ -88,9 +112,9 @@ def iceberg_test_env():
     """Create Iceberg test environment for the session"""
     # Create temporary directory for Iceberg tests
     temp_dir = tempfile.mkdtemp(prefix='iceberg_test_')
-    
+
     yield temp_dir
-    
+
     # Cleanup
     shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -178,6 +202,7 @@ def pytest_configure(config):
     config.addinivalue_line('markers', 'redis: Tests requiring Redis')
     config.addinivalue_line('markers', 'delta_lake: Tests requiring Delta Lake')
     config.addinivalue_line('markers', 'iceberg: Tests requiring Apache Iceberg')
+    config.addinivalue_line('markers', 'snowflake: Tests requiring Snowflake')
     config.addinivalue_line('markers', 'slow: Slow tests (> 30 seconds)')
 
 

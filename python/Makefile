@@ -2,7 +2,7 @@ SHELL := /bin/bash
 .PHONY: test test-unit test-integration test-all clean setup lint format
 
 # Use UV for all commands
-PYTHON = uv run
+PYTHON = uv run --env-file .test.env
 
 # Quick unit tests (no database dependencies)
 test-unit:
@@ -12,7 +12,7 @@ test-unit:
 # Integration tests (requires databases)
 test-integration:
 	@echo "🔗 Running integration tests..."
-	@bash -c 'source .env.test && $(PYTHON) pytest tests/integration/ -m "integration" -v --log-cli-level=CRITICAL'
+	$(PYTHON) pytest tests/integration/ -m "integration" -v --log-cli-level=CRITICAL
 
 # All tests with coverage
 test-all:
@@ -22,16 +22,24 @@ test-all:
 # Specific loader tests
 test-postgresql:
 	@echo "🐘 Running PostgreSQL tests..."
-	@bash -c 'source .env.test && export POSTGRES_HOST POSTGRES_PORT POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD && $(PYTHON) pytest tests/ -m "postgresql" -v --log-cli-level=ERROR'
+	$(PYTHON) pytest tests/ -m "postgresql" -v --log-cli-level=ERROR
 
 test-redis:
 	@echo "🔴 Running Redis tests..."
-	@bash -c 'source .env.test && export REDIS_HOST REDIS_PORT REDIS_DB REDIS_PASSWORD && $(PYTHON) pytest tests/ -m "redis" -v --log-cli-level=ERROR'
+	$(PYTHON) pytest tests/ -m "redis" -v --log-cli-level=ERROR
+
+test-iceberg:
+	@echo "🧊 Running iceberg tests..."
+	$(PYTHON) pytest tests/ -m "snowflake" -v --log-cli-level=ERROR
+
+test-snowflake:
+	@echo "❄️ Running Snowflake tests..."
+	$(PYTHON) pytest tests/ -m "snowflake" -v --log-cli-level=ERROR
 
 # Performance tests
 test-performance:
 	@echo "⚡ Running performance tests..."
-	@bash -c 'source .env.test && $(PYTHON) pytest tests/performance/ -m "performance" -v --log-cli-level=ERROR'
+	$(PYTHON) pytest tests/performance/ -m "performance" -v --log-cli-level=ERROR
 
 # Code quality (using your ruff config)
 lint:
@@ -50,11 +58,15 @@ setup:
 # Install specific loader dependencies
 install-postgresql:
 	@echo "📦 Installing PostgreSQL dependencies..."
-	uv sync --group postgresql
+	uv sync --group postgresql --group test --group dev
 
 install-redis:
 	@echo "📦 Installing Redis dependencies..."
-	uv sync --group redis
+	uv sync --group redis --group test --group dev
+
+install-snowflake:
+	@echo "📦 Installing Snowflake dependencies..."
+	uv sync --group snowflake --group test --group dev
 
 # Database setup for testing
 test-setup:
@@ -95,6 +107,7 @@ help:
 	@echo "  make test-all         - Run all tests with coverage"
 	@echo "  make test-postgresql  - Run PostgreSQL tests"
 	@echo "  make test-redis       - Run Redis tests"
+	@echo "  make test-snowflake   - Run Snowflake tests"
 	@echo "  make test-performance - Run performance tests"
 	@echo "  make lint             - Lint code with ruff"
 	@echo "  make format           - Format code with ruff"

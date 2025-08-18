@@ -5,12 +5,13 @@ Performance tests for data loaders to ensure production readiness.
 
 import time
 
-import pytest
 import pyarrow as pa
+import pytest
 
 try:
     from src.nozzle.loaders.implementations.postgresql_loader import PostgreSQLLoader
     from src.nozzle.loaders.implementations.redis_loader import RedisLoader
+    from src.nozzle.loaders.implementations.snowflake_loader import SnowflakeLoader
 
     from .benchmarks import record_benchmark
 except ImportError:
@@ -288,10 +289,231 @@ class TestDeltaLakePerformance:
 
 
 @pytest.mark.performance
+@pytest.mark.snowflake
+class TestSnowflakePerformance:
+    """Performance tests for Snowflake loader"""
+
+    def test_large_table_loading_performance(self, snowflake_config, performance_test_data, memory_monitor):
+        """Test loading large datasets with performance monitoring"""
+        config = {**snowflake_config, 'use_stage': True, 'batch_size': 10000}
+        loader = SnowflakeLoader(config)
+        table_name = 'perf_test_large_snowflake'
+
+        try:
+            with loader:
+                start_time = time.time()
+                result = loader.load_table(performance_test_data, table_name)
+                duration = time.time() - start_time
+
+                # Performance assertions - Snowflake should handle large loads well
+                rows_per_second = result.rows_loaded / duration
+                assert rows_per_second > 500, f'Snowflake throughput too low: {rows_per_second:.0f} rows/sec'
+                assert duration < 120, f'Load took too long: {duration:.2f}s'
+
+                # Record benchmark
+                memory_mb = memory_monitor.get('initial_mb', 0)
+                record_benchmark(
+                    'large_table_loading_performance',
+                    'snowflake',
+                    {
+                        'throughput': rows_per_second,
+                        'memory_mb': memory_mb,
+                        'duration': duration,
+                        'dataset_size': result.rows_loaded,
+                        'loading_method': 'stage' if config['use_stage'] else 'insert'
+                    }
+                )
+
+                print(f"\nSnowflake Performance Metrics:")
+                print(f"  Rows loaded: {result.rows_loaded:,}")
+                print(f"  Duration: {duration:.2f}s")
+                print(f"  Throughput: {rows_per_second:,.0f} rows/sec")
+                print(f"  Loading method: {'stage' if config['use_stage'] else 'insert'}")
+                print(f"  Batches processed: {result.metadata.get('batches_processed', 1)}")
+
+        finally:
+            # Cleanup
+            try:
+                if loader._is_connected:
+                    loader.cursor.execute(f'DROP TABLE IF EXISTS {table_name}')
+                    loader.connection.commit()
+            except Exception:
+                pass
+
+    def test_stage_vs_insert_performance(self, snowflake_config, medium_test_table):
+        """Compare performance between stage loading and insert loading"""
+        results = {}
+        table_base_name = 'perf_stage_vs_insert'
+
+        # Test both loading methods
+        for use_stage in [True, False]:
+            method_name = 'stage' if use_stage else 'insert'
+            table_name = f'{table_base_name}_{method_name}'
+            config = {**snowflake_config, 'use_stage': use_stage, 'batch_size': 5000}
+            loader = SnowflakeLoader(config)
+
+            try:
+                with loader:
+                    start_time = time.time()
+                    result = loader.load_table(medium_test_table, table_name)
+                    duration = time.time() - start_time
+
+                    throughput = result.rows_loaded / duration
+                    results[method_name] = {
+                        'throughput': throughput,
+                        'duration': duration,
+                        'rows_loaded': result.rows_loaded,
+                        'success': result.success
+                    }
+
+                    assert result.success, f'{method_name} loading failed: {result.error}'
+                    assert throughput > 200, f'{method_name} throughput too low: {throughput:.0f} rows/sec'
+
+            finally:
+                # Cleanup
+                try:
+                    if loader._is_connected:
+                        loader.cursor.execute(f'DROP TABLE IF EXISTS {table_name}')
+                        loader.connection.commit()
+                except Exception:
+                    pass
+
+        # Compare results
+        stage_throughput = results['stage']['throughput']
+        insert_throughput = results['insert']['throughput']
+
+        print(f"\nSnowflake Loading Method Comparison:")
+        print(f"  Stage loading: {stage_throughput:,.0f} rows/sec")
+        print(f"  Insert loading: {insert_throughput:,.0f} rows/sec")
+        print(f"  Stage vs Insert ratio: {stage_throughput/insert_throughput:.2f}x")
+
+        # Stage loading should generally be faster for larger datasets
+        if medium_test_table.num_rows > 1000:
+            assert stage_throughput >= insert_throughput * 0.5, "Stage loading significantly slower than expected"
+
+    def test_batch_size_performance_scaling(self, snowflake_config, performance_test_data):
+        """Test performance scaling with different batch sizes"""
+        batch_sizes = [1000, 5000, 10000, 25000]
+        results = {}
+        table_base_name = 'perf_batch_scaling'
+
+        for batch_size in batch_sizes:
+            table_name = f'{table_base_name}_{batch_size}'
+            config = {**snowflake_config, 'use_stage': True, 'batch_size': batch_size}
+            loader = SnowflakeLoader(config)
+
+            try:
+                with loader:
+                    start_time = time.time()
+                    result = loader.load_table(performance_test_data, table_name)
+                    duration = time.time() - start_time
+
+                    throughput = result.rows_loaded / duration
+                    results[batch_size] = {
+                        'throughput': throughput,
+                        'duration': duration,
+                        'batches_processed': result.metadata.get('batches_processed', 1)
+                    }
+
+                    assert result.success, f'Batch size {batch_size} failed: {result.error}'
+
+            finally:
+                # Cleanup
+                try:
+                    if loader._is_connected:
+                        loader.cursor.execute(f'DROP TABLE IF EXISTS {table_name}')
+                        loader.connection.commit()
+                except Exception:
+                    pass
+
+        # Find optimal batch size
+        best_batch_size = max(results.keys(), key=lambda x: results[x]['throughput'])
+        best_throughput = results[best_batch_size]['throughput']
+
+        print(f"\nSnowflake Batch Size Performance:")
+        for batch_size, metrics in results.items():
+            print(f"  {batch_size:,} rows/batch: {metrics['throughput']:,.0f} rows/sec ({metrics['batches_processed']} batches)")
+        print(f"  Optimal batch size: {best_batch_size:,} rows ({best_throughput:,.0f} rows/sec)")
+
+        # All batch sizes should achieve reasonable performance
+        for batch_size, metrics in results.items():
+            assert metrics['throughput'] > 100, f'Batch size {batch_size} too slow: {metrics["throughput"]:.0f} rows/sec'
+
+    def test_concurrent_loading_performance(self, snowflake_config, medium_test_table):
+        """Test performance with concurrent batch loading"""
+        import concurrent.futures
+        from src.nozzle.loaders.base import LoadMode
+
+        config = {**snowflake_config, 'use_stage': True, 'batch_size': 2000}
+        table_name = 'perf_concurrent_test'
+
+        # Split data into chunks for concurrent processing
+        num_chunks = 4
+        chunk_size = medium_test_table.num_rows // num_chunks
+        chunks = []
+
+        for i in range(num_chunks):
+            start_idx = i * chunk_size
+            end_idx = (i + 1) * chunk_size if i < num_chunks - 1 else medium_test_table.num_rows
+            chunk = medium_test_table.slice(start_idx, end_idx - start_idx)
+            chunks.append(chunk)
+
+        def load_chunk(chunk_data, chunk_id):
+            loader = SnowflakeLoader(config)
+            chunk_table_name = f'{table_name}_{chunk_id}'
+
+            try:
+                with loader:
+                    start_time = time.time()
+                    result = loader.load_table(chunk_data, chunk_table_name)
+                    duration = time.time() - start_time
+
+                    return {
+                        'chunk_id': chunk_id,
+                        'rows_loaded': result.rows_loaded,
+                        'duration': duration,
+                        'throughput': result.rows_loaded / duration,
+                        'success': result.success
+                    }
+            finally:
+                # Cleanup
+                try:
+                    if loader._is_connected:
+                        loader.cursor.execute(f'DROP TABLE IF EXISTS {chunk_table_name}')
+                        loader.connection.commit()
+                except Exception:
+                    pass
+
+        # Test concurrent loading
+        start_time = time.time()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=num_chunks) as executor:
+            futures = [executor.submit(load_chunk, chunk, i) for i, chunk in enumerate(chunks)]
+            results = [future.result() for future in concurrent.futures.as_completed(futures)]
+
+        total_duration = time.time() - start_time
+        total_rows = sum(r['rows_loaded'] for r in results)
+        overall_throughput = total_rows / total_duration
+
+        print(f"\nSnowflake Concurrent Loading Performance:")
+        print(f"  Chunks processed: {len(results)}")
+        print(f"  Total rows: {total_rows:,}")
+        print(f"  Total duration: {total_duration:.2f}s")
+        print(f"  Overall throughput: {overall_throughput:,.0f} rows/sec")
+
+        # All chunks should succeed
+        for result in results:
+            assert result['success'], f"Chunk {result['chunk_id']} failed"
+            assert result['throughput'] > 50, f"Chunk {result['chunk_id']} too slow: {result['throughput']:.0f} rows/sec"
+
+        # Concurrent loading should be reasonably efficient
+        assert overall_throughput > 200, f'Concurrent loading too slow: {overall_throughput:.0f} rows/sec'
+
+
+@pytest.mark.performance
 class TestCrossLoaderPerformance:
     """Performance comparison tests across all loaders"""
 
-    def test_throughput_comparison(self, postgresql_config, redis_config, delta_basic_config, medium_test_table):
+    def test_throughput_comparison(self, postgresql_config, redis_config, snowflake_config, delta_basic_config, medium_test_table):
         """Compare throughput across all loaders with medium dataset"""
         results = {}
 
@@ -319,6 +541,26 @@ class TestCrossLoaderPerformance:
             duration = time.time() - start_time
             results['redis'] = result.rows_loaded / duration
             redis_loader.redis_client.flushdb()
+
+        # Test Snowflake
+        try:
+            snowflake_config_perf = {**snowflake_config, 'use_stage': True, 'batch_size': 5000}
+            snowflake_loader = SnowflakeLoader(snowflake_config_perf)
+            with snowflake_loader:
+                start_time = time.time()
+                result = snowflake_loader.load_table(medium_test_table, 'throughput_test')
+                duration = time.time() - start_time
+                results['snowflake'] = result.rows_loaded / duration
+
+                # Cleanup
+                try:
+                    snowflake_loader.cursor.execute('DROP TABLE IF EXISTS throughput_test')
+                    snowflake_loader.connection.commit()
+                except Exception:
+                    pass
+        except Exception as e:
+            print(f"Snowflake test skipped: {e}")
+            results['snowflake'] = 0
 
         # Test Delta Lake
         try:
@@ -355,7 +597,7 @@ class TestCrossLoaderPerformance:
             if throughput > 0:
                 print(f'  {loader_name}: {throughput:.0f}')
 
-    def test_memory_usage_comparison(self, postgresql_config, redis_config, small_test_table):
+    def test_memory_usage_comparison(self, postgresql_config, redis_config, snowflake_config, small_test_table):
         """Compare memory usage patterns across loaders"""
         try:
             import psutil
@@ -390,9 +632,33 @@ class TestCrossLoaderPerformance:
             results['redis'] = (peak_memory - initial_memory) / 1024 / 1024
             redis_loader.redis_client.flushdb()
 
+        # Test Snowflake memory usage
+        try:
+            initial_memory = process.memory_info().rss
+            snowflake_config_mem = {**snowflake_config, 'use_stage': True}
+            snowflake_loader = SnowflakeLoader(snowflake_config_mem)
+            with snowflake_loader:
+                snowflake_loader.load_table(small_test_table, 'memory_test')
+                peak_memory = process.memory_info().rss
+                results['snowflake'] = (peak_memory - initial_memory) / 1024 / 1024
+
+                # Cleanup
+                try:
+                    snowflake_loader.cursor.execute('DROP TABLE IF EXISTS memory_test')
+                    snowflake_loader.connection.commit()
+                except Exception:
+                    pass
+        except Exception as e:
+            print(f"Snowflake memory test skipped: {e}")
+            results['snowflake'] = 0
+
         # Memory usage should be reasonable (< 100MB for small dataset)
+        print(f"\nMemory usage comparison (MB):")
         for loader_name, memory_mb in results.items():
-            assert memory_mb < 100, f'{loader_name} using too much memory: {memory_mb:.1f}MB'
+            if memory_mb > 0:  # Skip if loader not available
+                print(f"  {loader_name}: {memory_mb:.1f}MB")
+                assert memory_mb < 100, f'{loader_name} using too much memory: {memory_mb:.1f}MB'
+
 
 
 @pytest.mark.performance
