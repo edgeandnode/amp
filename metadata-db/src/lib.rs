@@ -17,7 +17,9 @@ use self::conn::{DbConn, DbConnPool};
 #[cfg(feature = "temp-db")]
 pub use self::temp::{KEEP_TEMP_DIRS, temp_metadata_db};
 pub use self::{
-    locations::{Location, LocationId},
+    locations::{
+        Location, LocationId, LocationIdFromStrError, LocationIdI64ConvError, LocationIdU64Error,
+    },
     workers::{
         Worker, WorkerNodeId,
         events::{JobNotifAction, JobNotifListener, JobNotifRecvError, JobNotification},
@@ -537,7 +539,7 @@ impl MetadataDb {
 
     pub async fn insert_metadata(
         &self,
-        location_id: i64,
+        location_id: LocationId,
         file_name: String,
         object_size: u64,
         object_e_tag: Option<String>,

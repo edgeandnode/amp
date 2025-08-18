@@ -1,12 +1,14 @@
 //! Location-related database operations
 
+pub use location_id::{
+    LocationId, LocationIdFromStrError, LocationIdI64ConvError, LocationIdU64Error,
+};
 use sqlx::{Executor, Postgres};
 use url::Url;
 
 use crate::{TableId, workers::jobs::JobId};
 
-/// Unique identifier for location records tracking dataset table storage locations (non-negative).
-pub type LocationId = i64;
+mod location_id;
 
 /// Insert a location into the database and return its ID (idempotent operation)
 #[tracing::instrument(skip(exe), err)]
