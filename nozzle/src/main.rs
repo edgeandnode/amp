@@ -1,10 +1,13 @@
 use std::{path::PathBuf, sync::Arc};
 
 use clap::Parser as _;
-use common::{BoxError, config::Config, tracing_helpers};
+use common::{BoxError, config::Config, manifest::Manifest};
+use dataset_store::DatasetStore;
 use dump::worker::Worker;
 use metadata_db::MetadataDb;
+use monitoring::{logging, telemetry::traces::provider_flush_shutdown};
 use nozzle::dump_cmd;
+use registry_service::handlers::register::register_manifest;
 use tracing::info;
 
 #[cfg(feature = "snmalloc")]
@@ -26,7 +29,7 @@ struct Args {
 #[derive(Debug, clap::Subcommand, Clone)]
 enum Command {
     Dump {
-        /// The name of the dataset to dump. This will be looked up in the dataset definition directory.
+        /// The name or path of the dataset to dump. This will be looked up in the dataset definition directory.
         /// Will also be used as a subdirectory in the output path, `<data_dir>/<dataset>`.
         ///
         /// Also accepts a comma-separated list of datasets, which will be dumped in the provided order.
@@ -80,18 +83,27 @@ enum Command {
         /// Run in dev mode, which starts a worker in the same process.
         #[arg(long, env = "SERVER_DEV")]
         dev: bool,
-        /// Enable Arrow Flight RPC Server
+        /// Enable Arrow Flight RPC Server.
         #[arg(long, env = "FLIGHT_SERVER")]
         flight_server: bool,
-        /// Enable JSON Lines Server
+        /// Enable JSON Lines Server.
         #[arg(long, env = "JSONL_SERVER")]
         jsonl_server: bool,
-        /// Enable Registry Server
+        /// Enable Registry Server.
         #[arg(long, env = "REGISTRY_SERVER")]
         registry_server: bool,
-        /// Enable Admin API Server
+        /// Enable Admin API Server.
         #[arg(long, env = "ADMIN_SERVER")]
         admin_server: bool,
+        /// Remote OpenTelemetry traces collector endpoint. OpenTelemetry collector must be running and
+        /// configured to accept traces at this endpoint. Traces are sent over gRPC.
+        ///
+        /// If not specified, traces infrastructure will not be initialized.
+        #[arg(long, env = "OPENTELEMETRY_TRACE_URL")]
+        opentelemetry_trace_url: Option<String>,
+        /// The ratio of traces to sample (f64). Samples all traces by default (equivalent to 1.0).
+        #[arg(long, env = "OPENTELEMETRY_TRACE_RATIO")]
+        opentelemetry_trace_ratio: Option<f64>,
     },
     Worker {
         /// The node id of the worker.
@@ -141,8 +153,6 @@ async fn main() {
 }
 
 async fn main_inner() -> Result<(), BoxError> {
-    tracing_helpers::register_logger();
-
     // Log version info
     info!(
         "built on {}, git describe {}",
@@ -166,12 +176,29 @@ async fn main_inner() -> Result<(), BoxError> {
             location,
             fresh,
         } => {
+            logging::init();
+
             let (config, metadata_db) =
                 construct_confing_and_metadatadb(config_path.as_ref(), &command).await?;
+            let mut datasets_to_dump = Vec::new();
+            let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
+
+            for dataset in datasets {
+                if dataset.ends_with(".json") {
+                    info!("Registering manifest: {}", dataset);
+                    let manifest = std::fs::read_to_string(&dataset)?;
+                    let manifest: Manifest = serde_json::from_str(&manifest)?;
+                    register_manifest(&dataset_store, &manifest).await?;
+                    datasets_to_dump.push(manifest.to_identifier());
+                } else {
+                    datasets_to_dump.push(dataset);
+                }
+            }
+
             dump_cmd::dump(
                 config,
                 metadata_db,
-                datasets,
+                datasets_to_dump,
                 ignore_deps,
                 start,
                 end_block,
@@ -191,7 +218,19 @@ async fn main_inner() -> Result<(), BoxError> {
             mut jsonl_server,
             mut registry_server,
             mut admin_server,
+            opentelemetry_trace_url,
+            opentelemetry_trace_ratio,
         } => {
+            let telemetry_tracing_provider = if let Some(url) = opentelemetry_trace_url {
+                Some(logging::init_with_telemetry(
+                    url,
+                    opentelemetry_trace_ratio.unwrap_or(1.0),
+                )?)
+            } else {
+                logging::init();
+                None
+            };
+
             let (config, metadata_db) =
                 construct_confing_and_metadatadb(config_path.as_ref(), &command).await?;
             if !flight_server && !jsonl_server && !registry_server && !admin_server {
@@ -211,9 +250,17 @@ async fn main_inner() -> Result<(), BoxError> {
                 admin_server,
             )
             .await?;
-            server.await
+            server.await.and_then(move |_| {
+                telemetry_tracing_provider
+                    .map(provider_flush_shutdown)
+                    .transpose()?;
+
+                Ok(())
+            })
         }
         Command::Worker { node_id } => {
+            logging::init();
+
             let (config, metadata_db) =
                 construct_confing_and_metadatadb(config_path.as_ref(), &command).await?;
             let worker = Worker::new(config.clone(), metadata_db, node_id.parse()?);
@@ -227,6 +274,8 @@ async fn main_inner() -> Result<(), BoxError> {
             manifest,
             module,
         } => {
+            logging::init();
+
             if let Some(mut out) = out {
                 if out.is_dir() {
                     out.push(format!("{}.json", &kind));

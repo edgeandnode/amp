@@ -24,11 +24,17 @@
     "exactOptionalPropertyTypes": true,
     "noUnusedLocals": true,
     "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
 
     // Miscellaneoaus
     "skipLibCheck": true, // Skip type checking of third party libraries.
     "noErrorTruncation": false, // Do not truncate error messages.
     "types": [], // Disable automatic loading of `@types/*` packages.
-    "plugins": [{ "name": "@effect/language-service" }],
+    "plugins": [
+      {
+        "name": "@effect/language-service",
+        "namespaceImportPackages": ["effect", "@effect/*"],
+      },
+    ],
   },
 }

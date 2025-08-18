@@ -31,7 +31,7 @@ pub struct TempMetadataDb {
 
 impl TempMetadataDb {
     /// Create a new temporary Metadata DB
-    pub async fn new(keep: bool) -> Self {
+    pub async fn new(keep: bool, pool_size: u32) -> Self {
         // Set C locale. To remove this `unsafe` we need:
         // https://github.com/boustrophedon/pgtemp/pull/21
         unsafe {
@@ -46,7 +46,7 @@ impl TempMetadataDb {
         let uri = pg_temp.connection_uri();
         tracing::info!("connecting to metadata-db at: {}", uri);
 
-        let metadata_db = MetadataDb::connect(&uri)
+        let metadata_db = MetadataDb::connect(&uri, pool_size)
             .await
             .expect("failed to connect to metadata-db");
 
@@ -80,8 +80,8 @@ static TEMP_METADATA_DB: OnceCell<TempMetadataDb> = OnceCell::const_new();
 ///
 /// The `keep` parameter controls whether the temporary directory is kept after the Metadata DB is
 /// dropped.
-pub async fn temp_metadata_db(keep: bool) -> &'static TempMetadataDb {
+pub async fn temp_metadata_db(keep: bool, pool_size: u32) -> &'static TempMetadataDb {
     TEMP_METADATA_DB
-        .get_or_init(|| async { TempMetadataDb::new(keep).await })
+        .get_or_init(|| async { TempMetadataDb::new(keep, pool_size).await })
         .await
 }

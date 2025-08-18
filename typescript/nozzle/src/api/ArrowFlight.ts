@@ -1,29 +1,69 @@
 import { create, toBinary } from "@bufbuild/protobuf"
 import { anyPack, AnySchema } from "@bufbuild/protobuf/wkt"
-import type { Transport } from "@connectrpc/connect"
-import { createClient } from "@connectrpc/connect"
-import { Template } from "@effect/platform"
+import { type Client, createClient, type Transport } from "@connectrpc/connect"
+import * as Template from "@effect/platform/Template"
 import type { RecordBatch } from "apache-arrow"
 import { RecordBatchReader, Table } from "apache-arrow"
-import { Chunk, Context, Data, Effect, Layer, Option, Stream } from "effect"
-import * as Flight from "./proto/Flight_pb.ts"
-import * as FlightSql from "./proto/FlightSql_pb.ts"
+import * as Chunk from "effect/Chunk"
+import * as Context from "effect/Context"
+import * as Data from "effect/Data"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
+import * as Stream from "effect/Stream"
+import * as Flight from "../proto/Flight_pb.ts"
+import * as FlightSql from "../proto/FlightSql_pb.ts"
 
-export * as Flight from "./proto/Flight_pb.ts"
-export * as FlightSql from "./proto/FlightSql_pb.ts"
+export * as Flight from "../proto/Flight_pb.ts"
+export * as FlightSql from "../proto/FlightSql_pb.ts"
 
+/**
+ * Error type for the Arrow Flight service.
+ */
 export class ArrowFlightError extends Data.TaggedError("ArrowFlightError")<{
   cause?: unknown
   message: string
 }> {}
 
-export class ArrowFlight extends Context.Tag("Nozzle/ArrowFlight")<ArrowFlight, ReturnType<typeof make>>() {
-  static withTransport(transport: Transport) {
-    return Layer.sync(this, () => make(transport))
-  }
-}
+/**
+ * Service definition for the Arrow Flight api.
+ */
+export class ArrowFlight extends Context.Tag("Nozzle/ArrowFlight")<ArrowFlight, {
+  /**
+   * The client for the Arrow Flight service.
+   */
+  readonly client: Client<typeof Flight.FlightService>
 
-const make = (transport: Transport) => {
+  /**
+   * A stream of record batches from a sql query.
+   *
+   * @param sql - The sql query to execute.
+   * @returns A stream of record batches.
+   */
+  readonly stream: {
+    (sql: TemplateStringsArray): Stream.Stream<RecordBatch, ArrowFlightError>
+    (sql: string): Stream.Stream<RecordBatch, ArrowFlightError>
+  }
+
+  /**
+   * A table representation of the results from a sql query.
+   *
+   * @param sql - The sql query to execute.
+   * @returns A table representation of the results.
+   */
+  readonly table: {
+    (sql: TemplateStringsArray): Effect.Effect<Table, ArrowFlightError>
+    (sql: string): Effect.Effect<Table, ArrowFlightError>
+  }
+}>() {}
+
+/**
+ * Creates a new Arrow Flight service instance.
+ *
+ * @param transport - The transport to use for the Arrow Flight service instance.
+ * @returns A new Arrow Flight service instance.
+ */
+export const make = (transport: Transport) => {
   const client = createClient(Flight.FlightService, transport)
   const stream: {
     (sql: TemplateStringsArray): Stream.Stream<RecordBatch, ArrowFlightError>
@@ -44,10 +84,12 @@ const make = (transport: Transport) => {
         catch: (cause) => new ArrowFlightError({ cause, message: "Failed to get flight info" }),
       })
 
-      const ticket = yield* Option.fromNullable(info.endpoint[0]?.ticket).pipe(Option.match({
-        onNone: () => new ArrowFlightError({ message: "No flight ticket found" }),
-        onSome: (ticket) => Effect.succeed(ticket),
-      }))
+      const ticket = yield* Option.fromNullable(info.endpoint[0]?.ticket).pipe(
+        Option.match({
+          onNone: () => new ArrowFlightError({ message: "No flight ticket found" }),
+          onSome: (ticket) => Effect.succeed(ticket),
+        }),
+      )
 
       const request = yield* Effect.async<AsyncIterable<Flight.FlightData>>((resume, signal) => {
         resume(Effect.sync(() => client.doGet(ticket, { signal })))
@@ -66,7 +108,7 @@ const make = (transport: Transport) => {
                 const length = 8 + data.dataHeader.length + padding + data.dataBody.length
                 const buf = new ArrayBuffer(length)
                 const view = new DataView(buf)
-                view.setUint32(0, 0xFFFFFFFF, true) // Continuation token
+                view.setUint32(0, 0xffffffff, true) // Continuation token
                 view.setUint32(4, data.dataHeader.length, true) // Header length
 
                 // Copy header and body into buffer.
@@ -94,3 +136,11 @@ const make = (transport: Transport) => {
 
   return { client, stream, table }
 }
+
+/**
+ * Creates a layer for the Arrow Flight service.
+ *
+ * @param transport - The transport to use for the Arrow Flight service.
+ * @returns A layer for the Arrow Flight service.
+ */
+export const layer = (transport: Transport) => Layer.sync(ArrowFlight, () => make(transport))

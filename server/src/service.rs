@@ -39,6 +39,7 @@ use metadata_db::MetadataDb;
 use prost::Message as _;
 use thiserror::Error;
 use tonic::{Request, Response, Status};
+use tracing::instrument;
 
 type TonicStream<T> = Pin<Box<dyn Stream<Item = Result<T, Status>> + Send + 'static>>;
 
@@ -203,7 +204,6 @@ impl Service {
             .await
             .map_err(|err| Error::from(err))?;
         let is_streaming = common::stream_helpers::is_streaming(&query);
-
         let ctx = Arc::new(ctx);
         self.execute_plan(ctx, dataset_store, plan, is_streaming)
             .await
@@ -385,6 +385,7 @@ impl FlightService for Service {
 }
 
 impl Service {
+    #[instrument(skip(self))]
     async fn get_flight_info(&self, descriptor: FlightDescriptor) -> Result<FlightInfo, Error> {
         let (serialized_plan, schema) = match DescriptorType::try_from(descriptor.r#type)
             .map_err(|e| Error::PbDecodeError(e.to_string()))?
@@ -452,6 +453,7 @@ impl Service {
         Ok(info)
     }
 
+    #[instrument(skip_all)]
     async fn do_get(&self, ticket: arrow_flight::Ticket) -> Result<TonicStream<FlightData>, Error> {
         let remote_plan = common::query_context::remote_plan_from_bytes(&ticket.ticket)?;
         let table_refs = remote_plan.table_refs.into_iter().map(|t| t.into());

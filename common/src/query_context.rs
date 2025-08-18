@@ -1,16 +1,18 @@
 use std::{ops::RangeInclusive, sync::Arc};
 
-use arrow::{
-    array::{ArrayRef, RecordBatch},
-    compute::concat_batches,
-};
+use arrow::{array::ArrayRef, compute::concat_batches};
 use axum::response::IntoResponse;
 use bincode::{Decode, Encode, config};
 use bytes::Bytes;
 use datafusion::{
-    arrow::datatypes::{DataType, Field, Fields, SchemaRef},
+    self,
+    arrow::{
+        array::RecordBatch,
+        datatypes::{DataType, Field, Fields, SchemaRef},
+    },
     catalog::{MemorySchemaProvider, TableProvider},
-    common::{DFSchema, DFSchemaRef, not_impl_err},
+    common::{DFSchema, DFSchemaRef, extensions_options, not_impl_err},
+    config::ConfigExtension,
     datasource::MemTable,
     error::DataFusionError,
     execution::{
@@ -20,6 +22,7 @@ use datafusion::{
         runtime_env::RuntimeEnv,
     },
     logical_expr::{AggregateUDF, Extension, LogicalPlan, ScalarUDF},
+    physical_optimizer::PhysicalOptimizerRule,
     physical_plan::{ExecutionPlan, displayable, stream::RecordBatchStreamAdapter},
     physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner as _},
     sql::{TableReference, parser},
@@ -30,12 +33,15 @@ use datafusion_proto::{
     },
     logical_plan::LogicalExtensionCodec,
 };
+use datafusion_tracing::{
+    InstrumentationOptions, instrument_with_info_spans, pretty_format_compact_batch,
+};
 use futures::{FutureExt as _, TryStreamExt, stream};
 use js_runtime::isolate_pool::IsolatePool;
 use metadata_db::{LocationId, TableId};
 use regex::Regex;
 use thiserror::Error;
-use tracing::{debug, instrument};
+use tracing::{debug, field, instrument};
 
 use crate::{
     BlockNum, BoxError, LogicalCatalog, ResolvedTable, SPECIAL_BLOCK_NUM, arrow, attestation,
@@ -120,6 +126,18 @@ impl IntoResponse for Error {
 pub struct PlanningContext {
     session_config: SessionConfig,
     catalog: LogicalCatalog,
+}
+
+extensions_options! {
+    /// Nozzle-specific session configuration options.
+    pub struct NozzleSessionConfig {
+        /// By default, SQL execution only scans canonical chain segments. When this is set to
+        /// `true`, table scans will include data associated with forked blocks.
+        pub ignore_canonical_segments: bool, default = false
+    }
+}
+impl ConfigExtension for NozzleSessionConfig {
+    const PREFIX: &'static str = "nozzle";
 }
 
 // Serialized plan with additional options
@@ -228,6 +246,7 @@ pub struct QueryEnv {
 }
 
 /// A context for executing queries against a catalog.
+#[derive(Clone)]
 pub struct QueryContext {
     pub env: QueryEnv,
     session_config: SessionConfig,
@@ -269,6 +288,19 @@ impl QueryContext {
         })
     }
 
+    /// Create a clone of this QueryContext that scans all se.
+    /// This allows physical tables to scan all segments instead of just canonical ones,
+    /// which is needed for reorg handling in streaming queries.
+    pub fn with_custom_settings(&self, settings: NozzleSessionConfig) -> Self {
+        let mut new_context = self.clone();
+        new_context
+            .session_config
+            .options_mut()
+            .extensions
+            .insert(settings);
+        new_context
+    }
+
     pub fn catalog(&self) -> &Catalog {
         &self.catalog
     }
@@ -308,6 +340,7 @@ impl QueryContext {
             .with_config(self.session_config.clone())
             .with_runtime_env(self.env.df_env.clone())
             .with_default_features()
+            .with_physical_optimizer_rule(create_instrumentation_rule())
             .build();
         let ctx = SessionContext::new_with_state(state);
 
@@ -367,7 +400,6 @@ impl QueryContext {
             dataset_version: None,
             table: table_ref.table(),
         };
-
         self.catalog
             .tables()
             .iter()
@@ -708,4 +740,20 @@ impl LogicalExtensionCodec for TableProviderCodec {
         // No-op, the only thing we need for table scans is the table name.
         Ok(())
     }
+}
+
+/// Creates an instrumentation rule that captures metrics and provides previews of data during execution.
+pub fn create_instrumentation_rule() -> Arc<dyn PhysicalOptimizerRule + Send + Sync> {
+    let options_builder = InstrumentationOptions::builder()
+        .record_metrics(true)
+        .preview_limit(5)
+        .preview_fn(Arc::new(|batch: &RecordBatch| {
+            pretty_format_compact_batch(batch, 64, 3, 10).map(|fmt| fmt.to_string())
+        }));
+
+    instrument_with_info_spans!(
+        options: options_builder.build(),
+        env = field::Empty,
+        region = field::Empty,
+    )
 }

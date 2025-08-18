@@ -41,6 +41,7 @@ impl Scheduler {
         };
 
         let mut locations = Vec::new();
+
         let metadata_db = Arc::new(self.metadata_db.clone());
         for table in Arc::new(dataset).resolved_tables() {
             let physical_table =
@@ -56,7 +57,6 @@ impl Scheduler {
         }
 
         let job_desc = serde_json::to_string(&JobDesc::Dump { end_block })?;
-
         let job_id = self
             .metadata_db
             .schedule_job(node_id, &job_desc, &locations)

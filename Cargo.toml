@@ -16,6 +16,7 @@ members = [
     "registry-service",
     "js-runtime",
     "generate-manifest",
+    "monitoring",
 ]
 
 resolver = "2"
@@ -49,7 +50,6 @@ hex = "0.4.3"
 itertools = "0.14.0"
 pgtemp = "0.6.0"
 pretty_assertions = "1.4.1"
-prometheus = "0.13"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_yaml = "0.9.34"
@@ -86,10 +86,15 @@ indoc = "2.0.6"
 schemars = "1.0.4"
 governor = "0.10.0"
 tower = "0.5.2"
+opentelemetry = { version = "0.30", features = ["trace"] }
+opentelemetry-otlp = { version = "0.30", features = ["grpc-tonic"] }
+opentelemetry_sdk = { version = "0.30" }
+tracing-opentelemetry = { version = "0.31", features = ["default"] }
 
 # Datafusion and Arrow crates
 arrow-flight = { version = "55", features = ["flight-sql-experimental"] }
 datafusion = { version = "49", features = ["serde"] }
+datafusion-tracing = { version = "49" }
 datafusion-proto = { version = "49" }
 object_store = { version = "0.12", features = ["aws", "gcp", "azure"] }
 

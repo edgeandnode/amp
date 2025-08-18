@@ -3,13 +3,13 @@ use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc};
 use datafusion::{
     arrow::datatypes::SchemaRef,
     catalog::{Session, memory::DataSourceExec},
-    common::DFSchema,
+    common::{DFSchema, DataFusionError},
     datasource::{
         TableProvider, TableType, create_ordering,
         listing::{ListingTableUrl, PartitionedFile},
         physical_plan::{FileGroup, FileScanConfigBuilder, ParquetSource},
     },
-    error::{DataFusionError, Result as DataFusionResult},
+    error::Result as DataFusionResult,
     execution::object_store::ObjectStoreUrl,
     logical_expr::{ScalarUDF, SortExpr, col, utils::conjunction},
     physical_expr::LexOrdering,
@@ -17,7 +17,7 @@ use datafusion::{
     prelude::Expr,
     sql::TableReference,
 };
-use futures::{Stream, StreamExt, TryStreamExt, future::join_all, stream};
+use futures::{Stream, StreamExt, TryStreamExt, stream};
 use metadata_db::{LocationId, MetadataDb, TableId};
 use object_store::{ObjectMeta, ObjectStore, path::Path};
 use tracing::info;
@@ -32,6 +32,7 @@ use crate::{
         parquet::ParquetMeta,
         segments::{Chain, Segment, canonical_chain, missing_ranges},
     },
+    query_context::NozzleSessionConfig,
     store::{Store, infer_object_store},
 };
 
@@ -146,9 +147,13 @@ impl PhysicalTable {
         start_block: i64,
     ) -> Result<Self, BoxError> {
         let dataset_name = &table.dataset().name;
+        let dataset_version = match table.dataset().kind.as_str() {
+            "manifest" => table.dataset_version(),
+            _ => None,
+        };
         let table_id = TableId {
             dataset: dataset_name,
-            dataset_version: None,
+            dataset_version: dataset_version.as_deref(),
             table: &table.name(),
         };
 
@@ -166,9 +171,7 @@ impl PhysicalTable {
             .await?;
 
         if set_active {
-            metadata_db
-                .set_active_location(table_id, url.as_str())
-                .await?;
+            metadata_db.set_active_location(table_id, &url).await?;
         }
 
         let path = Path::from_url_path(url.path()).unwrap();
@@ -205,9 +208,13 @@ impl PhysicalTable {
         start_block: i64,
     ) -> Result<Option<Self>, BoxError> {
         let dataset_name = &table.dataset().name;
+        let dataset_version = match table.dataset().kind.as_str() {
+            "manifest" => table.dataset_version(),
+            _ => None,
+        };
         let table_id = TableId {
             dataset: &table.dataset().name,
-            dataset_version: None,
+            dataset_version: dataset_version.as_deref(),
             table: &table.name(),
         };
 
@@ -232,9 +239,13 @@ impl PhysicalTable {
         metadata_db: Arc<MetadataDb>,
     ) -> Result<Option<Self>, BoxError> {
         let dataset_name = &table.dataset().name;
+        let dataset_version = match table.dataset().kind.as_str() {
+            "manifest" => table.dataset_version(),
+            _ => None,
+        };
         let table_id = TableId {
             dataset: dataset_name,
-            dataset_version: None,
+            dataset_version: dataset_version.as_deref(),
             table: &table.name(),
         };
 
@@ -324,9 +335,7 @@ impl PhysicalTable {
             )
             .await?;
 
-        metadata_db
-            .set_active_location(*table_id, url.as_str())
-            .await?;
+        metadata_db.set_active_location(*table_id, &url).await?;
 
         let object_store = data_store.object_store();
         let mut file_stream = object_store.list(Some(&path));
@@ -553,36 +562,6 @@ impl PhysicalTable {
         create_ordering(&schema, &sort_order)
     }
 
-    async fn fetch_partitioned_files(
-        &self,
-        ctx: &dyn Session,
-    ) -> DataFusionResult<BTreeMap<BlockNum, PartitionedFile>> {
-        let canonical_chain = self
-            .canonical_chain()
-            .await
-            .map_err(DataFusionError::from)?;
-        let mut canonical_segments = canonical_chain.map(|c| c.0).unwrap_or_default();
-        let mut partitioned_files: BTreeMap<BlockNum, PartitionedFile> = Default::default();
-        while !canonical_segments.is_empty() {
-            let batch_len = usize::min(
-                canonical_segments.len(),
-                ctx.config_options().execution.meta_fetch_concurrency,
-            );
-            let batch: Vec<Segment> = canonical_segments.drain(0..batch_len).collect();
-            let results: Vec<DataFusionResult<(BlockNum, PartitionedFile)>> =
-                join_all(batch.into_iter().map(async |Segment { range, object }| {
-                    let partitioned_file = PartitionedFile::from(object);
-                    Ok((range.start(), partitioned_file))
-                }))
-                .await;
-            for result in results {
-                let (start_block, partitioned_file) = result?;
-                partitioned_files.insert(start_block, partitioned_file);
-            }
-        }
-        Ok(partitioned_files)
-    }
-
     /// See: https://github.com/apache/datafusion/blob/main/datafusion-examples/examples/advanced_parquet_index.rs
     fn filters_to_predicate(
         &self,
@@ -614,6 +593,7 @@ impl TableProvider for PhysicalTable {
         self.schema()
     }
 
+    #[tracing::instrument(skip_all, err)]
     async fn scan(
         &self,
         state: &dyn Session,
@@ -621,14 +601,26 @@ impl TableProvider for PhysicalTable {
         filters: &[Expr],
         limit: Option<usize>,
     ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
-        let files = self.fetch_partitioned_files(state).await?;
-        if files.is_empty() {
-            return Ok(Arc::new(datafusion::physical_plan::empty::EmptyExec::new(
-                self.schema(),
-            )));
-        }
+        let NozzleSessionConfig {
+            ignore_canonical_segments,
+        } = state
+            .config_options()
+            .extensions
+            .get()
+            .cloned()
+            .unwrap_or_default();
+
+        let segments = if ignore_canonical_segments {
+            self.segments().await?
+        } else {
+            self.canonical_chain()
+                .await?
+                .into_iter()
+                .flatten()
+                .collect()
+        };
         let target_partitions = state.config_options().execution.target_partitions;
-        let file_groups = round_robin(files, target_partitions);
+        let file_groups = round_robin(segments, target_partitions);
 
         let output_ordering = self.output_ordering()?;
 
@@ -700,13 +692,14 @@ pub async fn list_revisions(
         .collect())
 }
 
-fn round_robin(files: BTreeMap<u64, PartitionedFile>, target_partitions: usize) -> Vec<FileGroup> {
-    let size = files.len().min(target_partitions);
-    if size <= 0 {
+fn round_robin(segments: Vec<Segment>, target_partitions: usize) -> Vec<FileGroup> {
+    let size = segments.len().min(target_partitions);
+    if size == 0 {
         return vec![];
     }
     let mut groups = vec![FileGroup::default(); size];
-    for (idx, (_, file)) in files.into_iter().enumerate() {
+    for (idx, segment) in segments.into_iter().enumerate() {
+        let file = PartitionedFile::from(segment.object);
         groups[idx % size].push(file);
     }
     groups

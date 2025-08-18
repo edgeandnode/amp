@@ -6,9 +6,27 @@ use crate::{
     conn::DbConn,
     workers::{
         heartbeat,
-        jobs::{self, JobStatus},
+        jobs::{self, JobId, JobStatus},
     },
 };
+
+/// Private helper function for tests - simplified job status update
+async fn update_job_status<'c, E>(exe: E, id: &JobId, status: JobStatus) -> Result<(), sqlx::Error>
+where
+    E: sqlx::Executor<'c, Database = sqlx::Postgres>,
+{
+    let query = indoc::indoc! {r#"
+        UPDATE jobs
+        SET status = $1, updated_at = (timezone('UTC', now()))
+        WHERE id = $2
+    "#};
+    sqlx::query(query)
+        .bind(status)
+        .bind(id)
+        .execute(exe)
+        .await?;
+    Ok(())
+}
 
 #[tokio::test]
 async fn register_job_creates_with_scheduled_status() {
@@ -48,45 +66,6 @@ async fn register_job_creates_with_scheduled_status() {
     assert_eq!(job.status, JobStatus::Scheduled);
     assert_eq!(job.node_id, worker_id);
     assert_eq!(job.desc, job_desc);
-}
-
-#[tokio::test]
-async fn update_job_status_changes_status() {
-    //* Given
-    let temp_db = PgTempDB::new();
-    let mut conn = DbConn::connect(&temp_db.connection_uri())
-        .await
-        .expect("Failed to connect to metadata db");
-    conn.run_migrations()
-        .await
-        .expect("Failed to run migrations");
-
-    let worker_id = "test-worker-update".parse().expect("Invalid worker ID");
-    heartbeat::register_worker(&mut *conn, &worker_id)
-        .await
-        .expect("Failed to pre-register the worker");
-
-    let job_desc = serde_json::json!({ "key": "value" });
-    let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
-
-    let job_id = jobs::register_job(&mut *conn, &worker_id, &job_desc_str)
-        .await
-        .expect("Failed to schedule job");
-
-    //* When
-    jobs::update_job_status(&mut *conn, &job_id, JobStatus::Running)
-        .await
-        .expect("Failed to update job status");
-
-    //* Then
-    let job = jobs::get_job(&mut *conn, &job_id)
-        .await
-        .expect("Failed to get job")
-        .expect("Job not found");
-
-    assert_eq!(job.id, job_id);
-    assert_eq!(job.status, JobStatus::Running);
-    assert_eq!(job.node_id, worker_id);
 }
 
 #[tokio::test]
@@ -180,7 +159,7 @@ async fn get_jobs_for_node_filters_by_status() {
     let job_id_running = jobs::register_job(&mut *db, &worker_id, &job_desc_str)
         .await
         .expect("Failed to register job_id_running");
-    jobs::update_job_status(&mut *db, &job_id_running, JobStatus::Running)
+    update_job_status(&mut *db, &job_id_running, JobStatus::Running)
         .await
         .expect("Failed to update job_id_running to Running");
 
@@ -188,28 +167,28 @@ async fn get_jobs_for_node_filters_by_status() {
     let job_id_completed = jobs::register_job(&mut *db, &worker_id, &job_desc_str)
         .await
         .expect("Failed to register job_id_completed");
-    jobs::update_job_status(&mut *db, &job_id_completed, JobStatus::Completed)
+    update_job_status(&mut *db, &job_id_completed, JobStatus::Completed)
         .await
         .expect("Failed to update job_id_completed to Completed");
 
     let job_id_failed = jobs::register_job(&mut *db, &worker_id, &job_desc_str)
         .await
         .expect("Failed to schedule job_id_failed");
-    jobs::update_job_status(&mut *db, &job_id_failed, JobStatus::Failed)
+    update_job_status(&mut *db, &job_id_failed, JobStatus::Failed)
         .await
         .expect("Failed to update job_id_failed to Failed");
 
     let job_id_stop_requested = jobs::register_job(&mut *db, &worker_id, &job_desc_str)
         .await
         .expect("Failed to register job_id_stop_requested");
-    jobs::update_job_status(&mut *db, &job_id_stop_requested, JobStatus::StopRequested)
+    update_job_status(&mut *db, &job_id_stop_requested, JobStatus::StopRequested)
         .await
         .expect("Failed to update job_id_stop_requested to StopRequested");
 
     let job_id_stopped = jobs::register_job(&mut *db, &worker_id, &job_desc_str)
         .await
         .expect("Failed to register job_id_stopped");
-    jobs::update_job_status(&mut *db, &job_id_stopped, JobStatus::Stopped)
+    update_job_status(&mut *db, &job_id_stopped, JobStatus::Stopped)
         .await
         .expect("Failed to update job_id_stopped to Stopped");
 

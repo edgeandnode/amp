@@ -1,28 +1,33 @@
 use std::{future::Future, sync::Arc, time::Duration};
 
 use futures::stream::{BoxStream, Stream};
-use sqlx::{
-    Executor, FromRow, Postgres,
-    postgres::{PgListener, PgNotification},
-};
+use sqlx::postgres::{PgListener, PgNotification};
 use thiserror::Error;
 use tokio::time::MissedTickBehavior;
 use tracing::instrument;
 use url::Url;
 
 mod conn;
+mod locations;
+pub mod registry;
 #[cfg(feature = "temp-db")]
 pub mod temp;
-pub mod workers;
+mod workers;
 
 use self::conn::{DbConn, DbConnPool};
 #[cfg(feature = "temp-db")]
 pub use self::temp::{KEEP_TEMP_DIRS, temp_metadata_db};
-pub use self::workers::{
-    WorkerNodeId,
-    events::{JobNotifAction, JobNotifListener, JobNotifRecvError, JobNotification},
-    jobs::{Job, JobId, JobStatus, JobStatusUpdateError, JobWithDetails},
+pub use self::{
+    locations::{
+        Location, LocationId, LocationIdFromStrError, LocationIdI64ConvError, LocationIdU64Error,
+    },
+    workers::{
+        Worker, WorkerNodeId,
+        events::{JobNotifAction, JobNotifListener, JobNotifRecvError, JobNotification},
+        jobs::{Job, JobId, JobStatus, JobStatusUpdateError, JobWithDetails},
+    },
 };
+use crate::registry::{Registry, insert_dataset_to_registry};
 
 /// Frequency on which to send a heartbeat.
 pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
@@ -31,13 +36,14 @@ pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
 /// schedule new jobs only on active workers.
 pub const DEFAULT_DEAD_WORKER_INTERVAL: Duration = Duration::from_secs(5);
 
+/// Default pool size for the metadata DB.
+pub const DEFAULT_POOL_SIZE: u32 = 10;
+
 /// Row ids, always non-negative.
 pub type FileId = i64;
-pub type LocationId = i64;
-pub type JobDatabaseId = i64;
 pub type FooterBytes = Vec<u8>;
 
-#[derive(Debug, FromRow)]
+#[derive(Debug, sqlx::FromRow)]
 pub struct FileMetadataRow {
     /// file_metadata.id
     pub id: FileId,
@@ -55,21 +61,6 @@ pub struct FileMetadataRow {
     pub object_version: Option<String>,
     /// file_metadata.metadata
     pub metadata: serde_json::Value,
-}
-
-#[derive(Debug, Clone, sqlx::FromRow)]
-pub struct Location {
-    /// location.id
-    pub id: LocationId,
-    /// location.dataset
-    pub dataset: String,
-    /// location.tbl
-    pub tbl: String,
-    /// location.url
-    #[sqlx(try_from = "&'a str")]
-    pub url: Url,
-    /// location.start_block
-    pub start_block: i64,
 }
 
 #[derive(Error, Debug)]
@@ -167,8 +158,8 @@ impl MetadataDb {
     ///
     /// Runs migrations if necessary.
     #[instrument(skip_all, err)]
-    pub async fn connect(url: &str) -> Result<Self, Error> {
-        let pool = DbConnPool::connect(url).await?;
+    pub async fn connect(url: &str, pool_size: u32) -> Result<Self, Error> {
+        let pool = DbConnPool::connect(url, pool_size).await?;
         pool.run_migrations().await?;
         Ok(Self {
             pool,
@@ -184,6 +175,10 @@ impl MetadataDb {
             url: self.url,
             dead_worker_interval,
         }
+    }
+
+    pub fn default_pool_size() -> u32 {
+        DEFAULT_POOL_SIZE
     }
 }
 
@@ -260,10 +255,13 @@ impl MetadataDb {
         // successfully locked.
         let mut tx = self.pool.begin().await?;
 
+        // Register the job in the workers job queue
         let job_id = workers::jobs::register_job(&mut *tx, node_id, job_desc).await?;
 
-        lock_locations(&mut *tx, job_id, locations).await?;
+        // Lock the locations for this job by assigning the job ID as the writer
+        locations::assign_job_writer(&mut *tx, locations, job_id).await?;
 
+        // Notify the worker about the new job
         workers::events::notify(&mut *tx, JobNotification::start(node_id.to_owned(), job_id))
             .await?;
 
@@ -519,19 +517,7 @@ impl MetadataDb {
     }
 
     pub async fn url_to_location_id(&self, url: &Url) -> Result<Option<LocationId>, Error> {
-        let query = "
-            SELECT id
-            FROM locations
-            WHERE url = $1
-            LIMIT 1
-        ";
-
-        let location_id: Option<LocationId> = sqlx::query_scalar(query)
-            .bind(url.to_string())
-            .fetch_optional(&*self.pool)
-            .await?;
-
-        Ok(location_id)
+        Ok(locations::url_to_location_id(&*self.pool, url).await?)
     }
 
     /// Returns the active location. The active location has meaning on both the write and read side:
@@ -542,113 +528,51 @@ impl MetadataDb {
         &self,
         table: TableId<'_>,
     ) -> Result<Option<(Url, LocationId)>, Error> {
-        let TableId {
-            dataset,
-            dataset_version,
-            table,
-        } = table;
-        let dataset_version = dataset_version.unwrap_or("");
+        let active_locations = locations::get_active_by_table_id(&*self.pool, table).await?;
 
-        let query = "
-        SELECT url, id
-        FROM locations
-        WHERE dataset = $1 AND dataset_version = $2 AND tbl = $3 AND active
-        ";
-
-        let tuples: Vec<(String, LocationId)> = sqlx::query_as(query)
-            .bind(dataset)
-            .bind(dataset_version)
-            .bind(table)
-            .fetch_all(&*self.pool)
-            .await?;
-
-        let mut urls = tuples
-            .into_iter()
-            .map(|(url, id)| Ok((Url::parse(&url)?, id)))
-            .collect::<Result<Vec<_>, Error>>()?;
-
-        match urls.len() {
-            0 => Ok(None),
-            1 => Ok(Some(urls.pop().unwrap())),
-
-            // Currently unreachable thanks to DB constraints.
-            _ => Err(Error::MultipleActiveLocations(
-                dataset.to_string(),
-                dataset_version.to_string(),
-                table.to_string(),
-                urls.iter().map(|(url, _)| url.to_string()).collect(),
+        match active_locations.as_slice() {
+            [] => Ok(None),
+            [(url, location_id)] => {
+                let url = Url::parse(url)?;
+                Ok(Some((url, *location_id)))
+            }
+            multiple => Err(Error::MultipleActiveLocations(
+                table.dataset.to_string(),
+                table.dataset_version.unwrap_or("").to_string(),
+                table.table.to_string(),
+                multiple.iter().map(|(url, _)| url.clone()).collect(),
             )),
         }
     }
 
-    /// Set a location as the active materialization for a table. If there was a previously active
-    /// location, it will be made inactive in the same transaction, achieving an atomic switch.
+    /// Set a location as the active materialization for a table.
+    ///
+    /// If there was a previously active location, it will be made inactive in the
+    /// same transaction, achieving an atomic switch.
     #[instrument(skip(self), err)]
     pub async fn set_active_location(
         &self,
         table: TableId<'_>,
-        location: &str,
+        location: &Url,
     ) -> Result<(), Error> {
-        let TableId {
-            dataset,
-            dataset_version,
-            table,
-        } = table;
-        let dataset_version = dataset_version.unwrap_or("");
-
-        // Transactionally update the active location.
         let mut tx = self.pool.begin().await?;
-
-        // First, set the existing active location to inactive.
-        let query = "
-        UPDATE locations
-        SET active = false
-        WHERE dataset = $1 AND dataset_version = $2 AND tbl = $3 AND active
-        ";
-
-        sqlx::query(query)
-            .bind(dataset)
-            .bind(dataset_version)
-            .bind(table)
-            .execute(&mut *tx)
-            .await?;
-
-        // Then, set the new active location to active.
-        let query = "
-        UPDATE locations
-        SET active = true
-        WHERE dataset = $1 AND dataset_version = $2 AND tbl = $3 AND url = $4
-        ";
-
-        sqlx::query(query)
-            .bind(dataset)
-            .bind(dataset_version)
-            .bind(table)
-            .bind(location)
-            .execute(&mut *tx)
-            .await?;
-
+        locations::mark_inactive_by_table_id(&mut *tx, table).await?;
+        locations::mark_active_by_url(&mut *tx, table, location).await?;
         tx.commit().await?;
-
         Ok(())
     }
 
-    /// Returns tuples of `(location_id, table_name, url)`.
-    pub async fn output_locations(&self, id: &JobId) -> Result<Vec<Location>, Error> {
-        let query = indoc::indoc! {r#"
-            SELECT id, dataset, tbl, url
-            FROM locations
-            WHERE writer = $1
-        "#};
-
-        let tuples = sqlx::query_as(query)
-            .bind(id)
-            .fetch_all(&*self.pool)
-            .await?;
-
-        Ok(tuples)
+    /// Returns locations that were written by a specific job.
+    ///
+    /// This method queries the `locations` table for all locations where the given job
+    /// was assigned as the writer, converting them to [`Location`] type.
+    pub async fn output_locations(&self, id: JobId) -> Result<Vec<Location>, Error> {
+        Ok(locations::get_by_job_id(&*self.pool, id).await?)
     }
+}
 
+/// File metadata-related API
+impl MetadataDb {
     pub fn stream_file_metadata(
         &self,
         location_id: LocationId,
@@ -672,7 +596,7 @@ impl MetadataDb {
 
     pub async fn insert_metadata(
         &self,
-        location_id: i64,
+        location_id: LocationId,
         file_name: String,
         object_size: u64,
         object_e_tag: Option<String>,
@@ -790,17 +714,101 @@ impl MetadataDb {
     }
 }
 
-#[instrument(skip(executor), err)]
-async fn lock_locations(
-    executor: impl Executor<'_, Database = Postgres>,
-    job_id: JobId,
-    locations: &[LocationId],
-) -> Result<(), Error> {
-    let query = "UPDATE locations SET writer = $1 WHERE id = ANY($2)";
-    sqlx::query(query)
-        .bind(job_id)
-        .bind(locations)
-        .execute(executor)
-        .await?;
-    Ok(())
+/// Registry API
+impl MetadataDb {
+    pub async fn register_dataset(&self, registry: Registry) -> Result<(), Error> {
+        let mut tx = self.pool.begin().await?;
+        insert_dataset_to_registry(&mut *tx, registry).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn dataset_exists(&self, dataset_name: &str, version: &str) -> Result<bool, Error> {
+        let sql = "
+            SELECT COUNT(*) FROM registry 
+            WHERE dataset = $1 AND version = $2
+        ";
+        let count: i64 = sqlx::query_scalar(sql)
+            .bind(dataset_name)
+            .bind(version)
+            .fetch_one(&*self.pool)
+            .await?;
+        Ok(count > 0)
+    }
+
+    pub async fn get_manifest(
+        &self,
+        dataset: &str,
+        version: &str,
+    ) -> Result<Option<String>, Error> {
+        let sql = "
+            SELECT manifest FROM registry 
+            WHERE dataset = $1 AND version = $2
+        ";
+        let result = sqlx::query_scalar(sql)
+            .bind(dataset)
+            .bind(version)
+            .fetch_optional(&*self.pool)
+            .await?;
+        Ok(result)
+    }
+
+    #[instrument(skip(self), err)]
+    pub async fn get_latest_dataset_version(
+        &self,
+        dataset_name: &str,
+    ) -> Result<Option<String>, Error> {
+        let sql = "
+            SELECT version FROM registry 
+            WHERE dataset = $1
+            ORDER BY version DESC
+            LIMIT 1
+        ";
+
+        let version: Option<String> = sqlx::query_scalar(sql)
+            .bind(&dataset_name)
+            .fetch_optional(&*self.pool)
+            .await?;
+        match version {
+            Some(version) => Ok(Some(format!("{}__{}", dataset_name, version))),
+            None => Ok(None),
+        }
+    }
+
+    #[instrument(skip(self), err)]
+    pub async fn get_dataset(
+        &self,
+        dataset_name: &str,
+        version: &str,
+    ) -> Result<Option<String>, Error> {
+        let sql = "
+            SELECT manifest FROM registry 
+            WHERE dataset = $1 AND version = $2
+            LIMIT 1
+        ";
+
+        let dataset: Option<String> = sqlx::query_scalar(sql)
+            .bind(&dataset_name)
+            .bind(&version)
+            .fetch_optional(&*self.pool)
+            .await?;
+        match dataset {
+            Some(dataset) => Ok(Some(dataset.trim_end_matches(".json").to_string())),
+            None => Ok(None),
+        }
+    }
+
+    pub async fn get_registry_info(
+        &self,
+        dataset_name: &str,
+        version: &str,
+    ) -> Result<Registry, sqlx::Error> {
+        let sql = "SELECT owner, dataset, version, manifest FROM registry WHERE dataset = $1 AND version = $2";
+        let dataset = sqlx::query_as(sql)
+            .bind(&dataset_name)
+            .bind(&version)
+            .fetch_one(&*self.pool)
+            .await?;
+        Ok(dataset)
+    }
 }

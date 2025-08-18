@@ -1,5 +1,6 @@
-import { Data, Effect } from "effect"
-import * as Api from "./Api.ts"
+import * as Data from "effect/Data"
+import * as Effect from "effect/Effect"
+import * as Admin from "./api/Admin.ts"
 import type * as Model from "./Model.ts"
 
 export class ManifestDeployerError extends Data.TaggedError("ManifestDeployerError")<{
@@ -10,13 +11,12 @@ export class ManifestDeployerError extends Data.TaggedError("ManifestDeployerErr
 
 export class ManifestDeployer extends Effect.Service<ManifestDeployer>()("Nozzle/ManifestDeployer", {
   effect: Effect.gen(function*() {
-    const client = yield* Api.Admin
+    const client = yield* Admin.Admin
     const deploy = (manifest: Model.DatasetManifest) =>
       Effect.gen(function*() {
-        const result = yield* client.deploy(manifest).pipe(Effect.catchTags({
-          AdminError: (cause) =>
-            new ManifestDeployerError({ cause, manifest: manifest.name, message: "Failed to deploy manifest" }),
-        }))
+        const result = yield* client.deployDataset(manifest).pipe(Effect.catchAll((cause) =>
+          new ManifestDeployerError({ cause, manifest: manifest.name, message: "Failed to deploy manifest" })
+        ))
 
         return result
       })

@@ -1,11 +1,12 @@
 pub mod job;
 pub mod metrics;
 
-use std::sync::Arc;
+use std::{str::FromStr, sync::Arc};
 
 use common::{
     BoxError, QueryContext,
     catalog::physical::{Catalog, PhysicalTable},
+    manifest::Version,
     query_context::QueryEnv,
 };
 use dataset_store::DatasetStore;
@@ -15,6 +16,7 @@ use metadata_db::{MetadataDb, TableId};
 
 pub async fn dump_check(
     dataset_name: &str,
+    dataset_version: Option<&str>,
     dataset_store: &Arc<DatasetStore>,
     metadata_db: Arc<MetadataDb>,
     env: &QueryEnv,
@@ -23,15 +25,24 @@ pub async fn dump_check(
     start: u64,
     end_block: u64,
 ) -> Result<(), BoxError> {
-    let dataset = dataset_store.load_dataset(&dataset_name).await?;
+    let dataset_version = match dataset_version {
+        Some(version) => Some(Version::from_str(version)?),
+        None => None,
+    };
+    let dataset = dataset_store
+        .load_dataset(&dataset_name, dataset_version.as_ref())
+        .await?;
     let client = dataset_store.load_client(&dataset_name).await?;
     let total_blocks = end_block - start + 1;
     let mut tables = Vec::with_capacity(dataset.tables.len());
-
+    let dataset_version = match dataset.kind.as_str() {
+        "manifest" => dataset.dataset_version(),
+        _ => None,
+    };
     for table in Arc::new(dataset.clone()).resolved_tables() {
         let table_id = TableId {
             dataset: dataset_name,
-            dataset_version: None,
+            dataset_version: dataset_version.as_deref(),
             table: &table.name(),
         };
         let (url, location_id) = metadata_db

@@ -18,3 +18,4 @@ prost.workspace = true
 thiserror.workspace = true
 tonic.workspace = true
 axum.workspace = true
+tracing.workspace = true

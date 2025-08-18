@@ -17,6 +17,7 @@ use futures::{
 use metadata_db::MetadataDb;
 use server::service::Service;
 use tonic::transport::{Server, server::TcpIncoming};
+use tracing::instrument;
 
 #[derive(Debug, Clone, Copy)]
 pub struct BoundAddrs {
@@ -172,6 +173,7 @@ async fn run_jsonl_server(
     http_common::serve_at(addr, app).await
 }
 
+#[instrument(skip(service))]
 async fn handle_jsonl_request(
     axum::extract::State(service): axum::extract::State<Service>,
     request: String,

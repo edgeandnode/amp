@@ -24,6 +24,7 @@ pub async fn dataset(dataset_cfg: common::DatasetValue) -> Result<Dataset, Error
     Ok(Dataset {
         kind: dataset_def.kind,
         name: dataset_def.name,
+        version: None,
         tables: tables.tables,
         functions: vec![],
         network: dataset_def.network,

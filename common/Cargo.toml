@@ -11,6 +11,7 @@ atty.workspace = true
 bytes.workspace = true
 datafusion-proto.workspace = true
 datafusion.workspace = true
+datafusion-tracing.workspace = true
 figment.workspace = true
 fs-err.workspace = true
 futures.workspace = true
@@ -23,7 +24,6 @@ stable-hash = { git = "https://github.com/graphprotocol/stable-hash" }
 thiserror.workspace = true
 tokio.workspace = true
 toml.workspace = true
-tracing-subscriber.workspace = true
 url.workspace = true
 uuid.workspace = true
 semver.workspace = true
@@ -43,6 +43,5 @@ governor.workspace = true
 tower.workspace = true
 
 [dev-dependencies]
-cargo_metadata = "0.19.0"
 chrono.workspace = true
 rand = "0.9.0"

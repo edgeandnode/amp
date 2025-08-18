@@ -87,8 +87,9 @@ use std::{
 };
 
 use common::{
-    BlockNum, BlockStreamer, BoxError, catalog::physical::PhysicalTable,
-    metadata::segments::merge_ranges, query_context::QueryContext,
+    BlockNum, BlockStreamer, BoxError,
+    catalog::physical::{Catalog, PhysicalTable},
+    metadata::segments::merge_ranges,
 };
 use futures::TryStreamExt as _;
 use metadata_db::MetadataDb;
@@ -106,7 +107,7 @@ use crate::parquet_writer::{ParquetWriterProperties, RawDatasetWriter};
 pub async fn dump(
     ctx: Ctx,
     n_jobs: u16,
-    query_ctx: Arc<QueryContext>,
+    catalog: Arc<Catalog>,
     dataset_name: &str,
     tables: &[Arc<PhysicalTable>],
     partition_size: u64,
@@ -169,7 +170,7 @@ pub async fn dump(
         .into_iter()
         .enumerate()
         .map(|(i, ranges)| DumpPartition {
-            query_ctx: query_ctx.clone(),
+            catalog: catalog.clone(),
             metadata_db: ctx.metadata_db.clone(),
             block_streamer: client.clone(),
             ranges,
@@ -264,8 +265,8 @@ struct DumpPartition<S: BlockStreamer> {
     block_streamer: S,
     /// The metadata database
     metadata_db: Arc<MetadataDb>,
-    /// The query context
-    query_ctx: Arc<QueryContext>,
+    /// The tables to write to
+    catalog: Arc<Catalog>,
     /// The block ranges to scan
     ranges: Vec<RangeInclusive<BlockNum>>,
     /// The Parquet writer properties
@@ -341,7 +342,7 @@ impl<S: BlockStreamer> DumpPartition<S> {
         }
 
         let mut writer = RawDatasetWriter::new(
-            self.query_ctx.clone(),
+            self.catalog.clone(),
             self.metadata_db.clone(),
             self.parquet_opts.clone(),
             self.partition_size,

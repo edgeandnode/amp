@@ -28,7 +28,9 @@ use figment::{
 };
 use fs_err as fs;
 use futures::{StreamExt as _, stream::TryStreamExt};
-use metadata_db::{KEEP_TEMP_DIRS, MetadataDb, WorkerNodeId, temp::TempMetadataDb};
+use metadata_db::{
+    DEFAULT_POOL_SIZE, KEEP_TEMP_DIRS, MetadataDb, WorkerNodeId, temp::TempMetadataDb,
+};
 use nozzle::{
     dump_cmd::{datasets_and_dependencies, dump},
     server::BoundAddrs,
@@ -111,7 +113,7 @@ impl TestEnv {
         temp: bool,
         anvil_url: Option<&str>,
     ) -> Result<Self, BoxError> {
-        let db = TempMetadataDb::new(*KEEP_TEMP_DIRS).await;
+        let db = TempMetadataDb::new(*KEEP_TEMP_DIRS, DEFAULT_POOL_SIZE).await;
         let mut figment = Figment::from(Json::string(&format!(
             r#"{{ "metadata_db_url": "{}" }}"#,
             db.url(),
@@ -311,7 +313,7 @@ pub(crate) async fn catalog_for_dataset(
     dataset_store: &Arc<DatasetStore>,
     metadata_db: Arc<MetadataDb>,
 ) -> Result<Catalog, BoxError> {
-    let dataset = dataset_store.load_dataset(dataset_name).await?;
+    let dataset = dataset_store.load_dataset(dataset_name, None).await?;
     let mut tables = Vec::new();
     for table in Arc::new(dataset.clone()).resolved_tables() {
         // Unwrap: we just dumped the dataset, so it must have an active physical table.
@@ -344,6 +346,7 @@ pub async fn check_blocks(
 
     dump_check::dump_check(
         dataset_name,
+        None,
         &test_env.dataset_store,
         test_env.metadata_db.clone(),
         &env,
@@ -594,7 +597,7 @@ pub async fn restore_blessed_dataset(
 ) -> Result<Vec<Arc<PhysicalTable>>, BoxError> {
     let config = load_test_config(None).await?;
     let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
-    let dataset = dataset_store.load_dataset(dataset).await?;
+    let dataset = dataset_store.load_dataset(dataset, None).await?;
     let dataset_name = dataset.name.clone();
     let data_store = config.data_store.clone();
     let mut tables = Vec::<Arc<PhysicalTable>>::new();

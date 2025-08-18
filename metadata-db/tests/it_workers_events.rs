@@ -9,9 +9,10 @@ async fn schedule_job_and_receive_notification() {
     //* Given
     let temp_db = PgTempDB::new();
 
-    let metadata_db = MetadataDb::connect(&temp_db.connection_uri())
-        .await
-        .expect("Failed to connect to metadata db");
+    let metadata_db =
+        MetadataDb::connect(&temp_db.connection_uri(), MetadataDb::default_pool_size())
+            .await
+            .expect("Failed to connect to metadata db");
 
     // Pre-register the worker
     let worker_id = "test-worker-events".parse().expect("Invalid worker ID");

@@ -11,13 +11,13 @@ pub(crate) async fn ui(blocks: u64) {
 }
 
 async fn log_ui(blocks: u64) {
-    while METRICS.blocks_read.get() < blocks as f64 {
+    while METRICS.blocks_read.get() < blocks {
         tokio::time::sleep(std::time::Duration::from_secs(10)).await;
         tracing::info!(
             "Progress: {:.2}%, Read {} blocks, {} arrow data",
-            METRICS.blocks_read.get() / blocks as f64 * 100.0,
+            METRICS.blocks_read.get() as f64 / blocks as f64 * 100.0,
             METRICS.blocks_read.get(),
-            human_bytes(METRICS.bytes_read.get())
+            human_bytes(METRICS.bytes_read.get() as f64)
         );
     }
 }
@@ -31,10 +31,16 @@ async fn nice_ui(blocks: u64) {
             .progress_chars("##-"),
     );
 
-    while METRICS.blocks_read.get() < blocks as f64 {
-        pb.set_position(METRICS.blocks_read.get() as u64);
-        pb.set_message(format!("{:>10}", human_bytes(METRICS.bytes_read.get())));
+    while METRICS.blocks_read.get() < blocks {
+        pb.set_position(METRICS.blocks_read.get());
+        pb.set_message(format!(
+            "{:>10}",
+            human_bytes(METRICS.bytes_read.get() as f64)
+        ));
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
-    pb.finish_with_message(format!("{:>10}", human_bytes(METRICS.bytes_read.get())));
+    pb.finish_with_message(format!(
+        "{:>10}",
+        human_bytes(METRICS.bytes_read.get() as f64)
+    ));
 }

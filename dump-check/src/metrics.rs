@@ -1,24 +1,13 @@
-use lazy_static::lazy_static;
-use prometheus::{Counter, register_counter};
+use std::sync::LazyLock;
 
-lazy_static! {
-    pub static ref METRICS: MetricsRegistry = MetricsRegistry::new();
-}
+use monitoring::telemetry::metrics;
 
 pub struct MetricsRegistry {
-    pub blocks_read: Counter,
-    pub bytes_read: Counter,
+    pub bytes_read: metrics::ReadableCounter,
+    pub blocks_read: metrics::ReadableCounter,
 }
 
-impl MetricsRegistry {
-    fn new() -> Self {
-        let blocks_read = register_counter!("blocks_read", "Number of blocks read from firehose")
-            .expect("failed to create blocks_read counter");
-        let bytes_read = register_counter!("bytes_read", "Number of bytes read from firehose")
-            .expect("failed to create bytes_read counter");
-        Self {
-            blocks_read,
-            bytes_read,
-        }
-    }
-}
+pub static METRICS: LazyLock<MetricsRegistry> = LazyLock::new(|| MetricsRegistry {
+    bytes_read: metrics::ReadableCounter::new("BYTES_READ", "Tracks bytes read from dataset"),
+    blocks_read: metrics::ReadableCounter::new("BLOCKS_READ", "Tracks blocks read from dataset"),
+});
