@@ -1867,7 +1867,6 @@ version = "0.1.0"
 dependencies = [
  "alloy",
  "async-trait",
- "atty",
  "axum 0.8.4",
  "backon",
  "bincode",
@@ -2891,7 +2890,6 @@ dependencies = [
 name = "dataset-store"
 version = "0.1.0"
 dependencies = [
- "alloy",
  "async-stream",
  "common",
  "datafusion",
@@ -3107,7 +3105,6 @@ dependencies = [
  "monitoring",
  "tokio",
  "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -3533,12 +3530,8 @@ dependencies = [
  "dataset-store",
  "evm-rpc-datasets",
  "firehose-datasets",
- "metadata-db",
- "serde",
  "serde_json",
  "substreams-datasets",
- "thiserror",
- "tracing",
 ]
 
 [[package]]
@@ -4527,7 +4520,6 @@ version = "0.1.0"
 dependencies = [
  "futures",
  "indoc",
- "object_store",
  "pgtemp",
  "serde",
  "serde_json",
@@ -4585,7 +4577,6 @@ version = "0.1.0"
 dependencies = [
  "atty",
  "cargo_metadata",
- "datafusion",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
@@ -4634,7 +4625,6 @@ dependencies = [
  "metadata-db",
  "monitoring",
  "registry-service",
- "serde",
  "serde_json",
  "server",
  "snmalloc-rs",
@@ -5717,7 +5707,6 @@ version = "0.1.0"
 dependencies = [
  "axum 0.8.4",
  "common",
- "datafusion",
  "dataset-store",
  "http-common",
  "metadata-db",
@@ -6910,7 +6899,6 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
- "sqlx",
  "substreams-datasets",
  "tempfile",
  "tokio",
