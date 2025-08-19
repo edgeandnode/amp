@@ -8,10 +8,7 @@ use super::{Location, LocationId};
 ///
 /// Returns a paginated list of locations ordered by ID in descending order (newest first).
 /// This function is used to fetch the initial page when no cursor is available.
-pub async fn list_locations_first_page<'c, E>(
-    exe: E,
-    limit: i64,
-) -> Result<Vec<Location>, sqlx::Error>
+pub async fn list_first_page<'c, E>(exe: E, limit: i64) -> Result<Vec<Location>, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
@@ -37,7 +34,7 @@ where
 /// Returns a paginated list of locations with IDs less than the provided cursor,
 /// ordered by ID in descending order (newest first). This implements cursor-based
 /// pagination for efficient traversal of large location lists.
-pub async fn list_locations_next_page<'c, E>(
+pub async fn list_next_page<'c, E>(
     exe: E,
     limit: i64,
     last_location_id: LocationId,
