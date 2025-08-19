@@ -114,7 +114,7 @@
 //! - **Incremental Updates**: Avoids reprocessing already-computed data by maintaining
 //!   precise tracking of processed block ranges per table.
 
-use std::{ops::RangeInclusive, sync::Arc};
+use std::{collections::BTreeSet, ops::RangeInclusive, sync::Arc};
 
 use common::{
     BlockNum, BoxError,
@@ -123,11 +123,9 @@ use common::{
     plan_visitors::is_incremental,
     query_context::{QueryContext, QueryEnv},
 };
-use datafusion::sql::parser::Statement;
-use datafusion::sql::resolve::resolve_table_references;
+use datafusion::sql::{parser::Statement, resolve::resolve_table_references};
 use dataset_store::{DatasetStore, resolve_blocks_table, sql_datasets::SqlDataset};
 use futures::StreamExt as _;
-use std::collections::BTreeSet;
 use tracing::instrument;
 
 use super::{Ctx, block_ranges, tasks::FailFastJoinSet};

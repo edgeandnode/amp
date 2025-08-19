@@ -11,7 +11,7 @@ use crate::{TableId, workers::jobs::JobId};
 mod location_id;
 
 /// Insert a location into the database and return its ID (idempotent operation)
-#[tracing::instrument(skip(exe), err)]
+#[allow(dead_code)]
 pub async fn insert<'c, E>(
     exe: E,
     table: TableId<'_>,
