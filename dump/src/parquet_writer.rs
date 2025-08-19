@@ -31,7 +31,7 @@ impl RawDatasetWriter {
     /// Expects `dataset_ctx` to contain a single dataset and `block_ranges_by_table` to contain
     /// one entry per table in that dataset.
     pub fn new(
-        catalog: Arc<Catalog>,
+        catalog: Catalog,
         metadata_db: Arc<MetadataDb>,
         opts: ParquetWriterProperties,
         partition_size: u64,

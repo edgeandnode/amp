@@ -4,7 +4,7 @@ pub mod metrics;
 use std::{str::FromStr, sync::Arc};
 
 use common::{
-    BoxError, QueryContext,
+    BoxError, LogicalCatalog, QueryContext,
     catalog::physical::{Catalog, PhysicalTable},
     manifest::Version,
     query_context::QueryEnv,
@@ -34,7 +34,7 @@ pub async fn dump_check(
         .await?;
     let client = dataset_store.load_client(&dataset_name).await?;
     let total_blocks = end_block - start + 1;
-    let mut tables = Vec::with_capacity(dataset.tables.len());
+    let mut tables: Vec<Arc<PhysicalTable>> = Vec::with_capacity(dataset.tables.len());
     let dataset_version = match dataset.kind.as_str() {
         "manifest" => dataset.dataset_version(),
         _ => None,
@@ -52,7 +52,8 @@ pub async fn dump_check(
         let table = PhysicalTable::new(table.clone(), url, location_id, metadata_db.clone())?;
         tables.push(table.into());
     }
-    let catalog = Catalog::new(tables, vec![]);
+    let logical = LogicalCatalog::from_tables(tables.iter().map(|t| t.table()));
+    let catalog = Catalog::new(tables, logical);
     let ctx = Arc::new(QueryContext::for_catalog(catalog, env.clone())?);
 
     let jobs = {

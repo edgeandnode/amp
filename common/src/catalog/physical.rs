@@ -25,7 +25,7 @@ use url::Url;
 use uuid::Uuid;
 
 use crate::{
-    BlockNum, BoxError, Dataset, ResolvedTable,
+    BlockNum, BoxError, Dataset, LogicalCatalog, ResolvedTable,
     catalog::reader::NozzleReaderFactory,
     metadata::{
         FileMetadata, nozzle_metadata_from_parquet_file,
@@ -39,28 +39,19 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct Catalog {
     tables: Vec<Arc<PhysicalTable>>,
-    /// User-defined functions (UDFs) specific to this catalog.
-    udfs: Vec<ScalarUDF>,
+    logical: LogicalCatalog,
 }
 
 impl Catalog {
     pub fn empty() -> Self {
         Catalog {
             tables: vec![],
-            udfs: vec![],
+            logical: LogicalCatalog::empty(),
         }
     }
 
-    pub fn new(tables: Vec<Arc<PhysicalTable>>, udfs: Vec<ScalarUDF>) -> Self {
-        Catalog { tables, udfs }
-    }
-
-    pub fn add_table(&mut self, table: Arc<PhysicalTable>) {
-        self.tables.push(table);
-    }
-
-    pub fn add_udf(&mut self, udf: ScalarUDF) {
-        self.udfs.push(udf);
+    pub fn new(tables: Vec<Arc<PhysicalTable>>, logical: LogicalCatalog) -> Self {
+        Catalog { tables, logical }
     }
 
     pub fn tables(&self) -> &[Arc<PhysicalTable>] {
@@ -68,7 +59,11 @@ impl Catalog {
     }
 
     pub fn udfs(&self) -> &[ScalarUDF] {
-        &self.udfs
+        &self.logical.udfs
+    }
+
+    pub fn logical(&self) -> &LogicalCatalog {
+        &self.logical
     }
 
     /// Returns the earliest block number across all tables in this catalog.

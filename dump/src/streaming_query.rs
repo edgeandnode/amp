@@ -7,13 +7,14 @@ use common::{
     catalog::physical::{Catalog, PhysicalTable},
     metadata::segments::{BlockRange, Chain, Watermark},
     notification_multiplexer::NotificationMultiplexerHandle,
-    plan_visitors::{order_by_block_num, propagate_block_num},
-    query_context::{NozzleSessionConfig, QueryContext, parse_sql},
+    query_context::{
+        DetachedLogicalPlan, NozzleSessionConfig, PlanningContext, QueryContext, QueryEnv,
+        parse_sql,
+    },
 };
 use datafusion::{
     common::cast::as_fixed_size_binary_array, error::DataFusionError,
-    execution::SendableRecordBatchStream, logical_expr::LogicalPlan,
-    physical_plan::stream::RecordBatchStreamAdapter,
+    execution::SendableRecordBatchStream, physical_plan::stream::RecordBatchStreamAdapter,
 };
 use dataset_store::{DatasetStore, resolve_blocks_table};
 use futures::{
@@ -144,9 +145,10 @@ impl StreamingQueryHandle {
 /// This follows a 'microbatch' model where it processes data in chunks based on a block range
 /// stream.
 pub struct StreamingQuery {
-    ctx: Arc<QueryContext>,
+    query_env: QueryEnv,
     dataset_store: Arc<DatasetStore>,
-    plan: LogicalPlan,
+    catalog: Catalog,
+    plan: DetachedLogicalPlan,
     start_block: BlockNum,
     end_block: Option<BlockNum>,
     table_updates: TableUpdates,
@@ -168,9 +170,10 @@ impl StreamingQuery {
     ///
     /// The query execution loop will run in its own task.
     pub async fn spawn(
-        ctx: Arc<QueryContext>,
+        query_env: QueryEnv,
+        catalog: Catalog,
         dataset_store: Arc<DatasetStore>,
-        plan: LogicalPlan,
+        plan: DetachedLogicalPlan,
         start_block: BlockNum,
         end_block: Option<BlockNum>,
         multiplexer_handle: &NotificationMultiplexerHandle,
@@ -193,20 +196,23 @@ impl StreamingQuery {
         // - Enforce `order by _block_num`.
         // - Run logical optimizations ahead of execution.
         let plan = {
-            let mut plan = propagate_block_num(plan)?;
-            plan = order_by_block_num(plan);
+            let mut plan = plan.propagate_block_num()?;
+            plan = plan.order_by_block_num();
+
+            let ctx = PlanningContext::new(catalog.logical().clone());
             let plan = ctx.optimize_plan(&plan).await?;
             plan
         };
 
-        let tables: Vec<Arc<PhysicalTable>> = ctx.catalog().tables().iter().cloned().collect();
+        let tables: Vec<Arc<PhysicalTable>> = catalog.tables().iter().cloned().collect();
         let network = tables.iter().map(|t| t.network()).next().unwrap();
         let src_datasets = tables.iter().map(|t| t.dataset().name.as_str()).collect();
         let blocks_table = resolve_blocks_table(&dataset_store, &src_datasets, network).await?;
-        let table_updates = TableUpdates::new(&ctx.catalog(), multiplexer_handle).await;
+        let table_updates = TableUpdates::new(&catalog, multiplexer_handle).await;
         let streaming_query = Self {
-            ctx,
+            query_env,
             dataset_store,
+            catalog,
             plan,
             tx,
             start_block,
@@ -248,10 +254,11 @@ impl StreamingQuery {
             tracing::debug!("execute range [{}-{}]", range.start(), range.end());
 
             // Start microbatch execution for this chunk
-            let mut stream = self
-                .ctx
+            let ctx = QueryContext::for_catalog(self.catalog.clone(), self.query_env.clone())?;
+            let attached_plan = self.plan.clone().attach_to(&ctx)?;
+            let mut stream = ctx
                 .execute_plan_for_range(
-                    self.plan.clone(),
+                    attached_plan,
                     range.start(),
                     range.end(),
                     self.preserve_block_num,
@@ -300,9 +307,11 @@ impl StreamingQuery {
                 "SELECT block_num, hash FROM {}",
                 self.blocks_table,
             ))?;
-            self.dataset_store
-                .ctx_for_sql(&query, self.ctx.env.clone())
-                .await?
+            let catalog = self
+                .dataset_store
+                .catalog_for_sql(&query, self.query_env.clone())
+                .await?;
+            QueryContext::for_catalog(catalog, self.query_env.clone())?
         };
 
         // The latest common watermark across the source tables.

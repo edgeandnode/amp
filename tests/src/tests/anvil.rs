@@ -76,8 +76,8 @@ impl AnvilTestContext {
         let sql = parse_sql(&format!("select * from {}.blocks", dataset)).unwrap();
         let env = self.env.config.make_query_env().unwrap();
         let dataset_store = self.dataset_store().await;
-        let ctx = dataset_store.ctx_for_sql(&sql, env).await.unwrap();
-        let tables = ctx.catalog().tables();
+        let catalog = dataset_store.catalog_for_sql(&sql, env).await.unwrap();
+        let tables = catalog.tables();
         let table = tables.iter().find(|t| t.table_name() == "blocks").unwrap();
         table_ranges(&table).await.unwrap()
     }

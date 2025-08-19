@@ -8,7 +8,7 @@ use std::{
 };
 
 use common::{
-    BoxError, QueryContext,
+    BoxError, LogicalCatalog, QueryContext,
     arrow::{
         self,
         array::{BinaryArray, FixedSizeBinaryArray, RecordBatch, StringArray},
@@ -197,7 +197,8 @@ impl SnapshotContext {
     pub async fn blessed(env: &TestEnv, dataset: &str) -> Result<Self, BoxError> {
         let metadata_db = &env.metadata_db;
         let tables = restore_blessed_dataset(dataset, metadata_db).await?;
-        let catalog = Catalog::new(tables, vec![]);
+        let logical = LogicalCatalog::from_tables(tables.iter().map(|t| t.table()));
+        let catalog = Catalog::new(tables, logical);
         let ctx: QueryContext = QueryContext::for_catalog(catalog, env.config.make_query_env()?)?;
         Ok(Self { ctx })
     }
@@ -314,7 +315,7 @@ pub(crate) async fn catalog_for_dataset(
     metadata_db: Arc<MetadataDb>,
 ) -> Result<Catalog, BoxError> {
     let dataset = dataset_store.load_dataset(dataset_name, None).await?;
-    let mut tables = Vec::new();
+    let mut tables: Vec<Arc<PhysicalTable>> = Vec::new();
     for table in Arc::new(dataset.clone()).resolved_tables() {
         // Unwrap: we just dumped the dataset, so it must have an active physical table.
         let physical_table = PhysicalTable::get_active(&table, metadata_db.clone())
@@ -322,7 +323,8 @@ pub(crate) async fn catalog_for_dataset(
             .unwrap();
         tables.push(physical_table.into());
     }
-    Ok(Catalog::new(tables, vec![]))
+    let logical = LogicalCatalog::from_tables(tables.iter().map(|t| t.table()));
+    Ok(Catalog::new(tables, logical))
 }
 
 pub async fn table_ranges(table: &PhysicalTable) -> Result<Vec<BlockRange>, BoxError> {

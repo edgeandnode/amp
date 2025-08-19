@@ -11,7 +11,7 @@ use std::{
 use async_stream::stream;
 use common::{
     BlockNum, BlockStreamer, BoxError, DataTypeJsonSchema, Dataset, DatasetValue, LogicalCatalog,
-    QueryContext, RawDatasetRows, SPECIAL_BLOCK_NUM, Store,
+    RawDatasetRows, SPECIAL_BLOCK_NUM, Store,
     catalog::physical::{Catalog, PhysicalTable},
     config::Config,
     evm::{self, udfs::EthCall},
@@ -581,18 +581,16 @@ impl DatasetStore {
     /// 2. Assume that in `foo.bar`, `foo` is a dataset name.
     /// 3. Look up the dataset names in the configured dataset store.
     /// 4. Collect the datasets into a catalog.
-    pub async fn ctx_for_sql(
+    pub async fn catalog_for_sql(
         self: &Arc<Self>,
         query: &parser::Statement,
         env: QueryEnv,
-    ) -> Result<QueryContext, DatasetError> {
+    ) -> Result<Catalog, DatasetError> {
         let (tables, _) = resolve_table_references(query, true).map_err(DatasetError::unknown)?;
         let function_names = all_function_names(query).map_err(DatasetError::unknown)?;
 
-        let catalog = self
-            .load_physical_catalog(tables, function_names, &env)
-            .await?;
-        QueryContext::for_catalog(catalog, env).map_err(DatasetError::unknown)
+        self.load_physical_catalog(tables, function_names, &env)
+            .await
     }
 
     /// Looks up the datasets for the given table references and loads them into a catalog.
@@ -607,7 +605,7 @@ impl DatasetStore {
             .await?;
 
         let mut tables = Vec::new();
-        for table in logical_catalog.tables {
+        for table in &logical_catalog.tables {
             let physical_table = PhysicalTable::get_active(&table, self.metadata_db.clone())
                 .await
                 .map_err(DatasetError::unknown)?
@@ -617,10 +615,10 @@ impl DatasetStore {
                 )))?;
             tables.push(physical_table.into());
         }
-        Ok(Catalog::new(tables, logical_catalog.udfs))
+        Ok(Catalog::new(tables, logical_catalog))
     }
 
-    /// Similar to `ctx_for_sql`, but only for planning and not execution. This does not require a
+    /// Similar to `catalog_for_sql`, but only for planning and not execution. This does not require a
     /// physical location to exist for the dataset views.
     pub async fn planning_ctx_for_sql(
         self: Arc<Self>,

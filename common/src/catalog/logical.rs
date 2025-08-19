@@ -216,3 +216,19 @@ pub struct LogicalCatalog {
     /// UDFs specific to the datasets corresponding to the resolved tables.
     pub udfs: Vec<ScalarUDF>,
 }
+
+impl LogicalCatalog {
+    pub fn from_tables<'a>(tables: impl Iterator<Item = &'a ResolvedTable>) -> Self {
+        Self {
+            tables: tables.cloned().collect(),
+            udfs: Vec::new(),
+        }
+    }
+
+    pub fn empty() -> Self {
+        Self {
+            tables: Vec::new(),
+            udfs: Vec::new(),
+        }
+    }
+}
