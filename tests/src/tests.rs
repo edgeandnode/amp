@@ -161,6 +161,21 @@ async fn basic_function() -> Result<(), BoxError> {
 }
 
 #[tokio::test]
+async fn intra_deps() -> Result<(), BoxError> {
+    logging::init();
+
+    let test_env = TestEnv::temp("intra_deps").await.unwrap();
+    let mut client = TestClient::connect(&test_env).await.unwrap();
+
+    for step in load_test_steps("intra-deps.yaml").unwrap() {
+        step.run(&test_env, &mut client).await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn generate_manifest_evm_rpc_builtin() {
     logging::init();
 

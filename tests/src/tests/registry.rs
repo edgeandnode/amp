@@ -48,11 +48,43 @@ impl RegistryTestContext {
     "tables": {{
         "erc20_transfers": {{
             "input": {{
-                "sql": ""
+                "sql": "SELECT block_num, miner, hash, parent_hash FROM eth_firehose.blocks"
             }},
             "schema": {{
                 "arrow": {{
-                    "fields": []
+                    "fields": [
+                        {{
+                            "name": "_block_num",
+                            "type": "UInt64",
+                            "nullable": false
+                        }},
+                        {{
+                            "name": "block_num",
+                            "type": "UInt64",
+                            "nullable": false
+                        }},
+                        {{
+                            "name": "miner",
+                            "type": {{
+                                "FixedSizeBinary": 20
+                            }},
+                            "nullable": false
+                        }},
+                        {{
+                            "name": "hash",
+                            "type": {{
+                                "FixedSizeBinary": 32
+                            }},
+                            "nullable": false
+                        }},
+                        {{
+                            "name": "parent_hash",
+                            "type": {{
+                                "FixedSizeBinary": 32
+                            }},
+                            "nullable": false
+                        }}
+                    ]
                 }}
             }},
             "network": "mainnet"

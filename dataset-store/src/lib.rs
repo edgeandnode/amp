@@ -2,7 +2,7 @@ pub mod sql_datasets;
 
 use core::fmt;
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeSet,
     num::NonZeroU32,
     str::FromStr,
     sync::{Arc, RwLock},
@@ -15,8 +15,8 @@ use common::{
     catalog::physical::{Catalog, PhysicalTable},
     config::Config,
     evm::{self, udfs::EthCall},
-    manifest::{Manifest, TableInput, Version},
-    query_context::{self, PlanningContext, QueryEnv, parse_sql},
+    manifest::{self, Manifest, Version},
+    query_context::{self, PlanningContext, QueryEnv},
     sql_visitors::all_function_names,
     store::StoreError,
 };
@@ -384,13 +384,8 @@ impl DatasetStore {
         let raw_manifest = self.dataset_defs_store().get_string(filename).await?;
         let manifest: Manifest =
             serde_json::from_str(&raw_manifest).map_err(Error::ManifestError)?;
-        let dataset = Dataset::from(manifest.clone());
-        let mut queries = BTreeMap::new();
-        for table in manifest.tables {
-            let TableInput::View(query) = table.1.input;
-            let query = parse_sql(&query.sql).map_err(Error::SqlParseError)?;
-            queries.insert(table.0, query);
-        }
+        let queries = manifest.queries().map_err(Error::SqlParseError)?;
+        let dataset = manifest::dataset(manifest).map_err(Error::Unknown)?;
         Ok(SqlDataset { dataset, queries })
     }
 
@@ -430,7 +425,7 @@ impl DatasetStore {
             }
             DatasetKind::Manifest => {
                 let manifest = raw_dataset.to_manifest()?;
-                let dataset = Dataset::from(manifest);
+                let dataset = manifest::dataset(manifest).map_err(|e| Error::Unknown(e))?;
                 (dataset, None)
             }
         };
@@ -647,7 +642,8 @@ impl DatasetStore {
         function_names: impl IntoIterator<Item = String>,
         isolate_pool: &IsolatePool,
     ) -> Result<LogicalCatalog, DatasetError> {
-        let mut dataset_names = datasets_from_table_refs(table_refs.into_iter())?;
+        let table_refs: Vec<_> = table_refs.into_iter().collect();
+        let mut dataset_names = datasets_from_table_refs(table_refs.iter().cloned())?;
         for func_name in function_names {
             match func_name.split('.').collect::<Vec<_>>().as_slice() {
                 // Simple name assumed to be Datafusion built-in function.
@@ -679,10 +675,20 @@ impl DatasetStore {
                 udfs.push(udf.into());
             }
 
-            for mut table in Arc::new(dataset).resolved_tables() {
-                let table_ref = TableReference::partial(dataset_name.clone(), table.name());
-                table.update_table_ref(table_ref);
-                resolved_tables.push(table);
+            for table in Arc::new(dataset).resolved_tables() {
+                // Only include tables that are actually referenced in the query
+                let is_referenced = table_refs.iter().any(|table_ref| {
+                    match (table_ref.schema(), table_ref.table()) {
+                        (Some(schema), table_name) => {
+                            schema == &dataset_name && table_name == table.name()
+                        }
+                        _ => false, // Unqualified table
+                    }
+                });
+
+                if is_referenced {
+                    resolved_tables.push(table);
+                }
             }
         }
         Ok(LogicalCatalog {
