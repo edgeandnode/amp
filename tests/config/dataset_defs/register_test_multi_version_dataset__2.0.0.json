@@ -1,0 +1,1 @@
+{"name":"register_test_multi_version_dataset","network":"mainnet","version":"2.0.0","kind":"manifest","dependencies":{"raw_mainnet":{"owner":"test_owner","name":"base_dataset","version":"^0.0.1"}},"tables":{"erc20_transfers":{"input":{"sql":""},"schema":{"arrow":{"fields":[]}},"network":"mainnet"}},"functions":{}}

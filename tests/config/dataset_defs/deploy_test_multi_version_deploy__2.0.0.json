@@ -1,0 +1,1 @@
+{"name":"deploy_test_multi_version_deploy","network":"mainnet","version":"2.0.0","kind":"manifest","dependencies":{"raw_mainnet":{"owner":"test_owner","name":"base_dataset","version":"^0.0.1"}},"tables":{"test_table":{"input":{"sql":"SELECT * FROM base_dataset.blocks LIMIT 10"},"schema":{"arrow":{"fields":[]}},"network":"mainnet"}},"functions":{}}
