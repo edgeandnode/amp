@@ -17,7 +17,7 @@ async fn list_locations_first_page_when_empty() {
         .expect("Failed to run migrations");
 
     //* When
-    let locations = locations::list_locations_first_page(&mut *conn, 10)
+    let locations = locations::list_first_page(&mut *conn, 10)
         .await
         .expect("Failed to list locations");
 
@@ -61,7 +61,7 @@ async fn list_locations_first_page_respects_limit() {
     }
 
     //* When
-    let locations = locations::list_locations_first_page(&mut *conn, 3)
+    let locations = locations::list_first_page(&mut *conn, 3)
         .await
         .expect("Failed to list locations");
 
@@ -115,7 +115,7 @@ async fn list_locations_next_page_uses_cursor() {
     }
 
     // Get the first page to establish cursor
-    let first_page = locations::list_locations_first_page(&mut *conn, 3)
+    let first_page = locations::list_first_page(&mut *conn, 3)
         .await
         .expect("Failed to list first page");
     let cursor = first_page
@@ -124,7 +124,7 @@ async fn list_locations_next_page_uses_cursor() {
         .id;
 
     //* When
-    let second_page = locations::list_locations_next_page(&mut *conn, 3, cursor)
+    let second_page = locations::list_next_page(&mut *conn, 3, cursor)
         .await
         .expect("Failed to list second page");
 

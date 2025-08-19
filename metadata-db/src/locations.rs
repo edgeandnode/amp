@@ -5,9 +5,9 @@ use url::Url;
 
 pub use self::{
     location_id::{LocationId, LocationIdFromStrError, LocationIdI64ConvError, LocationIdU64Error},
-    pagination::{list_locations_first_page, list_locations_next_page},
+    pagination::{list_first_page, list_next_page},
 };
-use crate::{TableId, workers::jobs::JobId};
+use crate::{TableId, workers::job_id::JobId};
 
 mod location_id;
 mod pagination;

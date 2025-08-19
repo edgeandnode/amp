@@ -6,7 +6,8 @@ use crate::{
     conn::DbConn,
     workers::{
         heartbeat,
-        jobs::{self, JobId, JobStatus},
+        job_id::JobId,
+        jobs::{self, JobStatus},
     },
 };
 
@@ -53,12 +54,12 @@ async fn register_job_creates_with_scheduled_status() {
     let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize job desc");
 
     //* When
-    let job_id = jobs::register_job(&mut *conn, &worker_id, &job_desc_str)
+    let job_id = jobs::register(&mut *conn, &worker_id, &job_desc_str)
         .await
         .expect("Failed to schedule job");
 
     //* Then
-    let job = jobs::get_job(&mut *conn, &job_id)
+    let job = jobs::get_by_id(&mut *conn, &job_id)
         .await
         .expect("Failed to get job")
         .expect("Job not found");
@@ -91,26 +92,26 @@ async fn get_jobs_for_node_filters_by_node_id() {
     // Register jobs
     let job_desc1 = serde_json::json!({ "job": 1 });
     let job_desc_str1 = serde_json::to_string(&job_desc1).expect("Failed to serialize");
-    let job_id1 = jobs::register_job(&mut *conn, &worker_id_main, &job_desc_str1)
+    let job_id1 = jobs::register(&mut *conn, &worker_id_main, &job_desc_str1)
         .await
         .expect("Failed to register job 1");
 
     let job_desc2 = serde_json::json!({ "job": 2 });
     let job_desc_str2 = serde_json::to_string(&job_desc2).expect("Failed to serialize");
-    let job_id2 = jobs::register_job(&mut *conn, &worker_id_main, &job_desc_str2)
+    let job_id2 = jobs::register(&mut *conn, &worker_id_main, &job_desc_str2)
         .await
         .expect("Failed to register job 2");
 
     // Register a job for a different worker to ensure it's not retrieved
     let job_desc_other = serde_json::json!({ "job": "other" });
     let job_desc_str_other = serde_json::to_string(&job_desc_other).expect("Failed to serialize");
-    let job_id_other = jobs::register_job(&mut *conn, &worker_id_other, &job_desc_str_other)
+    let job_id_other = jobs::register(&mut *conn, &worker_id_other, &job_desc_str_other)
         .await
         .expect("Failed to register job for other worker");
 
     //* When
     let jobs_list =
-        jobs::get_jobs_for_node_with_statuses(&mut *conn, &worker_id_main, [JobStatus::Scheduled])
+        jobs::get_by_node_id_and_statuses(&mut *conn, &worker_id_main, [JobStatus::Scheduled])
             .await
             .expect("Failed to get jobs for node");
 
@@ -152,11 +153,11 @@ async fn get_jobs_for_node_filters_by_status() {
     let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
 
     // Active jobs
-    let job_id_scheduled = jobs::register_job(&mut *db, &worker_id, &job_desc_str)
+    let job_id_scheduled = jobs::register(&mut *db, &worker_id, &job_desc_str)
         .await
         .expect("Failed to register job_id_scheduled");
 
-    let job_id_running = jobs::register_job(&mut *db, &worker_id, &job_desc_str)
+    let job_id_running = jobs::register(&mut *db, &worker_id, &job_desc_str)
         .await
         .expect("Failed to register job_id_running");
     update_job_status(&mut *db, &job_id_running, JobStatus::Running)
@@ -164,28 +165,28 @@ async fn get_jobs_for_node_filters_by_status() {
         .expect("Failed to update job_id_running to Running");
 
     // Terminal state jobs (should not be retrieved)
-    let job_id_completed = jobs::register_job(&mut *db, &worker_id, &job_desc_str)
+    let job_id_completed = jobs::register(&mut *db, &worker_id, &job_desc_str)
         .await
         .expect("Failed to register job_id_completed");
     update_job_status(&mut *db, &job_id_completed, JobStatus::Completed)
         .await
         .expect("Failed to update job_id_completed to Completed");
 
-    let job_id_failed = jobs::register_job(&mut *db, &worker_id, &job_desc_str)
+    let job_id_failed = jobs::register(&mut *db, &worker_id, &job_desc_str)
         .await
         .expect("Failed to schedule job_id_failed");
     update_job_status(&mut *db, &job_id_failed, JobStatus::Failed)
         .await
         .expect("Failed to update job_id_failed to Failed");
 
-    let job_id_stop_requested = jobs::register_job(&mut *db, &worker_id, &job_desc_str)
+    let job_id_stop_requested = jobs::register(&mut *db, &worker_id, &job_desc_str)
         .await
         .expect("Failed to register job_id_stop_requested");
     update_job_status(&mut *db, &job_id_stop_requested, JobStatus::StopRequested)
         .await
         .expect("Failed to update job_id_stop_requested to StopRequested");
 
-    let job_id_stopped = jobs::register_job(&mut *db, &worker_id, &job_desc_str)
+    let job_id_stopped = jobs::register(&mut *db, &worker_id, &job_desc_str)
         .await
         .expect("Failed to register job_id_stopped");
     update_job_status(&mut *db, &job_id_stopped, JobStatus::Stopped)
@@ -193,7 +194,7 @@ async fn get_jobs_for_node_filters_by_status() {
         .expect("Failed to update job_id_stopped to Stopped");
 
     //* When
-    let active_jobs = jobs::get_jobs_for_node_with_statuses(
+    let active_jobs = jobs::get_by_node_id_and_statuses(
         &mut *db,
         &worker_id,
         [
@@ -248,12 +249,12 @@ async fn get_job_by_id_returns_job() {
     });
     let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
 
-    let job_id = jobs::register_job(&mut *conn, &worker_id, &job_desc_str)
+    let job_id = jobs::register(&mut *conn, &worker_id, &job_desc_str)
         .await
         .expect("Failed to register job");
 
     //* When
-    let job = jobs::get_job(&mut *conn, &job_id)
+    let job = jobs::get_by_id(&mut *conn, &job_id)
         .await
         .expect("Failed to get job")
         .expect("Job not found");
@@ -287,12 +288,12 @@ async fn get_job_with_details_includes_timestamps() {
     });
     let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
 
-    let job_id = jobs::register_job(&mut *conn, &worker_id, &job_desc_str)
+    let job_id = jobs::register(&mut *conn, &worker_id, &job_desc_str)
         .await
         .expect("Failed to register job");
 
     //* When
-    let job_details = jobs::get_job_with_details(&mut *conn, &job_id)
+    let job_details = jobs::get_by_id_with_details(&mut *conn, &job_id)
         .await
         .expect("Failed to get job with details")
         .expect("Job not found");
@@ -317,7 +318,7 @@ async fn list_jobs_first_page_when_empty() {
         .expect("Failed to run migrations");
 
     //* When
-    let jobs = jobs::list_jobs_first_page(&mut *conn, 10)
+    let jobs = jobs::list_first_page(&mut *conn, 10)
         .await
         .expect("Failed to list jobs");
 
@@ -352,7 +353,7 @@ async fn list_jobs_first_page_respects_limit() {
         });
         let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
 
-        let job_id = jobs::register_job(&mut *conn, &worker_id, &job_desc_str)
+        let job_id = jobs::register(&mut *conn, &worker_id, &job_desc_str)
             .await
             .expect("Failed to register job");
         job_ids.push(job_id);
@@ -362,7 +363,7 @@ async fn list_jobs_first_page_respects_limit() {
     }
 
     //* When
-    let jobs = jobs::list_jobs_first_page(&mut *conn, 3)
+    let jobs = jobs::list_first_page(&mut *conn, 3)
         .await
         .expect("Failed to list jobs");
 
@@ -403,7 +404,7 @@ async fn list_jobs_next_page_uses_cursor() {
         });
         let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
 
-        let job_id = jobs::register_job(&mut *conn, &worker_id, &job_desc_str)
+        let job_id = jobs::register(&mut *conn, &worker_id, &job_desc_str)
             .await
             .expect("Failed to register job");
         all_job_ids.push(job_id);
@@ -413,7 +414,7 @@ async fn list_jobs_next_page_uses_cursor() {
     }
 
     // Get the first page to establish cursor
-    let first_page = jobs::list_jobs_first_page(&mut *conn, 3)
+    let first_page = jobs::list_first_page(&mut *conn, 3)
         .await
         .expect("Failed to list first page");
     let cursor = first_page
@@ -422,7 +423,7 @@ async fn list_jobs_next_page_uses_cursor() {
         .id;
 
     //* When
-    let second_page = jobs::list_jobs_next_page(&mut *conn, 3, cursor)
+    let second_page = jobs::list_next_page(&mut *conn, 3, cursor)
         .await
         .expect("Failed to list second page");
 
