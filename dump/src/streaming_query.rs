@@ -81,15 +81,17 @@ impl TableUpdates {
 ///
 /// Completion points do not necessarily follow increments of 1, as the query progresses in batches.
 pub enum QueryMessage {
+    MicrobatchStart(BlockRange),
     Data(RecordBatch),
-    Completed(BlockRange),
+    MicrobatchEnd(BlockRange),
 }
 
 impl QueryMessage {
     fn as_data(self) -> Option<RecordBatch> {
         match self {
+            QueryMessage::MicrobatchStart(_) => None,
             QueryMessage::Data(data) => Some(data),
-            QueryMessage::Completed(_) => None,
+            QueryMessage::MicrobatchEnd(_) => None,
         }
     }
 }
@@ -266,6 +268,12 @@ impl StreamingQuery {
                 )
                 .await?;
 
+            // Send start message for this microbatch
+            let _ = self
+                .tx
+                .send(QueryMessage::MicrobatchStart(range.clone()))
+                .await;
+
             // Drain the microbatch completely
             while let Some(item) = stream.next().await {
                 let item = item?;
@@ -275,8 +283,11 @@ impl StreamingQuery {
                 let _ = self.tx.send(QueryMessage::Data(item)).await;
             }
 
-            // Send completion message for this chunk
-            let _ = self.tx.send(QueryMessage::Completed(range.clone())).await;
+            // Send end message for this microbatch
+            let _ = self
+                .tx
+                .send(QueryMessage::MicrobatchEnd(range.clone()))
+                .await;
 
             if Some(range.end()) == self.end_block {
                 // If we reached the end block, we are done
