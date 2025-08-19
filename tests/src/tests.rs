@@ -162,7 +162,7 @@ async fn basic_function() -> Result<(), BoxError> {
 
 #[tokio::test]
 async fn intra_deps() -> Result<(), BoxError> {
-    tracing_helpers::register_logger();
+    logging::init();
 
     let test_env = TestEnv::temp("intra_deps").await.unwrap();
     let mut client = TestClient::connect(&test_env).await.unwrap();

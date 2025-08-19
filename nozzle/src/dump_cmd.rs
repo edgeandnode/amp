@@ -6,8 +6,12 @@ use std::{
 };
 
 use common::{
-    BoxError, Store, catalog::physical::PhysicalTable, config::Config, manifest,
-    notification_multiplexer, utils::dfs,
+    BoxError, Store,
+    catalog::physical::PhysicalTable,
+    config::Config,
+    manifest::{self, Version},
+    notification_multiplexer,
+    utils::dfs,
 };
 use datafusion::sql::resolve::resolve_table_references;
 use dataset_store::{DatasetStore, sql_datasets};
