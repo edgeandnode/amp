@@ -521,6 +521,33 @@ impl MetadataDb {
     pub async fn output_locations(&self, id: JobId) -> Result<Vec<Location>, Error> {
         Ok(locations::get_by_job_id(&*self.pool, id).await?)
     }
+
+    /// List locations with cursor-based pagination support
+    ///
+    /// Uses cursor-based pagination where `last_location_id` is the ID of the last location
+    /// from the previous page. For the first page, pass `None` for `last_location_id`.
+    pub async fn list_locations_with_details(
+        &self,
+        limit: i64,
+        last_location_id: Option<LocationId>,
+    ) -> Result<Vec<Location>, Error> {
+        match last_location_id {
+            Some(location_id) => {
+                Ok(locations::list_locations_next_page(&*self.pool, limit, location_id).await?)
+            }
+            None => Ok(locations::list_locations_first_page(&*self.pool, limit).await?),
+        }
+    }
+
+    /// Get a location by its ID
+    ///
+    /// Returns the location if found, or None if no location exists with the given ID.
+    pub async fn get_location_by_id(
+        &self,
+        location_id: LocationId,
+    ) -> Result<Option<Location>, Error> {
+        Ok(locations::get_by_id(&*self.pool, location_id).await?)
+    }
 }
 
 /// File metadata-related API

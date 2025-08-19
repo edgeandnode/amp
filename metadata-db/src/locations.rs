@@ -1,14 +1,16 @@
 //! Location-related database operations
 
-pub use location_id::{
-    LocationId, LocationIdFromStrError, LocationIdI64ConvError, LocationIdU64Error,
-};
 use sqlx::{Executor, Postgres};
 use url::Url;
 
+pub use self::{
+    location_id::{LocationId, LocationIdFromStrError, LocationIdI64ConvError, LocationIdU64Error},
+    pagination::{list_locations_first_page, list_locations_next_page},
+};
 use crate::{TableId, workers::jobs::JobId};
 
 mod location_id;
+mod pagination;
 
 /// Insert a location into the database and return its ID (idempotent operation)
 #[tracing::instrument(skip(exe), err)]
@@ -63,6 +65,27 @@ where
         .fetch_optional(exe)
         .await?;
     Ok(location_id)
+}
+
+/// Get a location by its ID
+pub async fn get_by_id<'c, E>(
+    exe: E,
+    location_id: LocationId,
+) -> Result<Option<Location>, sqlx::Error>
+where
+    E: Executor<'c, Database = Postgres>,
+{
+    let query = indoc::indoc! {"
+        SELECT id, dataset, dataset_version, tbl, url, active
+        FROM locations
+        WHERE id = $1
+    "};
+
+    let location = sqlx::query_as(query)
+        .bind(location_id)
+        .fetch_optional(exe)
+        .await?;
+    Ok(location)
 }
 
 /// Get all active locations for a table
@@ -199,5 +222,9 @@ pub struct Location {
     pub active: bool,
 }
 
+/// In-tree integration tests
 #[cfg(test)]
-mod tests;
+mod tests {
+    mod it_crud;
+    mod it_pagination;
+}
