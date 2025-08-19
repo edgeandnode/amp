@@ -19,14 +19,12 @@ use common::{
     catalog::physical::Catalog,
     config::Config,
     notification_multiplexer::{self, NotificationMultiplexerHandle},
-    plan_visitors::{is_incremental, propagate_block_num, unproject_special_block_num_column},
-    query_context::{Error as CoreError, QueryContext, QueryEnv, parse_sql},
+    query_context::{
+        DetachedLogicalPlan, Error as CoreError, PlanningContext, QueryContext, QueryEnv, parse_sql,
+    },
 };
 use datafusion::{
-    common::{
-        DFSchema,
-        tree_node::{TreeNode, TreeNodeRecursion},
-    },
+    common::{DFSchema, tree_node::TreeNodeRecursion},
     error::DataFusionError,
     execution::SendableRecordBatchStream,
     logical_expr::LogicalPlan,
@@ -101,6 +99,7 @@ impl RequestError for Error {
             Error::CoreError(CoreError::PlanningError(_)) => "PLANNING_ERROR",
             Error::CoreError(CoreError::ExecutionError(_)) => "CORE_EXECUTION_ERROR",
             Error::CoreError(CoreError::MetaTableError(_)) => "META_TABLE_ERROR",
+            Error::CoreError(CoreError::TableNotFoundError(_)) => "TABLE_NOT_FOUND_ERROR",
             Error::InvalidQuery(_) => "INVALID_QUERY",
             Error::StreamingExecutionError(_) => "STREAMING_EXECUTION_ERROR",
         }
@@ -121,6 +120,7 @@ impl RequestError for Error {
                 | CoreError::ExecutionError(_)
                 | CoreError::MetaTableError(_),
             ) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::CoreError(CoreError::TableNotFoundError(_)) => StatusCode::NOT_FOUND,
             Error::ExecutionError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::StreamingExecutionError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::DatasetStoreError(e) if e.is_not_found() => StatusCode::NOT_FOUND,
@@ -157,6 +157,7 @@ impl From<Error> for Status {
             }
             Error::CoreError(CoreError::DatasetError(_)) => Status::internal(e.to_string()),
             Error::CoreError(CoreError::ConfigError(_)) => Status::internal(e.to_string()),
+            Error::CoreError(CoreError::TableNotFoundError(_)) => Status::not_found(e.to_string()),
 
             Error::CoreError(
                 CoreError::PlanningError(df)
@@ -201,7 +202,7 @@ impl Service {
             .await
             .map_err(|err| Error::DatasetStoreError(err))?;
 
-        let ctx = QueryContext::for_catalog(catalog.clone(), self.env.clone())?;
+        let ctx = PlanningContext::new(catalog.logical().clone());
         let plan = ctx
             .plan_sql(query.clone())
             .await
@@ -211,15 +212,18 @@ impl Service {
             .await
     }
 
+    #[tracing::instrument(skip_all, err)]
     pub async fn execute_plan(
         &self,
         catalog: Catalog,
         dataset_store: Arc<DatasetStore>,
-        plan: LogicalPlan,
+        plan: DetachedLogicalPlan,
         is_streaming: bool,
     ) -> Result<SendableRecordBatchStream, Error> {
         // is_incremental returns an error if query contains DDL, DML, etc.
-        let is_incr = is_incremental(&plan).map_err(|e| Error::InvalidQuery(e.to_string()))?;
+        let is_incr = plan
+            .is_incremental()
+            .map_err(|e| Error::InvalidQuery(e.to_string()))?;
         if is_streaming && !is_incr {
             return Err(Error::InvalidQuery(
                 "not incremental queries are not supported for streaming".to_string(),
@@ -229,23 +233,26 @@ impl Service {
         // If not streaming or metadata db is not available, execute once
         if !is_streaming {
             let original_schema = plan.schema().clone();
-            let should_transform = should_transform_plan(&plan).map_err(Error::ExecutionError)?;
+            let should_transform =
+                dbg!(should_transform_plan(&plan).map_err(Error::ExecutionError)?);
             let plan = if should_transform {
-                let mut plan = propagate_block_num(plan).map_err(Error::ExecutionError)?;
+                let mut plan = plan.propagate_block_num().map_err(Error::ExecutionError)?;
                 // If the user did not request `_block_num` column, we omit it from the final output.
                 if !original_schema
                     .fields()
                     .iter()
                     .any(|f| f.name() == SPECIAL_BLOCK_NUM)
                 {
-                    plan =
-                        unproject_special_block_num_column(plan).map_err(Error::ExecutionError)?;
+                    plan = plan
+                        .unproject_special_block_num_column()
+                        .map_err(Error::ExecutionError)?;
                 }
                 plan
             } else {
                 plan
             };
             let ctx = QueryContext::for_catalog(catalog, self.env.clone())?;
+            let plan = plan.attach_to(&ctx)?;
             ctx.execute_plan(plan, true)
                 .await
                 .map_err(|err| Error::from(err))
@@ -286,7 +293,7 @@ impl Service {
     }
 }
 
-fn should_transform_plan(plan: &LogicalPlan) -> Result<bool, DataFusionError> {
+fn should_transform_plan(plan: &DetachedLogicalPlan) -> Result<bool, DataFusionError> {
     let mut result = true;
     plan.apply(|node| {
         match node {
@@ -465,7 +472,7 @@ impl Service {
             .dataset_store
             .load_physical_catalog(table_refs, remote_plan.function_refs, &self.env)
             .await?;
-        let query_ctx = QueryContext::for_catalog(catalog.clone(), self.env.clone())?;
+        let query_ctx = PlanningContext::new(catalog.logical().clone());
         let plan = query_ctx
             .plan_from_bytes(&remote_plan.serialized_plan)
             .await?;

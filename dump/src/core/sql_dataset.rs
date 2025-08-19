@@ -117,13 +117,11 @@
 use std::{ops::RangeInclusive, sync::Arc};
 
 use common::{
-    BlockNum, BoxError,
+    BlockNum, BoxError, QueryContext,
     catalog::physical::{Catalog, PhysicalTable},
     notification_multiplexer::NotificationMultiplexerHandle,
-    plan_visitors::is_incremental,
-    query_context::{QueryContext, QueryEnv},
+    query_context::{DetachedLogicalPlan, PlanningContext, QueryEnv},
 };
-use datafusion::logical_expr::LogicalPlan;
 use dataset_store::{DatasetStore, sql_datasets::SqlDataset};
 use futures::StreamExt as _;
 use tracing::instrument;
@@ -169,14 +167,15 @@ pub async fn dump_table(
             .clone()
             .catalog_for_sql(&query, env.clone())
             .await?;
-        let planning_ctx = QueryContext::for_catalog(catalog.clone(), env.clone())?;
+        let planning_ctx = PlanningContext::new(catalog.logical().clone());
 
         let plan = planning_ctx.plan_sql(query.clone()).await?;
-        let is_incr = is_incremental(&plan)?;
+        let is_incr = plan.is_incremental()?;
         let (start, end) = match (start, end) {
             (start, Some(end)) if start >= 0 && end >= 0 => (start as BlockNum, end as BlockNum),
             _ => {
-                match planning_ctx.max_end_block(&plan).await? {
+                let ctx = QueryContext::for_catalog(catalog.clone(), env.clone())?;
+                match ctx.max_end_block(&plan.clone().attach_to(&ctx)?).await? {
                     Some(max_end_block) => {
                         block_ranges::resolve_relative(start, end, max_end_block)?
                     }
@@ -246,7 +245,7 @@ async fn dump_sql_query(
     dataset_store: &Arc<DatasetStore>,
     env: &QueryEnv,
     catalog: &Catalog,
-    query: LogicalPlan,
+    query: DetachedLogicalPlan,
     range: RangeInclusive<BlockNum>,
     physical_table: Arc<PhysicalTable>,
     parquet_opts: &ParquetWriterProperties,

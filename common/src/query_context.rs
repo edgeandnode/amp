@@ -12,9 +12,12 @@ use datafusion::{
         datatypes::{DataType, Field, Fields, SchemaRef},
     },
     catalog::{MemorySchemaProvider, Session, TableProvider},
-    common::{DFSchema, DFSchemaRef, extensions_options, not_impl_err},
+    common::{
+        DFSchema, DFSchemaRef, extensions_options, not_impl_err,
+        tree_node::{TreeNode as _, TreeNodeRecursion},
+    },
     config::ConfigExtension,
-    datasource::TableType,
+    datasource::{DefaultTableSource, TableType},
     error::DataFusionError,
     execution::{
         SendableRecordBatchStream, SessionStateBuilder,
@@ -22,7 +25,7 @@ use datafusion::{
         context::{SQLOptions, SessionContext},
         runtime_env::RuntimeEnv,
     },
-    logical_expr::{AggregateUDF, Extension, LogicalPlan, ScalarUDF},
+    logical_expr::{AggregateUDF, Extension, LogicalPlan, ScalarUDF, TableScan},
     physical_optimizer::PhysicalOptimizerRule,
     physical_plan::{ExecutionPlan, displayable, stream::RecordBatchStreamAdapter},
     physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner as _},
@@ -40,7 +43,7 @@ use datafusion_tracing::{
 };
 use futures::{FutureExt as _, TryStreamExt, stream};
 use js_runtime::isolate_pool::IsolatePool;
-use metadata_db::{LocationId, TableId};
+use metadata_db::TableId;
 use regex::Regex;
 use thiserror::Error;
 use tracing::{debug, field, instrument};
@@ -54,7 +57,8 @@ use crate::{
     },
     plan_visitors::{
         constrain_by_block_num, extract_table_references_from_plan,
-        forbid_underscore_prefixed_aliases, unproject_special_block_num_column,
+        forbid_underscore_prefixed_aliases, is_incremental, order_by_block_num,
+        propagate_block_num, unproject_special_block_num_column,
     },
     stream_helpers::is_streaming,
 };
@@ -88,6 +92,9 @@ pub enum Error {
 
     #[error("DataFusion configuration error: {0}")]
     ConfigError(DataFusionError),
+
+    #[error("table not found: {0}")]
+    TableNotFoundError(TableReference),
 }
 
 impl IntoResponse for Error {
@@ -96,6 +103,7 @@ impl IntoResponse for Error {
         let status = match self {
             Error::SqlParseError(_) => axum::http::StatusCode::BAD_REQUEST,
             Error::InvalidPlan(_) => axum::http::StatusCode::BAD_REQUEST,
+            Error::TableNotFoundError(_) => axum::http::StatusCode::NOT_FOUND,
             Error::PlanEncodingError(_) | Error::PlanDecodingError(_) => {
                 axum::http::StatusCode::INTERNAL_SERVER_ERROR
             }
@@ -117,6 +125,7 @@ impl IntoResponse for Error {
                 Error::PlanningError(_) => "PLANNING_ERROR",
                 Error::ExecutionError(_) => "EXECUTION_ERROR",
                 Error::MetaTableError(_) => "META_TABLE_ERROR",
+                Error::TableNotFoundError(_) => "TABLE_NOT_FOUND_ERROR",
             },
             "error_message": err,
         });
@@ -171,7 +180,7 @@ impl PlanningContext {
 
     /// Infers the output schema of the query by planning it against empty tables.
     pub async fn sql_output_schema(&self, query: parser::Statement) -> Result<DFSchemaRef, Error> {
-        let ctx = self.datafusion_ctx().await?;
+        let ctx = self.datafusion_ctx()?;
         let plan = sql_to_plan(&ctx, query).await?;
         Ok(plan.schema().clone())
     }
@@ -185,7 +194,7 @@ impl PlanningContext {
         query: parser::Statement,
     ) -> Result<(Bytes, DFSchemaRef), Error> {
         let is_streaming = is_streaming(&query);
-        let ctx = self.datafusion_ctx().await?;
+        let ctx = self.datafusion_ctx()?;
         let plan = sql_to_plan(&ctx, query).await?;
         let schema = plan.schema().clone();
         let serialized_plan =
@@ -211,7 +220,7 @@ impl PlanningContext {
         Ok((serialized_plan, schema))
     }
 
-    async fn datafusion_ctx(&self) -> Result<SessionContext, Error> {
+    fn datafusion_ctx(&self) -> Result<SessionContext, Error> {
         let state = SessionStateBuilder::new()
             .with_config(self.session_config.clone())
             .with_runtime_env(Default::default())
@@ -244,6 +253,31 @@ impl PlanningContext {
     pub fn catalog(&self) -> &[ResolvedTable] {
         &self.catalog.tables
     }
+
+    pub async fn optimize_plan(
+        &self,
+        plan: &DetachedLogicalPlan,
+    ) -> Result<DetachedLogicalPlan, Error> {
+        self.datafusion_ctx()?
+            .state()
+            .optimize(&plan.0)
+            .map_err(Error::PlanningError)
+            .map(DetachedLogicalPlan)
+    }
+
+    pub async fn plan_sql(&self, query: parser::Statement) -> Result<DetachedLogicalPlan, Error> {
+        let ctx = self.datafusion_ctx()?;
+        let plan = sql_to_plan(&ctx, query).await?;
+        Ok(DetachedLogicalPlan(plan))
+    }
+
+    pub async fn plan_from_bytes(&self, bytes: &[u8]) -> Result<DetachedLogicalPlan, Error> {
+        let ctx = self.datafusion_ctx()?;
+        let plan = logical_plan_from_bytes_with_extension_codec(bytes, &ctx, &TableProviderCodec)
+            .map_err(Error::PlanDecodingError)?;
+        verify_plan(&plan)?;
+        Ok(DetachedLogicalPlan(plan))
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -271,6 +305,63 @@ impl TableProvider for PlanningTable {
         _limit: Option<usize>,
     ) -> Result<Arc<dyn ExecutionPlan>, DataFusionError> {
         unreachable!("PlanningTable should never be scanned")
+    }
+}
+/// A plan that has `PlanningTable` for its `TableProvider`s. It cannot be executed before being
+/// first "attached" to a `QueryContext`.
+#[derive(Debug, Clone)]
+pub struct DetachedLogicalPlan(LogicalPlan);
+
+impl DetachedLogicalPlan {
+    pub fn attach_to(self, ctx: &QueryContext) -> Result<LogicalPlan, Error> {
+        use datafusion::common::tree_node::Transformed;
+
+        Ok(self
+            .0
+            .transform(|mut node| match &mut node {
+                // Insert the clauses in non-view table scans
+                LogicalPlan::TableScan(TableScan {
+                    table_name, source, ..
+                }) if source.table_type() == TableType::Base
+                    && source.get_logical_plan().is_none() =>
+                {
+                    let provider = ctx
+                        .get_table(table_name)
+                        .map_err(|e| DataFusionError::External(e.into()))?;
+                    *source = Arc::new(DefaultTableSource::new(provider));
+                    Ok(Transformed::yes(node))
+                }
+                _ => Ok(Transformed::no(node)),
+            })
+            .map_err(Error::PlanningError)?
+            .data)
+    }
+
+    pub fn is_incremental(&self) -> Result<bool, BoxError> {
+        is_incremental(&self.0)
+    }
+
+    pub fn schema(&self) -> DFSchemaRef {
+        self.0.schema().clone()
+    }
+
+    pub fn propagate_block_num(self) -> Result<Self, DataFusionError> {
+        Ok(Self(propagate_block_num(self.0)?))
+    }
+
+    pub fn order_by_block_num(self) -> Self {
+        Self(order_by_block_num(self.0))
+    }
+
+    pub fn unproject_special_block_num_column(self) -> Result<Self, DataFusionError> {
+        Ok(Self(unproject_special_block_num_column(self.0)?))
+    }
+
+    pub fn apply<'n, F>(&self, f: F) -> Result<TreeNodeRecursion, DataFusionError>
+    where
+        F: FnMut(&LogicalPlan) -> Result<TreeNodeRecursion, DataFusionError>,
+    {
+        self.0.apply(f)
     }
 }
 
@@ -359,15 +450,6 @@ impl QueryContext {
         execute_plan(&ctx, plan, true).await
     }
 
-    /// This will deserialize the plan with empty tables in the `TableScan` nodes.
-    pub async fn plan_from_bytes(&self, bytes: &[u8]) -> Result<LogicalPlan, Error> {
-        let ctx = self.datafusion_ctx()?;
-        let plan = logical_plan_from_bytes_with_extension_codec(bytes, &ctx, &TableProviderCodec)
-            .map_err(Error::PlanDecodingError)?;
-        verify_plan(&plan)?;
-        Ok(plan)
-    }
-
     /// Because `DatasetContext` is read-only, planning and execution can be done on ephemeral
     /// sessions created by this function, and they will behave the same as if they had been run
     /// against a persistent `SessionContext`
@@ -402,13 +484,6 @@ impl QueryContext {
         }
     }
 
-    pub async fn optimize_plan(&self, plan: &LogicalPlan) -> Result<LogicalPlan, Error> {
-        self.datafusion_ctx()?
-            .state()
-            .optimize(plan)
-            .map_err(Error::PlanningError)
-    }
-
     pub async fn execute_plan(
         &self,
         plan: LogicalPlan,
@@ -430,7 +505,8 @@ impl QueryContext {
         Ok(concat_batches(&schema, &batch_stream).unwrap())
     }
 
-    pub fn get_table(&self, table_ref: &TableReference) -> Option<Arc<PhysicalTable>> {
+    /// Returns table or `TableNotFoundError`
+    pub fn get_table(&self, table_ref: &TableReference) -> Result<Arc<PhysicalTable>, Error> {
         let table_id = TableId {
             dataset: table_ref.schema().unwrap(),
             dataset_version: None,
@@ -441,22 +517,7 @@ impl QueryContext {
             .iter()
             .find(|table| table.table_id() == table_id)
             .cloned()
-    }
-
-    /// Get all physical table locations that have been queried by the given plan.
-    #[instrument(skip_all, err)]
-    pub async fn queried_physical_tables(
-        &self,
-        plan: &LogicalPlan,
-    ) -> Result<Vec<LocationId>, BoxError> {
-        let tables = extract_table_references_from_plan(&plan)?;
-
-        let locations: Vec<_> = tables
-            .into_iter()
-            .filter_map(|t| self.get_table(&t).map(|t| t.location_id()))
-            .collect();
-
-        Ok(locations)
+            .ok_or_else(|| Error::TableNotFoundError(table_ref.clone()))
     }
 
     /// Get the blocks that have been synced for all tables in the plan.
@@ -487,14 +548,7 @@ impl QueryContext {
         &self,
         table: &TableReference,
     ) -> Result<Option<RangeInclusive<BlockNum>>, BoxError> {
-        let Some(table) = self.get_table(table) else {
-            return Err(format!(
-                "table {}.{} not found",
-                table.schema().unwrap(),
-                table.table()
-            )
-            .into());
-        };
+        let table = self.get_table(table)?;
         table.synced_range().await
     }
 
@@ -519,9 +573,7 @@ impl QueryContext {
         // Validate dependency block ranges
         {
             for table in tables {
-                let physical_table = self
-                    .get_table(&table)
-                    .ok_or::<BoxError>(format!("table {} not found", table).into())?;
+                let physical_table = self.get_table(&table)?;
                 let range = physical_table.synced_range().await?;
                 let synced = range.map(|r| end <= *r.end()).unwrap_or(false);
                 if !synced {

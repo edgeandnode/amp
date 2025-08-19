@@ -62,6 +62,10 @@ impl Catalog {
         &self.logical.udfs
     }
 
+    pub fn logical(&self) -> &LogicalCatalog {
+        &self.logical
+    }
+
     /// Returns the earliest block number across all tables in this catalog.
     pub async fn earliest_block(&self) -> Result<Option<BlockNum>, BoxError> {
         let mut earliest = None;

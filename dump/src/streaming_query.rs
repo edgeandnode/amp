@@ -7,13 +7,14 @@ use common::{
     catalog::physical::{Catalog, PhysicalTable},
     metadata::segments::{BlockRange, Chain, Watermark},
     notification_multiplexer::NotificationMultiplexerHandle,
-    plan_visitors::{order_by_block_num, propagate_block_num},
-    query_context::{NozzleSessionConfig, QueryContext, QueryEnv, parse_sql},
+    query_context::{
+        DetachedLogicalPlan, NozzleSessionConfig, PlanningContext, QueryContext, QueryEnv,
+        parse_sql,
+    },
 };
 use datafusion::{
     common::cast::as_fixed_size_binary_array, error::DataFusionError,
-    execution::SendableRecordBatchStream, logical_expr::LogicalPlan,
-    physical_plan::stream::RecordBatchStreamAdapter,
+    execution::SendableRecordBatchStream, physical_plan::stream::RecordBatchStreamAdapter,
 };
 use dataset_store::{DatasetStore, resolve_blocks_table};
 use futures::{
@@ -147,7 +148,7 @@ pub struct StreamingQuery {
     query_env: QueryEnv,
     dataset_store: Arc<DatasetStore>,
     catalog: Catalog,
-    plan: LogicalPlan,
+    plan: DetachedLogicalPlan,
     start_block: BlockNum,
     end_block: Option<BlockNum>,
     table_updates: TableUpdates,
@@ -172,7 +173,7 @@ impl StreamingQuery {
         query_env: QueryEnv,
         catalog: Catalog,
         dataset_store: Arc<DatasetStore>,
-        plan: LogicalPlan,
+        plan: DetachedLogicalPlan,
         start_block: BlockNum,
         end_block: Option<BlockNum>,
         multiplexer_handle: &NotificationMultiplexerHandle,
@@ -195,10 +196,10 @@ impl StreamingQuery {
         // - Enforce `order by _block_num`.
         // - Run logical optimizations ahead of execution.
         let plan = {
-            let mut plan = propagate_block_num(plan)?;
-            plan = order_by_block_num(plan);
+            let mut plan = plan.propagate_block_num()?;
+            plan = plan.order_by_block_num();
 
-            let ctx = QueryContext::for_catalog(catalog.clone(), query_env.clone())?;
+            let ctx = PlanningContext::new(catalog.logical().clone());
             let plan = ctx.optimize_plan(&plan).await?;
             plan
         };
@@ -254,9 +255,10 @@ impl StreamingQuery {
 
             // Start microbatch execution for this chunk
             let ctx = QueryContext::for_catalog(self.catalog.clone(), self.query_env.clone())?;
+            let attached_plan = self.plan.clone().attach_to(&ctx)?;
             let mut stream = ctx
                 .execute_plan_for_range(
-                    self.plan.clone(),
+                    attached_plan,
                     range.start(),
                     range.end(),
                     self.preserve_block_num,
