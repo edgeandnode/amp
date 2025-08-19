@@ -673,7 +673,7 @@ impl DatasetStore {
                 udfs.push(udf.into());
             }
 
-            for table in Arc::new(dataset).resolved_tables() {
+            for mut table in Arc::new(dataset).resolved_tables() {
                 // Only include tables that are actually referenced in the query
                 let is_referenced = table_refs.iter().any(|table_ref| {
                     match (table_ref.schema(), table_ref.table()) {
@@ -685,6 +685,18 @@ impl DatasetStore {
                 });
 
                 if is_referenced {
+                    let schema_to_use = table_refs
+                        .iter()
+                        .find_map(|table_ref| match (table_ref.schema(), table_ref.table()) {
+                            (Some(schema), table_name) if table_name == table.name() => {
+                                Some(schema.to_string())
+                            }
+                            _ => None,
+                        })
+                        .unwrap_or_else(|| dataset_name.clone());
+
+                    let table_ref = TableReference::partial(schema_to_use, table.name());
+                    table.update_table_ref(table_ref);
                     resolved_tables.push(table);
                 }
             }
