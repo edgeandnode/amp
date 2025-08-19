@@ -4,18 +4,20 @@ edition.workspace = true
 version.workspace = true
 
 [dependencies]
-http-common = { path = "../http-common" }
-metadata-db = { path = "../metadata-db" }
 arrow-flight.workspace = true
+async-stream.workspace = true
 async-trait.workspace = true
+axum.workspace = true
 bytes.workspace = true
 common = { path = "../common" }
 datafusion.workspace = true
 dataset-store = { path = "../dataset-store" }
 dump = { path = "../dump" }
 futures.workspace = true
+http-common = { path = "../http-common" }
+metadata-db = { path = "../metadata-db" }
 prost.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 tonic.workspace = true
-axum.workspace = true
 tracing.workspace = true

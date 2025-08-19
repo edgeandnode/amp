@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, sync::Arc};
 use alloy::{hex::ToHexExt as _, primitives::BlockHash};
 use common::{
     BlockNum, BoxError, SPECIAL_BLOCK_NUM,
-    arrow::{array::RecordBatch, datatypes::SchemaRef},
+    arrow::array::RecordBatch,
     catalog::physical::{Catalog, PhysicalTable},
     metadata::segments::{BlockRange, Chain, Watermark},
     notification_multiplexer::NotificationMultiplexerHandle,
@@ -12,14 +12,11 @@ use common::{
         parse_sql,
     },
 };
-use datafusion::{
-    common::cast::as_fixed_size_binary_array, error::DataFusionError,
-    execution::SendableRecordBatchStream, physical_plan::stream::RecordBatchStreamAdapter,
-};
+use datafusion::common::cast::as_fixed_size_binary_array;
 use dataset_store::{DatasetStore, resolve_blocks_table};
 use futures::{
-    FutureExt, Stream, TryStreamExt as _,
-    stream::{self, StreamExt},
+    FutureExt,
+    stream::{self, BoxStream, StreamExt},
 };
 use metadata_db::LocationId;
 use tokio::sync::{mpsc, watch};
@@ -86,27 +83,16 @@ pub enum QueryMessage {
     MicrobatchEnd(BlockRange),
 }
 
-impl QueryMessage {
-    fn as_data(self) -> Option<RecordBatch> {
-        match self {
-            QueryMessage::MicrobatchStart(_) => None,
-            QueryMessage::Data(data) => Some(data),
-            QueryMessage::MicrobatchEnd(_) => None,
-        }
-    }
-}
-
 /// A handle to a streaming query that can be used to retrieve results as a stream.
 ///
 /// Aborts the query task when dropped.
 pub struct StreamingQueryHandle {
     rx: mpsc::Receiver<QueryMessage>,
     join_handle: AbortOnDropHandle<Result<(), BoxError>>,
-    schema: SchemaRef,
 }
 
 impl StreamingQueryHandle {
-    pub fn as_stream(self) -> impl Stream<Item = Result<QueryMessage, BoxError>> + Unpin {
+    pub fn as_stream(self) -> BoxStream<'static, Result<QueryMessage, BoxError>> {
         let data_stream = ReceiverStream::new(self.rx);
 
         let join = self.join_handle;
@@ -128,17 +114,6 @@ impl StreamingQueryHandle {
             .map(Ok)
             .chain(stream::once(get_task_result).filter_map(|x| async { x }))
             .boxed()
-    }
-
-    pub fn as_record_batch_stream(self) -> SendableRecordBatchStream {
-        let schema = self.schema.clone();
-        let stream = RecordBatchStreamAdapter::new(
-            schema,
-            self.as_stream()
-                .try_filter_map(|m| async { Ok(m.as_data()) })
-                .map_err(DataFusionError::External),
-        );
-        Box::pin(stream)
     }
 }
 
@@ -182,7 +157,6 @@ impl StreamingQuery {
         is_sql_dataset: bool,
         microbatch_max_interval: u64,
     ) -> Result<StreamingQueryHandle, BoxError> {
-        let schema: SchemaRef = plan.schema().clone().as_ref().clone().into();
         let (tx, rx) = mpsc::channel(10);
 
         // Preserve `_block_num` for SQL materializaiton or if explicitly selected in the schema.
@@ -232,11 +206,7 @@ impl StreamingQuery {
         let join_handle =
             AbortOnDropHandle::new(tokio::spawn(streaming_query.execute().in_current_span()));
 
-        Ok(StreamingQueryHandle {
-            rx,
-            join_handle,
-            schema,
-        })
+        Ok(StreamingQueryHandle { rx, join_handle })
     }
 
     /// The loop:
