@@ -578,7 +578,6 @@ fn flight_data_stream(
 
             // Create encoder for this single batch with custom metadata, skipping schema messages.
             let mut batch_encoder = FlightDataEncoderBuilder::new()
-                .with_metadata(metadata.into())
                 .build(futures::stream::once(async { Ok(batch) }));
             let mut first_message = true;
             while let Some(result) = batch_encoder.next().await {
@@ -594,7 +593,7 @@ fn flight_data_stream(
                 if schema_message {
                     continue;
                 } else {
-                    yield Ok(flight_data);
+                    yield Ok(flight_data.with_app_metadata(metadata.clone()));
                 }
             }
         }
