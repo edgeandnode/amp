@@ -48,11 +48,17 @@ fn default_pool_size() -> u32 {
     DEFAULT_POOL_SIZE
 }
 
+fn default_auto_migrate() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct MetadataDbConfig {
     pub url: Option<String>,
     #[serde(default = "default_pool_size")]
     pub pool_size: u32,
+    #[serde(default = "default_auto_migrate")]
+    pub auto_migrate: bool,
 }
 
 impl Default for MetadataDbConfig {
@@ -60,6 +66,7 @@ impl Default for MetadataDbConfig {
         Self {
             url: None,
             pool_size: DEFAULT_POOL_SIZE,
+            auto_migrate: true,
         }
     }
 }
@@ -181,6 +188,7 @@ impl Config {
             MetadataDbConfig {
                 url: Some(url),
                 pool_size: config_file.metadata_db.pool_size,
+                auto_migrate: config_file.metadata_db.auto_migrate,
             }
         } else if allow_temp_db {
             MetadataDbConfig {
@@ -191,6 +199,7 @@ impl Config {
                         .to_string(),
                 ),
                 pool_size: config_file.metadata_db.pool_size,
+                auto_migrate: config_file.metadata_db.auto_migrate,
             }
         } else {
             return Err(ConfigError::MissingConfig(
@@ -263,9 +272,13 @@ impl Config {
         let url = self.metadata_db.url.as_ref().ok_or_else(|| {
             ConfigError::MissingConfig(self.config_path.clone(), "metadata_db.url")
         })?;
-        MetadataDb::connect(url, self.metadata_db.pool_size)
-            .await
-            .map_err(|e| ConfigError::MetadataDb(self.config_path.clone(), e))
+        MetadataDb::connect_with_config(
+            url,
+            self.metadata_db.pool_size,
+            self.metadata_db.auto_migrate,
+        )
+        .await
+        .map_err(|e| ConfigError::MetadataDb(self.config_path.clone(), e))
     }
 }
 
