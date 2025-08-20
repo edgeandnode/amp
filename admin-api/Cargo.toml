@@ -22,3 +22,4 @@ metadata-db = { path = "../metadata-db" }
 registry-service = { path = "../registry-service" }
 dump = { path = "../dump" }
 object_store.workspace = true
+futures.workspace = true
