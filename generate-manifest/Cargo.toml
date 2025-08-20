@@ -8,9 +8,5 @@ common = { path = "../common" }
 dataset-store = { path = "../dataset-store" }
 evm-rpc-datasets = { path = "../evm-rpc-datasets" }
 firehose-datasets = { path = "../firehose-datasets" }
-metadata-db = { path = "../metadata-db" }
 substreams-datasets = { path = "../substreams-datasets" }
-serde.workspace = true
 serde_json.workspace = true
-thiserror.workspace = true
-tracing.workspace = true
