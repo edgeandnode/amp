@@ -72,7 +72,7 @@ async fn list_locations_first_page_respects_limit() {
     for location in &locations {
         assert_eq!(location.dataset, "test-dataset");
         assert_eq!(location.dataset_version, "v1.0");
-        assert!(location.tbl.starts_with("test-table-"));
+        assert!(location.table.starts_with("test-table-"));
         assert_eq!(location.active, true);
     }
 }

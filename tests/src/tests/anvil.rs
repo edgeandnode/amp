@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc};
+use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc, usize};
 
 use alloy::{
     node_bindings::{Anvil, AnvilInstance},
@@ -6,10 +6,16 @@ use alloy::{
     providers::{Provider as _, ext::AnvilApi as _},
     rpc::types::anvil::ReorgOptions,
 };
+use arrow_flight::{
+    FlightData, flight_service_client::FlightServiceClient, sql::client::FlightSqlServiceClient,
+};
 use common::{BlockNum, metadata::segments::BlockRange, query_context::parse_sql};
 use dataset_store::DatasetStore;
+use futures::StreamExt as _;
 use monitoring::logging;
 use rand::{Rng, RngCore, SeedableRng as _, rngs::StdRng};
+use serde::Deserialize;
+use tokio::sync::mpsc;
 
 use crate::{
     test_client::TestClient,
@@ -378,4 +384,85 @@ async fn streaming_reorg_rewind_deep() {
         &take_blocks(&mut test.client, 8).await,
         &test.query_blocks("anvil_rpc", None).await[1..=8],
     );
+}
+
+#[tokio::test]
+async fn flight_data_app_metadata() {
+    async fn pull_flight_metadata(rx: &mut mpsc::UnboundedReceiver<FlightData>) -> Vec<BlockRange> {
+        let mut buffer: Vec<FlightData> = Default::default();
+        rx.recv_many(&mut buffer, usize::MAX).await;
+        buffer.into_iter().filter_map(extract_metadata).collect()
+    }
+    fn extract_metadata(data: FlightData) -> Option<BlockRange> {
+        if data.app_metadata.is_empty() {
+            return None;
+        }
+        #[derive(Deserialize)]
+        struct Metadata {
+            range: BlockRange,
+        }
+        let metadata: Metadata = serde_json::from_slice(&data.app_metadata.to_vec()).unwrap();
+        Some(metadata.range)
+    }
+    async fn expected_range(
+        test: &mut AnvilTestContext,
+        numbers: RangeInclusive<BlockNum>,
+    ) -> BlockRange {
+        let blocks = test.query_blocks("anvil_rpc", None).await;
+        BlockRange {
+            numbers: numbers.clone(),
+            network: "anvil".to_string(),
+            hash: blocks[*numbers.end() as usize].hash,
+            prev_hash: Some(blocks[*numbers.start() as usize].parent_hash),
+        }
+    }
+
+    let mut test = AnvilTestContext::setup("flight_data_app_metadata").await;
+    let query = "SELECT block_num, hash FROM anvil_rpc.blocks SETTINGS stream = true";
+
+    test.dump("anvil_rpc", 0..=0).await;
+    let mut flight_data = flight_data_stream(&test, query).await;
+    assert_eq!(
+        pull_flight_metadata(&mut flight_data).await[0],
+        expected_range(&mut test, 0..=0).await,
+    );
+
+    test.mine(2).await;
+    test.dump("anvil_rpc", 0..=2).await;
+    assert_eq!(
+        pull_flight_metadata(&mut flight_data).await[0],
+        expected_range(&mut test, 1..=2).await,
+    );
+
+    test.reorg(1).await;
+    test.mine(1).await;
+    test.dump("anvil_rpc", 0..=3).await;
+    test.dump("anvil_rpc", 0..=3).await;
+    assert_eq!(
+        pull_flight_metadata(&mut flight_data).await[0],
+        expected_range(&mut test, 1..=3).await,
+    );
+}
+
+async fn flight_data_stream(
+    test: &AnvilTestContext,
+    query: &str,
+) -> mpsc::UnboundedReceiver<FlightData> {
+    let addr = format!("grpc://{}", test.env.server_addrs.flight_addr);
+    let flight_client = FlightServiceClient::connect(addr).await.unwrap();
+    let mut client = FlightSqlServiceClient::new_from_inner(flight_client);
+    let info = client.execute(query.to_string(), None).await.unwrap();
+    let ticket = info.endpoint[0].ticket.clone().unwrap();
+    let response = client.inner_mut().do_get(ticket).await.unwrap();
+    let mut flight_data_stream = response.into_inner();
+    let (tx, rx) = mpsc::unbounded_channel();
+    tokio::spawn(async move {
+        while let Some(result) = flight_data_stream.next().await {
+            let flight_data = result.unwrap();
+            if let Err(_) = tx.send(flight_data) {
+                return;
+            }
+        }
+    });
+    rx
 }

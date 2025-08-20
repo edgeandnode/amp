@@ -1,7 +1,7 @@
-//! Jobs stop handler
+//! Jobs stop handlerLi
 
 use axum::{
-    extract::{Path, State},
+    extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
 };
 use http_common::{BoxRequestError, RequestError};
@@ -17,12 +17,20 @@ use crate::{ctx::Ctx, scheduler::StopJobError};
 #[tracing::instrument(skip_all, err)]
 pub async fn handler(
     State(ctx): State<Ctx>,
-    Path(id): Path<JobId>,
+    path: Result<Path<JobId>, PathRejection>,
 ) -> Result<StatusCode, BoxRequestError> {
+    let id = match path {
+        Ok(Path(path)) => path,
+        Err(err) => {
+            tracing::debug!(error=?err, "invalid job ID in path");
+            return Err(Error::InvalidId { err }.into());
+        }
+    };
+
     // Get current job status to validate it can be stopped
     let job = ctx
         .metadata_db
-        .get_job_with_details(&id)
+        .get_job_by_id_with_details(&id)
         .await
         .map_err(|err| {
             tracing::debug!(error=?err, job_id=?id, "failed to get job");
@@ -31,7 +39,7 @@ pub async fn handler(
 
     let job = match job {
         Some(job) => job,
-        None => return Err(Error::NotFound { id: id.to_string() }.into()),
+        None => return Err(Error::NotFound { id }.into()),
     };
 
     // Delegate to scheduler for atomic stop operation
@@ -42,7 +50,7 @@ pub async fn handler(
         .map_err(|err| {
             match err {
                 StopJobError::JobNotFound => {
-                    Error::NotFound { id: id.to_string() }
+                    Error::NotFound { id }
                 }
                 StopJobError::JobAlreadyTerminated { status } => {
                     tracing::debug!(job_id=?id, actual_status=?status, "job already in terminal state");
@@ -68,9 +76,21 @@ pub async fn handler(
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// The job ID in the URL path is invalid
+    ///
+    /// This occurs when the ID cannot be parsed as a valid JobId.
+    #[error("invalid job ID: {err}")]
+    InvalidId {
+        /// The rejection details from Axum's path extractor
+        err: PathRejection,
+    },
+
     /// Job not found
     #[error("job '{id}' not found")]
-    NotFound { id: String },
+    NotFound {
+        /// The job ID that was not found
+        id: JobId,
+    },
 
     /// Metadata DB error
     #[error("metadata db error: {0}")]
@@ -84,6 +104,7 @@ pub enum Error {
 impl RequestError for Error {
     fn error_code(&self) -> &'static str {
         match self {
+            Error::InvalidId { .. } => "INVALID_JOB_ID",
             Error::NotFound { .. } => "JOB_NOT_FOUND",
             Error::MetadataDbError(_) => "METADATA_DB_ERROR",
             Error::Conflict { .. } => "JOB_CONFLICT",
@@ -92,6 +113,7 @@ impl RequestError for Error {
 
     fn status_code(&self) -> StatusCode {
         match self {
+            Error::InvalidId { .. } => StatusCode::BAD_REQUEST,
             Error::NotFound { .. } => StatusCode::NOT_FOUND,
             Error::MetadataDbError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::Conflict { .. } => StatusCode::CONFLICT,

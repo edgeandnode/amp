@@ -16,5 +16,5 @@ FROM debian:bookworm-slim AS nozzle
 RUN apt-get update && apt-get install -y ca-certificates && apt-get clean
 COPY --from=build /bin/nozzle /bin/
 COPY --from=build /usr/local/cargo/bin/datafusion-cli /bin/
-COPY --from=build /usr/local/cargo/bin/sqlx-cli /bin/
+COPY --from=build /usr/local/cargo/bin/sqlx /bin/
 CMD ["/bin/nozzle"]

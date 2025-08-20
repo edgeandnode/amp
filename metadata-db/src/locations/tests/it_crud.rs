@@ -501,7 +501,7 @@ async fn get_by_job_id_returns_locations_written_by_job() {
     for location in &job_locations {
         assert_eq!(location.dataset, "test-dataset");
         assert_eq!(location.dataset_version, "v1.0");
-        assert!(location.tbl == "test-table1" || location.tbl == "test-table2");
+        assert!(location.table == "test-table1" || location.table == "test-table2");
         assert_eq!(location.active, true);
     }
 }
@@ -627,7 +627,7 @@ async fn get_by_id_returns_existing_location() {
     .expect("Failed to insert location");
 
     //* When
-    let location = locations::get_by_id(&mut *conn, inserted_id)
+    let location = locations::get_by_id_with_details(&mut *conn, inserted_id)
         .await
         .expect("Failed to get location by id");
 
@@ -639,7 +639,7 @@ async fn get_by_id_returns_existing_location() {
     assert_eq!(location.id, inserted_id);
     assert_eq!(location.dataset, "test-dataset");
     assert_eq!(location.dataset_version, "v1.0");
-    assert_eq!(location.tbl, "test-table");
+    assert_eq!(location.table, "test-table");
     assert_eq!(location.url, url);
     assert_eq!(location.active, true);
 }
@@ -658,7 +658,7 @@ async fn get_by_id_returns_none_for_nonexistent_location() {
     let nonexistent_id = LocationId::try_from(999999_i64).expect("Failed to create LocationId");
 
     //* When
-    let location = locations::get_by_id(&mut *conn, nonexistent_id)
+    let location = locations::get_by_id_with_details(&mut *conn, nonexistent_id)
         .await
         .expect("Failed to get location by id");
 

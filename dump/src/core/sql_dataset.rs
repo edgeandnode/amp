@@ -296,13 +296,14 @@ async fn dump_sql_query(
     while let Some(message) = stream.next().await {
         let message = message?;
         match message {
+            QueryMessage::MicrobatchStart(_) => (),
             QueryMessage::Data(batch) => {
                 writer.write(&batch).await?;
             }
-            QueryMessage::Completed(microbatch_range) => {
-                let microbatch_end = microbatch_range.end();
+            QueryMessage::MicrobatchEnd(range) => {
+                let microbatch_end = range.end();
                 // Close current file and commit metadata
-                let (parquet_meta, object_meta, footer) = writer.close(microbatch_range).await?;
+                let (parquet_meta, object_meta, footer) = writer.close(range).await?;
                 commit_metadata(
                     &dataset_store.metadata_db,
                     parquet_meta,

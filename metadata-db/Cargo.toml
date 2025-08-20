@@ -18,7 +18,6 @@ serde_json.workspace = true
 futures.workspace = true
 tokio.workspace = true
 indoc.workspace = true
-object_store.workspace = true
 
 [dev-dependencies]
 pgtemp = "0.6.0"

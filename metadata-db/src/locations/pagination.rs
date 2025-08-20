@@ -20,7 +20,8 @@ where
             tbl,
             url,
             active,
-            start_block
+            start_block,
+            writer
         FROM locations
         ORDER BY id DESC
         LIMIT $1
@@ -51,7 +52,8 @@ where
             tbl,
             url,
             active,
-            start_block
+            start_block,
+            writer
         FROM locations
         WHERE id < $2
         ORDER BY id DESC

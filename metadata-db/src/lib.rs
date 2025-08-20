@@ -1,6 +1,6 @@
 use std::{future::Future, sync::Arc, time::Duration};
 
-use futures::stream::{BoxStream, Stream};
+use futures::stream::Stream;
 use sqlx::postgres::{PgListener, PgNotification};
 use thiserror::Error;
 use tokio::time::MissedTickBehavior;
@@ -20,6 +20,7 @@ pub use self::temp::{KEEP_TEMP_DIRS, temp_metadata_db};
 pub use self::{
     locations::{
         Location, LocationId, LocationIdFromStrError, LocationIdI64ConvError, LocationIdU64Error,
+        LocationWithDetails,
     },
     workers::{
         Worker, WorkerNodeId,
@@ -393,7 +394,10 @@ impl MetadataDb {
     }
 
     /// Get a job by ID with full details including timestamps
-    pub async fn get_job_with_details(&self, id: &JobId) -> Result<Option<JobWithDetails>, Error> {
+    pub async fn get_job_by_id_with_details(
+        &self,
+        id: &JobId,
+    ) -> Result<Option<JobWithDetails>, Error> {
         Ok(workers::jobs::get_by_id_with_details(&*self.pool, id).await?)
     }
 
@@ -587,7 +591,7 @@ impl MetadataDb {
     ///
     /// Uses cursor-based pagination where `last_location_id` is the ID of the last location
     /// from the previous page. For the first page, pass `None` for `last_location_id`.
-    pub async fn list_locations_with_details(
+    pub async fn list_locations(
         &self,
         limit: i64,
         last_location_id: Option<LocationId>,
@@ -600,15 +604,23 @@ impl MetadataDb {
         }
     }
 
-    // Get a location by its ID
+    // Get a location by its ID with full details including writer job
     //
     // Returns the location if found, or None if no location exists with the given ID.
-    // pub async fn get_location_by_id(
-    //     &self,
-    //     location_id: LocationId,
-    // ) -> Result<Option<Location>, Error> {
-    //     Ok(locations::get_by_id(&*self.pool, location_id).await?)
-    // }
+    pub async fn get_location_by_id_with_details(
+        &self,
+        location_id: LocationId,
+    ) -> Result<Option<LocationWithDetails>, Error> {
+        Ok(locations::get_by_id_with_details(&*self.pool, location_id).await?)
+    }
+
+    /// Delete a location by its ID
+    ///
+    /// This will also delete all associated file_metadata entries due to CASCADE.
+    /// Returns true if the location was deleted, false if it didn't exist.
+    pub async fn delete_location_by_id(&self, location_id: LocationId) -> Result<bool, Error> {
+        Ok(locations::delete_by_id(&*self.pool, location_id).await?)
+    }
 }
 
 /// File metadata-related API
@@ -616,7 +628,7 @@ impl MetadataDb {
     pub fn stream_file_metadata(
         &self,
         location_id: LocationId,
-    ) -> BoxStream<'_, Result<FileMetadataRow, sqlx::Error>> {
+    ) -> impl Stream<Item = Result<FileMetadataRow, sqlx::Error>> + '_ {
         let query = "
         SELECT fm.id
              , fm.location_id

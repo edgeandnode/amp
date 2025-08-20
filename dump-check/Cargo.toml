@@ -20,5 +20,4 @@ human_bytes = { version = "0.4", default-features = false }
 indicatif = "0.17"
 tracing.workspace = true
 tokio.workspace = true
-tracing-subscriber.workspace = true
 monitoring = { path = "../monitoring" }
