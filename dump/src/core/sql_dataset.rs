@@ -122,7 +122,7 @@ use common::{
     notification_multiplexer::NotificationMultiplexerHandle,
     query_context::{DetachedLogicalPlan, PlanningContext, QueryEnv},
 };
-use datafusion::sql::{resolve::resolve_table_references};
+use datafusion::sql::resolve::resolve_table_references;
 use dataset_store::{DatasetStore, resolve_blocks_table, sql_datasets::SqlDataset};
 use futures::StreamExt as _;
 use tracing::instrument;

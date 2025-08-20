@@ -25,7 +25,10 @@ async fn insert_creates_location_and_returns_id() {
     println!("Locations table columns: {:?}", columns);
 
     let has_start_block = columns.contains(&"start_block".to_string());
-    assert!(has_start_block, "start_block column is missing after migrations!");
+    assert!(
+        has_start_block,
+        "start_block column is missing after migrations!"
+    );
 
     let table = TableId {
         dataset: "test-dataset",
@@ -679,7 +682,7 @@ async fn get_location_by_id<'c, E>(
         String,
         String,
         bool,
-        i64
+        i64,
     ),
     sqlx::Error,
 >
