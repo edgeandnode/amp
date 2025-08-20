@@ -7,7 +7,7 @@ use std::{
 };
 
 use opentelemetry_otlp::{ExporterBuildError, Protocol, WithExportConfig};
-use opentelemetry_sdk::metrics::SdkMeterProvider;
+pub use opentelemetry_sdk::metrics::SdkMeterProvider;
 
 pub type Result = std::result::Result<SdkMeterProvider, ExporterBuildError>;
 

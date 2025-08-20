@@ -82,11 +82,9 @@ async fn main() -> Result<(), BoxError> {
         return Err("The start block number must be less than the end block number".into());
     }
 
-    let telemetry_metrics_provider = if let Some(url) = opentelemetry_metrics_url {
-        Some(telemetry::metrics::start(url)?)
-    } else {
-        None
-    };
+    let telemetry_metrics_provider = opentelemetry_metrics_url
+        .map(telemetry::metrics::start)
+        .transpose()?;
 
     let total_blocks = end_block - start + 1;
     let ui_handle = tokio::spawn(ui::ui(total_blocks));

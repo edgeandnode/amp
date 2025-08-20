@@ -5,7 +5,7 @@ use common::{BoxError, config::Config, manifest::Manifest};
 use dataset_store::DatasetStore;
 use dump::worker::Worker;
 use metadata_db::MetadataDb;
-use monitoring::{logging, telemetry::traces::provider_flush_shutdown};
+use monitoring::{logging, telemetry};
 use nozzle::dump_cmd;
 use registry_service::handlers::register::register_manifest;
 use tracing::info;
@@ -22,6 +22,23 @@ struct Args {
     /// This argument is optional for the `generate-manifest` command.
     #[arg(long, env = "NOZZLE_CONFIG")]
     config: Option<String>,
+
+    /// Remote OpenTelemetry metrics collector endpoint. OpenTelemetry collector must be running and
+    /// configured to accept metrics at this endpoint. Metrics are sent over binary HTTP.
+    ///
+    /// If not specified, metrics infrastructure will not be initialized.
+    #[arg(long, env = "DUMP_OPENTELEMETRY_METRICS_URL")]
+    opentelemetry_metrics_url: Option<String>,
+    /// Remote OpenTelemetry traces collector endpoint. OpenTelemetry collector must be running and
+    /// configured to accept traces at this endpoint. Traces are sent over gRPC.
+    ///
+    /// If not specified, traces infrastructure will not be initialized.
+    #[arg(long, env = "OPENTELEMETRY_TRACE_URL")]
+    opentelemetry_trace_url: Option<String>,
+    /// The ratio of traces to sample (f64). Samples all traces by default (equivalent to 1.0).
+    #[arg(long, env = "OPENTELEMETRY_TRACE_RATIO")]
+    opentelemetry_trace_ratio: Option<f64>,
+
     #[command(subcommand)]
     command: Command,
 }
@@ -95,15 +112,6 @@ enum Command {
         /// Enable Admin API Server.
         #[arg(long, env = "ADMIN_SERVER")]
         admin_server: bool,
-        /// Remote OpenTelemetry traces collector endpoint. OpenTelemetry collector must be running and
-        /// configured to accept traces at this endpoint. Traces are sent over gRPC.
-        ///
-        /// If not specified, traces infrastructure will not be initialized.
-        #[arg(long, env = "OPENTELEMETRY_TRACE_URL")]
-        opentelemetry_trace_url: Option<String>,
-        /// The ratio of traces to sample (f64). Samples all traces by default (equivalent to 1.0).
-        #[arg(long, env = "OPENTELEMETRY_TRACE_RATIO")]
-        opentelemetry_trace_ratio: Option<f64>,
     },
     Worker {
         /// The node id of the worker.
@@ -153,6 +161,21 @@ async fn main() {
 }
 
 async fn main_inner() -> Result<(), BoxError> {
+    let Args {
+        config,
+        opentelemetry_metrics_url,
+        opentelemetry_trace_url,
+        opentelemetry_trace_ratio,
+        command,
+    } = Args::parse();
+    let config_path = config;
+
+    let (telemetry_metrics_provider, telemetry_tracing_provider) = init_monitoring(
+        opentelemetry_metrics_url,
+        opentelemetry_trace_url,
+        opentelemetry_trace_ratio,
+    )?;
+
     // Log version info
     info!(
         "built on {}, git describe {}",
@@ -160,11 +183,8 @@ async fn main_inner() -> Result<(), BoxError> {
         env!("VERGEN_GIT_DESCRIBE"),
     );
 
-    let args = Args::parse();
-    let command = args.command.clone();
-    let config_path = args.config;
-
-    match args.command {
+    let allow_temp_db = matches!(command, Command::Server { dev, .. } if dev);
+    let cmd_result = match command {
         Command::Dump {
             start,
             end_block,
@@ -176,10 +196,8 @@ async fn main_inner() -> Result<(), BoxError> {
             location,
             fresh,
         } => {
-            logging::init();
-
             let (config, metadata_db) =
-                construct_confing_and_metadatadb(config_path.as_ref(), &command).await?;
+                construct_confing_and_metadatadb(config_path.as_ref(), allow_temp_db).await?;
             let mut datasets_to_dump = Vec::new();
             let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
 
@@ -218,21 +236,9 @@ async fn main_inner() -> Result<(), BoxError> {
             mut jsonl_server,
             mut registry_server,
             mut admin_server,
-            opentelemetry_trace_url,
-            opentelemetry_trace_ratio,
         } => {
-            let telemetry_tracing_provider = if let Some(url) = opentelemetry_trace_url {
-                Some(logging::init_with_telemetry(
-                    url,
-                    opentelemetry_trace_ratio.unwrap_or(1.0),
-                )?)
-            } else {
-                logging::init();
-                None
-            };
-
             let (config, metadata_db) =
-                construct_confing_and_metadatadb(config_path.as_ref(), &command).await?;
+                construct_confing_and_metadatadb(config_path.as_ref(), allow_temp_db).await?;
             if !flight_server && !jsonl_server && !registry_server && !admin_server {
                 flight_server = true;
                 jsonl_server = true;
@@ -259,10 +265,8 @@ async fn main_inner() -> Result<(), BoxError> {
             })
         }
         Command::Worker { node_id } => {
-            logging::init();
-
             let (config, metadata_db) =
-                construct_confing_and_metadatadb(config_path.as_ref(), &command).await?;
+                construct_confing_and_metadatadb(config_path.as_ref(), allow_temp_db).await?;
             let worker = Worker::new(config.clone(), metadata_db, node_id.parse()?);
             worker.run().await.map_err(Into::into)
         }
@@ -274,8 +278,6 @@ async fn main_inner() -> Result<(), BoxError> {
             manifest,
             module,
         } => {
-            logging::init();
-
             if let Some(mut out) = out {
                 if out.is_dir() {
                     out.push(format!("{}.json", &kind));
@@ -288,22 +290,58 @@ async fn main_inner() -> Result<(), BoxError> {
                 generate_manifest::run(network, kind, name, manifest, module, &mut stdout).await
             }
         }
-    }
+    };
+
+    cmd_result.and_then(move |_| {
+        if let Some(provider) = telemetry_metrics_provider {
+            provider.force_flush()?;
+            provider.shutdown()?;
+        }
+        if let Some(provider) = telemetry_tracing_provider {
+            provider.force_flush()?;
+            provider.shutdown()?;
+        }
+
+        Ok(())
+    })?;
+
+    Ok(())
+}
+
+fn init_monitoring(
+    opentelemetry_metrics_url: Option<String>,
+    opentelemetry_trace_url: Option<String>,
+    opentelemetry_trace_ratio: Option<f64>,
+) -> Result<
+    (
+        Option<telemetry::metrics::SdkMeterProvider>,
+        Option<telemetry::traces::SdkTracerProvider>,
+    ),
+    telemetry::ExporterBuildError,
+> {
+    let telemetry_metrics_provider = opentelemetry_metrics_url
+        .map(telemetry::metrics::start)
+        .transpose()?;
+    let telemetry_tracing_provider = if let Some(url) = opentelemetry_trace_url {
+        let provider = logging::init_with_telemetry(url, opentelemetry_trace_ratio.unwrap_or(1.0))?;
+        Some(provider)
+    } else {
+        logging::init();
+        None
+    };
+
+    Ok((telemetry_metrics_provider, telemetry_tracing_provider))
 }
 
 async fn construct_confing_and_metadatadb(
     config_path: Option<&String>,
-    command: &Command,
+    allow_temp_db: bool,
 ) -> Result<(Arc<Config>, Arc<MetadataDb>), BoxError> {
-    let allow_temp_db = matches!(&command, Command::Server { dev, .. } if *dev);
-    match config_path {
-        Some(config) => {
-            let config = Arc::new(Config::load(config, true, None, allow_temp_db).await?);
-            let metadata_db = config.metadata_db().await?.into();
-            Ok((config, metadata_db))
-        }
-        None => {
-            return Err("--config parameter is mandatory".into());
-        }
-    }
+    let Some(config) = config_path else {
+        return Err("--config parameter is mandatory".into());
+    };
+
+    let config = Arc::new(Config::load(config, true, None, allow_temp_db).await?);
+    let metadata_db = config.metadata_db().await?.into();
+    Ok((config, metadata_db))
 }
