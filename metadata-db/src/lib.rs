@@ -155,8 +155,22 @@ impl MetadataDb {
     /// Runs migrations if necessary.
     #[instrument(skip_all, err)]
     pub async fn connect(url: &str, pool_size: u32) -> Result<Self, Error> {
+        Self::connect_with_config(url, pool_size, true).await
+    }
+
+    /// Sets up a connection pool to the Metadata DB with configurable migration behavior
+    ///
+    /// Runs migrations only if `auto_migrate` is true.
+    #[instrument(skip_all, err)]
+    pub async fn connect_with_config(
+        url: &str,
+        pool_size: u32,
+        auto_migrate: bool,
+    ) -> Result<Self, Error> {
         let pool = DbConnPool::connect(url, pool_size).await?;
-        pool.run_migrations().await?;
+        if auto_migrate {
+            pool.run_migrations().await?;
+        }
         Ok(Self {
             pool,
             url: url.into(),
