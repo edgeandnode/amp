@@ -209,9 +209,6 @@ pub async fn dump_table(
         let blocks_table =
             resolve_blocks_table(&dataset_store, &src_datasets, table.network()).await?;
 
-        // Use blocks_table here or remove if truly unused
-        tracing::debug!("Resolved blocks table: {}", blocks_table);
-
         if is_incr {
             ctx.metadata_db
                 .check_start_block(table.location_id(), start_block)
