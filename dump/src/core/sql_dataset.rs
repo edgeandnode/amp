@@ -128,6 +128,7 @@ use tracing::instrument;
 
 use super::{Ctx, block_ranges, tasks::FailFastJoinSet};
 use crate::{
+    metrics,
     parquet_writer::{ParquetFileWriter, ParquetWriterProperties, commit_metadata},
     streaming_query::{QueryMessage, StreamingQuery},
 };
@@ -281,6 +282,8 @@ async fn dump_sql_query(
         microbatch_start,
     )?;
 
+    let dataset = physical_table.dataset().name.clone();
+
     // Receive data from the query stream, commiting a file on every watermark update received. The
     // `microbatch_max_interval` parameter controls the frequency of these updates.
     while let Some(message) = stream.next().await {
@@ -288,6 +291,9 @@ async fn dump_sql_query(
         match message {
             QueryMessage::MicrobatchStart(_) => (),
             QueryMessage::Data(batch) => {
+                let num_rows: u64 = batch.num_rows().try_into().unwrap();
+                metrics::throughput::sql(num_rows, dataset.clone());
+
                 writer.write(&batch).await?;
             }
             QueryMessage::MicrobatchEnd(range) => {

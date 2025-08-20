@@ -1,4 +1,4 @@
-use std::{path::PathBuf, sync::Arc};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use clap::Parser as _;
 use common::{BoxError, config::Config, manifest::Manifest};
@@ -27,8 +27,17 @@ struct Args {
     /// configured to accept metrics at this endpoint. Metrics are sent over binary HTTP.
     ///
     /// If not specified, metrics infrastructure will not be initialized.
-    #[arg(long, env = "DUMP_OPENTELEMETRY_METRICS_URL")]
+    #[arg(long, env = "OPENTELEMETRY_METRICS_URL")]
     opentelemetry_metrics_url: Option<String>,
+
+    /// The interval (in seconds, fractions are allowed) at which to export metrics to the OpenTelemetry collector.
+    #[arg(
+        long,
+        env = "OPENTELEMETRY_METRICS_EXPORT_INTERVAL",
+        value_parser = metrics_export_interval_parser,
+    )]
+    opentelemetry_metrics_export_interval: Option<Duration>,
+
     /// Remote OpenTelemetry traces collector endpoint. OpenTelemetry collector must be running and
     /// configured to accept traces at this endpoint. Traces are sent over gRPC.
     ///
@@ -164,16 +173,18 @@ async fn main_inner() -> Result<(), BoxError> {
     let Args {
         config,
         opentelemetry_metrics_url,
+        opentelemetry_metrics_export_interval,
         opentelemetry_trace_url,
         opentelemetry_trace_ratio,
         command,
     } = Args::parse();
     let config_path = config;
 
-    let (telemetry_metrics_provider, telemetry_tracing_provider) = init_monitoring(
-        opentelemetry_metrics_url,
+    let (telemetry_tracing_provider, telemetry_metrics_provider) = init_monitoring(
         opentelemetry_trace_url,
         opentelemetry_trace_ratio,
+        opentelemetry_metrics_url,
+        opentelemetry_metrics_export_interval,
     )?;
 
     // Log version info
@@ -196,6 +207,30 @@ async fn main_inner() -> Result<(), BoxError> {
             location,
             fresh,
         } => {
+            match opentelemetry_metrics_export_interval {
+                Some(export_interval) => {
+                    if export_interval > dump::RECOMMENDED_METRICS_EXPORT_INTERVAL {
+                        tracing::warn!(
+                            recommended_dump_metrics_export_interval = ?dump::RECOMMENDED_METRICS_EXPORT_INTERVAL,
+                            "OpenTelemetry metrics export interval is set above the recommended value for the `dump` command. \
+                            This could lead to less precise metrics."
+                        );
+                    }
+                }
+                None => {
+                    debug_assert!(
+                        telemetry::metrics::DEFAULT_METRICS_EXPORT_INTERVAL
+                            > dump::RECOMMENDED_METRICS_EXPORT_INTERVAL
+                    );
+                    tracing::warn!(
+                        default_metrics_export_interval = ?telemetry::metrics::DEFAULT_METRICS_EXPORT_INTERVAL,
+                        recommended_dump_metrics_export_interval = ?dump::RECOMMENDED_METRICS_EXPORT_INTERVAL,
+                        "OpenTelemetry metrics export interval defaults to a value which is above the recommended interval for the `dump` command. \
+                        This could lead to less precise metrics."
+                    );
+                }
+            }
+
             let (config, metadata_db) =
                 construct_confing_and_metadatadb(config_path.as_ref(), allow_temp_db).await?;
             let mut datasets_to_dump = Vec::new();
@@ -256,13 +291,7 @@ async fn main_inner() -> Result<(), BoxError> {
                 admin_server,
             )
             .await?;
-            server.await.and_then(move |_| {
-                telemetry_tracing_provider
-                    .map(provider_flush_shutdown)
-                    .transpose()?;
-
-                Ok(())
-            })
+            server.await
         }
         Command::Worker { node_id } => {
             let (config, metadata_db) =
@@ -293,15 +322,7 @@ async fn main_inner() -> Result<(), BoxError> {
     };
 
     cmd_result.and_then(move |_| {
-        if let Some(provider) = telemetry_metrics_provider {
-            provider.force_flush()?;
-            provider.shutdown()?;
-        }
-        if let Some(provider) = telemetry_tracing_provider {
-            provider.force_flush()?;
-            provider.shutdown()?;
-        }
-
+        deinit_monitoring(telemetry_metrics_provider, telemetry_tracing_provider)?;
         Ok(())
     })?;
 
@@ -309,28 +330,80 @@ async fn main_inner() -> Result<(), BoxError> {
 }
 
 fn init_monitoring(
-    opentelemetry_metrics_url: Option<String>,
     opentelemetry_trace_url: Option<String>,
     opentelemetry_trace_ratio: Option<f64>,
+    opentelemetry_metrics_url: Option<String>,
+    opentelemtry_metrics_export_interval: Option<Duration>,
 ) -> Result<
     (
-        Option<telemetry::metrics::SdkMeterProvider>,
         Option<telemetry::traces::SdkTracerProvider>,
+        Option<telemetry::metrics::SdkMeterProvider>,
     ),
     telemetry::ExporterBuildError,
 > {
-    let telemetry_metrics_provider = opentelemetry_metrics_url
-        .map(telemetry::metrics::start)
-        .transpose()?;
-    let telemetry_tracing_provider = if let Some(url) = opentelemetry_trace_url {
-        let provider = logging::init_with_telemetry(url, opentelemetry_trace_ratio.unwrap_or(1.0))?;
-        Some(provider)
-    } else {
-        logging::init();
-        None
+    let telemetry_tracing_provider = match (opentelemetry_trace_url, opentelemetry_trace_ratio) {
+        (Some(url), trace_ratio) => {
+            let provider = logging::init_with_telemetry(url, trace_ratio.unwrap_or(1.0))?;
+            Some(provider)
+        }
+        (None, trace_ratio) => {
+            logging::init();
+
+            if trace_ratio.is_some() {
+                tracing::warn!(
+                    "OpenTelemetry trace ratio is set but will not be used. Please provide an OpenTelemetry trace URL to enable tracing."
+                );
+            }
+
+            None
+        }
     };
 
-    Ok((telemetry_metrics_provider, telemetry_tracing_provider))
+    let telemetry_metrics_provider = match (
+        opentelemetry_metrics_url,
+        opentelemtry_metrics_export_interval,
+    ) {
+        (Some(url), export_interval) => {
+            let provider = telemetry::metrics::start(url, export_interval)?;
+            Some(provider)
+        }
+        (None, export_interval) => {
+            if export_interval.is_some() {
+                tracing::warn!(
+                    "OpenTelemetry metrics export interval is set but will not be used. Please provide an OpenTelemetry metrics URL to enable metrics."
+                );
+            }
+
+            None
+        }
+    };
+
+    Ok((telemetry_tracing_provider, telemetry_metrics_provider))
+}
+
+fn deinit_monitoring(
+    metrics_provider: Option<telemetry::metrics::SdkMeterProvider>,
+    tracing_provider: Option<telemetry::traces::SdkTracerProvider>,
+) -> Result<(), String> {
+    if let Some(provider) = metrics_provider {
+        telemetry::metrics::provider_flush_shutdown(provider).map_err(|e| {
+            format!("Failed to flush and shutdown OpenTelemetry metrics provider: {e}") 
+        })?;
+    }
+    if let Some(provider) = tracing_provider {
+        telemetry::traces::provider_flush_shutdown(provider).map_err(|e| {
+            format!("Failed to flush and shutdown OpenTelemetry tracing provider: {e}")
+        })?;
+    }
+
+    Ok(())
+}
+
+fn metrics_export_interval_parser(arg: &str) -> Result<Duration, String> {
+    arg
+        .parse()
+        .map(Duration::from_secs_f64)
+        .map_err(|_| String::from("Invalid OpenTelemetry metrics export interval format, expected a number representing seconds (e.g., 60.0 for 1 minute)"))
 }
 
 async fn construct_confing_and_metadatadb(

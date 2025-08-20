@@ -96,7 +96,10 @@ use metadata_db::MetadataDb;
 use tracing::instrument;
 
 use super::{Ctx, block_ranges, tasks::FailFastJoinSet};
-use crate::parquet_writer::{ParquetWriterProperties, RawDatasetWriter};
+use crate::{
+    metrics,
+    parquet_writer::{ParquetWriterProperties, RawDatasetWriter},
+};
 
 /// Dumps a raw dataset by extracting blockchain data from specified block ranges
 /// and writing it to partitioned Parquet files.
@@ -164,14 +167,15 @@ pub async fn dump(
         .into_iter()
         .enumerate()
         .map(|(i, ranges)| DumpPartition {
-            catalog: catalog.clone(),
-            metadata_db: ctx.metadata_db.clone(),
             block_streamer: client.clone(),
+            dataset_name: dataset_name.to_string(),
+            metadata_db: ctx.metadata_db.clone(),
+            catalog: catalog.clone(),
             ranges,
-            id: i as u32,
-            partition_size,
             parquet_opts: parquet_opts.clone(),
+            partition_size,
             missing_ranges_by_table: missing_ranges_by_table.clone(),
+            id: i as u32,
         });
 
     // Spawn the jobs, starting them with a 1 second delay between each.
@@ -257,6 +261,8 @@ fn split_and_partition(
 struct DumpPartition<S: BlockStreamer> {
     /// The block streamer
     block_streamer: S,
+    /// The name of the dataset
+    dataset_name: String,
     /// The metadata database
     metadata_db: Arc<MetadataDb>,
     /// The tables to write to
@@ -346,6 +352,9 @@ impl<S: BlockStreamer> DumpPartition<S> {
         let mut stream = std::pin::pin!(stream);
         while let Some(dataset_rows) = stream.try_next().await? {
             for table_rows in dataset_rows {
+                let num_rows: u64 = table_rows.rows.num_rows().try_into().unwrap();
+                metrics::throughput::raw(num_rows, self.dataset_name.clone());
+
                 writer.write(table_rows).await?;
             }
         }

@@ -1,34 +1,47 @@
-#![allow(unused)]
+use std::{sync::LazyLock, time::Duration};
 
-use std::sync::Arc;
+use monitoring::telemetry;
 
-use monitoring::telemetry::metrics;
+/// The recommended interval at which to export metrics when running the `dump` command.
+/// If the export interval is set to a higher value (less frequent), there is a risk
+/// some observation points will not be exported.
+pub const RECOMMENDED_METRICS_EXPORT_INTERVAL: Duration = Duration::from_secs(1);
 
-pub struct ParquetWriterMetrics {
-    pub files_written: metrics::Counter,
-    pub bytes_written: metrics::Counter,
+static METRICS: LazyLock<MetricsRegistry> = LazyLock::new(|| MetricsRegistry::new());
+
+/// Dataset dump throughput metrics. Expressed as total number of rows dumped. Metrics backends
+/// such as Prometheus should allow querying for the rate of change, turning the metrics into rows
+/// per second.
+pub(crate) mod throughput {
+    use super::*;
+
+    pub(crate) fn raw(rows: u64, dataset: String) {
+        let kv_pairs = [telemetry::metrics::KeyValue::new("dataset", dataset)];
+        METRICS.raw_dataset_rows.inc_by_with_kvs(rows, &kv_pairs);
+    }
+
+    pub(crate) fn sql(rows: u64, dataset: String) {
+        let kv_pairs = [telemetry::metrics::KeyValue::new("dataset", dataset)];
+        METRICS.sql_dataset_rows.inc_by_with_kvs(rows, &kv_pairs);
+    }
 }
 
-impl ParquetWriterMetrics {
-    pub fn new() -> Arc<Self> {
-        let files_written =
-            metrics::Counter::new("files_written", "Count of parquet files written");
-        let bytes_written = metrics::Counter::new(
-            "bytes_written",
-            "Bytes written to the parquet writer, possibly unflushed. Counts towards the partition size limit, but does not exactly correspond to the size of the parquet files written.",
-        );
+struct MetricsRegistry {
+    raw_dataset_rows: telemetry::metrics::Counter,
+    sql_dataset_rows: telemetry::metrics::Counter,
+}
 
-        Arc::new(ParquetWriterMetrics {
-            files_written,
-            bytes_written,
-        })
-    }
-
-    pub fn inc_files_written(&self) {
-        self.files_written.inc();
-    }
-
-    pub fn add_bytes_written(&self, bytes: u64) {
-        self.bytes_written.inc_by(bytes);
+impl MetricsRegistry {
+    fn new() -> Self {
+        Self {
+            raw_dataset_rows: telemetry::metrics::Counter::new(
+                "raw_dataset_rows_dumped",
+                "Counter for raw dataset rows processed",
+            ),
+            sql_dataset_rows: telemetry::metrics::Counter::new(
+                "sql_dataset_rows_dumped",
+                "Counter for SQL dataset rows processed",
+            ),
+        }
     }
 }
