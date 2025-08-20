@@ -90,6 +90,7 @@ opentelemetry = { version = "0.30", features = ["trace"] }
 opentelemetry-otlp = { version = "0.30", features = ["grpc-tonic"] }
 opentelemetry_sdk = { version = "0.30" }
 tracing-opentelemetry = { version = "0.31", features = ["default"] }
+static_assertions = "1.1.0"
 
 # Datafusion and Arrow crates
 arrow-flight = { version = "55", features = ["flight-sql-experimental"] }

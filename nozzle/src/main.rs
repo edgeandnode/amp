@@ -8,6 +8,7 @@ use metadata_db::MetadataDb;
 use monitoring::{logging, telemetry};
 use nozzle::dump_cmd;
 use registry_service::handlers::register::register_manifest;
+use static_assertions::const_assert;
 use tracing::info;
 
 #[cfg(feature = "snmalloc")]
@@ -218,9 +219,9 @@ async fn main_inner() -> Result<(), BoxError> {
                     }
                 }
                 None => {
-                    debug_assert!(
-                        telemetry::metrics::DEFAULT_METRICS_EXPORT_INTERVAL
-                            > dump::RECOMMENDED_METRICS_EXPORT_INTERVAL
+                    const_assert!(
+                        telemetry::metrics::DEFAULT_METRICS_EXPORT_INTERVAL.as_secs()
+                            > dump::RECOMMENDED_METRICS_EXPORT_INTERVAL.as_secs()
                     );
                     tracing::warn!(
                         default_metrics_export_interval = ?telemetry::metrics::DEFAULT_METRICS_EXPORT_INTERVAL,
@@ -387,7 +388,7 @@ fn deinit_monitoring(
 ) -> Result<(), String> {
     if let Some(provider) = metrics_provider {
         telemetry::metrics::provider_flush_shutdown(provider).map_err(|e| {
-            format!("Failed to flush and shutdown OpenTelemetry metrics provider: {e}") 
+            format!("Failed to flush and shutdown OpenTelemetry metrics provider: {e}")
         })?;
     }
     if let Some(provider) = tracing_provider {
