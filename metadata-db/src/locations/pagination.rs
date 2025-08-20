@@ -19,7 +19,8 @@ where
             dataset_version,
             tbl,
             url,
-            active
+            active,
+            writer
         FROM locations
         ORDER BY id DESC
         LIMIT $1
@@ -49,7 +50,8 @@ where
             dataset_version, 
             tbl,
             url,
-            active
+            active,
+            writer
         FROM locations
         WHERE id < $2
         ORDER BY id DESC
