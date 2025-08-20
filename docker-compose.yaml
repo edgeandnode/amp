@@ -19,3 +19,17 @@ services:
     restart: always
     ports:
       - 7402:8080
+
+  # All-in-one observability stack (Grafana + OTEL + Loki + Tempo + Prometheus + Pyroscope).
+  # To get started with telemetry in Nozzle, add an `[opentelemetry]` section in the `config.toml` file.
+  #
+  # To export OpenTelemtry traces add `trace_url = "http://localhost:4317/v1/traces"` to the [opentelemetry] section of the config file.
+  # To export OpenTelemtry metrics add `metrics_url = "http://localhost:4318/v1/metrics"` to the [opentelemetry] section of the config file.
+  #
+  # To view OpenTelemetry traces/metrics/logs open the Grafana UI at http://localhost:3000.
+  lgtm:
+    image: grafana/otel-lgtm
+    ports:
+      - "3000:3000" # Grafana UI
+      - "4317:4317" # OTLP_gRPC_PORT
+      - "4318:4318" # OTLP_HTTP_PORT
