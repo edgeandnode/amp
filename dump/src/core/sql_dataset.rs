@@ -114,7 +114,7 @@
 //! - **Incremental Updates**: Avoids reprocessing already-computed data by maintaining
 //!   precise tracking of processed block ranges per table.
 
-use std::{collections::BTreeSet, ops::RangeInclusive, sync::Arc};
+use std::{ops::RangeInclusive, sync::Arc};
 
 use common::{
     BlockNum, BoxError, QueryContext,
@@ -122,8 +122,7 @@ use common::{
     notification_multiplexer::NotificationMultiplexerHandle,
     query_context::{DetachedLogicalPlan, PlanningContext, QueryEnv},
 };
-use datafusion::sql::resolve::resolve_table_references;
-use dataset_store::{DatasetStore, resolve_blocks_table, sql_datasets::SqlDataset};
+use dataset_store::{DatasetStore, sql_datasets::SqlDataset};
 use futures::StreamExt as _;
 use tracing::instrument;
 
@@ -173,16 +172,6 @@ pub async fn dump_table(
         let plan = planning_ctx.plan_sql(query.clone()).await?;
         let is_incr = plan.is_incremental()?;
 
-        let (table_refs, _) = resolve_table_references(&query, true)
-            .map_err(|e| format!("Failed to resolve table references: {}", e))?;
-
-        let src_datasets_vec: Vec<String> = table_refs
-            .into_iter()
-            .filter_map(|t| t.schema().map(|s| s.to_owned()))
-            .collect();
-
-        let src_datasets: BTreeSet<&str> = src_datasets_vec.iter().map(|s| s.as_str()).collect();
-
         let (start, end) = match (start, end) {
             (start, Some(end)) if start >= 0 && end >= 0 => (start as BlockNum, end as BlockNum),
             _ => {
@@ -205,9 +194,6 @@ pub async fn dump_table(
         let start_block = start
             .try_into()
             .map_err(|e| format!("start_block value {} is out of range: {}", start, e))?;
-
-        let blocks_table =
-            resolve_blocks_table(&dataset_store, &src_datasets, table.network()).await?;
 
         if is_incr {
             ctx.metadata_db
