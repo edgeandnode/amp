@@ -2,10 +2,7 @@
 use std::str::FromStr;
 
 use axum::{Json, extract::State, http::StatusCode};
-use common::{
-    Dataset,
-    manifest::{Manifest, Version},
-};
+use common::manifest::{self, Manifest, Version};
 use dataset_store::DatasetDefsCommon;
 use http_common::BoxRequestError;
 use object_store::path::Path;
@@ -79,7 +76,8 @@ pub async fn handler_inner(
                         payload.version
                     );
 
-                    let dataset = Dataset::from(manifest);
+                    let dataset = manifest::dataset(manifest)
+                        .map_err(|e| Error::InvalidManifest(e.to_string()))?;
                     ctx.scheduler.schedule_dataset_dump(dataset, None).await?;
                 }
                 _ => {

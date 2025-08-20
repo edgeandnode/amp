@@ -103,7 +103,7 @@ impl sqlx::postgres::PgHasArrayType for LocationId {
 impl<'r> sqlx::Decode<'r, Postgres> for LocationId {
     fn decode(value: sqlx::postgres::PgValueRef<'r>) -> Result<Self, BoxDynError> {
         let id = <i64 as sqlx::Decode<Postgres>>::decode(value)?;
-        LocationId::try_from(id).map_err(|err| Box::new(err) as BoxDynError)
+        id.try_into().map_err(|err| Box::new(err) as BoxDynError)
     }
 }
 
@@ -113,6 +113,25 @@ impl<'q> sqlx::Encode<'q, Postgres> for LocationId {
         buf: &mut <Postgres as Database>::ArgumentBuffer<'q>,
     ) -> Result<IsNull, BoxDynError> {
         <i64 as sqlx::Encode<'q, Postgres>>::encode_by_ref(&self.0, buf)
+    }
+}
+
+impl serde::Serialize for LocationId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.0.serialize(serializer)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for LocationId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let id = i64::deserialize(deserializer)?;
+        id.try_into().map_err(serde::de::Error::custom)
     }
 }
 

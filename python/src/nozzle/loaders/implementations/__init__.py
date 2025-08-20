@@ -24,6 +24,16 @@ try:
 except ImportError:
     IcebergLoader = None
 
+try:
+    from .snowflake_loader import SnowflakeLoader
+except ImportError:
+    SnowflakeLoader = None
+
+try:
+    from .lmdb_loader import LMDBLoader
+except ImportError:
+    LMDBLoader = None
+
 # Add any other loaders here
 # try:
 #     from .snowflake_loader import SnowflakeLoader
@@ -41,3 +51,7 @@ if DeltaLakeLoader:
     __all__.append('DeltaLakeLoader')
 if IcebergLoader:
     __all__.append('IcebergLoader')
+if SnowflakeLoader:
+    __all__.append('SnowflakeLoader')
+if LMDBLoader:
+    __all__.append('LMDBLoader')

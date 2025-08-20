@@ -10,8 +10,6 @@
 /local
 /target
 /tests/config/providers/
-/tests/config/dataset_defs/register_test*.json
-/tests/config/dataset_defs/deploy_test*.json
 uv.lock
 cache/
 out/

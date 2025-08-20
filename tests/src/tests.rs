@@ -321,8 +321,8 @@ async fn anvil_rpc_reorg() {
     let metadata_ranges = async || -> Vec<BlockRange> {
         let sql = parse_sql("select * from anvil_rpc.blocks").unwrap();
         let env = test_env.config.make_query_env().unwrap();
-        let ctx = dataset_store.ctx_for_sql(&sql, env).await.unwrap();
-        let tables = ctx.catalog().tables();
+        let catalog = dataset_store.catalog_for_sql(&sql, env).await.unwrap();
+        let tables = catalog.tables();
         let table = tables.iter().find(|t| t.table_name() == "blocks").unwrap();
         test_support::table_ranges(&table).await.unwrap()
     };

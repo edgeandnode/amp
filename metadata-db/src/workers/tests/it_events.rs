@@ -10,7 +10,7 @@ use crate::{
     conn::DbConn,
     workers::{
         events::{self, JobNotifAction, JobNotification},
-        jobs::JobId,
+        job_id::JobId,
         node_id::WorkerNodeId,
     },
 };
@@ -27,7 +27,7 @@ async fn send_and_receive_start_notification() {
         .expect("Failed to run migrations");
 
     let worker_id: WorkerNodeId = "test-worker-notify".parse().expect("Invalid worker ID");
-    let job_id: JobId = 1i64.into();
+    let job_id = JobId::new_unchecked(1i64);
 
     // Create listener
     let listener = events::listen_url(&temp_db.connection_uri())
@@ -65,7 +65,7 @@ async fn send_and_receive_stop_notification() {
         .expect("Failed to run migrations");
 
     let worker_id: WorkerNodeId = "test-worker-stop".parse().expect("Invalid worker ID");
-    let job_id: JobId = 2i64.into();
+    let job_id = JobId::new_unchecked(2i64);
 
     let listener = events::listen_url(&temp_db.connection_uri())
         .await
@@ -102,7 +102,7 @@ async fn notification_serialization_roundtrip() {
         .expect("Failed to run migrations");
 
     let worker_id: WorkerNodeId = "test-worker-serialize".parse().expect("Invalid worker ID");
-    let job_id: JobId = 3i64.into();
+    let job_id = JobId::new_unchecked(3i64);
 
     //* When & Then - Test START action
     let start_notification = JobNotification::start(worker_id.clone(), job_id);
@@ -137,7 +137,7 @@ async fn multiple_listeners_receive_same_notification() {
         .expect("Failed to run migrations");
 
     let worker_id: WorkerNodeId = "test-worker-multi".parse().expect("Invalid worker ID");
-    let job_id: JobId = 4i64.into();
+    let job_id = JobId::new_unchecked(4i64);
 
     // Create multiple listeners
     let listener1 = events::listen_url(&temp_db.connection_uri())
@@ -190,8 +190,8 @@ async fn listener_stream_yields_notifications() {
         .expect("Failed to run migrations");
 
     let worker_id: WorkerNodeId = "test-worker-stream".parse().expect("Invalid worker ID");
-    let job_id1: JobId = 5i64.into();
-    let job_id2: JobId = 6i64.into();
+    let job_id1 = JobId::new_unchecked(5i64);
+    let job_id2 = JobId::new_unchecked(6i64);
 
     let listener = events::listen_url(&temp_db.connection_uri())
         .await
@@ -279,7 +279,7 @@ async fn notification_not_received_before_listen() {
         .expect("Failed to run migrations");
 
     let worker_id: WorkerNodeId = "test-worker-timing".parse().expect("Invalid worker ID");
-    let job_id: JobId = 7i64.into();
+    let job_id = JobId::new_unchecked(7i64);
 
     //* When - Send notification BEFORE creating listener
     let notification = JobNotification::start(worker_id.clone(), job_id);

@@ -107,7 +107,7 @@ use crate::parquet_writer::{ParquetWriterProperties, RawDatasetWriter};
 pub async fn dump(
     ctx: Ctx,
     n_jobs: u16,
-    catalog: Arc<Catalog>,
+    catalog: Catalog,
     dataset_name: &str,
     tables: &[Arc<PhysicalTable>],
     partition_size: u64,
@@ -266,7 +266,7 @@ struct DumpPartition<S: BlockStreamer> {
     /// The metadata database
     metadata_db: Arc<MetadataDb>,
     /// The tables to write to
-    catalog: Arc<Catalog>,
+    catalog: Catalog,
     /// The block ranges to scan
     ranges: Vec<RangeInclusive<BlockNum>>,
     /// The Parquet writer properties

@@ -24,7 +24,8 @@ pub use self::{
     workers::{
         Worker, WorkerNodeId,
         events::{JobNotifAction, JobNotifListener, JobNotifRecvError, JobNotification},
-        jobs::{Job, JobId, JobStatus, JobStatusUpdateError, JobWithDetails},
+        job_id::{JobId, JobIdFromStrError, JobIdI64ConvError, JobIdU64Error},
+        jobs::{Job, JobStatus, JobStatusUpdateError, JobWithDetails},
     },
 };
 use crate::registry::{Registry, insert_dataset_to_registry};
@@ -159,8 +160,22 @@ impl MetadataDb {
     /// Runs migrations if necessary.
     #[instrument(skip_all, err)]
     pub async fn connect(url: &str, pool_size: u32) -> Result<Self, Error> {
+        Self::connect_with_config(url, pool_size, true).await
+    }
+
+    /// Sets up a connection pool to the Metadata DB with configurable migration behavior
+    ///
+    /// Runs migrations only if `auto_migrate` is true.
+    #[instrument(skip_all, err)]
+    pub async fn connect_with_config(
+        url: &str,
+        pool_size: u32,
+        auto_migrate: bool,
+    ) -> Result<Self, Error> {
         let pool = DbConnPool::connect(url, pool_size).await?;
-        pool.run_migrations().await?;
+        if auto_migrate {
+            pool.run_migrations().await?;
+        }
         Ok(Self {
             pool,
             url: url.into(),
@@ -256,7 +271,7 @@ impl MetadataDb {
         let mut tx = self.pool.begin().await?;
 
         // Register the job in the workers job queue
-        let job_id = workers::jobs::register_job(&mut *tx, node_id, job_desc).await?;
+        let job_id = workers::jobs::register(&mut *tx, node_id, job_desc).await?;
 
         // Lock the locations for this job by assigning the job ID as the writer
         locations::assign_job_writer(&mut *tx, locations, job_id).await?;
@@ -292,7 +307,7 @@ impl MetadataDb {
         let mut tx = self.pool.begin().await?;
 
         // Try to update job status
-        match workers::jobs::update_job_status_if_any_state(
+        match workers::jobs::update_status_if_any_state(
             &mut *tx,
             job_id,
             &[JobStatus::Running, JobStatus::Scheduled],
@@ -328,10 +343,8 @@ impl MetadataDb {
         last_job_id: Option<JobId>,
     ) -> Result<Vec<JobWithDetails>, Error> {
         match last_job_id {
-            Some(job_id) => {
-                Ok(workers::jobs::list_jobs_next_page(&*self.pool, limit, job_id).await?)
-            }
-            None => Ok(workers::jobs::list_jobs_first_page(&*self.pool, limit).await?),
+            Some(job_id) => Ok(workers::jobs::list_next_page(&*self.pool, limit, job_id).await?),
+            None => Ok(workers::jobs::list_first_page(&*self.pool, limit).await?),
         }
     }
 
@@ -343,7 +356,7 @@ impl MetadataDb {
     ///
     /// This method is used to fetch all the jobs that the worker should be running after a restart.
     pub async fn get_scheduled_jobs(&self, node_id: &WorkerNodeId) -> Result<Vec<Job>, Error> {
-        Ok(workers::jobs::get_jobs_for_node_with_statuses(
+        Ok(workers::jobs::get_by_node_id_and_statuses(
             &*self.pool,
             node_id,
             [JobStatus::Scheduled, JobStatus::Running],
@@ -362,7 +375,7 @@ impl MetadataDb {
     /// ensures each worker's job set remains synchronized with the Metadata DB. This method fetches all jobs that a
     /// worker should be tracking, enabling the worker to reconcile its state when notifications are lost.
     pub async fn get_active_jobs(&self, node_id: &WorkerNodeId) -> Result<Vec<Job>, Error> {
-        Ok(workers::jobs::get_jobs_for_node_with_statuses(
+        Ok(workers::jobs::get_by_node_id_and_statuses(
             &*self.pool,
             node_id,
             [
@@ -376,12 +389,12 @@ impl MetadataDb {
 
     /// Returns the job with the given ID
     pub async fn get_job(&self, id: &JobId) -> Result<Option<Job>, Error> {
-        Ok(workers::jobs::get_job(&*self.pool, id).await?)
+        Ok(workers::jobs::get_by_id(&*self.pool, id).await?)
     }
 
     /// Get a job by ID with full details including timestamps
     pub async fn get_job_with_details(&self, id: &JobId) -> Result<Option<JobWithDetails>, Error> {
-        Ok(workers::jobs::get_job_with_details(&*self.pool, id).await?)
+        Ok(workers::jobs::get_by_id_with_details(&*self.pool, id).await?)
     }
 
     /// Conditionally marks a job as `RUNNING` only if it's currently `SCHEDULED`
@@ -389,7 +402,7 @@ impl MetadataDb {
     /// This provides idempotent behavior - if the job is already running, completed, or failed,
     /// the appropriate error will be returned indicating the state conflict.
     pub async fn mark_job_running(&self, id: &JobId) -> Result<(), Error> {
-        Ok(workers::jobs::update_job_status_if_any_state(
+        Ok(workers::jobs::update_status_if_any_state(
             &*self.pool,
             id,
             &[JobStatus::Scheduled],
@@ -402,7 +415,7 @@ impl MetadataDb {
     ///
     /// This is typically used by workers to acknowledge a stop request.
     pub async fn mark_job_stopping(&self, id: &JobId) -> Result<(), Error> {
-        Ok(workers::jobs::update_job_status_if_any_state(
+        Ok(workers::jobs::update_status_if_any_state(
             &*self.pool,
             id,
             &[JobStatus::StopRequested],
@@ -415,7 +428,7 @@ impl MetadataDb {
     ///
     /// This provides proper state transition from stopping to stopped.
     pub async fn mark_job_stopped(&self, id: &JobId) -> Result<(), Error> {
-        Ok(workers::jobs::update_job_status_if_any_state(
+        Ok(workers::jobs::update_status_if_any_state(
             &*self.pool,
             id,
             &[JobStatus::Stopping],
@@ -428,7 +441,7 @@ impl MetadataDb {
     ///
     /// This ensures jobs can only be completed from a running state.
     pub async fn mark_job_completed(&self, id: &JobId) -> Result<(), Error> {
-        Ok(workers::jobs::update_job_status_if_any_state(
+        Ok(workers::jobs::update_status_if_any_state(
             &*self.pool,
             id,
             &[JobStatus::Running],
@@ -441,7 +454,7 @@ impl MetadataDb {
     ///
     /// Jobs can fail from either scheduled (startup failure) or running (runtime failure) states.
     pub async fn mark_job_failed(&self, id: &JobId) -> Result<(), Error> {
-        Ok(workers::jobs::update_job_status_if_any_state(
+        Ok(workers::jobs::update_status_if_any_state(
             &*self.pool,
             id,
             &[JobStatus::Scheduled, JobStatus::Running],
@@ -569,6 +582,33 @@ impl MetadataDb {
     pub async fn output_locations(&self, id: JobId) -> Result<Vec<Location>, Error> {
         Ok(locations::get_by_job_id(&*self.pool, id).await?)
     }
+
+    /// List locations with cursor-based pagination support
+    ///
+    /// Uses cursor-based pagination where `last_location_id` is the ID of the last location
+    /// from the previous page. For the first page, pass `None` for `last_location_id`.
+    pub async fn list_locations_with_details(
+        &self,
+        limit: i64,
+        last_location_id: Option<LocationId>,
+    ) -> Result<Vec<Location>, Error> {
+        match last_location_id {
+            Some(location_id) => {
+                Ok(locations::list_next_page(&*self.pool, limit, location_id).await?)
+            }
+            None => Ok(locations::list_first_page(&*self.pool, limit).await?),
+        }
+    }
+
+    // Get a location by its ID
+    //
+    // Returns the location if found, or None if no location exists with the given ID.
+    // pub async fn get_location_by_id(
+    //     &self,
+    //     location_id: LocationId,
+    // ) -> Result<Option<Location>, Error> {
+    //     Ok(locations::get_by_id(&*self.pool, location_id).await?)
+    // }
 }
 
 /// File metadata-related API

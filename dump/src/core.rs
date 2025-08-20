@@ -5,7 +5,7 @@ use std::{
 };
 
 use common::{
-    BoxError,
+    BoxError, LogicalCatalog,
     catalog::physical::{Catalog, PhysicalTable},
     config::Config,
     notification_multiplexer::NotificationMultiplexerHandle,
@@ -71,7 +71,8 @@ pub async fn dump_raw_tables(
         ds
     };
 
-    let catalog = Arc::new(Catalog::new(tables.to_vec(), vec![]));
+    let logical = LogicalCatalog::from_tables(tables.iter().map(|t| t.table()));
+    let catalog = Catalog::new(tables.to_vec(), logical);
 
     // Ensure consistency before starting the dump procedure.
     for table in tables {
