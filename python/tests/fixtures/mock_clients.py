@@ -4,6 +4,7 @@ Mock clients and components for testing the data loader framework.
 Fixed import paths for nozzle project structure.
 """
 
+from dataclasses import dataclass
 from typing import Any, Dict, Optional
 from unittest.mock import Mock
 
@@ -82,7 +83,12 @@ class MockFlightSQLClient:
             return self._test_data.to_batches(max_chunksize=100)
 
 
-class MockDataLoader(DataLoader):
+@dataclass
+class MockConfig:
+    """Mock configuration for testing"""
+    test: Optional[str] = None
+
+class MockDataLoader(DataLoader[MockConfig]):
     """Mock data loader for testing framework components"""
 
     def __init__(self, config: Dict[str, Any]):
@@ -91,27 +97,47 @@ class MockDataLoader(DataLoader):
         self.should_fail = False
         self.fail_message = 'Mock failure'
 
+    def _get_required_config_fields(self) -> list[str]:
+        return []
+
     def connect(self) -> None:
         self._is_connected = True
 
     def disconnect(self) -> None:
         self._is_connected = False
 
+    def _load_batch_impl(self, batch: pa.RecordBatch, table_name: str, **kwargs) -> int:
+        """Implementation-specific batch loading logic"""
+        self.load_calls.append(('batch', table_name, batch.num_rows))
+        
+        if self.should_fail:
+            raise RuntimeError(self.fail_message)
+        
+        return batch.num_rows
+
+    def _create_table_from_schema(self, schema: pa.Schema, table_name: str) -> None:
+        """Mock table creation"""
+        pass
+
+    def _clear_table(self, table_name: str) -> None:
+        """Mock table clearing"""
+        pass
+
     def load_batch(self, batch: pa.RecordBatch, table_name: str, **kwargs) -> LoadResult:
         self.load_calls.append(('batch', table_name, batch.num_rows))
 
         if self.should_fail:
-            return LoadResult(rows_loaded=0, duration=0.1, table_name=table_name, loader_type='mock', success=False, error=self.fail_message)
+            return LoadResult(rows_loaded=0, duration=0.1, ops_per_second=0.0, table_name=table_name, loader_type='mock', success=False, error=self.fail_message)
 
-        return LoadResult(rows_loaded=batch.num_rows, duration=0.1, table_name=table_name, loader_type='mock', success=True)
+        return LoadResult(rows_loaded=batch.num_rows, duration=0.1, ops_per_second=batch.num_rows/0.1, table_name=table_name, loader_type='mock', success=True)
 
     def load_table(self, table: pa.Table, table_name: str, **kwargs) -> LoadResult:
         self.load_calls.append(('table', table_name, table.num_rows))
 
         if self.should_fail:
-            return LoadResult(rows_loaded=0, duration=0.1, table_name=table_name, loader_type='mock', success=False, error=self.fail_message)
+            return LoadResult(rows_loaded=0, duration=0.1, ops_per_second=0.0, table_name=table_name, loader_type='mock', success=False, error=self.fail_message)
 
-        return LoadResult(rows_loaded=table.num_rows, duration=0.1, table_name=table_name, loader_type='mock', success=True)
+        return LoadResult(rows_loaded=table.num_rows, duration=0.1, ops_per_second=table.num_rows/0.1, table_name=table_name, loader_type='mock', success=True)
 
 
 class MockConnectionManager:

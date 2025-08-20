@@ -28,9 +28,13 @@ test-redis:
 	@echo "🔴 Running Redis tests..."
 	$(PYTHON) pytest tests/ -m "redis" -v --log-cli-level=ERROR
 
+test-deltalake:
+	@echo "🔺 Running Delta Lake tests..."
+	$(PYTHON) pytest tests/ -m "delta_lake" -v --log-cli-level=ERROR
+
 test-iceberg:
 	@echo "🧊 Running iceberg tests..."
-	$(PYTHON) pytest tests/ -m "snowflake" -v --log-cli-level=ERROR
+	$(PYTHON) pytest tests/ -m "iceberg" -v --log-cli-level=ERROR
 
 test-snowflake:
 	@echo "❄️ Running Snowflake tests..."

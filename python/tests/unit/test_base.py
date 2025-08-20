@@ -5,6 +5,12 @@ Unit tests for base classes and utilities.
 Updated for nozzle project structure.
 """
 
+import ast
+import importlib
+import inspect
+from pathlib import Path
+from typing import Dict, List
+
 import pytest
 
 try:
