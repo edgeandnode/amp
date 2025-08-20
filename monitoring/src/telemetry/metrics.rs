@@ -1,9 +1,6 @@
 use std::{
     borrow::Cow,
-    sync::{
-        LazyLock,
-        atomic::{AtomicU64, Ordering},
-    },
+    sync::atomic::{AtomicU64, Ordering},
     time::Duration,
 };
 
@@ -15,8 +12,7 @@ pub const DEFAULT_METRICS_EXPORT_INTERVAL: Duration = Duration::from_secs(60);
 
 pub type Result = std::result::Result<SdkMeterProvider, ExporterBuildError>;
 
-static METER: LazyLock<opentelemetry::metrics::Meter> =
-    LazyLock::new(|| opentelemetry::global::meter("nozzle_meter"));
+const NOZZLE_METER: &str = "nozzle-meter";
 
 /// Starts a periodic OpenTelemetry metrics exporter over binary HTTP transport.
 pub fn start(url: String, export_interval: Option<Duration>) -> Result {
@@ -61,7 +57,7 @@ impl Gauge<u64> {
         description: impl Into<Cow<'static, str>>,
         unit: impl Into<Cow<'static, str>>,
     ) -> Self {
-        let inner = METER
+        let inner = opentelemetry::global::meter(NOZZLE_METER)
             .u64_gauge(name)
             .with_description(description)
             .with_unit(unit)
@@ -78,7 +74,7 @@ impl Gauge<f64> {
         description: impl Into<Cow<'static, str>>,
         unit: impl Into<Cow<'static, str>>,
     ) -> Self {
-        let inner = METER
+        let inner = opentelemetry::global::meter(NOZZLE_METER)
             .f64_gauge(name)
             .with_description(description)
             .with_unit(unit)
@@ -110,7 +106,7 @@ impl Histogram<u64> {
         description: impl Into<Cow<'static, str>>,
         unit: impl Into<Cow<'static, str>>,
     ) -> Self {
-        let inner = METER
+        let inner = opentelemetry::global::meter(NOZZLE_METER)
             .u64_histogram(name)
             .with_description(description)
             .with_unit(unit)
@@ -127,7 +123,7 @@ impl Histogram<f64> {
         description: impl Into<Cow<'static, str>>,
         unit: impl Into<Cow<'static, str>>,
     ) -> Self {
-        let inner = METER
+        let inner = opentelemetry::global::meter(NOZZLE_METER)
             .f64_histogram(name)
             .with_description(description)
             .with_unit(unit)
@@ -149,12 +145,12 @@ impl Counter {
         name: impl Into<Cow<'static, str>>,
         description: impl Into<Cow<'static, str>>,
     ) -> Self {
-        Self(
-            METER
-                .u64_counter(name)
-                .with_description(description)
-                .build(),
-        )
+        let inner = opentelemetry::global::meter(NOZZLE_METER)
+            .u64_counter(name)
+            .with_description(description)
+            .build();
+
+        Self(inner)
     }
 
     /// Increment the OpenTelemetry counter by the given amount with additional key-value pairs.
@@ -193,12 +189,13 @@ impl ReadableCounter {
         name: impl Into<Cow<'static, str>>,
         description: impl Into<Cow<'static, str>>,
     ) -> Self {
-        let otpl_counter = METER
+        let counter = opentelemetry::global::meter(NOZZLE_METER)
             .u64_counter(name)
             .with_description(description)
             .build();
+
         Self {
-            counter: otpl_counter,
+            counter,
             copy: AtomicU64::new(0),
         }
     }
