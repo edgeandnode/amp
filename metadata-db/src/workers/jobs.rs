@@ -137,14 +137,14 @@ where
 {
     let query = indoc::indoc! {r#"
         SELECT
-            j.id,
-            j.node_id,
-            j.status,
-            j.descriptor,
-            j.created_at,
-            j.updated_at
-        FROM jobs j
-        WHERE j.id = $1
+            id,
+            node_id,
+            status,
+            descriptor,
+            created_at,
+            updated_at
+        FROM jobs
+        WHERE id = $1
     "#};
     let res = sqlx::query_as(query).bind(id).fetch_optional(exe).await?;
     Ok(res)
@@ -187,14 +187,14 @@ where
 {
     let query = indoc::indoc! {r#"
         SELECT
-            j.id,
-            j.node_id,
-            j.status,
-            j.descriptor,
-            j.created_at,
-            j.updated_at
-        FROM jobs j
-        ORDER BY j.id DESC
+            id,
+            node_id,
+            status,
+            descriptor,
+            created_at,
+            updated_at
+        FROM jobs
+        ORDER BY id DESC
         LIMIT $1
     "#};
 
@@ -217,15 +217,15 @@ where
 {
     let query = indoc::indoc! {r#"
         SELECT 
-            j.id, 
-            j.node_id, 
-            j.status, 
-            j.descriptor,
-            j.created_at,
-            j.updated_at
-        FROM jobs j
-        WHERE j.id < $2
-        ORDER BY j.id DESC
+            id, 
+            node_id, 
+            status, 
+            descriptor,
+            created_at,
+            updated_at
+        FROM jobs
+        WHERE id < $2
+        ORDER BY id DESC
         LIMIT $1
     "#};
 
@@ -354,6 +354,18 @@ impl JobStatus {
             Self::Failed => "FAILED",
             Self::Unknown => "UNKNOWN",
         }
+    }
+
+    /// Returns true if the job status is terminal (cannot be changed further)
+    ///
+    /// Terminal states are final states where the job lifecycle has ended:
+    /// - `Completed`: Job finished successfully
+    /// - `Stopped`: Job was stopped by request
+    /// - `Failed`: Job encountered an error and failed
+    ///
+    /// Non-terminal states can still transition to other states
+    pub fn is_terminal(&self) -> bool {
+        matches!(self, Self::Completed | Self::Stopped | Self::Failed)
     }
 }
 

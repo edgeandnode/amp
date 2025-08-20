@@ -1,13 +1,16 @@
 //! Location-related database operations
 
-use sqlx::{Executor, Postgres};
+use sqlx::{Executor, Postgres, types::JsonValue};
 use url::Url;
 
 pub use self::{
     location_id::{LocationId, LocationIdFromStrError, LocationIdI64ConvError, LocationIdU64Error},
     pagination::{list_first_page, list_next_page},
 };
-use crate::{TableId, workers::job_id::JobId};
+use crate::{
+    JobStatus, TableId, WorkerNodeId,
+    workers::{job_id::JobId, jobs::Job},
+};
 
 mod location_id;
 mod pagination;
@@ -68,24 +71,83 @@ where
 }
 
 /// Get a location by its ID
-pub async fn get_by_id<'c, E>(
+pub async fn get_by_id_with_details<'c, E>(
     exe: E,
     location_id: LocationId,
-) -> Result<Option<Location>, sqlx::Error>
+) -> Result<Option<LocationWithDetails>, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
     let query = indoc::indoc! {"
-        SELECT id, dataset, dataset_version, tbl, url, active
-        FROM locations
-        WHERE id = $1
+        SELECT 
+            -- Location fields
+            l.id,
+            l.dataset,
+            l.dataset_version,
+            l.tbl,
+            l.url,
+            l.active,
+            
+            -- Writer job fields (optional)
+            j.id          AS writer_job_id,
+            j.node_id     AS writer_job_node_id,
+            j.status      AS writer_job_status,
+            j.descriptor  AS writer_job_descriptor
+        FROM locations l
+        LEFT JOIN jobs j ON l.writer = j.id
+        WHERE l.id = $1
     "};
 
-    let location = sqlx::query_as(query)
+    // Internal row structure to match the query result
+    #[derive(sqlx::FromRow)]
+    struct Row {
+        id: LocationId,
+        dataset: String,
+        dataset_version: String,
+        #[sqlx(rename = "tbl")]
+        table: String,
+        #[sqlx(try_from = "&'a str")]
+        url: Url,
+        active: bool,
+        writer_job_id: Option<JobId>,
+        writer_job_node_id: Option<WorkerNodeId>,
+        writer_job_status: Option<JobStatus>,
+        writer_job_descriptor: Option<JsonValue>,
+    }
+
+    let Some(row) = sqlx::query_as::<_, Row>(query)
         .bind(location_id)
         .fetch_optional(exe)
-        .await?;
-    Ok(location)
+        .await?
+    else {
+        return Ok(None);
+    };
+
+    // Construct the writer job if all fields are present
+    let writer = match (
+        row.writer_job_id,
+        row.writer_job_node_id,
+        row.writer_job_status,
+        row.writer_job_descriptor,
+    ) {
+        (Some(id), Some(node_id), Some(status), Some(desc)) => Some(Job {
+            id,
+            node_id,
+            status,
+            desc,
+        }),
+        _ => None,
+    };
+
+    Ok(Some(LocationWithDetails {
+        id: row.id,
+        dataset: row.dataset,
+        dataset_version: row.dataset_version,
+        table: row.table,
+        url: row.url,
+        active: row.active,
+        writer,
+    }))
 }
 
 /// Get all active locations for a table
@@ -171,7 +233,7 @@ where
     E: Executor<'c, Database = Postgres>,
 {
     let query = indoc::indoc! {"
-        SELECT id, dataset, dataset_version, tbl, url, active
+        SELECT id, dataset, dataset_version, tbl, url, active, writer
         FROM locations
         WHERE writer = $1
     "};
@@ -204,6 +266,25 @@ where
     Ok(())
 }
 
+/// Delete a location by its ID
+///
+/// This will also delete all associated file_metadata entries due to CASCADE.
+/// Returns true if the location was deleted, false if it didn't exist.
+#[tracing::instrument(skip(exe), err)]
+pub async fn delete_by_id<'c, E>(exe: E, location_id: LocationId) -> Result<bool, sqlx::Error>
+where
+    E: Executor<'c, Database = Postgres>,
+{
+    let query = indoc::indoc! {"
+        DELETE FROM locations
+        WHERE id = $1
+    "};
+
+    let result = sqlx::query(query).bind(location_id).execute(exe).await?;
+
+    Ok(result.rows_affected() > 0)
+}
+
 /// Basic location information from the database
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct Location {
@@ -214,12 +295,34 @@ pub struct Location {
     /// Version of the dataset (empty string if unversioned)
     pub dataset_version: String,
     /// Name of the table within the dataset
-    pub tbl: String,
+    #[sqlx(rename = "tbl")]
+    pub table: String,
     /// Full URL to the storage location
     #[sqlx(try_from = "&'a str")]
     pub url: Url,
     /// Whether this location is currently active for queries
     pub active: bool,
+    /// Writer job ID (if one exists)
+    pub writer: Option<JobId>,
+}
+
+/// Basic location information from the database
+#[derive(Debug, Clone)]
+pub struct LocationWithDetails {
+    /// Unique identifier for the location
+    pub id: LocationId,
+    /// Name of the dataset this location belongs to
+    pub dataset: String,
+    /// Version of the dataset (empty string if unversioned)
+    pub dataset_version: String,
+    /// Name of the table within the dataset
+    pub table: String,
+    /// Full URL to the storage location
+    pub url: Url,
+    /// Whether this location is currently active for queries
+    pub active: bool,
+    /// Writer job (if one exists)
+    pub writer: Option<Job>,
 }
 
 /// In-tree integration tests
