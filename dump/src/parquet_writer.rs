@@ -18,6 +18,8 @@ use rand::RngCore as _;
 use tracing::{debug, trace};
 use url::Url;
 
+use crate::metrics;
+
 const MAX_PARTITION_BLOCK_RANGE: u64 = 1_000_000;
 
 /// Only used for raw datasets.
@@ -33,6 +35,7 @@ impl RawDatasetWriter {
     pub fn new(
         catalog: Catalog,
         metadata_db: Arc<MetadataDb>,
+        dataset_name: String,
         opts: ParquetWriterProperties,
         partition_size: u64,
         missing_ranges_by_table: BTreeMap<String, Vec<RangeInclusive<BlockNum>>>,
@@ -42,7 +45,13 @@ impl RawDatasetWriter {
             // Unwrap: `missing_ranges_by_table` contains an entry for each table.
             let table_name = table.table_name();
             let ranges = missing_ranges_by_table.get(table_name).unwrap().clone();
-            let writer = RawTableWriter::new(table.clone(), opts.clone(), partition_size, ranges)?;
+            let writer = RawTableWriter::new(
+                table.clone(),
+                dataset_name.clone(),
+                opts.clone(),
+                partition_size,
+                ranges,
+            )?;
             writers.insert(table_name.to_string(), writer);
         }
         Ok(RawDatasetWriter {
@@ -124,6 +133,7 @@ pub async fn commit_metadata(
 
 struct RawTableWriter {
     table: Arc<PhysicalTable>,
+    dataset_name: String,
     opts: ParquetWriterProperties,
     partition_size: u64,
 
@@ -138,6 +148,7 @@ struct RawTableWriter {
 impl RawTableWriter {
     pub fn new(
         table: Arc<PhysicalTable>,
+        dataset_name: String,
         opts: ParquetWriterProperties,
         partition_size: u64,
         missing_ranges: Vec<RangeInclusive<BlockNum>>,
@@ -154,6 +165,7 @@ impl RawTableWriter {
         };
         Ok(Self {
             table,
+            dataset_name,
             opts,
             ranges_to_write,
             partition_size,
@@ -180,7 +192,7 @@ impl RawTableWriter {
             parquet_meta = Some(self.close_current_file().await?);
             assert!(self.current_file.is_none());
             self.ranges_to_write.pop();
-            self.current_file = match self.ranges_to_write.last() {
+            let new_file = match self.ranges_to_write.last() {
                 Some(range) => Some(ParquetFileWriter::new(
                     self.table.clone(),
                     self.opts.clone(),
@@ -188,6 +200,7 @@ impl RawTableWriter {
                 )?),
                 None => None,
             };
+            self.set_current_file(new_file);
         }
 
         if self.ranges_to_write.is_empty() {
@@ -230,15 +243,19 @@ impl RawTableWriter {
             // The current range was partially written, so we need to split it.
             let range = self.ranges_to_write.pop().unwrap();
             self.ranges_to_write.push(block_num..=*range.end());
-            self.current_file = Some(ParquetFileWriter::new(
+            let new_file = Some(ParquetFileWriter::new(
                 self.table.clone(),
                 self.opts.clone(),
                 block_num,
             )?);
+            self.set_current_file(new_file);
         }
 
         let rows = &table_rows.rows;
+        let num_bytes: u64 = rows.get_array_memory_size().try_into().unwrap();
         self.current_file.as_mut().unwrap().write(rows).await?;
+        metrics::raw::inc_bytes(num_bytes, self.dataset_name.clone());
+
         self.current_range = match self.current_range.take() {
             None => Some(table_rows.range),
             Some(range) => {
@@ -253,6 +270,13 @@ impl RawTableWriter {
         };
 
         Ok(parquet_meta)
+    }
+
+    pub fn set_current_file(&mut self, new_file: Option<ParquetFileWriter>) {
+        if new_file.is_some() {
+            metrics::raw::inc_files(self.dataset_name.clone());
+        }
+        self.current_file = new_file;
     }
 
     async fn close(mut self) -> Result<Option<(ParquetMeta, ObjectMeta, FooterBytes)>, BoxError> {

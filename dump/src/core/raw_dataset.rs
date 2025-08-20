@@ -344,6 +344,7 @@ impl<S: BlockStreamer> DumpPartition<S> {
         let mut writer = RawDatasetWriter::new(
             self.catalog.clone(),
             self.metadata_db.clone(),
+            self.dataset_name.clone(),
             self.parquet_opts.clone(),
             self.partition_size,
             missing_ranges_by_table,
@@ -353,7 +354,7 @@ impl<S: BlockStreamer> DumpPartition<S> {
         while let Some(dataset_rows) = stream.try_next().await? {
             for table_rows in dataset_rows {
                 let num_rows: u64 = table_rows.rows.num_rows().try_into().unwrap();
-                metrics::throughput::raw(num_rows, self.dataset_name.clone());
+                metrics::raw::inc_rows(num_rows, self.dataset_name.clone());
 
                 writer.write(table_rows).await?;
             }
