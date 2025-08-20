@@ -16,6 +16,8 @@ use common::{
 use datafusion::sql::resolve::resolve_table_references;
 use dataset_store::{DatasetStore, sql_datasets};
 use metadata_db::MetadataDb;
+use monitoring::telemetry;
+use static_assertions::const_assert;
 use tracing::{info, warn};
 
 pub async fn dump(
@@ -221,6 +223,32 @@ pub async fn datasets_and_dependencies(
     }
 
     dependency_sort(deps)
+}
+
+pub fn validate_export_interval(metrics_export_interval: Option<Duration>) {
+    match metrics_export_interval {
+        Some(export_interval) => {
+            if export_interval > dump::RECOMMENDED_METRICS_EXPORT_INTERVAL {
+                tracing::warn!(
+                    recommended_dump_metrics_export_interval = ?dump::RECOMMENDED_METRICS_EXPORT_INTERVAL,
+                    "OpenTelemetry metrics export interval is set above the recommended value for the `dump` command. \
+                    This could lead to less precise metrics."
+                );
+            }
+        }
+        None => {
+            const_assert!(
+                telemetry::metrics::DEFAULT_METRICS_EXPORT_INTERVAL.as_secs()
+                    > dump::RECOMMENDED_METRICS_EXPORT_INTERVAL.as_secs()
+            );
+            tracing::warn!(
+                default_metrics_export_interval = ?telemetry::metrics::DEFAULT_METRICS_EXPORT_INTERVAL,
+                recommended_dump_metrics_export_interval = ?dump::RECOMMENDED_METRICS_EXPORT_INTERVAL,
+                "OpenTelemetry metrics export interval defaults to a value which is above the recommended interval for the `dump` command. \
+                This could lead to less precise metrics."
+            );
+        }
+    }
 }
 
 /// Given a map of values to their dependencies, return a set where each value is ordered after
