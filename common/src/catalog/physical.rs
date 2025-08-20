@@ -9,7 +9,7 @@ use datafusion::{
         listing::{ListingTableUrl, PartitionedFile},
         physical_plan::{FileGroup, FileScanConfigBuilder, ParquetSource},
     },
-    error::Result as DataFusionResult,
+    error::{DataFusionError, Result as DataFusionResult},
     execution::object_store::ObjectStoreUrl,
     logical_expr::{ScalarUDF, SortExpr, col, utils::conjunction},
     physical_expr::LexOrdering,
@@ -78,6 +78,13 @@ impl Catalog {
         }
         Ok(earliest)
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct TableSnapshot {
+    physical_table: Arc<PhysicalTable>,
+    reader_factory: Arc<NozzleReaderFactory>,
+    segments: Vec<Segment>,
 }
 
 #[derive(Debug, Clone)]
@@ -533,6 +540,31 @@ impl PhysicalTable {
             .try_collect()
             .await
     }
+
+    /// A snapshot binds this physical table to the currently canonical chain.
+    ///
+    /// `ignore_canonical_segments` will instead bind to all segments physically present. This should
+    /// be used carefully as it may include duplicated or forked data.
+    pub async fn snapshot(
+        &self,
+        ignore_canonical_segments: bool,
+    ) -> Result<TableSnapshot, BoxError> {
+        let segments = if ignore_canonical_segments {
+            self.segments().await?
+        } else {
+            self.canonical_chain()
+                .await?
+                .into_iter()
+                .flatten()
+                .collect()
+        };
+
+        Ok(TableSnapshot {
+            physical_table: Arc::new(self.clone()),
+            reader_factory: Arc::clone(&self.reader_factory),
+            segments,
+        })
+    }
 }
 
 // Methods for streaming metadata and file information of PhysicalTable
@@ -607,23 +639,45 @@ impl TableProvider for PhysicalTable {
             .cloned()
             .unwrap_or_default();
 
-        let segments = if ignore_canonical_segments {
-            self.segments().await?
-        } else {
-            self.canonical_chain()
-                .await?
-                .into_iter()
-                .flatten()
-                .collect()
-        };
+        let snapshot = self
+            .snapshot(ignore_canonical_segments)
+            .await
+            .map_err(|e| DataFusionError::External(e.into()))?;
+
+        snapshot.scan(state, projection, filters, limit).await
+    }
+}
+
+#[async_trait::async_trait]
+impl TableProvider for TableSnapshot {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn table_type(&self) -> TableType {
+        TableType::Base
+    }
+
+    fn schema(&self) -> SchemaRef {
+        self.physical_table.schema()
+    }
+
+    #[tracing::instrument(skip_all, err)]
+    async fn scan(
+        &self,
+        state: &dyn Session,
+        projection: Option<&Vec<usize>>,
+        filters: &[Expr],
+        limit: Option<usize>,
+    ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
         let target_partitions = state.config_options().execution.target_partitions;
-        let file_groups = round_robin(segments, target_partitions);
+        let file_groups = round_robin(self.segments.iter(), target_partitions);
 
-        let output_ordering = self.output_ordering()?;
+        let output_ordering = self.physical_table.output_ordering()?;
 
-        let file_schema = self.schema();
-        let object_store_url = self.object_store_url()?;
-        let predicate = self.filters_to_predicate(state, filters)?;
+        let file_schema = self.physical_table.schema();
+        let object_store_url = self.physical_table.object_store_url()?;
+        let predicate = self.physical_table.filters_to_predicate(state, filters)?;
 
         let parquet_file_reader_factory = Arc::clone(&self.reader_factory);
         let table_parquet_options = state.table_options().parquet.clone();
@@ -689,14 +743,14 @@ pub async fn list_revisions(
         .collect())
 }
 
-fn round_robin(segments: Vec<Segment>, target_partitions: usize) -> Vec<FileGroup> {
+fn round_robin<'a>(
+    segments: impl ExactSizeIterator<Item = &'a Segment>,
+    target_partitions: usize,
+) -> Vec<FileGroup> {
     let size = segments.len().min(target_partitions);
-    if size == 0 {
-        return vec![];
-    }
     let mut groups = vec![FileGroup::default(); size];
-    for (idx, segment) in segments.into_iter().enumerate() {
-        let file = PartitionedFile::from(segment.object);
+    for (idx, segment) in segments.enumerate() {
+        let file = PartitionedFile::from(segment.object.clone());
         groups[idx % size].push(file);
     }
     groups
