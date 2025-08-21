@@ -283,12 +283,23 @@ impl DatasetStore {
                         Error::DatasetVersionNotFound(dataset.to_string(), version.to_string()),
                     ))
                 })?,
-            None => self
-                .metadata_db
-                .get_latest_dataset_version(dataset)
-                .await
-                .map_err(|e| DatasetError::from((dataset, Error::MetadataDbError(e))))?
-                .unwrap_or_else(|| dataset.to_string()),
+            None => {
+                let latest_version = self
+                    .metadata_db
+                    .get_latest_dataset_version(dataset)
+                    .await
+                    .map_err(|e| DatasetError::from((dataset, Error::MetadataDbError(e))))?;
+                match latest_version {
+                    Some((dataset, version)) => {
+                        let version_identifier =
+                            Version::version_identifier(&version).map_err(|e| {
+                                DatasetError::from((dataset.as_str(), Error::Unknown(e)))
+                            })?;
+                        format!("{}__{}", dataset, version_identifier)
+                    }
+                    None => dataset.to_string(),
+                }
+            }
         };
         Ok(dataset_identifier)
     }

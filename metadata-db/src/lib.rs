@@ -739,7 +739,7 @@ impl MetadataDb {
     pub async fn get_latest_dataset_version(
         &self,
         dataset_name: &str,
-    ) -> Result<Option<String>, Error> {
+    ) -> Result<Option<(String, String)>, Error> {
         let sql = "
             SELECT version FROM registry 
             WHERE dataset = $1
@@ -752,7 +752,7 @@ impl MetadataDb {
             .fetch_optional(&*self.pool)
             .await?;
         match version {
-            Some(version) => Ok(Some(format!("{}__{}", dataset_name, version))),
+            Some(version) => Ok(Some((dataset_name.to_string(), version))),
             None => Ok(None),
         }
     }

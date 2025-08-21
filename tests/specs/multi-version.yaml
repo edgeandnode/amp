@@ -15,51 +15,51 @@
 
 # Test queries with versioned dataset names
 - name: query_v1_versioned_name
-  query: SELECT * FROM 'multi_version__0.0.1'.blocks ORDER BY block_num LIMIT 1
+  query: SELECT * FROM multi_version__0_0_1.blocks ORDER BY block_num LIMIT 1
   results: |
     [
       {"_block_num":0,"block_num":0,"gas_limit":5000,"gas_used":0,"nonce":66,"miner":"0000000000000000000000000000000000000000","hash":"d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3","parent_hash":"0000000000000000000000000000000000000000000000000000000000000000"}
     ]
 
-# - name: query_v2_versioned_name
-#   query: SELECT * FROM 'multi_version__0.0.2'.blocks ORDER BY block_num LIMIT 1
-#   results: |
-#     [
-#       {"_block_num":0,"block_num":0,"gas_limit":5000,"hash":"d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3","parent_hash":"0000000000000000000000000000000000000000000000000000000000000000"}
-#     ]
+- name: query_v2_versioned_name
+  query: SELECT * FROM multi_version__0_0_2.blocks ORDER BY block_num LIMIT 1
+  results: |
+    [
+      {"_block_num":0,"block_num":0,"gas_limit":5000,"hash":"d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3","parent_hash":"0000000000000000000000000000000000000000000000000000000000000000"}
+    ]
 
-# # Test queries with non-versioned dataset names (should point to latest version)
-# - name: query_latest_version_non_versioned
-#   query: SELECT * FROM multi_version.blocks ORDER BY block_num LIMIT 1
-#   results: |
-#     [
-#       {"_block_num":0,"block_num":0,"gas_limit":5000,"hash":"d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3","parent_hash":"0000000000000000000000000000000000000000000000000000000000000000"}
-#     ]
+# Test queries with non-versioned dataset names (should point to latest version)
+- name: query_latest_version_non_versioned
+  query: SELECT * FROM multi_version.blocks ORDER BY block_num LIMIT 1
+  results: |
+    [
+      {"_block_num":0,"block_num":0,"gas_limit":5000,"hash":"d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3","parent_hash":"0000000000000000000000000000000000000000000000000000000000000000"}
+    ]
 
-# # Test field availability for different versions
-# - name: query_v1_specific_fields
-#   query: SELECT nonce, gas_used FROM 'multi_version__0.0.1'.blocks ORDER BY block_num LIMIT 1
-#   results: |
-#     [
-#       {"nonce":66,"gas_used":0}
-#     ]
+# Test field availability for different versions
+- name: query_v1_specific_fields
+  query: SELECT nonce, gas_used FROM multi_version__0_0_1.blocks ORDER BY block_num LIMIT 1
+  results: |
+    [
+      {"nonce":66,"gas_used":0}
+    ]
 
-# - name: query_v2_missing_fields_should_fail
-#   query: SELECT nonce FROM 'multi_version__0.0.2'.blocks
-#   failure: |
-#     No field named nonce. Valid fields are multi_version__0.0.2.blocks._block_num, multi_version__0.0.2.blocks.block_num, multi_version__0.0.2.blocks.gas_limit, multi_version__0.0.2.blocks.hash, multi_version__0.0.2.blocks.parent_hash
+- name: query_v2_missing_fields_should_fail
+  query: SELECT nonce FROM 'multi_version__0_0_2'.blocks
+  failure: |
+    No field named nonce. Valid fields are multi_version__0_0_2.blocks._block_num, multi_version__0_0_2.blocks.block_num, multi_version__0_0_2.blocks.gas_limit, multi_version__0_0_2.blocks.hash, multi_version__0_0_2.blocks.parent_hash
 
-# # Test count queries for different versions
-# - name: query_v1_count
-#   query: SELECT count(*) as total_blocks FROM 'multi_version__0.0.1'.blocks
-#   results: |
-#     [
-#       {"total_blocks":21}
-#     ]
+# Test count queries for different versions
+- name: query_v1_count
+  query: SELECT count(*) as total_blocks FROM multi_version__0_0_1.blocks
+  results: |
+    [
+      {"total_blocks":21}
+    ]
 
-# - name: query_v2_count
-#   query: SELECT count(*) as total_blocks FROM 'multi_version__0.0.2'.blocks
-#   results: |
-#     [
-#       {"total_blocks":21}
-#     ]
+- name: query_v2_count
+  query: SELECT count(*) as total_blocks FROM multi_version__0_0_2.blocks
+  results: |
+    [
+      {"total_blocks":21}
+    ]
