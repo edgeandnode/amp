@@ -699,7 +699,9 @@ impl DatasetStore {
                     let schema_to_use = table_refs
                         .iter()
                         .find_map(|table_ref| match (table_ref.schema(), table_ref.table()) {
-                            (Some(schema), table_name) if table_name == table.name() => {
+                            (Some(schema), table_name)
+                                if schema == &dataset_name && table_name == table.name() =>
+                            {
                                 Some(schema.to_string())
                             }
                             _ => None,
