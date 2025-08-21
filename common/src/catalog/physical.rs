@@ -33,7 +33,7 @@ use crate::{
         segments::{Chain, Segment, canonical_chain, missing_ranges},
     },
     query_context::NozzleSessionConfig,
-    store::{Store, infer_object_store},
+    store::{Store, object_store},
 };
 
 #[derive(Debug, Clone)]
@@ -109,7 +109,8 @@ impl PhysicalTable {
         metadata_db: Arc<MetadataDb>,
     ) -> Result<Self, BoxError> {
         let path = Path::from_url_path(url.path()).unwrap();
-        let (object_store, _) = infer_object_store(&url)?;
+        let object_store_url = url.clone().try_into()?;
+        let (object_store, _) = object_store(&object_store_url)?;
         let reader_factory = NozzleReaderFactory {
             location_id,
             object_store: object_store.clone(),
@@ -235,7 +236,8 @@ impl PhysicalTable {
         };
 
         let path = Path::from_url_path(url.path()).unwrap();
-        let (object_store, _) = infer_object_store(&url)?;
+        let object_store_url = url.clone().try_into()?;
+        let (object_store, _) = object_store(&object_store_url)?;
         let reader_factory = NozzleReaderFactory {
             location_id,
             object_store,
