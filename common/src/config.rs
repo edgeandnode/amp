@@ -19,7 +19,7 @@ use metadata_db::{DEFAULT_POOL_SIZE, KEEP_TEMP_DIRS, MetadataDb, temp_metadata_d
 use serde::Deserialize;
 use thiserror::Error;
 
-use crate::{Store, query_context::QueryEnv};
+use crate::{Store, query_context::QueryEnv, store::ObjectStoreUrl};
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -135,6 +135,8 @@ pub enum ConfigError {
     MissingConfig(PathBuf, &'static str),
     #[error("Config parse error at {0}: {1}")]
     Figment(PathBuf, figment::Error),
+    #[error("Invalid object store URL at {0}: {1}")]
+    InvalidObjectStoreUrl(PathBuf, crate::store::InvalidObjectStoreUrlError),
     #[error("Store error at {0}: {1}")]
     Store(PathBuf, crate::store::StoreError),
     #[error("Metadata DB error at {0}: {1}")]
@@ -174,12 +176,21 @@ impl Config {
         // Resolve any filesystem paths relative to the directory of the config file.
         let base = config_path.parent();
         let addrs = Addrs::from_config_file(&config_file, Addrs::default())?;
-        let data_store = Store::new(config_file.data_dir, base)
-            .map_err(|e| ConfigError::Store(config_path.clone(), e))?;
-        let providers_store = Store::new(config_file.providers_dir, base)
-            .map_err(|e| ConfigError::Store(config_path.clone(), e))?;
-        let dataset_defs_store = Store::new(config_file.dataset_defs_dir, base)
-            .map_err(|e| ConfigError::Store(config_path.clone(), e))?;
+        let data_store = Store::new(
+            ObjectStoreUrl::new_with_base(config_file.data_dir, base)
+                .map_err(|err| ConfigError::InvalidObjectStoreUrl(config_path.clone(), err))?,
+        )
+        .map_err(|err| ConfigError::Store(config_path.clone(), err))?;
+        let providers_store = Store::new(
+            ObjectStoreUrl::new_with_base(config_file.providers_dir, base)
+                .map_err(|err| ConfigError::InvalidObjectStoreUrl(config_path.clone(), err))?,
+        )
+        .map_err(|err| ConfigError::Store(config_path.clone(), err))?;
+        let dataset_defs_store = Store::new(
+            ObjectStoreUrl::new_with_base(config_file.dataset_defs_dir, base)
+                .map_err(|err| ConfigError::InvalidObjectStoreUrl(config_path.clone(), err))?,
+        )
+        .map_err(|err| ConfigError::Store(config_path.clone(), err))?;
 
         let metadata_db = if config_file.metadata_db.url.is_some() {
             let db_config = config_file.metadata_db.clone();
