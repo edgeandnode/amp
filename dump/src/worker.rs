@@ -44,6 +44,8 @@ impl Worker {
         let notification_multiplexer =
             Arc::new(notification_multiplexer::spawn((*metadata_db).clone()));
 
+        let metrics = Arc::new(crate::metrics::MetricsRegistry::new());
+
         Self {
             node_id,
             reconcile_interval,
@@ -54,6 +56,7 @@ impl Worker {
                 dataset_store,
                 data_store,
                 notification_multiplexer,
+                metrics,
             },
             job_set: Default::default(),
         }

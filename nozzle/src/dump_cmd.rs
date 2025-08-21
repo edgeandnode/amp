@@ -111,12 +111,15 @@ pub async fn dump(
     let notification_multiplexer =
         Arc::new(notification_multiplexer::spawn((*metadata_db).clone()));
 
+    let metrics = Arc::new(dump::MetricsRegistry::new());
+
     let ctx = dump::Ctx {
         config: config.clone(),
         metadata_db: metadata_db.clone(),
         dataset_store: dataset_store.clone(),
         data_store: data_store.clone(),
         notification_multiplexer,
+        metrics,
     };
 
     let all_tables: Vec<Arc<PhysicalTable>> = physical_datasets.iter().flatten().cloned().collect();

@@ -86,8 +86,10 @@ async fn main() -> Result<(), BoxError> {
         .map(|url| telemetry::metrics::start(url, None))
         .transpose()?;
 
+    let metrics = Arc::new(dump_check::metrics::MetricsRegistry::new());
+
     let total_blocks = end_block - start + 1;
-    let ui_handle = tokio::spawn(ui::ui(total_blocks));
+    let ui_handle = tokio::spawn(ui::ui(total_blocks, metrics.clone()));
 
     let env = config.make_query_env()?;
 
@@ -101,6 +103,7 @@ async fn main() -> Result<(), BoxError> {
         n_jobs,
         start,
         end_block,
+        metrics,
     )
     .await?;
 

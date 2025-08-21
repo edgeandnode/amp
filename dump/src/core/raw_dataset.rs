@@ -96,10 +96,7 @@ use metadata_db::MetadataDb;
 use tracing::instrument;
 
 use super::{Ctx, block_ranges, tasks::FailFastJoinSet};
-use crate::{
-    metrics,
-    parquet_writer::{ParquetWriterProperties, RawDatasetWriter},
-};
+use crate::parquet_writer::{ParquetWriterProperties, RawDatasetWriter};
 
 /// Dumps a raw dataset by extracting blockchain data from specified block ranges
 /// and writing it to partitioned Parquet files.
@@ -176,6 +173,7 @@ pub async fn dump(
             partition_size,
             missing_ranges_by_table: missing_ranges_by_table.clone(),
             id: i as u32,
+            metrics: ctx.metrics.clone(),
         });
 
     // Spawn the jobs, starting them with a 1 second delay between each.
@@ -282,6 +280,8 @@ struct DumpPartition<S: BlockStreamer> {
     missing_ranges_by_table: BTreeMap<String, Vec<RangeInclusive<BlockNum>>>,
     /// The partition ID
     id: u32,
+    /// Metrics registry
+    metrics: Arc<crate::metrics::MetricsRegistry>,
 }
 impl<S: BlockStreamer> DumpPartition<S> {
     /// Consumes the instance returning a future that runs the partition, processing all assigned block ranges sequentially.
@@ -348,13 +348,15 @@ impl<S: BlockStreamer> DumpPartition<S> {
             self.parquet_opts.clone(),
             self.partition_size,
             missing_ranges_by_table,
+            self.metrics.clone(),
         )?;
 
         let mut stream = std::pin::pin!(stream);
         while let Some(dataset_rows) = stream.try_next().await? {
             for table_rows in dataset_rows {
                 let num_rows: u64 = table_rows.rows.num_rows().try_into().unwrap();
-                metrics::raw::inc_rows(num_rows, self.dataset_name.clone());
+                self.metrics
+                    .inc_raw_rows(num_rows, self.dataset_name.clone());
 
                 writer.write(table_rows).await?;
             }

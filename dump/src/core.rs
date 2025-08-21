@@ -171,6 +171,8 @@ pub struct Ctx {
     pub data_store: Arc<DataStore>,
     /// Shared notification multiplexer for streaming queries
     pub notification_multiplexer: Arc<NotificationMultiplexerHandle>,
+    /// Metrics registry for dump operations
+    pub metrics: Arc<crate::metrics::MetricsRegistry>,
 }
 
 /// This will check and fix consistency issues when possible. When fixing is not possible, it will

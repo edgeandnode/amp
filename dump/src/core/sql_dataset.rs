@@ -128,7 +128,6 @@ use tracing::instrument;
 
 use super::{Ctx, block_ranges, tasks::FailFastJoinSet};
 use crate::{
-    metrics,
     parquet_writer::{ParquetFileWriter, ParquetWriterProperties, commit_metadata},
     streaming_query::{QueryMessage, StreamingQuery},
 };
@@ -203,6 +202,7 @@ pub async fn dump_table(
                     &parquet_opts,
                     microbatch_max_interval,
                     &ctx.notification_multiplexer,
+                    &ctx.metrics,
                 )
                 .await?;
             }
@@ -225,6 +225,7 @@ pub async fn dump_table(
                 &parquet_opts,
                 microbatch_max_interval,
                 &ctx.notification_multiplexer,
+                &ctx.metrics,
             )
             .await?;
         }
@@ -252,6 +253,7 @@ async fn dump_sql_query(
     parquet_opts: &ParquetWriterProperties,
     microbatch_max_interval: u64,
     notification_multiplexer: &Arc<NotificationMultiplexerHandle>,
+    metrics: &Arc<crate::metrics::MetricsRegistry>,
 ) -> Result<(), BoxError> {
     tracing::info!(
         "dumping {} [{}-{}]",
@@ -295,8 +297,8 @@ async fn dump_sql_query(
 
                 let num_rows: u64 = batch.num_rows().try_into().unwrap();
                 let num_bytes: u64 = batch.get_array_memory_size().try_into().unwrap();
-                metrics::sql::inc_rows(num_rows, dataset.clone());
-                metrics::sql::inc_bytes(num_bytes, dataset.clone());
+                metrics.inc_sql_rows(num_rows, dataset.clone());
+                metrics.inc_sql_bytes(num_bytes, dataset.clone());
             }
             QueryMessage::MicrobatchEnd(range) => {
                 let microbatch_end = range.end();
@@ -319,7 +321,7 @@ async fn dump_sql_query(
                     microbatch_start,
                 )?;
 
-                metrics::sql::inc_files(dataset.clone());
+                metrics.inc_sql_files(dataset.clone());
             }
         }
     }

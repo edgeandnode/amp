@@ -1,4 +1,4 @@
-use std::{sync::LazyLock, time::Duration};
+use std::time::Duration;
 
 use monitoring::telemetry;
 
@@ -7,53 +7,7 @@ use monitoring::telemetry;
 /// some observation points will not be exported.
 pub const RECOMMENDED_METRICS_EXPORT_INTERVAL: Duration = Duration::from_secs(1);
 
-static METRICS: LazyLock<MetricsRegistry> = LazyLock::new(|| MetricsRegistry::new());
-
-/// Raw dataset dump metrics.
-pub(crate) mod raw {
-    use super::*;
-
-    pub(crate) fn inc_rows(rows: u64, dataset: String) {
-        let kv_pairs = [telemetry::metrics::KeyValue::new("dataset", dataset)];
-        METRICS.raw_dataset_rows.inc_by_with_kvs(rows, &kv_pairs);
-    }
-
-    pub(crate) fn inc_files(dataset: String) {
-        let kv_pairs = [telemetry::metrics::KeyValue::new("dataset", dataset)];
-        METRICS.raw_dataset_files_written.inc_with_kvs(&kv_pairs);
-    }
-
-    pub(crate) fn inc_bytes(bytes: u64, dataset: String) {
-        let kv_pairs = [telemetry::metrics::KeyValue::new("dataset", dataset)];
-        METRICS
-            .raw_dataset_bytes_written
-            .inc_by_with_kvs(bytes, &kv_pairs);
-    }
-}
-
-/// SQL dataset dump metrics.
-pub(crate) mod sql {
-    use super::*;
-
-    pub(crate) fn inc_rows(rows: u64, dataset: String) {
-        let kv_pairs = [telemetry::metrics::KeyValue::new("dataset", dataset)];
-        METRICS.sql_dataset_rows.inc_by_with_kvs(rows, &kv_pairs);
-    }
-
-    pub(crate) fn inc_files(dataset: String) {
-        let kv_pairs = [telemetry::metrics::KeyValue::new("dataset", dataset)];
-        METRICS.sql_dataset_files_written.inc_with_kvs(&kv_pairs);
-    }
-
-    pub(crate) fn inc_bytes(bytes: u64, dataset: String) {
-        let kv_pairs = [telemetry::metrics::KeyValue::new("dataset", dataset)];
-        METRICS
-            .sql_dataset_bytes_written
-            .inc_by_with_kvs(bytes, &kv_pairs);
-    }
-}
-
-struct MetricsRegistry {
+pub struct MetricsRegistry {
     // Row metrics, expressed in total rows dumped. Most metrics backends have a rate of change
     // function which can be used to turn these metrics into rows per second.
     raw_dataset_rows: telemetry::metrics::Counter,
@@ -69,7 +23,7 @@ struct MetricsRegistry {
 }
 
 impl MetricsRegistry {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             raw_dataset_rows: telemetry::metrics::Counter::new(
                 "raw_dataset_rows_dumped",
@@ -96,5 +50,39 @@ impl MetricsRegistry {
                 "Counter for SQL dataset bytes written",
             ),
         }
+    }
+
+    /// Raw dataset dump metrics.
+    pub fn inc_raw_rows(&self, rows: u64, dataset: String) {
+        let kv_pairs = [telemetry::metrics::KeyValue::new("dataset", dataset)];
+        self.raw_dataset_rows.inc_by_with_kvs(rows, &kv_pairs);
+    }
+
+    pub fn inc_raw_files(&self, dataset: String) {
+        let kv_pairs = [telemetry::metrics::KeyValue::new("dataset", dataset)];
+        self.raw_dataset_files_written.inc_with_kvs(&kv_pairs);
+    }
+
+    pub fn inc_raw_bytes(&self, bytes: u64, dataset: String) {
+        let kv_pairs = [telemetry::metrics::KeyValue::new("dataset", dataset)];
+        self.raw_dataset_bytes_written
+            .inc_by_with_kvs(bytes, &kv_pairs);
+    }
+
+    /// SQL dataset dump metrics.
+    pub fn inc_sql_rows(&self, rows: u64, dataset: String) {
+        let kv_pairs = [telemetry::metrics::KeyValue::new("dataset", dataset)];
+        self.sql_dataset_rows.inc_by_with_kvs(rows, &kv_pairs);
+    }
+
+    pub fn inc_sql_files(&self, dataset: String) {
+        let kv_pairs = [telemetry::metrics::KeyValue::new("dataset", dataset)];
+        self.sql_dataset_files_written.inc_with_kvs(&kv_pairs);
+    }
+
+    pub fn inc_sql_bytes(&self, bytes: u64, dataset: String) {
+        let kv_pairs = [telemetry::metrics::KeyValue::new("dataset", dataset)];
+        self.sql_dataset_bytes_written
+            .inc_by_with_kvs(bytes, &kv_pairs);
     }
 }

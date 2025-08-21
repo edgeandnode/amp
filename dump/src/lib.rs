@@ -3,14 +3,14 @@
 use common::parquet::file::properties::WriterProperties as ParquetWriterProperties;
 
 mod core;
-mod metrics;
+pub mod metrics;
 mod parquet_writer;
 pub mod streaming_query;
 pub mod worker;
 
 pub use core::*;
 
-pub use metrics::RECOMMENDED_METRICS_EXPORT_INTERVAL;
+pub use metrics::{MetricsRegistry, RECOMMENDED_METRICS_EXPORT_INTERVAL};
 
 pub fn default_partition_size() -> u64 {
     4096 * 1024 * 1024 // 4 GB

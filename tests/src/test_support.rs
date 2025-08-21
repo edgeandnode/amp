@@ -345,6 +345,7 @@ pub async fn check_blocks(
     end: u64,
 ) -> Result<(), BoxError> {
     let env = test_env.config.make_query_env()?;
+    let metrics = Arc::new(dump_check::metrics::MetricsRegistry::new());
 
     dump_check::dump_check(
         dataset_name,
@@ -356,6 +357,7 @@ pub async fn check_blocks(
         1,
         start,
         end,
+        metrics,
     )
     .await
 }
