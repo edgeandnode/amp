@@ -696,19 +696,7 @@ impl DatasetStore {
                 });
 
                 if is_referenced {
-                    let schema_to_use = table_refs
-                        .iter()
-                        .find_map(|table_ref| match (table_ref.schema(), table_ref.table()) {
-                            (Some(schema), table_name)
-                                if schema == &dataset_name && table_name == table.name() =>
-                            {
-                                Some(schema.to_string())
-                            }
-                            _ => None,
-                        })
-                        .unwrap_or_else(|| dataset_name.clone());
-
-                    let table_ref = TableReference::partial(schema_to_use, table.name());
+                    let table_ref = TableReference::partial(dataset_name.clone(), table.name());
                     table.update_table_ref(table_ref);
                     resolved_tables.push(table);
                 }

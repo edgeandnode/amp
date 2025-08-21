@@ -45,7 +45,7 @@
     ]
 
 - name: query_v2_missing_fields_should_fail
-  query: SELECT nonce FROM 'multi_version__0_0_2'.blocks
+  query: SELECT nonce FROM multi_version__0_0_2.blocks
   failure: |
     No field named nonce. Valid fields are multi_version__0_0_2.blocks._block_num, multi_version__0_0_2.blocks.block_num, multi_version__0_0_2.blocks.gas_limit, multi_version__0_0_2.blocks.hash, multi_version__0_0_2.blocks.parent_hash
 
@@ -62,4 +62,11 @@
   results: |
     [
       {"total_blocks":21}
+    ]
+
+- name: query_same_table_union
+  query: select gas_limit,block_num,hash from multi_version.blocks union select gas_limit,block_num,hash from multi_version__0_0_2.blocks order by block_num limit 3
+  results: |
+    [
+      {"block_num":0,"gas_limit":5000,"hash":"d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3"},{"block_num":1,"gas_limit":5000,"hash":"88e96d4537bea4d9c05d12549907b32561d3bf31f45aae734cdc119f13406cb6"},{"block_num":2,"gas_limit":5000,"hash":"b495a1d7e6663152ae92708da4843337b958146015a2802f4193a410044698c9"}
     ]
