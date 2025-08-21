@@ -525,15 +525,23 @@ impl PhysicalTable {
                 ctx.config_options().execution.meta_fetch_concurrency,
             );
             let batch: Vec<Segment> = canonical_segments.drain(0..batch_len).collect();
-            let results: Vec<DataFusionResult<(BlockNum, PartitionedFile)>> = join_all(
-                batch
-                    .into_iter()
-                    .map(async |Segment { range, object, .. }| {
-                        let partitioned_file = PartitionedFile::from(object);
+            let results: Vec<DataFusionResult<(BlockNum, PartitionedFile)>> =
+                join_all(batch.into_iter().map(
+                    async |Segment {
+                               file_id,
+                               range,
+                               object,
+                               ..
+                           }| {
+                        let mut partitioned_file = PartitionedFile::from(object);
+                        if let Some(file_id) = file_id {
+                            partitioned_file.extensions = Some(Arc::new(file_id));
+                        }
+
                         Ok((range.start(), partitioned_file))
-                    }),
-            )
-            .await;
+                    },
+                ))
+                .await;
             for result in results {
                 let (start_block, partitioned_file) = result?;
                 partitioned_files.insert(start_block, partitioned_file);

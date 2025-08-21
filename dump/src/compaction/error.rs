@@ -1,4 +1,5 @@
 use std::{
+    error::Error,
     fmt::{Display, Formatter, Result as FmtResult},
     sync::Arc,
 };
@@ -10,12 +11,15 @@ use common::{
         errors::ParquetError, file::properties::WriterProperties as ParquetWriterProperties,
     },
 };
-use datafusion::error::DataFusionError;
+use datafusion::{error::DataFusionError, sql::TableReference};
 use metadata_db::FileId;
 use object_store::Error as ObjectStoreError;
 use tokio::task::JoinError;
 
-use crate::compaction::{Collector, compactor::Compactor};
+use crate::{
+    ConsistencyCheckError,
+    compaction::{Collector, compactor::Compactor},
+};
 
 pub type CompactionResult<T> = Result<T, CompactionError>;
 pub type DeletionResult<T> = Result<T, DeletionError>;
@@ -26,9 +30,9 @@ pub enum CompactionError {
     CanonicalChainError { err: BoxError, table_ref: String },
     /// Catching errors while creating a compaction writer
     CreateWriterError {
-        table_ref: String,
-        opts: ParquetWriterProperties,
         err: BoxError,
+        opts: ParquetWriterProperties,
+        table_ref: String,
     },
     /// Catching errors while writing data to a parquet file
     FileWriteError { err: BoxError },
@@ -75,10 +79,11 @@ impl CompactionError {
         }
     }
 
-    pub fn manifest_update_error(
-        file_ids: Arc<[FileId]>,
-    ) -> impl FnOnce(metadata_db::Error) -> Self {
-        move |err| CompactionError::ManifestUpdateError { err, file_ids }
+    pub fn manifest_update_error(file_ids: &[FileId]) -> impl FnOnce(metadata_db::Error) -> Self {
+        move |err| CompactionError::ManifestUpdateError {
+            err,
+            file_ids: Arc::from(file_ids),
+        }
     }
 
     pub fn create_writer_error(
@@ -173,8 +178,8 @@ impl Display for CompactionError {
     }
 }
 
-impl std::error::Error for CompactionError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl Error for CompactionError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             CompactionError::FileWriteError { err, .. } => err.source(),
             CompactionError::MetadataCommitError { err, .. } => err.source(),
@@ -188,6 +193,10 @@ impl std::error::Error for CompactionError {
 
 #[derive(Debug)]
 pub enum DeletionError {
+    Consistency {
+        table: TableReference,
+        error: ConsistencyCheckError,
+    },
     FileDeleteError {
         collector: Collector,
         err: ObjectStoreError,
@@ -211,6 +220,14 @@ pub enum DeletionError {
 }
 
 impl DeletionError {
+    pub fn consistency_check_error(
+        collector: &Collector,
+    ) -> impl FnOnce(ConsistencyCheckError) -> Self {
+        let table = collector.table.table_ref().clone();
+
+        move |error| DeletionError::Consistency { table, error }
+    }
+
     pub fn manifest_update_error(
         collector: Collector,
         file_ids: Vec<FileId>,
@@ -256,6 +273,14 @@ impl DeletionError {
 impl Display for DeletionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            DeletionError::Consistency { table, error } => {
+                write!(
+                    f,
+                    "Consistency check failed for collector.
+                    Table: {table},
+                    Error: {error}",
+                )
+            }
             DeletionError::FileDeleteError {
                 file_id,
                 location,
@@ -301,9 +326,10 @@ impl Display for DeletionError {
     }
 }
 
-impl std::error::Error for DeletionError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl Error for DeletionError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
+            DeletionError::Consistency { error, .. } => error.source(),
             DeletionError::FileDeleteError {
                 err,
                 not_found: false,

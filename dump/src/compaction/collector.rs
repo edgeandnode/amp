@@ -8,15 +8,18 @@ use futures::{
 use metadata_db::{FileId, GcManifestRow, MetadataDb};
 use object_store::{Error as ObjectStoreError, ObjectStore, path::Path};
 
-use crate::compaction::{
-    DeletionTask,
-    error::{DeletionError, DeletionResult},
+use crate::{
+    compaction::{
+        DeletionTask,
+        error::{DeletionError, DeletionResult},
+    },
+    consistency_check,
 };
 
 #[derive(Clone, Debug)]
 pub struct Collector {
-    table: Arc<PhysicalTable>,
-    metadata_db: Arc<MetadataDb>,
+    pub table: Arc<PhysicalTable>,
+    pub metadata_db: Arc<MetadataDb>,
 }
 
 impl Collector {
@@ -37,6 +40,16 @@ impl Collector {
     }
 
     pub(super) async fn collect(self) -> DeletionResult<Self> {
+        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        if let Err(error) = consistency_check(&self.table)
+            .await
+            .map_err(DeletionError::consistency_check_error(&self))
+        {
+            tracing::error!("{error}");
+            return Ok(self);
+        }
+
         let table = Arc::clone(&self.table);
 
         let location_id = table.location_id();

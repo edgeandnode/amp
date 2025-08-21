@@ -1,7 +1,6 @@
 use std::{
-    pin,
+    fmt::{Display, Formatter},
     sync::Arc,
-    task::{Context, Poll},
 };
 
 use common::{
@@ -20,87 +19,68 @@ use common::{
     },
 };
 use datafusion::{
-    arrow::array::RecordBatch,
     datasource::physical_plan::{FileMeta, ParquetFileReaderFactory},
-    error::{DataFusionError, Result as DataFusionResult},
+    error::DataFusionError,
     execution::SendableRecordBatchStream,
     physical_plan::{metrics::ExecutionPlanMetricsSet, stream::RecordBatchStreamAdapter},
 };
 use futures::{
-    FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt,
-    future::{self, BoxFuture},
+    FutureExt, StreamExt, TryFutureExt, TryStreamExt, future,
     stream::{self, BoxStream},
 };
 use metadata_db::{FileId, FooterBytes, LocationId, MetadataDb};
 use object_store::{ObjectMeta, path::Path};
-use tokio::{
-    sync::mpsc::{self, error::SendError},
-    task::JoinSet,
-};
-pub use tokio_stream::wrappers::UnboundedReceiverStream;
+use tokio::task::JoinSet;
 
+use super::size::SegmentSize;
 use crate::{
     compaction::{
-        CompactionResult, CompactionTask, FILE_LOCK_DURATION, FileSize, FileSizeLimit,
-        error::CompactionError,
+        COMPACTOR_INTERVAL, CompactionError, CompactionResult, CompactionTask, FILE_LOCK_DURATION,
+        size::SegmentSizeLimit,
     },
     parquet_writer::ParquetFileWriter,
 };
 
-type FileStreamSender = mpsc::UnboundedSender<CompactionFile>;
-type FileStreamReceiver = mpsc::UnboundedReceiver<CompactionFile>;
-
 #[derive(Clone, Debug)]
 pub struct Compactor {
     pub(super) table: Arc<PhysicalTable>,
-    pub(super) opts: ParquetWriterProperties,
-    pub(super) size_limit: FileSizeLimit,
+    pub(super) opts: CompactionProperties,
 }
 
 impl Compactor {
-    pub fn start(
-        table: Arc<PhysicalTable>,
-        opts: &ParquetWriterProperties,
-        size_limit: FileSizeLimit,
-    ) -> CompactionTask {
-        let size_limit = size_limit.into();
-
+    pub fn start(table: &Arc<PhysicalTable>, opts: CompactionProperties) -> CompactionTask {
         CompactionTask {
-            task: tokio::spawn(future::ok(Compactor::new(&table, &opts, size_limit))),
-            table,
-            opts: opts.clone(),
-            size_limit,
+            task: tokio::spawn(future::ok(Compactor::new(table, &opts)).boxed()),
+            table: Arc::clone(table),
+            opts,
+            previous: None,
         }
     }
 
-    pub(super) fn new<'a>(
-        table: &'a Arc<PhysicalTable>,
-        opts: &'a ParquetWriterProperties,
-        size_limit: FileSizeLimit,
-    ) -> Self {
+    pub(super) fn new<'a>(table: &'a Arc<PhysicalTable>, opts: &'a CompactionProperties) -> Self {
         Compactor {
             table: Arc::clone(table),
             opts: opts.clone(),
-            size_limit,
         }
     }
 
     #[tracing::instrument(skip_all, fields(location_id = self.table.location_id()))]
     pub(super) async fn compact(self) -> CompactionResult<Self> {
         let table = Arc::clone(&self.table);
-        let size_limit = self.size_limit.clone();
+        let metadata_db = table.metadata_db();
         let opts = self.opts.clone();
 
         // await: We need to await the PhysicalTable::segments method
-        let compaction_stream = CompactionStream::from_table::<8>(table, opts, size_limit).await?;
+        let compaction_stream = CompactionStream::from_table(table, opts).await?;
 
-        let mut compaction_futures = compaction_stream.into_futures();
+        // await: We need to collect the stream
+        let mut compaction_groups = compaction_stream.into_compaction_groups().await.into_iter();
 
         let mut join_set = JoinSet::new();
 
         // await: We need to await the creation of a compaction group (which awaits reading from the metadata db)
-        while let Some(future) = compaction_futures.next().await {
-            join_set.spawn(future);
+        while let Some(group) = compaction_groups.next() {
+            join_set.spawn(group.compact(Arc::clone(&metadata_db)));
         }
 
         // await: We need to await the completion of compaction tasks
@@ -121,23 +101,54 @@ impl Compactor {
     }
 }
 
-/// A stream of compaction jobs.
-pub(super) struct CompactionStream<'a> {
-    table: Arc<PhysicalTable>,
-    metadata_db: Arc<MetadataDb>,
-    inner: BoxStream<'a, CompactionResult<CompactionFile>>,
-    statistics_concurrency: usize,
-    size_limit: FileSizeLimit,
-    opts: ParquetWriterProperties,
-    range: BlockRange,
+#[derive(Debug, Clone)]
+pub struct CompactionProperties {
+    pub compactor_interval: std::time::Duration,
+    pub metadata_concurrency: usize,
+    pub parquet_writer_props: ParquetWriterProperties,
+    pub size_limit: SegmentSizeLimit,
 }
 
-impl<'a> CompactionStream<'a> {
-    #[tracing::instrument(skip_all, fields(location_id = table.location_id(), statistics_concurrency = BUFFER_SIZE))]
-    pub async fn from_table<const BUFFER_SIZE: usize>(
+impl CompactionProperties {
+    pub fn new(
+        metadata_concurrency: usize,
+        opts: &ParquetWriterProperties,
+        size_limit: SegmentSizeLimit,
+    ) -> Self {
+        let parquet_writer_props = opts.clone();
+
+        Self {
+            compactor_interval: COMPACTOR_INTERVAL,
+            metadata_concurrency,
+            parquet_writer_props,
+            size_limit,
+        }
+    }
+}
+
+impl Display for CompactionProperties {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        f.debug_map()
+            .entry(&"metadata_concurrency", &self.metadata_concurrency)
+            .entry(&"parquet_writer_props", &self.parquet_writer_props)
+            .entry(&"size_limit", &self.size_limit)
+            .finish()
+    }
+}
+
+pub struct CompactionStream<'stream> {
+    pub table: Arc<PhysicalTable>,
+    pub opts: CompactionProperties,
+    pub range: BlockRange,
+    pub remain: usize,
+    pub stream: BoxStream<'stream, CompactionResult<CompactionFile>>,
+}
+
+impl CompactionStream<'_> {
+    #[tracing::instrument(skip_all, fields(opts = format!("{opts}")))]
+    pub async fn from_table(
         table: Arc<PhysicalTable>,
-        opts: ParquetWriterProperties,
-        size_limit: FileSizeLimit,
+        opts: CompactionProperties,
     ) -> CompactionResult<Self> {
         let chain = table
             .segments()
@@ -145,361 +156,226 @@ impl<'a> CompactionStream<'a> {
             .map_err(CompactionError::chain_error(table.as_ref()))
             .await?;
 
-        tracing::info!("Scanning {} segments for compaction", chain.0.len());
-
-        let reader_factory = Arc::clone(&table.reader_factory);
-        let metadata_db = Arc::clone(&table.metadata_db());
+        let remain = chain.0.len();
+        tracing::info!("Scanning {} segments for compaction", remain);
 
         let range = chain.range();
+        let reader_factory = Arc::clone(&table.reader_factory);
 
-        let inner = stream::iter(chain.0)
+        let stream = stream::iter(chain.0)
             .enumerate()
             .map(move |(partition_index, segment)| {
-                CompactionFile::new(reader_factory.clone(), partition_index, segment, size_limit)
+                CompactionFile::try_new(Arc::clone(&reader_factory), partition_index, segment)
             })
-            .buffered(BUFFER_SIZE)
+            .buffered(opts.metadata_concurrency)
             .boxed();
 
-        let statistics_concurrency = BUFFER_SIZE;
-
         Ok(Self {
+            table,
             opts,
             range,
-            table,
-            inner,
-            size_limit,
-            metadata_db,
-            statistics_concurrency,
+            remain,
+            stream,
         })
     }
 
-    #[tracing::instrument(skip_all, fields(location_id = %self.table.location_id(), statistics_concurrency = self.statistics_concurrency))]
-    pub fn into_futures(self) -> BoxStream<'a, BoxFuture<'a, CompactionResult<()>>> {
-        self.take_while(|result| match result {
-            // If no error occurred while constructing the file group, we can send the future to the join set
-            Ok(_) => future::ready(true),
-            // If an error occurred, we log it and stop producing any more futures
-            Err(err) => {
-                tracing::error!("{err}");
-                future::ready(false)
-            }
-        })
-        .filter_map(move |result| async move {
-            match result {
-                Ok(file_group) => Some(file_group.try_compaction().boxed()),
-                _ => None,
-            }
-        })
-        .boxed()
-    }
-}
-
-impl<'a> Stream for CompactionStream<'a> {
-    type Item = CompactionResult<CompactionFileGroup<'a>>;
-
-    /// See [`CompactionFileGroupBuilder`]
-    fn poll_next(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        let stream = self.get_mut();
-        let range = stream.range.clone();
-        let size_limit = stream.size_limit;
-
-        match CompactionFileGroup::builder(size_limit, range).try_build(stream, cx) {
-            Some(Ok(Some(file_group))) => Poll::Ready(Some(Ok(file_group))),
-            Some(Ok(None)) => Poll::Pending,
-            Some(Err(e)) => Poll::Ready(Some(Err(e))),
-            None => Poll::Ready(None),
-        }
-    }
-}
-
-pub(super) struct CompactionFileGroup<'a> {
-    /// A stream of `CompactionFiles`
-    inner: BoxStream<'a, CompactionFile>,
-    /// The writer for the new compacted file output
-    writer: ParquetFileWriter,
-    /// The range of blocks being compacted
-    range: BlockRange,
-    /// The size of the compacted file output
-    size: FileSize,
-    /// The location ID of the compacted file
-    location_id: LocationId,
-    /// The file IDs being compacted
-    file_ids: Vec<FileId>,
-    /// The metadata database
-    metadata_db: Arc<MetadataDb>,
-}
-
-impl CompactionFileGroup<'_> {
-    fn builder(size_limit: FileSizeLimit, range: BlockRange) -> CompactionFileGroupBuilder {
-        let (sender, receiver) = mpsc::unbounded_channel();
-        CompactionFileGroupBuilder {
-            start: BlockNum::MAX,
-            stop: BlockNum::MIN,
-            size: FileSize::default(),
-            length: 0,
-            range,
-            size_limit,
-            sender,
-            receiver,
-        }
-    }
-
-    async fn write(&mut self) -> CompactionResult<()> {
-        use CompactionError::{FileStreamError, FileWriteError};
-        let mut stream = pin::pin!(&mut self.inner);
-
-        // We flatten the inner stream (a stream of streams of `RecordBatches`) and produce batches in order
-        while let Some(ref batch) = stream
-            .as_mut()
+    pub async fn next_file(&mut self) -> Option<CompactionResult<CompactionFile>> {
+        (self.remain > 0)
+            .then_some(self.stream.next().await.inspect(|_| self.remain -= 1))
             .flatten()
-            .try_next()
-            .await
-            .map_err(|err| FileStreamError { err })?
-        {
-            self.writer
-                .write(batch)
-                .await
-                .map_err(|err| FileWriteError { err: err.into() })?;
-        }
-
-        Ok(())
     }
 
-    async fn close(mut self) -> CompactionResult<CompactionWriterOutput> {
-        use CompactionError::FileWriteError;
-        let range = self.range.clone();
-        let file_ids = std::mem::take(&mut self.file_ids);
-        let location_id = std::mem::take(&mut self.location_id);
+    pub async fn next_group(&mut self) -> CompactionResult<Option<CompactionGroup>> {
+        let mut streams = Vec::new();
+        let mut total_size = SegmentSize::default();
+        let mut start = self.range.start();
 
-        self.writer
-            .close(range)
-            .and_then(move |(parquet_meta, location, footer)| async move {
-                Ok(CompactionWriterOutput::new(
-                    location_id,
-                    parquet_meta,
-                    location,
-                    file_ids,
-                    footer,
-                ))
-            })
-            .await
-            .map_err(|err| FileWriteError { err })
-    }
+        while let Some(file) = self.next_file().await {
+            match file {
+                // No error we add the file to the group and optionally return the group
+                Ok(file) => {
+                    start = start.min(file.range.start());
+                    total_size += file.size;
+                    streams.push(file);
 
-    #[tracing::instrument(skip_all, fields(location_id = %self.location_id, file_count = self.file_ids.len(), size = self.size.value(), start = self.range.start(), stop = self.range.end()))]
-    async fn try_compaction(mut self) -> CompactionResult<()> {
-        tracing::info!("Beginning compaction");
+                    let (size_exceeded, length_exceeded) =
+                        self.opts.size_limit.is_exceeded(&total_size);
 
-        let metadata_db = Arc::clone(&self.metadata_db);
-
-        // await: We need to await reading the stream of record batches and writing them to
-        self.write().await?;
-
-        let output = self.close().await?;
-
-        tracing::info!(
-            "Completed writing {} bytes to {}",
-            output.object_size,
-            output.location()
-        );
-
-        tracing::info!("Committing metadata for new file at {}", output.location());
-        output
-            .commit_metadata(metadata_db.clone())
-            .await
-            .map_err(|err| CompactionError::MetadataCommitError {
-                err,
-                location: output.location(),
-            })?;
-
-        tracing::info!("Updating GC manifest");
-        output
-            .upsert_gc_manifest(metadata_db)
-            .await
-            .map_err(|err| CompactionError::ManifestUpdateError {
-                err,
-                file_ids: output.file_ids(),
-            })?;
-
-        tracing::info!("Compaction completed");
-        Ok(())
-    }
-}
-
-impl Stream for CompactionFileGroup<'_> {
-    type Item = CompactionFile;
-
-    fn poll_next(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        let this = self.get_mut();
-        match this.inner.poll_next_unpin(cx) {
-            Poll::Ready(Some(file)) => {
-                this.file_ids.push(file.file_id);
-                Poll::Ready(Some(file))
-            }
-            poll => poll,
-        }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let exact_size = self.file_ids.capacity() - self.file_ids.len();
-        (exact_size, Some(exact_size))
-    }
-}
-
-struct CompactionFileGroupBuilder {
-    start: BlockNum,
-    stop: BlockNum,
-    range: BlockRange,
-    size: FileSize,
-    size_limit: FileSizeLimit,
-    length: usize,
-    sender: FileStreamSender,
-    receiver: FileStreamReceiver,
-}
-
-impl CompactionFileGroupBuilder {
-    #[tracing::instrument(skip_all, fields(start = self.start, stop = self.stop, size = self.size.value(), size_limit = self.size_limit.value()))]
-    fn finish<'a>(
-        self,
-        stream: &CompactionStream<'a>,
-    ) -> CompactionResult<CompactionFileGroup<'a>> {
-        let opts = stream.opts.clone();
-        let table = &stream.table;
-        let location_id = table.location_id();
-        let metadata_db = Arc::clone(&stream.metadata_db);
-
-        let BlockRange {
-            network,
-            hash,
-            prev_hash,
-            ..
-        } = stream.range.clone();
-
-        let numbers = self.start..=self.stop;
-
-        let range = BlockRange {
-            numbers,
-            network,
-            hash,
-            prev_hash,
-        };
-
-        ParquetFileWriter::new(Arc::clone(table), &opts, self.start)
-            .map(|writer| {
-                tracing::info!("Building compaction task");
-
-                let inner = UnboundedReceiverStream::from(self.receiver).boxed();
-
-                CompactionFileGroup {
-                    inner,
-                    writer,
-                    range,
-                    size: self.size,
-                    location_id,
-                    metadata_db,
-                    file_ids: Vec::with_capacity(self.length),
-                }
-            })
-            .map_err(CompactionError::create_writer_error(table, &opts))
-    }
-
-    // Loops through items of a `CompactionStream` and generates a `CompactionFileGroup`
-    pub fn try_build<'a>(
-        mut self,
-        stream: &mut CompactionStream<'a>,
-        cx: &mut Context<'_>,
-    ) -> Option<CompactionResult<Option<CompactionFileGroup<'a>>>> {
-        loop {
-            match stream.inner.poll_next_unpin(cx) {
-                // if we receive a pending poll, we continue to wait for the next item.
-                Poll::Pending => continue,
-                // If we receive a file, we update the group and attempt to finish it.
-                Poll::Ready(Some(Ok(file))) => {
-                    self.update(file);
-
-                    // Check if the group is ready to be finished and sent to a writer.
-                    match (
-                        self.size_limit_criteria_met(),
-                        self.file_count_criteria_met(),
-                    ) {
-                        // If the size limit is reached and there are multiple files, we finish the group.
-                        (true, true) => {
-                            return Some(self.finish(&stream).map(Some));
-                        }
-                        // If the size limit is reached but there is only one file we skip the group.
-                        (true, false) => return Some(Ok(None)),
-                        // If the size limit is not reached, we continue to collect files.
-                        (false, _) => continue,
+                    // Size threshold met and length threshold met, return the group
+                    if size_exceeded && length_exceeded {
+                        return CompactionGroup::try_new(
+                            streams,
+                            &self.table,
+                            &self.opts.parquet_writer_props,
+                            start,
+                        )
+                        .map(Some);
+                    // Size threshold met but length threshold not met
+                    } else if size_exceeded {
+                        streams = Vec::new();
+                        total_size = SegmentSize::default();
+                    } else if self.remain == 0 && length_exceeded {
+                        return CompactionGroup::try_new(
+                            streams,
+                            &self.table,
+                            &self.opts.parquet_writer_props,
+                            start,
+                        )
+                        .map(Some);
                     }
                 }
-                // If an error occurs while processing the file, we return the error.
-                Poll::Ready(Some(Err(error))) => return Some(Err(error)),
-                // If the stream is finished and we have collected files, we finish the group
-                // if there are multiple files; else we return None to indicate the underlying
-                // stream has finished.
-                Poll::Ready(None) => {
-                    return self
-                        .file_count_criteria_met()
-                        .then_some(self.finish(&stream).map(Some));
+                // If there is an error, we print it and stop creating any more groups
+                Err(err) => {
+                    tracing::error!("{err}");
+                    self.remain = 0;
+
+                    // We treat what ever the current group is as the final group
+                    if total_size.length >= self.opts.size_limit.0.length {
+                        return CompactionGroup::try_new(
+                            streams,
+                            &self.table,
+                            &self.opts.parquet_writer_props,
+                            start,
+                        )
+                        .map(Some);
+                    }
                 }
             }
         }
+
+        // If we reach here, it means we have exhausted all files, and the current group is not valid
+        Ok(None)
     }
 
-    /// Check if the size limit criteria is met. Currently a greater than test
-    ///
-    /// TODO: more nuanced criteria and implementation
-    fn size_limit_criteria_met(&self) -> bool {
-        self.size_limit.is_exceeded(self.size)
-    }
+    /// This function will return an iterator over the compaction groups created from the
+    /// files in the stream.
+    #[tracing::instrument(skip_all, fields(opts = format!("{}", self.opts)))]
+    pub async fn into_compaction_groups(mut self) -> Vec<CompactionGroup> {
+        let mut groups = Vec::new();
 
-    /// Check if the file count criteria is met. Currently a greater than 1 test
-    ///
-    /// TODO: more nuanced criteria and implementation
-    fn file_count_criteria_met(&self) -> bool {
-        self.length > 1
-    }
-
-    fn update(&mut self, file: CompactionFile) {
-        if self.start > file.range.start() {
-            self.start = file.range.start();
-            self.range.prev_hash = file.range.prev_hash;
+        while let Some(group) = self.next_group().await.transpose() {
+            match group {
+                Ok(group) => {
+                    groups.push(group);
+                }
+                Err(err) => {
+                    tracing::error!("{err}");
+                }
+            }
         }
 
-        if self.stop < file.range.end() {
-            self.stop = file.range.end();
-            self.range.hash = file.range.hash;
-        }
-
-        self.size += file.size;
-
-        self.length += 1;
-
-        self.sender.send(file).unwrap();
+        groups
     }
 }
 
-pub(super) struct CompactionFile {
-    file_id: FileId,
-    range: BlockRange,
-    size: FileSize,
-    stream: SendableRecordBatchStream,
+pub struct CompactionGroup {
+    pub location_id: LocationId,
+    pub streams: Vec<CompactionFile>,
+    pub writer: ParquetFileWriter,
+}
+
+impl CompactionGroup {
+    pub fn try_new(
+        streams: Vec<CompactionFile>,
+        table: &Arc<PhysicalTable>,
+        opts: &ParquetWriterProperties,
+        start: BlockNum,
+    ) -> CompactionResult<Self> {
+        let writer = ParquetFileWriter::new(Arc::clone(table), opts, start)
+            .map_err(CompactionError::create_writer_error(table, opts))?;
+
+        let location_id = table.location_id();
+
+        Ok(Self {
+            streams,
+            writer,
+            location_id,
+        })
+    }
+
+    #[tracing::instrument(skip_all, fields(location_id = self.location_id))]
+    async fn write_and_finish(mut self) -> CompactionResult<CompactionWriterOutput> {
+        let range = {
+            let start_range = &self
+                .streams
+                .first()
+                .expect("At least one stream in group")
+                .range;
+
+            let end_range = &self
+                .streams
+                .last()
+                .expect("At least one stream in group")
+                .range;
+
+            let network = start_range.network.to_owned();
+            let numbers = start_range.start()..=end_range.end();
+
+            BlockRange {
+                network,
+                numbers,
+                hash: end_range.hash,
+                prev_hash: start_range.prev_hash,
+            }
+        };
+
+        let mut file_ids = Vec::with_capacity(self.streams.len());
+
+        for file in self.streams.iter_mut() {
+            file_ids.push(file.file_id);
+            while let Some(ref batch) = file.stream.try_next().await? {
+                self.writer.write(batch).await?;
+            }
+        }
+
+        let (parquet_meta, object_meta, footer) = self
+            .writer
+            .close(range)
+            .await
+            .map_err(|err| CompactionError::FileWriteError { err })?;
+
+        Ok(CompactionWriterOutput::new(
+            self.location_id,
+            parquet_meta,
+            object_meta,
+            file_ids,
+            footer,
+        ))
+    }
+
+    pub async fn compact(self, metadata_db: Arc<MetadataDb>) -> CompactionResult<()> {
+        let output = self.write_and_finish().await?;
+
+        output
+            .commit_metadata(Arc::clone(&metadata_db))
+            .await
+            .map_err(CompactionError::metadata_commit_error(
+                output.location.as_ref(),
+            ))?;
+
+        output
+            .upsert_gc_manifest(Arc::clone(&metadata_db))
+            .await
+            .map_err(CompactionError::manifest_update_error(&output.file_ids))?;
+
+        Ok(())
+    }
+}
+
+pub struct CompactionFile {
+    pub file_id: FileId,
+    pub range: BlockRange,
+    pub stream: SendableRecordBatchStream,
+    pub size: SegmentSize,
 }
 
 impl CompactionFile {
-    pub async fn new(
+    pub async fn try_new(
         reader_factory: Arc<NozzleReaderFactory>,
         partition_index: usize,
         segment: Segment,
-        size_limit: FileSizeLimit,
     ) -> CompactionResult<Self> {
-        let file_id = segment.file_id.unwrap();
+        let file_id = segment.file_id.expect("Segment must have a FileId");
         let range = segment.range;
 
         let mut file_meta = FileMeta::from(segment.object);
@@ -517,14 +393,13 @@ impl CompactionFile {
             ArrowReaderMetadata::load_async(&mut input, Default::default()).await?;
 
         let schema = Arc::clone(reader_metadata.schema());
-        let size = size_limit.get_size(&reader_metadata);
+        let size = SegmentSize::from(&reader_metadata);
 
         let stream = ParquetRecordBatchStreamBuilder::new_with_metadata(input, reader_metadata)
             .build()?
             .map_err(DataFusionError::from);
 
-        let sendable_stream: SendableRecordBatchStream =
-            Box::pin(RecordBatchStreamAdapter::new(schema, stream));
+        let sendable_stream = Box::pin(RecordBatchStreamAdapter::new(schema, stream));
 
         let compaction_item = CompactionFile {
             file_id,
@@ -537,36 +412,21 @@ impl CompactionFile {
     }
 }
 
-impl From<SendError<CompactionFile>> for CompactionError {
-    fn from(_: SendError<CompactionFile>) -> Self {
-        CompactionError::SendError {}
-    }
-}
-
-impl Stream for CompactionFile {
-    type Item = DataFusionResult<RecordBatch>;
-
-    fn poll_next(self: pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let this = self.get_mut();
-        this.stream.poll_next_unpin(cx)
-    }
-}
-
-#[derive(Debug, Clone, Hash, Eq, PartialEq)]
-pub(super) struct CompactionWriterOutput {
-    location_id: LocationId,
-    file_ids: Vec<FileId>,
-    pub(super) location: Path,
-    file_name: String,
-    parquet_meta: serde_json::Value,
-    object_size: u64,
-    object_e_tag: Option<String>,
-    object_version: Option<String>,
-    footer: FooterBytes,
+#[derive(Debug)]
+pub struct CompactionWriterOutput {
+    pub location_id: LocationId,
+    pub file_ids: Vec<FileId>,
+    pub location: Path,
+    pub file_name: String,
+    pub parquet_meta: serde_json::Value,
+    pub object_size: u64,
+    pub object_e_tag: Option<String>,
+    pub object_version: Option<String>,
+    pub footer: FooterBytes,
 }
 
 impl CompactionWriterOutput {
-    pub(super) fn new(
+    fn new(
         location_id: LocationId,
         parquet_meta: ParquetMeta,
         ObjectMeta {
@@ -595,15 +455,8 @@ impl CompactionWriterOutput {
             footer,
         }
     }
-    pub(super) fn location(&self) -> Arc<str> {
-        self.location.as_ref().into()
-    }
 
-    pub(super) fn file_ids(&self) -> Arc<[FileId]> {
-        Arc::from(self.file_ids.as_slice())
-    }
-
-    pub(super) async fn commit_metadata(
+    async fn commit_metadata(
         &self,
         metadata_db: Arc<MetadataDb>,
     ) -> Result<(), metadata_db::Error> {
@@ -628,7 +481,7 @@ impl CompactionWriterOutput {
             .await
     }
 
-    pub(super) async fn upsert_gc_manifest(
+    async fn upsert_gc_manifest(
         &self,
         metadata_db: Arc<MetadataDb>,
     ) -> Result<(), metadata_db::Error> {

@@ -686,12 +686,12 @@ impl MetadataDb {
         Ok(())
     }
 
-    pub fn stream_expired_files(
-        &self,
+    pub fn stream_expired_files<'a>(
+        &'a self,
         location_id: LocationId,
         secs: i64,
         nsecs: u32,
-    ) -> BoxStream<Result<GcManifestRow, Error>> {
+    ) -> BoxStream<'a, Result<GcManifestRow, Error>> {
         let sql = "
         SELECT location_id
              , file_id
@@ -699,7 +699,7 @@ impl MetadataDb {
              , expiration
           FROM gc_manifest
          WHERE location_id = $1
-               AND expiration <= $1;
+               AND expiration <= $2;
         ";
 
         let expiration = DateTime::<Utc>::from_timestamp(secs, nsecs);

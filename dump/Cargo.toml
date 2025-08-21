@@ -23,5 +23,3 @@ backon = { version = "1.5.1", default-features = false, features = [
 ] }
 rand.workspace = true
 tokio-util.workspace = true
-dashmap = "6.1.0"
-tokio-stream.workspace = true
