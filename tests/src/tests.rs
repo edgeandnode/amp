@@ -395,11 +395,12 @@ async fn sql_dataset_input_batch_size() {
 
     let file_count = table.files().await.unwrap().len();
 
-    // 5. With batch size 1 and 4 blocks, we expect 4 files (even if some are empty) since
-    // microbatch_max_interval=1 should create one file per block even_blocks only includes even
-    // block numbers, so we expect 2 files with data for blocks 15000000 and 15000002, plus empty
-    // files for odd blocks
-    assert_eq!(file_count, 4);
+    // 5. With batch size 1 and 4 blocks, we expect 4 files to be dumped (even if some are empty)
+    // since microbatch_max_interval=1 should create one file per block even_blocks only includes
+    // even block numbers, so we expect 2 files with data for blocks 15000000 and 15000002, plus
+    // empty files for odd blocks. However, with compaction, we would expect these files to be merged
+    // as they are dumped, resulting in 7 files total ([1], [2], [1, 2], [3], [1, 2, 3], [4], [1, 2, 3, 4]).
+    assert_eq!(file_count, 7);
 
     let mut test_client = TestClient::connect(&test_env).await.unwrap();
     let res = test_client
