@@ -110,9 +110,7 @@ impl CatalogSnapshot {
 
     /// Access physical tables through the snapshots
     pub fn physical_tables(&self) -> impl Iterator<Item = &Arc<PhysicalTable>> {
-        self.table_snapshots
-            .iter()
-            .map(|snapshot| snapshot.physical_table())
+        self.table_snapshots.iter().map(|s| s.physical_table())
     }
 
     pub fn udfs(&self) -> &[ScalarUDF] {
@@ -151,6 +149,10 @@ impl TableSnapshot {
         } else {
             None
         }
+    }
+
+    pub fn segments(&self) -> &[Segment] {
+        &self.segments
     }
 }
 
