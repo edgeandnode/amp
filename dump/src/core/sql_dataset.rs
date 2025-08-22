@@ -175,7 +175,7 @@ pub async fn dump_table(
         let (start, end) = match (start, end) {
             (start, Some(end)) if start >= 0 && end >= 0 => (start as BlockNum, end as BlockNum),
             _ => {
-                let ctx = QueryContext::for_catalog(catalog.clone(), env.clone())?;
+                let ctx = QueryContext::for_catalog(catalog.clone(), env.clone(), false).await?;
                 match ctx.max_end_block(&plan.clone().attach_to(&ctx)?).await? {
                     Some(max_end_block) => {
                         block_ranges::resolve_relative(start, end, max_end_block)?

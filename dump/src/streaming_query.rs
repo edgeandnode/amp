@@ -7,10 +7,7 @@ use common::{
     catalog::physical::{Catalog, PhysicalTable},
     metadata::segments::{BlockRange, Chain, Watermark},
     notification_multiplexer::NotificationMultiplexerHandle,
-    query_context::{
-        DetachedLogicalPlan, NozzleSessionConfig, PlanningContext, QueryContext, QueryEnv,
-        parse_sql,
-    },
+    query_context::{DetachedLogicalPlan, PlanningContext, QueryContext, QueryEnv, parse_sql},
 };
 use datafusion::common::cast::as_fixed_size_binary_array;
 use dataset_store::{DatasetStore, resolve_blocks_table};
@@ -226,7 +223,9 @@ impl StreamingQuery {
             tracing::debug!("execute range [{}-{}]", range.start(), range.end());
 
             // Start microbatch execution for this chunk
-            let ctx = QueryContext::for_catalog(self.catalog.clone(), self.query_env.clone())?;
+            let ctx =
+                QueryContext::for_catalog(self.catalog.clone(), self.query_env.clone(), false)
+                    .await?;
             let attached_plan = self.plan.clone().attach_to(&ctx)?;
             let mut stream = ctx
                 .execute_plan_for_range(
@@ -292,7 +291,7 @@ impl StreamingQuery {
                 .dataset_store
                 .catalog_for_sql(&query, self.query_env.clone())
                 .await?;
-            QueryContext::for_catalog(catalog, self.query_env.clone())?
+            QueryContext::for_catalog(catalog, self.query_env.clone(), false).await?
         };
 
         // The latest common watermark across the source tables.
@@ -409,9 +408,11 @@ impl StreamingQuery {
     ) -> Result<Option<BlockRow>, BoxError> {
         // context for querying forked blocks
         let fork_ctx = {
-            let mut settings = NozzleSessionConfig::default();
-            settings.ignore_canonical_segments = true;
-            ctx.with_custom_settings(settings)
+            let catalog = Catalog::new(
+                ctx.catalog().physical_tables().cloned().collect(),
+                ctx.catalog().logical().clone(),
+            );
+            QueryContext::for_catalog(catalog, ctx.env.clone(), true).await?
         };
 
         let mut min_fork_block_num = prev_range.end();

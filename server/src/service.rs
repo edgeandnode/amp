@@ -257,7 +257,7 @@ impl Service {
             } else {
                 plan
             };
-            let ctx = QueryContext::for_catalog(catalog, self.env.clone())?;
+            let ctx = QueryContext::for_catalog(catalog, self.env.clone(), false).await?;
             let plan = plan.attach_to(&ctx)?;
             let record_baches = ctx.execute_plan(plan, true).await?;
             Ok(record_baches

@@ -9,7 +9,7 @@ use datafusion::{
         listing::{ListingTableUrl, PartitionedFile},
         physical_plan::{FileGroup, FileScanConfigBuilder, ParquetSource},
     },
-    error::{DataFusionError, Result as DataFusionResult},
+    error::Result as DataFusionResult,
     execution::object_store::ObjectStoreUrl,
     logical_expr::{ScalarUDF, SortExpr, col, utils::conjunction},
     physical_expr::LexOrdering,
@@ -32,7 +32,6 @@ use crate::{
         parquet::ParquetMeta,
         segments::{Chain, Segment, canonical_chain, missing_ranges},
     },
-    query_context::NozzleSessionConfig,
     store::{Store, object_store},
 };
 
@@ -70,7 +69,9 @@ impl Catalog {
     pub async fn earliest_block(&self) -> Result<Option<BlockNum>, BoxError> {
         let mut earliest = None;
         for table in &self.tables {
-            let synced_range = table.synced_range().await?;
+            // Create a snapshot to get synced range
+            let snapshot = table.snapshot(false).await?;
+            let synced_range = snapshot.synced_range();
             match (earliest, &synced_range) {
                 (None, Some(range)) => earliest = Some(*range.start()),
                 _ => earliest = earliest.min(synced_range.map(|s| *s.start())),
@@ -81,10 +82,76 @@ impl Catalog {
 }
 
 #[derive(Debug, Clone)]
+pub struct CatalogSnapshot {
+    table_snapshots: Vec<Arc<TableSnapshot>>,
+    logical: LogicalCatalog,
+}
+
+impl CatalogSnapshot {
+    pub async fn from_catalog(
+        catalog: Catalog,
+        ignore_canonical_segments: bool,
+    ) -> Result<Self, BoxError> {
+        let mut table_snapshots = Vec::new();
+        for physical_table in &catalog.tables {
+            let snapshot = physical_table.snapshot(ignore_canonical_segments).await?;
+            table_snapshots.push(Arc::new(snapshot));
+        }
+
+        Ok(CatalogSnapshot {
+            table_snapshots,
+            logical: catalog.logical,
+        })
+    }
+
+    pub fn table_snapshots(&self) -> &[Arc<TableSnapshot>] {
+        &self.table_snapshots
+    }
+
+    /// Access physical tables through the snapshots
+    pub fn physical_tables(&self) -> impl Iterator<Item = &Arc<PhysicalTable>> {
+        self.table_snapshots
+            .iter()
+            .map(|snapshot| snapshot.physical_table())
+    }
+
+    pub fn udfs(&self) -> &[ScalarUDF] {
+        &self.logical.udfs
+    }
+
+    pub fn logical(&self) -> &LogicalCatalog {
+        &self.logical
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct TableSnapshot {
     physical_table: Arc<PhysicalTable>,
     reader_factory: Arc<NozzleReaderFactory>,
     segments: Vec<Segment>,
+}
+
+impl TableSnapshot {
+    pub fn physical_table(&self) -> &Arc<PhysicalTable> {
+        &self.physical_table
+    }
+
+    /// Return the block range to use for query execution over this table. This is defined as the
+    /// contiguous range of block numbers starting from the lowest start block. Ok(None) is
+    /// returned if no block range has been synced.
+    pub fn synced_range(&self) -> Option<RangeInclusive<BlockNum>> {
+        if self.segments.is_empty() {
+            return None;
+        }
+        let start = self.segments.iter().map(|s| s.range.start()).min()?;
+        let end = self.segments.iter().map(|s| s.range.end()).max()?;
+
+        if start as i64 == self.physical_table.start_block {
+            Some(start..=end)
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -490,22 +557,6 @@ impl PhysicalTable {
         self.stream_file_metadata().try_collect().await
     }
 
-    /// Return the block range to use for query execution over this table. This is defined as the
-    /// contiguous range of block numbers starting from the lowest start block. Ok(None) is
-    /// returned if no block range has been synced.
-    pub async fn synced_range(&self) -> Result<Option<RangeInclusive<BlockNum>>, BoxError> {
-        let chain = self.canonical_chain().await?;
-        if let Some(chain) = chain {
-            if chain.start() as i64 == self.start_block {
-                Ok(Some(chain.start()..=chain.end()))
-            } else {
-                Ok(None)
-            }
-        } else {
-            Ok(None)
-        }
-    }
-
     pub async fn missing_ranges(
         &self,
         desired: RangeInclusive<BlockNum>,
@@ -605,46 +656,6 @@ impl PhysicalTable {
             .unwrap_or_else(|| datafusion::physical_expr::expressions::lit(true));
 
         Ok(predicate)
-    }
-}
-
-#[async_trait::async_trait]
-impl TableProvider for PhysicalTable {
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
-    fn table_type(&self) -> TableType {
-        TableType::Base
-    }
-
-    fn schema(&self) -> SchemaRef {
-        self.schema()
-    }
-
-    #[tracing::instrument(skip_all, err)]
-    async fn scan(
-        &self,
-        state: &dyn Session,
-        projection: Option<&Vec<usize>>,
-        filters: &[Expr],
-        limit: Option<usize>,
-    ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
-        let NozzleSessionConfig {
-            ignore_canonical_segments,
-        } = state
-            .config_options()
-            .extensions
-            .get()
-            .cloned()
-            .unwrap_or_default();
-
-        let snapshot = self
-            .snapshot(ignore_canonical_segments)
-            .await
-            .map_err(|e| DataFusionError::External(e.into()))?;
-
-        snapshot.scan(state, projection, filters, limit).await
     }
 }
 
