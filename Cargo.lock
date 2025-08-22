@@ -1891,6 +1891,7 @@ dependencies = [
  "serde",
  "serde_json",
  "stable-hash",
+ "tempfile",
  "thiserror",
  "tokio",
  "tokio-stream",

@@ -11,6 +11,7 @@ use common::{
     config::Config,
     manifest::{self, Version},
     notification_multiplexer,
+    store::ObjectStoreUrl,
     utils::dfs,
 };
 use datafusion::sql::resolve::resolve_table_references;
@@ -37,7 +38,7 @@ pub async fn dump(
             let data_path = fs::canonicalize(&location)
                 .map_err(|e| format!("Failed to canonicalize path '{}': {}", location, e))?;
             let base = data_path.parent();
-            Arc::new(Store::new(location, base)?)
+            Arc::new(Store::new(ObjectStoreUrl::new_with_base(location, base)?)?)
         }
         None => config.data_store.clone(),
     };
