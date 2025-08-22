@@ -252,7 +252,7 @@ impl PhysicalTable {
         let path = Path::from_url_path(url.path()).unwrap();
         let object_store_url = url.clone().try_into()?;
         let (object_store, _) = object_store(&object_store_url)?;
-        
+
         let location = metadata_db
             .get_location_by_id(location_id)
             .await?
