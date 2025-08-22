@@ -4,6 +4,7 @@
 
 use std::{
     collections::{BTreeMap, BTreeSet},
+    str::FromStr,
     sync::Arc,
 };
 
@@ -76,6 +77,28 @@ impl std::str::FromStr for Version {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let version = semver::Version::from_str(s)?;
         Ok(Version(version))
+    }
+}
+
+impl Version {
+    /// Convert the Semver version to a string with underscores.
+    ///
+    /// Example: SemverVersion(1, 0, 0) -> String("1_0_0").
+    pub fn to_underscore_version(&self) -> String {
+        self.0.to_string().replace('.', "_")
+    }
+
+    /// Convert a Semver version string to a string with underscores.
+    ///
+    /// Example: String("1.0.0") -> String("1_0_0").
+    pub fn version_identifier(version: &str) -> Result<String, BoxError> {
+        let version = Version::from_str(version)?;
+        Ok(version.to_underscore_version())
+    }
+
+    pub fn from_version_identifier(v_identifier: &str) -> Result<Self, BoxError> {
+        let version = Version::from_str(&v_identifier.replace("_", "."))?;
+        Ok(version)
     }
 }
 
@@ -190,7 +213,8 @@ impl Manifest {
     }
 
     pub fn to_identifier(&self) -> String {
-        format!("{}__{}", self.name, self.version.0)
+        let version_str = self.version.to_underscore_version();
+        format!("{}__{}", self.name, version_str)
     }
 
     pub fn to_filename(&self) -> String {

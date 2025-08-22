@@ -283,12 +283,23 @@ impl DatasetStore {
                         Error::DatasetVersionNotFound(dataset.to_string(), version.to_string()),
                     ))
                 })?,
-            None => self
-                .metadata_db
-                .get_latest_dataset_version(dataset)
-                .await
-                .map_err(|e| DatasetError::from((dataset, Error::MetadataDbError(e))))?
-                .unwrap_or_else(|| dataset.to_string()),
+            None => {
+                let latest_version = self
+                    .metadata_db
+                    .get_latest_dataset_version(dataset)
+                    .await
+                    .map_err(|e| DatasetError::from((dataset, Error::MetadataDbError(e))))?;
+                match latest_version {
+                    Some((dataset, version)) => {
+                        let version_identifier =
+                            Version::version_identifier(&version).map_err(|e| {
+                                DatasetError::from((dataset.as_str(), Error::Unknown(e)))
+                            })?;
+                        format!("{}__{}", dataset, version_identifier)
+                    }
+                    None => dataset.to_string(),
+                }
+            }
         };
         Ok(dataset_identifier)
     }
@@ -673,7 +684,7 @@ impl DatasetStore {
                 udfs.push(udf.into());
             }
 
-            for table in Arc::new(dataset).resolved_tables() {
+            for mut table in Arc::new(dataset).resolved_tables() {
                 // Only include tables that are actually referenced in the query
                 let is_referenced = table_refs.iter().any(|table_ref| {
                     match (table_ref.schema(), table_ref.table()) {
@@ -685,6 +696,8 @@ impl DatasetStore {
                 });
 
                 if is_referenced {
+                    let table_ref = TableReference::partial(dataset_name.clone(), table.name());
+                    table.update_table_ref(table_ref);
                     resolved_tables.push(table);
                 }
             }
