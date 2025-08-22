@@ -16,7 +16,7 @@ mod location_id;
 mod pagination;
 
 /// Insert a location into the database and return its ID (idempotent operation)
-#[tracing::instrument(skip(exe), err)]
+#[allow(dead_code)]
 pub async fn insert<'c, E>(
     exe: E,
     table: TableId<'_>,
@@ -87,6 +87,7 @@ where
             l.tbl,
             l.url,
             l.active,
+            l.start_block,
             
             -- Writer job fields (optional)
             j.id          AS writer_job_id,
@@ -109,6 +110,7 @@ where
         #[sqlx(try_from = "&'a str")]
         url: Url,
         active: bool,
+        start_block: i64,
         writer_job_id: Option<JobId>,
         writer_job_node_id: Option<WorkerNodeId>,
         writer_job_status: Option<JobStatus>,
@@ -146,6 +148,7 @@ where
         table: row.table,
         url: row.url,
         active: row.active,
+        start_block: row.start_block,
         writer,
     }))
 }
@@ -233,7 +236,7 @@ where
     E: Executor<'c, Database = Postgres>,
 {
     let query = indoc::indoc! {"
-        SELECT id, dataset, dataset_version, tbl, url, active, writer
+        SELECT id, dataset, dataset_version, tbl, url, active, start_block, writer
         FROM locations
         WHERE writer = $1
     "};
@@ -300,6 +303,8 @@ pub struct Location {
     /// Full URL to the storage location
     #[sqlx(try_from = "&'a str")]
     pub url: Url,
+    /// The starting block number for this location
+    pub start_block: i64,
     /// Whether this location is currently active for queries
     pub active: bool,
     /// Writer job ID (if one exists)
@@ -321,6 +326,8 @@ pub struct LocationWithDetails {
     pub url: Url,
     /// Whether this location is currently active for queries
     pub active: bool,
+    /// The starting block number for this location
+    pub start_block: i64,
     /// Writer job (if one exists)
     pub writer: Option<Job>,
 }

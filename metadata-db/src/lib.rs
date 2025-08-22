@@ -96,6 +96,11 @@ pub enum Error {
     #[error("Error parsing URL: {0}")]
     UrlParseError(#[from] url::ParseError),
 
+    #[error(
+        "Cannot start dump: location has existing start_block={existing}, but requested start_block={requested}"
+    )]
+    MismatchedStartBlock { existing: i64, requested: i64 },
+
     #[error("Job status update error: {0}")]
     JobStatusUpdateError(#[from] workers::jobs::JobStatusUpdateError),
 }
@@ -142,7 +147,7 @@ impl From<conn::ConnError> for Error {
 /// Connection pool to the metadata DB. Clones will refer to the same instance.
 #[derive(Clone, Debug)]
 pub struct MetadataDb {
-    pub(crate) pool: DbConnPool,
+    pub pool: DbConnPool,
     pub(crate) url: Arc<str>,
     dead_worker_interval: Duration,
 }
@@ -484,13 +489,56 @@ impl MetadataDb {
         path: &str,
         url: &Url,
         active: bool,
-    ) -> Result<LocationId, Error> {
-        Ok(locations::insert(&*self.pool, table, bucket, path, url, active).await?)
+        start_block: Option<i64>,
+    ) -> Result<LocationId, sqlx::Error> {
+        // An empty `dataset_version` is represented as an empty string in the DB.
+        let dataset_version = table.dataset_version.unwrap_or("");
+        let mut tx = self.pool.begin().await?;
+
+        let query = "
+            INSERT INTO locations (dataset, dataset_version, tbl, bucket, path, url, active, start_block)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            ON CONFLICT DO NOTHING;
+        ";
+
+        sqlx::query(query)
+            .bind(table.dataset)
+            .bind(dataset_version)
+            .bind(table.table)
+            .bind(bucket)
+            .bind(path)
+            .bind(url.to_string())
+            .bind(active)
+            .bind(start_block.unwrap_or(0))
+            .execute(&mut *tx)
+            .await?;
+
+        let query = "
+            SELECT id
+            FROM locations
+            WHERE dataset = $1 AND dataset_version = $2 AND tbl = $3 AND url = $4
+        ";
+
+        let location_id: LocationId = sqlx::query_scalar(query)
+            .bind(table.dataset)
+            .bind(dataset_version)
+            .bind(table.table)
+            .bind(url.to_string())
+            .fetch_one(&mut *tx)
+            .await?;
+
+        tx.commit().await?;
+        Ok(location_id)
     }
 
-    /// Find a location ID by its URL.
-    ///
-    /// Returns the location ID if a location with the given URL exists, or None if not found.
+    pub async fn get_location_by_id(&self, id: LocationId) -> Result<Option<Location>, Error> {
+        sqlx::query_as("SELECT * FROM locations WHERE id = $1")
+            .bind(id)
+            .fetch_optional(&*self.pool)
+            .await
+            .map_err(Error::from)
+    }
+
     pub async fn url_to_location_id(&self, url: &Url) -> Result<Option<LocationId>, Error> {
         Ok(locations::url_to_location_id(&*self.pool, url).await?)
     }
@@ -562,9 +610,9 @@ impl MetadataDb {
         }
     }
 
-    /// Get a location by its ID with full details including writer job
-    ///
-    /// Returns the location if found, or None if no location exists with the given ID.
+    // Get a location by its ID with full details including writer job
+    //
+    // Returns the location if found, or None if no location exists with the given ID.
     pub async fn get_location_by_id_with_details(
         &self,
         location_id: LocationId,
@@ -630,6 +678,28 @@ impl MetadataDb {
             .bind(footer)
             .execute(&*self.pool)
             .await?;
+
+        Ok(())
+    }
+
+    /// If the start block is already set, it must match the provided start_block.
+    pub async fn check_start_block(
+        &self,
+        location_id: LocationId,
+        start_block: i64,
+    ) -> Result<(), Error> {
+        let existing_start_block: i64 =
+            sqlx::query_scalar("SELECT start_block FROM locations WHERE id = $1")
+                .bind(location_id)
+                .fetch_one(&*self.pool)
+                .await?;
+
+        if existing_start_block != start_block {
+            return Err(Error::MismatchedStartBlock {
+                existing: existing_start_block,
+                requested: start_block,
+            });
+        }
 
         Ok(())
     }
@@ -738,7 +808,7 @@ impl MetadataDb {
     pub async fn get_latest_dataset_version(
         &self,
         dataset_name: &str,
-    ) -> Result<Option<String>, Error> {
+    ) -> Result<Option<(String, String)>, Error> {
         let sql = "
             SELECT version FROM registry 
             WHERE dataset = $1
@@ -751,7 +821,7 @@ impl MetadataDb {
             .fetch_optional(&*self.pool)
             .await?;
         match version {
-            Some(version) => Ok(Some(format!("{}__{}", dataset_name, version))),
+            Some(version) => Ok(Some((dataset_name.to_string(), version))),
             None => Ok(None),
         }
     }

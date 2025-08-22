@@ -2,8 +2,14 @@ mod anvil;
 mod deploy;
 mod registry;
 
-use common::BoxError;
-use dataset_store::{DatasetDefsCommon, SerializableSchema};
+use alloy::{
+    node_bindings::Anvil,
+    primitives::BlockHash,
+    providers::{DynProvider, Provider, ProviderBuilder, ext::AnvilApi as _},
+    transports::http::reqwest,
+};
+use common::{BlockNum, BoxError, metadata::segments::BlockRange, query_context::parse_sql};
+use dataset_store::{DatasetDefsCommon, DatasetStore, SerializableSchema};
 use generate_manifest;
 use monitoring::logging;
 use schemars::schema_for;
@@ -161,18 +167,206 @@ async fn basic_function() -> Result<(), BoxError> {
 }
 
 #[tokio::test]
-async fn intra_deps() -> Result<(), BoxError> {
+async fn persist_start_block_test() -> Result<(), BoxError> {
     logging::init();
 
-    let test_env = TestEnv::temp("intra_deps").await.unwrap();
-    let mut client = TestClient::connect(&test_env).await.unwrap();
+    // Spawn Anvil on a random port
+    let anvil = Anvil::new().port(0_u16).spawn();
+    let anvil_url = anvil.endpoint_url();
 
-    for step in load_test_steps("intra-deps.yaml").unwrap() {
-        step.run(&test_env, &mut client).await.unwrap();
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    // Set up the test environment with the Anvil provider
+    let test_env = TestEnv::new("persist_start_block_test", true, Some(anvil_url.as_str())).await?;
+    let mut client = TestClient::connect(&test_env).await?;
+
+    // Create a provider and mine 10 blocks
+    let provider = ProviderBuilder::new().connect_http(anvil_url);
+    provider.anvil_mine(Some(10), None).await?;
+
+    // Verify that blocks were mined (current block should be 10)
+    let block_number = provider.get_block_number().await?;
+    assert_eq!(block_number, 10, "Expected block number 10 after mining");
+
+    // Run test steps from YAML, which should set and verify the start block
+    for step in load_test_steps("persist-start-block-test.yaml")? {
+        step.run(&test_env, &mut client).await?;
     }
 
     Ok(())
+}
+
+#[tokio::test]
+async fn persist_start_block_set_on_creation() -> Result<(), BoxError> {
+    logging::init();
+
+    // Set up the Anvil test environment from the `anvil.rs` test helpers
+    let test = anvil::AnvilTestContext::setup("persist_start_block_set_on_creation").await;
+
+    // Mine 10 blocks so the dump has something to process
+    test.mine(10).await;
+    assert_eq!(test.latest_block().await.block_num, 10);
+
+    // Perform the initial dump from block 0. This should succeed and persist `start_block = 0`.
+    test_support::dump_dataset(&test.env.config, "anvil_rpc", 0, 9, 1, None).await?;
+
+    // Query the database to verify that the start_block was persisted correctly as 0.
+    let location = test
+        .env
+        .metadata_db
+        .get_active_location(metadata_db::TableId {
+            dataset: "anvil_rpc",
+            dataset_version: None,
+            table: "blocks",
+        })
+        .await?
+        .ok_or("No active location found for anvil_rpc.blocks")?;
+    let location_id = location.1;
+
+    test.env
+        .metadata_db
+        .check_start_block(location_id, 0)
+        .await?;
+
+    // Now, attempt to dump again with a *different* start_block. This must fail.
+    let result = test_support::dump_dataset(&test.env.config, "anvil_rpc", 1, 9, 1, None).await;
+
+    assert!(result.is_err(), "Expected dump to fail but it succeeded");
+    let err_msg = result.unwrap_err().to_string();
+    let expected_err =
+        "Cannot start dump: location has existing start_block=0, but requested start_block=1";
+    assert!(
+        err_msg.contains(expected_err),
+        "Error message did not match.\nGot: '{}'\nExpected to contain: '{}'",
+        err_msg,
+        expected_err
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn multi_version_test() -> Result<(), BoxError> {
+    logging::init();
+
+    let test_env = TestEnv::temp("multi_version_test").await.unwrap();
+    let mut client = TestClient::connect(&test_env).await.unwrap();
+
+    for step in load_test_steps("multi-version.yaml").unwrap() {
+        step.run(&test_env, &mut client).await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn anvil_rpc_reorg() {
+    logging::init();
+
+    let dataset_name = "anvil_rpc";
+    check_provider_file("rpc_anvil.toml").await;
+
+    let http = reqwest::Client::new();
+    let test_env = TestEnv::temp("anvil_rpc_reorg").await.unwrap();
+    let dataset_store = DatasetStore::new(test_env.config.clone(), test_env.metadata_db.clone());
+    // Start Anvil on port 8545 to match the rpc_anvil.toml configuration
+    let provider = alloy::providers::ProviderBuilder::new()
+        .connect_anvil_with_config(|anvil| anvil.port(8545u16));
+    let provider = DynProvider::new(provider);
+
+    #[derive(Debug, PartialEq, Eq, serde::Deserialize)]
+    struct BlockRow {
+        block_num: BlockNum,
+        hash: BlockHash,
+        parent_hash: BlockHash,
+    }
+
+    let mine = async |blocks: u64| provider.anvil_mine(Some(blocks), None).await.unwrap();
+    let latest_block = async || {
+        let block = provider
+            .get_block(alloy::eips::BlockId::latest())
+            .await
+            .unwrap()
+            .unwrap();
+        BlockRow {
+            block_num: block.header.number,
+            hash: block.header.hash,
+            parent_hash: block.header.parent_hash,
+        }
+    };
+    let reorg = async |depth: u64| {
+        assert_ne!(depth, 0);
+        let original_head = latest_block().await;
+        tracing::info!(depth, "reorg");
+        provider
+            .anvil_reorg(alloy::rpc::types::anvil::ReorgOptions {
+                depth,
+                tx_block_pairs: vec![],
+            })
+            .await
+            .unwrap();
+        let new_head = latest_block().await;
+        assert_eq!(original_head.block_num, new_head.block_num);
+        assert_ne!(original_head.hash, new_head.hash);
+    };
+    let query_blocks = async |range: std::ops::RangeInclusive<BlockNum>| -> Vec<BlockRow> {
+        let url = format!("http://{}/", test_env.server_addrs.jsonl_addr);
+        let sql = format!(
+            r#"
+            select block_num, hash, parent_hash
+            from anvil_rpc.blocks
+            where block_num >= {} and block_num <= {}
+            "#,
+            range.start(),
+            range.end(),
+        );
+        let response = http.post(url).body(sql).send().await.unwrap();
+        let buffer = response.text().await.unwrap();
+        let mut rows: Vec<BlockRow> = Default::default();
+        for line in buffer.lines() {
+            rows.push(serde_json::from_str(line).unwrap());
+        }
+        rows.sort_by_key(|r| r.block_num);
+        rows
+    };
+    let dump = async |range: std::ops::RangeInclusive<BlockNum>| {
+        SnapshotContext::temp_dump(&test_env, &dataset_name, *range.start(), *range.end(), 1)
+            .await
+            .unwrap()
+    };
+    let metadata_ranges = async || -> Vec<BlockRange> {
+        let sql = parse_sql("select * from anvil_rpc.blocks").unwrap();
+        let env = test_env.config.make_query_env().unwrap();
+        let catalog = dataset_store.catalog_for_sql(&sql, env).await.unwrap();
+        let tables = catalog.tables();
+        let table = tables.iter().find(|t| t.table_name() == "blocks").unwrap();
+        test_support::table_ranges(&table).await.unwrap()
+    };
+
+    mine(2).await;
+    dump(0..=2).await;
+    let blocks0 = query_blocks(0..=2).await;
+    reorg(1).await;
+    mine(1).await;
+    dump(0..=3).await;
+    let blocks1 = query_blocks(0..=3).await;
+
+    // For now, we don't fully handle reorgs. But we're checking that metadata reflects the current
+    // expected behavior. We only expect to query the "canonical chain", which will not resolve the
+    // reorg unless the uncled block range is re-dumped.
+    assert_eq!(&blocks0, &blocks1);
+    let ranges = metadata_ranges().await;
+    assert_eq!(ranges.len(), 2);
+    assert_eq!(
+        &ranges[0],
+        &BlockRange {
+            numbers: 0..=2,
+            network: "anvil".to_string(),
+            hash: blocks1[2].hash,
+            prev_hash: Some(blocks1[0].parent_hash),
+        }
+    );
+    assert_eq!(ranges[1].numbers, 3..=3);
+    assert_eq!(&ranges[1].network, "anvil");
+    assert_ne!(&ranges[1].prev_hash, &Some(ranges[0].hash));
 }
 
 #[tokio::test]

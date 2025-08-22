@@ -16,6 +16,7 @@ pub(crate) enum TestStep {
     Query(QueryStep),
     Restore(RestoreStep),
     Deploy(DeployStep),
+    CleanDumpLocation(CleanDumpLocationStep),
 }
 
 #[derive(Debug, Deserialize)]
@@ -33,11 +34,18 @@ pub struct RestoreStep {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct CleanDumpLocationStep {
+    pub clean_dump_location: String,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct DumpStep {
     pub name: String,
     pub dataset: String,
     pub start: u64,
     pub end: u64,
+    #[serde(default)]
+    pub expect_fail: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -105,6 +113,7 @@ impl TestStep {
             TestStep::Stream(step) => &step.name,
             TestStep::Restore(step) => &step.name,
             TestStep::Deploy(step) => &step.name,
+            TestStep::CleanDumpLocation(step) => &step.clean_dump_location,
         }
     }
 
@@ -112,7 +121,14 @@ impl TestStep {
         let result = match self {
             TestStep::Dump(step) => {
                 let config = test_env.config.clone();
-                dump_dataset(&config, &step.dataset, step.start, step.end, 1, None).await
+                let result =
+                    dump_dataset(&config, &step.dataset, step.start, step.end, 1, None).await;
+                if step.expect_fail {
+                    assert!(result.is_err(), "Expected dump to fail, but it succeeded");
+                    Ok(())
+                } else {
+                    result
+                }
             }
             TestStep::StreamTake(step) => step.run(client).await,
             TestStep::Query(step) => step.run(client).await,
@@ -125,6 +141,14 @@ impl TestStep {
                 let dataset_package = DatasetPackage::new(&step.deploy);
                 dataset_package.pnpm_install().await?;
                 dataset_package.deploy(test_env.server_addrs).await
+            }
+            TestStep::CleanDumpLocation(step) => {
+                let mut path = std::path::PathBuf::from(test_env.config.data_store.url().path());
+                path.push(&step.clean_dump_location);
+                if path.exists() {
+                    fs::remove_dir_all(path)?;
+                }
+                Ok(())
             }
         };
 

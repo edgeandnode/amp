@@ -172,6 +172,7 @@ pub async fn dump_table(
 
         let plan = planning_ctx.plan_sql(query.clone()).await?;
         let is_incr = plan.is_incremental()?;
+
         let (start, end) = match (start, end) {
             (start, Some(end)) if start >= 0 && end >= 0 => (start as BlockNum, end as BlockNum),
             _ => {
@@ -191,7 +192,15 @@ pub async fn dump_table(
             }
         };
 
+        let start_block = start
+            .try_into()
+            .map_err(|e| format!("start_block value {} is out of range: {}", start, e))?;
+
         if is_incr {
+            ctx.metadata_db
+                .check_start_block(table.location_id(), start_block)
+                .await?;
+
             for range in table.missing_ranges(start..=end).await? {
                 dump_sql_query(
                     &dataset_store,
@@ -212,6 +221,7 @@ pub async fn dump_table(
                 &data_store,
                 dataset_store.metadata_db.clone(),
                 false,
+                start_block as i64,
             )
             .await?
             .into();

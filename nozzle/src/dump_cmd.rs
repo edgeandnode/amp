@@ -58,7 +58,7 @@ pub async fn dump(
     for dataset_name in datasets {
         let (dataset_name, version) =
             if let Some((name, version_str)) = dataset_name.split_once("__") {
-                match version_str.parse::<Version>() {
+                match Version::from_version_identifier(version_str) {
                     Ok(v) => (name, Some(v)),
                     Err(e) => {
                         warn!(
@@ -86,8 +86,14 @@ pub async fn dump(
 
         for table in Arc::new(dataset).resolved_tables() {
             let physical_table = if fresh {
-                PhysicalTable::next_revision(&table, data_store.as_ref(), metadata_db.clone(), true)
-                    .await?
+                PhysicalTable::next_revision(
+                    &table,
+                    data_store.as_ref(),
+                    metadata_db.clone(),
+                    true,
+                    start,
+                )
+                .await?
             } else {
                 match PhysicalTable::get_active(&table, metadata_db.clone()).await? {
                     Some(physical_table) => physical_table,
@@ -97,6 +103,7 @@ pub async fn dump(
                             data_store.as_ref(),
                             metadata_db.clone(),
                             true,
+                            start,
                         )
                         .await?
                     }
