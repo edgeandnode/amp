@@ -114,6 +114,12 @@ pub async fn dump(
     parquet_opts: &ParquetWriterProperties,
     (start, end): (i64, Option<i64>),
 ) -> Result<(), BoxError> {
+    for table in tables {
+        ctx.metadata_db
+            .check_start_block(table.location_id(), start)
+            .await?;
+    }
+
     let mut client = ctx.dataset_store.load_client(dataset_name).await?;
 
     let (start, end) = match (start, end) {

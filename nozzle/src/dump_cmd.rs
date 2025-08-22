@@ -86,8 +86,14 @@ pub async fn dump(
 
         for table in Arc::new(dataset).resolved_tables() {
             let physical_table = if fresh {
-                PhysicalTable::next_revision(&table, data_store.as_ref(), metadata_db.clone(), true)
-                    .await?
+                PhysicalTable::next_revision(
+                    &table,
+                    data_store.as_ref(),
+                    metadata_db.clone(),
+                    true,
+                    start,
+                )
+                .await?
             } else {
                 match PhysicalTable::get_active(&table, metadata_db.clone()).await? {
                     Some(physical_table) => physical_table,
@@ -97,6 +103,7 @@ pub async fn dump(
                             data_store.as_ref(),
                             metadata_db.clone(),
                             true,
+                            start,
                         )
                         .await?
                     }

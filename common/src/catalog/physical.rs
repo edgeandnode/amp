@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc};
 use datafusion::{
     arrow::datatypes::SchemaRef,
     catalog::{Session, memory::DataSourceExec},
-    common::DFSchema,
+    common::{DFSchema, DataFusionError},
     datasource::{
         TableProvider, TableType, create_ordering,
         listing::{ListingTableUrl, PartitionedFile},
@@ -97,6 +97,7 @@ pub struct PhysicalTable {
 
     /// ParquetFileReaderFactory
     pub reader_factory: Arc<NozzleReaderFactory>,
+    start_block: i64,
 }
 
 // Methods for creating and managing PhysicalTable instances
@@ -107,6 +108,7 @@ impl PhysicalTable {
         url: Url,
         location_id: LocationId,
         metadata_db: Arc<MetadataDb>,
+        start_block: i64,
     ) -> Result<Self, BoxError> {
         let path = Path::from_url_path(url.path()).unwrap();
         let object_store_url = url.clone().try_into()?;
@@ -125,11 +127,12 @@ impl PhysicalTable {
             location_id,
             metadata_db,
             reader_factory,
+            start_block,
         })
     }
 
     /// Create a new physical table with the given dataset name, table, URL, and object store.
-    /// This is used for creating a new location (revision) for a new or  existing table in
+    /// This is used for creating a new location (revision) for a new or existing table in
     /// the metadata database.
     #[tracing::instrument(skip_all, fields(table = %table, active = %set_active), err)]
     pub async fn next_revision(
@@ -137,6 +140,7 @@ impl PhysicalTable {
         data_store: &Store,
         metadata_db: Arc<MetadataDb>,
         set_active: bool,
+        start_block: i64,
     ) -> Result<Self, BoxError> {
         let dataset_name = &table.dataset().name;
         let dataset_version = match table.dataset().kind.as_str() {
@@ -152,7 +156,14 @@ impl PhysicalTable {
         let path = make_location_path(dataset_name, &table.name());
         let url = data_store.url().join(&path)?;
         let location_id = metadata_db
-            .register_location(table_id, data_store.bucket(), &path, &url, false)
+            .register_location(
+                table_id,
+                data_store.bucket(),
+                &path,
+                &url,
+                false,
+                Some(start_block),
+            )
             .await?;
 
         if set_active {
@@ -176,6 +187,7 @@ impl PhysicalTable {
             location_id,
             metadata_db,
             reader_factory,
+            start_block,
         };
 
         info!("Created new revision at {}", physical_table.path);
@@ -189,6 +201,7 @@ impl PhysicalTable {
         table: &ResolvedTable,
         data_store: Arc<Store>,
         metadata_db: Arc<MetadataDb>,
+        start_block: i64,
     ) -> Result<Option<Self>, BoxError> {
         let dataset_name = &table.dataset().name;
         let dataset_version = match table.dataset().kind.as_str() {
@@ -211,6 +224,7 @@ impl PhysicalTable {
             &table_id,
             Arc::clone(&data_store),
             Arc::clone(&metadata_db),
+            start_block,
         )
         .await
     }
@@ -238,6 +252,15 @@ impl PhysicalTable {
         let path = Path::from_url_path(url.path()).unwrap();
         let object_store_url = url.clone().try_into()?;
         let (object_store, _) = object_store(&object_store_url)?;
+
+        let location = metadata_db
+            .get_location_by_id(location_id)
+            .await?
+            .ok_or_else(|| {
+                DataFusionError::Internal(format!("Location with id {location_id} not found"))
+            })?;
+        let start_block = location.start_block;
+
         let reader_factory = NozzleReaderFactory {
             location_id,
             object_store,
@@ -252,6 +275,7 @@ impl PhysicalTable {
             location_id,
             metadata_db,
             reader_factory,
+            start_block,
         }))
     }
 
@@ -266,11 +290,21 @@ impl PhysicalTable {
         table_id: &TableId<'_>,
         data_store: Arc<Store>,
         metadata_db: Arc<MetadataDb>,
+        start_block: i64,
     ) -> Result<Option<Self>, BoxError> {
         if let Some((path, url, prefix)) = revisions.values().last() {
-            Self::restore(table, table_id, prefix, path, url, data_store, metadata_db)
-                .await
-                .map(Some)
+            Self::restore(
+                table,
+                table_id,
+                prefix,
+                path,
+                url,
+                data_store,
+                metadata_db,
+                start_block,
+            )
+            .await
+            .map(Some)
         } else {
             Ok(None)
         }
@@ -285,9 +319,17 @@ impl PhysicalTable {
         url: &Url,
         data_store: Arc<Store>,
         metadata_db: Arc<MetadataDb>,
+        start_block: i64,
     ) -> Result<Self, BoxError> {
         let location_id = metadata_db
-            .register_location(*table_id, data_store.bucket(), prefix, url, false)
+            .register_location(
+                *table_id,
+                data_store.bucket(),
+                prefix,
+                url,
+                false,
+                Some(start_block),
+            )
             .await?;
 
         metadata_db.set_active_location(*table_id, &url).await?;
@@ -335,6 +377,7 @@ impl PhysicalTable {
             location_id,
             metadata_db,
             reader_factory,
+            start_block,
         };
 
         Ok(physical_table)
@@ -445,7 +488,15 @@ impl PhysicalTable {
     /// returned if no block range has been synced.
     pub async fn synced_range(&self) -> Result<Option<RangeInclusive<BlockNum>>, BoxError> {
         let chain = self.canonical_chain().await?;
-        Ok(chain.map(|c| c.start()..=c.end()))
+        if let Some(chain) = chain {
+            if chain.start() as i64 == self.start_block {
+                Ok(Some(chain.start()..=chain.end()))
+            } else {
+                Ok(None)
+            }
+        } else {
+            Ok(None)
+        }
     }
 
     pub async fn missing_ranges(

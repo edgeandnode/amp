@@ -22,15 +22,15 @@ use crate::{
     test_support::{SnapshotContext, TestEnv, table_ranges},
 };
 
-struct AnvilTestContext {
-    env: TestEnv,
+pub(crate) struct AnvilTestContext {
+    pub(crate) env: TestEnv,
     client: TestClient,
     provider: alloy::providers::DynProvider,
     _anvil: AnvilInstance,
 }
 
 impl AnvilTestContext {
-    async fn setup(test_name: &str) -> Self {
+    pub(crate) async fn setup(test_name: &str) -> Self {
         logging::init();
         let anvil = Anvil::new().port(0_u16).spawn();
         let url = anvil.endpoint_url();
@@ -51,7 +51,7 @@ impl AnvilTestContext {
         DatasetStore::new(self.env.config.clone(), self.env.metadata_db.clone())
     }
 
-    async fn mine(&self, blocks: u64) {
+    pub(crate) async fn mine(&self, blocks: u64) {
         tracing::info!(blocks, "mine");
         self.provider.anvil_mine(Some(blocks), None).await.unwrap()
     }
@@ -88,7 +88,7 @@ impl AnvilTestContext {
         table_ranges(&table).await.unwrap()
     }
 
-    async fn latest_block(&self) -> BlockRow {
+    pub(crate) async fn latest_block(&self) -> BlockRow {
         let block = self
             .provider
             .get_block(alloy::eips::BlockId::latest())
@@ -117,8 +117,8 @@ impl AnvilTestContext {
 }
 
 #[derive(Debug, PartialEq, Eq, serde::Deserialize)]
-struct BlockRow {
-    block_num: BlockNum,
+pub(crate) struct BlockRow {
+    pub(crate) block_num: BlockNum,
     hash: BlockHash,
     parent_hash: BlockHash,
 }
@@ -129,7 +129,7 @@ async fn rpc_reorg_simple() {
 
     test.dump("anvil_rpc", 0..=0).await;
     test.mine(2).await;
-    test.dump("anvil_rpc", 1..=2).await;
+    test.dump("anvil_rpc", 0..=2).await;
     let blocks0 = test.query_blocks("anvil_rpc", None).await;
     test.reorg(1).await;
     test.mine(1).await;
@@ -261,21 +261,21 @@ async fn streaming_reorg_desync() {
     check_batch(&mut test.client, 2).await;
 
     test.mine(2).await;
-    test.dump("anvil_rpc", 1..=2).await;
-    test.dump("sql_over_anvil_1", 1..=2).await;
+    test.dump("anvil_rpc", 0..=2).await;
+    test.dump("sql_over_anvil_1", 0..=2).await;
     test.reorg(1).await;
     test.mine(2).await;
-    test.dump("anvil_rpc", 1..=4).await;
-    test.dump("anvil_rpc", 1..=4).await;
-    test.dump("sql_over_anvil_2", 1..=4).await;
+    test.dump("anvil_rpc", 0..=4).await;
+    test.dump("anvil_rpc", 0..=4).await;
+    test.dump("sql_over_anvil_2", 0..=4).await;
 
     assert_ne!(
         test.query_blocks("sql_over_anvil_1", None).await,
         test.query_blocks("sql_over_anvil_2", None).await,
     );
 
-    test.dump("sql_over_anvil_1", 1..=4).await;
-    test.dump("sql_over_anvil_1", 1..=4).await;
+    test.dump("sql_over_anvil_1", 0..=4).await;
+    test.dump("sql_over_anvil_1", 0..=4).await;
 
     check_batch(&mut test.client, 8).await;
 }
@@ -310,8 +310,8 @@ async fn streaming_reorg_rewind_shallow() {
     );
 
     test.mine(2).await;
-    test.dump("anvil_rpc", 1..=2).await;
-    test.dump("sql_over_anvil_1", 1..=2).await;
+    test.dump("anvil_rpc", 0..=2).await;
+    test.dump("sql_over_anvil_1", 0..=2).await;
 
     assert_eq!(
         &take_blocks(&mut test.client, 2).await,
@@ -320,10 +320,10 @@ async fn streaming_reorg_rewind_shallow() {
 
     test.reorg(1).await;
     test.mine(2).await;
-    test.dump("anvil_rpc", 1..=4).await;
-    test.dump("anvil_rpc", 1..=4).await;
-    test.dump("sql_over_anvil_1", 1..=4).await;
-    test.dump("sql_over_anvil_1", 1..=4).await;
+    test.dump("anvil_rpc", 0..=4).await;
+    test.dump("anvil_rpc", 0..=4).await;
+    test.dump("sql_over_anvil_1", 0..=4).await;
+    test.dump("sql_over_anvil_1", 0..=4).await;
 
     assert_eq!(
         &take_blocks(&mut test.client, 4).await,
@@ -361,10 +361,10 @@ async fn streaming_reorg_rewind_deep() {
     );
 
     test.mine(6).await;
-    test.dump("anvil_rpc", 1..=6).await;
-    test.dump("sql_over_anvil_1", 1..=2).await;
-    test.dump("sql_over_anvil_1", 3..=4).await;
-    test.dump("sql_over_anvil_1", 5..=6).await;
+    test.dump("anvil_rpc", 0..=6).await;
+    test.dump("sql_over_anvil_1", 0..=2).await;
+    test.dump("sql_over_anvil_1", 0..=4).await;
+    test.dump("sql_over_anvil_1", 0..=6).await;
 
     assert_eq!(
         &take_blocks(&mut test.client, 6).await,
@@ -373,12 +373,12 @@ async fn streaming_reorg_rewind_deep() {
 
     test.reorg(5).await;
     test.mine(2).await;
-    test.dump("anvil_rpc", 1..=8).await;
-    test.dump("anvil_rpc", 1..=8).await;
-    test.dump("sql_over_anvil_1", 1..=8).await;
-    test.dump("sql_over_anvil_1", 1..=8).await;
-    test.dump("sql_over_anvil_1", 1..=8).await;
-    test.dump("sql_over_anvil_1", 1..=8).await;
+    test.dump("anvil_rpc", 0..=8).await;
+    test.dump("anvil_rpc", 0..=8).await;
+    test.dump("sql_over_anvil_1", 0..=8).await;
+    test.dump("sql_over_anvil_1", 0..=8).await;
+    test.dump("sql_over_anvil_1", 0..=8).await;
+    test.dump("sql_over_anvil_1", 0..=8).await;
 
     assert_eq!(
         &take_blocks(&mut test.client, 8).await,
@@ -428,7 +428,7 @@ async fn flight_data_app_metadata() {
     );
 
     test.mine(2).await;
-    test.dump("anvil_rpc", 1..=2).await;
+    test.dump("anvil_rpc", 0..=2).await;
     assert_eq!(
         pull_flight_metadata(&mut flight_data).await[0],
         expected_range(&mut test, 1..=2).await,

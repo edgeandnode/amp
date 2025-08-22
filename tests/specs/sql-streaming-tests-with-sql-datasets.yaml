@@ -28,11 +28,11 @@
       {"hash": "9a71a95be3fe957457b11817587e5af4c7e24836d5b383c430ff25b9286a457f"},
       {"hash": "7a7d7c23bb8c5e340eead8537bb5e2f3e125bfa0b588cf07e4aa140ba374295e"}
     ]
-  
+
 #   # Dump more blocks and check stream progress
 - name: dump_eth_firehose
   dataset: eth_firehose
-  start: 15000002
+  start: 15000000
   end: 15000004
 
 - name: select_block_num_5

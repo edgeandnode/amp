@@ -21,6 +21,15 @@ async fn insert_creates_location_and_returns_id() {
         .await
         .expect("Failed to run migrations");
 
+    let columns: Vec<String> = sqlx::query_scalar("SELECT column_name FROM information_schema.columns WHERE table_name = 'locations' ORDER BY column_name").fetch_all(&mut *conn).await.expect("Failed to query schema");
+    println!("Locations table columns: {:?}", columns);
+
+    let has_start_block = columns.contains(&"start_block".to_string());
+    assert!(
+        has_start_block,
+        "start_block column is missing after migrations!"
+    );
+
     let table = TableId {
         dataset: "test-dataset",
         dataset_version: Some("v1.0"),
@@ -50,6 +59,7 @@ async fn insert_creates_location_and_returns_id() {
         row_path,
         row_url,
         row_active,
+        row_start_block,
     ) = get_location_by_id(&mut *conn, location_id)
         .await
         .expect("Failed to fetch inserted location");
@@ -62,6 +72,7 @@ async fn insert_creates_location_and_returns_id() {
     assert_eq!(row_path, "/test/path/file.parquet");
     assert_eq!(row_url, url.as_str());
     assert_eq!(row_active, true);
+    assert_eq!(row_start_block, 0);
 }
 
 #[tokio::test]
@@ -620,6 +631,8 @@ async fn get_by_id_returns_existing_location() {
         .await
         .expect("Failed to get location by id");
 
+    println!("location: {:?}", location);
+
     //* Then
     assert!(location.is_some());
     let location = location.unwrap();
@@ -669,13 +682,14 @@ async fn get_location_by_id<'c, E>(
         String,
         String,
         bool,
+        i64,
     ),
     sqlx::Error,
 >
 where
     E: sqlx::Executor<'c, Database = sqlx::Postgres>,
 {
-    let query = "SELECT id, dataset, dataset_version, tbl, bucket, path, url, active FROM locations WHERE id = $1";
+    let query = "SELECT id, dataset, dataset_version, tbl, bucket, path, url, active, start_block FROM locations WHERE id = $1";
     sqlx::query_as(query).bind(location_id).fetch_one(exe).await
 }
 
