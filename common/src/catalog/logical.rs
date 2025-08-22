@@ -63,7 +63,7 @@ impl Dataset {
                 self.name,
                 self.version
                     .as_ref()
-                    .map(|v| v.0.to_string())
+                    .map(|v| v.to_underscore_version())
                     .unwrap_or_default()
             ),
             _ => self.name.clone(),

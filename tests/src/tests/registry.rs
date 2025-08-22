@@ -1,4 +1,4 @@
-use common::manifest::Manifest;
+use common::manifest::{Manifest, Version};
 use registry_service::handlers::register::{RegisterRequest, RegisterResponse};
 use reqwest::StatusCode;
 
@@ -137,7 +137,7 @@ async fn test_register_success() {
     assert_eq!(registry_info.owner, "test_owner");
     assert_eq!(
         registry_info.manifest.to_string(),
-        "register_test_dataset__1.0.0.json"
+        "register_test_dataset__1_0_0.json"
     );
 }
 
@@ -238,7 +238,7 @@ async fn test_register_multiple_versions() {
     }
 
     // Verify all versions are registered and check registry info
-    for (version, owner) in &test_cases {
+    for (version, owner) in test_cases {
         assert!(
             ctx.verify_dataset_registered("register_test_multi_version_dataset", version)
                 .await
@@ -251,7 +251,10 @@ async fn test_register_multiple_versions() {
             .expect("Registry info should exist");
         assert_eq!(
             registry_info.manifest.to_string(),
-            format!("register_test_multi_version_dataset__{}.json", version)
+            format!(
+                "register_test_multi_version_dataset__{}.json",
+                Version::version_identifier(version).unwrap()
+            )
         );
         assert_eq!(registry_info.owner, *owner);
     }
