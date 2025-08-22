@@ -5,7 +5,7 @@ use futures::{
     stream::{BoxStream, Stream},
 };
 use sqlx::{
-    postgres::{types::PgInterval, PgListener, PgNotification},
+    postgres::{PgListener, PgNotification, types::PgInterval},
     types::chrono::{DateTime, NaiveDateTime, Utc},
 };
 use thiserror::Error;
