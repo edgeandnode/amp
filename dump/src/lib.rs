@@ -2,6 +2,7 @@
 
 use common::parquet::file::properties::WriterProperties as ParquetWriterProperties;
 
+pub mod compaction;
 mod core;
 mod metrics; // unused for now
 mod parquet_writer;

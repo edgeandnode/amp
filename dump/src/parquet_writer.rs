@@ -12,11 +12,14 @@ use common::{
     },
     parquet::{arrow::AsyncArrowWriter, errors::ParquetError, format::KeyValue},
 };
+use futures::TryFutureExt;
 use metadata_db::{FooterBytes, LocationId, MetadataDb};
 use object_store::{ObjectMeta, buffered::BufWriter, path::Path};
 use rand::RngCore as _;
 use tracing::{debug, trace};
 use url::Url;
+
+use crate::compaction::{FILE_SIZE_LIMIT_BYTES, NozzleCompactor};
 
 const MAX_PARTITION_BLOCK_RANGE: u64 = 1_000_000;
 
@@ -133,6 +136,8 @@ struct RawTableWriter {
 
     current_file: Option<ParquetFileWriter>,
     current_range: Option<BlockRange>,
+
+    compactor: NozzleCompactor,
 }
 
 impl RawTableWriter {
@@ -152,6 +157,9 @@ impl RawTableWriter {
             )?),
             None => None,
         };
+
+        let nozzle_compactor = NozzleCompactor::start(table.clone(), &opts, FILE_SIZE_LIMIT_BYTES);
+
         Ok(Self {
             table,
             opts,
@@ -159,6 +167,7 @@ impl RawTableWriter {
             partition_size,
             current_file,
             current_range: None,
+            compactor: nozzle_compactor,
         })
     }
 
@@ -271,7 +280,16 @@ impl RawTableWriter {
         assert!(self.current_file.is_some());
         let file = self.current_file.take().unwrap();
         let range = self.current_range.take().unwrap();
-        file.close(range).await
+        file.close(range)
+            .and_then(|result| async move {
+                self.try_run_compaction().await;
+                Ok(result)
+            })
+            .await
+    }
+
+    fn try_run_compaction(&mut self) -> impl Future<Output = ()> {
+        self.compactor.try_run()
     }
 }
 
