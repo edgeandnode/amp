@@ -13,10 +13,9 @@ use datafusion::{
     },
     catalog::{MemorySchemaProvider, Session, TableProvider},
     common::{
-        DFSchema, DFSchemaRef, extensions_options, not_impl_err,
+        DFSchema, DFSchemaRef, not_impl_err,
         tree_node::{TreeNode as _, TreeNodeRecursion},
     },
-    config::ConfigExtension,
     datasource::{DefaultTableSource, TableType},
     error::DataFusionError,
     execution::{
@@ -51,7 +50,7 @@ use tracing::{debug, field, instrument};
 use crate::{
     BlockNum, BoxError, LogicalCatalog, ResolvedTable, SPECIAL_BLOCK_NUM, arrow, attestation,
     block_range_intersection,
-    catalog::physical::{Catalog, PhysicalTable},
+    catalog::physical::{Catalog, CatalogSnapshot, TableSnapshot},
     evm::udfs::{
         EvmDecodeLog, EvmDecodeParams, EvmDecodeType, EvmEncodeParams, EvmEncodeType, EvmTopic,
     },
@@ -137,18 +136,6 @@ impl IntoResponse for Error {
 pub struct PlanningContext {
     session_config: SessionConfig,
     catalog: LogicalCatalog,
-}
-
-extensions_options! {
-    /// Nozzle-specific session configuration options.
-    pub struct NozzleSessionConfig {
-        /// By default, SQL execution only scans canonical chain segments. When this is set to
-        /// `true`, table scans will include data associated with forked blocks.
-        pub ignore_canonical_segments: bool, default = false
-    }
-}
-impl ConfigExtension for NozzleSessionConfig {
-    const PREFIX: &'static str = "nozzle";
 }
 
 // Serialized plan with additional options
@@ -377,11 +364,15 @@ pub struct QueryEnv {
 pub struct QueryContext {
     pub env: QueryEnv,
     session_config: SessionConfig,
-    catalog: Catalog,
+    catalog: CatalogSnapshot,
 }
 
 impl QueryContext {
-    pub fn for_catalog(catalog: Catalog, env: QueryEnv) -> Result<Self, Error> {
+    pub async fn for_catalog(
+        catalog: Catalog,
+        env: QueryEnv,
+        ignore_canonical_segments: bool,
+    ) -> Result<Self, Error> {
         // This contains various tuning options for the query engine.
         // Using `from_env` allows tinkering without re-compiling.
         let mut session_config = SessionConfig::from_env().map_err(Error::ConfigError)?;
@@ -408,27 +399,19 @@ impl QueryContext {
             opts.execution.parquet.pushdown_filters = true;
         }
 
+        // Create a catalog snapshot with canonical chain locked in
+        let catalog_snapshot = CatalogSnapshot::from_catalog(catalog, ignore_canonical_segments)
+            .await
+            .map_err(Error::DatasetError)?;
+
         Ok(Self {
             env,
             session_config,
-            catalog,
+            catalog: catalog_snapshot,
         })
     }
 
-    /// Create a clone of this QueryContext that scans all se.
-    /// This allows physical tables to scan all segments instead of just canonical ones,
-    /// which is needed for reorg handling in streaming queries.
-    pub fn with_custom_settings(&self, settings: NozzleSessionConfig) -> Self {
-        let mut new_context = self.clone();
-        new_context
-            .session_config
-            .options_mut()
-            .extensions
-            .insert(settings);
-        new_context
-    }
-
-    pub fn catalog(&self) -> &Catalog {
+    pub fn catalog(&self) -> &CatalogSnapshot {
         &self.catalog
     }
 
@@ -462,9 +445,8 @@ impl QueryContext {
             .build();
         let ctx = SessionContext::new_with_state(state);
 
-        for table in self.catalog.tables() {
-            create_physical_table(&ctx, table.clone())
-                .map_err(|e| Error::DatasetError(e.into()))?;
+        for table in self.catalog.table_snapshots() {
+            register_table(&ctx, table.clone()).map_err(|e| Error::DatasetError(e.into()))?;
         }
 
         self.register_udfs(&ctx);
@@ -506,16 +488,16 @@ impl QueryContext {
     }
 
     /// Returns table or `TableNotFoundError`
-    pub fn get_table(&self, table_ref: &TableReference) -> Result<Arc<PhysicalTable>, Error> {
+    pub fn get_table(&self, table_ref: &TableReference) -> Result<Arc<TableSnapshot>, Error> {
         let table_id = TableId {
             dataset: table_ref.schema().unwrap(),
             dataset_version: None,
             table: table_ref.table(),
         };
         self.catalog
-            .tables()
+            .table_snapshots()
             .iter()
-            .find(|table| table.table_id() == table_id)
+            .find(|snapshot| snapshot.physical_table().table_id() == table_id)
             .cloned()
             .ok_or_else(|| Error::TableNotFoundError(table_ref.clone()))
     }
@@ -528,7 +510,7 @@ impl QueryContext {
     ) -> Result<Option<RangeInclusive<BlockNum>>, BoxError> {
         let mut range: Option<RangeInclusive<BlockNum>> = None;
         for table in extract_table_references_from_plan(&plan)? {
-            range = match (range, self.get_synced_range_for_table(&table).await?) {
+            range = match (range, self.get_synced_range_for_table(&table)?) {
                 (None, range) | (range, None) => range,
                 (Some(a), Some(b)) => block_range_intersection(a, b),
             };
@@ -544,12 +526,12 @@ impl QueryContext {
     }
 
     /// Helper method to get ranges for a specific table.
-    async fn get_synced_range_for_table(
+    fn get_synced_range_for_table(
         &self,
         table: &TableReference,
     ) -> Result<Option<RangeInclusive<BlockNum>>, BoxError> {
-        let table = self.get_table(table)?;
-        table.synced_range().await
+        let table_snapshot = self.get_table(table)?;
+        Ok(table_snapshot.synced_range())
     }
 
     /// This will:
@@ -573,8 +555,7 @@ impl QueryContext {
         // Validate dependency block ranges
         {
             for table in tables {
-                let physical_table = self.get_table(&table)?;
-                let range = physical_table.synced_range().await?;
+                let range = self.get_synced_range_for_table(&table)?;
                 let synced = range.map(|r| end <= *r.end()).unwrap_or(false);
                 if !synced {
                     return Err(format!(
@@ -621,20 +602,20 @@ fn read_only_check(plan: &LogicalPlan) -> Result<(), Error> {
         .map_err(Error::InvalidPlan)
 }
 
-fn create_physical_table(
-    ctx: &SessionContext,
-    provider: Arc<PhysicalTable>,
-) -> Result<(), DataFusionError> {
+fn register_table(ctx: &SessionContext, table: Arc<TableSnapshot>) -> Result<(), DataFusionError> {
     // The catalog schema needs to be explicitly created or table creation will fail.
-    create_catalog_schema(ctx, provider.catalog_schema().to_string());
+    create_catalog_schema(ctx, table.physical_table().catalog_schema().to_string());
 
-    let table_ref = provider.table_ref().clone();
+    let table_ref = table.physical_table().table_ref().clone();
 
     // This may overwrite a previously registered store, but that should not make a difference.
     // The only segment of the `table.url()` that matters here is the schema and bucket name.
-    ctx.register_object_store(provider.url(), provider.object_store());
+    ctx.register_object_store(
+        table.physical_table().url(),
+        table.physical_table().object_store(),
+    );
 
-    ctx.register_table(table_ref, provider)?;
+    ctx.register_table(table_ref, table)?;
 
     Ok(())
 }

@@ -32,7 +32,6 @@ use crate::{
         parquet::ParquetMeta,
         segments::{Chain, Segment, canonical_chain, missing_ranges},
     },
-    query_context::NozzleSessionConfig,
     store::{Store, object_store},
 };
 
@@ -70,13 +69,90 @@ impl Catalog {
     pub async fn earliest_block(&self) -> Result<Option<BlockNum>, BoxError> {
         let mut earliest = None;
         for table in &self.tables {
-            let synced_range = table.synced_range().await?;
+            // Create a snapshot to get synced range
+            let snapshot = table.snapshot(false).await?;
+            let synced_range = snapshot.synced_range();
             match (earliest, &synced_range) {
                 (None, Some(range)) => earliest = Some(*range.start()),
                 _ => earliest = earliest.min(synced_range.map(|s| *s.start())),
             }
         }
         Ok(earliest)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CatalogSnapshot {
+    table_snapshots: Vec<Arc<TableSnapshot>>,
+    logical: LogicalCatalog,
+}
+
+impl CatalogSnapshot {
+    pub async fn from_catalog(
+        catalog: Catalog,
+        ignore_canonical_segments: bool,
+    ) -> Result<Self, BoxError> {
+        let mut table_snapshots = Vec::new();
+        for physical_table in &catalog.tables {
+            let snapshot = physical_table.snapshot(ignore_canonical_segments).await?;
+            table_snapshots.push(Arc::new(snapshot));
+        }
+
+        Ok(CatalogSnapshot {
+            table_snapshots,
+            logical: catalog.logical,
+        })
+    }
+
+    pub fn table_snapshots(&self) -> &[Arc<TableSnapshot>] {
+        &self.table_snapshots
+    }
+
+    /// Access physical tables through the snapshots
+    pub fn physical_tables(&self) -> impl Iterator<Item = &Arc<PhysicalTable>> {
+        self.table_snapshots.iter().map(|s| s.physical_table())
+    }
+
+    pub fn udfs(&self) -> &[ScalarUDF] {
+        &self.logical.udfs
+    }
+
+    pub fn logical(&self) -> &LogicalCatalog {
+        &self.logical
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct TableSnapshot {
+    physical_table: Arc<PhysicalTable>,
+    reader_factory: Arc<NozzleReaderFactory>,
+    segments: Vec<Segment>,
+}
+
+impl TableSnapshot {
+    pub fn physical_table(&self) -> &Arc<PhysicalTable> {
+        &self.physical_table
+    }
+
+    /// Return the block range to use for query execution over this table. This is defined as the
+    /// contiguous range of block numbers starting from the lowest start block. Ok(None) is
+    /// returned if no block range has been synced.
+    pub fn synced_range(&self) -> Option<RangeInclusive<BlockNum>> {
+        if self.segments.is_empty() {
+            return None;
+        }
+        let start = self.segments.iter().map(|s| s.range.start()).min()?;
+        let end = self.segments.iter().map(|s| s.range.end()).max()?;
+
+        if start as i64 == self.physical_table.start_block {
+            Some(start..=end)
+        } else {
+            None
+        }
+    }
+
+    pub fn segments(&self) -> &[Segment] {
+        &self.segments
     }
 }
 
@@ -483,22 +559,6 @@ impl PhysicalTable {
         self.stream_file_metadata().try_collect().await
     }
 
-    /// Return the block range to use for query execution over this table. This is defined as the
-    /// contiguous range of block numbers starting from the lowest start block. Ok(None) is
-    /// returned if no block range has been synced.
-    pub async fn synced_range(&self) -> Result<Option<RangeInclusive<BlockNum>>, BoxError> {
-        let chain = self.canonical_chain().await?;
-        if let Some(chain) = chain {
-            if chain.start() as i64 == self.start_block {
-                Ok(Some(chain.start()..=chain.end()))
-            } else {
-                Ok(None)
-            }
-        } else {
-            Ok(None)
-        }
-    }
-
     pub async fn missing_ranges(
         &self,
         desired: RangeInclusive<BlockNum>,
@@ -532,6 +592,31 @@ impl PhysicalTable {
             })
             .try_collect()
             .await
+    }
+
+    /// A snapshot binds this physical table to the currently canonical chain.
+    ///
+    /// `ignore_canonical_segments` will instead bind to all segments physically present. This should
+    /// be used carefully as it may include duplicated or forked data.
+    pub async fn snapshot(
+        &self,
+        ignore_canonical_segments: bool,
+    ) -> Result<TableSnapshot, BoxError> {
+        let segments = if ignore_canonical_segments {
+            self.segments().await?
+        } else {
+            self.canonical_chain()
+                .await?
+                .into_iter()
+                .flatten()
+                .collect()
+        };
+
+        Ok(TableSnapshot {
+            physical_table: Arc::new(self.clone()),
+            reader_factory: Arc::clone(&self.reader_factory),
+            segments,
+        })
     }
 }
 
@@ -577,7 +662,7 @@ impl PhysicalTable {
 }
 
 #[async_trait::async_trait]
-impl TableProvider for PhysicalTable {
+impl TableProvider for TableSnapshot {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
@@ -587,7 +672,7 @@ impl TableProvider for PhysicalTable {
     }
 
     fn schema(&self) -> SchemaRef {
-        self.schema()
+        self.physical_table.schema()
     }
 
     #[tracing::instrument(skip_all, err)]
@@ -598,32 +683,14 @@ impl TableProvider for PhysicalTable {
         filters: &[Expr],
         limit: Option<usize>,
     ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
-        let NozzleSessionConfig {
-            ignore_canonical_segments,
-        } = state
-            .config_options()
-            .extensions
-            .get()
-            .cloned()
-            .unwrap_or_default();
-
-        let segments = if ignore_canonical_segments {
-            self.segments().await?
-        } else {
-            self.canonical_chain()
-                .await?
-                .into_iter()
-                .flatten()
-                .collect()
-        };
         let target_partitions = state.config_options().execution.target_partitions;
-        let file_groups = round_robin(segments, target_partitions);
+        let file_groups = round_robin(self.segments.iter(), target_partitions);
 
-        let output_ordering = self.output_ordering()?;
+        let output_ordering = self.physical_table.output_ordering()?;
 
-        let file_schema = self.schema();
-        let object_store_url = self.object_store_url()?;
-        let predicate = self.filters_to_predicate(state, filters)?;
+        let file_schema = self.physical_table.schema();
+        let object_store_url = self.physical_table.object_store_url()?;
+        let predicate = self.physical_table.filters_to_predicate(state, filters)?;
 
         let parquet_file_reader_factory = Arc::clone(&self.reader_factory);
         let table_parquet_options = state.table_options().parquet.clone();
@@ -689,14 +756,14 @@ pub async fn list_revisions(
         .collect())
 }
 
-fn round_robin(segments: Vec<Segment>, target_partitions: usize) -> Vec<FileGroup> {
+fn round_robin<'a>(
+    segments: impl ExactSizeIterator<Item = &'a Segment>,
+    target_partitions: usize,
+) -> Vec<FileGroup> {
     let size = segments.len().min(target_partitions);
-    if size == 0 {
-        return vec![];
-    }
     let mut groups = vec![FileGroup::default(); size];
-    for (idx, segment) in segments.into_iter().enumerate() {
-        let file = PartitionedFile::from(segment.object);
+    for (idx, segment) in segments.enumerate() {
+        let file = PartitionedFile::from(segment.object.clone());
         groups[idx % size].push(file);
     }
     groups

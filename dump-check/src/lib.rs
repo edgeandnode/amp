@@ -65,7 +65,7 @@ pub async fn dump_check(
     }
     let logical = LogicalCatalog::from_tables(tables.iter().map(|t| t.table()));
     let catalog = Catalog::new(tables, logical);
-    let ctx = Arc::new(QueryContext::for_catalog(catalog, env.clone())?);
+    let ctx = Arc::new(QueryContext::for_catalog(catalog, env.clone(), false).await?);
 
     let jobs = {
         let mut jobs = vec![];
