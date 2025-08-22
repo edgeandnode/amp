@@ -1,6 +1,7 @@
 use std::{collections::BTreeMap, fmt::Debug, ops::RangeInclusive};
 
 use alloy::primitives::BlockHash;
+use metadata_db::FileId;
 use object_store::ObjectMeta;
 
 use crate::{BlockNum, block_range_intersection};
@@ -52,6 +53,7 @@ pub struct Watermark {
 /// A block range associated with the matadata from a file in object storage.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Segment {
+    pub id: Option<FileId>,
     pub range: BlockRange,
     pub object: ObjectMeta,
 }
@@ -372,7 +374,11 @@ mod test {
             e_tag: None,
             version: None,
         };
-        Segment { range, object }
+        Segment {
+            range,
+            object,
+            id: None,
+        }
     }
 
     #[test]
