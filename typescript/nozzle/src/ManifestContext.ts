@@ -17,6 +17,9 @@ export class ManifestContextError extends Data.TaggedError("ManifestContextError
 
 export const ManifestContext = Context.GenericTag<Model.DatasetManifest>("Nozzle/ManifestContext")
 
+const getOptionValue = <T>(option?: Option.Option<T>): T | undefined =>
+  option && Option.isSome(option) ? option.value : undefined
+
 const fromManifest = (file: string) =>
   Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
@@ -43,18 +46,20 @@ const fromConfigFile = (file: string) =>
 const fromFile = (options: {
   manifest: Option.Option<string>
   config: Option.Option<string>
+  dataset?: Option.Option<string>
 }) =>
   Effect.gen(function*() {
     if (Option.isSome(options.manifest)) {
       return yield* fromManifest(options.manifest.value)
     }
+    const datasetName = getOptionValue(options.dataset)
 
     if (Option.isSome(options.config)) {
       return yield* fromConfigFile(options.config.value)
     }
 
     const configLoader = yield* ConfigLoader.ConfigLoader
-    const foundConfigPath = yield* configLoader.find()
+    const foundConfigPath = yield* configLoader.find(".", datasetName)
     if (Option.isSome(foundConfigPath)) {
       return yield* fromConfigFile(foundConfigPath.value)
     }
@@ -83,13 +88,14 @@ export const layerFromManifestFile = (file: Option.Option<string>) =>
     Layer.effect(ManifestContext),
   )
 
-export const layerFromConfigFile = (file: Option.Option<string>) =>
+export const layerFromConfigFile = (file: Option.Option<string>, dataset?: Option.Option<string>) =>
   Option.match(file, {
     onSome: (file) => fromConfigFile(file),
     onNone: () =>
       Effect.gen(function*() {
         const configLoader = yield* ConfigLoader.ConfigLoader
-        const foundConfigPath = yield* configLoader.find()
+        const datasetName = getOptionValue(dataset)
+        const foundConfigPath = yield* configLoader.find(".", datasetName)
         if (Option.isNone(foundConfigPath)) {
           return yield* new ManifestContextError({ message: "Failed to find config file" })
         }
@@ -104,6 +110,7 @@ export const layerFromConfigFile = (file: Option.Option<string>) =>
 export const layerFromFile = (options: {
   manifest: Option.Option<string>
   config: Option.Option<string>
+  dataset?: Option.Option<string>
 }) =>
   fromFile(options).pipe(
     Layer.effect(ManifestContext),

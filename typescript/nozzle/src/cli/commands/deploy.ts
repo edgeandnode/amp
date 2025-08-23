@@ -1,3 +1,4 @@
+import * as Args from "@effect/cli/Args"
 import * as Command from "@effect/cli/Command"
 import * as Options from "@effect/cli/Options"
 import * as Config from "effect/Config"
@@ -12,6 +13,12 @@ import * as ManifestDeployer from "../../ManifestDeployer.ts"
 
 export const deploy = Command.make("deploy", {
   args: {
+    dataset: Args.text({ name: "dataset" }).pipe(
+      Args.optional,
+      Args.withDescription(
+        "The name of the dataset directory that contains the config. Dataset name must match the directory name.",
+      ),
+    ),
     config: Options.file("config").pipe(
       Options.optional,
       Options.withAlias("c"),
@@ -46,7 +53,7 @@ export const deploy = Command.make("deploy", {
     }),
   ),
   Command.provide(({ args }) =>
-    ManifestContext.layerFromFile({ manifest: args.manifest, config: args.config }).pipe(
+    ManifestContext.layerFromFile({ manifest: args.manifest, config: args.config, dataset: args.dataset }).pipe(
       Layer.merge(ManifestDeployer.ManifestDeployer.Default),
       Layer.provide(Admin.layer(`${args.admin}`)),
       Layer.provide(Registry.layer(`${args.registry}`)),

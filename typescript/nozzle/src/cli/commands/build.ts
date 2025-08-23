@@ -1,3 +1,4 @@
+import * as Args from "@effect/cli/Args"
 import * as Command from "@effect/cli/Command"
 import * as Options from "@effect/cli/Options"
 import * as FileSystem from "@effect/platform/FileSystem"
@@ -14,6 +15,12 @@ import * as Model from "../../Model.ts"
 
 export const build = Command.make("build", {
   args: {
+    dataset: Args.text({ name: "dataset" }).pipe(
+      Args.optional,
+      Args.withDescription(
+        "The name of the dataset directory that contains the config. Dataset name must match the directory name.",
+      ),
+    ),
     config: Options.file("config", { exists: "yes" }).pipe(
       Options.optional,
       Options.withAlias("c"),
@@ -53,6 +60,8 @@ export const build = Command.make("build", {
     }),
   ),
   Command.provide(({ args }) =>
-    ManifestContext.layerFromConfigFile(args.config).pipe(Layer.provide(Registry.layer(`${args.registry}`)))
+    ManifestContext.layerFromConfigFile(args.config, args.dataset).pipe(
+      Layer.provide(Registry.layer(`${args.registry}`)),
+    )
   ),
 )

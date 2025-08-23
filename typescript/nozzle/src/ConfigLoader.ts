@@ -104,15 +104,16 @@ export class ConfigLoader extends Effect.Service<ConfigLoader>()("Nozzle/ConfigL
       )
     })
 
-    const find = Effect.fnUntraced(function*(cwd: string = ".") {
+    const find = Effect.fnUntraced(function*(cwd: string = ".", datasetName?: string) {
+      const baseDir = datasetName ? path.resolve(cwd, datasetName) : path.resolve(cwd)
       const candidates = [
-        path.resolve(cwd, `nozzle.config.ts`),
-        path.resolve(cwd, `nozzle.config.mts`),
-        path.resolve(cwd, `nozzle.config.cts`),
-        path.resolve(cwd, `nozzle.config.js`),
-        path.resolve(cwd, `nozzle.config.mjs`),
-        path.resolve(cwd, `nozzle.config.cjs`),
-        path.resolve(cwd, `nozzle.config.json`),
+        path.resolve(baseDir, `nozzle.config.ts`),
+        path.resolve(baseDir, `nozzle.config.mts`),
+        path.resolve(baseDir, `nozzle.config.cts`),
+        path.resolve(baseDir, `nozzle.config.js`),
+        path.resolve(baseDir, `nozzle.config.mjs`),
+        path.resolve(baseDir, `nozzle.config.cjs`),
+        path.resolve(baseDir, `nozzle.config.json`),
       ]
       return yield* Effect.findFirst(candidates, (_) => fs.exists(_).pipe(Effect.orElseSucceed(() => false)))
     })
