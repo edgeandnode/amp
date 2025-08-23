@@ -167,6 +167,34 @@ async fn basic_function() -> Result<(), BoxError> {
 }
 
 #[tokio::test]
+async fn intra_deps_test() -> Result<(), BoxError> {
+    logging::init();
+
+    let test_env = TestEnv::temp("intra_deps_test").await.unwrap();
+    let mut client = TestClient::connect(&test_env).await.unwrap();
+
+    for step in load_test_steps("intra-deps.yaml").unwrap() {
+        step.run(&test_env, &mut client).await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn multi_version_test() -> Result<(), BoxError> {
+    logging::init();
+
+    let test_env = TestEnv::temp("multi_version_test").await.unwrap();
+    let mut client = TestClient::connect(&test_env).await.unwrap();
+
+    for step in load_test_steps("multi-version.yaml").unwrap() {
+        step.run(&test_env, &mut client).await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn persist_start_block_test() -> Result<(), BoxError> {
     logging::init();
 
@@ -240,20 +268,6 @@ async fn persist_start_block_set_on_creation() -> Result<(), BoxError> {
         expected_err
     );
 
-    Ok(())
-}
-
-#[tokio::test]
-async fn multi_version_test() -> Result<(), BoxError> {
-    logging::init();
-
-    let test_env = TestEnv::temp("multi_version_test").await.unwrap();
-    let mut client = TestClient::connect(&test_env).await.unwrap();
-
-    for step in load_test_steps("multi-version.yaml").unwrap() {
-        step.run(&test_env, &mut client).await.unwrap();
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-    }
     Ok(())
 }
 
