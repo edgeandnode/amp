@@ -1,15 +1,10 @@
 use std::{path::PathBuf, sync::Arc};
 
 use clap::Parser as _;
-use common::{
-    BoxError,
-    config::{Config, OpenTelemetryConfig},
-    manifest::Manifest,
-};
+use common::{BoxError, config::Config, manifest::Manifest};
 use dataset_store::DatasetStore;
 use dump::worker::Worker;
 use metadata_db::MetadataDb;
-use monitoring::{logging, telemetry};
 use nozzle::dump_cmd;
 use registry_service::handlers::register::register_manifest;
 use tracing::info;
@@ -157,7 +152,7 @@ async fn main_inner() -> Result<(), BoxError> {
         construct_confing_and_metadatadb(config_path.as_ref(), allow_temp_db).await?;
 
     let (telemetry_tracing_provider, telemetry_metrics_provider, telemetry_metrics_meter) =
-        init_monitoring(config.opentelemetry.as_ref())?;
+        monitoring::init(config.opentelemetry.as_ref())?;
 
     let metrics_registry = telemetry_metrics_meter
         .as_ref()
@@ -278,89 +273,9 @@ async fn main_inner() -> Result<(), BoxError> {
     };
 
     cmd_result.and_then(move |_| {
-        deinit_monitoring(telemetry_metrics_provider, telemetry_tracing_provider)?;
+        monitoring::deinit(telemetry_metrics_provider, telemetry_tracing_provider)?;
         Ok(())
     })?;
-
-    Ok(())
-}
-
-type TelemetryKit = (
-    Option<telemetry::traces::SdkTracerProvider>,
-    Option<telemetry::metrics::SdkMeterProvider>,
-    Option<telemetry::metrics::Meter>,
-);
-
-fn init_monitoring(
-    opentelemetry_config: Option<&OpenTelemetryConfig>,
-) -> Result<TelemetryKit, telemetry::ExporterBuildError> {
-    let Some(opentelemetry_config) = opentelemetry_config else {
-        // Make sure logging is enabled in any case.
-        logging::init();
-        return Ok((None, None, None));
-    };
-
-    let telemetry_tracing_provider = match (
-        opentelemetry_config.trace_url.clone(),
-        opentelemetry_config.trace_ratio,
-    ) {
-        (Some(url), trace_ratio) => {
-            let provider = logging::init_with_telemetry(url, trace_ratio.unwrap_or(1.0))?;
-            Some(provider)
-        }
-        (None, trace_ratio) => {
-            logging::init();
-
-            if trace_ratio.is_some() {
-                tracing::warn!(
-                    "OpenTelemetry trace ratio is set but will not be used. Please provide an OpenTelemetry trace URL to enable tracing."
-                );
-            }
-
-            None
-        }
-    };
-
-    let (telemetry_metrics_provider, telemetry_metrics_meter) = match (
-        opentelemetry_config.metrics_url.clone(),
-        opentelemetry_config.metrics_export_interval,
-    ) {
-        (Some(url), export_interval) => {
-            let (provider, meter) = telemetry::metrics::start(url, export_interval)?;
-            (Some(provider), Some(meter))
-        }
-        (None, export_interval) => {
-            if export_interval.is_some() {
-                tracing::warn!(
-                    "OpenTelemetry metrics export interval is set but will not be used. Please provide an OpenTelemetry metrics URL to enable metrics."
-                );
-            }
-
-            (None, None)
-        }
-    };
-
-    Ok((
-        telemetry_tracing_provider,
-        telemetry_metrics_provider,
-        telemetry_metrics_meter,
-    ))
-}
-
-fn deinit_monitoring(
-    metrics_provider: Option<telemetry::metrics::SdkMeterProvider>,
-    tracing_provider: Option<telemetry::traces::SdkTracerProvider>,
-) -> Result<(), String> {
-    if let Some(provider) = metrics_provider {
-        telemetry::metrics::provider_flush_shutdown(provider).map_err(|e| {
-            format!("Failed to flush and shutdown OpenTelemetry metrics provider: {e}")
-        })?;
-    }
-    if let Some(provider) = tracing_provider {
-        telemetry::traces::provider_flush_shutdown(provider).map_err(|e| {
-            format!("Failed to flush and shutdown OpenTelemetry tracing provider: {e}")
-        })?;
-    }
 
     Ok(())
 }

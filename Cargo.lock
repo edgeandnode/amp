@@ -4581,6 +4581,7 @@ version = "0.1.0"
 dependencies = [
  "atty",
  "cargo_metadata",
+ "common",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
