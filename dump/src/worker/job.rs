@@ -1,6 +1,8 @@
 use std::{str::FromStr, sync::Arc};
 
-use common::{BoxError, catalog::physical::PhysicalTable, manifest::Version};
+use common::{
+    BoxError, catalog::physical::PhysicalTable, manifest::Version, store::ObjectStoreUrl,
+};
 use metadata_db::JobId;
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
@@ -65,7 +67,10 @@ impl Job {
                     tables.push(
                         PhysicalTable::new(
                             table.clone(),
-                            location.url,
+                            // SAFETY: The URL comes from the metadata database where it was stored
+                            // as a `LocationUrl`, and was originally derived from an `ObjectStoreUrl`,
+                            // so it's guaranteed to have a supported object store scheme.
+                            unsafe { ObjectStoreUrl::from_location_url_unchecked(location.url) },
                             location.id,
                             ctx.metadata_db.clone(),
                             start_block,

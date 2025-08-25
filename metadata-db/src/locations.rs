@@ -1,10 +1,10 @@
 //! Location-related database operations
 
 use sqlx::{Executor, Postgres, types::JsonValue};
-use url::Url;
 
 pub use self::{
     location_id::{LocationId, LocationIdFromStrError, LocationIdI64ConvError, LocationIdU64Error},
+    location_url::LocationUrl,
     pagination::{list_first_page, list_next_page},
 };
 use crate::{
@@ -13,6 +13,7 @@ use crate::{
 };
 
 mod location_id;
+mod location_url;
 mod pagination;
 
 /// Insert a location into the database and return its ID (idempotent operation)
@@ -22,7 +23,7 @@ pub async fn insert<'c, E>(
     table: TableId<'_>,
     bucket: Option<&str>,
     path: &str,
-    url: &Url,
+    url: &LocationUrl,
     active: bool,
 ) -> Result<LocationId, sqlx::Error>
 where
@@ -44,7 +45,7 @@ where
         .bind(table.table)
         .bind(bucket)
         .bind(path)
-        .bind(url.as_str())
+        .bind(url)
         .bind(active)
         .fetch_one(exe)
         .await?;
@@ -52,7 +53,10 @@ where
 }
 
 /// Get location ID by URL only, returns first match if multiple exist
-pub async fn url_to_location_id<'c, E>(exe: E, url: &Url) -> Result<Option<LocationId>, sqlx::Error>
+pub async fn url_to_location_id<'c, E>(
+    exe: E,
+    url: &LocationUrl,
+) -> Result<Option<LocationId>, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
@@ -64,7 +68,7 @@ where
     "};
 
     let location_id: Option<LocationId> = sqlx::query_scalar(query)
-        .bind(url.as_str())
+        .bind(url)
         .fetch_optional(exe)
         .await?;
     Ok(location_id)
@@ -107,8 +111,7 @@ where
         dataset_version: String,
         #[sqlx(rename = "tbl")]
         table: String,
-        #[sqlx(try_from = "&'a str")]
-        url: Url,
+        url: LocationUrl,
         active: bool,
         start_block: i64,
         writer_job_id: Option<JobId>,
@@ -158,7 +161,7 @@ where
 pub async fn get_active_by_table_id<'c, E>(
     exe: E,
     table: TableId<'_>,
-) -> Result<Vec<(String, LocationId)>, sqlx::Error>
+) -> Result<Vec<(LocationUrl, LocationId)>, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
@@ -168,7 +171,7 @@ where
         WHERE dataset = $1 AND dataset_version = $2 AND tbl = $3 AND active
     "};
 
-    let tuples: Vec<(String, LocationId)> = sqlx::query_as(query)
+    let tuples: Vec<(LocationUrl, LocationId)> = sqlx::query_as(query)
         .bind(table.dataset)
         .bind(table.dataset_version.unwrap_or(""))
         .bind(table.table)
@@ -206,7 +209,7 @@ where
 pub async fn mark_active_by_url<'c, E>(
     exe: E,
     table: TableId<'_>,
-    location_url: &Url,
+    location_url: &LocationUrl,
 ) -> Result<(), sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
@@ -223,7 +226,7 @@ where
         .bind(table.dataset)
         .bind(dataset_version)
         .bind(table.table)
-        .bind(location_url.as_str())
+        .bind(location_url)
         .execute(exe)
         .await?;
     Ok(())
@@ -301,8 +304,7 @@ pub struct Location {
     #[sqlx(rename = "tbl")]
     pub table: String,
     /// Full URL to the storage location
-    #[sqlx(try_from = "&'a str")]
-    pub url: Url,
+    pub url: LocationUrl,
     /// The starting block number for this location
     pub start_block: i64,
     /// Whether this location is currently active for queries
@@ -323,7 +325,7 @@ pub struct LocationWithDetails {
     /// Name of the table within the dataset
     pub table: String,
     /// Full URL to the storage location
-    pub url: Url,
+    pub url: LocationUrl,
     /// Whether this location is currently active for queries
     pub active: bool,
     /// The starting block number for this location

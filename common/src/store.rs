@@ -3,6 +3,7 @@ use std::{future::Future, path::PathBuf, sync::Arc};
 use bytes::Bytes;
 use fs_err as fs;
 use futures::{StreamExt, TryStreamExt, stream::BoxStream};
+use metadata_db::LocationUrl;
 use object_store::{
     ObjectMeta, ObjectStore, ObjectStoreScheme,
     aws::{AmazonS3Builder, AmazonS3ConfigKey},
@@ -389,6 +390,53 @@ impl std::fmt::Debug for ObjectStoreUrl {
 impl From<&ObjectStoreUrl> for String {
     fn from(value: &ObjectStoreUrl) -> Self {
         value.to_string()
+    }
+}
+
+impl From<ObjectStoreUrl> for LocationUrl {
+    fn from(value: ObjectStoreUrl) -> Self {
+        // SAFETY: Since `ObjectStoreUrl` holds the object store URL validity invariant,
+        // we can safely convert to `LocationUrl` which only requires URL validity
+        unsafe { LocationUrl::new_unchecked(value.0) }
+    }
+}
+
+impl ObjectStoreUrl {
+    /// Create an `ObjectStoreUrl` from a `LocationUrl` without validation.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that the `LocationUrl` contains a URL with a scheme
+    /// that is supported by object stores (e.g., `s3://`, `gs://`, `file://`, etc.).
+    /// While `LocationUrl` validates that the URL is well-formed, it doesn't guarantee
+    /// that the scheme is supported for object store operations.
+    ///
+    /// This function should only be used when you know the `LocationUrl` represents
+    /// a valid object store URL, such as when the URL was originally derived from
+    /// an `ObjectStoreUrl`.
+    pub unsafe fn from_location_url_unchecked(location_url: LocationUrl) -> Self {
+        // SAFETY: The caller guarantees that the LocationUrl contains a supported
+        // object store scheme. Both types have identical memory layout as they are
+        // #[repr(transparent)] wrappers around `url::Url`.
+        unsafe { Self::new_unchecked(location_url.into_url()) }
+    }
+}
+
+impl AsRef<LocationUrl> for ObjectStoreUrl {
+    fn as_ref(&self) -> &LocationUrl {
+        // SAFETY: This transmute is safe for the following reasons:
+        // 1. **Memory Layout**: Both `ObjectStoreUrl` and `LocationUrl` are `#[repr(transparent)]`
+        //    wrappers around `url::Url`, guaranteeing identical memory representation.
+        // 2. **Invariant Preservation**: `ObjectStoreUrl`'s validation (supported object store schemes)
+        //    is stronger than `LocationUrl`'s validation (well-formed URL). Every valid object
+        //    store URL is also a valid location URL, so the conversion preserves all invariants.
+        // 3. **Lifetime Safety**: We're only transmuting references (`&ObjectStoreUrl` -> `&LocationUrl`),
+        //    preserving the original lifetime without any ownership transfer.
+        // 4. **ABI Stability**: Both types are in the same codebase, ensuring coordinated changes
+        //    to internal representation if needed.
+        // 5. **Memory Safety**: No allocation, deallocation, or ownership changes occur, eliminating
+        //    risks of use-after-free, double-free, or memory corruption.
+        unsafe { std::mem::transmute(self) }
     }
 }
 

@@ -1,9 +1,12 @@
 //! Pagination tests for location listing
 
 use pgtemp::PgTempDB;
-use url::Url;
 
-use crate::{TableId, conn::DbConn, locations};
+use crate::{
+    TableId,
+    conn::DbConn,
+    locations::{self, LocationUrl},
+};
 
 #[tokio::test]
 async fn list_locations_first_page_when_empty() {
@@ -43,8 +46,7 @@ async fn list_locations_first_page_respects_limit() {
             dataset_version: Some("v1.0"),
             table: &format!("test-table-{}", i),
         };
-        let url =
-            Url::parse(&format!("s3://bucket/file{}.parquet", i)).expect("Failed to parse URL");
+        let url = location_url(&format!("s3://bucket/file{}.parquet", i));
         locations::insert(
             &mut *conn,
             table,
@@ -96,8 +98,7 @@ async fn list_locations_next_page_uses_cursor() {
             dataset_version: Some("v1.0"),
             table: &format!("test-table-page-{}", i),
         };
-        let url =
-            Url::parse(&format!("s3://bucket/page{}.parquet", i)).expect("Failed to parse URL");
+        let url = location_url(&format!("s3://bucket/page{}.parquet", i));
         let location_id = locations::insert(
             &mut *conn,
             table,
@@ -140,4 +141,12 @@ async fn list_locations_next_page_uses_cursor() {
     assert!(second_page[1].id > second_page[2].id);
     // Verify cursor worked correctly
     assert!(cursor > second_page[0].id);
+}
+
+/// Helper function to parse a URL string into a LocationUrl for tests
+fn location_url(url_str: &str) -> LocationUrl {
+    let url = url_str.parse().expect("Failed to parse test URL");
+    // SAFETY: This is a test helper function that creates LocationUrl from valid URL strings.
+    // The URL parsing above ensures the URL is well-formed, which satisfies LocationUrl's requirements.
+    unsafe { LocationUrl::new_unchecked(url) }
 }

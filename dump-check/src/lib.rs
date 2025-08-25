@@ -8,6 +8,7 @@ use common::{
     catalog::physical::{Catalog, PhysicalTable},
     manifest::Version,
     query_context::QueryEnv,
+    store::ObjectStoreUrl,
 };
 use dataset_store::DatasetStore;
 use futures::future::try_join_all;
@@ -57,7 +58,10 @@ pub async fn dump_check(
         let start_block = loc.start_block;
         let table = PhysicalTable::new(
             table.clone(),
-            url,
+            // SAFETY: The URL comes from the metadata database where it was stored
+            // as a `LocationUrl`, and was originally derived from an `ObjectStoreUrl`,
+            // so it's guaranteed to have a supported object store scheme.
+            unsafe { ObjectStoreUrl::from_location_url_unchecked(url) },
             location_id,
             metadata_db.clone(),
             start_block,

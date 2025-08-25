@@ -10,7 +10,7 @@ use datafusion::{
         physical_plan::{FileGroup, FileScanConfigBuilder, ParquetSource},
     },
     error::Result as DataFusionResult,
-    execution::object_store::ObjectStoreUrl,
+    execution::object_store::ObjectStoreUrl as DataFusionObjectStoreUrl,
     logical_expr::{ScalarUDF, SortExpr, col, utils::conjunction},
     physical_expr::LexOrdering,
     physical_plan::{ExecutionPlan, PhysicalExpr},
@@ -32,7 +32,7 @@ use crate::{
         parquet::ParquetMeta,
         segments::{Chain, Segment, canonical_chain, missing_ranges},
     },
-    store::{Store, object_store},
+    store::{ObjectStoreUrl, Store, object_store},
 };
 
 #[derive(Debug, Clone)]
@@ -162,7 +162,7 @@ pub struct PhysicalTable {
     table: ResolvedTable,
 
     /// Absolute URL to the data location, path section of the URL and the corresponding object store.
-    url: Url,
+    url: ObjectStoreUrl,
     /// Path to the data location in the object store.
     path: Path,
 
@@ -181,14 +181,13 @@ impl PhysicalTable {
     /// Create a new physical table with the given dataset name, table, URL, and object store.
     pub fn new(
         table: ResolvedTable,
-        url: Url,
+        url: ObjectStoreUrl,
         location_id: LocationId,
         metadata_db: Arc<MetadataDb>,
         start_block: i64,
     ) -> Result<Self, BoxError> {
         let path = Path::from_url_path(url.path()).unwrap();
-        let object_store_url = url.clone().try_into()?;
-        let (object_store, _) = object_store(&object_store_url)?;
+        let (object_store, _) = object_store(&url)?;
         let reader_factory = NozzleReaderFactory {
             location_id,
             object_store: object_store.clone(),
@@ -230,20 +229,23 @@ impl PhysicalTable {
         };
 
         let path = make_location_path(dataset_name, &table.name());
-        let url = data_store.url().join(&path)?;
+        let base_url = data_store.url().join(&path)?;
+        let url: ObjectStoreUrl = base_url.try_into()?;
         let location_id = metadata_db
             .register_location(
                 table_id,
                 data_store.bucket(),
                 &path,
-                &url,
+                url.as_ref(),
                 false,
                 Some(start_block),
             )
             .await?;
 
         if set_active {
-            metadata_db.set_active_location(table_id, &url).await?;
+            metadata_db
+                .set_active_location(table_id, url.as_ref())
+                .await?;
         }
 
         let path = Path::from_url_path(url.path()).unwrap();
@@ -326,8 +328,11 @@ impl PhysicalTable {
         };
 
         let path = Path::from_url_path(url.path()).unwrap();
-        let object_store_url = url.clone().try_into()?;
-        let (object_store, _) = object_store(&object_store_url)?;
+        // SAFETY: The URL comes from the metadata database where it was stored
+        // as a `LocationUrl`, and was originally derived from an `ObjectStoreUrl`,
+        // so it's guaranteed to have a supported object store scheme.
+        let url = unsafe { ObjectStoreUrl::from_location_url_unchecked(url.clone()) };
+        let (object_store, _) = object_store(&url)?;
 
         let location = metadata_db
             .get_location_by_id(location_id)
@@ -397,18 +402,21 @@ impl PhysicalTable {
         metadata_db: Arc<MetadataDb>,
         start_block: i64,
     ) -> Result<Self, BoxError> {
+        let url: ObjectStoreUrl = url.clone().try_into()?;
         let location_id = metadata_db
             .register_location(
                 *table_id,
                 data_store.bucket(),
                 prefix,
-                url,
+                url.as_ref(),
                 false,
                 Some(start_block),
             )
             .await?;
 
-        metadata_db.set_active_location(*table_id, &url).await?;
+        metadata_db
+            .set_active_location(*table_id, url.as_ref())
+            .await?;
 
         let object_store = data_store.object_store();
         let mut file_stream = object_store.list(Some(&path));
@@ -448,7 +456,7 @@ impl PhysicalTable {
 
         let physical_table = Self {
             table: table.clone(),
-            url: url.clone(),
+            url,
             path: path.clone(),
             location_id,
             metadata_db,
@@ -496,7 +504,7 @@ impl PhysicalTable {
         self.table.name()
     }
 
-    pub fn url(&self) -> &Url {
+    pub fn url(&self) -> &ObjectStoreUrl {
         &self.url
     }
 
@@ -634,8 +642,8 @@ impl PhysicalTable {
 // helper methods for implementing `TableProvider` trait
 
 impl PhysicalTable {
-    fn object_store_url(&self) -> DataFusionResult<ObjectStoreUrl> {
-        Ok(ListingTableUrl::try_new(self.url.clone(), None)?.object_store())
+    fn object_store_url(&self) -> DataFusionResult<DataFusionObjectStoreUrl> {
+        Ok(ListingTableUrl::try_new(self.url.clone().into_url(), None)?.object_store())
     }
 
     fn output_ordering(&self) -> DataFusionResult<Vec<LexOrdering>> {

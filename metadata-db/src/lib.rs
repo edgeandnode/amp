@@ -5,7 +5,6 @@ use sqlx::postgres::{PgListener, PgNotification};
 use thiserror::Error;
 use tokio::time::MissedTickBehavior;
 use tracing::instrument;
-use url::Url;
 
 mod conn;
 mod locations;
@@ -20,7 +19,7 @@ pub use self::temp::{KEEP_TEMP_DIRS, temp_metadata_db};
 pub use self::{
     locations::{
         Location, LocationId, LocationIdFromStrError, LocationIdI64ConvError, LocationIdU64Error,
-        LocationWithDetails,
+        LocationUrl, LocationWithDetails,
     },
     workers::{
         Worker, WorkerNodeId,
@@ -481,7 +480,7 @@ impl MetadataDb {
         table: TableId<'_>,
         bucket: Option<&str>,
         path: &str,
-        url: &Url,
+        url: &LocationUrl,
         active: bool,
         start_block: Option<i64>,
     ) -> Result<LocationId, sqlx::Error> {
@@ -501,7 +500,7 @@ impl MetadataDb {
             .bind(table.table)
             .bind(bucket)
             .bind(path)
-            .bind(url.to_string())
+            .bind(url)
             .bind(active)
             .bind(start_block.unwrap_or(0))
             .execute(&mut *tx)
@@ -517,7 +516,7 @@ impl MetadataDb {
             .bind(table.dataset)
             .bind(dataset_version)
             .bind(table.table)
-            .bind(url.to_string())
+            .bind(url)
             .fetch_one(&mut *tx)
             .await?;
 
@@ -533,7 +532,7 @@ impl MetadataDb {
             .map_err(Error::from)
     }
 
-    pub async fn url_to_location_id(&self, url: &Url) -> Result<Option<LocationId>, Error> {
+    pub async fn url_to_location_id(&self, url: &LocationUrl) -> Result<Option<LocationId>, Error> {
         Ok(locations::url_to_location_id(&*self.pool, url).await?)
     }
 
@@ -544,21 +543,25 @@ impl MetadataDb {
     pub async fn get_active_location(
         &self,
         table: TableId<'_>,
-    ) -> Result<Option<(Url, LocationId)>, Error> {
-        let active_locations = locations::get_active_by_table_id(&*self.pool, table).await?;
+    ) -> Result<Option<(LocationUrl, LocationId)>, Error> {
+        let mut active_locations = locations::get_active_by_table_id(&*self.pool, table).await?;
 
-        match active_locations.as_slice() {
-            [] => Ok(None),
-            [(url, location_id)] => {
-                let url = Url::parse(url)?;
-                Ok(Some((url, *location_id)))
-            }
-            multiple => Err(Error::MultipleActiveLocations(
+        if active_locations.len() > 1 {
+            return Err(Error::MultipleActiveLocations(
                 table.dataset.to_string(),
                 table.dataset_version.unwrap_or("").to_string(),
                 table.table.to_string(),
-                multiple.iter().map(|(url, _)| url.clone()).collect(),
-            )),
+                active_locations
+                    .iter()
+                    .map(|(url, _)| url.to_string())
+                    .collect(),
+            ));
+        }
+
+        if let Some((url, id)) = active_locations.pop() {
+            Ok(Some((url, id)))
+        } else {
+            Ok(None)
         }
     }
 
@@ -570,7 +573,7 @@ impl MetadataDb {
     pub async fn set_active_location(
         &self,
         table: TableId<'_>,
-        location: &Url,
+        location: &LocationUrl,
     ) -> Result<(), Error> {
         let mut tx = self.pool.begin().await?;
         locations::mark_inactive_by_table_id(&mut *tx, table).await?;
