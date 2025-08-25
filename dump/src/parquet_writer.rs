@@ -39,6 +39,7 @@ impl RawDatasetWriter {
         opts: ParquetWriterProperties,
         partition_size: u64,
         missing_ranges_by_table: BTreeMap<String, Vec<RangeInclusive<BlockNum>>>,
+        metrics: Option<Arc<metrics::MetricsRegistry>>,
     ) -> Result<Self, BoxError> {
         let mut writers = BTreeMap::new();
         for table in catalog.tables() {
@@ -51,6 +52,7 @@ impl RawDatasetWriter {
                 opts.clone(),
                 partition_size,
                 ranges,
+                metrics.clone(),
             )?;
             writers.insert(table_name.to_string(), writer);
         }
@@ -143,6 +145,8 @@ struct RawTableWriter {
 
     current_file: Option<ParquetFileWriter>,
     current_range: Option<BlockRange>,
+
+    metrics: Option<Arc<metrics::MetricsRegistry>>,
 }
 
 impl RawTableWriter {
@@ -152,6 +156,7 @@ impl RawTableWriter {
         opts: ParquetWriterProperties,
         partition_size: u64,
         missing_ranges: Vec<RangeInclusive<BlockNum>>,
+        metrics: Option<Arc<metrics::MetricsRegistry>>,
     ) -> Result<Self, BoxError> {
         let mut ranges_to_write = limit_ranges(missing_ranges, MAX_PARTITION_BLOCK_RANGE);
         ranges_to_write.reverse();
@@ -171,6 +176,7 @@ impl RawTableWriter {
             partition_size,
             current_file,
             current_range: None,
+            metrics,
         })
     }
 
@@ -252,9 +258,12 @@ impl RawTableWriter {
         }
 
         let rows = &table_rows.rows;
-        let num_bytes: u64 = rows.get_array_memory_size().try_into().unwrap();
         self.current_file.as_mut().unwrap().write(rows).await?;
-        metrics::raw::inc_bytes(num_bytes, self.dataset_name.clone());
+
+        if let Some(ref metrics) = self.metrics {
+            let num_bytes: u64 = rows.get_array_memory_size().try_into().unwrap();
+            metrics::raw::inc_bytes(metrics, num_bytes, self.dataset_name.clone());
+        }
 
         self.current_range = match self.current_range.take() {
             None => Some(table_rows.range),
@@ -273,8 +282,8 @@ impl RawTableWriter {
     }
 
     pub fn set_current_file(&mut self, new_file: Option<ParquetFileWriter>) {
-        if new_file.is_some() {
-            metrics::raw::inc_files(self.dataset_name.clone());
+        if let Some(ref metrics) = self.metrics {
+            metrics::raw::inc_files(metrics, self.dataset_name.clone());
         }
         self.current_file = new_file;
     }

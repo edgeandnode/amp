@@ -3,7 +3,7 @@
 use common::parquet::file::properties::WriterProperties as ParquetWriterProperties;
 
 mod core;
-mod metrics;
+pub mod metrics;
 mod parquet_writer;
 pub mod streaming_query;
 pub mod worker;

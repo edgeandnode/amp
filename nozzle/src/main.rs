@@ -156,8 +156,12 @@ async fn main_inner() -> Result<(), BoxError> {
     let (config, metadata_db) =
         construct_confing_and_metadatadb(config_path.as_ref(), allow_temp_db).await?;
 
-    let (telemetry_tracing_provider, telemetry_metrics_provider) =
+    let (telemetry_tracing_provider, telemetry_metrics_provider, telemetry_metrics_meter) =
         init_monitoring(config.opentelemetry.as_ref())?;
+
+    let metrics_registry = telemetry_metrics_meter
+        .as_ref()
+        .map(|meter| Arc::new(dump::metrics::MetricsRegistry::new(meter)));
 
     // Log version info
     info!(
@@ -210,6 +214,7 @@ async fn main_inner() -> Result<(), BoxError> {
                 None,
                 location,
                 fresh,
+                metrics_registry,
             )
             .await?;
             Ok(())
@@ -236,12 +241,18 @@ async fn main_inner() -> Result<(), BoxError> {
                 jsonl_server,
                 registry_server,
                 admin_server,
+                metrics_registry,
             )
             .await?;
             server.await
         }
         Command::Worker { node_id } => {
-            let worker = Worker::new(config.clone(), metadata_db, node_id.parse()?);
+            let worker = Worker::new(
+                config.clone(),
+                metadata_db,
+                node_id.parse()?,
+                metrics_registry,
+            );
             worker.run().await.map_err(Into::into)
         }
         Command::GenerateManifest {
@@ -274,19 +285,19 @@ async fn main_inner() -> Result<(), BoxError> {
     Ok(())
 }
 
+type TelemetryKit = (
+    Option<telemetry::traces::SdkTracerProvider>,
+    Option<telemetry::metrics::SdkMeterProvider>,
+    Option<telemetry::metrics::Meter>,
+);
+
 fn init_monitoring(
     opentelemetry_config: Option<&OpenTelemetryConfig>,
-) -> Result<
-    (
-        Option<telemetry::traces::SdkTracerProvider>,
-        Option<telemetry::metrics::SdkMeterProvider>,
-    ),
-    telemetry::ExporterBuildError,
-> {
+) -> Result<TelemetryKit, telemetry::ExporterBuildError> {
     let Some(opentelemetry_config) = opentelemetry_config else {
         // Make sure logging is enabled in any case.
         logging::init();
-        return Ok((None, None));
+        return Ok((None, None, None));
     };
 
     let telemetry_tracing_provider = match (
@@ -310,13 +321,13 @@ fn init_monitoring(
         }
     };
 
-    let telemetry_metrics_provider = match (
+    let (telemetry_metrics_provider, telemetry_metrics_meter) = match (
         opentelemetry_config.metrics_url.clone(),
         opentelemetry_config.metrics_export_interval,
     ) {
         (Some(url), export_interval) => {
-            let provider = telemetry::metrics::start(url, export_interval)?;
-            Some(provider)
+            let (provider, meter) = telemetry::metrics::start(url, export_interval)?;
+            (Some(provider), Some(meter))
         }
         (None, export_interval) => {
             if export_interval.is_some() {
@@ -325,11 +336,15 @@ fn init_monitoring(
                 );
             }
 
-            None
+            (None, None)
         }
     };
 
-    Ok((telemetry_tracing_provider, telemetry_metrics_provider))
+    Ok((
+        telemetry_tracing_provider,
+        telemetry_metrics_provider,
+        telemetry_metrics_meter,
+    ))
 }
 
 fn deinit_monitoring(

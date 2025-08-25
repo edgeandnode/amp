@@ -167,6 +167,7 @@ impl TestEnv {
             true,
             true,
             true,
+            None,
         )
         .await?;
         tokio::spawn(server);
@@ -175,6 +176,7 @@ impl TestEnv {
             config.clone(),
             metadata_db.clone(),
             WorkerNodeId::from_str(test_name).unwrap(),
+            None,
         );
         tokio::spawn(worker.run());
 
@@ -300,6 +302,7 @@ pub(crate) async fn dump_dataset(
         microbatch_max_interval,
         None,
         false,
+        None,
     )
     .await?;
 
@@ -358,6 +361,7 @@ pub async fn check_blocks(
         1,
         start,
         end,
+        None,
     )
     .await
 }

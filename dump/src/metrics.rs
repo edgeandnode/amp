@@ -1,4 +1,4 @@
-use std::{sync::LazyLock, time::Duration};
+use std::time::Duration;
 
 use monitoring::telemetry;
 
@@ -7,25 +7,23 @@ use monitoring::telemetry;
 /// some observation points will not be exported.
 pub const RECOMMENDED_METRICS_EXPORT_INTERVAL: Duration = Duration::from_secs(1);
 
-static METRICS: LazyLock<MetricsRegistry> = LazyLock::new(|| MetricsRegistry::new());
-
 /// Raw dataset dump metrics.
 pub(crate) mod raw {
     use super::*;
 
-    pub(crate) fn inc_rows(rows: u64, dataset: String) {
+    pub(crate) fn inc_rows(metrics: &MetricsRegistry, rows: u64, dataset: String) {
         let kv_pairs = [telemetry::metrics::KeyValue::new("dataset", dataset)];
-        METRICS.raw_dataset_rows.inc_by_with_kvs(rows, &kv_pairs);
+        metrics.raw_dataset_rows.inc_by_with_kvs(rows, &kv_pairs);
     }
 
-    pub(crate) fn inc_files(dataset: String) {
+    pub(crate) fn inc_files(metrics: &MetricsRegistry, dataset: String) {
         let kv_pairs = [telemetry::metrics::KeyValue::new("dataset", dataset)];
-        METRICS.raw_dataset_files_written.inc_with_kvs(&kv_pairs);
+        metrics.raw_dataset_files_written.inc_with_kvs(&kv_pairs);
     }
 
-    pub(crate) fn inc_bytes(bytes: u64, dataset: String) {
+    pub(crate) fn inc_bytes(metrics: &MetricsRegistry, bytes: u64, dataset: String) {
         let kv_pairs = [telemetry::metrics::KeyValue::new("dataset", dataset)];
-        METRICS
+        metrics
             .raw_dataset_bytes_written
             .inc_by_with_kvs(bytes, &kv_pairs);
     }
@@ -35,63 +33,70 @@ pub(crate) mod raw {
 pub(crate) mod sql {
     use super::*;
 
-    pub(crate) fn inc_rows(rows: u64, dataset: String) {
+    pub(crate) fn inc_rows(metrics: &MetricsRegistry, rows: u64, dataset: String) {
         let kv_pairs = [telemetry::metrics::KeyValue::new("dataset", dataset)];
-        METRICS.sql_dataset_rows.inc_by_with_kvs(rows, &kv_pairs);
+        metrics.sql_dataset_rows.inc_by_with_kvs(rows, &kv_pairs);
     }
 
-    pub(crate) fn inc_files(dataset: String) {
+    pub(crate) fn inc_files(metrics: &MetricsRegistry, dataset: String) {
         let kv_pairs = [telemetry::metrics::KeyValue::new("dataset", dataset)];
-        METRICS.sql_dataset_files_written.inc_with_kvs(&kv_pairs);
+        metrics.sql_dataset_files_written.inc_with_kvs(&kv_pairs);
     }
 
-    pub(crate) fn inc_bytes(bytes: u64, dataset: String) {
+    pub(crate) fn inc_bytes(metrics: &MetricsRegistry, bytes: u64, dataset: String) {
         let kv_pairs = [telemetry::metrics::KeyValue::new("dataset", dataset)];
-        METRICS
+        metrics
             .sql_dataset_bytes_written
             .inc_by_with_kvs(bytes, &kv_pairs);
     }
 }
 
-struct MetricsRegistry {
+#[derive(Debug, Clone)]
+pub struct MetricsRegistry {
     // Row metrics, expressed in total rows dumped. Most metrics backends have a rate of change
     // function which can be used to turn these metrics into rows per second.
-    raw_dataset_rows: telemetry::metrics::Counter,
-    sql_dataset_rows: telemetry::metrics::Counter,
+    pub raw_dataset_rows: telemetry::metrics::Counter,
+    pub sql_dataset_rows: telemetry::metrics::Counter,
 
     // File metrics.
-    raw_dataset_files_written: telemetry::metrics::Counter,
-    sql_dataset_files_written: telemetry::metrics::Counter,
+    pub raw_dataset_files_written: telemetry::metrics::Counter,
+    pub sql_dataset_files_written: telemetry::metrics::Counter,
 
     // Byte metrics.
-    raw_dataset_bytes_written: telemetry::metrics::Counter,
-    sql_dataset_bytes_written: telemetry::metrics::Counter,
+    pub raw_dataset_bytes_written: telemetry::metrics::Counter,
+    pub sql_dataset_bytes_written: telemetry::metrics::Counter,
 }
 
 impl MetricsRegistry {
-    fn new() -> Self {
+    pub fn new(meter: &telemetry::metrics::Meter) -> Self {
         Self {
             raw_dataset_rows: telemetry::metrics::Counter::new(
+                meter,
                 "raw_dataset_rows_dumped",
                 "Counter for raw dataset rows processed",
             ),
             sql_dataset_rows: telemetry::metrics::Counter::new(
+                meter,
                 "sql_dataset_rows_dumped",
                 "Counter for SQL dataset rows processed",
             ),
             raw_dataset_files_written: telemetry::metrics::Counter::new(
+                meter,
                 "raw_dataset_files_written",
                 "Counter for raw dataset files written",
             ),
             sql_dataset_files_written: telemetry::metrics::Counter::new(
+                meter,
                 "sql_dataset_files_written",
                 "Counter for SQL dataset files written",
             ),
             raw_dataset_bytes_written: telemetry::metrics::Counter::new(
+                meter,
                 "raw_dataset_bytes_written",
                 "Counter for raw dataset bytes written",
             ),
             sql_dataset_bytes_written: telemetry::metrics::Counter::new(
+                meter,
                 "sql_dataset_bytes_written",
                 "Counter for SQL dataset bytes written",
             ),

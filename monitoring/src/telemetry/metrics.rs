@@ -4,13 +4,13 @@ use std::{
     time::Duration,
 };
 
-pub use opentelemetry::KeyValue;
+pub use opentelemetry::{KeyValue, metrics::Meter};
 use opentelemetry_otlp::{ExporterBuildError, Protocol, WithExportConfig};
 pub use opentelemetry_sdk::metrics::SdkMeterProvider;
 
 pub const DEFAULT_METRICS_EXPORT_INTERVAL: Duration = Duration::from_secs(60);
 
-pub type Result = std::result::Result<SdkMeterProvider, ExporterBuildError>;
+pub type Result = std::result::Result<(SdkMeterProvider, Meter), ExporterBuildError>;
 
 const NOZZLE_METER: &str = "nozzle-meter";
 
@@ -31,11 +31,13 @@ pub fn start(url: String, export_interval: Option<Duration>) -> Result {
         .with_reader(reader)
         .build();
     opentelemetry::global::set_meter_provider(meter_provider.clone());
+    let meter = opentelemetry::global::meter(NOZZLE_METER);
 
-    Ok(meter_provider)
+    Ok((meter_provider, meter))
 }
 
 /// An OpenTelemetry gauge.
+#[derive(Debug, Clone)]
 pub struct Gauge<T>(opentelemetry::metrics::Gauge<T>);
 
 impl<T> Gauge<T> {
@@ -53,11 +55,12 @@ impl<T> Gauge<T> {
 impl Gauge<u64> {
     /// Create a new u64 OpenTelemetry gauge.
     pub fn new_u64(
+        meter: &Meter,
         name: impl Into<Cow<'static, str>>,
         description: impl Into<Cow<'static, str>>,
         unit: impl Into<Cow<'static, str>>,
     ) -> Self {
-        let inner = opentelemetry::global::meter(NOZZLE_METER)
+        let inner = meter
             .u64_gauge(name)
             .with_description(description)
             .with_unit(unit)
@@ -70,11 +73,12 @@ impl Gauge<u64> {
 impl Gauge<f64> {
     /// Create a new f64 OpenTelemetry gauge.
     pub fn new_f64(
+        meter: &Meter,
         name: impl Into<Cow<'static, str>>,
         description: impl Into<Cow<'static, str>>,
         unit: impl Into<Cow<'static, str>>,
     ) -> Self {
-        let inner = opentelemetry::global::meter(NOZZLE_METER)
+        let inner = meter
             .f64_gauge(name)
             .with_description(description)
             .with_unit(unit)
@@ -85,6 +89,7 @@ impl Gauge<f64> {
 }
 
 /// An OpenTelemetry histogram.
+#[derive(Debug, Clone)]
 pub struct Histogram<T>(opentelemetry::metrics::Histogram<T>);
 
 impl<T> Histogram<T> {
@@ -102,11 +107,12 @@ impl<T> Histogram<T> {
 impl Histogram<u64> {
     /// Create a new u64 OpenTelemetry histogram.
     pub fn new_u64(
+        meter: &Meter,
         name: impl Into<Cow<'static, str>>,
         description: impl Into<Cow<'static, str>>,
         unit: impl Into<Cow<'static, str>>,
     ) -> Self {
-        let inner = opentelemetry::global::meter(NOZZLE_METER)
+        let inner = meter
             .u64_histogram(name)
             .with_description(description)
             .with_unit(unit)
@@ -119,11 +125,12 @@ impl Histogram<u64> {
 impl Histogram<f64> {
     /// Create a new f64 OpenTelemetry histogram.
     pub fn new_f64(
+        meter: &Meter,
         name: impl Into<Cow<'static, str>>,
         description: impl Into<Cow<'static, str>>,
         unit: impl Into<Cow<'static, str>>,
     ) -> Self {
-        let inner = opentelemetry::global::meter(NOZZLE_METER)
+        let inner = meter
             .f64_histogram(name)
             .with_description(description)
             .with_unit(unit)
@@ -137,15 +144,17 @@ impl Histogram<f64> {
 ///
 /// As this type does not allow reading the current value, use a [ReadableCounter] if this
 /// functionality is needed.
+#[derive(Debug, Clone)]
 pub struct Counter(opentelemetry::metrics::Counter<u64>);
 
 impl Counter {
     /// Create a new OpenTelemetry counter.
     pub fn new(
+        meter: &Meter,
         name: impl Into<Cow<'static, str>>,
         description: impl Into<Cow<'static, str>>,
     ) -> Self {
-        let inner = opentelemetry::global::meter(NOZZLE_METER)
+        let inner = meter
             .u64_counter(name)
             .with_description(description)
             .build();
@@ -177,6 +186,7 @@ impl Counter {
 /// An OpenTelemetry counter that can also be read from.
 ///
 /// If reading the counter value isn't needed, users can create a regular [Counter].
+#[derive(Debug)]
 pub struct ReadableCounter {
     counter: opentelemetry::metrics::Counter<u64>,
     /// A local copy used to enable reading the counter value.
@@ -186,10 +196,11 @@ pub struct ReadableCounter {
 impl ReadableCounter {
     /// Create a new readable OpenTelemetry counter.
     pub fn new(
+        meter: &Meter,
         name: impl Into<Cow<'static, str>>,
         description: impl Into<Cow<'static, str>>,
     ) -> Self {
-        let counter = opentelemetry::global::meter(NOZZLE_METER)
+        let counter = meter
             .u64_counter(name)
             .with_description(description)
             .build();
