@@ -1,14 +1,17 @@
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{path::PathBuf, sync::Arc};
 
 use clap::Parser as _;
-use common::{BoxError, config::Config, manifest::Manifest};
+use common::{
+    BoxError,
+    config::{Config, OpenTelemetryConfig},
+    manifest::Manifest,
+};
 use dataset_store::DatasetStore;
 use dump::worker::Worker;
 use metadata_db::MetadataDb;
 use monitoring::{logging, telemetry};
 use nozzle::dump_cmd;
 use registry_service::handlers::register::register_manifest;
-use static_assertions::const_assert;
 use tracing::info;
 
 #[cfg(feature = "snmalloc")]
@@ -23,31 +26,6 @@ struct Args {
     /// This argument is optional for the `generate-manifest` command.
     #[arg(long, env = "NOZZLE_CONFIG")]
     config: Option<String>,
-
-    /// Remote OpenTelemetry metrics collector endpoint. OpenTelemetry collector must be running and
-    /// configured to accept metrics at this endpoint. Metrics are sent over binary HTTP.
-    ///
-    /// If not specified, metrics infrastructure will not be initialized.
-    #[arg(long, env = "OPENTELEMETRY_METRICS_URL")]
-    opentelemetry_metrics_url: Option<String>,
-
-    /// The interval (in seconds, fractions are allowed) at which to export metrics to the OpenTelemetry collector.
-    #[arg(
-        long,
-        env = "OPENTELEMETRY_METRICS_EXPORT_INTERVAL",
-        value_parser = metrics_export_interval_parser,
-    )]
-    opentelemetry_metrics_export_interval: Option<Duration>,
-
-    /// Remote OpenTelemetry traces collector endpoint. OpenTelemetry collector must be running and
-    /// configured to accept traces at this endpoint. Traces are sent over gRPC.
-    ///
-    /// If not specified, traces infrastructure will not be initialized.
-    #[arg(long, env = "OPENTELEMETRY_TRACE_URL")]
-    opentelemetry_trace_url: Option<String>,
-    /// The ratio of traces to sample (f64). Samples all traces by default (equivalent to 1.0).
-    #[arg(long, env = "OPENTELEMETRY_TRACE_RATIO")]
-    opentelemetry_trace_ratio: Option<f64>,
 
     #[command(subcommand)]
     command: Command,
@@ -171,22 +149,15 @@ async fn main() {
 }
 
 async fn main_inner() -> Result<(), BoxError> {
-    let Args {
-        config,
-        opentelemetry_metrics_url,
-        opentelemetry_metrics_export_interval,
-        opentelemetry_trace_url,
-        opentelemetry_trace_ratio,
-        command,
-    } = Args::parse();
+    let Args { config, command } = Args::parse();
     let config_path = config;
 
-    let (telemetry_tracing_provider, telemetry_metrics_provider) = init_monitoring(
-        opentelemetry_trace_url,
-        opentelemetry_trace_ratio,
-        opentelemetry_metrics_url,
-        opentelemetry_metrics_export_interval,
-    )?;
+    let allow_temp_db = matches!(command, Command::Server { dev, .. } if dev);
+    let (config, metadata_db) =
+        construct_confing_and_metadatadb(config_path.as_ref(), allow_temp_db).await?;
+
+    let (telemetry_tracing_provider, telemetry_metrics_provider) =
+        init_monitoring(config.opentelemetry.as_ref())?;
 
     // Log version info
     info!(
@@ -195,7 +166,6 @@ async fn main_inner() -> Result<(), BoxError> {
         env!("VERGEN_GIT_DESCRIBE"),
     );
 
-    let allow_temp_db = matches!(command, Command::Server { dev, .. } if dev);
     let cmd_result = match command {
         Command::Dump {
             start,
@@ -208,32 +178,10 @@ async fn main_inner() -> Result<(), BoxError> {
             location,
             fresh,
         } => {
-            match opentelemetry_metrics_export_interval {
-                Some(export_interval) => {
-                    if export_interval > dump::RECOMMENDED_METRICS_EXPORT_INTERVAL {
-                        tracing::warn!(
-                            recommended_dump_metrics_export_interval = ?dump::RECOMMENDED_METRICS_EXPORT_INTERVAL,
-                            "OpenTelemetry metrics export interval is set above the recommended value for the `dump` command. \
-                            This could lead to less precise metrics."
-                        );
-                    }
-                }
-                None => {
-                    const_assert!(
-                        telemetry::metrics::DEFAULT_METRICS_EXPORT_INTERVAL.as_secs()
-                            > dump::RECOMMENDED_METRICS_EXPORT_INTERVAL.as_secs()
-                    );
-                    tracing::warn!(
-                        default_metrics_export_interval = ?telemetry::metrics::DEFAULT_METRICS_EXPORT_INTERVAL,
-                        recommended_dump_metrics_export_interval = ?dump::RECOMMENDED_METRICS_EXPORT_INTERVAL,
-                        "OpenTelemetry metrics export interval defaults to a value which is above the recommended interval for the `dump` command. \
-                        This could lead to less precise metrics."
-                    );
-                }
+            if let Some(ref opentelemetry) = config.opentelemetry {
+                dump_cmd::validate_export_interval(opentelemetry.metrics_export_interval);
             }
 
-            let (config, metadata_db) =
-                construct_confing_and_metadatadb(config_path.as_ref(), allow_temp_db).await?;
             let mut datasets_to_dump = Vec::new();
             let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
 
@@ -273,8 +221,6 @@ async fn main_inner() -> Result<(), BoxError> {
             mut registry_server,
             mut admin_server,
         } => {
-            let (config, metadata_db) =
-                construct_confing_and_metadatadb(config_path.as_ref(), allow_temp_db).await?;
             if !flight_server && !jsonl_server && !registry_server && !admin_server {
                 flight_server = true;
                 jsonl_server = true;
@@ -295,8 +241,6 @@ async fn main_inner() -> Result<(), BoxError> {
             server.await
         }
         Command::Worker { node_id } => {
-            let (config, metadata_db) =
-                construct_confing_and_metadatadb(config_path.as_ref(), allow_temp_db).await?;
             let worker = Worker::new(config.clone(), metadata_db, node_id.parse()?);
             worker.run().await.map_err(Into::into)
         }
@@ -331,10 +275,7 @@ async fn main_inner() -> Result<(), BoxError> {
 }
 
 fn init_monitoring(
-    opentelemetry_trace_url: Option<String>,
-    opentelemetry_trace_ratio: Option<f64>,
-    opentelemetry_metrics_url: Option<String>,
-    opentelemtry_metrics_export_interval: Option<Duration>,
+    opentelemetry_config: Option<&OpenTelemetryConfig>,
 ) -> Result<
     (
         Option<telemetry::traces::SdkTracerProvider>,
@@ -342,7 +283,16 @@ fn init_monitoring(
     ),
     telemetry::ExporterBuildError,
 > {
-    let telemetry_tracing_provider = match (opentelemetry_trace_url, opentelemetry_trace_ratio) {
+    let Some(opentelemetry_config) = opentelemetry_config else {
+        // Make sure logging is enabled in any case.
+        logging::init();
+        return Ok((None, None));
+    };
+
+    let telemetry_tracing_provider = match (
+        opentelemetry_config.trace_url.clone(),
+        opentelemetry_config.trace_ratio,
+    ) {
         (Some(url), trace_ratio) => {
             let provider = logging::init_with_telemetry(url, trace_ratio.unwrap_or(1.0))?;
             Some(provider)
@@ -361,8 +311,8 @@ fn init_monitoring(
     };
 
     let telemetry_metrics_provider = match (
-        opentelemetry_metrics_url,
-        opentelemtry_metrics_export_interval,
+        opentelemetry_config.metrics_url.clone(),
+        opentelemetry_config.metrics_export_interval,
     ) {
         (Some(url), export_interval) => {
             let provider = telemetry::metrics::start(url, export_interval)?;
@@ -398,13 +348,6 @@ fn deinit_monitoring(
     }
 
     Ok(())
-}
-
-fn metrics_export_interval_parser(arg: &str) -> Result<Duration, String> {
-    arg
-        .parse()
-        .map(Duration::from_secs_f64)
-        .map_err(|_| String::from("Invalid OpenTelemetry metrics export interval format, expected a number representing seconds (e.g., 60.0 for 1 minute)"))
 }
 
 async fn construct_confing_and_metadatadb(
