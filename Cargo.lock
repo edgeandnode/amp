@@ -4632,6 +4632,7 @@ dependencies = [
  "serde_json",
  "server",
  "snmalloc-rs",
+ "static_assertions",
  "tokio",
  "tonic 0.12.3",
  "tower-http",
