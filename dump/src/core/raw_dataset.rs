@@ -354,7 +354,6 @@ impl<S: BlockStreamer> DumpPartition<S> {
         let mut writer = RawDatasetWriter::new(
             self.catalog.clone(),
             self.metadata_db.clone(),
-            self.dataset_name.clone(),
             self.parquet_opts.clone(),
             self.partition_size,
             missing_ranges_by_table,

@@ -35,7 +35,6 @@ impl RawDatasetWriter {
     pub fn new(
         catalog: Catalog,
         metadata_db: Arc<MetadataDb>,
-        dataset_name: String,
         opts: ParquetWriterProperties,
         partition_size: u64,
         missing_ranges_by_table: BTreeMap<String, Vec<RangeInclusive<BlockNum>>>,
@@ -48,7 +47,6 @@ impl RawDatasetWriter {
             let ranges = missing_ranges_by_table.get(table_name).unwrap().clone();
             let writer = RawTableWriter::new(
                 table.clone(),
-                dataset_name.clone(),
                 opts.clone(),
                 partition_size,
                 ranges,
@@ -135,7 +133,6 @@ pub async fn commit_metadata(
 
 struct RawTableWriter {
     table: Arc<PhysicalTable>,
-    dataset_name: String,
     opts: ParquetWriterProperties,
     partition_size: u64,
 
@@ -152,7 +149,6 @@ struct RawTableWriter {
 impl RawTableWriter {
     pub fn new(
         table: Arc<PhysicalTable>,
-        dataset_name: String,
         opts: ParquetWriterProperties,
         partition_size: u64,
         missing_ranges: Vec<RangeInclusive<BlockNum>>,
@@ -170,7 +166,6 @@ impl RawTableWriter {
         };
         Ok(Self {
             table,
-            dataset_name,
             opts,
             ranges_to_write,
             partition_size,
@@ -262,7 +257,8 @@ impl RawTableWriter {
 
         if let Some(ref metrics) = self.metrics {
             let num_bytes: u64 = rows.get_array_memory_size().try_into().unwrap();
-            metrics::raw::inc_bytes(metrics, num_bytes, self.dataset_name.clone());
+            let dataset_name = self.table.dataset().name.clone();
+            metrics::raw::inc_bytes(metrics, num_bytes, dataset_name);
         }
 
         self.current_range = match self.current_range.take() {
@@ -283,7 +279,8 @@ impl RawTableWriter {
 
     pub fn set_current_file(&mut self, new_file: Option<ParquetFileWriter>) {
         if let Some(ref metrics) = self.metrics {
-            metrics::raw::inc_files(metrics, self.dataset_name.clone());
+            let dataset_name = self.table.dataset().name.clone();
+            metrics::raw::inc_files(metrics, dataset_name);
         }
         self.current_file = new_file;
     }
