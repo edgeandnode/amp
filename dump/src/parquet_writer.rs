@@ -193,15 +193,14 @@ impl RawTableWriter {
             parquet_meta = Some(self.close_current_file().await?);
             assert!(self.current_file.is_none());
             self.ranges_to_write.pop();
-            let new_file = match self.ranges_to_write.last() {
-                Some(range) => Some(ParquetFileWriter::new(
-                    self.table.clone(),
-                    self.opts.clone(),
-                    *range.start(),
-                )?),
-                None => None,
-            };
-            self.set_current_file(new_file);
+            let new_file = self
+                .ranges_to_write
+                .last()
+                .map(|range| {
+                    ParquetFileWriter::new(self.table.clone(), self.opts.clone(), *range.start())
+                })
+                .transpose()?;
+            self.current_file = new_file;
         }
 
         if self.ranges_to_write.is_empty() {
@@ -249,7 +248,7 @@ impl RawTableWriter {
                 self.opts.clone(),
                 block_num,
             )?);
-            self.set_current_file(new_file);
+            self.current_file = new_file;
         }
 
         let rows = &table_rows.rows;
@@ -277,14 +276,6 @@ impl RawTableWriter {
         Ok(parquet_meta)
     }
 
-    pub fn set_current_file(&mut self, new_file: Option<ParquetFileWriter>) {
-        if let Some(ref metrics) = self.metrics {
-            let dataset_name = self.table.dataset().name.clone();
-            metrics.inc_raw_dataset_files_written(dataset_name);
-        }
-        self.current_file = new_file;
-    }
-
     async fn close(mut self) -> Result<Option<(ParquetMeta, ObjectMeta, FooterBytes)>, BoxError> {
         if self.current_file.is_none() {
             assert!(self.ranges_to_write.is_empty());
@@ -301,7 +292,15 @@ impl RawTableWriter {
         assert!(self.current_file.is_some());
         let file = self.current_file.take().unwrap();
         let range = self.current_range.take().unwrap();
-        file.close(range).await
+
+        let metadata = file.close(range).await?;
+
+        if let Some(ref metrics) = self.metrics {
+            let dataset_name = self.table.dataset().name.clone();
+            metrics.inc_raw_dataset_files_written(dataset_name);
+        }
+
+        Ok(metadata)
     }
 }
 
