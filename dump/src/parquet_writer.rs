@@ -12,7 +12,6 @@ use common::{
     },
     parquet::{arrow::AsyncArrowWriter, errors::ParquetError, format::KeyValue},
 };
-use futures::TryFutureExt;
 use metadata_db::{FooterBytes, LocationId, MetadataDb};
 use object_store::{ObjectMeta, buffered::BufWriter, path::Path};
 use rand::RngCore as _;
@@ -305,7 +304,7 @@ impl RawTableWriter {
 
         let metadata = file.close(range).await?;
 
-        self.try_run_compaction().await;
+        self.compactor.try_run().await;
 
         if let Some(ref metrics) = self.metrics {
             let dataset_name = self.table.dataset().name.clone();
