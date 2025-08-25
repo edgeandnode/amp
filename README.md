@@ -27,6 +27,7 @@ docker-compose up -d
 
 This will run the metadata DB at `postgresql://postgres:postgres@localhost:5432/nozzle`.
 Update your config file to include it:
+
 ```toml
 metadata_db_url = "postgresql://postgres:postgres@localhost:5432/nozzle"
 ```
@@ -76,12 +77,19 @@ The Arrow Flight server requires a specialized client. We currently have a Pytho
 see docs for that [here](https://github.com/edgeandnode/project-nozzle/tree/main/python).
 
 > **Note:**
+>
 > - When streaming data from the `jsonl` server, responses are always sent in uncompressed format, regardless of any `accept-encoding` headers (such as `gzip`, `br`, or `deflate`).
 > - For non-streaming requests, responses will be compressed according to the `accept-encoding` header, if specified.
 
+### Telemetry
 
+Nozzle has an OpenTelemetry setup to track various metrics and traces. For local testing, a Grafana telemetry stack
+is already configured and can be run through `docker-compose`:
 
+```
+docker-compose up -d
+```
 
+This will (among other things) run the `grafana/otel-lgmt` image. More info about the image can be found [here](https://github.com/grafana/docker-otel-lgtm/).
 
-
-
+More detailed instructions regarding telemetry can be found in [here](./docs/telemetry.md).

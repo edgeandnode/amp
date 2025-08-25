@@ -1,0 +1,16 @@
+apiVersion: 1
+
+providers:
+  - name: "Dashboards"
+    orgId: 1
+    type: file
+    disableDeletion: true
+    # How often Grafana will scan for changed dashboards.
+    updateIntervalSeconds: 10
+    # Doesn't make sense to allow this since we'll run Grafana in a docker pod.
+    allowUiUpdates: false
+    options:
+      # Path to dashboard files on disk. Required when using the 'file' type.
+      path: /var/lib/grafana/dashboards
+      # Use folder names from filesystem to create folders in Grafana.
+      foldersFromFilesStructure: true

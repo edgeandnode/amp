@@ -33,3 +33,7 @@ services:
       - "3000:3000" # Grafana UI
       - "4317:4317" # OTLP_gRPC_PORT
       - "4318:4318" # OTLP_HTTP_PORT
+    # Mount local dashboard files to the LGTM Grafana image.
+    volumes:
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+      - ./grafana/provisioning/dashboards:/otel-lgtm/grafana/conf/provisioning/dashboards
