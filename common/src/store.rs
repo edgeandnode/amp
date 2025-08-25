@@ -433,7 +433,8 @@ impl AsRef<LocationUrl> for ObjectStoreUrl {
         // 3. **Lifetime Safety**: We're only transmuting references (`&ObjectStoreUrl` -> `&LocationUrl`),
         //    preserving the original lifetime without any ownership transfer.
         // 4. **ABI Stability**: Both types are in the same codebase, ensuring coordinated changes
-        //    to internal representation if needed.
+        // 4. **ABI Stability**: Both types are marked with `#[repr(transparent)]`, which guarantees
+        //    that they have identical memory layouts as their inner `url::Url` field.
         // 5. **Memory Safety**: No allocation, deallocation, or ownership changes occur, eliminating
         //    risks of use-after-free, double-free, or memory corruption.
         unsafe { std::mem::transmute(self) }
