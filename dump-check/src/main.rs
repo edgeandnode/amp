@@ -83,7 +83,7 @@ async fn main() -> Result<(), BoxError> {
     }
 
     let telemetry_metrics_provider = opentelemetry_metrics_url
-        .map(telemetry::metrics::start)
+        .map(|url| telemetry::metrics::start(url, None))
         .transpose()?;
 
     let total_blocks = end_block - start + 1;
