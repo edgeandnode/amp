@@ -258,7 +258,7 @@ impl RawTableWriter {
         if let Some(ref metrics) = self.metrics {
             let num_bytes: u64 = rows.get_array_memory_size().try_into().unwrap();
             let dataset_name = self.table.dataset().name.clone();
-            metrics::raw::inc_bytes(metrics, num_bytes, dataset_name);
+            metrics.inc_raw_dataset_bytes_written_by(num_bytes, dataset_name);
         }
 
         self.current_range = match self.current_range.take() {
@@ -280,7 +280,7 @@ impl RawTableWriter {
     pub fn set_current_file(&mut self, new_file: Option<ParquetFileWriter>) {
         if let Some(ref metrics) = self.metrics {
             let dataset_name = self.table.dataset().name.clone();
-            metrics::raw::inc_files(metrics, dataset_name);
+            metrics.inc_raw_dataset_files_written(dataset_name);
         }
         self.current_file = new_file;
     }

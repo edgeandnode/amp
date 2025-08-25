@@ -7,50 +7,6 @@ use monitoring::telemetry;
 /// some observation points will not be exported.
 pub const RECOMMENDED_METRICS_EXPORT_INTERVAL: Duration = Duration::from_secs(1);
 
-/// Raw dataset dump metrics.
-pub(crate) mod raw {
-    use super::*;
-
-    pub(crate) fn inc_rows(metrics: &MetricsRegistry, rows: u64, dataset: String) {
-        let kv_pairs = [telemetry::metrics::KeyValue::new("dataset", dataset)];
-        metrics.raw_dataset_rows.inc_by_with_kvs(rows, &kv_pairs);
-    }
-
-    pub(crate) fn inc_files(metrics: &MetricsRegistry, dataset: String) {
-        let kv_pairs = [telemetry::metrics::KeyValue::new("dataset", dataset)];
-        metrics.raw_dataset_files_written.inc_with_kvs(&kv_pairs);
-    }
-
-    pub(crate) fn inc_bytes(metrics: &MetricsRegistry, bytes: u64, dataset: String) {
-        let kv_pairs = [telemetry::metrics::KeyValue::new("dataset", dataset)];
-        metrics
-            .raw_dataset_bytes_written
-            .inc_by_with_kvs(bytes, &kv_pairs);
-    }
-}
-
-/// SQL dataset dump metrics.
-pub(crate) mod sql {
-    use super::*;
-
-    pub(crate) fn inc_rows(metrics: &MetricsRegistry, rows: u64, dataset: String) {
-        let kv_pairs = [telemetry::metrics::KeyValue::new("dataset", dataset)];
-        metrics.sql_dataset_rows.inc_by_with_kvs(rows, &kv_pairs);
-    }
-
-    pub(crate) fn inc_files(metrics: &MetricsRegistry, dataset: String) {
-        let kv_pairs = [telemetry::metrics::KeyValue::new("dataset", dataset)];
-        metrics.sql_dataset_files_written.inc_with_kvs(&kv_pairs);
-    }
-
-    pub(crate) fn inc_bytes(metrics: &MetricsRegistry, bytes: u64, dataset: String) {
-        let kv_pairs = [telemetry::metrics::KeyValue::new("dataset", dataset)];
-        metrics
-            .sql_dataset_bytes_written
-            .inc_by_with_kvs(bytes, &kv_pairs);
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct MetricsRegistry {
     // Row metrics, expressed in total rows dumped. Most metrics backends have a rate of change
@@ -101,5 +57,37 @@ impl MetricsRegistry {
                 "Counter for SQL dataset bytes written",
             ),
         }
+    }
+
+    pub(crate) fn inc_sql_dataset_rows_by(&self, amount: u64, dataset: String) {
+        let kv_pairs = [telemetry::metrics::KeyValue::new("dataset", dataset)];
+        self.sql_dataset_rows.inc_by_with_kvs(amount, &kv_pairs);
+    }
+
+    pub(crate) fn inc_sql_dataset_files_written(&self, dataset: String) {
+        let kv_pairs = [telemetry::metrics::KeyValue::new("dataset", dataset)];
+        self.sql_dataset_files_written.inc_with_kvs(&kv_pairs);
+    }
+
+    pub(crate) fn inc_sql_dataset_bytes_written_by(&self, amount: u64, dataset: String) {
+        let kv_pairs = [telemetry::metrics::KeyValue::new("dataset", dataset)];
+        self.sql_dataset_bytes_written
+            .inc_by_with_kvs(amount, &kv_pairs);
+    }
+
+    pub(crate) fn inc_raw_dataset_rows_by(&self, amount: u64, dataset: String) {
+        let kv_pairs = [telemetry::metrics::KeyValue::new("dataset", dataset)];
+        self.raw_dataset_rows.inc_by_with_kvs(amount, &kv_pairs);
+    }
+
+    pub(crate) fn inc_raw_dataset_files_written(&self, dataset: String) {
+        let kv_pairs = [telemetry::metrics::KeyValue::new("dataset", dataset)];
+        self.raw_dataset_files_written.inc_with_kvs(&kv_pairs);
+    }
+
+    pub(crate) fn inc_raw_dataset_bytes_written_by(&self, amount: u64, dataset: String) {
+        let kv_pairs = [telemetry::metrics::KeyValue::new("dataset", dataset)];
+        self.raw_dataset_bytes_written
+            .inc_by_with_kvs(amount, &kv_pairs);
     }
 }

@@ -365,7 +365,7 @@ impl<S: BlockStreamer> DumpPartition<S> {
             for table_rows in dataset_rows {
                 if let Some(ref metrics) = self.metrics {
                     let num_rows: u64 = table_rows.rows.num_rows().try_into().unwrap();
-                    metrics::raw::inc_rows(metrics, num_rows, self.dataset_name.clone());
+                    metrics.inc_raw_dataset_rows_by(num_rows, self.dataset_name.clone());
                 }
 
                 writer.write(table_rows).await?;

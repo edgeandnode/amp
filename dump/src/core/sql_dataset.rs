@@ -310,8 +310,8 @@ async fn dump_sql_query(
                 if let Some(ref metrics) = metrics {
                     let num_rows: u64 = batch.num_rows().try_into().unwrap();
                     let num_bytes: u64 = batch.get_array_memory_size().try_into().unwrap();
-                    metrics::sql::inc_rows(metrics, num_rows, dataset.clone());
-                    metrics::sql::inc_bytes(metrics, num_bytes, dataset.clone());
+                    metrics.inc_sql_dataset_rows_by(num_rows, dataset.clone());
+                    metrics.inc_sql_dataset_bytes_written_by(num_bytes, dataset.clone());
                 }
             }
             QueryMessage::MicrobatchEnd(range) => {
@@ -336,7 +336,7 @@ async fn dump_sql_query(
                 )?;
 
                 if let Some(ref metrics) = metrics {
-                    metrics::sql::inc_files(metrics, dataset.clone());
+                    metrics.inc_sql_dataset_files_written(dataset.clone());
                 }
             }
         }
