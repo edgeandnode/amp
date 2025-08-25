@@ -301,10 +301,12 @@ async fn dump_sql_query(
         match message {
             QueryMessage::MicrobatchStart(_) => (),
             QueryMessage::Data(batch) => {
-                let num_rows: u64 = batch.num_rows().try_into().unwrap();
-                metrics::throughput::sql(num_rows, dataset.clone());
-
                 writer.write(&batch).await?;
+
+                let num_rows: u64 = batch.num_rows().try_into().unwrap();
+                let num_bytes: u64 = batch.get_array_memory_size().try_into().unwrap();
+                metrics::sql::inc_rows(num_rows, dataset.clone());
+                metrics::sql::inc_bytes(num_bytes, dataset.clone());
             }
             QueryMessage::MicrobatchEnd(range) => {
                 let microbatch_end = range.end();
@@ -326,6 +328,8 @@ async fn dump_sql_query(
                     parquet_opts.clone(),
                     microbatch_start,
                 )?;
+
+                metrics::sql::inc_files(dataset.clone());
             }
         }
     }
