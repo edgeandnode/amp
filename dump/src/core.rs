@@ -17,6 +17,8 @@ use futures::TryStreamExt as _;
 use metadata_db::{LocationId, MetadataDb};
 use object_store::ObjectMeta;
 
+use crate::metrics;
+
 mod block_ranges;
 mod raw_dataset;
 mod sql_dataset;
@@ -30,6 +32,7 @@ pub async fn dump_tables(
     partition_size: u64,
     microbatch_max_interval: u64,
     range: (i64, Option<i64>),
+    metrics: Option<Arc<metrics::MetricsRegistry>>,
 ) -> Result<(), BoxError> {
     let mut kinds = BTreeSet::new();
     for t in tables {
@@ -40,9 +43,9 @@ pub async fn dump_tables(
         if !kinds.iter().all(|k| k.is_raw()) {
             return Err("Cannot mix raw and non-raw datasets in a same dump".into());
         }
-        dump_raw_tables(ctx, tables, n_jobs, partition_size, range).await
+        dump_raw_tables(ctx, tables, n_jobs, partition_size, range, metrics).await
     } else {
-        dump_user_tables(ctx, tables, microbatch_max_interval, n_jobs, range).await
+        dump_user_tables(ctx, tables, microbatch_max_interval, n_jobs, range, metrics).await
     }
 }
 
@@ -53,6 +56,7 @@ pub async fn dump_raw_tables(
     n_jobs: u16,
     partition_size: u64,
     range: (i64, Option<i64>),
+    metrics: Option<Arc<metrics::MetricsRegistry>>,
 ) -> Result<(), BoxError> {
     if tables.is_empty() {
         return Ok(());
@@ -86,11 +90,12 @@ pub async fn dump_raw_tables(
                 ctx,
                 n_jobs,
                 catalog,
-                &dataset.name,
                 tables,
                 partition_size,
                 &parquet_opts,
                 range,
+                &dataset.name,
+                metrics,
             )
             .await?;
         }
@@ -114,6 +119,7 @@ pub async fn dump_user_tables(
     microbatch_max_interval: u64,
     n_jobs: u16,
     range: (i64, Option<i64>),
+    metrics: Option<Arc<metrics::MetricsRegistry>>,
 ) -> Result<(), BoxError> {
     if n_jobs > 1 {
         tracing::warn!("n_jobs > 1 has no effect for SQL datasets");
@@ -153,6 +159,7 @@ pub async fn dump_user_tables(
             &parquet_opts,
             microbatch_max_interval,
             range,
+            metrics.clone(),
         )
         .await?;
 

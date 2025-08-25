@@ -11,6 +11,8 @@ opentelemetry.workspace = true
 opentelemetry-otlp.workspace = true
 opentelemetry_sdk.workspace = true
 tracing-opentelemetry.workspace = true
+common = { path = "../common" }
+
 
 [dev-dependencies]
 cargo_metadata = "0.19.0"

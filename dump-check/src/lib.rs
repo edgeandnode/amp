@@ -24,6 +24,7 @@ pub async fn dump_check(
     n_jobs: u8,
     start: u64,
     end_block: u64,
+    metrics: Option<Arc<metrics::MetricsRegistry>>,
 ) -> Result<(), BoxError> {
     let dataset_version = match dataset_version {
         Some(version) => Some(Version::from_str(version)?),
@@ -80,6 +81,7 @@ pub async fn dump_check(
                 end: to,
                 batch_size,
                 ctx: ctx.clone(),
+                metrics: metrics.clone(),
             });
             from = to + 1;
         }

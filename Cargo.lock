@@ -4581,6 +4581,7 @@ version = "0.1.0"
 dependencies = [
  "atty",
  "cargo_metadata",
+ "common",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
@@ -4632,6 +4633,7 @@ dependencies = [
  "serde_json",
  "server",
  "snmalloc-rs",
+ "static_assertions",
  "tokio",
  "tonic 0.12.3",
  "tower-http",
