@@ -110,7 +110,11 @@ pub struct OpenTelemetryConfig {
     /// Remote OpenTelemetry metrics collector endpoint. Metrics are sent over binary HTTP.
     pub metrics_url: Option<String>,
     /// The interval (in seconds) at which to export metrics to the OpenTelemetry collector.
-    #[serde(deserialize_with = "deserialize_duration")]
+    #[serde(
+        default,
+        rename = "metrics_export_interval_secs",
+        deserialize_with = "deserialize_duration"
+    )]
     pub metrics_export_interval: Option<Duration>,
     /// Remote OpenTelemetry traces collector endpoint. Traces are sent over gRPC.
     pub trace_url: Option<String>,
