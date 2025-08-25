@@ -96,7 +96,10 @@ use metadata_db::MetadataDb;
 use tracing::instrument;
 
 use super::{Ctx, block_ranges, tasks::FailFastJoinSet};
-use crate::parquet_writer::{ParquetWriterProperties, RawDatasetWriter};
+use crate::{
+    metrics,
+    parquet_writer::{ParquetWriterProperties, RawDatasetWriter},
+};
 
 /// Dumps a raw dataset by extracting blockchain data from specified block ranges
 /// and writing it to partitioned Parquet files.
@@ -108,11 +111,12 @@ pub async fn dump(
     ctx: Ctx,
     n_jobs: u16,
     catalog: Catalog,
-    dataset_name: &str,
     tables: &[Arc<PhysicalTable>],
     partition_size: u64,
     parquet_opts: &ParquetWriterProperties,
     (start, end): (i64, Option<i64>),
+    dataset_name: &str,
+    metrics: Option<Arc<metrics::MetricsRegistry>>,
 ) -> Result<(), BoxError> {
     for table in tables {
         ctx.metadata_db
@@ -170,14 +174,16 @@ pub async fn dump(
         .into_iter()
         .enumerate()
         .map(|(i, ranges)| DumpPartition {
-            catalog: catalog.clone(),
-            metadata_db: ctx.metadata_db.clone(),
             block_streamer: client.clone(),
+            metadata_db: ctx.metadata_db.clone(),
+            catalog: catalog.clone(),
             ranges,
-            id: i as u32,
-            partition_size,
             parquet_opts: parquet_opts.clone(),
+            partition_size,
             missing_ranges_by_table: missing_ranges_by_table.clone(),
+            id: i as u32,
+            dataset_name: dataset_name.to_string(),
+            metrics: metrics.clone(),
         });
 
     // Spawn the jobs, starting them with a 1 second delay between each.
@@ -263,6 +269,8 @@ fn split_and_partition(
 struct DumpPartition<S: BlockStreamer> {
     /// The block streamer
     block_streamer: S,
+    /// The name of the dataset
+    dataset_name: String,
     /// The metadata database
     metadata_db: Arc<MetadataDb>,
     /// The tables to write to
@@ -282,6 +290,8 @@ struct DumpPartition<S: BlockStreamer> {
     missing_ranges_by_table: BTreeMap<String, Vec<RangeInclusive<BlockNum>>>,
     /// The partition ID
     id: u32,
+    /// Metrics registry
+    metrics: Option<Arc<metrics::MetricsRegistry>>,
 }
 impl<S: BlockStreamer> DumpPartition<S> {
     /// Consumes the instance returning a future that runs the partition, processing all assigned block ranges sequentially.
@@ -347,11 +357,17 @@ impl<S: BlockStreamer> DumpPartition<S> {
             self.parquet_opts.clone(),
             self.partition_size,
             missing_ranges_by_table,
+            self.metrics.clone(),
         )?;
 
         let mut stream = std::pin::pin!(stream);
         while let Some(dataset_rows) = stream.try_next().await? {
             for table_rows in dataset_rows {
+                if let Some(ref metrics) = self.metrics {
+                    let num_rows: u64 = table_rows.rows.num_rows().try_into().unwrap();
+                    metrics.inc_raw_dataset_rows_by(num_rows, self.dataset_name.clone());
+                }
+
                 writer.write(table_rows).await?;
             }
         }

@@ -24,6 +24,7 @@ pub async fn dump_check(
     n_jobs: u8,
     start: u64,
     end_block: u64,
+    metrics: Option<Arc<metrics::MetricsRegistry>>,
 ) -> Result<(), BoxError> {
     let dataset_version = match dataset_version {
         Some(version) => Some(Version::from_str(version)?),
@@ -65,7 +66,7 @@ pub async fn dump_check(
     }
     let logical = LogicalCatalog::from_tables(tables.iter().map(|t| t.table()));
     let catalog = Catalog::new(tables, logical);
-    let ctx = Arc::new(QueryContext::for_catalog(catalog, env.clone())?);
+    let ctx = Arc::new(QueryContext::for_catalog(catalog, env.clone(), false).await?);
 
     let jobs = {
         let mut jobs = vec![];
@@ -80,6 +81,7 @@ pub async fn dump_check(
                 end: to,
                 batch_size,
                 ctx: ctx.clone(),
+                metrics: metrics.clone(),
             });
             from = to + 1;
         }

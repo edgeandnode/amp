@@ -129,6 +129,7 @@ use tracing::instrument;
 use super::{Ctx, block_ranges, tasks::FailFastJoinSet};
 use crate::{
     compaction::{FILE_SIZE_LIMIT_ROWS, NozzleCompactor},
+    metrics,
     parquet_writer::{ParquetFileWriter, ParquetWriterProperties, commit_metadata},
     streaming_query::{QueryMessage, StreamingQuery},
 };
@@ -143,6 +144,7 @@ pub async fn dump_table(
     parquet_opts: &ParquetWriterProperties,
     microbatch_max_interval: u64,
     (start, end): (i64, Option<i64>),
+    metrics: Option<Arc<metrics::MetricsRegistry>>,
 ) -> Result<(), BoxError> {
     let dataset_name = dataset.dataset.name.as_str();
     let table_name = table.table_name().to_string();
@@ -176,7 +178,7 @@ pub async fn dump_table(
         let (start, end) = match (start, end) {
             (start, Some(end)) if start >= 0 && end >= 0 => (start as BlockNum, end as BlockNum),
             _ => {
-                let ctx = QueryContext::for_catalog(catalog.clone(), env.clone())?;
+                let ctx = QueryContext::for_catalog(catalog.clone(), env.clone(), false).await?;
                 match ctx.max_end_block(&plan.clone().attach_to(&ctx)?).await? {
                     Some(max_end_block) => {
                         block_ranges::resolve_relative(start, end, max_end_block)?
@@ -212,6 +214,7 @@ pub async fn dump_table(
                     &parquet_opts,
                     microbatch_max_interval,
                     &ctx.notification_multiplexer,
+                    metrics.clone(),
                 )
                 .await?;
             }
@@ -235,6 +238,7 @@ pub async fn dump_table(
                 &parquet_opts,
                 microbatch_max_interval,
                 &ctx.notification_multiplexer,
+                metrics.clone(),
             )
             .await?;
         }
@@ -262,6 +266,7 @@ async fn dump_sql_query(
     parquet_opts: &ParquetWriterProperties,
     microbatch_max_interval: u64,
     notification_multiplexer: &Arc<NotificationMultiplexerHandle>,
+    metrics: Option<Arc<metrics::MetricsRegistry>>,
 ) -> Result<(), BoxError> {
     tracing::info!(
         "dumping {} [{}-{}]",
@@ -292,6 +297,8 @@ async fn dump_sql_query(
         microbatch_start,
     )?;
 
+    let dataset = physical_table.dataset().name.clone();
+
     let mut compactor =
         NozzleCompactor::start(physical_table.clone(), &parquet_opts, FILE_SIZE_LIMIT_ROWS);
 
@@ -303,6 +310,13 @@ async fn dump_sql_query(
             QueryMessage::MicrobatchStart(_) => (),
             QueryMessage::Data(batch) => {
                 writer.write(&batch).await?;
+
+                if let Some(ref metrics) = metrics {
+                    let num_rows: u64 = batch.num_rows().try_into().unwrap();
+                    let num_bytes: u64 = batch.get_array_memory_size().try_into().unwrap();
+                    metrics.inc_sql_dataset_rows_by(num_rows, dataset.clone());
+                    metrics.inc_sql_dataset_bytes_written_by(num_bytes, dataset.clone());
+                }
             }
             QueryMessage::MicrobatchEnd(range) => {
                 let microbatch_end = range.end();
@@ -327,6 +341,10 @@ async fn dump_sql_query(
                     parquet_opts.clone(),
                     microbatch_start,
                 )?;
+
+                if let Some(ref metrics) = metrics {
+                    metrics.inc_sql_dataset_files_written(dataset.clone());
+                }
             }
         }
     }

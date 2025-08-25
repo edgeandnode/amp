@@ -20,7 +20,7 @@ use self::{
         WorkerNodeId,
     },
 };
-use crate::Ctx;
+use crate::{Ctx, metrics};
 
 pub struct Worker {
     node_id: WorkerNodeId,
@@ -29,11 +29,17 @@ pub struct Worker {
     meta: WorkerMetadataDb,
     job_ctx: Ctx,
     job_set: JobSet,
+    metrics: Option<Arc<metrics::MetricsRegistry>>,
 }
 
 impl Worker {
     /// Create a new worker instance
-    pub fn new(config: Arc<Config>, metadata_db: Arc<MetadataDb>, node_id: WorkerNodeId) -> Self {
+    pub fn new(
+        config: Arc<Config>,
+        metadata_db: Arc<MetadataDb>,
+        node_id: WorkerNodeId,
+        metrics: Option<Arc<metrics::MetricsRegistry>>,
+    ) -> Self {
         let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
         let data_store = config.data_store.clone();
         let meta = WorkerMetadataDb::new(metadata_db.clone());
@@ -56,6 +62,7 @@ impl Worker {
                 notification_multiplexer,
             },
             job_set: Default::default(),
+            metrics,
         }
     }
 
@@ -322,9 +329,10 @@ impl Worker {
             WorkerError::JobLoadFailed(format!("invalid job descriptor: {}", err).into())
         })?;
 
-        let job = Job::try_from_descriptor(self.job_ctx.clone(), job_id, job_desc)
-            .await
-            .map_err(WorkerError::JobLoadFailed)?;
+        let job =
+            Job::try_from_descriptor(self.job_ctx.clone(), job_id, job_desc, self.metrics.clone())
+                .await
+                .map_err(WorkerError::JobLoadFailed)?;
         self.job_set.spawn(job_id, job);
 
         Ok(())

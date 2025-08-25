@@ -1,5 +1,5 @@
 use opentelemetry_otlp::{ExporterBuildError, WithExportConfig};
-use opentelemetry_sdk::trace::SdkTracerProvider;
+pub use opentelemetry_sdk::trace::SdkTracerProvider;
 
 pub type Result = std::result::Result<SdkTracerProvider, ExporterBuildError>;
 
@@ -24,7 +24,6 @@ pub fn provider(url: String, trace_ratio: f64) -> Result {
 
     Ok(provider)
 }
-
 /// Flushes the OpenTelemetry tracing provider and shuts it down. This ensures that all
 /// pending traces are sent before the application exits.
 pub fn provider_flush_shutdown(

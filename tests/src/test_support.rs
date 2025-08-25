@@ -167,6 +167,7 @@ impl TestEnv {
             true,
             true,
             true,
+            None,
         )
         .await?;
         tokio::spawn(server);
@@ -175,6 +176,7 @@ impl TestEnv {
             config.clone(),
             metadata_db.clone(),
             WorkerNodeId::from_str(test_name).unwrap(),
+            None,
         );
         tokio::spawn(worker.run());
 
@@ -199,7 +201,8 @@ impl SnapshotContext {
         let tables = restore_blessed_dataset(dataset, metadata_db).await?;
         let logical = LogicalCatalog::from_tables(tables.iter().map(|t| t.table()));
         let catalog = Catalog::new(tables, logical);
-        let ctx: QueryContext = QueryContext::for_catalog(catalog, env.config.make_query_env()?)?;
+        let ctx: QueryContext =
+            QueryContext::for_catalog(catalog, env.config.make_query_env()?, false).await?;
         Ok(Self { ctx })
     }
 
@@ -218,19 +221,20 @@ impl SnapshotContext {
             test_env.metadata_db.clone(),
         )
         .await?;
-        let ctx = QueryContext::for_catalog(catalog, test_env.config.make_query_env()?)?;
+        let ctx =
+            QueryContext::for_catalog(catalog, test_env.config.make_query_env()?, false).await?;
 
         Ok(SnapshotContext { ctx })
     }
 
     async fn check_block_range_eq(&self, blessed: &SnapshotContext) -> Result<(), BoxError> {
         let mut blessed_block_ranges: BTreeMap<String, Vec<BlockRange>> = Default::default();
-        for table in blessed.ctx.catalog().tables() {
+        for table in blessed.ctx.catalog().physical_tables() {
             blessed_block_ranges
                 .insert(table.table_name().to_string(), table_ranges(&table).await?);
         }
 
-        for table in self.ctx.catalog().tables() {
+        for table in self.ctx.catalog().physical_tables() {
             let table_name = table.table_name();
             let mut expected_ranges = table_ranges(&table).await?;
             expected_ranges.sort_by_key(|r| *r.numbers.start());
@@ -251,7 +255,7 @@ impl SnapshotContext {
     pub async fn assert_eq(&self, other: &SnapshotContext) -> Result<(), BoxError> {
         self.check_block_range_eq(other).await?;
 
-        for table in self.ctx.catalog().tables() {
+        for table in self.ctx.catalog().physical_tables() {
             let query = parse_sql(&format!(
                 "select * from {} order by block_num",
                 table.table_ref()
@@ -298,6 +302,7 @@ pub(crate) async fn dump_dataset(
         microbatch_max_interval,
         None,
         false,
+        None,
     )
     .await?;
 
@@ -356,6 +361,7 @@ pub async fn check_blocks(
         1,
         start,
         end,
+        None,
     )
     .await
 }

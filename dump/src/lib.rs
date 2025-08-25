@@ -4,12 +4,14 @@ use common::parquet::file::properties::WriterProperties as ParquetWriterProperti
 
 pub mod compaction;
 mod core;
-mod metrics; // unused for now
+pub mod metrics;
 mod parquet_writer;
 pub mod streaming_query;
 pub mod worker;
 
 pub use core::*;
+
+pub use metrics::RECOMMENDED_METRICS_EXPORT_INTERVAL;
 
 pub fn default_partition_size() -> u64 {
     4096 * 1024 * 1024 // 4 GB

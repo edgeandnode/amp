@@ -907,11 +907,12 @@ impl From<&[common::catalog::logical::Table]> for SerializableSchema {
 }
 
 /// Return a table identifier, in the form `{dataset}.blocks`, for the given network.
+#[instrument(skip(dataset_store), err)]
 pub async fn resolve_blocks_table(
     dataset_store: &Arc<DatasetStore>,
     src_datasets: &BTreeSet<&str>,
     network: &str,
-) -> Result<String, BoxError> {
+) -> Result<PhysicalTable, BoxError> {
     let dataset = {
         fn is_raw_dataset(kind: &str) -> bool {
             ["evm-rpc", "firehose"].contains(&kind)
@@ -949,6 +950,24 @@ pub async fn resolve_blocks_table(
         }
     };
 
-    assert!(dataset.tables.iter().any(|t| t.name() == "blocks"));
-    Ok(format!("{}.blocks", dataset.name))
+    let dataset_name = dataset.name.clone();
+    let table = Arc::new(dataset)
+        .resolved_tables()
+        .find(|t| t.name() == "blocks")
+        .ok_or_else(|| {
+            BoxError::from(format!(
+                "dataset '{}' does not have a 'blocks' table",
+                dataset_name
+            ))
+        })?;
+
+    PhysicalTable::get_active(&table, dataset_store.metadata_db.clone())
+        .await?
+        .ok_or_else(|| {
+            BoxError::from(format!(
+                "table '{}.{}' has not been synced",
+                dataset_name,
+                table.name()
+            ))
+        })
 }

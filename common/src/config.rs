@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 
 use datafusion::{
     error::DataFusionError,
@@ -31,6 +31,7 @@ pub struct Config {
     pub spill_location: Vec<PathBuf>,
     pub microbatch_max_interval: u64,
     pub parquet: ParquetConfig,
+    pub opentelemetry: Option<OpenTelemetryConfig>,
     /// Addresses to bind the server to. Used during testing.
     pub addrs: Addrs,
     pub config_path: PathBuf,
@@ -105,6 +106,30 @@ where
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct OpenTelemetryConfig {
+    /// Remote OpenTelemetry metrics collector endpoint. Metrics are sent over binary HTTP.
+    pub metrics_url: Option<String>,
+    /// The interval (in seconds) at which to export metrics to the OpenTelemetry collector.
+    #[serde(
+        default,
+        rename = "metrics_export_interval_secs",
+        deserialize_with = "deserialize_duration"
+    )]
+    pub metrics_export_interval: Option<Duration>,
+    /// Remote OpenTelemetry traces collector endpoint. Traces are sent over gRPC.
+    pub trace_url: Option<String>,
+    /// The ratio of traces to sample (f64). Samples all traces by default (equivalent to 1.0).
+    pub trace_ratio: Option<f64>,
+}
+
+fn deserialize_duration<'de, D>(deserializer: D) -> Result<Option<Duration>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    <Option<f64>>::deserialize(deserializer).map(|option| option.map(Duration::from_secs_f64))
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct ConfigFile {
     pub data_dir: String,
     pub providers_dir: String,
@@ -123,6 +148,7 @@ pub struct ConfigFile {
     pub admin_api_addr: Option<String>,
     #[serde(default)]
     pub parquet: ParquetConfig,
+    pub opentelemetry: Option<OpenTelemetryConfig>,
 }
 
 pub type FigmentJson = figment::providers::Data<figment::providers::Json>;
@@ -228,6 +254,7 @@ impl Config {
             spill_location: config_file.spill_location,
             microbatch_max_interval: config_file.microbatch_max_interval.unwrap_or(100_000),
             parquet: config_file.parquet,
+            opentelemetry: config_file.opentelemetry,
             addrs,
             config_path,
         })

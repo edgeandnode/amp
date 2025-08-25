@@ -2,15 +2,12 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use alloy::{hex::ToHexExt as _, primitives::BlockHash};
 use common::{
-    BlockNum, BoxError, SPECIAL_BLOCK_NUM,
+    BlockNum, BoxError, LogicalCatalog, SPECIAL_BLOCK_NUM,
     arrow::array::RecordBatch,
     catalog::physical::{Catalog, PhysicalTable},
-    metadata::segments::{BlockRange, Chain, Watermark},
+    metadata::segments::{BlockRange, Segment, Watermark},
     notification_multiplexer::NotificationMultiplexerHandle,
-    query_context::{
-        DetachedLogicalPlan, NozzleSessionConfig, PlanningContext, QueryContext, QueryEnv,
-        parse_sql,
-    },
+    query_context::{DetachedLogicalPlan, PlanningContext, QueryContext, QueryEnv, parse_sql},
 };
 use datafusion::common::cast::as_fixed_size_binary_array;
 use dataset_store::{DatasetStore, resolve_blocks_table};
@@ -123,7 +120,6 @@ impl StreamingQueryHandle {
 /// stream.
 pub struct StreamingQuery {
     query_env: QueryEnv,
-    dataset_store: Arc<DatasetStore>,
     catalog: Catalog,
     plan: DetachedLogicalPlan,
     start_block: BlockNum,
@@ -132,11 +128,9 @@ pub struct StreamingQuery {
     tx: mpsc::Sender<QueryMessage>,
     microbatch_max_interval: u64,
     preserve_block_num: bool,
-    /// Physical tables used for SQL execution.
-    tables: Vec<Arc<PhysicalTable>>,
     network: String,
-    /// `blocks` table for the network associated with the physical tables.
-    blocks_table: String,
+    /// `blocks` table for the network associated with the catalog.
+    blocks_table: Arc<PhysicalTable>,
     /// Previously processed range. These may be provided by the consumer to resume a stream.
     prev_range: Option<BlockRange>,
 }
@@ -187,7 +181,6 @@ impl StreamingQuery {
         let table_updates = TableUpdates::new(&catalog, multiplexer_handle).await;
         let streaming_query = Self {
             query_env,
-            dataset_store,
             catalog,
             plan,
             tx,
@@ -197,8 +190,7 @@ impl StreamingQuery {
             microbatch_max_interval,
             preserve_block_num,
             network: network.to_string(),
-            tables,
-            blocks_table,
+            blocks_table: Arc::new(blocks_table),
             // TODO: Set from client to resume a stream after dropping a connection.
             prev_range: None,
         };
@@ -219,14 +211,18 @@ impl StreamingQuery {
         loop {
             self.table_updates.changed().await;
 
+            // The table snapshots to execute the microbatch against.
+            let ctx =
+                QueryContext::for_catalog(self.catalog.clone(), self.query_env.clone(), false)
+                    .await?;
+
             // Get the next execution range
-            let Some(range) = self.next_microbatch_range().await? else {
+            let Some(range) = self.next_microbatch_range(&ctx).await? else {
                 continue;
             };
             tracing::debug!("execute range [{}-{}]", range.start(), range.end());
 
             // Start microbatch execution for this chunk
-            let ctx = QueryContext::for_catalog(self.catalog.clone(), self.query_env.clone())?;
             let attached_plan = self.plan.clone().attach_to(&ctx)?;
             let mut stream = ctx
                 .execute_plan_for_range(
@@ -267,36 +263,27 @@ impl StreamingQuery {
         }
     }
 
-    async fn next_microbatch_range(&mut self) -> Result<Option<BlockRange>, BoxError> {
-        // Load the canonical chains for each source table.
-        let chains = {
-            let mut chains: Vec<Chain> = Default::default();
-            for table in &self.tables {
-                let Some(chain) = table.canonical_chain().await? else {
-                    // No canonical chain available for source table.
-                    return Ok(None);
-                };
-                chains.push(chain);
-            }
-            chains
-        };
+    async fn next_microbatch_range(
+        &mut self,
+        ctx: &QueryContext,
+    ) -> Result<Option<BlockRange>, BoxError> {
+        // Gather the chains for each source table.
+        let chains = ctx.catalog().table_snapshots().iter().map(|s| s.segments());
 
         // Use a single context for all queries against the blocks table. This is to keep a
         // consistent reference chain within the scope of this function.
-        let ctx = {
-            let query = parse_sql(&format!(
-                "SELECT block_num, hash FROM {}",
-                self.blocks_table,
-            ))?;
-            let catalog = self
-                .dataset_store
-                .catalog_for_sql(&query, self.query_env.clone())
-                .await?;
-            QueryContext::for_catalog(catalog, self.query_env.clone())?
+        let blocks_ctx = {
+            // Construct a catalog for the single `blocks_table`.
+            let catalog = {
+                let logical =
+                    LogicalCatalog::from_tables(std::iter::once(self.blocks_table.table()));
+                Catalog::new(vec![self.blocks_table.clone()], logical)
+            };
+            QueryContext::for_catalog(catalog, self.query_env.clone(), false).await?
         };
 
         // The latest common watermark across the source tables.
-        let Some(common_watermark) = self.latest_src_watermark(&ctx, &chains).await? else {
+        let Some(common_watermark) = self.latest_src_watermark(&blocks_ctx, chains).await? else {
             // No common watermark across source tables.
             return Ok(None);
         };
@@ -306,11 +293,11 @@ impl StreamingQuery {
             return Ok(None);
         }
 
-        let Some(start) = self.next_microbatch_start(&ctx).await? else {
+        let Some(start) = self.next_microbatch_start(&blocks_ctx).await? else {
             return Ok(None);
         };
         let Some(end) = self
-            .next_microbatch_end(&ctx, &start, common_watermark)
+            .next_microbatch_end(&blocks_ctx, &start, common_watermark)
             .await?
         else {
             return Ok(None);
@@ -376,12 +363,12 @@ impl StreamingQuery {
     async fn latest_src_watermark(
         &self,
         ctx: &QueryContext,
-        chains: &[Chain],
+        chains: impl Iterator<Item = &[Segment]>,
     ) -> Result<Option<Watermark>, BoxError> {
         // For each chain, collect the latest segment
         let mut latest_src_watermarks: Vec<Watermark> = Default::default();
         'chain_loop: for chain in chains {
-            for segment in chain.0.iter().rev() {
+            for segment in chain.iter().rev() {
                 let watermark = segment.range.watermark();
                 if self.blocks_table_contains(&ctx, &watermark).await? {
                     latest_src_watermarks.push(watermark);
@@ -409,9 +396,11 @@ impl StreamingQuery {
     ) -> Result<Option<BlockRow>, BoxError> {
         // context for querying forked blocks
         let fork_ctx = {
-            let mut settings = NozzleSessionConfig::default();
-            settings.ignore_canonical_segments = true;
-            ctx.with_custom_settings(settings)
+            let catalog = Catalog::new(
+                ctx.catalog().physical_tables().cloned().collect(),
+                ctx.catalog().logical().clone(),
+            );
+            QueryContext::for_catalog(catalog, ctx.env.clone(), true).await?
         };
 
         let mut min_fork_block_num = prev_range.end();
@@ -455,7 +444,9 @@ impl StreamingQuery {
             .unwrap_or_default();
         let query = parse_sql(&format!(
             "SELECT hash, parent_hash FROM {} WHERE block_num = {} {} LIMIT 1",
-            self.blocks_table, number, hash_constraint,
+            self.blocks_table.table_ref(),
+            number,
+            hash_constraint,
         ))?;
         let plan = ctx.plan_sql(query).await?;
         let results = ctx.execute_and_concat(plan).await?;
