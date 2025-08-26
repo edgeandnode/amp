@@ -4,12 +4,14 @@
   end: 20
 
 - name: deploy_multi_version_v1
-  deploy: multi_version_v1
+  deploy: multi_version
+  config: v1.config.ts
   start: 0
   end: 20
 
 - name: deploy_multi_version_v2
-  deploy: multi_version_v2
+  deploy: multi_version
+  config: v2.config.ts
   start: 0
   end: 20
 

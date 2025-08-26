@@ -507,13 +507,17 @@ pub struct DatasetPackage {
 
     // Relative to crate root
     pub path: PathBuf,
+
+    // Relative config path
+    pub config: Option<String>,
 }
 
 impl DatasetPackage {
-    pub fn new(name: &str) -> Self {
+    pub fn new(name: &str, config: Option<&str>) -> Self {
         Self {
             name: name.to_string(),
             path: PathBuf::from_str(&format!("datasets/{}", name)).unwrap(),
+            config: config.map(|s| s.to_string()),
         }
     }
 
@@ -572,8 +576,13 @@ impl DatasetPackage {
 
     #[instrument(skip_all, err)]
     pub async fn deploy(&self, bound_addrs: BoundAddrs) -> Result<(), BoxError> {
+        let mut args = vec!["nozzl", "deploy"];
+        if let Some(config) = &self.config {
+            args.push("--config");
+            args.push(config);
+        }
         let status = tokio::process::Command::new("pnpm")
-            .args(&["nozzl", "deploy"])
+            .args(&args)
             .env(
                 "NOZZLE_REGISTRY_URL",
                 &format!("http://{}", bound_addrs.registry_service_addr),
