@@ -4,6 +4,7 @@ name: PR GCR Image and Cloud Run Deployment
 on:
   workflow_dispatch:
   pull_request:
+    types: [opened, synchronize, reopened]
 
 concurrency:
   cancel-in-progress: true
@@ -48,7 +49,7 @@ jobs:
           images: ${{ env.REGION }}-docker.pkg.dev/${{ github.repository }}/${{ env.GH_IMAGE }}
           tags: |
             type=ref,event=tag
-            type=sha
+            type=sha,format=short
 
       - name: Build and push Docker image
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6
@@ -59,6 +60,10 @@ jobs:
           push: true
           tags: ${{ steps.metadata.outputs.tags }}
           labels: ${{ steps.metadata.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: true
+          sbom: true
 
       - name: Deploy to Cloud Run
         uses: google-github-actions/deploy-cloudrun@v2
