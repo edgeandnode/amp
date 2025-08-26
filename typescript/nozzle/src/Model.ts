@@ -154,6 +154,7 @@ export class DatasetRpc extends Schema.Class<DatasetRpc>("DatasetRpc")({
   kind: Schema.Literal("evm-rpc"),
   network: Network,
   name: DatasetName,
+  version: DatasetVersion,
   schema: Schema.Record({ key: Schema.String, value: Schema.Any }),
 }) {}
 

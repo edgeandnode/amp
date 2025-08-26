@@ -1,47 +1,93 @@
-#![allow(unused)]
+use std::time::Duration;
 
-use std::sync::Arc;
+use monitoring::telemetry;
 
-use prometheus::{IntCounterVec, Opts, register};
+/// The recommended interval at which to export metrics when running the `dump` command.
+/// If the export interval is set to a higher value (less frequent), there is a risk
+/// some observation points will not be exported.
+pub const RECOMMENDED_METRICS_EXPORT_INTERVAL: Duration = Duration::from_secs(1);
 
-pub struct ParquetWriterMetrics {
-    pub files_written: IntCounterVec,
-    pub bytes_written: IntCounterVec,
+#[derive(Debug, Clone)]
+pub struct MetricsRegistry {
+    // Row metrics, expressed in total rows dumped. Most metrics backends have a rate of change
+    // function which can be used to turn these metrics into rows per second.
+    pub raw_dataset_rows: telemetry::metrics::Counter,
+    pub sql_dataset_rows: telemetry::metrics::Counter,
+
+    // File metrics.
+    pub raw_dataset_files_written: telemetry::metrics::Counter,
+    pub sql_dataset_files_written: telemetry::metrics::Counter,
+
+    // Byte metrics.
+    pub raw_dataset_bytes_written: telemetry::metrics::Counter,
+    pub sql_dataset_bytes_written: telemetry::metrics::Counter,
 }
 
-impl ParquetWriterMetrics {
-    pub fn new() -> Arc<Self> {
-        let files_written_opts = Opts::new("files_written", "Count of parquet files written.");
-
-        let bytes_written_opts = Opts::new(
-            "bytes_written",
-            "Bytes written to the parquet writer, possibly unflushed.
-            Counts towards the partition size limit, \
-            but does not exactly correspond to the size of the parquet files written.",
-        );
-
-        let labels = &["dataset", "network", "location", "table"];
-        let files_written = IntCounterVec::new(files_written_opts, labels).unwrap();
-        let bytes_written = IntCounterVec::new(bytes_written_opts, labels).unwrap();
-
-        register(Box::new(files_written.clone())).unwrap();
-        register(Box::new(bytes_written.clone())).unwrap();
-
-        Arc::new(ParquetWriterMetrics {
-            files_written,
-            bytes_written,
-        })
+impl MetricsRegistry {
+    pub fn new(meter: &telemetry::metrics::Meter) -> Self {
+        Self {
+            raw_dataset_rows: telemetry::metrics::Counter::new(
+                meter,
+                "raw_dataset_rows_dumped",
+                "Counter for raw dataset rows processed",
+            ),
+            sql_dataset_rows: telemetry::metrics::Counter::new(
+                meter,
+                "sql_dataset_rows_dumped",
+                "Counter for SQL dataset rows processed",
+            ),
+            raw_dataset_files_written: telemetry::metrics::Counter::new(
+                meter,
+                "raw_dataset_files_written",
+                "Counter for raw dataset files written",
+            ),
+            sql_dataset_files_written: telemetry::metrics::Counter::new(
+                meter,
+                "sql_dataset_files_written",
+                "Counter for SQL dataset files written",
+            ),
+            raw_dataset_bytes_written: telemetry::metrics::Counter::new(
+                meter,
+                "raw_dataset_bytes_written",
+                "Counter for raw dataset bytes written",
+            ),
+            sql_dataset_bytes_written: telemetry::metrics::Counter::new(
+                meter,
+                "sql_dataset_bytes_written",
+                "Counter for SQL dataset bytes written",
+            ),
+        }
     }
 
-    pub fn inc_files_written(&self, dataset: &str, location: &str, table: &str) {
-        self.files_written
-            .with_label_values(&[dataset, location, table])
-            .inc();
+    pub(crate) fn inc_sql_dataset_rows_by(&self, amount: u64, dataset: String) {
+        let kv_pairs = [telemetry::metrics::KeyValue::new("dataset", dataset)];
+        self.sql_dataset_rows.inc_by_with_kvs(amount, &kv_pairs);
     }
 
-    pub fn add_bytes_written(&self, dataset: &str, location: &str, table: &str, bytes: u64) {
-        self.bytes_written
-            .with_label_values(&[dataset, location, table])
-            .inc_by(bytes);
+    pub(crate) fn inc_sql_dataset_files_written(&self, dataset: String) {
+        let kv_pairs = [telemetry::metrics::KeyValue::new("dataset", dataset)];
+        self.sql_dataset_files_written.inc_with_kvs(&kv_pairs);
+    }
+
+    pub(crate) fn inc_sql_dataset_bytes_written_by(&self, amount: u64, dataset: String) {
+        let kv_pairs = [telemetry::metrics::KeyValue::new("dataset", dataset)];
+        self.sql_dataset_bytes_written
+            .inc_by_with_kvs(amount, &kv_pairs);
+    }
+
+    pub(crate) fn inc_raw_dataset_rows_by(&self, amount: u64, dataset: String) {
+        let kv_pairs = [telemetry::metrics::KeyValue::new("dataset", dataset)];
+        self.raw_dataset_rows.inc_by_with_kvs(amount, &kv_pairs);
+    }
+
+    pub(crate) fn inc_raw_dataset_files_written(&self, dataset: String) {
+        let kv_pairs = [telemetry::metrics::KeyValue::new("dataset", dataset)];
+        self.raw_dataset_files_written.inc_with_kvs(&kv_pairs);
+    }
+
+    pub(crate) fn inc_raw_dataset_bytes_written_by(&self, amount: u64, dataset: String) {
+        let kv_pairs = [telemetry::metrics::KeyValue::new("dataset", dataset)];
+        self.raw_dataset_bytes_written
+            .inc_by_with_kvs(amount, &kv_pairs);
     }
 }

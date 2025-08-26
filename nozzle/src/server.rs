@@ -35,6 +35,7 @@ pub async fn run(
     enable_jsonl: bool,
     enable_registry: bool,
     enable_admin: bool,
+    metrics: Option<Arc<dump::metrics::MetricsRegistry>>,
 ) -> Result<(BoundAddrs, impl Future<Output = BoxResult<()>>), BoxError> {
     if config.max_mem_mb == 0 {
         tracing::info!("Memory limit is unlimited");
@@ -52,6 +53,7 @@ pub async fn run(
             config.clone(),
             metadata_db.clone(),
             "worker".parse().expect("Invalid worker ID"),
+            metrics,
         );
         tokio::spawn(async move {
             if let Err(err) = worker.run().await {
@@ -192,12 +194,13 @@ async fn handle_jsonl_request(
         Err(err) => return err.into_response(),
     };
     let stream = stream
-        .map(|result| -> Result<String, BoxError> {
-            let batch = result.map_err(error_payload)?;
+        .map(|result| -> Result<Vec<u8>, BoxError> {
+            let (batch, _range) = result.map_err(error_payload)?;
+            // TODO: propagate range to client
             let mut buf: Vec<u8> = Default::default();
             let mut writer = arrow::json::writer::LineDelimitedWriter::new(&mut buf);
             writer.write(&batch)?;
-            Ok(String::from_utf8(buf).unwrap())
+            Ok(buf)
         })
         .map_err(error_payload);
     let mut response =

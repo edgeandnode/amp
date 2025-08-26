@@ -14,6 +14,7 @@ use datafusion::{
     },
     physical_plan::metrics::ExecutionPlanMetricsSet,
 };
+use foyer::Cache;
 use futures::future::BoxFuture;
 use metadata_db::{LocationId, MetadataDb};
 use object_store::ObjectStore;
@@ -23,6 +24,7 @@ pub struct NozzleReaderFactory {
     pub location_id: LocationId,
     pub metadata_db: Arc<MetadataDb>,
     pub object_store: Arc<dyn ObjectStore>,
+    pub parquet_footer_cache: Cache<(LocationId, String), Arc<ParquetMetaData>>,
 }
 
 impl ParquetFileReaderFactory for NozzleReaderFactory {
@@ -47,6 +49,7 @@ impl ParquetFileReaderFactory for NozzleReaderFactory {
             file_metrics,
             metadata_db,
             file_meta,
+            parquet_footer_cache: self.parquet_footer_cache.clone(),
         }))
     }
 }
@@ -57,6 +60,7 @@ pub struct NozzleReader {
     pub metadata_db: Arc<MetadataDb>,
     pub file_metrics: ParquetFileMetrics,
     pub inner: ParquetObjectReader,
+    pub parquet_footer_cache: Cache<(LocationId, String), Arc<ParquetMetaData>>,
 }
 
 impl AsyncFileReader for NozzleReader {
@@ -82,21 +86,34 @@ impl AsyncFileReader for NozzleReader {
         let metadata_db = Arc::clone(&self.metadata_db);
         let file_meta = &self.file_meta;
         let location_id = self.location_id;
+        let cache = self.parquet_footer_cache.clone();
+
         Box::pin(async move {
             let file_name = file_meta
                 .location()
                 .filename()
                 .ok_or(ParquetError::External("File name is not available".into()))?
                 .to_string();
-            let footer = metadata_db
-                .get_footer_bytes(location_id, file_name)
-                .await
-                .map_err(|e| ParquetError::External(e.into()))?;
 
-            let metadata = ParquetMetaDataReader::new()
-                .with_page_indexes(true)
-                .parse_and_finish(&Bytes::from_owner(footer))?;
-            Ok(Arc::new(metadata))
+            let cache_key = (location_id, file_name.clone());
+
+            cache
+                .fetch(cache_key, || async move {
+                    // Cache miss, fetch from database
+                    let footer = metadata_db
+                        .get_footer_bytes(location_id, file_name)
+                        .await
+                        .map_err(|e| foyer::Error::Other(e.into()))?;
+
+                    let metadata = ParquetMetaDataReader::new()
+                        .with_page_indexes(true)
+                        .parse_and_finish(&Bytes::from_owner(footer))
+                        .map_err(|e| foyer::Error::Other(e.into()))?;
+                    Ok(Arc::new(metadata))
+                })
+                .await
+                .map(|c| c.value().clone())
+                .map_err(|e: foyer::Error| ParquetError::External(e.into()))
         })
     }
 }

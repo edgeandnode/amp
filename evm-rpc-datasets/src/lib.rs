@@ -64,6 +64,7 @@ pub fn dataset(dataset_cfg: common::DatasetValue) -> Result<Dataset, Error> {
     Ok(Dataset {
         kind: def.kind,
         name: def.name,
+        version: None,
         tables: tables::all(&def.network),
         network: def.network,
         functions: vec![],
@@ -89,7 +90,7 @@ pub async fn client(provider: toml::Value, network: String) -> Result<JsonRpcCli
 #[tokio::test]
 async fn print_schema_to_readme() {
     fs_err::write(
-        "src/README.md",
+        "../docs/schemas/evm-rpc.md",
         common::catalog::schema_to_markdown(tables::all("test_network")).await,
     )
     .unwrap();

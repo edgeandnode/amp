@@ -2,7 +2,7 @@ pub mod sql_datasets;
 
 use core::fmt;
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeSet,
     num::NonZeroU32,
     str::FromStr,
     sync::{Arc, RwLock},
@@ -11,12 +11,12 @@ use std::{
 use async_stream::stream;
 use common::{
     BlockNum, BlockStreamer, BoxError, DataTypeJsonSchema, Dataset, DatasetValue, LogicalCatalog,
-    QueryContext, RawDatasetRows, SPECIAL_BLOCK_NUM, Store,
+    RawDatasetRows, SPECIAL_BLOCK_NUM, Store,
     catalog::physical::{Catalog, PhysicalTable},
     config::Config,
     evm::{self, udfs::EthCall},
-    manifest::{Manifest, TableInput},
-    query_context::{self, PlanningContext, QueryEnv, parse_sql},
+    manifest::{self, Manifest, Version},
+    query_context::{self, PlanningContext, QueryEnv},
     sql_visitors::all_function_names,
     store::StoreError,
 };
@@ -47,6 +47,9 @@ pub enum Error {
 
     #[error("JSON parse error: {0}")]
     Json(#[from] serde_json::Error),
+
+    #[error("Metadata db error: {0}")]
+    MetadataDbError(#[from] metadata_db::Error),
 
     #[error("unsupported dataset kind '{0}'")]
     UnsupportedKind(String),
@@ -86,6 +89,9 @@ pub enum Error {
         dataset_kind: DatasetKind,
         network: String,
     },
+
+    #[error("dataset '{0}' version '{1}' not found")]
+    DatasetVersionNotFound(String, String),
 
     #[error("{0}")]
     Unknown(BoxError),
@@ -173,7 +179,7 @@ impl DatasetError {
         matches!(
             &self.error,
             Error::FetchError(e) if e.is_not_found()
-        )
+        ) || matches!(&self.error, Error::DatasetVersionNotFound(_, _))
     }
 }
 
@@ -231,12 +237,71 @@ impl DatasetStore {
         })
     }
 
-    // TODO: Update to return a Result<Option<..>, Error> if the dataset is not found
-    pub async fn load_dataset(self: &Arc<Self>, dataset: &str) -> Result<Dataset, DatasetError> {
+    pub async fn load_dataset(
+        self: &Arc<Self>,
+        dataset: &str,
+        version: Option<&Version>,
+    ) -> Result<Dataset, DatasetError> {
+        let dataset_identifier = self.load_dataset_from_registry(dataset, version).await?;
         self.clone()
-            .load_dataset_inner(dataset)
+            .load_dataset_inner(&dataset_identifier)
             .await
             .map_err(|e| (dataset, e).into())
+    }
+
+    pub async fn try_load_dataset(
+        self: &Arc<Self>,
+        dataset: &str,
+        version: Option<&Version>,
+    ) -> Result<Option<Dataset>, DatasetError> {
+        match self.load_dataset(dataset, version).await {
+            Ok(dataset) => Ok(Some(dataset)),
+            Err(e) => {
+                if e.is_not_found() {
+                    Ok(None)
+                } else {
+                    Err(e)
+                }
+            }
+        }
+    }
+
+    pub async fn load_dataset_from_registry(
+        self: &Arc<Self>,
+        dataset: &str,
+        version: Option<&Version>,
+    ) -> Result<String, DatasetError> {
+        let dataset_identifier = match version {
+            Some(version) => self
+                .metadata_db
+                .get_dataset(dataset, &version.to_string())
+                .await
+                .map_err(|e| DatasetError::from((dataset, Error::MetadataDbError(e))))?
+                .ok_or_else(|| {
+                    DatasetError::from((
+                        dataset,
+                        Error::DatasetVersionNotFound(dataset.to_string(), version.to_string()),
+                    ))
+                })?,
+            None => {
+                let latest_version = self
+                    .metadata_db
+                    .get_latest_dataset_version(dataset)
+                    .await
+                    .map_err(|e| DatasetError::from((dataset, Error::MetadataDbError(e))))?;
+                match latest_version {
+                    Some((dataset, version)) => {
+                        let version_identifier =
+                            Version::version_identifier(&version).map_err(|e| {
+                                DatasetError::from((dataset.as_str(), Error::Unknown(e)))
+                            })?;
+                        format!("{}__{}", dataset, version_identifier)
+                    }
+                    None => dataset.to_string(),
+                }
+            }
+        };
+        Ok(dataset_identifier)
     }
 
     pub async fn all_datasets(self: &Arc<Self>) -> Result<Vec<Dataset>, DatasetError> {
@@ -254,7 +319,7 @@ impl DatasetStore {
             if stem.is_none() {
                 continue;
             }
-            datasets.push(self.load_dataset(stem.unwrap()).await?);
+            datasets.push(self.load_dataset(stem.unwrap(), None).await?);
         }
         Ok(datasets)
     }
@@ -274,9 +339,13 @@ impl DatasetStore {
     pub async fn load_manifest_dataset(
         self: &Arc<Self>,
         dataset: &str,
+        version: &Version,
     ) -> Result<SqlDataset, DatasetError> {
+        let dataset_identifier = self
+            .load_dataset_from_registry(dataset, Some(version))
+            .await?;
         self.clone()
-            .load_manifest_dataset_inner(dataset)
+            .load_manifest_dataset_inner(&dataset_identifier)
             .await
             .map_err(|e| (dataset, e).into())
     }
@@ -288,7 +357,6 @@ impl DatasetStore {
         dataset_name: &str,
     ) -> Result<(DatasetDefsCommon, RawDataset), Error> {
         use Error::*;
-
         let raw_dataset = self
             .dataset_defs_store()
             .get_string(format!("{}.toml", dataset_name))
@@ -297,7 +365,6 @@ impl DatasetStore {
                 if !err.is_not_found() {
                     return Err(err);
                 }
-
                 self.dataset_defs_store()
                     .get_string(format!("{}.json", dataset_name))
                     .await
@@ -313,7 +380,7 @@ impl DatasetStore {
             RawDataset::Json(ref raw) => serde_json::from_str::<DatasetDefsCommon>(raw)?.into(),
         };
 
-        if common.name != dataset_name {
+        if common.name != dataset_name && common.kind != "manifest" {
             return Err(NameMismatch(common.name, dataset_name.to_string()));
         }
 
@@ -328,22 +395,20 @@ impl DatasetStore {
         let raw_manifest = self.dataset_defs_store().get_string(filename).await?;
         let manifest: Manifest =
             serde_json::from_str(&raw_manifest).map_err(Error::ManifestError)?;
-        let dataset = Dataset::from(manifest.clone());
-        let mut queries = BTreeMap::new();
-        for table in manifest.tables {
-            let TableInput::View(query) = table.1.input;
-            let query = parse_sql(&query.sql).map_err(Error::SqlParseError)?;
-            queries.insert(table.0, query);
-        }
+        let queries = manifest.queries().map_err(Error::SqlParseError)?;
+        let dataset = manifest::dataset(manifest).map_err(Error::Unknown)?;
         Ok(SqlDataset { dataset, queries })
     }
 
-    async fn load_dataset_inner(self: &Arc<Self>, dataset_name: &str) -> Result<Dataset, Error> {
-        if let Some(dataset) = self.dataset_cache.read().unwrap().get(dataset_name) {
+    async fn load_dataset_inner(
+        self: &Arc<Self>,
+        dataset_identifier: &str,
+    ) -> Result<Dataset, Error> {
+        if let Some(dataset) = self.dataset_cache.read().unwrap().get(dataset_identifier) {
             return Ok(dataset.clone());
         }
 
-        let (common, raw_dataset) = self.common_data_and_dataset(dataset_name).await?;
+        let (common, raw_dataset) = self.common_data_and_dataset(dataset_identifier).await?;
         let kind = DatasetKind::from_str(&common.kind)?;
         let value = raw_dataset.to_value()?;
         let (dataset, ground_truth_schema) = match kind {
@@ -371,7 +436,7 @@ impl DatasetStore {
             }
             DatasetKind::Manifest => {
                 let manifest = raw_dataset.to_manifest()?;
-                let dataset = Dataset::from(manifest);
+                let dataset = manifest::dataset(manifest).map_err(|e| Error::Unknown(e))?;
                 (dataset, None)
             }
         };
@@ -389,7 +454,7 @@ impl DatasetStore {
         self.dataset_cache
             .write()
             .unwrap()
-            .insert(dataset_name.to_string(), dataset.clone());
+            .insert(dataset_identifier.to_string(), dataset.clone());
 
         Ok(dataset)
     }
@@ -527,18 +592,16 @@ impl DatasetStore {
     /// 2. Assume that in `foo.bar`, `foo` is a dataset name.
     /// 3. Look up the dataset names in the configured dataset store.
     /// 4. Collect the datasets into a catalog.
-    pub async fn ctx_for_sql(
+    pub async fn catalog_for_sql(
         self: &Arc<Self>,
         query: &parser::Statement,
         env: QueryEnv,
-    ) -> Result<QueryContext, DatasetError> {
+    ) -> Result<Catalog, DatasetError> {
         let (tables, _) = resolve_table_references(query, true).map_err(DatasetError::unknown)?;
         let function_names = all_function_names(query).map_err(DatasetError::unknown)?;
 
-        let catalog = self
-            .load_physical_catalog(tables, function_names, &env)
-            .await?;
-        QueryContext::for_catalog(catalog, env).map_err(DatasetError::unknown)
+        self.load_physical_catalog(tables, function_names, &env)
+            .await
     }
 
     /// Looks up the datasets for the given table references and loads them into a catalog.
@@ -553,7 +616,7 @@ impl DatasetStore {
             .await?;
 
         let mut tables = Vec::new();
-        for table in logical_catalog.tables {
+        for table in &logical_catalog.tables {
             let physical_table = PhysicalTable::get_active(&table, self.metadata_db.clone())
                 .await
                 .map_err(DatasetError::unknown)?
@@ -563,10 +626,10 @@ impl DatasetStore {
                 )))?;
             tables.push(physical_table.into());
         }
-        Ok(Catalog::new(tables, logical_catalog.udfs))
+        Ok(Catalog::new(tables, logical_catalog))
     }
 
-    /// Similar to `ctx_for_sql`, but only for planning and not execution. This does not require a
+    /// Similar to `catalog_for_sql`, but only for planning and not execution. This does not require a
     /// physical location to exist for the dataset views.
     pub async fn planning_ctx_for_sql(
         self: Arc<Self>,
@@ -588,7 +651,8 @@ impl DatasetStore {
         function_names: impl IntoIterator<Item = String>,
         isolate_pool: &IsolatePool,
     ) -> Result<LogicalCatalog, DatasetError> {
-        let mut dataset_names = datasets_from_table_refs(table_refs.into_iter())?;
+        let table_refs: Vec<_> = table_refs.into_iter().collect();
+        let mut dataset_names = datasets_from_table_refs(table_refs.iter().cloned())?;
         for func_name in function_names {
             match func_name.split('.').collect::<Vec<_>>().as_slice() {
                 // Simple name assumed to be Datafusion built-in function.
@@ -606,7 +670,7 @@ impl DatasetStore {
         let mut resolved_tables = Vec::new();
         let mut udfs = Vec::new();
         for dataset_name in dataset_names {
-            let dataset = self.load_dataset(&dataset_name).await?;
+            let dataset = self.load_dataset(&dataset_name, None).await?;
             let udf = self
                 .eth_call_for_dataset(&dataset)
                 .await
@@ -620,8 +684,22 @@ impl DatasetStore {
                 udfs.push(udf.into());
             }
 
-            for table in Arc::new(dataset).resolved_tables() {
-                resolved_tables.push(table);
+            for mut table in Arc::new(dataset).resolved_tables() {
+                // Only include tables that are actually referenced in the query
+                let is_referenced = table_refs.iter().any(|table_ref| {
+                    match (table_ref.schema(), table_ref.table()) {
+                        (Some(schema), table_name) => {
+                            schema == &dataset_name && table_name == table.name()
+                        }
+                        _ => false, // Unqualified table
+                    }
+                });
+
+                if is_referenced {
+                    let table_ref = TableReference::partial(dataset_name.clone(), table.name());
+                    table.update_table_ref(table_ref);
+                    resolved_tables.push(table);
+                }
             }
         }
         Ok(LogicalCatalog {
@@ -644,7 +722,7 @@ impl DatasetStore {
         &self.config.providers_store
     }
 
-    fn dataset_defs_store(&self) -> &Arc<Store> {
+    pub fn dataset_defs_store(&self) -> &Arc<Store> {
         &self.config.dataset_defs_store
     }
 }
@@ -829,11 +907,12 @@ impl From<&[common::catalog::logical::Table]> for SerializableSchema {
 }
 
 /// Return a table identifier, in the form `{dataset}.blocks`, for the given network.
+#[instrument(skip(dataset_store), err)]
 pub async fn resolve_blocks_table(
     dataset_store: &Arc<DatasetStore>,
     src_datasets: &BTreeSet<&str>,
     network: &str,
-) -> Result<String, BoxError> {
+) -> Result<PhysicalTable, BoxError> {
     let dataset = {
         fn is_raw_dataset(kind: &str) -> bool {
             ["evm-rpc", "firehose"].contains(&kind)
@@ -871,6 +950,24 @@ pub async fn resolve_blocks_table(
         }
     };
 
-    assert!(dataset.tables.iter().any(|t| t.name() == "blocks"));
-    Ok(format!("{}.blocks", dataset.name))
+    let dataset_name = dataset.name.clone();
+    let table = Arc::new(dataset)
+        .resolved_tables()
+        .find(|t| t.name() == "blocks")
+        .ok_or_else(|| {
+            BoxError::from(format!(
+                "dataset '{}' does not have a 'blocks' table",
+                dataset_name
+            ))
+        })?;
+
+    PhysicalTable::get_active(&table, dataset_store.metadata_db.clone())
+        .await?
+        .ok_or_else(|| {
+            BoxError::from(format!(
+                "table '{}.{}' has not been synced",
+                dataset_name,
+                table.name()
+            ))
+        })
 }

@@ -9,23 +9,24 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     # Core dependencies for all loaders
+    "pandas>=2.3.1",
     "pyarrow>=20.0.0",
     "typer>=0.15.2",
-    
+
     # Flight SQL support
     "adbc-driver-manager>=1.5.0",
     "adbc-driver-postgresql>=1.5.0",
     "protobuf>=4.21.0",
-    
+
     # Ethereum/blockchain utilities
     "base58>=2.1.1",
     "eth-hash[pysha3]>=0.7.1",
     "eth-utils>=5.2.0",
-    
+
     # Google Cloud support
     "google-cloud-bigquery>=3.30.0",
     "google-cloud-storage>=3.1.0",
-    
+
     # Arro3 for enhanced PyArrow operations
     "arro3-core>=0.5.1",
     "arro3-compute>=0.5.1",
@@ -51,10 +52,25 @@ delta_lake = [
     "deltalake>=1.0.2",
 ]
 
+iceberg = [
+    "pyiceberg[sql-sqlite]>=0.9.1",
+]
+
+snowflake = [
+    "snowflake-connector-python>=3.5.0",
+]
+
+lmdb = [
+    "lmdb>=1.4.0",
+]
+
 all_loaders = [
     "psycopg2-binary>=2.9.0",       # PostgreSQL
     "redis>=4.5.0",                 # Redis
     "deltalake>=1.0.2",             # Delta Lake (consistent version)
+    "pyiceberg[sql-sqlite]>=0.9.1", # Apache Iceberg
+    "snowflake-connector-python>=3.5.0",  # Snowflake
+    "lmdb>=1.4.0",                  # LMDB
 ]
 
 test = [
@@ -82,6 +98,10 @@ addopts = [
     "--tb=short",
     "--strict-markers",
 ]
+# Timeout configuration for longer-running integration tests
+timeout = 300  # 5 minutes per test
+timeout_method = "thread"
+
 markers = [
     "unit: Unit tests (fast, no external dependencies)",
     "integration: Integration tests (require databases)",
@@ -91,6 +111,7 @@ markers = [
     "redis: Tests requiring Redis",
     "delta_lake: Tests requiring Delta Lake",
     "iceberg: Tests requiring Apache Iceberg",
+    "snowflake: Tests requiring Snowflake",
     "cloud: Tests requiring cloud storage access",
 ]
 

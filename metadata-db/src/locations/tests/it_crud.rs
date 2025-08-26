@@ -1,4 +1,4 @@
-//! In-tree DB integration tests for locations
+//! Core location operations tests
 
 use pgtemp::PgTempDB;
 use url::Url;
@@ -7,10 +7,7 @@ use crate::{
     TableId,
     conn::DbConn,
     locations::{self, LocationId},
-    workers::{
-        heartbeat,
-        jobs::{self, JobId},
-    },
+    workers::{heartbeat, job_id::JobId, jobs},
 };
 
 #[tokio::test]
@@ -23,6 +20,15 @@ async fn insert_creates_location_and_returns_id() {
     conn.run_migrations()
         .await
         .expect("Failed to run migrations");
+
+    let columns: Vec<String> = sqlx::query_scalar("SELECT column_name FROM information_schema.columns WHERE table_name = 'locations' ORDER BY column_name").fetch_all(&mut *conn).await.expect("Failed to query schema");
+    println!("Locations table columns: {:?}", columns);
+
+    let has_start_block = columns.contains(&"start_block".to_string());
+    assert!(
+        has_start_block,
+        "start_block column is missing after migrations!"
+    );
 
     let table = TableId {
         dataset: "test-dataset",
@@ -41,7 +47,7 @@ async fn insert_creates_location_and_returns_id() {
         .expect("Failed to insert location");
 
     //* Then
-    assert!(location_id > 0);
+    assert!(*location_id > 0);
 
     // Verify the location was created correctly
     let (
@@ -53,6 +59,7 @@ async fn insert_creates_location_and_returns_id() {
         row_path,
         row_url,
         row_active,
+        row_start_block,
     ) = get_location_by_id(&mut *conn, location_id)
         .await
         .expect("Failed to fetch inserted location");
@@ -65,6 +72,7 @@ async fn insert_creates_location_and_returns_id() {
     assert_eq!(row_path, "/test/path/file.parquet");
     assert_eq!(row_url, url.as_str());
     assert_eq!(row_active, true);
+    assert_eq!(row_start_block, 0);
 }
 
 #[tokio::test]
@@ -411,7 +419,7 @@ async fn get_by_job_id_returns_locations_written_by_job() {
     let job_desc = serde_json::json!({"operation": "dump"});
     let job_desc_str =
         serde_json::to_string(&job_desc).expect("Failed to serialize job description");
-    let job_id = jobs::register_job(&mut *conn, &worker_id, &job_desc_str)
+    let job_id = jobs::register(&mut *conn, &worker_id, &job_desc_str)
         .await
         .expect("Failed to register job");
 
@@ -493,7 +501,7 @@ async fn get_by_job_id_returns_locations_written_by_job() {
     for location in &job_locations {
         assert_eq!(location.dataset, "test-dataset");
         assert_eq!(location.dataset_version, "v1.0");
-        assert!(location.tbl == "test-table1" || location.tbl == "test-table2");
+        assert!(location.table == "test-table1" || location.table == "test-table2");
         assert_eq!(location.active, true);
     }
 }
@@ -520,7 +528,7 @@ async fn assign_job_writer_assigns_job_to_multiple_locations() {
     let job_desc = serde_json::json!({"operation": "write"});
     let job_desc_str =
         serde_json::to_string(&job_desc).expect("Failed to serialize job description");
-    let job_id = jobs::register_job(&mut *conn, &worker_id, &job_desc_str)
+    let job_id = jobs::register(&mut *conn, &worker_id, &job_desc_str)
         .await
         .expect("Failed to register job");
 
@@ -589,6 +597,75 @@ async fn assign_job_writer_assigns_job_to_multiple_locations() {
     assert_eq!(writer_unassigned, None);
 }
 
+#[tokio::test]
+async fn get_by_id_returns_existing_location() {
+    //* Given
+    let temp_db = PgTempDB::new();
+    let mut conn = DbConn::connect(&temp_db.connection_uri())
+        .await
+        .expect("Failed to connect to metadata db");
+    conn.run_migrations()
+        .await
+        .expect("Failed to run migrations");
+
+    let table = TableId {
+        dataset: "test-dataset",
+        dataset_version: Some("v1.0"),
+        table: "test-table",
+    };
+    let url = Url::parse("s3://bucket/get-by-id.parquet").expect("Failed to parse URL");
+
+    let inserted_id = locations::insert(
+        &mut *conn,
+        table,
+        Some("bucket"),
+        "/get-by-id.parquet",
+        &url,
+        true,
+    )
+    .await
+    .expect("Failed to insert location");
+
+    //* When
+    let location = locations::get_by_id_with_details(&mut *conn, inserted_id)
+        .await
+        .expect("Failed to get location by id");
+
+    println!("location: {:?}", location);
+
+    //* Then
+    assert!(location.is_some());
+    let location = location.unwrap();
+    assert_eq!(location.id, inserted_id);
+    assert_eq!(location.dataset, "test-dataset");
+    assert_eq!(location.dataset_version, "v1.0");
+    assert_eq!(location.table, "test-table");
+    assert_eq!(location.url, url);
+    assert_eq!(location.active, true);
+}
+
+#[tokio::test]
+async fn get_by_id_returns_none_for_nonexistent_location() {
+    //* Given
+    let temp_db = PgTempDB::new();
+    let mut conn = DbConn::connect(&temp_db.connection_uri())
+        .await
+        .expect("Failed to connect to metadata db");
+    conn.run_migrations()
+        .await
+        .expect("Failed to run migrations");
+
+    let nonexistent_id = LocationId::try_from(999999_i64).expect("Failed to create LocationId");
+
+    //* When
+    let location = locations::get_by_id_with_details(&mut *conn, nonexistent_id)
+        .await
+        .expect("Failed to get location by id");
+
+    //* Then
+    assert!(location.is_none());
+}
+
 // Helper functions for tests
 
 /// Helper function to fetch location details by ID
@@ -605,13 +682,14 @@ async fn get_location_by_id<'c, E>(
         String,
         String,
         bool,
+        i64,
     ),
     sqlx::Error,
 >
 where
     E: sqlx::Executor<'c, Database = sqlx::Postgres>,
 {
-    let query = "SELECT id, dataset, dataset_version, tbl, bucket, path, url, active FROM locations WHERE id = $1";
+    let query = "SELECT id, dataset, dataset_version, tbl, bucket, path, url, active, start_block FROM locations WHERE id = $1";
     sqlx::query_as(query).bind(location_id).fetch_one(exe).await
 }
 

@@ -8,9 +8,10 @@ async fn schedule_and_retrieve_job() {
     //* Given
     let temp_db = PgTempDB::new();
 
-    let metadata_db = MetadataDb::connect(&temp_db.connection_uri())
-        .await
-        .expect("Failed to connect to metadata db");
+    let metadata_db =
+        MetadataDb::connect(&temp_db.connection_uri(), MetadataDb::default_pool_size())
+            .await
+            .expect("Failed to connect to metadata db");
 
     // Pre-register the worker
     let worker_id = "test-worker-id".parse().expect("Invalid worker ID");
@@ -53,9 +54,10 @@ async fn schedule_and_retrieve_job() {
 async fn pagination_traverses_all_jobs_ordered() {
     //* Given
     let temp_db = PgTempDB::new();
-    let metadata_db = MetadataDb::connect(&temp_db.connection_uri())
-        .await
-        .expect("Failed to connect to metadata db");
+    let metadata_db =
+        MetadataDb::connect(&temp_db.connection_uri(), MetadataDb::default_pool_size())
+            .await
+            .expect("Failed to connect to metadata db");
 
     let total_jobs = 7;
     let worker_id = "test-worker-traverse".parse().expect("Invalid worker ID");

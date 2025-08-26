@@ -2,15 +2,21 @@
 
 use axum::{
     Json,
-    extract::{Query, State},
+    extract::{Query, State, rejection::QueryRejection},
     http::StatusCode,
 };
-use common::BoxError;
 use http_common::{BoxRequestError, RequestError};
-use metadata_db::{JobId, JobWithDetails};
+use metadata_db::JobId;
 use serde::{Deserialize, Serialize};
 
+use super::job_info::JobInfo;
 use crate::ctx::Ctx;
+
+/// Default number of jobs returned per page
+const DEFAULT_PAGE_LIMIT: usize = 50;
+
+/// Maximum number of jobs allowed per page
+const MAX_PAGE_LIMIT: usize = 1000;
 
 /// Query parameters for the jobs listing endpoint
 #[derive(Debug, Deserialize)]
@@ -24,12 +30,27 @@ pub struct JobsQuery {
 }
 
 fn default_limit() -> usize {
-    50
+    DEFAULT_PAGE_LIMIT
 }
 
 /// Handler for the `GET /jobs` endpoint
 ///
 /// Retrieves and returns a paginated list of jobs from the metadata database.
+///
+/// ## Query Parameters
+/// - `limit`: Maximum number of jobs to return (default: 50, max: 1000)
+/// - `last_job_id`: ID of the last job from previous page for cursor-based pagination
+///
+/// ## Response
+/// - **200 OK**: Returns paginated job data with next cursor
+/// - **400 Bad Request**: Invalid limit parameter (0, negative, or > 1000)
+/// - **500 Internal Server Error**: Database connection or query error
+///
+/// ## Error Codes
+/// - `INVALID_QUERY_PARAMETERS`: Invalid query parameters (malformed or unparseable)
+/// - `LIMIT_TOO_LARGE`: Limit exceeds maximum allowed value
+/// - `LIMIT_INVALID`: Limit is zero or negative
+/// - `METADATA_DB_ERROR`: Internal database error occurred
 ///
 /// This handler:
 /// - Accepts query parameters for pagination (limit, last_job_id)
@@ -39,13 +60,24 @@ fn default_limit() -> usize {
 #[tracing::instrument(skip_all, err)]
 pub async fn handler(
     State(ctx): State<Ctx>,
-    Query(query): Query<JobsQuery>,
+    query: Result<Query<JobsQuery>, QueryRejection>,
 ) -> Result<Json<JobsResponse>, BoxRequestError> {
+    let query = match query {
+        Ok(Query(query)) => query,
+        Err(err) => {
+            tracing::debug!(error=?err, "invalid query parameters");
+            return Err(Error::InvalidQueryParams { err }.into());
+        }
+    };
     // Validate limit
-    let limit = if query.limit > 1000 {
-        return Err(Error::InvalidRequest("limit cannot be greater than 1000".into()).into());
+    let limit = if query.limit > MAX_PAGE_LIMIT {
+        return Err(Error::LimitTooLarge {
+            limit: query.limit,
+            max: MAX_PAGE_LIMIT,
+        }
+        .into());
     } else if query.limit == 0 {
-        return Err(Error::InvalidRequest("limit must be greater than 0".into()).into());
+        return Err(Error::LimitInvalid.into());
     } else {
         query.limit
     };
@@ -62,13 +94,13 @@ pub async fn handler(
 
     // Determine next cursor (ID of the last job in this page)
     let next_cursor = jobs.last().map(|job| job.id);
+    let jobs = jobs
+        .into_iter()
+        .take(limit)
+        .map(Into::into)
+        .collect::<Vec<_>>();
 
-    let response = JobsResponse {
-        jobs: jobs.into_iter().map(JobInfo::from).collect(),
-        next_cursor,
-    };
-
-    Ok(Json(response))
+    Ok(Json(JobsResponse { jobs, next_cursor }))
 }
 
 /// API response containing job information
@@ -81,59 +113,59 @@ pub struct JobsResponse {
     pub next_cursor: Option<JobId>,
 }
 
-/// Represents job information for the API response
-#[derive(Debug, Serialize)]
-pub struct JobInfo {
-    /// Unique identifier for the job
-    pub id: JobId,
-    /// ID of the worker node this job is scheduled for
-    pub node_id: String,
-    /// Current status of the job
-    pub status: String,
-    /// Job descriptor (contains job-specific parameters)
-    pub descriptor: serde_json::Value,
-    /// Job creation timestamp (ISO 8601 format)
-    pub created_at: String,
-    /// Job last update timestamp (ISO 8601 format)  
-    pub updated_at: String,
-}
-
-impl From<JobWithDetails> for JobInfo {
-    fn from(job: JobWithDetails) -> Self {
-        Self {
-            id: job.id,
-            node_id: job.node_id.to_string(),
-            status: job.status.to_string(),
-            descriptor: job.desc,
-            created_at: job.created_at.to_rfc3339(),
-            updated_at: job.updated_at.to_rfc3339(),
-        }
-    }
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// The query parameters are invalid or malformed
+    ///
+    /// This occurs when query parameters cannot be parsed, such as:
+    /// - Invalid integer format for limit or last_job_id
+    /// - Malformed query string syntax
+    #[error("invalid query parameters: {err}")]
+    InvalidQueryParams {
+        /// The rejection details from Axum's query extractor
+        err: QueryRejection,
+    },
+
+    /// The requested limit exceeds the maximum allowed value
+    ///
+    /// This occurs when the limit parameter is greater than the maximum
+    /// allowed page size.
+    #[error("limit {limit} exceeds maximum allowed limit of {max}")]
+    LimitTooLarge {
+        /// The requested limit value
+        limit: usize,
+        /// The maximum allowed limit
+        max: usize,
+    },
+
+    /// The requested limit is invalid (zero or negative)
+    ///
+    /// This occurs when the limit parameter is 0, which would result
+    /// in no items being returned.
+    #[error("limit must be greater than 0")]
+    LimitInvalid,
+
     /// Metadata DB error
     #[error("metadata db error: {0}")]
     MetadataDbError(#[from] metadata_db::Error),
-
-    /// Invalid request
-    #[error("invalid request: {0}")]
-    InvalidRequest(BoxError),
 }
 
 impl RequestError for Error {
     fn error_code(&self) -> &'static str {
         match self {
+            Error::InvalidQueryParams { .. } => "INVALID_QUERY_PARAMETERS",
+            Error::LimitTooLarge { .. } => "LIMIT_TOO_LARGE",
+            Error::LimitInvalid => "LIMIT_INVALID",
             Error::MetadataDbError(_) => "METADATA_DB_ERROR",
-            Error::InvalidRequest(_) => "INVALID_REQUEST",
         }
     }
 
     fn status_code(&self) -> StatusCode {
         match self {
+            Error::InvalidQueryParams { .. } => StatusCode::BAD_REQUEST,
+            Error::LimitTooLarge { .. } => StatusCode::BAD_REQUEST,
+            Error::LimitInvalid => StatusCode::BAD_REQUEST,
             Error::MetadataDbError(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::InvalidRequest(_) => StatusCode::BAD_REQUEST,
         }
     }
 }

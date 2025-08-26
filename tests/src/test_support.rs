@@ -8,7 +8,7 @@ use std::{
 };
 
 use common::{
-    BoxError, QueryContext,
+    BoxError, LogicalCatalog, QueryContext,
     arrow::{
         self,
         array::{BinaryArray, FixedSizeBinaryArray, RecordBatch, StringArray},
@@ -28,7 +28,9 @@ use figment::{
 };
 use fs_err as fs;
 use futures::{StreamExt as _, stream::TryStreamExt};
-use metadata_db::{KEEP_TEMP_DIRS, MetadataDb, WorkerNodeId, temp::TempMetadataDb};
+use metadata_db::{
+    DEFAULT_POOL_SIZE, KEEP_TEMP_DIRS, MetadataDb, WorkerNodeId, temp::TempMetadataDb,
+};
 use nozzle::{
     dump_cmd::{datasets_and_dependencies, dump},
     server::BoundAddrs,
@@ -111,7 +113,7 @@ impl TestEnv {
         temp: bool,
         anvil_url: Option<&str>,
     ) -> Result<Self, BoxError> {
-        let db = TempMetadataDb::new(*KEEP_TEMP_DIRS).await;
+        let db = TempMetadataDb::new(*KEEP_TEMP_DIRS, DEFAULT_POOL_SIZE).await;
         let mut figment = Figment::from(Json::string(&format!(
             r#"{{ "metadata_db_url": "{}" }}"#,
             db.url(),
@@ -165,6 +167,7 @@ impl TestEnv {
             true,
             true,
             true,
+            None,
         )
         .await?;
         tokio::spawn(server);
@@ -173,6 +176,7 @@ impl TestEnv {
             config.clone(),
             metadata_db.clone(),
             WorkerNodeId::from_str(test_name).unwrap(),
+            None,
         );
         tokio::spawn(worker.run());
 
@@ -195,8 +199,10 @@ impl SnapshotContext {
     pub async fn blessed(env: &TestEnv, dataset: &str) -> Result<Self, BoxError> {
         let metadata_db = &env.metadata_db;
         let tables = restore_blessed_dataset(dataset, metadata_db).await?;
-        let catalog = Catalog::new(tables, vec![]);
-        let ctx: QueryContext = QueryContext::for_catalog(catalog, env.config.make_query_env()?)?;
+        let logical = LogicalCatalog::from_tables(tables.iter().map(|t| t.table()));
+        let catalog = Catalog::new(tables, logical);
+        let ctx: QueryContext =
+            QueryContext::for_catalog(catalog, env.config.make_query_env()?, false).await?;
         Ok(Self { ctx })
     }
 
@@ -215,19 +221,20 @@ impl SnapshotContext {
             test_env.metadata_db.clone(),
         )
         .await?;
-        let ctx = QueryContext::for_catalog(catalog, test_env.config.make_query_env()?)?;
+        let ctx =
+            QueryContext::for_catalog(catalog, test_env.config.make_query_env()?, false).await?;
 
         Ok(SnapshotContext { ctx })
     }
 
     async fn check_block_range_eq(&self, blessed: &SnapshotContext) -> Result<(), BoxError> {
         let mut blessed_block_ranges: BTreeMap<String, Vec<BlockRange>> = Default::default();
-        for table in blessed.ctx.catalog().tables() {
+        for table in blessed.ctx.catalog().physical_tables() {
             blessed_block_ranges
                 .insert(table.table_name().to_string(), table_ranges(&table).await?);
         }
 
-        for table in self.ctx.catalog().tables() {
+        for table in self.ctx.catalog().physical_tables() {
             let table_name = table.table_name();
             let mut expected_ranges = table_ranges(&table).await?;
             expected_ranges.sort_by_key(|r| *r.numbers.start());
@@ -248,7 +255,7 @@ impl SnapshotContext {
     pub async fn assert_eq(&self, other: &SnapshotContext) -> Result<(), BoxError> {
         self.check_block_range_eq(other).await?;
 
-        for table in self.ctx.catalog().tables() {
+        for table in self.ctx.catalog().physical_tables() {
             let query = parse_sql(&format!(
                 "select * from {} order by block_num",
                 table.table_ref()
@@ -295,6 +302,7 @@ pub(crate) async fn dump_dataset(
         microbatch_max_interval,
         None,
         false,
+        None,
     )
     .await?;
 
@@ -311,8 +319,8 @@ pub(crate) async fn catalog_for_dataset(
     dataset_store: &Arc<DatasetStore>,
     metadata_db: Arc<MetadataDb>,
 ) -> Result<Catalog, BoxError> {
-    let dataset = dataset_store.load_dataset(dataset_name).await?;
-    let mut tables = Vec::new();
+    let dataset = dataset_store.load_dataset(dataset_name, None).await?;
+    let mut tables: Vec<Arc<PhysicalTable>> = Vec::new();
     for table in Arc::new(dataset.clone()).resolved_tables() {
         // Unwrap: we just dumped the dataset, so it must have an active physical table.
         let physical_table = PhysicalTable::get_active(&table, metadata_db.clone())
@@ -320,7 +328,8 @@ pub(crate) async fn catalog_for_dataset(
             .unwrap();
         tables.push(physical_table.into());
     }
-    Ok(Catalog::new(tables, vec![]))
+    let logical = LogicalCatalog::from_tables(tables.iter().map(|t| t.table()));
+    Ok(Catalog::new(tables, logical))
 }
 
 pub async fn table_ranges(table: &PhysicalTable) -> Result<Vec<BlockRange>, BoxError> {
@@ -344,6 +353,7 @@ pub async fn check_blocks(
 
     dump_check::dump_check(
         dataset_name,
+        None,
         &test_env.dataset_store,
         test_env.metadata_db.clone(),
         &env,
@@ -351,6 +361,7 @@ pub async fn check_blocks(
         1,
         start,
         end,
+        None,
     )
     .await
 }
@@ -496,13 +507,17 @@ pub struct DatasetPackage {
 
     // Relative to crate root
     pub path: PathBuf,
+
+    // Relative config path
+    pub config: Option<String>,
 }
 
 impl DatasetPackage {
-    pub fn new(name: &str) -> Self {
+    pub fn new(name: &str, config: Option<&str>) -> Self {
         Self {
             name: name.to_string(),
             path: PathBuf::from_str(&format!("datasets/{}", name)).unwrap(),
+            config: config.map(|s| s.to_string()),
         }
     }
 
@@ -561,8 +576,13 @@ impl DatasetPackage {
 
     #[instrument(skip_all, err)]
     pub async fn deploy(&self, bound_addrs: BoundAddrs) -> Result<(), BoxError> {
+        let mut args = vec!["nozzl", "deploy"];
+        if let Some(config) = &self.config {
+            args.push("--config");
+            args.push(config);
+        }
         let status = tokio::process::Command::new("pnpm")
-            .args(&["nozzl", "deploy"])
+            .args(&args)
             .env(
                 "NOZZLE_REGISTRY_URL",
                 &format!("http://{}", bound_addrs.registry_service_addr),
@@ -594,25 +614,38 @@ pub async fn restore_blessed_dataset(
 ) -> Result<Vec<Arc<PhysicalTable>>, BoxError> {
     let config = load_test_config(None).await?;
     let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
-    let dataset = dataset_store.load_dataset(dataset).await?;
+    let dataset = dataset_store.load_dataset(dataset, None).await?;
     let dataset_name = dataset.name.clone();
     let data_store = config.data_store.clone();
-    let mut tables = Vec::new();
+    let mut tables = Vec::<Arc<PhysicalTable>>::new();
+
+    // Determine the start_block for known datasets
+    let start_block: i64 = match dataset.name.as_str() {
+        "eth_firehose" | "eth_rpc" | "sql_over_eth_firehose" => 15_000_000,
+        "base" => 33411770,
+        _ => 0,
+    };
+
     for table in Arc::new(dataset).resolved_tables() {
-        let physical_table =
-            PhysicalTable::restore_latest_revision(&table, data_store.clone(), metadata_db.clone())
-                .await?
-                .expect(
-                    format!(
-                        "Failed to restore blessed table {dataset_name}.{}. This is likely due to \
+        let physical_table = PhysicalTable::restore_latest_revision(
+            &table,
+            data_store.clone(),
+            metadata_db.clone(),
+            start_block,
+        )
+        .await?
+        .expect(
+            format!(
+                "Failed to restore blessed table {dataset_name}.{}. This is likely due to \
                         the dataset or table being deleted. \n\
                         Bless the dataset again with by running \
                         `cargo run -p tests -- bless {dataset_name} <start_block> <end_block>`",
-                        table.name()
-                    )
-                    .as_str(),
-                );
+                table.name()
+            )
+            .as_str(),
+        );
         tables.push(physical_table.into());
     }
+
     Ok(tables)
 }

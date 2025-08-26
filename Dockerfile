@@ -1,4 +1,4 @@
-FROM rust:1.88.0 AS build
+FROM rust:1.89.0 AS build
 
 # cmake is for snmalloc
 RUN apt-get update && apt-get install -y protobuf-compiler cmake
@@ -9,8 +9,12 @@ RUN cargo build -p nozzle --release -v && \
 # As a convenience, we also provide datafusion-cli
 RUN cargo install datafusion-cli
 
+# install sqlx-cli for migration management
+RUN cargo install sqlx-cli
+
 FROM debian:bookworm-slim AS nozzle
 RUN apt-get update && apt-get install -y ca-certificates && apt-get clean
 COPY --from=build /bin/nozzle /bin/
 COPY --from=build /usr/local/cargo/bin/datafusion-cli /bin/
+COPY --from=build /usr/local/cargo/bin/sqlx /bin/
 CMD ["/bin/nozzle"]

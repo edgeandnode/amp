@@ -5,6 +5,7 @@ use std::{
 
 use common::{
     BoxError, Dataset, DatasetValue, SPECIAL_BLOCK_NUM, Table,
+    manifest::sort_tables_by_dependencies,
     query_context::{parse_sql, prepend_special_block_num_field},
 };
 use datafusion::sql::parser;
@@ -80,7 +81,6 @@ pub(super) async fn dataset(
         let Some(table_name) = filename.strip_suffix(".sql") else {
             continue;
         };
-
         let raw_query = defs_store.get_string(file.location.clone()).await?;
         let query = parse_sql(&raw_query)?;
         let ctx = store.clone().planning_ctx_for_sql(&query).await?;
@@ -112,12 +112,14 @@ pub(super) async fn dataset(
         tables.push(table);
         queries.insert(table_name.to_string(), query);
     }
+    let tables = sort_tables_by_dependencies(&def.name, tables, &queries)?;
 
     Ok(SqlDataset {
         dataset: Dataset {
             kind: def.kind,
             network: def.network,
             name: def.name,
+            version: None,
             tables,
             functions: vec![],
         },

@@ -2,6 +2,7 @@ use sqlx::types::chrono::{DateTime, Utc};
 
 pub mod events;
 pub mod heartbeat;
+pub mod job_id;
 pub mod jobs;
 mod node_id;
 

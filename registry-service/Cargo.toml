@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 # Serialization
 serde.workspace = true
+serde_json.workspace = true
 
 # Error handling and logging
 thiserror.workspace = true
@@ -16,4 +17,4 @@ common = { path = "../common" }
 dataset-store = { path = "../dataset-store" }
 metadata-db = { path = "../metadata-db" }
 http-common = { path = "../http-common" }
-datafusion.workspace = true
+object_store.workspace = true

@@ -41,22 +41,22 @@ impl Scheduler {
         };
 
         let mut locations = Vec::new();
+
         let metadata_db = Arc::new(self.metadata_db.clone());
         for table in Arc::new(dataset).resolved_tables() {
-            let physical_table = match PhysicalTable::get_active(&table, metadata_db.clone())
-                .await?
-            {
-                Some(physical_table) => physical_table,
-                None => {
-                    let store = &self.config.data_store;
-                    PhysicalTable::next_revision(&table, store, metadata_db.clone(), true).await?
-                }
-            };
+            let physical_table =
+                match PhysicalTable::get_active(&table, metadata_db.clone()).await? {
+                    Some(physical_table) => physical_table,
+                    None => {
+                        let store = &self.config.data_store;
+                        PhysicalTable::next_revision(&table, store, metadata_db.clone(), true, 0)
+                            .await?
+                    }
+                };
             locations.push(physical_table.location_id());
         }
 
         let job_desc = serde_json::to_string(&JobDesc::Dump { end_block })?;
-
         let job_id = self
             .metadata_db
             .schedule_job(node_id, &job_desc, &locations)

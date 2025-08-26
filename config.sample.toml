@@ -21,6 +21,14 @@ dataset_defs_dir = "<config_dir/dataset_defs>"
 # By default, temporary DBs will be created and persisted in the OS temp directory.
 metadata_db_url = "postgres://<pg_url>"
 
+# Metadata DB configuration (optional)
+[metadata_db]
+# Database connection URL - alternative to metadata_db_url above
+# url = "postgres://<pg_url>"
+
+# Size of the connection pool (default: 10)
+# pool_size = 10
+
 # How much memory the server can use in MB. Setting this to 0, the default, means unlimited.
 # max_mem_mb = 0
 
@@ -47,5 +55,8 @@ metadata_db_url = "postgres://<pg_url>"
 # Compression algorithm: zstd, lz4, gzip, brotli, snappy, uncompressed (default: zstd(1))
 # compression = "zstd(1)"
 
-# Enable bloom filters for better query performance (default: false)
+# Enable bloom filters (default: false)
 # bloom_filters = false
+
+# Parquet metadata cache size in MB (default: 1024)
+# cache_size_mb = 1024

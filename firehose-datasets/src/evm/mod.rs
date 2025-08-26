@@ -11,6 +11,7 @@ pub fn dataset(dataset_cfg: common::DatasetValue) -> Result<Dataset, Error> {
     Ok(Dataset {
         kind: dataset_def.kind,
         name: dataset_def.name,
+        version: None,
         tables: tables::all(&dataset_def.network),
         network: dataset_def.network,
         functions: vec![],
@@ -21,7 +22,7 @@ pub fn dataset(dataset_cfg: common::DatasetValue) -> Result<Dataset, Error> {
 #[tokio::test]
 async fn print_schema_to_readme() {
     fs_err::write(
-        "src/evm/README.md",
+        "../docs/schemas/firehose-evm.md",
         common::catalog::schema_to_markdown(tables::all("test_network")).await,
     )
     .unwrap();

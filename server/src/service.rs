@@ -8,35 +8,38 @@ use arrow_flight::{
     flight_service_server::FlightService,
     sql::{Any, CommandStatementQuery},
 };
+use async_stream::stream;
 use axum::{
     http::StatusCode,
     response::{IntoResponse, Response as AxumResponse},
 };
 use bytes::{BufMut, Bytes, BytesMut};
 use common::{
-    SPECIAL_BLOCK_NUM,
-    arrow::{self, ipc::writer::IpcDataGenerator},
+    BoxError, SPECIAL_BLOCK_NUM,
+    arrow::{self, array::RecordBatch, datatypes::SchemaRef, ipc::writer::IpcDataGenerator},
+    catalog::physical::Catalog,
     config::Config,
+    metadata::segments::BlockRange,
     notification_multiplexer::{self, NotificationMultiplexerHandle},
-    plan_visitors::{is_incremental, propagate_block_num, unproject_special_block_num_column},
-    query_context::{Error as CoreError, QueryContext, QueryEnv, parse_sql},
+    query_context::{
+        DetachedLogicalPlan, Error as CoreError, PlanningContext, QueryContext, QueryEnv, parse_sql,
+    },
 };
 use datafusion::{
-    common::{
-        DFSchema,
-        tree_node::{TreeNode, TreeNodeRecursion},
-    },
+    common::{DFSchema, tree_node::TreeNodeRecursion},
     error::DataFusionError,
-    execution::SendableRecordBatchStream,
     logical_expr::LogicalPlan,
-    physical_plan::stream::RecordBatchStreamAdapter,
 };
 use dataset_store::{DatasetError, DatasetStore};
-use dump::streaming_query::StreamingQuery;
-use futures::{Stream, StreamExt as _, TryStreamExt, stream};
+use dump::streaming_query::{QueryMessage, StreamingQuery};
+use futures::{
+    Stream, StreamExt as _, TryStreamExt,
+    stream::{self, BoxStream},
+};
 use http_common::{BoxRequestError, RequestError};
 use metadata_db::MetadataDb;
 use prost::Message as _;
+use serde_json::json;
 use thiserror::Error;
 use tonic::{Request, Response, Status};
 use tracing::instrument;
@@ -100,6 +103,7 @@ impl RequestError for Error {
             Error::CoreError(CoreError::PlanningError(_)) => "PLANNING_ERROR",
             Error::CoreError(CoreError::ExecutionError(_)) => "CORE_EXECUTION_ERROR",
             Error::CoreError(CoreError::MetaTableError(_)) => "META_TABLE_ERROR",
+            Error::CoreError(CoreError::TableNotFoundError(_)) => "TABLE_NOT_FOUND_ERROR",
             Error::InvalidQuery(_) => "INVALID_QUERY",
             Error::StreamingExecutionError(_) => "STREAMING_EXECUTION_ERROR",
         }
@@ -120,6 +124,7 @@ impl RequestError for Error {
                 | CoreError::ExecutionError(_)
                 | CoreError::MetaTableError(_),
             ) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::CoreError(CoreError::TableNotFoundError(_)) => StatusCode::NOT_FOUND,
             Error::ExecutionError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::StreamingExecutionError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::DatasetStoreError(e) if e.is_not_found() => StatusCode::NOT_FOUND,
@@ -156,6 +161,7 @@ impl From<Error> for Status {
             }
             Error::CoreError(CoreError::DatasetError(_)) => Status::internal(e.to_string()),
             Error::CoreError(CoreError::ConfigError(_)) => Status::internal(e.to_string()),
+            Error::CoreError(CoreError::TableNotFoundError(_)) => Status::not_found(e.to_string()),
 
             Error::CoreError(
                 CoreError::PlanningError(df)
@@ -169,6 +175,8 @@ impl From<Error> for Status {
         }
     }
 }
+
+pub type QueryResultStream = BoxStream<'static, Result<(RecordBatch, Option<BlockRange>), Error>>;
 
 #[derive(Clone)]
 pub struct Service {
@@ -192,33 +200,36 @@ impl Service {
         })
     }
 
-    pub async fn execute_query(&self, sql: &str) -> Result<SendableRecordBatchStream, Error> {
+    pub async fn execute_query(&self, sql: &str) -> Result<QueryResultStream, Error> {
         let query = parse_sql(sql).map_err(|err| Error::from(err))?;
         let dataset_store = self.dataset_store.clone();
-        let ctx = dataset_store
-            .ctx_for_sql(&query, self.env.clone())
+        let catalog = dataset_store
+            .catalog_for_sql(&query, self.env.clone())
             .await
             .map_err(|err| Error::DatasetStoreError(err))?;
+
+        let ctx = PlanningContext::new(catalog.logical().clone());
         let plan = ctx
             .plan_sql(query.clone())
             .await
             .map_err(|err| Error::from(err))?;
         let is_streaming = common::stream_helpers::is_streaming(&query);
-
-        let ctx = Arc::new(ctx);
-        self.execute_plan(ctx, dataset_store, plan, is_streaming)
+        self.execute_plan(catalog, dataset_store, plan, is_streaming)
             .await
     }
 
+    #[tracing::instrument(skip_all, err)]
     pub async fn execute_plan(
         &self,
-        ctx: Arc<QueryContext>,
+        catalog: Catalog,
         dataset_store: Arc<DatasetStore>,
-        plan: LogicalPlan,
+        plan: DetachedLogicalPlan,
         is_streaming: bool,
-    ) -> Result<SendableRecordBatchStream, Error> {
+    ) -> Result<QueryResultStream, Error> {
         // is_incremental returns an error if query contains DDL, DML, etc.
-        let is_incr = is_incremental(&plan).map_err(|e| Error::InvalidQuery(e.to_string()))?;
+        let is_incr = plan
+            .is_incremental()
+            .map_err(|e| Error::InvalidQuery(e.to_string()))?;
         if is_streaming && !is_incr {
             return Err(Error::InvalidQuery(
                 "not incremental queries are not supported for streaming".to_string(),
@@ -228,46 +239,47 @@ impl Service {
         // If not streaming or metadata db is not available, execute once
         if !is_streaming {
             let original_schema = plan.schema().clone();
-            let should_transform = should_transform_plan(&plan).map_err(Error::ExecutionError)?;
+            let should_transform =
+                dbg!(should_transform_plan(&plan).map_err(Error::ExecutionError)?);
             let plan = if should_transform {
-                let mut plan = propagate_block_num(plan).map_err(Error::ExecutionError)?;
+                let mut plan = plan.propagate_block_num().map_err(Error::ExecutionError)?;
                 // If the user did not request `_block_num` column, we omit it from the final output.
                 if !original_schema
                     .fields()
                     .iter()
                     .any(|f| f.name() == SPECIAL_BLOCK_NUM)
                 {
-                    plan =
-                        unproject_special_block_num_column(plan).map_err(Error::ExecutionError)?;
+                    plan = plan
+                        .unproject_special_block_num_column()
+                        .map_err(Error::ExecutionError)?;
                 }
                 plan
             } else {
                 plan
             };
-            ctx.execute_plan(plan, true)
-                .await
-                .map_err(|err| Error::from(err))
+            let ctx = QueryContext::for_catalog(catalog, self.env.clone(), false).await?;
+            let plan = plan.attach_to(&ctx)?;
+            let record_baches = ctx.execute_plan(plan, true).await?;
+            Ok(record_baches
+                .map_ok(|batch| (batch, None))
+                .map_err(|err| Error::StreamingExecutionError(err.to_string()))
+                .boxed())
         } else {
             // As an optimization, start the stream from the minimum start block across all tables.
             // Otherwise starting from `0` would spend time scanning ranges known to be empty.
-            let earliest_block = ctx
-                .catalog()
+            let earliest_block = catalog
                 .earliest_block()
                 .await
                 .map_err(|e| Error::StreamingExecutionError(e.to_string()))?;
 
             // If no tables are synced, we return an empty stream.
             let Some(earliest_block) = earliest_block else {
-                let schema = plan.schema().clone().as_ref().clone().into();
-                let empty_stream = Box::pin(RecordBatchStreamAdapter::new(
-                    schema,
-                    stream::empty().map(Ok),
-                ));
-                return Ok(empty_stream);
+                return Ok(Box::pin(stream::empty()));
             };
 
             let query = StreamingQuery::spawn(
-                ctx.clone(),
+                self.env.clone(),
+                catalog,
                 dataset_store,
                 plan,
                 earliest_block,
@@ -279,12 +291,12 @@ impl Service {
             .await
             .map_err(|e| Error::StreamingExecutionError(e.to_string()))?;
 
-            Ok(query.as_record_batch_stream())
+            Ok(query_result_stream(query.as_stream()))
         }
     }
 }
 
-fn should_transform_plan(plan: &LogicalPlan) -> Result<bool, DataFusionError> {
+fn should_transform_plan(plan: &DetachedLogicalPlan) -> Result<bool, DataFusionError> {
     let mut result = true;
     plan.apply(|node| {
         match node {
@@ -454,7 +466,7 @@ impl Service {
         Ok(info)
     }
 
-    #[instrument(skip(self))]
+    #[instrument(skip_all)]
     async fn do_get(&self, ticket: arrow_flight::Ticket) -> Result<TonicStream<FlightData>, Error> {
         let remote_plan = common::query_context::remote_plan_from_bytes(&ticket.ticket)?;
         let table_refs = remote_plan.table_refs.into_iter().map(|t| t.into());
@@ -463,27 +475,18 @@ impl Service {
             .dataset_store
             .load_physical_catalog(table_refs, remote_plan.function_refs, &self.env)
             .await?;
-        let query_ctx = QueryContext::for_catalog(catalog, self.env.clone())?;
+        let query_ctx = PlanningContext::new(catalog.logical().clone());
         let plan = query_ctx
             .plan_from_bytes(&remote_plan.serialized_plan)
             .await?;
+        let schema: SchemaRef = plan.schema().as_ref().clone().into();
 
-        let query_ctx = Arc::new(query_ctx);
         let dataset_store = self.dataset_store.clone();
         let stream = self
-            .execute_plan(query_ctx, dataset_store, plan, remote_plan.is_streaming)
+            .execute_plan(catalog, dataset_store, plan, remote_plan.is_streaming)
             .await?;
 
-        Ok(FlightDataEncoderBuilder::new()
-            .with_schema(stream.schema())
-            .build(
-                stream
-                    .map_err(Error::ExecutionError)
-                    .map_err(Status::from)
-                    .err_into(),
-            )
-            .map_err(Status::from)
-            .boxed())
+        Ok(flight_data_stream(stream, schema))
     }
 }
 
@@ -502,4 +505,99 @@ fn ipc_schema(schema: &DFSchema) -> Bytes {
     let mut bytes = BytesMut::new().writer();
     arrow::ipc::writer::write_message(&mut bytes, encoded, ipc_opts).unwrap();
     bytes.into_inner().into()
+}
+
+fn query_result_stream(
+    mut message_stream: BoxStream<'static, Result<QueryMessage, BoxError>>,
+) -> QueryResultStream {
+    stream! {
+        let mut current_range: Option<BlockRange> = None;
+        while let Some(result) = message_stream.next().await {
+            match result {
+                Ok(message) => {
+                    match message {
+                        QueryMessage::MicrobatchStart(range) => {
+                            assert_eq!(current_range, None);
+                            current_range = Some(range);
+                        }
+                        QueryMessage::Data(record_batch) => {
+                            assert!(current_range.is_some());
+                            yield Ok((record_batch, current_range.clone()));
+                        }
+                        QueryMessage::MicrobatchEnd(_) => {
+                            assert!(current_range.is_some());
+                            current_range = None;
+                        }
+                    }
+                }
+                Err(err) => {
+                    yield Err(Error::StreamingExecutionError(err.to_string()));
+                }
+            }
+        }
+    }
+    .boxed()
+}
+
+fn flight_data_stream(
+    mut query_result_stream: QueryResultStream,
+    schema: SchemaRef,
+) -> TonicStream<FlightData> {
+    // The FlightDataEncoderBuilder interface doesn't allow us to set the metadata per record
+    // batch. And there doesn't seem to be an interface that allows us to cleanly encode the
+    // output stream ourselves. So we need to be careful to send schema messages and metadata
+    // properly.
+    stream! {
+        let mut schema_sent = false;
+        while let Some(result) = query_result_stream.next().await {
+            let (batch, range) = match result {
+                Ok(result) => result,
+                Err(err) => {
+                    yield Err(err.into());
+                    return;
+                }
+            };
+            let ranges: Vec<BlockRange> = range.into_iter().collect();
+            let metadata = serde_json::to_string(&json!({"ranges": ranges})).unwrap();
+
+            if !schema_sent {
+                // Send schema message.
+                let mut schema_encoder = FlightDataEncoderBuilder::new()
+                    .with_schema(schema.clone())
+                    .build(futures::stream::empty());
+                if let Some(schema_result) = schema_encoder.next().await {
+                    match schema_result {
+                        Ok(flight_data) => yield Ok(flight_data),
+                        Err(err) => {
+                            yield Err(err.into());
+                            return;
+                        }
+                    }
+                }
+                schema_sent = true;
+            }
+
+            // Create encoder for this single batch with custom metadata, skipping schema messages.
+            let mut batch_encoder = FlightDataEncoderBuilder::new()
+                .build(futures::stream::once(async { Ok(batch) }));
+            let mut first_message = true;
+            while let Some(result) = batch_encoder.next().await {
+                let flight_data = match result {
+                    Ok(flight_data) => flight_data,
+                    Err(err) => {
+                        yield Err(err.into());
+                        return;
+                    }
+                };
+                let schema_message = first_message && !flight_data.data_header.is_empty() && flight_data.data_body.is_empty();
+                first_message = false;
+                if schema_message {
+                    continue;
+                } else {
+                    yield Ok(flight_data.with_app_metadata(metadata.clone()));
+                }
+            }
+        }
+    }
+    .boxed()
 }

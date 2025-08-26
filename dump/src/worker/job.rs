@@ -1,12 +1,12 @@
-use std::sync::Arc;
+use std::{str::FromStr, sync::Arc};
 
-use common::{BoxError, catalog::physical::PhysicalTable};
+use common::{BoxError, catalog::physical::PhysicalTable, manifest::Version};
 use metadata_db::JobId;
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
 pub use crate::core::Ctx;
-use crate::{core::dump_tables, default_partition_size};
+use crate::{core::dump_tables, default_partition_size, metrics};
 
 /// The kind of job is inferred from the location and associated dataset information.
 ///
@@ -23,38 +23,52 @@ pub enum Job {
         tables: Vec<Arc<PhysicalTable>>,
         /// The end block to dump, or `None` for the latest block.
         end_block: Option<i64>,
+        /// Metrics registry.
+        metrics: Option<Arc<metrics::MetricsRegistry>>,
     },
 }
 
 impl Job {
     /// Try to build a job from a job ID and descriptor.
-    #[instrument(skip(ctx, job_id, job_desc), err)]
+    #[instrument(skip(ctx, job_id, job_desc, metrics), err)]
     pub async fn try_from_descriptor(
         ctx: Ctx,
         job_id: JobId,
         job_desc: JobDesc,
+        metrics: Option<Arc<metrics::MetricsRegistry>>,
     ) -> Result<Job, BoxError> {
         let output_locations = ctx.metadata_db.output_locations(job_id).await?;
         match job_desc {
             JobDesc::Dump { end_block } => {
                 let mut tables = vec![];
                 for location in output_locations {
-                    let dataset =
-                        Arc::new(ctx.dataset_store.load_dataset(&location.dataset).await?);
+                    let dataset_version = Version::from_str(&location.dataset_version).ok();
+                    let dataset = Arc::new(
+                        ctx.dataset_store
+                            .load_dataset(&location.dataset, dataset_version.as_ref())
+                            .await?,
+                    );
                     let mut resolved_tables = dataset.resolved_tables();
-                    let Some(table) = resolved_tables.find(|t| t.name() == location.tbl) else {
+                    let Some(table) = resolved_tables.find(|t| t.name() == location.table) else {
                         return Err(format!(
                             "Table `{}` not found in dataset `{}`",
-                            location.tbl, location.dataset
+                            location.table, location.dataset
                         )
                         .into());
                     };
+                    let loc = ctx
+                        .metadata_db
+                        .get_location_by_id(location.id)
+                        .await?
+                        .ok_or("Location not found")?;
+                    let start_block = loc.start_block;
                     tables.push(
                         PhysicalTable::new(
                             table.clone(),
                             location.url,
                             location.id,
                             ctx.metadata_db.clone(),
+                            start_block,
                         )?
                         .into(),
                     );
@@ -64,6 +78,7 @@ impl Job {
                     ctx,
                     tables,
                     end_block,
+                    metrics,
                 })
             }
         }
@@ -75,6 +90,7 @@ impl Job {
                 ctx,
                 tables,
                 end_block,
+                metrics,
             } => {
                 dump_tables(
                     ctx.clone(),
@@ -83,6 +99,7 @@ impl Job {
                     default_partition_size(),
                     ctx.config.microbatch_max_interval,
                     (0, end_block),
+                    metrics,
                 )
                 .await
             }

@@ -5,17 +5,19 @@ use std::{
 };
 
 use common::{
-    BoxError,
+    BoxError, LogicalCatalog,
     catalog::physical::{Catalog, PhysicalTable},
     config::Config,
     notification_multiplexer::NotificationMultiplexerHandle,
-    query_context::{Error as QueryError, QueryContext},
+    query_context::Error as QueryError,
     store::Store as DataStore,
 };
 use dataset_store::{DatasetKind, DatasetStore};
 use futures::TryStreamExt as _;
 use metadata_db::{LocationId, MetadataDb};
 use object_store::ObjectMeta;
+
+use crate::metrics;
 
 mod block_ranges;
 mod raw_dataset;
@@ -30,6 +32,7 @@ pub async fn dump_tables(
     partition_size: u64,
     microbatch_max_interval: u64,
     range: (i64, Option<i64>),
+    metrics: Option<Arc<metrics::MetricsRegistry>>,
 ) -> Result<(), BoxError> {
     let mut kinds = BTreeSet::new();
     for t in tables {
@@ -40,9 +43,9 @@ pub async fn dump_tables(
         if !kinds.iter().all(|k| k.is_raw()) {
             return Err("Cannot mix raw and non-raw datasets in a same dump".into());
         }
-        dump_raw_tables(ctx, tables, n_jobs, partition_size, range).await
+        dump_raw_tables(ctx, tables, n_jobs, partition_size, range, metrics).await
     } else {
-        dump_user_tables(ctx, tables, microbatch_max_interval, n_jobs, range).await
+        dump_user_tables(ctx, tables, microbatch_max_interval, n_jobs, range, metrics).await
     }
 }
 
@@ -53,6 +56,7 @@ pub async fn dump_raw_tables(
     n_jobs: u16,
     partition_size: u64,
     range: (i64, Option<i64>),
+    metrics: Option<Arc<metrics::MetricsRegistry>>,
 ) -> Result<(), BoxError> {
     if tables.is_empty() {
         return Ok(());
@@ -71,9 +75,8 @@ pub async fn dump_raw_tables(
         ds
     };
 
-    let catalog = Catalog::new(tables.to_vec(), vec![]);
-    let env = ctx.config.make_query_env()?;
-    let query_ctx = Arc::new(QueryContext::for_catalog(catalog, env.clone())?);
+    let logical = LogicalCatalog::from_tables(tables.iter().map(|t| t.table()));
+    let catalog = Catalog::new(tables.to_vec(), logical);
 
     // Ensure consistency before starting the dump procedure.
     for table in tables {
@@ -86,12 +89,13 @@ pub async fn dump_raw_tables(
             raw_dataset::dump(
                 ctx,
                 n_jobs,
-                query_ctx,
-                &dataset.name,
+                catalog,
                 tables,
                 partition_size,
                 &parquet_opts,
                 range,
+                &dataset.name,
+                metrics,
             )
             .await?;
         }
@@ -115,6 +119,7 @@ pub async fn dump_user_tables(
     microbatch_max_interval: u64,
     n_jobs: u16,
     range: (i64, Option<i64>),
+    metrics: Option<Arc<metrics::MetricsRegistry>>,
 ) -> Result<(), BoxError> {
     if n_jobs > 1 {
         tracing::warn!("n_jobs > 1 has no effect for SQL datasets");
@@ -133,7 +138,7 @@ pub async fn dump_user_tables(
             DatasetKind::Sql => ctx.dataset_store.load_sql_dataset(&dataset.name).await?,
             DatasetKind::Manifest => {
                 ctx.dataset_store
-                    .load_manifest_dataset(&dataset.name)
+                    .load_manifest_dataset(&dataset.name, dataset.version.as_ref().unwrap())
                     .await?
             }
             _ => {
@@ -154,6 +159,7 @@ pub async fn dump_user_tables(
             &parquet_opts,
             microbatch_max_interval,
             range,
+            metrics.clone(),
         )
         .await?;
 

@@ -13,12 +13,11 @@ Project Nozzle is a high-performance ETL (Extract, Transform, Load) architecture
 4. **Serve**: Provide query interfaces (Arrow Flight gRPC, JSON Lines HTTP)
 
 ### Technology Stack
-- **Language**: Rust (2024 edition)
-- **Query Engine**: Apache DataFusion (v48)
+- **Language**: Rust
+- **Query Engine**: Apache DataFusion
 - **Storage Format**: Apache Parquet
 - **Wire Format**: Apache Arrow
 - **Database**: PostgreSQL (for metadata)
-- **Runtime**: Tokio (async runtime)
 
 ## Key Components
 
@@ -33,11 +32,6 @@ Project Nozzle is a high-performance ETL (Extract, Transform, Load) architecture
 ### 2. Data Extraction (`dump`)
 - Parallel extraction with configurable workers
 - Resumable extraction (tracks progress)
-- Supports:
-  - Configurable partition sizes
-  - Compression options
-  - Incremental dumps
-  - Memory management for large datasets
 
 ### 3. Query Serving (`server`)
 - **Arrow Flight Server** (port 1602): High-performance binary protocol
@@ -47,7 +41,6 @@ Project Nozzle is a high-performance ETL (Extract, Transform, Load) architecture
 - Features:
   - SQL query execution via DataFusion
   - Streaming query support
-  - Query optimization
 
 ### 4. Data Sources
 
@@ -140,7 +133,6 @@ curl -X POST http://localhost:1603 --data "select * from eth_rpc.logs limit 10"
 ### Python Integration
 - Arrow Flight client available
 - Marimo notebook examples provided
-- Direct DataFrame integration
 
 ## Development Notes
 
@@ -151,22 +143,12 @@ curl -X POST http://localhost:1603 --data "select * from eth_rpc.logs limit 10"
 
 ### Project Structure
 - Workspace-based Cargo project
-- 20 member crates
 - Extensive use of async/await
-- Type-safe SQL building
 
 ### Testing
 - Integration tests in `tests/` directory
 - Test configurations provided
 - Mock data available
-
-### Performance Considerations
-- Memory usage scales with:
-  - Number of parallel jobs
-  - Partition size
-  - Number of tables
-- Snmalloc allocator optional for performance
-- Streaming support for large result sets
 
 ## Important Conventions
 
@@ -194,20 +176,10 @@ curl -X POST http://localhost:1603 --data "select * from eth_rpc.logs limit 10"
 - All authentication tokens in environment variables
 - Dataset isolation via schemas
 
-## Future Considerations
-- Distributed processing capabilities
-- Advanced query optimization
-- More data source types
-- Enhanced monitoring/observability
-
 ## More info
 
-Look into `glossary.md` for more.
+Look into `docs/` for more.
 
 ## Planning
 
 AI generated plans for issues are registered in `issue_context/`.
-
-## Commit messages
-
-- Don't credit Claude Code

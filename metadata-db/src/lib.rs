@@ -1,6 +1,6 @@
 use std::{future::Future, sync::Arc, time::Duration};
 
-use futures::stream::{BoxStream, Stream};
+use futures::stream::Stream;
 use sqlx::postgres::{PgListener, PgNotification};
 use thiserror::Error;
 use tokio::time::MissedTickBehavior;
@@ -9,6 +9,7 @@ use url::Url;
 
 mod conn;
 mod locations;
+pub mod registry;
 #[cfg(feature = "temp-db")]
 pub mod temp;
 mod workers;
@@ -17,13 +18,18 @@ use self::conn::{DbConn, DbConnPool};
 #[cfg(feature = "temp-db")]
 pub use self::temp::{KEEP_TEMP_DIRS, temp_metadata_db};
 pub use self::{
-    locations::{Location, LocationId},
+    locations::{
+        Location, LocationId, LocationIdFromStrError, LocationIdI64ConvError, LocationIdU64Error,
+        LocationWithDetails,
+    },
     workers::{
         Worker, WorkerNodeId,
         events::{JobNotifAction, JobNotifListener, JobNotifRecvError, JobNotification},
-        jobs::{Job, JobId, JobStatus, JobStatusUpdateError, JobWithDetails},
+        job_id::{JobId, JobIdFromStrError, JobIdI64ConvError, JobIdU64Error},
+        jobs::{Job, JobStatus, JobStatusUpdateError, JobWithDetails},
     },
 };
+use crate::registry::{Registry, insert_dataset_to_registry};
 
 /// Frequency on which to send a heartbeat.
 pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
@@ -31,6 +37,9 @@ pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
 /// A worker is considered active if it has sent a heartbeat in this period. The scheduler will
 /// schedule new jobs only on active workers.
 pub const DEFAULT_DEAD_WORKER_INTERVAL: Duration = Duration::from_secs(5);
+
+/// Default pool size for the metadata DB.
+pub const DEFAULT_POOL_SIZE: u32 = 10;
 
 /// Row ids, always non-negative.
 pub type FileId = i64;
@@ -81,6 +90,11 @@ pub enum Error {
     #[error("Error parsing URL: {0}")]
     UrlParseError(#[from] url::ParseError),
 
+    #[error(
+        "Cannot start dump: location has existing start_block={existing}, but requested start_block={requested}"
+    )]
+    MismatchedStartBlock { existing: i64, requested: i64 },
+
     #[error("Job status update error: {0}")]
     JobStatusUpdateError(#[from] workers::jobs::JobStatusUpdateError),
 }
@@ -127,7 +141,7 @@ impl From<conn::ConnError> for Error {
 /// Connection pool to the metadata DB. Clones will refer to the same instance.
 #[derive(Clone, Debug)]
 pub struct MetadataDb {
-    pub(crate) pool: DbConnPool,
+    pub pool: DbConnPool,
     pub(crate) url: Arc<str>,
     dead_worker_interval: Duration,
 }
@@ -146,9 +160,23 @@ impl MetadataDb {
     ///
     /// Runs migrations if necessary.
     #[instrument(skip_all, err)]
-    pub async fn connect(url: &str) -> Result<Self, Error> {
-        let pool = DbConnPool::connect(url).await?;
-        pool.run_migrations().await?;
+    pub async fn connect(url: &str, pool_size: u32) -> Result<Self, Error> {
+        Self::connect_with_config(url, pool_size, true).await
+    }
+
+    /// Sets up a connection pool to the Metadata DB with configurable migration behavior
+    ///
+    /// Runs migrations only if `auto_migrate` is true.
+    #[instrument(skip_all, err)]
+    pub async fn connect_with_config(
+        url: &str,
+        pool_size: u32,
+        auto_migrate: bool,
+    ) -> Result<Self, Error> {
+        let pool = DbConnPool::connect(url, pool_size).await?;
+        if auto_migrate {
+            pool.run_migrations().await?;
+        }
         Ok(Self {
             pool,
             url: url.into(),
@@ -163,6 +191,10 @@ impl MetadataDb {
             url: self.url,
             dead_worker_interval,
         }
+    }
+
+    pub fn default_pool_size() -> u32 {
+        DEFAULT_POOL_SIZE
     }
 }
 
@@ -240,7 +272,7 @@ impl MetadataDb {
         let mut tx = self.pool.begin().await?;
 
         // Register the job in the workers job queue
-        let job_id = workers::jobs::register_job(&mut *tx, node_id, job_desc).await?;
+        let job_id = workers::jobs::register(&mut *tx, node_id, job_desc).await?;
 
         // Lock the locations for this job by assigning the job ID as the writer
         locations::assign_job_writer(&mut *tx, locations, job_id).await?;
@@ -276,7 +308,7 @@ impl MetadataDb {
         let mut tx = self.pool.begin().await?;
 
         // Try to update job status
-        match workers::jobs::update_job_status_if_any_state(
+        match workers::jobs::update_status_if_any_state(
             &mut *tx,
             job_id,
             &[JobStatus::Running, JobStatus::Scheduled],
@@ -312,10 +344,8 @@ impl MetadataDb {
         last_job_id: Option<JobId>,
     ) -> Result<Vec<JobWithDetails>, Error> {
         match last_job_id {
-            Some(job_id) => {
-                Ok(workers::jobs::list_jobs_next_page(&*self.pool, limit, job_id).await?)
-            }
-            None => Ok(workers::jobs::list_jobs_first_page(&*self.pool, limit).await?),
+            Some(job_id) => Ok(workers::jobs::list_next_page(&*self.pool, limit, job_id).await?),
+            None => Ok(workers::jobs::list_first_page(&*self.pool, limit).await?),
         }
     }
 
@@ -327,7 +357,7 @@ impl MetadataDb {
     ///
     /// This method is used to fetch all the jobs that the worker should be running after a restart.
     pub async fn get_scheduled_jobs(&self, node_id: &WorkerNodeId) -> Result<Vec<Job>, Error> {
-        Ok(workers::jobs::get_jobs_for_node_with_statuses(
+        Ok(workers::jobs::get_by_node_id_and_statuses(
             &*self.pool,
             node_id,
             [JobStatus::Scheduled, JobStatus::Running],
@@ -346,7 +376,7 @@ impl MetadataDb {
     /// ensures each worker's job set remains synchronized with the Metadata DB. This method fetches all jobs that a
     /// worker should be tracking, enabling the worker to reconcile its state when notifications are lost.
     pub async fn get_active_jobs(&self, node_id: &WorkerNodeId) -> Result<Vec<Job>, Error> {
-        Ok(workers::jobs::get_jobs_for_node_with_statuses(
+        Ok(workers::jobs::get_by_node_id_and_statuses(
             &*self.pool,
             node_id,
             [
@@ -360,12 +390,15 @@ impl MetadataDb {
 
     /// Returns the job with the given ID
     pub async fn get_job(&self, id: &JobId) -> Result<Option<Job>, Error> {
-        Ok(workers::jobs::get_job(&*self.pool, id).await?)
+        Ok(workers::jobs::get_by_id(&*self.pool, id).await?)
     }
 
     /// Get a job by ID with full details including timestamps
-    pub async fn get_job_with_details(&self, id: &JobId) -> Result<Option<JobWithDetails>, Error> {
-        Ok(workers::jobs::get_job_with_details(&*self.pool, id).await?)
+    pub async fn get_job_by_id_with_details(
+        &self,
+        id: &JobId,
+    ) -> Result<Option<JobWithDetails>, Error> {
+        Ok(workers::jobs::get_by_id_with_details(&*self.pool, id).await?)
     }
 
     /// Conditionally marks a job as `RUNNING` only if it's currently `SCHEDULED`
@@ -373,7 +406,7 @@ impl MetadataDb {
     /// This provides idempotent behavior - if the job is already running, completed, or failed,
     /// the appropriate error will be returned indicating the state conflict.
     pub async fn mark_job_running(&self, id: &JobId) -> Result<(), Error> {
-        Ok(workers::jobs::update_job_status_if_any_state(
+        Ok(workers::jobs::update_status_if_any_state(
             &*self.pool,
             id,
             &[JobStatus::Scheduled],
@@ -386,7 +419,7 @@ impl MetadataDb {
     ///
     /// This is typically used by workers to acknowledge a stop request.
     pub async fn mark_job_stopping(&self, id: &JobId) -> Result<(), Error> {
-        Ok(workers::jobs::update_job_status_if_any_state(
+        Ok(workers::jobs::update_status_if_any_state(
             &*self.pool,
             id,
             &[JobStatus::StopRequested],
@@ -399,7 +432,7 @@ impl MetadataDb {
     ///
     /// This provides proper state transition from stopping to stopped.
     pub async fn mark_job_stopped(&self, id: &JobId) -> Result<(), Error> {
-        Ok(workers::jobs::update_job_status_if_any_state(
+        Ok(workers::jobs::update_status_if_any_state(
             &*self.pool,
             id,
             &[JobStatus::Stopping],
@@ -412,7 +445,7 @@ impl MetadataDb {
     ///
     /// This ensures jobs can only be completed from a running state.
     pub async fn mark_job_completed(&self, id: &JobId) -> Result<(), Error> {
-        Ok(workers::jobs::update_job_status_if_any_state(
+        Ok(workers::jobs::update_status_if_any_state(
             &*self.pool,
             id,
             &[JobStatus::Running],
@@ -425,7 +458,7 @@ impl MetadataDb {
     ///
     /// Jobs can fail from either scheduled (startup failure) or running (runtime failure) states.
     pub async fn mark_job_failed(&self, id: &JobId) -> Result<(), Error> {
-        Ok(workers::jobs::update_job_status_if_any_state(
+        Ok(workers::jobs::update_status_if_any_state(
             &*self.pool,
             id,
             &[JobStatus::Scheduled, JobStatus::Running],
@@ -450,13 +483,56 @@ impl MetadataDb {
         path: &str,
         url: &Url,
         active: bool,
-    ) -> Result<LocationId, Error> {
-        Ok(locations::insert(&*self.pool, table, bucket, path, url, active).await?)
+        start_block: Option<i64>,
+    ) -> Result<LocationId, sqlx::Error> {
+        // An empty `dataset_version` is represented as an empty string in the DB.
+        let dataset_version = table.dataset_version.unwrap_or("");
+        let mut tx = self.pool.begin().await?;
+
+        let query = "
+            INSERT INTO locations (dataset, dataset_version, tbl, bucket, path, url, active, start_block)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            ON CONFLICT DO NOTHING;
+        ";
+
+        sqlx::query(query)
+            .bind(table.dataset)
+            .bind(dataset_version)
+            .bind(table.table)
+            .bind(bucket)
+            .bind(path)
+            .bind(url.to_string())
+            .bind(active)
+            .bind(start_block.unwrap_or(0))
+            .execute(&mut *tx)
+            .await?;
+
+        let query = "
+            SELECT id
+            FROM locations
+            WHERE dataset = $1 AND dataset_version = $2 AND tbl = $3 AND url = $4
+        ";
+
+        let location_id: LocationId = sqlx::query_scalar(query)
+            .bind(table.dataset)
+            .bind(dataset_version)
+            .bind(table.table)
+            .bind(url.to_string())
+            .fetch_one(&mut *tx)
+            .await?;
+
+        tx.commit().await?;
+        Ok(location_id)
     }
 
-    /// Find a location ID by its URL.
-    ///
-    /// Returns the location ID if a location with the given URL exists, or None if not found.
+    pub async fn get_location_by_id(&self, id: LocationId) -> Result<Option<Location>, Error> {
+        sqlx::query_as("SELECT * FROM locations WHERE id = $1")
+            .bind(id)
+            .fetch_optional(&*self.pool)
+            .await
+            .map_err(Error::from)
+    }
+
     pub async fn url_to_location_id(&self, url: &Url) -> Result<Option<LocationId>, Error> {
         Ok(locations::url_to_location_id(&*self.pool, url).await?)
     }
@@ -510,6 +586,41 @@ impl MetadataDb {
     pub async fn output_locations(&self, id: JobId) -> Result<Vec<Location>, Error> {
         Ok(locations::get_by_job_id(&*self.pool, id).await?)
     }
+
+    /// List locations with cursor-based pagination support
+    ///
+    /// Uses cursor-based pagination where `last_location_id` is the ID of the last location
+    /// from the previous page. For the first page, pass `None` for `last_location_id`.
+    pub async fn list_locations(
+        &self,
+        limit: i64,
+        last_location_id: Option<LocationId>,
+    ) -> Result<Vec<Location>, Error> {
+        match last_location_id {
+            Some(location_id) => {
+                Ok(locations::list_next_page(&*self.pool, limit, location_id).await?)
+            }
+            None => Ok(locations::list_first_page(&*self.pool, limit).await?),
+        }
+    }
+
+    // Get a location by its ID with full details including writer job
+    //
+    // Returns the location if found, or None if no location exists with the given ID.
+    pub async fn get_location_by_id_with_details(
+        &self,
+        location_id: LocationId,
+    ) -> Result<Option<LocationWithDetails>, Error> {
+        Ok(locations::get_by_id_with_details(&*self.pool, location_id).await?)
+    }
+
+    /// Delete a location by its ID
+    ///
+    /// This will also delete all associated file_metadata entries due to CASCADE.
+    /// Returns true if the location was deleted, false if it didn't exist.
+    pub async fn delete_location_by_id(&self, location_id: LocationId) -> Result<bool, Error> {
+        Ok(locations::delete_by_id(&*self.pool, location_id).await?)
+    }
 }
 
 /// File metadata-related API
@@ -517,7 +628,7 @@ impl MetadataDb {
     pub fn stream_file_metadata(
         &self,
         location_id: LocationId,
-    ) -> BoxStream<'_, Result<FileMetadataRow, sqlx::Error>> {
+    ) -> impl Stream<Item = Result<FileMetadataRow, sqlx::Error>> + '_ {
         let query = "
         SELECT fm.id
              , fm.location_id
@@ -537,7 +648,7 @@ impl MetadataDb {
 
     pub async fn insert_metadata(
         &self,
-        location_id: i64,
+        location_id: LocationId,
         file_name: String,
         object_size: u64,
         object_e_tag: Option<String>,
@@ -561,6 +672,28 @@ impl MetadataDb {
             .bind(footer)
             .execute(&*self.pool)
             .await?;
+
+        Ok(())
+    }
+
+    /// If the start block is already set, it must match the provided start_block.
+    pub async fn check_start_block(
+        &self,
+        location_id: LocationId,
+        start_block: i64,
+    ) -> Result<(), Error> {
+        let existing_start_block: i64 =
+            sqlx::query_scalar("SELECT start_block FROM locations WHERE id = $1")
+                .bind(location_id)
+                .fetch_one(&*self.pool)
+                .await?;
+
+        if existing_start_block != start_block {
+            return Err(Error::MismatchedStartBlock {
+                existing: existing_start_block,
+                requested: start_block,
+            });
+        }
 
         Ok(())
     }
@@ -630,5 +763,104 @@ impl MetadataDb {
             .map_err(Error::ConnectionError)?;
         channel.listen(channel_name).await.map_err(Error::DbError)?;
         Ok(channel.into_stream())
+    }
+}
+
+/// Registry API
+impl MetadataDb {
+    pub async fn register_dataset(&self, registry: Registry) -> Result<(), Error> {
+        let mut tx = self.pool.begin().await?;
+        insert_dataset_to_registry(&mut *tx, registry).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn dataset_exists(&self, dataset_name: &str, version: &str) -> Result<bool, Error> {
+        let sql = "
+            SELECT COUNT(*) FROM registry 
+            WHERE dataset = $1 AND version = $2
+        ";
+        let count: i64 = sqlx::query_scalar(sql)
+            .bind(dataset_name)
+            .bind(version)
+            .fetch_one(&*self.pool)
+            .await?;
+        Ok(count > 0)
+    }
+
+    pub async fn get_manifest(
+        &self,
+        dataset: &str,
+        version: &str,
+    ) -> Result<Option<String>, Error> {
+        let sql = "
+            SELECT manifest FROM registry 
+            WHERE dataset = $1 AND version = $2
+        ";
+        let result = sqlx::query_scalar(sql)
+            .bind(dataset)
+            .bind(version)
+            .fetch_optional(&*self.pool)
+            .await?;
+        Ok(result)
+    }
+
+    #[instrument(skip(self), err)]
+    pub async fn get_latest_dataset_version(
+        &self,
+        dataset_name: &str,
+    ) -> Result<Option<(String, String)>, Error> {
+        let sql = "
+            SELECT version FROM registry 
+            WHERE dataset = $1
+            ORDER BY version DESC
+            LIMIT 1
+        ";
+
+        let version: Option<String> = sqlx::query_scalar(sql)
+            .bind(&dataset_name)
+            .fetch_optional(&*self.pool)
+            .await?;
+        match version {
+            Some(version) => Ok(Some((dataset_name.to_string(), version))),
+            None => Ok(None),
+        }
+    }
+
+    #[instrument(skip(self), err)]
+    pub async fn get_dataset(
+        &self,
+        dataset_name: &str,
+        version: &str,
+    ) -> Result<Option<String>, Error> {
+        let sql = "
+            SELECT manifest FROM registry 
+            WHERE dataset = $1 AND version = $2
+            LIMIT 1
+        ";
+
+        let dataset: Option<String> = sqlx::query_scalar(sql)
+            .bind(&dataset_name)
+            .bind(&version)
+            .fetch_optional(&*self.pool)
+            .await?;
+        match dataset {
+            Some(dataset) => Ok(Some(dataset.trim_end_matches(".json").to_string())),
+            None => Ok(None),
+        }
+    }
+
+    pub async fn get_registry_info(
+        &self,
+        dataset_name: &str,
+        version: &str,
+    ) -> Result<Registry, sqlx::Error> {
+        let sql = "SELECT owner, dataset, version, manifest FROM registry WHERE dataset = $1 AND version = $2";
+        let dataset = sqlx::query_as(sql)
+            .bind(&dataset_name)
+            .bind(&version)
+            .fetch_one(&*self.pool)
+            .await?;
+        Ok(dataset)
     }
 }

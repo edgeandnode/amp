@@ -217,7 +217,7 @@ Each benchmark includes:
 psql -h localhost -U ford -d test_nozzle -c "SELECT version();"
 
 # Verify connection pooling
-grep "max_connections" .env.test
+grep "max_connections" .test.env
 ```
 
 **"Redis pipeline optimization not effective"**

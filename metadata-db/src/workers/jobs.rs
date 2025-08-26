@@ -5,13 +5,13 @@ use sqlx::types::{
     chrono::{DateTime, Utc},
 };
 
-use super::WorkerNodeId;
+use super::{WorkerNodeId, job_id::JobId};
 
 /// Insert a new job into the queue
 ///
 /// The job will be set as the default [`JobStatus`], which is [`JobStatus::Scheduled`],
 /// and will be assigned to the given worker node.
-pub async fn register_job<'c, E>(
+pub async fn register<'c, E>(
     exe: E,
     node_id: &WorkerNodeId,
     descriptor: &str,
@@ -38,7 +38,7 @@ where
 /// This function will only update the job status if the job exists and currently has
 /// one of the expected original statuses. If the job doesn't exist, returns `UpdateJobStatusError::NotFound`.
 /// If the job exists but has a different status than any of the expected ones, returns `UpdateJobStatusError::StateConflict`.
-pub async fn update_job_status_if_any_state<'c, E>(
+pub async fn update_status_if_any_state<'c, E>(
     exe: E,
     id: &JobId,
     expected_statuses: &[JobStatus],
@@ -114,7 +114,7 @@ pub enum JobStatusUpdateError {
 }
 
 /// Get a job by its ID
-pub async fn get_job<'c, E>(exe: E, id: &JobId) -> Result<Option<Job>, sqlx::Error>
+pub async fn get_by_id<'c, E>(exe: E, id: &JobId) -> Result<Option<Job>, sqlx::Error>
 where
     E: sqlx::Executor<'c, Database = sqlx::Postgres>,
 {
@@ -128,7 +128,7 @@ where
 }
 
 /// Get a job by ID with full details including timestamps
-pub async fn get_job_with_details<'c, E>(
+pub async fn get_by_id_with_details<'c, E>(
     exe: E,
     id: &JobId,
 ) -> Result<Option<JobWithDetails>, sqlx::Error>
@@ -137,21 +137,21 @@ where
 {
     let query = indoc::indoc! {r#"
         SELECT
-            j.id,
-            j.node_id,
-            j.status,
-            j.descriptor,
-            j.created_at,
-            j.updated_at
-        FROM jobs j
-        WHERE j.id = $1
+            id,
+            node_id,
+            status,
+            descriptor,
+            created_at,
+            updated_at
+        FROM jobs
+        WHERE id = $1
     "#};
     let res = sqlx::query_as(query).bind(id).fetch_optional(exe).await?;
     Ok(res)
 }
 
 /// Get jobs for a given worker node with any of the specified statuses
-pub async fn get_jobs_for_node_with_statuses<'c, E, const N: usize>(
+pub async fn get_by_node_id_and_statuses<'c, E, const N: usize>(
     exe: E,
     node_id: &WorkerNodeId,
     statuses: [JobStatus; N],
@@ -181,23 +181,20 @@ where
 ///
 /// Returns a paginated list of jobs ordered by ID in descending order (newest first).
 /// This function is used to fetch the initial page when no cursor is available.
-pub async fn list_jobs_first_page<'c, E>(
-    exe: E,
-    limit: i64,
-) -> Result<Vec<JobWithDetails>, sqlx::Error>
+pub async fn list_first_page<'c, E>(exe: E, limit: i64) -> Result<Vec<JobWithDetails>, sqlx::Error>
 where
     E: sqlx::Executor<'c, Database = sqlx::Postgres>,
 {
     let query = indoc::indoc! {r#"
         SELECT
-            j.id,
-            j.node_id,
-            j.status,
-            j.descriptor,
-            j.created_at,
-            j.updated_at
-        FROM jobs j
-        ORDER BY j.id DESC
+            id,
+            node_id,
+            status,
+            descriptor,
+            created_at,
+            updated_at
+        FROM jobs
+        ORDER BY id DESC
         LIMIT $1
     "#};
 
@@ -210,7 +207,7 @@ where
 /// Returns a paginated list of jobs with IDs less than the provided cursor,
 /// ordered by ID in descending order (newest first). This implements cursor-based
 /// pagination for efficient traversal of large job lists.
-pub async fn list_jobs_next_page<'c, E>(
+pub async fn list_next_page<'c, E>(
     exe: E,
     limit: i64,
     last_job_id: JobId,
@@ -220,15 +217,15 @@ where
 {
     let query = indoc::indoc! {r#"
         SELECT 
-            j.id, 
-            j.node_id, 
-            j.status, 
-            j.descriptor,
-            j.created_at,
-            j.updated_at
-        FROM jobs j
-        WHERE j.id < $2
-        ORDER BY j.id DESC
+            id, 
+            node_id, 
+            status, 
+            descriptor,
+            created_at,
+            updated_at
+        FROM jobs
+        WHERE id < $2
+        ORDER BY id DESC
         LIMIT $1
     "#};
 
@@ -278,38 +275,6 @@ pub struct JobWithDetails {
 
     /// Job last update timestamp
     pub updated_at: DateTime<Utc>,
-}
-
-/// A unique identifier for a job
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    sqlx::Type,
-    serde::Serialize,
-    serde::Deserialize,
-)]
-#[repr(transparent)]
-#[serde(transparent)]
-#[sqlx(transparent)]
-pub struct JobId(i64);
-
-#[cfg(test)]
-impl From<i64> for JobId {
-    fn from(value: i64) -> Self {
-        Self(value)
-    }
-}
-
-impl std::fmt::Display for JobId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
 }
 
 /// Represents the current status of a job
@@ -390,6 +355,36 @@ impl JobStatus {
             Self::Unknown => "UNKNOWN",
         }
     }
+
+    /// Returns true if the job status is terminal (cannot be changed further)
+    ///
+    /// Terminal states are final states where the job lifecycle has ended:
+    /// - `Completed`: Job finished successfully
+    /// - `Stopped`: Job was stopped by request
+    /// - `Failed`: Job encountered an error and failed
+    ///
+    /// Non-terminal states can still transition to other states
+    pub fn is_terminal(&self) -> bool {
+        matches!(self, Self::Completed | Self::Stopped | Self::Failed)
+    }
+}
+
+impl std::str::FromStr for JobStatus {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // Use `eq_ignore_ascii_case` to make the comparison case-insensitive
+        match s {
+            s if s.eq_ignore_ascii_case("SCHEDULED") => Ok(Self::Scheduled),
+            s if s.eq_ignore_ascii_case("RUNNING") => Ok(Self::Running),
+            s if s.eq_ignore_ascii_case("COMPLETED") => Ok(Self::Completed),
+            s if s.eq_ignore_ascii_case("STOPPED") => Ok(Self::Stopped),
+            s if s.eq_ignore_ascii_case("STOP_REQUESTED") => Ok(Self::StopRequested),
+            s if s.eq_ignore_ascii_case("STOPPING") => Ok(Self::Stopping),
+            s if s.eq_ignore_ascii_case("FAILED") => Ok(Self::Failed),
+            _ => Ok(Self::Unknown), // Default to Unknown for Infallible
+        }
+    }
 }
 
 impl std::fmt::Display for JobStatus {
@@ -426,23 +421,5 @@ impl<'q> sqlx::Encode<'q, sqlx::Postgres> for JobStatus {
         buf: &mut <sqlx::Postgres as sqlx::Database>::ArgumentBuffer<'q>,
     ) -> Result<sqlx::encode::IsNull, sqlx::error::BoxDynError> {
         sqlx::Encode::<sqlx::Postgres>::encode_by_ref(&self.as_str(), buf)
-    }
-}
-
-impl std::str::FromStr for JobStatus {
-    type Err = std::convert::Infallible;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        // Use `eq_ignore_ascii_case` to make the comparison case-insensitive
-        match s {
-            s if s.eq_ignore_ascii_case("SCHEDULED") => Ok(Self::Scheduled),
-            s if s.eq_ignore_ascii_case("RUNNING") => Ok(Self::Running),
-            s if s.eq_ignore_ascii_case("COMPLETED") => Ok(Self::Completed),
-            s if s.eq_ignore_ascii_case("STOPPED") => Ok(Self::Stopped),
-            s if s.eq_ignore_ascii_case("STOP_REQUESTED") => Ok(Self::StopRequested),
-            s if s.eq_ignore_ascii_case("STOPPING") => Ok(Self::Stopping),
-            s if s.eq_ignore_ascii_case("FAILED") => Ok(Self::Failed),
-            _ => Ok(Self::Unknown), // Default to Unknown for Infallible
-        }
     }
 }

@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc};
+use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc, usize};
 
 use alloy::{
     node_bindings::{Anvil, AnvilInstance},
@@ -6,25 +6,32 @@ use alloy::{
     providers::{Provider as _, ext::AnvilApi as _},
     rpc::types::anvil::ReorgOptions,
 };
-use common::{BlockNum, metadata::segments::BlockRange, query_context::parse_sql, tracing_helpers};
+use arrow_flight::{
+    FlightData, flight_service_client::FlightServiceClient, sql::client::FlightSqlServiceClient,
+};
+use common::{BlockNum, metadata::segments::BlockRange, query_context::parse_sql};
 use dataset_store::DatasetStore;
+use futures::StreamExt as _;
+use monitoring::logging;
 use rand::{Rng, RngCore, SeedableRng as _, rngs::StdRng};
+use serde::Deserialize;
+use tokio::sync::mpsc;
 
 use crate::{
     test_client::TestClient,
     test_support::{SnapshotContext, TestEnv, table_ranges},
 };
 
-struct AnvilTestContext {
-    env: TestEnv,
+pub(crate) struct AnvilTestContext {
+    pub(crate) env: TestEnv,
     client: TestClient,
     provider: alloy::providers::DynProvider,
     _anvil: AnvilInstance,
 }
 
 impl AnvilTestContext {
-    async fn setup(test_name: &str) -> Self {
-        tracing_helpers::register_logger();
+    pub(crate) async fn setup(test_name: &str) -> Self {
+        logging::init();
         let anvil = Anvil::new().port(0_u16).spawn();
         let url = anvil.endpoint_url();
         let env = TestEnv::new(test_name, true, Some(url.as_str()))
@@ -44,7 +51,7 @@ impl AnvilTestContext {
         DatasetStore::new(self.env.config.clone(), self.env.metadata_db.clone())
     }
 
-    async fn mine(&self, blocks: u64) {
+    pub(crate) async fn mine(&self, blocks: u64) {
         tracing::info!(blocks, "mine");
         self.provider.anvil_mine(Some(blocks), None).await.unwrap()
     }
@@ -75,13 +82,13 @@ impl AnvilTestContext {
         let sql = parse_sql(&format!("select * from {}.blocks", dataset)).unwrap();
         let env = self.env.config.make_query_env().unwrap();
         let dataset_store = self.dataset_store().await;
-        let ctx = dataset_store.ctx_for_sql(&sql, env).await.unwrap();
-        let tables = ctx.catalog().tables();
+        let catalog = dataset_store.catalog_for_sql(&sql, env).await.unwrap();
+        let tables = catalog.tables();
         let table = tables.iter().find(|t| t.table_name() == "blocks").unwrap();
         table_ranges(&table).await.unwrap()
     }
 
-    async fn latest_block(&self) -> BlockRow {
+    pub(crate) async fn latest_block(&self) -> BlockRow {
         let block = self
             .provider
             .get_block(alloy::eips::BlockId::latest())
@@ -110,8 +117,8 @@ impl AnvilTestContext {
 }
 
 #[derive(Debug, PartialEq, Eq, serde::Deserialize)]
-struct BlockRow {
-    block_num: BlockNum,
+pub(crate) struct BlockRow {
+    pub(crate) block_num: BlockNum,
     hash: BlockHash,
     parent_hash: BlockHash,
 }
@@ -122,7 +129,7 @@ async fn rpc_reorg_simple() {
 
     test.dump("anvil_rpc", 0..=0).await;
     test.mine(2).await;
-    test.dump("anvil_rpc", 1..=2).await;
+    test.dump("anvil_rpc", 0..=2).await;
     let blocks0 = test.query_blocks("anvil_rpc", None).await;
     test.reorg(1).await;
     test.mine(1).await;
@@ -254,27 +261,27 @@ async fn streaming_reorg_desync() {
     check_batch(&mut test.client, 2).await;
 
     test.mine(2).await;
-    test.dump("anvil_rpc", 1..=2).await;
-    test.dump("sql_over_anvil_1", 1..=2).await;
+    test.dump("anvil_rpc", 0..=2).await;
+    test.dump("sql_over_anvil_1", 0..=2).await;
     test.reorg(1).await;
     test.mine(2).await;
-    test.dump("anvil_rpc", 1..=4).await;
-    test.dump("anvil_rpc", 1..=4).await;
-    test.dump("sql_over_anvil_2", 1..=4).await;
+    test.dump("anvil_rpc", 0..=4).await;
+    test.dump("anvil_rpc", 0..=4).await;
+    test.dump("sql_over_anvil_2", 0..=4).await;
 
     assert_ne!(
         test.query_blocks("sql_over_anvil_1", None).await,
         test.query_blocks("sql_over_anvil_2", None).await,
     );
 
-    test.dump("sql_over_anvil_1", 1..=4).await;
-    test.dump("sql_over_anvil_1", 1..=4).await;
+    test.dump("sql_over_anvil_1", 0..=4).await;
+    test.dump("sql_over_anvil_1", 0..=4).await;
 
     check_batch(&mut test.client, 8).await;
 }
 
 #[tokio::test]
-async fn streaming_reorg_rewind() {
+async fn streaming_reorg_rewind_shallow() {
     let mut test = AnvilTestContext::setup("streaming_reorg_rewind").await;
 
     test.dump("anvil_rpc", 0..=0).await;
@@ -303,8 +310,8 @@ async fn streaming_reorg_rewind() {
     );
 
     test.mine(2).await;
-    test.dump("anvil_rpc", 1..=2).await;
-    test.dump("sql_over_anvil_1", 1..=2).await;
+    test.dump("anvil_rpc", 0..=2).await;
+    test.dump("sql_over_anvil_1", 0..=2).await;
 
     assert_eq!(
         &take_blocks(&mut test.client, 2).await,
@@ -313,13 +320,151 @@ async fn streaming_reorg_rewind() {
 
     test.reorg(1).await;
     test.mine(2).await;
-    test.dump("anvil_rpc", 1..=4).await;
-    test.dump("anvil_rpc", 1..=4).await;
-    test.dump("sql_over_anvil_1", 1..=4).await;
-    test.dump("sql_over_anvil_1", 1..=4).await;
+    test.dump("anvil_rpc", 0..=4).await;
+    test.dump("anvil_rpc", 0..=4).await;
+    test.dump("sql_over_anvil_1", 0..=4).await;
+    test.dump("sql_over_anvil_1", 0..=4).await;
 
     assert_eq!(
         &take_blocks(&mut test.client, 4).await,
         &test.query_blocks("anvil_rpc", None).await[1..=4],
     );
+}
+
+#[tokio::test]
+async fn streaming_reorg_rewind_deep() {
+    let mut test = AnvilTestContext::setup("streaming_reorg_rewind").await;
+
+    test.dump("anvil_rpc", 0..=0).await;
+    test.dump("sql_over_anvil_1", 0..=0).await;
+
+    let streaming_query = r#"
+        SELECT block_num, hash, parent_hash
+        FROM sql_over_anvil_1.blocks
+        SETTINGS stream = true
+    "#;
+    test.client
+        .register_stream("stream", streaming_query)
+        .await
+        .unwrap();
+
+    async fn take_blocks(client: &mut TestClient, take: usize) -> Vec<BlockRow> {
+        let blocks = client.take_from_stream("stream", take).await.unwrap();
+        let mut blocks: Vec<BlockRow> = serde_json::from_value(blocks).unwrap();
+        blocks.sort_by_key(|b| b.block_num);
+        blocks
+    }
+
+    assert_eq!(
+        take_blocks(&mut test.client, 1).await,
+        test.query_blocks("anvil_rpc", None).await,
+    );
+
+    test.mine(6).await;
+    test.dump("anvil_rpc", 0..=6).await;
+    test.dump("sql_over_anvil_1", 0..=2).await;
+    test.dump("sql_over_anvil_1", 0..=4).await;
+    test.dump("sql_over_anvil_1", 0..=6).await;
+
+    assert_eq!(
+        &take_blocks(&mut test.client, 6).await,
+        &test.query_blocks("anvil_rpc", None).await[1..=6],
+    );
+
+    test.reorg(5).await;
+    test.mine(2).await;
+    test.dump("anvil_rpc", 0..=8).await;
+    test.dump("anvil_rpc", 0..=8).await;
+    test.dump("sql_over_anvil_1", 0..=8).await;
+    test.dump("sql_over_anvil_1", 0..=8).await;
+    test.dump("sql_over_anvil_1", 0..=8).await;
+    test.dump("sql_over_anvil_1", 0..=8).await;
+
+    assert_eq!(
+        &take_blocks(&mut test.client, 8).await,
+        &test.query_blocks("anvil_rpc", None).await[1..=8],
+    );
+}
+
+#[tokio::test]
+async fn flight_data_app_metadata() {
+    async fn pull_flight_metadata(rx: &mut mpsc::UnboundedReceiver<FlightData>) -> Vec<BlockRange> {
+        let mut buffer: Vec<FlightData> = Default::default();
+        rx.recv_many(&mut buffer, usize::MAX).await;
+        buffer.into_iter().filter_map(extract_metadata).collect()
+    }
+    fn extract_metadata(data: FlightData) -> Option<BlockRange> {
+        if data.app_metadata.is_empty() {
+            return None;
+        }
+        #[derive(Deserialize)]
+        struct Metadata {
+            ranges: Vec<BlockRange>,
+        }
+        let mut metadata: Metadata = serde_json::from_slice(&data.app_metadata.to_vec()).unwrap();
+        assert_eq!(metadata.ranges.len(), 1);
+        let range = metadata.ranges.remove(0);
+        Some(range)
+    }
+    async fn expected_range(
+        test: &mut AnvilTestContext,
+        numbers: RangeInclusive<BlockNum>,
+    ) -> BlockRange {
+        let blocks = test.query_blocks("anvil_rpc", None).await;
+        BlockRange {
+            numbers: numbers.clone(),
+            network: "anvil".to_string(),
+            hash: blocks[*numbers.end() as usize].hash,
+            prev_hash: Some(blocks[*numbers.start() as usize].parent_hash),
+        }
+    }
+
+    let mut test = AnvilTestContext::setup("flight_data_app_metadata").await;
+    let query = "SELECT block_num, hash FROM anvil_rpc.blocks SETTINGS stream = true";
+
+    test.dump("anvil_rpc", 0..=0).await;
+    let mut flight_data = flight_data_stream(&test, query).await;
+    assert_eq!(
+        pull_flight_metadata(&mut flight_data).await[0],
+        expected_range(&mut test, 0..=0).await,
+    );
+
+    test.mine(2).await;
+    test.dump("anvil_rpc", 0..=2).await;
+    assert_eq!(
+        pull_flight_metadata(&mut flight_data).await[0],
+        expected_range(&mut test, 1..=2).await,
+    );
+
+    test.reorg(1).await;
+    test.mine(1).await;
+    test.dump("anvil_rpc", 0..=3).await;
+    test.dump("anvil_rpc", 0..=3).await;
+    assert_eq!(
+        pull_flight_metadata(&mut flight_data).await[0],
+        expected_range(&mut test, 1..=3).await,
+    );
+}
+
+async fn flight_data_stream(
+    test: &AnvilTestContext,
+    query: &str,
+) -> mpsc::UnboundedReceiver<FlightData> {
+    let addr = format!("grpc://{}", test.env.server_addrs.flight_addr);
+    let flight_client = FlightServiceClient::connect(addr).await.unwrap();
+    let mut client = FlightSqlServiceClient::new_from_inner(flight_client);
+    let info = client.execute(query.to_string(), None).await.unwrap();
+    let ticket = info.endpoint[0].ticket.clone().unwrap();
+    let response = client.inner_mut().do_get(ticket).await.unwrap();
+    let mut flight_data_stream = response.into_inner();
+    let (tx, rx) = mpsc::unbounded_channel();
+    tokio::spawn(async move {
+        while let Some(result) = flight_data_stream.next().await {
+            let flight_data = result.unwrap();
+            if let Err(_) = tx.send(flight_data) {
+                return;
+            }
+        }
+    });
+    rx
 }

@@ -16,6 +16,7 @@ members = [
     "registry-service",
     "js-runtime",
     "generate-manifest",
+    "monitoring",
 ]
 
 resolver = "2"
@@ -47,13 +48,10 @@ fs-err = "3.0.0"
 futures = "0.3"
 hex = "0.4.3"
 itertools = "0.14.0"
-pgtemp = "0.6.0"
 pretty_assertions = "1.4.1"
-prometheus = "0.13"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_yaml = "0.9.34"
-snmalloc-rs = "0.3.4"
 tempfile = "3.13.0"
 thiserror = "2.0"
 toml = "0.8.10"
@@ -90,6 +88,7 @@ opentelemetry = { version = "0.30", features = ["trace"] }
 opentelemetry-otlp = { version = "0.30", features = ["grpc-tonic"] }
 opentelemetry_sdk = { version = "0.30" }
 tracing-opentelemetry = { version = "0.31", features = ["default"] }
+static_assertions = "1.1.0"
 
 # Datafusion and Arrow crates
 arrow-flight = { version = "55", features = ["flight-sql-experimental"] }

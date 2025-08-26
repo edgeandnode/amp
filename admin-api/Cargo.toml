@@ -19,5 +19,6 @@ http-common = { path = "../http-common" }
 common = { path = "../common" }
 dataset-store = { path = "../dataset-store" }
 metadata-db = { path = "../metadata-db" }
+registry-service = { path = "../registry-service" }
 dump = { path = "../dump" }
 object_store.workspace = true

@@ -5,7 +5,12 @@ use std::sync::Arc;
 use clap::Parser;
 use common::{BoxError, config::Config};
 use dataset_store::DatasetStore;
+use dump_check::metrics;
 use metadata_db::MetadataDb;
+use monitoring::{
+    logging,
+    telemetry::{self, metrics::provider_flush_shutdown},
+};
 
 /// Checks the output of `dump` against a provider.
 #[derive(Parser, Debug)]
@@ -19,6 +24,10 @@ struct Args {
     /// Will also be used as a subdirectory in the output path, `<data_dir>/<dataset>`.
     #[arg(long, env = "DUMP_DATASET")]
     dataset: String,
+
+    /// The version of the dataset to dump.
+    #[arg(long, env = "DUMP_DATASET_VERSION")]
+    version: Option<String>,
 
     /// The block number to start from, inclusive.
     #[arg(long, short, default_value = "0", env = "DUMP_START_BLOCK")]
@@ -37,24 +46,33 @@ struct Args {
     /// Number of blocks to validate per query
     #[arg(long, short, default_value = "1000", env = "DUMP_BATCH_SIZE")]
     batch_size: u64,
+
+    /// Remote OpenTelemetry metrics collector endpoint. OpenTelemetry collector must be running and
+    /// configured to accept metrics at this endpoint. Metrics are sent over binary HTTP.
+    ///
+    /// If not specified, metrics infrastructure will not be initialized.
+    #[arg(long, env = "DUMP_OPENTELEMETRY_METRICS_URL")]
+    opentelemetry_metrics_url: Option<String>,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), BoxError> {
-    tracing_subscriber::fmt::init();
+    logging::init();
 
     let args = Args::parse();
     let Args {
         config: config_path,
         dataset: dataset_name,
+        version: dataset_version,
         start,
         end_block,
         batch_size,
         n_jobs,
+        opentelemetry_metrics_url,
     } = args;
 
     let config = Arc::new(Config::load(config_path, true, None, false).await?);
-    let metadata_db: Arc<MetadataDb> = MetadataDb::connect(&config.metadata_db_url).await?.into();
+    let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
     let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
 
     if end_block == 0 {
@@ -65,16 +83,21 @@ async fn main() -> Result<(), BoxError> {
         return Err("The start block number must be less than the end block number".into());
     }
 
-    prometheus_exporter::start("0.0.0.0:9102".parse().expect("failed to parse binding"))
-        .expect("failed to start prometheus exporter");
+    let telemetry_metrics_kit = opentelemetry_metrics_url
+        .map(|url| telemetry::metrics::start(url, None))
+        .transpose()?;
+    let metrics_registry = telemetry_metrics_kit
+        .as_ref()
+        .map(|(_, meter)| Arc::new(metrics::MetricsRegistry::new(meter)));
 
     let total_blocks = end_block - start + 1;
-    let ui_handle = tokio::spawn(ui::ui(total_blocks));
+    let ui_handle = tokio::spawn(ui::ui(metrics_registry.clone(), total_blocks));
 
     let env = config.make_query_env()?;
 
     dump_check::dump_check(
         &dataset_name,
+        dataset_version.as_deref(),
         &dataset_store,
         metadata_db,
         &env,
@@ -82,10 +105,15 @@ async fn main() -> Result<(), BoxError> {
         n_jobs,
         start,
         end_block,
+        metrics_registry,
     )
     .await?;
 
     ui_handle.await?;
+
+    telemetry_metrics_kit
+        .map(|(provider, _)| provider_flush_shutdown(provider))
+        .transpose()?;
 
     Ok(())
 }

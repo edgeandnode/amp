@@ -1,24 +1,19 @@
 use std::{collections::BTreeMap, sync::Arc};
 
-use alloy::primitives::BlockHash;
+use alloy::{hex::ToHexExt as _, primitives::BlockHash};
 use common::{
-    BlockNum, BoxError, SPECIAL_BLOCK_NUM,
-    arrow::{array::RecordBatch, datatypes::SchemaRef},
-    catalog::physical::PhysicalTable,
-    metadata::segments::{BlockRange, Chain, Watermark},
+    BlockNum, BoxError, LogicalCatalog, SPECIAL_BLOCK_NUM,
+    arrow::array::RecordBatch,
+    catalog::physical::{Catalog, PhysicalTable},
+    metadata::segments::{BlockRange, Segment, Watermark},
     notification_multiplexer::NotificationMultiplexerHandle,
-    plan_visitors::{order_by_block_num, propagate_block_num},
-    query_context::{QueryContext, parse_sql},
+    query_context::{DetachedLogicalPlan, PlanningContext, QueryContext, QueryEnv, parse_sql},
 };
-use datafusion::{
-    common::cast::as_fixed_size_binary_array, error::DataFusionError,
-    execution::SendableRecordBatchStream, logical_expr::LogicalPlan,
-    physical_plan::stream::RecordBatchStreamAdapter,
-};
+use datafusion::common::cast::as_fixed_size_binary_array;
 use dataset_store::{DatasetStore, resolve_blocks_table};
 use futures::{
-    FutureExt, Stream, TryStreamExt as _,
-    stream::{self, StreamExt},
+    FutureExt,
+    stream::{self, BoxStream, StreamExt},
 };
 use metadata_db::LocationId;
 use tokio::sync::{mpsc, watch};
@@ -33,9 +28,9 @@ struct TableUpdates {
 }
 
 impl TableUpdates {
-    async fn new(ctx: &QueryContext, multiplexer_handle: &NotificationMultiplexerHandle) -> Self {
+    async fn new(catalog: &Catalog, multiplexer_handle: &NotificationMultiplexerHandle) -> Self {
         let mut subscriptions: BTreeMap<LocationId, watch::Receiver<()>> = Default::default();
-        for table in ctx.catalog().tables() {
+        for table in catalog.tables() {
             let location = table.location_id();
             subscriptions.insert(location, multiplexer_handle.subscribe(location).await);
         }
@@ -80,17 +75,9 @@ impl TableUpdates {
 ///
 /// Completion points do not necessarily follow increments of 1, as the query progresses in batches.
 pub enum QueryMessage {
+    MicrobatchStart(BlockRange),
     Data(RecordBatch),
-    Completed(BlockRange),
-}
-
-impl QueryMessage {
-    fn as_data(self) -> Option<RecordBatch> {
-        match self {
-            QueryMessage::Data(data) => Some(data),
-            QueryMessage::Completed(_) => None,
-        }
-    }
+    MicrobatchEnd(BlockRange),
 }
 
 /// A handle to a streaming query that can be used to retrieve results as a stream.
@@ -99,11 +86,10 @@ impl QueryMessage {
 pub struct StreamingQueryHandle {
     rx: mpsc::Receiver<QueryMessage>,
     join_handle: AbortOnDropHandle<Result<(), BoxError>>,
-    schema: SchemaRef,
 }
 
 impl StreamingQueryHandle {
-    pub fn as_stream(self) -> impl Stream<Item = Result<QueryMessage, BoxError>> + Unpin {
+    pub fn as_stream(self) -> BoxStream<'static, Result<QueryMessage, BoxError>> {
         let data_stream = ReceiverStream::new(self.rx);
 
         let join = self.join_handle;
@@ -126,17 +112,6 @@ impl StreamingQueryHandle {
             .chain(stream::once(get_task_result).filter_map(|x| async { x }))
             .boxed()
     }
-
-    pub fn as_record_batch_stream(self) -> SendableRecordBatchStream {
-        let schema = self.schema.clone();
-        let stream = RecordBatchStreamAdapter::new(
-            schema,
-            self.as_stream()
-                .try_filter_map(|m| async { Ok(m.as_data()) })
-                .map_err(DataFusionError::External),
-        );
-        Box::pin(stream)
-    }
 }
 
 /// A streaming query that continuously listens for new blocks and emits incremental results.
@@ -144,20 +119,18 @@ impl StreamingQueryHandle {
 /// This follows a 'microbatch' model where it processes data in chunks based on a block range
 /// stream.
 pub struct StreamingQuery {
-    ctx: Arc<QueryContext>,
-    dataset_store: Arc<DatasetStore>,
-    plan: LogicalPlan,
+    query_env: QueryEnv,
+    catalog: Catalog,
+    plan: DetachedLogicalPlan,
     start_block: BlockNum,
     end_block: Option<BlockNum>,
     table_updates: TableUpdates,
     tx: mpsc::Sender<QueryMessage>,
     microbatch_max_interval: u64,
     preserve_block_num: bool,
-    /// Physical tables used for SQL execution.
-    tables: Vec<Arc<PhysicalTable>>,
     network: String,
-    /// `blocks` table for the network associated with the physical tables.
-    blocks_table: String,
+    /// `blocks` table for the network associated with the catalog.
+    blocks_table: Arc<PhysicalTable>,
     /// Previously processed range. These may be provided by the consumer to resume a stream.
     prev_range: Option<BlockRange>,
 }
@@ -168,16 +141,16 @@ impl StreamingQuery {
     ///
     /// The query execution loop will run in its own task.
     pub async fn spawn(
-        ctx: Arc<QueryContext>,
+        query_env: QueryEnv,
+        catalog: Catalog,
         dataset_store: Arc<DatasetStore>,
-        plan: LogicalPlan,
+        plan: DetachedLogicalPlan,
         start_block: BlockNum,
         end_block: Option<BlockNum>,
         multiplexer_handle: &NotificationMultiplexerHandle,
         is_sql_dataset: bool,
         microbatch_max_interval: u64,
     ) -> Result<StreamingQueryHandle, BoxError> {
-        let schema: SchemaRef = plan.schema().clone().as_ref().clone().into();
         let (tx, rx) = mpsc::channel(10);
 
         // Preserve `_block_num` for SQL materializaiton or if explicitly selected in the schema.
@@ -193,20 +166,22 @@ impl StreamingQuery {
         // - Enforce `order by _block_num`.
         // - Run logical optimizations ahead of execution.
         let plan = {
-            let mut plan = propagate_block_num(plan)?;
-            plan = order_by_block_num(plan);
+            let mut plan = plan.propagate_block_num()?;
+            plan = plan.order_by_block_num();
+
+            let ctx = PlanningContext::new(catalog.logical().clone());
             let plan = ctx.optimize_plan(&plan).await?;
             plan
         };
 
-        let tables: Vec<Arc<PhysicalTable>> = ctx.catalog().tables().iter().cloned().collect();
+        let tables: Vec<Arc<PhysicalTable>> = catalog.tables().iter().cloned().collect();
         let network = tables.iter().map(|t| t.network()).next().unwrap();
         let src_datasets = tables.iter().map(|t| t.dataset().name.as_str()).collect();
         let blocks_table = resolve_blocks_table(&dataset_store, &src_datasets, network).await?;
-        let table_updates = TableUpdates::new(&ctx, multiplexer_handle).await;
+        let table_updates = TableUpdates::new(&catalog, multiplexer_handle).await;
         let streaming_query = Self {
-            ctx,
-            dataset_store,
+            query_env,
+            catalog,
             plan,
             tx,
             start_block,
@@ -215,8 +190,7 @@ impl StreamingQuery {
             microbatch_max_interval,
             preserve_block_num,
             network: network.to_string(),
-            tables,
-            blocks_table,
+            blocks_table: Arc::new(blocks_table),
             // TODO: Set from client to resume a stream after dropping a connection.
             prev_range: None,
         };
@@ -224,11 +198,7 @@ impl StreamingQuery {
         let join_handle =
             AbortOnDropHandle::new(tokio::spawn(streaming_query.execute().in_current_span()));
 
-        Ok(StreamingQueryHandle {
-            rx,
-            join_handle,
-            schema,
-        })
+        Ok(StreamingQueryHandle { rx, join_handle })
     }
 
     /// The loop:
@@ -241,22 +211,34 @@ impl StreamingQuery {
         loop {
             self.table_updates.changed().await;
 
+            // The table snapshots to execute the microbatch against.
+            let ctx =
+                QueryContext::for_catalog(self.catalog.clone(), self.query_env.clone(), false)
+                    .await?;
+
             // Get the next execution range
-            let Some(range) = self.next_microbatch_range().await? else {
+            let Some(range) = self.next_microbatch_range(&ctx).await? else {
                 continue;
             };
+            tracing::debug!("execute range [{}-{}]", range.start(), range.end());
 
             // Start microbatch execution for this chunk
-            let mut stream = self
-                .ctx
+            let attached_plan = self.plan.clone().attach_to(&ctx)?;
+            let mut stream = ctx
                 .execute_plan_for_range(
-                    self.plan.clone(),
+                    attached_plan,
                     range.start(),
                     range.end(),
                     self.preserve_block_num,
                     false,
                 )
                 .await?;
+
+            // Send start message for this microbatch
+            let _ = self
+                .tx
+                .send(QueryMessage::MicrobatchStart(range.clone()))
+                .await;
 
             // Drain the microbatch completely
             while let Some(item) = stream.next().await {
@@ -267,8 +249,11 @@ impl StreamingQuery {
                 let _ = self.tx.send(QueryMessage::Data(item)).await;
             }
 
-            // Send completion message for this chunk
-            let _ = self.tx.send(QueryMessage::Completed(range.clone())).await;
+            // Send end message for this microbatch
+            let _ = self
+                .tx
+                .send(QueryMessage::MicrobatchEnd(range.clone()))
+                .await;
 
             if Some(range.end()) == self.end_block {
                 // If we reached the end block, we are done
@@ -278,34 +263,27 @@ impl StreamingQuery {
         }
     }
 
-    async fn next_microbatch_range(&mut self) -> Result<Option<BlockRange>, BoxError> {
-        // Load the canonical chains for each source table.
-        let chains = {
-            let mut chains: Vec<Chain> = Default::default();
-            for table in &self.tables {
-                let Some(chain) = table.canonical_chain().await? else {
-                    // No canonical chain available for source table.
-                    return Ok(None);
-                };
-                chains.push(chain);
-            }
-            chains
-        };
+    async fn next_microbatch_range(
+        &mut self,
+        ctx: &QueryContext,
+    ) -> Result<Option<BlockRange>, BoxError> {
+        // Gather the chains for each source table.
+        let chains = ctx.catalog().table_snapshots().iter().map(|s| s.segments());
 
         // Use a single context for all queries against the blocks table. This is to keep a
         // consistent reference chain within the scope of this function.
-        let ctx = {
-            let query = parse_sql(&format!(
-                "SELECT block_num, hash FROM {}",
-                self.blocks_table,
-            ))?;
-            self.dataset_store
-                .ctx_for_sql(&query, self.ctx.env.clone())
-                .await?
+        let blocks_ctx = {
+            // Construct a catalog for the single `blocks_table`.
+            let catalog = {
+                let logical =
+                    LogicalCatalog::from_tables(std::iter::once(self.blocks_table.table()));
+                Catalog::new(vec![self.blocks_table.clone()], logical)
+            };
+            QueryContext::for_catalog(catalog, self.query_env.clone(), false).await?
         };
 
         // The latest common watermark across the source tables.
-        let Some(common_watermark) = self.latest_src_watermark(&ctx, &chains).await? else {
+        let Some(common_watermark) = self.latest_src_watermark(&blocks_ctx, chains).await? else {
             // No common watermark across source tables.
             return Ok(None);
         };
@@ -315,11 +293,11 @@ impl StreamingQuery {
             return Ok(None);
         }
 
-        let Some(start) = self.next_microbatch_start(&ctx).await? else {
+        let Some(start) = self.next_microbatch_start(&blocks_ctx).await? else {
             return Ok(None);
         };
         let Some(end) = self
-            .next_microbatch_end(&ctx, &start, common_watermark)
+            .next_microbatch_end(&blocks_ctx, &start, common_watermark)
             .await?
         else {
             return Ok(None);
@@ -335,39 +313,23 @@ impl StreamingQuery {
     async fn next_microbatch_start(
         &self,
         ctx: &QueryContext,
-    ) -> Result<Option<RangeStart>, BoxError> {
+    ) -> Result<Option<BlockRow>, BoxError> {
         match &self.prev_range {
             // start stream
-            None => self.blocks_table_start(&ctx, self.start_block).await,
+            None => self.blocks_table_fetch(&ctx, self.start_block, None).await,
             // continue stream
             Some(prev) if self.blocks_table_contains(ctx, &prev.watermark()).await? => {
-                self.blocks_table_start(&ctx, prev.end() + 1).await
+                self.blocks_table_fetch(&ctx, prev.end() + 1, None).await
             }
             // rewind stream due to reorg
-            Some(prev) => {
-                // Check for a quick rewind from 1 block before the previous range.
-                let quick_rewind_base = Watermark {
-                    number: prev.start().saturating_sub(1),
-                    hash: prev.prev_hash.unwrap(),
-                };
-                if self.blocks_table_contains(ctx, &quick_rewind_base).await? {
-                    Ok(Some(RangeStart {
-                        number: prev.start(),
-                        prev_hash: prev.prev_hash,
-                    }))
-                } else {
-                    // TODO: we need to inspect reorganized blocks to determine where the last
-                    // range and the canonical chain diverge.
-                    todo!("rewind before last range")
-                }
-            }
+            Some(prev) => self.reorg_base(ctx, prev).await,
         }
     }
 
     async fn next_microbatch_end(
         &mut self,
         ctx: &QueryContext,
-        start: &RangeStart,
+        start: &BlockRow,
         common_watermark: Watermark,
     ) -> Result<Option<Watermark>, BoxError> {
         let number = {
@@ -392,19 +354,21 @@ impl StreamingQuery {
         if number == common_watermark.number {
             Ok(Some(common_watermark))
         } else {
-            self.blocks_table_watermark(&ctx, number).await
+            self.blocks_table_fetch(&ctx, number, None)
+                .await
+                .map(|r| r.map(|r| r.watermark()))
         }
     }
 
     async fn latest_src_watermark(
         &self,
         ctx: &QueryContext,
-        chains: &[Chain],
+        chains: impl Iterator<Item = &[Segment]>,
     ) -> Result<Option<Watermark>, BoxError> {
         // For each chain, collect the latest segment
         let mut latest_src_watermarks: Vec<Watermark> = Default::default();
         'chain_loop: for chain in chains {
-            for segment in chain.0.iter().rev() {
+            for segment in chain.iter().rev() {
                 let watermark = segment.range.watermark();
                 if self.blocks_table_contains(&ctx, &watermark).await? {
                     latest_src_watermarks.push(watermark);
@@ -420,73 +384,100 @@ impl StreamingQuery {
             .cloned())
     }
 
+    /// Find the block to resume streaming from after detecting a reorg.
+    ///
+    /// When a streaming query detects that the previous block range is no longer on the canonical
+    /// chain (indicating a reorg), this method walks backwards from the end of the previous block
+    /// range to find the latest adjacent block that exists on the canonical chain.
+    async fn reorg_base(
+        &self,
+        ctx: &QueryContext,
+        prev_range: &BlockRange,
+    ) -> Result<Option<BlockRow>, BoxError> {
+        // context for querying forked blocks
+        let fork_ctx = {
+            let catalog = Catalog::new(
+                ctx.catalog().physical_tables().cloned().collect(),
+                ctx.catalog().logical().clone(),
+            );
+            QueryContext::for_catalog(catalog, ctx.env.clone(), true).await?
+        };
+
+        let mut min_fork_block_num = prev_range.end();
+        let mut fork: Option<BlockRow> = self
+            .blocks_table_fetch(&fork_ctx, prev_range.end(), Some(&prev_range.hash))
+            .await?;
+        while let Some(block) = fork.take() {
+            min_fork_block_num = block.number;
+            if self.blocks_table_contains(ctx, &block.watermark()).await? {
+                break;
+            }
+            fork = self
+                .blocks_table_fetch(
+                    &fork_ctx,
+                    block.number.saturating_sub(1),
+                    block.prev_hash.as_ref(),
+                )
+                .await?;
+        }
+        self.blocks_table_fetch(ctx, min_fork_block_num, None).await
+    }
+
     async fn blocks_table_contains(
         &self,
         ctx: &QueryContext,
         watermark: &Watermark,
     ) -> Result<bool, BoxError> {
-        let query = parse_sql(&format!(
-            "SELECT 1 FROM {} WHERE block_num = {} AND hash = {}",
-            self.blocks_table, watermark.number, watermark.hash,
-        ))?;
-        let plan = ctx.plan_sql(query).await?;
-        let results = ctx.execute_and_concat(plan).await?;
-        assert!(results.num_rows() <= 1);
-        Ok(results.num_rows() == 1)
+        self.blocks_table_fetch(ctx, watermark.number, Some(&watermark.hash))
+            .await
+            .map(|row| row.is_some())
     }
 
-    async fn blocks_table_watermark(
+    async fn blocks_table_fetch(
         &self,
         ctx: &QueryContext,
         number: BlockNum,
-    ) -> Result<Option<Watermark>, BoxError> {
+        hash: Option<&BlockHash>,
+    ) -> Result<Option<BlockRow>, BoxError> {
+        let hash_constraint = hash
+            .map(|h| format!("AND hash = x'{}'", h.encode_hex()))
+            .unwrap_or_default();
         let query = parse_sql(&format!(
-            "SELECT hash FROM {} WHERE block_num = {}",
-            self.blocks_table, number,
-        ))?;
-        let plan = ctx.plan_sql(query).await?;
-        let results = ctx.execute_and_concat(plan).await?;
-        assert!(results.num_rows() <= 1);
-        if results.num_rows() == 0 {
-            return Ok(None);
-        }
-        let hash = as_fixed_size_binary_array(results.column_by_name("hash").unwrap())
-            .unwrap()
-            .value(0)
-            .try_into()
-            .unwrap();
-        Ok(Some(Watermark { number, hash }))
-    }
-
-    async fn blocks_table_start(
-        &self,
-        ctx: &QueryContext,
-        number: BlockNum,
-    ) -> Result<Option<RangeStart>, BoxError> {
-        let query = parse_sql(&format!(
-            "SELECT parent_hash FROM {} WHERE block_num = {}",
-            self.blocks_table, number,
-        ))?;
-        let plan = ctx.plan_sql(query).await?;
-        let results = ctx.execute_and_concat(plan).await?;
-        assert!(results.num_rows() <= 1);
-        if results.num_rows() == 0 {
-            return Ok(None);
-        }
-        let parent_hash =
-            as_fixed_size_binary_array(results.column_by_name("parent_hash").unwrap())
-                .unwrap()
-                .value(0)
-                .try_into()
-                .unwrap();
-        Ok(Some(RangeStart {
+            "SELECT hash, parent_hash FROM {} WHERE block_num = {} {} LIMIT 1",
+            self.blocks_table.table_ref(),
             number,
-            prev_hash: Some(parent_hash),
+            hash_constraint,
+        ))?;
+        let plan = ctx.plan_sql(query).await?;
+        let results = ctx.execute_and_concat(plan).await?;
+        if results.num_rows() == 0 {
+            return Ok(None);
+        }
+        let get_hash_value = |column_name: &str| -> Option<BlockHash> {
+            let column =
+                as_fixed_size_binary_array(results.column_by_name(column_name).unwrap()).unwrap();
+            let bytes = column.iter().flatten().next();
+            bytes.map(|b| b.try_into().unwrap())
+        };
+        Ok(Some(BlockRow {
+            number,
+            hash: get_hash_value("hash").unwrap(),
+            prev_hash: get_hash_value("parent_hash"),
         }))
     }
 }
 
-struct RangeStart {
+struct BlockRow {
     number: BlockNum,
+    hash: BlockHash,
     prev_hash: Option<BlockHash>,
+}
+
+impl BlockRow {
+    fn watermark(&self) -> Watermark {
+        Watermark {
+            number: self.number,
+            hash: self.hash,
+        }
+    }
 }
