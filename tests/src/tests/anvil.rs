@@ -399,10 +399,12 @@ async fn flight_data_app_metadata() {
         }
         #[derive(Deserialize)]
         struct Metadata {
-            range: BlockRange,
+            ranges: Vec<BlockRange>,
         }
-        let metadata: Metadata = serde_json::from_slice(&data.app_metadata.to_vec()).unwrap();
-        Some(metadata.range)
+        let mut metadata: Metadata = serde_json::from_slice(&data.app_metadata.to_vec()).unwrap();
+        assert_eq!(metadata.ranges.len(), 1);
+        let range = metadata.ranges.remove(0);
+        Some(range)
     }
     async fn expected_range(
         test: &mut AnvilTestContext,
