@@ -34,16 +34,16 @@ jobs:
         with:
           credentials_json: ${{ secrets.STAGING_GOOGLE_CREDENTIALS }}
 
-      - name: 'Set up Cloud SDK'
-        uses: 'google-github-actions/setup-gcloud@26f734c2779b00b7dda794207734c511110a4368' # v3
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@26f734c2779b00b7dda794207734c511110a4368 # v3
         with:
           version: '>= 363.0.0'
 
       - name: Docker Auth
         id: docker-auth
-        uses: 'docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1' # v3.5.0
+        uses: docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1 # v3.5.0
         with:
-          registry: '${{ env.REGION }}-docker.pkg.dev'
+          registry: ${{ env.REGION }}-docker.pkg.dev'
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3
@@ -75,4 +75,4 @@ jobs:
           service: ${{ env.CLOUD_RUN_SERVICE }}
           image: ${{ env.REGION }}-docker.pkg.dev/${{ env.GH_ORG }}/${{ env.GH_REPO }}/${{ env.GH_IMAGE }}:${{ steps.metadata.outputs.tags }}
           region: ${{ env.REGION }}
-          project_id: ${{ secrets.STAGING_GCP NOZZLE_PROJECT_ID }}
+          project_id: ${{ secrets.STAGING_GCP_NOZZLE_PROJECT_ID }}
