@@ -11,16 +11,13 @@ concurrency:
 
 env:
   REGION: us-central1
-  GH_ORG: edgeandnode
-  GH_REPO: nozzle
-  GH_IMAGE: nozzle
   CLOUD_RUN_SERVICE: nozzle-staging
+  GH_IMAGE: nozzle
 
 jobs:
   build_and_push:
     permissions:
       contents: read
-      id-token: write
 
     name: Build and push to GCR
     runs-on: nscloud-ubuntu-22.04-amd64-32x32
@@ -44,17 +41,11 @@ jobs:
         uses: docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1 # v3.5.0
         with:
           registry: ${{ env.REGION }}-docker.pkg.dev'
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3
-
       - name: Docker meta
-        uses: docker/metadata-action@902fa8ec7d6ecbf8d84d538b9b233a880e428804 # v5
+        uses: docker/metadata-action@c1e51972afc2121e065aed6d45c65596fe445f3f # v5.8.0
         id: metadata
         with:
-          images: ${{ env.REGION }}-docker.pkg.dev/${{ env.GH_ORG }}/${{ env.GH_REPO }}/${{ env.GH_IMAGE }}
+          images: ${{ env.REGION }}-docker.pkg.dev/${{ github.repository }}/${{ env.GH_IMAGE }}
           tags: |
             type=ref,event=tag
             type=sha
@@ -73,6 +64,6 @@ jobs:
         uses: google-github-actions/deploy-cloudrun@v2
         with:
           service: ${{ env.CLOUD_RUN_SERVICE }}
-          image: ${{ env.REGION }}-docker.pkg.dev/${{ env.GH_ORG }}/${{ env.GH_REPO }}/${{ env.GH_IMAGE }}:${{ steps.metadata.outputs.tags }}
+          image: ${{ env.REGION }}-docker.pkg.dev/${{ github.repository }}/${{ env.GH_IMAGE }}:${{ steps.metadata.outputs.tags }}
           region: ${{ env.REGION }}
           project_id: ${{ secrets.STAGING_GCP_NOZZLE_PROJECT_ID }}
