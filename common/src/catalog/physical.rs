@@ -12,11 +12,13 @@ use datafusion::{
     error::Result as DataFusionResult,
     execution::object_store::ObjectStoreUrl,
     logical_expr::{ScalarUDF, SortExpr, col, utils::conjunction},
+    parquet::file::metadata::ParquetMetaData,
     physical_expr::LexOrdering,
     physical_plan::{ExecutionPlan, PhysicalExpr},
     prelude::Expr,
     sql::TableReference,
 };
+use foyer::Cache;
 use futures::{Stream, StreamExt, TryStreamExt, stream};
 use metadata_db::{LocationId, MetadataDb, TableId};
 use object_store::{ObjectMeta, ObjectStore, path::Path};
@@ -32,7 +34,7 @@ use crate::{
         parquet::ParquetMeta,
         segments::{Chain, Segment, canonical_chain, missing_ranges},
     },
-    store::{Store, object_store},
+    store::Store,
 };
 
 #[derive(Debug, Clone)]
@@ -70,7 +72,8 @@ impl Catalog {
         let mut earliest = None;
         for table in &self.tables {
             // Create a snapshot to get synced range
-            let snapshot = table.snapshot(false).await?;
+            let dummy_cache = foyer::CacheBuilder::new(1).build();
+            let snapshot = table.snapshot(false, dummy_cache).await?;
             let synced_range = snapshot.synced_range();
             match (earliest, &synced_range) {
                 (None, Some(range)) => earliest = Some(*range.start()),
@@ -91,10 +94,13 @@ impl CatalogSnapshot {
     pub async fn from_catalog(
         catalog: Catalog,
         ignore_canonical_segments: bool,
+        parquet_footer_cache: Cache<(LocationId, String), Arc<ParquetMetaData>>,
     ) -> Result<Self, BoxError> {
         let mut table_snapshots = Vec::new();
         for physical_table in &catalog.tables {
-            let snapshot = physical_table.snapshot(ignore_canonical_segments).await?;
+            let snapshot = physical_table
+                .snapshot(ignore_canonical_segments, parquet_footer_cache.clone())
+                .await?;
             table_snapshots.push(Arc::new(snapshot));
         }
 
@@ -170,9 +176,9 @@ pub struct PhysicalTable {
     location_id: LocationId,
     /// Metadata database to use for this table.
     metadata_db: Arc<MetadataDb>,
+    /// Object store for accessing the data files.
+    object_store: Arc<dyn ObjectStore>,
 
-    /// ParquetFileReaderFactory
-    pub reader_factory: Arc<NozzleReaderFactory>,
     start_block: i64,
 }
 
@@ -188,13 +194,7 @@ impl PhysicalTable {
     ) -> Result<Self, BoxError> {
         let path = Path::from_url_path(url.path()).unwrap();
         let object_store_url = url.clone().try_into()?;
-        let (object_store, _) = object_store(&object_store_url)?;
-        let reader_factory = NozzleReaderFactory {
-            location_id,
-            object_store: object_store.clone(),
-            metadata_db: metadata_db.clone(),
-        }
-        .into();
+        let (object_store, _) = crate::store::object_store(&object_store_url)?;
 
         Ok(Self {
             table,
@@ -202,7 +202,7 @@ impl PhysicalTable {
             path,
             location_id,
             metadata_db,
-            reader_factory,
+            object_store,
             start_block,
         })
     }
@@ -249,20 +249,13 @@ impl PhysicalTable {
         let path = Path::from_url_path(url.path()).unwrap();
 
         let object_store = data_store.object_store();
-        let reader_factory = NozzleReaderFactory {
-            location_id,
-            object_store,
-            metadata_db: Arc::clone(&metadata_db),
-        }
-        .into();
-
         let physical_table = Self {
             table: table.clone(),
             url,
             path,
             location_id,
             metadata_db,
-            reader_factory,
+            object_store,
             start_block,
         };
 
@@ -326,8 +319,6 @@ impl PhysicalTable {
         };
 
         let path = Path::from_url_path(url.path()).unwrap();
-        let object_store_url = url.clone().try_into()?;
-        let (object_store, _) = object_store(&object_store_url)?;
 
         let location = metadata_db
             .get_location_by_id(location_id)
@@ -337,12 +328,8 @@ impl PhysicalTable {
             })?;
         let start_block = location.start_block;
 
-        let reader_factory = NozzleReaderFactory {
-            location_id,
-            object_store,
-            metadata_db: Arc::clone(&metadata_db),
-        }
-        .into();
+        let object_store_url = url.clone().try_into()?;
+        let (object_store, _) = crate::store::object_store(&object_store_url)?;
 
         Ok(Some(Self {
             table: table.clone(),
@@ -350,7 +337,7 @@ impl PhysicalTable {
             path,
             location_id,
             metadata_db,
-            reader_factory,
+            object_store,
             start_block,
         }))
     }
@@ -439,20 +426,13 @@ impl PhysicalTable {
                 .await?;
         }
 
-        let reader_factory = NozzleReaderFactory {
-            location_id,
-            object_store: Arc::clone(&object_store),
-            metadata_db: Arc::clone(&metadata_db),
-        }
-        .into();
-
         let physical_table = Self {
             table: table.clone(),
             url: url.clone(),
             path: path.clone(),
             location_id,
             metadata_db,
-            reader_factory,
+            object_store: Arc::clone(&object_store),
             start_block,
         };
 
@@ -469,7 +449,6 @@ impl PhysicalTable {
         let num_files = file_locations.len();
         let locations = Box::pin(stream::iter(file_locations.into_iter().map(Ok)));
         let deleted = self
-            .reader_factory
             .object_store
             .delete_stream(locations)
             .try_collect::<Vec<Path>>()
@@ -548,7 +527,7 @@ impl PhysicalTable {
     }
 
     pub fn object_store(&self) -> Arc<dyn ObjectStore> {
-        Arc::clone(&self.reader_factory.object_store)
+        Arc::clone(&self.object_store)
     }
 
     pub fn table(&self) -> &ResolvedTable {
@@ -601,6 +580,7 @@ impl PhysicalTable {
     pub async fn snapshot(
         &self,
         ignore_canonical_segments: bool,
+        parquet_footer_cache: Cache<(LocationId, String), Arc<ParquetMetaData>>,
     ) -> Result<TableSnapshot, BoxError> {
         let segments = if ignore_canonical_segments {
             self.segments().await?
@@ -612,9 +592,17 @@ impl PhysicalTable {
                 .collect()
         };
 
+        // Create a reader factory with the cache
+        let reader_factory_with_cache = NozzleReaderFactory {
+            location_id: self.location_id,
+            metadata_db: Arc::clone(&self.metadata_db),
+            object_store: Arc::clone(&self.object_store),
+            parquet_footer_cache,
+        };
+
         Ok(TableSnapshot {
             physical_table: Arc::new(self.clone()),
-            reader_factory: Arc::clone(&self.reader_factory),
+            reader_factory: Arc::new(reader_factory_with_cache),
             segments,
         })
     }
