@@ -1,0 +1,3 @@
+kind = "evm-rpc"
+url = "${RPC_ETH_MAINNET_URL}"
+network = "mainnet"

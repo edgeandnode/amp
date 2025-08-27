@@ -15,7 +15,7 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: full
-  RUSTFLAGS: "-D warnings --force-warn deprecated"
+  RUSTFLAGS: "-D warnings"
 
 jobs:
   unit-tests:
@@ -93,20 +93,13 @@ jobs:
         run: |
           echo "/usr/lib/postgresql/$(pg_lsclusters | awk 'NR==2 {print $1}')/bin" >> $GITHUB_PATH
 
-      - name: Copy provider files
-        run: |
-          cp -r tests/config/COPY_ME_providers tests/config/providers
-          sed -i -e "s@\$FIREHOSE_ETH_MAINNET_URL@$FIREHOSE_ETH_MAINNET_URL@g" -e "s@\$FIREHOSE_ETH_MAINNET_TOKEN@$FIREHOSE_ETH_MAINNET_TOKEN@g" tests/config/providers/firehose_eth_mainnet.toml
-          sed -i -e "s@\$RPC_ETH_MAINNET_URL@$RPC_ETH_MAINNET_URL@g" tests/config/providers/rpc_eth_mainnet.toml
-          sed -i -e "s@\$RPC_ETH_BASE_URL@$RPC_ETH_BASE_URL@g" tests/config/providers/rpc_eth_base.toml
+      - name: Integration tests
+        run: just test-it --verbose
         env:
           FIREHOSE_ETH_MAINNET_URL: ${{ secrets.FIREHOSE_ETH_MAINNET_URL }}
           FIREHOSE_ETH_MAINNET_TOKEN: ${{ secrets.FIREHOSE_ETH_MAINNET_TOKEN }}
           RPC_ETH_MAINNET_URL: ${{ secrets.RPC_ETH_MAINNET_URL }}
           RPC_ETH_BASE_URL: ${{ secrets.RPC_ETH_BASE_URL }}
-
-      - name: Integration tests
-        run: just test-it --verbose
 
   rustfmt:
     name: Check rustfmt style
@@ -118,7 +111,7 @@ jobs:
       - name: Setup Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@fb51252c7ba57d633bc668f941da052e410add48 # v1
         with:
-          toolchain: nightly # Required for unstable features (see `rustfmt.toml` for details)
+          #toolchain: nightly # Required for unstable features (see `rustfmt.toml` for details)
           components: rustfmt
           cache: false
           rustflags: ""

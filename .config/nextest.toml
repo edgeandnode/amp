@@ -1,0 +1,13 @@
+[profile.local]
+# Exclude tests that require external dependencies
+default-filter = '''
+  all() -
+  test(eth_firehose_single_dump) -
+  test(evm_rpc_single_dump) -
+  test(evm_rpc_base_single_dump) -
+  test(sql_tests) -
+  test(sql_dataset_input_batch_size) -
+  test(intra_deps_test) -
+  test(multi_version_test) -
+  test(streaming_tests_with_sql_datasets)
+'''

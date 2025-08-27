@@ -4,11 +4,11 @@ default:
 
 # Format all Rust code (cargo fmt)
 fmt:
-    cargo +nightly fmt --all
+    cargo fmt --all
 
 # Check Rust code format (cargo fmt --check)
 fmt-check:
-    cargo +nightly fmt --all -- --check
+    cargo fmt --all -- --check
 
 # Check Rust code (cargo check)
 check *EXTRA_FLAGS:
@@ -45,6 +45,18 @@ test-it *EXTRA_FLAGS:
         cargo nextest run {{EXTRA_FLAGS}} --package tests
     else
         cargo test {{EXTRA_FLAGS}} --package tests -- --nocapture
+    fi
+
+# Run only tests without external dependencies
+test-local *EXTRA_FLAGS:
+    #!/usr/bin/env bash
+    set -e # Exit on error
+
+    if command -v "cargo-nextest" &> /dev/null; then
+        cargo nextest run --profile local {{EXTRA_FLAGS}} --workspace
+    else
+        echo "This command requires cargo-nextest to filter tests"
+        exit 1
     fi
 
 # Clean workspace (cargo clean)
