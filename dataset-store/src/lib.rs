@@ -482,27 +482,42 @@ impl DatasetStore {
         self.sql_dataset(value).await
     }
 
-    pub async fn load_client(&self, dataset: &str) -> Result<impl BlockStreamer, DatasetError> {
-        self.load_client_inner(dataset)
+    pub async fn load_client(
+        &self,
+        dataset: &str,
+        only_finalized_blocks: bool,
+    ) -> Result<impl BlockStreamer, DatasetError> {
+        self.load_client_inner(dataset, only_finalized_blocks)
             .await
             .map_err(|e| (dataset, e).into())
     }
 
-    async fn load_client_inner(&self, dataset_name: &str) -> Result<BlockStreamClient, Error> {
+    async fn load_client_inner(
+        &self,
+        dataset_name: &str,
+        only_finalized_blocks: bool,
+    ) -> Result<BlockStreamClient, Error> {
         let (common, raw_dataset) = self.common_data_and_dataset(dataset_name).await?;
         let value = raw_dataset.to_value()?;
         let kind = DatasetKind::from_str(&common.kind)?;
 
         let provider = self.find_provider(kind, common.network.clone()).await?;
         Ok(match kind {
-            DatasetKind::EvmRpc => {
-                BlockStreamClient::EvmRpc(evm_rpc_datasets::client(provider, common.network).await?)
-            }
+            DatasetKind::EvmRpc => BlockStreamClient::EvmRpc(
+                evm_rpc_datasets::client(provider, common.network, only_finalized_blocks).await?,
+            ),
             DatasetKind::Firehose => BlockStreamClient::Firehose(
-                firehose_datasets::Client::new(provider, common.network).await?,
+                firehose_datasets::Client::new(provider, common.network, only_finalized_blocks)
+                    .await?,
             ),
             DatasetKind::Substreams => BlockStreamClient::Substreams(
-                substreams_datasets::Client::new(provider, value, common.network).await?,
+                substreams_datasets::Client::new(
+                    provider,
+                    value,
+                    common.network,
+                    only_finalized_blocks,
+                )
+                .await?,
             ),
             DatasetKind::Sql | DatasetKind::Manifest => {
                 // SQL and Manifest datasets don't have a client.
@@ -862,11 +877,11 @@ impl BlockStreamer for BlockStreamClient {
         }
     }
 
-    async fn latest_block(&mut self, finalized: bool) -> Result<BlockNum, BoxError> {
+    async fn latest_block(&mut self) -> Result<BlockNum, BoxError> {
         match self {
-            Self::EvmRpc(client) => client.latest_block(finalized).await,
-            Self::Firehose(client) => client.latest_block(finalized).await,
-            Self::Substreams(client) => client.latest_block(finalized).await,
+            Self::EvmRpc(client) => client.latest_block().await,
+            Self::Firehose(client) => client.latest_block().await,
+            Self::Substreams(client) => client.latest_block().await,
         }
     }
 }
