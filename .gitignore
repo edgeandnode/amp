@@ -9,7 +9,6 @@
 .nozzle
 /local
 /target
-/tests/config/providers/
 uv.lock
 cache/
 out/

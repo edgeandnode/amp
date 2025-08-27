@@ -43,6 +43,9 @@ use tracing::{debug, info, instrument};
 const TEST_CONFIG_BASE_DIRS: [&str; 2] = ["tests/config", "config"];
 
 pub async fn load_test_config(config_override: Option<Figment>) -> Result<Arc<Config>, BoxError> {
+    // Load .env file if it exists for environment variable support
+    let _ = dotenvy::from_filename(".env");
+
     let mut path = None;
     for dir in TEST_CONFIG_BASE_DIRS.iter() {
         let p = format!("{}/config.toml", dir);
@@ -134,7 +137,6 @@ impl TestEnv {
         }
 
         if let Some(anvil_url) = anvil_url {
-            check_provider_file("rpc_anvil.toml").await;
             let tmp_providers = tempfile::tempdir()?;
             info!("Temporary provider dir {}", tmp_providers.path().display());
             for config_base in TEST_CONFIG_BASE_DIRS {
@@ -375,20 +377,6 @@ async fn clear_dataset(config: &Config, dataset_name: &str) -> Result<(), BoxErr
         .try_collect::<Vec<_>>()
         .await?;
     Ok(())
-}
-
-pub async fn check_provider_file(filename: &str) {
-    if TEST_CONFIG_BASE_DIRS.iter().all(|dir| {
-        matches!(
-            fs::metadata(format!("{dir}/providers/{filename}")).map_err(|e| e.kind()),
-            Err(ErrorKind::NotFound)
-        )
-    }) {
-        panic!(
-            "Provider file '{filename}' does not exist. To run this test, copy 'COPY_ME_{filename}' as '{filename}', \
-             filling in the required endpoints and credentials.",
-        );
-    }
 }
 
 pub fn assert_batch_eq(left: &RecordBatch, right: &RecordBatch) {
