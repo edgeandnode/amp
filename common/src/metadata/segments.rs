@@ -53,7 +53,7 @@ pub struct Watermark {
 /// A block range associated with the matadata from a file in object storage.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Segment {
-    pub id: Option<FileId>,
+    pub id: FileId,
     pub range: BlockRange,
     pub object: ObjectMeta,
 }
@@ -338,6 +338,7 @@ mod test {
 
     use alloy::primitives::BlockHash;
     use chrono::DateTime;
+    use metadata_db::FileId;
     use object_store::ObjectMeta;
     use rand::{Rng as _, RngCore as _, SeedableRng as _, rngs::StdRng, seq::SliceRandom};
 
@@ -377,7 +378,7 @@ mod test {
         Segment {
             range,
             object,
-            id: None,
+            id: FileId::MIN,
         }
     }
 

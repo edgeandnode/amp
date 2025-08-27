@@ -5,7 +5,7 @@ use std::{
     ops::{Add, AddAssign},
 };
 
-use common::{BLOCK_NUM, SPECIAL_BLOCK_NUM};
+use common::{BLOCK_NUM, SPECIAL_BLOCK_NUM, config::CompactionConfig};
 use datafusion::parquet::{
     arrow::arrow_reader::ArrowReaderMetadata, file::metadata::RowGroupMetaData,
 };
@@ -385,7 +385,7 @@ pub fn le_bytes_to_nonzero_i64_opt(bytes: &[u8]) -> Result<Option<NonZeroI64>, T
 ///
 /// ### Limit Behavior
 ///
-/// - A limit value of `-1` means that dimension is ignored (no limit)
+/// - A limit value of `-1` or `0` means that dimension is ignored (no limit)
 /// - The `length` field specifies the minimum number of files required for compaction
 /// - Multiple dimensions can be active simultaneously
 /// ```
@@ -463,6 +463,17 @@ impl SegmentSizeLimit {
     }
 }
 
+impl From<&CompactionConfig> for SegmentSizeLimit {
+    fn from(config: &CompactionConfig) -> Self {
+        Self(SegmentSize {
+            blocks: config.block_threshold,
+            bytes: config.byte_threshold,
+            rows: config.row_threshold,
+            length: config.min_file_count,
+        })
+    }
+}
+
 // Default values for file size limits
 impl SegmentSizeLimit {
     const LENGTH_DEFAULT: usize = 2; // 2 files
@@ -524,7 +535,175 @@ impl SegmentSizeLimit {
     }
 }
 
-mod test {
+pub mod test {
+    use std::sync::Arc;
+
+    use common::{
+        BLOCK_NUM,
+        parquet::{
+            basic::Type as PhysicalType,
+            file::{
+                metadata::{
+                    ColumnChunkMetaData, FileMetaData, ParquetMetaData, ParquetMetaDataBuilder,
+                    RowGroupMetaData,
+                },
+                statistics::Statistics,
+            },
+            schema::types::{ColumnDescriptor, ColumnPath, SchemaDescriptor, Type},
+        },
+    };
+
+    /// Create a Parquet metadata object for testing.
+    ///
+    /// # Sanity Check
+    /// ```
+    /// use dump::compaction::size::test;
+    /// let meta = test::parquet_meta(1000, 3, 400, 100);
+    /// assert_eq!(meta.file_metadata().num_rows(), 3000);
+    /// assert_eq!(meta.row_groups().len(), 3);
+    /// assert_eq!(meta.row_groups()[0].num_rows(), 1000);
+    /// assert_eq!(meta.row_groups()[1].num_rows(), 1000);
+    /// assert_eq!(meta.row_groups()[2].num_rows(), 1000);
+    /// assert_eq!(
+    ///     meta.row_groups()[0].columns()[0]
+    ///         .statistics()
+    ///         .unwrap()
+    ///         .max_bytes(),
+    ///     199i64.to_le_bytes()
+    /// );
+    /// assert_eq!(
+    ///     meta.row_groups()[0].columns()[0]
+    ///         .statistics()
+    ///         .unwrap()
+    ///         .min_bytes(),
+    ///     100i64.to_le_bytes()
+    /// );
+    /// assert_eq!(
+    ///     meta.row_groups()[0].columns()[0]
+    ///         .statistics()
+    ///         .unwrap()
+    ///         .null_count(),
+    ///     0
+    /// );
+    /// assert_eq!(
+    ///     meta.row_groups()[0].columns()[0]
+    ///         .statistics()
+    ///         .unwrap()
+    ///         .distinct_count(),
+    ///     Some(100u64)
+    /// );
+    /// ```
+    pub fn parquet_meta(
+        num_rows: i64,
+        num_row_groups: i16,
+        block_max: i64,
+        block_min: i64,
+    ) -> ParquetMetaData {
+        assert!(num_row_groups > 0, "Must have at least one row group");
+        assert!(
+            block_max - block_min + 1 >= num_row_groups as i64,
+            "Block range must cover at least one distinct block per row group"
+        );
+
+        fn schema_descr() -> SchemaDescriptor {
+            let block_num = Type::primitive_type_builder(BLOCK_NUM, PhysicalType::INT64)
+                .with_repetition(common::parquet::basic::Repetition::REPEATED)
+                .build()
+                .unwrap()
+                .into();
+
+            let schema = Type::group_type_builder("schema")
+                .with_fields(vec![block_num])
+                .build()
+                .unwrap()
+                .into();
+
+            SchemaDescriptor::new(schema)
+        }
+
+        fn column_descr(schema_descr: Arc<SchemaDescriptor>) -> ColumnDescriptor {
+            let primitive_type = schema_descr.column(0).self_type_ptr();
+            let max_def_level = schema_descr.column(0).max_def_level();
+            let max_rep_level = schema_descr.column(0).max_rep_level();
+            let path = ColumnPath::new(vec![BLOCK_NUM.to_string()]);
+            ColumnDescriptor::new(primitive_type, max_def_level, max_rep_level, path)
+        }
+
+        fn file_meta(num_rows: i64) -> FileMetaData {
+            let schema_descr = schema_descr().into();
+            FileMetaData::new(2, num_rows, None, None, schema_descr, None)
+        }
+
+        fn statistics(block_max: i64, block_min: i64) -> Statistics {
+            let max = Some(block_max);
+            let min = Some(block_min);
+            let null_count = Some(0);
+            let distinct_count = Some((block_max - block_min + 1) as u64);
+
+            Statistics::new(min, max, distinct_count, null_count, false)
+        }
+
+        fn column_chunk_metadata(
+            block_max: i64,
+            block_min: i64,
+            schema_descr: Arc<SchemaDescriptor>,
+        ) -> ColumnChunkMetaData {
+            ColumnChunkMetaData::builder(column_descr(schema_descr).into())
+                .set_statistics(statistics(block_max, block_min).into())
+                .build()
+                .unwrap()
+        }
+
+        fn row_group(
+            num_rows: i64,
+            ordinal: i16,
+            block_max: i64,
+            block_min: i64,
+        ) -> RowGroupMetaData {
+            let schema_descr: Arc<SchemaDescriptor> = schema_descr().into();
+            RowGroupMetaData::builder(schema_descr.clone())
+                .set_num_rows(num_rows)
+                .set_ordinal(ordinal)
+                .add_column_metadata(column_chunk_metadata(block_max, block_min, schema_descr))
+                .build()
+                .unwrap()
+        }
+        let step = (block_max - block_min + 1) / num_row_groups as i64;
+        let mut pmin = block_min;
+        let mut pmax = block_min + step - 1;
+
+        (0..num_row_groups)
+            .fold(
+                ParquetMetaDataBuilder::new(file_meta(num_rows * num_row_groups as i64)),
+                |mut builder, ordinal| {
+                    builder = builder.add_row_group(row_group(num_rows, ordinal, pmax, pmin));
+                    pmin = pmax + 1;
+                    pmax = pmin + step - 1;
+                    builder
+                },
+            )
+            .build()
+    }
+
+    #[test]
+    fn segment_size_calc() {
+        let options =
+            common::parquet::arrow::arrow_reader::ArrowReaderOptions::new().with_page_index(true);
+        let metadata = common::parquet::arrow::arrow_reader::ArrowReaderMetadata::try_new(
+            parquet_meta(1000, 3, 400, 100).into(),
+            options,
+        )
+        .unwrap();
+        let file_size = crate::compaction::SegmentSize::from(&metadata);
+
+        assert_eq!(file_size.length, 1);
+        assert_eq!(file_size.blocks, 300);
+        assert_eq!(file_size.rows, 3000);
+        // We did not set data sizes in the test metadata, this is hard to do without writing data to disk 
+        // which we cannot do in a unit test
+        assert_eq!(file_size.bytes, 0); 
+    }
+
     #[test]
     fn segment_size_display() {
         let size = super::SegmentSize {

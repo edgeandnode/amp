@@ -169,7 +169,7 @@ pub struct PhysicalTable {
     /// Location ID in the metadata database.
     location_id: LocationId,
     /// Metadata database to use for this table.
-    pub metadata_db: Arc<MetadataDb>,
+    metadata_db: Arc<MetadataDb>,
 
     /// ParquetFileReaderFactory
     pub reader_factory: Arc<NozzleReaderFactory>,
@@ -547,6 +547,10 @@ impl PhysicalTable {
         self.table.network()
     }
 
+    pub fn metadata_db(&self) -> Arc<MetadataDb> {
+        Arc::clone(&self.metadata_db)
+    }
+
     pub fn object_store(&self) -> Arc<dyn ObjectStore> {
         Arc::clone(&self.reader_factory.object_store)
     }
@@ -587,7 +591,7 @@ impl PhysicalTable {
                     )));
                 }
                 Ok(Segment {
-                    id: Some(file_id),
+                    id: file_id,
                     range: ranges.remove(0),
                     object: object_meta,
                 })
@@ -766,7 +770,7 @@ fn round_robin<'a>(
     let mut groups = vec![FileGroup::default(); size];
     for (idx, segment) in segments.into_iter().enumerate() {
         let mut file = PartitionedFile::from(segment.object.clone());
-        file.extensions = Some(Arc::new(segment.id.unwrap()));
+        file.extensions = Some(Arc::new(segment.id));
         groups[idx % size].push(file);
     }
     groups

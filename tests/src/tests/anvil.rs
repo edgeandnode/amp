@@ -162,7 +162,7 @@ async fn rpc_reorg_simple() {
     // [0..=0, 0..=2, 0..=2, 1..=2, 3..=3]
     assert_eq!(
         ranges.iter().map(|r| r.numbers.clone()).collect::<Vec<_>>(),
-        vec![0..=0, 0..=2, 0..=2, 1..=2, 3..=3],
+        vec![0..=0, 1..=2, 1..=2, 3..=3],
     );
     assert!(ranges.contains(&BlockRange {
         numbers: blocks1[1].block_num..=blocks1[2].block_num,

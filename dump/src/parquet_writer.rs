@@ -7,19 +7,19 @@ use common::{
     catalog::physical::{Catalog, PhysicalTable},
     metadata::{
         extract_footer_bytes_from_file,
-        parquet::{PARQUET_METADATA_KEY, ParquetMeta},
+        parquet::{PARENT_FILE_ID_METADATA_KEY, PARQUET_METADATA_KEY, ParquetMeta},
         segments::BlockRange,
     },
     parquet::{arrow::AsyncArrowWriter, errors::ParquetError, format::KeyValue},
 };
-use metadata_db::{FooterBytes, LocationId, MetadataDb};
+use metadata_db::{FileId, FooterBytes, LocationId, MetadataDb};
 use object_store::{ObjectMeta, buffered::BufWriter, path::Path};
 use rand::RngCore as _;
 use tracing::{debug, trace};
 use url::Url;
 
 use crate::{
-    compaction::{FILE_SIZE_LIMIT_BYTES, NozzleCompactor},
+    compaction::{CompactionProperties, NozzleCompactor},
     metrics,
 };
 
@@ -39,6 +39,7 @@ impl RawDatasetWriter {
         catalog: Catalog,
         metadata_db: Arc<MetadataDb>,
         opts: ParquetWriterProperties,
+        compaction_opts: &Arc<CompactionProperties>,
         partition_size: u64,
         missing_ranges_by_table: BTreeMap<String, Vec<RangeInclusive<BlockNum>>>,
         metrics: Option<Arc<metrics::MetricsRegistry>>,
@@ -51,6 +52,7 @@ impl RawDatasetWriter {
             let writer = RawTableWriter::new(
                 table.clone(),
                 opts.clone(),
+                compaction_opts,
                 partition_size,
                 ranges,
                 metrics.clone(),
@@ -155,6 +157,7 @@ impl RawTableWriter {
     pub fn new(
         table: Arc<PhysicalTable>,
         opts: ParquetWriterProperties,
+        compaction_opts: &Arc<CompactionProperties>,
         partition_size: u64,
         missing_ranges: Vec<RangeInclusive<BlockNum>>,
         metrics: Option<Arc<metrics::MetricsRegistry>>,
@@ -170,7 +173,7 @@ impl RawTableWriter {
             None => None,
         };
 
-        let nozzle_compactor = NozzleCompactor::start(table.clone(), &opts, FILE_SIZE_LIMIT_BYTES);
+        let nozzle_compactor = NozzleCompactor::start(table.clone(), compaction_opts.clone());
 
         Ok(Self {
             table,
@@ -302,9 +305,9 @@ impl RawTableWriter {
         let file = self.current_file.take().unwrap();
         let range = self.current_range.take().unwrap();
 
-        let metadata = file.close(range).await?;
+        let metadata = file.close(range, &[]).await?;
 
-        self.compactor.try_run().await;
+        self.compactor.try_run();
 
         if let Some(ref metrics) = self.metrics {
             let dataset_name = self.table.dataset().name.clone();
@@ -354,6 +357,7 @@ impl ParquetFileWriter {
     pub async fn close(
         mut self,
         range: BlockRange,
+        parent_ids: &[FileId],
     ) -> Result<(ParquetMeta, ObjectMeta, FooterBytes), BoxError> {
         self.writer.flush().await?;
 
@@ -370,11 +374,20 @@ impl ParquetFileWriter {
             created_at: Timestamp::now(),
             ranges: vec![range],
         };
+
         let kv_metadata = KeyValue::new(
             PARQUET_METADATA_KEY.to_string(),
             serde_json::to_string(&parquet_meta)?,
         );
         self.writer.append_key_value_metadata(kv_metadata);
+
+        let parent_file_id_metadata = KeyValue::new(
+            PARENT_FILE_ID_METADATA_KEY.to_string(),
+            serde_json::to_string(&parent_ids)?,
+        );
+        self.writer
+            .append_key_value_metadata(parent_file_id_metadata);
+
         self.writer.close().await?;
 
         let location = Path::from_url_path(self.file_url.path())?;

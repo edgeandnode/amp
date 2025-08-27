@@ -57,3 +57,26 @@ metadata_db_url = "postgres://<pg_url>"
 
 # Enable bloom filters (default: false)
 # bloom_filters = false
+
+# File compaction configuration (optional)
+[compaction]
+# The maximum number of concurrent metadata operations (default: 10)
+# metadata_concurrency = 10
+
+# The interval (in seconds) at which to run the garbage collector (default: 60)
+# collector_interval_secs = 60
+
+# The interval (in seconds) at which to run the compactor (default: 0)
+# compactor_interval_secs = 0
+
+# The minimum number of distinct blocks in a set of contiguous files before it is compacted (default: -1)
+# block_threshold = -1
+
+# The minimum number of bytes in a set of contiguous files before it is compacted (default: -1)
+# byte_threshold = -1
+
+# The minimum number of rows in a set of contiguous files before it is compacted (default: -1)
+# row_threshold = -1
+
+# The minimum number of contiguous files to compact at once (default: 2)
+# min_file_count = 2

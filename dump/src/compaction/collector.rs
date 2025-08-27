@@ -2,7 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use common::{Timestamp, catalog::physical::PhysicalTable};
 use futures::{
-    StreamExt, TryStreamExt, future,
+    FutureExt, StreamExt, TryStreamExt, future,
     stream::{self, BoxStream},
 };
 use metadata_db::{FileId, GcManifestRow, MetadataDb};
@@ -10,7 +10,7 @@ use object_store::{Error as ObjectStoreError, ObjectStore, path::Path};
 
 use crate::{
     compaction::{
-        DeletionTask,
+        CompactionProperties, DeletionTask,
         error::{DeletionError, DeletionResult},
     },
     consistency_check,
@@ -19,23 +19,28 @@ use crate::{
 #[derive(Clone, Debug)]
 pub struct Collector {
     pub table: Arc<PhysicalTable>,
-    pub metadata_db: Arc<MetadataDb>,
+    pub opts: Arc<CompactionProperties>,
 }
 
 impl Collector {
-    pub(super) fn start(table: Arc<PhysicalTable>, metadata_db: Arc<MetadataDb>) -> DeletionTask {
+    /// Starts the deletion task by spawning a new asynchronous task
+    /// that returns a new Collector.
+    pub fn start(table: &Arc<PhysicalTable>, opts: &Arc<CompactionProperties>) -> DeletionTask {
         DeletionTask {
-            task: tokio::spawn(future::ok(Collector::new(&table, &metadata_db))),
-            table,
-            metadata_db,
+            task: tokio::spawn(future::ok(Collector::new(table, opts)).boxed()),
+            table: Arc::clone(table),
+            opts: Arc::clone(opts),
             previous: None,
         }
     }
 
-    pub(super) fn new<'a>(table: &'a Arc<PhysicalTable>, metadata_db: &'a Arc<MetadataDb>) -> Self {
+    pub(super) fn new<'a>(
+        table: &'a Arc<PhysicalTable>,
+        opts: &'a Arc<CompactionProperties>,
+    ) -> Self {
         Collector {
             table: Arc::clone(table),
-            metadata_db: Arc::clone(metadata_db),
+            opts: Arc::clone(opts),
         }
     }
 
@@ -48,7 +53,7 @@ impl Collector {
         let now = Timestamp::now();
         let secs = now.0.as_secs() as i64;
         let nsecs = now.0.subsec_nanos();
-        let metadata_db = Arc::clone(&self.metadata_db);
+        let metadata_db = table.metadata_db();
 
         let expired_stream = metadata_db.stream_expired_files(location_id, secs, nsecs);
 
