@@ -37,3 +37,27 @@ services:
     volumes:
       - ./grafana/dashboards:/var/lib/grafana/dashboards
       - ./grafana/provisioning/dashboards:/otel-lgtm/grafana/conf/provisioning/dashboards
+
+  # Runs a gel database instance for the nozzle registry api.
+  # This will maintain the metadata-rich view of datasets with full-text searching as well as ai embeddings/RAG.
+  #
+  # To view the gel admin ui, open: localhost:5656/ui
+  nozzle_registry_db:
+    image: geldata/gel:latest
+    environment:
+      GEL_SERVER_USER: nozzle_registry_adm
+      GEL_SERVER_PASSWORD: admin
+      GEL_SERVER_INSTANCE: nozzle_registry
+      GEL_SERVER_SECURITY: insecure_dev_mode
+      GEL_SERVER_ADMIN_UI: enabled
+      GEL_SERVER_PORT: 5656
+      GEL_DOCKER_APPLY_MIGRATIONS: always
+    ports:
+      - "5656:5656"
+    volumes:
+      - nozzle_registry_data:/var/lib/gel/data
+      - "./dbschema:/dbschema"
+    restart: unless-stopped
+
+volumes:
+  nozzle_registry_data:

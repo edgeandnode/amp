@@ -1,0 +1,151 @@
+using extension ai;
+using extension pg_trgm;
+
+module default {
+  # Enum of the dataset status
+  scalar type DatasetStatus extending enum<Draft, Published, Deprecated, Archived>;
+  # Enum of the dataset visibility
+  scalar type DatasetVisibility extending enum<Private, Public>;
+  # Enum of the dataset mutability
+  scalar type DatasetMutability extending enum<Mutable, Snapshot, AppendOnly>;
+
+  # Represents a deployed version of a Dataset. A Dataset can have 1->many versions
+  type DatasetVersion {
+    # Label representing the version. example: v0.0.1 (semver. recommended); 367e521 (git commit hash)
+    required label: str;
+    # The version-specific public facing id that is the content-addressable reference to this DatasetVersion.
+    ## This is not exclusive as it is possible, and acceptable that multiple versions have the same _content_,
+    ## and therefore, the same id
+    required dataset_version_id: str;
+    # Current status of the dataset version
+    required status: DatasetStatus {
+      default := DatasetStatus.Draft;
+    }
+    # (Optional) a description of what changed with this version
+    changelog: str;
+    # (Optional) if this version introduces breaking changes to the dataset (eg. dataset columns were removed, etc)
+    breaking: bool {
+      default := false;
+    }
+    # Location of the dataset manifest. When a dataset is referenced, this manifest is what is brought in.
+    required manifest: str;
+    # Timestamp when the dataset version was created
+    required created_at: datetime {
+      default := datetime_of_statement();
+    }
+
+    ## computeds
+
+    # Provides a computed backlink to the Dataset that owns this DatasetVersion
+    single dataset := .<versions[is Dataset];
+
+    ## indexes
+
+    index on (.dataset_version_id);
+    index on (.label);
+  }
+
+  # Data related to discoverability of a dataset
+  abstract type DatasetDiscovery {
+    # (Optional) Provides a description breaking down the dataset, its intended use, etc
+    description: str {
+      constraint max_len_value(1024);
+    }
+    # (Optional) Keywords defining the usage of the dataset. example: ERC20, transfers, NFT, marketplace, DeFi
+    keywords: array<str>;
+    # Chains the dataset is indexing. Format is caip2id: eip155:1, etc
+    required indexing_chains: array<str>;
+    # Source of the data. example: substreams, logs, the 0x address of the indexed smart contracts, etc
+    required source: array<str>;
+    # Visibility of the dataset. If private, only the dataset owner(s) can view/find. If public, anyone can find
+    required visibility: DatasetVisibility {
+      default := DatasetVisibility.Public;
+    }
+
+    ## indexes
+
+    index on (.indexing_chains);
+  }
+  # Data related to the developer experience when building a dataset
+  abstract type DatasetMetadata {
+    # ID of the dataset owner. Could be the 0x address of the owning wallet, or an org id, etc
+    required owner: str;
+    # (Optional) URL of the dataset repository, if stored in GitHub, as example.
+    repository_url: str {
+      constraint regexp(r'^https?://[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*(/.*)?$');
+    }
+    # (Optional) Contains dynamic runtime configuration
+    runtime_config: json;
+    # (Optional) If the dataset is covered by a license
+    license: str;
+    # (Optional) The mutability of the dataset
+    mutability: DatasetMutability;
+    # (Optional) Lineage of datasets that this dataset extends from.
+    multi link ancestors: Dataset {
+       constraint exclusive;
+    }
+
+    ## indexes
+
+    index on (.owner);
+  }
+
+  # Defines the root dataset model
+  type Dataset extending DatasetDiscovery, DatasetMetadata {
+    # Globally unique, content-addressable, id of the dataset
+    required dataset_id: str {
+      constraint exclusive;
+    }
+    # Slugified name of the dataset. example: ethereum-transfers
+    required name: str {
+      constraint regexp(r'^[a-z][a-z0-9_-]*$');
+    }
+    # Grouping mechanism for datasets. Can be the org or team name, wallet address, ens name, etc.
+    required namespace: str;
+    # Current status of the dataset
+    required status: DatasetStatus {
+      default := DatasetStatus.Draft;
+    }
+    # Timestamp when the dataset was created
+    required created_at: datetime {
+      default := datetime_of_statement();
+    }
+
+    ## links
+
+    # Provides an array of DatasetVersion belonging to this Dataset
+    multi versions: DatasetVersion {
+      constraint exclusive;
+      # If the Dataset (source) is deleted, any orphaned DatasetVersion records will also be deleted
+      on source delete delete target if orphan;
+    }
+
+    ## computeds
+
+    # The full dataset name is: {namespace}/{name}. example: graphprotocol/ethereum-transfers
+    dataset_name := str_lower(.namespace ++ '/' ++ .name);
+    # The latest, published, version of the dataset
+    latest_version := (
+      select .versions filter .status = DatasetStatus.Published order by .created_at desc limit 1
+    );
+    # Datasets that have this dataset as an ancestor (descendants)
+    descendants := .<ancestors[is Dataset];
+
+    ## constraints
+
+    # The combination of {namespace}/{name} is exclusive
+    constraint exclusive on ((.namespace, .name));
+
+    ## indexes
+    index on (str_lower(.namespace ++ '/' ++ .name));
+    ### create trigram index for partial/fuzzy dataset name matching
+    index pg::btree on (str_lower(.namespace ++ '/' ++ .name));
+    ### create full-text search indexes, in weight-ranked order: keywords, source, indexing_chains, description
+    index fts::index on ((
+        fts::with_options(array_join(.keywords, ' '), language := fts::Language.eng, weight_category := fts::Weight.A),
+        fts::with_options(array_join(.source, ' '), language := fts::Language.eng, weight_category := fts::Weight.B),
+        fts::with_options(array_join(.indexing_chains, ' '), language := fts::Language.eng, weight_category := fts::Weight.C),
+        fts::with_options(.description, language := fts::Language.eng, weight_category := fts::Weight.D),
+    ));
+  }
+}

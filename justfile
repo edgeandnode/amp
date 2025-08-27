@@ -106,3 +106,19 @@ remove-git-hooks:
 
     # Remove the pre-commit hooks
     pre-commit uninstall --config .github/pre-commit-config.yaml
+
+# nozzle-registry commands for running gel database commands, such as migrations
+
+## create a gel migration for any nozzle-registry schema changes
+nozzle_registry__migration_create:
+    docker compose exec nozzle_registry_db gel --tls-security=insecure --user=nozzle_registry_adm --password -P 5656 migration create
+## runs any unapplied migrations
+## note: the docker image will run all migrations on startup
+nozzle_registry__migrate:
+    docker compose exec nozzle_registry_db gel --tls-security=insecure --user=nozzle_registry_adm --password -P 5656 migration apply
+## Renders a logs of the applied migrations on the gel instance
+nozzle_registry__migrate_log:
+    docker compose exec nozzle_registry_db gel --tls-security=insecure --user=nozzle_registry_adm --password -P 5656 migration log --from-db
+## connects the nozzle-registry gel sql instance to the running docker compose gel instance
+nozzle_registry__gel_cli:
+    docker compose exec nozzle_registry_db gel --tls-security=insecure --user=nozzle_registry_adm --password -P 5656
