@@ -3,6 +3,12 @@ name: GCR Image and Cloud Run Deployment
 
 on:
   workflow_dispatch:
+    inputs:
+      environment:
+        required: true
+        type: string
+        default: staging
+        description: The environment to deploy to
   pull_request:
   push:
     branches: [main]
@@ -13,10 +19,7 @@ concurrency:
 
 env:
   REGION: us-central1
-  CLOUD_RUN_SERVICE: nozzle-staging
-  STAGING_GCP_NOZZLE_PROJECT_ID: nozzle-staging
-  PRODUCTION_GCP_NOZZLE_PROJECT_ID: nozzle-production
-  GH_IMAGE: nozzle
+  REPO_NAME: ${{ github.event.repository.name }}
 
 jobs:
   build_and_push:
@@ -31,7 +34,7 @@ jobs:
 
       # # Authenticate to Production GCP only from main branch
       # - name: Google auth to Production GCP
-      #   if: github.ref == 'refs/heads/main'
+      #   if: github.ref == 'refs/heads/main' && inputs.environment == 'production'
       #   id: auth
       #   uses: google-github-actions/auth@b7593ed2efd1c1617e1b0254da33b86225adb2a5 # v2
       #   with:
@@ -40,37 +43,38 @@ jobs:
 
       # Authenticate to Staging GCP only on workflow_dispatch
       - name: Google auth to Staging GCP
-        if: github.ref != 'refs/heads/main' && github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' && inputs.environment == 'staging'
         id: auth
         uses: google-github-actions/auth@b7593ed2efd1c1617e1b0254da33b86225adb2a5 # v2
         with:
-          project_id: ${{ env.STAGING_GCP_NOZZLE_PROJECT_ID }}
-          workload_identity_provider: 'projects/${{ env.STAGING_GCP_NOZZLE_PROJECT_ID }}/locations/global/workloadIdentityPools/github-pipeline/providers/github-pipeline'
+          project_id: ${{ env.REPO_NAME }}-${{ inputs.environment }}
+          workload_identity_provider: 'projects/${{ env.REPO_NAME }}-${{ inputs.environment }}/locations/global/workloadIdentityPools/github-pipeline/providers/github-pipeline'
 
       - name: Set up Cloud SDK
+        if: steps.auth.outcome == 'success'
         uses: google-github-actions/setup-gcloud@26f734c2779b00b7dda794207734c511110a4368 # v3
         with:
           version: '>= 363.0.0'
 
       - name: Docker Auth
-        if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+        if: steps.auth.outcome == 'success'
         id: docker-auth
         uses: docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1 # v3.5.0
         with:
           registry: ${{ env.REGION }}-docker.pkg.dev'
 
       - name: Docker meta
-        if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+        if: steps.auth.outcome == 'success'
         id: metadata
         uses: docker/metadata-action@c1e51972afc2121e065aed6d45c65596fe445f3f # v5.8.0
         with:
-          images: ${{ env.REGION }}-docker.pkg.dev/${{ github.repository }}/${{ env.GH_IMAGE }}
+          images: ${{ env.REGION }}-docker.pkg.dev/${{ github.repository }}/${{ env.REPO_NAME }}
           tags: |
             type=ref,event=tag
             type=sha,format=short
 
       - name: Build and push Docker image
-        if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+        if: steps.auth.outcome == 'success'
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6
         with:
           context: .
@@ -84,19 +88,19 @@ jobs:
           sbom: true
 
       - name: Deploy to Staging Cloud Run
-        if: github.ref != 'refs/heads/main' && github.event_name == 'workflow_dispatch'
+        if: steps.auth.outcome == 'success'
         uses: google-github-actions/deploy-cloudrun@v2
         with:
-          service: ${{ env.CLOUD_RUN_SERVICE }}
-          image: ${{ env.REGION }}-docker.pkg.dev/${{ github.repository }}/${{ env.GH_IMAGE }}:${{ steps.metadata.outputs.tags }}
+          project_id: ${{ env.REPO_NAME }}-${{ inputs.environment }}
+          service: ${{ env.REPO_NAME }}-${{ inputs.environment }}
+          image: ${{ env.REGION }}-docker.pkg.dev/${{ github.repository }}/${{ env.REPO_NAME }}:${{ steps.metadata.outputs.tags }}
           region: ${{ env.REGION }}
-          project_id: ${{ env.STAGING_GCP_NOZZLE_PROJECT_ID }}
 
       # - name: Deploy to Production Cloud Run
-      #   if: github.ref == 'refs/heads/main'
+      #   if: steps.auth.outcome == 'success'
       #   uses: google-github-actions/deploy-cloudrun@v2
       #   with:
       #     service: ${{ env.CLOUD_RUN_SERVICE }}
       #     image: ${{ env.REGION }}-docker.pkg.dev/${{ github.repository }}/${{ env.GH_IMAGE }}:${{ steps.metadata.outputs.tags }}
       #     region: ${{ env.REGION }}
-      #     project_id: ${{ env.STAGING_GCP_NOZZLE_PROJECT_ID }}
+      #     project_id: ${{ env.REPO_NAME }}-${{ inputs.environment }}
