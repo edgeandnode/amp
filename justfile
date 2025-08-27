@@ -47,6 +47,18 @@ test-it *EXTRA_FLAGS:
         cargo test {{EXTRA_FLAGS}} --package tests -- --nocapture
     fi
 
+# Run only tests without external dependencies
+test-local *EXTRA_FLAGS:
+    #!/usr/bin/env bash
+    set -e # Exit on error
+
+    if command -v "cargo-nextest" &> /dev/null; then
+        cargo nextest run --profile local {{EXTRA_FLAGS}} --workspace
+    else
+        echo "This command requires cargo-nextest to filter tests"
+        exit 1
+    fi
+
 # Clean workspace (cargo clean)
 clean:
     cargo clean
