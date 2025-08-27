@@ -84,7 +84,7 @@ jobs:
           sbom: true
 
       - name: Deploy to Staging Cloud Run
-        if: github.ref != 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+        if: github.ref != 'refs/heads/main' && github.event_name == 'workflow_dispatch'
         uses: google-github-actions/deploy-cloudrun@v2
         with:
           service: ${{ env.CLOUD_RUN_SERVICE }}
