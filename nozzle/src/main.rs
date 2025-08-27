@@ -129,6 +129,8 @@ enum Command {
         #[arg(long, env = "GM_SS_MODULE")]
         module: Option<String>,
     },
+    /// Run migrations on the metadata database
+    Migrate,
 }
 
 #[tokio::main]
@@ -149,7 +151,7 @@ async fn main_inner() -> Result<(), BoxError> {
 
     let allow_temp_db = matches!(command, Command::Server { dev, .. } if dev);
     let (config, metadata_db) =
-        construct_confing_and_metadatadb(config_path.as_ref(), allow_temp_db).await?;
+        load_config_and_metadata_db(config_path.as_ref(), allow_temp_db).await?;
 
     let (telemetry_tracing_provider, telemetry_metrics_provider, telemetry_metrics_meter) =
         monitoring::init(config.opentelemetry.as_ref())?;
@@ -270,6 +272,23 @@ async fn main_inner() -> Result<(), BoxError> {
                 generate_manifest::run(network, kind, name, manifest, module, &mut stdout).await
             }
         }
+        Command::Migrate => {
+            let config_path = config_path.ok_or("--config parameter is mandatory")?;
+            let config = Arc::new(Config::load(config_path, true, None, false).await?);
+
+            let url = config
+                .metadata_db
+                .url
+                .as_ref()
+                .ok_or("metadata_db.url is required for migrate command")?;
+
+            info!("Running migrations on metadata database...");
+            let _metadata_db =
+                MetadataDb::connect_with_config(url, config.metadata_db.pool_size, true).await?;
+            info!("Migrations completed successfully");
+
+            Ok(())
+        }
     };
 
     cmd_result.and_then(move |_| {
@@ -280,7 +299,7 @@ async fn main_inner() -> Result<(), BoxError> {
     Ok(())
 }
 
-async fn construct_confing_and_metadatadb(
+async fn load_config_and_metadata_db(
     config_path: Option<&String>,
     allow_temp_db: bool,
 ) -> Result<(Arc<Config>, Arc<MetadataDb>), BoxError> {
