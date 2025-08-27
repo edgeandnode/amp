@@ -4,11 +4,11 @@ default:
 
 # Format all Rust code (cargo fmt)
 fmt:
-    cargo +nightly fmt --all
+    cargo fmt --all
 
 # Check Rust code format (cargo fmt --check)
 fmt-check:
-    cargo +nightly fmt --all -- --check
+    cargo fmt --all -- --check
 
 # Check Rust code (cargo check)
 check *EXTRA_FLAGS:
