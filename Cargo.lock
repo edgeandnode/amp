@@ -7272,6 +7272,7 @@ dependencies = [
  "clap",
  "common",
  "dataset-store",
+ "dotenvy",
  "dump",
  "dump-check",
  "evm-rpc-datasets",

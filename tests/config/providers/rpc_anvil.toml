@@ -1,0 +1,3 @@
+kind = "evm-rpc"
+url = "http://localhost:8545" # This is substituted at runtime (see `test_support.ts`)
+network = "anvil"

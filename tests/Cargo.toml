@@ -13,6 +13,7 @@ name = "tests"
 alloy.workspace = true
 clap.workspace = true
 common = { path = "../common" }
+dotenvy.workspace = true
 dataset-store = { path = "../dataset-store" }
 dump = { path = "../dump" }
 dump-check = { path = "../dump-check" }
