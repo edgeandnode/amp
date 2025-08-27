@@ -118,7 +118,7 @@ jobs:
       - name: Setup Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@fb51252c7ba57d633bc668f941da052e410add48 # v1
         with:
-          toolchain: nightly # Required for unstable features (see `rustfmt.toml` for details)
+          #toolchain: nightly # Required for unstable features (see `rustfmt.toml` for details)
           components: rustfmt
           cache: false
           rustflags: ""
