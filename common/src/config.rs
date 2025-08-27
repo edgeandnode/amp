@@ -107,22 +107,17 @@ where
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
 pub struct CompactionConfig {
     #[serde(skip)]
     pub enabled: bool,
-    #[serde(default)]
     pub metadata_concurrency: usize,
-    #[serde(default)]
+    pub write_concurrency: usize,
     pub collector_interval_secs: u64,
-    #[serde(default)]
     pub compactor_interval_secs: u64,
-    #[serde(default)]
     pub block_threshold: i64,
-    #[serde(default)]
     pub byte_threshold: i64,
-    #[serde(default)]
     pub row_threshold: i64,
-    #[serde(default)]
     pub min_file_count: usize,
 }
 
@@ -131,7 +126,8 @@ impl Default for CompactionConfig {
         Self {
             enabled: false,
             metadata_concurrency: 10,
-            collector_interval_secs: 0,
+            write_concurrency: 1,
+            collector_interval_secs: 30 * 60,
             compactor_interval_secs: 0,
             block_threshold: -1,
             byte_threshold: -1,

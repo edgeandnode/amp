@@ -4,10 +4,9 @@ use common::{
     catalog::physical::PhysicalTable,
     metadata::{parquet::ParquetMeta, segments::BlockRange},
 };
-use futures::{FutureExt, TryStreamExt, future};
+use futures::{FutureExt, StreamExt, TryStreamExt, future, stream};
 use metadata_db::{FileId, FooterBytes, LocationId, MetadataDb};
 use object_store::{ObjectMeta, path::Path};
-use tokio::task::JoinSet;
 
 use crate::{
     compaction::{
@@ -43,16 +42,16 @@ impl Compactor {
         }
     }
 
+    #[tracing::instrument(skip_all, err)]
     pub(super) async fn compact(self) -> CompactionResult<Self> {
         let table = Arc::clone(&self.table);
-        let metadata_db = table.metadata_db();
         let opts = Arc::clone(&self.opts);
 
         // await: We need to await the PhysicalTable::segments method
         let compaction_stream = CompactionGroupGenerator::from_table(table, opts).await?;
 
         // await: We need to collect the stream
-        let mut compaction_groups = compaction_stream.into_compaction_groups().await.into_iter();
+        let compaction_groups = compaction_stream.into_compaction_groups().await;
 
         tracing::info!(
             "Created {} compaction groups for table {}",
@@ -60,24 +59,20 @@ impl Compactor {
             self.table.table_ref()
         );
 
-        let mut join_set = JoinSet::new();
-
-        // await: We need to await the creation of a compaction group (which awaits reading from the metadata db)
-        while let Some(group) = compaction_groups.next() {
-            join_set.spawn(group.compact(Arc::clone(&metadata_db)));
-        }
+        let mut join_set = stream::iter(compaction_groups)
+            .map(|group| group.compact())
+            .buffer_unordered(1);
 
         // await: We need to await the completion of compaction tasks
-        while let Some(result) = join_set.join_next().await {
+        while let Some(result) = join_set.next().await {
             match result {
-                // Happy path
-                Ok(Ok(..)) => continue,
-                // Error occurred during compaction, trace it and move on
-                Ok(Err(err)) => tracing::error!("{err}"),
-                // Something went wrong with the join, trace it and move on
-                Err(err) => {
-                    tracing::error!("{err}");
+                // Happy path, compaction succeeded
+                Ok(file_ids) => {
+                    tracing::debug!("Compaction succeeded. FileIds: {file_ids:?}");
+                    continue;
                 }
+                // Error occurred during compaction, trace it and move on
+                Err(err) => tracing::error!("{err}"),
             }
         }
 
@@ -164,7 +159,9 @@ impl CompactionGroup {
         ))
     }
 
-    pub async fn compact(self, metadata_db: Arc<MetadataDb>) -> CompactionResult<()> {
+    pub async fn compact(self) -> CompactionResult<Vec<FileId>> {
+        let metadata_db = self.table.metadata_db();
+
         let output = self.write_and_finish().await?;
 
         output
@@ -179,7 +176,7 @@ impl CompactionGroup {
             .await
             .map_err(CompactionError::manifest_update_error(&output.file_ids))?;
 
-        Ok(())
+        Ok(output.file_ids)
     }
 }
 

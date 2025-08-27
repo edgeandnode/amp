@@ -172,13 +172,19 @@ impl CompactionGroupGenerator<'_> {
 
     /// This function will return an iterator over the compaction groups created from the
     /// files in the stream.
-    #[tracing::instrument(skip_all, fields(opts = format!("{}", self.opts)))]
+    #[tracing::instrument(skip_all, fields(opts = self.opts.to_string()))]
     pub async fn into_compaction_groups(mut self) -> Vec<CompactionGroup> {
         let mut groups = Vec::new();
 
         while let Some(group) = self.next_group().await.transpose() {
             match group {
                 Ok(group) => {
+                    tracing::debug!(
+                        "Compaction group with {} segments created for table {}",
+                        group.streams.len(),
+                        self.table.table_ref()
+                    );
+
                     groups.push(group);
                 }
                 Err(err) => {

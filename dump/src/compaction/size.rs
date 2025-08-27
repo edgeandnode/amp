@@ -142,7 +142,7 @@ use datafusion::parquet::{
 /// assert_eq!(large_files_total.bytes, 3000); // 1000 + 2000
 /// assert_eq!(large_files_total.rows, 1500); // 500 + 1000
 /// ```
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialOrd, Ord, PartialEq, Eq)]
 pub struct SegmentSize {
     /// Total number of files in the segment
     pub length: usize,
@@ -163,6 +163,19 @@ impl Add for SegmentSize {
             bytes: self.bytes + other.bytes,
             rows: self.rows + other.rows,
             length: self.length + other.length,
+        }
+    }
+}
+
+impl std::ops::Mul<i32> for SegmentSize {
+    type Output = Self;
+
+    fn mul(self, rhs: i32) -> Self::Output {
+        Self {
+            blocks: self.blocks * rhs as i64,
+            bytes: self.bytes * rhs as i64,
+            rows: self.rows * rhs as i64,
+            length: self.length,
         }
     }
 }
@@ -699,9 +712,9 @@ pub mod test {
         assert_eq!(file_size.length, 1);
         assert_eq!(file_size.blocks, 300);
         assert_eq!(file_size.rows, 3000);
-        // We did not set data sizes in the test metadata, this is hard to do without writing data to disk 
+        // We did not set data sizes in the test metadata, this is hard to do without writing data to disk
         // which we cannot do in a unit test
-        assert_eq!(file_size.bytes, 0); 
+        assert_eq!(file_size.bytes, 0);
     }
 
     #[test]

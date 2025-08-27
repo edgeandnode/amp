@@ -32,6 +32,7 @@ pub struct CompactionProperties {
     pub compactor_interval: Duration,
     pub collector_interval: Duration,
     pub metadata_concurrency: usize,
+    pub write_concurrency: usize,
     pub parquet_writer_props: ParquetWriterProperties,
     pub size_limit: SegmentSizeLimit,
 }
@@ -40,8 +41,16 @@ impl Display for CompactionProperties {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         f.debug_map()
             .entry(&"metadata_concurrency", &self.metadata_concurrency)
-            .entry(&"parquet_writer_props", &self.parquet_writer_props)
+            .entry(&"write_concurrency", &self.write_concurrency)
             .entry(&"size_limit", &self.size_limit)
+            .entry(
+                &"collector_interval_secs",
+                &self.collector_interval.as_secs(),
+            )
+            .entry(
+                &"compactor_interval_secs",
+                &self.compactor_interval.as_secs(),
+            )
             .finish()
     }
 }
