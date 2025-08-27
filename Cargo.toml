@@ -17,6 +17,7 @@ members = [
     "js-runtime",
     "generate-manifest",
     "monitoring",
+    "client",
 ]
 
 resolver = "2"

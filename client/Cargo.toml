@@ -1,0 +1,17 @@
+[package]
+name = "nozzle-client"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+arrow-flight.workspace = true
+async-stream.workspace = true
+bytes.workspace = true
+common = { version = "0.1.0", path = "../common" }
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tonic.workspace = true
+url.workspace = true

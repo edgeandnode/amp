@@ -15,7 +15,7 @@ use futures::StreamExt as _;
 use monitoring::logging;
 use rand::{Rng, RngCore, SeedableRng as _, rngs::StdRng};
 use serde::Deserialize;
-use tokio::sync::mpsc;
+use tokio::{sync::mpsc, task::JoinHandle};
 
 use crate::{
     test_client::TestClient,
@@ -467,4 +467,77 @@ async fn flight_data_stream(
         }
     });
     rx
+}
+
+#[tokio::test]
+async fn nozzle_client() {
+    let test = AnvilTestContext::setup("nozzle_client").await;
+    let query = "SELECT block_num, hash FROM anvil_rpc.blocks SETTINGS stream = true";
+    let last_block = 3;
+
+    let endpoint = format!("grpc://{}", test.env.server_addrs.flight_addr);
+    let mut client = nozzle_client::SqlClient::new(&endpoint).await.unwrap();
+    test.dump("anvil_rpc", 0..=0).await;
+    let stream = client.query(query, None).await.unwrap();
+    #[derive(Debug, PartialEq, Eq)]
+    enum ControlMessage {
+        Batch(Vec<nozzle_client::InvalidationRange>),
+        Reorg(Vec<nozzle_client::InvalidationRange>),
+    }
+    let handle: JoinHandle<Vec<ControlMessage>> = tokio::spawn(async move {
+        let mut control_messages: Vec<ControlMessage> = Default::default();
+        let mut stream = nozzle_client::with_reorg(stream);
+        while let Some(result) = stream.next().await {
+            let response_batch = result.unwrap();
+            control_messages.push(match response_batch {
+                nozzle_client::ResponseBatchWithReorg::Batch { metadata, .. } => {
+                    ControlMessage::Batch(metadata.ranges.into_iter().map(Into::into).collect())
+                }
+                nozzle_client::ResponseBatchWithReorg::Reorg { invalidation } => {
+                    ControlMessage::Reorg(invalidation)
+                }
+            });
+            if let Some(ControlMessage::Batch(ranges)) = control_messages.last()
+                && *ranges[0].numbers.end() == last_block
+            {
+                break;
+            }
+        }
+        control_messages
+    });
+
+    test.mine(1).await;
+    test.dump("anvil_rpc", 0..=1).await;
+    test.mine(1).await;
+    test.dump("anvil_rpc", 0..=2).await;
+    test.reorg(1).await;
+    test.mine(1).await;
+    test.dump("anvil_rpc", 0..=3).await;
+    test.dump("anvil_rpc", 0..=3).await;
+
+    assert_eq!(
+        handle.await.unwrap(),
+        vec![
+            ControlMessage::Batch(vec![nozzle_client::InvalidationRange {
+                network: "anvil".to_string(),
+                numbers: 0..=0,
+            }]),
+            ControlMessage::Batch(vec![nozzle_client::InvalidationRange {
+                network: "anvil".to_string(),
+                numbers: 1..=1,
+            }]),
+            ControlMessage::Batch(vec![nozzle_client::InvalidationRange {
+                network: "anvil".to_string(),
+                numbers: 2..=2,
+            }]),
+            ControlMessage::Reorg(vec![nozzle_client::InvalidationRange {
+                network: "anvil".to_string(),
+                numbers: 1..=3,
+            }]),
+            ControlMessage::Batch(vec![nozzle_client::InvalidationRange {
+                network: "anvil".to_string(),
+                numbers: 1..=3,
+            }]),
+        ],
+    );
 }

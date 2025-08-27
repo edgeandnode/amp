@@ -19,6 +19,7 @@ dump = { path = "../dump" }
 dump-check = { path = "../dump-check" }
 metadata-db = { path = "../metadata-db" }
 nozzle = { path = "../nozzle" }
+nozzle-client = { path = "../client" }
 figment.workspace = true
 fs-err.workspace = true
 futures.workspace = true
