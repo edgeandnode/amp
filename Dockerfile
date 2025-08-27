@@ -12,7 +12,7 @@ RUN cargo install datafusion-cli
 # install sqlx-cli for migration management
 RUN cargo install sqlx-cli
 
-FROM debian:bookworm-slim AS nozzle
+FROM debian:trixie-slim AS nozzle
 RUN apt-get update && apt-get install -y ca-certificates && apt-get clean
 COPY --from=build /bin/nozzle /bin/
 COPY --from=build /usr/local/cargo/bin/datafusion-cli /bin/
