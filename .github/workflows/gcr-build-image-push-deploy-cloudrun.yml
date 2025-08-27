@@ -1,10 +1,11 @@
 # Build, push to GCR and deploy to Cloud Run on every PR
-name: PR GCR Image and Cloud Run Deployment
+name: GCR Image and Cloud Run Deployment
 
 on:
   workflow_dispatch:
   pull_request:
-    types: [opened, synchronize, reopened]
+  push:
+    branches: [main]
 
 concurrency:
   cancel-in-progress: true
@@ -26,11 +27,23 @@ jobs:
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
 
-      - name: Google auth
+      # # Authenticate to Production GCP only from main branch
+      # - name: Google auth to Production GCP
+      #   if: github.ref == 'refs/heads/main'
+      #   id: auth
+      #   uses: google-github-actions/auth@b7593ed2efd1c1617e1b0254da33b86225adb2a5 # v2
+      #   with:
+      #     project_id: 'nozzle-production'
+      #     workload_identity_provider: 'projects/nozzle-staging/locations/global/workloadIdentityPools/github-pipeline/providers/github-pipeline'
+
+      # Authenticate to Staging GCP only on workflow_dispatch
+      - name: Google auth to Staging GCP
+        if: github.ref != 'refs/heads/main' && github.event_name == 'workflow_dispatch'
         id: auth
         uses: google-github-actions/auth@b7593ed2efd1c1617e1b0254da33b86225adb2a5 # v2
         with:
-          credentials_json: ${{ secrets.STAGING_GOOGLE_CREDENTIALS }}
+          project_id: 'nozzle-staging'
+          workload_identity_provider: 'projects/nozzle-staging/locations/global/workloadIdentityPools/github-pipeline/providers/github-pipeline'
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@26f734c2779b00b7dda794207734c511110a4368 # v3
@@ -38,13 +51,16 @@ jobs:
           version: '>= 363.0.0'
 
       - name: Docker Auth
+        if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
         id: docker-auth
         uses: docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1 # v3.5.0
         with:
           registry: ${{ env.REGION }}-docker.pkg.dev'
+
       - name: Docker meta
-        uses: docker/metadata-action@c1e51972afc2121e065aed6d45c65596fe445f3f # v5.8.0
+        if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
         id: metadata
+        uses: docker/metadata-action@c1e51972afc2121e065aed6d45c65596fe445f3f # v5.8.0
         with:
           images: ${{ env.REGION }}-docker.pkg.dev/${{ github.repository }}/${{ env.GH_IMAGE }}
           tags: |
@@ -52,8 +68,8 @@ jobs:
             type=sha,format=short
 
       - name: Build and push Docker image
+        if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6
-        id: push
         with:
           context: .
           pull: true
@@ -66,6 +82,7 @@ jobs:
           sbom: true
 
       - name: Deploy to Cloud Run
+        if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
         uses: google-github-actions/deploy-cloudrun@v2
         with:
           service: ${{ env.CLOUD_RUN_SERVICE }}
