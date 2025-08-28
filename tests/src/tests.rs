@@ -17,9 +17,7 @@ use schemars::schema_for;
 use crate::{
     steps::load_test_steps,
     test_client::TestClient,
-    test_support::{
-        self, SnapshotContext, TestEnv, check_blocks, check_provider_file, restore_blessed_dataset,
-    },
+    test_support::{self, SnapshotContext, TestEnv, check_blocks, restore_blessed_dataset},
 };
 
 #[tokio::test]
@@ -27,8 +25,6 @@ async fn evm_rpc_single_dump() {
     logging::init();
 
     let dataset_name = "eth_rpc";
-    check_provider_file("rpc_eth_mainnet.toml").await;
-
     let test_env = TestEnv::temp("evm_rpc_single_dump").await.unwrap();
 
     let blessed = SnapshotContext::blessed(&test_env, &dataset_name)
@@ -52,8 +48,6 @@ async fn evm_rpc_base_single_dump() {
     logging::init();
 
     let dataset_name = "base";
-    check_provider_file("rpc_eth_base.toml").await;
-
     let test_env = TestEnv::temp("evm_rpc_base_single_dump").await.unwrap();
 
     let blessed = SnapshotContext::blessed(&test_env, &dataset_name)
@@ -77,8 +71,6 @@ async fn eth_firehose_single_dump() {
     logging::init();
 
     let dataset_name = "eth_firehose";
-    check_provider_file("firehose_eth_mainnet.toml").await;
-
     let test_env = TestEnv::temp("eth_firehose_single_dump").await.unwrap();
     let blessed = SnapshotContext::blessed(&test_env, &dataset_name)
         .await
@@ -167,6 +159,34 @@ async fn basic_function() -> Result<(), BoxError> {
 }
 
 #[tokio::test]
+async fn intra_deps_test() -> Result<(), BoxError> {
+    logging::init();
+
+    let test_env = TestEnv::temp("intra_deps_test").await.unwrap();
+    let mut client = TestClient::connect(&test_env).await.unwrap();
+
+    for step in load_test_steps("intra-deps.yaml").unwrap() {
+        step.run(&test_env, &mut client).await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn multi_version_test() -> Result<(), BoxError> {
+    logging::init();
+
+    let test_env = TestEnv::temp("multi_version_test").await.unwrap();
+    let mut client = TestClient::connect(&test_env).await.unwrap();
+
+    for step in load_test_steps("multi-version.yaml").unwrap() {
+        step.run(&test_env, &mut client).await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn persist_start_block_test() -> Result<(), BoxError> {
     logging::init();
 
@@ -244,25 +264,10 @@ async fn persist_start_block_set_on_creation() -> Result<(), BoxError> {
 }
 
 #[tokio::test]
-async fn multi_version_test() -> Result<(), BoxError> {
-    logging::init();
-
-    let test_env = TestEnv::temp("multi_version_test").await.unwrap();
-    let mut client = TestClient::connect(&test_env).await.unwrap();
-
-    for step in load_test_steps("multi-version.yaml").unwrap() {
-        step.run(&test_env, &mut client).await.unwrap();
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-    }
-    Ok(())
-}
-
-#[tokio::test]
 async fn anvil_rpc_reorg() {
     logging::init();
 
     let dataset_name = "anvil_rpc";
-    check_provider_file("rpc_anvil.toml").await;
 
     let http = reqwest::Client::new();
     let test_env = TestEnv::temp("anvil_rpc_reorg").await.unwrap();

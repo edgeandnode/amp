@@ -58,6 +58,9 @@ metadata_db_url = "postgres://<pg_url>"
 # Enable bloom filters (default: false)
 # bloom_filters = false
 
+# Parquet metadata cache size in MB (default: 1024)
+# cache_size_mb = 1024
+
 # File compaction configuration (optional)
 [compaction]
 # The maximum number of concurrent metadata operations (default: 10)

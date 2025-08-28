@@ -25,6 +25,7 @@ use datafusion::{
         runtime_env::RuntimeEnv,
     },
     logical_expr::{AggregateUDF, Extension, LogicalPlan, ScalarUDF, TableScan},
+    parquet::file::metadata::ParquetMetaData,
     physical_optimizer::PhysicalOptimizerRule,
     physical_plan::{ExecutionPlan, displayable, stream::RecordBatchStreamAdapter},
     physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner as _},
@@ -40,9 +41,10 @@ use datafusion_proto::{
 use datafusion_tracing::{
     InstrumentationOptions, instrument_with_info_spans, pretty_format_compact_batch,
 };
+use foyer::Cache;
 use futures::{FutureExt as _, TryStreamExt, stream};
 use js_runtime::isolate_pool::IsolatePool;
-use metadata_db::TableId;
+use metadata_db::{FileId, TableId};
 use regex::Regex;
 use thiserror::Error;
 use tracing::{debug, field, instrument};
@@ -357,6 +359,7 @@ impl DetachedLogicalPlan {
 pub struct QueryEnv {
     pub df_env: Arc<RuntimeEnv>,
     pub isolate_pool: IsolatePool,
+    pub parquet_footer_cache: Cache<FileId, Arc<ParquetMetaData>>,
 }
 
 /// A context for executing queries against a catalog.
@@ -400,9 +403,13 @@ impl QueryContext {
         }
 
         // Create a catalog snapshot with canonical chain locked in
-        let catalog_snapshot = CatalogSnapshot::from_catalog(catalog, ignore_canonical_segments)
-            .await
-            .map_err(Error::DatasetError)?;
+        let catalog_snapshot = CatalogSnapshot::from_catalog(
+            catalog,
+            ignore_canonical_segments,
+            env.parquet_footer_cache.clone(),
+        )
+        .await
+        .map_err(Error::DatasetError)?;
 
         Ok(Self {
             env,

@@ -557,7 +557,8 @@ fn flight_data_stream(
                     return;
                 }
             };
-            let metadata = serde_json::to_string(&json!({"range": range})).unwrap();
+            let ranges: Vec<BlockRange> = range.into_iter().collect();
+            let metadata = serde_json::to_string(&json!({"ranges": ranges})).unwrap();
 
             if !schema_sent {
                 // Send schema message.

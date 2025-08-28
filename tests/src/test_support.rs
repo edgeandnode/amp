@@ -43,6 +43,9 @@ use tracing::{debug, info, instrument};
 const TEST_CONFIG_BASE_DIRS: [&str; 2] = ["tests/config", "config"];
 
 pub async fn load_test_config(config_override: Option<Figment>) -> Result<Arc<Config>, BoxError> {
+    // Load .env file if it exists for environment variable support
+    let _ = dotenvy::from_filename(".env");
+
     let mut path = None;
     for dir in TEST_CONFIG_BASE_DIRS.iter() {
         let p = format!("{}/config.toml", dir);
@@ -134,7 +137,6 @@ impl TestEnv {
         }
 
         if let Some(anvil_url) = anvil_url {
-            check_provider_file("rpc_anvil.toml").await;
             let tmp_providers = tempfile::tempdir()?;
             info!("Temporary provider dir {}", tmp_providers.path().display());
             for config_base in TEST_CONFIG_BASE_DIRS {
@@ -377,20 +379,6 @@ async fn clear_dataset(config: &Config, dataset_name: &str) -> Result<(), BoxErr
     Ok(())
 }
 
-pub async fn check_provider_file(filename: &str) {
-    if TEST_CONFIG_BASE_DIRS.iter().all(|dir| {
-        matches!(
-            fs::metadata(format!("{dir}/providers/{filename}")).map_err(|e| e.kind()),
-            Err(ErrorKind::NotFound)
-        )
-    }) {
-        panic!(
-            "Provider file '{filename}' does not exist. To run this test, copy 'COPY_ME_{filename}' as '{filename}', \
-             filling in the required endpoints and credentials.",
-        );
-    }
-}
-
 pub fn assert_batch_eq(left: &RecordBatch, right: &RecordBatch) {
     use pretty_assertions::assert_str_eq;
 
@@ -507,13 +495,17 @@ pub struct DatasetPackage {
 
     // Relative to crate root
     pub path: PathBuf,
+
+    // Relative config path
+    pub config: Option<String>,
 }
 
 impl DatasetPackage {
-    pub fn new(name: &str) -> Self {
+    pub fn new(name: &str, config: Option<&str>) -> Self {
         Self {
             name: name.to_string(),
             path: PathBuf::from_str(&format!("datasets/{}", name)).unwrap(),
+            config: config.map(|s| s.to_string()),
         }
     }
 
@@ -572,8 +564,13 @@ impl DatasetPackage {
 
     #[instrument(skip_all, err)]
     pub async fn deploy(&self, bound_addrs: BoundAddrs) -> Result<(), BoxError> {
+        let mut args = vec!["nozzl", "deploy"];
+        if let Some(config) = &self.config {
+            args.push("--config");
+            args.push(config);
+        }
         let status = tokio::process::Command::new("pnpm")
-            .args(&["nozzl", "deploy"])
+            .args(&args)
             .env(
                 "NOZZLE_REGISTRY_URL",
                 &format!("http://{}", bound_addrs.registry_service_addr),

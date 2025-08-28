@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use common::{
+    ParquetFooterCache,
     catalog::{physical::PhysicalTable, reader::NozzleReaderFactory},
     metadata::segments::{BlockRange, Segment},
     parquet::arrow::{
@@ -98,7 +99,12 @@ impl CompactionGroupGenerator<'_> {
         let remain = chain.0.len();
         tracing::info!("Scanning {remain} segments for compaction");
 
-        let reader_factory = Arc::clone(&table.reader_factory);
+        let reader_factory: Arc<NozzleReaderFactory> = Arc::new(NozzleReaderFactory {
+            location_id: table.location_id(),
+            metadata_db: Arc::clone(&table.metadata_db()),
+            object_store: Arc::clone(&table.object_store()),
+            parquet_footer_cache: ParquetFooterCache::builder(1).build(),
+        });
 
         let stream = stream::iter(chain.0)
             .enumerate()

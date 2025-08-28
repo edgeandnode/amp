@@ -90,6 +90,12 @@ pub enum Error {
         network: String,
     },
 
+    #[error("provider environment substitution failed at {location}: {source}")]
+    ProviderEnvSubstitution {
+        location: String,
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
     #[error("dataset '{0}' version '{1}' not found")]
     DatasetVersionNotFound(String, String),
 
@@ -546,7 +552,16 @@ impl DatasetStore {
         location: &str,
     ) -> Result<(DatasetKind, String, toml::Value), Error> {
         let raw = self.providers_store().get_string(location).await?;
-        let toml_value: toml::Value = toml::from_str(&raw)?;
+        let mut toml_value: toml::Value = toml::from_str(&raw)?;
+
+        // Apply environment variable substitution
+        common::env_substitute::substitute_env_vars(&mut toml_value).map_err(|e| {
+            Error::ProviderEnvSubstitution {
+                location: location.to_string(),
+                source: Box::new(e),
+            }
+        })?;
+
         let common_fields = ProviderDefsCommon::deserialize(toml_value.clone())?;
         let kind = DatasetKind::from_str(&common_fields.kind)?;
         Ok((kind, common_fields.network, toml_value))
@@ -970,4 +985,152 @@ pub async fn resolve_blocks_table(
                 table.name()
             ))
         })
+}
+
+#[cfg(test)]
+mod tests {
+
+    #[test]
+    fn test_env_substitution_in_toml_value() {
+        // Create local variable map
+        let mut vars = std::collections::HashMap::new();
+        vars.insert("TEST_URL".to_string(), "http://localhost:8545".to_string());
+        vars.insert("TEST_KIND".to_string(), "evm-rpc".to_string());
+
+        let lookup = |name: &str| vars.get(name).cloned();
+
+        // Create a TOML value with variable placeholders
+        let toml_str = r#"
+kind = "${TEST_KIND}"
+url = "${TEST_URL}"
+network = "mainnet"
+rate_limit_per_minute = 100
+"#;
+        let mut toml_value: toml::Value = toml::from_str(toml_str).unwrap();
+
+        // Apply variable substitution using local lookup
+        let result = common::env_substitute::substitute_vars(&mut toml_value, &lookup);
+        assert!(
+            result.is_ok(),
+            "Expected successful substitution, got: {:?}",
+            result
+        );
+
+        // Verify the substitution worked correctly
+        let url = toml_value.get("url").and_then(|v| v.as_str()).unwrap();
+        assert_eq!(url, "http://localhost:8545");
+
+        let kind = toml_value.get("kind").and_then(|v| v.as_str()).unwrap();
+        assert_eq!(kind, "evm-rpc");
+
+        let network = toml_value.get("network").and_then(|v| v.as_str()).unwrap();
+        assert_eq!(network, "mainnet");
+
+        let rate_limit = toml_value
+            .get("rate_limit_per_minute")
+            .and_then(|v| v.as_integer())
+            .unwrap();
+        assert_eq!(rate_limit, 100);
+    }
+
+    #[test]
+    fn test_missing_var_in_toml() {
+        // Empty variable map - no variables available
+        let vars: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        let lookup = |name: &str| vars.get(name).cloned();
+
+        let toml_str = r#"
+kind = "evm-rpc"
+url = "${MISSING_VAR}"
+network = "mainnet"
+"#;
+        let mut toml_value: toml::Value = toml::from_str(toml_str).unwrap();
+
+        // Apply variable substitution - should fail
+        let result = common::env_substitute::substitute_vars(&mut toml_value, &lookup);
+        assert!(result.is_err(), "Expected error for missing variable");
+
+        // Check that it's the right type of error
+        match result.unwrap_err() {
+            common::env_substitute::Error::MissingVar(var_name) => {
+                assert_eq!(var_name, "MISSING_VAR");
+            }
+            other => panic!("Expected MissingVar error, got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_non_templated_toml_unchanged() {
+        // Variables map (not used since there are no variables in the TOML)
+        let vars: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        let lookup = |name: &str| vars.get(name).cloned();
+
+        let toml_str = r#"
+kind = "evm-rpc"
+url = "http://hardcoded:8545"
+network = "mainnet"
+rate_limit_per_minute = 200
+"#;
+        let mut toml_value: toml::Value = toml::from_str(toml_str).unwrap();
+
+        // Apply variable substitution - should be no-op
+        let result = common::env_substitute::substitute_vars(&mut toml_value, &lookup);
+        assert!(
+            result.is_ok(),
+            "Expected successful substitution, got: {:?}",
+            result
+        );
+
+        // Verify values are unchanged
+        let url = toml_value.get("url").and_then(|v| v.as_str()).unwrap();
+        assert_eq!(url, "http://hardcoded:8545");
+
+        let kind = toml_value.get("kind").and_then(|v| v.as_str()).unwrap();
+        assert_eq!(kind, "evm-rpc");
+
+        let rate_limit = toml_value
+            .get("rate_limit_per_minute")
+            .and_then(|v| v.as_integer())
+            .unwrap();
+        assert_eq!(rate_limit, 200);
+    }
+
+    #[test]
+    fn test_callback_based_substitution() {
+        // Test the callback-based approach for custom variable sources
+        let mut vars = std::collections::HashMap::new();
+        vars.insert(
+            "CUSTOM_URL".to_string(),
+            "http://custom-endpoint:9999".to_string(),
+        );
+        vars.insert("CUSTOM_TOKEN".to_string(), "abc123token".to_string());
+
+        let lookup = |name: &str| vars.get(name).cloned();
+
+        let toml_str = r#"
+kind = "firehose"
+url = "${CUSTOM_URL}"
+token = "${CUSTOM_TOKEN}"
+network = "custom"
+"#;
+        let mut toml_value: toml::Value = toml::from_str(toml_str).unwrap();
+
+        // Apply variable substitution using custom lookup
+        let result = common::env_substitute::substitute_vars(&mut toml_value, &lookup);
+        assert!(
+            result.is_ok(),
+            "Expected successful substitution, got: {:?}",
+            result
+        );
+
+        // Verify the substitution worked correctly
+        let url = toml_value.get("url").and_then(|v| v.as_str()).unwrap();
+        assert_eq!(url, "http://custom-endpoint:9999");
+
+        let token = toml_value.get("token").and_then(|v| v.as_str()).unwrap();
+        assert_eq!(token, "abc123token");
+
+        let network = toml_value.get("network").and_then(|v| v.as_str()).unwrap();
+        assert_eq!(network, "custom");
+    }
 }

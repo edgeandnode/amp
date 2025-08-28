@@ -634,7 +634,7 @@ impl MetadataDb {
     pub fn stream_file_metadata(
         &self,
         location_id: LocationId,
-    ) -> impl Stream<Item = Result<FileMetadataRow, sqlx::Error>> + '_ {
+    ) -> impl Stream<Item = Result<FileMetadataRow, Error>> + '_ {
         let query = "
         SELECT fm.id
              , fm.location_id
@@ -649,7 +649,10 @@ impl MetadataDb {
          WHERE location_id = $1;
         ";
 
-        sqlx::query_as(query).bind(location_id).fetch(&*self.pool)
+        sqlx::query_as(query)
+            .bind(location_id)
+            .fetch(&*self.pool)
+            .map(|result| result.map_err(Error::DbError))
     }
 
     pub async fn insert_metadata(

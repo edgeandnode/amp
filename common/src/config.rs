@@ -7,12 +7,16 @@ use datafusion::{
         memory_pool::{FairSpillPool, GreedyMemoryPool, MemoryPool},
         runtime_env::RuntimeEnvBuilder,
     },
-    parquet::basic::{Compression, ZstdLevel},
+    parquet::{
+        basic::{Compression, ZstdLevel},
+        file::metadata::ParquetMetaData,
+    },
 };
 use figment::{
     Figment,
     providers::{Env, Format as _, Toml},
 };
+use foyer::CacheBuilder;
 use fs_err as fs;
 use js_runtime::isolate_pool::IsolatePool;
 use metadata_db::{DEFAULT_POOL_SIZE, KEEP_TEMP_DIRS, MetadataDb, temp_metadata_db};
@@ -82,6 +86,8 @@ pub struct ParquetConfig {
     pub compression: Compression,
     #[serde(default)]
     pub bloom_filters: bool,
+    #[serde(default = "default_cache_size_mb")]
+    pub cache_size_mb: u64,
 }
 
 impl Default for ParquetConfig {
@@ -89,12 +95,17 @@ impl Default for ParquetConfig {
         Self {
             compression: default_compression(),
             bloom_filters: false,
+            cache_size_mb: default_cache_size_mb(),
         }
     }
 }
 
 fn default_compression() -> Compression {
     Compression::ZSTD(ZstdLevel::try_new(1).unwrap())
+}
+
+fn default_cache_size_mb() -> u64 {
+    1024 // 1GB default cache size
 }
 
 fn deserialize_compression<'de, D>(deserializer: D) -> Result<Compression, D::Error>
@@ -304,10 +315,6 @@ impl Config {
     }
 
     pub fn make_query_env(&self) -> Result<QueryEnv, DataFusionError> {
-        use datafusion::execution::cache::{
-            cache_manager::CacheManagerConfig, cache_unit::DefaultFileStatisticsCache,
-        };
-
         let spill_allowed = !self.spill_location.is_empty();
         let disk_manager_mode = if spill_allowed {
             DiskManagerMode::Disabled
@@ -328,14 +335,9 @@ impl Config {
         } else {
             None
         };
-        let cache_manager = CacheManagerConfig {
-            table_files_statistics_cache: Some(Arc::new(DefaultFileStatisticsCache::default())),
-            list_files_cache: None,
-        };
 
-        let mut runtime_config = RuntimeEnvBuilder::new()
-            .with_disk_manager_builder(disk_manager_builder)
-            .with_cache_manager(cache_manager);
+        let mut runtime_config =
+            RuntimeEnvBuilder::new().with_disk_manager_builder(disk_manager_builder);
 
         if let Some(memory_pool) = memory_pool {
             runtime_config = runtime_config.with_memory_pool(memory_pool);
@@ -343,9 +345,17 @@ impl Config {
 
         let runtime_env = runtime_config.build()?;
         let isolate_pool = IsolatePool::new();
+
+        // Create ParquetMetaData footer cache with the configured memory limit
+        let cache_size_bytes = self.parquet.cache_size_mb * 1024 * 1024; // Convert MB to bytes
+        let parquet_footer_cache = CacheBuilder::new(cache_size_bytes as usize)
+            .with_weighter(|_k, v: &Arc<ParquetMetaData>| v.memory_size())
+            .build();
+
         Ok(QueryEnv {
             df_env: Arc::new(runtime_env),
             isolate_pool,
+            parquet_footer_cache,
         })
     }
 

@@ -23,6 +23,7 @@ pub(crate) enum TestStep {
 pub struct DeployStep {
     pub name: String,
     pub deploy: String,
+    pub config: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -138,7 +139,7 @@ impl TestStep {
                 Ok(())
             }
             TestStep::Deploy(step) => {
-                let dataset_package = DatasetPackage::new(&step.deploy);
+                let dataset_package = DatasetPackage::new(&step.deploy, step.config.as_deref());
                 dataset_package.pnpm_install().await?;
                 dataset_package.deploy(test_env.server_addrs).await
             }

@@ -40,6 +40,7 @@ axum.workspace = true
 regex.workspace = true
 governor.workspace = true
 tower.workspace = true
+foyer = "0.18"
 
 [dev-dependencies]
 chrono.workspace = true
