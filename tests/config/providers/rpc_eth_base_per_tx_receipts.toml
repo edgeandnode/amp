@@ -1,0 +1,4 @@
+kind = "evm-rpc"
+url = "${RPC_ETH_BASE_URL}"
+network = "base"
+fetch_receipts_per_tx = true
