@@ -13,6 +13,7 @@ use common::{BlockNum, metadata::segments::BlockRange, query_context::parse_sql}
 use dataset_store::DatasetStore;
 use futures::StreamExt as _;
 use monitoring::logging;
+use nozzle::dump_cmd::dump;
 use rand::{Rng, RngCore, SeedableRng as _, rngs::StdRng};
 use serde::Deserialize;
 use tokio::{sync::mpsc, task::JoinHandle};
@@ -540,4 +541,38 @@ async fn nozzle_client() {
             }]),
         ],
     );
+}
+
+#[tokio::test]
+async fn dump_finalized() {
+    let test = AnvilTestContext::setup("dump_finalized").await;
+    async fn max_dump_block(test: &AnvilTestContext) -> BlockNum {
+        let ranges = test.metadata_ranges("anvil_rpc").await;
+        ranges.iter().map(|r| r.end()).max().unwrap()
+    }
+
+    let last_block = 70;
+    test.mine(last_block).await;
+
+    dump(
+        test.env.config.clone(),
+        test.env.metadata_db.clone(),
+        vec!["anvil_rpc".to_string()],
+        true,
+        0,
+        None,
+        1,
+        100,
+        None,
+        None,
+        None,
+        false,
+        None,
+        true,
+    )
+    .await
+    .unwrap();
+    assert_eq!(max_dump_block(&test).await, last_block % 64);
+    test.dump("anvil_rpc", 0..=last_block).await;
+    assert_eq!(max_dump_block(&test).await, last_block);
 }
