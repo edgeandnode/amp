@@ -48,7 +48,7 @@ jobs:
         uses: google-github-actions/auth@b7593ed2efd1c1617e1b0254da33b86225adb2a5 # v2
         with:
           project_id: ${{ env.REPO_NAME }}-${{ inputs.environment }}
-          workload_identity_provider: 'projects/${{ env.REPO_NAME }}-${{ inputs.environment }}/locations/global/workloadIdentityPools/github-pipeline/providers/github-pipeline'
+          workload_identity_provider: 'projects/${{ env.REPO_NAME }}-${{ inputs.environment }}/locations/global/workloadIdentityPools/github-pipeline-idp/providers/github-pipeline-provider'
 
       - name: Set up Cloud SDK
         if: steps.auth.outcome == 'success'
