@@ -246,27 +246,29 @@ impl JsonRpcClient {
                         .transactions
                         .hashes()
                         .map(|hash| self.client.get_transaction_receipt(hash));
-                    try_join_all(calls).await.map(|receipts| {
-                        // Flatten to get rid of `Option`. All calls should return `Some`
-                        // anyway, since we're fetching with known transaction hashes.
-                        receipts.into_iter().flatten().collect()
-                    })
+                    let Ok(receipts) = try_join_all(calls).await else {
+                        yield Err("error fetching receipts".into());
+                        continue;
+                    };
+                    let Some(receipts) = receipts.into_iter().collect::<Option<Vec<_>>>() else {
+                        yield Err("missing receipt for a transaction".into());
+                        continue;
+                    };
+                    receipts
                 } else {
-                    self.client
+                    let receipts = self.client
                         .get_block_receipts(BlockId::Number(block_num))
                         .await
                         .map(|receipts| {
                             let mut receipts = receipts.expect("block already found");
                             receipts.sort_by(|r1, r2| r1.transaction_index.cmp(&r2.transaction_index));
                             receipts
-                        })
-                };
-                let receipts = match receipts {
-                    Ok(receipts) => receipts,
-                    Err(err) => {
-                        yield Err(err.into());
+                        });
+                    let Ok(receipts) = receipts else {
+                        yield Err("error fetching receipts".into());
                         continue;
-                    }
+                    };
+                    receipts
                 };
 
                 yield rpc_to_rows(block, receipts, &self.network);
