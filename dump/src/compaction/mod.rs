@@ -127,7 +127,7 @@ impl CompactionTask {
             && self.opts.active
     }
 
-    async fn spawn(&mut self) {
+    pub async fn spawn(&mut self) {
         let task = &mut self.task;
 
         let compactor = match task
@@ -149,6 +149,15 @@ impl CompactionTask {
         };
 
         self.task = tokio::spawn(compactor.compact());
+    }
+
+    pub async fn join(&mut self) -> CompactionResult<Compactor> {
+        self.task
+            .await
+            .map_err(CompactionError::join_error(Compactor::new(
+                &self.table,
+                &self.opts,
+            )))?
     }
 
     fn try_run(&mut self) {

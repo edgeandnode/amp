@@ -487,64 +487,9 @@ impl From<&CompactionConfig> for SegmentSizeLimit {
     }
 }
 
-// Default values for file size limits
-impl SegmentSizeLimit {
-    const LENGTH_DEFAULT: usize = 2; // 2 files
-    const BLOCK_DEFAULT: i64 = 100_000; // 100k blocks
-    const BYTE_DEFAULT: i64 = 2 * 1024 * 1024 * 1024; // 2 GB
-    const ROW_DEFAULT: i64 = 10_000_000; // 10 million rows
-
-    #[allow(non_snake_case)]
-    pub const fn BLOCKS() -> Self {
-        Self(SegmentSize {
-            blocks: Self::BLOCK_DEFAULT,
-            bytes: -1,
-            rows: -1,
-            length: Self::LENGTH_DEFAULT,
-        })
-    }
-
-    #[allow(non_snake_case)]
-    pub const fn BYTES() -> Self {
-        Self(SegmentSize {
-            blocks: -1,
-            bytes: Self::BYTE_DEFAULT,
-            rows: -1,
-            length: Self::LENGTH_DEFAULT,
-        })
-    }
-
-    #[allow(non_snake_case)]
-    pub const fn ROWS() -> Self {
-        Self(SegmentSize {
-            blocks: -1,
-            bytes: -1,
-            rows: Self::ROW_DEFAULT,
-            length: Self::LENGTH_DEFAULT,
-        })
-    }
-
-    #[allow(non_snake_case)]
-    pub const fn LENGTH() -> Self {
-        Self(SegmentSize {
-            blocks: -1,
-            bytes: -1,
-            rows: -1,
-            length: Self::LENGTH_DEFAULT,
-        })
-    }
-}
-
 impl Display for SegmentSizeLimit {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         write!(f, "{}", self.0)
-    }
-}
-
-impl SegmentSizeLimit {
-    /// For Tracing
-    pub fn value(&self) -> String {
-        format!("{self}")
     }
 }
 
