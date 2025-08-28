@@ -49,6 +49,7 @@ jobs:
         id: auth
         uses: google-github-actions/auth@b7593ed2efd1c1617e1b0254da33b86225adb2a5 # v2
         with:
+          token_format: access_token
           project_id: ${{ env.PROJECT_NAME }}-${{ inputs.environment }}
           workload_identity_provider: ${{ inputs.environment == 'production' && secrets.PRODUCTION_WORKLOAD_IDENTITY_PROVIDER || secrets.STAGING_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ inputs.environment == 'production' && secrets.PRODUCTION_SERVICE_ACCOUNT_EMAIL || secrets.STAGING_SERVICE_ACCOUNT_EMAIL }}
