@@ -15,7 +15,7 @@ use common::{
 use metadata_db::{FooterBytes, LocationId, MetadataDb};
 use object_store::{ObjectMeta, buffered::BufWriter, path::Path};
 use rand::RngCore as _;
-use tracing::{debug, trace};
+use tracing::{debug, instrument, trace};
 use url::Url;
 
 use crate::metrics;
@@ -340,6 +340,7 @@ impl ParquetFileWriter {
     }
 
     #[must_use]
+    #[instrument(skip_all, fields(location = %self.table.location_id()), err)]
     pub async fn close(
         mut self,
         range: BlockRange,
@@ -348,7 +349,7 @@ impl ParquetFileWriter {
 
         debug!(
             "wrote {} for range {} to {}",
-            self.file_url,
+            self.filename,
             range.start(),
             range.end(),
         );
