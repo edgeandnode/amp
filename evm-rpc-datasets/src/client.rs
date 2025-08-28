@@ -369,8 +369,9 @@ impl JsonRpcClient {
                     let mut all_receipts = all_receipts.into_iter();
 
                     for block in blocks {
-                        let block_receipts: Vec<_> =
+                        let mut block_receipts: Vec<_> =
                             all_receipts.by_ref().take(block.transactions.len()).collect();
+                        block_receipts.sort_by(|r1, r2| r1.transaction_index.cmp(&r2.transaction_index));
                         blocks_completed += 1;
                         txns_completed += block.transactions.len();
                         yield rpc_to_rows(block, block_receipts, &self.network);
