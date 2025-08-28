@@ -8,3 +8,6 @@ mod test_client;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod test_auth;

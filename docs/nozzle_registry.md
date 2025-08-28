@@ -137,6 +137,122 @@ The schema includes sophisticated indexing for dataset discovery:
 
 This allows for efficient searching across dataset metadata with relevance ranking based on the field where matches are found.
 
+## Environment
+
+Copy the [.env.example](./.env.example) to a `.env` file:
+
+```bash
+cp ./.env.example ./.env
+```
+
+### Database Configuration
+
+- `GEL_SERVER_USER`: Database user (default: `nozzle_registry_adm`)
+- `GEL_SERVER_PASSWORD`: Database password (default: `admin` for local dev)
+- `GEL_SERVER_HOST`: Database host (default: `localhost`)
+- `GEL_SERVER_PORT`: Database port (default: `5656`)
+- `GEL_SERVER_CLIENT_TLS_SECURITY`: TLS mode (default: `insecure` for local dev)
+
+### Authentication Configuration
+
+- `AUTH_APP_ID`: Your Privy application ID
+- `AUTH_APP_SECRET`: Your Privy app secret for server-side operations
+- `JWKS_URL`: JWKS endpoint (e.g., `https://auth.privy.io/api/v1/apps/{app-id}/jwks.json`)
+- `AUTH_USER_API_URL`: Privy user API endpoint (default: `https://api.privy.io/v1/users`)
+
+### Optional Configuration
+
+- `PRIVY_TEST_TOKEN`: Valid JWT token from Privy for testing authenticated endpoints
+- `RUST_LOG`: Logging level control (e.g., `debug`, `info`, `warn`, `error`)
+
+## Authentication
+
+The API uses JWT authentication with Privy as the identity provider. Protected endpoints require a valid bearer token in
+the Authorization header.
+
+### Configuration
+
+The authentication service validates JWTs against Privy's JWKS endpoint:
+
+- JWKS URL: `https://auth.privy.io/api/v1/apps/{AUTH_APP_ID}/jwks.json`
+- Algorithm: ES256 (Elliptic Curve)
+- Token format: Bearer token in Authorization header
+
+### How It Works
+
+1. **Token Validation**: Incoming bearer tokens are validated against Privy's JWKS
+2. **User Verification**: The user ID from the token is used to fetch the user from Privy's API
+3. **Dual Validation**: Authentication succeeds only if BOTH the JWT is valid AND the user exists in Privy
+4. **JWKS Caching**: Keys are cached for 1 hour to reduce network calls
+5. **User Caching**: User data is also cached for 1 hour to minimize API calls
+6. **Claims Extraction**: Valid tokens have their claims extracted (sub, sid, aud, iss, iat, exp)
+7. **User ID**: The subject claim contains a DID format `did:privy:user_id`, which is parsed to extract the user ID
+
+### Security Model
+
+Authentication requires **both**:
+
+- A valid JWT token properly signed by Privy
+- The user must exist in the Privy IDaaS system
+
+Even with a technically valid JWT, authentication will fail with `403 FORBIDDEN` if the user doesn't exist in Privy.
+This provides defense-in-depth security and ensures deleted or suspended users are immediately blocked.
+
+### Using Protected Routes
+
+```rust
+use axum::{Router, routing::get, Json};
+use http_auth::{AuthenticatedUser, AuthService, auth_layer};
+use serde_json::json;
+
+// Protected endpoint handler
+async fn protected_endpoint(user: AuthenticatedUser) -> Json<serde_json::Value> {
+    // The AuthenticatedUser contains both JWT claims and user data from Privy
+    Json(json!({
+        "message": "Authenticated!",
+        "user_id": user.user_id(), // Extracts user ID from did:privy:xxx format
+        "full_subject": user.claims.sub,
+        "session_id": user.claims.sid,
+        "has_user_data": user.user.is_some(), // User data from Privy API
+    }))
+}
+
+// Configure auth service with Privy credentials
+let app_id = std::env::var("AUTH_APP_ID").expect("AUTH_APP_ID env var required");
+let app_secret = std::env::var("AUTH_APP_SECRET").expect("AUTH_APP_SECRET env var required");
+let jwks_url = format!("https://auth.privy.io/api/v1/apps/{}/jwks.json", app_id);
+let user_api_url = "https://api.privy.io/v1/users".to_string();
+let auth_service = AuthService::new(jwks_url, user_api_url, app_id.clone(), app_secret)
+  .with_audience(vec![app_id])
+  .with_issuer(vec!["privy.io".to_string()]);
+
+// Add protected routes
+let app = Router::new()
+  .route("/api/protected/user", get(protected_endpoint))
+  .layer(auth_layer(auth_service));
+```
+
+### Making Authenticated Requests
+
+Include the bearer token in your requests:
+
+```bash
+curl -H "Authorization: Bearer YOUR_JWT_TOKEN" http://localhost:4000/api/protected/user
+```
+
+### Error Responses
+
+- `401 Unauthorized`: Missing, invalid, or expired token
+- `500 Internal Server Error`: Issues fetching JWKS
+
+Example error response:
+
+```json
+{
+  "error": "Invalid token: JWT expired"
+}
+```
+
 ## References
 
 - [gel database](https://docs.geldata.com/).

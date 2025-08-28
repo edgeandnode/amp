@@ -11,6 +11,7 @@ name = "tests"
 
 [dependencies]
 alloy.workspace = true
+axum.workspace = true
 clap.workspace = true
 common = { path = "../common" }
 dotenvy.workspace = true
@@ -29,6 +30,7 @@ object_store.workspace = true
 pretty_assertions.workspace = true
 tempfile.workspace = true
 tokio.workspace = true
+tower.workspace = true
 arrow-flight.workspace = true
 serde_json.workspace = true
 serde.workspace = true
@@ -41,6 +43,10 @@ firehose-datasets = { path = "../firehose-datasets" }
 rand.workspace = true
 schemars.workspace = true
 monitoring = { path = "../monitoring" }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = [
+  "json",
+  "rustls-tls",
+] }
 registry-service = { path = "../registry-service" }
 admin-api = { path = "../admin-api" }
+http-auth = { path = "../http-auth" }
