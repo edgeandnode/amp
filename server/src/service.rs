@@ -516,7 +516,7 @@ fn query_result_stream(
             match result {
                 Ok(message) => {
                     match message {
-                        QueryMessage::MicrobatchStart(range) => {
+                        QueryMessage::MicrobatchStart { range, is_reorg: _ } => {
                             assert_eq!(current_range, None);
                             current_range = Some(range);
                         }

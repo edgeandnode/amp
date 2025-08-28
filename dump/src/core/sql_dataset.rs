@@ -311,7 +311,10 @@ async fn dump_sql_query(
     while let Some(message) = stream.next().await {
         let message = message?;
         match message {
-            QueryMessage::MicrobatchStart(_) => (),
+            QueryMessage::MicrobatchStart {
+                range: _,
+                is_reorg: _,
+            } => (),
             QueryMessage::Data(batch) => {
                 writer.write(&batch).await?;
 
