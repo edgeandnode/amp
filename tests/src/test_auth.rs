@@ -42,7 +42,7 @@ fn init_test_env() -> Option<TestEnv> {
     let app_id = match env::var("AUTH_APP_ID") {
         Ok(id) => id,
         Err(_) => {
-            println!("⚠️  Skipping test: AUTH_APP_ID environment variable not set");
+            println!("Skipping test: AUTH_APP_ID environment variable not set");
             return None;
         }
     };
@@ -50,7 +50,7 @@ fn init_test_env() -> Option<TestEnv> {
     let app_secret = match env::var("AUTH_APP_SECRET") {
         Ok(secret) => secret,
         Err(_) => {
-            println!("⚠️  Skipping test: AUTH_APP_SECRET environment variable not set");
+            println!("Skipping test: AUTH_APP_SECRET environment variable not set");
             return None;
         }
     };
@@ -58,7 +58,7 @@ fn init_test_env() -> Option<TestEnv> {
     let jwks_url = match env::var("JWKS_URL") {
         Ok(url) => url,
         Err(_) => {
-            println!("⚠️  Skipping test: JWKS_URL environment variable not set");
+            println!("Skipping test: JWKS_URL environment variable not set");
             return None;
         }
     };
@@ -84,7 +84,7 @@ fn init_jwks_only() -> Option<String> {
     match env::var("JWKS_URL") {
         Ok(url) => Some(url),
         Err(_) => {
-            println!("⚠️  Skipping test: JWKS_URL environment variable not set");
+            println!("Skipping test: JWKS_URL environment variable not set");
             None
         }
     }
@@ -99,7 +99,7 @@ async fn test_http_auth_validation() {
     let test_token = match &env.test_token {
         Some(token) => token.clone(),
         None => {
-            println!("⚠️  Skipping test: PRIVY_TEST_TOKEN environment variable not set");
+            println!("Skipping test: PRIVY_TEST_TOKEN environment variable not set");
             return;
         }
     };
@@ -108,7 +108,7 @@ async fn test_http_auth_validation() {
 
     match auth_service.validate_token(&test_token).await {
         Ok(claims) => {
-            println!("✅ Token validated successfully!");
+            println!("Token validated successfully!");
             println!("  Subject: {}", claims.sub);
             println!("  Audience: {:?}", claims.aud);
             println!("  Issuer: {:?}", claims.iss);
@@ -140,7 +140,7 @@ async fn test_http_auth_validation() {
             assert!(!user_id.is_empty(), "User ID should not be empty");
         }
         Err(e) => {
-            panic!("❌ Token validation failed: {}", e);
+            panic!("Token validation failed: {}", e);
         }
     }
 }
@@ -165,7 +165,7 @@ async fn test_jwks_endpoint_connectivity() {
     let body = response.text().await.expect("Failed to read response body");
     let jwks: serde_json::Value = serde_json::from_str(&body).expect("Failed to parse JWKS JSON");
 
-    println!("✅ JWKS endpoint is reachable and returns valid JSON");
+    println!("JWKS endpoint is reachable and returns valid JSON");
 
     assert!(
         jwks.get("keys").is_some(),
@@ -203,7 +203,7 @@ async fn test_expired_token_rejection() {
     match auth_service.validate_token(expired_token).await {
         Ok(_) => panic!("Should not validate an expired/invalid token"),
         Err(e) => {
-            println!("✅ Correctly rejected invalid token: {}", e);
+            println!("Correctly rejected invalid token: {}", e);
         }
     }
 }
@@ -241,14 +241,14 @@ async fn test_caching_behavior() {
             "Second call should be faster due to caching"
         );
 
-        println!("✅ Caching is working correctly");
+        println!("Caching is working correctly");
     } else {
-        println!("⚠️  Skipping real token caching test (PRIVY_TEST_TOKEN not set)");
+        println!("Skipping real token caching test (PRIVY_TEST_TOKEN not set)");
 
         let invalid_token = "invalid.token.here";
         let _ = auth_service.validate_token(invalid_token).await;
         let _ = auth_service.validate_token(invalid_token).await;
-        println!("✅ Caching mechanism executed (without real validation)");
+        println!("Caching mechanism executed (without real validation)");
     }
 }
 
@@ -311,16 +311,16 @@ async fn test_integration_with_axum() {
                     "Response should contain greeting"
                 );
                 println!(
-                    "✅ Axum integration test passed (user exists in IDaaS): {}",
+                    "Axum integration test passed (user exists in IDaaS): {}",
                     body_str
                 );
             }
             axum::http::StatusCode::FORBIDDEN => {
                 println!(
-                    "⚠️  Token is valid but user not found in IDaaS (expected for test tokens without real user)"
+                    "Token is valid but user not found in IDaaS (expected for test tokens without real user)"
                 );
                 println!(
-                    "    This is correct security behavior - authentication requires both valid JWT and existing user"
+                    "This is correct security behavior - authentication requires both valid JWT and existing user"
                 );
             }
             status => {
@@ -331,7 +331,7 @@ async fn test_integration_with_axum() {
             }
         }
     } else {
-        println!("⚠️  Skipping Axum integration test with real token (PRIVY_TEST_TOKEN not set)");
+        println!("Skipping Axum integration test with real token (PRIVY_TEST_TOKEN not set)");
     }
 
     let request_without_auth = Request::builder()
@@ -355,7 +355,7 @@ async fn test_integration_with_axum() {
         401,
         "Should return 401 for missing auth header"
     );
-    println!("✅ Correctly rejected request without auth header");
+    println!("Correctly rejected request without auth header");
 }
 
 #[tokio::test]
@@ -376,5 +376,5 @@ async fn test_lru_cache_eviction() {
     assert_eq!(current_size, 0);
     assert_eq!(max_size, 3);
 
-    println!("✅ LRU cache initialized with size limit");
+    println!("LRU cache initialized with size limit");
 }
