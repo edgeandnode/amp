@@ -572,7 +572,8 @@ async fn dump_finalized() {
     )
     .await
     .unwrap();
-    assert_eq!(max_dump_block(&test).await, last_block % 64);
+    // Ethereum PoS finalizes after 2 epochs (32 slots/blocks each) totalling 64 blocks.
+    assert_eq!(max_dump_block(&test).await, last_block - 64);
     test.dump("anvil_rpc", 0..=last_block).await;
     assert_eq!(max_dump_block(&test).await, last_block);
 }
