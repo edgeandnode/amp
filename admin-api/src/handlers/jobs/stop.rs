@@ -1,4 +1,4 @@
-//! Jobs stop handlerLi
+//! Jobs stop handler
 
 use axum::{
     extract::{Path, State, rejection::PathRejection},
@@ -11,9 +11,48 @@ use crate::{ctx::Ctx, scheduler::StopJobError};
 
 /// Handler for the `PUT /jobs/{id}/stop` endpoint
 ///
-/// This is an idempotent operation that handles job stop requests by delegating
-/// to the Scheduler which atomically updates status and notifies worker.
-/// The database layer handles all validation and idempotent behavior.
+/// Stops a running job using the specified job ID. This is an idempotent
+/// operation that handles job termination requests safely.
+///
+/// ## Path Parameters
+/// - `id`: The unique identifier of the job to stop (must be a valid JobId)
+///
+/// ## Response
+/// - **200 OK**: Job stop request processed successfully
+/// - **400 Bad Request**: Invalid job ID format (not parseable as JobId)
+/// - **404 Not Found**: Job with the given ID does not exist
+/// - **409 Conflict**: Job cannot be stopped from current state (already terminal or invalid transition)
+/// - **500 Internal Server Error**: Database connection or scheduler error
+///
+/// ## Error Codes
+/// - `INVALID_JOB_ID`: The provided ID is not a valid job identifier
+/// - `JOB_NOT_FOUND`: No job exists with the given ID
+/// - `JOB_CONFLICT`: Job is in a state that cannot be stopped (terminal or invalid transition)
+/// - `METADATA_DB_ERROR`: Internal database error occurred
+///
+/// ## Behavior
+/// This handler provides idempotent job stopping with the following characteristics:
+/// - Jobs already in terminal states return conflict error
+/// - Only running/scheduled jobs can be transitioned to stop-requested
+/// - The scheduler handles atomic status updates and worker notifications
+/// - Database layer validates state transitions and prevents race conditions
+///
+/// ## State Transitions
+/// Valid stop transitions:
+/// - Scheduled → StopRequested
+/// - Running → StopRequested
+///
+/// Invalid transitions (return conflict):
+/// - Completed → (no change)
+/// - Failed → (no change)
+/// - Stopped → (no change)
+/// - Unknown → (no change)
+///
+/// The handler:
+/// - Validates and extracts the job ID from the URL path
+/// - Retrieves current job status to validate it exists
+/// - Delegates to scheduler for atomic stop operation with worker notification
+/// - Returns appropriate HTTP status codes and error messages
 #[tracing::instrument(skip_all, err)]
 pub async fn handler(
     State(ctx): State<Ctx>,

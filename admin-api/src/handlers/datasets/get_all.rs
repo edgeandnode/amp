@@ -10,14 +10,30 @@ use crate::ctx::Ctx;
 
 /// Handler for the `GET /datasets` endpoint
 ///
-/// Retrieves and returns information about all datasets in the system, including their tables
-/// and active locations if a metadata DB is configured.
+/// Lists all available datasets in the system with their table information and
+/// active locations.
 ///
-/// This handler:
-/// - Retrieves all datasets from the dataset store
-/// - For each dataset, collects information about its tables
-/// - For each table, attempts to determine its active location if a metadata DB is available
-/// - Returns a structured response with the collected information
+/// ## Response
+/// - **200 OK**: Returns list of datasets with their tables and location information
+/// - **500 Internal Server Error**: Dataset store or database connection error
+///
+/// ## Error Codes
+/// - `STORE_ERROR`: Failed to retrieve datasets from the dataset store
+/// - `METADATA_DB_ERROR`: Database error while retrieving active locations for tables
+///
+/// ## Behavior
+/// This handler provides comprehensive dataset information including:
+/// - Dataset names and types (manifest, SQL, etc.)
+/// - All tables within each dataset with their network associations
+/// - Active storage locations for each table (if available via metadata DB)
+/// - Dataset version information for manifest-based datasets
+///
+/// The handler:
+/// - Retrieves all datasets from the configured dataset store
+/// - For each dataset, collects detailed information about its tables
+/// - For each table, attempts to determine its currently active storage location
+/// - Returns a structured JSON response with the collected information
+/// - Handles cases where metadata DB is unavailable (active_location will be null)
 #[tracing::instrument(skip_all, err)]
 pub async fn handler(State(ctx): State<Ctx>) -> Result<Json<DatasetsResponse>, BoxRequestError> {
     let datasets_with_provider = ctx.store.all_datasets().await.map_err(|err| {
