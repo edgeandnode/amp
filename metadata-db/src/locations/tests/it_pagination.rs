@@ -3,13 +3,13 @@
 use pgtemp::PgTempDB;
 use url::Url;
 
-use crate::{TableId, conn::DbConn, locations};
+use crate::{TableId, locations, test_utils};
 
 #[tokio::test]
 async fn list_locations_first_page_when_empty() {
     //* Given
     let temp_db = PgTempDB::new();
-    let mut conn = DbConn::connect(&temp_db.connection_uri())
+    let mut conn = test_utils::connect_with_retry(&temp_db.connection_uri())
         .await
         .expect("Failed to connect to metadata db");
     conn.run_migrations()
@@ -29,7 +29,7 @@ async fn list_locations_first_page_when_empty() {
 async fn list_locations_first_page_respects_limit() {
     //* Given
     let temp_db = PgTempDB::new();
-    let mut conn = DbConn::connect(&temp_db.connection_uri())
+    let mut conn = test_utils::connect_with_retry(&temp_db.connection_uri())
         .await
         .expect("Failed to connect to metadata db");
     conn.run_migrations()
@@ -81,7 +81,7 @@ async fn list_locations_first_page_respects_limit() {
 async fn list_locations_next_page_uses_cursor() {
     //* Given
     let temp_db = PgTempDB::new();
-    let mut conn = DbConn::connect(&temp_db.connection_uri())
+    let mut conn = test_utils::connect_with_retry(&temp_db.connection_uri())
         .await
         .expect("Failed to connect to metadata db");
     conn.run_migrations()

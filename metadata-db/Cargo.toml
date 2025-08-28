@@ -18,6 +18,7 @@ serde_json.workspace = true
 futures.workspace = true
 tokio.workspace = true
 indoc.workspace = true
+backon = { version = "1.5.1", default-features = false, features = ["std", "tokio-sleep"] }
 
 [dev-dependencies]
 pgtemp = "0.6.0"

@@ -12,6 +12,7 @@ mod locations;
 pub mod registry;
 #[cfg(feature = "temp-db")]
 pub mod temp;
+pub mod test_utils;
 mod workers;
 
 use self::conn::{DbConn, DbConnPool};

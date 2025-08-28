@@ -3,7 +3,7 @@
 use pgtemp::PgTempDB;
 
 use crate::{
-    conn::DbConn,
+    test_utils,
     workers::{
         heartbeat,
         job_id::JobId,
@@ -33,7 +33,7 @@ where
 async fn register_job_creates_with_scheduled_status() {
     //* Given
     let temp_db = PgTempDB::new();
-    let mut conn = DbConn::connect(&temp_db.connection_uri())
+    let mut conn = test_utils::connect_with_retry(&temp_db.connection_uri())
         .await
         .expect("Failed to connect to metadata db");
     conn.run_migrations()
@@ -73,7 +73,7 @@ async fn register_job_creates_with_scheduled_status() {
 async fn get_jobs_for_node_filters_by_node_id() {
     //* Given
     let temp_db = PgTempDB::new();
-    let mut conn = DbConn::connect(&temp_db.connection_uri())
+    let mut conn = test_utils::connect_with_retry(&temp_db.connection_uri())
         .await
         .expect("Failed to connect to metadata db");
     conn.run_migrations()
@@ -139,7 +139,7 @@ async fn get_jobs_for_node_filters_by_status() {
     let temp_db = PgTempDB::new();
 
     // Connect to the DB
-    let mut db = DbConn::connect(&temp_db.connection_uri())
+    let mut db = test_utils::connect_with_retry(&temp_db.connection_uri())
         .await
         .expect("Failed to connect to metadata db");
     db.run_migrations().await.expect("Failed to run migrations");
@@ -230,7 +230,7 @@ async fn get_jobs_for_node_filters_by_status() {
 async fn get_job_by_id_returns_job() {
     //* Given
     let temp_db = PgTempDB::new();
-    let mut conn = DbConn::connect(&temp_db.connection_uri())
+    let mut conn = test_utils::connect_with_retry(&temp_db.connection_uri())
         .await
         .expect("Failed to connect to metadata db");
     conn.run_migrations()
@@ -270,7 +270,7 @@ async fn get_job_by_id_returns_job() {
 async fn get_job_with_details_includes_timestamps() {
     //* Given
     let temp_db = PgTempDB::new();
-    let mut conn = DbConn::connect(&temp_db.connection_uri())
+    let mut conn = test_utils::connect_with_retry(&temp_db.connection_uri())
         .await
         .expect("Failed to connect to metadata db");
     conn.run_migrations()
@@ -310,7 +310,7 @@ async fn get_job_with_details_includes_timestamps() {
 async fn list_jobs_first_page_when_empty() {
     //* Given
     let temp_db = PgTempDB::new();
-    let mut conn = DbConn::connect(&temp_db.connection_uri())
+    let mut conn = test_utils::connect_with_retry(&temp_db.connection_uri())
         .await
         .expect("Failed to connect to metadata db");
     conn.run_migrations()
@@ -330,7 +330,7 @@ async fn list_jobs_first_page_when_empty() {
 async fn list_jobs_first_page_respects_limit() {
     //* Given
     let temp_db = PgTempDB::new();
-    let mut conn = DbConn::connect(&temp_db.connection_uri())
+    let mut conn = test_utils::connect_with_retry(&temp_db.connection_uri())
         .await
         .expect("Failed to connect to metadata db");
     conn.run_migrations()
@@ -381,7 +381,7 @@ async fn list_jobs_first_page_respects_limit() {
 async fn list_jobs_next_page_uses_cursor() {
     //* Given
     let temp_db = PgTempDB::new();
-    let mut conn = DbConn::connect(&temp_db.connection_uri())
+    let mut conn = test_utils::connect_with_retry(&temp_db.connection_uri())
         .await
         .expect("Failed to connect to metadata db");
     conn.run_migrations()

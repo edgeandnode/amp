@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use metadata_db::MetadataDb;
+use metadata_db::{MetadataDb, test_utils};
 use pgtemp::PgTempDB;
 
 #[tokio::test]
@@ -10,10 +10,12 @@ async fn register_worker() {
     //* Given
     let temp_db = PgTempDB::new();
 
-    let metadata_db =
-        MetadataDb::connect(&temp_db.connection_uri(), MetadataDb::default_pool_size())
-            .await
-            .expect("Failed to connect to metadata db");
+    let metadata_db = test_utils::connect_metadata_db_with_retry(
+        &temp_db.connection_uri(),
+        MetadataDb::default_pool_size(),
+    )
+    .await
+    .expect("Failed to connect to metadata db");
 
     let worker_id = "test-worker-id".parse().expect("Invalid worker ID");
 
