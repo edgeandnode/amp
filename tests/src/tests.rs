@@ -2,7 +2,6 @@ mod anvil;
 mod deploy;
 mod registry;
 
-
 use alloy::{
     node_bindings::Anvil,
     primitives::BlockHash,
