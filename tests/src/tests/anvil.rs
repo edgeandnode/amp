@@ -153,13 +153,7 @@ async fn rpc_reorg_simple() {
     }
     let mut ranges = test.metadata_ranges("anvil_rpc").await;
     ranges.sort_by_key(|r| *r.numbers.start());
-    // Compaction clarification:
-    // - The first dump creates range [0,0]
-    // - Then we dump [1, 2]
-    // - These are compacted to [0, 1, 2]
-    // - The reorg creates a new chain [0, 1, 2'] dumping [3] as a fork
-    // This results in the following metadata ranges (when sorted):
-    // [0..=0, 0..=2, 0..=2, 1..=2, 3..=3]
+
     assert_eq!(
         ranges.iter().map(|r| r.numbers.clone()).collect::<Vec<_>>(),
         vec![0..=0, 1..=2, 1..=2, 3..=3],
