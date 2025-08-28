@@ -1,7 +1,7 @@
 //! DB integration tests for the workers events notifications
 
 use futures::StreamExt;
-use metadata_db::{JobNotifAction, JobStatus, MetadataDb, test_utils};
+use metadata_db::{JobNotifAction, JobStatus, MetadataDb};
 use pgtemp::PgTempDB;
 
 #[tokio::test]
@@ -9,12 +9,10 @@ async fn schedule_job_and_receive_notification() {
     //* Given
     let temp_db = PgTempDB::new();
 
-    let metadata_db = test_utils::connect_metadata_db_with_retry(
-        &temp_db.connection_uri(),
-        MetadataDb::default_pool_size(),
-    )
-    .await
-    .expect("Failed to connect to metadata db");
+    let metadata_db =
+        MetadataDb::connect_with_retry(&temp_db.connection_uri(), MetadataDb::default_pool_size())
+            .await
+            .expect("Failed to connect to metadata db");
 
     // Pre-register the worker
     let worker_id = "test-worker-events".parse().expect("Invalid worker ID");

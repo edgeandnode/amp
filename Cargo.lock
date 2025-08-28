@@ -4848,6 +4848,7 @@ dependencies = [
  "backon",
  "futures",
  "indoc",
+ "metadata-db",
  "pgtemp",
  "serde",
  "serde_json",

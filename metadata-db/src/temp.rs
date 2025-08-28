@@ -46,7 +46,7 @@ impl TempMetadataDb {
         let uri = pg_temp.connection_uri();
         tracing::info!("connecting to metadata-db at: {}", uri);
 
-        let metadata_db = MetadataDb::connect(&uri, pool_size)
+        let metadata_db = MetadataDb::connect_with_retry(&uri, pool_size)
             .await
             .expect("failed to connect to metadata-db");
 

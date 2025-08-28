@@ -4,15 +4,17 @@ use futures::{StreamExt, stream::Stream};
 use sqlx::postgres::{PgListener, PgNotification};
 use thiserror::Error;
 use tokio::time::MissedTickBehavior;
-use tracing::instrument;
+use tracing::{instrument, warn};
 use url::Url;
+
+#[cfg(feature = "temp-db")]
+use backon::{ExponentialBuilder, Retryable};
 
 mod conn;
 mod locations;
 pub mod registry;
 #[cfg(feature = "temp-db")]
 pub mod temp;
-pub mod test_utils;
 mod workers;
 
 use self::conn::{DbConn, DbConnPool};
@@ -178,6 +180,50 @@ impl MetadataDb {
         if auto_migrate {
             pool.run_migrations().await?;
         }
+        Ok(Self {
+            pool,
+            url: url.into(),
+            dead_worker_interval: DEFAULT_DEAD_WORKER_INTERVAL,
+        })
+    }
+
+    /// Sets up a connection pool to the Metadata DB with retry logic for temporary databases.
+    #[cfg(feature = "temp-db")]
+    #[instrument(skip_all, err)]
+    pub async fn connect_with_retry(url: &str, pool_size: u32) -> Result<Self, Error> {
+        let retry_policy = ExponentialBuilder::default()
+            .with_min_delay(Duration::from_millis(10))
+            .with_max_delay(Duration::from_millis(100))
+            .with_max_times(20);
+
+        fn is_db_starting_up(err: &conn::ConnError) -> bool {
+            match err {
+                conn::ConnError::ConnectionError(sqlx_err) => match sqlx_err {
+                    sqlx::Error::Database(db_err) => {
+                        db_err.code().map_or(false, |code| code == "57P03")
+                    }
+                    _ => false,
+                },
+                _ => false,
+            }
+        }
+
+        fn notify_retry(err: &conn::ConnError, dur: Duration) {
+            warn!(
+                error = %err,
+                "Database still starting up during connection. Retrying in {:.1}s",
+                dur.as_secs_f32()
+            );
+        }
+
+        let pool = (|| DbConnPool::connect(url, pool_size))
+            .retry(retry_policy)
+            .when(is_db_starting_up)
+            .notify(notify_retry)
+            .await?;
+
+        pool.run_migrations().await?;
+
         Ok(Self {
             pool,
             url: url.into(),
