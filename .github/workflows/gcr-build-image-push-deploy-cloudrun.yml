@@ -41,14 +41,14 @@ jobs:
       #     project_id: 'nozzle-production'
       #     workload_identity_provider: 'projects/nozzle-staging/locations/global/workloadIdentityPools/github-pipeline/providers/github-pipeline'
 
-      # Authenticate to Staging GCP only on workflow_dispatch
-      - name: Google auth to Staging GCP
-        if: github.event_name == 'workflow_dispatch' && inputs.environment == 'staging'
+      # Authenticate to GCP based on environment
+      - name: Google auth to GCP
+        if: github.event_name == 'workflow_dispatch'
         id: auth
         uses: google-github-actions/auth@b7593ed2efd1c1617e1b0254da33b86225adb2a5 # v2
         with:
           project_id: ${{ env.REPO_NAME }}-${{ inputs.environment }}
-          workload_identity_provider: 'projects/${{ env.REPO_NAME }}-${{ inputs.environment }}/locations/global/workloadIdentityPools/github-pipeline-idp/providers/github-pipeline-provider'
+          workload_identity_provider: ${{ inputs.environment == 'production' && secrets.PRODUCTION_WORKLOAD_IDENTITY_PROVIDER || secrets.STAGING_WORKLOAD_IDENTITY_PROVIDER }}
 
       - name: Set up Cloud SDK
         if: steps.auth.outcome == 'success'
@@ -87,7 +87,7 @@ jobs:
           provenance: true
           sbom: true
 
-      - name: Deploy to Staging Cloud Run
+      - name: Deploy to Cloud Run
         if: steps.auth.outcome == 'success'
         uses: google-github-actions/deploy-cloudrun@v2
         with:
