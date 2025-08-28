@@ -48,9 +48,12 @@ async fn evm_rpc_single_dump_fetch_receipts_per_tx() {
     logging::init();
 
     let dataset_name = "eth_rpc";
-    let test_env = TestEnv::temp("evm_rpc_single_dump_fetch_receipts_per_tx")
-        .await
-        .unwrap();
+    let test_env = TestEnv::temp_with_config(
+        "evm_rpc_single_dump_fetch_receipts_per_tx",
+        "per_tx_receipt_config.toml",
+    )
+    .await
+    .unwrap();
 
     let blessed = SnapshotContext::blessed(&test_env, &dataset_name)
         .await
@@ -96,9 +99,12 @@ async fn evm_rpc_base_single_dump_fetch_receipts_per_tx() {
     logging::init();
 
     let dataset_name = "base";
-    let test_env = TestEnv::temp("evm_rpc_base_single_dump_fetch_receipts_per_tx")
-        .await
-        .unwrap();
+    let test_env = TestEnv::temp_with_config(
+        "evm_rpc_base_single_dump_fetch_receipts_per_tx",
+        "per_tx_receipt_config.toml",
+    )
+    .await
+    .unwrap();
 
     let blessed = SnapshotContext::blessed(&test_env, &dataset_name)
         .await
