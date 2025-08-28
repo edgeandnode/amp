@@ -11,17 +11,40 @@ use metadata_db::TableId;
 use super::error::Error;
 use crate::{ctx::Ctx, handlers::common::validate_dataset_name};
 
-/// Handler for the `GET /datasets/:id` endpoint
+/// Handler for the `GET /datasets/{id}` endpoint
 ///
-/// Retrieves and returns information about a specific dataset by ID (dataset name),
-/// including its tables and active locations.
+/// Retrieves detailed information about a specific dataset by its ID, including
+/// its tables and active locations.
 ///
-/// This handler:
-/// - Validates the dataset ID format
-/// - Retrieves the specified dataset from the dataset store
-/// - Collects information about its tables
-/// - For each table, attempts to determine its active location if a metadata DB is available
-/// - Returns a structured response with the collected information
+/// ## Path Parameters
+/// - `id`: The unique identifier of the dataset to retrieve (dataset name)
+///
+/// ## Response
+/// - **200 OK**: Returns the dataset information as JSON
+/// - **400 Bad Request**: Invalid dataset ID format (invalid dataset name)
+/// - **404 Not Found**: Dataset with the given ID does not exist
+/// - **500 Internal Server Error**: Dataset store or database connection error
+///
+/// ## Error Codes
+/// - `INVALID_ID`: The provided dataset name is not valid (contains invalid characters or format)
+/// - `NOT_FOUND`: No dataset exists with the given name
+/// - `STORE_ERROR`: Failed to load dataset from the dataset store
+/// - `METADATA_DB_ERROR`: Database error while retrieving active locations for tables
+///
+/// ## Behavior
+/// This handler provides detailed information for a specific dataset including:
+/// - Dataset name, type, and version information
+/// - Complete list of tables within the dataset with their network associations
+/// - Active storage locations for each table (if available via metadata DB)
+/// - Table-level metadata and configuration details
+///
+/// The handler:
+/// - Validates the dataset ID (name) format according to naming conventions
+/// - Retrieves the specified dataset from the configured dataset store
+/// - Collects comprehensive information about all tables in the dataset
+/// - For each table, determines its currently active storage location
+/// - Returns a structured JSON response with the collected information
+/// - Handles cases where the dataset doesn't exist or metadata DB is unavailable
 #[tracing::instrument(skip_all, err)]
 pub async fn handler(
     State(ctx): State<Ctx>,
