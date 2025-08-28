@@ -168,10 +168,7 @@ pub trait BlockStreamer: Clone + 'static {
         end: BlockNum,
     ) -> impl Future<Output = impl Stream<Item = Result<RawDatasetRows, BoxError>> + Send> + Send;
 
-    fn latest_block(
-        &mut self,
-        finalized: bool,
-    ) -> impl Future<Output = Result<BlockNum, BoxError>> + Send;
+    fn latest_block(&mut self) -> impl Future<Output = Result<BlockNum, BoxError>> + Send;
 }
 
 pub enum DatasetValue {

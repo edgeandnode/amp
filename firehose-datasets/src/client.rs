@@ -3,7 +3,7 @@ use std::{str::FromStr, time::Duration};
 use async_stream::stream;
 use common::{BlockNum, BlockStreamer, BoxError, RawDatasetRows};
 use futures::{Stream, StreamExt as _, TryStreamExt as _};
-use pbfirehose::{ForkStep, Response as StreamResponse, stream_client::StreamClient};
+use pbfirehose::{Response as StreamResponse, stream_client::StreamClient};
 use prost::Message as _;
 use tonic::{
     codec::CompressionEncoding,
@@ -19,19 +19,22 @@ use crate::{
     proto::sf::firehose::v2 as pbfirehose,
 };
 
-/// This client only handles final blocks.
-// See also: only-final-blocks
 // Cloning is cheap and shares the underlying connection.
 #[derive(Clone)]
 pub struct Client {
     endpoint: Endpoint,
     auth: AuthInterceptor,
     network: String,
+    final_blocks_only: bool,
 }
 
 impl Client {
     /// Configure the client from a Firehose dataset definition.
-    pub async fn new(provider: toml::Value, network: String) -> Result<Self, Error> {
+    pub async fn new(
+        provider: toml::Value,
+        network: String,
+        final_blocks_only: bool,
+    ) -> Result<Self, Error> {
         let FirehoseProvider { url, token } = provider.try_into()?;
 
         let client = {
@@ -43,6 +46,7 @@ impl Client {
                 endpoint,
                 auth,
                 network,
+                final_blocks_only,
             }
         };
 
@@ -77,8 +81,7 @@ impl Client {
         let request = tonic::Request::new(pbfirehose::Request {
             start_block_num: start as i64,
             stop_block_num: stop,
-            // See also: only-final-blocks
-            final_blocks_only: true,
+            final_blocks_only: self.final_blocks_only,
             cursor: String::new(),
             transforms: vec![],
         });
@@ -92,16 +95,9 @@ impl Client {
             .and_then(|response| async move {
                 let StreamResponse {
                     block,
-                    step,
+                    step: _,
                     cursor: _,
                 } = response;
-                let step = ForkStep::try_from(step).map_err(|e| Error::AssertFail(e.into()))?;
-
-                // See also: only-final-blocks
-                if step != ForkStep::StepFinal {
-                    let err = format!("Only STEP_FINAL is expected, found {}", step.as_str_name());
-                    return Err(Error::AssertFail(err.into()));
-                }
                 let Some(block) = block else {
                     return Err(Error::AssertFail("Expected block, found none".into()));
                 };
@@ -213,9 +209,7 @@ impl BlockStreamer for Client {
         }
     }
 
-    async fn latest_block(&mut self, finalized: bool) -> Result<BlockNum, BoxError> {
-        // See also: only-final-blocks
-        _ = finalized;
+    async fn latest_block(&mut self) -> Result<BlockNum, BoxError> {
         let stream = self.blocks(-1, 0).await?;
         let mut stream = std::pin::pin!(stream);
         let block = stream.next().await;

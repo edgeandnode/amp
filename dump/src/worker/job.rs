@@ -100,6 +100,7 @@ impl Job {
                     ctx.config.microbatch_max_interval,
                     (0, end_block),
                     metrics,
+                    false,
                 )
                 .await
             }
