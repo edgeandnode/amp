@@ -25,6 +25,7 @@ jobs:
   build_and_push:
     permissions:
       contents: read
+      id-token: write
 
     name: Build and push to GCR
     runs-on: nscloud-ubuntu-22.04-amd64-32x32
