@@ -151,15 +151,6 @@ impl CompactionTask {
         self.task = tokio::spawn(compactor.compact());
     }
 
-    pub async fn join(&mut self) -> CompactionResult<Compactor> {
-        self.task
-            .await
-            .map_err(CompactionError::join_error(Compactor::new(
-                &self.table,
-                &self.opts,
-            )))?
-    }
-
     fn try_run(&mut self) {
         if self.is_ready() {
             self.spawn()

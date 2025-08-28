@@ -2,7 +2,6 @@ mod anvil;
 mod deploy;
 mod registry;
 
-use std::sync::Arc;
 
 use alloy::{
     node_bindings::Anvil,
@@ -12,7 +11,6 @@ use alloy::{
 };
 use common::{BlockNum, BoxError, metadata::segments::BlockRange, query_context::parse_sql};
 use dataset_store::{DatasetDefsCommon, DatasetStore, SerializableSchema};
-use dump::compaction::{SegmentSize, SegmentSizeLimit, compactor::Compactor};
 use generate_manifest;
 use monitoring::logging;
 use schemars::schema_for;
