@@ -47,7 +47,7 @@ use datafusion_tracing::{
 use foyer::Cache;
 use futures::{FutureExt as _, TryStreamExt, stream};
 use js_runtime::isolate_pool::IsolatePool;
-use metadata_db::{LocationId, TableId};
+use metadata_db::{FileId, TableId};
 use regex::Regex;
 use thiserror::Error;
 use tracing::{debug, field, instrument};
@@ -362,7 +362,7 @@ impl DetachedLogicalPlan {
 pub struct QueryEnv {
     pub df_env: Arc<RuntimeEnv>,
     pub isolate_pool: IsolatePool,
-    pub parquet_footer_cache: Cache<(LocationId, String), Arc<ParquetMetaData>>,
+    pub parquet_footer_cache: Cache<FileId, Arc<ParquetMetaData>>,
 }
 
 /// A context for executing queries against a catalog.
