@@ -673,7 +673,7 @@ pub async fn spawn_compaction_and_await_completion(
     let parquet_writer_props = dump::parquet_opts(&config.parquet);
     let mut opts = dump::compaction_opts(&config.compaction, &parquet_writer_props);
     opts.active = true;
-    opts.size_limit = SegmentSizeLimit::new(-1, -1, -1, length);
+    opts.size_limit = SegmentSizeLimit::new(1, 1, 1, length);
     opts.file_lock_duration = Duration::from_secs(1);
 
     let mut compactor = Compactor::start(table, &Arc::new(opts));
@@ -695,7 +695,7 @@ pub async fn spawn_collection_and_await_completion(
     let parquet_writer_props = dump::parquet_opts(&config.parquet);
     let mut opts = dump::compaction_opts(&config.compaction, &parquet_writer_props);
     opts.active = true;
-    opts.size_limit = SegmentSizeLimit::new(-1, -1, -1, length);
+    opts.size_limit = SegmentSizeLimit::new(1, 1, 1, length);
     opts.file_lock_duration = Duration::from_secs(1);
 
     let opts = Arc::new(opts);
