@@ -7,7 +7,6 @@ These tests require actual Iceberg functionality and catalog access.
 import json
 import tempfile
 from datetime import datetime, timedelta
-from pathlib import Path
 
 import pyarrow as pa
 import pytest
@@ -152,9 +151,9 @@ class TestIcebergLoaderIntegration:
         """Test loader initialization and connection"""
         loader = IcebergLoader(iceberg_basic_config)
 
-        assert loader.storage_config.namespace == iceberg_basic_config['namespace']
-        assert loader.storage_config.create_namespace == True
-        assert loader.storage_config.create_table == True
+        assert loader.config.namespace == iceberg_basic_config['namespace']
+        assert loader.config.create_namespace == True
+        assert loader.config.create_table == True
 
         loader.connect()
         assert loader._is_connected == True
@@ -420,7 +419,6 @@ class TestIcebergLoaderIntegration:
             assert 'operation' in metadata
             assert 'rows_loaded' in metadata
             assert 'columns' in metadata
-            assert 'duration_seconds' in metadata
             assert 'namespace' in metadata
             assert metadata['namespace'] == iceberg_basic_config['namespace']
             assert metadata['rows_loaded'] == 1000

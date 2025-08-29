@@ -19,7 +19,7 @@ try:
 except ImportError:
     DELTALAKE_AVAILABLE = False
 
-from ..base import DataLoader, LoadMode, LoadResult
+from ..base import DataLoader, LoadMode
 
 
 class DeltaWriteMode(Enum):
@@ -58,7 +58,7 @@ class DeltaStorageConfig:
     max_rows_per_group: Optional[int] = None
 
 
-class DeltaLakeLoader(DataLoader):
+class DeltaLakeLoader(DataLoader[DeltaStorageConfig]):
     """
     High-performance Delta Lake loader with zero-copy Arrow integration.
 
@@ -71,16 +71,18 @@ class DeltaLakeLoader(DataLoader):
     - Automatic optimization and maintenance
     - Comprehensive error handling
     """
+    
+    # Declare loader capabilities
+    SUPPORTED_MODES = {LoadMode.APPEND, LoadMode.OVERWRITE, LoadMode.MERGE, LoadMode.UPSERT}
+    REQUIRES_SCHEMA_MATCH = False
+    SUPPORTS_TRANSACTIONS = True
 
     def __init__(self, config: Dict[str, Any]):
-        super().__init__(config)
-
         if not DELTALAKE_AVAILABLE:
             raise ImportError("Delta Lake support requires 'deltalake' package. Install with: pip install deltalake")
-
-        # Core configuration
-        self.storage_config = DeltaStorageConfig(table_path=config['table_path'], storage_options=config.get('storage_options', {}), partition_by=config.get('partition_by'), optimize_after_write=config.get('optimize_after_write', True), vacuum_after_write=config.get('vacuum_after_write', False), schema_evolution=config.get('schema_evolution', True), merge_schema=config.get('merge_schema', True), file_size_hint=config.get('file_size_hint'), max_rows_per_file=config.get('max_rows_per_file'), max_rows_per_group=config.get('max_rows_per_group'))
-
+        
+        super().__init__(config)
+        
         # Performance settings
         self.batch_size = config.get('batch_size', 10000)
         self.enable_statistics = config.get('enable_statistics', True)
@@ -94,41 +96,46 @@ class DeltaLakeLoader(DataLoader):
 
     def _detect_storage_backend(self) -> None:
         """Detect and configure storage backend"""
-        parsed_path = urlparse(self.storage_config.table_path)
+        parsed_path = urlparse(self.config.table_path)
 
         if parsed_path.scheme == 's3':
             self.storage_backend = 'S3'
-            self.logger.info(f'Detected S3 storage backend: {self.storage_config.table_path}')
+            self.logger.info(f'Detected S3 storage backend: {self.config.table_path}')
 
             # Set default S3 options if not provided
-            if 'AWS_S3_ALLOW_UNSAFE_RENAME' not in self.storage_config.storage_options:
-                self.storage_config.storage_options['AWS_S3_ALLOW_UNSAFE_RENAME'] = 'true'
+            if 'AWS_S3_ALLOW_UNSAFE_RENAME' not in self.config.storage_options:
+                self.config.storage_options['AWS_S3_ALLOW_UNSAFE_RENAME'] = 'true'
 
         elif parsed_path.scheme in ['az', 'abfs', 'abfss']:
             self.storage_backend = 'Azure'
-            self.logger.info(f'Detected Azure storage backend: {self.storage_config.table_path}')
+            self.logger.info(f'Detected Azure storage backend: {self.config.table_path}')
 
         elif parsed_path.scheme in ['gs', 'gcs']:
             self.storage_backend = 'GCS'
-            self.logger.info(f'Detected GCS storage backend: {self.storage_config.table_path}')
+            self.logger.info(f'Detected GCS storage backend: {self.config.table_path}')
 
         elif parsed_path.scheme in ['', 'file']:
             self.storage_backend = 'Local'
-            self.logger.info(f'Detected local storage backend: {self.storage_config.table_path}')
+            self.logger.info(f'Detected local storage backend: {self.config.table_path}')
 
             # Ensure local directory exists
-            Path(self.storage_config.table_path).parent.mkdir(parents=True, exist_ok=True)
+            Path(self.config.table_path).parent.mkdir(parents=True, exist_ok=True)
 
         else:
             self.storage_backend = 'Unknown'
             self.logger.warning(f'Unknown storage backend: {parsed_path.scheme}')
+    
+    
+    def _get_required_config_fields(self) -> list[str]:
+        """Return required configuration fields"""
+        return ['table_path']
 
     def connect(self) -> None:
         """Initialize Delta Lake connection and table"""
         try:
             # Check if table exists
             try:
-                self._delta_table = DeltaTable(self.storage_config.table_path, storage_options=self.storage_config.storage_options)
+                self._delta_table = DeltaTable(self.config.table_path, storage_options=self.config.storage_options)
                 self._table_exists = True
 
                 # Get table information
@@ -141,7 +148,7 @@ class DeltaLakeLoader(DataLoader):
 
             except (TableNotFoundError, DeltaError, OSError):
                 self._table_exists = False
-                self.logger.info(f'Table does not exist, will create on first write: {self.storage_config.table_path}')
+                self.logger.info(f'Table does not exist, will create on first write: {self.config.table_path}')
 
             # Validate storage options
             self._validate_storage_options()
@@ -161,71 +168,57 @@ class DeltaLakeLoader(DataLoader):
         self._is_connected = False
         self.logger.info('Delta Lake loader disconnected')
 
-    def load_batch(self, batch: pa.RecordBatch, table_name: str, **kwargs) -> LoadResult:
-        """Load Arrow RecordBatch to Delta Lake"""
-        start_time = time.time()
+    def _load_batch_impl(self, batch: pa.RecordBatch, table_name: str, **kwargs) -> int:
+        """Implementation-specific batch loading logic for Delta Lake"""
+        # Convert batch to table for Delta Lake API
+        table = pa.Table.from_batches([batch])
+        
+        # Determine write mode
+        mode = kwargs.get('mode', LoadMode.APPEND)
+        delta_mode = self._convert_load_mode(mode)
 
-        try:
-            # Convert batch to table
-            table = pa.Table.from_batches([batch])
+        # Prepare write options
+        write_options = self._prepare_write_options(kwargs)
 
-            # Use the table loading method
-            result = self.load_table(table, table_name, **kwargs)
+        # Pre-write optimizations
+        if self.config.partition_by:
+            self._validate_partition_columns(table, self.config.partition_by)
 
-            # Update metadata to reflect batch operation
-            result.metadata.update({'operation': 'load_batch', 'batch_size': batch.num_rows, 'schema_fields': len(batch.schema)})
+        # Write to Delta Lake (zero-copy operation)
+        self.logger.info(f'Writing {table.num_rows} rows to Delta Lake (mode: {delta_mode.value})')
 
-            return result
+        write_deltalake(
+            table_or_uri=self.config.table_path,
+            data=table,  # Direct Arrow Table - zero-copy!
+            mode=delta_mode.value,
+            partition_by=self.config.partition_by,
+            schema_mode='merge' if self.config.merge_schema else 'strict',
+            storage_options=self.config.storage_options,
+            **write_options,
+        )
 
-        except Exception as e:
-            self.logger.error(f'Failed to load batch: {str(e)}')
-            return LoadResult(rows_loaded=0, duration=time.time() - start_time, table_name=table_name, loader_type='delta_lake', success=False, error=str(e))
+        # Refresh table reference
+        self._refresh_table_reference()
 
-    def load_table(self, table: pa.Table, table_name: str, **kwargs) -> LoadResult:
-        """Load Arrow Table to Delta Lake using zero-copy operations"""
-        start_time = time.time()
+        # Post-write optimizations
+        optimization_results = self._perform_post_write_optimizations(table.num_rows)
+        
+        # Store optimization results in base class metadata
+        if hasattr(self, '_last_batch_metadata'):
+            self._last_batch_metadata = optimization_results
 
-        try:
-            # Determine write mode
-            mode = kwargs.get('mode', LoadMode.APPEND)
-            delta_mode = self._convert_load_mode(mode)
+        return batch.num_rows
 
-            # Prepare write options
-            write_options = self._prepare_write_options(kwargs)
-
-            # Pre-write optimizations
-            if self.storage_config.partition_by:
-                self._validate_partition_columns(table, self.storage_config.partition_by)
-
-            # Write to Delta Lake (zero-copy operation)
-            self.logger.info(f'Writing {table.num_rows} rows to Delta Lake (mode: {delta_mode.value})')
-
-            write_deltalake(
-                table_or_uri=self.storage_config.table_path,
-                data=table,  # Direct Arrow Table - zero-copy!
-                mode=delta_mode.value,
-                partition_by=self.storage_config.partition_by,
-                schema_mode='merge' if self.storage_config.merge_schema else 'strict',
-                storage_options=self.storage_config.storage_options,
-                **write_options,
-            )
-
-            # Refresh table reference
-            self._refresh_table_reference()
-
-            # Post-write optimizations
-            optimization_results = self._perform_post_write_optimizations(table.num_rows)
-
-            duration = time.time() - start_time
-
-            # Get updated table info
-            table_info = self._get_table_info()
-
-            return LoadResult(rows_loaded=table.num_rows, duration=duration, table_name=table_name, loader_type='delta_lake', success=True, metadata={'operation': 'load_table', 'write_mode': delta_mode.value, 'table_version': table_info.get('version', 0), 'total_files': table_info.get('num_files', 0), 'total_size_bytes': table_info.get('size_bytes', 0), 'partition_columns': self.storage_config.partition_by, 'schema_fields': len(table.schema), 'table_size_mb': round(table.nbytes / 1024 / 1024, 2), 'storage_backend': self.storage_backend, 'optimization_results': optimization_results, 'throughput_rows_per_sec': round(table.num_rows / duration, 2) if duration > 0 else 0})
-
-        except Exception as e:
-            self.logger.error(f'Failed to load table: {str(e)}')
-            return LoadResult(rows_loaded=0, duration=time.time() - start_time, table_name=table_name, loader_type='delta_lake', success=False, error=str(e))
+    def _create_table_from_schema(self, schema: pa.Schema, table_name: str) -> None:
+        """Create table from Arrow schema - Delta Lake handles this automatically"""
+        # Delta Lake automatically creates tables on first write with the schema
+        # from the Arrow data, so we don't need to do anything here
+        self.logger.info(f"Delta Lake will auto-create table '{table_name}' on first write")
+    
+    def _clear_table(self, table_name: str) -> None:
+        """Clear table for overwrite mode - Delta Lake handles this via write mode"""
+        # Delta Lake handles overwrite mode internally, no need to clear manually
+        self.logger.info(f"Delta Lake will handle overwrite for table '{table_name}'")
 
     def _convert_load_mode(self, mode: LoadMode) -> DeltaWriteMode:
         """Convert LoadMode to Delta Lake write mode"""
@@ -243,14 +236,14 @@ class DeltaLakeLoader(DataLoader):
         options = {}
 
         # File size optimization
-        if self.storage_config.file_size_hint:
-            options['file_size_hint'] = self.storage_config.file_size_hint
+        if self.config.file_size_hint:
+            options['file_size_hint'] = self.config.file_size_hint
 
-        if self.storage_config.max_rows_per_file:
-            options['max_rows_per_file'] = self.storage_config.max_rows_per_file
+        if self.config.max_rows_per_file:
+            options['max_rows_per_file'] = self.config.max_rows_per_file
 
-        if self.storage_config.max_rows_per_group:
-            options['max_rows_per_group'] = self.storage_config.max_rows_per_group
+        if self.config.max_rows_per_group:
+            options['max_rows_per_group'] = self.config.max_rows_per_group
 
         # Custom options from kwargs
         for key in ['engine', 'writer_properties', 'large_dtypes']:
@@ -271,7 +264,7 @@ class DeltaLakeLoader(DataLoader):
         """Refresh the Delta table reference after write"""
         try:
             # Force refresh of the table reference
-            self._delta_table = DeltaTable(self.storage_config.table_path, storage_options=self.storage_config.storage_options)
+            self._delta_table = DeltaTable(self.config.table_path, storage_options=self.config.storage_options)
             self._table_exists = True
 
             # Verify the table is accessible
@@ -291,7 +284,7 @@ class DeltaLakeLoader(DataLoader):
         optimization_results = {}
 
         try:
-            if self.storage_config.optimize_after_write and self._delta_table:
+            if self.config.optimize_after_write and self._delta_table:
                 self.logger.info('Running Delta Lake optimization...')
 
                 # Optimize (compaction) - handle different API versions
@@ -303,7 +296,7 @@ class DeltaLakeLoader(DataLoader):
 
                 self.logger.info(f'Optimization completed in {optimize_duration:.2f}s')
 
-            if self.storage_config.vacuum_after_write and self._delta_table:
+            if self.config.vacuum_after_write and self._delta_table:
                 self.logger.info('Running Delta Lake vacuum...')
 
                 # Vacuum (cleanup old files)
@@ -406,7 +399,7 @@ class DeltaLakeLoader(DataLoader):
                     if self.storage_backend == 'Local':
                         for file_path in files:
                             try:
-                                full_path = Path(self.storage_config.table_path) / file_path
+                                full_path = Path(self.config.table_path) / file_path
                                 if full_path.exists():
                                     total_size += full_path.stat().st_size
                             except Exception:
@@ -418,11 +411,50 @@ class DeltaLakeLoader(DataLoader):
                 self.logger.warning(f'Failed to calculate total file size: {e}')
                 total_size = 0
 
-            return {'version': version, 'num_files': len(files), 'size_bytes': total_size, 'partition_columns': self.storage_config.partition_by or [], 'schema': self._delta_table.schema() if hasattr(self._delta_table, 'schema') else None}
+            return {'version': version, 'num_files': len(files), 'size_bytes': total_size, 'partition_columns': self.config.partition_by or [], 'schema': self._delta_table.schema() if hasattr(self._delta_table, 'schema') else None}
 
         except Exception as e:
             self.logger.warning(f'Failed to get table info: {e}')
             return {'version': 0, 'num_files': 0, 'size_bytes': 0, 'partition_columns': [], 'error': str(e)}
+
+    def _get_loader_batch_metadata(self, batch: pa.RecordBatch, duration: float, **kwargs) -> Dict[str, Any]:
+        """Get Delta Lake-specific metadata for batch operation"""
+        # Determine write mode from kwargs
+        mode = kwargs.get('mode', LoadMode.APPEND)
+        delta_mode = self._convert_load_mode(mode)
+        
+        metadata = {
+            'write_mode': delta_mode.value,
+            'storage_backend': self.storage_backend,
+            'partition_columns': self.config.partition_by or []
+        }
+        
+        # Add table version if table exists
+        if self._table_exists and self._delta_table is not None:
+            metadata['table_version'] = self._delta_table.version()
+
+        # Add optimization results if available
+        if hasattr(self, '_last_batch_metadata'):
+            metadata['optimization_results'] = self._last_batch_metadata
+            
+        return metadata
+    
+    def _get_loader_table_metadata(self, table: pa.Table, duration: float, batch_count: int, **kwargs) -> Dict[str, Any]:
+        """Get Delta Lake-specific metadata for table operation"""
+        table_info = self._get_table_info()
+        
+        # Determine write mode from kwargs
+        mode = kwargs.get('mode', LoadMode.APPEND)
+        delta_mode = self._convert_load_mode(mode)
+        
+        return {
+            'write_mode': delta_mode.value,
+            'table_version': table_info.get('version', 0),
+            'total_files': table_info.get('num_files', 0),
+            'total_size_bytes': table_info.get('size_bytes', 0),
+            'partition_columns': self.config.partition_by or [],
+            'storage_backend': self.storage_backend
+        }
 
     def _validate_storage_options(self) -> None:
         """Validate storage options for the detected backend"""
@@ -431,7 +463,7 @@ class DeltaLakeLoader(DataLoader):
         if self.storage_backend in required_options:
             missing_options = []
             for option in required_options[self.storage_backend]:
-                if option not in self.storage_config.storage_options and option not in os.environ:
+                if option not in self.config.storage_options and option not in os.environ:
                     missing_options.append(option)
 
             if missing_options:
@@ -485,7 +517,7 @@ class DeltaLakeLoader(DataLoader):
             stats = self._get_table_info()
 
             # Add additional statistics
-            stats.update({'storage_backend': self.storage_backend, 'table_path': self.storage_config.table_path, 'partition_columns': self.storage_config.partition_by, 'optimization_settings': {'optimize_after_write': self.storage_config.optimize_after_write, 'vacuum_after_write': self.storage_config.vacuum_after_write, 'schema_evolution': self.storage_config.schema_evolution}})
+            stats.update({'storage_backend': self.storage_backend, 'table_path': self.config.table_path, 'partition_columns': self.config.partition_by, 'optimization_settings': {'optimize_after_write': self.config.optimize_after_write, 'vacuum_after_write': self.config.vacuum_after_write, 'schema_evolution': self.config.schema_evolution}})
 
             # Get recent history
             stats['recent_history'] = self.get_table_history(limit=5)

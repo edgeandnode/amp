@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 import pyarrow as pa
 import redis
 
-from ..base import DataLoader, LoadMode, LoadResult
+from ..base import DataLoader, LoadMode
 
 
 class RedisDataStructure(Enum):
@@ -34,9 +34,10 @@ class RedisDataStructure(Enum):
 
 
 @dataclass
-class RedisConnectionConfig:
-    """Configuration for Redis connection with sensible defaults"""
-
+class RedisConfig:
+    """Configuration for Redis loader"""
+    
+    # Connection settings
     host: str = 'localhost'
     port: int = 6379
     db: int = 0
@@ -46,13 +47,26 @@ class RedisConnectionConfig:
     max_connections: int = 20
     decode_responses: bool = False  # Keep as bytes for binary data
     connection_params: Dict[str, Any] = None
+    
+    # Data structure configuration
+    data_structure: str = 'hash'
+    key_pattern: str = '{table}:{id}'
+    ttl: Optional[int] = None
+    
+    # Performance configuration
+    batch_size: int = 1000
+    pipeline_size: int = 1000
+    
+    # Data structure specific configuration
+    score_field: Optional[str] = None  # For sorted sets
+    unique_field: Optional[str] = None  # For sets
 
     def __post_init__(self):
         if self.connection_params is None:
             self.connection_params = {}
 
 
-class RedisLoader(DataLoader):
+class RedisLoader(DataLoader[RedisConfig]):
     """
     Optimized Redis data loader combining zero-copy operations with flexible data structures.
 
@@ -66,41 +80,48 @@ class RedisLoader(DataLoader):
     - Binary data support
     """
 
+    # Declare loader capabilities
+    SUPPORTED_MODES = {LoadMode.APPEND, LoadMode.OVERWRITE}
+    REQUIRES_SCHEMA_MATCH = False
+    SUPPORTS_TRANSACTIONS = False
+
     def __init__(self, config: Dict[str, Any]):
         super().__init__(config)
-
+        
         # Core Redis configuration
         self.redis_client = None
         self.connection_pool = None
-
-        # Data structure configuration
-        self.data_structure = RedisDataStructure(config.get('data_structure', 'hash'))
-        self.key_pattern = config.get('key_pattern', '{table}:{id}')
-        self.ttl = config.get('ttl', None)
-
-        # Performance configuration
-        self.batch_size = config.get('batch_size', 1000)
-        self.pipeline_size = config.get('pipeline_size', 1000)
-
-        # Data structure specific configuration
-        self.score_field = config.get('score_field', None)  # For sorted sets
-        self.unique_field = config.get('unique_field', None)  # For sets
-
-        # Connection configuration
-        self.conn_config = RedisConnectionConfig(host=config.get('host', 'localhost'), port=config.get('port', 6379), db=config.get('db', 0), password=config.get('password'), socket_connect_timeout=config.get('connect_timeout', 5), socket_timeout=config.get('socket_timeout', 5), max_connections=config.get('max_connections', 20), decode_responses=config.get('decode_responses', False), connection_params=config.get('connection_params', {}))
+        
+        # Convert data_structure string to enum
+        self.data_structure = RedisDataStructure(self.config.data_structure)
+    
+    
+    def _get_required_config_fields(self) -> list[str]:
+        """Return required configuration fields"""
+        return ['host']  # Only host is truly required, others have defaults
 
     def connect(self) -> None:
         """Establish optimized connection to Redis with pooling"""
         try:
             # Create connection pool for efficient reuse
-            self.connection_pool = redis.ConnectionPool(host=self.conn_config.host, port=self.conn_config.port, db=self.conn_config.db, password=self.conn_config.password, decode_responses=self.conn_config.decode_responses, socket_connect_timeout=self.conn_config.socket_connect_timeout, socket_timeout=self.conn_config.socket_timeout, max_connections=self.conn_config.max_connections, **self.conn_config.connection_params)
+            self.connection_pool = redis.ConnectionPool(
+                host=self.config.host,
+                port=self.config.port,
+                db=self.config.db,
+                password=self.config.password,
+                decode_responses=self.config.decode_responses,
+                socket_connect_timeout=self.config.socket_connect_timeout,
+                socket_timeout=self.config.socket_timeout,
+                max_connections=self.config.max_connections,
+                **self.config.connection_params
+            )
 
             # Create Redis client with connection pool
             self.redis_client = redis.Redis(connection_pool=self.connection_pool)
 
             # Test connection and get server info
             info = self.redis_client.info()
-            self.logger.info(f'Connected to Redis {info["redis_version"]} at {self.conn_config.host}:{self.conn_config.port}')
+            self.logger.info(f'Connected to Redis {info["redis_version"]} at {self.config.host}:{self.config.port}')
             self.logger.info(f'Memory usage: {info.get("used_memory_human", "unknown")}')
             self.logger.info(f'Connected clients: {info.get("connected_clients", "unknown")}')
             self.logger.info(f'Data structure: {self.data_structure.value}')
@@ -111,7 +132,7 @@ class RedisLoader(DataLoader):
             elif self.data_structure == RedisDataStructure.STREAM:
                 self.logger.info('Optimized for time-series and event data')
             elif self.data_structure == RedisDataStructure.SORTED_SET:
-                self.logger.info(f'Optimized for ranked data (score field: {self.score_field})')
+                self.logger.info(f'Optimized for ranked data (score field: {self.config.score_field})')
 
             self._is_connected = True
 
@@ -130,54 +151,20 @@ class RedisLoader(DataLoader):
         self._is_connected = False
         self.logger.info('Disconnected from Redis')
 
-    def load_batch(self, batch: pa.RecordBatch, table_name: str, **kwargs) -> LoadResult:
-        """Load Arrow RecordBatch using zero-copy operations where possible"""
-        start_time = time.time()
-
-        try:
-            # Handle load modes
-            mode = kwargs.get('mode', LoadMode.APPEND)
-            if mode == LoadMode.OVERWRITE:
-                self._clear_data(table_name)
-
-            # Use optimized loading method based on data structure
-            rows_loaded = self._load_batch_optimized(batch, table_name)
-
-            duration = time.time() - start_time
-
-            return LoadResult(rows_loaded=rows_loaded, duration=duration, table_name=table_name, loader_type='redis', success=True, metadata={'batch_size': batch.num_rows, 'data_structure': self.data_structure.value, 'schema_fields': len(batch.schema), 'key_pattern': self.key_pattern, 'ttl': self.ttl, 'ops_per_second': round(batch.num_rows / duration, 2) if duration > 0 else 0})
-
-        except Exception as e:
-            self.logger.error(f'Failed to load batch: {str(e)}')
-            return LoadResult(rows_loaded=0, duration=time.time() - start_time, table_name=table_name, loader_type='redis', success=False, error=str(e))
-
-    def load_table(self, table: pa.Table, table_name: str, **kwargs) -> LoadResult:
-        """Load complete Arrow Table with optimized batching"""
-        start_time = time.time()
-
-        try:
-            # Handle load modes
-            mode = kwargs.get('mode', LoadMode.APPEND)
-            if mode == LoadMode.OVERWRITE:
-                self._clear_data(table_name)
-
-            # Process table in optimized batches
-            batch_size = kwargs.get('batch_size', self.batch_size)
-            total_rows = 0
-            batch_count = 0
-
-            for batch in table.to_batches(max_chunksize=batch_size):
-                rows_loaded = self._load_batch_optimized(batch, table_name)
-                total_rows += rows_loaded
-                batch_count += 1
-
-            duration = time.time() - start_time
-
-            return LoadResult(rows_loaded=total_rows, duration=duration, table_name=table_name, loader_type='redis', success=True, metadata={'total_rows': table.num_rows, 'data_structure': self.data_structure.value, 'schema_fields': len(table.schema), 'batches_processed': batch_count, 'avg_batch_size': round(total_rows / batch_count, 2) if batch_count > 0 else 0, 'ops_per_second': round(total_rows / duration, 2) if duration > 0 else 0, 'table_size_mb': round(table.nbytes / 1024 / 1024, 2)})
-
-        except Exception as e:
-            self.logger.error(f'Failed to load table: {str(e)}')
-            return LoadResult(rows_loaded=0, duration=time.time() - start_time, table_name=table_name, loader_type='redis', success=False, error=str(e))
+    def _load_batch_impl(self, batch: pa.RecordBatch, table_name: str, **kwargs) -> int:
+        """Implementation-specific batch loading logic"""
+        return self._load_batch_optimized(batch, table_name)
+    
+    def _create_table_from_schema(self, schema: pa.Schema, table_name: str) -> None:
+        """Create table from Arrow schema - Redis doesn't require explicit table creation"""
+        # Redis is schemaless and creates keys/structures on demand
+        # No action needed here as Redis will create the data structures
+        # automatically when data is inserted
+        self.logger.debug(f"Redis will create data structures for '{table_name}' on first write")
+    
+    def _clear_table(self, table_name: str) -> None:
+        """Clear table for overwrite mode"""
+        self._clear_data(table_name)
 
     def _load_batch_optimized(self, batch: pa.RecordBatch, table_name: str) -> int:
         """Optimized batch loading with zero-copy operations"""
@@ -238,12 +225,12 @@ class RedisLoader(DataLoader):
                 pipe.hset(key, mapping=hash_data)
                 commands_in_pipe += 1
 
-                if self.ttl:
-                    pipe.expire(key, self.ttl)
+                if self.config.ttl:
+                    pipe.expire(key, self.config.ttl)
                     commands_in_pipe += 1
 
                 # Execute pipeline when it gets large
-                if commands_in_pipe >= self.pipeline_size:
+                if commands_in_pipe >= self.config.pipeline_size:
                     pipe.execute()
                     pipe = self.redis_client.pipeline()
                     commands_in_pipe = 0
@@ -279,12 +266,12 @@ class RedisLoader(DataLoader):
                 pipe.set(key, json_str)
                 commands_in_pipe += 1
 
-                if self.ttl:
-                    pipe.expire(key, self.ttl)
+                if self.config.ttl:
+                    pipe.expire(key, self.config.ttl)
                     commands_in_pipe += 1
 
                 # Execute pipeline when it gets large
-                if commands_in_pipe >= self.pipeline_size:
+                if commands_in_pipe >= self.config.pipeline_size:
                     pipe.execute()
                     pipe = self.redis_client.pipeline()
                     commands_in_pipe = 0
@@ -319,14 +306,14 @@ class RedisLoader(DataLoader):
                 commands_in_pipe += 1
 
                 # Execute pipeline when it gets large
-                if commands_in_pipe >= self.pipeline_size:
+                if commands_in_pipe >= self.config.pipeline_size:
                     pipe.execute()
                     pipe = self.redis_client.pipeline()
                     commands_in_pipe = 0
 
         # Set TTL on stream if specified
-        if self.ttl and commands_in_pipe >= 0:
-            pipe.expire(stream_key, self.ttl)
+        if self.config.ttl and commands_in_pipe >= 0:
+            pipe.expire(stream_key, self.config.ttl)
             commands_in_pipe += 1
 
         # Execute remaining commands
@@ -344,9 +331,9 @@ class RedisLoader(DataLoader):
 
         for i in range(num_rows):
             # Build unique member representation
-            if self.unique_field and self.unique_field in data_dict:
+            if self.config.unique_field and self.config.unique_field in data_dict:
                 # Use specific field for uniqueness
-                value = data_dict[self.unique_field][i]
+                value = data_dict[self.config.unique_field][i]
                 if value is not None:
                     member = str(value)
                     members.append(member)
@@ -368,8 +355,8 @@ class RedisLoader(DataLoader):
         # Add all members to set in one operation
         if members:
             pipe.sadd(set_key, *members)
-            if self.ttl:
-                pipe.expire(set_key, self.ttl)
+            if self.config.ttl:
+                pipe.expire(set_key, self.config.ttl)
             pipe.execute()
 
         return num_rows
@@ -383,8 +370,8 @@ class RedisLoader(DataLoader):
 
         for i in range(num_rows):
             # Determine score
-            if self.score_field and self.score_field in data_dict:
-                score_value = data_dict[self.score_field][i]
+            if self.config.score_field and self.config.score_field in data_dict:
+                score_value = data_dict[self.config.score_field][i]
                 score = float(score_value) if score_value is not None else float(i)
             else:
                 score = float(i)
@@ -406,8 +393,8 @@ class RedisLoader(DataLoader):
         # Add all members to sorted set in one operation
         if mapping:
             pipe.zadd(zset_key, mapping)
-            if self.ttl:
-                pipe.expire(zset_key, self.ttl)
+            if self.config.ttl:
+                pipe.expire(zset_key, self.config.ttl)
             pipe.execute()
 
         return num_rows
@@ -437,8 +424,8 @@ class RedisLoader(DataLoader):
         # Add all items to list in one operation
         if items:
             pipe.rpush(list_key, *items)
-            if self.ttl:
-                pipe.expire(list_key, self.ttl)
+            if self.config.ttl:
+                pipe.expire(list_key, self.config.ttl)
             pipe.execute()
 
         return num_rows
@@ -473,12 +460,12 @@ class RedisLoader(DataLoader):
 
                 commands_in_pipe += 1
 
-                if self.ttl:
-                    pipe.expire(key, self.ttl)
+                if self.config.ttl:
+                    pipe.expire(key, self.config.ttl)
                     commands_in_pipe += 1
 
                 # Execute pipeline when it gets large
-                if commands_in_pipe >= self.pipeline_size:
+                if commands_in_pipe >= self.config.pipeline_size:
                     pipe.execute()
                     pipe = self.redis_client.pipeline()
                     commands_in_pipe = 0
@@ -493,7 +480,7 @@ class RedisLoader(DataLoader):
         """Optimized key generation with better error handling"""
 
         try:
-            key = self.key_pattern
+            key = self.config.key_pattern
 
             # Replace table placeholder
             key = key.replace('{table}', table_name)
@@ -533,7 +520,7 @@ class RedisLoader(DataLoader):
         try:
             if self.data_structure in [RedisDataStructure.HASH, RedisDataStructure.STRING, RedisDataStructure.JSON]:
                 # For key-based structures, delete matching keys
-                pattern = self.key_pattern.replace('{table}', table_name)
+                pattern = self.config.key_pattern.replace('{table}', table_name)
                 # Replace common placeholders with wildcards
                 for placeholder in ['{id}', '{block_num}', '{block_hash}', '{user_id}']:
                     pattern = pattern.replace(placeholder, '*')
@@ -561,11 +548,22 @@ class RedisLoader(DataLoader):
         """Get comprehensive statistics about stored data"""
 
         try:
-            stats = {'table_name': table_name, 'data_structure': self.data_structure.value, 'key_pattern': self.key_pattern, 'ttl': self.ttl, 'connection_info': {'host': self.conn_config.host, 'port': self.conn_config.port, 'db': self.conn_config.db}}
+            stats = {
+                'table_name': table_name, 
+                'data_structure': self.data_structure.value, 
+                'key_pattern': self.config.key_pattern, 
+                'ttl': self.config.ttl, 
+                'connection_info': 
+                    {
+                        'host': self.config.host, 
+                        'port': self.config.port, 
+                        'db': self.config.db
+                    }
+            }
 
             if self.data_structure in [RedisDataStructure.HASH, RedisDataStructure.STRING, RedisDataStructure.JSON]:
                 # Key-based structures
-                pattern = self.key_pattern.replace('{table}', table_name).replace('{id}', '*')
+                pattern = self.config.key_pattern.replace('{table}', table_name).replace('{id}', '*')
                 keys = list(self.redis_client.scan_iter(match=pattern, count=1000))
                 stats['key_count'] = len(keys)
 
@@ -646,8 +644,35 @@ class RedisLoader(DataLoader):
             test_value = self.redis_client.get(test_key)
             self.redis_client.delete(test_key)
 
-            return {'healthy': True, 'ping': ping_result, 'redis_version': info.get('redis_version'), 'used_memory_human': info.get('used_memory_human'), 'connected_clients': info.get('connected_clients'), 'total_commands_processed': info.get('total_commands_processed'), 'keyspace_hits': info.get('keyspace_hits'), 'keyspace_misses': info.get('keyspace_misses'), 'hit_rate': round(info.get('keyspace_hits', 0) / max(info.get('keyspace_hits', 0) + info.get('keyspace_misses', 0), 1) * 100, 2), 'uptime_in_seconds': info.get('uptime_in_seconds'), 'test_operation': test_value == b'test_value' if not self.conn_config.decode_responses else test_value == 'test_value', 'max_memory': config_info.get('maxmemory', 'unlimited'), 'eviction_policy': config_info.get('maxmemory-policy', 'noeviction')}
+            return {
+                'healthy': True, 
+                'ping': ping_result, 
+                'redis_version': info.get('redis_version'), 
+                'used_memory_human': info.get('used_memory_human'), 
+                'connected_clients': info.get('connected_clients'), 
+                'total_commands_processed': info.get('total_commands_processed'), 
+                'keyspace_hits': info.get('keyspace_hits'), 
+                'keyspace_misses': info.get('keyspace_misses'), 
+                'hit_rate': round(info.get('keyspace_hits', 0) / max(info.get('keyspace_hits', 0) + info.get('keyspace_misses', 0), 1) * 100, 2), 
+                'uptime_in_seconds': info.get('uptime_in_seconds'), 
+                'test_operation': test_value == b'test_value' if not self.config.decode_responses else test_value == 'test_value', 
+                'max_memory': config_info.get('maxmemory', 'unlimited'), 
+                'eviction_policy': config_info.get('maxmemory-policy', 'noeviction')
+            }
 
         except Exception as e:
             return {'healthy': False, 'error': str(e)}
-
+    
+    def _get_loader_batch_metadata(self, batch: pa.RecordBatch, duration: float, **kwargs) -> Dict[str, Any]:
+        """Get Redis-specific metadata for batch operation"""
+        metadata = {
+            'data_structure': self.data_structure.value
+        }
+        return metadata
+    
+    def _get_loader_table_metadata(self, table: pa.Table, duration: float, batch_count: int, **kwargs) -> Dict[str, Any]:
+        """Get Redis-specific metadata for table operation"""
+        metadata = {
+            'data_structure': self.data_structure.value
+        }
+        return metadata

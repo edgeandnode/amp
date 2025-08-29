@@ -6,8 +6,8 @@ These tests use a local LMDB instance.
 
 import os
 import shutil
-import time
 import tempfile
+import time
 from datetime import datetime
 
 import pyarrow as pa
@@ -15,6 +15,7 @@ import pytest
 
 try:
     import lmdb
+
     from src.nozzle.loaders.base import LoadMode
     from src.nozzle.loaders.implementations.lmdb_loader import LMDBLoader
 except ImportError:
@@ -72,8 +73,9 @@ def blockchain_test_data():
     }
     return pa.Table.from_pydict(data)
 
-
-class TestLMDBLoader:
+@pytest.mark.integration
+@pytest.mark.lmdb
+class TestLMDBLoaderIntegration:
     """Test LMDB loader implementation"""
     
     def test_connection(self, lmdb_config):
@@ -295,7 +297,7 @@ class TestLMDBLoader:
         size = 50000
         data = {
             'id': list(range(size)),
-            'data': [f'x' * 100 for _ in range(size)]  # 100 chars per row
+            'data': ['x' * 100 for _ in range(size)]  # 100 chars per row
         }
         table = pa.Table.from_pydict(data)
         

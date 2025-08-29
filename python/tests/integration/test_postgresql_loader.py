@@ -111,8 +111,8 @@ class TestPostgreSQLLoaderIntegration:
             assert result.rows_loaded == 5
             assert result.loader_type == 'postgresql'
             assert result.table_name == test_table_name
-            assert 'total_rows' in result.metadata
-            assert 'schema_fields' in result.metadata
+            assert 'columns' in result.metadata
+            assert result.metadata['columns'] == 7
 
     def test_append_mode(self, postgresql_config, small_test_data, test_table_name, cleanup_tables):
         """Test append mode functionality"""
@@ -379,11 +379,10 @@ class TestPostgreSQLLoaderIntegration:
             assert result.success == True
             assert result.duration > 0
             assert result.duration <= (end_time - start_time)
+            assert result.rows_loaded == 10000
 
             # Check metadata contains performance info
-            assert 'total_rows' in result.metadata
             assert 'table_size_bytes' in result.metadata
-            assert result.metadata['total_rows'] == 10000
             assert result.metadata['table_size_bytes'] > 0
 
 

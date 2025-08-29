@@ -5,12 +5,14 @@ when working with PyIceberg types.
 """
 
 from typing import Any, Optional, Protocol, runtime_checkable
+
 import pyarrow as pa
 
 try:
-    from pyiceberg.table import Table as IcebergTable, UpsertResult
     from pyiceberg.catalog import Catalog as IcebergCatalog
     from pyiceberg.schema import Schema as IcebergSchema
+    from pyiceberg.table import Table as IcebergTable
+    from pyiceberg.table import UpsertResult
 except ImportError:
     # Fallback protocols when PyIceberg is not available
     

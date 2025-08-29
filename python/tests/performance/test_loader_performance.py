@@ -376,7 +376,7 @@ class TestLMDBPerformance:
                 }
             )
 
-        print(f"\nLMDB Key Generation Strategy Performance:")
+        print("\nLMDB Key Generation Strategy Performance:")
         for strategy, throughput in results.items():
             print(f"  {strategy}: {throughput:,.0f} rows/sec")
 
@@ -415,7 +415,7 @@ class TestLMDBPerformance:
         best_txn_size = max(results.keys(), key=lambda x: results[x]['throughput'])
         best_throughput = results[best_txn_size]['throughput']
 
-        print(f"\nLMDB Transaction Size Performance:")
+        print("\nLMDB Transaction Size Performance:")
         for txn_size, metrics in results.items():
             print(f"  {txn_size:,} rows/txn: {metrics['throughput']:,.0f} rows/sec (DB: {metrics['db_size_mb']:.1f}MB)")
         print(f"  Optimal transaction size: {best_txn_size:,} rows ({best_throughput:,.0f} rows/sec)")
@@ -458,7 +458,7 @@ class TestLMDBPerformance:
         writemap_throughput = results['with_writemap']
         no_writemap_throughput = results['without_writemap']
 
-        print(f"\nLMDB Writemap Performance Comparison:")
+        print("\nLMDB Writemap Performance Comparison:")
         print(f"  With writemap: {writemap_throughput:,.0f} rows/sec")
         print(f"  Without writemap: {no_writemap_throughput:,.0f} rows/sec")
         
@@ -466,7 +466,7 @@ class TestLMDBPerformance:
         if no_writemap_throughput > 0:
             print(f"  Performance ratio: {writemap_throughput/no_writemap_throughput:.2f}x")
         else:
-            print(f"  Without writemap failed to process any data")
+            print("  Without writemap failed to process any data")
 
         # Both should achieve reasonable performance, but be lenient for testing
         assert writemap_throughput > 1000, f'Writemap performance too low: {writemap_throughput:.0f} rows/sec'
@@ -499,7 +499,7 @@ class TestLMDBPerformance:
             # LMDB has significant overhead due to Arrow IPC format and per-row storage
             original_size_mb = performance_test_data.get_total_buffer_size() / 1024**2
             
-            print(f"\nLMDB Memory Efficiency:")
+            print("\nLMDB Memory Efficiency:")
             print(f"  Original data size: {original_size_mb:.1f}MB")
             print(f"  Database size: {db_size_mb:.1f}MB")
             print(f"  Map size: {map_size_mb:.1f}MB")
@@ -541,7 +541,6 @@ class TestLMDBPerformance:
             pytest.skip('LMDB loader not available')
             
         import concurrent.futures
-        import threading
         
         config = {**lmdb_perf_config, 'key_column': 'id', 'max_readers': 16}
         loader = LMDBLoader(config)
@@ -585,7 +584,7 @@ class TestLMDBPerformance:
             total_reads = sum(r[0] for r in results)
             reads_per_second = total_reads / total_duration
 
-            print(f"\nLMDB Concurrent Read Performance:")
+            print("\nLMDB Concurrent Read Performance:")
             print(f"  Threads: {num_threads}")
             print(f"  Total reads: {total_reads:,}")
             print(f"  Total duration: {total_duration:.2f}s")
@@ -613,7 +612,6 @@ class TestLMDBPerformance:
         except ImportError:
             pytest.skip('LMDB loader not available')
             
-        from src.nozzle.loaders.base import LoadMode
         
         results = {}
         
@@ -646,14 +644,14 @@ class TestLMDBPerformance:
         batch_throughput = results['batch']
         single_throughput = results['single']
 
-        print(f"\nLMDB Batch vs Single Row Performance:")
+        print("\nLMDB Batch vs Single Row Performance:")
         print(f"  Batch loading: {batch_throughput:,.0f} rows/sec")
         print(f"  Single row loading: {single_throughput:,.0f} rows/sec")
         
         if single_throughput > 0:
             print(f"  Batch advantage: {batch_throughput/single_throughput:.2f}x faster")
         else:
-            print(f"  Single row loading failed or processed no data")
+            print("  Single row loading failed or processed no data")
 
         # Batch loading should be faster than single row (if single row succeeded)
         assert batch_throughput > 1000, f'Batch loading too slow: {batch_throughput:.0f} rows/sec'
@@ -690,7 +688,7 @@ class TestLMDBPerformance:
             data_mb = large_table.nbytes / 1024 / 1024
             mb_per_sec = data_mb / duration
 
-            print(f"\nLMDB Large Value Performance:")
+            print("\nLMDB Large Value Performance:")
             print(f"  Rows: {result.rows_loaded:,}")
             print(f"  Data size: {data_mb:.1f}MB")
             print(f"  Duration: {duration:.2f}s")
@@ -716,12 +714,13 @@ class TestLMDBPerformance:
 
 @pytest.mark.performance
 @pytest.mark.snowflake
+@pytest.mark.skip(reason="Snowflake tests disabled - trial account expired, see test_snowflake_loader.py docstring")
 class TestSnowflakePerformance:
     """Performance tests for Snowflake loader"""
 
     def test_large_table_loading_performance(self, snowflake_config, performance_test_data, memory_monitor):
         """Test loading large datasets with performance monitoring"""
-        config = {**snowflake_config, 'use_stage': True, 'batch_size': 10000}
+        config = {**snowflake_config, 'use_stage': True}
         loader = SnowflakeLoader(config)
         table_name = 'perf_test_large_snowflake'
 
@@ -750,7 +749,7 @@ class TestSnowflakePerformance:
                     }
                 )
 
-                print(f"\nSnowflake Performance Metrics:")
+                print("\nSnowflake Performance Metrics:")
                 print(f"  Rows loaded: {result.rows_loaded:,}")
                 print(f"  Duration: {duration:.2f}s")
                 print(f"  Throughput: {rows_per_second:,.0f} rows/sec")
@@ -775,7 +774,7 @@ class TestSnowflakePerformance:
         for use_stage in [True, False]:
             method_name = 'stage' if use_stage else 'insert'
             table_name = f'{table_base_name}_{method_name}'
-            config = {**snowflake_config, 'use_stage': use_stage, 'batch_size': 5000}
+            config = {**snowflake_config, 'use_stage': use_stage}
             loader = SnowflakeLoader(config)
 
             try:
@@ -808,7 +807,7 @@ class TestSnowflakePerformance:
         stage_throughput = results['stage']['throughput']
         insert_throughput = results['insert']['throughput']
 
-        print(f"\nSnowflake Loading Method Comparison:")
+        print("\nSnowflake Loading Method Comparison:")
         print(f"  Stage loading: {stage_throughput:,.0f} rows/sec")
         print(f"  Insert loading: {insert_throughput:,.0f} rows/sec")
         print(f"  Stage vs Insert ratio: {stage_throughput/insert_throughput:.2f}x")
@@ -825,13 +824,13 @@ class TestSnowflakePerformance:
 
         for batch_size in batch_sizes:
             table_name = f'{table_base_name}_{batch_size}'
-            config = {**snowflake_config, 'use_stage': True, 'batch_size': batch_size}
+            config = {**snowflake_config, 'use_stage': True}
             loader = SnowflakeLoader(config)
 
             try:
                 with loader:
                     start_time = time.time()
-                    result = loader.load_table(performance_test_data, table_name)
+                    result = loader.load_table(performance_test_data, table_name, batch_size=batch_size)
                     duration = time.time() - start_time
 
                     throughput = result.rows_loaded / duration
@@ -856,7 +855,7 @@ class TestSnowflakePerformance:
         best_batch_size = max(results.keys(), key=lambda x: results[x]['throughput'])
         best_throughput = results[best_batch_size]['throughput']
 
-        print(f"\nSnowflake Batch Size Performance:")
+        print("\nSnowflake Batch Size Performance:")
         for batch_size, metrics in results.items():
             print(f"  {batch_size:,} rows/batch: {metrics['throughput']:,.0f} rows/sec ({metrics['batches_processed']} batches)")
         print(f"  Optimal batch size: {best_batch_size:,} rows ({best_throughput:,.0f} rows/sec)")
@@ -868,7 +867,7 @@ class TestSnowflakePerformance:
     def test_concurrent_loading_performance(self, snowflake_config, medium_test_table):
         """Test performance with concurrent batch loading"""
         import concurrent.futures
-        from src.nozzle.loaders.base import LoadMode
+
 
         config = {**snowflake_config, 'use_stage': True, 'batch_size': 2000}
         table_name = 'perf_concurrent_test'
@@ -920,7 +919,7 @@ class TestSnowflakePerformance:
         total_rows = sum(r['rows_loaded'] for r in results)
         overall_throughput = total_rows / total_duration
 
-        print(f"\nSnowflake Concurrent Loading Performance:")
+        print("\nSnowflake Concurrent Loading Performance:")
         print(f"  Chunks processed: {len(results)}")
         print(f"  Total rows: {total_rows:,}")
         print(f"  Total duration: {total_duration:.2f}s")
@@ -1093,7 +1092,7 @@ class TestCrossLoaderPerformance:
             results['snowflake'] = 0
 
         # Memory usage should be reasonable (< 100MB for small dataset)
-        print(f"\nMemory usage comparison (MB):")
+        print("\nMemory usage comparison (MB):")
         for loader_name, memory_mb in results.items():
             if memory_mb > 0:  # Skip if loader not available
                 print(f"  {loader_name}: {memory_mb:.1f}MB")

@@ -532,9 +532,9 @@ class TestRedisLoaderIntegration:
             assert result.duration > 0
             assert result.duration <= (end_time - start_time)
 
-            # Check metadata contains performance info
-            assert 'ops_per_second' in result.metadata
-            assert result.metadata['ops_per_second'] > 0
+            # Check performance info - ops_per_second is now a direct attribute
+            assert hasattr(result, 'ops_per_second')
+            assert result.ops_per_second > 0
             assert 'batches_processed' in result.metadata
             assert 'avg_batch_size' in result.metadata
 
@@ -565,7 +565,7 @@ class TestRedisLoaderPerformance:
             assert result.duration < 30  # Should complete within 30 seconds
 
             # Verify performance metrics
-            assert result.metadata['ops_per_second'] > 100  # Should handle >100 ops/sec
+            assert result.ops_per_second > 100  # Should handle >100 ops/sec
 
     def test_data_structure_performance_comparison(self, redis_config, cleanup_redis):
         """Compare performance across different data structures"""
@@ -587,7 +587,7 @@ class TestRedisLoaderPerformance:
 
             with loader:
                 result = loader.load_table(table, f'perf_{structure}')
-                results[structure] = result.metadata.get('ops_per_second', 0)
+                results[structure] = result.ops_per_second
 
         # All structures should perform reasonably well
         for structure, ops_per_sec in results.items():

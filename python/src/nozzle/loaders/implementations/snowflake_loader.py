@@ -8,7 +8,7 @@ import pyarrow.csv as pa_csv
 import snowflake.connector
 from snowflake.connector import DictCursor, SnowflakeConnection
 
-from ..base import DataLoader, LoadMode, LoadResult
+from ..base import DataLoader, LoadMode
 
 
 @dataclass
@@ -41,7 +41,7 @@ class SnowflakeConnectionConfig:
             self.connection_params = {}
 
 
-class SnowflakeLoader(DataLoader):
+class SnowflakeLoader(DataLoader[SnowflakeConnectionConfig]):
     """
     Snowflake data loader optimized for bulk loading operations.
 
@@ -53,84 +53,68 @@ class SnowflakeLoader(DataLoader):
     - Comprehensive error handling
     - Support for all Snowflake data types
     """
+    
+    # Declare loader capabilities
+    SUPPORTED_MODES = {LoadMode.APPEND}  # Snowflake loader only supports APPEND
+    REQUIRES_SCHEMA_MATCH = False
+    SUPPORTS_TRANSACTIONS = True
 
     def __init__(self, config: Dict[str, Any]) -> None:
         super().__init__(config)
         self.connection: SnowflakeConnection = None
         self.cursor = None
-        self._created_tables = set()  # Track tables we've already created
-
-        # Connection configuration
-        self.conn_config = SnowflakeConnectionConfig(
-            account=config['account'],
-            user=config['user'],
-            password=config.get('password', ''),
-            warehouse=config['warehouse'],
-            database=config['database'],
-            schema=config.get('schema', 'PUBLIC'),
-            role=config.get('role'),
-            authenticator=config.get('authenticator'),
-            private_key=config.get('private_key'),
-            private_key_passphrase=config.get('private_key_passphrase'),
-            token=config.get('token'),
-            okta_account_name=config.get('okta_account_name'),
-            login_timeout=config.get('login_timeout', 60),
-            network_timeout=config.get('network_timeout', 300),
-            socket_timeout=config.get('socket_timeout', 300),
-            ocsp_response_cache_filename=config.get('ocsp_response_cache_filename'),
-            validate_default_parameters=config.get('validate_default_parameters', True),
-            paramstyle=config.get('paramstyle', 'qmark'),
-            timezone=config.get('timezone'),
-            connection_params=config.get('connection_params', {}),
-        )
+        self._created_tables = set()  # Track created tables
 
         # Loading configuration
         self.use_stage = config.get('use_stage', True)
         self.stage_name = config.get('stage_name', 'NOZZLE_STAGE')
-        self.batch_size = config.get('batch_size', 10000)
-
         self.compression = config.get('compression', 'gzip')
+    
+    
+    def _get_required_config_fields(self) -> list[str]:
+        """Return required configuration fields"""
+        return ['account', 'user', 'warehouse', 'database']
 
     def connect(self) -> None:
         """Establish connection to Snowflake"""
         try:
             # Build connection parameters
             conn_params = {
-                'account': self.conn_config.account,
-                'user': self.conn_config.user,
-                'warehouse': self.conn_config.warehouse,
-                'database': self.conn_config.database,
-                'schema': self.conn_config.schema,
-                'login_timeout': self.conn_config.login_timeout,
-                'network_timeout': self.conn_config.network_timeout,
-                'socket_timeout': self.conn_config.socket_timeout,
-                'ocsp_response_cache_filename': self.conn_config.ocsp_response_cache_filename,
-                'validate_default_parameters': self.conn_config.validate_default_parameters,
-                'paramstyle': self.conn_config.paramstyle,
-                **self.conn_config.connection_params,
+                'account': self.config.account,
+                'user': self.config.user,
+                'warehouse': self.config.warehouse,
+                'database': self.config.database,
+                'schema': self.config.schema,
+                'login_timeout': self.config.login_timeout,
+                'network_timeout': self.config.network_timeout,
+                'socket_timeout': self.config.socket_timeout,
+                'ocsp_response_cache_filename': self.config.ocsp_response_cache_filename,
+                'validate_default_parameters': self.config.validate_default_parameters,
+                'paramstyle': self.config.paramstyle,
+                **self.config.connection_params,
             }
 
             # Add authentication parameters
-            if self.conn_config.authenticator:
-                conn_params['authenticator'] = self.conn_config.authenticator
-                if self.conn_config.authenticator == 'oauth':
-                    conn_params['token'] = self.conn_config.token
-                elif self.conn_config.authenticator == 'externalbrowser':
+            if self.config.authenticator:
+                conn_params['authenticator'] = self.config.authenticator
+                if self.config.authenticator == 'oauth':
+                    conn_params['token'] = self.config.token
+                elif self.config.authenticator == 'externalbrowser':
                     pass  # No additional params needed
-                elif self.conn_config.authenticator == 'okta' and self.conn_config.okta_account_name:
-                    conn_params['authenticator'] = f'https://{self.conn_config.okta_account_name}.okta.com'
-            elif self.conn_config.private_key:
-                conn_params['private_key'] = self.conn_config.private_key
-                if self.conn_config.private_key_passphrase:
-                    conn_params['private_key_passphrase'] = self.conn_config.private_key_passphrase
+                elif self.config.authenticator == 'okta' and self.config.okta_account_name:
+                    conn_params['authenticator'] = f'https://{self.config.okta_account_name}.okta.com'
+            elif self.config.private_key:
+                conn_params['private_key'] = self.config.private_key
+                if self.config.private_key_passphrase:
+                    conn_params['private_key_passphrase'] = self.config.private_key_passphrase
             else:
-                conn_params['password'] = self.conn_config.password
+                conn_params['password'] = self.config.password
 
             # Optional parameters
-            if self.conn_config.role:
-                conn_params['role'] = self.conn_config.role
-            if self.conn_config.timezone:
-                conn_params['timezone'] = self.conn_config.timezone
+            if self.config.role:
+                conn_params['role'] = self.config.role
+            if self.config.timezone:
+                conn_params['timezone'] = self.config.timezone
 
             self.connection = snowflake.connector.connect(**conn_params)
             self.cursor = self.connection.cursor(DictCursor)
@@ -161,87 +145,13 @@ class SnowflakeLoader(DataLoader):
             self.connection = None
         self._is_connected = False
         self.logger.info('Disconnected from Snowflake')
+    
+    def _clear_table(self, table_name: str) -> None:
+        """Clear table for overwrite mode"""
+        # Snowflake loader doesn't support overwrite mode
+        raise ValueError("Snowflake loader does not support OVERWRITE mode")
 
-    def load_batch(self, batch: pa.RecordBatch, table_name: str, **kwargs) -> LoadResult:
-        """Load a single Arrow RecordBatch to Snowflake"""
-        start_time = time.time()
-
-        try:
-            rows_loaded = self._load_data(batch, table_name, **kwargs)
-            duration = time.time() - start_time
-
-            return LoadResult(
-                rows_loaded=rows_loaded,
-                duration=duration,
-                table_name=table_name,
-                loader_type='snowflake',
-                success=True,
-                metadata={
-                    'batch_size': batch.num_rows,
-                    'schema_fields': len(batch.schema),
-                    'loading_method': 'stage' if self.use_stage else 'insert',
-                    'warehouse': self.conn_config.warehouse,
-                },
-            )
-
-        except Exception as e:
-            self.logger.error(f'Failed to load batch: {str(e)}')
-            self.connection.rollback()
-            return LoadResult(
-                rows_loaded=0,
-                duration=time.time() - start_time,
-                table_name=table_name,
-                loader_type='snowflake',
-                success=False,
-                error=str(e),
-            )
-
-    def load_table(self, table: pa.Table, table_name: str, **kwargs) -> LoadResult:
-        """Load a complete Arrow Table to Snowflake"""
-        start_time = time.time()
-
-        try:
-            batch_size = kwargs.get('batch_size', self.batch_size)
-            total_rows = 0
-            batch_count = 0
-
-            for batch in table.to_batches(max_chunksize=batch_size):
-                rows_loaded = self._load_data(batch, table_name, **kwargs)
-                total_rows += rows_loaded
-                batch_count += 1
-                self.logger.debug(f'Loaded batch {batch_count}: {rows_loaded} rows')
-
-            duration = time.time() - start_time
-
-            return LoadResult(
-                rows_loaded=total_rows,
-                duration=duration,
-                table_name=table_name,
-                loader_type='snowflake',
-                success=True,
-                metadata={
-                    'total_rows': table.num_rows,
-                    'schema_fields': len(table.schema),
-                    'batches_processed': batch_count,
-                    'avg_batch_size': round(total_rows / batch_count, 2) if batch_count > 0 else 0,
-                    'loading_method': 'stage' if self.use_stage else 'insert',
-                    'table_size_mb': round(table.nbytes / 1024 / 1024, 2),
-                },
-            )
-
-        except Exception as e:
-            self.logger.error(f'Failed to load table: {str(e)}')
-            self.connection.rollback()
-            return LoadResult(
-                rows_loaded=0,
-                duration=time.time() - start_time,
-                table_name=table_name,
-                loader_type='snowflake',
-                success=False,
-                error=str(e),
-            )
-
-    def _load_data(self, batch: pa.RecordBatch, table_name: str, **kwargs) -> int:
+    def _load_batch_impl(self, batch: pa.RecordBatch, table_name: str, **kwargs) -> int:
         """Internal method to load data - used by both load_batch and load_table"""
         mode = kwargs.get('mode', LoadMode.APPEND)
         create_table = kwargs.get('create_table', True)
@@ -361,7 +271,7 @@ class SnowflakeLoader(DataLoader):
             FROM INFORMATION_SCHEMA.TABLES
             WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
             """,
-            (self.conn_config.schema, table_name.upper()),
+            (self.config.schema, table_name.upper()),
         )
 
         result = self.cursor.fetchone()
@@ -454,6 +364,24 @@ class SnowflakeLoader(DataLoader):
             self.logger.debug(f"Successfully created table '{table_name}'")
         except Exception as e:
             raise RuntimeError(f"Failed to create table '{table_name}': {str(e)}") from e
+    
+    def _get_loader_batch_metadata(self, batch: pa.RecordBatch, duration: float, **kwargs) -> Dict[str, Any]:
+        """Get Snowflake-specific metadata for batch operation"""
+        return {
+            'loading_method': 'stage' if self.use_stage else 'insert',
+            'warehouse': self.config.warehouse,
+            'database': self.config.database,
+            'schema': self.config.schema
+        }
+    
+    def _get_loader_table_metadata(self, table: pa.Table, duration: float, batch_count: int, **kwargs) -> Dict[str, Any]:
+        """Get Snowflake-specific metadata for table operation"""
+        return {
+            'loading_method': 'stage' if self.use_stage else 'insert',
+            'warehouse': self.config.warehouse,
+            'database': self.config.database,
+            'schema': self.config.schema
+        }
 
     def get_table_info(self, table_name: str) -> Optional[Dict[str, Any]]:
         """Get information about a Snowflake table"""
@@ -473,7 +401,7 @@ class SnowflakeLoader(DataLoader):
                 FROM INFORMATION_SCHEMA.TABLES
                 WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
                 """,
-                (self.conn_config.schema, table_name.upper()),
+                (self.config.schema, table_name.upper()),
             )
 
             table_info = self.cursor.fetchone()
@@ -495,7 +423,7 @@ class SnowflakeLoader(DataLoader):
                 WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
                 ORDER BY ORDINAL_POSITION
                 """,
-                (self.conn_config.schema, table_name.upper()),
+                (self.config.schema, table_name.upper()),
             )
 
             columns = self.cursor.fetchall()

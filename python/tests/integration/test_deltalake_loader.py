@@ -82,9 +82,9 @@ class TestDeltaLakeLoaderIntegration:
         loader = DeltaLakeLoader(delta_basic_config)
 
         # Test configuration
-        assert loader.storage_config.table_path == delta_basic_config['table_path']
-        assert loader.storage_config.partition_by == ['year', 'month']
-        assert loader.storage_config.optimize_after_write == True
+        assert loader.config.table_path == delta_basic_config['table_path']
+        assert loader.config.partition_by == ['year', 'month']
+        assert loader.config.optimize_after_write == True
         assert loader.storage_backend == 'Local'
 
         # Test connection
@@ -327,7 +327,7 @@ class TestDeltaLakeLoaderIntegration:
 
             # Check required metadata fields
             metadata = result.metadata
-            required_fields = ['write_mode', 'storage_backend', 'partition_columns', 'schema_fields', 'throughput_rows_per_sec', 'table_version']
+            required_fields = ['write_mode', 'storage_backend', 'partition_columns', 'throughput_rows_per_sec', 'table_version']
 
             for field in required_fields:
                 assert field in metadata, f'Missing metadata field: {field}'
@@ -336,7 +336,6 @@ class TestDeltaLakeLoaderIntegration:
             assert metadata['write_mode'] == 'overwrite'
             assert metadata['storage_backend'] == 'Local'
             assert metadata['partition_columns'] == ['year', 'month']
-            assert metadata['schema_fields'] == len(comprehensive_test_data.schema)
             assert metadata['throughput_rows_per_sec'] > 0
 
     def test_null_value_handling(self, delta_basic_config, null_test_data):

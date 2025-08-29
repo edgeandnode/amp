@@ -1,7 +1,6 @@
 # src/nozzle/loaders/implementations/iceberg_loader.py
 
-import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 import pyarrow as pa
@@ -9,36 +8,31 @@ import pyarrow.compute as pc
 
 try:
     from pyiceberg.catalog import load_catalog
-    from pyiceberg.exceptions import (
-        NoSuchNamespaceError,
-        NoSuchTableError,
-        NoSuchIcebergTableError
-    )
+    from pyiceberg.exceptions import NoSuchIcebergTableError, NoSuchNamespaceError, NoSuchTableError
+    from pyiceberg.partitioning import PartitionSpec
     from pyiceberg.schema import Schema as IcebergSchema
     from pyiceberg.types import (
+        BinaryType,
+        BooleanType,
+        DateType,
+        DecimalType,
+        DoubleType,
+        FloatType,
+        IntegerType,
+        ListType,
+        LongType,
         NestedField,
         StringType,
-        IntegerType,
-        LongType,
-        FloatType,
-        DoubleType,
-        BooleanType,
-        DecimalType,
-        DateType,
+        StructType,
         TimestampType,
-        BinaryType,
-        ListType,
-        StructType
     )
-    from pyiceberg.partitioning import PartitionSpec
     ICEBERG_AVAILABLE = True
 except ImportError:
     ICEBERG_AVAILABLE = False
 
 # Import types for better IDE support
-from .iceberg_types import IcebergTable, IcebergCatalog, UpsertResult
-
-from ..base import DataLoader, LoadMode, LoadResult
+from ..base import DataLoader, LoadMode
+from .iceberg_types import IcebergCatalog, IcebergTable
 
 
 @dataclass
@@ -58,7 +52,7 @@ class IcebergStorageConfig:
     batch_size: int = 10000
 
 
-class IcebergLoader(DataLoader):
+class IcebergLoader(DataLoader[IcebergStorageConfig]):
     """
     Apache Iceberg loader with zero-copy Arrow integration.
     
@@ -74,47 +68,43 @@ class IcebergLoader(DataLoader):
     - schema_evolution: Enable automatic schema evolution (default: True)
     """
     
+    # Declare loader capabilities
+    SUPPORTED_MODES = {LoadMode.APPEND, LoadMode.OVERWRITE, LoadMode.UPSERT, LoadMode.MERGE}
+    REQUIRES_SCHEMA_MATCH = False
+    SUPPORTS_TRANSACTIONS = True
+    
     def __init__(self, config: Dict[str, Any]):
-        super().__init__(config)
-        
         if not ICEBERG_AVAILABLE:
             raise ImportError(
                 "Apache Iceberg support requires 'pyiceberg' package. "
                 "Install with: pip install pyiceberg"
             )
         
-        # Handle schema evolution configuration
-        schema_evolution = config.get('schema_evolution', True)
-        
-        self.storage_config = IcebergStorageConfig(
-            catalog_config=config['catalog_config'],
-            namespace=config['namespace'],
-            default_table_name=config.get('default_table_name'),
-            create_namespace=config.get('create_namespace', True),
-            create_table=config.get('create_table', True),
-            partition_spec=config.get('partition_spec'),  # Accept PartitionSpec directly
-            schema_evolution=schema_evolution,
-            batch_size=config.get('batch_size', 10000)
-        )
+        super().__init__(config)
         
         self._catalog: Optional[IcebergCatalog] = None
         self._current_table: Optional[IcebergTable] = None
         self._namespace_exists: bool = False
         self.enable_statistics: bool = config.get('enable_statistics', True)
+    
+    
+    def _get_required_config_fields(self) -> list[str]:
+        """Return required configuration fields"""
+        return ['catalog_config', 'namespace']
         
     def connect(self) -> None:
         """Initialize Iceberg catalog connection"""
         try:
-            self._catalog = load_catalog(**self.storage_config.catalog_config)
+            self._catalog = load_catalog(**self.config.catalog_config)
             self._validate_catalog_connection()
             
-            if self.storage_config.create_namespace:
-                self._ensure_namespace(self.storage_config.namespace)
+            if self.config.create_namespace:
+                self._ensure_namespace(self.config.namespace)
             else:
-                self._check_namespace_exists(self.storage_config.namespace)
+                self._check_namespace_exists(self.config.namespace)
             
             self._is_connected = True
-            self.logger.info(f"Iceberg loader connected successfully to namespace: {self.storage_config.namespace}")
+            self.logger.info(f"Iceberg loader connected successfully to namespace: {self.config.namespace}")
             
         except Exception as e:
             self.logger.error(f"Failed to connect to Iceberg catalog: {str(e)}")
@@ -131,73 +121,36 @@ class IcebergLoader(DataLoader):
         self._is_connected = False
         self.logger.info("Iceberg loader disconnected")
     
-    def load_batch(self, batch: pa.RecordBatch, table_name: str, **kwargs) -> LoadResult:
-        """Load Arrow RecordBatch to Iceberg table"""
-        start_time = time.time()
+    def _load_batch_impl(self, batch: pa.RecordBatch, table_name: str, **kwargs) -> int:
+        """Implementation-specific batch loading logic for Iceberg"""
+        # Convert batch to table for Iceberg API
+        table = pa.Table.from_batches([batch])
         
-        try:
-            table = pa.Table.from_batches([batch])
-            result = self.load_table(table, table_name, **kwargs)
-            
-            result.metadata.update({
-                'operation': 'load_batch',
-                'batch_size': batch.num_rows,
-                'schema_fields': len(batch.schema)
-            })
-            
-            return result
-            
-        except Exception as e:
-            self.logger.error(f"Failed to load batch: {str(e)}")
-            return LoadResult(
-                rows_loaded=0,
-                duration=time.time() - start_time,
-                table_name=table_name,
-                loader_type='iceberg',
-                success=False,
-                error=str(e)
-            )
+        # Fix timestamps for Iceberg compatibility
+        table = self._fix_timestamps(table)
+        
+        # Get or create the Iceberg table
+        mode = kwargs.get('mode', LoadMode.APPEND)
+        iceberg_table = self._get_or_create_table(table_name, table.schema)
+        
+        # Validate schema compatibility (unless overwriting)
+        if mode != LoadMode.OVERWRITE:
+            self._validate_schema_compatibility(iceberg_table, table.schema)
+        
+        # Perform the actual load operation
+        rows_written = self._perform_load_operation(iceberg_table, table, mode)
+        
+        return rows_written
     
-    def load_table(self, table: pa.Table, table_name: str, **kwargs) -> LoadResult:
-        """Load Arrow Table to Iceberg using zero-copy operations"""
-        start_time = time.time()
-        
-        try:
-            table = self._fix_timestamps(table)
-            mode = kwargs.get('mode', LoadMode.APPEND)
-            iceberg_table = self._get_or_create_table(table_name, table.schema)
-            
-            if mode != LoadMode.OVERWRITE:
-                self._validate_schema_compatibility(iceberg_table, table.schema)
-            
-            rows_written = self._perform_load_operation(iceberg_table, table, mode)
-            duration = time.time() - start_time
-            metadata = self._get_load_metadata(iceberg_table, table, duration)
-            
-            self.logger.info(
-                f"Successfully loaded {rows_written} rows to {table_name} "
-                f"in {duration:.2f}s (mode: {mode.value})"
-            )
-            
-            return LoadResult(
-                rows_loaded=rows_written,
-                duration=duration,
-                table_name=table_name,
-                loader_type='iceberg',
-                success=True,
-                metadata=metadata
-            )
-            
-        except Exception as e:
-            self.logger.error(f"Failed to load table {table_name}: {str(e)}")
-            return LoadResult(
-                rows_loaded=0,
-                duration=time.time() - start_time,
-                table_name=table_name,
-                loader_type='iceberg',
-                success=False,
-                error=str(e)
-            )
+    def _create_table_from_schema(self, schema: pa.Schema, table_name: str) -> None:
+        """Create table from Arrow schema"""
+        # Iceberg handles table creation in _get_or_create_table
+        self.logger.info(f"Iceberg will create table '{table_name}' on first write with appropriate schema")
+    
+    def _clear_table(self, table_name: str) -> None:
+        """Clear table for overwrite mode"""
+        # Iceberg handles overwrites internally
+        self.logger.info(f"Iceberg will handle overwrite for table '{table_name}'")
     
     def _fix_timestamps(self, arrow_table: pa.Table) -> pa.Table:
         """Convert nanosecond timestamps to microseconds for Iceberg compatibility"""
@@ -268,7 +221,7 @@ class IcebergLoader(DataLoader):
     
     def _get_or_create_table(self, table_name: str, schema: pa.Schema) -> IcebergTable:
         """Get existing table or create new one"""
-        table_identifier = f"{self.storage_config.namespace}.{table_name}"
+        table_identifier = f"{self.config.namespace}.{table_name}"
         
         try:
             table = self._catalog.load_table(table_identifier)
@@ -276,16 +229,16 @@ class IcebergLoader(DataLoader):
             return table
             
         except (NoSuchTableError, NoSuchIcebergTableError):
-            if not self.storage_config.create_table:
+            if not self.config.create_table:
                 raise NoSuchTableError(f"Table '{table_identifier}' not found and create_table=False")
             
             try:
                 # Use partition_spec if provided
-                if self.storage_config.partition_spec:
+                if self.config.partition_spec:
                     table = self._catalog.create_table(
                         identifier=table_identifier,
                         schema=schema,
-                        partition_spec=self.storage_config.partition_spec
+                        partition_spec=self.config.partition_spec
                     )
                 else:
                     # Create table without partitioning
@@ -304,7 +257,7 @@ class IcebergLoader(DataLoader):
         """Validate that Arrow schema is compatible with Iceberg table schema and perform schema evolution if enabled"""
         iceberg_schema = iceberg_table.schema()
         
-        if not self.storage_config.schema_evolution:
+        if not self.config.schema_evolution:
             # Strict mode: schema must match exactly
             self._validate_schema_strict(iceberg_schema, arrow_schema)
         else:
@@ -354,7 +307,7 @@ class IcebergLoader(DataLoader):
                     update.add_column(
                         field_name, 
                         iceberg_type, 
-                        doc=f"Added by schema evolution from Arrow field",
+                        doc="Added by schema evolution from Arrow field",
                         required=False
                     )
                     self.logger.debug(f"Added column '{field_name}' with type {iceberg_type}")
@@ -418,7 +371,7 @@ class IcebergLoader(DataLoader):
                 # Use PyIceberg's upsert method with default settings
                 upsert_result = iceberg_table.upsert(arrow_table)
                 
-                self.logger.info(f"Upsert operation completed successfully")
+                self.logger.info("Upsert operation completed successfully")
                 return arrow_table.num_rows
                 
             except Exception as e:
@@ -429,34 +382,64 @@ class IcebergLoader(DataLoader):
         else:
             raise ValueError(f"Unsupported load mode: {mode}")
     
-    def _get_load_metadata(self, iceberg_table: IcebergTable, arrow_table: pa.Table, duration: float) -> Dict[str, Any]:
-        """Get metadata about the load operation"""
+    def _get_loader_batch_metadata(self, batch: pa.RecordBatch, duration: float, **kwargs) -> Dict[str, Any]:
+        """Get Iceberg-specific metadata for batch operation"""
         metadata = {
-            'operation': 'load_table',
-            'rows_loaded': arrow_table.num_rows,
-            'columns': len(arrow_table.schema),
-            'duration_seconds': duration,
-            'namespace': self.storage_config.namespace,
-            'partition_columns': [],
+            'namespace': self.config.namespace
+        }
+
+        # Add partition columns if available
+        table_name = kwargs.get('table_name')
+        if table_name and self._table_exists(table_name):
+            try:
+                table_info = self.get_table_info(table_name)
+                metadata['partition_columns'] = table_info.get('partition_columns', [])
+            except Exception:
+                metadata['partition_columns'] = []
+        else:
+            # For new tables, get partition fields from partition_spec if available
+            metadata['partition_columns'] = []
+
+        return metadata
+    
+    def _get_loader_table_metadata(self, table: pa.Table, duration: float, batch_count: int, **kwargs) -> Dict[str, Any]:
+        """Get Iceberg-specific metadata for table operation"""
+        metadata = {
+            'namespace': self.config.namespace
         }
         
-        if self.enable_statistics:
+        # Add partition columns if available
+        table_name = kwargs.get('table_name')
+        if table_name and self._table_exists(table_name):
             try:
-                table_scan = iceberg_table.scan()
-                metadata.update({
-                    'table_size_bytes': sum(f.file_size_in_bytes for f in iceberg_table.current_snapshot().data_manifests) if iceberg_table.current_snapshot() else 0,
-                    'snapshot_id': iceberg_table.current_snapshot().snapshot_id if iceberg_table.current_snapshot() else None,
-                })
-            except Exception as e:
-                self.logger.debug(f"Failed to get table statistics: {str(e)}")
-        
+                table_info = self.get_table_info(table_name)
+                metadata['partition_columns'] = table_info.get('partition_columns', [])
+            except Exception:
+                metadata['partition_columns'] = []
+        else:
+            # For new tables, get partition fields from partition_spec if available
+            metadata['partition_columns'] = []
+            if self.config.partition_spec and hasattr(self.config.partition_spec, 'fields'):
+                # partition_spec.fields contains partition field definitions
+                # We'll extract them during table creation
+                metadata['partition_columns'] = []  # Will be populated after table creation
+            
         return metadata
 
+    def _table_exists(self, table_name: str) -> bool:
+        """Check if a table exists"""
+        try:
+            table_identifier = f"{self.config.namespace}.{table_name}"
+            self._catalog.load_table(table_identifier)
+            return True
+        except (NoSuchTableError, NoSuchIcebergTableError, Exception):
+            return False
+    
     def get_table_info(self, table_name: str) -> Dict[str, Any]:
         """Get comprehensive table information including schema, files, and metadata"""
         try:
             # Load the table
-            table_identifier = f"{self.storage_config.namespace}.{table_name}"
+            table_identifier = f"{self.config.namespace}.{table_name}"
             try:
                 iceberg_table = self._catalog.load_table(table_identifier)
             except (NoSuchTableError, NoSuchIcebergTableError):
@@ -469,7 +452,7 @@ class IcebergLoader(DataLoader):
             info = {
                 'exists': True,
                 'table_name': table_name,
-                'namespace': self.storage_config.namespace,
+                'namespace': self.config.namespace,
                 'columns': [],
                 'partition_columns': [],
                 'num_files': 0,

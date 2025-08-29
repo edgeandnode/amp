@@ -39,7 +39,6 @@ def snowflake_config():
         'warehouse': os.getenv('SNOWFLAKE_WAREHOUSE', 'test_warehouse'),
         'database': os.getenv('SNOWFLAKE_DATABASE', 'test_database'),
         'schema': os.getenv('SNOWFLAKE_SCHEMA', 'PUBLIC'),
-        'batch_size': 10000,
         'use_stage': True
     }
 
