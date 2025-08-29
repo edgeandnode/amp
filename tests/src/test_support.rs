@@ -21,7 +21,11 @@ use common::{
     query_context::parse_sql,
 };
 use dataset_store::DatasetStore;
-use dump::{consistency_check, worker::Worker};
+use dump::{
+    compaction::{SegmentSizeLimit, compactor::Compactor},
+    consistency_check,
+    worker::Worker,
+};
 use figment::{
     Figment,
     providers::{Format as _, Json},
@@ -305,6 +309,7 @@ pub(crate) async fn dump_dataset(
         None,
         false,
         None,
+        false,
     )
     .await?;
 
@@ -636,4 +641,26 @@ pub async fn restore_blessed_dataset(
     }
 
     Ok(tables)
+}
+
+/// Spawn a compaction for the given table and wait for it to complete.
+/// The compaction is configured to compact all files into a single file.
+pub async fn spawn_compaction_and_await_completion(
+    table: &Arc<PhysicalTable>,
+    config: &Arc<Config>,
+) {
+    let length = table.files().await.unwrap().len();
+    let parquet_writer_props = dump::parquet_opts(&config.parquet);
+    let mut opts = dump::compaction_opts(&config.compaction, &parquet_writer_props);
+    opts.active = true;
+    opts.size_limit = SegmentSizeLimit::new(1, 1, 1, length);
+
+    let mut compactor = Compactor::start(table, &Arc::new(opts));
+
+    compactor.spawn().await;
+
+    // Wait for compaction to finish
+    while !compactor.is_finished() {
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
 }

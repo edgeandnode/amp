@@ -71,7 +71,11 @@ pub fn dataset(dataset_cfg: common::DatasetValue) -> Result<Dataset, Error> {
     })
 }
 
-pub async fn client(provider: toml::Value, network: String) -> Result<JsonRpcClient, Error> {
+pub async fn client(
+    provider: toml::Value,
+    network: String,
+    final_blocks_only: bool,
+) -> Result<JsonRpcClient, Error> {
     let provider: EvmRpcProvider = provider.try_into()?;
     let request_limit = u16::max(1, provider.concurrent_request_limit.unwrap_or(1024));
 
@@ -81,6 +85,7 @@ pub async fn client(provider: toml::Value, network: String) -> Result<JsonRpcCli
         request_limit,
         provider.rpc_batch_size,
         provider.rate_limit_per_minute,
+        final_blocks_only,
     )
     .map_err(Error::Client)?;
     Ok(client)

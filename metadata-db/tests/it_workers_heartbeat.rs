@@ -11,7 +11,7 @@ async fn register_worker() {
     let temp_db = PgTempDB::new();
 
     let metadata_db =
-        MetadataDb::connect(&temp_db.connection_uri(), MetadataDb::default_pool_size())
+        MetadataDb::connect_with_retry(&temp_db.connection_uri(), MetadataDb::default_pool_size())
             .await
             .expect("Failed to connect to metadata db");
 

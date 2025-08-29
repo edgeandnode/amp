@@ -12,13 +12,11 @@ use datafusion::{
     error::Result as DataFusionResult,
     execution::object_store::ObjectStoreUrl,
     logical_expr::{ScalarUDF, SortExpr, col, utils::conjunction},
-    parquet::file::metadata::ParquetMetaData,
     physical_expr::LexOrdering,
     physical_plan::{ExecutionPlan, PhysicalExpr},
     prelude::Expr,
     sql::TableReference,
 };
-use foyer::Cache;
 use futures::{Stream, StreamExt, TryStreamExt, stream};
 use metadata_db::{LocationId, MetadataDb, TableId};
 use object_store::{ObjectMeta, ObjectStore, path::Path};
@@ -27,7 +25,7 @@ use url::Url;
 use uuid::Uuid;
 
 use crate::{
-    BlockNum, BoxError, Dataset, LogicalCatalog, ResolvedTable,
+    BlockNum, BoxError, Dataset, LogicalCatalog, ParquetFooterCache, ResolvedTable,
     catalog::reader::NozzleReaderFactory,
     metadata::{
         FileMetadata, nozzle_metadata_from_parquet_file,
@@ -94,7 +92,7 @@ impl CatalogSnapshot {
     pub async fn from_catalog(
         catalog: Catalog,
         ignore_canonical_segments: bool,
-        parquet_footer_cache: Cache<(LocationId, String), Arc<ParquetMetaData>>,
+        parquet_footer_cache: ParquetFooterCache,
     ) -> Result<Self, BoxError> {
         let mut table_snapshots = Vec::new();
         for physical_table in &catalog.tables {
@@ -526,6 +524,10 @@ impl PhysicalTable {
         self.table.network()
     }
 
+    pub fn metadata_db(&self) -> Arc<MetadataDb> {
+        Arc::clone(&self.metadata_db)
+    }
+
     pub fn object_store(&self) -> Arc<dyn ObjectStore> {
         Arc::clone(&self.object_store)
     }
@@ -554,6 +556,7 @@ impl PhysicalTable {
         self.stream_file_metadata()
             .map(|result| {
                 let FileMetadata {
+                    file_id,
                     file_name,
                     object_meta,
                     parquet_meta: ParquetMeta { mut ranges, .. },
@@ -565,6 +568,7 @@ impl PhysicalTable {
                     )));
                 }
                 Ok(Segment {
+                    id: file_id,
                     range: ranges.remove(0),
                     object: object_meta,
                 })
@@ -580,7 +584,7 @@ impl PhysicalTable {
     pub async fn snapshot(
         &self,
         ignore_canonical_segments: bool,
-        parquet_footer_cache: Cache<(LocationId, String), Arc<ParquetMetaData>>,
+        parquet_footer_cache: ParquetFooterCache,
     ) -> Result<TableSnapshot, BoxError> {
         let segments = if ignore_canonical_segments {
             self.segments().await?
@@ -750,8 +754,9 @@ fn round_robin<'a>(
 ) -> Vec<FileGroup> {
     let size = segments.len().min(target_partitions);
     let mut groups = vec![FileGroup::default(); size];
-    for (idx, segment) in segments.enumerate() {
-        let file = PartitionedFile::from(segment.object.clone());
+    for (idx, segment) in segments.into_iter().enumerate() {
+        let mut file = PartitionedFile::from(segment.object.clone());
+        file.extensions = Some(Arc::new(segment.id));
         groups[idx % size].push(file);
     }
     groups

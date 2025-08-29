@@ -4845,8 +4845,10 @@ dependencies = [
 name = "metadata-db"
 version = "0.1.0"
 dependencies = [
+ "backon",
  "futures",
  "indoc",
+ "metadata-db",
  "pgtemp",
  "serde",
  "serde_json",
