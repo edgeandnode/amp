@@ -198,7 +198,7 @@ impl ParquetFileWriterOutput {
         duration: Duration,
     ) -> Result<(), metadata_db::Error> {
         metadata_db
-            .upsert_gc_manifest(self.location_id, &self.file_ids, duration)
+            .upsert_gc_manifest(self.location_id, &self.parent_ids, duration)
             .await
     }
 }
