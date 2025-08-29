@@ -35,6 +35,27 @@ jobs:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
         if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
 
+      # Cache Rust dependencies
+      - name: Cache Rust dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      # Cache Docker layers
+      - name: Cache Docker layers
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+
       # # Authenticate to Production GCP only from main branch
       # - name: Google auth to Production GCP
       #   if: github.ref == 'refs/heads/main' && inputs.environment == 'production'
@@ -92,8 +113,12 @@ jobs:
           push: true
           tags: ${{ steps.metadata.outputs.tags }}
           labels: ${{ steps.metadata.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: |
+            type=gha
+            type=local,src=/tmp/.buildx-cache
+          cache-to: |
+            type=gha,mode=max
+            type=local,dest=/tmp/.buildx-cache,mode=max
           provenance: mode=max
           sbom: true
 
