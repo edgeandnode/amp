@@ -7,6 +7,7 @@ use futures::{
 };
 use metadata_db::{FileId, GcManifestRow, MetadataDb};
 use object_store::{Error as ObjectStoreError, ObjectStore, path::Path};
+use url::Url;
 
 use crate::{
     compaction::{
@@ -58,7 +59,7 @@ impl Collector {
 
         let expired_stream = metadata_db.stream_expired_files(location_id, secs, nsecs);
 
-        match DeletionOutput::try_from_manifest_stream(object_store, expired_stream, now).await {
+        match DeletionOutput::try_from_manifest_stream(object_store, expired_stream, now, self.table.url()).await {
             Ok(output) if output.len() > 0 => {
                 tracing::info!(
                     "Deleted {} files ({} successes, {} not found, {} errors) for table {}",
@@ -119,6 +120,7 @@ impl DeletionOutput {
         object_store: Arc<dyn ObjectStore>,
         expired_stream: BoxStream<'a, Result<GcManifestRow, metadata_db::Error>>,
         now: Timestamp,
+        url: &Url,
     ) -> Result<Self, metadata_db::Error> {
         let (file_ids, file_paths) = expired_stream
             .try_fold(
@@ -126,7 +128,7 @@ impl DeletionOutput {
                 |(mut file_ids, mut file_paths),
                  GcManifestRow {
                      file_id,
-                     file_path,
+                     file_path: file_name,
                      expiration,
                      ..
                  }| {
@@ -134,8 +136,9 @@ impl DeletionOutput {
                         .saturating_sub(now.0)
                         .is_zero()
                     {
+                        let file_path = url.join(&file_name).unwrap();
                         file_ids.push(file_id);
-                        file_paths.push(Ok(Path::from(file_path)));
+                        file_paths.push(Ok(Path::from(file_path.path())));
                     }
 
                     future::ok((file_ids, file_paths))
