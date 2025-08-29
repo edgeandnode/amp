@@ -10,6 +10,7 @@ use alloy::{
 };
 use common::{BlockNum, BoxError, metadata::segments::BlockRange, query_context::parse_sql};
 use dataset_store::{DatasetDefsCommon, DatasetStore, SerializableSchema};
+use futures::StreamExt;
 use generate_manifest;
 use monitoring::logging;
 use schemars::schema_for;
@@ -668,7 +669,12 @@ async fn sql_dataset_input_batch_size() {
     spawn_collection_and_await_completion(table, &test_env.config).await;
 
     // 7. After collection, we expect only the compacted file to remain.
-    let file_count_after_collection = table.files().await.unwrap().len();
+    let file_count_after_collection = table
+        .object_store()
+        .list(Some(table.path()))
+        .collect::<Vec<_>>()
+        .await
+        .len();
     assert_eq!(file_count_after_collection, 1);
 
     let mut test_client = TestClient::connect(&test_env).await.unwrap();
