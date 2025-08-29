@@ -135,10 +135,15 @@ Returns 404 if job doesn't exist, 409 if job exists but isn't in terminal state.
 
 See [`handlers/jobs/delete_by_id.rs`](src/handlers/jobs/delete_by_id.rs) for more detailed information about this endpoint.
 
-#### `DELETE /jobs?status=terminal`
-Deletes all jobs that are in terminal states (Completed, Stopped, or Failed).
+#### `DELETE /jobs?status=<filter>`
+Deletes jobs based on status filter. Supports deleting jobs by various status criteria.
 This is a bulk cleanup operation for finalized jobs.
-The `status` query parameter must be set to `terminal` (case insensitive).
+The `status` query parameter accepts the following values
+- `terminal`: Delete all jobs in terminal states (Completed, Stopped, Failed)
+- `complete`: Delete all completed jobs
+- `stopped`: Delete all stopped jobs  
+- `error`: Delete all failed jobs
+
 Only removes jobs that have completed their lifecycle and are safe to delete.
 This endpoint is typically used for periodic cleanup and administrative maintenance.
 
