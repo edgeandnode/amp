@@ -155,7 +155,7 @@ impl DeletionOutput {
 
                 match result {
                     Ok(..) => acc.insert_success(*file_id),
-                    Err(ObjectStoreError::NotFound { .. }) => acc.insert_not_found(*file_id),
+                    Err(ObjectStoreError::NotFound { path, .. }) => acc.insert_not_found(*file_id, path),
                     Err(err) => acc.insert_error(*file_id, err),
                 }
                 future::ready(acc)
@@ -184,7 +184,9 @@ impl DeletionOutput {
         &self.successes
     }
 
+    #[tracing::instrument(skip_all)]
     fn insert_success(&mut self, file_id: FileId) {
+        tracing::debug!("File deleted successfully: {file_id}");
         self.successes.push(file_id);
     }
 
@@ -192,10 +194,13 @@ impl DeletionOutput {
         &self.not_found
     }
 
-    fn insert_not_found(&mut self, file_id: FileId) {
+    #[tracing::instrument(skip_all)]
+    fn insert_not_found(&mut self, file_id: FileId, path: String) {
+        tracing::debug!("File not found: {path}");
         self.not_found.push(file_id);
     }
 
+    #[tracing::instrument(skip_all)]
     fn insert_error(&mut self, file_id: FileId, err: ObjectStoreError) {
         tracing::error!("Error deleting file {file_id}: {err}");
         self.errors.push((file_id, Box::new(err)));
