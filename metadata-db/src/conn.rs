@@ -85,8 +85,7 @@ impl DbConn {
     }
 
     /// Set up a connection to the metadata DB with retry logic for temporary databases.
-    #[cfg(test)]
-    #[cfg(feature = "temp-db")]
+    #[cfg(all(test, feature = "temp-db"))]
     #[instrument(skip_all, err)]
     pub async fn connect_with_retry(url: &str) -> Result<Self, ConnError> {
         use backon::{ExponentialBuilder, Retryable};
