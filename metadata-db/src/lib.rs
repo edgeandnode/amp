@@ -7,9 +7,6 @@ use tokio::time::MissedTickBehavior;
 use tracing::{instrument, warn};
 use url::Url;
 
-#[cfg(feature = "temp-db")]
-use backon::{ExponentialBuilder, Retryable};
-
 mod conn;
 mod locations;
 pub mod registry;
