@@ -190,6 +190,48 @@ impl MetadataDb {
         })
     }
 
+    /// Sets up a connection pool to the Metadata DB with retry logic for temporary databases.
+    #[cfg(feature = "temp-db")]
+    #[instrument(skip_all, err)]
+    pub async fn connect_with_retry(url: &str, pool_size: u32) -> Result<Self, Error> {
+        use backon::{ExponentialBuilder, Retryable};
+
+        let retry_policy = ExponentialBuilder::default()
+            .with_min_delay(Duration::from_millis(10))
+            .with_max_delay(Duration::from_millis(100))
+            .with_max_times(20);
+
+        fn is_db_starting_up(err: &conn::ConnError) -> bool {
+            matches!(
+                err,
+                conn::ConnError::ConnectionError(sqlx::Error::Database(db_err))
+                if db_err.code().map_or(false, |code| code == "57P03")
+            )
+        }
+
+        fn notify_retry(err: &conn::ConnError, dur: Duration) {
+            tracing::warn!(
+                error = %err,
+                "Database still starting up during connection. Retrying in {:.1}s",
+                dur.as_secs_f32()
+            );
+        }
+
+        let pool = (|| DbConnPool::connect(url, pool_size))
+            .retry(retry_policy)
+            .when(is_db_starting_up)
+            .notify(notify_retry)
+            .await?;
+
+        pool.run_migrations().await?;
+
+        Ok(Self {
+            pool,
+            url: url.into(),
+            dead_worker_interval: DEFAULT_DEAD_WORKER_INTERVAL,
+        })
+    }
+
     /// Configures the "dead worker" interval for the metadata DB instance
     pub fn with_dead_worker_interval(self, dead_worker_interval: Duration) -> Self {
         Self {
