@@ -19,7 +19,7 @@ concurrency:
 
 env:
   REGION: us-central1
-  REPO_NAME: ${{ github.event.repository.name }}
+  REPO_NAME: ${{ github.repository }}
   PROJECT_NAME: nozzle
 
 jobs:
@@ -68,7 +68,6 @@ jobs:
           workload_identity_provider: ${{ inputs.environment == 'production' && secrets.PRODUCTION_WORKLOAD_IDENTITY_PROVIDER || secrets.STAGING_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ inputs.environment == 'production' && secrets.PRODUCTION_SERVICE_ACCOUNT_EMAIL || secrets.STAGING_SERVICE_ACCOUNT_EMAIL }}
           export_environment_variables: true
-          export_default_credentials: true
           # request_reason: '${{ env.PROJECT_NAME}} build and push to GCR' # this will add X-Goog-Request-Reason for audit logs
 
       - name: Set up Cloud SDK
@@ -91,7 +90,7 @@ jobs:
         id: metadata
         uses: docker/metadata-action@c1e51972afc2121e065aed6d45c65596fe445f3f # v5.8.0
         with:
-          images: ${{ env.REGION }}-docker.pkg.dev/${{ github.repository }}/${{ env.REPO_NAME }}
+          images: ${{ env.REGION }}-docker.pkg.dev/${{ env.REPO_NAME }}
           tags: |
             type=ref,event=tag
             type=sha,format=short
@@ -116,7 +115,7 @@ jobs:
         with:
           project_id: ${{ env.REPO_NAME }}-${{ inputs.environment }}
           service: ${{ env.REPO_NAME }}-${{ inputs.environment }}
-          image: ${{ env.REGION }}-docker.pkg.dev/${{ github.repository }}/${{ env.REPO_NAME }}:${{ steps.metadata.outputs.tags }}
+          image: ${{ env.REGION }}-docker.pkg.dev/${{ env.REPO_NAME }}:${{ steps.metadata.outputs.tags }}
           region: ${{ env.REGION }}
 
       # - name: Deploy to Production Cloud Run
@@ -124,6 +123,6 @@ jobs:
       #   uses: google-github-actions/deploy-cloudrun@v2
       #   with:
       #     service: ${{ env.CLOUD_RUN_SERVICE }}
-      #     image: ${{ env.REGION }}-docker.pkg.dev/${{ github.repository }}/${{ env.GH_IMAGE }}:${{ steps.metadata.outputs.tags }}
+      #     image: ${{ env.REGION }}-docker.pkg.dev/${{ env.REPO_NAME }}:${{ steps.metadata.outputs.tags }}
       #     region: ${{ env.REGION }}
       #     project_id: ${{ env.REPO_NAME }}-${{ inputs.environment }}
