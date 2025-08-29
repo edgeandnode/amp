@@ -419,7 +419,7 @@ async fn get_by_job_id_returns_locations_written_by_job() {
     let job_desc = serde_json::json!({"operation": "dump"});
     let job_desc_str =
         serde_json::to_string(&job_desc).expect("Failed to serialize job description");
-    let job_id = jobs::register(&mut *conn, &worker_id, &job_desc_str)
+    let job_id = jobs::insert_with_default_status(&mut *conn, &worker_id, &job_desc_str)
         .await
         .expect("Failed to register job");
 
@@ -528,7 +528,7 @@ async fn assign_job_writer_assigns_job_to_multiple_locations() {
     let job_desc = serde_json::json!({"operation": "write"});
     let job_desc_str =
         serde_json::to_string(&job_desc).expect("Failed to serialize job description");
-    let job_id = jobs::register(&mut *conn, &worker_id, &job_desc_str)
+    let job_id = jobs::insert_with_default_status(&mut *conn, &worker_id, &job_desc_str)
         .await
         .expect("Failed to register job");
 

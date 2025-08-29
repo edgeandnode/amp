@@ -320,7 +320,7 @@ impl MetadataDb {
         let mut tx = self.pool.begin().await?;
 
         // Register the job in the workers job queue
-        let job_id = workers::jobs::register(&mut *tx, node_id, job_desc).await?;
+        let job_id = workers::jobs::insert_with_default_status(&mut *tx, node_id, job_desc).await?;
 
         // Lock the locations for this job by assigning the job ID as the writer
         locations::assign_job_writer(&mut *tx, locations, job_id).await?;
@@ -513,6 +513,35 @@ impl MetadataDb {
             JobStatus::Failed,
         )
         .await?)
+    }
+
+    /// Delete a job by ID if it's in a terminal state
+    ///
+    /// This function will only delete the job if it exists and is in a terminal state
+    /// (Completed, Stopped, or Failed). Returns true if a job was deleted, false otherwise.
+    pub async fn delete_job_if_terminal(&self, id: &JobId) -> Result<bool, Error> {
+        Ok(workers::jobs::delete_by_id_and_statuses(
+            &*self.pool,
+            id,
+            JobStatus::terminal_statuses(),
+        )
+        .await?)
+    }
+
+    /// Delete all jobs that are in terminal states
+    ///
+    /// This function deletes all jobs that are in terminal states (Completed, Stopped, or Failed).
+    /// Returns the number of jobs that were deleted.
+    pub async fn delete_all_terminal_jobs(&self) -> Result<usize, Error> {
+        Ok(workers::jobs::delete_by_statuses(&*self.pool, JobStatus::terminal_statuses()).await?)
+    }
+
+    /// Delete all jobs that match the specified status
+    ///
+    /// This function deletes all jobs that are in the specified status.
+    /// Returns the number of jobs that were deleted.
+    pub async fn delete_all_jobs_by_status(&self, status: JobStatus) -> Result<usize, Error> {
+        Ok(workers::jobs::delete_by_status(&*self.pool, status).await?)
     }
 }
 

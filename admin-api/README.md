@@ -126,6 +126,24 @@ notifying workers.
 
 See [`handlers/jobs/stop.rs`](src/handlers/jobs/stop.rs) for more detailed information about this endpoint.
 
+#### `DELETE /jobs/{id}`
+Deletes a specific job by its ID if it's in a terminal state.
+The `id` parameter must be a valid JobId identifier.
+Only jobs in terminal states (Completed, Stopped, Failed) can be deleted.
+Non-terminal jobs are protected from accidental deletion.
+Returns 404 if job doesn't exist, 409 if job exists but isn't in terminal state.
+
+See [`handlers/jobs/delete_by_id.rs`](src/handlers/jobs/delete_by_id.rs) for more detailed information about this endpoint.
+
+#### `DELETE /jobs?status=terminal`
+Deletes all jobs that are in terminal states (Completed, Stopped, or Failed).
+This is a bulk cleanup operation for finalized jobs.
+The `status` query parameter must be set to `terminal` (case insensitive).
+Only removes jobs that have completed their lifecycle and are safe to delete.
+This endpoint is typically used for periodic cleanup and administrative maintenance.
+
+See [`handlers/jobs/delete.rs`](src/handlers/jobs/delete.rs) for more detailed information about this endpoint.
+
 ### Location Management
 
 Location endpoints manage distributed worker nodes and their availability for
@@ -156,4 +174,4 @@ Accepts optional `force` query parameter to override safety checks.
 Performs comprehensive cleanup including deleting associated files from object
 store and removing location metadata from the database.
 
-See [`handlers/locations/delete.rs`](src/handlers/locations/delete.rs) for more detailed information about this endpoint.
+See [`handlers/locations/delete_by_id.rs`](src/handlers/locations/delete_by_id.rs) for more detailed information about this endpoint.
