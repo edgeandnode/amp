@@ -151,6 +151,7 @@ impl From<BlockRange> for InvalidationRange {
 ///         }
 ///     }
 /// }
+/// # Ok(())
 /// # }
 /// ```
 pub fn with_reorg(
