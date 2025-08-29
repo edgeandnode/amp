@@ -44,6 +44,7 @@ impl Collector {
         }
     }
 
+    #[tracing::instrument(skip_all, err, fields(table = %self.table.table_ref()))]
     pub(super) async fn collect(self) -> DeletionResult<Self> {
         let table = Arc::clone(&self.table);
 
@@ -59,6 +60,14 @@ impl Collector {
 
         match DeletionOutput::try_from_manifest_stream(object_store, expired_stream, now).await {
             Ok(output) if output.len() > 0 => {
+                tracing::info!(
+                    "Deleted {} files ({} successes, {} not found, {} errors) for table {}",
+                    output.len(),
+                    output.successes.len(),
+                    output.not_found.len(),
+                    output.errors.len(),
+                    table.table_ref()
+                );
                 output.update_manifest(&metadata_db).await.map_err(
                     DeletionError::manifest_update_error(
                         self.clone(),
@@ -105,6 +114,7 @@ impl DeletionOutput {
         }
     }
 
+    #[tracing::instrument(skip_all)]
     pub async fn try_from_manifest_stream<'a>(
         object_store: Arc<dyn ObjectStore>,
         expired_stream: BoxStream<'a, Result<GcManifestRow, metadata_db::Error>>,
@@ -134,6 +144,8 @@ impl DeletionOutput {
             .await?;
 
         let size = file_ids.len();
+
+        tracing::debug!("Deleting {} expired files", size);
 
         Ok(object_store
             .delete_stream(stream::iter(file_paths).boxed())

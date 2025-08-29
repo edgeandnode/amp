@@ -703,6 +703,7 @@ pub async fn spawn_collection_and_await_completion(
 
     // Wait for a moment to let the file leases to expire
     tokio::time::sleep(opts.file_lock_duration).await;
+    tokio::time::sleep(opts.file_lock_duration).await;
 
     collector.spawn().await;
 

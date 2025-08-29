@@ -41,7 +41,7 @@ impl Compactor {
         }
     }
 
-    #[tracing::instrument(skip_all, err)]
+    #[tracing::instrument(skip_all, err, fields(table = %self.table.table_ref()))]
     pub(super) async fn compact(self) -> CompactionResult<Self> {
         let table = Arc::clone(&self.table);
         let opts = Arc::clone(&self.opts);
