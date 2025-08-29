@@ -56,9 +56,8 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target/
-          key: ${{ runner.os }}-cargo-${{ github.sha }}
+          key: ${{ runner.os }}-cargo-${{ github.head_ref || github.ref_name }}
           restore-keys: |
-            ${{ runner.os }}-cargo-${{ github.ref_name }}
             ${{ runner.os }}-cargo-
 
       # # Authenticate to Production GCP only from main branch
@@ -83,7 +82,7 @@ jobs:
           service_account: ${{ inputs.environment == 'production' && secrets.PRODUCTION_SERVICE_ACCOUNT_EMAIL || secrets.STAGING_SERVICE_ACCOUNT_EMAIL }}
           export_environment_variables: true
           create_credentials_file: false
-          clean_credentials: true
+          cleanup_credentials: true
           # request_reason: '${{ env.PROJECT_NAME}} build and push to GCR' # this will add X-Goog-Request-Reason for audit logs
 
       - name: Set up Cloud SDK
