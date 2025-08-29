@@ -1,3 +1,5 @@
+pub mod message_stream_with_block_complete;
+
 use std::{collections::BTreeMap, sync::Arc};
 
 use alloy::{hex::ToHexExt as _, primitives::BlockHash};
@@ -20,6 +22,7 @@ use tokio::sync::{mpsc, watch};
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::task::AbortOnDropHandle;
 use tracing::{Instrument, instrument};
+use message_stream_with_block_complete::MessageStreamWithBlockComplete;
 
 /// Awaits any update for tables in a query context catalog.
 struct TableUpdates {
@@ -78,6 +81,7 @@ pub enum QueryMessage {
     MicrobatchStart { range: BlockRange, is_reorg: bool },
     Data(RecordBatch),
     MicrobatchEnd(BlockRange),
+    BlockComplete(BlockNum),
 }
 
 struct MicrobatchRange {
@@ -114,7 +118,9 @@ pub struct StreamingQueryHandle {
 
 impl StreamingQueryHandle {
     pub fn as_stream(self) -> BoxStream<'static, Result<QueryMessage, BoxError>> {
-        let data_stream = ReceiverStream::new(self.rx);
+        let data_stream = MessageStreamWithBlockComplete::new(
+            ReceiverStream::new(self.rx).map(Ok)
+        );
 
         let join = self.join_handle;
 
@@ -132,7 +138,6 @@ impl StreamingQueryHandle {
         };
 
         data_stream
-            .map(Ok)
             .chain(stream::once(get_task_result).filter_map(|x| async { x }))
             .boxed()
     }

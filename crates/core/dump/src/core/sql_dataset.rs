@@ -320,6 +320,9 @@ async fn dump_sql_query(
                     metrics.inc_sql_dataset_bytes_written_by(num_bytes, dataset.clone());
                 }
             }
+            QueryMessage::BlockComplete(_) => {
+                // TODO: Check if file should be closed early
+            }
             QueryMessage::MicrobatchEnd(range) => {
                 let microbatch_end = range.end();
                 // Close current file and commit metadata

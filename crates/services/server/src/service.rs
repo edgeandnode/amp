@@ -527,6 +527,9 @@ fn query_result_stream(
                             assert!(current_range.is_some());
                             current_range = None;
                         }
+                        QueryMessage::BlockComplete(_) => {
+                            // We don't yet expose this
+                        }
                     }
                 }
                 Err(err) => {
