@@ -204,7 +204,7 @@ impl MetadataDb {
         }
 
         fn notify_retry(err: &conn::ConnError, dur: Duration) {
-            warn!(
+            tracing::warn!(
                 error = %err,
                 "Database still starting up during connection. Retrying in {:.1}s",
                 dur.as_secs_f32()
