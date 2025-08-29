@@ -4,7 +4,8 @@ use std::{
     path::PathBuf,
     process::{ExitStatus, Stdio},
     str::FromStr as _,
-    sync::Arc, time::Duration,
+    sync::Arc,
+    time::Duration,
 };
 
 use common::{
@@ -690,7 +691,6 @@ pub async fn spawn_collection_and_await_completion(
     table: &Arc<PhysicalTable>,
     config: &Arc<Config>,
 ) {
-
     let length = table.files().await.unwrap().len();
     let parquet_writer_props = dump::parquet_opts(&config.parquet);
     let mut opts = dump::compaction_opts(&config.compaction, &parquet_writer_props);
@@ -700,7 +700,7 @@ pub async fn spawn_collection_and_await_completion(
 
     let opts = Arc::new(opts);
     let mut collector = Collector::start(table, &opts);
-    
+
     // Wait for a moment to let the file leases to expire
     tokio::time::sleep(opts.file_lock_duration).await;
 
