@@ -212,7 +212,7 @@ impl JsonRpcClient {
         let mut last_progress_report = Instant::now();
 
         stream! {
-            for block_num in start_block..=end_block {
+            'outer: for block_num in start_block..=end_block {
                 let elapsed = last_progress_report.elapsed();
                 if elapsed >= Duration::from_secs(15) {
                     tracing::info!(block = %block_num, "Progress: fetched up to block");
@@ -245,16 +245,27 @@ impl JsonRpcClient {
                     let calls = block
                         .transactions
                         .hashes()
-                        .map(|hash| self.client.get_transaction_receipt(hash));
+                        .map(|hash| {
+                            let client = &self.client;
+                            async move {
+                                client.get_transaction_receipt(hash).await.map(|r| (hash, r))
+                            }
+                        });
                     let Ok(receipts) = try_join_all(calls).await else {
-                        yield Err("error fetching receipts".into());
+                        yield Err(format!("error fetching receipts for block {}", block.header.number).into());
                         continue;
                     };
-                    let Some(receipts) = receipts.into_iter().collect::<Option<Vec<_>>>() else {
-                        yield Err("missing receipt for a transaction".into());
-                        continue;
-                    };
-                    receipts
+                    let mut received_receipts = Vec::new();
+                    for (hash, receipt) in receipts {
+                        match receipt {
+                            Some(receipt) => received_receipts.push(receipt),
+                            None => {
+                                yield Err(format!("missing receipt for transaction: {}", hex::encode(&hash)).into());
+                                continue 'outer;
+                            }
+                        }
+                    }
+                    received_receipts
                 } else {
                     let receipts = self.client
                         .get_block_receipts(BlockId::Number(block_num))
