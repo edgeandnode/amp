@@ -734,7 +734,7 @@ impl MetadataDb {
         object_e_tag: Option<String>,
         object_version: Option<String>,
         parquet_meta: serde_json::Value,
-        footer: Vec<u8>,
+        footer: &Vec<u8>,
     ) -> Result<(), Error> {
         let sql = "
         INSERT INTO file_metadata (location_id, file_name, object_size, object_e_tag, object_version, metadata, footer)
