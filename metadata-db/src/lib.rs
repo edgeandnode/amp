@@ -4,7 +4,7 @@ use futures::{StreamExt, stream::Stream};
 use sqlx::postgres::{PgListener, PgNotification};
 use thiserror::Error;
 use tokio::time::MissedTickBehavior;
-use tracing::{instrument, warn};
+use tracing::instrument;
 use url::Url;
 
 mod conn;
