@@ -1,0 +1,156 @@
+//! Jobs delete by ID handler
+
+use axum::{
+    extract::{Path, State, rejection::PathRejection},
+    http::StatusCode,
+};
+use http_common::{BoxRequestError, RequestError};
+use metadata_db::JobId;
+
+use crate::ctx::Ctx;
+
+/// Handler for the `DELETE /jobs/{id}` endpoint
+///
+/// Deletes a job by its ID if it's in a terminal state (Completed, Stopped, or Failed).
+/// This is a safe operation that only removes finalized jobs from the system.
+///
+/// ## Path Parameters
+/// - `id`: The unique identifier of the job to delete (must be a valid JobId)
+///
+/// ## Response
+/// - **204 No Content**: Job was successfully deleted
+/// - **400 Bad Request**: Invalid job ID format (not parseable as JobId)
+/// - **404 Not Found**: Job with the given ID does not exist
+/// - **409 Conflict**: Job exists but is not in a terminal state (cannot be deleted)
+/// - **500 Internal Server Error**: Database error occurred
+///
+/// ## Error Codes
+/// - `INVALID_JOB_ID`: The provided ID is not a valid job identifier
+/// - `JOB_NOT_FOUND`: No job exists with the given ID
+/// - `JOB_CONFLICT`: Job exists but is not in a terminal state
+/// - `METADATA_DB_ERROR`: Internal database error occurred
+///
+/// ## Behavior
+/// This handler provides safe job deletion with the following characteristics:
+/// - Only jobs in terminal states (Completed, Stopped, Failed) can be deleted
+/// - Non-terminal jobs are protected from accidental deletion
+/// - Clear error messages distinguish between non-existent jobs and non-terminal jobs
+/// - Database layer ensures atomic deletion
+///
+/// ## Terminal States
+/// Jobs can only be deleted when in these states:
+/// - Completed → Safe to delete
+/// - Stopped → Safe to delete  
+/// - Failed → Safe to delete
+///
+/// Protected states (cannot be deleted):
+/// - Scheduled → Job is waiting to run
+/// - Running → Job is actively executing
+/// - StopRequested → Job is being stopped
+/// - Stopping → Job is in process of stopping
+/// - Unknown → Invalid state
+#[tracing::instrument(skip_all, err)]
+pub async fn handler(
+    State(ctx): State<Ctx>,
+    path: Result<Path<JobId>, PathRejection>,
+) -> Result<StatusCode, BoxRequestError> {
+    let id = match path {
+        Ok(Path(path)) => path,
+        Err(err) => {
+            tracing::debug!(error=?err, "invalid job ID in path");
+            return Err(Error::InvalidId { err }.into());
+        }
+    };
+
+    // First, check if the job exists and get its status
+    let job = ctx.metadata_db.get_job(&id).await.map_err(|err| {
+        tracing::debug!(job_id=%id, error=?err, "failed to get job");
+        Error::MetadataDbError(err)
+    })?;
+
+    let Some(job) = job else {
+        tracing::debug!(job_id=%id, "job not found");
+        return Err(Error::NotFound { id }.into());
+    };
+
+    // Check if the job is in a terminal state
+    if !job.status.is_terminal() {
+        tracing::debug!(job_id=%id, status=%job.status, "job is not in terminal state");
+        return Err(Error::Conflict {
+            id,
+            status: job.status,
+        }
+        .into());
+    }
+
+    // Attempt to delete the job
+    let deleted = ctx
+        .metadata_db
+        .delete_job_if_terminal(&id)
+        .await
+        .map_err(|err| {
+            tracing::error!(job_id=%id, error=?err, "failed to delete job");
+            Error::MetadataDbError(err)
+        })?;
+
+    if deleted {
+        tracing::info!(job_id=%id, "successfully deleted terminal job");
+    } else {
+        tracing::warn!(job_id=?id, "deletion did not affect any rows, but job should have been deletable");
+    }
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Errors that can occur during job deletion by ID
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    /// The job ID in the URL path is invalid
+    ///
+    /// This occurs when the ID cannot be parsed as a valid JobId.
+    #[error("invalid job ID: {err}")]
+    InvalidId {
+        /// The rejection details from Axum's path extractor
+        err: PathRejection,
+    },
+
+    /// Job not found
+    #[error("job '{id}' not found")]
+    NotFound {
+        /// The job ID that was not found
+        id: JobId,
+    },
+
+    /// Job exists but cannot be deleted (not in terminal state)
+    #[error("job '{id}' cannot be deleted from current state: {status}")]
+    Conflict {
+        /// The job ID that cannot be deleted
+        id: JobId,
+        /// The current status of the job
+        status: metadata_db::JobStatus,
+    },
+
+    /// Metadata DB error
+    #[error("metadata db error: {0}")]
+    MetadataDbError(#[from] metadata_db::Error),
+}
+
+impl RequestError for Error {
+    fn error_code(&self) -> &'static str {
+        match self {
+            Error::InvalidId { .. } => "INVALID_JOB_ID",
+            Error::NotFound { .. } => "JOB_NOT_FOUND",
+            Error::Conflict { .. } => "JOB_CONFLICT",
+            Error::MetadataDbError(_) => "METADATA_DB_ERROR",
+        }
+    }
+
+    fn status_code(&self) -> StatusCode {
+        match self {
+            Error::InvalidId { .. } => StatusCode::BAD_REQUEST,
+            Error::NotFound { .. } => StatusCode::NOT_FOUND,
+            Error::Conflict { .. } => StatusCode::CONFLICT,
+            Error::MetadataDbError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+}

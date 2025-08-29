@@ -35,6 +35,7 @@ pub async fn dump(
     new_location: Option<String>,
     fresh: bool,
     metrics: Option<Arc<dump::metrics::MetricsRegistry>>,
+    only_finalized_blocks: bool,
 ) -> Result<Vec<Arc<PhysicalTable>>, BoxError> {
     let data_store = match new_location {
         Some(location) => {
@@ -141,6 +142,7 @@ pub async fn dump(
                     microbatch_max_interval_override.unwrap_or(config.microbatch_max_interval),
                     (start, end_block),
                     metrics.clone(),
+                    only_finalized_blocks,
                 )
                 .await?
             }
@@ -157,6 +159,7 @@ pub async fn dump(
                     microbatch_max_interval_override.unwrap_or(config.microbatch_max_interval),
                     (start, end_block),
                     metrics.clone(),
+                    only_finalized_blocks,
                 )
                 .await?;
             }

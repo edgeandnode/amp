@@ -18,20 +18,26 @@ pub mod utils;
 use std::{
     future::Future,
     ops::RangeInclusive,
+    sync::Arc,
     time::{Duration, SystemTime},
 };
 
 use arrow::{array::FixedSizeBinaryArray, datatypes::DataType};
 pub use arrow_helpers::*;
 pub use catalog::logical::*;
-use datafusion::arrow::{
-    array::{ArrayRef, AsArray as _, RecordBatch},
-    datatypes::{DECIMAL128_MAX_PRECISION, TimeUnit, UInt64Type},
-    error::ArrowError,
-};
 pub use datafusion::{arrow, parquet};
+use datafusion::{
+    arrow::{
+        array::{ArrayRef, AsArray as _, RecordBatch},
+        datatypes::{DECIMAL128_MAX_PRECISION, TimeUnit, UInt64Type},
+        error::ArrowError,
+    },
+    parquet::file::metadata::ParquetMetaData,
+};
+pub use foyer::Cache;
 use futures::Stream;
 use metadata::segments::BlockRange;
+use metadata_db::FileId;
 pub use query_context::QueryContext;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -60,6 +66,8 @@ pub type EvmAddressArrayType = FixedSizeBinaryArray;
 
 /// Payment amount in the EVM. Used for gas or value transfers.
 pub const EVM_CURRENCY_TYPE: DataType = DataType::Decimal128(DECIMAL128_MAX_PRECISION, 0);
+
+pub type ParquetFooterCache = Cache<FileId, Arc<ParquetMetaData>>;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize)]
 pub struct Timestamp(pub Duration);
@@ -168,10 +176,7 @@ pub trait BlockStreamer: Clone + 'static {
         end: BlockNum,
     ) -> impl Future<Output = impl Stream<Item = Result<RawDatasetRows, BoxError>> + Send> + Send;
 
-    fn latest_block(
-        &mut self,
-        finalized: bool,
-    ) -> impl Future<Output = Result<BlockNum, BoxError>> + Send;
+    fn latest_block(&mut self) -> impl Future<Output = Result<BlockNum, BoxError>> + Send;
 }
 
 pub enum DatasetValue {

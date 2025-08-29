@@ -33,7 +33,7 @@ pub async fn dump_check(
     let dataset = dataset_store
         .load_dataset(&dataset_name, dataset_version.as_ref())
         .await?;
-    let client = dataset_store.load_client(&dataset_name).await?;
+    let client = dataset_store.load_client(&dataset_name, false).await?;
     let total_blocks = end_block - start + 1;
     let mut tables: Vec<Arc<PhysicalTable>> = Vec::with_capacity(dataset.tables.len());
     let dataset_version = match dataset.kind.as_str() {

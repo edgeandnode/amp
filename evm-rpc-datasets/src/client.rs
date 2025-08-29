@@ -173,6 +173,7 @@ pub struct JsonRpcClient {
     limiter: Arc<tokio::sync::Semaphore>,
     batch_size: usize,
     fetch_receipts_per_tx: bool,
+    final_blocks_only: bool,
 }
 
 impl JsonRpcClient {
@@ -183,6 +184,7 @@ impl JsonRpcClient {
         batch_size: usize,
         rate_limit: Option<NonZeroU32>,
         fetch_receipts_per_tx: bool,
+        final_blocks_only: bool,
     ) -> Result<Self, BoxError> {
         assert!(request_limit >= 1);
         let client = evm::provider::new(url, rate_limit);
@@ -193,6 +195,7 @@ impl JsonRpcClient {
             limiter,
             batch_size,
             fetch_receipts_per_tx,
+            final_blocks_only,
         })
     }
 
@@ -439,8 +442,8 @@ impl BlockStreamer for JsonRpcClient {
         }
     }
 
-    async fn latest_block(&mut self, finalized: bool) -> Result<BlockNum, BoxError> {
-        let number = match finalized {
+    async fn latest_block(&mut self) -> Result<BlockNum, BoxError> {
+        let number = match self.final_blocks_only {
             true => BlockNumberOrTag::Finalized,
             false => BlockNumberOrTag::Latest,
         };

@@ -9,12 +9,12 @@ use super::{WorkerNodeId, job_id::JobId};
 
 /// Insert a new job into the queue
 ///
-/// The job will be set as the default [`JobStatus`], which is [`JobStatus::Scheduled`],
-/// and will be assigned to the given worker node.
-pub async fn register<'c, E>(
+/// The job will be assigned to the given worker node with the specified status.
+pub async fn insert<'c, E>(
     exe: E,
     node_id: &WorkerNodeId,
     descriptor: &str,
+    status: JobStatus,
 ) -> Result<JobId, sqlx::Error>
 where
     E: sqlx::Executor<'c, Database = sqlx::Postgres>,
@@ -27,10 +27,25 @@ where
     let res = sqlx::query_scalar(query)
         .bind(node_id)
         .bind(descriptor)
-        .bind(JobStatus::default())
+        .bind(status)
         .fetch_one(exe)
         .await?;
     Ok(res)
+}
+
+/// Insert a new job into the queue with the default status
+///
+/// The job will be assigned to the given worker node with the default status (Scheduled).
+#[inline]
+pub async fn insert_with_default_status<'c, E>(
+    exe: E,
+    node_id: &WorkerNodeId,
+    descriptor: &str,
+) -> Result<JobId, sqlx::Error>
+where
+    E: sqlx::Executor<'c, Database = sqlx::Postgres>,
+{
+    insert(exe, node_id, descriptor, JobStatus::default()).await
 }
 
 /// Update the status of a job with multiple possible expected original states
@@ -237,6 +252,71 @@ where
     Ok(res)
 }
 
+/// Delete a job by ID if it matches any of the specified statuses
+///
+/// This function will only delete the job if it exists and is in one of the specified statuses.
+/// Returns true if a job was deleted, false otherwise.
+pub async fn delete_by_id_and_statuses<'c, E, const N: usize>(
+    exe: E,
+    id: &JobId,
+    statuses: [JobStatus; N],
+) -> Result<bool, sqlx::Error>
+where
+    E: sqlx::Executor<'c, Database = sqlx::Postgres>,
+{
+    let query = indoc::indoc! {r#"
+        DELETE FROM jobs 
+        WHERE id = $1 AND status = ANY($2)
+    "#};
+
+    let result = sqlx::query(query)
+        .bind(id)
+        .bind(statuses)
+        .execute(exe)
+        .await?;
+
+    Ok(result.rows_affected() == 1)
+}
+
+/// Delete all jobs that match the specified status
+///
+/// This function deletes all jobs that are in the specified status.
+/// Returns the number of jobs that were deleted.
+pub async fn delete_by_status<'c, E>(exe: E, status: JobStatus) -> Result<usize, sqlx::Error>
+where
+    E: sqlx::Executor<'c, Database = sqlx::Postgres>,
+{
+    let query = indoc::indoc! {r#"
+        DELETE FROM jobs 
+        WHERE status = $1
+    "#};
+
+    let result = sqlx::query(query).bind(status).execute(exe).await?;
+
+    Ok(result.rows_affected() as usize)
+}
+
+/// Delete all jobs that match any of the specified statuses
+///
+/// This function deletes all jobs that are in one of the specified statuses.
+/// Returns the number of jobs that were deleted.
+pub async fn delete_by_statuses<'c, E, const N: usize>(
+    exe: E,
+    statuses: [JobStatus; N],
+) -> Result<usize, sqlx::Error>
+where
+    E: sqlx::Executor<'c, Database = sqlx::Postgres>,
+{
+    let query = indoc::indoc! {r#"
+        DELETE FROM jobs 
+        WHERE status = ANY($1)
+    "#};
+
+    let result = sqlx::query(query).bind(statuses).execute(exe).await?;
+
+    Ok(result.rows_affected() as usize)
+}
+
 /// Represents a job with its metadata and associated node.
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct Job {
@@ -366,6 +446,14 @@ impl JobStatus {
     /// Non-terminal states can still transition to other states
     pub fn is_terminal(&self) -> bool {
         matches!(self, Self::Completed | Self::Stopped | Self::Failed)
+    }
+
+    /// Returns an array of all terminal job statuses
+    ///
+    /// These are the statuses that represent completed job lifecycles
+    /// and can be safely deleted from the system.
+    pub fn terminal_statuses() -> [JobStatus; 3] {
+        [Self::Completed, Self::Stopped, Self::Failed]
     }
 }
 

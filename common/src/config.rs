@@ -39,6 +39,7 @@ pub struct Config {
     /// Addresses to bind the server to. Used during testing.
     pub addrs: Addrs,
     pub config_path: PathBuf,
+    pub compaction: CompactionConfig,
 }
 
 #[derive(Debug, Clone)]
@@ -117,6 +118,37 @@ where
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct CompactionConfig {
+    #[serde(skip)]
+    pub enabled: bool,
+    pub metadata_concurrency: usize,
+    pub write_concurrency: usize,
+    pub collector_interval_secs: u64,
+    pub compactor_interval_secs: u64,
+    pub block_threshold: i64,
+    pub byte_threshold: i64,
+    pub row_threshold: i64,
+    pub min_file_count: usize,
+}
+
+impl Default for CompactionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            metadata_concurrency: 10,
+            write_concurrency: 1,
+            collector_interval_secs: 30 * 60,
+            compactor_interval_secs: 0,
+            block_threshold: -1,
+            byte_threshold: -1,
+            row_threshold: -1,
+            min_file_count: 2,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct OpenTelemetryConfig {
     /// Remote OpenTelemetry metrics collector endpoint. Metrics are sent over binary HTTP.
     pub metrics_url: Option<String>,
@@ -160,6 +192,8 @@ pub struct ConfigFile {
     #[serde(default)]
     pub parquet: ParquetConfig,
     pub opentelemetry: Option<OpenTelemetryConfig>,
+    #[serde(default)]
+    pub compaction: CompactionConfig,
 }
 
 pub type FigmentJson = figment::providers::Data<figment::providers::Json>;
@@ -256,6 +290,14 @@ impl Config {
             ));
         };
 
+        let mut compaction = config_file.compaction;
+
+        compaction.enabled = compaction.block_threshold > 0
+            || compaction.byte_threshold > 0
+            || compaction.row_threshold > 0;
+
+        compaction.min_file_count = compaction.min_file_count.max(2);
+
         Ok(Self {
             data_store: Arc::new(data_store),
             providers_store: Arc::new(providers_store),
@@ -268,6 +310,7 @@ impl Config {
             opentelemetry: config_file.opentelemetry,
             addrs,
             config_path,
+            compaction,
         })
     }
 

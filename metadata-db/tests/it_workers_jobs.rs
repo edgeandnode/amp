@@ -9,7 +9,7 @@ async fn schedule_and_retrieve_job() {
     let temp_db = PgTempDB::new();
 
     let metadata_db =
-        MetadataDb::connect(&temp_db.connection_uri(), MetadataDb::default_pool_size())
+        MetadataDb::connect_with_retry(&temp_db.connection_uri(), MetadataDb::default_pool_size())
             .await
             .expect("Failed to connect to metadata db");
 
@@ -55,7 +55,7 @@ async fn pagination_traverses_all_jobs_ordered() {
     //* Given
     let temp_db = PgTempDB::new();
     let metadata_db =
-        MetadataDb::connect(&temp_db.connection_uri(), MetadataDb::default_pool_size())
+        MetadataDb::connect_with_retry(&temp_db.connection_uri(), MetadataDb::default_pool_size())
             .await
             .expect("Failed to connect to metadata db");
 

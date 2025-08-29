@@ -97,6 +97,7 @@ use tracing::instrument;
 
 use super::{Ctx, block_ranges, tasks::FailFastJoinSet};
 use crate::{
+    compaction::CompactionProperties,
     metrics,
     parquet_writer::{ParquetWriterProperties, RawDatasetWriter},
 };
@@ -114,9 +115,11 @@ pub async fn dump(
     tables: &[Arc<PhysicalTable>],
     partition_size: u64,
     parquet_opts: &ParquetWriterProperties,
+    compaction_opts: Arc<CompactionProperties>,
     (start, end): (i64, Option<i64>),
     dataset_name: &str,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
+    only_finalized_blocks: bool,
 ) -> Result<(), BoxError> {
     for table in tables {
         ctx.metadata_db
@@ -124,12 +127,15 @@ pub async fn dump(
             .await?;
     }
 
-    let mut client = ctx.dataset_store.load_client(dataset_name).await?;
+    let mut client = ctx
+        .dataset_store
+        .load_client(dataset_name, only_finalized_blocks)
+        .await?;
 
     let (start, end) = match (start, end) {
         (start, Some(end)) if start >= 0 && end >= 0 => (start as BlockNum, end as BlockNum),
         _ => {
-            let latest_block = client.latest_block(true).await?;
+            let latest_block = client.latest_block().await?;
             block_ranges::resolve_relative(start, end, latest_block)?
         }
     };
@@ -179,6 +185,7 @@ pub async fn dump(
             catalog: catalog.clone(),
             ranges,
             parquet_opts: parquet_opts.clone(),
+            compaction_opts: Arc::clone(&compaction_opts),
             partition_size,
             missing_ranges_by_table: missing_ranges_by_table.clone(),
             id: i as u32,
@@ -292,6 +299,8 @@ struct DumpPartition<S: BlockStreamer> {
     id: u32,
     /// Metrics registry
     metrics: Option<Arc<metrics::MetricsRegistry>>,
+    /// Compaction properties
+    compaction_opts: Arc<CompactionProperties>,
 }
 impl<S: BlockStreamer> DumpPartition<S> {
     /// Consumes the instance returning a future that runs the partition, processing all assigned block ranges sequentially.
@@ -355,6 +364,7 @@ impl<S: BlockStreamer> DumpPartition<S> {
             self.catalog.clone(),
             self.metadata_db.clone(),
             self.parquet_opts.clone(),
+            &self.compaction_opts,
             self.partition_size,
             missing_ranges_by_table,
             self.metrics.clone(),

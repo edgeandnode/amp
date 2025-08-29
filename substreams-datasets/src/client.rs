@@ -23,16 +23,14 @@ use crate::{
     transform::transform,
 };
 
-/// This client only handles final blocks.
-// See also: only-final-blocks
 // Cloning is cheap and shares the underlying connection.
 #[derive(Clone)]
 pub struct Client {
-    pub stream_client: StreamClient<InterceptedService<Channel, AuthInterceptor>>,
-    pub tables: Tables,
-    pub package: Package,
-    pub output_module: String,
-    pub network: String,
+    stream_client: StreamClient<InterceptedService<Channel, AuthInterceptor>>,
+    tables: Tables,
+    package: Package,
+    output_module: String,
+    final_blocks_only: bool,
 }
 
 impl Package {
@@ -62,6 +60,7 @@ impl Client {
         provider: toml::Value,
         dataset: DatasetValue,
         network: String,
+        final_blocks_only: bool,
     ) -> Result<Self, Error> {
         let provider: SubstreamsProvider = provider.try_into()?;
         let dataset_def: DatasetDef = DatasetDef::from_value(dataset)?;
@@ -96,7 +95,7 @@ impl Client {
             package,
             tables,
             output_module: dataset_def.module,
-            network,
+            final_blocks_only,
         })
     }
 
@@ -116,8 +115,7 @@ impl Client {
             stop_block_num: stop,
 
             start_cursor: String::new(),
-            // See also: only-final-blocks
-            final_blocks_only: true,
+            final_blocks_only: self.final_blocks_only,
             modules: self.package.modules.clone(),
             production_mode: true,
             output_module: self.output_module.clone(),
@@ -213,15 +211,13 @@ impl BlockStreamer for Client {
         }
     }
 
-    async fn latest_block(&mut self, finalized: bool) -> Result<BlockNum, BoxError> {
-        // See also: only-final-blocks
-        _ = finalized;
+    async fn latest_block(&mut self) -> Result<BlockNum, BoxError> {
         let stream = self.blocks(-1, 0).await?;
         let mut stream = std::pin::pin!(stream);
         let block = stream.next().await;
         Ok(block
             .transpose()?
-            .map(|b| b.final_block_height)
+            .map(|b| b.clock.map(|c| c.number).unwrap_or(b.final_block_height))
             .unwrap_or(0))
     }
 }

@@ -1,7 +1,13 @@
 use std::{future::Future, sync::Arc, time::Duration};
 
-use futures::{StreamExt, stream::Stream};
-use sqlx::postgres::{PgListener, PgNotification};
+use futures::{
+    StreamExt, TryStreamExt,
+    stream::{BoxStream, Stream},
+};
+use sqlx::{
+    postgres::{PgListener, PgNotification, types::PgInterval},
+    types::chrono::{DateTime, NaiveDateTime, Utc},
+};
 use thiserror::Error;
 use tokio::time::MissedTickBehavior;
 use tracing::instrument;
@@ -184,6 +190,48 @@ impl MetadataDb {
         })
     }
 
+    /// Sets up a connection pool to the Metadata DB with retry logic for temporary databases.
+    #[cfg(feature = "temp-db")]
+    #[instrument(skip_all, err)]
+    pub async fn connect_with_retry(url: &str, pool_size: u32) -> Result<Self, Error> {
+        use backon::{ExponentialBuilder, Retryable};
+
+        let retry_policy = ExponentialBuilder::default()
+            .with_min_delay(Duration::from_millis(10))
+            .with_max_delay(Duration::from_millis(100))
+            .with_max_times(20);
+
+        fn is_db_starting_up(err: &conn::ConnError) -> bool {
+            matches!(
+                err,
+                conn::ConnError::ConnectionError(sqlx::Error::Database(db_err))
+                if db_err.code().map_or(false, |code| code == "57P03")
+            )
+        }
+
+        fn notify_retry(err: &conn::ConnError, dur: Duration) {
+            tracing::warn!(
+                error = %err,
+                "Database still starting up during connection. Retrying in {:.1}s",
+                dur.as_secs_f32()
+            );
+        }
+
+        let pool = (|| DbConnPool::connect(url, pool_size))
+            .retry(retry_policy)
+            .when(is_db_starting_up)
+            .notify(notify_retry)
+            .await?;
+
+        pool.run_migrations().await?;
+
+        Ok(Self {
+            pool,
+            url: url.into(),
+            dead_worker_interval: DEFAULT_DEAD_WORKER_INTERVAL,
+        })
+    }
+
     /// Configures the "dead worker" interval for the metadata DB instance
     pub fn with_dead_worker_interval(self, dead_worker_interval: Duration) -> Self {
         Self {
@@ -272,7 +320,7 @@ impl MetadataDb {
         let mut tx = self.pool.begin().await?;
 
         // Register the job in the workers job queue
-        let job_id = workers::jobs::register(&mut *tx, node_id, job_desc).await?;
+        let job_id = workers::jobs::insert_with_default_status(&mut *tx, node_id, job_desc).await?;
 
         // Lock the locations for this job by assigning the job ID as the writer
         locations::assign_job_writer(&mut *tx, locations, job_id).await?;
@@ -465,6 +513,35 @@ impl MetadataDb {
             JobStatus::Failed,
         )
         .await?)
+    }
+
+    /// Delete a job by ID if it's in a terminal state
+    ///
+    /// This function will only delete the job if it exists and is in a terminal state
+    /// (Completed, Stopped, or Failed). Returns true if a job was deleted, false otherwise.
+    pub async fn delete_job_if_terminal(&self, id: &JobId) -> Result<bool, Error> {
+        Ok(workers::jobs::delete_by_id_and_statuses(
+            &*self.pool,
+            id,
+            JobStatus::terminal_statuses(),
+        )
+        .await?)
+    }
+
+    /// Delete all jobs that are in terminal states
+    ///
+    /// This function deletes all jobs that are in terminal states (Completed, Stopped, or Failed).
+    /// Returns the number of jobs that were deleted.
+    pub async fn delete_all_terminal_jobs(&self) -> Result<usize, Error> {
+        Ok(workers::jobs::delete_by_statuses(&*self.pool, JobStatus::terminal_statuses()).await?)
+    }
+
+    /// Delete all jobs that match the specified status
+    ///
+    /// This function deletes all jobs that are in the specified status.
+    /// Returns the number of jobs that were deleted.
+    pub async fn delete_all_jobs_by_status(&self, status: JobStatus) -> Result<usize, Error> {
+        Ok(workers::jobs::delete_by_status(&*self.pool, status).await?)
     }
 }
 
@@ -701,22 +778,15 @@ impl MetadataDb {
         Ok(())
     }
 
-    pub async fn get_footer_bytes(
-        &self,
-        location_id: LocationId,
-        file_name: String,
-    ) -> Result<Vec<u8>, Error> {
+    pub async fn get_footer_bytes(&self, file_id: FileId) -> Result<Vec<u8>, Error> {
         let sql = "
         SELECT footer
           FROM file_metadata
-         WHERE location_id = $1
-               AND file_name = $2
-      ORDER BY id DESC LIMIT 1
+         WHERE id = $1;
         ";
 
         Ok(sqlx::query_scalar(sql)
-            .bind(location_id)
-            .bind(file_name)
+            .bind(file_id)
             .fetch_one(&*self.pool)
             .await?)
     }
@@ -865,5 +935,92 @@ impl MetadataDb {
             .fetch_one(&*self.pool)
             .await?;
         Ok(dataset)
+    }
+}
+
+#[derive(Debug, sqlx::FromRow)]
+pub struct GcManifestRow {
+    /// gc_manifest.location_id
+    pub location_id: LocationId,
+    /// gc_manifest.file_id
+    pub file_id: FileId,
+    /// gc_manifest.file_path
+    pub file_path: String,
+    /// gc_manifest.expiration
+    pub expiration: NaiveDateTime,
+}
+
+// Garbage Collection API
+impl MetadataDb {
+    pub async fn delete_file_ids(&self, file_ids: &[FileId]) -> Result<(), Error> {
+        let sql = "
+        DELETE FROM gc_manifest
+         WHERE file_id = ANY($1);
+        ";
+
+        sqlx::query(sql).bind(file_ids).execute(&*self.pool).await?;
+
+        Ok(())
+    }
+
+    /// Inserts or updates the GC manifest for the given file IDs.
+    /// If a file ID already exists, it updates the expiration time.
+    /// The expiration time is set to the current time plus the given duration.
+    /// If the file ID does not exist, it inserts a new row.
+    pub async fn upsert_gc_manifest(
+        &self,
+        location_id: LocationId,
+        file_ids: &[FileId],
+        duration: Duration,
+    ) -> Result<(), Error> {
+        let mut interval = PgInterval::default();
+        interval.microseconds = duration.as_micros() as i64;
+
+        let sql = "
+            INSERT INTO gc_manifest (location_id, file_id, file_path, expiration)
+            SELECT $1
+                  , file.id
+                  , locations.url || file_metadata.file_name
+                  , NOW() + $3
+               FROM UNNEST ($2) AS file(id)
+         INNER JOIN file_metadata ON file_metadata.id = file.id
+         INNER JOIN locations ON file_metadata.location_id = locations.id
+        ON CONFLICT (file_id) DO UPDATE SET expiration = EXCLUDED.expiration;
+        ";
+
+        sqlx::query(sql)
+            .bind(location_id)
+            .bind(file_ids.as_ref())
+            .bind(interval)
+            .execute(&*self.pool)
+            .await?;
+
+        Ok(())
+    }
+
+    pub fn stream_expired_files<'a>(
+        &'a self,
+        location_id: LocationId,
+        secs: i64,
+        nsecs: u32,
+    ) -> BoxStream<'a, Result<GcManifestRow, Error>> {
+        let sql = "
+        SELECT location_id
+             , file_id
+             , file_path
+             , expiration
+          FROM gc_manifest
+         WHERE location_id = $1
+               AND expiration <= $2;
+        ";
+
+        let expiration = DateTime::<Utc>::from_timestamp(secs, nsecs);
+
+        sqlx::query_as(sql)
+            .bind(location_id)
+            .bind(expiration)
+            .fetch(&*self.pool)
+            .map_err(Error::DbError)
+            .boxed()
     }
 }
