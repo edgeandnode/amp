@@ -1,4 +1,7 @@
-use std::{pin::Pin, task::{Context, Poll}};
+use std::{
+    pin::Pin,
+    task::{Context, Poll},
+};
 
 use common::{BlockNum, BoxError, SPECIAL_BLOCK_NUM, arrow::array::RecordBatch};
 use futures::{Stream, ready};
@@ -49,7 +52,7 @@ where
         if let Some(block_num) = this.pending_block_complete.take() {
             return Poll::Ready(Some(Ok(QueryMessage::BlockComplete(block_num))));
         }
-        
+
         if let Some(batch) = this.pending_batch.take() {
             return Poll::Ready(Some(Ok(QueryMessage::Data(batch))));
         }
@@ -82,13 +85,15 @@ where
                     }) => {
                         // Update state for the next block
                         this.last_block_num = Some(next_block_num);
-                        
+
                         // Queue the next batch
                         this.pending_batch = Some(next_block_batch);
-                        
+
                         // If current block batch is None, emit BlockComplete directly
                         match current_block_batch {
-                            None => Poll::Ready(Some(Ok(QueryMessage::BlockComplete(completed_block_num)))),
+                            None => Poll::Ready(Some(Ok(QueryMessage::BlockComplete(
+                                completed_block_num,
+                            )))),
                             Some(batch) => {
                                 // Queue the block complete message and emit the current batch first
                                 this.pending_block_complete = Some(completed_block_num);
@@ -108,12 +113,11 @@ where
                 this.last_block_num = None;
                 Poll::Ready(Some(Ok(QueryMessage::MicrobatchEnd(range))))
             }
-            QueryMessage::BlockComplete(block_num) => {
-                Poll::Ready(Some(Err(format!(
-                    "Unexpected BlockComplete message from inner stream: {}",
-                    block_num
-                ).into())))
-            }
+            QueryMessage::BlockComplete(block_num) => Poll::Ready(Some(Err(format!(
+                "Unexpected BlockComplete message from inner stream: {}",
+                block_num
+            )
+            .into()))),
         }
     }
 }
@@ -138,7 +142,7 @@ fn process_data_batch(
 ) -> Result<BatchProcessResult, BoxError> {
     // Find the _block_num column
     let block_num_column = batch.column_by_name(SPECIAL_BLOCK_NUM);
-    
+
     let Some(block_num_array) = block_num_column else {
         // No _block_num column, pass through unchanged
         return Ok(BatchProcessResult::PassThrough(batch));
@@ -146,7 +150,7 @@ fn process_data_batch(
 
     // Extract block numbers from the array
     let block_nums = extract_block_numbers(block_num_array)?;
-    
+
     if block_nums.is_empty() {
         return Ok(BatchProcessResult::PassThrough(batch));
     }
@@ -169,10 +173,9 @@ fn process_data_batch(
                     Ok(BatchProcessResult::PassThrough(batch))
                 } else {
                     // Batch spans multiple blocks, need to split
-                    let split_index = block_nums.iter().position(|&n| n > current_block)
-                        .unwrap(); // Safe: we know last_block > current_block from condition above
+                    let split_index = block_nums.iter().position(|&n| n > current_block).unwrap(); // Safe: we know last_block > current_block from condition above
                     let (current_batch, next_batch) = split_record_batch(&batch, split_index)?;
-                    
+
                     Ok(BatchProcessResult::Split {
                         current_block_batch: Some(current_batch),
                         completed_block_num: current_block,
@@ -197,18 +200,30 @@ fn process_data_batch(
     }
 }
 
-fn extract_block_numbers(array: &dyn common::arrow::array::Array) -> Result<Vec<BlockNum>, BoxError> {
+fn extract_block_numbers(
+    array: &dyn common::arrow::array::Array,
+) -> Result<Vec<BlockNum>, BoxError> {
     use common::arrow::array::*;
     use common::arrow::datatypes::DataType;
 
     let block_nums = match array.data_type() {
         DataType::UInt64 => {
-            let uint64_array = array.as_any().downcast_ref::<UInt64Array>()
+            let uint64_array = array
+                .as_any()
+                .downcast_ref::<UInt64Array>()
                 .ok_or("Failed to downcast to UInt64Array")?;
-            uint64_array.iter().collect::<Option<Vec<_>>>()
+            uint64_array
+                .iter()
+                .collect::<Option<Vec<_>>>()
                 .ok_or("Found null values in _block_num column")?
         }
-        _ => return Err(format!("Unsupported _block_num column type: {:?}", array.data_type()).into()),
+        _ => {
+            return Err(format!(
+                "Unsupported _block_num column type: {:?}",
+                array.data_type()
+            )
+            .into());
+        }
     };
 
     Ok(block_nums)
@@ -217,30 +232,32 @@ fn extract_block_numbers(array: &dyn common::arrow::array::Array) -> Result<Vec<
 fn validate_block_ordering(block_nums: &[BlockNum]) -> Result<(), BoxError> {
     for window in block_nums.windows(2) {
         if window[1] < window[0] {
-            return Err(format!(
-                "Block numbers not ordered: {} > {}",
-                window[0], window[1]
-            ).into());
+            return Err(format!("Block numbers not ordered: {} > {}", window[0], window[1]).into());
         }
     }
     Ok(())
 }
 
-fn split_record_batch(batch: &RecordBatch, split_index: usize) -> Result<(RecordBatch, RecordBatch), BoxError> {
+fn split_record_batch(
+    batch: &RecordBatch,
+    split_index: usize,
+) -> Result<(RecordBatch, RecordBatch), BoxError> {
     if split_index == 0 {
         return Err("Split index is 0, cannot split".into());
     }
-    
+
     if split_index >= batch.num_rows() {
         return Err("Split index is out of bounds".into());
     }
 
-    let first_batch_arrays: Vec<_> = batch.columns()
+    let first_batch_arrays: Vec<_> = batch
+        .columns()
         .iter()
         .map(|array| array.slice(0, split_index))
         .collect();
-    
-    let second_batch_arrays: Vec<_> = batch.columns()
+
+    let second_batch_arrays: Vec<_> = batch
+        .columns()
         .iter()
         .map(|array| array.slice(split_index, batch.num_rows() - split_index))
         .collect();
@@ -254,8 +271,14 @@ fn split_record_batch(batch: &RecordBatch, split_index: usize) -> Result<(Record
 #[cfg(test)]
 mod tests {
     use super::*;
-    use common::{arrow::{array::UInt64Array, datatypes::{DataType, Field, Schema}}, metadata::segments::BlockRange};
-    use futures::{stream, StreamExt};
+    use common::{
+        arrow::{
+            array::UInt64Array,
+            datatypes::{DataType, Field, Schema},
+        },
+        metadata::segments::BlockRange,
+    };
+    use futures::{StreamExt, stream};
     use std::sync::Arc;
 
     fn create_test_batch(block_nums: Vec<u64>, data: Vec<u64>) -> RecordBatch {
@@ -280,11 +303,11 @@ mod tests {
     }
 
     async fn collect_messages(
-        messages: Vec<Result<QueryMessage, BoxError>>
+        messages: Vec<Result<QueryMessage, BoxError>>,
     ) -> Vec<Result<QueryMessage, BoxError>> {
         let input_stream = stream::iter(messages);
         let mut aligned_stream = MessageStreamWithBlockComplete::new(input_stream);
-        
+
         let mut results = Vec::new();
         while let Some(msg) = aligned_stream.next().await {
             results.push(msg);
@@ -301,16 +324,16 @@ mod tests {
     }
 
     fn microbatch(start: u64, end: u64) -> QueryMessage {
-        QueryMessage::MicrobatchStart { 
-            range: create_test_range(start, end), 
-            is_reorg: false 
+        QueryMessage::MicrobatchStart {
+            range: create_test_range(start, end),
+            is_reorg: false,
         }
     }
 
     fn microbatch_reorg(start: u64, end: u64) -> QueryMessage {
-        QueryMessage::MicrobatchStart { 
-            range: create_test_range(start, end), 
-            is_reorg: true 
+        QueryMessage::MicrobatchStart {
+            range: create_test_range(start, end),
+            is_reorg: true,
         }
     }
 
@@ -318,7 +341,10 @@ mod tests {
     async fn test_single_block_batch() {
         let messages = vec![
             Ok(microbatch(100, 100)),
-            Ok(QueryMessage::Data(create_test_batch(vec![100, 100, 100], vec![1, 2, 3]))),
+            Ok(QueryMessage::Data(create_test_batch(
+                vec![100, 100, 100],
+                vec![1, 2, 3],
+            ))),
             Ok(QueryMessage::MicrobatchEnd(create_test_range(100, 100))),
         ];
 
@@ -330,8 +356,14 @@ mod tests {
     async fn test_split_at_block_boundary() {
         let messages = vec![
             Ok(microbatch(100, 101)),
-            Ok(QueryMessage::Data(create_test_batch(vec![100, 100], vec![1, 2]))),
-            Ok(QueryMessage::Data(create_test_batch(vec![100, 101, 101], vec![3, 4, 5]))), // spans blocks
+            Ok(QueryMessage::Data(create_test_batch(
+                vec![100, 100],
+                vec![1, 2],
+            ))),
+            Ok(QueryMessage::Data(create_test_batch(
+                vec![100, 101, 101],
+                vec![3, 4, 5],
+            ))), // spans blocks
             Ok(QueryMessage::MicrobatchEnd(create_test_range(100, 101))),
         ];
 
@@ -346,8 +378,14 @@ mod tests {
     async fn test_new_block_transition_no_current_data() {
         let messages = vec![
             Ok(microbatch(100, 101)),
-            Ok(QueryMessage::Data(create_test_batch(vec![100, 100], vec![1, 2]))),
-            Ok(QueryMessage::Data(create_test_batch(vec![101, 101], vec![3, 4]))), // new block
+            Ok(QueryMessage::Data(create_test_batch(
+                vec![100, 100],
+                vec![1, 2],
+            ))),
+            Ok(QueryMessage::Data(create_test_batch(
+                vec![101, 101],
+                vec![3, 4],
+            ))), // new block
             Ok(QueryMessage::MicrobatchEnd(create_test_range(100, 101))),
         ];
 
@@ -360,9 +398,15 @@ mod tests {
     async fn test_reorg_clears_state() {
         let messages = vec![
             Ok(microbatch(100, 100)),
-            Ok(QueryMessage::Data(create_test_batch(vec![100, 100], vec![1, 2]))),
+            Ok(QueryMessage::Data(create_test_batch(
+                vec![100, 100],
+                vec![1, 2],
+            ))),
             Ok(microbatch_reorg(99, 99)),
-            Ok(QueryMessage::Data(create_test_batch(vec![99, 99], vec![3, 4]))), // goes backwards
+            Ok(QueryMessage::Data(create_test_batch(
+                vec![99, 99],
+                vec![3, 4],
+            ))), // goes backwards
             Ok(QueryMessage::MicrobatchEnd(create_test_range(99, 99))),
         ];
 
@@ -375,7 +419,10 @@ mod tests {
         let messages = vec![
             Ok(microbatch(100, 102)),
             Ok(QueryMessage::Data(create_test_batch(vec![100], vec![1]))),
-            Ok(QueryMessage::Data(create_test_batch(vec![100, 101, 102, 102], vec![2, 3, 4, 5]))), // 3 blocks
+            Ok(QueryMessage::Data(create_test_batch(
+                vec![100, 101, 102, 102],
+                vec![2, 3, 4, 5],
+            ))), // 3 blocks
             Ok(QueryMessage::MicrobatchEnd(create_test_range(100, 102))),
         ];
 
@@ -390,7 +437,10 @@ mod tests {
     async fn test_ordering_validation() {
         let messages = vec![
             Ok(microbatch(99, 101)),
-            Ok(QueryMessage::Data(create_test_batch(vec![100, 99, 101], vec![1, 2, 3]))), // unordered
+            Ok(QueryMessage::Data(create_test_batch(
+                vec![100, 99, 101],
+                vec![1, 2, 3],
+            ))), // unordered
         ];
 
         let results = collect_messages(messages).await;
@@ -398,11 +448,16 @@ mod tests {
         matches!(results[1], Err(_)); // Error due to bad ordering
     }
 
-    #[tokio::test] 
+    #[tokio::test]
     async fn test_no_block_num_column() {
-        let schema = Arc::new(Schema::new(vec![Field::new("data", DataType::UInt64, false)]));
-        let batch = RecordBatch::try_new(schema, vec![Arc::new(UInt64Array::from(vec![1, 2, 3]))]).unwrap();
-        
+        let schema = Arc::new(Schema::new(vec![Field::new(
+            "data",
+            DataType::UInt64,
+            false,
+        )]));
+        let batch =
+            RecordBatch::try_new(schema, vec![Arc::new(UInt64Array::from(vec![1, 2, 3]))]).unwrap();
+
         let messages = vec![
             Ok(microbatch(100, 100)),
             Ok(QueryMessage::Data(batch)),
@@ -426,8 +481,14 @@ mod tests {
     async fn test_same_block_passthrough() {
         let messages = vec![
             Ok(microbatch(100, 100)),
-            Ok(QueryMessage::Data(create_test_batch(vec![100, 100], vec![1, 2]))), // sets last_block_num = 100
-            Ok(QueryMessage::Data(create_test_batch(vec![100, 100], vec![3, 4]))), // same block, should pass through
+            Ok(QueryMessage::Data(create_test_batch(
+                vec![100, 100],
+                vec![1, 2],
+            ))), // sets last_block_num = 100
+            Ok(QueryMessage::Data(create_test_batch(
+                vec![100, 100],
+                vec![3, 4],
+            ))), // same block, should pass through
             Ok(QueryMessage::MicrobatchEnd(create_test_range(100, 100))),
         ];
 
@@ -441,8 +502,14 @@ mod tests {
     async fn test_block_number_goes_backwards() {
         let messages = vec![
             Ok(microbatch(100, 100)),
-            Ok(QueryMessage::Data(create_test_batch(vec![100, 100], vec![1, 2]))), // sets last_block_num = 100
-            Ok(QueryMessage::Data(create_test_batch(vec![99, 99], vec![3, 4]))), // goes backwards (not during reorg)
+            Ok(QueryMessage::Data(create_test_batch(
+                vec![100, 100],
+                vec![1, 2],
+            ))), // sets last_block_num = 100
+            Ok(QueryMessage::Data(create_test_batch(
+                vec![99, 99],
+                vec![3, 4],
+            ))), // goes backwards (not during reorg)
             Ok(QueryMessage::MicrobatchEnd(create_test_range(99, 100))),
         ];
 

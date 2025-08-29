@@ -17,12 +17,12 @@ use futures::{
     FutureExt,
     stream::{self, BoxStream, StreamExt},
 };
+use message_stream_with_block_complete::MessageStreamWithBlockComplete;
 use metadata_db::LocationId;
 use tokio::sync::{mpsc, watch};
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::task::AbortOnDropHandle;
 use tracing::{Instrument, instrument};
-use message_stream_with_block_complete::MessageStreamWithBlockComplete;
 
 /// Awaits any update for tables in a query context catalog.
 struct TableUpdates {
@@ -118,9 +118,7 @@ pub struct StreamingQueryHandle {
 
 impl StreamingQueryHandle {
     pub fn as_stream(self) -> BoxStream<'static, Result<QueryMessage, BoxError>> {
-        let data_stream = MessageStreamWithBlockComplete::new(
-            ReceiverStream::new(self.rx).map(Ok)
-        );
+        let data_stream = MessageStreamWithBlockComplete::new(ReceiverStream::new(self.rx).map(Ok));
 
         let join = self.join_handle;
 
