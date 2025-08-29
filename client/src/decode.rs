@@ -94,6 +94,11 @@ impl FlightStreamState {
         &mut self,
         flight_data: FlightData,
     ) -> Result<Option<DecodedRecordBatch>, ArrowError> {
+        eprintln!("[?] recv: {:#?}", flight_data);
+        eprintln!(
+            "    header decode: {:#?}",
+            ipc::root_as_message(&flight_data.data_header)
+        );
         if flight_data.data_header.is_empty() {
             return Ok(None);
         }

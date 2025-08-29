@@ -557,6 +557,7 @@ fn flight_data_stream(
                     return;
                 }
             };
+            tracing::warn!(?range);
             let ranges: Vec<BlockRange> = range.into_iter().collect();
             let metadata = serde_json::to_string(&json!({"ranges": ranges})).unwrap();
 
@@ -594,8 +595,17 @@ fn flight_data_stream(
                 if schema_message {
                     continue;
                 } else {
+                    tracing::warn!(?flight_data, "batch");
                     yield Ok(flight_data.with_app_metadata(metadata.clone()));
                 }
+            }
+            // send an empty batch to forward metadata to client
+            if !first_message {
+                let data = ipc_schema(&DFSchema::try_from(schema.clone()).unwrap());
+                tracing::warn!(?data);
+                let flight_data = FlightData::new().with_app_metadata(metadata.clone());
+                tracing::warn!(?flight_data, "empty batch");
+                yield Ok(flight_data);
             }
         }
     }

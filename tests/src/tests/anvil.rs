@@ -578,3 +578,38 @@ async fn dump_finalized() {
     test.dump("anvil_rpc", 0..=last_block).await;
     assert_eq!(max_dump_block(&test).await, last_block);
 }
+
+#[tokio::test]
+async fn sql_stream_sparse() {
+    let test = AnvilTestContext::setup("sql_stream_sparse").await;
+    let end_block = 5;
+    let query =
+        "SELECT block_num FROM anvil_rpc.blocks WHERE block_num % 5 = 0 SETTINGS stream = true";
+    let endpoint = format!("grpc://{}", test.env.server_addrs.flight_addr);
+    let mut client = nozzle_client::SqlClient::new(&endpoint).await.unwrap();
+    test.dump("anvil_rpc", 0..=0).await;
+    let mut stream = client.query(query, None).await.unwrap();
+    let handle: JoinHandle<Vec<nozzle_client::Metadata>> = tokio::spawn(async move {
+        let mut metadata: Vec<nozzle_client::Metadata> = Default::default();
+        while let Some(result) = stream.next().await {
+            let response = result.unwrap();
+            let last_block = response.metadata.ranges[0].end();
+            metadata.push(response.metadata);
+            if last_block == end_block {
+                break;
+            }
+        }
+        metadata
+    });
+    for i in 1..=end_block {
+        test.mine(1).await;
+        test.dump("anvil_rpc", 0..=i).await;
+    }
+
+    let metadata = handle.await.unwrap();
+    let ranges: Vec<RangeInclusive<BlockNum>> = metadata
+        .into_iter()
+        .map(|m| m.ranges[0].numbers.clone())
+        .collect();
+    todo!("{:#?}", ranges);
+}

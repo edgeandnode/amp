@@ -270,13 +270,20 @@ impl StreamingQuery {
                 })
                 .await;
 
+            let mut batch_count: usize = 0;
             // Drain the microbatch completely
             while let Some(item) = stream.next().await {
                 let item = item?;
+                batch_count += 1;
 
                 // If the receiver in `StreamingQueryHandle` is dropped, then this task has been
                 // aborted, so we don't bother checking for errors when sending a message.
                 let _ = self.tx.send(QueryMessage::Data(item)).await;
+            }
+
+            if batch_count == 0 {
+                let batch = RecordBatch::new_empty(stream.schema());
+                let _ = self.tx.send(QueryMessage::Data(batch)).await;
             }
 
             // Send end message for this microbatch
