@@ -187,7 +187,7 @@ impl MetadataDb {
     /// Sets up a connection pool to the Metadata DB with retry logic for temporary databases.
     #[cfg(feature = "temp-db")]
     #[instrument(skip_all, err)]
-    pub async fn connect_with_retry(url: &str, pool_size: u32) -> Result<Self, Error> {    
+    pub async fn connect_with_retry(url: &str, pool_size: u32) -> Result<Self, Error> {
         use backon::{ExponentialBuilder, Retryable};
 
         let retry_policy = ExponentialBuilder::default()
