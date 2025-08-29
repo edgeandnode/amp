@@ -199,15 +199,11 @@ impl MetadataDb {
             .with_max_times(20);
 
         fn is_db_starting_up(err: &conn::ConnError) -> bool {
-            match err {
-                conn::ConnError::ConnectionError(sqlx_err) => match sqlx_err {
-                    sqlx::Error::Database(db_err) => {
-                        db_err.code().map_or(false, |code| code == "57P03")
-                    }
-                    _ => false,
-                },
-                _ => false,
-            }
+            matches!(
+                err,
+                conn::ConnError::ConnectionError(sqlx::Error::Database(db_err))
+                if db_err.code().map_or(false, |code| code == "57P03")
+            )
         }
 
         fn notify_retry(err: &conn::ConnError, dur: Duration) {
