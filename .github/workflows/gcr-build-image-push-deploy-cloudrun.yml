@@ -47,7 +47,7 @@ jobs:
       - name: Google auth to GCP
         if: github.event_name == 'workflow_dispatch'
         id: auth
-        uses: google-github-actions/auth@v2 # v2
+        uses: google-github-actions/auth@b7593ed2efd1c1617e1b0254da33b86225adb2a5 # v2
         with:
           token_format: access_token
           # project_id: ${{ env.PROJECT_NAME }}-${{ inputs.environment }}
