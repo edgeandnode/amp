@@ -66,9 +66,9 @@ jobs:
           project_id: ${{ env.PROJECT_NAME }}-${{ inputs.environment }}
           workload_identity_provider: ${{ inputs.environment == 'production' && secrets.PRODUCTION_WORKLOAD_IDENTITY_PROVIDER || secrets.STAGING_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ inputs.environment == 'production' && secrets.PRODUCTION_SERVICE_ACCOUNT_EMAIL || secrets.STAGING_SERVICE_ACCOUNT_EMAIL }}
-          create_credentials_file: true
           export_environment_variables: true
-          export_default_credentials: false
+          export_default_credentials: true
+          # request_reason: '${{ env.PROJECT_NAME}} build and push to GCR' # this will add X-Goog-Request-Reason for audit logs
 
       - name: Set up Cloud SDK
         if: steps.auth.outcome == 'success'
