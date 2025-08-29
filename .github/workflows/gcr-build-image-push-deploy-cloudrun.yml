@@ -82,7 +82,6 @@ jobs:
           service_account: ${{ inputs.environment == 'production' && secrets.PRODUCTION_SERVICE_ACCOUNT_EMAIL || secrets.STAGING_SERVICE_ACCOUNT_EMAIL }}
           export_environment_variables: true
           create_credentials_file: false
-          cleanup_credentials: true
           # request_reason: '${{ env.PROJECT_NAME}} build and push to GCR' # this will add X-Goog-Request-Reason for audit logs
 
       - name: Set up Cloud SDK
