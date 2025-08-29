@@ -31,6 +31,7 @@ pub struct CompactionProperties {
     pub active: bool,
     pub compactor_interval: Duration,
     pub collector_interval: Duration,
+    pub file_lock_duration: Duration,
     pub metadata_concurrency: usize,
     pub write_concurrency: usize,
     pub parquet_writer_props: ParquetWriterProperties,
@@ -91,7 +92,7 @@ impl NozzleCompactor {
     /// Block until the current deletion task is finished
     /// and then trigger another deletion
     pub async fn run_deletion(&mut self) {
-        self.deletion_task.run().await;
+        self.deletion_task.spawn().await;
     }
 }
 
@@ -192,7 +193,7 @@ impl DeletionTask {
             && self.opts.active
     }
 
-    async fn run(&mut self) {
+    pub async fn spawn(&mut self) {
         let task = &mut self.task;
 
         let collector = match task
@@ -200,8 +201,7 @@ impl DeletionTask {
                 &self.table,
                 &self.opts,
             )))
-            .now_or_never()
-            .expect("We already checked is_finished")
+            .await
         {
             Ok(Ok(collector)) => {
                 self.previous = Some(Timestamp::now());
@@ -223,7 +223,7 @@ impl DeletionTask {
 
     fn try_run(&mut self) {
         if self.ready() {
-            self.run()
+            self.spawn()
                 .now_or_never()
                 .expect("We already checked is_finished");
         }

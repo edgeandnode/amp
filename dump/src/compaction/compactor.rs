@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use common::{
     catalog::physical::PhysicalTable,
@@ -11,7 +11,6 @@ use object_store::{ObjectMeta, path::Path};
 use crate::{
     compaction::{
         CompactionError, CompactionProperties, CompactionResult, CompactionTask,
-        FILE_LOCK_DURATION,
         group::{CompactionFile, CompactionGroupGenerator},
     },
     parquet_writer::ParquetFileWriter,
@@ -60,8 +59,8 @@ impl Compactor {
         );
 
         let mut join_set = stream::iter(compaction_groups)
-            .map(|group| group.compact())
-            .buffer_unordered(1);
+            .map(|group: CompactionGroup| group.compact())
+            .buffer_unordered(self.opts.write_concurrency);
 
         // await: We need to await the completion of compaction tasks
         while let Some(result) = join_set.next().await {
@@ -161,6 +160,7 @@ impl CompactionGroup {
 
     pub async fn compact(self) -> CompactionResult<Vec<FileId>> {
         let metadata_db = self.table.metadata_db();
+        let duration = self.opts.file_lock_duration;
 
         let output = self.write_and_finish().await?;
 
@@ -172,7 +172,7 @@ impl CompactionGroup {
             ))?;
 
         output
-            .upsert_gc_manifest(Arc::clone(&metadata_db))
+            .upsert_gc_manifest(Arc::clone(&metadata_db), duration)
             .await
             .map_err(CompactionError::manifest_update_error(&output.file_ids))?;
 
@@ -252,9 +252,10 @@ impl CompactionWriterOutput {
     async fn upsert_gc_manifest(
         &self,
         metadata_db: Arc<MetadataDb>,
+        duration: Duration,
     ) -> Result<(), metadata_db::Error> {
         metadata_db
-            .upsert_gc_manifest(self.location_id, &self.file_ids, FILE_LOCK_DURATION)
+            .upsert_gc_manifest(self.location_id, &self.file_ids, duration)
             .await
     }
 }

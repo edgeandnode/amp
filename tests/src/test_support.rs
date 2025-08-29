@@ -4,7 +4,7 @@ use std::{
     path::PathBuf,
     process::{ExitStatus, Stdio},
     str::FromStr as _,
-    sync::Arc,
+    sync::Arc, time::Duration,
 };
 
 use common::{
@@ -22,7 +22,7 @@ use common::{
 };
 use dataset_store::DatasetStore;
 use dump::{
-    compaction::{SegmentSizeLimit, compactor::Compactor},
+    compaction::{SegmentSizeLimit, collector::Collector, compactor::Compactor},
     consistency_check,
     worker::Worker,
 };
@@ -662,7 +662,8 @@ pub async fn restore_blessed_dataset(
 }
 
 /// Spawn a compaction for the given table and wait for it to complete.
-/// The compaction is configured to compact all files into a single file.
+/// The compaction is configured to compact all files into a single file
+/// and lock parent files for only 1 second
 pub async fn spawn_compaction_and_await_completion(
     table: &Arc<PhysicalTable>,
     config: &Arc<Config>,
@@ -671,7 +672,8 @@ pub async fn spawn_compaction_and_await_completion(
     let parquet_writer_props = dump::parquet_opts(&config.parquet);
     let mut opts = dump::compaction_opts(&config.compaction, &parquet_writer_props);
     opts.active = true;
-    opts.size_limit = SegmentSizeLimit::new(1, 1, 1, length);
+    opts.size_limit = SegmentSizeLimit::new(-1, -1, -1, length);
+    opts.file_lock_duration = Duration::from_secs(1);
 
     let mut compactor = Compactor::start(table, &Arc::new(opts));
 
@@ -679,6 +681,33 @@ pub async fn spawn_compaction_and_await_completion(
 
     // Wait for compaction to finish
     while !compactor.is_finished() {
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+}
+
+/// Spawn a garbage collection pass for the given table and wait for it to complete.
+pub async fn spawn_collection_and_await_completion(
+    table: &Arc<PhysicalTable>,
+    config: &Arc<Config>,
+) {
+
+    let length = table.files().await.unwrap().len();
+    let parquet_writer_props = dump::parquet_opts(&config.parquet);
+    let mut opts = dump::compaction_opts(&config.compaction, &parquet_writer_props);
+    opts.active = true;
+    opts.size_limit = SegmentSizeLimit::new(-1, -1, -1, length);
+    opts.file_lock_duration = Duration::from_secs(1);
+
+    let opts = Arc::new(opts);
+    let mut collector = Collector::start(table, &opts);
+    
+    // Wait for a moment to let the file leases to expire
+    tokio::time::sleep(opts.file_lock_duration).await;
+
+    collector.spawn().await;
+
+    // Wait for compaction to finish
+    while !collector.is_finished() {
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
 }

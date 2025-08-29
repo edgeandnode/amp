@@ -19,7 +19,7 @@ use crate::{
     test_client::TestClient,
     test_support::{
         self, SnapshotContext, TestEnv, check_blocks, restore_blessed_dataset,
-        spawn_compaction_and_await_completion,
+        spawn_collection_and_await_completion, spawn_compaction_and_await_completion,
     },
 };
 
@@ -662,8 +662,14 @@ async fn sql_dataset_input_batch_size() {
     spawn_compaction_and_await_completion(table, &test_env.config).await;
 
     // 6. After compaction, we expect an additional file to be created, with all data in it.
-    let file_count_after = table.files().await.unwrap().len();
-    assert_eq!(file_count_after, 5);
+    let file_count_after_compaction = table.files().await.unwrap().len();
+    assert_eq!(file_count_after_compaction, 5);
+
+    spawn_collection_and_await_completion(table, &test_env.config).await;
+
+    // 7. After collection, we expect only the compacted file to remain.
+    let file_count_after_collection = table.files().await.unwrap().len();
+    assert_eq!(file_count_after_collection, 1);
 
     let mut test_client = TestClient::connect(&test_env).await.unwrap();
     let res = test_client

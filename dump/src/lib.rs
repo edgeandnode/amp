@@ -51,11 +51,14 @@ pub fn compaction_opts(
     let compactor_interval = Duration::from_secs(config.compactor_interval_secs);
     let collector_interval = Duration::from_secs(config.collector_interval_secs);
     let parquet_writer_props = parquet_writer_props.clone();
+    let file_lock_duration: Duration = u64::try_from(config.file_lock_duration)
+        .map_or(compaction::FILE_LOCK_DURATION, |v| Duration::from_secs(v));
 
     CompactionProperties {
         active,
         compactor_interval,
         collector_interval,
+        file_lock_duration,
         metadata_concurrency,
         write_concurrency: table_concurrency,
         parquet_writer_props,
