@@ -1,19 +1,15 @@
 use std::{sync::Arc, time::Duration};
 
-use common::{
-    catalog::physical::PhysicalTable,
-    metadata::{parquet::ParquetMeta, segments::BlockRange},
-};
+use common::{catalog::physical::PhysicalTable, metadata::segments::BlockRange};
 use futures::{FutureExt, StreamExt, TryStreamExt, future, stream};
-use metadata_db::{FileId, FooterBytes, LocationId, MetadataDb};
-use object_store::{ObjectMeta, path::Path};
+use metadata_db::{FileId, MetadataDb};
 
 use crate::{
     compaction::{
         CompactionError, CompactionProperties, CompactionResult, CompactionTask,
         group::{CompactionFile, CompactionGroupGenerator},
     },
-    parquet_writer::ParquetFileWriter,
+    parquet_writer::{ParquetFileWriter, ParquetFileWriterOutput},
 };
 
 #[derive(Clone, Debug)]
@@ -98,7 +94,7 @@ impl CompactionGroup {
         })
     }
 
-    async fn write_and_finish(mut self) -> CompactionResult<CompactionWriterOutput> {
+    async fn write_and_finish(mut self) -> CompactionResult<ParquetFileWriterOutput> {
         let range = {
             let start_range = &self
                 .streams
@@ -142,20 +138,10 @@ impl CompactionGroup {
             }
         }
 
-        let (parquet_meta, object_meta, footer) = writer
-            .close(range, &file_ids)
+        writer
+            .close(range, file_ids)
             .await
-            .map_err(|err| CompactionError::FileWriteError { err })?;
-
-        let location_id = self.table.location_id();
-
-        Ok(CompactionWriterOutput::new(
-            location_id,
-            parquet_meta,
-            object_meta,
-            file_ids,
-            footer,
-        ))
+            .map_err(|err| CompactionError::FileWriteError { err })
     }
 
     pub async fn compact(self) -> CompactionResult<Vec<FileId>> {
@@ -168,73 +154,30 @@ impl CompactionGroup {
             .commit_metadata(Arc::clone(&metadata_db))
             .await
             .map_err(CompactionError::metadata_commit_error(
-                output.location.as_ref(),
+                output.object_meta.location.as_ref(),
             ))?;
 
         output
             .upsert_gc_manifest(Arc::clone(&metadata_db), duration)
             .await
-            .map_err(CompactionError::manifest_update_error(&output.file_ids))?;
+            .map_err(CompactionError::manifest_update_error(&output.parent_ids))?;
 
-        Ok(output.file_ids)
+        Ok(output.parent_ids)
     }
 }
 
-#[derive(Debug)]
-pub struct CompactionWriterOutput {
-    pub location_id: LocationId,
-    pub file_ids: Vec<FileId>,
-    pub location: Path,
-    pub file_name: String,
-    pub parquet_meta: serde_json::Value,
-    pub object_size: u64,
-    pub object_e_tag: Option<String>,
-    pub object_version: Option<String>,
-    pub footer: FooterBytes,
-}
-
-impl CompactionWriterOutput {
-    fn new(
-        location_id: LocationId,
-        parquet_meta: ParquetMeta,
-        ObjectMeta {
-            location,
-            size: object_size,
-            e_tag: object_e_tag,
-            version: object_version,
-            ..
-        }: ObjectMeta,
-        file_ids: Vec<FileId>,
-        footer: FooterBytes,
-    ) -> Self {
-        let file_name = parquet_meta.filename.to_string();
-        let parquet_meta = serde_json::to_value(parquet_meta)
-            .expect("Failed to serialize parquet metadata to JSON");
-
-        CompactionWriterOutput {
-            location_id,
-            file_ids,
-            location,
-            file_name,
-            parquet_meta,
-            object_size,
-            object_e_tag,
-            object_version,
-            footer,
-        }
-    }
-
+impl ParquetFileWriterOutput {
     async fn commit_metadata(
         &self,
         metadata_db: Arc<MetadataDb>,
     ) -> Result<(), metadata_db::Error> {
         let location_id = self.location_id;
-        let file_name = self.file_name.clone();
-        let object_size = self.object_size;
-        let object_e_tag = self.object_e_tag.clone();
-        let object_version = self.object_version.clone();
-        let parquet_meta = self.parquet_meta.clone();
-        let footer = self.footer.clone();
+        let file_name = self.object_meta.location.filename().unwrap().to_string();
+        let object_size = self.object_meta.size;
+        let object_e_tag = self.object_meta.e_tag.clone();
+        let object_version = self.object_meta.version.clone();
+        let parquet_meta = serde_json::to_value(&self.parquet_meta).unwrap();
+        let footer = &self.footer;
 
         metadata_db
             .insert_metadata(

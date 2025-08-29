@@ -130,7 +130,9 @@ use super::{Ctx, block_ranges, tasks::FailFastJoinSet};
 use crate::{
     compaction::{CompactionProperties, NozzleCompactor},
     metrics,
-    parquet_writer::{ParquetFileWriter, ParquetWriterProperties, commit_metadata},
+    parquet_writer::{
+        ParquetFileWriter, ParquetFileWriterOutput, ParquetWriterProperties, commit_metadata,
+    },
     streaming_query::{QueryMessage, StreamingQuery},
 };
 
@@ -328,7 +330,12 @@ async fn dump_sql_query(
             QueryMessage::MicrobatchEnd(range) => {
                 let microbatch_end = range.end();
                 // Close current file and commit metadata
-                let (parquet_meta, object_meta, footer) = writer.close(range, &[]).await?;
+                let ParquetFileWriterOutput {
+                    parquet_meta,
+                    object_meta,
+                    footer,
+                    ..
+                } = writer.close(range, vec![]).await?;
 
                 commit_metadata(
                     &dataset_store.metadata_db,
