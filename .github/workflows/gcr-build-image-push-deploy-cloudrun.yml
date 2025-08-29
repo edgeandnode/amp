@@ -36,11 +36,15 @@ jobs:
         id: checkout
         if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
 
-      - name: Get Repository Base Name
+      - name: Configure Image Name and GCR Registry
         if: steps.checkout.outcome == 'success'
-        id: repo-name
+        id: registry
         run: |
-          echo "value=`basename ${{ github.repository }}`" >> $GITHUB_OUTPUT
+          REPO_BASE_NAME=`basename ${{ github.repository }}`
+          REGISTRY=${{ env.REGION }}-docker.pkg.dev
+          REGISTRY_PATH="${REGISTRY}/${{ env.PROJECT_NAME }}-${{ inputs.environment }}/${{ env.PROJECT_NAME }}"
+          echo "registry=${REGISTRY}" >> $GITHUB_OUTPUT
+          echo "image_name=${REGISTRY_PATH}/${REPO_BASE_NAME}" >> $GITHUB_OUTPUT
         shell: bash
 
       # Cache Rust dependencies
@@ -78,6 +82,8 @@ jobs:
           workload_identity_provider: ${{ inputs.environment == 'production' && secrets.PRODUCTION_WORKLOAD_IDENTITY_PROVIDER || secrets.STAGING_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ inputs.environment == 'production' && secrets.PRODUCTION_SERVICE_ACCOUNT_EMAIL || secrets.STAGING_SERVICE_ACCOUNT_EMAIL }}
           export_environment_variables: true
+          create_credentials_file: false
+          clean_credentials: true
           # request_reason: '${{ env.PROJECT_NAME}} build and push to GCR' # this will add X-Goog-Request-Reason for audit logs
 
       - name: Set up Cloud SDK
@@ -91,7 +97,7 @@ jobs:
         id: docker-auth
         uses: docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1 # v3.5.0
         with:
-          registry: ${{ env.REGION }}-docker.pkg.dev
+          registry: ${{ steps.registry.outputs.registry}}
           username: oauth2accesstoken
           password: ${{ steps.auth.outputs.access_token }}
 
@@ -100,7 +106,7 @@ jobs:
         id: metadata
         uses: docker/metadata-action@c1e51972afc2121e065aed6d45c65596fe445f3f # v5.8.0
         with:
-          images: ${{ env.REGION }}-docker.pkg.dev/${{ steps.repo-name.outputs.value }}
+          images: ${{ steps.registry.outputs.image_name }}
           tags: |
             type=ref,event=tag
             type=sha,format=short
@@ -125,7 +131,7 @@ jobs:
         with:
           project_id: ${{ env.PROJECT_NAME }}-${{ inputs.environment }}
           service: ${{ env.PROJECT_NAME }}-${{ inputs.environment }}
-          image: ${{ env.REGION }}-docker.pkg.dev/${{ steps.repo-name.outputs.value }}:${{ steps.metadata.outputs.tags }}
+          image: ${{ steps.registry.outputs.image_name }}:${{ steps.metadata.outputs.tags }}
           region: ${{ env.REGION }}
 
       # - name: Deploy to Production Cloud Run
@@ -133,6 +139,6 @@ jobs:
       #   uses: google-github-actions/deploy-cloudrun@v2
       #   with:
       #     service: ${{ env.CLOUD_RUN_SERVICE }}
-      #     image: ${{ env.REGION }}-docker.pkg.dev/${{ env.REPO_NAME }}:${{ steps.metadata.outputs.tags }}
+      #     image: ${{ steps.registry.outputs.image_name }}:${{ steps.metadata.outputs.tags }}
       #     region: ${{ env.REGION }}
       #     project_id: ${{ env.REPO_NAME }}-${{ inputs.environment }}
