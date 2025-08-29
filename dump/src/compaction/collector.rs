@@ -59,7 +59,14 @@ impl Collector {
 
         let expired_stream = metadata_db.stream_expired_files(location_id, secs, nsecs);
 
-        match DeletionOutput::try_from_manifest_stream(object_store, expired_stream, now, self.table.url()).await {
+        match DeletionOutput::try_from_manifest_stream(
+            object_store,
+            expired_stream,
+            now,
+            self.table.url(),
+        )
+        .await
+        {
             Ok(output) if output.len() > 0 => {
                 tracing::info!(
                     "Deleted {} files ({} successes, {} not found, {} errors) for table {}",
@@ -158,7 +165,9 @@ impl DeletionOutput {
 
                 match result {
                     Ok(..) => acc.insert_success(*file_id),
-                    Err(ObjectStoreError::NotFound { path, .. }) => acc.insert_not_found(*file_id, path),
+                    Err(ObjectStoreError::NotFound { path, .. }) => {
+                        acc.insert_not_found(*file_id, path)
+                    }
                     Err(err) => acc.insert_error(*file_id, err),
                 }
                 future::ready(acc)
