@@ -43,8 +43,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-${{ github.sha }}
           restore-keys: |
+            ${{ runner.os }}-cargo-${{ github.ref_name }}
             ${{ runner.os }}-cargo-
 
       # # Authenticate to Production GCP only from main branch
