@@ -133,10 +133,10 @@ impl From<BlockRange> for InvalidationRange {
 /// # Example
 ///
 /// ```rust,no_run
-/// use nozzle_client::{with_reorg, ResponseBatchWithReorg};
+/// use nozzle_client::{with_reorg, ResponseBatchWithReorg, Error};
 /// use futures::StreamExt;
 ///
-/// # async fn example(stream: nozzle_client::ResultStream) {
+/// # async fn example(stream: nozzle_client::ResultStream) -> Result<(), Error> {
 /// let mut reorg_stream = with_reorg(stream);
 /// while let Some(result) = reorg_stream.next().await {
 ///     match result? {
