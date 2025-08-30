@@ -68,7 +68,13 @@ impl RawDatasetWriter {
     pub async fn write(&mut self, table_rows: RawTableRows) -> Result<(), BoxError> {
         let table_name = table_rows.table.name();
         let writer = self.writers.get_mut(table_name).unwrap();
-        if let Some((parquet_meta, object_meta, footer)) = writer.write(table_rows).await? {
+        if let Some(ParquetFileWriterOutput {
+            parquet_meta,
+            object_meta,
+            footer,
+            ..
+        }) = writer.write(table_rows).await?
+        {
             let location_id = writer.table.location_id();
             commit_metadata(
                 &self.metadata_db,
@@ -87,7 +93,13 @@ impl RawDatasetWriter {
     pub async fn close(self) -> Result<(), BoxError> {
         for (_, writer) in self.writers {
             let location_id = writer.table.location_id();
-            if let Some((parquet_meta, object_meta, footer)) = writer.close().await? {
+            if let Some(ParquetFileWriterOutput {
+                parquet_meta,
+                object_meta,
+                footer,
+                ..
+            }) = writer.close().await?
+            {
                 commit_metadata(
                     &self.metadata_db,
                     parquet_meta,
@@ -125,7 +137,7 @@ pub async fn commit_metadata(
             object_e_tag,
             object_version,
             parquet_meta,
-            footer,
+            &footer,
         )
         .await?;
 
@@ -190,7 +202,7 @@ impl RawTableWriter {
     pub async fn write(
         &mut self,
         table_rows: RawTableRows,
-    ) -> Result<Option<(ParquetMeta, ObjectMeta, FooterBytes)>, BoxError> {
+    ) -> Result<Option<ParquetFileWriterOutput>, BoxError> {
         assert_eq!(table_rows.table.name(), self.table.table_name());
 
         let mut parquet_meta = None;
@@ -288,7 +300,7 @@ impl RawTableWriter {
         Ok(parquet_meta)
     }
 
-    async fn close(mut self) -> Result<Option<(ParquetMeta, ObjectMeta, FooterBytes)>, BoxError> {
+    async fn close(mut self) -> Result<Option<ParquetFileWriterOutput>, BoxError> {
         if self.current_file.is_none() {
             assert!(self.ranges_to_write.is_empty());
             return Ok(None);
@@ -298,14 +310,12 @@ impl RawTableWriter {
         self.close_current_file().await.map(Some)
     }
 
-    async fn close_current_file(
-        &mut self,
-    ) -> Result<(ParquetMeta, ObjectMeta, FooterBytes), BoxError> {
+    async fn close_current_file(&mut self) -> Result<ParquetFileWriterOutput, BoxError> {
         assert!(self.current_file.is_some());
         let file = self.current_file.take().unwrap();
         let range = self.current_range.take().unwrap();
 
-        let metadata = file.close(range, &[]).await?;
+        let metadata = file.close(range, vec![]).await?;
 
         self.compactor.try_run();
 
@@ -358,8 +368,8 @@ impl ParquetFileWriter {
     pub async fn close(
         mut self,
         range: BlockRange,
-        parent_ids: &[FileId],
-    ) -> Result<(ParquetMeta, ObjectMeta, FooterBytes), BoxError> {
+        parent_ids: Vec<FileId>,
+    ) -> Result<ParquetFileWriterOutput, BoxError> {
         self.writer.flush().await?;
 
         debug!(
@@ -397,7 +407,15 @@ impl ParquetFileWriter {
         let footer =
             extract_footer_bytes_from_file(&object_meta, self.table.object_store()).await?;
 
-        Ok((parquet_meta, object_meta, footer))
+        let location_id = self.table.location_id();
+
+        Ok(ParquetFileWriterOutput {
+            parquet_meta,
+            object_meta,
+            location_id,
+            parent_ids,
+            footer,
+        })
     }
 
     // This is calculate as:
@@ -405,6 +423,14 @@ impl ParquetFileWriter {
     pub fn bytes_written(&self) -> usize {
         self.writer.bytes_written() + self.writer.in_progress_size()
     }
+}
+
+pub struct ParquetFileWriterOutput {
+    pub(crate) parquet_meta: ParquetMeta,
+    pub(crate) object_meta: ObjectMeta,
+    pub(crate) location_id: LocationId,
+    pub(crate) parent_ids: Vec<FileId>,
+    pub(crate) footer: FooterBytes,
 }
 
 fn limit_ranges(

@@ -53,6 +53,10 @@ pub(crate) struct EvmRpcProvider {
     #[serde(default = "default_rpc_batch_size")]
     pub rpc_batch_size: usize,
     pub rate_limit_per_minute: Option<NonZeroU32>,
+    /// Whether to use `eth_getTransactionReceipt` to fetch receipts for each transaction
+    /// or `eth_getBlockReceipts` to fetch all receipts for a block in one call.
+    #[serde(default)]
+    pub fetch_receipts_per_tx: bool,
 }
 
 fn default_rpc_batch_size() -> usize {
@@ -85,6 +89,7 @@ pub async fn client(
         request_limit,
         provider.rpc_batch_size,
         provider.rate_limit_per_minute,
+        provider.fetch_receipts_per_tx,
         final_blocks_only,
     )
     .map_err(Error::Client)?;
