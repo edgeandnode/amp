@@ -129,7 +129,7 @@ jobs:
         with:
           project_id: ${{ env.PROJECT_NAME }}-${{ inputs.environment }}
           service: ${{ env.PROJECT_NAME }}-${{ inputs.environment }}
-          image: ${{ steps.registry.outputs.image_name }}:${{ steps.metadata.outputs.tags }}
+          image: ${{ steps.metadata.outputs.tags }}
           region: ${{ env.REGION }}
 
       # - name: Deploy to Production Cloud Run
