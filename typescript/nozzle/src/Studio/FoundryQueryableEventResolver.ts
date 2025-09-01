@@ -277,18 +277,36 @@ export class FoundryQueryableEventResolver extends Effect.Service<FoundryQueryab
       return {
         queryableEventsStream,
         metadata() {
-          return Effect.succeed(Model.DatasetMetadata.make({
+          return Effect.succeed([
+            Model.DatasetMetadata.make(
+            {
             metadata_columns: [
               { name: "address", description: "The 0x address that invoked the transaction", dataType: "address" },
               { name: "block_num", description: "The block # when the transaction occurred", dataType: "bigint" },
               {
                 name: "timestamp",
-                description: "The timestamp, in unix-seconds, when the transaction occurred",
+                description: "The timestamp,z in unix-seconds, when the transaction occurred",
                 dataType: "bigint",
               },
             ],
             source: "anvil.logs",
-          }))
+          }),
+            Model.DatasetMetadata.make(
+            {
+            metadata_columns: [
+              { name: "block_num", description: "The block # when the transaction occurred", dataType: "bigint" },
+              {
+                name: "timestamp",
+                description: "The timestamp,z in unix-seconds, when the transaction occurred",
+                dataType: "bigint",
+              },
+              { name: "to", description: "The 0x address that sent the tokens", dataType: "address" },
+              { name: "from", description: "The 0x address that received the tokens", dataType: "address" },
+              { name: "value", description: "Amount transferred", dataType: "bigint" },             
+            ],
+            source: "erc20token.transfers",
+          }),
+        ])
         },
       } as const
     }),

@@ -38,12 +38,12 @@ class NozzleStudioApiRouter extends HttpApiGroup.make("NozzleStudioApi").add(
         "Listens to file changes on the smart contracts/abis and emits updates of the available events to query",
     })),
 ).add(
-  HttpApiEndpoint.get("Metadata")`/metadata`.addSuccess(StudioModel.DatasetMetadata).annotateContext(
+  HttpApiEndpoint.get("Metadata")`/metadata`.addSuccess(Schema.Array(StudioModel.DatasetMetadata)).annotateContext(
     OpenApi.annotations({
-      title: "Metadata about the nozzle dataset",
+      title: "Metadata about the nozzle datasets",
       version: "v1",
       description:
-        "Provides metadata about how to query the dataset. Things like metadata columns and the event source to query",
+        "Provides metadata about how to query the dataset. Returns an array of dataset metadata, where each item contains metadata columns and the event source to query",
     }),
   ),
 ).prefix("/v1") {}
