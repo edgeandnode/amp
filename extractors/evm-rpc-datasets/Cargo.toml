@@ -4,7 +4,7 @@ edition.workspace = true
 version.workspace = true
 
 [dependencies]
-common = { path = "../common" }
+common = { path = "../../common" }
 alloy.workspace = true
 tokio.workspace = true
 thiserror.workspace = true
