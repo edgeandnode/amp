@@ -99,11 +99,6 @@ pub enum Error {
     #[error("Error parsing URL: {0}")]
     UrlParseError(#[from] url::ParseError),
 
-    #[error(
-        "Cannot start dump: location has existing start_block={existing}, but requested start_block={requested}"
-    )]
-    MismatchedStartBlock { existing: i64, requested: i64 },
-
     #[error("Job status update error: {0}")]
     JobStatusUpdateError(#[from] jobs::JobStatusUpdateError),
 }
@@ -692,6 +687,11 @@ impl MetadataDb {
         Ok(locations::get_by_id_with_details(&*self.pool, location_id).await?)
     }
 
+    /// Get the start block for a location by ID
+    pub async fn get_location_start_block(&self, location_id: LocationId) -> Result<i64, Error> {
+        Ok(locations::get_start_block_by_id(&*self.pool, location_id).await?)
+    }
+
     /// Delete a location by its ID
     ///
     /// This will also delete all associated file_metadata entries due to CASCADE.
@@ -753,28 +753,6 @@ impl MetadataDb {
             .bind(footer)
             .execute(&*self.pool)
             .await?;
-
-        Ok(())
-    }
-
-    /// If the start block is already set, it must match the provided start_block.
-    pub async fn check_start_block(
-        &self,
-        location_id: LocationId,
-        start_block: i64,
-    ) -> Result<(), Error> {
-        let existing_start_block: i64 =
-            sqlx::query_scalar("SELECT start_block FROM locations WHERE id = $1")
-                .bind(location_id)
-                .fetch_one(&*self.pool)
-                .await?;
-
-        if existing_start_block != start_block {
-            return Err(Error::MismatchedStartBlock {
-                existing: existing_start_block,
-                requested: start_block,
-            });
-        }
 
         Ok(())
     }
