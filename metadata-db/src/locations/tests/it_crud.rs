@@ -6,8 +6,9 @@ use url::Url;
 use crate::{
     TableId,
     conn::DbConn,
+    jobs::{self, JobId},
     locations::{self, LocationId},
-    workers::{heartbeat, job_id::JobId, jobs},
+    workers::heartbeat,
 };
 
 #[tokio::test]

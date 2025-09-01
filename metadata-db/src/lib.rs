@@ -14,6 +14,7 @@ use tracing::instrument;
 use url::Url;
 
 mod conn;
+mod jobs;
 mod locations;
 pub mod registry;
 #[cfg(feature = "temp-db")]
@@ -24,6 +25,10 @@ use self::conn::{DbConn, DbConnPool};
 #[cfg(feature = "temp-db")]
 pub use self::temp::{KEEP_TEMP_DIRS, temp_metadata_db};
 pub use self::{
+    jobs::{
+        Job, JobId, JobIdFromStrError, JobIdI64ConvError, JobIdU64Error, JobStatus,
+        JobStatusUpdateError, JobWithDetails,
+    },
     locations::{
         Location, LocationId, LocationIdFromStrError, LocationIdI64ConvError, LocationIdU64Error,
         LocationWithDetails,
@@ -31,8 +36,6 @@ pub use self::{
     workers::{
         Worker, WorkerNodeId,
         events::{JobNotifAction, JobNotifListener, JobNotifRecvError, JobNotification},
-        job_id::{JobId, JobIdFromStrError, JobIdI64ConvError, JobIdU64Error},
-        jobs::{Job, JobStatus, JobStatusUpdateError, JobWithDetails},
     },
 };
 use crate::registry::{Registry, insert_dataset_to_registry};
@@ -102,7 +105,7 @@ pub enum Error {
     MismatchedStartBlock { existing: i64, requested: i64 },
 
     #[error("Job status update error: {0}")]
-    JobStatusUpdateError(#[from] workers::jobs::JobStatusUpdateError),
+    JobStatusUpdateError(#[from] jobs::JobStatusUpdateError),
 }
 
 impl Error {
@@ -320,7 +323,7 @@ impl MetadataDb {
         let mut tx = self.pool.begin().await?;
 
         // Register the job in the workers job queue
-        let job_id = workers::jobs::insert_with_default_status(&mut *tx, node_id, job_desc).await?;
+        let job_id = jobs::insert_with_default_status(&mut *tx, node_id, job_desc).await?;
 
         // Lock the locations for this job by assigning the job ID as the writer
         locations::assign_job_writer(&mut *tx, locations, job_id).await?;
@@ -356,7 +359,7 @@ impl MetadataDb {
         let mut tx = self.pool.begin().await?;
 
         // Try to update job status
-        match workers::jobs::update_status_if_any_state(
+        match jobs::update_status_if_any_state(
             &mut *tx,
             job_id,
             &[JobStatus::Running, JobStatus::Scheduled],
@@ -392,8 +395,8 @@ impl MetadataDb {
         last_job_id: Option<JobId>,
     ) -> Result<Vec<JobWithDetails>, Error> {
         match last_job_id {
-            Some(job_id) => Ok(workers::jobs::list_next_page(&*self.pool, limit, job_id).await?),
-            None => Ok(workers::jobs::list_first_page(&*self.pool, limit).await?),
+            Some(job_id) => Ok(jobs::list_next_page(&*self.pool, limit, job_id).await?),
+            None => Ok(jobs::list_first_page(&*self.pool, limit).await?),
         }
     }
 
@@ -405,7 +408,7 @@ impl MetadataDb {
     ///
     /// This method is used to fetch all the jobs that the worker should be running after a restart.
     pub async fn get_scheduled_jobs(&self, node_id: &WorkerNodeId) -> Result<Vec<Job>, Error> {
-        Ok(workers::jobs::get_by_node_id_and_statuses(
+        Ok(jobs::get_by_node_id_and_statuses(
             &*self.pool,
             node_id,
             [JobStatus::Scheduled, JobStatus::Running],
@@ -424,7 +427,7 @@ impl MetadataDb {
     /// ensures each worker's job set remains synchronized with the Metadata DB. This method fetches all jobs that a
     /// worker should be tracking, enabling the worker to reconcile its state when notifications are lost.
     pub async fn get_active_jobs(&self, node_id: &WorkerNodeId) -> Result<Vec<Job>, Error> {
-        Ok(workers::jobs::get_by_node_id_and_statuses(
+        Ok(jobs::get_by_node_id_and_statuses(
             &*self.pool,
             node_id,
             [
@@ -438,7 +441,7 @@ impl MetadataDb {
 
     /// Returns the job with the given ID
     pub async fn get_job(&self, id: &JobId) -> Result<Option<Job>, Error> {
-        Ok(workers::jobs::get_by_id(&*self.pool, id).await?)
+        Ok(jobs::get_by_id(&*self.pool, id).await?)
     }
 
     /// Get a job by ID with full details including timestamps
@@ -446,7 +449,7 @@ impl MetadataDb {
         &self,
         id: &JobId,
     ) -> Result<Option<JobWithDetails>, Error> {
-        Ok(workers::jobs::get_by_id_with_details(&*self.pool, id).await?)
+        Ok(jobs::get_by_id_with_details(&*self.pool, id).await?)
     }
 
     /// Conditionally marks a job as `RUNNING` only if it's currently `SCHEDULED`
@@ -454,7 +457,7 @@ impl MetadataDb {
     /// This provides idempotent behavior - if the job is already running, completed, or failed,
     /// the appropriate error will be returned indicating the state conflict.
     pub async fn mark_job_running(&self, id: &JobId) -> Result<(), Error> {
-        Ok(workers::jobs::update_status_if_any_state(
+        Ok(jobs::update_status_if_any_state(
             &*self.pool,
             id,
             &[JobStatus::Scheduled],
@@ -467,7 +470,7 @@ impl MetadataDb {
     ///
     /// This is typically used by workers to acknowledge a stop request.
     pub async fn mark_job_stopping(&self, id: &JobId) -> Result<(), Error> {
-        Ok(workers::jobs::update_status_if_any_state(
+        Ok(jobs::update_status_if_any_state(
             &*self.pool,
             id,
             &[JobStatus::StopRequested],
@@ -480,7 +483,7 @@ impl MetadataDb {
     ///
     /// This provides proper state transition from stopping to stopped.
     pub async fn mark_job_stopped(&self, id: &JobId) -> Result<(), Error> {
-        Ok(workers::jobs::update_status_if_any_state(
+        Ok(jobs::update_status_if_any_state(
             &*self.pool,
             id,
             &[JobStatus::Stopping],
@@ -493,7 +496,7 @@ impl MetadataDb {
     ///
     /// This ensures jobs can only be completed from a running state.
     pub async fn mark_job_completed(&self, id: &JobId) -> Result<(), Error> {
-        Ok(workers::jobs::update_status_if_any_state(
+        Ok(jobs::update_status_if_any_state(
             &*self.pool,
             id,
             &[JobStatus::Running],
@@ -506,7 +509,7 @@ impl MetadataDb {
     ///
     /// Jobs can fail from either scheduled (startup failure) or running (runtime failure) states.
     pub async fn mark_job_failed(&self, id: &JobId) -> Result<(), Error> {
-        Ok(workers::jobs::update_status_if_any_state(
+        Ok(jobs::update_status_if_any_state(
             &*self.pool,
             id,
             &[JobStatus::Scheduled, JobStatus::Running],
@@ -520,12 +523,10 @@ impl MetadataDb {
     /// This function will only delete the job if it exists and is in a terminal state
     /// (Completed, Stopped, or Failed). Returns true if a job was deleted, false otherwise.
     pub async fn delete_job_if_terminal(&self, id: &JobId) -> Result<bool, Error> {
-        Ok(workers::jobs::delete_by_id_and_statuses(
-            &*self.pool,
-            id,
-            JobStatus::terminal_statuses(),
+        Ok(
+            jobs::delete_by_id_and_statuses(&*self.pool, id, JobStatus::terminal_statuses())
+                .await?,
         )
-        .await?)
     }
 
     /// Delete all jobs that are in terminal states
@@ -533,7 +534,7 @@ impl MetadataDb {
     /// This function deletes all jobs that are in terminal states (Completed, Stopped, or Failed).
     /// Returns the number of jobs that were deleted.
     pub async fn delete_all_terminal_jobs(&self) -> Result<usize, Error> {
-        Ok(workers::jobs::delete_by_statuses(&*self.pool, JobStatus::terminal_statuses()).await?)
+        Ok(jobs::delete_by_statuses(&*self.pool, JobStatus::terminal_statuses()).await?)
     }
 
     /// Delete all jobs that match the specified status
@@ -541,7 +542,7 @@ impl MetadataDb {
     /// This function deletes all jobs that are in the specified status.
     /// Returns the number of jobs that were deleted.
     pub async fn delete_all_jobs_by_status(&self, status: JobStatus) -> Result<usize, Error> {
-        Ok(workers::jobs::delete_by_status(&*self.pool, status).await?)
+        Ok(jobs::delete_by_status(&*self.pool, status).await?)
     }
 }
 
