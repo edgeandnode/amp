@@ -130,7 +130,7 @@ pub async fn commit_metadata(
     let file_name = parquet_meta.filename.clone();
     let parquet_meta = serde_json::to_value(parquet_meta)?;
     metadata_db
-        .insert_metadata(
+        .register_file(
             location_id,
             file_name,
             object_size,

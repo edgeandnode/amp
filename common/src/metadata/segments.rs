@@ -378,7 +378,7 @@ mod test {
         Segment {
             range,
             object,
-            id: FileId::MIN,
+            id: FileId::try_from(1i64).expect("FileId::MIN is 1"),
         }
     }
 

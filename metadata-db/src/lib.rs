@@ -14,6 +14,7 @@ use tracing::instrument;
 use url::Url;
 
 mod conn;
+mod files;
 mod jobs;
 mod locations;
 pub mod registry;
@@ -25,6 +26,9 @@ use self::conn::{DbConn, DbConnPool};
 #[cfg(feature = "temp-db")]
 pub use self::temp::{KEEP_TEMP_DIRS, temp_metadata_db};
 pub use self::{
+    files::{
+        FileId, FileIdFromStrError, FileIdI64ConvError, FileIdU64Error, FileMetadata, FooterBytes,
+    },
     jobs::{
         Job, JobId, JobIdFromStrError, JobIdI64ConvError, JobIdU64Error, JobStatus,
         JobStatusUpdateError, JobWithDetails,
@@ -49,30 +53,6 @@ pub const DEFAULT_DEAD_WORKER_INTERVAL: Duration = Duration::from_secs(5);
 
 /// Default pool size for the metadata DB.
 pub const DEFAULT_POOL_SIZE: u32 = 10;
-
-/// Row ids, always non-negative.
-pub type FileId = i64;
-pub type FooterBytes = Vec<u8>;
-
-#[derive(Debug, sqlx::FromRow)]
-pub struct FileMetadataRow {
-    /// file_metadata.id
-    pub id: FileId,
-    /// file_metadata.location_id
-    pub location_id: LocationId,
-    /// file_metadata.file_name
-    pub file_name: String,
-    /// location.url
-    pub url: String,
-    /// file_metadata.object_size
-    pub object_size: Option<i64>,
-    /// file_metadata.object_e_tag
-    pub object_e_tag: Option<String>,
-    /// file_metadata.object_version
-    pub object_version: Option<String>,
-    /// file_metadata.metadata
-    pub metadata: serde_json::Value,
-}
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -659,31 +639,11 @@ impl MetadataDb {
 
 /// File metadata-related API
 impl MetadataDb {
-    pub fn stream_file_metadata(
-        &self,
-        location_id: LocationId,
-    ) -> impl Stream<Item = Result<FileMetadataRow, Error>> + '_ {
-        let query = "
-        SELECT fm.id
-             , fm.location_id
-             , fm.file_name
-             , l.url
-             , fm.object_size
-             , fm.object_e_tag
-             , fm.object_version
-             , fm.metadata
-          FROM file_metadata fm
-          JOIN locations l ON fm.location_id = l.id
-         WHERE location_id = $1;
-        ";
-
-        sqlx::query_as(query)
-            .bind(location_id)
-            .fetch(&*self.pool)
-            .map(|result| result.map_err(Error::DbError))
-    }
-
-    pub async fn insert_metadata(
+    /// Inserts new file metadata record.
+    ///
+    /// Creates a new file metadata entry with the provided information. Uses
+    /// ON CONFLICT DO NOTHING to make the operation idempotent.
+    pub async fn register_file(
         &self,
         location_id: LocationId,
         file_name: String,
@@ -693,37 +653,69 @@ impl MetadataDb {
         parquet_meta: serde_json::Value,
         footer: &Vec<u8>,
     ) -> Result<(), Error> {
-        let sql = "
-        INSERT INTO file_metadata (location_id, file_name, object_size, object_e_tag, object_version, metadata, footer)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
-        ON CONFLICT DO NOTHING
-        ";
-
-        sqlx::query(sql)
-            .bind(location_id)
-            .bind(file_name)
-            .bind(object_size as i64)
-            .bind(object_e_tag)
-            .bind(object_version)
-            .bind(parquet_meta)
-            .bind(footer)
-            .execute(&*self.pool)
-            .await?;
-
-        Ok(())
+        files::insert(
+            &*self.pool,
+            location_id,
+            file_name,
+            object_size,
+            object_e_tag,
+            object_version,
+            parquet_meta,
+            footer,
+        )
+        .await
+        .map_err(Error::DbError)
     }
 
-    pub async fn get_footer_bytes(&self, file_id: FileId) -> Result<Vec<u8>, Error> {
-        let sql = "
-        SELECT footer
-          FROM file_metadata
-         WHERE id = $1;
-        ";
+    /// Streams file metadata for a specific location.
+    ///
+    /// Returns a stream of file metadata rows that includes information from both
+    /// the file_metadata and locations tables via a JOIN operation.
+    pub fn stream_files_by_location_id(
+        &self,
+        location_id: LocationId,
+    ) -> impl Stream<Item = Result<FileMetadata, Error>> + '_ {
+        files::stream(&*self.pool, location_id).map(|result| result.map_err(Error::DbError))
+    }
 
-        Ok(sqlx::query_scalar(sql)
-            .bind(file_id)
-            .fetch_one(&*self.pool)
-            .await?)
+    /// List file metadata records for a specific location with cursor-based pagination support
+    ///
+    /// Uses cursor-based pagination where `last_file_id` is the ID of the last file
+    /// from the previous page. For the first page, pass `None` for `last_file_id`.
+    /// Returns file metadata records for the specified location ordered by ID in descending order (newest first).
+    pub async fn list_files_by_location_id(
+        &self,
+        location_id: LocationId,
+        limit: i64,
+        last_file_id: Option<FileId>,
+    ) -> Result<Vec<FileMetadata>, Error> {
+        match last_file_id {
+            Some(file_id) => {
+                Ok(
+                    files::pagination::list_next_page(&*self.pool, location_id, limit, file_id)
+                        .await?,
+                )
+            }
+            None => Ok(files::pagination::list_first_page(&*self.pool, location_id, limit).await?),
+        }
+    }
+
+    /// Retrieves footer bytes for a specific file.
+    ///
+    /// Returns the binary footer data stored for the specified file ID.
+    pub async fn get_file_footer_bytes(&self, file_id: FileId) -> Result<Vec<u8>, Error> {
+        files::get_footer_bytes_by_id(&*self.pool, file_id)
+            .await
+            .map_err(Error::DbError)
+    }
+
+    /// Delete file metadata record by ID
+    ///
+    /// Returns `true` if a file was deleted, `false` if no file was found.
+    pub async fn delete_file(&self, file_id: FileId) -> Result<bool, Error> {
+        files::delete(&*self.pool, file_id)
+            .await
+            .map_err(Error::DbError)
     }
 }
 
