@@ -1,4 +1,5 @@
 use std::env;
+
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -91,8 +92,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::collections::HashMap;
+
+    use super::*;
 
     fn test_lookup() -> impl Fn(&str) -> Option<String> {
         let mut vars = HashMap::new();
