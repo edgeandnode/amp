@@ -65,6 +65,7 @@ When contributing to `metadata-db`, ensure you follow these requirements:
 **Database Changes:**
 
 - [ ] Add timestamped migration files for any schema changes
+- [ ] Include a description of changes being made in the migration filename (like `timestamp_add_[stuff].sql` or `timestamp_update_[stuff].sql`)
 - [ ] Test migrations both forward and backward (if reversible)
 - [ ] Use proper constraint naming conventions
 - [ ] Implement cascading deletes where appropriate
