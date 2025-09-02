@@ -17,7 +17,6 @@ pub use self::{
     job_status::JobStatus,
     pagination::{list_first_page, list_next_page},
 };
-
 use crate::workers::WorkerNodeId;
 
 /// Insert a new job into the queue
