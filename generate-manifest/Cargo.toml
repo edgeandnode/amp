@@ -10,3 +10,4 @@ evm-rpc-datasets = { path = "../extractors/evm-rpc-datasets" }
 firehose-datasets = { path = "../extractors/firehose-datasets" }
 substreams-datasets = { path = "../extractors/substreams-datasets" }
 serde_json.workspace = true
+eth-beacon-datasets = { version = "0.1.0", path = "../extractors/eth-beacon-datasets" }

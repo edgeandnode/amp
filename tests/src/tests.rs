@@ -147,6 +147,25 @@ async fn eth_firehose_single_dump() {
 }
 
 #[tokio::test]
+async fn eth_beacon_single_dump() {
+    logging::init();
+
+    let dataset_name = "eth_beacon";
+    let test_env = TestEnv::temp("eth_beacon_single_dump").await.unwrap();
+
+    let blessed = SnapshotContext::blessed(&test_env, &dataset_name)
+        .await
+        .unwrap();
+    check_blocks(&test_env, dataset_name, 12_000_000, 12_000_000)
+        .await
+        .expect("blessed data differed from provider");
+    let temp_dump = SnapshotContext::temp_dump(&test_env, &dataset_name, 12_000_000, 12_000_000, 1)
+        .await
+        .expect("temp dump failed");
+    temp_dump.assert_eq(&blessed).await.unwrap();
+}
+
+#[tokio::test]
 async fn sql_over_eth_firehose_dump() {
     logging::init();
     let dataset_name = "sql_over_eth_firehose";

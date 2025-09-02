@@ -1,0 +1,15 @@
+{
+  "kind": "eth-beacon",
+  "name": "eth_beacon",
+  "network": "mainnet-beacon",
+  "schema": {
+    "blocks": {
+      "block_num": "UInt64",
+      "version": "Utf8",
+      "proposer_index": "UInt64",
+      "parent_root": { "FixedSizeBinary": 32 },
+      "state_root": { "FixedSizeBinary": 32 },
+      "execution_block_num": "UInt64"
+    }
+  }
+}

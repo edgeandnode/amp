@@ -72,6 +72,9 @@ pub enum Error {
     #[error("EVM RPC error: {0}")]
     EvmRpcError(#[from] evm_rpc_datasets::Error),
 
+    #[error("eth-beacon error: {0}")]
+    EthBeacon(#[from] eth_beacon_datasets::Error),
+
     #[error("firehose error: {0}")]
     FirehoseError(#[from] firehose_datasets::Error),
 
@@ -106,6 +109,7 @@ pub enum Error {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum DatasetKind {
     EvmRpc,
+    EthBeacon,
     Firehose,
     Substreams,
     Sql, // Will be deprecated in favor of `Manifest`
@@ -116,6 +120,7 @@ impl DatasetKind {
     pub fn as_str(&self) -> &str {
         match self {
             Self::EvmRpc => evm_rpc_datasets::DATASET_KIND,
+            Self::EthBeacon => eth_beacon_datasets::DATASET_KIND,
             Self::Firehose => firehose_datasets::DATASET_KIND,
             Self::Substreams => substreams_datasets::DATASET_KIND,
             Self::Sql => sql_datasets::DATASET_KIND,
@@ -125,7 +130,7 @@ impl DatasetKind {
 
     pub fn is_raw(&self) -> bool {
         match self {
-            Self::EvmRpc | Self::Firehose | Self::Substreams => true,
+            Self::EvmRpc | Self::EthBeacon | Self::Firehose | Self::Substreams => true,
             Self::Sql | Self::Manifest => false,
         }
     }
@@ -135,6 +140,7 @@ impl fmt::Display for DatasetKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::EvmRpc => f.write_str(evm_rpc_datasets::DATASET_KIND),
+            Self::EthBeacon => f.write_str(eth_beacon_datasets::DATASET_KIND),
             Self::Firehose => f.write_str(firehose_datasets::DATASET_KIND),
             Self::Substreams => f.write_str(substreams_datasets::DATASET_KIND),
             Self::Sql => f.write_str(sql_datasets::DATASET_KIND),
@@ -149,6 +155,7 @@ impl FromStr for DatasetKind {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             evm_rpc_datasets::DATASET_KIND => Ok(Self::EvmRpc),
+            eth_beacon_datasets::DATASET_KIND => Ok(Self::EthBeacon),
             firehose_datasets::DATASET_KIND => Ok(Self::Firehose),
             substreams_datasets::DATASET_KIND => Ok(Self::Substreams),
             sql_datasets::DATASET_KIND => Ok(Self::Sql),
@@ -423,6 +430,13 @@ impl DatasetStore {
                     evm_rpc_datasets::tables::all(&common.network).into();
                 (evm_rpc_datasets::dataset(value)?, Some(builtin_schema))
             }
+            DatasetKind::EthBeacon => {
+                let builtin_schema: SerializableSchema = vec![eth_beacon_datasets::blocks::table(
+                    common.network.to_string(),
+                )]
+                .into();
+                (eth_beacon_datasets::dataset(value)?, Some(builtin_schema))
+            }
             DatasetKind::Firehose => {
                 let builtin_schema: SerializableSchema =
                     firehose_datasets::evm::tables::all(&common.network).into();
@@ -506,6 +520,11 @@ impl DatasetStore {
             DatasetKind::EvmRpc => BlockStreamClient::EvmRpc(
                 evm_rpc_datasets::client(provider, common.network, only_finalized_blocks).await?,
             ),
+            DatasetKind::EthBeacon => BlockStreamClient::EthBeacon(eth_beacon_datasets::client(
+                provider,
+                common.network,
+                only_finalized_blocks,
+            )?),
             DatasetKind::Firehose => BlockStreamClient::Firehose(
                 firehose_datasets::Client::new(provider, common.network, only_finalized_blocks)
                     .await?,
@@ -841,6 +860,7 @@ fn datasets_from_table_refs<'a>(
 #[derive(Clone)]
 enum BlockStreamClient {
     EvmRpc(evm_rpc_datasets::JsonRpcClient),
+    EthBeacon(eth_beacon_datasets::BeaconClient),
     Firehose(firehose_datasets::Client),
     Substreams(substreams_datasets::Client),
 }
@@ -856,6 +876,12 @@ impl BlockStreamer for BlockStreamClient {
         stream! {
             match self {
                 Self::EvmRpc(client) => {
+                    let stream = client.block_stream(start_block, end_block).await;
+                    for await item in stream {
+                        yield item;
+                    }
+                }
+                Self::EthBeacon(client) => {
                     let stream = client.block_stream(start_block, end_block).await;
                     for await item in stream {
                         yield item;
@@ -880,6 +906,7 @@ impl BlockStreamer for BlockStreamClient {
     async fn latest_block(&mut self) -> Result<BlockNum, BoxError> {
         match self {
             Self::EvmRpc(client) => client.latest_block().await,
+            Self::EthBeacon(client) => client.latest_block().await,
             Self::Firehose(client) => client.latest_block().await,
             Self::Substreams(client) => client.latest_block().await,
         }

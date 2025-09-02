@@ -10,6 +10,7 @@ members = [
     "extractors/evm-rpc-datasets",
     "extractors/firehose-datasets",
     "extractors/substreams-datasets",
+    "extractors/eth-beacon-datasets",
     "metadata-db",
     "admin-api",
     "http-common",

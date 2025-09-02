@@ -17,6 +17,9 @@ pub async fn run<T: io::Write>(
 
     let schema: SerializableSchema = match dataset_kind {
         dataset_store::DatasetKind::EvmRpc => evm_rpc_datasets::tables::all(&network).into(),
+        dataset_store::DatasetKind::EthBeacon => {
+            vec![eth_beacon_datasets::blocks::table(network.to_string())].into()
+        }
         dataset_store::DatasetKind::Firehose => {
             firehose_datasets::evm::tables::all(&network).into()
         }
