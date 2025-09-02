@@ -6,7 +6,7 @@ version.workspace = true
 [dependencies]
 common = { path = "../common" }
 dataset-store = { path = "../dataset-store" }
-evm-rpc-datasets = { path = "../evm-rpc-datasets" }
-firehose-datasets = { path = "../firehose-datasets" }
-substreams-datasets = { path = "../substreams-datasets" }
+evm-rpc-datasets = { path = "../extractors/evm-rpc-datasets" }
+firehose-datasets = { path = "../extractors/firehose-datasets" }
+substreams-datasets = { path = "../extractors/substreams-datasets" }
 serde_json.workspace = true
