@@ -4,10 +4,8 @@ use pgtemp::PgTempDB;
 
 use crate::{
     conn::DbConn,
-    workers::{
-        heartbeat,
-        jobs::{self, JobStatus},
-    },
+    jobs::{self, JobStatus},
+    workers::heartbeat,
 };
 
 #[tokio::test]

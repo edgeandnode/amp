@@ -8,9 +8,9 @@ use tokio::time::{Duration, timeout};
 
 use crate::{
     conn::DbConn,
+    jobs::JobId,
     workers::{
         events::{self, JobNotifAction, JobNotification},
-        job_id::JobId,
         node_id::WorkerNodeId,
     },
 };

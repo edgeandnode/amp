@@ -7,7 +7,8 @@
 use futures::stream::{Stream, TryStreamExt as _};
 use sqlx::{Postgres, postgres::PgListener};
 
-use super::{job_id::JobId, node_id::WorkerNodeId};
+use super::node_id::WorkerNodeId;
+use crate::jobs::JobId;
 
 /// The worker actions PostgreSQL notification channel name
 const WORKER_ACTIONS_CHANNEL: &str = "worker_actions";
