@@ -1,6 +1,6 @@
 # Project Nozzle - Technical Overview for Claude
 
-## Project Overview
+## Project Summary
 
 Project Nozzle is a high-performance ETL (Extract, Transform, Load) architecture for blockchain data services on The Graph. It focuses on extracting blockchain data from various sources, transforming it via SQL queries, and serving it through multiple query interfaces.
 
