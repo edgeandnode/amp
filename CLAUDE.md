@@ -1,6 +1,6 @@
 # Project Nozzle - Technical Overview for Claude
 
-## Project Summary
+## Project Overview
 
 Project Nozzle is a high-performance ETL (Extract, Transform, Load) architecture for blockchain data services on The Graph. It focuses on extracting blockchain data from various sources, transforming it via SQL queries, and serving it through multiple query interfaces.
 
@@ -133,6 +133,32 @@ curl -X POST http://localhost:1603 --data "select * from eth_rpc.logs limit 10"
 ### Python Integration
 - Arrow Flight client available
 - Marimo notebook examples provided
+
+## Development Patterns Reference
+
+The `.patterns/` directory contains comprehensive development patterns and best practices for this codebase. **Always
+reference these patterns before implementing new functionality** to ensure consistency with established codebase
+conventions.
+
+### Available Patterns:
+
+- **[.patterns/README.md](.patterns/README.md)** - Overview of development patterns and usage guidelines
+- **[testing-patterns.md](.patterns/testing-patterns.md)** - Testing strategies and best practices for writing tests
+
+### Pattern Usage Guidelines:
+
+1. **Before coding**: Review relevant patterns in `.patterns/` directory
+2. **During implementation**: Follow established conventions and coding patterns
+3. **For complex features**: Use patterns as templates for consistent implementation
+4. **When stuck**: Reference similar implementations in existing codebase following these patterns
+
+## Crate-Specific Guidelines
+
+Some crates in this workspace have their own detailed contributing guidelines that supplement the global patterns. **You MUST check and follow these crate-specific guidelines when working on the respective crate.**
+
+### metadata-db
+
+- **[metadata-db/CONTRIBUTING.md](metadata-db/CONTRIBUTING.md)** - **REQUIRED reading** when working on the `metadata-db` crate. Contains comprehensive development guidelines including database design patterns, testing strategies, and API conventions that must be followed.
 
 ## Development Notes
 

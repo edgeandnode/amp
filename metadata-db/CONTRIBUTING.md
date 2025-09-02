@@ -281,235 +281,27 @@ ready for testing with fresh schema state.
 The `metadata-db` crate employs a comprehensive three-tier testing approach
 to ensure reliability and correctness across different levels of abstraction.
 
-### Writing tests
+**For detailed testing patterns and examples, see [.patterns/testing-patterns.md](../.patterns/testing-patterns.md).**
 
-All tests follow consistent naming conventions and structure patterns
-to ensure clarity and maintainability across the codebase.
+### Test Organization Overview
 
-**Function Naming Convention:**
-Test functions use descriptive names that explain the scenario being tested: `<function_name>_<scenario>_<expected_outcome>()`
-
-- `insert_job_with_valid_data_succeeds()`
-- `get_by_id_with_nonexistent_id_returns_none()`
-- `update_status_with_invalid_transition_fails()`
-
-**GIVEN-WHEN-THEN Structure:**
-Every test follows the GIVEN-WHEN-THEN pattern for clear organization:
-
-- **GIVEN**: Set up preconditions and data
-- **WHEN**: Execute **EXACTLY ONE** function under test
-- **THEN**: Assert expected outcomes and side effects
-
-**Single Function Under Test:**
-The WHEN section must test exactly one function call.
-Multiple function calls indicate the test scope is too broad
-and should be split into separate functions.
-
-**Test Error Handling:**
-Never use `unwrap()` in tests. Always use `expect()` with descriptive error messages
-to provide clear context when tests fail.
-Assertions should include descriptive error messages for easier debugging
-when test failures occur.
-
-**Example:**
-
-```rust
-#[tokio::test]
-async fn insert_job_with_valid_data_succeeds() {
-    //* Given
-    let db = temp_metadata_db().await;
-    let node_id = WorkerNodeId::new("worker-1".to_string())
-        .expect("should create valid worker node ID");
-    let job_desc = "job description";
-
-    //* When
-    let result = jobs::insert(&db.pool, &node_id, job_desc, JobStatus::Scheduled).await;
-
-    //* TheN
-    assert!(result.is_ok(), "job insertion should succeed with valid data");
-    let job_id = result.expect("should return valid job ID");
-    assert!(job_id.as_i64() > 0, "job ID should be positive");
-}
-```
-
-### Test organization
-
-Each test type serves a specific purpose:
-**unit tests** validate individual function behavior,
-**in-tree integration tests** verify resource module operations with real databases,
-and **public API integration tests** ensure end-to-end workflow correctness
-through the complete `MetadataDb` interface.
-
-#### Unit Tests
-
-Unit tests must have no external dependencies and execute in milliseconds.
-These tests validate pure business logic, data transformations, and error handling
-without requiring database connections or external services.
-
-**Requirements:**
-
-- **NO EXTERNAL DEPENDENCIES**: No PostgreSQL database instance required
-- **Performance**: Must complete execution in milliseconds
-- **Co-location**: Tests live within the same file as the code being tested
-- **Module structure**: Use `#[cfg(test)]` annotated `tests` submodule
-
-**Example:**
-
-```rust
-// src/workers/node_id.rs
-fn validate_worker_id(id: &str) -> Result<String, Box<dyn std::error::Error>> {
-    // [...]
-}
-
-// [...]
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn validate_worker_id_with_valid_input_succeeds() {
-        // [...]
-    }
-
-    // [...]
-}
-```
-
-#### In-tree integration tests
-
-In-tree integration tests cover internal functionality, that is, functionality not exposed through the crate's API.
-These tests are named "integration" because they test functionality with external dependencies
-and as a consequence they can suffer from slowness and flakiness.
-
-**Purpose:**
-
-- Test internal module functions that aren't part of the crate's public API
-- Cover internal functionality that requires external dependencies (database, network, filesystem)
-- Verify integration between internal components
-- Test edge cases and error conditions that involve external systems
-
-**Characteristics:**
-
-- **External dependencies**: Use actual database connections or external services
-- **Mandatory nesting**: Must live in `tests::it_*` submodules for test selection
-- **File structure**: Either separate files (`tests/it_jobs.rs`) or inline submodules
-- **Flakiness risk**: May fail due to external dependency issues
-- **Performance**: Slower execution due to external dependencies
-
-**File Structure Options:**
-
-**Option 1: Separate integration test file**
-
-```rust
-// src/workers.rs
-async fn update_heartbeat_timestamp<'c, E>(/* ... */) -> Result<(), sqlx::Error> {
-    // [...]
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    // Unit tests here...
-
-    mod it_heartbeat { // <-- Inline in-tree integration test submodule
-        use super::*;
-
-        #[tokio::test]
-        async fn update_heartbeat_timestamp_updates_worker_record() {
-            // [...]
-        }
-    }
-}
-```
-
-**Option 2: External integration test file**
-
-```rust
-// src/workers/tests/it_workers.rs
-use crate::workers::*;
-
-#[tokio::test]
-async fn update_heartbeat_timestamp_updates_worker_record() {
-    // [...]
-}
-```
-
-#### Public API integration tests
-
-Public API tests are Rust's standard integration testing mechanism as defined in
-the [Rust Book](https://doc.rust-lang.org/book/ch11-03-test-organization.html#integration-tests).
-These tests verify end-to-end functionality by testing the integration between different code parts
-through the crate's public API only.
-
-**Purpose:**
-
-- Test the public crate interface and all exported functionality
-- Verify integration between different components of the crate
-- Ensure complete workflows work correctly from a user perspective
-- Test the crate as external users would use it
-
-**Characteristics:**
-
-- **Public API only**: No access to internal crate APIs unless explicitly made public
-- **External location**: Located in `tests/` directory (separate from source code)
-- **End-to-end testing**: Test complete user workflows and integration scenarios
-- **External dependencies**: These ARE integration tests and MAY use external dependencies like databases
-- **Cargo integration**: Each file in `tests/` is compiled as a separate crate
-- **File naming**: Must be named `it_*` for test filtering purposes
-
-**File Structure:**
-
-```rust
-// tests/it_api_workers.rs
-use metadata_db::{MetadataDb, WorkerNodeId, Error};
-use metadata_db::temp::temp_metadata_db;
-
-#[tokio::test]
-async fn register_worker_and_schedule_job_workflow_succeeds() {
-    //* Given
-    let db = temp_metadata_db().await;
-    let node_id = WorkerNodeId::new("test-worker".to_string())
-        .expect("should create valid worker node ID");
-
-    //* When
-    let result = db.register_worker(&node_id).await;
-
-    //* Then
-    assert!(result.is_ok(), "worker registration should succeed");
-}
-
-// [...]
-```
+- **Unit Tests**: Pure business logic without external dependencies (milliseconds)
+- **In-tree Integration Tests**: Internal functionality with external dependencies (`tests::it_*` submodules)
+- **Public API Integration Tests**: End-to-end workflows through public API (`tests/` directory)
 
 ### Running Tests
 
-The three-tier testing strategy allows for selective test execution based on performance and dependency requirements.
-
 **Unit Tests (fast, no external dependencies):**
-
 ```bash
-# Run only unit tests, skip all in-tree integration tests
 cargo test -p metadata-db 'tests::' -- --skip 'tests::it_'
 ```
 
 **In-tree Integration Tests (slower, requires external dependencies):**
-
 ```bash
-# Run only in-tree integration tests
 cargo test -p metadata-db 'tests::it_'
-
-# Run specific in-tree integration test suite
-cargo test -p metadata-db 'tests::it_workers'
 ```
 
 **Public API Integration Tests (slower, requires external dependencies):**
-
 ```bash
-# Run all public API integration tests
 cargo test -p metadata-db --test '*'
-
-# Run specific public API integration test file
-cargo test -p metadata-db --test it_api_workers
 ```
