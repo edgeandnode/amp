@@ -165,7 +165,6 @@ export function useQueryableEventsQuery({
 
       eventSourceRef.current = es
     } catch (e) {
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       if (!mountedRef.current) return
 
       const error =

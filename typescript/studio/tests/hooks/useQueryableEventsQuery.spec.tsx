@@ -29,7 +29,6 @@ class MockEventSource {
   }
 
   addEventListener(type: string, listener: (event: any) => void) {
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (!this.listeners[type]) {
       this.listeners[type] = []
     }
@@ -37,14 +36,12 @@ class MockEventSource {
   }
 
   removeEventListener(type: string, listener: (event: any) => void) {
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (this.listeners[type]) {
       this.listeners[type] = this.listeners[type].filter((l) => l !== listener)
     }
   }
 
   dispatchEvent(event: { type: string; data?: string }) {
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     const listeners = this.listeners[event.type] || []
     listeners.forEach((listener) => listener(event))
   }

@@ -9,7 +9,7 @@ import * as Constants from "../constants.js"
 
 export const metadataQueryOptions = queryOptions({
   queryKey: ["Query", "Metadata"] as const,
-  async queryFn() {
+  async queryFn(): Promise<Array<DatasetMetadata>> {
     const response = await fetch(`${Constants.API_ORIGIN}/metadata`, {
       method: "GET",
     })
@@ -20,16 +20,16 @@ export const metadataQueryOptions = queryOptions({
     }
     const json = await response.json()
 
-    return Schema.decodeUnknownSync(DatasetMetadata)(json)
+    return Schema.decodeUnknownSync(Schema.Array(DatasetMetadata))(json)
   },
 })
 
 export function useMetadataSuspenseQuery(
   options: Omit<
     UseSuspenseQueryOptions<
-      DatasetMetadata,
+      Array<DatasetMetadata>,
       Error,
-      DatasetMetadata,
+      Array<DatasetMetadata>,
       readonly ["Query", "Metadata"]
     >,
     "queryKey" | "queryFn"

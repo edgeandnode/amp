@@ -2,6 +2,8 @@
 **/.python-version
 **/__pycache__
 **/*.DS_STORE
+**/playwright-report
+**/test-results
 .history
 .envrc
 .direnv

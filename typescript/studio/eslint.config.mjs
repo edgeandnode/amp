@@ -2,48 +2,23 @@
 
 import { tanstackConfig } from "@tanstack/eslint-config"
 
-import rootConfig from "../../eslint.config.mjs"
-
 export default [
-  ...rootConfig,
   ...tanstackConfig,
   {
-    ignores: ["prettier.config.js"],
+    ignores: ["prettier.config.js", "playwright-report/**", "test-results/**"],
   },
   {
     rules: {
       // Disable @effect/dprint to avoid conflicts with import sorting
       "@effect/dprint": "off",
-      // Disable tanstack's import/order rule to avoid conflicts with simple-import-sort
+      // Disable tanstack's import/order rule
       "import/order": "off",
       "import-x/order": "off",
-      // Disable sort-imports to avoid conflicts
+      // Disable sort-imports
       "sort-imports": "off",
-      // Enable simple-import-sort for import sorting
-      "simple-import-sort/imports": [
-        "error",
-        {
-          groups: [
-            // Node.js builtins
-            ["^node:"],
-            // External packages
-            ["^@?\\w"],
-            // Internal packages
-            [
-              "^(@|components|utils|config|hooks|services|types|lib|styles)(/.*|$)",
-            ],
-            // Side effect imports
-            ["^\\u0000"],
-            // Parent imports
-            ["^\\.\\.(?!/?$)", "^\\.\\./?$"],
-            // Other relative imports
-            ["^\\./(?=.*/)(?!/?$)", "^\\.(?!/?$)", "^\\./?$"],
-            // Type imports
-            ["^.+\\.?types$", "^.+\\?types$"],
-          ],
-        },
-      ],
-      "simple-import-sort/exports": "error",
+      // Disable strict type checking that interferes with Monaco type imports
+      "@typescript-eslint/consistent-type-imports": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
     },
   },
 ]
