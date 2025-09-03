@@ -300,10 +300,19 @@ async fn persist_start_block_set_on_creation() -> Result<(), BoxError> {
         .ok_or("No active location found for anvil_rpc.blocks")?;
     let location_id = location.1;
 
-    test.env
+    let existing_start_block = test
+        .env
         .metadata_db
-        .check_start_block(location_id, 0)
+        .get_location_start_block(location_id)
         .await?;
+
+    if existing_start_block != 0 {
+        return Err(format!(
+            "Cannot start dump: location has existing start_block={}, but requested start_block=0",
+            existing_start_block
+        )
+        .into());
+    }
 
     // Now, attempt to dump again with a *different* start_block. This must fail.
     let result = test_support::dump_dataset(&test.env.config, "anvil_rpc", 1, 9, 1, None).await;

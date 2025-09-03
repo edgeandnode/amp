@@ -198,14 +198,21 @@ pub async fn dump_table(
             }
         };
 
-        let start_block = start
+        let start_block: i64 = start
             .try_into()
             .map_err(|e| format!("start_block value {} is out of range: {}", start, e))?;
 
         if is_incr {
-            ctx.metadata_db
-                .check_start_block(table.location_id(), start_block)
+            let existing_start_block = ctx.metadata_db
+                .get_location_start_block(table.location_id())
                 .await?;
+
+            if existing_start_block != start_block {
+                return Err(format!(
+                    "Cannot start dump: location has existing start_block={}, but requested start_block={}",
+                    existing_start_block, start_block
+                ).into());
+            }
 
             for range in table.missing_ranges(start..=end).await? {
                 dump_sql_query(

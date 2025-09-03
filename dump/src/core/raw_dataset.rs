@@ -122,9 +122,17 @@ pub async fn dump(
     only_finalized_blocks: bool,
 ) -> Result<(), BoxError> {
     for table in tables {
-        ctx.metadata_db
-            .check_start_block(table.location_id(), start)
+        let existing_start_block = ctx
+            .metadata_db
+            .get_location_start_block(table.location_id())
             .await?;
+
+        if existing_start_block != start {
+            return Err(format!(
+                "Cannot start dump: location has existing start_block={}, but requested start_block={}",
+                existing_start_block, start
+            ).into());
+        }
     }
 
     let mut client = ctx
