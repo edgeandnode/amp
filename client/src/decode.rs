@@ -1,3 +1,10 @@
+use std::{
+    collections::HashMap,
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+};
+
 use arrow_flight::FlightData;
 use common::arrow::{
     array::{ArrayRef, RecordBatch},
@@ -7,12 +14,6 @@ use common::arrow::{
     ipc::{self, MessageHeader, MetadataVersion, reader},
 };
 use futures::{Stream, ready};
-use std::{
-    collections::HashMap,
-    pin::Pin,
-    sync::Arc,
-    task::{Context, Poll},
-};
 
 use crate::{Error, Metadata, ResponseBatch};
 
@@ -161,9 +162,10 @@ impl FlightStreamState {
 
 #[cfg(test)]
 mod test {
-    use super::*;
     use futures::{StreamExt as _, stream};
     use tonic::Status;
+
+    use super::*;
 
     #[tokio::test]
     async fn empty_stream() {

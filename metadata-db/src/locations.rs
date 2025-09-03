@@ -9,7 +9,7 @@ pub use self::{
 };
 use crate::{
     JobStatus, TableId, WorkerNodeId,
-    workers::{job_id::JobId, jobs::Job},
+    jobs::{Job, JobId},
 };
 
 mod location_id;

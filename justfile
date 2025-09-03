@@ -10,6 +10,32 @@ fmt:
 fmt-check:
     cargo fmt --all -- --check
 
+# Nightly rustfmt configuration flags
+# --unstable-features:
+#    Enable unstable/nightly-only formatting features. Required for rustfmt to enable the features below.
+#    See: https://rust-lang.github.io/rustfmt/?version=v1&search=#unstable_features
+# --config imports_granularity=Crate:
+#    Controls how imports are grouped together (at crate level)
+#    See: https://rust-lang.github.io/rustfmt/?version=v1&search=#imports_granularity
+# --config group_imports=StdExternalCrate:
+#    Groups imports into three categories: std, external crates, and local imports
+#    See: https://rust-lang.github.io/rustfmt/?version=v1&search=#group_imports
+# --config format_code_in_doc_comments=true:
+#    Enables formatting of code blocks in documentation comments
+#    See: https://rust-lang.github.io/rustfmt/?version=v1&search=#format_code_in_doc_comments
+FMT_NIGHTLY_FLAGS := "--unstable-features" + \
+    " --config imports_granularity=Crate" + \
+    " --config group_imports=StdExternalCrate" + \
+    " --config format_code_in_doc_comments=true"
+
+# Format all Rust code using nightly (cargo +nightly fmt)
+fmt-nightly:
+    cargo +nightly fmt --all -- {{FMT_NIGHTLY_FLAGS}}
+
+# Check Rust code format using nightly (cargo +nightly fmt --check)
+fmt-check-nightly:
+    cargo +nightly fmt --all -- {{FMT_NIGHTLY_FLAGS}} --check
+
 # Check Rust code (cargo check)
 check *EXTRA_FLAGS:
     cargo check {{EXTRA_FLAGS}}

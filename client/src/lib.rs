@@ -2,17 +2,18 @@
 
 mod decode;
 
+use std::{
+    ops::RangeInclusive,
+    pin::Pin,
+    task::{Context, Poll},
+};
+
 use arrow_flight::{FlightData, sql::client::FlightSqlServiceClient};
 use async_stream::stream;
 use bytes::Bytes;
 use common::{BlockNum, arrow::array::RecordBatch, metadata::segments::BlockRange};
 use futures::{Stream, StreamExt as _, stream::BoxStream};
 use serde::Deserialize;
-use std::{
-    ops::RangeInclusive,
-    pin::Pin,
-    task::{Context, Poll},
-};
 use tonic::{Streaming, transport::Endpoint};
 
 #[derive(thiserror::Error, Debug)]
@@ -133,10 +134,10 @@ impl From<BlockRange> for InvalidationRange {
 /// # Example
 ///
 /// ```rust,no_run
-/// use nozzle_client::{with_reorg, ResponseBatchWithReorg};
 /// use futures::StreamExt;
+/// use nozzle_client::{Error, ResponseBatchWithReorg, with_reorg};
 ///
-/// # async fn example(stream: nozzle_client::ResultStream) {
+/// # async fn example(stream: nozzle_client::ResultStream) -> Result<(), Error> {
 /// let mut reorg_stream = with_reorg(stream);
 /// while let Some(result) = reorg_stream.next().await {
 ///     match result? {

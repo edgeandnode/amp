@@ -6,15 +6,16 @@ use url::Url;
 use crate::{
     TableId,
     conn::DbConn,
+    jobs::{self, JobId},
     locations::{self, LocationId},
-    workers::{heartbeat, job_id::JobId, jobs},
+    workers::heartbeat,
 };
 
 #[tokio::test]
 async fn insert_creates_location_and_returns_id() {
     //* Given
     let temp_db = PgTempDB::new();
-    let mut conn = DbConn::connect(&temp_db.connection_uri())
+    let mut conn = DbConn::connect_with_retry(&temp_db.connection_uri())
         .await
         .expect("Failed to connect to metadata db");
     conn.run_migrations()
@@ -79,7 +80,7 @@ async fn insert_creates_location_and_returns_id() {
 async fn insert_on_conflict_returns_existing_id() {
     //* Given
     let temp_db = PgTempDB::new();
-    let mut conn = DbConn::connect(&temp_db.connection_uri())
+    let mut conn = DbConn::connect_with_retry(&temp_db.connection_uri())
         .await
         .expect("Failed to connect to metadata db");
     conn.run_migrations()
@@ -112,7 +113,7 @@ async fn insert_on_conflict_returns_existing_id() {
 async fn url_to_location_id_finds_existing_location() {
     //* Given
     let temp_db = PgTempDB::new();
-    let mut conn = DbConn::connect(&temp_db.connection_uri())
+    let mut conn = DbConn::connect_with_retry(&temp_db.connection_uri())
         .await
         .expect("Failed to connect to metadata db");
     conn.run_migrations()
@@ -143,7 +144,7 @@ async fn url_to_location_id_finds_existing_location() {
 async fn url_to_location_id_returns_none_when_not_found() {
     //* Given
     let temp_db = PgTempDB::new();
-    let mut conn = DbConn::connect(&temp_db.connection_uri())
+    let mut conn = DbConn::connect_with_retry(&temp_db.connection_uri())
         .await
         .expect("Failed to connect to metadata db");
     conn.run_migrations()
@@ -166,7 +167,7 @@ async fn url_to_location_id_returns_none_when_not_found() {
 async fn get_active_by_table_id_filters_by_table_and_active_status() {
     //* Given
     let temp_db = PgTempDB::new();
-    let mut conn = DbConn::connect(&temp_db.connection_uri())
+    let mut conn = DbConn::connect_with_retry(&temp_db.connection_uri())
         .await
         .expect("Failed to connect to metadata db");
     conn.run_migrations()
@@ -256,7 +257,7 @@ async fn get_active_by_table_id_filters_by_table_and_active_status() {
 async fn mark_inactive_by_table_id_deactivates_only_matching_active_locations() {
     //* Given
     let temp_db = PgTempDB::new();
-    let mut conn = DbConn::connect(&temp_db.connection_uri())
+    let mut conn = DbConn::connect_with_retry(&temp_db.connection_uri())
         .await
         .expect("Failed to connect to metadata db");
     conn.run_migrations()
@@ -341,7 +342,7 @@ async fn mark_inactive_by_table_id_deactivates_only_matching_active_locations() 
 async fn mark_active_by_url_activates_specific_location() {
     //* Given
     let temp_db = PgTempDB::new();
-    let mut conn = DbConn::connect(&temp_db.connection_uri())
+    let mut conn = DbConn::connect_with_retry(&temp_db.connection_uri())
         .await
         .expect("Failed to connect to metadata db");
     conn.run_migrations()
@@ -401,7 +402,7 @@ async fn mark_active_by_url_activates_specific_location() {
 async fn get_by_job_id_returns_locations_written_by_job() {
     //* Given
     let temp_db = PgTempDB::new();
-    let mut conn = DbConn::connect(&temp_db.connection_uri())
+    let mut conn = DbConn::connect_with_retry(&temp_db.connection_uri())
         .await
         .expect("Failed to connect to metadata db");
     conn.run_migrations()
@@ -419,7 +420,7 @@ async fn get_by_job_id_returns_locations_written_by_job() {
     let job_desc = serde_json::json!({"operation": "dump"});
     let job_desc_str =
         serde_json::to_string(&job_desc).expect("Failed to serialize job description");
-    let job_id = jobs::register(&mut *conn, &worker_id, &job_desc_str)
+    let job_id = jobs::insert_with_default_status(&mut *conn, &worker_id, &job_desc_str)
         .await
         .expect("Failed to register job");
 
@@ -510,7 +511,7 @@ async fn get_by_job_id_returns_locations_written_by_job() {
 async fn assign_job_writer_assigns_job_to_multiple_locations() {
     //* Given
     let temp_db = PgTempDB::new();
-    let mut conn = DbConn::connect(&temp_db.connection_uri())
+    let mut conn = DbConn::connect_with_retry(&temp_db.connection_uri())
         .await
         .expect("Failed to connect to metadata db");
     conn.run_migrations()
@@ -528,7 +529,7 @@ async fn assign_job_writer_assigns_job_to_multiple_locations() {
     let job_desc = serde_json::json!({"operation": "write"});
     let job_desc_str =
         serde_json::to_string(&job_desc).expect("Failed to serialize job description");
-    let job_id = jobs::register(&mut *conn, &worker_id, &job_desc_str)
+    let job_id = jobs::insert_with_default_status(&mut *conn, &worker_id, &job_desc_str)
         .await
         .expect("Failed to register job");
 
@@ -601,7 +602,7 @@ async fn assign_job_writer_assigns_job_to_multiple_locations() {
 async fn get_by_id_returns_existing_location() {
     //* Given
     let temp_db = PgTempDB::new();
-    let mut conn = DbConn::connect(&temp_db.connection_uri())
+    let mut conn = DbConn::connect_with_retry(&temp_db.connection_uri())
         .await
         .expect("Failed to connect to metadata db");
     conn.run_migrations()
@@ -648,7 +649,7 @@ async fn get_by_id_returns_existing_location() {
 async fn get_by_id_returns_none_for_nonexistent_location() {
     //* Given
     let temp_db = PgTempDB::new();
-    let mut conn = DbConn::connect(&temp_db.connection_uri())
+    let mut conn = DbConn::connect_with_retry(&temp_db.connection_uri())
         .await
         .expect("Failed to connect to metadata db");
     conn.run_migrations()

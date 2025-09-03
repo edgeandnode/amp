@@ -4,36 +4,15 @@ use pgtemp::PgTempDB;
 
 use crate::{
     conn::DbConn,
-    workers::{
-        heartbeat,
-        job_id::JobId,
-        jobs::{self, JobStatus},
-    },
+    jobs::{self, JobStatus},
+    workers::heartbeat,
 };
-
-/// Private helper function for tests - simplified job status update
-async fn update_job_status<'c, E>(exe: E, id: &JobId, status: JobStatus) -> Result<(), sqlx::Error>
-where
-    E: sqlx::Executor<'c, Database = sqlx::Postgres>,
-{
-    let query = indoc::indoc! {r#"
-        UPDATE jobs
-        SET status = $1, updated_at = (timezone('UTC', now()))
-        WHERE id = $2
-    "#};
-    sqlx::query(query)
-        .bind(status)
-        .bind(id)
-        .execute(exe)
-        .await?;
-    Ok(())
-}
 
 #[tokio::test]
 async fn register_job_creates_with_scheduled_status() {
     //* Given
     let temp_db = PgTempDB::new();
-    let mut conn = DbConn::connect(&temp_db.connection_uri())
+    let mut conn = DbConn::connect_with_retry(&temp_db.connection_uri())
         .await
         .expect("Failed to connect to metadata db");
     conn.run_migrations()
@@ -54,7 +33,7 @@ async fn register_job_creates_with_scheduled_status() {
     let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize job desc");
 
     //* When
-    let job_id = jobs::register(&mut *conn, &worker_id, &job_desc_str)
+    let job_id = jobs::insert_with_default_status(&mut *conn, &worker_id, &job_desc_str)
         .await
         .expect("Failed to schedule job");
 
@@ -73,7 +52,7 @@ async fn register_job_creates_with_scheduled_status() {
 async fn get_jobs_for_node_filters_by_node_id() {
     //* Given
     let temp_db = PgTempDB::new();
-    let mut conn = DbConn::connect(&temp_db.connection_uri())
+    let mut conn = DbConn::connect_with_retry(&temp_db.connection_uri())
         .await
         .expect("Failed to connect to metadata db");
     conn.run_migrations()
@@ -92,22 +71,37 @@ async fn get_jobs_for_node_filters_by_node_id() {
     // Register jobs
     let job_desc1 = serde_json::json!({ "job": 1 });
     let job_desc_str1 = serde_json::to_string(&job_desc1).expect("Failed to serialize");
-    let job_id1 = jobs::register(&mut *conn, &worker_id_main, &job_desc_str1)
-        .await
-        .expect("Failed to register job 1");
+    let job_id1 = jobs::insert(
+        &mut *conn,
+        &worker_id_main,
+        &job_desc_str1,
+        JobStatus::default(),
+    )
+    .await
+    .expect("Failed to register job 1");
 
     let job_desc2 = serde_json::json!({ "job": 2 });
     let job_desc_str2 = serde_json::to_string(&job_desc2).expect("Failed to serialize");
-    let job_id2 = jobs::register(&mut *conn, &worker_id_main, &job_desc_str2)
-        .await
-        .expect("Failed to register job 2");
+    let job_id2 = jobs::insert(
+        &mut *conn,
+        &worker_id_main,
+        &job_desc_str2,
+        JobStatus::default(),
+    )
+    .await
+    .expect("Failed to register job 2");
 
     // Register a job for a different worker to ensure it's not retrieved
     let job_desc_other = serde_json::json!({ "job": "other" });
     let job_desc_str_other = serde_json::to_string(&job_desc_other).expect("Failed to serialize");
-    let job_id_other = jobs::register(&mut *conn, &worker_id_other, &job_desc_str_other)
-        .await
-        .expect("Failed to register job for other worker");
+    let job_id_other = jobs::insert(
+        &mut *conn,
+        &worker_id_other,
+        &job_desc_str_other,
+        JobStatus::default(),
+    )
+    .await
+    .expect("Failed to register job for other worker");
 
     //* When
     let jobs_list =
@@ -139,7 +133,7 @@ async fn get_jobs_for_node_filters_by_status() {
     let temp_db = PgTempDB::new();
 
     // Connect to the DB
-    let mut db = DbConn::connect(&temp_db.connection_uri())
+    let mut db = DbConn::connect_with_retry(&temp_db.connection_uri())
         .await
         .expect("Failed to connect to metadata db");
     db.run_migrations().await.expect("Failed to run migrations");
@@ -153,45 +147,35 @@ async fn get_jobs_for_node_filters_by_status() {
     let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
 
     // Active jobs
-    let job_id_scheduled = jobs::register(&mut *db, &worker_id, &job_desc_str)
+    let job_id_scheduled = jobs::insert(&mut *db, &worker_id, &job_desc_str, JobStatus::Scheduled)
         .await
         .expect("Failed to register job_id_scheduled");
 
-    let job_id_running = jobs::register(&mut *db, &worker_id, &job_desc_str)
+    let job_id_running = jobs::insert(&mut *db, &worker_id, &job_desc_str, JobStatus::Running)
         .await
         .expect("Failed to register job_id_running");
-    update_job_status(&mut *db, &job_id_running, JobStatus::Running)
-        .await
-        .expect("Failed to update job_id_running to Running");
 
     // Terminal state jobs (should not be retrieved)
-    let job_id_completed = jobs::register(&mut *db, &worker_id, &job_desc_str)
+    jobs::insert(&mut *db, &worker_id, &job_desc_str, JobStatus::Completed)
         .await
-        .expect("Failed to register job_id_completed");
-    update_job_status(&mut *db, &job_id_completed, JobStatus::Completed)
-        .await
-        .expect("Failed to update job_id_completed to Completed");
+        .expect("Failed to register completed job");
 
-    let job_id_failed = jobs::register(&mut *db, &worker_id, &job_desc_str)
+    jobs::insert(&mut *db, &worker_id, &job_desc_str, JobStatus::Failed)
         .await
-        .expect("Failed to schedule job_id_failed");
-    update_job_status(&mut *db, &job_id_failed, JobStatus::Failed)
-        .await
-        .expect("Failed to update job_id_failed to Failed");
+        .expect("Failed to register failed job");
 
-    let job_id_stop_requested = jobs::register(&mut *db, &worker_id, &job_desc_str)
-        .await
-        .expect("Failed to register job_id_stop_requested");
-    update_job_status(&mut *db, &job_id_stop_requested, JobStatus::StopRequested)
-        .await
-        .expect("Failed to update job_id_stop_requested to StopRequested");
+    let job_id_stop_requested = jobs::insert(
+        &mut *db,
+        &worker_id,
+        &job_desc_str,
+        JobStatus::StopRequested,
+    )
+    .await
+    .expect("Failed to register job_id_stop_requested");
 
-    let job_id_stopped = jobs::register(&mut *db, &worker_id, &job_desc_str)
+    jobs::insert(&mut *db, &worker_id, &job_desc_str, JobStatus::Stopped)
         .await
-        .expect("Failed to register job_id_stopped");
-    update_job_status(&mut *db, &job_id_stopped, JobStatus::Stopped)
-        .await
-        .expect("Failed to update job_id_stopped to Stopped");
+        .expect("Failed to register stopped job");
 
     //* When
     let active_jobs = jobs::get_by_node_id_and_statuses(
@@ -230,7 +214,7 @@ async fn get_jobs_for_node_filters_by_status() {
 async fn get_job_by_id_returns_job() {
     //* Given
     let temp_db = PgTempDB::new();
-    let mut conn = DbConn::connect(&temp_db.connection_uri())
+    let mut conn = DbConn::connect_with_retry(&temp_db.connection_uri())
         .await
         .expect("Failed to connect to metadata db");
     conn.run_migrations()
@@ -249,7 +233,7 @@ async fn get_job_by_id_returns_job() {
     });
     let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
 
-    let job_id = jobs::register(&mut *conn, &worker_id, &job_desc_str)
+    let job_id = jobs::insert_with_default_status(&mut *conn, &worker_id, &job_desc_str)
         .await
         .expect("Failed to register job");
 
@@ -270,7 +254,7 @@ async fn get_job_by_id_returns_job() {
 async fn get_job_with_details_includes_timestamps() {
     //* Given
     let temp_db = PgTempDB::new();
-    let mut conn = DbConn::connect(&temp_db.connection_uri())
+    let mut conn = DbConn::connect_with_retry(&temp_db.connection_uri())
         .await
         .expect("Failed to connect to metadata db");
     conn.run_migrations()
@@ -288,7 +272,7 @@ async fn get_job_with_details_includes_timestamps() {
     });
     let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
 
-    let job_id = jobs::register(&mut *conn, &worker_id, &job_desc_str)
+    let job_id = jobs::insert_with_default_status(&mut *conn, &worker_id, &job_desc_str)
         .await
         .expect("Failed to register job");
 
@@ -310,7 +294,7 @@ async fn get_job_with_details_includes_timestamps() {
 async fn list_jobs_first_page_when_empty() {
     //* Given
     let temp_db = PgTempDB::new();
-    let mut conn = DbConn::connect(&temp_db.connection_uri())
+    let mut conn = DbConn::connect_with_retry(&temp_db.connection_uri())
         .await
         .expect("Failed to connect to metadata db");
     conn.run_migrations()
@@ -330,7 +314,7 @@ async fn list_jobs_first_page_when_empty() {
 async fn list_jobs_first_page_respects_limit() {
     //* Given
     let temp_db = PgTempDB::new();
-    let mut conn = DbConn::connect(&temp_db.connection_uri())
+    let mut conn = DbConn::connect_with_retry(&temp_db.connection_uri())
         .await
         .expect("Failed to connect to metadata db");
     conn.run_migrations()
@@ -353,7 +337,7 @@ async fn list_jobs_first_page_respects_limit() {
         });
         let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
 
-        let job_id = jobs::register(&mut *conn, &worker_id, &job_desc_str)
+        let job_id = jobs::insert_with_default_status(&mut *conn, &worker_id, &job_desc_str)
             .await
             .expect("Failed to register job");
         job_ids.push(job_id);
@@ -381,7 +365,7 @@ async fn list_jobs_first_page_respects_limit() {
 async fn list_jobs_next_page_uses_cursor() {
     //* Given
     let temp_db = PgTempDB::new();
-    let mut conn = DbConn::connect(&temp_db.connection_uri())
+    let mut conn = DbConn::connect_with_retry(&temp_db.connection_uri())
         .await
         .expect("Failed to connect to metadata db");
     conn.run_migrations()
@@ -404,7 +388,7 @@ async fn list_jobs_next_page_uses_cursor() {
         });
         let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
 
-        let job_id = jobs::register(&mut *conn, &worker_id, &job_desc_str)
+        let job_id = jobs::insert_with_default_status(&mut *conn, &worker_id, &job_desc_str)
             .await
             .expect("Failed to register job");
         all_job_ids.push(job_id);
@@ -439,4 +423,215 @@ async fn list_jobs_next_page_uses_cursor() {
     assert!(second_page[1].id > second_page[2].id);
     // Verify cursor worked correctly
     assert!(cursor > second_page[0].id);
+}
+
+#[tokio::test]
+async fn delete_by_id_and_statuses_deletes_matching_job() {
+    //* Given
+    let temp_db = PgTempDB::new();
+    let mut conn = DbConn::connect_with_retry(&temp_db.connection_uri())
+        .await
+        .expect("Failed to connect to metadata db");
+    conn.run_migrations()
+        .await
+        .expect("Failed to run migrations");
+
+    let worker_id = "test-worker-delete".parse().expect("Invalid worker ID");
+    heartbeat::register_worker(&mut *conn, &worker_id)
+        .await
+        .expect("Failed to register worker");
+
+    let job_desc = serde_json::json!({"test": "job"});
+    let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
+
+    let job_id = jobs::insert_with_default_status(&mut *conn, &worker_id, &job_desc_str)
+        .await
+        .expect("Failed to insert job");
+
+    //* When
+    let deleted = jobs::delete_by_id_and_statuses(&mut *conn, &job_id, [JobStatus::Scheduled])
+        .await
+        .expect("Failed to delete job");
+
+    //* Then
+    assert!(deleted);
+
+    let job = jobs::get_by_id(&mut *conn, &job_id)
+        .await
+        .expect("Failed to query job");
+    assert!(job.is_none());
+}
+
+#[tokio::test]
+async fn delete_by_id_and_statuses_does_not_delete_wrong_status() {
+    //* Given
+    let temp_db = PgTempDB::new();
+    let mut conn = DbConn::connect_with_retry(&temp_db.connection_uri())
+        .await
+        .expect("Failed to connect to metadata db");
+    conn.run_migrations()
+        .await
+        .expect("Failed to run migrations");
+
+    let worker_id = "test-worker-no-delete".parse().expect("Invalid worker ID");
+    heartbeat::register_worker(&mut *conn, &worker_id)
+        .await
+        .expect("Failed to register worker");
+
+    let job_desc = serde_json::json!({"test": "job"});
+    let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
+
+    let job_id = jobs::insert(&mut *conn, &worker_id, &job_desc_str, JobStatus::Running)
+        .await
+        .expect("Failed to insert job");
+
+    //* When
+    let deleted = jobs::delete_by_id_and_statuses(&mut *conn, &job_id, [JobStatus::Scheduled])
+        .await
+        .expect("Failed to delete job");
+
+    //* Then
+    assert!(!deleted);
+
+    let job = jobs::get_by_id(&mut *conn, &job_id)
+        .await
+        .expect("Failed to query job")
+        .expect("Job should still exist");
+    assert_eq!(job.status, JobStatus::Running);
+}
+
+#[tokio::test]
+async fn delete_by_status_deletes_all_matching_jobs() {
+    //* Given
+    let temp_db = PgTempDB::new();
+    let mut conn = DbConn::connect_with_retry(&temp_db.connection_uri())
+        .await
+        .expect("Failed to connect to metadata db");
+    conn.run_migrations()
+        .await
+        .expect("Failed to run migrations");
+
+    let worker_id = "test-worker-bulk-delete"
+        .parse()
+        .expect("Invalid worker ID");
+    heartbeat::register_worker(&mut *conn, &worker_id)
+        .await
+        .expect("Failed to register worker");
+
+    let job_desc = serde_json::json!({"test": "job"});
+    let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
+
+    // Create 3 jobs, 2 will be Completed, 1 will be Running
+    let job_id1 = jobs::insert(&mut *conn, &worker_id, &job_desc_str, JobStatus::Completed)
+        .await
+        .expect("Failed to insert job 1");
+    let job_id2 = jobs::insert(&mut *conn, &worker_id, &job_desc_str, JobStatus::Completed)
+        .await
+        .expect("Failed to insert job 2");
+    let job_id3 = jobs::insert(&mut *conn, &worker_id, &job_desc_str, JobStatus::Running)
+        .await
+        .expect("Failed to insert job 3");
+
+    //* When
+    let deleted_count = jobs::delete_by_status(&mut *conn, JobStatus::Completed)
+        .await
+        .expect("Failed to delete jobs");
+
+    //* Then
+    assert_eq!(deleted_count, 2);
+
+    // Verify the Completed jobs are gone
+    assert!(
+        jobs::get_by_id(&mut *conn, &job_id1)
+            .await
+            .expect("Failed to query job 1")
+            .is_none()
+    );
+    assert!(
+        jobs::get_by_id(&mut *conn, &job_id2)
+            .await
+            .expect("Failed to query job 2")
+            .is_none()
+    );
+
+    // Verify the Running job still exists
+    let running_job = jobs::get_by_id(&mut *conn, &job_id3)
+        .await
+        .expect("Failed to query job 3")
+        .expect("Running job should still exist");
+    assert_eq!(running_job.status, JobStatus::Running);
+}
+
+#[tokio::test]
+async fn delete_by_statuses_deletes_jobs_with_any_matching_status() {
+    //* Given
+    let temp_db = PgTempDB::new();
+    let mut conn = DbConn::connect_with_retry(&temp_db.connection_uri())
+        .await
+        .expect("Failed to connect to metadata db");
+    conn.run_migrations()
+        .await
+        .expect("Failed to run migrations");
+
+    let worker_id = "test-worker-multi-delete"
+        .parse()
+        .expect("Invalid worker ID");
+    heartbeat::register_worker(&mut *conn, &worker_id)
+        .await
+        .expect("Failed to register worker");
+
+    let job_desc = serde_json::json!({"test": "job"});
+    let job_desc_str = serde_json::to_string(&job_desc).expect("Failed to serialize");
+
+    // Create 4 jobs with different statuses
+    let job_id1 = jobs::insert(&mut *conn, &worker_id, &job_desc_str, JobStatus::Completed)
+        .await
+        .expect("Failed to insert job 1");
+    let job_id2 = jobs::insert(&mut *conn, &worker_id, &job_desc_str, JobStatus::Failed)
+        .await
+        .expect("Failed to insert job 2");
+    let job_id3 = jobs::insert(&mut *conn, &worker_id, &job_desc_str, JobStatus::Stopped)
+        .await
+        .expect("Failed to insert job 3");
+    let job_id4 = jobs::insert(&mut *conn, &worker_id, &job_desc_str, JobStatus::Running)
+        .await
+        .expect("Failed to insert job 4");
+
+    //* When
+    let deleted_count = jobs::delete_by_statuses(
+        &mut *conn,
+        [JobStatus::Completed, JobStatus::Failed, JobStatus::Stopped],
+    )
+    .await
+    .expect("Failed to delete jobs");
+
+    //* Then
+    assert_eq!(deleted_count, 3);
+
+    // Verify terminal jobs are gone
+    assert!(
+        jobs::get_by_id(&mut *conn, &job_id1)
+            .await
+            .expect("Failed to query job 1")
+            .is_none()
+    );
+    assert!(
+        jobs::get_by_id(&mut *conn, &job_id2)
+            .await
+            .expect("Failed to query job 2")
+            .is_none()
+    );
+    assert!(
+        jobs::get_by_id(&mut *conn, &job_id3)
+            .await
+            .expect("Failed to query job 3")
+            .is_none()
+    );
+
+    // Verify the Running job still exists
+    let running_job = jobs::get_by_id(&mut *conn, &job_id4)
+        .await
+        .expect("Failed to query job 4")
+        .expect("Running job should still exist");
+    assert_eq!(running_job.status, JobStatus::Running);
 }

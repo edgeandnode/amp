@@ -53,6 +53,10 @@ pub(crate) struct EvmRpcProvider {
     #[serde(default = "default_rpc_batch_size")]
     pub rpc_batch_size: usize,
     pub rate_limit_per_minute: Option<NonZeroU32>,
+    /// Whether to use `eth_getTransactionReceipt` to fetch receipts for each transaction
+    /// or `eth_getBlockReceipts` to fetch all receipts for a block in one call.
+    #[serde(default)]
+    pub fetch_receipts_per_tx: bool,
 }
 
 fn default_rpc_batch_size() -> usize {
@@ -71,7 +75,11 @@ pub fn dataset(dataset_cfg: common::DatasetValue) -> Result<Dataset, Error> {
     })
 }
 
-pub async fn client(provider: toml::Value, network: String) -> Result<JsonRpcClient, Error> {
+pub async fn client(
+    provider: toml::Value,
+    network: String,
+    final_blocks_only: bool,
+) -> Result<JsonRpcClient, Error> {
     let provider: EvmRpcProvider = provider.try_into()?;
     let request_limit = u16::max(1, provider.concurrent_request_limit.unwrap_or(1024));
 
@@ -81,6 +89,8 @@ pub async fn client(provider: toml::Value, network: String) -> Result<JsonRpcCli
         request_limit,
         provider.rpc_batch_size,
         provider.rate_limit_per_minute,
+        provider.fetch_receipts_per_tx,
+        final_blocks_only,
     )
     .map_err(Error::Client)?;
     Ok(client)
@@ -90,7 +100,7 @@ pub async fn client(provider: toml::Value, network: String) -> Result<JsonRpcCli
 #[tokio::test]
 async fn print_schema_to_readme() {
     fs_err::write(
-        "../docs/schemas/evm-rpc.md",
+        "../../docs/schemas/evm-rpc.md",
         common::catalog::schema_to_markdown(tables::all("test_network")).await,
     )
     .unwrap();

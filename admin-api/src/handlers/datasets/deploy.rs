@@ -11,6 +11,47 @@ use registry_service::handlers::register::register_manifest;
 use super::error::Error;
 use crate::{ctx::Ctx, handlers::common::validate_dataset_name};
 
+/// Handler for the `POST /datasets` and `POST /deploy` endpoints
+///
+/// Deploys a new dataset configuration to the system. Accepts a JSON payload
+/// containing the dataset deployment configuration.
+///
+/// ## Request Body
+/// - `dataset_name`: Name of the dataset to be deployed (must be valid dataset name)
+/// - `version`: Version of the dataset to deploy (must be valid version string)
+/// - `manifest`: Optional JSON string representation of the dataset manifest
+///
+/// ## Response
+/// - **200 OK**: Dataset successfully deployed
+/// - **400 Bad Request**: Invalid dataset name, version, or manifest format
+/// - **409 Conflict**: Dataset already exists with provided manifest, or manifest required but not provided
+/// - **500 Internal Server Error**: Database, scheduler, or object store error
+///
+/// ## Error Codes
+/// - `INVALID_REQUEST`: Invalid dataset name, version format, or request structure
+/// - `INVALID_MANIFEST`: Manifest JSON parsing or structure error
+/// - `MANIFEST_VALIDATION_ERROR`: Manifest name/version doesn't match request parameters
+/// - `MANIFEST_REGISTRATION_ERROR`: Failed to register manifest in system
+/// - `MANIFEST_REQUIRED`: No existing dataset found and no manifest provided
+/// - `DATASET_ALREADY_EXISTS`: Dataset exists and manifest provided (conflict)
+/// - `SCHEDULER_ERROR`: Failed to schedule dataset dump job
+/// - `DATASET_DEF_STORE_ERROR`: Failed to store dataset definition
+/// - `STORE_ERROR`: Failed to load or access dataset store
+///
+/// ## Behavior
+/// This handler supports multiple deployment scenarios:
+/// 1. **Existing dataset without manifest**: Schedules dump for existing dataset
+/// 2. **New manifest dataset**: Registers manifest then schedules dump
+/// 3. **New dataset definition**: Stores definition then schedules dump
+/// 4. **Conflict cases**: Returns appropriate errors for invalid combinations
+///
+/// The handler:
+/// - Validates dataset name and version format
+/// - Attempts to load existing dataset from store
+/// - Handles manifest registration for new datasets
+/// - Schedules dataset dump job via scheduler
+/// - Returns appropriate status codes and error messages
+#[tracing::instrument(skip_all, err)]
 pub async fn handler(
     State(ctx): State<Ctx>,
     Json(payload): Json<DeployRequest>,

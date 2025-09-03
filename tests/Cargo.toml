@@ -35,9 +35,9 @@ serde.workspace = true
 serde_yaml.workspace = true
 tonic.workspace = true
 generate-manifest = { path = "../generate-manifest" }
-substreams-datasets = { path = "../substreams-datasets" }
-evm-rpc-datasets = { path = "../evm-rpc-datasets" }
-firehose-datasets = { path = "../firehose-datasets" }
+substreams-datasets = { path = "../extractors/substreams-datasets" }
+evm-rpc-datasets = { path = "../extractors/evm-rpc-datasets" }
+firehose-datasets = { path = "../extractors/firehose-datasets" }
 rand.workspace = true
 schemars.workspace = true
 monitoring = { path = "../monitoring" }

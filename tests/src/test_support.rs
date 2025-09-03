@@ -21,7 +21,11 @@ use common::{
     query_context::parse_sql,
 };
 use dataset_store::DatasetStore;
-use dump::{consistency_check, worker::Worker};
+use dump::{
+    compaction::{SegmentSizeLimit, compactor::Compactor},
+    consistency_check,
+    worker::Worker,
+};
 use figment::{
     Figment,
     providers::{Format as _, Json},
@@ -42,13 +46,16 @@ use tracing::{debug, info, instrument};
 /// Assume the `cargo test` command is run either from the workspace root or from the crate root.
 const TEST_CONFIG_BASE_DIRS: [&str; 2] = ["tests/config", "config"];
 
-pub async fn load_test_config(config_override: Option<Figment>) -> Result<Arc<Config>, BoxError> {
+pub async fn load_test_config(
+    config_override: Option<Figment>,
+    config_name: &str,
+) -> Result<Arc<Config>, BoxError> {
     // Load .env file if it exists for environment variable support
     let _ = dotenvy::from_filename(".env");
 
     let mut path = None;
     for dir in TEST_CONFIG_BASE_DIRS.iter() {
-        let p = format!("{}/config.toml", dir);
+        let p = format!("{dir}/{config_name}");
         if matches!(
             fs::metadata(&p).map_err(|e| e.kind()),
             Err(ErrorKind::NotFound)
@@ -106,6 +113,12 @@ impl TestEnv {
         Self::new(test_name, true, None).await
     }
 
+    /// Same as [Self::temp] but accepts a custom config file name. Use this to run tests with
+    /// different configuration options.
+    pub async fn temp_with_config(test_name: &str, config_name: &str) -> Result<Self, BoxError> {
+        Self::new_with_config(test_name, true, config_name, None).await
+    }
+
     /// Create a new test environment with a temp metadata database, but the blessed data directory.
     pub async fn blessed(test_name: &str) -> Result<Self, BoxError> {
         Self::new(test_name, false, None).await
@@ -114,6 +127,15 @@ impl TestEnv {
     pub async fn new(
         test_name: &str,
         temp: bool,
+        anvil_url: Option<&str>,
+    ) -> Result<Self, BoxError> {
+        Self::new_with_config(test_name, temp, "config.toml", anvil_url).await
+    }
+
+    pub async fn new_with_config(
+        test_name: &str,
+        temp: bool,
+        config_name: &str,
         anvil_url: Option<&str>,
     ) -> Result<Self, BoxError> {
         let db = TempMetadataDb::new(*KEEP_TEMP_DIRS, DEFAULT_POOL_SIZE).await;
@@ -157,7 +179,7 @@ impl TestEnv {
             temp_dirs.push(tmp_providers);
         }
 
-        let config = load_test_config(Some(figment)).await?;
+        let config = load_test_config(Some(figment), config_name).await?;
         let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
         let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
 
@@ -305,6 +327,7 @@ pub(crate) async fn dump_dataset(
         None,
         false,
         None,
+        false,
     )
     .await?;
 
@@ -600,7 +623,7 @@ pub async fn restore_blessed_dataset(
     dataset: &str,
     metadata_db: &Arc<MetadataDb>,
 ) -> Result<Vec<Arc<PhysicalTable>>, BoxError> {
-    let config = load_test_config(None).await?;
+    let config = load_test_config(None, "config.toml").await?;
     let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
     let dataset = dataset_store.load_dataset(dataset, None).await?;
     let dataset_name = dataset.name.clone();
@@ -636,4 +659,26 @@ pub async fn restore_blessed_dataset(
     }
 
     Ok(tables)
+}
+
+/// Spawn a compaction for the given table and wait for it to complete.
+/// The compaction is configured to compact all files into a single file.
+pub async fn spawn_compaction_and_await_completion(
+    table: &Arc<PhysicalTable>,
+    config: &Arc<Config>,
+) {
+    let length = table.files().await.unwrap().len();
+    let parquet_writer_props = dump::parquet_opts(&config.parquet);
+    let mut opts = dump::compaction_opts(&config.compaction, &parquet_writer_props);
+    opts.active = true;
+    opts.size_limit = SegmentSizeLimit::new(1, 1, 1, length);
+
+    let mut compactor = Compactor::start(table, &Arc::new(opts));
+
+    compactor.spawn().await;
+
+    // Wait for compaction to finish
+    while !compactor.is_finished() {
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
 }

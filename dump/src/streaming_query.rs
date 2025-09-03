@@ -75,11 +75,35 @@ impl TableUpdates {
 ///
 /// Completion points do not necessarily follow increments of 1, as the query progresses in batches.
 pub enum QueryMessage {
-    MicrobatchStart(BlockRange),
+    MicrobatchStart { range: BlockRange, is_reorg: bool },
     Data(RecordBatch),
     MicrobatchEnd(BlockRange),
 }
 
+struct MicrobatchRange {
+    range: BlockRange,
+    direction: StreamDirection,
+}
+
+/// Direction of the stream. Helpful to distinguish reorgs, with the payload being the first block
+/// after the base of the fork.
+enum StreamDirection {
+    ForwardFrom(BlockRow),
+    ReorgFrom(BlockRow),
+}
+
+impl StreamDirection {
+    fn block(&self) -> &BlockRow {
+        match self {
+            StreamDirection::ForwardFrom(block) => block,
+            StreamDirection::ReorgFrom(block) => block,
+        }
+    }
+
+    fn is_reorg(&self) -> bool {
+        matches!(self, StreamDirection::ReorgFrom(_))
+    }
+}
 /// A handle to a streaming query that can be used to retrieve results as a stream.
 ///
 /// Aborts the query task when dropped.
@@ -217,9 +241,12 @@ impl StreamingQuery {
                     .await?;
 
             // Get the next execution range
-            let Some(range) = self.next_microbatch_range(&ctx).await? else {
+            let Some(MicrobatchRange { range, direction }) =
+                self.next_microbatch_range(&ctx).await?
+            else {
                 continue;
             };
+
             tracing::debug!("execute range [{}-{}]", range.start(), range.end());
 
             // Start microbatch execution for this chunk
@@ -237,7 +264,10 @@ impl StreamingQuery {
             // Send start message for this microbatch
             let _ = self
                 .tx
-                .send(QueryMessage::MicrobatchStart(range.clone()))
+                .send(QueryMessage::MicrobatchStart {
+                    range: range.clone(),
+                    is_reorg: direction.is_reorg(),
+                })
                 .await;
 
             // Drain the microbatch completely
@@ -266,7 +296,7 @@ impl StreamingQuery {
     async fn next_microbatch_range(
         &mut self,
         ctx: &QueryContext,
-    ) -> Result<Option<BlockRange>, BoxError> {
+    ) -> Result<Option<MicrobatchRange>, BoxError> {
         // Gather the chains for each source table.
         let chains = ctx.catalog().table_snapshots().iter().map(|s| s.segments());
 
@@ -293,36 +323,49 @@ impl StreamingQuery {
             return Ok(None);
         }
 
-        let Some(start) = self.next_microbatch_start(&blocks_ctx).await? else {
+        let Some(direction) = self.next_microbatch_start(&blocks_ctx).await? else {
             return Ok(None);
         };
+        let start = direction.block();
         let Some(end) = self
             .next_microbatch_end(&blocks_ctx, &start, common_watermark)
             .await?
         else {
             return Ok(None);
         };
-        Ok(Some(BlockRange {
-            numbers: start.number..=end.number,
-            network: self.network.clone(),
-            hash: end.hash,
-            prev_hash: start.prev_hash,
+        Ok(Some(MicrobatchRange {
+            range: BlockRange {
+                numbers: start.number..=end.number,
+                network: self.network.clone(),
+                hash: end.hash,
+                prev_hash: start.prev_hash,
+            },
+            direction,
         }))
     }
 
     async fn next_microbatch_start(
         &self,
         ctx: &QueryContext,
-    ) -> Result<Option<BlockRow>, BoxError> {
+    ) -> Result<Option<StreamDirection>, BoxError> {
         match &self.prev_range {
             // start stream
-            None => self.blocks_table_fetch(&ctx, self.start_block, None).await,
+            None => {
+                let block = self
+                    .blocks_table_fetch(&ctx, self.start_block, None)
+                    .await?;
+                Ok(block.map(StreamDirection::ForwardFrom))
+            }
             // continue stream
             Some(prev) if self.blocks_table_contains(ctx, &prev.watermark()).await? => {
-                self.blocks_table_fetch(&ctx, prev.end() + 1, None).await
+                let block = self.blocks_table_fetch(&ctx, prev.end() + 1, None).await?;
+                Ok(block.map(StreamDirection::ForwardFrom))
             }
             // rewind stream due to reorg
-            Some(prev) => self.reorg_base(ctx, prev).await,
+            Some(prev) => {
+                let block = self.reorg_base(ctx, prev).await?;
+                Ok(block.map(StreamDirection::ReorgFrom))
+            }
         }
     }
 

@@ -7,18 +7,21 @@ use common::{
     catalog::physical::{Catalog, PhysicalTable},
     metadata::{
         extract_footer_bytes_from_file,
-        parquet::{PARQUET_METADATA_KEY, ParquetMeta},
+        parquet::{PARENT_FILE_ID_METADATA_KEY, PARQUET_METADATA_KEY, ParquetMeta},
         segments::BlockRange,
     },
     parquet::{arrow::AsyncArrowWriter, errors::ParquetError, format::KeyValue},
 };
-use metadata_db::{FooterBytes, LocationId, MetadataDb};
+use metadata_db::{FileId, FooterBytes, LocationId, MetadataDb};
 use object_store::{ObjectMeta, buffered::BufWriter, path::Path};
 use rand::RngCore as _;
-use tracing::{debug, trace};
+use tracing::{debug, instrument, trace};
 use url::Url;
 
-use crate::metrics;
+use crate::{
+    compaction::{CompactionProperties, NozzleCompactor},
+    metrics,
+};
 
 const MAX_PARTITION_BLOCK_RANGE: u64 = 1_000_000;
 
@@ -36,6 +39,7 @@ impl RawDatasetWriter {
         catalog: Catalog,
         metadata_db: Arc<MetadataDb>,
         opts: ParquetWriterProperties,
+        compaction_opts: &Arc<CompactionProperties>,
         partition_size: u64,
         missing_ranges_by_table: BTreeMap<String, Vec<RangeInclusive<BlockNum>>>,
         metrics: Option<Arc<metrics::MetricsRegistry>>,
@@ -48,6 +52,7 @@ impl RawDatasetWriter {
             let writer = RawTableWriter::new(
                 table.clone(),
                 opts.clone(),
+                compaction_opts,
                 partition_size,
                 ranges,
                 metrics.clone(),
@@ -63,7 +68,13 @@ impl RawDatasetWriter {
     pub async fn write(&mut self, table_rows: RawTableRows) -> Result<(), BoxError> {
         let table_name = table_rows.table.name();
         let writer = self.writers.get_mut(table_name).unwrap();
-        if let Some((parquet_meta, object_meta, footer)) = writer.write(table_rows).await? {
+        if let Some(ParquetFileWriterOutput {
+            parquet_meta,
+            object_meta,
+            footer,
+            ..
+        }) = writer.write(table_rows).await?
+        {
             let location_id = writer.table.location_id();
             commit_metadata(
                 &self.metadata_db,
@@ -82,7 +93,13 @@ impl RawDatasetWriter {
     pub async fn close(self) -> Result<(), BoxError> {
         for (_, writer) in self.writers {
             let location_id = writer.table.location_id();
-            if let Some((parquet_meta, object_meta, footer)) = writer.close().await? {
+            if let Some(ParquetFileWriterOutput {
+                parquet_meta,
+                object_meta,
+                footer,
+                ..
+            }) = writer.close().await?
+            {
                 commit_metadata(
                     &self.metadata_db,
                     parquet_meta,
@@ -120,7 +137,7 @@ pub async fn commit_metadata(
             object_e_tag,
             object_version,
             parquet_meta,
-            footer,
+            &footer,
         )
         .await?;
 
@@ -144,12 +161,15 @@ struct RawTableWriter {
     current_range: Option<BlockRange>,
 
     metrics: Option<Arc<metrics::MetricsRegistry>>,
+
+    compactor: NozzleCompactor,
 }
 
 impl RawTableWriter {
     pub fn new(
         table: Arc<PhysicalTable>,
         opts: ParquetWriterProperties,
+        compaction_opts: &Arc<CompactionProperties>,
         partition_size: u64,
         missing_ranges: Vec<RangeInclusive<BlockNum>>,
         metrics: Option<Arc<metrics::MetricsRegistry>>,
@@ -164,6 +184,9 @@ impl RawTableWriter {
             )?),
             None => None,
         };
+
+        let nozzle_compactor = NozzleCompactor::start(table.clone(), compaction_opts.clone());
+
         Ok(Self {
             table,
             opts,
@@ -172,13 +195,14 @@ impl RawTableWriter {
             current_file,
             current_range: None,
             metrics,
+            compactor: nozzle_compactor,
         })
     }
 
     pub async fn write(
         &mut self,
         table_rows: RawTableRows,
-    ) -> Result<Option<(ParquetMeta, ObjectMeta, FooterBytes)>, BoxError> {
+    ) -> Result<Option<ParquetFileWriterOutput>, BoxError> {
         assert_eq!(table_rows.table.name(), self.table.table_name());
 
         let mut parquet_meta = None;
@@ -276,7 +300,7 @@ impl RawTableWriter {
         Ok(parquet_meta)
     }
 
-    async fn close(mut self) -> Result<Option<(ParquetMeta, ObjectMeta, FooterBytes)>, BoxError> {
+    async fn close(mut self) -> Result<Option<ParquetFileWriterOutput>, BoxError> {
         if self.current_file.is_none() {
             assert!(self.ranges_to_write.is_empty());
             return Ok(None);
@@ -286,14 +310,14 @@ impl RawTableWriter {
         self.close_current_file().await.map(Some)
     }
 
-    async fn close_current_file(
-        &mut self,
-    ) -> Result<(ParquetMeta, ObjectMeta, FooterBytes), BoxError> {
+    async fn close_current_file(&mut self) -> Result<ParquetFileWriterOutput, BoxError> {
         assert!(self.current_file.is_some());
         let file = self.current_file.take().unwrap();
         let range = self.current_range.take().unwrap();
 
-        let metadata = file.close(range).await?;
+        let metadata = file.close(range, vec![]).await?;
+
+        self.compactor.try_run();
 
         if let Some(ref metrics) = self.metrics {
             let dataset_name = self.table.dataset().name.clone();
@@ -340,15 +364,17 @@ impl ParquetFileWriter {
     }
 
     #[must_use]
+    #[instrument(skip_all, fields(location = %self.table.location_id()), err)]
     pub async fn close(
         mut self,
         range: BlockRange,
-    ) -> Result<(ParquetMeta, ObjectMeta, FooterBytes), BoxError> {
+        parent_ids: Vec<FileId>,
+    ) -> Result<ParquetFileWriterOutput, BoxError> {
         self.writer.flush().await?;
 
         debug!(
             "wrote {} for range {} to {}",
-            self.file_url,
+            self.filename,
             range.start(),
             range.end(),
         );
@@ -359,11 +385,20 @@ impl ParquetFileWriter {
             created_at: Timestamp::now(),
             ranges: vec![range],
         };
+
         let kv_metadata = KeyValue::new(
             PARQUET_METADATA_KEY.to_string(),
             serde_json::to_string(&parquet_meta)?,
         );
         self.writer.append_key_value_metadata(kv_metadata);
+
+        let parent_file_id_metadata = KeyValue::new(
+            PARENT_FILE_ID_METADATA_KEY.to_string(),
+            serde_json::to_string(&parent_ids)?,
+        );
+        self.writer
+            .append_key_value_metadata(parent_file_id_metadata);
+
         self.writer.close().await?;
 
         let location = Path::from_url_path(self.file_url.path())?;
@@ -372,7 +407,15 @@ impl ParquetFileWriter {
         let footer =
             extract_footer_bytes_from_file(&object_meta, self.table.object_store()).await?;
 
-        Ok((parquet_meta, object_meta, footer))
+        let location_id = self.table.location_id();
+
+        Ok(ParquetFileWriterOutput {
+            parquet_meta,
+            object_meta,
+            location_id,
+            parent_ids,
+            footer,
+        })
     }
 
     // This is calculate as:
@@ -380,6 +423,14 @@ impl ParquetFileWriter {
     pub fn bytes_written(&self) -> usize {
         self.writer.bytes_written() + self.writer.in_progress_size()
     }
+}
+
+pub struct ParquetFileWriterOutput {
+    pub(crate) parquet_meta: ParquetMeta,
+    pub(crate) object_meta: ObjectMeta,
+    pub(crate) location_id: LocationId,
+    pub(crate) parent_ids: Vec<FileId>,
+    pub(crate) footer: FooterBytes,
 }
 
 fn limit_ranges(
