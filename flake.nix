@@ -34,7 +34,13 @@
       formatter = forAllSystems ({ pkgs }: pkgs.alejandra);
       devShells = forAllSystems ({ pkgs, toolchain }: {
         default = pkgs.mkShell {
+          shellHook = ''
+            # This is not ideal, but it's needed to support our `just` commands.
+            rustup install nightly
+          '';
+
           packages = with pkgs; [
+            rustup
             toolchain
             foundry-bin
             solc
