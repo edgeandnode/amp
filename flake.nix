@@ -36,7 +36,7 @@
         default = pkgs.mkShell {
           shellHook = ''
             # This is not ideal, but it's needed to support our `just` commands.
-            rustup install nightly
+            rustup install nightly --profile minimal --component rustfmt
           '';
 
           packages = with pkgs; [
