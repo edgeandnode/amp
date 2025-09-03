@@ -23,7 +23,7 @@ function HomePage() {
       <div className="md:col-span-2 xl:col-span-3">
         <QueryPlaygroundWrapper />
       </div>
-      <div className="h-full border-l border-gray-300 dark:border-white/10 flex flex-col gap-y-4 overflow-y-auto">
+      <div className="h-full border-l border-space-1500 flex flex-col gap-y-4 overflow-y-auto">
         <SchemaBrowser />
         <MetadataBrowser />
         <UDFBrowser />

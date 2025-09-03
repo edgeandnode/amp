@@ -158,29 +158,20 @@ importers:
   typescript/studio:
     dependencies:
       '@base-ui-components/react':
-        specifier: ^1.0.0-beta.2
-        version: 1.0.0-beta.2(@types/react@19.1.12)(react-dom@19.1.1(react@19.1.1))(react@19.1.1)
+        specifier: ^1.0.0-beta.3
+        version: 1.0.0-beta.3(@types/react@19.1.12)(react-dom@19.1.1(react@19.1.1))(react@19.1.1)
       '@connectrpc/connect':
         specifier: ^2.1.0
         version: 2.1.0(@bufbuild/protobuf@2.6.3)
       '@connectrpc/connect-web':
         specifier: ^2.1.0
         version: 2.1.0(@bufbuild/protobuf@2.6.3)(@connectrpc/connect@2.1.0(@bufbuild/protobuf@2.6.3))
-      '@graphprotocol/gds-css':
-        specifier: https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-css@787178d
-        version: https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-css@787178d(tailwindcss@4.1.12)
-      '@graphprotocol/gds-icons':
-        specifier: https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-icons@787178d
-        version: https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-icons@787178d
       '@graphprotocol/gds-react':
         specifier: https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-react@787178d
         version: https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-react@787178d(react-dom@19.1.1(react@19.1.1))(react@19.1.1)(tailwindcss@4.1.12)
       '@monaco-editor/react':
         specifier: ^4.7.0
         version: 4.7.0(monaco-editor@0.52.2)(react-dom@19.1.1(react@19.1.1))(react@19.1.1)
-      '@phosphor-icons/react':
-        specifier: ^2.1.10
-        version: 2.1.10(react-dom@19.1.1(react@19.1.1))(react@19.1.1)
       '@t3-oss/env-core':
         specifier: ^0.13.8
         version: 0.13.8(typescript@5.8.3)(zod@4.1.5)
@@ -425,6 +416,10 @@ packages:
     resolution: {integrity: sha512-vbavdySgbTTrmFE+EsiqUTzlOr5bzlnJtUv9PynGCAKvfQqjIXbvFdumPM/GxMDfyuGMJaJAU6TO4zc1Jf1i8Q==}
     engines: {node: '>=6.9.0'}
 
+  '@babel/runtime@7.28.3':
+    resolution: {integrity: sha512-9uIQ10o0WGdpP6GDhXcdOJPJuDgFtIDtN/9+ArJQ2NAfAmiuhTQdzkaTGR33v43GYS2UrSA0eX2pPPHoFVvpxA==}
+    engines: {node: '>=6.9.0'}
+
   '@babel/template@7.27.2':
     resolution: {integrity: sha512-LPDZ85aEJyYSd18/DkjNh4/y1ntkE5KwUHWTiqgRxruuZL2F1yuHligVHLvcHY2vMHXttKFpJn6LwfI7cw7ODw==}
     engines: {node: '>=6.9.0'}
@@ -445,8 +440,8 @@ packages:
     resolution: {integrity: sha512-ruv7Ae4J5dUYULmeXw1gmb7rYRz57OWCPM57pHojnLq/3Z1CK2lNSLTCVjxVk1F/TZHwOZZrOWi0ur95BbLxNQ==}
     engines: {node: '>=6.9.0'}
 
-  '@base-ui-components/react@1.0.0-beta.2':
-    resolution: {integrity: sha512-jfAUfSgXvsfr8mQi7r/6gLG8U1Ybr77NN8WK5IXXM0c/hBvFDBtvUfwDJACV0gXiYbSKpA+dRzZz01V1tULobA==}
+  '@base-ui-components/react@1.0.0-beta.3':
+    resolution: {integrity: sha512-4sAq6zmDA9ixV2HRjjeM1+tSEw5R6nvGjXUQmFoQnC3DZLEUdwO94gWDmUDdpoDuChn27jdbaJs9F0Ih4w2UAA==}
     engines: {node: '>=14.0.0'}
     peerDependencies:
       '@types/react': ^17 || ^18 || ^19
@@ -456,8 +451,8 @@ packages:
       '@types/react':
         optional: true
 
-  '@base-ui-components/utils@0.1.0':
-    resolution: {integrity: sha512-9+uaWyF1o/PgXqHLJnC81IIG0HlV3o9eFCQ5hWZDMx5NHrFk0rrwqEFGQOB8lti/rnbxNPi+kYYw1D4e8xSn/Q==}
+  '@base-ui-components/utils@0.1.1':
+    resolution: {integrity: sha512-HWXZA8upEKgrdL1rQqxWu1H+2tB2cXzY2jCxvgnpUv3eoWN2jldhXxMZnXIjZF7jahGxSWXfSIM/qskiTWFFxA==}
     peerDependencies:
       '@types/react': ^17 || ^18 || ^19
       react: ^17 || ^18 || ^19
@@ -891,11 +886,11 @@ packages:
   '@floating-ui/core@1.7.3':
     resolution: {integrity: sha512-sGnvb5dmrJaKEZ+LDIpguvdX3bDlEllmv4/ClQ9awcmCZrlx5jQyyMWFM5kBI+EyNOCDDiKk8il0zeuX3Zlg/w==}
 
-  '@floating-ui/dom@1.7.3':
-    resolution: {integrity: sha512-uZA413QEpNuhtb3/iIKoYMSK07keHPYeXF02Zhd6e213j+d1NamLix/mCLxBUDW/Gx52sPH2m+chlUsyaBs/Ag==}
+  '@floating-ui/dom@1.7.4':
+    resolution: {integrity: sha512-OOchDgh4F2CchOX94cRVqhvy7b3AFb+/rQXyswmzmGakRfkMgoWVjfnLWkRirfLEfuD4ysVW16eXzwt3jHIzKA==}
 
-  '@floating-ui/react-dom@2.1.5':
-    resolution: {integrity: sha512-HDO/1/1oH9fjj4eLgegrlH3dklZpHtUYYFiVwMUwfGvk9jWDRWqkklA2/NFScknrcNSspbV868WjXORvreDX+Q==}
+  '@floating-ui/react-dom@2.1.6':
+    resolution: {integrity: sha512-4JX6rEatQEvlmgU80wZyq9RT96HZJa88q8hp0pBd+LrczeDI4o6uA2M+uvxngVHo4Ihr8uibXxH6+70zhAFrVw==}
     peerDependencies:
       react: '>=16.8.0'
       react-dom: '>=16.8.0'
@@ -903,21 +898,11 @@ packages:
   '@floating-ui/utils@0.2.10':
     resolution: {integrity: sha512-aGTxbpbg8/b5JfU1HXSrbH3wXZuLPJcNEcZQFMxLs3oSzgtVu6nFPkbbGGUvBcUjKV2YyB9Wxxabo+HEH9tcRQ==}
 
-  '@graphprotocol/gds-css@https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-css@787178d':
-    resolution: {tarball: https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-css@787178d}
-    version: 0.0.1
-    peerDependencies:
-      tailwindcss: ^4.1.11
-
   '@graphprotocol/gds-css@https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-css@787178de27d11b18fd944d59ce9ed9a77ffd99ea':
     resolution: {tarball: https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-css@787178de27d11b18fd944d59ce9ed9a77ffd99ea}
     version: 0.0.1
     peerDependencies:
       tailwindcss: ^4.1.11
-
-  '@graphprotocol/gds-icons@https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-icons@787178d':
-    resolution: {tarball: https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-icons@787178d}
-    version: 0.0.1
 
   '@graphprotocol/gds-icons@https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-icons@787178de27d11b18fd944d59ce9ed9a77ffd99ea':
     resolution: {tarball: https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-icons@787178de27d11b18fd944d59ce9ed9a77ffd99ea}
@@ -1146,13 +1131,6 @@ packages:
   '@parcel/watcher@2.5.1':
     resolution: {integrity: sha512-dfUnCxiN9H4ap84DvD2ubjw+3vUNpstxa0TneY/Paat8a3R4uQZDLSvWjmznAY/DoahqTHl9V46HF/Zs3F29pg==}
     engines: {node: '>= 10.0.0'}
-
-  '@phosphor-icons/react@2.1.10':
-    resolution: {integrity: sha512-vt8Tvq8GLjheAZZYa+YG/pW7HDbov8El/MANW8pOAz4eGxrwhnbfrQZq0Cp4q8zBEu8NIhHdnr+r8thnfRSNYA==}
-    engines: {node: '>=10'}
-    peerDependencies:
-      react: '>= 16.8'
-      react-dom: '>= 16.8'
 
   '@rolldown/pluginutils@1.0.0-beta.32':
     resolution: {integrity: sha512-QReCdvxiUZAPkvp1xpAg62IeNzykOFA6syH2CnClif4YmALN1XKpB39XneL80008UbtMShthSVDKmrx05N1q/g==}
@@ -4193,6 +4171,8 @@ snapshots:
 
   '@babel/runtime@7.27.6': {}
 
+  '@babel/runtime@7.28.3': {}
+
   '@babel/template@7.27.2':
     dependencies:
       '@babel/code-frame': 7.27.1
@@ -4233,11 +4213,11 @@ snapshots:
       '@babel/helper-string-parser': 7.27.1
       '@babel/helper-validator-identifier': 7.27.1
 
-  '@base-ui-components/react@1.0.0-beta.2(@types/react@19.1.12)(react-dom@19.1.1(react@19.1.1))(react@19.1.1)':
+  '@base-ui-components/react@1.0.0-beta.3(@types/react@19.1.12)(react-dom@19.1.1(react@19.1.1))(react@19.1.1)':
     dependencies:
-      '@babel/runtime': 7.27.6
-      '@base-ui-components/utils': 0.1.0(@types/react@19.1.12)(react-dom@19.1.1(react@19.1.1))(react@19.1.1)
-      '@floating-ui/react-dom': 2.1.5(react-dom@19.1.1(react@19.1.1))(react@19.1.1)
+      '@babel/runtime': 7.28.3
+      '@base-ui-components/utils': 0.1.1(@types/react@19.1.12)(react-dom@19.1.1(react@19.1.1))(react@19.1.1)
+      '@floating-ui/react-dom': 2.1.6(react-dom@19.1.1(react@19.1.1))(react@19.1.1)
       '@floating-ui/utils': 0.2.10
       react: 19.1.1
       react-dom: 19.1.1(react@19.1.1)
@@ -4247,9 +4227,9 @@ snapshots:
     optionalDependencies:
       '@types/react': 19.1.12
 
-  '@base-ui-components/utils@0.1.0(@types/react@19.1.12)(react-dom@19.1.1(react@19.1.1))(react@19.1.1)':
+  '@base-ui-components/utils@0.1.1(@types/react@19.1.12)(react-dom@19.1.1(react@19.1.1))(react@19.1.1)':
     dependencies:
-      '@babel/runtime': 7.27.6
+      '@babel/runtime': 7.28.3
       '@floating-ui/utils': 0.2.10
       react: 19.1.1
       react-dom: 19.1.1(react@19.1.1)
@@ -4601,28 +4581,22 @@ snapshots:
     dependencies:
       '@floating-ui/utils': 0.2.10
 
-  '@floating-ui/dom@1.7.3':
+  '@floating-ui/dom@1.7.4':
     dependencies:
       '@floating-ui/core': 1.7.3
       '@floating-ui/utils': 0.2.10
 
-  '@floating-ui/react-dom@2.1.5(react-dom@19.1.1(react@19.1.1))(react@19.1.1)':
+  '@floating-ui/react-dom@2.1.6(react-dom@19.1.1(react@19.1.1))(react@19.1.1)':
     dependencies:
-      '@floating-ui/dom': 1.7.3
+      '@floating-ui/dom': 1.7.4
       react: 19.1.1
       react-dom: 19.1.1(react@19.1.1)
 
   '@floating-ui/utils@0.2.10': {}
 
-  '@graphprotocol/gds-css@https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-css@787178d(tailwindcss@4.1.12)':
-    dependencies:
-      tailwindcss: 4.1.12
-
   '@graphprotocol/gds-css@https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-css@787178de27d11b18fd944d59ce9ed9a77ffd99ea(tailwindcss@4.1.12)':
     dependencies:
       tailwindcss: 4.1.12
-
-  '@graphprotocol/gds-icons@https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-icons@787178d': {}
 
   '@graphprotocol/gds-icons@https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-icons@787178de27d11b18fd944d59ce9ed9a77ffd99ea': {}
 
@@ -4810,11 +4784,6 @@ snapshots:
       '@parcel/watcher-win32-arm64': 2.5.1
       '@parcel/watcher-win32-ia32': 2.5.1
       '@parcel/watcher-win32-x64': 2.5.1
-
-  '@phosphor-icons/react@2.1.10(react-dom@19.1.1(react@19.1.1))(react@19.1.1)':
-    dependencies:
-      react: 19.1.1
-      react-dom: 19.1.1(react@19.1.1)
 
   '@rolldown/pluginutils@1.0.0-beta.32': {}
 

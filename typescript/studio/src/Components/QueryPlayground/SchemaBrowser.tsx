@@ -1,7 +1,8 @@
 "use client"
 
 import { Accordion } from "@base-ui-components/react/accordion"
-import { FolderIcon, FolderOpenIcon } from "@phosphor-icons/react"
+import { Button } from "@graphprotocol/gds-react"
+import { FolderIcon, FolderOpenIcon } from "@graphprotocol/gds-react/icons"
 
 import { useQueryableEventsQuery } from "@/hooks/useQueryableEventsQuery"
 
@@ -10,7 +11,7 @@ export function SchemaBrowser() {
 
   return (
     <div className="flex flex-col gap-y-4 p-6">
-      <p className="text-sm">Schema</p>
+      <p className="text-14">Schema</p>
       <Accordion.Root className="w-full box-border flex flex-col justify-center gap-y-3">
         {queryableEvents.map((event) => (
           <Accordion.Item
@@ -18,38 +19,42 @@ export function SchemaBrowser() {
             className="flex flex-col gap-y-2"
           >
             <Accordion.Header className="m-0">
-              <Accordion.Trigger className="group flex items-start relative w-full gap-x-1 px-0 py-2 text-sm cursor-pointer">
+              <Accordion.Trigger className="group flex items-start relative w-full gap-x-1 px-0 py-2 cursor-pointer">
                 <FolderIcon
-                  className="size-4 text-inherit group-data-[panel-open]:hidden block"
+                  className="text-inherit group-data-[panel-open]:hidden block"
                   aria-hidden="true"
+                  size={5}
+                  variant="regular"
+                  alt=""
                 />
                 <FolderOpenIcon
-                  className="size-4 text-inherit group-data-[panel-open]:block hidden"
+                  className="text-inherit group-data-[panel-open]:block hidden"
                   aria-hidden="true"
+                  size={5}
+                  variant="regular"
+                  alt=""
                 />
                 <div className="w-full flex flex-col gap-y-1 items-center justify-start">
-                  <span className="self-start text-gray-950 dark:text-white">
-                    {event.name}
-                  </span>
-                  <span className="text-xs text-gray-600 dark:text-white/55 self-start">
+                  <span className="self-start text-14">{event.name}</span>
+                  <span className="text-12 text-space-700 self-start">
                     {event.source}
                   </span>
                 </div>
               </Accordion.Trigger>
             </Accordion.Header>
-            <Accordion.Panel className="box-border overflow-y-auto overflow-x-hidden border-l border-gray-300 dark:border-white/25 ml-4 pl-1">
+            <Accordion.Panel className="box-border overflow-y-auto overflow-x-hidden border-l border-white/20 ml-4 pl-1">
               <div className="w-full flex flex-col gap-y-1">
                 {event.params.map((param) => (
-                  <button
+                  <Button
                     key={`${event.signature}__${param.name}`}
                     type="button"
-                    className="w-full flex items-center justify-between text-sm cursor-pointer border-none outline-none hover:bg-gray-200 hover:dark:bg-slate-800 px-4 py-1.5 rounded-md"
+                    className="w-full flex items-center justify-between text-sm cursor-pointer border-none outline-none hover:bg-space-1200 px-4 py-1.5 rounded-4"
                   >
-                    <span>{param.name}</span>
-                    <span className="ml-auto text-purple-500/70">
+                    <span className="text-14">{param.name}</span>
+                    <span className="ml-auto text-purple-200">
                       {param.datatype}
                     </span>
-                  </button>
+                  </Button>
                 ))}
               </div>
             </Accordion.Panel>

@@ -15,14 +15,11 @@
     "check": "prettier --write . && eslint --fix"
   },
   "dependencies": {
-    "@base-ui-components/react": "^1.0.0-beta.2",
+    "@base-ui-components/react": "^1.0.0-beta.3",
     "@connectrpc/connect-web": "^2.1.0",
     "@connectrpc/connect": "^2.1.0",
-    "@graphprotocol/gds-css": "https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-css@787178d",
-    "@graphprotocol/gds-icons": "https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-icons@787178d",
     "@graphprotocol/gds-react": "https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-react@787178d",
     "@monaco-editor/react": "^4.7.0",
-    "@phosphor-icons/react": "^2.1.10",
     "@t3-oss/env-core": "^0.13.8",
     "@tailwindcss/vite": "^4.1.12",
     "@tanstack/match-sorter-utils": "^8.19.4",

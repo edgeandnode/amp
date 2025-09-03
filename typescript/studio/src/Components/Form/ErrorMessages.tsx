@@ -10,10 +10,7 @@ export function ErrorMessages({
       {errors.map((error, idx) => {
         const key = `${id}__errorMessage__${idx}`
         return (
-          <div
-            key={key}
-            className="text-sm text-red-600 dark:text-red-500 w-full"
-          >
+          <div key={key} className="text-sm text-shadow-sonja-600 w-full">
             {typeof error === "string" ? error : error.message}
           </div>
         )
