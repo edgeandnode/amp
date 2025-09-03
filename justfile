@@ -2,43 +2,50 @@
 default:
     @just --list
 
-# Format all Rust code (cargo fmt)
+
+## Workspace management
+
+# Clean workspace (cargo clean)
+clean:
+    cargo clean
+
+
+## Code formatting
+# NOTE: The formatting commands below use the RUSTFMT environment variable to
+#  explicitly specify rustup's nightly rustfmt binary. This ensures nightly
+#  formatting features work correctly in both standard and Nix environments,
+#  preventing "unstable features only available in nightly" warnings that occur
+#  when Nix's stable rustfmt takes PATH precedenShogce over rustup's nightly version.
+
+# Format Rust code (cargo fmt)
 fmt:
-    cargo fmt --all
+    RUSTFMT="$(rustup which --toolchain nightly rustfmt)" cargo fmt --all
 
 # Check Rust code format (cargo fmt --check)
 fmt-check:
-    cargo fmt --all -- --check
+    RUSTFMT="$(rustup which --toolchain nightly rustfmt)" cargo fmt --all -- --check
 
-# Nightly rustfmt configuration flags
-# --unstable-features:
-#    Enable unstable/nightly-only formatting features. Required for rustfmt to enable the features below.
-#    See: https://rust-lang.github.io/rustfmt/?version=v1&search=#unstable_features
-# --config imports_granularity=Crate:
-#    Controls how imports are grouped together (at crate level)
-#    See: https://rust-lang.github.io/rustfmt/?version=v1&search=#imports_granularity
-# --config group_imports=StdExternalCrate:
-#    Groups imports into three categories: std, external crates, and local imports
-#    See: https://rust-lang.github.io/rustfmt/?version=v1&search=#group_imports
-# --config format_code_in_doc_comments=true:
-#    Enables formatting of code blocks in documentation comments
-#    See: https://rust-lang.github.io/rustfmt/?version=v1&search=#format_code_in_doc_comments
-FMT_NIGHTLY_FLAGS := "--unstable-features" + \
-    " --config imports_granularity=Crate" + \
-    " --config group_imports=StdExternalCrate" + \
-    " --config format_code_in_doc_comments=true"
 
-# Format all Rust code using nightly (cargo +nightly fmt)
-fmt-nightly:
-    cargo +nightly fmt --all -- {{FMT_NIGHTLY_FLAGS}}
-
-# Check Rust code format using nightly (cargo +nightly fmt --check)
-fmt-check-nightly:
-    cargo +nightly fmt --all -- {{FMT_NIGHTLY_FLAGS}} --check
+## Linting
 
 # Check Rust code (cargo check)
 check *EXTRA_FLAGS:
     cargo check {{EXTRA_FLAGS}}
+
+# Check all Rust code (cargo check --tests)
+check-all *EXTRA_FLAGS:
+    cargo check --tests {{EXTRA_FLAGS}}
+
+# Lint Rust code (cargo clippy)
+clippy *EXTRA_FLAGS:
+    cargo clippy {{EXTRA_FLAGS}}
+
+# Lint all Rust code (cargo clippy --tests)
+clippy-all *EXTRA_FLAGS:
+    cargo clippy --tests {{EXTRA_FLAGS}}
+
+
+## Testing
 
 # Run all tests (unit and integration)
 test *EXTRA_FLAGS:
@@ -48,6 +55,13 @@ test *EXTRA_FLAGS:
     if command -v "cargo-nextest" &> /dev/null; then
         cargo nextest run {{EXTRA_FLAGS}} --workspace
     else
+        >&2 echo "================================================================="
+        >&2 echo "WARNING: cargo-nextest not found - using 'cargo test' fallback ⚠️"
+        >&2 echo ""
+        >&2 echo "For faster test execution, consider installing cargo-nextest:"
+        >&2 echo "  cargo install --locked cargo-nextest@^0.9"
+        >&2 echo "================================================================="
+        sleep 1 # Give the user a moment to read the warning
         cargo test {{EXTRA_FLAGS}} --workspace
     fi
 
@@ -59,6 +73,13 @@ test-unit *EXTRA_FLAGS:
     if command -v "cargo-nextest" &> /dev/null; then
         cargo nextest run {{EXTRA_FLAGS}} --workspace --exclude tests 
     else
+        >&2 echo "================================================================="
+        >&2 echo "WARNING: cargo-nextest not found - using 'cargo test' fallback ⚠️"
+        >&2 echo ""
+        >&2 echo "For faster test execution, consider installing cargo-nextest:"
+        >&2 echo "  cargo install --locked cargo-nextest@^0.9"
+        >&2 echo "================================================================="
+        sleep 1 # Give the user a moment to read the warning
         cargo test {{EXTRA_FLAGS}} --workspace --exclude tests -- --nocapture
     fi
 
@@ -70,6 +91,13 @@ test-it *EXTRA_FLAGS:
     if command -v "cargo-nextest" &> /dev/null; then
         cargo nextest run {{EXTRA_FLAGS}} --package tests
     else
+        >&2 echo "================================================================="
+        >&2 echo "WARNING: cargo-nextest not found - using 'cargo test' fallback ⚠️"
+        >&2 echo ""
+        >&2 echo "For faster test execution, consider installing cargo-nextest:"
+        >&2 echo "  cargo install --locked cargo-nextest@^0.9"
+        >&2 echo "================================================================="
+        sleep 1 # Give the user a moment to read the warning
         cargo test {{EXTRA_FLAGS}} --package tests -- --nocapture
     fi
 
@@ -81,13 +109,17 @@ test-local *EXTRA_FLAGS:
     if command -v "cargo-nextest" &> /dev/null; then
         cargo nextest run --profile local {{EXTRA_FLAGS}} --workspace
     else
-        echo "This command requires cargo-nextest to filter tests"
+        >&2 echo "================================================="
+        >&2 echo "ERROR: This command requires 'cargo-nextest' ❌"
+        >&2 echo ""
+        >&2 echo "Please install cargo-nextest to use this command:"
+        >&2 echo "  cargo install --locked cargo-nextest@^0.9"
+        >&2 echo "================================================="
         exit 1
     fi
 
-# Clean workspace (cargo clean)
-clean:
-    cargo clean
+
+## Misc
 
 # Install Git hooks
 install-git-hooks:
