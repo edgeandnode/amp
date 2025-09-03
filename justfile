@@ -11,19 +11,14 @@ clean:
 
 
 ## Code formatting
-# NOTE: The formatting commands below use the RUSTFMT environment variable to
-#  explicitly specify rustup's nightly rustfmt binary. This ensures nightly
-#  formatting features work correctly in both standard and Nix environments,
-#  preventing "unstable features only available in nightly" warnings that occur
-#  when Nix's stable rustfmt takes PATH precedenShogce over rustup's nightly version.
 
 # Format Rust code (cargo fmt)
 fmt:
-    RUSTFMT="$(rustup which --toolchain nightly rustfmt)" cargo fmt --all
+    cargo +nightly fmt --all
 
 # Check Rust code format (cargo fmt --check)
 fmt-check:
-    RUSTFMT="$(rustup which --toolchain nightly rustfmt)" cargo fmt --all -- --check
+    cargo +nightly fmt --all -- --check
 
 
 ## Linting
