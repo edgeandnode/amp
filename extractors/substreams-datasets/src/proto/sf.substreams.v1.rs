@@ -7,6 +7,16 @@ pub struct Modules {
     #[prost(message, repeated, tag = "2")]
     pub binaries: ::prost::alloc::vec::Vec<Binary>,
 }
+impl ::prost::Name for Modules {
+    const NAME: &'static str = "Modules";
+    const PACKAGE: &'static str = "sf.substreams.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "sf.substreams.v1.Modules".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/sf.substreams.v1.Modules".into()
+    }
+}
 /// Binary represents some code compiled to its binary form.
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -15,6 +25,16 @@ pub struct Binary {
     pub r#type: ::prost::alloc::string::String,
     #[prost(bytes = "vec", tag = "2")]
     pub content: ::prost::alloc::vec::Vec<u8>,
+}
+impl ::prost::Name for Binary {
+    const NAME: &'static str = "Binary";
+    const PACKAGE: &'static str = "sf.substreams.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "sf.substreams.v1.Binary".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/sf.substreams.v1.Binary".into()
+    }
 }
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -46,11 +66,31 @@ pub mod module {
         #[prost(string, tag = "2")]
         pub query: ::prost::alloc::string::String,
     }
+    impl ::prost::Name for BlockFilter {
+        const NAME: &'static str = "BlockFilter";
+        const PACKAGE: &'static str = "sf.substreams.v1";
+        fn full_name() -> ::prost::alloc::string::String {
+            "sf.substreams.v1.Module.BlockFilter".into()
+        }
+        fn type_url() -> ::prost::alloc::string::String {
+            "/sf.substreams.v1.Module.BlockFilter".into()
+        }
+    }
     #[derive(serde::Serialize, serde::Deserialize)]
     #[derive(Clone, PartialEq, ::prost::Message)]
     pub struct KindMap {
         #[prost(string, tag = "1")]
         pub output_type: ::prost::alloc::string::String,
+    }
+    impl ::prost::Name for KindMap {
+        const NAME: &'static str = "KindMap";
+        const PACKAGE: &'static str = "sf.substreams.v1";
+        fn full_name() -> ::prost::alloc::string::String {
+            "sf.substreams.v1.Module.KindMap".into()
+        }
+        fn type_url() -> ::prost::alloc::string::String {
+            "/sf.substreams.v1.Module.KindMap".into()
+        }
     }
     #[derive(serde::Serialize, serde::Deserialize)]
     #[derive(Clone, PartialEq, ::prost::Message)]
@@ -129,11 +169,31 @@ pub mod module {
             }
         }
     }
+    impl ::prost::Name for KindStore {
+        const NAME: &'static str = "KindStore";
+        const PACKAGE: &'static str = "sf.substreams.v1";
+        fn full_name() -> ::prost::alloc::string::String {
+            "sf.substreams.v1.Module.KindStore".into()
+        }
+        fn type_url() -> ::prost::alloc::string::String {
+            "/sf.substreams.v1.Module.KindStore".into()
+        }
+    }
     #[derive(serde::Serialize, serde::Deserialize)]
     #[derive(Clone, PartialEq, ::prost::Message)]
     pub struct KindBlockIndex {
         #[prost(string, tag = "1")]
         pub output_type: ::prost::alloc::string::String,
+    }
+    impl ::prost::Name for KindBlockIndex {
+        const NAME: &'static str = "KindBlockIndex";
+        const PACKAGE: &'static str = "sf.substreams.v1";
+        fn full_name() -> ::prost::alloc::string::String {
+            "sf.substreams.v1.Module.KindBlockIndex".into()
+        }
+        fn type_url() -> ::prost::alloc::string::String {
+            "/sf.substreams.v1.Module.KindBlockIndex".into()
+        }
     }
     #[derive(serde::Serialize, serde::Deserialize)]
     #[derive(Clone, PartialEq, ::prost::Message)]
@@ -150,12 +210,32 @@ pub mod module {
             #[prost(string, tag = "1")]
             pub r#type: ::prost::alloc::string::String,
         }
+        impl ::prost::Name for Source {
+            const NAME: &'static str = "Source";
+            const PACKAGE: &'static str = "sf.substreams.v1";
+            fn full_name() -> ::prost::alloc::string::String {
+                "sf.substreams.v1.Module.Input.Source".into()
+            }
+            fn type_url() -> ::prost::alloc::string::String {
+                "/sf.substreams.v1.Module.Input.Source".into()
+            }
+        }
         #[derive(serde::Serialize, serde::Deserialize)]
         #[derive(Clone, PartialEq, ::prost::Message)]
         pub struct Map {
             /// ex: "block_to_pairs"
             #[prost(string, tag = "1")]
             pub module_name: ::prost::alloc::string::String,
+        }
+        impl ::prost::Name for Map {
+            const NAME: &'static str = "Map";
+            const PACKAGE: &'static str = "sf.substreams.v1";
+            fn full_name() -> ::prost::alloc::string::String {
+                "sf.substreams.v1.Module.Input.Map".into()
+            }
+            fn type_url() -> ::prost::alloc::string::String {
+                "/sf.substreams.v1.Module.Input.Map".into()
+            }
         }
         #[derive(serde::Serialize, serde::Deserialize)]
         #[derive(Clone, PartialEq, ::prost::Message)]
@@ -208,11 +288,31 @@ pub mod module {
                 }
             }
         }
+        impl ::prost::Name for Store {
+            const NAME: &'static str = "Store";
+            const PACKAGE: &'static str = "sf.substreams.v1";
+            fn full_name() -> ::prost::alloc::string::String {
+                "sf.substreams.v1.Module.Input.Store".into()
+            }
+            fn type_url() -> ::prost::alloc::string::String {
+                "/sf.substreams.v1.Module.Input.Store".into()
+            }
+        }
         #[derive(serde::Serialize, serde::Deserialize)]
         #[derive(Clone, PartialEq, ::prost::Message)]
         pub struct Params {
             #[prost(string, tag = "1")]
             pub value: ::prost::alloc::string::String,
+        }
+        impl ::prost::Name for Params {
+            const NAME: &'static str = "Params";
+            const PACKAGE: &'static str = "sf.substreams.v1";
+            fn full_name() -> ::prost::alloc::string::String {
+                "sf.substreams.v1.Module.Input.Params".into()
+            }
+            fn type_url() -> ::prost::alloc::string::String {
+                "/sf.substreams.v1.Module.Input.Params".into()
+            }
         }
         #[derive(serde::Serialize, serde::Deserialize)]
         #[derive(Clone, PartialEq, ::prost::Oneof)]
@@ -227,11 +327,31 @@ pub mod module {
             Params(Params),
         }
     }
+    impl ::prost::Name for Input {
+        const NAME: &'static str = "Input";
+        const PACKAGE: &'static str = "sf.substreams.v1";
+        fn full_name() -> ::prost::alloc::string::String {
+            "sf.substreams.v1.Module.Input".into()
+        }
+        fn type_url() -> ::prost::alloc::string::String {
+            "/sf.substreams.v1.Module.Input".into()
+        }
+    }
     #[derive(serde::Serialize, serde::Deserialize)]
     #[derive(Clone, PartialEq, ::prost::Message)]
     pub struct Output {
         #[prost(string, tag = "1")]
         pub r#type: ::prost::alloc::string::String,
+    }
+    impl ::prost::Name for Output {
+        const NAME: &'static str = "Output";
+        const PACKAGE: &'static str = "sf.substreams.v1";
+        fn full_name() -> ::prost::alloc::string::String {
+            "sf.substreams.v1.Module.Output".into()
+        }
+        fn type_url() -> ::prost::alloc::string::String {
+            "/sf.substreams.v1.Module.Output".into()
+        }
     }
     #[derive(serde::Serialize, serde::Deserialize)]
     #[derive(Clone, PartialEq, ::prost::Oneof)]
@@ -242,6 +362,16 @@ pub mod module {
         KindStore(KindStore),
         #[prost(message, tag = "10")]
         KindBlockIndex(KindBlockIndex),
+    }
+}
+impl ::prost::Name for Module {
+    const NAME: &'static str = "Module";
+    const PACKAGE: &'static str = "sf.substreams.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "sf.substreams.v1.Module".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/sf.substreams.v1.Module".into()
     }
 }
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -282,6 +412,16 @@ pub struct Package {
         ::prost::alloc::string::String,
     >,
 }
+impl ::prost::Name for Package {
+    const NAME: &'static str = "Package";
+    const PACKAGE: &'static str = "sf.substreams.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "sf.substreams.v1.Package".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/sf.substreams.v1.Package".into()
+    }
+}
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct NetworkParams {
@@ -292,6 +432,16 @@ pub struct NetworkParams {
         ::prost::alloc::string::String,
         ::prost::alloc::string::String,
     >,
+}
+impl ::prost::Name for NetworkParams {
+    const NAME: &'static str = "NetworkParams";
+    const PACKAGE: &'static str = "sf.substreams.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "sf.substreams.v1.NetworkParams".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/sf.substreams.v1.NetworkParams".into()
+    }
 }
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -305,6 +455,16 @@ pub struct PackageMetadata {
     #[prost(string, tag = "4")]
     pub doc: ::prost::alloc::string::String,
 }
+impl ::prost::Name for PackageMetadata {
+    const NAME: &'static str = "PackageMetadata";
+    const PACKAGE: &'static str = "sf.substreams.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "sf.substreams.v1.PackageMetadata".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/sf.substreams.v1.PackageMetadata".into()
+    }
+}
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ModuleMetadata {
@@ -313,6 +473,16 @@ pub struct ModuleMetadata {
     pub package_index: u64,
     #[prost(string, tag = "2")]
     pub doc: ::prost::alloc::string::String,
+}
+impl ::prost::Name for ModuleMetadata {
+    const NAME: &'static str = "ModuleMetadata";
+    const PACKAGE: &'static str = "sf.substreams.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "sf.substreams.v1.ModuleMetadata".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/sf.substreams.v1.ModuleMetadata".into()
+    }
 }
 /// Clock is a pointer to a block with added timestamp
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -327,6 +497,16 @@ pub struct Clock {
         super::super::super::google::protobuf::Timestamp,
     >,
 }
+impl ::prost::Name for Clock {
+    const NAME: &'static str = "Clock";
+    const PACKAGE: &'static str = "sf.substreams.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "sf.substreams.v1.Clock".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/sf.substreams.v1.Clock".into()
+    }
+}
 /// BlockRef is a pointer to a block to which we don't know the timestamp
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -335,4 +515,14 @@ pub struct BlockRef {
     pub id: ::prost::alloc::string::String,
     #[prost(uint64, tag = "2")]
     pub number: u64,
+}
+impl ::prost::Name for BlockRef {
+    const NAME: &'static str = "BlockRef";
+    const PACKAGE: &'static str = "sf.substreams.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "sf.substreams.v1.BlockRef".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/sf.substreams.v1.BlockRef".into()
+    }
 }

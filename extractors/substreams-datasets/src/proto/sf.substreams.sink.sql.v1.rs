@@ -59,6 +59,16 @@ pub mod service {
         }
     }
 }
+impl ::prost::Name for Service {
+    const NAME: &'static str = "Service";
+    const PACKAGE: &'static str = "sf.substreams.sink.sql.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "sf.substreams.sink.sql.v1.Service".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/sf.substreams.sink.sql.v1.Service".into()
+    }
+}
 /// <https://www.getdbt.com/product/what-is-dbt>
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -70,12 +80,32 @@ pub struct DbtConfig {
     #[prost(bool, tag = "3")]
     pub enabled: bool,
 }
+impl ::prost::Name for DbtConfig {
+    const NAME: &'static str = "DBTConfig";
+    const PACKAGE: &'static str = "sf.substreams.sink.sql.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "sf.substreams.sink.sql.v1.DBTConfig".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/sf.substreams.sink.sql.v1.DBTConfig".into()
+    }
+}
 /// <https://hasura.io/docs/latest/index/>
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct HasuraFrontend {
     #[prost(bool, tag = "1")]
     pub enabled: bool,
+}
+impl ::prost::Name for HasuraFrontend {
+    const NAME: &'static str = "HasuraFrontend";
+    const PACKAGE: &'static str = "sf.substreams.sink.sql.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "sf.substreams.sink.sql.v1.HasuraFrontend".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/sf.substreams.sink.sql.v1.HasuraFrontend".into()
+    }
 }
 /// <https://www.graphile.org/postgraphile/>
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -84,6 +114,16 @@ pub struct PostgraphileFrontend {
     #[prost(bool, tag = "1")]
     pub enabled: bool,
 }
+impl ::prost::Name for PostgraphileFrontend {
+    const NAME: &'static str = "PostgraphileFrontend";
+    const PACKAGE: &'static str = "sf.substreams.sink.sql.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "sf.substreams.sink.sql.v1.PostgraphileFrontend".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/sf.substreams.sink.sql.v1.PostgraphileFrontend".into()
+    }
+}
 /// <https://github.com/sosedoff/pgweb>
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
@@ -91,10 +131,30 @@ pub struct PgWebFrontend {
     #[prost(bool, tag = "1")]
     pub enabled: bool,
 }
+impl ::prost::Name for PgWebFrontend {
+    const NAME: &'static str = "PGWebFrontend";
+    const PACKAGE: &'static str = "sf.substreams.sink.sql.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "sf.substreams.sink.sql.v1.PGWebFrontend".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/sf.substreams.sink.sql.v1.PGWebFrontend".into()
+    }
+}
 /// <https://github.com/semiotic-ai/sql-wrapper>
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct RestFrontend {
     #[prost(bool, tag = "1")]
     pub enabled: bool,
+}
+impl ::prost::Name for RestFrontend {
+    const NAME: &'static str = "RESTFrontend";
+    const PACKAGE: &'static str = "sf.substreams.sink.sql.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "sf.substreams.sink.sql.v1.RESTFrontend".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/sf.substreams.sink.sql.v1.RESTFrontend".into()
+    }
 }

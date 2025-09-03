@@ -5,6 +5,16 @@ pub struct DatabaseChanges {
     #[prost(message, repeated, tag = "1")]
     pub table_changes: ::prost::alloc::vec::Vec<TableChange>,
 }
+impl ::prost::Name for DatabaseChanges {
+    const NAME: &'static str = "DatabaseChanges";
+    const PACKAGE: &'static str = "sf.substreams.sink.database.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "sf.substreams.sink.database.v1.DatabaseChanges".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/sf.substreams.sink.database.v1.DatabaseChanges".into()
+    }
+}
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct TableChange {
@@ -74,6 +84,16 @@ pub mod table_change {
         CompositePk(super::CompositePrimaryKey),
     }
 }
+impl ::prost::Name for TableChange {
+    const NAME: &'static str = "TableChange";
+    const PACKAGE: &'static str = "sf.substreams.sink.database.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "sf.substreams.sink.database.v1.TableChange".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/sf.substreams.sink.database.v1.TableChange".into()
+    }
+}
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CompositePrimaryKey {
@@ -82,6 +102,16 @@ pub struct CompositePrimaryKey {
         ::prost::alloc::string::String,
         ::prost::alloc::string::String,
     >,
+}
+impl ::prost::Name for CompositePrimaryKey {
+    const NAME: &'static str = "CompositePrimaryKey";
+    const PACKAGE: &'static str = "sf.substreams.sink.database.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "sf.substreams.sink.database.v1.CompositePrimaryKey".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/sf.substreams.sink.database.v1.CompositePrimaryKey".into()
+    }
 }
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -92,4 +122,14 @@ pub struct Field {
     pub new_value: ::prost::alloc::string::String,
     #[prost(string, tag = "3")]
     pub old_value: ::prost::alloc::string::String,
+}
+impl ::prost::Name for Field {
+    const NAME: &'static str = "Field";
+    const PACKAGE: &'static str = "sf.substreams.sink.database.v1";
+    fn full_name() -> ::prost::alloc::string::String {
+        "sf.substreams.sink.database.v1.Field".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/sf.substreams.sink.database.v1.Field".into()
+    }
 }

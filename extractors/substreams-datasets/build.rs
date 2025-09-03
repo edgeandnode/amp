@@ -6,6 +6,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // These comments break doc tests, so we disable them.
     prost_config.disable_comments(["google.protobuf.Timestamp", "google.protobuf.Any"]);
 
+    // Enable field ordering for deterministic output
+    prost_config.enable_type_names();
+
     let config = tonic_build::configure()
         .build_server(false)
         .out_dir("src/proto");

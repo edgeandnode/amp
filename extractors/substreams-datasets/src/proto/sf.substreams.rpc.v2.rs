@@ -43,6 +43,16 @@ pub struct Request {
         ::prost::alloc::string::String,
     >,
 }
+impl ::prost::Name for Request {
+    const NAME: &'static str = "Request";
+    const PACKAGE: &'static str = "sf.substreams.rpc.v2";
+    fn full_name() -> ::prost::alloc::string::String {
+        "sf.substreams.rpc.v2.Request".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/sf.substreams.rpc.v2.Request".into()
+    }
+}
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Response {
@@ -74,6 +84,16 @@ pub mod response {
         DebugSnapshotComplete(super::InitialSnapshotComplete),
     }
 }
+impl ::prost::Name for Response {
+    const NAME: &'static str = "Response";
+    const PACKAGE: &'static str = "sf.substreams.rpc.v2";
+    fn full_name() -> ::prost::alloc::string::String {
+        "sf.substreams.rpc.v2.Response".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/sf.substreams.rpc.v2.Response".into()
+    }
+}
 /// BlockUndoSignal informs you that every bit of data
 /// with a block number above 'last_valid_block' has been reverted
 /// on-chain. Delete that data and restart from 'last_valid_cursor'
@@ -84,6 +104,16 @@ pub struct BlockUndoSignal {
     pub last_valid_block: ::core::option::Option<super::super::v1::BlockRef>,
     #[prost(string, tag = "2")]
     pub last_valid_cursor: ::prost::alloc::string::String,
+}
+impl ::prost::Name for BlockUndoSignal {
+    const NAME: &'static str = "BlockUndoSignal";
+    const PACKAGE: &'static str = "sf.substreams.rpc.v2";
+    fn full_name() -> ::prost::alloc::string::String {
+        "sf.substreams.rpc.v2.BlockUndoSignal".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/sf.substreams.rpc.v2.BlockUndoSignal".into()
+    }
 }
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -102,6 +132,16 @@ pub struct BlockScopedData {
     #[prost(message, repeated, tag = "11")]
     pub debug_store_outputs: ::prost::alloc::vec::Vec<StoreModuleOutput>,
 }
+impl ::prost::Name for BlockScopedData {
+    const NAME: &'static str = "BlockScopedData";
+    const PACKAGE: &'static str = "sf.substreams.rpc.v2";
+    fn full_name() -> ::prost::alloc::string::String {
+        "sf.substreams.rpc.v2.BlockScopedData".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/sf.substreams.rpc.v2.BlockScopedData".into()
+    }
+}
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct SessionInit {
@@ -114,11 +154,31 @@ pub struct SessionInit {
     #[prost(uint64, tag = "4")]
     pub max_parallel_workers: u64,
 }
+impl ::prost::Name for SessionInit {
+    const NAME: &'static str = "SessionInit";
+    const PACKAGE: &'static str = "sf.substreams.rpc.v2";
+    fn full_name() -> ::prost::alloc::string::String {
+        "sf.substreams.rpc.v2.SessionInit".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/sf.substreams.rpc.v2.SessionInit".into()
+    }
+}
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct InitialSnapshotComplete {
     #[prost(string, tag = "1")]
     pub cursor: ::prost::alloc::string::String,
+}
+impl ::prost::Name for InitialSnapshotComplete {
+    const NAME: &'static str = "InitialSnapshotComplete";
+    const PACKAGE: &'static str = "sf.substreams.rpc.v2";
+    fn full_name() -> ::prost::alloc::string::String {
+        "sf.substreams.rpc.v2.InitialSnapshotComplete".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/sf.substreams.rpc.v2.InitialSnapshotComplete".into()
+    }
 }
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -132,6 +192,16 @@ pub struct InitialSnapshotData {
     #[prost(uint64, tag = "3")]
     pub total_keys: u64,
 }
+impl ::prost::Name for InitialSnapshotData {
+    const NAME: &'static str = "InitialSnapshotData";
+    const PACKAGE: &'static str = "sf.substreams.rpc.v2";
+    fn full_name() -> ::prost::alloc::string::String {
+        "sf.substreams.rpc.v2.InitialSnapshotData".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/sf.substreams.rpc.v2.InitialSnapshotData".into()
+    }
+}
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct MapModuleOutput {
@@ -144,6 +214,16 @@ pub struct MapModuleOutput {
     /// DebugOutputInfo is available in non-production mode only
     #[prost(message, optional, tag = "10")]
     pub debug_info: ::core::option::Option<OutputDebugInfo>,
+}
+impl ::prost::Name for MapModuleOutput {
+    const NAME: &'static str = "MapModuleOutput";
+    const PACKAGE: &'static str = "sf.substreams.rpc.v2";
+    fn full_name() -> ::prost::alloc::string::String {
+        "sf.substreams.rpc.v2.MapModuleOutput".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/sf.substreams.rpc.v2.MapModuleOutput".into()
+    }
 }
 /// StoreModuleOutput are produced for store modules in development mode.
 /// It is not possible to retrieve store models in production, with parallelization
@@ -159,6 +239,16 @@ pub struct StoreModuleOutput {
     #[prost(message, optional, tag = "10")]
     pub debug_info: ::core::option::Option<OutputDebugInfo>,
 }
+impl ::prost::Name for StoreModuleOutput {
+    const NAME: &'static str = "StoreModuleOutput";
+    const PACKAGE: &'static str = "sf.substreams.rpc.v2";
+    fn full_name() -> ::prost::alloc::string::String {
+        "sf.substreams.rpc.v2.StoreModuleOutput".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/sf.substreams.rpc.v2.StoreModuleOutput".into()
+    }
+}
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OutputDebugInfo {
@@ -170,6 +260,16 @@ pub struct OutputDebugInfo {
     pub logs_truncated: bool,
     #[prost(bool, tag = "3")]
     pub cached: bool,
+}
+impl ::prost::Name for OutputDebugInfo {
+    const NAME: &'static str = "OutputDebugInfo";
+    const PACKAGE: &'static str = "sf.substreams.rpc.v2";
+    fn full_name() -> ::prost::alloc::string::String {
+        "sf.substreams.rpc.v2.OutputDebugInfo".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/sf.substreams.rpc.v2.OutputDebugInfo".into()
+    }
 }
 /// ModulesProgress is a message that is sent every 500ms
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -187,6 +287,16 @@ pub struct ModulesProgress {
     #[prost(message, optional, tag = "5")]
     pub processed_bytes: ::core::option::Option<ProcessedBytes>,
 }
+impl ::prost::Name for ModulesProgress {
+    const NAME: &'static str = "ModulesProgress";
+    const PACKAGE: &'static str = "sf.substreams.rpc.v2";
+    fn full_name() -> ::prost::alloc::string::String {
+        "sf.substreams.rpc.v2.ModulesProgress".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/sf.substreams.rpc.v2.ModulesProgress".into()
+    }
+}
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct ProcessedBytes {
@@ -194,6 +304,16 @@ pub struct ProcessedBytes {
     pub total_bytes_read: u64,
     #[prost(uint64, tag = "2")]
     pub total_bytes_written: u64,
+}
+impl ::prost::Name for ProcessedBytes {
+    const NAME: &'static str = "ProcessedBytes";
+    const PACKAGE: &'static str = "sf.substreams.rpc.v2";
+    fn full_name() -> ::prost::alloc::string::String {
+        "sf.substreams.rpc.v2.ProcessedBytes".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/sf.substreams.rpc.v2.ProcessedBytes".into()
+    }
 }
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -209,6 +329,16 @@ pub struct Error {
     #[prost(bool, tag = "4")]
     pub logs_truncated: bool,
 }
+impl ::prost::Name for Error {
+    const NAME: &'static str = "Error";
+    const PACKAGE: &'static str = "sf.substreams.rpc.v2";
+    fn full_name() -> ::prost::alloc::string::String {
+        "sf.substreams.rpc.v2.Error".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/sf.substreams.rpc.v2.Error".into()
+    }
+}
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct Job {
@@ -223,6 +353,16 @@ pub struct Job {
     #[prost(uint64, tag = "5")]
     pub duration_ms: u64,
 }
+impl ::prost::Name for Job {
+    const NAME: &'static str = "Job";
+    const PACKAGE: &'static str = "sf.substreams.rpc.v2";
+    fn full_name() -> ::prost::alloc::string::String {
+        "sf.substreams.rpc.v2.Job".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/sf.substreams.rpc.v2.Job".into()
+    }
+}
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Stage {
@@ -230,6 +370,16 @@ pub struct Stage {
     pub modules: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     #[prost(message, repeated, tag = "2")]
     pub completed_ranges: ::prost::alloc::vec::Vec<BlockRange>,
+}
+impl ::prost::Name for Stage {
+    const NAME: &'static str = "Stage";
+    const PACKAGE: &'static str = "sf.substreams.rpc.v2";
+    fn full_name() -> ::prost::alloc::string::String {
+        "sf.substreams.rpc.v2.Stage".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/sf.substreams.rpc.v2.Stage".into()
+    }
 }
 /// ModuleStats gathers metrics and statistics from each module, running on tier1 or tier2
 /// All the 'count' and 'time_ms' values may include duplicate for each stage going over that module
@@ -274,6 +424,16 @@ pub struct ModuleStats {
     #[prost(uint64, tag = "15")]
     pub highest_contiguous_block: u64,
 }
+impl ::prost::Name for ModuleStats {
+    const NAME: &'static str = "ModuleStats";
+    const PACKAGE: &'static str = "sf.substreams.rpc.v2";
+    fn full_name() -> ::prost::alloc::string::String {
+        "sf.substreams.rpc.v2.ModuleStats".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/sf.substreams.rpc.v2.ModuleStats".into()
+    }
+}
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ExternalCallMetric {
@@ -283,6 +443,16 @@ pub struct ExternalCallMetric {
     pub count: u64,
     #[prost(uint64, tag = "3")]
     pub time_ms: u64,
+}
+impl ::prost::Name for ExternalCallMetric {
+    const NAME: &'static str = "ExternalCallMetric";
+    const PACKAGE: &'static str = "sf.substreams.rpc.v2";
+    fn full_name() -> ::prost::alloc::string::String {
+        "sf.substreams.rpc.v2.ExternalCallMetric".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/sf.substreams.rpc.v2.ExternalCallMetric".into()
+    }
 }
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -344,6 +514,16 @@ pub mod store_delta {
         }
     }
 }
+impl ::prost::Name for StoreDelta {
+    const NAME: &'static str = "StoreDelta";
+    const PACKAGE: &'static str = "sf.substreams.rpc.v2";
+    fn full_name() -> ::prost::alloc::string::String {
+        "sf.substreams.rpc.v2.StoreDelta".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/sf.substreams.rpc.v2.StoreDelta".into()
+    }
+}
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct BlockRange {
@@ -351,6 +531,16 @@ pub struct BlockRange {
     pub start_block: u64,
     #[prost(uint64, tag = "3")]
     pub end_block: u64,
+}
+impl ::prost::Name for BlockRange {
+    const NAME: &'static str = "BlockRange";
+    const PACKAGE: &'static str = "sf.substreams.rpc.v2";
+    fn full_name() -> ::prost::alloc::string::String {
+        "sf.substreams.rpc.v2.BlockRange".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/sf.substreams.rpc.v2.BlockRange".into()
+    }
 }
 /// Generated client implementations.
 pub mod stream_client {

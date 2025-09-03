@@ -7,6 +7,16 @@ pub struct FileDescriptorSet {
     #[prost(message, repeated, tag = "1")]
     pub file: ::prost::alloc::vec::Vec<FileDescriptorProto>,
 }
+impl ::prost::Name for FileDescriptorSet {
+    const NAME: &'static str = "FileDescriptorSet";
+    const PACKAGE: &'static str = "google.protobuf";
+    fn full_name() -> ::prost::alloc::string::String {
+        "google.protobuf.FileDescriptorSet".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/google.protobuf.FileDescriptorSet".into()
+    }
+}
 /// Describes a complete .proto file.
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -27,6 +37,10 @@ pub struct FileDescriptorProto {
     /// For Google-internal migration only. Do not use.
     #[prost(int32, repeated, packed = "false", tag = "11")]
     pub weak_dependency: ::prost::alloc::vec::Vec<i32>,
+    /// Names of files imported by this file purely for the purpose of providing
+    /// option extensions. These are excluded from the dependency list above.
+    #[prost(string, repeated, tag = "15")]
+    pub option_dependency: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// All top-level definitions in this file.
     #[prost(message, repeated, tag = "4")]
     pub message_type: ::prost::alloc::vec::Vec<DescriptorProto>,
@@ -48,11 +62,27 @@ pub struct FileDescriptorProto {
     /// The supported values are "proto2", "proto3", and "editions".
     ///
     /// If `edition` is present, this value must be "editions".
+    /// WARNING: This field should only be used by protobuf plugins or special
+    /// cases like the proto compiler. Other uses are discouraged and
+    /// developers should rely on the protoreflect APIs for their client language.
     #[prost(string, optional, tag = "12")]
     pub syntax: ::core::option::Option<::prost::alloc::string::String>,
     /// The edition of the proto file.
+    /// WARNING: This field should only be used by protobuf plugins or special
+    /// cases like the proto compiler. Other uses are discouraged and
+    /// developers should rely on the protoreflect APIs for their client language.
     #[prost(enumeration = "Edition", optional, tag = "14")]
     pub edition: ::core::option::Option<i32>,
+}
+impl ::prost::Name for FileDescriptorProto {
+    const NAME: &'static str = "FileDescriptorProto";
+    const PACKAGE: &'static str = "google.protobuf";
+    fn full_name() -> ::prost::alloc::string::String {
+        "google.protobuf.FileDescriptorProto".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/google.protobuf.FileDescriptorProto".into()
+    }
 }
 /// Describes a message type.
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -80,6 +110,9 @@ pub struct DescriptorProto {
     /// A given name may only be reserved once.
     #[prost(string, repeated, tag = "10")]
     pub reserved_name: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// Support for `export` and `local` keywords on enums.
+    #[prost(enumeration = "SymbolVisibility", optional, tag = "11")]
+    pub visibility: ::core::option::Option<i32>,
 }
 /// Nested message and enum types in `DescriptorProto`.
 pub mod descriptor_proto {
@@ -95,6 +128,16 @@ pub mod descriptor_proto {
         #[prost(message, optional, tag = "3")]
         pub options: ::core::option::Option<super::ExtensionRangeOptions>,
     }
+    impl ::prost::Name for ExtensionRange {
+        const NAME: &'static str = "ExtensionRange";
+        const PACKAGE: &'static str = "google.protobuf";
+        fn full_name() -> ::prost::alloc::string::String {
+            "google.protobuf.DescriptorProto.ExtensionRange".into()
+        }
+        fn type_url() -> ::prost::alloc::string::String {
+            "/google.protobuf.DescriptorProto.ExtensionRange".into()
+        }
+    }
     /// Range of reserved tag numbers. Reserved tag numbers may not be used by
     /// fields or extension ranges in the same message. Reserved ranges may
     /// not overlap.
@@ -107,6 +150,26 @@ pub mod descriptor_proto {
         /// Exclusive.
         #[prost(int32, optional, tag = "2")]
         pub end: ::core::option::Option<i32>,
+    }
+    impl ::prost::Name for ReservedRange {
+        const NAME: &'static str = "ReservedRange";
+        const PACKAGE: &'static str = "google.protobuf";
+        fn full_name() -> ::prost::alloc::string::String {
+            "google.protobuf.DescriptorProto.ReservedRange".into()
+        }
+        fn type_url() -> ::prost::alloc::string::String {
+            "/google.protobuf.DescriptorProto.ReservedRange".into()
+        }
+    }
+}
+impl ::prost::Name for DescriptorProto {
+    const NAME: &'static str = "DescriptorProto";
+    const PACKAGE: &'static str = "google.protobuf";
+    fn full_name() -> ::prost::alloc::string::String {
+        "google.protobuf.DescriptorProto".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/google.protobuf.DescriptorProto".into()
     }
 }
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -161,6 +224,16 @@ pub mod extension_range_options {
         #[prost(bool, optional, tag = "6")]
         pub repeated: ::core::option::Option<bool>,
     }
+    impl ::prost::Name for Declaration {
+        const NAME: &'static str = "Declaration";
+        const PACKAGE: &'static str = "google.protobuf";
+        fn full_name() -> ::prost::alloc::string::String {
+            "google.protobuf.ExtensionRangeOptions.Declaration".into()
+        }
+        fn type_url() -> ::prost::alloc::string::String {
+            "/google.protobuf.ExtensionRangeOptions.Declaration".into()
+        }
+    }
     /// The verification state of the extension range.
     #[derive(serde::Serialize, serde::Deserialize)]
     #[derive(
@@ -199,6 +272,16 @@ pub mod extension_range_options {
                 _ => None,
             }
         }
+    }
+}
+impl ::prost::Name for ExtensionRangeOptions {
+    const NAME: &'static str = "ExtensionRangeOptions";
+    const PACKAGE: &'static str = "google.protobuf";
+    fn full_name() -> ::prost::alloc::string::String {
+        "google.protobuf.ExtensionRangeOptions".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/google.protobuf.ExtensionRangeOptions".into()
     }
 }
 /// Describes a field within a message.
@@ -415,6 +498,16 @@ pub mod field_descriptor_proto {
         }
     }
 }
+impl ::prost::Name for FieldDescriptorProto {
+    const NAME: &'static str = "FieldDescriptorProto";
+    const PACKAGE: &'static str = "google.protobuf";
+    fn full_name() -> ::prost::alloc::string::String {
+        "google.protobuf.FieldDescriptorProto".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/google.protobuf.FieldDescriptorProto".into()
+    }
+}
 /// Describes a oneof.
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -423,6 +516,16 @@ pub struct OneofDescriptorProto {
     pub name: ::core::option::Option<::prost::alloc::string::String>,
     #[prost(message, optional, tag = "2")]
     pub options: ::core::option::Option<OneofOptions>,
+}
+impl ::prost::Name for OneofDescriptorProto {
+    const NAME: &'static str = "OneofDescriptorProto";
+    const PACKAGE: &'static str = "google.protobuf";
+    fn full_name() -> ::prost::alloc::string::String {
+        "google.protobuf.OneofDescriptorProto".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/google.protobuf.OneofDescriptorProto".into()
+    }
 }
 /// Describes an enum type.
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -445,6 +548,9 @@ pub struct EnumDescriptorProto {
     /// be reserved once.
     #[prost(string, repeated, tag = "5")]
     pub reserved_name: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// Support for `export` and `local` keywords on enums.
+    #[prost(enumeration = "SymbolVisibility", optional, tag = "6")]
+    pub visibility: ::core::option::Option<i32>,
 }
 /// Nested message and enum types in `EnumDescriptorProto`.
 pub mod enum_descriptor_proto {
@@ -464,6 +570,26 @@ pub mod enum_descriptor_proto {
         #[prost(int32, optional, tag = "2")]
         pub end: ::core::option::Option<i32>,
     }
+    impl ::prost::Name for EnumReservedRange {
+        const NAME: &'static str = "EnumReservedRange";
+        const PACKAGE: &'static str = "google.protobuf";
+        fn full_name() -> ::prost::alloc::string::String {
+            "google.protobuf.EnumDescriptorProto.EnumReservedRange".into()
+        }
+        fn type_url() -> ::prost::alloc::string::String {
+            "/google.protobuf.EnumDescriptorProto.EnumReservedRange".into()
+        }
+    }
+}
+impl ::prost::Name for EnumDescriptorProto {
+    const NAME: &'static str = "EnumDescriptorProto";
+    const PACKAGE: &'static str = "google.protobuf";
+    fn full_name() -> ::prost::alloc::string::String {
+        "google.protobuf.EnumDescriptorProto".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/google.protobuf.EnumDescriptorProto".into()
+    }
 }
 /// Describes a value within an enum.
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -476,6 +602,16 @@ pub struct EnumValueDescriptorProto {
     #[prost(message, optional, tag = "3")]
     pub options: ::core::option::Option<EnumValueOptions>,
 }
+impl ::prost::Name for EnumValueDescriptorProto {
+    const NAME: &'static str = "EnumValueDescriptorProto";
+    const PACKAGE: &'static str = "google.protobuf";
+    fn full_name() -> ::prost::alloc::string::String {
+        "google.protobuf.EnumValueDescriptorProto".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/google.protobuf.EnumValueDescriptorProto".into()
+    }
+}
 /// Describes a service.
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -486,6 +622,16 @@ pub struct ServiceDescriptorProto {
     pub method: ::prost::alloc::vec::Vec<MethodDescriptorProto>,
     #[prost(message, optional, tag = "3")]
     pub options: ::core::option::Option<ServiceOptions>,
+}
+impl ::prost::Name for ServiceDescriptorProto {
+    const NAME: &'static str = "ServiceDescriptorProto";
+    const PACKAGE: &'static str = "google.protobuf";
+    fn full_name() -> ::prost::alloc::string::String {
+        "google.protobuf.ServiceDescriptorProto".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/google.protobuf.ServiceDescriptorProto".into()
+    }
 }
 /// Describes a method of a service.
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -507,6 +653,16 @@ pub struct MethodDescriptorProto {
     /// Identifies if server streams multiple server messages
     #[prost(bool, optional, tag = "6", default = "false")]
     pub server_streaming: ::core::option::Option<bool>,
+}
+impl ::prost::Name for MethodDescriptorProto {
+    const NAME: &'static str = "MethodDescriptorProto";
+    const PACKAGE: &'static str = "google.protobuf";
+    fn full_name() -> ::prost::alloc::string::String {
+        "google.protobuf.MethodDescriptorProto".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/google.protobuf.MethodDescriptorProto".into()
+    }
 }
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -621,6 +777,9 @@ pub struct FileOptions {
     #[prost(string, optional, tag = "45")]
     pub ruby_package: ::core::option::Option<::prost::alloc::string::String>,
     /// Any features defined in the specific edition.
+    /// WARNING: This field should only be used by protobuf plugins or special
+    /// cases like the proto compiler. Other uses are discouraged and
+    /// developers should rely on the protoreflect APIs for their client language.
     #[prost(message, optional, tag = "50")]
     pub features: ::core::option::Option<FeatureSet>,
     /// The parser stores options it doesn't recognize here.
@@ -675,6 +834,16 @@ pub mod file_options {
                 _ => None,
             }
         }
+    }
+}
+impl ::prost::Name for FileOptions {
+    const NAME: &'static str = "FileOptions";
+    const PACKAGE: &'static str = "google.protobuf";
+    fn full_name() -> ::prost::alloc::string::String {
+        "google.protobuf.FileOptions".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/google.protobuf.FileOptions".into()
     }
 }
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -748,11 +917,24 @@ pub struct MessageOptions {
     #[prost(bool, optional, tag = "11")]
     pub deprecated_legacy_json_field_conflicts: ::core::option::Option<bool>,
     /// Any features defined in the specific edition.
+    /// WARNING: This field should only be used by protobuf plugins or special
+    /// cases like the proto compiler. Other uses are discouraged and
+    /// developers should rely on the protoreflect APIs for their client language.
     #[prost(message, optional, tag = "12")]
     pub features: ::core::option::Option<FeatureSet>,
     /// The parser stores options it doesn't recognize here. See above.
     #[prost(message, repeated, tag = "999")]
     pub uninterpreted_option: ::prost::alloc::vec::Vec<UninterpretedOption>,
+}
+impl ::prost::Name for MessageOptions {
+    const NAME: &'static str = "MessageOptions";
+    const PACKAGE: &'static str = "google.protobuf";
+    fn full_name() -> ::prost::alloc::string::String {
+        "google.protobuf.MessageOptions".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/google.protobuf.MessageOptions".into()
+    }
 }
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -852,6 +1034,9 @@ pub struct FieldOptions {
     #[prost(message, repeated, tag = "20")]
     pub edition_defaults: ::prost::alloc::vec::Vec<field_options::EditionDefault>,
     /// Any features defined in the specific edition.
+    /// WARNING: This field should only be used by protobuf plugins or special
+    /// cases like the proto compiler. Other uses are discouraged and
+    /// developers should rely on the protoreflect APIs for their client language.
     #[prost(message, optional, tag = "21")]
     pub features: ::core::option::Option<FeatureSet>,
     #[prost(message, optional, tag = "22")]
@@ -870,6 +1055,16 @@ pub mod field_options {
         /// Textproto value.
         #[prost(string, optional, tag = "2")]
         pub value: ::core::option::Option<::prost::alloc::string::String>,
+    }
+    impl ::prost::Name for EditionDefault {
+        const NAME: &'static str = "EditionDefault";
+        const PACKAGE: &'static str = "google.protobuf";
+        fn full_name() -> ::prost::alloc::string::String {
+            "google.protobuf.FieldOptions.EditionDefault".into()
+        }
+        fn type_url() -> ::prost::alloc::string::String {
+            "/google.protobuf.FieldOptions.EditionDefault".into()
+        }
     }
     /// Information about the support window of a feature.
     #[derive(serde::Serialize, serde::Deserialize)]
@@ -893,6 +1088,16 @@ pub mod field_options {
         /// not be able to override it.
         #[prost(enumeration = "super::Edition", optional, tag = "4")]
         pub edition_removed: ::core::option::Option<i32>,
+    }
+    impl ::prost::Name for FeatureSupport {
+        const NAME: &'static str = "FeatureSupport";
+        const PACKAGE: &'static str = "google.protobuf";
+        fn full_name() -> ::prost::alloc::string::String {
+            "google.protobuf.FieldOptions.FeatureSupport".into()
+        }
+        fn type_url() -> ::prost::alloc::string::String {
+            "/google.protobuf.FieldOptions.FeatureSupport".into()
+        }
     }
     #[derive(serde::Serialize, serde::Deserialize)]
     #[derive(
@@ -985,8 +1190,6 @@ pub mod field_options {
         }
     }
     /// If set to RETENTION_SOURCE, the option will be omitted from the binary.
-    /// Note: as of January 2023, support for this is in progress and does not yet
-    /// have an effect (b/264593489).
     #[derive(serde::Serialize, serde::Deserialize)]
     #[derive(
         Clone,
@@ -1029,8 +1232,7 @@ pub mod field_options {
     }
     /// This indicates the types of entities that the field may apply to when used
     /// as an option. If it is unset, then the field may be freely used as an
-    /// option on any kind of entity. Note: as of January 2023, support for this is
-    /// in progress and does not yet have an effect (b/264593489).
+    /// option on any kind of entity.
     #[derive(serde::Serialize, serde::Deserialize)]
     #[derive(
         Clone,
@@ -1093,15 +1295,38 @@ pub mod field_options {
         }
     }
 }
+impl ::prost::Name for FieldOptions {
+    const NAME: &'static str = "FieldOptions";
+    const PACKAGE: &'static str = "google.protobuf";
+    fn full_name() -> ::prost::alloc::string::String {
+        "google.protobuf.FieldOptions".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/google.protobuf.FieldOptions".into()
+    }
+}
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OneofOptions {
     /// Any features defined in the specific edition.
+    /// WARNING: This field should only be used by protobuf plugins or special
+    /// cases like the proto compiler. Other uses are discouraged and
+    /// developers should rely on the protoreflect APIs for their client language.
     #[prost(message, optional, tag = "1")]
     pub features: ::core::option::Option<FeatureSet>,
     /// The parser stores options it doesn't recognize here. See above.
     #[prost(message, repeated, tag = "999")]
     pub uninterpreted_option: ::prost::alloc::vec::Vec<UninterpretedOption>,
+}
+impl ::prost::Name for OneofOptions {
+    const NAME: &'static str = "OneofOptions";
+    const PACKAGE: &'static str = "google.protobuf";
+    fn full_name() -> ::prost::alloc::string::String {
+        "google.protobuf.OneofOptions".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/google.protobuf.OneofOptions".into()
+    }
 }
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -1126,11 +1351,24 @@ pub struct EnumOptions {
     #[prost(bool, optional, tag = "6")]
     pub deprecated_legacy_json_field_conflicts: ::core::option::Option<bool>,
     /// Any features defined in the specific edition.
+    /// WARNING: This field should only be used by protobuf plugins or special
+    /// cases like the proto compiler. Other uses are discouraged and
+    /// developers should rely on the protoreflect APIs for their client language.
     #[prost(message, optional, tag = "7")]
     pub features: ::core::option::Option<FeatureSet>,
     /// The parser stores options it doesn't recognize here. See above.
     #[prost(message, repeated, tag = "999")]
     pub uninterpreted_option: ::prost::alloc::vec::Vec<UninterpretedOption>,
+}
+impl ::prost::Name for EnumOptions {
+    const NAME: &'static str = "EnumOptions";
+    const PACKAGE: &'static str = "google.protobuf";
+    fn full_name() -> ::prost::alloc::string::String {
+        "google.protobuf.EnumOptions".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/google.protobuf.EnumOptions".into()
+    }
 }
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -1142,6 +1380,9 @@ pub struct EnumValueOptions {
     #[prost(bool, optional, tag = "1", default = "false")]
     pub deprecated: ::core::option::Option<bool>,
     /// Any features defined in the specific edition.
+    /// WARNING: This field should only be used by protobuf plugins or special
+    /// cases like the proto compiler. Other uses are discouraged and
+    /// developers should rely on the protoreflect APIs for their client language.
     #[prost(message, optional, tag = "2")]
     pub features: ::core::option::Option<FeatureSet>,
     /// Indicate that fields annotated with this enum value should not be printed
@@ -1156,10 +1397,23 @@ pub struct EnumValueOptions {
     #[prost(message, repeated, tag = "999")]
     pub uninterpreted_option: ::prost::alloc::vec::Vec<UninterpretedOption>,
 }
+impl ::prost::Name for EnumValueOptions {
+    const NAME: &'static str = "EnumValueOptions";
+    const PACKAGE: &'static str = "google.protobuf";
+    fn full_name() -> ::prost::alloc::string::String {
+        "google.protobuf.EnumValueOptions".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/google.protobuf.EnumValueOptions".into()
+    }
+}
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ServiceOptions {
     /// Any features defined in the specific edition.
+    /// WARNING: This field should only be used by protobuf plugins or special
+    /// cases like the proto compiler. Other uses are discouraged and
+    /// developers should rely on the protoreflect APIs for their client language.
     #[prost(message, optional, tag = "34")]
     pub features: ::core::option::Option<FeatureSet>,
     /// Is this service deprecated?
@@ -1171,6 +1425,16 @@ pub struct ServiceOptions {
     /// The parser stores options it doesn't recognize here. See above.
     #[prost(message, repeated, tag = "999")]
     pub uninterpreted_option: ::prost::alloc::vec::Vec<UninterpretedOption>,
+}
+impl ::prost::Name for ServiceOptions {
+    const NAME: &'static str = "ServiceOptions";
+    const PACKAGE: &'static str = "google.protobuf";
+    fn full_name() -> ::prost::alloc::string::String {
+        "google.protobuf.ServiceOptions".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/google.protobuf.ServiceOptions".into()
+    }
 }
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -1189,6 +1453,9 @@ pub struct MethodOptions {
     )]
     pub idempotency_level: ::core::option::Option<i32>,
     /// Any features defined in the specific edition.
+    /// WARNING: This field should only be used by protobuf plugins or special
+    /// cases like the proto compiler. Other uses are discouraged and
+    /// developers should rely on the protoreflect APIs for their client language.
     #[prost(message, optional, tag = "35")]
     pub features: ::core::option::Option<FeatureSet>,
     /// The parser stores options it doesn't recognize here. See above.
@@ -1243,6 +1510,16 @@ pub mod method_options {
         }
     }
 }
+impl ::prost::Name for MethodOptions {
+    const NAME: &'static str = "MethodOptions";
+    const PACKAGE: &'static str = "google.protobuf";
+    fn full_name() -> ::prost::alloc::string::String {
+        "google.protobuf.MethodOptions".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/google.protobuf.MethodOptions".into()
+    }
+}
 /// A message representing a option the parser does not recognize. This only
 /// appears in options protos created by the compiler::Parser class.
 /// DescriptorPool resolves these when building Descriptor objects. Therefore,
@@ -1284,6 +1561,26 @@ pub mod uninterpreted_option {
         #[prost(bool, required, tag = "2")]
         pub is_extension: bool,
     }
+    impl ::prost::Name for NamePart {
+        const NAME: &'static str = "NamePart";
+        const PACKAGE: &'static str = "google.protobuf";
+        fn full_name() -> ::prost::alloc::string::String {
+            "google.protobuf.UninterpretedOption.NamePart".into()
+        }
+        fn type_url() -> ::prost::alloc::string::String {
+            "/google.protobuf.UninterpretedOption.NamePart".into()
+        }
+    }
+}
+impl ::prost::Name for UninterpretedOption {
+    const NAME: &'static str = "UninterpretedOption";
+    const PACKAGE: &'static str = "google.protobuf";
+    fn full_name() -> ::prost::alloc::string::String {
+        "google.protobuf.UninterpretedOption".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/google.protobuf.UninterpretedOption".into()
+    }
 }
 /// TODO Enums in C++ gencode (and potentially other languages) are
 /// not well scoped.  This means that each of the feature enums below can clash
@@ -1306,9 +1603,85 @@ pub struct FeatureSet {
     pub message_encoding: ::core::option::Option<i32>,
     #[prost(enumeration = "feature_set::JsonFormat", optional, tag = "6")]
     pub json_format: ::core::option::Option<i32>,
+    #[prost(enumeration = "feature_set::EnforceNamingStyle", optional, tag = "7")]
+    pub enforce_naming_style: ::core::option::Option<i32>,
+    #[prost(
+        enumeration = "feature_set::visibility_feature::DefaultSymbolVisibility",
+        optional,
+        tag = "8"
+    )]
+    pub default_symbol_visibility: ::core::option::Option<i32>,
 }
 /// Nested message and enum types in `FeatureSet`.
 pub mod feature_set {
+    #[derive(serde::Serialize, serde::Deserialize)]
+    #[derive(Clone, Copy, PartialEq, ::prost::Message)]
+    pub struct VisibilityFeature {}
+    /// Nested message and enum types in `VisibilityFeature`.
+    pub mod visibility_feature {
+        #[derive(serde::Serialize, serde::Deserialize)]
+        #[derive(
+            Clone,
+            Copy,
+            Debug,
+            PartialEq,
+            Eq,
+            Hash,
+            PartialOrd,
+            Ord,
+            ::prost::Enumeration
+        )]
+        #[repr(i32)]
+        pub enum DefaultSymbolVisibility {
+            Unknown = 0,
+            /// Default pre-EDITION_2024, all UNSET visibility are export.
+            ExportAll = 1,
+            /// All top-level symbols default to export, nested default to local.
+            ExportTopLevel = 2,
+            /// All symbols default to local.
+            LocalAll = 3,
+            /// All symbols local by default. Nested types cannot be exported.
+            /// With special case caveat for message { enum {} reserved 1 to max; }
+            /// This is the recommended setting for new protos.
+            Strict = 4,
+        }
+        impl DefaultSymbolVisibility {
+            /// String value of the enum field names used in the ProtoBuf definition.
+            ///
+            /// The values are not transformed in any way and thus are considered stable
+            /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+            pub fn as_str_name(&self) -> &'static str {
+                match self {
+                    Self::Unknown => "DEFAULT_SYMBOL_VISIBILITY_UNKNOWN",
+                    Self::ExportAll => "EXPORT_ALL",
+                    Self::ExportTopLevel => "EXPORT_TOP_LEVEL",
+                    Self::LocalAll => "LOCAL_ALL",
+                    Self::Strict => "STRICT",
+                }
+            }
+            /// Creates an enum from field names used in the ProtoBuf definition.
+            pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+                match value {
+                    "DEFAULT_SYMBOL_VISIBILITY_UNKNOWN" => Some(Self::Unknown),
+                    "EXPORT_ALL" => Some(Self::ExportAll),
+                    "EXPORT_TOP_LEVEL" => Some(Self::ExportTopLevel),
+                    "LOCAL_ALL" => Some(Self::LocalAll),
+                    "STRICT" => Some(Self::Strict),
+                    _ => None,
+                }
+            }
+        }
+    }
+    impl ::prost::Name for VisibilityFeature {
+        const NAME: &'static str = "VisibilityFeature";
+        const PACKAGE: &'static str = "google.protobuf";
+        fn full_name() -> ::prost::alloc::string::String {
+            "google.protobuf.FeatureSet.VisibilityFeature".into()
+        }
+        fn type_url() -> ::prost::alloc::string::String {
+            "/google.protobuf.FeatureSet.VisibilityFeature".into()
+        }
+    }
     #[derive(serde::Serialize, serde::Deserialize)]
     #[derive(
         Clone,
@@ -1552,6 +1925,56 @@ pub mod feature_set {
             }
         }
     }
+    #[derive(serde::Serialize, serde::Deserialize)]
+    #[derive(
+        Clone,
+        Copy,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+        PartialOrd,
+        Ord,
+        ::prost::Enumeration
+    )]
+    #[repr(i32)]
+    pub enum EnforceNamingStyle {
+        Unknown = 0,
+        Style2024 = 1,
+        StyleLegacy = 2,
+    }
+    impl EnforceNamingStyle {
+        /// String value of the enum field names used in the ProtoBuf definition.
+        ///
+        /// The values are not transformed in any way and thus are considered stable
+        /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+        pub fn as_str_name(&self) -> &'static str {
+            match self {
+                Self::Unknown => "ENFORCE_NAMING_STYLE_UNKNOWN",
+                Self::Style2024 => "STYLE2024",
+                Self::StyleLegacy => "STYLE_LEGACY",
+            }
+        }
+        /// Creates an enum from field names used in the ProtoBuf definition.
+        pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+            match value {
+                "ENFORCE_NAMING_STYLE_UNKNOWN" => Some(Self::Unknown),
+                "STYLE2024" => Some(Self::Style2024),
+                "STYLE_LEGACY" => Some(Self::StyleLegacy),
+                _ => None,
+            }
+        }
+    }
+}
+impl ::prost::Name for FeatureSet {
+    const NAME: &'static str = "FeatureSet";
+    const PACKAGE: &'static str = "google.protobuf";
+    fn full_name() -> ::prost::alloc::string::String {
+        "google.protobuf.FeatureSet".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/google.protobuf.FeatureSet".into()
+    }
 }
 /// A compiled specification for the defaults of a set of features.  These
 /// messages are generated from FeatureSet extensions and can be used to seed
@@ -1590,6 +2013,26 @@ pub mod feature_set_defaults {
         /// Defaults of features that can't be overridden in this edition.
         #[prost(message, optional, tag = "5")]
         pub fixed_features: ::core::option::Option<super::FeatureSet>,
+    }
+    impl ::prost::Name for FeatureSetEditionDefault {
+        const NAME: &'static str = "FeatureSetEditionDefault";
+        const PACKAGE: &'static str = "google.protobuf";
+        fn full_name() -> ::prost::alloc::string::String {
+            "google.protobuf.FeatureSetDefaults.FeatureSetEditionDefault".into()
+        }
+        fn type_url() -> ::prost::alloc::string::String {
+            "/google.protobuf.FeatureSetDefaults.FeatureSetEditionDefault".into()
+        }
+    }
+}
+impl ::prost::Name for FeatureSetDefaults {
+    const NAME: &'static str = "FeatureSetDefaults";
+    const PACKAGE: &'static str = "google.protobuf";
+    fn full_name() -> ::prost::alloc::string::String {
+        "google.protobuf.FeatureSetDefaults".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/google.protobuf.FeatureSetDefaults".into()
     }
 }
 /// Encapsulates information about the original source file from which a
@@ -1736,6 +2179,26 @@ pub mod source_code_info {
             ::prost::alloc::string::String,
         >,
     }
+    impl ::prost::Name for Location {
+        const NAME: &'static str = "Location";
+        const PACKAGE: &'static str = "google.protobuf";
+        fn full_name() -> ::prost::alloc::string::String {
+            "google.protobuf.SourceCodeInfo.Location".into()
+        }
+        fn type_url() -> ::prost::alloc::string::String {
+            "/google.protobuf.SourceCodeInfo.Location".into()
+        }
+    }
+}
+impl ::prost::Name for SourceCodeInfo {
+    const NAME: &'static str = "SourceCodeInfo";
+    const PACKAGE: &'static str = "google.protobuf";
+    fn full_name() -> ::prost::alloc::string::String {
+        "google.protobuf.SourceCodeInfo".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/google.protobuf.SourceCodeInfo".into()
+    }
 }
 /// Describes the relationship between generated code and its original source
 /// file. A GeneratedCodeInfo message is associated with only one generated
@@ -1820,6 +2283,26 @@ pub mod generated_code_info {
             }
         }
     }
+    impl ::prost::Name for Annotation {
+        const NAME: &'static str = "Annotation";
+        const PACKAGE: &'static str = "google.protobuf";
+        fn full_name() -> ::prost::alloc::string::String {
+            "google.protobuf.GeneratedCodeInfo.Annotation".into()
+        }
+        fn type_url() -> ::prost::alloc::string::String {
+            "/google.protobuf.GeneratedCodeInfo.Annotation".into()
+        }
+    }
+}
+impl ::prost::Name for GeneratedCodeInfo {
+    const NAME: &'static str = "GeneratedCodeInfo";
+    const PACKAGE: &'static str = "google.protobuf";
+    fn full_name() -> ::prost::alloc::string::String {
+        "google.protobuf.GeneratedCodeInfo".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/google.protobuf.GeneratedCodeInfo".into()
+    }
 }
 /// The full set of known editions.
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -1843,7 +2326,7 @@ pub enum Edition {
     Edition2023 = 1000,
     Edition2024 = 1001,
     /// Placeholder editions for testing feature resolution.  These should not be
-    /// used or relyed on outside of tests.
+    /// used or relied on outside of tests.
     Edition1TestOnly = 1,
     Edition2TestOnly = 2,
     Edition99997TestOnly = 99997,
@@ -1894,6 +2377,41 @@ impl Edition {
         }
     }
 }
+/// Describes the 'visibility' of a symbol with respect to the proto import
+/// system. Symbols can only be imported when the visibility rules do not prevent
+/// it (ex: local symbols cannot be imported).  Visibility modifiers can only set
+/// on `message` and `enum` as they are the only types available to be referenced
+/// from other files.
+#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum SymbolVisibility {
+    VisibilityUnset = 0,
+    VisibilityLocal = 1,
+    VisibilityExport = 2,
+}
+impl SymbolVisibility {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::VisibilityUnset => "VISIBILITY_UNSET",
+            Self::VisibilityLocal => "VISIBILITY_LOCAL",
+            Self::VisibilityExport => "VISIBILITY_EXPORT",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "VISIBILITY_UNSET" => Some(Self::VisibilityUnset),
+            "VISIBILITY_LOCAL" => Some(Self::VisibilityLocal),
+            "VISIBILITY_EXPORT" => Some(Self::VisibilityExport),
+            _ => None,
+        }
+    }
+}
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Any {
@@ -1932,6 +2450,16 @@ pub struct Any {
     #[prost(bytes = "vec", tag = "2")]
     pub value: ::prost::alloc::vec::Vec<u8>,
 }
+impl ::prost::Name for Any {
+    const NAME: &'static str = "Any";
+    const PACKAGE: &'static str = "google.protobuf";
+    fn full_name() -> ::prost::alloc::string::String {
+        "google.protobuf.Any".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/google.protobuf.Any".into()
+    }
+}
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct Timestamp {
@@ -1946,4 +2474,14 @@ pub struct Timestamp {
     /// inclusive.
     #[prost(int32, tag = "2")]
     pub nanos: i32,
+}
+impl ::prost::Name for Timestamp {
+    const NAME: &'static str = "Timestamp";
+    const PACKAGE: &'static str = "google.protobuf";
+    fn full_name() -> ::prost::alloc::string::String {
+        "google.protobuf.Timestamp".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/google.protobuf.Timestamp".into()
+    }
 }

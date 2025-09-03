@@ -11,3 +11,13 @@ pub struct FieldOptions {
     #[prost(bool, tag = "2")]
     pub zip_from_folder: bool,
 }
+impl ::prost::Name for FieldOptions {
+    const NAME: &'static str = "FieldOptions";
+    const PACKAGE: &'static str = "sf.substreams";
+    fn full_name() -> ::prost::alloc::string::String {
+        "sf.substreams.FieldOptions".into()
+    }
+    fn type_url() -> ::prost::alloc::string::String {
+        "/sf.substreams.FieldOptions".into()
+    }
+}
