@@ -1,9 +1,9 @@
 import { createEnv } from "@t3-oss/env-core"
-import { z } from "zod"
+import { Schema } from "effect"
 
 export const env = createEnv({
   server: {
-    SERVER_URL: z.url().optional(),
+    SERVER_URL: Schema.standardSchemaV1(Schema.NullishOr(Schema.URL)),
   },
 
   /**
@@ -13,7 +13,8 @@ export const env = createEnv({
   clientPrefix: "VITE_",
 
   client: {
-    VITE_APP_TITLE: z.string().min(1).optional(),
+    VITE_APP_TITLE: Schema.standardSchemaV1(Schema.NullishOr(Schema.String)),
+    VITE_NOZZLE_ARROW_FLIGHT_URL: Schema.standardSchemaV1(Schema.String),
   },
 
   /**

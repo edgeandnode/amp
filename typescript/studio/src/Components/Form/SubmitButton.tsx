@@ -24,12 +24,11 @@ export const SubmitButton = forwardRef<HTMLButtonElement, SubmitButtonProps>(
           dirty: state.isDirty,
         })}
       >
-        {({ canSubmit, isSubmitting, valid, dirty }) => (
+        {() => (
           <Button
             ref={ref}
             {...rest}
             type="submit"
-            disabled={!canSubmit || !valid || !dirty || isSubmitting}
             data-state={status}
             className={classNames(
               "rounded-6 px-4 py-2.5 text-12 shadow-xs inset-ring inset-ring-space-1200 bg-space-1400 text-white cursor-pointer inline-flex items-center justify-center gap-x-1.5",
