@@ -43,7 +43,7 @@ export function SchemaBrowser() {
                   <button
                     key={`${event.signature}__${param.name}`}
                     type="button"
-                    className="w-full flex items-center justify-between text-sm cursor-pointer border-none outline-none bg-gray-200 dark:hover:bg-slate-800 px-4 py-1.5 rounded-md"
+                    className="w-full flex items-center justify-between text-sm cursor-pointer border-none outline-none hover:bg-gray-200 hover:dark:bg-slate-800 px-4 py-1.5 rounded-md"
                   >
                     <span>{param.name}</span>
                     <span className="ml-auto text-purple-500/70">

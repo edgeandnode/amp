@@ -96,8 +96,6 @@ export function DatasetQueryResultTable() {
     getFilteredRowModel: getFilteredRowModel(), // client side filtering
     getSortedRowModel: getSortedRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
-    debugTable: true,
-    debugHeaders: true,
     debugColumns: false,
   })
 
@@ -119,6 +117,7 @@ export function DatasetQueryResultTable() {
                     <tr key={headerGroup.id}>
                       {headerGroup.headers.map((header) => (
                         <th
+                          key={header.id}
                           scope="col"
                           className="sticky top-0 z-10 border-b border-gray-300 dark:border-slate-800 py-3.5 pr-3 pl-4 text-left text-xs font-light text-gray-900 dark:text-white/65 backdrop-blur-sm backdrop-filter sm:pl-6 lg:pl-8 uppercase"
                         >
@@ -136,6 +135,7 @@ export function DatasetQueryResultTable() {
                     <tr key={row.id} className="divide-x divide-white/10">
                       {row.getVisibleCells().map((cell, cellIdx) => (
                         <td
+                          key={cell.id}
                           className={classNames(
                             cellIdx === 0
                               ? "text-gray-950 dark:text-white font-semibold"

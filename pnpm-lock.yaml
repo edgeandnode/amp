@@ -117,6 +117,9 @@ importers:
       js-toml:
         specifier: ^1.0.2
         version: 1.0.2
+      minimatch:
+        specifier: ^10.0.3
+        version: 10.0.3
       open:
         specifier: ^10.2.0
         version: 10.2.0
@@ -163,6 +166,15 @@ importers:
       '@connectrpc/connect-web':
         specifier: ^2.1.0
         version: 2.1.0(@bufbuild/protobuf@2.6.3)(@connectrpc/connect@2.1.0(@bufbuild/protobuf@2.6.3))
+      '@graphprotocol/gds-css':
+        specifier: https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-css@787178d
+        version: https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-css@787178d(tailwindcss@4.1.12)
+      '@graphprotocol/gds-icons':
+        specifier: https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-icons@787178d
+        version: https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-icons@787178d
+      '@graphprotocol/gds-react':
+        specifier: https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-react@787178d
+        version: https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-react@787178d(react-dom@19.1.1(react@19.1.1))(react@19.1.1)(tailwindcss@4.1.12)
       '@monaco-editor/react':
         specifier: ^4.7.0
         version: 4.7.0(monaco-editor@0.52.2)(react-dom@19.1.1(react@19.1.1))(react@19.1.1)
@@ -890,6 +902,34 @@ packages:
 
   '@floating-ui/utils@0.2.10':
     resolution: {integrity: sha512-aGTxbpbg8/b5JfU1HXSrbH3wXZuLPJcNEcZQFMxLs3oSzgtVu6nFPkbbGGUvBcUjKV2YyB9Wxxabo+HEH9tcRQ==}
+
+  '@graphprotocol/gds-css@https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-css@787178d':
+    resolution: {tarball: https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-css@787178d}
+    version: 0.0.1
+    peerDependencies:
+      tailwindcss: ^4.1.11
+
+  '@graphprotocol/gds-css@https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-css@787178de27d11b18fd944d59ce9ed9a77ffd99ea':
+    resolution: {tarball: https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-css@787178de27d11b18fd944d59ce9ed9a77ffd99ea}
+    version: 0.0.1
+    peerDependencies:
+      tailwindcss: ^4.1.11
+
+  '@graphprotocol/gds-icons@https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-icons@787178d':
+    resolution: {tarball: https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-icons@787178d}
+    version: 0.0.1
+
+  '@graphprotocol/gds-icons@https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-icons@787178de27d11b18fd944d59ce9ed9a77ffd99ea':
+    resolution: {tarball: https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-icons@787178de27d11b18fd944d59ce9ed9a77ffd99ea}
+    version: 0.0.1
+
+  '@graphprotocol/gds-react@https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-react@787178d':
+    resolution: {tarball: https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-react@787178d}
+    version: 0.0.1
+    peerDependencies:
+      react: ^18.0.0 || ^19.0.0
+      react-dom: ^18.0.0 || ^19.0.0
+      tailwindcss: ^4.1.11
 
   '@humanfs/core@0.19.1':
     resolution: {integrity: sha512-5DyQ4+1JEUzejeK1JGICcideyfUbGixgS9jNgex5nqkW+cY7WZhxBigmieN5Qnw9ZosSNVC9KQKyb+GUaGyKUA==}
@@ -4573,6 +4613,26 @@ snapshots:
       react-dom: 19.1.1(react@19.1.1)
 
   '@floating-ui/utils@0.2.10': {}
+
+  '@graphprotocol/gds-css@https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-css@787178d(tailwindcss@4.1.12)':
+    dependencies:
+      tailwindcss: 4.1.12
+
+  '@graphprotocol/gds-css@https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-css@787178de27d11b18fd944d59ce9ed9a77ffd99ea(tailwindcss@4.1.12)':
+    dependencies:
+      tailwindcss: 4.1.12
+
+  '@graphprotocol/gds-icons@https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-icons@787178d': {}
+
+  '@graphprotocol/gds-icons@https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-icons@787178de27d11b18fd944d59ce9ed9a77ffd99ea': {}
+
+  '@graphprotocol/gds-react@https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-react@787178d(react-dom@19.1.1(react@19.1.1))(react@19.1.1)(tailwindcss@4.1.12)':
+    dependencies:
+      '@graphprotocol/gds-css': https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-css@787178de27d11b18fd944d59ce9ed9a77ffd99ea(tailwindcss@4.1.12)
+      '@graphprotocol/gds-icons': https://pkg.pr.new/graphprotocol/gds/@graphprotocol/gds-icons@787178de27d11b18fd944d59ce9ed9a77ffd99ea
+      react: 19.1.1
+      react-dom: 19.1.1(react@19.1.1)
+      tailwindcss: 4.1.12
 
   '@humanfs/core@0.19.1': {}
 
