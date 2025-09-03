@@ -28,20 +28,22 @@ export function SchemaBrowser() {
                   aria-hidden="true"
                 />
                 <div className="w-full flex flex-col gap-y-1 items-center justify-start">
-                  <span className="self-start">{event.name}</span>
-                  <span className="text-xs text-white/55 self-start">
+                  <span className="self-start text-gray-950 dark:text-white">
+                    {event.name}
+                  </span>
+                  <span className="text-xs text-gray-600 dark:text-white/55 self-start">
                     {event.source}
                   </span>
                 </div>
               </Accordion.Trigger>
             </Accordion.Header>
-            <Accordion.Panel className="box-border overflow-y-auto overflow-x-hidden border-l border-white/25 ml-4 pl-1">
+            <Accordion.Panel className="box-border overflow-y-auto overflow-x-hidden border-l border-gray-300 dark:border-white/25 ml-4 pl-1">
               <div className="w-full flex flex-col gap-y-1">
                 {event.params.map((param) => (
                   <button
                     key={`${event.signature}__${param.name}`}
                     type="button"
-                    className="w-full flex items-center justify-between text-sm cursor-pointer border-none outline-none hover:bg-slate-800 px-4 py-1.5 rounded-md"
+                    className="w-full flex items-center justify-between text-sm cursor-pointer border-none outline-none bg-gray-200 dark:hover:bg-slate-800 px-4 py-1.5 rounded-md"
                   >
                     <span>{param.name}</span>
                     <span className="ml-auto text-purple-500/70">

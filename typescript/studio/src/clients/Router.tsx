@@ -12,8 +12,6 @@ import type { ReactNode } from "react"
 import type { DatasetWorksRouterCtx } from "../routes/__root"
 import { routeTree } from "../routeTree.gen"
 
-import { transport } from "./Nozzle"
-
 export function createDatasetWorksAppRouter() {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -36,7 +34,6 @@ export function createDatasetWorksAppRouter() {
     defaultPreloadStaleTime: 0,
     context: {
       queryClient,
-      transport,
     } as const satisfies DatasetWorksRouterCtx,
     // On the server, dehydrate the loader client so the router
     // can serialize it and send it to the client for us

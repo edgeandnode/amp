@@ -27,17 +27,19 @@ export function UDFBrowser() {
                   aria-hidden="true"
                 />
                 <div className="w-full flex flex-col gap-y-1 items-center justify-start">
-                  <span className="self-start">{udf.name}</span>
-                  <span className="text-xs text-white/55 self-start text-left whitespace-break-spaces">
+                  <span className="self-start text-gray-950 dark:text-white">
+                    {udf.name}
+                  </span>
+                  <span className="text-xs text-gray-600 dark:text-white/55 self-start text-left whitespace-break-spaces">
                     {udf.description}
                   </span>
                 </div>
               </Accordion.Trigger>
             </Accordion.Header>
-            <Accordion.Panel className="box-border overflow-y-auto overflow-x-hidden border-l border-white/25 ml-4 pl-4">
+            <Accordion.Panel className="box-border overflow-y-auto overflow-x-hidden border-l border-gray-300 dark:border-white/25 ml-4 pl-4">
               {/** Use actual code component here. this is garbage */}
               <code
-                className="font-mono text-xs p-4 rounded-md bg-black"
+                className="font-mono text-xs p-4 rounded-md bg-gray-50 dark:bg-black"
                 key={udf.name}
               >
                 {udf.sql}

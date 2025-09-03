@@ -44,29 +44,28 @@ export function QueryPlaygroundWrapper() {
       onChangeAsyncDebounceMs: 100,
       onChange: Schema.standardSchemaV1(NozzleStudioQueryEditorForm),
     },
-    async onSubmit({ formApi, value }) {},
   })
 
   return (
-    <div className="w-full h-full flex flex-col border border-white/10 rounded-lg divide-y divide-white/10">
+    <div className="w-full h-full flex flex-col border border-gray-300 dark:border-white/10 rounded-lg divide-y divide-gray-300 dark:divide-white/10">
       <Tabs.Root
-        className="w-full flex flex-col divide-y divide-white/10"
+        className="w-full flex flex-col divide-y divide-gray-300 dark:divide-white/10"
         defaultValue={queryTabs[0]}
         value={activeTabIdx}
         onValueChange={(idx: number) => setActiveTabIdx(idx)}
       >
-        <Tabs.List className="w-full flex items-baseline relative bg-slate-900 px-2 pt-2 pb-0">
+        <Tabs.List className="w-full flex items-baseline relative bg-gray-100 dark:bg-slate-900 px-2 pt-2 pb-0">
           {queryTabs.map((tab, idx) => (
             <Tabs.Tab
               key={`queryTab[${tab}:${idx}]`}
               value={idx}
-              className="inline-flex items-center justify-center px-4 h-8 text-white/80 border-b border-transparent data-[selected]:text-white data-[selected]:border-purple-800 hover:text-white hover:border-purple-400 cursor-pointer text-xs"
+              className="inline-flex items-center justify-center px-4 h-8 text-gray-900 dark:text-white/80 border-b border-transparent data-[selected]:text-gray-950 data-[selected]:dark:text-white data-[selected]:border-purple-800 hover:text-gray-950 hover:dark:text-white hover:border-purple-400 cursor-pointer text-xs"
             >
               {tab}
             </Tabs.Tab>
           ))}
           <Tabs.Tab
-            className="inline-flex items-center justify-center px-4 h-8 gap-x-2 text-white/80 cursor-pointer text-xs hover:text-white border-b border-transparent mb-0 pb-0"
+            className="inline-flex items-center justify-center px-4 h-8 gap-x-2 text-gray-700 dark:text-white/80 cursor-pointer text-xs hover:text-gray-950 dark:hover:text-white border-b border-transparent mb-0 pb-0"
             onClick={() => {
               // add a new tab to queryTabs array, set as active
               const currentTabsLength = queryTabs.length
@@ -81,7 +80,7 @@ export function QueryPlaygroundWrapper() {
         {queryTabs.map((tab, idx) => (
           <Tabs.Panel
             key={`queryPanel[${tab}:${idx}]`}
-            className="w-full h-full overflow-hidden bg-slate-950 p-4"
+            className="w-full h-full overflow-hidden bg-white dark:bg-slate-950 p-4"
           >
             <form.AppField name="editor">
               {(field) => <field.Editor id="editor" />}
@@ -90,13 +89,13 @@ export function QueryPlaygroundWrapper() {
         ))}
       </Tabs.Root>
       <div className="w-full flex items-center justify-between h-16 px-4">
-        <span className="text-white/65 text-xs font-light">
+        <span className="text-gray-500 dark:text-white/65 text-xs font-light">
           Enter to new line, {correctKey} + ENTER to run
         </span>
         {/** @todo turn this into a form submit button */}
         <button
           type="button"
-          className="rounded-md bg-white/10 px-2.5 py-1.5 text-xs text-white shadow-xs hover:bg-white/20 cursor-pointer"
+          className="rounded-sm bg-white px-2 py-1 text-sm font-semibold text-gray-900 shadow-xs inset-ring inset-ring-gray-300 hover:bg-gray-50 dark:bg-white/10 dark:text-white dark:shadow-none dark:inset-ring-white/5 dark:hover:bg-white/20 cursor-pointer"
         >
           Run
         </button>

@@ -17,7 +17,7 @@ export function MetadataBrowser() {
         <TableIcon className="size-4 text-inherit" aria-hidden="true" />
         <div className="w-full flex flex-col gap-y-1 items-center justify-start">
           <span className="self-start">Logs source</span>
-          <span className="text-xs text-white/55 self-start">
+          <span className="text-xs text-gray-600 dark:text-white/55 self-start">
             {metadata.source}
           </span>
         </div>
@@ -34,21 +34,23 @@ export function MetadataBrowser() {
           />
           <div className="w-full flex flex-col gap-y-1 items-center justify-start">
             <span className="self-start">Columns</span>
-            <span className="text-xs text-white/55 self-start text-left">
+            <span className="text-xs text-gray-600 dark:text-white/55 self-start text-left">
               These columns are available on all queries. They represent
               metadata about the transaction, decoded from the logs.
             </span>
           </div>
         </Collapsible.Trigger>
-        <Collapsible.Panel className="box-border overflow-y-auto overflow-x-hidden border-l border-white/25 ml-4 pl-1">
+        <Collapsible.Panel className="box-border overflow-y-auto overflow-x-hidden border-l border-gray-300 dark:border-white/25 ml-4 pl-1">
           <div className="w-full flex flex-col gap-y-1">
             {metadata.metadata_columns.map((col) => (
               <button
                 key={col.name}
                 type="button"
-                className="w-full flex items-center justify-between text-sm cursor-pointer border-none outline-none hover:bg-slate-800 px-4 py-1.5 rounded-md"
+                className="w-full flex items-center justify-between text-sm cursor-pointer border-none outline-none hover:bg-gray-50 dark:hover:bg-slate-800 px-4 py-1.5 rounded-md"
               >
-                <span>{col.name}</span>
+                <span className="text-gray-950 dark:text-white">
+                  {col.name}
+                </span>
                 <span className="ml-auto text-purple-500/70">
                   {col.dataType}
                 </span>

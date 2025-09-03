@@ -105,7 +105,9 @@ export function DatasetQueryResultTable() {
     <div className="h-[550px] w-full px-4 mt-6 flex flex-col gap-y-4">
       <div className="w-full flex flex-col gap-y-4">
         {/** @todo derive correct status after running query */}
-        <span className="text-white/35 text-sm">Result - Success</span>
+        <span className="text-gray-700 dark:text-white/35 text-sm">
+          Result - Success
+        </span>
       </div>
       <div className="overflow-x-auto w-full">
         <div className="flow-root">
@@ -118,7 +120,7 @@ export function DatasetQueryResultTable() {
                       {headerGroup.headers.map((header) => (
                         <th
                           scope="col"
-                          className="sticky top-0 z-10 border-b border-slate-800 py-3.5 pr-3 pl-4 text-left text-xs font-light text-white/65 backdrop-blur-sm backdrop-filter sm:pl-6 lg:pl-8 uppercase"
+                          className="sticky top-0 z-10 border-b border-gray-300 dark:border-slate-800 py-3.5 pr-3 pl-4 text-left text-xs font-light text-gray-900 dark:text-white/65 backdrop-blur-sm backdrop-filter sm:pl-6 lg:pl-8 uppercase"
                         >
                           {flexRender(
                             header.column.columnDef.header,
@@ -136,9 +138,9 @@ export function DatasetQueryResultTable() {
                         <td
                           className={classNames(
                             cellIdx === 0
-                              ? "text-white font-semibold"
-                              : "text-gray-200 font-light",
-                            "py-4 pr-3 pl-4 text-xs whitespace-nowrap sm:pl-6 lg:pl-8 border-b border-white/10",
+                              ? "text-gray-950 dark:text-white font-semibold"
+                              : "text-gray-700 dark:text-gray-200 font-light",
+                            "py-4 pr-3 pl-4 text-xs whitespace-nowrap sm:pl-6 lg:pl-8 border-b border-gray-400 dark:border-white/10",
                           )}
                         >
                           {flexRender(
