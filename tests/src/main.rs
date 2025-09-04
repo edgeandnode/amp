@@ -29,10 +29,7 @@ async fn main() {
     logging::init();
 
     match args.command {
-        Command::Bless {
-            dataset,
-            end_block,
-        } => {
+        Command::Bless { dataset, end_block } => {
             let test_env = TestEnv::blessed("bless_cmd").await.unwrap();
             bless(&test_env, &dataset, end_block).await.unwrap();
             warn!("wrote new blessed dataset for {dataset}");
