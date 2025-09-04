@@ -24,8 +24,6 @@ const datasetMutationOptions = mutationOptions<
       }
       const json = await response.json()
 
-      console.log("returned json", json)
-
       return json as ReadonlyArray<any>
     } catch (err) {
       console.error("Failure querying dataset", { err })
