@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback } from "react"
+import { useCallback, useState } from "react"
 import { Collapsible } from "@base-ui-components/react/collapsible"
 import { Button } from "@graphprotocol/gds-react"
 import {
@@ -50,13 +50,12 @@ export type MetadataBrowserProps = {}
 export function MetadataBrowser() {
   const { data: metadata } = useMetadataSuspenseQuery()
   const { insertColumn } = useEditor()
-
-  // Get the first metadata object from the array
-  // In the future, we might want to show all datasets, but for now we show the first one
-  const firstMetadata = metadata[0]
+  
+  // State for tracking which dataset source is currently selected
+  const [selectedDatasetIndex, setSelectedDatasetIndex] = useState(0)
   
   // Early return if no metadata is available
-  if (!firstMetadata) {
+  if (!metadata || metadata.length === 0) {
     return (
       <div className="flex flex-col gap-y-4 p-6">
         <p className="text-14">Dataset Metadata</p>
@@ -64,6 +63,8 @@ export function MetadataBrowser() {
       </div>
     )
   }
+  // Get the currently selected metadata object
+  const selectedMetadata = metadata[selectedDatasetIndex] || metadata[0]
 
   /**
    * Inserts a column reference into the editor at the current cursor position
@@ -83,6 +84,7 @@ export function MetadataBrowser() {
   return (
     <div className="flex flex-col gap-y-4 p-6">
       <p className="text-14">Dataset Metadata</p>
+      
       <div className="group flex items-start relative w-full gap-x-1 px-0 py-2 text-sm">
         <TableIcon
           alt="Dataset Metadata"
@@ -91,11 +93,26 @@ export function MetadataBrowser() {
           size={5}
           variant="regular"
         />
-        <div className="w-full flex flex-col gap-y-1 items-center justify-start">
-          <span className="self-start text-14">Logs source</span>
-          <span className="text-12 text-space-700 self-start">
-            {firstMetadata.source}
+        <div className="w-full flex flex-col gap-y-1 justify-start">
+          <span className="self-start text-14">
+            Available datasets ({metadata.length})
           </span>
+          <div className="flex flex-wrap gap-1">
+            {metadata.map((datasetMeta, index) => (
+              <button
+                key={`${datasetMeta.source}-${index}`}
+                onClick={() => setSelectedDatasetIndex(index)}
+                className={`px-3 py-1.5 text-12 rounded-md transition-colors border ${
+                  selectedDatasetIndex === index
+                    ? 'bg-purple-600 text-white border-purple-600'
+                    : 'bg-space-1200 text-space-300 border-space-1400 hover:bg-space-1100'
+                }`}
+                title={`Switch to ${datasetMeta.source} dataset`}
+              >
+                {datasetMeta.source}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
       <Collapsible.Root className="w-full box-border flex flex-col justify-center gap-y-3">
@@ -124,7 +141,7 @@ export function MetadataBrowser() {
         </Collapsible.Trigger>
         <Collapsible.Panel className="box-border overflow-y-auto overflow-x-hidden border-l border-white/20 ml-4 pl-1">
           <div className="w-full flex flex-col gap-y-1">
-            {firstMetadata.metadata_columns.map((col) => (
+            {selectedMetadata.metadata_columns.map((col) => (
               <Button
                 key={col.name}
                 type="button"
