@@ -141,6 +141,7 @@ impl TestStep {
             TestStep::Deploy(step) => {
                 let dataset_package = DatasetPackage::new(&step.deploy, step.config.as_deref());
                 dataset_package.pnpm_install().await?;
+                dataset_package.register(test_env.server_addrs).await?;
                 dataset_package.deploy(test_env.server_addrs).await
             }
             TestStep::CleanDumpLocation(step) => {
