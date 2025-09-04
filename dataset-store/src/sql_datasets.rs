@@ -120,6 +120,7 @@ pub(super) async fn dataset(
             network: def.network,
             name: def.name,
             version: None,
+            start_block: None,
             tables,
             functions: vec![],
         },
