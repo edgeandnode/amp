@@ -15,20 +15,20 @@ import * as Model from "../../Model.ts"
 export const build = Command.make("build", {
   args: {
     config: Options.file("config", { exists: "yes" }).pipe(
-      Options.optional,
       Options.withAlias("c"),
       Options.withDescription("The dataset definition config file to build to a manifest"),
+      Options.optional,
     ),
     output: Options.file("output", { exists: "either" }).pipe(
-      Options.optional,
       Options.withAlias("o"),
       Options.withDescription("The output file to write the manifest to"),
+      Options.optional,
     ),
-    registry: Options.text("registry-url").pipe(
+    registryUrl: Options.text("registry-url").pipe(
       Options.withFallbackConfig(
         Config.string("NOZZLE_REGISTRY_URL").pipe(Config.withDefault("http://localhost:1611")),
       ),
-      Options.withDescription("The url of the Nozzle registry server"),
+      Options.withDescription("The url of the registry server"),
       Options.withSchema(Schema.URL),
     ),
   },
@@ -53,6 +53,6 @@ export const build = Command.make("build", {
     }),
   ),
   Command.provide(({ args }) =>
-    ManifestContext.layerFromConfigFile(args.config).pipe(Layer.provide(Registry.layer(`${args.registry}`)))
+    ManifestContext.layerFromConfigFile(args.config).pipe(Layer.provide(Registry.layer(`${args.registryUrl}`)))
   ),
 )

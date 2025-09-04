@@ -5,7 +5,7 @@ import { useEffect, useState } from "react"
 
 const program = Effect.gen(function*() {
   const flight = yield* ArrowFlight.ArrowFlight
-  const table = yield* flight.table`SELECT * FROM transfers_eth_mainnet.erc20_transfers LIMIT 100`
+  const table = yield* flight.table`SELECT * FROM example.counts ORDER BY block_num DESC LIMIT 100`
   const schema = Arrow.generateSchema(table.schema)
   const result = yield* Schema.encodeUnknown(Schema.Array(schema))([...table])
   return result

@@ -5,6 +5,7 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
 };
+use common::manifest::Version;
 use http_common::BoxRequestError;
 use metadata_db::JobStatus;
 use tokio::time::sleep;
@@ -19,6 +20,12 @@ use crate::ctx::Ctx;
 /// the API call should wait for job completion.
 #[derive(serde::Deserialize)]
 pub struct DumpOptions {
+    /// The dataset version to dump
+    ///
+    /// If not specified, the latest version of the dataset will be used
+    #[serde(default)]
+    version: Option<Version>,
+
     /// The last block number to extract (optional)
     ///
     /// If not specified, the extraction will continue indefinitely
@@ -88,7 +95,7 @@ pub async fn handler(
 ) -> Result<(StatusCode, &'static str), BoxRequestError> {
     let dataset = ctx
         .store
-        .load_dataset(&id, None) // TODO: add version handling from the request
+        .load_dataset(&id, options.version.as_ref())
         .await
         .map_err(Error::StoreError)?;
 

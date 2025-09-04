@@ -1,6 +1,13 @@
 import * as Path from "@effect/platform/Path"
 import { layer } from "@effect/vitest"
-import { assertEquals, assertFailure, assertInstanceOf, assertSome, deepStrictEqual } from "@effect/vitest/utils"
+import {
+  assertEquals,
+  assertFailure,
+  assertInstanceOf,
+  assertSome,
+  assertSuccess,
+  deepStrictEqual,
+} from "@effect/vitest/utils"
 import * as Array from "effect/Array"
 import * as Cause from "effect/Cause"
 import * as Duration from "effect/Duration"
@@ -56,7 +63,7 @@ layer(environment, {
 
       // Deploy and dump the root dataset.
       const dataset = yield* fixtures.load("anvil.json", Model.DatasetRpc)
-      yield* admin.deployDataset(dataset)
+      yield* admin.deployDataset(dataset.name, dataset.version, dataset)
       yield* admin.dumpDataset(dataset.name, {
         endBlock: Number(block),
         waitForCompletion: true,
@@ -92,6 +99,18 @@ layer(environment, {
   )
 
   it.effect(
+    "can register a dataset",
+    Effect.fn(function*() {
+      const registry = yield* Registry.Registry
+      const fixtures = yield* Fixtures.Fixtures
+      const dataset = yield* fixtures.load("manifest.json", Model.DatasetManifest)
+      const result = yield* registry.register(dataset).pipe(Effect.exit)
+      assertSuccess(result, { success: true })
+    }),
+    { sequential: true, timeout: Duration.toMillis("10 seconds") },
+  )
+
+  it.effect(
     "deploy and dump the example dataset",
     Effect.fn(function*() {
       const admin = yield* Admin.Admin
@@ -101,7 +120,7 @@ layer(environment, {
 
       // Deploy and dump the example manifest.
       const dataset = yield* fixtures.load("manifest.json", Model.DatasetManifest)
-      yield* admin.deployDataset(dataset)
+      yield* admin.deployDataset(dataset.name, dataset.version)
       yield* admin.dumpDataset(dataset.name, {
         endBlock: Number(block),
         waitForCompletion: true,

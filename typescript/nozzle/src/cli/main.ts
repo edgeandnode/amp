@@ -23,6 +23,7 @@ import { dev } from "./commands/dev.ts"
 import { dump } from "./commands/dump.ts"
 import { proxy } from "./commands/proxy.ts"
 import { query } from "./commands/query.ts"
+import { register } from "./commands/register.ts"
 
 const levels = LogLevel.allLevels.map((value) => String.toLowerCase(value.label)) as Array<Lowercase<LogLevel.Literal>>
 const nozzle = Command.make("nozzle", {
@@ -35,11 +36,14 @@ const nozzle = Command.make("nozzle", {
   },
 }).pipe(
   Command.withDescription("The Nozzle Command Line Interface"),
-  Command.withSubcommands([build, deploy, dev, codegen, dump, query, proxy]),
+  Command.withSubcommands([build, register, dev, codegen, dump, query, proxy, deploy]),
   Command.provide(({ args }) => Logger.minimumLogLevel(args.logs)),
 )
 
-const cli = Command.run(nozzle, { name: "Nozzle", version: "v0.0.1" })
+const cli = Command.run(nozzle, {
+  name: "Nozzle",
+  version: "v0.0.1",
+})
 
 const layer = Layer.provideMerge(PlatformConfigProvider.layerDotEnvAdd(".env"), NodeContext.layer)
 

@@ -13,25 +13,25 @@ import * as SchemaGenerator from "../../SchemaGenerator.ts"
 export const codegen = Command.make("codegen", {
   args: {
     config: Options.file("config", { exists: "yes" }).pipe(
-      Options.optional,
       Options.withAlias("c"),
       Options.withDescription("The dataset definition config file to generate code for"),
+      Options.optional,
     ),
     manifest: Options.file("manifest", { exists: "yes" }).pipe(
-      Options.optional,
       Options.withAlias("m"),
       Options.withDescription("The dataset manifest file to generate code for"),
+      Options.optional,
     ),
     query: Options.text("query").pipe(
-      Options.optional,
       Options.withAlias("q"),
       Options.withDescription("The query to generate code for"),
+      Options.optional,
     ),
-    registry: Options.text("registry-url").pipe(
+    registryUrl: Options.text("registry-url").pipe(
       Options.withFallbackConfig(
         Config.string("NOZZLE_REGISTRY_URL").pipe(Config.withDefault("http://localhost:1611")),
       ),
-      Options.withDescription("The url of the Nozzle registry server"),
+      Options.withDescription("The url of the registry server"),
       Options.withSchema(Schema.URL),
     ),
   },
@@ -53,6 +53,6 @@ export const codegen = Command.make("codegen", {
     Option.match(args.query, {
       onSome: () => Layer.empty,
       onNone: () => ManifestContext.layerFromFile({ config: args.config, manifest: args.manifest }),
-    }).pipe(Layer.merge(SchemaGenerator.SchemaGenerator.Default), Layer.provide(Registry.layer(`${args.registry}`)))
+    }).pipe(Layer.merge(SchemaGenerator.SchemaGenerator.Default), Layer.provide(Registry.layer(`${args.registryUrl}`)))
   ),
 )

@@ -35,11 +35,20 @@ export const DatasetKind = Schema.Literal("manifest", "sql", "substreams", "fire
 )
 
 export const DatasetVersion = Schema.String.pipe(
-  Schema.pattern(/^\d+\.\d+\.\d+$/),
+  Schema.pattern(/^\d+\.\d+\.\d+(-[a-zA-Z0-9]+)?$/),
   Schema.annotations({
     title: "Version",
     description: "a semantic version number (e.g. \"4.1.3\")",
-    examples: ["1.0.0", "1.0.1", "1.1.0"],
+    examples: ["1.0.0", "1.0.1", "1.1.0", "1.0.0-dev123"],
+  }),
+)
+
+export const DatasetNameAndVersion = Schema.TemplateLiteral(Schema.String, Schema.Literal("@"), Schema.String).pipe(
+  Schema.pattern(/^\w+@\d+\.\d+\.\d+(-[a-zA-Z0-9]+)?$/),
+  Schema.annotations({
+    title: "NameAndVersion",
+    description: "the name and version of the dataset",
+    examples: ["uniswap@1.0.0"],
   }),
 )
 
