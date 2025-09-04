@@ -47,6 +47,7 @@
     "@effect/experimental": "^0.54.6",
     "@effect/platform-node": "^0.96.0",
     "jiti": "^2.5.1",
+    "minimatch": "^10.0.3",
     "viem": "^2.33.3"
   },
   "peerDependencies": {
