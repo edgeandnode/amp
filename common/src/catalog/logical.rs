@@ -11,7 +11,7 @@ use serde::Deserialize;
 use crate::{BLOCK_NUM, BlockNum, BoxError, SPECIAL_BLOCK_NUM, js_udf::JsUdf, manifest::Version};
 
 /// Identifies a dataset and its data schema.
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug)]
 pub struct Dataset {
     pub kind: String,
     pub network: String,
