@@ -178,27 +178,6 @@ where
     Ok(tuples)
 }
 
-/// Get start block for a location by ID
-#[tracing::instrument(skip(exe), err)]
-pub async fn get_start_block_by_id<'c, E>(
-    exe: E,
-    location_id: LocationId,
-) -> Result<i64, sqlx::Error>
-where
-    E: Executor<'c, Database = Postgres>,
-{
-    let query = indoc::indoc! {r#"
-        SELECT start_block 
-        FROM locations 
-        WHERE id = $1
-    "#};
-
-    sqlx::query_scalar(query)
-        .bind(location_id)
-        .fetch_one(exe)
-        .await
-}
-
 /// Deactivate all active locations for a specific table
 #[tracing::instrument(skip(exe), err)]
 pub async fn mark_inactive_by_table_id<'c, E>(exe: E, table: TableId<'_>) -> Result<(), sqlx::Error>
