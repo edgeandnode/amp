@@ -35,13 +35,19 @@ pub async fn serve(
         )
         .route("/datasets/{id}", get(datasets::get_by_id::handler))
         .route("/datasets/{id}/dump", post(datasets::dump::handler))
-        .route("/jobs", get(jobs::get_all::handler))
-        .route("/jobs/{id}", get(jobs::get_by_id::handler))
+        .route(
+            "/jobs",
+            get(jobs::get_all::handler).delete(jobs::delete::handler),
+        )
+        .route(
+            "/jobs/{id}",
+            get(jobs::get_by_id::handler).delete(jobs::delete_by_id::handler),
+        )
         .route("/jobs/{id}/stop", put(jobs::stop::handler))
         .route("/locations", get(locations::get_all::handler))
         .route(
             "/locations/{id}",
-            get(locations::get_by_id::handler).delete(locations::delete::handler),
+            get(locations::get_by_id::handler).delete(locations::delete_by_id::handler),
         )
         .with_state(Ctx {
             config,

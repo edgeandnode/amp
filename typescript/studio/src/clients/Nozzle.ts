@@ -11,7 +11,7 @@ const program = <T = ReadonlyArray<any>>(query: string) =>
     const schema = Arrow.generateSchema(table.schema)
     const result = yield* Schema.encodeUnknown(Schema.Array(schema))([...table])
     return result as T
-  }).pipe(Effect.provide(ArrowFlight.ArrowFlight.withTransport(transport)))
+  }).pipe(Effect.provide(ArrowFlight.layer(transport)))
 
 export class NozzleQueryRunner {
   async query<T = ReadonlyArray<any>>(

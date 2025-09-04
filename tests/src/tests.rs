@@ -17,7 +17,10 @@ use schemars::schema_for;
 use crate::{
     steps::load_test_steps,
     test_client::TestClient,
-    test_support::{self, SnapshotContext, TestEnv, check_blocks, restore_blessed_dataset},
+    test_support::{
+        self, SnapshotContext, TestEnv, check_blocks, restore_blessed_dataset,
+        spawn_compaction_and_await_completion,
+    },
 };
 
 #[tokio::test]
@@ -44,11 +47,67 @@ async fn evm_rpc_single_dump() {
 }
 
 #[tokio::test]
+async fn evm_rpc_single_dump_fetch_receipts_per_tx() {
+    logging::init();
+
+    let dataset_name = "eth_rpc";
+    let test_env = TestEnv::temp_with_config(
+        "evm_rpc_single_dump_fetch_receipts_per_tx",
+        "per_tx_receipt_config.toml",
+    )
+    .await
+    .unwrap();
+
+    let blessed = SnapshotContext::blessed(&test_env, &dataset_name)
+        .await
+        .unwrap();
+
+    // Check the dataset directly against the RPC provider with `check_blocks`.
+    check_blocks(&test_env, dataset_name, 15_000_000, 15_000_000)
+        .await
+        .expect("blessed data differed from provider");
+
+    // Now dump the dataset to a temporary directory and check it again against the blessed files.
+    let temp_dump = SnapshotContext::temp_dump(&test_env, &dataset_name, 15_000_000, 15_000_000, 1)
+        .await
+        .expect("temp dump failed");
+    temp_dump.assert_eq(&blessed).await.unwrap();
+}
+
+#[tokio::test]
 async fn evm_rpc_base_single_dump() {
     logging::init();
 
     let dataset_name = "base";
     let test_env = TestEnv::temp("evm_rpc_base_single_dump").await.unwrap();
+
+    let blessed = SnapshotContext::blessed(&test_env, &dataset_name)
+        .await
+        .unwrap();
+
+    // Check the dataset directly against the RPC provider with `check_blocks`.
+    check_blocks(&test_env, dataset_name, 33_411_770, 33_411_770)
+        .await
+        .expect("blessed data differed from provider");
+
+    // Now dump the dataset to a temporary directory and check it again against the blessed files.
+    let temp_dump = SnapshotContext::temp_dump(&test_env, &dataset_name, 33_411_770, 33_411_770, 1)
+        .await
+        .expect("temp dump failed");
+    temp_dump.assert_eq(&blessed).await.unwrap();
+}
+
+#[tokio::test]
+async fn evm_rpc_base_single_dump_fetch_receipts_per_tx() {
+    logging::init();
+
+    let dataset_name = "base";
+    let test_env = TestEnv::temp_with_config(
+        "evm_rpc_base_single_dump_fetch_receipts_per_tx",
+        "per_tx_receipt_config.toml",
+    )
+    .await
+    .unwrap();
 
     let blessed = SnapshotContext::blessed(&test_env, &dataset_name)
         .await
@@ -594,11 +653,17 @@ async fn sql_dataset_input_batch_size() {
 
     let file_count = table.files().await.unwrap().len();
 
-    // 5. With batch size 1 and 4 blocks, we expect 4 files (even if some are empty) since
-    // microbatch_max_interval=1 should create one file per block even_blocks only includes even
-    // block numbers, so we expect 2 files with data for blocks 15000000 and 15000002, plus empty
-    // files for odd blocks
+    // 5. With batch size 1 and 4 blocks, we expect 4 files to be dumped (even if some are empty)
+    // since microbatch_max_interval=1 should create one file per block even_blocks only includes
+    // even block numbers, so we expect 2 files with data for blocks 15000000 and 15000002, plus
+    // empty files for odd blocks.
     assert_eq!(file_count, 4);
+
+    spawn_compaction_and_await_completion(table, &test_env.config).await;
+
+    // 6. After compaction, we expect an additional file to be created, with all data in it.
+    let file_count_after = table.files().await.unwrap().len();
+    assert_eq!(file_count_after, 5);
 
     let mut test_client = TestClient::connect(&test_env).await.unwrap();
     let res = test_client

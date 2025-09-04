@@ -128,8 +128,11 @@ use tracing::instrument;
 
 use super::{Ctx, block_ranges, tasks::FailFastJoinSet};
 use crate::{
+    compaction::{CompactionProperties, NozzleCompactor},
     metrics,
-    parquet_writer::{ParquetFileWriter, ParquetWriterProperties, commit_metadata},
+    parquet_writer::{
+        ParquetFileWriter, ParquetFileWriterOutput, ParquetWriterProperties, commit_metadata,
+    },
     streaming_query::{QueryMessage, StreamingQuery},
 };
 
@@ -141,6 +144,7 @@ pub async fn dump_table(
     env: &QueryEnv,
     table: Arc<PhysicalTable>,
     parquet_opts: &ParquetWriterProperties,
+    compaction_opts: &Arc<CompactionProperties>,
     microbatch_max_interval: u64,
     (start, end): (i64, Option<i64>),
     metrics: Option<Arc<metrics::MetricsRegistry>>,
@@ -163,6 +167,7 @@ pub async fn dump_table(
     let data_store = ctx.data_store.clone();
     let env = env.clone();
     let parquet_opts = parquet_opts.clone();
+    let compaction_opts = compaction_opts.clone();
 
     join_set.spawn(async move {
         let catalog = dataset_store
@@ -211,6 +216,7 @@ pub async fn dump_table(
                     range,
                     table.clone(),
                     &parquet_opts,
+                    &compaction_opts,
                     microbatch_max_interval,
                     &ctx.notification_multiplexer,
                     metrics.clone(),
@@ -235,6 +241,7 @@ pub async fn dump_table(
                 start..=end,
                 physical_table,
                 &parquet_opts,
+                &compaction_opts,
                 microbatch_max_interval,
                 &ctx.notification_multiplexer,
                 metrics.clone(),
@@ -263,6 +270,7 @@ async fn dump_sql_query(
     range: RangeInclusive<BlockNum>,
     physical_table: Arc<PhysicalTable>,
     parquet_opts: &ParquetWriterProperties,
+    compaction_opts: &Arc<CompactionProperties>,
     microbatch_max_interval: u64,
     notification_multiplexer: &Arc<NotificationMultiplexerHandle>,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
@@ -298,12 +306,17 @@ async fn dump_sql_query(
 
     let dataset = physical_table.dataset().name.clone();
 
+    let mut compactor = NozzleCompactor::start(physical_table.clone(), compaction_opts.clone());
+
     // Receive data from the query stream, commiting a file on every watermark update received. The
     // `microbatch_max_interval` parameter controls the frequency of these updates.
     while let Some(message) = stream.next().await {
         let message = message?;
         match message {
-            QueryMessage::MicrobatchStart(_) => (),
+            QueryMessage::MicrobatchStart {
+                range: _,
+                is_reorg: _,
+            } => (),
             QueryMessage::Data(batch) => {
                 writer.write(&batch).await?;
 
@@ -317,7 +330,13 @@ async fn dump_sql_query(
             QueryMessage::MicrobatchEnd(range) => {
                 let microbatch_end = range.end();
                 // Close current file and commit metadata
-                let (parquet_meta, object_meta, footer) = writer.close(range).await?;
+                let ParquetFileWriterOutput {
+                    parquet_meta,
+                    object_meta,
+                    footer,
+                    ..
+                } = writer.close(range, vec![]).await?;
+
                 commit_metadata(
                     &dataset_store.metadata_db,
                     parquet_meta,
@@ -326,6 +345,8 @@ async fn dump_sql_query(
                     footer,
                 )
                 .await?;
+
+                compactor.try_run();
 
                 // Open new file for next chunk
                 microbatch_start = microbatch_end + 1;

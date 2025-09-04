@@ -8,9 +8,9 @@ use tokio::time::{Duration, timeout};
 
 use crate::{
     conn::DbConn,
+    jobs::JobId,
     workers::{
         events::{self, JobNotifAction, JobNotification},
-        job_id::JobId,
         node_id::WorkerNodeId,
     },
 };
@@ -19,7 +19,7 @@ use crate::{
 async fn send_and_receive_start_notification() {
     //* Given
     let temp_db = PgTempDB::new();
-    let mut conn = DbConn::connect(&temp_db.connection_uri())
+    let mut conn = DbConn::connect_with_retry(&temp_db.connection_uri())
         .await
         .expect("Failed to connect to metadata db");
     conn.run_migrations()
@@ -57,7 +57,7 @@ async fn send_and_receive_start_notification() {
 async fn send_and_receive_stop_notification() {
     //* Given
     let temp_db = PgTempDB::new();
-    let mut conn = DbConn::connect(&temp_db.connection_uri())
+    let mut conn = DbConn::connect_with_retry(&temp_db.connection_uri())
         .await
         .expect("Failed to connect to metadata db");
     conn.run_migrations()
@@ -94,7 +94,7 @@ async fn send_and_receive_stop_notification() {
 async fn notification_serialization_roundtrip() {
     //* Given
     let temp_db = PgTempDB::new();
-    let mut conn = DbConn::connect(&temp_db.connection_uri())
+    let mut conn = DbConn::connect_with_retry(&temp_db.connection_uri())
         .await
         .expect("Failed to connect to metadata db");
     conn.run_migrations()
@@ -129,7 +129,7 @@ async fn notification_serialization_roundtrip() {
 async fn multiple_listeners_receive_same_notification() {
     //* Given
     let temp_db = PgTempDB::new();
-    let mut conn = DbConn::connect(&temp_db.connection_uri())
+    let mut conn = DbConn::connect_with_retry(&temp_db.connection_uri())
         .await
         .expect("Failed to connect to metadata db");
     conn.run_migrations()
@@ -182,7 +182,7 @@ async fn multiple_listeners_receive_same_notification() {
 async fn listener_stream_yields_notifications() {
     //* Given
     let temp_db = PgTempDB::new();
-    let mut conn = DbConn::connect(&temp_db.connection_uri())
+    let mut conn = DbConn::connect_with_retry(&temp_db.connection_uri())
         .await
         .expect("Failed to connect to metadata db");
     conn.run_migrations()
@@ -235,7 +235,7 @@ async fn listener_stream_yields_notifications() {
 async fn invalid_payload_deserialization_error() {
     //* Given
     let temp_db = PgTempDB::new();
-    let mut conn = DbConn::connect(&temp_db.connection_uri())
+    let mut conn = DbConn::connect_with_retry(&temp_db.connection_uri())
         .await
         .expect("Failed to connect to metadata db");
     conn.run_migrations()
@@ -271,7 +271,7 @@ async fn invalid_payload_deserialization_error() {
 async fn notification_not_received_before_listen() {
     //* Given
     let temp_db = PgTempDB::new();
-    let mut conn = DbConn::connect(&temp_db.connection_uri())
+    let mut conn = DbConn::connect_with_retry(&temp_db.connection_uri())
         .await
         .expect("Failed to connect to metadata db");
     conn.run_migrations()

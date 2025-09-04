@@ -3,7 +3,7 @@
 import type { EditorProps as MonacoEditorProps } from "@monaco-editor/react"
 import MonacoEditor from "@monaco-editor/react"
 import { useStore } from "@tanstack/react-form"
-import { useEffect, useRef } from "react"
+import { useEffect } from "react"
 import type * as monaco from "monaco-editor"
 
 import { ErrorMessages } from "../Form/ErrorMessages"
@@ -21,10 +21,12 @@ export type EditorProps = Omit<
   "defaultLanguage" | "language"
 > & {
   id: string
+  name: string
 }
 export function Editor({
   height = 450,
   id,
+  name,
   theme = "vs-dark",
   ...rest
 }: Readonly<EditorProps>) {

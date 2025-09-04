@@ -7,7 +7,7 @@ version.workspace = true
 anyhow = "1.0.80"
 async-stream.workspace = true
 chrono.workspace = true
-common = { path = "../common" }
+common = { path = "../../common" }
 firehose-datasets = { path = "../firehose-datasets" }
 schemars.workspace = true
 futures.workspace = true

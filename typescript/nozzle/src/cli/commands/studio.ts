@@ -1,3 +1,4 @@
+import { createGrpcTransport } from "@connectrpc/connect-node"
 import { Command, Options } from "@effect/cli"
 import {
   HttpApi,
@@ -15,40 +16,73 @@ import {
   Path,
 } from "@effect/platform"
 import { NodeHttpServer } from "@effect/platform-node"
-import { Console, Data, Effect, Layer, Option, Schema, String as EffectString, Struct } from "effect"
+import { Cause, Config, Console, Data, Effect, Layer, Option, Schema, String as EffectString, Struct } from "effect"
 import { createServer } from "node:http"
 import { fileURLToPath } from "node:url"
 import open, { type AppName, apps } from "open"
 
+import * as ArrowFlight from "../../api/ArrowFlight.ts"
+import * as Arrow from "../../Arrow.ts"
 import { FoundryQueryableEventResolver, Model as StudioModel } from "../../Studio/index.js"
 
-class NozzleStudioApiRouter extends HttpApiGroup.make("NozzleStudioApi").add(
-  HttpApiEndpoint.get("QueryableEventStream")`/events/stream`
-    .addSuccess(
-      Schema.String.pipe(HttpApiSchema.withEncoding({
-        kind: "Json",
-        contentType: "text/event-stream",
-      })),
-    )
-    .addError(HttpApiError.InternalServerError)
-    .annotateContext(OpenApi.annotations({
-      title: "Queryable Smart Contract events stream",
-      version: "v1",
-      description:
-        "Listens to file changes on the smart contracts/abis and emits updates of the available events to query",
-    })),
-).add(
-  HttpApiEndpoint.get("Metadata")`/metadata`.addSuccess(Schema.Array(StudioModel.DatasetMetadata)).annotateContext(
-    OpenApi.annotations({
-      title: "Metadata about the nozzle datasets",
-      version: "v1",
-      description:
-        "Provides metadata about how to query the dataset. Returns an array of dataset metadata, where each item contains metadata columns and the event source to query",
-    }),
-  ),
-).prefix("/v1") {}
+class NozzleStudioApiRouter extends HttpApiGroup.make("NozzleStudioApi")
+  .add(
+    HttpApiEndpoint.get("QueryableEventStream")`/events/stream`
+      .addSuccess(
+        Schema.String.pipe(
+          HttpApiSchema.withEncoding({
+            kind: "Json",
+            contentType: "text/event-stream",
+          }),
+        ),
+      )
+      .addError(HttpApiError.InternalServerError)
+      .annotateContext(
+        OpenApi.annotations({
+          title: "Queryable Smart Contract events stream",
+          version: "v1",
+          description:
+            "Listens to file changes on the smart contracts/abis and emits updates of the available events to query",
+        }),
+      ),
+  )
+  .add(
+    HttpApiEndpoint.get("Metadata")`/metadata`
+      .addSuccess(Schema.Array(StudioModel.DatasetMetadata))
+      .annotateContext(
+        OpenApi.annotations({
+          title: "Metadata about the nozzle datasets",
+          version: "v1",
+          description:
+            "Provides metadata about how to query the dataset. Returns an array of dataset metadata, where each item contains metadata columns and the event source to query",
+        }),
+      ),
+  )
+  .add(
+    HttpApiEndpoint.post("Query")`/query`
+      .setPayload(
+        Schema.Union(
+          Schema.Struct({ query: Schema.NonEmptyTrimmedString }),
+          Schema.parseJson(Schema.Struct({ query: Schema.NonEmptyTrimmedString })),
+        ),
+      )
+      .addSuccess(Schema.Array(Schema.Any))
+      .addError(HttpApiError.InternalServerError)
+      .annotateContext(
+        OpenApi.annotations({
+          title: "Perform Query",
+          version: "v1",
+          description: "Runs the submitted query payload through the ArrowFlight service",
+        }),
+      ),
+  )
+  .prefix("/v1")
+{}
 
-class NozzleStudioApi extends HttpApi.make("NozzleStudioApi").add(NozzleStudioApiRouter).prefix("/api") {}
+class NozzleStudioApi extends HttpApi.make("NozzleStudioApi")
+  .add(NozzleStudioApiRouter)
+  .prefix("/api")
+{}
 
 const NozzleStudioApiLive = HttpApiBuilder.group(
   NozzleStudioApi,
@@ -56,34 +90,56 @@ const NozzleStudioApiLive = HttpApiBuilder.group(
   (handlers) =>
     Effect.gen(function*() {
       const resolver = yield* FoundryQueryableEventResolver.FoundryQueryableEventResolver
+      const flight = yield* ArrowFlight.ArrowFlight
 
-      return handlers.handle(
-        "QueryableEventStream",
-        () =>
+      return handlers
+        .handle("QueryableEventStream", () =>
           Effect.gen(function*() {
-            const stream = yield* resolver.queryableEventsStream().pipe(
-              Effect.catchAll(() => new HttpApiError.InternalServerError()),
-            )
+            const stream = yield* resolver
+              .queryableEventsStream()
+              .pipe(
+                Effect.catchAll(() => new HttpApiError.InternalServerError()),
+              )
 
-            return yield* HttpServerResponse.stream(stream, { contentType: "text/event-stream" }).pipe(
+            return yield* HttpServerResponse.stream(stream, {
+              contentType: "text/event-stream",
+            }).pipe(
               HttpServerResponse.setHeaders({
                 "Content-Type": "text/event-stream",
                 "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
+                Connection: "keep-alive",
               }),
             )
-          }),
-      ).handle("Metadata", () => resolver.metadata())
+          }))
+        .handle("Metadata", () => resolver.metadata())
+        .handle("Query", ({ payload }) =>
+          flight.table(payload.query).pipe(
+            Effect.flatMap((table) => {
+              const schema = Arrow.generateSchema(table.schema)
+              return Effect.succeed([table, schema] as const)
+            }),
+            Effect.flatMap(([table, schema]) => Schema.decodeUnknown(schema)([...table])),
+            Effect.tapErrorCause((cause) => Effect.logError("Failure performing query", Cause.pretty(cause))),
+            Effect.mapError(() => new HttpApiError.InternalServerError()),
+          ))
     }),
 )
-const NozzleStudioApiLayer = Layer.merge(HttpApiBuilder.middlewareCors(), HttpApiScalar.layer({ path: "/api/docs" }))
-  .pipe(
-    Layer.provideMerge(HttpApiBuilder.api(NozzleStudioApi)),
-    Layer.provide(FoundryQueryableEventResolver.layer),
-    Layer.provide(NozzleStudioApiLive),
-  )
+const NozzleStudioApiLayer = Layer.merge(
+  HttpApiBuilder.middlewareCors(),
+  HttpApiScalar.layer({ path: "/api/docs" }),
+).pipe(
+  Layer.provideMerge(HttpApiBuilder.api(NozzleStudioApi)),
+  Layer.provide(FoundryQueryableEventResolver.layer),
+  Layer.provide(NozzleStudioApiLive),
+)
 const ApiLive = HttpApiBuilder.httpApp.pipe(
-  Effect.provide(Layer.mergeAll(NozzleStudioApiLayer, HttpApiBuilder.Router.Live, HttpApiBuilder.Middleware.layer)),
+  Effect.provide(
+    Layer.mergeAll(
+      NozzleStudioApiLayer,
+      HttpApiBuilder.Router.Live,
+      HttpApiBuilder.Middleware.layer,
+    ),
+  ),
 )
 
 const StudioFileRouter = Effect.gen(function*() {
@@ -113,14 +169,19 @@ const StudioFileRouter = Effect.gen(function*() {
     HttpRouter.get(
       "/assets/:file",
       Effect.gen(function*() {
-        const file = yield* HttpRouter.params.pipe(Effect.map(Struct.get("file")), Effect.map(Option.fromNullable))
+        const file = yield* HttpRouter.params.pipe(
+          Effect.map(Struct.get("file")),
+          Effect.map(Option.fromNullable),
+        )
 
         if (Option.isNone(file)) {
           return HttpServerResponse.empty({ status: 404 })
         }
 
         const assets = path.join(studioClientDist, "assets")
-        const normalized = path.normalize(path.join(assets, ...file.value.split("/")))
+        const normalized = path.normalize(
+          path.join(assets, ...file.value.split("/")),
+        )
         if (!normalized.startsWith(assets)) {
           return HttpServerResponse.empty({ status: 404 })
         }
@@ -136,7 +197,10 @@ const Server = Effect.all({
   files: StudioFileRouter,
 }).pipe(
   Effect.map(({ api, files }) =>
-    HttpRouter.empty.pipe(HttpRouter.mount("/", files), HttpRouter.mountApp("/api", api, { includePrefix: true }))
+    HttpRouter.empty.pipe(
+      HttpRouter.mount("/", files),
+      HttpRouter.mountApp("/api", api, { includePrefix: true }),
+    )
   ),
   Effect.map((router) => HttpServer.serve(HttpMiddleware.logger)(router)),
   Layer.unwrapEffect,
@@ -147,10 +211,14 @@ export const studio = Command.make("studio", {
     port: Options.integer("port").pipe(
       Options.withAlias("p"),
       Options.withDefault(3000),
-      Options.withDescription("The port to run the nozzle dataset studio server on. Default 3000"),
+      Options.withDescription(
+        "The port to run the nozzle dataset studio server on. Default 3000",
+      ),
     ),
     open: Options.boolean("open").pipe(
-      Options.withDescription("If true, opens the nozzle dataset studio in your browser"),
+      Options.withDescription(
+        "If true, opens the nozzle dataset studio in your browser",
+      ),
       Options.withDefault(true),
     ),
     browser: Options.choice("browser", [
@@ -167,6 +235,13 @@ export const studio = Command.make("studio", {
         "Broweser to open the nozzle dataset studio app in. Default is your default selected browser",
       ),
       Options.withDefault("browser"),
+    ),
+    flight: Options.text("flight-url").pipe(
+      Options.withFallbackConfig(
+        Config.string("NOZZLE_ARROW_FLIGHT_URL").pipe(Config.withDefault("http://34.27.238.174")),
+      ),
+      Options.withDescription("The Arrow Flight URL to use for the query"),
+      Options.withSchema(Schema.URL),
     ),
   },
 }).pipe(
@@ -194,15 +269,23 @@ export const studio = Command.make("studio", {
             return Effect.void
           })
         ),
-        Layer.tap(() => Console.log(`🎉 nozzle dataset studio started and running at http://localhost:${args.port}`)),
+        Layer.tap(() =>
+          Console.log(
+            `🎉 nozzle dataset studio started and running at http://localhost:${args.port}`,
+          )
+        ),
         Layer.launch,
       )
     })
   ),
   Command.provide(FoundryQueryableEventResolver.layer),
+  Command.provide(({ args }) => ArrowFlight.layer(createGrpcTransport({ baseUrl: `${args.flight}` }))),
 )
 
-const openBrowser = (port: number, browser: AppName | "arc" | "safari" | "browser" | "browserPrivate") =>
+const openBrowser = (
+  port: number,
+  browser: AppName | "arc" | "safari" | "browser" | "browserPrivate",
+) =>
   Effect.async<void, OpenBrowserError>((resume) => {
     const url = `http://localhost:${port}`
 
@@ -212,7 +295,9 @@ const openBrowser = (port: number, browser: AppName | "arc" | "safari" | "browse
         subprocess.on("error", (err) => resume(Effect.fail(new OpenBrowserError({ cause: err }))))
       })
 
-    const mapBrowserName = (b: typeof browser): string | ReadonlyArray<string> | undefined => {
+    const mapBrowserName = (
+      b: typeof browser,
+    ): string | ReadonlyArray<string> | undefined => {
       switch (b) {
         case "chrome":
           return apps.chrome // cross-platform alias from open
@@ -248,6 +333,8 @@ const openBrowser = (port: number, browser: AppName | "arc" | "safari" | "browse
     }
   })
 
-export class OpenBrowserError extends Data.TaggedError("Nozzle/cli/studio/errors/OpenBrowserError")<{
+export class OpenBrowserError extends Data.TaggedError(
+  "Nozzle/cli/studio/errors/OpenBrowserError",
+)<{
   readonly cause: unknown
 }> {}

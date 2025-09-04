@@ -84,6 +84,43 @@ impl DbConn {
             .map_err(ConnError::ConnectionError)
     }
 
+    /// Set up a connection to the metadata DB with retry logic for temporary databases.
+    #[cfg(all(test, feature = "temp-db"))]
+    #[instrument(skip_all, err)]
+    pub async fn connect_with_retry(url: &str) -> Result<Self, ConnError> {
+        use backon::{ExponentialBuilder, Retryable};
+
+        let retry_policy = ExponentialBuilder::default()
+            .with_min_delay(Duration::from_millis(10))
+            .with_max_delay(Duration::from_millis(100))
+            .with_max_times(20);
+
+        fn is_db_starting_up(err: &sqlx::Error) -> bool {
+            match err {
+                sqlx::Error::Database(db_err) => {
+                    db_err.code().map_or(false, |code| code == "57P03")
+                }
+                _ => false,
+            }
+        }
+
+        fn notify_retry(err: &sqlx::Error, dur: Duration) {
+            tracing::warn!(
+                error = %err,
+                "Database still starting up during connection. Retrying in {:.1}s",
+                dur.as_secs_f32()
+            );
+        }
+
+        (|| PgConnection::connect(url))
+            .retry(retry_policy)
+            .when(is_db_starting_up)
+            .notify(notify_retry)
+            .await
+            .map(Self)
+            .map_err(ConnError::ConnectionError)
+    }
+
     /// Runs migrations on the database.
     ///
     /// SQLx does the right things:

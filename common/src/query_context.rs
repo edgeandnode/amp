@@ -1,4 +1,7 @@
-use std::{ops::RangeInclusive, sync::Arc};
+use std::{
+    ops::RangeInclusive,
+    sync::{Arc, LazyLock},
+};
 
 use arrow::{array::ArrayRef, compute::concat_batches};
 use async_trait::async_trait;
@@ -44,7 +47,7 @@ use datafusion_tracing::{
 use foyer::Cache;
 use futures::{FutureExt as _, TryStreamExt, stream};
 use js_runtime::isolate_pool::IsolatePool;
-use metadata_db::{LocationId, TableId};
+use metadata_db::{FileId, TableId};
 use regex::Regex;
 use thiserror::Error;
 use tracing::{debug, field, instrument};
@@ -359,7 +362,7 @@ impl DetachedLogicalPlan {
 pub struct QueryEnv {
     pub df_env: Arc<RuntimeEnv>,
     pub isolate_pool: IsolatePool,
-    pub parquet_footer_cache: Cache<(LocationId, String), Arc<ParquetMetaData>>,
+    pub parquet_footer_cache: Cache<FileId, Arc<ParquetMetaData>>,
 }
 
 /// A context for executing queries against a catalog.
@@ -718,6 +721,16 @@ async fn execute_explain(
     Ok(Box::pin(stream))
 }
 
+// Regex to match full paths to .parquet files and capture just the filename
+// This handles paths with forward or backward slashes
+static PARQUET_PATH_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?:[^\s\[,]+[/\\])?([^\s\[,/\\]+\.parquet)").unwrap());
+
+/// Sanitizes a string by replacing full paths to .parquet files with just the filename
+fn sanitize_parquet_paths(text: &str) -> String {
+    PARQUET_PATH_REGEX.replace_all(text, "$1").into_owned()
+}
+
 // Sanitize the explain output by removing full paths and and keeping only the filenames.
 fn sanitize_explain(batch: &RecordBatch) -> RecordBatch {
     use arrow::array::StringArray;
@@ -729,13 +742,9 @@ fn sanitize_explain(batch: &RecordBatch) -> RecordBatch {
         .downcast_ref::<StringArray>()
         .unwrap();
 
-    // Match full paths to .parquet files and capture just the filename
-    // This handles paths with forward or backward slashes
-    let regex = Regex::new(r"(?:[^\s\[,]+[/\\])?([^\s\[,/\\]+\.parquet)").unwrap();
-
     let transformed: StringArray = plan_column
         .iter()
-        .map(|value| value.map(|v| regex.replace_all(v, "$1").into_owned()))
+        .map(|value| value.map(|v| sanitize_parquet_paths(v)))
         .collect();
 
     let mut columns: Vec<ArrayRef> = batch.columns().to_vec();
@@ -756,10 +765,11 @@ pub fn prepend_special_block_num_field(schema: &DFSchema) -> Arc<DFSchema> {
 
 /// Prints the physical plan to a single line, for logging.
 fn print_physical_plan(plan: &dyn ExecutionPlan) -> String {
-    displayable(plan)
+    let plan_str = displayable(plan)
         .indent(false)
         .to_string()
-        .replace('\n', "\\n")
+        .replace('\n', "\\n");
+    sanitize_parquet_paths(&plan_str)
 }
 
 #[derive(Debug)]

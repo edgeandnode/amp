@@ -1,3 +1,5 @@
+import * as monaco from "monaco-editor"
+
 /**
  * UDF Snippets - Advanced snippet generation for Nozzle User-Defined Functions
  *
