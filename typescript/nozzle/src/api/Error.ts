@@ -327,3 +327,128 @@ export class PlanningError extends Schema.Class<PlanningError>("PlanningError")(
 ) {
   readonly _tag = "PlanningError" as const
 }
+
+/**
+ * JobNotFound - The requested job does not exist.
+ *
+ * Causes:
+ * - Job ID does not exist in the system
+ * - Job has been deleted
+ * - Job has completed and been cleaned up
+ *
+ * Applies to:
+ * - GET /jobs/{id} - When job ID doesn't exist
+ * - DELETE /jobs/{id} - When attempting to delete non-existent job
+ * - PUT /jobs/{id}/stop - When attempting to stop non-existent job
+ */
+export class JobNotFound extends Schema.Class<JobNotFound>("JobNotFound")(
+  {
+    code: Schema.Literal("JOB_NOT_FOUND").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
+    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
+  },
+  {
+    [HttpApiSchema.AnnotationStatus]: 404,
+  },
+) {
+  readonly _tag = "JobNotFound" as const
+}
+
+/**
+ * LocationNotFound - The requested location does not exist.
+ *
+ * Causes:
+ * - Location ID does not exist in the system
+ * - Location has been deleted
+ * - Location has been marked as inactive
+ *
+ * Applies to:
+ * - GET /locations/{id} - When location ID doesn't exist
+ * - DELETE /locations/{id} - When attempting to delete non-existent location
+ */
+export class LocationNotFound extends Schema.Class<LocationNotFound>("LocationNotFound")(
+  {
+    code: Schema.Literal("LOCATION_NOT_FOUND").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
+    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
+  },
+  {
+    [HttpApiSchema.AnnotationStatus]: 404,
+  },
+) {
+  readonly _tag = "LocationNotFound" as const
+}
+
+/**
+ * InvalidQueryParameters - The query parameters are invalid or malformed.
+ *
+ * Causes:
+ * - Invalid integer format for limit or pagination cursors
+ * - Malformed query string syntax
+ * - Missing required query parameters
+ * - Query parameter validation failures
+ *
+ * Applies to:
+ * - GET /jobs - Invalid pagination parameters
+ * - GET /locations - Invalid pagination parameters
+ * - Any endpoint with query parameter validation
+ */
+export class InvalidQueryParameters extends Schema.Class<InvalidQueryParameters>("InvalidQueryParameters")(
+  {
+    code: Schema.Literal("INVALID_QUERY_PARAMETERS").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
+    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
+  },
+  {
+    [HttpApiSchema.AnnotationStatus]: 400,
+  },
+) {
+  readonly _tag = "InvalidQueryParameters" as const
+}
+
+/**
+ * LimitTooLarge - The requested limit exceeds the maximum allowed value.
+ *
+ * Causes:
+ * - Limit parameter greater than maximum page size (1000)
+ * - Attempting to request too many records at once
+ * - Pagination limit validation failure
+ *
+ * Applies to:
+ * - GET /jobs - When limit exceeds maximum
+ * - GET /locations - When limit exceeds maximum
+ * - Any paginated endpoint with limit validation
+ */
+export class LimitTooLarge extends Schema.Class<LimitTooLarge>("LimitTooLarge")(
+  {
+    code: Schema.Literal("LIMIT_TOO_LARGE").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
+    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
+  },
+  {
+    [HttpApiSchema.AnnotationStatus]: 400,
+  },
+) {
+  readonly _tag = "LimitTooLarge" as const
+}
+
+/**
+ * LimitInvalid - The requested limit is invalid (zero or negative).
+ *
+ * Causes:
+ * - Limit parameter is 0 or negative
+ * - Invalid limit format or type
+ * - Limit validation failure
+ *
+ * Applies to:
+ * - GET /jobs - When limit is 0 or negative
+ * - GET /locations - When limit is 0 or negative
+ * - Any paginated endpoint with limit validation
+ */
+export class LimitInvalid extends Schema.Class<LimitInvalid>("LimitInvalid")(
+  {
+    code: Schema.Literal("LIMIT_INVALID").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
+    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
+  },
+  {
+    [HttpApiSchema.AnnotationStatus]: 400,
+  },
+) {
+  readonly _tag = "LimitInvalid" as const
+}
