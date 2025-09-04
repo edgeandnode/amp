@@ -26,8 +26,7 @@ pub async fn dump(
     metadata_db: Arc<MetadataDb>,
     mut datasets: Vec<String>,
     ignore_deps: bool,
-    start: i64,
-    end_block: Option<String>,
+    end_block: Option<i64>,
     n_jobs: u16,
     partition_size_mb: u64,
     run_every_mins: Option<u64>,
@@ -48,7 +47,6 @@ pub async fn dump(
     };
     let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
     let partition_size = partition_size_mb * 1024 * 1024;
-    let end_block = end_block.map(|e| resolve_end_block(start, e)).transpose()?;
     let run_every = run_every_mins.map(|s| tokio::time::interval(Duration::from_secs(s * 60)));
 
     if !ignore_deps {
@@ -90,14 +88,8 @@ pub async fn dump(
 
         for table in Arc::new(dataset).resolved_tables() {
             let physical_table = if fresh {
-                PhysicalTable::next_revision(
-                    &table,
-                    data_store.as_ref(),
-                    metadata_db.clone(),
-                    true,
-                    start,
-                )
-                .await?
+                PhysicalTable::next_revision(&table, data_store.as_ref(), metadata_db.clone(), true)
+                    .await?
             } else {
                 match PhysicalTable::get_active(&table, metadata_db.clone()).await? {
                     Some(physical_table) => physical_table,
@@ -107,7 +99,6 @@ pub async fn dump(
                             data_store.as_ref(),
                             metadata_db.clone(),
                             true,
-                            start,
                         )
                         .await?
                     }
@@ -140,7 +131,7 @@ pub async fn dump(
                     n_jobs,
                     partition_size,
                     microbatch_max_interval_override.unwrap_or(config.microbatch_max_interval),
-                    (start, end_block),
+                    end_block,
                     metrics.clone(),
                     only_finalized_blocks,
                 )
@@ -157,7 +148,7 @@ pub async fn dump(
                     n_jobs,
                     partition_size,
                     microbatch_max_interval_override.unwrap_or(config.microbatch_max_interval),
-                    (start, end_block),
+                    end_block,
                     metrics.clone(),
                     only_finalized_blocks,
                 )
@@ -167,31 +158,6 @@ pub async fn dump(
     }
 
     Ok(all_tables)
-}
-
-// if end_block starts with "+" then it is a relative block number
-// otherwise, it's an absolute block number and should be after start_block
-fn resolve_end_block(start_block: i64, end_block: String) -> Result<i64, BoxError> {
-    let end_block = if end_block.starts_with('+') {
-        let relative_block = end_block
-            .trim_start_matches('+')
-            .parse::<u64>()
-            .map_err(|e| format!("invalid relative end block: {e}"))?;
-        if start_block < 0 && relative_block as i64 + start_block >= 0 {
-            return Err(
-                "invalid range: end block exceeds the bound specified by start block".into(),
-            );
-        }
-        start_block + relative_block as i64
-    } else {
-        end_block
-            .parse::<i64>()
-            .map_err(|e| format!("invalid end block: {e}"))?
-    };
-    if start_block > 0 && end_block > 0 && end_block < start_block {
-        return Err("end_block must be greater than or equal to start_block".into());
-    }
-    Ok(end_block)
 }
 
 /// Return the input datasets and their dataset dependencies. The output set is ordered such that
@@ -286,38 +252,6 @@ fn dependency_sort(deps: BTreeMap<String, Vec<String>>) -> Result<Vec<String>, B
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_resolve_block_range() {
-        let test_cases = vec![
-            (10, "20", Ok(20)),
-            (0, "1", Ok(1)),
-            (
-                9223372036854775806,
-                "9223372036854775807",
-                Ok(9_223_372_036_854_775_807i64),
-            ),
-            (10, "+5", Ok(15)),
-            (100, "90", Err(BoxError::from(""))),
-            (0, "0", Ok(0)),
-            (0, "0x", Err(BoxError::from(""))),
-            (0, "xxx", Err(BoxError::from(""))),
-            (100, "+1000x", Err(BoxError::from(""))),
-            (100, "+1x", Err(BoxError::from(""))),
-            (-100, "+99", Ok(-1)),
-            (-100, "+100", Err(BoxError::from(""))),
-            (-100, "-100", Ok(-100)),
-            (-100, "50", Ok(50)),
-            (100, "-100", Ok(-100)),
-        ];
-
-        for (start_block, end_block, expected) in test_cases {
-            match resolve_end_block(start_block, end_block.into()) {
-                Ok(result) => assert_eq!(expected.unwrap(), result),
-                Err(_) => assert!(expected.is_err()),
-            }
-        }
-    }
 
     #[test]
     fn dependency_sort_order() {
