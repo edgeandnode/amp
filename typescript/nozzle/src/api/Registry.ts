@@ -16,8 +16,6 @@ import * as Error from "./Error.ts"
  */
 const getOutputSchema = HttpApiEndpoint.post("getOutputSchema")`/output_schema`
   .addError(Error.DatasetStoreError)
-  .addError(Error.SqlParseError)
-  .addError(Error.PlanningError)
   .addSuccess(Model.OutputSchema)
   .setPayload(
     Schema.Struct({
@@ -30,16 +28,37 @@ const getOutputSchema = HttpApiEndpoint.post("getOutputSchema")`/output_schema`
  * Error type for the `getOutputSchema` endpoint.
  *
  * - DatasetStoreError: Failure in dataset storage operations.
- * - SqlParseError: Failure in SQL parsing.
- * - PlanningError: Failure in planning the query.
  */
-export type GetOutputSchemaError = Error.DatasetStoreError | Error.SqlParseError | Error.PlanningError
+export type GetOutputSchemaError = Error.DatasetStoreError
+
+/**
+ * The register endpoint (POST /register).
+ */
+const register = HttpApiEndpoint.post("register")`/register`
+  .addError(Error.InvalidManifest)
+  .addError(Error.RegistrationFailed)
+  .addSuccess(Schema.Struct({
+    success: Schema.Boolean,
+  }))
+  .setPayload(
+    Schema.Struct({
+      manifest: Schema.String,
+    }),
+  )
+
+/**
+ * Error type for the `register` endpoint.
+ *
+ * - InvalidManifest: The manifest JSON is malformed or invalid.
+ * - RegistrationFailed: Failed to register manifest in the system.
+ */
+export type RegisterError = Error.InvalidManifest | Error.RegistrationFailed
 
 /**
  * The api definition for the registry api.
  */
 export class Api extends HttpApi.make("registry").add(
-  HttpApiGroup.make("registry", { topLevel: true }).add(getOutputSchema),
+  HttpApiGroup.make("registry", { topLevel: true }).add(getOutputSchema).add(register),
 ) {}
 
 /**
@@ -69,6 +88,16 @@ export class Registry extends Context.Tag("Nozzle/Registry")<Registry, {
     sql: string,
     options?: GetSchemaOptions,
   ) => Effect.Effect<Model.OutputSchema, HttpClientError.HttpClientError | GetOutputSchemaError>
+
+  /**
+   * Registers a manifest in the registry.
+   *
+   * @param manifest - The manifest JSON string to register.
+   * @returns An effect that resolves when the registration is successful.
+   */
+  readonly register: (
+    manifest: string,
+  ) => Effect.Effect<{ success: boolean }, HttpClientError.HttpClientError | RegisterError>
 }>() {}
 
 /**
@@ -100,7 +129,24 @@ export const make = Effect.fn(function*(url: string) {
     return result
   })
 
-  return { getOutputSchema }
+  const register = Effect.fn("register")(function*(manifest: string) {
+    const request = client.register({
+      payload: {
+        manifest,
+      },
+    })
+
+    const result = yield* request.pipe(
+      Effect.catchTags({
+        ParseError: Effect.die,
+        HttpApiDecodeError: Effect.die,
+      }),
+    )
+
+    return result
+  })
+
+  return { getOutputSchema, register }
 })
 
 /**

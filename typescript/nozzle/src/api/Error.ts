@@ -119,8 +119,6 @@ export class DatasetDefStoreError extends Schema.Class<DatasetDefStoreError>("Da
  * - GET /datasets/{id} - When dataset ID doesn't exist
  * - POST /datasets/{id}/dump - When attempting to dump non-existent dataset
  * - Query operations referencing non-existent datasets
- *
- * Note: HTTP status is 400 (not 404) to match Rust implementation
  */
 export class DatasetNotFound extends Schema.Class<DatasetNotFound>("DatasetNotFound")(
   {
@@ -128,7 +126,7 @@ export class DatasetNotFound extends Schema.Class<DatasetNotFound>("DatasetNotFo
     message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
   },
   {
-    [HttpApiSchema.AnnotationStatus]: 400,
+    [HttpApiSchema.AnnotationStatus]: 404,
   },
 ) {
   readonly _tag = "DatasetNotFound" as const
@@ -173,8 +171,6 @@ export class InvalidDatasetId extends Schema.Class<InvalidDatasetId>("InvalidDat
  * - POST /deploy - Invalid deployment request
  * - POST /datasets/{id}/dump - Invalid dump parameters
  * - Any endpoint with request validation
- *
- * Note: HTTP status is 404 (not 400) to match Rust implementation
  */
 export class InvalidRequest extends Schema.Class<InvalidRequest>("InvalidRequest")(
   {
@@ -182,39 +178,10 @@ export class InvalidRequest extends Schema.Class<InvalidRequest>("InvalidRequest
     message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
   },
   {
-    [HttpApiSchema.AnnotationStatus]: 404,
+    [HttpApiSchema.AnnotationStatus]: 400,
   },
 ) {
   readonly _tag = "InvalidRequest" as const
-}
-
-/**
- * ManifestParseError - Failed to parse dataset manifest file.
- *
- * Causes:
- * - Invalid TOML syntax in manifest
- * - Invalid JSON syntax in manifest
- * - Missing required manifest fields
- * - Type mismatches in manifest values
- * - Unsupported manifest version
- *
- * Applies to:
- * - Dataset loading operations
- * - Manifest validation during deployment
- * - Generated from DatasetStoreError::ManifestError
- *
- * Related to: InvalidManifest (for semantic validation errors)
- */
-export class ManifestParseError extends Schema.Class<ManifestParseError>("ManifestParseError")(
-  {
-    code: Schema.Literal("MANIFEST_PARSE_ERROR").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
-    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
-  },
-  {
-    [HttpApiSchema.AnnotationStatus]: 500,
-  },
-) {
-  readonly _tag = "ManifestParseError" as const
 }
 
 /**
@@ -238,7 +205,7 @@ export class InvalidManifest extends Schema.Class<InvalidManifest>("InvalidManif
     message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
   },
   {
-    [HttpApiSchema.AnnotationStatus]: 500,
+    [HttpApiSchema.AnnotationStatus]: 400,
   },
 ) {
   readonly _tag = "InvalidManifest" as const
@@ -269,63 +236,6 @@ export class UnexpectedJobStatus extends Schema.Class<UnexpectedJobStatus>("Unex
   },
 ) {
   readonly _tag = "UnexpectedJobStatus" as const
-}
-
-/**
- * SqlParseError - Failed to parse SQL query or dataset definition.
- *
- * Causes:
- * - Invalid SQL syntax in dataset definitions
- * - Malformed SQL queries in requests
- * - Unsupported SQL features or functions
- * - Invalid table/column references
- * - SQL injection attempts blocked by parser
- *
- * Applies to:
- * - SQL dataset definitions during deployment
- * - Query operations with invalid SQL
- * - Dataset validation operations
- * - Generated from DatasetStoreError::SqlParseError
- */
-export class SqlParseError extends Schema.Class<SqlParseError>("SqlParseError")(
-  {
-    code: Schema.Literal("SQL_PARSE_ERROR").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
-    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
-  },
-  {
-    [HttpApiSchema.AnnotationStatus]: 500,
-  },
-) {
-  readonly _tag = "SqlParseError" as const
-}
-
-/**
- * PlanningError - Failed to create query execution plan.
- *
- * Causes:
- * - Invalid table references in query
- * - Unsupported query operations
- * - Query optimizer failures
- * - Resource constraints exceeded
- * - Invalid join conditions
- * - Schema mismatch between datasets
- *
- * Applies to:
- * - Query execution via Arrow Flight or JSON Lines API
- * - SQL dataset validation during deployment
- * - Complex queries with multiple datasets
- * - Generated from query planning phase failures
- */
-export class PlanningError extends Schema.Class<PlanningError>("PlanningError")(
-  {
-    code: Schema.Literal("PLANNING_ERROR").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
-    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
-  },
-  {
-    [HttpApiSchema.AnnotationStatus]: 500,
-  },
-) {
-  readonly _tag = "PlanningError" as const
 }
 
 /**
@@ -451,4 +361,223 @@ export class LimitInvalid extends Schema.Class<LimitInvalid>("LimitInvalid")(
   },
 ) {
   readonly _tag = "LimitInvalid" as const
+}
+
+/**
+ * DatasetAlreadyExists - The dataset already exists with the provided manifest.
+ *
+ * Causes:
+ * - Attempting to deploy a dataset that already exists when a manifest is provided
+ * - Conflict between existing dataset and new manifest
+ *
+ * Applies to:
+ * - POST /datasets - When dataset exists and manifest is provided
+ * - POST /deploy - When dataset exists and manifest is provided
+ */
+export class DatasetAlreadyExists extends Schema.Class<DatasetAlreadyExists>("DatasetAlreadyExists")(
+  {
+    code: Schema.Literal("DATASET_ALREADY_EXISTS").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
+    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
+  },
+  {
+    [HttpApiSchema.AnnotationStatus]: 409,
+  },
+) {
+  readonly _tag = "DatasetAlreadyExists" as const
+}
+
+/**
+ * ManifestRequired - Dataset not found and manifest is required but not provided.
+ *
+ * Causes:
+ * - Dataset does not exist in registry
+ * - No manifest provided with deployment request
+ * - Cannot deploy without dataset definition
+ *
+ * Applies to:
+ * - POST /datasets - When dataset not found and no manifest provided
+ * - POST /deploy - When dataset not found and no manifest provided
+ */
+export class ManifestRequired extends Schema.Class<ManifestRequired>("ManifestRequired")(
+  {
+    code: Schema.Literal("MANIFEST_REQUIRED").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
+    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
+  },
+  {
+    [HttpApiSchema.AnnotationStatus]: 400,
+  },
+) {
+  readonly _tag = "ManifestRequired" as const
+}
+
+/**
+ * ManifestValidationError - Manifest name and version do not match request parameters.
+ *
+ * Causes:
+ * - Manifest contains different name than request parameter
+ * - Manifest contains different version than request parameter
+ * - Mismatch between manifest content and deployment request
+ *
+ * Applies to:
+ * - POST /datasets - During manifest validation
+ * - POST /deploy - During manifest validation
+ */
+export class ManifestValidationError extends Schema.Class<ManifestValidationError>("ManifestValidationError")(
+  {
+    code: Schema.Literal("MANIFEST_VALIDATION_ERROR").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
+    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
+  },
+  {
+    [HttpApiSchema.AnnotationStatus]: 400,
+  },
+) {
+  readonly _tag = "ManifestValidationError" as const
+}
+
+/**
+ * ManifestRegistrationError - Failed to register manifest in the system.
+ *
+ * Causes:
+ * - Internal error during manifest registration
+ * - Registry service unavailable
+ * - Manifest storage failure
+ *
+ * Applies to:
+ * - POST /datasets - During manifest registration
+ * - POST /deploy - During manifest registration
+ */
+export class ManifestRegistrationError extends Schema.Class<ManifestRegistrationError>("ManifestRegistrationError")(
+  {
+    code: Schema.Literal("MANIFEST_REGISTRATION_ERROR").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
+    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
+  },
+  {
+    [HttpApiSchema.AnnotationStatus]: 500,
+  },
+) {
+  readonly _tag = "ManifestRegistrationError" as const
+}
+
+/**
+ * InvalidJobId - The provided job ID is malformed or invalid.
+ *
+ * Causes:
+ * - Job ID contains invalid characters
+ * - Job ID format does not match expected pattern
+ * - Empty or null job ID
+ * - Job ID is not a valid integer
+ *
+ * Applies to:
+ * - GET /jobs/{id} - When ID format is invalid
+ * - DELETE /jobs/{id} - When ID format is invalid
+ * - PUT /jobs/{id}/stop - When ID format is invalid
+ */
+export class InvalidJobId extends Schema.Class<InvalidJobId>("InvalidJobId")(
+  {
+    code: Schema.Literal("INVALID_JOB_ID").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
+    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
+  },
+  {
+    [HttpApiSchema.AnnotationStatus]: 400,
+  },
+) {
+  readonly _tag = "InvalidJobId" as const
+}
+
+/**
+ * InvalidLocationId - The provided location ID is malformed or invalid.
+ *
+ * Causes:
+ * - Location ID contains invalid characters
+ * - Location ID format does not match expected pattern
+ * - Empty or null location ID
+ * - Location ID is not a valid integer
+ *
+ * Applies to:
+ * - GET /locations/{id} - When ID format is invalid
+ * - DELETE /locations/{id} - When ID format is invalid
+ */
+export class InvalidLocationId extends Schema.Class<InvalidLocationId>("InvalidLocationId")(
+  {
+    code: Schema.Literal("INVALID_LOCATION_ID").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
+    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
+  },
+  {
+    [HttpApiSchema.AnnotationStatus]: 400,
+  },
+) {
+  readonly _tag = "InvalidLocationId" as const
+}
+
+/**
+ * JobConflict - Job is in a state that conflicts with the requested operation.
+ *
+ * Causes:
+ * - Attempting to delete a job that is not in terminal state
+ * - Attempting to stop a job that is already in terminal state
+ * - Invalid state transitions for job operations
+ *
+ * Applies to:
+ * - DELETE /jobs/{id} - When job is not in terminal state
+ * - PUT /jobs/{id}/stop - When job cannot be stopped from current state
+ */
+export class JobConflict extends Schema.Class<JobConflict>("JobConflict")(
+  {
+    code: Schema.Literal("JOB_CONFLICT").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
+    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
+  },
+  {
+    [HttpApiSchema.AnnotationStatus]: 409,
+  },
+) {
+  readonly _tag = "JobConflict" as const
+}
+
+/**
+ * InvalidQueryParam - The query parameters are invalid or malformed.
+ *
+ * Causes:
+ * - Invalid query parameter values
+ * - Missing required query parameters
+ * - Query parameter validation failures
+ * - Unsupported parameter combinations
+ *
+ * Applies to:
+ * - DELETE /jobs - Invalid status parameter
+ * - Any endpoint with query parameter validation
+ */
+export class InvalidQueryParam extends Schema.Class<InvalidQueryParam>("InvalidQueryParam")(
+  {
+    code: Schema.Literal("INVALID_QUERY_PARAM").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
+    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
+  },
+  {
+    [HttpApiSchema.AnnotationStatus]: 400,
+  },
+) {
+  readonly _tag = "InvalidQueryParam" as const
+}
+
+/**
+ * RegistrationFailed - Failed to register manifest in the registry system.
+ *
+ * Causes:
+ * - Dataset already exists with the given name and version
+ * - Dataset store error during manifest storage
+ * - Database error during registry operations
+ * - Serialization error when processing manifest
+ *
+ * Applies to:
+ * - POST /register - When manifest registration fails
+ */
+export class RegistrationFailed extends Schema.Class<RegistrationFailed>("RegistrationFailed")(
+  {
+    code: Schema.Literal("REGISTRATION_FAILED").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
+    message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
+  },
+  {
+    [HttpApiSchema.AnnotationStatus]: 500,
+  },
+) {
+  readonly _tag = "RegistrationFailed" as const
 }
