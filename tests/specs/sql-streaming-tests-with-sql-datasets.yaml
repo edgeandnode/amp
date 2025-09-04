@@ -1,7 +1,6 @@
 # # Dump initial blocks
 - name: dump_eth_firehose
   dataset: eth_firehose
-  start: 15000000
   end: 15000001
 
 # # Declare initial streams
@@ -32,7 +31,6 @@
 #   # Dump more blocks and check stream progress
 - name: dump_eth_firehose
   dataset: eth_firehose
-  start: 15000000
   end: 15000004
 
 - name: select_block_num_5
@@ -57,12 +55,11 @@
 
 - name: dump_sql_stream_ds
   dataset: sql_stream_ds
-  start: 15000001
   end: 15000004
 
 - name: sql_dataset_even_blocks
   query: |
-    SELECT * FROM sql_stream_ds.even_blocks
+    SELECT * FROM sql_stream_ds.even_blocks WHERE _block_num >= 15000001
     SETTINGS stream = true
   streamingOptions:
     atLeastRows: 2
@@ -112,7 +109,7 @@
 
 - name: sql_dataset_even_blocks_hashes_only
   query: |
-    SELECT * FROM sql_stream_ds.even_blocks_hashes_only
+    SELECT * FROM sql_stream_ds.even_blocks_hashes_only WHERE _block_num >= 15000001
     SETTINGS stream = true
   streamingOptions:
     atLeastRows: 2
@@ -131,16 +128,17 @@
 - name: union_all_multiple_datasets
   query: SELECT 'eth' as src, block_num FROM eth_firehose.blocks UNION ALL select 'sql' as src, block_num FROM sql_stream_ds.even_blocks SETTINGS stream = true
   streamingOptions:
-    atLeastRows: 7
+    atLeastRows: 8
   results: |
     [
-      {"src": "eth", "block_num": 15000000},
-      {"src": "eth", "block_num": 15000001},
-      {"src": "eth", "block_num": 15000002},
-      {"src": "sql", "block_num": 15000002},
-      {"src": "eth", "block_num": 15000003},
-      {"src": "eth", "block_num": 15000004},
-      {"src": "sql", "block_num": 15000004}
+      { "block_num": 15000000, "src": "eth" },
+      { "block_num": 15000000, "src": "sql" },
+      { "block_num": 15000001, "src": "eth" },
+      { "block_num": 15000002, "src": "eth" },
+      { "block_num": 15000002, "src": "sql" },
+      { "block_num": 15000003, "src": "eth" },
+      { "block_num": 15000004, "src": "eth" },
+      { "block_num": 15000004, "src": "sql" }
     ]
 
 - name: union_all_multiple_datasets_no_block_num
@@ -150,10 +148,11 @@
     SELECT 'sql' AS src, hash FROM sql_stream_ds.even_blocks
     SETTINGS stream = true
   streamingOptions:
-    atLeastRows: 7
+    atLeastRows: 8
   results: |
     [
-      {"src":"eth", "hash":"9a71a95be3fe957457b11817587e5af4c7e24836d5b383c430ff25b9286a457f"},
+      {"src": "eth", "hash": "9a71a95be3fe957457b11817587e5af4c7e24836d5b383c430ff25b9286a457f"},
+      {"src": "sql", "hash": "9a71a95be3fe957457b11817587e5af4c7e24836d5b383c430ff25b9286a457f"},
       {"src": "eth", "hash": "7a7d7c23bb8c5e340eead8537bb5e2f3e125bfa0b588cf07e4aa140ba374295e"},
       {"src": "eth", "hash": "b8aeee482d9cdf68868e758983a47bc24012398848b8f64f159966ff0530642b"},
       {"src": "sql", "hash": "b8aeee482d9cdf68868e758983a47bc24012398848b8f64f159966ff0530642b"},

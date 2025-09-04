@@ -14,11 +14,16 @@ import * as Arrow from "../../Arrow.ts"
 
 export const query = Command.make("query", {
   args: {
-    query: Args.text({ name: "query" }).pipe(Args.withDescription("The SQL query")),
-    limit: Options.integer("limit").pipe(Options.optional, Options.withDescription("The number of rows to return")),
+    query: Args.text({ name: "query" }).pipe(
+      Args.withDescription("The SQL query"),
+    ),
+    limit: Options.integer("limit").pipe(
+      Options.withDescription("The number of rows to return"),
+      Options.optional,
+    ),
     format: Options.choice("format", ["table", "json", "jsonl", "pretty"]).pipe(
-      Options.withDefault("table"),
       Options.withDescription("The format to output the results in"),
+      Options.withDefault("table"),
     ),
     flight: Options.text("flight-url").pipe(
       Options.withFallbackConfig(

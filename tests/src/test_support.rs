@@ -74,12 +74,7 @@ pub async fn load_test_config(
     ))
 }
 
-pub async fn bless(
-    test_env: &TestEnv,
-    dataset_name: &str,
-    start: u64,
-    end: u64,
-) -> Result<(), BoxError> {
+pub async fn bless(test_env: &TestEnv, dataset_name: &str, end: u64) -> Result<(), BoxError> {
     let config = test_env.config.clone();
     let deps = {
         let ds = dataset_name.to_string();
@@ -92,7 +87,7 @@ pub async fn bless(
     }
 
     clear_dataset(&test_env.config, dataset_name).await?;
-    dump_dataset(&config, dataset_name, start, end, 1, None).await?;
+    dump_dataset(&config, dataset_name, end, 1, None).await?;
     Ok(())
 }
 
@@ -234,11 +229,10 @@ impl SnapshotContext {
     pub async fn temp_dump(
         test_env: &TestEnv,
         dataset_name: &str,
-        start: u64,
         end: u64,
         n_jobs: u16,
     ) -> Result<SnapshotContext, BoxError> {
-        dump_dataset(&test_env.config, dataset_name, start, end, n_jobs, None).await?;
+        dump_dataset(&test_env.config, dataset_name, end, n_jobs, None).await?;
         let catalog = catalog_for_dataset(
             dataset_name,
             &test_env.dataset_store,
@@ -304,7 +298,6 @@ impl SnapshotContext {
 pub(crate) async fn dump_dataset(
     config: &Arc<Config>,
     dataset_name: &str,
-    start: u64,
     end: u64,
     n_jobs: u16,
     microbatch_max_interval: Option<u64>,
@@ -318,8 +311,7 @@ pub(crate) async fn dump_dataset(
         metadata_db.clone(),
         vec![dataset_name.to_string()],
         true,
-        start as i64,
-        Some(end.to_string()),
+        Some(end as i64),
         n_jobs,
         partition_size_mb,
         None,
@@ -586,6 +578,39 @@ impl DatasetPackage {
     }
 
     #[instrument(skip_all, err)]
+    pub async fn register(&self, bound_addrs: BoundAddrs) -> Result<(), BoxError> {
+        let mut args = vec!["nozzl", "register"];
+        if let Some(config) = &self.config {
+            args.push("--config");
+            args.push(config);
+        }
+        let status = tokio::process::Command::new("pnpm")
+            .args(&args)
+            .env(
+                "NOZZLE_REGISTRY_URL",
+                &format!("http://{}", bound_addrs.registry_service_addr),
+            )
+            .env(
+                "NOZZLE_ADMIN_URL",
+                &format!("http://{}", bound_addrs.admin_api_addr),
+            )
+            .current_dir(&self.path)
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .status()
+            .await?;
+
+        if status != ExitStatus::default() {
+            return Err(BoxError::from(format!(
+                "Failed to register dataset {}: pnpm nozzl register failed with exit code {status}",
+                self.name,
+            )));
+        }
+
+        Ok(())
+    }
+
+    #[instrument(skip_all, err)]
     pub async fn deploy(&self, bound_addrs: BoundAddrs) -> Result<(), BoxError> {
         let mut args = vec!["nozzl", "deploy"];
         if let Some(config) = &self.config {
@@ -610,7 +635,7 @@ impl DatasetPackage {
 
         if status != ExitStatus::default() {
             return Err(BoxError::from(format!(
-                "Failed to deploy dataset {}: pnpm deploy failed with exit code {status}",
+                "Failed to deploy dataset {}: pnpm nozzl deploy failed with exit code {status}",
                 self.name,
             )));
         }
@@ -630,31 +655,20 @@ pub async fn restore_blessed_dataset(
     let data_store = config.data_store.clone();
     let mut tables = Vec::<Arc<PhysicalTable>>::new();
 
-    // Determine the start_block for known datasets
-    let start_block: i64 = match dataset.name.as_str() {
-        "eth_firehose" | "eth_rpc" | "sql_over_eth_firehose" => 15_000_000,
-        "base" => 33411770,
-        _ => 0,
-    };
-
     for table in Arc::new(dataset).resolved_tables() {
-        let physical_table = PhysicalTable::restore_latest_revision(
-            &table,
-            data_store.clone(),
-            metadata_db.clone(),
-            start_block,
-        )
-        .await?
-        .expect(
-            format!(
-                "Failed to restore blessed table {dataset_name}.{}. This is likely due to \
+        let physical_table =
+            PhysicalTable::restore_latest_revision(&table, data_store.clone(), metadata_db.clone())
+                .await?
+                .expect(
+                    format!(
+                        "Failed to restore blessed table {dataset_name}.{}. This is likely due to \
                         the dataset or table being deleted. \n\
                         Bless the dataset again with by running \
                         `cargo run -p tests -- bless {dataset_name} <start_block> <end_block>`",
-                table.name()
-            )
-            .as_str(),
-        );
+                        table.name()
+                    )
+                    .as_str(),
+                );
         tables.push(physical_table.into());
     }
 

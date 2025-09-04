@@ -1,7 +1,15 @@
 import * as Path from "@effect/platform/Path"
 import { layer } from "@effect/vitest"
-import { assertEquals, assertInstanceOf, assertSome, deepStrictEqual } from "@effect/vitest/utils"
+import {
+  assertEquals,
+  assertFailure,
+  assertInstanceOf,
+  assertSome,
+  assertSuccess,
+  deepStrictEqual,
+} from "@effect/vitest/utils"
 import * as Array from "effect/Array"
+import * as Cause from "effect/Cause"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
@@ -9,6 +17,7 @@ import * as Schema from "effect/Schema"
 import * as Struct from "effect/Struct"
 import * as Anvil from "nozzl/Anvil"
 import * as Admin from "nozzl/api/Admin"
+import * as Errors from "nozzl/api/Error"
 import * as JsonLines from "nozzl/api/JsonLines"
 import * as Registry from "nozzl/api/Registry"
 import * as EvmRpc from "nozzl/evm/EvmRpc"
@@ -54,7 +63,7 @@ layer(environment, {
 
       // Deploy and dump the root dataset.
       const dataset = yield* fixtures.load("anvil.json", Model.DatasetRpc)
-      yield* admin.deployDataset(dataset)
+      yield* admin.deployDataset(dataset.name, dataset.version, dataset)
       yield* admin.dumpDataset(dataset.name, {
         endBlock: Number(block),
         waitForCompletion: true,
@@ -90,6 +99,18 @@ layer(environment, {
   )
 
   it.effect(
+    "can register a dataset",
+    Effect.fn(function*() {
+      const registry = yield* Registry.Registry
+      const fixtures = yield* Fixtures.Fixtures
+      const dataset = yield* fixtures.load("manifest.json", Model.DatasetManifest)
+      const result = yield* registry.register(dataset).pipe(Effect.exit)
+      assertSuccess(result, { success: true })
+    }),
+    { sequential: true, timeout: Duration.toMillis("10 seconds") },
+  )
+
+  it.effect(
     "deploy and dump the example dataset",
     Effect.fn(function*() {
       const admin = yield* Admin.Admin
@@ -99,7 +120,7 @@ layer(environment, {
 
       // Deploy and dump the example manifest.
       const dataset = yield* fixtures.load("manifest.json", Model.DatasetManifest)
-      yield* admin.deployDataset(dataset)
+      yield* admin.deployDataset(dataset.name, dataset.version)
       yield* admin.dumpDataset(dataset.name, {
         endBlock: Number(block),
         waitForCompletion: true,
@@ -148,5 +169,44 @@ layer(environment, {
       assertSome(Array.last(response).pipe(Option.map(Struct.get("count"))), 3)
     }),
     { sequential: true, timeout: Duration.toMillis("10 seconds") },
+  )
+
+  it.effect(
+    "handles job not found error",
+    Effect.fn(function*() {
+      const admin = yield* Admin.Admin
+      const result = yield* admin.getJobById(999999).pipe(Effect.exit)
+      const expected = new Errors.JobNotFound({
+        message: "job '999999' not found",
+        code: "JOB_NOT_FOUND",
+      })
+      assertFailure(result, Cause.fail(expected))
+    }),
+  )
+
+  it.effect(
+    "handles location not found error",
+    Effect.fn(function*() {
+      const admin = yield* Admin.Admin
+      const result = yield* admin.getLocationById(999999).pipe(Effect.exit)
+      const expected = new Errors.LocationNotFound({
+        message: "location '999999' not found",
+        code: "LOCATION_NOT_FOUND",
+      })
+      assertFailure(result, Cause.fail(expected))
+    }),
+  )
+
+  it.effect(
+    "handles pagination limit validation",
+    Effect.fn(function*() {
+      const admin = yield* Admin.Admin
+      const result = yield* admin.getJobs({ limit: 0 }).pipe(Effect.exit)
+      const expected = new Errors.LimitInvalid({
+        message: "limit must be greater than 0",
+        code: "LIMIT_INVALID",
+      })
+      assertFailure(result, Cause.fail(expected))
+    }),
   )
 })

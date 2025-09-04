@@ -16,12 +16,14 @@ import * as LogLevel from "effect/LogLevel"
 import * as String from "effect/String"
 import * as Utils from "../Utils.ts"
 
-import { build } from "./commands/build.js"
-import { codegen } from "./commands/codegen.js"
-import { deploy } from "./commands/deploy.js"
-import { dev } from "./commands/dev.js"
-import { proxy } from "./commands/proxy.js"
-import { query } from "./commands/query.js"
+import { build } from "./commands/build.ts"
+import { codegen } from "./commands/codegen.ts"
+import { deploy } from "./commands/deploy.ts"
+import { dev } from "./commands/dev.ts"
+import { dump } from "./commands/dump.ts"
+import { proxy } from "./commands/proxy.ts"
+import { query } from "./commands/query.ts"
+import { register } from "./commands/register.ts"
 import { studio } from "./commands/studio.js"
 
 const levels = LogLevel.allLevels.map((value) => String.toLowerCase(value.label)) as Array<Lowercase<LogLevel.Literal>>
@@ -35,11 +37,14 @@ const nozzle = Command.make("nozzle", {
   },
 }).pipe(
   Command.withDescription("The Nozzle Command Line Interface"),
-  Command.withSubcommands([build, studio, deploy, dev, codegen, query, proxy]),
+  Command.withSubcommands([build, register, dev, codegen, dump, query, proxy, deploy, studio]),
   Command.provide(({ args }) => Logger.minimumLogLevel(args.logs)),
 )
 
-const cli = Command.run(nozzle, { name: "Nozzle", version: "v0.0.1" })
+const cli = Command.run(nozzle, {
+  name: "Nozzle",
+  version: "v0.0.1",
+})
 
 const layer = Layer.provideMerge(PlatformConfigProvider.layerDotEnvAdd(".env"), NodeContext.layer)
 

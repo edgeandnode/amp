@@ -158,13 +158,16 @@ async fn test_register_duplicate_dataset() {
     assert!(response1_body.success);
 
     let response2 = ctx.test_register(manifest_json).await;
-    assert_eq!(response2.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(response2.status(), StatusCode::CONFLICT);
 
     let error_response: serde_json::Value = response2.json().await.unwrap();
-    let error_message = error_response["error"].as_str().unwrap();
-    assert!(error_message.contains("Dataset already exists"));
-    assert!(error_message.contains("register_test_duplicate_dataset"));
-    assert!(error_message.contains("1.0.0"));
+    let error_code = error_response["error_code"].as_str().unwrap();
+    let error_message = error_response["error_message"].as_str().unwrap();
+    assert_eq!(error_code, "DATASET_ALREADY_EXISTS");
+    assert!(
+        error_message
+            .contains("dataset 'register_test_duplicate_dataset' version '1.0.0' already exists")
+    );
 }
 
 #[tokio::test]
@@ -187,8 +190,10 @@ async fn test_register_invalid_json() {
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
     let error_response: serde_json::Value = response.json().await.unwrap();
-    let error_message = error_response["error"].as_str().unwrap();
-    assert!(error_message.contains("Invalid manifest"));
+    let error_code = error_response["error_code"].as_str().unwrap();
+    let error_message = error_response["error_message"].as_str().unwrap();
+    assert_eq!(error_code, "INVALID_MANIFEST");
+    assert!(error_message.contains("invalid manifest"));
 }
 
 #[tokio::test]
@@ -209,8 +214,10 @@ async fn test_register_with_missing_fields() {
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
     let error_response: serde_json::Value = response.json().await.unwrap();
-    let error_message = error_response["error"].as_str().unwrap();
-    assert!(error_message.contains("Invalid manifest"));
+    let error_code = error_response["error_code"].as_str().unwrap();
+    let error_message = error_response["error_message"].as_str().unwrap();
+    assert_eq!(error_code, "INVALID_MANIFEST");
+    assert!(error_message.contains("invalid manifest"));
 }
 
 #[tokio::test]

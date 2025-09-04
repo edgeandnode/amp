@@ -7,9 +7,9 @@ import * as Schema from "effect/Schema"
 export const dev = Command.make("dev", {
   args: {
     config: Options.file("config").pipe(
-      Options.optional,
       Options.withAlias("c"),
       Options.withDescription("The dataset definition config file to build to a manifest"),
+      Options.optional,
     ),
     rpc: Options.text("rpc-url").pipe(
       Options.withFallbackConfig(Config.string("NOZZLE_RPC_URL").pipe(Config.withDefault("http://localhost:8545"))),
@@ -17,9 +17,9 @@ export const dev = Command.make("dev", {
       Options.withSchema(Schema.URL),
     ),
     nozzle: Options.text("nozzle").pipe(
-      Options.withDefault("nozzle"),
       Options.withAlias("n"),
       Options.withDescription("The path of the nozzle executable"),
+      Options.withDefault("nozzle"),
     ),
   },
 }).pipe(

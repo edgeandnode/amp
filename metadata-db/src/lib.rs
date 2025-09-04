@@ -556,15 +556,14 @@ impl MetadataDb {
         path: &str,
         url: &Url,
         active: bool,
-        start_block: Option<i64>,
     ) -> Result<LocationId, sqlx::Error> {
         // An empty `dataset_version` is represented as an empty string in the DB.
         let dataset_version = table.dataset_version.unwrap_or("");
         let mut tx = self.pool.begin().await?;
 
         let query = "
-            INSERT INTO locations (dataset, dataset_version, tbl, bucket, path, url, active, start_block)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            INSERT INTO locations (dataset, dataset_version, tbl, bucket, path, url, active)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             ON CONFLICT DO NOTHING;
         ";
 
@@ -576,7 +575,6 @@ impl MetadataDb {
             .bind(path)
             .bind(url.to_string())
             .bind(active)
-            .bind(start_block.unwrap_or(0))
             .execute(&mut *tx)
             .await?;
 
@@ -685,11 +683,6 @@ impl MetadataDb {
         location_id: LocationId,
     ) -> Result<Option<LocationWithDetails>, Error> {
         Ok(locations::get_by_id_with_details(&*self.pool, location_id).await?)
-    }
-
-    /// Get the start block for a location by ID
-    pub async fn get_location_start_block(&self, location_id: LocationId) -> Result<i64, Error> {
-        Ok(locations::get_start_block_by_id(&*self.pool, location_id).await?)
     }
 
     /// Delete a location by its ID

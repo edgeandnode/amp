@@ -15,7 +15,13 @@ export default defineDataset(() => ({
   name: "example",
   version: "0.1.0",
   network: "mainnet",
-  dependencies: {},
+  dependencies: {
+    anvil: {
+      owner: "graphprotocol",
+      name: "anvil",
+      version: "0.1.0",
+    },
+  },
   tables: {
     counts: {
       sql: `

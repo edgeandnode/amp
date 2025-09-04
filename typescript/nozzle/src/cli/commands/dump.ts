@@ -12,7 +12,7 @@ import * as Registry from "../../api/Registry.ts"
 import * as ManifestContext from "../../ManifestContext.ts"
 import * as Model from "../../Model.ts"
 
-export const deploy = Command.make("deploy", {
+export const dump = Command.make("dump", {
   args: {
     dataset: Args.text({ name: "dataset" }).pipe(
       Args.withDescription("The name and version of the dataset to dump"),
@@ -29,6 +29,11 @@ export const deploy = Command.make("deploy", {
       Options.withDescription("The dataset definition config file to dump"),
       Options.optional,
     ),
+    endBlock: Options.integer("end-block").pipe(
+      Options.withAlias("e"),
+      Options.withDescription("The block number to end at, inclusive"),
+      Options.optional,
+    ),
     registryUrl: Options.text("registry-url").pipe(
       Options.withFallbackConfig(
         Config.string("NOZZLE_REGISTRY_URL").pipe(Config.withDefault("http://localhost:1611")),
@@ -43,9 +48,14 @@ export const deploy = Command.make("deploy", {
       Options.withDescription("The Admin API URL to use for the dump request"),
       Options.withSchema(Schema.URL),
     ),
+    waitForCompletion: Options.boolean("wait").pipe(
+      Options.withAlias("w"),
+      Options.withDefault(false),
+      Options.withDescription("Wait for the dump to complete before returning"),
+    ),
   },
 }).pipe(
-  Command.withDescription("Deploy a dataset"),
+  Command.withDescription("Dump a dataset"),
   Command.withHandler(
     Effect.fn(function*({ args }) {
       const manifest = yield* ManifestContext.ManifestContext.pipe(Effect.serviceOption)
@@ -56,10 +66,22 @@ export const deploy = Command.make("deploy", {
           manifest.pipe(Effect.map((manifest) => `${manifest.name}@${manifest.version}` as const), Effect.orDie),
       })
 
-      const [name, version] = dataset.split("@")
-      yield* admin.deployDataset(name, version)
+      const [name, version] = dataset.split("@") as [string, string | undefined]
+      if (args.waitForCompletion) {
+        yield* Console.log(`Starting dump for dataset ${dataset} up to block ${args.endBlock}`)
+      }
 
-      yield* Console.log(`Deployed dataset ${dataset}`)
+      yield* admin.dumpDataset(name, {
+        version,
+        endBlock: args.endBlock.pipe(Option.getOrUndefined),
+        waitForCompletion: args.waitForCompletion,
+      })
+
+      if (args.waitForCompletion) {
+        yield* Console.log(`Dump completed for dataset ${dataset}`)
+      } else {
+        yield* Console.log(`Dump scheduled for dataset ${dataset}`)
+      }
     }),
   ),
   Command.provide(({ args }) =>
