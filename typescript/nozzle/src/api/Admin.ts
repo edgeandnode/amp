@@ -18,6 +18,16 @@ import * as Error from "./Error.ts"
 const datasetId = HttpApiSchema.param("datasetId", Model.DatasetName)
 
 /**
+ * The job ID parameter (GET /jobs/{jobId}, DELETE /jobs/{jobId}, PUT /jobs/{jobId}/stop).
+ */
+const jobId = HttpApiSchema.param("jobId", Model.JobIdParam)
+
+/**
+ * The location ID parameter (GET /locations/{locationId}, DELETE /locations/{locationId}).
+ */
+const locationId = HttpApiSchema.param("locationId", Model.LocationIdParam)
+
+/**
  * The dump dataset endpoint (POST /datasets/{datasetId}/dump).
  */
 const dumpDataset = HttpApiEndpoint.post("dumpDataset")`/datasets/${datasetId}/dump`
@@ -107,15 +117,170 @@ const getDatasetById = HttpApiEndpoint.get("getDatasetById")`/datasets/${dataset
 export type GetDatasetByIdError = Error.DatasetNotFound | Error.InvalidDatasetId | Error.UnexpectedJobStatus
 
 /**
+ * The get jobs endpoint (GET /jobs).
+ */
+const getJobs = HttpApiEndpoint.get("getJobs")`/jobs`
+  .addError(Error.InvalidQueryParameters)
+  .addError(Error.LimitTooLarge)
+  .addError(Error.LimitInvalid)
+  .addError(Error.MetadataDbError)
+  .addSuccess(Model.JobsResponse)
+  .setUrlParams(
+    Schema.Struct({
+      limit: Schema.optional(Schema.NumberFromString),
+      lastJobId: Schema.optional(Model.JobIdParam).pipe(Schema.fromKey("last_job_id")),
+    }),
+  )
+
+/**
+ * Error type for the `getJobs` endpoint.
+ */
+export type GetJobsError =
+  | Error.InvalidQueryParameters
+  | Error.LimitTooLarge
+  | Error.LimitInvalid
+  | Error.MetadataDbError
+
+/**
+ * The get job by ID endpoint (GET /jobs/{jobId}).
+ */
+const getJobById = HttpApiEndpoint.get("getJobById")`/jobs/${jobId}`
+  .addError(Error.JobNotFound)
+  .addError(Error.MetadataDbError)
+  .addSuccess(Model.JobInfo)
+
+/**
+ * Error type for the `getJobById` endpoint.
+ */
+export type GetJobByIdError = Error.JobNotFound | Error.MetadataDbError
+
+/**
+ * The delete all jobs endpoint (DELETE /jobs).
+ */
+const deleteAllJobs = HttpApiEndpoint.del("deleteAllJobs")`/jobs`
+  .addError(Error.MetadataDbError)
+  .addSuccess(Schema.Void, { status: 204 })
+
+/**
+ * Error type for the `deleteAllJobs` endpoint.
+ */
+export type DeleteAllJobsError = Error.MetadataDbError
+
+/**
+ * The delete job by ID endpoint (DELETE /jobs/{jobId}).
+ */
+const deleteJobById = HttpApiEndpoint.del("deleteJobById")`/jobs/${jobId}`
+  .addError(Error.JobNotFound)
+  .addError(Error.MetadataDbError)
+  .addSuccess(Schema.Void, { status: 204 })
+
+/**
+ * Error type for the `deleteJobById` endpoint.
+ */
+export type DeleteJobByIdError = Error.JobNotFound | Error.MetadataDbError
+
+/**
+ * The stop job endpoint (PUT /jobs/{jobId}/stop).
+ */
+const stopJob = HttpApiEndpoint.put("stopJob")`/jobs/${jobId}/stop`
+  .addError(Error.JobNotFound)
+  .addError(Error.MetadataDbError)
+  .addSuccess(Schema.Void, { status: 204 })
+
+/**
+ * Error type for the `stopJob` endpoint.
+ */
+export type StopJobError = Error.JobNotFound | Error.MetadataDbError
+
+/**
+ * The get locations endpoint (GET /locations).
+ */
+const getLocations = HttpApiEndpoint.get("getLocations")`/locations`
+  .addError(Error.InvalidQueryParameters)
+  .addError(Error.LimitTooLarge)
+  .addError(Error.LimitInvalid)
+  .addError(Error.MetadataDbError)
+  .addSuccess(Model.LocationsResponse)
+  .setUrlParams(
+    Schema.Struct({
+      limit: Schema.optional(Schema.NumberFromString),
+      lastLocationId: Schema.optional(Model.LocationIdParam).pipe(Schema.fromKey("last_location_id")),
+    }),
+  )
+
+/**
+ * Error type for the `getLocations` endpoint.
+ */
+export type GetLocationsError =
+  | Error.InvalidQueryParameters
+  | Error.LimitTooLarge
+  | Error.LimitInvalid
+  | Error.MetadataDbError
+
+/**
+ * The get location by ID endpoint (GET /locations/{locationId}).
+ */
+const getLocationById = HttpApiEndpoint.get("getLocationById")`/locations/${locationId}`
+  .addError(Error.LocationNotFound)
+  .addError(Error.MetadataDbError)
+  .addSuccess(Model.LocationInfo)
+
+/**
+ * Error type for the `getLocationById` endpoint.
+ */
+export type GetLocationByIdError = Error.LocationNotFound | Error.MetadataDbError
+
+/**
+ * The delete location by ID endpoint (DELETE /locations/{locationId}).
+ */
+const deleteLocationById = HttpApiEndpoint.del("deleteLocationById")`/locations/${locationId}`
+  .addError(Error.LocationNotFound)
+  .addError(Error.MetadataDbError)
+  .addSuccess(Schema.Void, { status: 204 })
+
+/**
+ * Error type for the `deleteLocationById` endpoint.
+ */
+export type DeleteLocationByIdError = Error.LocationNotFound | Error.MetadataDbError
+
+/**
+ * The api group for the dataset endpoints.
+ */
+export class DatasetGroup extends HttpApiGroup.make("dataset")
+  .add(deployDataset)
+  .add(dumpDataset)
+  .add(getDatasetById)
+  .add(getDatasets)
+{}
+
+/**
+ * The api group for the job endpoints.
+ */
+export class JobGroup extends HttpApiGroup.make("job")
+  .add(getJobs)
+  .add(getJobById)
+  .add(deleteAllJobs)
+  .add(deleteJobById)
+  .add(stopJob)
+{}
+
+/**
+ * The api group for the location endpoints.
+ */
+export class LocationGroup extends HttpApiGroup.make("location")
+  .add(getLocations)
+  .add(getLocationById)
+  .add(deleteLocationById)
+{}
+
+/**
  * The api definition for the admin api.
  */
-export class Api extends HttpApi.make("admin").add(
-  HttpApiGroup.make("admin", { topLevel: true })
-    .add(deployDataset)
-    .add(dumpDataset)
-    .add(getDatasetById)
-    .add(getDatasets),
-) {}
+export class Api extends HttpApi.make("admin")
+  .add(DatasetGroup)
+  .add(JobGroup)
+  .add(LocationGroup)
+{}
 
 /**
  * Options for dumping a dataset.
@@ -178,6 +343,78 @@ export class Admin extends Context.Tag("Nozzle/Admin")<Admin, {
     Array<Model.DatasetInfo>,
     HttpClientError.HttpClientError | GetDatasetsError
   >
+
+  /**
+   * Get all jobs with pagination.
+   *
+   * @param options The pagination options.
+   * @return The paginated jobs response.
+   */
+  readonly getJobs: (options?: {
+    limit?: number
+    lastJobId?: number
+  }) => Effect.Effect<Model.JobsResponse, HttpClientError.HttpClientError | GetJobsError>
+
+  /**
+   * Get a job by ID.
+   *
+   * @param jobId The ID of the job to get.
+   * @return The job information.
+   */
+  readonly getJobById: (
+    jobId: number,
+  ) => Effect.Effect<Model.JobInfo, HttpClientError.HttpClientError | GetJobByIdError>
+
+  /**
+   * Delete all jobs.
+   */
+  readonly deleteAllJobs: () => Effect.Effect<void, HttpClientError.HttpClientError | DeleteAllJobsError>
+
+  /**
+   * Delete a job by ID.
+   *
+   * @param jobId The ID of the job to delete.
+   */
+  readonly deleteJobById: (
+    jobId: number,
+  ) => Effect.Effect<void, HttpClientError.HttpClientError | DeleteJobByIdError>
+
+  /**
+   * Stop a job.
+   *
+   * @param jobId The ID of the job to stop.
+   */
+  readonly stopJob: (jobId: number) => Effect.Effect<void, HttpClientError.HttpClientError | StopJobError>
+
+  /**
+   * Get all locations with pagination.
+   *
+   * @param options The pagination options.
+   * @return The paginated locations response.
+   */
+  readonly getLocations: (options?: {
+    limit?: number
+    lastLocationId?: number
+  }) => Effect.Effect<Model.LocationsResponse, HttpClientError.HttpClientError | GetLocationsError>
+
+  /**
+   * Get a location by ID.
+   *
+   * @param locationId The ID of the location to get.
+   * @return The location information.
+   */
+  readonly getLocationById: (
+    locationId: number,
+  ) => Effect.Effect<Model.LocationInfo, HttpClientError.HttpClientError | GetLocationByIdError>
+
+  /**
+   * Delete a location by ID.
+   *
+   * @param locationId The ID of the location to delete.
+   */
+  readonly deleteLocationById: (
+    locationId: number,
+  ) => Effect.Effect<void, HttpClientError.HttpClientError | DeleteLocationByIdError>
 }>() {}
 
 /**
@@ -192,7 +429,7 @@ export const make = Effect.fn(function*(url: string) {
   })
 
   const deployDataset = Effect.fn("deployDataset")(function*(dataset: Model.DatasetManifest | Model.DatasetRpc) {
-    const request = client.deployDataset({
+    const request = client.dataset.deployDataset({
       payload: {
         manifest: dataset,
         datasetName: dataset.name,
@@ -217,7 +454,7 @@ export const make = Effect.fn(function*(url: string) {
       waitForCompletion?: boolean
     },
   ) {
-    const request = client.dumpDataset({
+    const request = client.dataset.dumpDataset({
       path: {
         datasetId,
       },
@@ -238,7 +475,7 @@ export const make = Effect.fn(function*(url: string) {
   })
 
   const getDatasetById = Effect.fn("getDatasetById")(function*(datasetId: string) {
-    const request = client.getDatasetById({
+    const request = client.dataset.getDatasetById({
       path: {
         datasetId,
       },
@@ -255,7 +492,7 @@ export const make = Effect.fn(function*(url: string) {
   })
 
   const getDatasets = Effect.fn("getDatasets")(function*() {
-    const result = yield* client.getDatasets().pipe(
+    const result = yield* client.dataset.getDatasets().pipe(
       Effect.catchTags({
         HttpApiDecodeError: Effect.die,
         ParseError: Effect.die,
@@ -265,7 +502,130 @@ export const make = Effect.fn(function*(url: string) {
     return result.datasets
   })
 
-  return { dumpDataset, deployDataset, getDatasetById, getDatasets }
+  const getJobs = Effect.fn("getJobs")(function*(options?: { limit?: number; lastJobId?: number }) {
+    const result = yield* client.job.getJobs({
+      urlParams: {
+        limit: options?.limit,
+        lastJobId: options?.lastJobId,
+      },
+    }).pipe(
+      Effect.catchTags({
+        HttpApiDecodeError: Effect.die,
+        ParseError: Effect.die,
+      }),
+    )
+
+    return result
+  })
+
+  const getJobById = Effect.fn("getJobById")(function*(jobId: number) {
+    const result = yield* client.job.getJobById({
+      path: {
+        jobId,
+      },
+    }).pipe(
+      Effect.catchTags({
+        HttpApiDecodeError: Effect.die,
+        ParseError: Effect.die,
+      }),
+    )
+
+    return result
+  })
+
+  const deleteAllJobs = Effect.fn("deleteAllJobs")(function*() {
+    yield* client.job.deleteAllJobs().pipe(
+      Effect.catchTags({
+        HttpApiDecodeError: Effect.die,
+        ParseError: Effect.die,
+      }),
+    )
+  })
+
+  const deleteJobById = Effect.fn("deleteJobById")(function*(jobId: number) {
+    yield* client.job.deleteJobById({
+      path: {
+        jobId,
+      },
+    }).pipe(
+      Effect.catchTags({
+        HttpApiDecodeError: Effect.die,
+        ParseError: Effect.die,
+      }),
+    )
+  })
+
+  const stopJob = Effect.fn("stopJob")(function*(jobId: number) {
+    yield* client.job.stopJob({
+      path: {
+        jobId,
+      },
+    }).pipe(
+      Effect.catchTags({
+        HttpApiDecodeError: Effect.die,
+        ParseError: Effect.die,
+      }),
+    )
+  })
+
+  const getLocations = Effect.fn("getLocations")(function*(options?: { limit?: number; lastLocationId?: number }) {
+    const result = yield* client.location.getLocations({
+      urlParams: {
+        limit: options?.limit,
+        lastLocationId: options?.lastLocationId,
+      },
+    }).pipe(
+      Effect.catchTags({
+        HttpApiDecodeError: Effect.die,
+        ParseError: Effect.die,
+      }),
+    )
+
+    return result
+  })
+
+  const getLocationById = Effect.fn("getLocationById")(function*(locationId: number) {
+    const result = yield* client.location.getLocationById({
+      path: {
+        locationId,
+      },
+    }).pipe(
+      Effect.catchTags({
+        HttpApiDecodeError: Effect.die,
+        ParseError: Effect.die,
+      }),
+    )
+
+    return result
+  })
+
+  const deleteLocationById = Effect.fn("deleteLocationById")(function*(locationId: number) {
+    yield* client.location.deleteLocationById({
+      path: {
+        locationId,
+      },
+    }).pipe(
+      Effect.catchTags({
+        HttpApiDecodeError: Effect.die,
+        ParseError: Effect.die,
+      }),
+    )
+  })
+
+  return {
+    dumpDataset,
+    deployDataset,
+    getDatasetById,
+    getDatasets,
+    getJobs,
+    getJobById,
+    deleteAllJobs,
+    deleteJobById,
+    stopJob,
+    getLocations,
+    getLocationById,
+    deleteLocationById,
+  }
 })
 
 /**
