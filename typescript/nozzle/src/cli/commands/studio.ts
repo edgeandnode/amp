@@ -16,7 +16,19 @@ import {
   Path,
 } from "@effect/platform"
 import { NodeHttpServer } from "@effect/platform-node"
-import { Cause, Config, Console, Data, Effect, Layer, Option, Schema, String as EffectString, Struct } from "effect"
+import {
+  Cause,
+  Config,
+  Console,
+  Data,
+  Effect,
+  Layer,
+  Option,
+  Schema,
+  Stream,
+  String as EffectString,
+  Struct,
+} from "effect"
 import { createServer } from "node:http"
 import { fileURLToPath } from "node:url"
 import open, { type AppName, apps } from "open"
@@ -76,6 +88,31 @@ class NozzleStudioApiRouter extends HttpApiGroup.make("NozzleStudioApi")
         }),
       ),
   )
+  .add(
+    HttpApiEndpoint.post("QueryStream")`/query/stream`
+      .setPayload(
+        Schema.Union(
+          Schema.Struct({ query: Schema.NonEmptyTrimmedString }),
+          Schema.parseJson(Schema.Struct({ query: Schema.NonEmptyTrimmedString })),
+        ),
+      )
+      .addSuccess(
+        Schema.String.pipe(
+          HttpApiSchema.withEncoding({
+            kind: "Json",
+            contentType: "text/event-stream",
+          }),
+        ),
+      )
+      .addError(HttpApiError.InternalServerError)
+      .annotateContext(
+        OpenApi.annotations({
+          title: "Dataset query stream",
+          version: "v1",
+          description: "Performs the Dataset query and returns a stream of the data",
+        }),
+      ),
+  )
   .prefix("/v1")
 {}
 
@@ -118,10 +155,38 @@ const NozzleStudioApiLive = HttpApiBuilder.group(
               const schema = Arrow.generateSchema(table.schema)
               return Effect.succeed([table, schema] as const)
             }),
-            Effect.flatMap(([table, schema]) => Schema.decodeUnknown(schema)([...table])),
+            Effect.flatMap(([table, schema]) => Schema.encodeUnknown(Schema.Array(schema))([...table])),
             Effect.tapErrorCause((cause) => Effect.logError("Failure performing query", Cause.pretty(cause))),
             Effect.mapError(() => new HttpApiError.InternalServerError()),
           ))
+        .handle("QueryStream", ({ payload }) =>
+          Effect.gen(function*() {
+            const stream = flight.stream(payload.query).pipe(
+              Stream.mapEffect((batch) =>
+                Effect.gen(function*() {
+                  const schema = Arrow.generateSchema(batch.schema)
+                  const data = batch.toArray()
+                  const encodedData = yield* Schema.encodeUnknown(Schema.Array(schema))(data)
+                  // Format as SSE
+                  const jsonData = JSON.stringify(encodedData)
+                  const sseData = `data: ${jsonData}\n\n`
+                  return new TextEncoder().encode(sseData)
+                })
+              ),
+              Stream.tapErrorCause((cause) => Console.error("Failure performing query stream", Cause.pretty(cause))),
+              Stream.catchAll(() => new HttpApiError.InternalServerError()),
+            )
+
+            return yield* HttpServerResponse.stream(stream, {
+              contentType: "text/event-stream",
+            }).pipe(
+              HttpServerResponse.setHeaders({
+                "Content-Type": "text/event-stream",
+                "Cache-Control": "no-cache",
+                Connection: "keep-alive",
+              }),
+            )
+          }))
     }),
 )
 const NozzleStudioApiLayer = Layer.merge(
