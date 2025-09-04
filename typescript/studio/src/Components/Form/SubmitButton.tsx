@@ -1,6 +1,7 @@
 "use client"
 
-import { Button, type ButtonProps } from "@graphprotocol/gds-react"
+import type {ButtonProps} from "@graphprotocol/gds-react";
+import { Button  } from "@graphprotocol/gds-react"
 import { CheckIcon, ExclamationMarkIcon } from "@graphprotocol/gds-react/icons"
 import { forwardRef } from "react"
 
@@ -12,7 +13,7 @@ export type SubmitButtonProps = ButtonProps & {
   status: "idle" | "error" | "success" | "submitting"
 }
 export const SubmitButton = forwardRef<HTMLButtonElement, SubmitButtonProps>(
-  ({ status, children, ...rest }, ref) => {
+  ({ children, status, ...rest }, ref) => {
     const form = useFormContext()
 
     return (

@@ -21,12 +21,10 @@ export type EditorProps = Omit<
   "defaultLanguage" | "language"
 > & {
   id: string
-  name: string
 }
 export function Editor({
   height = 450,
   id,
-  name,
   theme = "vs-dark",
   ...rest
 }: Readonly<EditorProps>) {

@@ -5006,7 +5006,6 @@ dependencies = [
  "thiserror",
  "tokio",
  "tonic 0.12.3",
- "url",
 ]
 
 [[package]]

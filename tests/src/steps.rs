@@ -43,7 +43,6 @@ pub struct CleanDumpLocationStep {
 pub struct DumpStep {
     pub name: String,
     pub dataset: String,
-    pub start: u64,
     pub end: u64,
     #[serde(default)]
     pub expect_fail: bool,
@@ -122,8 +121,7 @@ impl TestStep {
         let result = match self {
             TestStep::Dump(step) => {
                 let config = test_env.config.clone();
-                let result =
-                    dump_dataset(&config, &step.dataset, step.start, step.end, 1, None).await;
+                let result = dump_dataset(&config, &step.dataset, step.end, 1, None).await;
                 if step.expect_fail {
                     assert!(result.is_err(), "Expected dump to fail, but it succeeded");
                     Ok(())
@@ -141,6 +139,7 @@ impl TestStep {
             TestStep::Deploy(step) => {
                 let dataset_package = DatasetPackage::new(&step.deploy, step.config.as_deref());
                 dataset_package.pnpm_install().await?;
+                dataset_package.register(test_env.server_addrs).await?;
                 dataset_package.deploy(test_env.server_addrs).await
             }
             TestStep::CleanDumpLocation(step) => {

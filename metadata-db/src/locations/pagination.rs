@@ -20,7 +20,6 @@ where
             tbl,
             url,
             active,
-            start_block,
             writer
         FROM locations
         ORDER BY id DESC
@@ -52,7 +51,6 @@ where
             tbl,
             url,
             active,
-            start_block,
             writer
         FROM locations
         WHERE id < $2

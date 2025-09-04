@@ -16,6 +16,9 @@
       ];
 
       forAllSystems = f: nixpkgs.lib.genAttrs nixpkgs.lib.systems.flakeExposed (system: f {
+        # NOTE: Fenix doesn't support rustup's +nightly syntax (e.g., `cargo +nightly fmt`)
+        # This is a rustup-specific feature that requires rustup's toolchain management.
+        # See: https://github.com/nix-community/fenix/issues/110
         toolchain = with fenix.packages.${system}; combine [
           (fromToolchainFile {
             file = ./rust-toolchain.toml;
@@ -31,7 +34,13 @@
       formatter = forAllSystems ({ pkgs }: pkgs.alejandra);
       devShells = forAllSystems ({ pkgs, toolchain }: {
         default = pkgs.mkShell {
+          shellHook = ''
+            # This is not ideal, but it's needed to support our `just` commands.
+            rustup install nightly --profile minimal --component rustfmt
+          '';
+
           packages = with pkgs; [
+            rustup
             toolchain
             foundry-bin
             solc

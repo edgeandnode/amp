@@ -36,10 +36,6 @@ All configuration can be set through env vars instead of the CLI.
 
 ### Optional
 
-- **DUMP_START_BLOCK**
-  - Description: The block number to start from, inclusive.
-  - Default: `DUMP_START_BLOCK=0`
-
 - **DUMP_END_BLOCK**
   - Description: Specifies the block number to end at, inclusive.
   - Default: For Firehose datasets, 100 blocks behind chain head. For Substreams, the latest final

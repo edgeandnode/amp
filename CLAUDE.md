@@ -134,6 +134,55 @@ curl -X POST http://localhost:1603 --data "select * from eth_rpc.logs limit 10"
 - Arrow Flight client available
 - Marimo notebook examples provided
 
+## Development Patterns Reference
+
+The `.patterns/` directory contains comprehensive development patterns and best practices for this codebase. **Always
+reference these patterns before implementing new functionality** to ensure consistency with established codebase
+conventions.
+
+### Available Patterns:
+
+- **[.patterns/README.md](.patterns/README.md)** - Overview of development patterns and usage guidelines
+- **[testing-patterns.md](.patterns/testing-patterns.md)** - Testing strategies and best practices for writing tests
+
+### Pattern Usage Guidelines:
+
+1. **Before coding**: Review relevant patterns in `.patterns/` directory
+2. **During implementation**: Follow established conventions and coding patterns
+3. **For complex features**: Use patterns as templates for consistent implementation
+4. **When stuck**: Reference similar implementations in existing codebase following these patterns
+
+## Crate-Specific Guidelines
+
+Some crates in this workspace have their own detailed contributing guidelines that supplement the global patterns. **You MUST check and follow these crate-specific guidelines when working on the respective crate.**
+
+### metadata-db
+
+- **[metadata-db/CONTRIBUTING.md](metadata-db/CONTRIBUTING.md)** - **REQUIRED reading** when working on the `metadata-db` crate. Contains comprehensive development guidelines including database design patterns, testing strategies, and API conventions that must be followed.
+
+## 🔐 Crate-Specific Security Guidelines
+
+**🚨 CRITICAL: Some crates have specialized security requirements that MUST be reviewed before making any changes.**
+
+Security guidelines provide essential protection for sensitive operations, data handling, and compliance requirements. These documents contain mandatory security checklists, coding patterns, and review processes that ensure code meets enterprise security standards.
+
+### `metadata-db` Security Requirements
+
+- **[metadata-db/SECURITY.md](metadata-db/SECURITY.md)** - **🚨 MANDATORY SECURITY REVIEW** for all `metadata-db` changes. Contains comprehensive security checklist covering database security, access control, OWASP compliance, and secure coding patterns.
+
+**⚠️ WARNING: Security violations may result in:**
+- Immediate rejection of pull requests
+- Required security audits and remediation
+- Compliance violations and regulatory issues  
+- Potential data breach risks
+
+**🎯 AI Agent Instructions:**
+- **ALWAYS** review crate-specific security guidelines BEFORE making changes
+- **COMPLETE** all security checklists as part of development process
+- **PRIORITIZE** security requirements over convenience or speed
+- **ESCALATE** any security concerns or questions immediately
+- **NEVER** bypass or ignore security requirements
+
 ## Development Notes
 
 ### Prerequisites

@@ -37,11 +37,20 @@ export const DatasetKind = Schema.Literal("manifest", "sql", "substreams", "fire
 )
 
 export const DatasetVersion = Schema.String.pipe(
-  Schema.pattern(/^\d+\.\d+\.\d+$/),
+  Schema.pattern(/^\d+\.\d+\.\d+(-[a-zA-Z0-9]+)?$/),
   Schema.annotations({
     title: "Version",
     description: "a semantic version number (e.g. \"4.1.3\")",
-    examples: ["1.0.0", "1.0.1", "1.1.0"],
+    examples: ["1.0.0", "1.0.1", "1.1.0", "1.0.0-dev123"],
+  }),
+)
+
+export const DatasetNameAndVersion = Schema.TemplateLiteral(Schema.String, Schema.Literal("@"), Schema.String).pipe(
+  Schema.pattern(/^\w+@\d+\.\d+\.\d+(-[a-zA-Z0-9]+)?$/),
+  Schema.annotations({
+    title: "NameAndVersion",
+    description: "the name and version of the dataset",
+    examples: ["uniswap@1.0.0"],
   }),
 )
 
@@ -170,3 +179,60 @@ export const Provider = Schema.Union(EvmRpcProvider).pipe(
     description: "a provider definition",
   }),
 )
+
+export const JobId = Schema.Number.pipe(
+  Schema.annotations({
+    title: "JobId",
+    description: "unique identifier for a job",
+  }),
+)
+
+export const JobIdParam = Schema.NumberFromString.pipe(
+  Schema.annotations({
+    title: "JobIdParam",
+    description: "job identifier as URL parameter",
+  }),
+)
+
+export const LocationId = Schema.Number.pipe(
+  Schema.annotations({
+    title: "LocationId",
+    description: "unique identifier for a location",
+  }),
+)
+
+export const LocationIdParam = Schema.NumberFromString.pipe(
+  Schema.annotations({
+    title: "LocationIdParam",
+    description: "location identifier as URL parameter",
+  }),
+)
+
+export class JobInfo extends Schema.Class<JobInfo>("JobInfo")({
+  id: JobId,
+  createdAt: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("created_at")),
+  updatedAt: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("updated_at")),
+  nodeId: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("node_id")),
+  status: Schema.String,
+  descriptor: Schema.Any,
+}) {}
+
+export class LocationInfo extends Schema.Class<LocationInfo>("LocationInfo")({
+  id: LocationId,
+  dataset: Schema.String,
+  datasetVersion: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("dataset_version")),
+  table: Schema.String,
+  url: Schema.String,
+  active: Schema.Boolean,
+  writer: Schema.optional(JobId),
+}) {}
+
+export class JobsResponse extends Schema.Class<JobsResponse>("JobsResponse")({
+  jobs: Schema.Array(JobInfo),
+  nextCursor: Schema.optional(JobId).pipe(Schema.fromKey("next_cursor")),
+}) {}
+
+export class LocationsResponse extends Schema.Class<LocationsResponse>("LocationsResponse")({
+  locations: Schema.Array(LocationInfo),
+  nextCursor: Schema.optional(LocationId).pipe(Schema.fromKey("next_cursor")),
+}) {}

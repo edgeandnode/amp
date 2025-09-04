@@ -10,9 +10,9 @@ import * as ArrowFlight from "../../api/ArrowFlight.ts"
 export const proxy = Command.make("proxy", {
   args: {
     port: Options.integer("port").pipe(
-      Options.between(1, 65535),
-      Options.withDefault(8080),
       Options.withDescription("The port to listen on"),
+      Options.withSchema(Schema.Int.pipe(Schema.between(1, 65535))),
+      Options.withDefault(8080),
     ),
     admin: Options.text("admin-url").pipe(
       Options.withFallbackConfig(Config.string("NOZZLE_ADMIN_URL").pipe(Config.withDefault("http://localhost:1610"))),

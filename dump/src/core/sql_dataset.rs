@@ -146,7 +146,7 @@ pub async fn dump_table(
     parquet_opts: &ParquetWriterProperties,
     compaction_opts: &Arc<CompactionProperties>,
     microbatch_max_interval: u64,
-    (start, end): (i64, Option<i64>),
+    end: Option<i64>,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
 ) -> Result<(), BoxError> {
     let dataset_name = dataset.dataset.name.as_str();
@@ -179,35 +179,29 @@ pub async fn dump_table(
         let plan = planning_ctx.plan_sql(query.clone()).await?;
         let is_incr = plan.is_incremental()?;
 
-        let (start, end) = match (start, end) {
-            (start, Some(end)) if start >= 0 && end >= 0 => (start as BlockNum, end as BlockNum),
+        let Some(start) = catalog.earliest_block().await? else {
+            // If the dependencies have synced nothing, we have nothing to do.
+            tracing::warn!("no blocks to dump for {table_name}, dependencies are empty");
+            return Ok::<(), BoxError>(());
+        };
+        let end = match end {
+            Some(end) if end >= 0 => end as BlockNum,
             _ => {
                 let ctx = QueryContext::for_catalog(catalog.clone(), env.clone(), false).await?;
-                match ctx.max_end_block(&plan.clone().attach_to(&ctx)?).await? {
-                    Some(max_end_block) => {
-                        block_ranges::resolve_relative(start, end, max_end_block)?
-                    }
-                    None => {
-                        // If the dependencies have synced nothing, we have nothing to do.
-                        tracing::warn!(
-                            "no blocks to dump for {table_name}, dependencies are empty"
-                        );
-                        return Ok::<(), BoxError>(());
-                    }
-                }
+                let Some(max_end_block) = ctx.max_end_block(&plan.clone().attach_to(&ctx)?).await?
+                else {
+                    tracing::warn!("no blocks to dump for {table_name}, dependencies are empty");
+                    return Ok::<(), BoxError>(());
+                };
+                block_ranges::resolve_relative(start, end, max_end_block)?
             }
         };
 
-        let start_block = start
-            .try_into()
-            .map_err(|e| format!("start_block value {} is out of range: {}", start, e))?;
+        tracing::warn!(table = table.table_name(), start, end);
 
         if is_incr {
-            ctx.metadata_db
-                .check_start_block(table.location_id(), start_block)
-                .await?;
-
             for range in table.missing_ranges(start..=end).await? {
+                tracing::warn!(?range);
                 dump_sql_query(
                     &dataset_store,
                     &env,
@@ -229,7 +223,6 @@ pub async fn dump_table(
                 &data_store,
                 dataset_store.metadata_db.clone(),
                 false,
-                start_block as i64,
             )
             .await?
             .into();
