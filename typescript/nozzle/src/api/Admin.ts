@@ -40,7 +40,8 @@ const dumpDataset = HttpApiEndpoint.post("dumpDataset")`/datasets/${datasetId}/d
   .addSuccess(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }))
   .setPayload(
     Schema.Struct({
-      endBlock: Schema.Number.pipe(Schema.propertySignature, Schema.fromKey("end_block")),
+      version: Model.DatasetVersion.pipe(Schema.optional),
+      endBlock: Schema.Number.pipe(Schema.optional, Schema.fromKey("end_block")),
       waitForCompletion: Schema.Boolean.pipe(Schema.optional, Schema.fromKey("wait_for_completion")),
     }),
   )
@@ -80,7 +81,7 @@ const deployDataset = HttpApiEndpoint.post("deployDataset")`/datasets`
     Schema.Struct({
       datasetName: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("dataset_name")),
       version: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("version")),
-      manifest: Schema.parseJson(Schema.Union(Model.DatasetManifest, Model.DatasetRpc)),
+      manifest: Schema.parseJson(Schema.Union(Model.DatasetManifest, Model.DatasetRpc)).pipe(Schema.optional),
     }),
   )
 
@@ -350,15 +351,19 @@ export class Api extends HttpApi.make("admin")
  */
 export interface DumpDatasetOptions {
   /**
+   * The version of the dataset to dump.
+   */
+  readonly version?: string | undefined
+  /**
    * The block up to which to dump.
    */
-  readonly endBlock: number
+  readonly endBlock?: number | undefined
   /**
    * Whether to wait for the dump to complete before returning.
    *
    * @default false
    */
-  readonly waitForCompletion?: boolean
+  readonly waitForCompletion?: boolean | undefined
 }
 
 /**
@@ -368,11 +373,14 @@ export class Admin extends Context.Tag("Nozzle/Admin")<Admin, {
   /**
    * Deploy a dataset manifest.
    *
-   * @param dataset The dataset manifest to deploy.
+   * @param name The name of the dataset to deploy.
+   * @param version The version of the dataset to deploy.
    * @return Whether the deployment was successful.
    */
   readonly deployDataset: (
-    dataset: Model.DatasetManifest | Model.DatasetRpc,
+    name: string,
+    version: string,
+    manifest?: Model.DatasetManifest | Model.DatasetRpc,
   ) => Effect.Effect<string, HttpClientError.HttpClientError | DeployDatasetError>
 
   /**
@@ -384,7 +392,7 @@ export class Admin extends Context.Tag("Nozzle/Admin")<Admin, {
    */
   readonly dumpDataset: (
     datasetId: string,
-    options: DumpDatasetOptions,
+    options?: DumpDatasetOptions | undefined,
   ) => Effect.Effect<string, HttpClientError.HttpClientError | DumpDatasetError>
 
   /**
@@ -495,30 +503,33 @@ export const make = Effect.fn(function*(url: string) {
     baseUrl: url,
   })
 
-  const deployDataset = Effect.fn("deployDataset")(function*(dataset: Model.DatasetManifest | Model.DatasetRpc) {
-    const request = client.dataset.deployDataset({
-      payload: {
-        manifest: dataset,
-        datasetName: dataset.name,
-        version: dataset.version,
-      },
-    })
+  const deployDataset = Effect.fn("deployDataset")(
+    function*(name: string, version: string, manifest?: Model.DatasetManifest | Model.DatasetRpc) {
+      const request = client.dataset.deployDataset({
+        payload: {
+          datasetName: name,
+          version,
+          manifest,
+        },
+      })
 
-    const result = yield* request.pipe(
-      Effect.catchTags({
-        HttpApiDecodeError: Effect.die,
-        ParseError: Effect.die,
-      }),
-    )
+      const result = yield* request.pipe(
+        Effect.catchTags({
+          HttpApiDecodeError: Effect.die,
+          ParseError: Effect.die,
+        }),
+      )
 
-    return result
-  })
+      return result
+    },
+  )
 
   const dumpDataset = Effect.fn("dumpDataset")(function*(
     datasetId: string,
-    options: {
-      endBlock: number
-      waitForCompletion?: boolean
+    options?: {
+      version?: string | undefined
+      endBlock?: number | undefined
+      waitForCompletion?: boolean | undefined
     },
   ) {
     const request = client.dataset.dumpDataset({
@@ -526,8 +537,9 @@ export const make = Effect.fn(function*(url: string) {
         datasetId,
       },
       payload: {
-        waitForCompletion: options.waitForCompletion,
-        endBlock: options.endBlock,
+        version: options?.version,
+        endBlock: options?.endBlock,
+        waitForCompletion: options?.waitForCompletion,
       },
     })
 

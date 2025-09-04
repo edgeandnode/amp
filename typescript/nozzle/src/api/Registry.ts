@@ -37,12 +37,13 @@ export type GetOutputSchemaError = Error.DatasetStoreError
 const register = HttpApiEndpoint.post("register")`/register`
   .addError(Error.InvalidManifest)
   .addError(Error.RegistrationFailed)
+  .addError(Error.DatasetAlreadyExists)
   .addSuccess(Schema.Struct({
     success: Schema.Boolean,
   }))
   .setPayload(
     Schema.Struct({
-      manifest: Schema.String,
+      manifest: Schema.parseJson(Schema.Union(Model.DatasetManifest, Model.DatasetRpc)),
     }),
   )
 
@@ -52,7 +53,7 @@ const register = HttpApiEndpoint.post("register")`/register`
  * - InvalidManifest: The manifest JSON is malformed or invalid.
  * - RegistrationFailed: Failed to register manifest in the system.
  */
-export type RegisterError = Error.InvalidManifest | Error.RegistrationFailed
+export type RegisterError = Error.InvalidManifest | Error.RegistrationFailed | Error.DatasetAlreadyExists
 
 /**
  * The api definition for the registry api.
@@ -96,7 +97,7 @@ export class Registry extends Context.Tag("Nozzle/Registry")<Registry, {
    * @returns An effect that resolves when the registration is successful.
    */
   readonly register: (
-    manifest: string,
+    manifest: Model.DatasetManifest | Model.DatasetRpc,
   ) => Effect.Effect<{ success: boolean }, HttpClientError.HttpClientError | RegisterError>
 }>() {}
 
@@ -129,7 +130,7 @@ export const make = Effect.fn(function*(url: string) {
     return result
   })
 
-  const register = Effect.fn("register")(function*(manifest: string) {
+  const register = Effect.fn("register")(function*(manifest: Model.DatasetManifest | Model.DatasetRpc) {
     const request = client.register({
       payload: {
         manifest,
