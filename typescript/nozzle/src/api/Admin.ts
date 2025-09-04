@@ -31,9 +31,12 @@ const locationId = HttpApiSchema.param("locationId", Model.LocationIdParam)
  * The dump dataset endpoint (POST /datasets/{datasetId}/dump).
  */
 const dumpDataset = HttpApiEndpoint.post("dumpDataset")`/datasets/${datasetId}/dump`
+  .addError(Error.InvalidRequest)
+  .addError(Error.DatasetStoreError)
   .addError(Error.InvalidDatasetId)
   .addError(Error.UnexpectedJobStatus)
-  .addError(Error.DatasetStoreError)
+  .addError(Error.SchedulerError)
+  .addError(Error.MetadataDbError)
   .addSuccess(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }))
   .setPayload(
     Schema.Struct({
@@ -44,21 +47,34 @@ const dumpDataset = HttpApiEndpoint.post("dumpDataset")`/datasets/${datasetId}/d
 
 /**
  * Error type for the `dumpDataset` endpoint.
+ *
+ * - InvalidRequest: Invalid request parameters.
+ * - DatasetStoreError: Failed to load dataset from store.
+ * - InvalidDatasetId: The dataset ID is invalid.
+ * - UnexpectedJobStatus: The job status is unexpected.
+ * - SchedulerError: Failed to schedule the dump job.
+ * - MetadataDbError: Database error while polling job status.
  */
 export type DumpDatasetError =
+  | Error.InvalidRequest
   | Error.DatasetStoreError
   | Error.InvalidDatasetId
   | Error.UnexpectedJobStatus
   | Error.SchedulerError
+  | Error.MetadataDbError
 
 /**
  * The deploy dataset endpoint (POST /datasets).
  */
 const deployDataset = HttpApiEndpoint.post("deployDataset")`/datasets`
+  .addError(Error.InvalidRequest)
+  .addError(Error.InvalidManifest)
+  .addError(Error.ManifestValidationError)
+  .addError(Error.ManifestRegistrationError)
+  .addError(Error.ManifestRequired)
+  .addError(Error.DatasetAlreadyExists)
   .addError(Error.SchedulerError)
   .addError(Error.DatasetDefStoreError)
-  .addError(Error.ManifestParseError)
-  .addError(Error.InvalidManifest)
   .addSuccess(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }))
   .setPayload(
     Schema.Struct({
@@ -71,50 +87,62 @@ const deployDataset = HttpApiEndpoint.post("deployDataset")`/datasets`
 /**
  * Error type for the `deployDataset` endpoint.
  *
+ * - InvalidRequest: Invalid request parameters or dataset name format.
+ * - InvalidManifest: The manifest is semantically invalid.
+ * - ManifestValidationError: Manifest name/version doesn't match request parameters.
+ * - ManifestRegistrationError: Failed to register manifest in system.
+ * - ManifestRequired: Dataset not found and manifest not provided.
+ * - DatasetAlreadyExists: Dataset exists and manifest provided (conflict).
  * - SchedulerError: Failure in scheduling the dataset dump after deployment.
  * - DatasetDefStoreError: Failure in dataset definition store operations.
- * - ManifestParseError: Failure in parsing the manifest.
- * - InvalidManifest: The manifest is invalid.
  */
 export type DeployDatasetError =
+  | Error.InvalidRequest
+  | Error.InvalidManifest
+  | Error.ManifestValidationError
+  | Error.ManifestRegistrationError
+  | Error.ManifestRequired
+  | Error.DatasetAlreadyExists
   | Error.SchedulerError
   | Error.DatasetDefStoreError
-  | Error.ManifestParseError
-  | Error.InvalidManifest
 
 /**
  * The get datasets endpoint (GET /datasets).
  */
-const getDatasets = HttpApiEndpoint.get("getDatasets")`/datasets`.addError(Error.MetadataDbError).addSuccess(
-  Schema.Struct({
-    datasets: Schema.Array(Model.DatasetInfo).pipe(Schema.mutable),
-  }),
-)
+const getDatasets = HttpApiEndpoint.get("getDatasets")`/datasets`
+  .addError(Error.DatasetStoreError)
+  .addError(Error.MetadataDbError)
+  .addSuccess(
+    Schema.Struct({
+      datasets: Schema.Array(Model.DatasetInfo).pipe(Schema.mutable),
+    }),
+  )
 
 /**
  * Error type for the `getDatasets` endpoint.
  *
- * - MetadataDbError: Failure in metadata database operations.
+ * - DatasetStoreError: Failed to retrieve datasets from the dataset store.
+ * - MetadataDbError: Database error while retrieving active locations for tables.
  */
-export type GetDatasetsError = Error.MetadataDbError
+export type GetDatasetsError = Error.DatasetStoreError | Error.MetadataDbError
 
 /**
  * The get dataset by ID endpoint (GET /datasets/{datasetId}).
  */
 const getDatasetById = HttpApiEndpoint.get("getDatasetById")`/datasets/${datasetId}`
-  .addError(Error.DatasetNotFound)
   .addError(Error.InvalidDatasetId)
-  .addError(Error.UnexpectedJobStatus)
+  .addError(Error.DatasetNotFound)
+  .addError(Error.DatasetStoreError)
   .addSuccess(Model.DatasetInfo)
 
 /**
  * Error type for the `getDatasetById` endpoint.
  *
- * - DatasetNotFound: The dataset was not found.
  * - InvalidDatasetId: The dataset ID is invalid.
- * - UnexpectedJobStatus: The job status is unexpected.
+ * - DatasetNotFound: The dataset was not found.
+ * - DatasetStoreError: Failed to load dataset from store.
  */
-export type GetDatasetByIdError = Error.DatasetNotFound | Error.InvalidDatasetId | Error.UnexpectedJobStatus
+export type GetDatasetByIdError = Error.InvalidDatasetId | Error.DatasetNotFound | Error.DatasetStoreError
 
 /**
  * The get jobs endpoint (GET /jobs).
@@ -145,52 +173,77 @@ export type GetJobsError =
  * The get job by ID endpoint (GET /jobs/{jobId}).
  */
 const getJobById = HttpApiEndpoint.get("getJobById")`/jobs/${jobId}`
+  .addError(Error.InvalidJobId)
   .addError(Error.JobNotFound)
   .addError(Error.MetadataDbError)
   .addSuccess(Model.JobInfo)
 
 /**
  * Error type for the `getJobById` endpoint.
+ *
+ * - InvalidJobId: The provided ID is not a valid job identifier.
+ * - JobNotFound: No job exists with the given ID.
+ * - MetadataDbError: Internal database error occurred.
  */
-export type GetJobByIdError = Error.JobNotFound | Error.MetadataDbError
+export type GetJobByIdError = Error.InvalidJobId | Error.JobNotFound | Error.MetadataDbError
 
 /**
  * The delete all jobs endpoint (DELETE /jobs).
  */
 const deleteAllJobs = HttpApiEndpoint.del("deleteAllJobs")`/jobs`
+  .addError(Error.InvalidQueryParam)
   .addError(Error.MetadataDbError)
   .addSuccess(Schema.Void, { status: 204 })
+  .setUrlParams(
+    Schema.Struct({
+      status: Schema.Literal("terminal", "complete", "stopped", "error"),
+    }),
+  )
 
 /**
  * Error type for the `deleteAllJobs` endpoint.
  */
-export type DeleteAllJobsError = Error.MetadataDbError
+export type DeleteAllJobsError = Error.InvalidQueryParam | Error.MetadataDbError
 
 /**
  * The delete job by ID endpoint (DELETE /jobs/{jobId}).
  */
 const deleteJobById = HttpApiEndpoint.del("deleteJobById")`/jobs/${jobId}`
+  .addError(Error.InvalidJobId)
   .addError(Error.JobNotFound)
+  .addError(Error.JobConflict)
   .addError(Error.MetadataDbError)
   .addSuccess(Schema.Void, { status: 204 })
 
 /**
  * Error type for the `deleteJobById` endpoint.
+ *
+ * - InvalidJobId: The provided ID is not a valid job identifier.
+ * - JobNotFound: No job exists with the given ID.
+ * - JobConflict: Job exists but is not in a terminal state.
+ * - MetadataDbError: Internal database error occurred.
  */
-export type DeleteJobByIdError = Error.JobNotFound | Error.MetadataDbError
+export type DeleteJobByIdError = Error.InvalidJobId | Error.JobNotFound | Error.JobConflict | Error.MetadataDbError
 
 /**
  * The stop job endpoint (PUT /jobs/{jobId}/stop).
  */
 const stopJob = HttpApiEndpoint.put("stopJob")`/jobs/${jobId}/stop`
+  .addError(Error.InvalidJobId)
   .addError(Error.JobNotFound)
+  .addError(Error.JobConflict)
   .addError(Error.MetadataDbError)
   .addSuccess(Schema.Void, { status: 204 })
 
 /**
  * Error type for the `stopJob` endpoint.
+ *
+ * - InvalidJobId: The provided ID is not a valid job identifier.
+ * - JobNotFound: No job exists with the given ID.
+ * - JobConflict: Job is in a state that cannot be stopped.
+ * - MetadataDbError: Internal database error occurred.
  */
-export type StopJobError = Error.JobNotFound | Error.MetadataDbError
+export type StopJobError = Error.InvalidJobId | Error.JobNotFound | Error.JobConflict | Error.MetadataDbError
 
 /**
  * The get locations endpoint (GET /locations).
@@ -221,27 +274,37 @@ export type GetLocationsError =
  * The get location by ID endpoint (GET /locations/{locationId}).
  */
 const getLocationById = HttpApiEndpoint.get("getLocationById")`/locations/${locationId}`
+  .addError(Error.InvalidLocationId)
   .addError(Error.LocationNotFound)
   .addError(Error.MetadataDbError)
   .addSuccess(Model.LocationInfo)
 
 /**
  * Error type for the `getLocationById` endpoint.
+ *
+ * - InvalidLocationId: The provided ID is not a valid location identifier.
+ * - LocationNotFound: No location exists with the given ID.
+ * - MetadataDbError: Internal database error occurred.
  */
-export type GetLocationByIdError = Error.LocationNotFound | Error.MetadataDbError
+export type GetLocationByIdError = Error.InvalidLocationId | Error.LocationNotFound | Error.MetadataDbError
 
 /**
  * The delete location by ID endpoint (DELETE /locations/{locationId}).
  */
 const deleteLocationById = HttpApiEndpoint.del("deleteLocationById")`/locations/${locationId}`
+  .addError(Error.InvalidLocationId)
   .addError(Error.LocationNotFound)
   .addError(Error.MetadataDbError)
   .addSuccess(Schema.Void, { status: 204 })
 
 /**
  * Error type for the `deleteLocationById` endpoint.
+ *
+ * - InvalidLocationId: The provided ID is not a valid location identifier.
+ * - LocationNotFound: No location exists with the given ID.
+ * - MetadataDbError: Internal database error occurred.
  */
-export type DeleteLocationByIdError = Error.LocationNotFound | Error.MetadataDbError
+export type DeleteLocationByIdError = Error.InvalidLocationId | Error.LocationNotFound | Error.MetadataDbError
 
 /**
  * The api group for the dataset endpoints.
@@ -366,9 +429,13 @@ export class Admin extends Context.Tag("Nozzle/Admin")<Admin, {
   ) => Effect.Effect<Model.JobInfo, HttpClientError.HttpClientError | GetJobByIdError>
 
   /**
-   * Delete all jobs.
+   * Delete all jobs by status filter.
+   *
+   * @param status The status filter for jobs to delete ("terminal", "complete", "stopped", "error")
    */
-  readonly deleteAllJobs: () => Effect.Effect<void, HttpClientError.HttpClientError | DeleteAllJobsError>
+  readonly deleteAllJobs: (
+    status: "terminal" | "complete" | "stopped" | "error",
+  ) => Effect.Effect<void, HttpClientError.HttpClientError | DeleteAllJobsError>
 
   /**
    * Delete a job by ID.
@@ -533,8 +600,12 @@ export const make = Effect.fn(function*(url: string) {
     return result
   })
 
-  const deleteAllJobs = Effect.fn("deleteAllJobs")(function*() {
-    yield* client.job.deleteAllJobs().pipe(
+  const deleteAllJobs = Effect.fn("deleteAllJobs")(function*(status: "terminal" | "complete" | "stopped" | "error") {
+    yield* client.job.deleteAllJobs({
+      urlParams: {
+        status,
+      },
+    }).pipe(
       Effect.catchTags({
         HttpApiDecodeError: Effect.die,
         ParseError: Effect.die,
