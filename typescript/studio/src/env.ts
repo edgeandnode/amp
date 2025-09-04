@@ -14,7 +14,6 @@ export const env = createEnv({
 
   client: {
     VITE_APP_TITLE: Schema.standardSchemaV1(Schema.NullishOr(Schema.String)),
-    VITE_NOZZLE_ARROW_FLIGHT_URL: Schema.standardSchemaV1(Schema.String),
   },
 
   /**
