@@ -562,8 +562,8 @@ impl MetadataDb {
         let mut tx = self.pool.begin().await?;
 
         let query = "
-            INSERT INTO locations (dataset, dataset_version, tbl, bucket, path, url, active, start_block)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            INSERT INTO locations (dataset, dataset_version, tbl, bucket, path, url, active)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             ON CONFLICT DO NOTHING;
         ";
 
@@ -575,7 +575,6 @@ impl MetadataDb {
             .bind(path)
             .bind(url.to_string())
             .bind(active)
-            .bind(0)
             .execute(&mut *tx)
             .await?;
 
