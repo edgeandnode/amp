@@ -11,6 +11,7 @@ import { useOSQuery } from "../../hooks/useOSQuery"
 import { classNames } from "../../utils/classnames"
 import { fieldContext, formContext } from "../Form/form"
 import { SubmitButton } from "../Form/SubmitButton"
+
 import { Editor } from "./Editor"
 
 export const { useAppForm } = createFormHook({
@@ -44,7 +45,7 @@ export function QueryPlaygroundWrapper() {
   const { data: os } = useOSQuery()
   const correctKey = os === "MacOS" ? "CMD" : "CTRL"
 
-  const { mutateAsync, data, status } = useDatasetsMutation({
+  const { data, mutateAsync, status } = useDatasetsMutation({
     onError(error) {
       console.error("Failure performing dataset query", { error })
     },
@@ -151,7 +152,6 @@ export function QueryPlaygroundWrapper() {
                   {(field) => (
                     <field.Editor
                       id={`queries[${idx}].query` as const}
-                      name={`queries[${idx}].query` as const}
                     />
                   )}
                 </form.AppField>

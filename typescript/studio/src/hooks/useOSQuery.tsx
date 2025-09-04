@@ -1,9 +1,9 @@
 "use client"
 
+import type {UseSuspenseQueryOptions} from "@tanstack/react-query";
 import {
   queryOptions,
-  useSuspenseQuery,
-  type UseSuspenseQueryOptions,
+  useSuspenseQuery
 } from "@tanstack/react-query"
 
 // Type declaration for the experimental userAgentData API

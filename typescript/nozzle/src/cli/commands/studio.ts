@@ -34,10 +34,29 @@ import { fileURLToPath } from "node:url"
 import open, { type AppName, apps } from "open"
 
 import * as ArrowFlight from "../../api/ArrowFlight.ts"
+import * as Registry from "../../api/Registry.ts"
 import * as Arrow from "../../Arrow.ts"
+import * as ConfigLoader from "../../ConfigLoader.ts"
 import { FoundryQueryableEventResolver, Model as StudioModel } from "../../Studio/index.js"
 
 class NozzleStudioApiRouter extends HttpApiGroup.make("NozzleStudioApi")
+  .add(
+    HttpApiEndpoint.get("NozzleConfigStream")`/config/stream`
+      .addSuccess(
+        Schema.String.pipe(
+          HttpApiSchema.withEncoding({
+            kind: "Json",
+            contentType: "text/event-stream",
+          }),
+        ),
+      ).annotateContext(
+        OpenApi.annotations({
+          title: "Nozzle Config",
+          description: "Watches the nozzle config and emits a stream of events of changes to the file",
+          version: "v1",
+        }),
+      ),
+  )
   .add(
     HttpApiEndpoint.get("QueryableEventStream")`/events/stream`
       .addSuccess(
@@ -126,10 +145,53 @@ const NozzleStudioApiLive = HttpApiBuilder.group(
   "NozzleStudioApi",
   (handlers) =>
     Effect.gen(function*() {
+      const loader = yield* ConfigLoader.ConfigLoader
       const resolver = yield* FoundryQueryableEventResolver.FoundryQueryableEventResolver
       const flight = yield* ArrowFlight.ArrowFlight
 
       return handlers
+        .handle("NozzleConfigStream", () =>
+          Effect.gen(function*() {
+            const stream: Stream.Stream<Uint8Array<ArrayBuffer>, HttpApiError.InternalServerError, never> =
+              yield* loader.find().pipe(
+                Effect.map(Option.match({
+                  onNone() {
+                    console.log("No nozzle config found :{")
+                    return Stream.make([1]).pipe(
+                      Stream.map(() => {
+                        const jsonData = JSON.stringify({})
+                        const sseData = `data: ${jsonData}\n\n`
+                        return new TextEncoder().encode(sseData)
+                      }),
+                    )
+                  },
+                  onSome(nozzleConfigPath) {
+                    return loader.watch<HttpApiError.InternalServerError, never>(nozzleConfigPath, {
+                      onError(cause) {
+                        console.error("Failure while watching the nozzle config", nozzleConfigPath, cause)
+                        return new HttpApiError.InternalServerError()
+                      },
+                    }).pipe(
+                      Stream.map((manifest) => {
+                        const jsonData = JSON.stringify(manifest)
+                        const sseData = `data: ${jsonData}\n\n`
+                        return new TextEncoder().encode(sseData)
+                      }),
+                      Stream.mapError(() => new HttpApiError.InternalServerError()),
+                    )
+                  },
+                })),
+              )
+            return yield* HttpServerResponse.stream(stream, {
+              contentType: "text/event-stream",
+            }).pipe(
+              HttpServerResponse.setHeaders({
+                "Content-Type": "text/event-stream",
+                "Cache-Control": "no-cache",
+                Connection: "keep-alive",
+              }),
+            )
+          }))
         .handle("QueryableEventStream", () =>
           Effect.gen(function*() {
             const stream = yield* resolver
@@ -297,15 +359,22 @@ export const studio = Command.make("studio", {
     ]).pipe(
       Options.withAlias("b"),
       Options.withDescription(
-        "Broweser to open the nozzle dataset studio app in. Default is your default selected browser",
+        "Browser to open the nozzle dataset studio app in. Default is your default selected browser",
       ),
       Options.withDefault("browser"),
     ),
     flight: Options.text("flight-url").pipe(
       Options.withFallbackConfig(
-        Config.string("NOZZLE_ARROW_FLIGHT_URL").pipe(Config.withDefault("http://34.27.238.174")),
+        Config.string("NOZZLE_ARROW_FLIGHT_URL").pipe(Config.withDefault("http://localhost:1602")),
       ),
       Options.withDescription("The Arrow Flight URL to use for the query"),
+      Options.withSchema(Schema.URL),
+    ),
+    registry: Options.text("registry-url").pipe(
+      Options.withFallbackConfig(
+        Config.string("NOZZLE_REGISTRY_URL").pipe(Config.withDefault("http://localhost:1611")),
+      ),
+      Options.withDescription("The url of the Nozzle registry server"),
       Options.withSchema(Schema.URL),
     ),
   },
@@ -342,6 +411,9 @@ export const studio = Command.make("studio", {
         Layer.launch,
       )
     })
+  ),
+  Command.provide(({ args }) =>
+    ConfigLoader.ConfigLoader.Default.pipe(Layer.provide(Registry.layer(`${args.registry}`)))
   ),
   Command.provide(FoundryQueryableEventResolver.layer),
   Command.provide(({ args }) => ArrowFlight.layer(createGrpcTransport({ baseUrl: `${args.flight}` }))),
