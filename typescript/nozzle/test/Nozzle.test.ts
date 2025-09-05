@@ -64,6 +64,7 @@ layer(environment, {
       yield* admin.deployDataset(Anvil.dataset.name, Anvil.dataset.version, Anvil.dataset)
       yield* admin.dumpDataset(Anvil.dataset.name, {
         endBlock: Number(block),
+        version: Anvil.dataset.version,
         waitForCompletion: true,
       })
 
@@ -121,6 +122,7 @@ layer(environment, {
       yield* admin.deployDataset(dataset.name, dataset.version)
       yield* admin.dumpDataset(dataset.name, {
         endBlock: Number(block),
+        version: dataset.version,
         waitForCompletion: true,
       })
 
