@@ -9,8 +9,10 @@ use metadata_db::MetadataDb;
 
 use crate::handlers::{output_schema::output_schema_handler, register::register_handler};
 
+#[derive(Clone)]
 pub struct ServiceState {
-    dataset_store: Arc<DatasetStore>,
+    pub dataset_store: Arc<DatasetStore>,
+    pub metadata_db: Arc<MetadataDb>,
 }
 
 pub async fn serve(
@@ -18,9 +20,11 @@ pub async fn serve(
     config: Arc<Config>,
     metadata_db: Arc<MetadataDb>,
 ) -> BoxResult<(SocketAddr, impl Future<Output = BoxResult<()>>)> {
-    let state = Arc::new(ServiceState {
-        dataset_store: DatasetStore::new(config, metadata_db),
-    });
+    let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
+    let state = ServiceState {
+        dataset_store,
+        metadata_db,
+    };
 
     // Build the application with routes
     let app = Router::new()

@@ -223,7 +223,7 @@ impl fmt::Display for DatasetError {
 #[derive(Clone)]
 pub struct DatasetStore {
     config: Arc<Config>,
-    pub metadata_db: Arc<MetadataDb>,
+    metadata_db: Arc<MetadataDb>,
     // Cache maps dataset name to eth_call UDF.
     eth_call_cache: Arc<RwLock<HashMap<String, ScalarUDF>>>,
     // This cache maps dataset name to the dataset definition.

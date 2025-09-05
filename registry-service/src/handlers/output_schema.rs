@@ -1,4 +1,4 @@
-use std::{collections::BTreeSet, sync::Arc};
+use std::collections::BTreeSet;
 
 use axum::{Json, extract::State, http::StatusCode};
 use common::{
@@ -55,19 +55,22 @@ impl RequestError for Error {
 
 #[instrument(skip_all, err)]
 pub async fn output_schema_handler(
-    State(state): State<Arc<ServiceState>>,
+    State(ctx): State<ServiceState>,
     Json(payload): Json<OutputSchemaRequest>,
 ) -> Result<Json<OutputSchemaResponse>, BoxRequestError> {
     use Error::*;
 
     let stmt = parse_sql(&payload.sql_query).map_err(SqlParseError)?;
-    let ctx = state
+    let query_ctx = ctx
         .dataset_store
         .clone()
         .planning_ctx_for_sql(&stmt)
         .await
         .map_err(DatasetStoreError)?;
-    let schema = ctx.sql_output_schema(stmt).await.map_err(PlanningError)?;
+    let schema = query_ctx
+        .sql_output_schema(stmt)
+        .await
+        .map_err(PlanningError)?;
     let schema = if payload.is_sql_dataset {
         // For SQL datasets, the `SPECIAL_BLOCK_NUM` field is always included in the schema.
         prepend_special_block_num_field(&schema)
@@ -75,7 +78,7 @@ pub async fn output_schema_handler(
         schema
     };
 
-    let networks: BTreeSet<String> = ctx
+    let networks: BTreeSet<String> = query_ctx
         .catalog()
         .iter()
         .map(|t| t.table().network().to_string())
