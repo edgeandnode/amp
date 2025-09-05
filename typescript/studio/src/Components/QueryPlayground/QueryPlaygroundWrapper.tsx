@@ -4,7 +4,7 @@ import { Tabs } from "@base-ui-components/react/tabs"
 import { PlusIcon, XIcon } from "@graphprotocol/gds-react/icons"
 import { createFormHook, useStore } from "@tanstack/react-form"
 import { Schema, String as EffectString } from "effect"
-import { useMemo } from "react"
+import { useEffect, useMemo } from "react"
 
 import { useDatasetsMutation } from "@/hooks/useDatasetMutation"
 import { useOSQuery } from "@/hooks/useOSQuery"
@@ -95,6 +95,23 @@ export function QueryPlaygroundWrapper() {
     return { columns, formattedHeaders, rows: data }
   }, [data])
 
+  // Add keyboard listener for CMD+ENTER / CTRL+ENTER when focus is outside editor
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Only handle if the target is not the Monaco editor
+      const target = e.target as HTMLElement
+      if (!target.closest('.monaco-editor')) {
+        if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+          e.preventDefault()
+          void form.handleSubmit()
+        }
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [form])
+
   return (
     <form
       noValidate
@@ -182,7 +199,12 @@ export function QueryPlaygroundWrapper() {
                       }}
                     >
                       {(field) => (
-                        <field.Editor id={`queries[${idx}].query` as const} />
+                        <field.Editor 
+                          id={`queries[${idx}].query` as const}
+                          onSubmit={() => {
+                            void form.handleSubmit()
+                          }}
+                        />
                       )}
                     </form.AppField>
                   </Tabs.Panel>

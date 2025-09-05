@@ -12,11 +12,13 @@ export type EditorProps = Omit<
   "defaultLanguage" | "language"
 > & {
   id: string
+  onSubmit?: () => void
 }
 export function Editor({
   height = 450,
   id,
   theme = "vs-dark",
+  onSubmit,
   ...rest
 }: Readonly<EditorProps>) {
   const field = useFieldContext<string>()
@@ -37,6 +39,16 @@ export function Editor({
         data-state={hasErrors ? "invalid" : undefined}
         aria-invalid={hasErrors ? "true" : undefined}
         aria-describedby={hasErrors ? `${id}-invalid` : undefined}
+        onMount={(editor) => {
+          // Add keyboard shortcut for CMD+ENTER / CTRL+ENTER
+          editor.addCommand(
+            // monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter
+            2048 | 3, // KeyMod.CtrlCmd | KeyCode.Enter
+            () => {
+              onSubmit?.()
+            }
+          )
+        }}
       />
       {hasErrors ? (
         <ErrorMessages id={`${id}-invalid`} errors={errors} />

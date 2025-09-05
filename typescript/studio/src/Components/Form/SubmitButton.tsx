@@ -1,7 +1,7 @@
 "use client"
 
-import type {ButtonProps} from "@graphprotocol/gds-react";
-import { Button  } from "@graphprotocol/gds-react"
+import type { ButtonProps } from "@graphprotocol/gds-react"
+import { Button } from "@graphprotocol/gds-react"
 import { CheckIcon, ExclamationMarkIcon } from "@graphprotocol/gds-react/icons"
 import { forwardRef } from "react"
 
@@ -25,15 +25,16 @@ export const SubmitButton = forwardRef<HTMLButtonElement, SubmitButtonProps>(
           dirty: state.isDirty,
         })}
       >
-        {() => (
+        {({ canSubmit, dirty, valid }) => (
           <Button
             ref={ref}
             {...rest}
             type="submit"
+            disabled={!canSubmit || !dirty || !valid}
             data-state={status}
             className={classNames(
               "rounded-6 px-4 py-2.5 text-12 shadow-xs inset-ring inset-ring-space-1200 bg-space-1400 text-white cursor-pointer inline-flex items-center justify-center gap-x-1.5",
-              // "disabled:bg-space-400 disabled:text-space-900 disabled:hover:bg-space-400 disabled:focus-visible:outline-space-400 disabled:cursor-not-allowed",
+              "disabled:bg-space-1500 disabled:text-white/80 disabled:hover:bg-space-1500 disabled:focus-visible:outline-space-1200 disabled:cursor-not-allowed",
               "data-[state=error]:bg-red-600 data-[state=error]:hover:bg-red-500 data-[state=error]:focus-visible:bg-red-500 data-[state=success]:focus-visible:bg-green-500",
               "data-[state=success]:bg-green-600 data-[state=success]:hover:bg-green-500",
             )}
