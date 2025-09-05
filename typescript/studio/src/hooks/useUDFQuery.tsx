@@ -83,8 +83,7 @@ Binary evm_encode_type(
   },
   {
     name: "evm_decode_type",
-    description:
-      "Decodes the given Solidity ABI-encoded value into an SQL value.",
+    description: "Decodes the given Solidity ABI-encoded value into an SQL value.",
     sql: `
 T evm_decode_type(
   Binary data,

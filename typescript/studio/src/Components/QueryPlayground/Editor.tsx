@@ -9,7 +9,11 @@ import { ErrorMessages } from "../Form/ErrorMessages"
 import { useFieldContext } from "../Form/form"
 import { useMetadataSuspenseQuery } from "../../hooks/useMetadataQuery"
 import { useUDFSuspenseQuery } from "../../hooks/useUDFQuery"
-import { setupNozzleSQLProviders, updateProviderData, type DisposableHandle } from "../../services/sql"
+import {
+  setupNozzleSQLProviders,
+  updateProviderData,
+  type DisposableHandle,
+} from "../../services/sql"
 
 export type EditorProps = Omit<
   MonacoEditorProps,
@@ -21,8 +25,8 @@ export type EditorProps = Omit<
 export function Editor({
   height = 450,
   id,
-  theme = "vs-dark",
   onSubmit,
+  theme = "vs-dark",
   ...rest
 }: Readonly<EditorProps>) {
   const field = useFieldContext<string>()
@@ -41,7 +45,12 @@ export function Editor({
    * Setup SQL providers when Monaco editor is available
    */
   const setupProviders = () => {
-    if (metadataQuery.data && udfQuery.data && typeof window !== 'undefined' && window.monaco) {
+    if (
+      metadataQuery.data &&
+      udfQuery.data &&
+      typeof window !== "undefined" &&
+      window.monaco
+    ) {
       // Dispose existing providers first
       if (providersRef.current) {
         providersRef.current.dispose()
@@ -53,32 +62,39 @@ export function Editor({
         udfQuery.data,
         {
           // Enable debug logging in development
-          enableDebugLogging: process.env.NODE_ENV === 'development',
+          enableDebugLogging: process.env.NODE_ENV === "development",
           // Allow completions without prefix for better UX (especially for columns in SELECT)
           minPrefixLength: 0,
-          maxSuggestions: 50
-        }
+          maxSuggestions: 50,
+        },
       )
-      
-      console.debug('[Editor] SQL intellisense providers initialized', {
+
+      console.debug("[Editor] SQL intellisense providers initialized", {
         tableCount: metadataQuery.data.length,
-        udfCount: udfQuery.data.length
+        udfCount: udfQuery.data.length,
       })
     }
   }
 
   /**
    * Effect: Update providers when data changes
-   * 
+   *
    * Handles hot-swapping of metadata and UDF data when the hooks
    * refetch fresh data from the API.
    */
   useEffect(() => {
     if (providersRef.current && metadataQuery.data && udfQuery.data) {
       updateProviderData(metadataQuery.data, udfQuery.data)
-      console.debug('[Editor] SQL intellisense providers updated with fresh data')
+      console.debug(
+        "[Editor] SQL intellisense providers updated with fresh data",
+      )
     }
-  }, [metadataQuery.data, udfQuery.data, metadataQuery.dataUpdatedAt, udfQuery.dataUpdatedAt])
+  }, [
+    metadataQuery.data,
+    udfQuery.data,
+    metadataQuery.dataUpdatedAt,
+    udfQuery.dataUpdatedAt,
+  ])
 
   /**
    * Cleanup providers on unmount
@@ -88,7 +104,7 @@ export function Editor({
       if (providersRef.current) {
         providersRef.current.dispose()
         providersRef.current = null
-        console.debug('[Editor] SQL intellisense providers disposed')
+        console.debug("[Editor] SQL intellisense providers disposed")
       }
     }
   }, [])
@@ -107,13 +123,14 @@ export function Editor({
         aria-invalid={hasErrors ? "true" : undefined}
         aria-describedby={hasErrors ? `${id}-invalid` : undefined}
         onMount={(editor) => {
-          // Add keyboard shortcut for CMD+ENTER / CTRL+ENTER to execute query
+          // Add keyboard shortcut for CMD+ENTER / CTRL+ENTER
+          // When user hits CMD/CTRL+ENTER, we submit the query
           editor.addCommand(
             // monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter
             2048 | 3, // KeyMod.CtrlCmd | KeyCode.Enter
             () => {
               onSubmit?.()
-            }
+            },
           )
 
           // Enable SQL language features for better intellisense experience
@@ -127,26 +144,28 @@ export function Editor({
             quickSuggestions: {
               strings: false, // Disable completions inside string literals
               comments: false, // Disable completions inside comments
-              other: true     // Enable completions in other contexts
+              other: true, // Enable completions in other contexts
             },
             parameterHints: {
-              enabled: true,  // Enable parameter hints for UDF functions
-              cycle: true     // Allow cycling through parameter hints
+              enabled: true, // Enable parameter hints for UDF functions
+              cycle: true, // Allow cycling through parameter hints
             },
             hover: {
-              enabled: true,  // Enable hover information for UDF functions
-              delay: 300      // Show hover after 300ms
+              enabled: true, // Enable hover information for UDF functions
+              delay: 300, // Show hover after 300ms
             },
             // Enhanced editing experience
-            wordWrap: 'on',
+            wordWrap: "on",
             minimap: { enabled: false }, // Disable minimap for better focus
-            renderLineHighlight: 'gutter', // Highlight current line in gutter only
+            renderLineHighlight: "gutter", // Highlight current line in gutter only
           })
 
           // Setup SQL intellisense providers now that Monaco is available
           setupProviders()
 
-          console.debug('[Editor] Monaco editor mounted with SQL intellisense configuration')
+          console.debug(
+            "[Editor] Monaco editor mounted with SQL intellisense configuration",
+          )
         }}
       />
       {hasErrors ? (
