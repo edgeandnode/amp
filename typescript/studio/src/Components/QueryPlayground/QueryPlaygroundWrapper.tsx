@@ -9,6 +9,7 @@ import { useEffect, useMemo } from "react"
 import { useDatasetsMutation } from "@/hooks/useDatasetMutation"
 import { useOSQuery } from "@/hooks/useOSQuery"
 import { classNames } from "@/utils/classnames"
+import { RESERVED_FIELDS } from "@/constants"
 
 import { fieldContext, formContext } from "../Form/form.ts"
 import { SubmitButton } from "../Form/SubmitButton.tsx"
@@ -100,7 +101,7 @@ export function QueryPlaygroundWrapper() {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Only handle if the target is not the Monaco editor
       const target = e.target as HTMLElement
-      if (!target.closest('.monaco-editor')) {
+      if (!target.closest(".monaco-editor")) {
         if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
           e.preventDefault()
           void form.handleSubmit()
@@ -144,7 +145,7 @@ export function QueryPlaygroundWrapper() {
                       render={
                         <div>
                           {query.tab || ""}
-                          {idx > 0 ? (
+                          {queryField.state.value.length > 1 ? (
                             <button
                               type="button"
                               className="size-fit p-1.5 rounded-full inline-flex items-center justify-center bg-transparent hover:bg-transparent cursor-pointer"
@@ -193,13 +194,42 @@ export function QueryPlaygroundWrapper() {
                       name={`queries[${idx}].query` as const}
                       listeners={{
                         onChangeDebounceMs: 300,
-                        onChange() {
-                          // set the query tab title to the query
+                        onChange({ value }) {
+                          const generateQueryTitle = (query: string) => {
+                            const trimmed = query.trim().toLowerCase()
+                            if (!trimmed) return "New Query"
+
+                            // Extract the main SQL operation
+                            const operation =
+                              trimmed.split(/\s+/)[0]?.toUpperCase() || "QUERY"
+
+                            // Try to extract table name from FROM clause
+                            const fromMatch =
+                              trimmed.match(/from\s+([^\s,;]+)/i)
+                            const tableName = fromMatch?.[1] || ""
+
+                            if (tableName) {
+                              return `${operation} ... ${tableName}`
+                            }
+
+                            // Fallback to just the operation if no table found
+                            return operation
+                          }
+
+                          const title = generateQueryTitle(value)
+                          form.setFieldValue("queries", (curr) => {
+                            const updated = [...curr]
+                            updated[activeTab] = {
+                              ...updated[activeTab],
+                              tab: title,
+                            }
+                            return updated
+                          })
                         },
                       }}
                     >
                       {(field) => (
-                        <field.Editor 
+                        <field.Editor
                           id={`queries[${idx}].query` as const}
                           onSubmit={() => {
                             void form.handleSubmit()
@@ -345,7 +375,14 @@ WHERE topic0 = evm_topic('${event.signature}');`.trim()
         <MetadataBrowser
           onTableSelected={(table) => {
             const query = `SELECT
-  ${table.metadata_columns.map((col) => col.name).join(",\n  ")}
+  ${table.metadata_columns
+    .map((col) => {
+      if (RESERVED_FIELDS.has(col.name)) {
+        return `"${col.name}"`
+      }
+      return col.name
+    })
+    .join(",\n  ")}
 FROM ${table.source}
 LIMIT 10;`.trim()
             const tab = `SELECT ... ${table.source}`
