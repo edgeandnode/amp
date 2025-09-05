@@ -79,7 +79,7 @@ class NozzleStudioApiRouter extends HttpApiGroup.make("NozzleStudioApi")
   )
   .add(
     HttpApiEndpoint.get("Metadata")`/metadata`
-      .addSuccess(StudioModel.DatasetMetadata)
+      .addSuccess(Schema.Array(StudioModel.DatasetMetadata))
       .annotateContext(
         OpenApi.annotations({
           title: "Metadata about the nozzle dataset",

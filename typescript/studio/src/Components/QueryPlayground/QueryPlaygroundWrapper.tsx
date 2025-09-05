@@ -1,9 +1,9 @@
 "use client"
 
 import { Tabs } from "@base-ui-components/react/tabs"
-import { PlusIcon } from "@graphprotocol/gds-react/icons"
+import { PlusIcon, XIcon } from "@graphprotocol/gds-react/icons"
 import { createFormHook, useStore } from "@tanstack/react-form"
-import { Schema } from "effect"
+import { Schema, String as EffectString } from "effect"
 import { useMemo } from "react"
 
 import { useDatasetsMutation } from "@/hooks/useDatasetMutation"
@@ -12,7 +12,6 @@ import { classNames } from "@/utils/classnames"
 
 import { fieldContext, formContext } from "../Form/form.ts"
 import { SubmitButton } from "../Form/SubmitButton.tsx"
-
 import { Editor } from "./Editor.tsx"
 import { MetadataBrowser } from "./MetadataBrowser.tsx"
 import { SchemaBrowser } from "./SchemaBrowser.tsx"
@@ -62,10 +61,12 @@ export function QueryPlaygroundWrapper() {
       onChange: Schema.standardSchemaV1(NozzleStudioQueryEditorForm),
     },
     async onSubmit({ value }) {
-      const query = value.queries[value.activeTab]
-      console.log(query.query)
+      const active = value.queries[value.activeTab]
+      if (EffectString.isEmpty(active.query)) {
+        return
+      }
       await mutateAsync({
-        query: query.query,
+        query: EffectString.trim(active.query),
       })
     },
   })
@@ -121,10 +122,35 @@ export function QueryPlaygroundWrapper() {
                     <Tabs.Tab
                       key={`queries[${idx}].tab`}
                       value={idx}
-                      className="inline-flex items-center justify-center px-4 h-8 text-14 bg-transparent text-white/65 border-b border-transparent data-[selected]:text-white data-[selected]:border-purple-500 hover:dark:text-white hover:border-purple-500 cursor-pointer"
-                    >
-                      {query.tab || ""}
-                    </Tabs.Tab>
+                      className="inline-flex items-center justify-center gap-x-1.5 px-4 h-8 text-14 bg-transparent text-white/65 border-b border-transparent data-[selected]:text-white data-[selected]:border-purple-500 hover:dark:text-white hover:border-purple-500 cursor-pointer"
+                      nativeButton={false}
+                      render={
+                        <div>
+                          {query.tab || ""}
+                          {idx > 0 ? (
+                            <button
+                              type="button"
+                              className="size-fit p-1.5 rounded-full inline-flex items-center justify-center bg-transparent hover:bg-transparent cursor-pointer"
+                              onClick={() => {
+                                queryField.removeValue(idx)
+                                // set the active tab to curr - 1
+                                form.setFieldValue(
+                                  "activeTab",
+                                  Math.max(idx - 1, 0),
+                                )
+                              }}
+                            >
+                              <XIcon
+                                size={3}
+                                alt=""
+                                className="text-white"
+                                aria-hidden="true"
+                              />
+                            </button>
+                          ) : null}
+                        </div>
+                      }
+                    />
                   ))}
                   <Tabs.Tab
                     key="queries.tab.new"
@@ -269,21 +295,57 @@ export function QueryPlaygroundWrapper() {
       <div className="h-full border-l border-space-1500 flex flex-col gap-y-4 overflow-y-auto">
         <SchemaBrowser
           onEventSelected={(event) => {
+            const query =
+              `SELECT tx_hash, block_num, evm_decode_log(topic1, topic2, topic3, data, '${event.signature}') as event
+FROM anvil.logs
+WHERE topic0 = evm_topic('${event.signature}');`.trim()
+            const tab = `SELECT ... ${event.name}`
             // update the query at the active tab to query the selected event
+            let newTab = false
             form.setFieldValue("queries", (curr) => {
               const updatedQueries = [...curr]
-              updatedQueries[activeTab] = {
-                ...updatedQueries[activeTab],
-                query:
-                  `SELECT tx_hash, block_num, evm_decode_log(topic1, topic2, topic3, data, '${event.signature}') as event
-FROM anvil.logs
-WHERE topic0 = evm_topic('${event.signature}');`.trim(),
+              const active = curr[activeTab]
+              if (EffectString.isEmpty(active.query)) {
+                updatedQueries[activeTab] = { tab, query }
+              } else {
+                updatedQueries.push({ tab, query })
+                newTab = true
+              }
+
+              return updatedQueries
+            })
+            if (newTab) {
+              // set new tab the active tab
+              form.setFieldValue("activeTab", (curr) => curr + 1)
+            }
+          }}
+        />
+        <MetadataBrowser
+          onTableSelected={(table) => {
+            const query = `SELECT
+  ${table.metadata_columns.map((col) => col.name).join(",\n  ")}
+FROM ${table.source}
+LIMIT 10;`.trim()
+            const tab = `SELECT ... ${table.source}`
+            // update the query with the selected table and columns
+            let newTab = false
+            form.setFieldValue("queries", (curr) => {
+              const updatedQueries = [...curr]
+              const active = curr[activeTab]
+              if (EffectString.isEmpty(active.query)) {
+                updatedQueries[activeTab] = { tab, query }
+              } else {
+                updatedQueries.push({ tab, query })
+                newTab = true
               }
               return updatedQueries
             })
+            if (newTab) {
+              // set new tab the active tab
+              form.setFieldValue("activeTab", (curr) => curr + 1)
+            }
           }}
         />
-        <MetadataBrowser />
         <UDFBrowser />
       </div>
     </form>

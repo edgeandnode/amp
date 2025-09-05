@@ -20,16 +20,16 @@ export const metadataQueryOptions = queryOptions({
     }
     const json = await response.json()
 
-    return Schema.decodeUnknownSync(DatasetMetadata)(json)
+    return Schema.decodeUnknownSync(Schema.Array(DatasetMetadata))(json)
   },
 })
 
 export function useMetadataSuspenseQuery(
   options: Omit<
     UseSuspenseQueryOptions<
-      DatasetMetadata,
+      ReadonlyArray<DatasetMetadata>,
       Error,
-      DatasetMetadata,
+      ReadonlyArray<DatasetMetadata>,
       readonly ["Query", "Metadata"]
     >,
     "queryKey" | "queryFn"
