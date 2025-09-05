@@ -186,7 +186,7 @@ async fn base_firehose_single_dump() {
         .await
         .expect("blessed data differed from provider");
     // Now dump the dataset to a temporary directory and check it again against the blessed files.
-    let temp_dump = SnapshotContext::temp_dump(&test_env, &dataset_name, 33_411_770, 33_411_770, 1)
+    let temp_dump = SnapshotContext::temp_dump(&test_env, &dataset_name, 33_411_770, 1)
         .await
         .expect("temp dump failed");
     temp_dump.assert_eq(&blessed).await.unwrap();

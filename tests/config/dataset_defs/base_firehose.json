@@ -2,6 +2,7 @@
   "kind": "firehose",
   "network": "base",
   "name": "base_firehose",
+  "start_block": 33411770,
   "schema": {
     "logs": {
       "timestamp": {
@@ -160,4 +161,3 @@
     }
   }
 }
-
