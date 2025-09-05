@@ -1,6 +1,6 @@
 {
   "kind": "evm-rpc",
-  "name": "base",
+  "name": "base_rpc",
   "network": "base",
   "start_block": 33411770,
   "schema": {
