@@ -87,8 +87,7 @@ export const make = Effect.gen(function*() {
         const dependencies = Object.values(manifest.dependencies)
         yield* Effect.forEach(dependencies, (dependency) =>
           admin.dumpDataset(dependency.name, {
-            // TODO: For some reason, dumping dependencies with a version is broken since a recent update.
-            // version: dependency.version,
+            version: dependency.version,
             endBlock: Number(block),
           }), {
           concurrency: "unbounded",
