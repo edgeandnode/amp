@@ -116,19 +116,37 @@ pub async fn dump(
     partition_size: u64,
     parquet_opts: &ParquetWriterProperties,
     compaction_opts: Arc<CompactionProperties>,
-    end: Option<i64>,
+    (start, end): (i64, Option<i64>),
     dataset_name: &str,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
     only_finalized_blocks: bool,
 ) -> Result<(), BoxError> {
+    for table in tables {
+        let existing_start_block = ctx
+            .metadata_db
+            .get_location_start_block(table.location_id())
+            .await?;
+
+        if existing_start_block != start {
+            return Err(format!(
+                "Cannot start dump: location has existing start_block={}, but requested start_block={}",
+                existing_start_block, start
+            ).into());
+        }
+    }
+
     let mut client = ctx
         .dataset_store
         .load_client(dataset_name, only_finalized_blocks)
         .await?;
 
-    let start = tables[0].dataset().start_block.unwrap_or(0);
-    let latest_block = client.latest_block().await?;
-    let end = block_ranges::resolve_relative(start, end, latest_block)?;
+    let (start, end) = match (start, end) {
+        (start, Some(end)) if start >= 0 && end >= 0 => (start as BlockNum, end as BlockNum),
+        _ => {
+            let latest_block = client.latest_block().await?;
+            block_ranges::resolve_relative(start, end, latest_block)?
+        }
+    };
 
     let mut missing_ranges_by_table: BTreeMap<String, Vec<RangeInclusive<BlockNum>>> =
         Default::default();

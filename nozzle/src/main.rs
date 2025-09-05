@@ -42,10 +42,18 @@ enum Command {
         #[arg(long, env = "DUMP_IGNORE_DEPS")]
         ignore_deps: bool,
 
-        /// The block number to end at, inclusive. If omitted, defaults to a recent block. If
-        /// starts with "-" then relative to the latest block for this dataset.
+        /// The block number to start from, inclusive. If omitted, defaults to `0`. Note that `dump` is
+        /// smart about keeping track of what blocks have already been dumped, so you only need to set
+        /// this if you really don't want the data before this block. If starts with "-" then relative
+        /// to the latest block for the dataset.
+        #[arg(long, short, default_value = "0", env = "DUMP_START_BLOCK")]
+        start: i64,
+
+        /// The block number to end at, inclusive. If starts with "+" then relative to `start`. If
+        /// omitted, defaults to a recent block. If starts with "-" then relative to the latest block
+        /// for this dataset.
         #[arg(long, short, env = "DUMP_END_BLOCK")]
-        end_block: Option<i64>,
+        end_block: Option<String>,
 
         /// How many parallel extractor jobs to run. Defaults to 1. Each job will be responsible for an
         /// equal number of blocks. Example: If start = 0, end = 10_000_000 and n_jobs = 10, then each
@@ -165,6 +173,7 @@ async fn main_inner() -> Result<(), BoxError> {
 
     let cmd_result = match command {
         Command::Dump {
+            start,
             end_block,
             n_jobs,
             partition_size_mb,
@@ -199,6 +208,7 @@ async fn main_inner() -> Result<(), BoxError> {
                 metadata_db,
                 datasets_to_dump,
                 ignore_deps,
+                start,
                 end_block,
                 n_jobs,
                 partition_size_mb,

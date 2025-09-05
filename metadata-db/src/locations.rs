@@ -87,6 +87,7 @@ where
             l.tbl,
             l.url,
             l.active,
+            l.start_block,
             
             -- Writer job fields (optional)
             j.id          AS writer_job_id,
@@ -109,6 +110,7 @@ where
         #[sqlx(try_from = "&'a str")]
         url: Url,
         active: bool,
+        start_block: i64,
         writer_job_id: Option<JobId>,
         writer_job_node_id: Option<WorkerNodeId>,
         writer_job_status: Option<JobStatus>,
@@ -146,6 +148,7 @@ where
         table: row.table,
         url: row.url,
         active: row.active,
+        start_block: row.start_block,
         writer,
     }))
 }
@@ -173,6 +176,27 @@ where
         .await?;
 
     Ok(tuples)
+}
+
+/// Get start block for a location by ID
+#[tracing::instrument(skip(exe), err)]
+pub async fn get_start_block_by_id<'c, E>(
+    exe: E,
+    location_id: LocationId,
+) -> Result<i64, sqlx::Error>
+where
+    E: Executor<'c, Database = Postgres>,
+{
+    let query = indoc::indoc! {r#"
+        SELECT start_block 
+        FROM locations 
+        WHERE id = $1
+    "#};
+
+    sqlx::query_scalar(query)
+        .bind(location_id)
+        .fetch_one(exe)
+        .await
 }
 
 /// Deactivate all active locations for a specific table
@@ -233,7 +257,7 @@ where
     E: Executor<'c, Database = Postgres>,
 {
     let query = indoc::indoc! {"
-        SELECT id, dataset, dataset_version, tbl, url, active, writer
+        SELECT id, dataset, dataset_version, tbl, url, active, start_block, writer
         FROM locations
         WHERE writer = $1
     "};
@@ -300,6 +324,8 @@ pub struct Location {
     /// Full URL to the storage location
     #[sqlx(try_from = "&'a str")]
     pub url: Url,
+    /// The starting block number for this location
+    pub start_block: i64,
     /// Whether this location is currently active for queries
     pub active: bool,
     /// Writer job ID (if one exists)
@@ -321,6 +347,8 @@ pub struct LocationWithDetails {
     pub url: Url,
     /// Whether this location is currently active for queries
     pub active: bool,
+    /// The starting block number for this location
+    pub start_block: i64,
     /// Writer job (if one exists)
     pub writer: Option<Job>,
 }

@@ -56,12 +56,19 @@ impl Job {
                         )
                         .into());
                     };
+                    let loc = ctx
+                        .metadata_db
+                        .get_location_by_id(location.id)
+                        .await?
+                        .ok_or("Location not found")?;
+                    let start_block = loc.start_block;
                     tables.push(
                         PhysicalTable::new(
                             table.clone(),
                             location.url,
                             location.id,
                             ctx.metadata_db.clone(),
+                            start_block,
                         )?
                         .into(),
                     );
@@ -91,7 +98,7 @@ impl Job {
                     1,
                     default_partition_size(),
                     ctx.config.microbatch_max_interval,
-                    end_block,
+                    (0, end_block),
                     metrics,
                     false,
                 )

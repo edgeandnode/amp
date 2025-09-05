@@ -281,7 +281,6 @@ pub fn dataset(manifest: Manifest) -> Result<Dataset, BoxError> {
         network: manifest.network,
         name: manifest.name,
         version: Some(manifest.version),
-        start_block: None,
         tables,
         functions: manifest
             .functions
