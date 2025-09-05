@@ -2,15 +2,15 @@ import * as Command from "@effect/platform/Command"
 import type * as CommandExecutor from "@effect/platform/CommandExecutor"
 import * as FileSystem from "@effect/platform/FileSystem"
 import * as Context from "effect/Context"
-import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Match from "effect/Match"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
-import * as String from "effect/String"
 import * as EvmRpc from "./evm/EvmRpc.ts"
+import * as Model from "./Model.ts"
 import * as Utils from "./Utils.ts"
 
 // NODE: This is not a secret prviate key, it's one of the test keys from anvil's default mnemonic.
@@ -29,19 +29,19 @@ export class AnvilError extends Schema.TaggedError<AnvilError>("AnvilError")("An
  */
 export class Anvil extends Context.Tag("Nozzle/Anvil")<Anvil, {
   /**
+   * Joins the fiber that runs the anvil process.
+   *
+   * @returns An effect that completes when the process exits.
+   */
+  readonly join: Effect.Effect<void, AnvilError>
+
+  /**
    * Kills the anvil instance.
    *
    * @param signal - The signal to send to the process.
    * @returns An effect that completes when the process is killed.
    */
   readonly kill: (signal?: CommandExecutor.Signal) => Effect.Effect<void>
-
-  /**
-   * Joins the fiber that runs the anvil process.
-   *
-   * @returns An effect that completes when the process exits.
-   */
-  readonly join: () => Effect.Effect<void, AnvilError>
 
   /**
    * Runs a script on the anvil instance.
@@ -56,6 +56,11 @@ export class Anvil extends Context.Tag("Nozzle/Anvil")<Anvil, {
  * The configuration for the anvil service.
  */
 export interface AnvilOptions {
+  /**
+   * The verbosity level to run anvil with.
+   */
+  readonly verbosity?: 0 | 1 | 2 | 3 | 4 | 5
+
   /**
    * The port to run the anvil instance on.
    */
@@ -111,7 +116,14 @@ export const make = Effect.fn(function*(options: AnvilOptions = {}) {
     }),
   )
 
-  const cmd = Command.make("anvil", "--port", `${httpPort}`).pipe(
+  const verbosity = Match.value(options.verbosity).pipe(
+    Match.when(0, () => ["--quiet"] as const),
+    Match.whenOr(1, undefined, () => [] as const),
+    Match.whenOr(2, 3, 4, 5, (_) => ["--verbosity", `${_}`] as const),
+    Match.exhaustive,
+  )
+
+  const cmd = Command.make("anvil", "--port", `${httpPort}`, ...verbosity).pipe(
     Command.workingDirectory(directory),
     Command.stderr("inherit"),
   )
@@ -133,17 +145,6 @@ export const make = Effect.fn(function*(options: AnvilOptions = {}) {
   // Print the stdout and stderr output of nozzle to the console if configured to do so.
   yield* Utils.intoNodeSink({ which: printOutput, stdout, stderr })
 
-  // Wait for anvil to report that it's listening through stdout ("Listening on ...").
-  const ready = yield* Deferred.make()
-  yield* stdout.pipe(
-    Stream.filter(String.includes("Listening on")),
-    Stream.take(1),
-    Stream.tap(() => Deferred.succeed(ready, undefined)),
-    Stream.merge(stdout),
-    Stream.runDrain,
-    Effect.forkScoped,
-  )
-
   // Checks if anvil exited prematurely.
   const exit = anvil.exitCode.pipe(
     Effect.mapError((cause) => new AnvilError({ cause, message: "Process interrupted" })),
@@ -162,17 +163,15 @@ export const make = Effect.fn(function*(options: AnvilOptions = {}) {
   // Wait for the server to either be up and running with all ports open or exit (crash).
   yield* Effect.raceFirst(
     exit.pipe(Effect.as(new AnvilError({ message: "Process finished prematurely" }))),
-    ready.pipe(Effect.zipRight(open)),
+    open,
   )
 
   return {
     stdout,
     stderr,
+    join: exit.pipe(Effect.asVoid),
     kill: Effect.fn(function*(signal?: CommandExecutor.Signal) {
       return yield* anvil.kill(signal).pipe(Effect.orDie)
-    }),
-    join: Effect.fn(function*() {
-      return yield* exit.pipe(Effect.asVoid)
     }),
     runScript: (script: string, options: ScriptOptions = {}) =>
       Effect.gen(function*() {
@@ -227,3 +226,75 @@ export const make = Effect.fn(function*(options: AnvilOptions = {}) {
  */
 export const layer = (config: AnvilOptions = {}) =>
   make(config).pipe(Layer.scoped(Anvil), Layer.merge(EvmRpc.layer(`http://localhost:${config.httpPort}`)))
+
+/**
+ * The anvil dataset.
+ */
+export const dataset = new Model.DatasetRpc({
+  "kind": "evm-rpc",
+  "name": "anvil",
+  "version": "0.1.0",
+  "network": "anvil",
+  "schema": {
+    "blocks": {
+      "timestamp": { "Timestamp": ["Nanosecond", "+00:00"] },
+      "mix_hash": { "FixedSizeBinary": 32 },
+      "base_fee_per_gas": { "Decimal128": [38, 0] },
+      "blob_gas_used": "UInt64",
+      "miner": { "FixedSizeBinary": 20 },
+      "block_num": "UInt64",
+      "parent_hash": { "FixedSizeBinary": 32 },
+      "excess_blob_gas": "UInt64",
+      "state_root": { "FixedSizeBinary": 32 },
+      "receipt_root": { "FixedSizeBinary": 32 },
+      "withdrawals_root": { "FixedSizeBinary": 32 },
+      "hash": { "FixedSizeBinary": 32 },
+      "difficulty": { "Decimal128": [38, 0] },
+      "ommers_hash": { "FixedSizeBinary": 32 },
+      "transactions_root": { "FixedSizeBinary": 32 },
+      "nonce": "UInt64",
+      "parent_beacon_root": { "FixedSizeBinary": 32 },
+      "extra_data": "Binary",
+      "gas_used": "UInt64",
+      "logs_bloom": "Binary",
+      "gas_limit": "UInt64",
+    },
+    "logs": {
+      "topic3": { "FixedSizeBinary": 32 },
+      "topic2": { "FixedSizeBinary": 32 },
+      "tx_index": "UInt32",
+      "tx_hash": { "FixedSizeBinary": 32 },
+      "data": "Binary",
+      "address": { "FixedSizeBinary": 20 },
+      "block_hash": { "FixedSizeBinary": 32 },
+      "block_num": "UInt64",
+      "log_index": "UInt32",
+      "topic0": { "FixedSizeBinary": 32 },
+      "topic1": { "FixedSizeBinary": 32 },
+      "timestamp": { "Timestamp": ["Nanosecond", "+00:00"] },
+    },
+    "transactions": {
+      "gas_used": "UInt64",
+      "from": { "FixedSizeBinary": 20 },
+      "block_hash": { "FixedSizeBinary": 32 },
+      "type": "Int32",
+      "gas_limit": "UInt64",
+      "timestamp": { "Timestamp": ["Nanosecond", "+00:00"] },
+      "status": "Boolean",
+      "s": "Binary",
+      "tx_index": "UInt32",
+      "gas_price": { "Decimal128": [38, 0] },
+      "input": "Binary",
+      "max_fee_per_gas": { "Decimal128": [38, 0] },
+      "r": "Binary",
+      "v": "Binary",
+      "max_priority_fee_per_gas": { "Decimal128": [38, 0] },
+      "max_fee_per_blob_gas": { "Decimal128": [38, 0] },
+      "tx_hash": { "FixedSizeBinary": 32 },
+      "to": { "FixedSizeBinary": 20 },
+      "block_num": "UInt64",
+      "nonce": "UInt64",
+      "value": { "Decimal128": [38, 0] },
+    },
+  },
+})

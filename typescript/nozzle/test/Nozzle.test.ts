@@ -28,11 +28,11 @@ import * as Testing from "./utils/Testing.ts"
 const environment = Testing.layer({
   nozzleOutput: "both",
   anvilOutput: "both",
-  adminPort: 1610,
-  registryPort: 1611,
-  jsonLinesPort: 1603,
-  arrowFlightPort: 1604,
-  anvilPort: 8545,
+  adminPort: 51610,
+  registryPort: 51611,
+  jsonLinesPort: 51603,
+  arrowFlightPort: 51602,
+  anvilPort: 58545,
   // nozzleExecutable: "cargo",
   // nozzleArgs: ["run", "--bin", "nozzle", "--"],
 })
@@ -59,19 +59,18 @@ layer(environment, {
       const admin = yield* Admin.Admin
       const rpc = yield* EvmRpc.EvmRpc
       const block = yield* rpc.getLatestBlockNumber
-      const fixtures = yield* Fixtures.Fixtures
 
       // Deploy and dump the root dataset.
-      const dataset = yield* fixtures.load("anvil.json", Model.DatasetRpc)
-      yield* admin.deployDataset(dataset.name, dataset.version, dataset)
-      yield* admin.dumpDataset(dataset.name, {
+      yield* admin.deployDataset(Anvil.dataset.name, Anvil.dataset.version, Anvil.dataset)
+      yield* admin.dumpDataset(Anvil.dataset.name, {
         endBlock: Number(block),
+        version: Anvil.dataset.version,
         waitForCompletion: true,
       })
 
-      const response = yield* admin.getDatasetById(dataset.name)
+      const response = yield* admin.getDatasetById(Anvil.dataset.name)
       assertInstanceOf(response, Model.DatasetInfo)
-      deepStrictEqual(response.name, dataset.name)
+      deepStrictEqual(response.name, Anvil.dataset.name)
     }),
     { sequential: true, timeout: Duration.toMillis("10 seconds") },
   )
@@ -123,6 +122,7 @@ layer(environment, {
       yield* admin.deployDataset(dataset.name, dataset.version)
       yield* admin.dumpDataset(dataset.name, {
         endBlock: Number(block),
+        version: dataset.version,
         waitForCompletion: true,
       })
 

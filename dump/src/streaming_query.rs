@@ -298,7 +298,11 @@ impl StreamingQuery {
         ctx: &QueryContext,
     ) -> Result<Option<MicrobatchRange>, BoxError> {
         // Gather the chains for each source table.
-        let chains = ctx.catalog().table_snapshots().iter().map(|s| s.segments());
+        let chains = ctx
+            .catalog()
+            .table_snapshots()
+            .iter()
+            .map(|s| s.canonical_segments());
 
         // Use a single context for all queries against the blocks table. This is to keep a
         // consistent reference chain within the scope of this function.

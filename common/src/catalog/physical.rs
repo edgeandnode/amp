@@ -130,7 +130,7 @@ impl CatalogSnapshot {
 pub struct TableSnapshot {
     physical_table: Arc<PhysicalTable>,
     reader_factory: Arc<NozzleReaderFactory>,
-    segments: Vec<Segment>,
+    canonical_segments: Vec<Segment>,
 }
 
 impl TableSnapshot {
@@ -142,22 +142,14 @@ impl TableSnapshot {
     /// contiguous range of block numbers starting from the lowest start block. Ok(None) is
     /// returned if no block range has been synced.
     pub fn synced_range(&self) -> Option<RangeInclusive<BlockNum>> {
-        if self.segments.is_empty() {
-            return None;
-        }
-        let start = self.segments.iter().map(|s| s.range.start()).min()?;
-        let end = self.segments.iter().map(|s| s.range.end()).max()?;
-
-        if let Some(start_block) = self.physical_table.dataset().start_block
-            && start_block > start
-        {
-            return None;
-        }
+        let segments = &self.canonical_segments;
+        let start = segments.iter().map(|s| s.range.start()).min()?;
+        let end = segments.iter().map(|s| s.range.end()).max()?;
         Some(start..=end)
     }
 
-    pub fn segments(&self) -> &[Segment] {
-        &self.segments
+    pub fn canonical_segments(&self) -> &[Segment] {
+        &self.canonical_segments
     }
 }
 
@@ -507,7 +499,15 @@ impl PhysicalTable {
     }
 
     pub async fn canonical_chain(&self) -> Result<Option<Chain>, BoxError> {
-        self.segments().await.map(canonical_chain)
+        let segments = self.segments().await?;
+        let canonical = canonical_chain(segments);
+        if let Some(start_block) = self.dataset().start_block
+            && let Some(canonical) = &canonical
+            && canonical.start() > start_block
+        {
+            return Ok(None);
+        }
+        Ok(canonical)
     }
 
     async fn segments(&self) -> Result<Vec<Segment>, BoxError> {
@@ -544,7 +544,7 @@ impl PhysicalTable {
         ignore_canonical_segments: bool,
         parquet_footer_cache: ParquetFooterCache,
     ) -> Result<TableSnapshot, BoxError> {
-        let segments = if ignore_canonical_segments {
+        let canonical_segments = if ignore_canonical_segments {
             self.segments().await?
         } else {
             self.canonical_chain()
@@ -565,7 +565,7 @@ impl PhysicalTable {
         Ok(TableSnapshot {
             physical_table: Arc::new(self.clone()),
             reader_factory: Arc::new(reader_factory_with_cache),
-            segments,
+            canonical_segments,
         })
     }
 }
@@ -634,7 +634,7 @@ impl TableProvider for TableSnapshot {
         limit: Option<usize>,
     ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
         let target_partitions = state.config_options().execution.target_partitions;
-        let file_groups = round_robin(self.segments.iter(), target_partitions);
+        let file_groups = round_robin(self.canonical_segments.iter(), target_partitions);
 
         let output_ordering = self.physical_table.output_ordering()?;
 
