@@ -50,7 +50,18 @@ pub async fn dump_check(
             .get_active_location(table_id)
             .await?
             .ok_or(format!("No active location for {table_id:?}"))?;
-        let table = PhysicalTable::new(table.clone(), url, location_id, metadata_db.clone())?;
+        let loc = metadata_db
+            .get_location_by_id(location_id)
+            .await?
+            .ok_or("Location not found")?;
+        let start_block = loc.start_block;
+        let table = PhysicalTable::new(
+            table.clone(),
+            url,
+            location_id,
+            metadata_db.clone(),
+            start_block,
+        )?;
         tables.push(table.into());
     }
     let logical = LogicalCatalog::from_tables(tables.iter().map(|t| t.table()));

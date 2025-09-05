@@ -9,17 +9,18 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@connectrpc/connect-web": "^2.0.3",
-    "effect": "^3.17.7",
+    "@connectrpc/connect-web": "^2.1.0",
+    "@effect-atom/atom-react": "^0.1.15",
+    "effect": "^3.17.13",
     "nozzl": "workspace:*",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"
   },
   "devDependencies": {
-    "@types/react": "^19.1.9",
-    "@types/react-dom": "^19.1.7",
-    "@vitejs/plugin-react": "^5.0.0",
-    "typescript": "^5.9.2",
-    "vite": "^7.1.1"
+    "@types/react": "^19.1.12",
+    "@types/react-dom": "^19.1.9",
+    "@vitejs/plugin-react": "^5.0.2",
+    "typescript": "^5.8.3",
+    "vite": "^7.1.4"
   }
 }

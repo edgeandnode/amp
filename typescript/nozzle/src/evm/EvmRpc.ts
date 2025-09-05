@@ -1,11 +1,8 @@
-import * as BigInt from "effect/BigInt"
 import * as Context from "effect/Context"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
-import * as Function from "effect/Function"
 import * as Layer from "effect/Layer"
 import * as Mailbox from "effect/Mailbox"
-import * as Option from "effect/Option"
 import * as Schedule from "effect/Schedule"
 import * as Stream from "effect/Stream"
 import * as Viem from "viem"
@@ -48,7 +45,10 @@ export class EvmRpcError extends Data.TaggedError("EvmRpcError")<{
 
 const make = (url: string) =>
   Effect.gen(function*() {
-    const rpc = Viem.createPublicClient({ chain: Chains.foundry, transport: Viem.http(url, { retryCount: 0 }) })
+    const rpc = Viem.createPublicClient({
+      chain: Chains.foundry,
+      transport: Viem.webSocket(url, { retryCount: 0 }),
+    })
 
     const getLatestBlockNumber = Effect.tryPromise({
       try: () => rpc.getBlockNumber({ cacheTime: 0 }),
@@ -62,21 +62,22 @@ const make = (url: string) =>
       })
     })
 
-    const sharedBlocks = yield* Stream.repeatEffectWithSchedule(getLatestBlockNumber, Schedule.fixed("1 second")).pipe(
-      Stream.changes,
-      Stream.mapAccumEffect(Option.none<bigint>(), (state, current) => {
-        if (Option.isNone(state)) {
-          return getBlockByNumber(current).pipe(Effect.map((block) => [Option.some(current), Stream.succeed(block)]))
-        }
+    const streamBlocks = Stream.asyncPush<Viem.Block<bigint, false, "latest">, EvmRpcError>((emit) =>
+      Effect.acquireRelease(
+        Effect.try({
+          try: () =>
+            rpc.watchBlocks({
+              onBlock: (block) => emit.single(block),
+              onError: (cause) => emit.fail(new EvmRpcError({ message: "Failed to watch blocks", cause })),
+              emitOnBegin: true,
+            }),
+          catch: (cause) => new EvmRpcError({ message: "Failed to watch blocks", cause }),
+        }),
+        (handle) => Effect.sync(handle).pipe(Effect.ignore),
+      )
+    )
 
-        const blocks = Stream.iterate(BigInt.increment(state.value), BigInt.increment).pipe(
-          Stream.takeWhile(BigInt.lessThan(current)),
-          Stream.mapEffect(getBlockByNumber),
-        )
-
-        return Effect.succeed([Option.some(current), blocks])
-      }),
-      Stream.flatMap(Function.identity),
+    const sharedBlocks = yield* streamBlocks.pipe(
       Stream.changesWith((a, b) => a.hash === b.hash),
       Stream.retry(
         Schedule.exponential("1 second").pipe(

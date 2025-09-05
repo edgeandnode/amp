@@ -239,8 +239,7 @@ impl Service {
         // If not streaming or metadata db is not available, execute once
         if !is_streaming {
             let original_schema = plan.schema().clone();
-            let should_transform =
-                dbg!(should_transform_plan(&plan).map_err(Error::ExecutionError)?);
+            let should_transform = should_transform_plan(&plan).map_err(Error::ExecutionError)?;
             let plan = if should_transform {
                 let mut plan = plan.propagate_block_num().map_err(Error::ExecutionError)?;
                 // If the user did not request `_block_num` column, we omit it from the final output.

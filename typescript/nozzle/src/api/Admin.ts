@@ -76,6 +76,7 @@ const deployDataset = HttpApiEndpoint.post("deployDataset")`/datasets`
   .addError(Error.DatasetAlreadyExists)
   .addError(Error.SchedulerError)
   .addError(Error.DatasetDefStoreError)
+  .addError(Error.DatasetStoreError)
   .addSuccess(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }))
   .setPayload(
     Schema.Struct({
@@ -106,6 +107,7 @@ export type DeployDatasetError =
   | Error.DatasetAlreadyExists
   | Error.SchedulerError
   | Error.DatasetDefStoreError
+  | Error.DatasetStoreError
 
 /**
  * The get datasets endpoint (GET /datasets).

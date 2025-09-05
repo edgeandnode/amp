@@ -2,7 +2,6 @@
   "kind": "evm-rpc",
   "name": "eth_rpc",
   "network": "mainnet",
-  "start_block": 15000000,
   "schema": {
     "blocks": {
       "timestamp": { "Timestamp": ["Nanosecond", "+00:00"] },
@@ -66,3 +65,4 @@
     }
   }
 }
+

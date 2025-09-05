@@ -5,7 +5,7 @@ use std::num::NonZeroU32;
 
 use alloy::transports::http::reqwest::Url;
 pub use client::JsonRpcClient;
-use common::{BlockNum, BoxError, Dataset, DatasetValue, store::StoreError};
+use common::{BoxError, Dataset, DatasetValue, store::StoreError};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json;
@@ -32,9 +32,6 @@ pub struct DatasetDef {
     pub name: String,
     /// Network name, e.g., `mainnet`.
     pub network: String,
-    /// Dataset start block.
-    #[serde(default)]
-    pub start_block: BlockNum,
 }
 
 impl DatasetDef {
@@ -72,7 +69,6 @@ pub fn dataset(dataset_cfg: common::DatasetValue) -> Result<Dataset, Error> {
         kind: def.kind,
         name: def.name,
         version: None,
-        start_block: Some(def.start_block),
         tables: tables::all(&def.network),
         network: def.network,
         functions: vec![],

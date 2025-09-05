@@ -18,6 +18,9 @@ enum Command {
         /// Name of the dataset to dump.
         dataset: String,
 
+        /// Start block number.
+        start_block: u64,
+
         /// End block number.
         end_block: u64,
     },
@@ -29,9 +32,15 @@ async fn main() {
     logging::init();
 
     match args.command {
-        Command::Bless { dataset, end_block } => {
+        Command::Bless {
+            dataset,
+            start_block,
+            end_block,
+        } => {
             let test_env = TestEnv::blessed("bless_cmd").await.unwrap();
-            bless(&test_env, &dataset, end_block).await.unwrap();
+            bless(&test_env, &dataset, start_block, end_block)
+                .await
+                .unwrap();
             warn!("wrote new blessed dataset for {dataset}");
         }
     }

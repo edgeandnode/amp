@@ -4,7 +4,6 @@ import type * as CommandExecutor from "@effect/platform/CommandExecutor"
 import * as FileSystem from "@effect/platform/FileSystem"
 import * as Path from "@effect/platform/Path"
 import * as Context from "effect/Context"
-import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Match from "effect/Match"
@@ -42,19 +41,19 @@ export class Nozzle extends Context.Tag("Nozzle/Nozzle")<Nozzle, {
   readonly stderr: Stream.Stream<string, NozzleError>
 
   /**
+   * Joins the fiber that runs the nozzle process.
+   *
+   * @returns An effect that completes when the process exits.
+   */
+  readonly join: Effect.Effect<void, NozzleError>
+
+  /**
    * Kills the nozzle process.
    *
    * @param signal - The signal to send to the process.
    * @returns An effect that completes when the process is killed.
    */
   readonly kill: (signal?: CommandExecutor.Signal) => Effect.Effect<void>
-
-  /**
-   * Joins the fiber that runs the nozzle process.
-   *
-   * @returns An effect that completes when the process exits.
-   */
-  readonly join: () => Effect.Effect<void, NozzleError>
 }>() {}
 
 /**
@@ -124,7 +123,7 @@ export interface NozzleOptions {
   /**
    * The port to run the arrow-flight service on.
    *
-   * @default 1604
+   * @default 1602
    */
   readonly arrowFlightPort?: number | undefined
 }
@@ -137,7 +136,7 @@ export const make = Effect.fn(function*(options: NozzleOptions = {}) {
   const fs = yield* FileSystem.FileSystem
   const {
     adminPort = 1610,
-    arrowFlightPort = 1604,
+    arrowFlightPort = 1602,
     jsonLinesPort = 1603,
     loggingLevel = "info",
     nozzleArgs = [],
@@ -206,17 +205,6 @@ export const make = Effect.fn(function*(options: NozzleOptions = {}) {
   // Print the stdout and stderr output of nozzle to the console if configured to do so.
   yield* Utils.intoNodeSink({ which: printOutput, stdout, stderr })
 
-  // Wait for anvil to report that it's listening through stdout ("... running at ...").
-  const ready = yield* Deferred.make()
-  yield* stdout.pipe(
-    Stream.filter(String.includes("running at")),
-    Stream.take(1),
-    Stream.tap(() => Deferred.succeed(ready, undefined)),
-    Stream.merge(stdout), // Continue reading stdout after the first line.
-    Stream.runDrain,
-    Effect.forkScoped,
-  )
-
   // This effect waits for all ports to be open.
   const open = Effect.all([
     Utils.waitForPort(adminPort),
@@ -241,17 +229,15 @@ export const make = Effect.fn(function*(options: NozzleOptions = {}) {
   // Wait for the server to either be up and running with all ports open or exit (crash).
   yield* Effect.raceFirst(
     exit.pipe(Effect.as(new NozzleError({ message: "Process finished prematurely" }))),
-    ready.pipe(Effect.zipRight(open)),
+    open,
   )
 
   return {
     stdout,
     stderr,
+    join: exit.pipe(Effect.asVoid),
     kill: Effect.fn(function*(signal?: CommandExecutor.Signal) {
       return yield* nozzle.kill(signal).pipe(Effect.orDie)
-    }),
-    join: Effect.fn(function*() {
-      return yield* exit.pipe(Effect.asVoid)
     }),
   }
 })
@@ -259,20 +245,22 @@ export const make = Effect.fn(function*(options: NozzleOptions = {}) {
 /**
  * Creates a nozzle service layer.
  */
-export const layer = (options: NozzleOptions = {}) =>
-  make(options).pipe(
+export const layer = (options: NozzleOptions = {}) => {
+  const {
+    adminPort = 1610,
+    arrowFlightPort = 1602,
+    jsonLinesPort = 1603,
+    registryPort = 1611,
+  } = options
+
+  return make(options).pipe(
     Layer.scoped(Nozzle),
-    Layer.merge(Admin.layer(`http://localhost:${options.adminPort}`)),
-    Layer.merge(Registry.layer(`http://localhost:${options.registryPort}`)),
-    Layer.merge(JsonLines.layer(`http://localhost:${options.jsonLinesPort}`)),
-    Layer.merge(
-      ArrowFlight.layer(
-        createGrpcTransport({
-          baseUrl: `http://localhost:${options.arrowFlightPort}`,
-        }),
-      ),
-    ),
+    Layer.merge(Admin.layer(`http://localhost:${adminPort}`)),
+    Layer.merge(Registry.layer(`http://localhost:${registryPort}`)),
+    Layer.merge(JsonLines.layer(`http://localhost:${jsonLinesPort}`)),
+    Layer.merge(ArrowFlight.layer(createGrpcTransport({ baseUrl: `http://localhost:${arrowFlightPort}` }))),
   )
+}
 
 /**
  * Renders a provider definition to a config string.
