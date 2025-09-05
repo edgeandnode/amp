@@ -46,7 +46,7 @@ export const dev = Command.make("dev", {}).pipe(
       const nozzle = Nozzle.layer({
         printOutput: "both",
         tempDirectory: directory,
-        // loggingLevel: "warn",
+        loggingLevel: "warn",
         providerDefinitions: {
           anvil: new Model.EvmRpcProvider({
             kind: "evm-rpc",
