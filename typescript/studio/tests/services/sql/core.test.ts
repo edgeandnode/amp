@@ -3,10 +3,13 @@
  * Tests the basic functionality of types, UDF snippets, and configurations
  */
 
-import { describe, test, expect } from 'vitest'
-import { UdfSnippetGenerator, createUdfSnippet, createUdfCompletionItem } from '../../../src/services/sql/udfSnippets'
-import { DEFAULT_COMPLETION_CONFIG, COMPLETION_PRIORITY } from '../../../src/services/sql/types'
+import { describe, expect,test } from 'vitest'
+
+import { createUdfCompletionItem,createUdfSnippet, UdfSnippetGenerator } from '../../../src/services/sql/UDFSnippetGenerator'
+
 import { mockUDFs } from './fixtures'
+
+import { COMPLETION_PRIORITY,DEFAULT_COMPLETION_CONFIG } from '../../../src/services/sql/types'
 
 describe('SQL Intellisense Core Functionality', () => {
   describe('Configuration', () => {

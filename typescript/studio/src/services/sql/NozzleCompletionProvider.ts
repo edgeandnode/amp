@@ -18,17 +18,22 @@
  */
 
 // Monaco types are defined in types.ts to avoid import issues
+import { Array } from 'effect'
+import type { CancellationToken, editor, IMarkdownString, IRange, Position } from 'monaco-editor/esm/vs/editor/editor.api';
+import { languages } from 'monaco-editor/esm/vs/editor/editor.api';
 import type { DatasetMetadata } from 'nozzl/Studio/Model'
-import { QueryContextAnalyzer } from './contextAnalyzer'
+
+import { QueryContextAnalyzer } from './QueryContextAnalyzer'
 import type {
-  UserDefinedFunction,
   CompletionConfig,
-  CompletionItemOptions,
-  TableInfo,
-  ColumnInfo,
-  QueryContext
+  QueryContext,
+  UserDefinedFunction
 } from './types'
-import { DEFAULT_COMPLETION_CONFIG, COMPLETION_PRIORITY } from './types'
+
+import {
+  COMPLETION_PRIORITY,
+  DEFAULT_COMPLETION_CONFIG,
+} from './types'
 
 /**
  * Nozzle SQL Completion Provider
@@ -43,7 +48,7 @@ import { DEFAULT_COMPLETION_CONFIG, COMPLETION_PRIORITY } from './types'
  * - Performance optimizations with caching and filtering
  * - Error recovery for malformed queries
  */
-export class NozzleCompletionProvider implements monaco.languages.CompletionItemProvider {
+export class NozzleCompletionProvider implements languages.CompletionItemProvider {
   private analyzer: QueryContextAnalyzer
   private config: CompletionConfig
 
@@ -57,8 +62,8 @@ export class NozzleCompletionProvider implements monaco.languages.CompletionItem
   }
 
   constructor(
-    private metadata: DatasetMetadata[],
-    private udfs: UserDefinedFunction[],
+    private metadata: ReadonlyArray<DatasetMetadata>,
+    private udfs: ReadonlyArray<UserDefinedFunction>,
     analyzer?: QueryContextAnalyzer,
     config: CompletionConfig = DEFAULT_COMPLETION_CONFIG
   ) {
@@ -78,24 +83,20 @@ export class NozzleCompletionProvider implements monaco.languages.CompletionItem
    * @param token - Cancellation token
    * @returns Promise resolving to completion list
    */
-  async provideCompletionItems(
-    model: monaco.editor.ITextModel,
-    position: monaco.Position,
-    context: monaco.languages.CompletionContext,
-    token: monaco.CancellationToken
-  ): Promise<monaco.languages.CompletionList> {
+  provideCompletionItems(
+    model: editor.ITextModel,
+    position: Position,
+    _context: languages.CompletionContext,
+    token: CancellationToken
+  ): languages.ProviderResult<languages.CompletionList> {
     try {
       // Check if request has been cancelled
       if (token.isCancellationRequested) {
         return { suggestions: [] }
       }
-
-      const startTime = performance.now()
       
       // Analyze query context to determine what completions are appropriate
       const queryContext = this.analyzer.analyzeContext(model, position)
-      
-      this.logDebug('Query context analysis:', queryContext)
 
       // Don't provide completions if cursor is in string/comment
       if (queryContext.cursorInString || queryContext.cursorInComment) {
@@ -108,38 +109,36 @@ export class NozzleCompletionProvider implements monaco.languages.CompletionItem
       }
 
       // Generate completions based on context
-      const suggestions: monaco.languages.CompletionItem[] = []
+      let suggestions: Array<languages.CompletionItem> = []
 
       // 1. Table completions (highest priority in appropriate contexts)
       if (queryContext.expectsTable) {
-        this.logDebug('Creating table completions...')
-        const tableCompletions = this.createTableCompletions(queryContext)
-        this.logDebug('Table completions created:', { count: tableCompletions.length, tables: tableCompletions.map(t => t.label) })
-        suggestions.push(...tableCompletions)
+        const tableCompletions = this.createTableCompletions(position)
+        suggestions = Array.appendAll(tableCompletions)(suggestions)
       }
 
       // 2. Column completions (context-filtered)
       if (queryContext.expectsColumn) {
-        const columnCompletions = this.createColumnCompletions(queryContext)
-        suggestions.push(...columnCompletions)
+        const columnCompletions = this.createColumnCompletions(queryContext, position)
+        suggestions = Array.appendAll(columnCompletions)(suggestions)
       }
 
       // 3. UDF function completions
       if (queryContext.expectsFunction) {
-        const udfCompletions = this.createUDFCompletions(queryContext)
-        suggestions.push(...udfCompletions)
+        const udfCompletions = this.createUDFCompletions(position)
+        suggestions = Array.appendAll(udfCompletions)(suggestions)
       }
 
       // 4. SQL keyword completions
       if (queryContext.expectsKeyword) {
-        const keywordCompletions = this.createKeywordCompletions(queryContext)
-        suggestions.push(...keywordCompletions)
+        const keywordCompletions = this.createKeywordCompletions(queryContext, position)
+        suggestions = Array.appendAll(keywordCompletions)(suggestions)
       }
 
       // 5. Operator completions
       if (queryContext.expectsOperator) {
-        const operatorCompletions = this.createOperatorCompletions(queryContext)
-        suggestions.push(...operatorCompletions)
+        const operatorCompletions = this.createOperatorCompletions(position)
+        suggestions = Array.appendAll(operatorCompletions)(suggestions)
       }
 
       // Filter by prefix and apply limits
@@ -147,15 +146,10 @@ export class NozzleCompletionProvider implements monaco.languages.CompletionItem
 
       // Add range information for text replacement
       const suggestionsWithRange = this.addRangeToSuggestions(
-        filteredSuggestions, 
-        model, 
+        filteredSuggestions,
         position,
         queryContext.currentPrefix
       )
-
-      const duration = performance.now() - startTime
-      this.logDebug(`Completion generation completed in ${duration.toFixed(2)}ms, ${suggestionsWithRange.length} suggestions`)
-      this.logDebug('Final suggestions:', suggestionsWithRange.map(s => ({ label: s.label, kind: s.kind })))
 
       return {
         suggestions: suggestionsWithRange,
@@ -164,7 +158,7 @@ export class NozzleCompletionProvider implements monaco.languages.CompletionItem
 
     } catch (error) {
       this.logError('Completion provider failed', error)
-      return this.getFallbackCompletions(model, position)
+      return this.getFallbackCompletions(position)
     }
   }
 
@@ -175,19 +169,18 @@ export class NozzleCompletionProvider implements monaco.languages.CompletionItem
    * Provides detailed documentation showing available columns.
    * 
    * @private
-   * @param queryContext - Current query context
    * @returns Array of table completion items
    */
-  private createTableCompletions(queryContext: QueryContext): monaco.languages.CompletionItem[] {
-    const completions: monaco.languages.CompletionItem[] = []
+  private createTableCompletions(position: Position): Array<languages.CompletionItem> {
+    const completions: Array<languages.CompletionItem> = []
 
     this.metadata.forEach((dataset, index) => {
       // Create detailed documentation showing table schema
       const columnList = dataset.metadata_columns
-        .map(col => `- \`${col.name}\` (${col.datatype})${col.description ? ': ' + col.description : ''}`)
+        .map(col => `- \`${col.name}\` (${col.datatype})`)
         .join('\n')
 
-      const documentation: monaco.IMarkdownString = {
+      const documentation: IMarkdownString = {
         value: [
           `**Dataset Table: ${dataset.source}**`,
           '',
@@ -202,7 +195,7 @@ export class NozzleCompletionProvider implements monaco.languages.CompletionItem
 
       completions.push({
         label: dataset.source,
-        kind: monaco.languages.CompletionItemKind.Class,
+        kind: languages.CompletionItemKind.Class,
         detail: `Table (${dataset.metadata_columns.length} columns)`,
         documentation,
         insertText: dataset.source,
@@ -213,6 +206,12 @@ export class NozzleCompletionProvider implements monaco.languages.CompletionItem
         command: {
           id: 'editor.action.triggerSuggest',
           title: 'Re-trigger completion'
+        },
+        range: {
+          startColumn: position.column,
+          endColumn: position.column,
+          startLineNumber: position.lineNumber,
+          endLineNumber: position.lineNumber
         }
       })
     })
@@ -230,11 +229,11 @@ export class NozzleCompletionProvider implements monaco.languages.CompletionItem
    * @param queryContext - Current query context
    * @returns Array of column completion items
    */
-  private createColumnCompletions(queryContext: QueryContext): monaco.languages.CompletionItem[] {
-    const completions: monaco.languages.CompletionItem[] = []
+  private createColumnCompletions(queryContext: QueryContext, position: Position): Array<languages.CompletionItem> {
+    const completions: Array<languages.CompletionItem> = []
     let columnIndex = 0
 
-    this.metadata.forEach((dataset, datasetIndex) => {
+    this.metadata.forEach((dataset) => {
       // Skip tables not in scope (unless no tables are specified, then include all)
       if (queryContext.availableTables.length > 0 && 
           !queryContext.availableTables.includes(dataset.source)) {
@@ -242,13 +241,11 @@ export class NozzleCompletionProvider implements monaco.languages.CompletionItem
       }
 
       dataset.metadata_columns.forEach((column) => {
-        const documentation: monaco.IMarkdownString = {
+        const documentation: IMarkdownString = {
           value: [
             `**Column: ${column.name}**`,
             `**Type:** ${column.datatype}`,
             `**Table:** ${dataset.source}`,
-            '',
-            column.description || 'No description available',
             '',
             '*Click to insert column name in query*'
           ].join('\n'),
@@ -257,12 +254,18 @@ export class NozzleCompletionProvider implements monaco.languages.CompletionItem
 
         completions.push({
           label: column.name,
-          kind: monaco.languages.CompletionItemKind.Field,
+          kind: languages.CompletionItemKind.Field,
           detail: `${column.datatype} - ${dataset.source}`,
           documentation,
           insertText: column.name,
           sortText: `${COMPLETION_PRIORITY.COLUMN}-${columnIndex.toString().padStart(4, '0')}`,
-          filterText: column.name
+          filterText: column.name,
+          range: {
+            startLineNumber: position.lineNumber,
+            startColumn: position.column,
+            endLineNumber: position.lineNumber,
+            endColumn: position.column
+          }
         })
 
         columnIndex++
@@ -282,8 +285,8 @@ export class NozzleCompletionProvider implements monaco.languages.CompletionItem
    * @param queryContext - Current query context
    * @returns Array of UDF completion items
    */
-  private createUDFCompletions(queryContext: QueryContext): monaco.languages.CompletionItem[] {
-    const completions: monaco.languages.CompletionItem[] = []
+  private createUDFCompletions(position: Position): Array<languages.CompletionItem> {
+    const completions: Array<languages.CompletionItem> = []
 
     this.udfs.forEach((udf, index) => {
       // Generate snippet with parameter placeholders
@@ -292,7 +295,7 @@ export class NozzleCompletionProvider implements monaco.languages.CompletionItem
       // Clean up display name for functions with dataset prefix
       const displayName = udf.name.replace('${dataset}', '{dataset}')
       
-      const documentation: monaco.IMarkdownString = {
+      const documentation: IMarkdownString = {
         value: [
           `**${displayName}** - Nozzle User-Defined Function`,
           '',
@@ -312,17 +315,23 @@ export class NozzleCompletionProvider implements monaco.languages.CompletionItem
 
       completions.push({
         label: displayName,
-        kind: monaco.languages.CompletionItemKind.Function,
+        kind: languages.CompletionItemKind.Function,
         detail: 'Nozzle UDF',
         documentation,
         insertText: snippet,
-        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+        insertTextRules: languages.CompletionItemInsertTextRule.InsertAsSnippet,
         sortText: `${COMPLETION_PRIORITY.UDF}-${index.toString().padStart(3, '0')}`,
         filterText: udf.name,
         // Trigger parameter hints after insertion
         command: {
           id: 'editor.action.triggerParameterHints',
           title: 'Trigger Parameter Hints'
+        },
+        range: {
+          startLineNumber: position.lineNumber,
+          startColumn: position.column,
+          endLineNumber: position.lineNumber,
+          endColumn: position.column
         }
       })
     })
@@ -388,12 +397,12 @@ export class NozzleCompletionProvider implements monaco.languages.CompletionItem
    * @param queryContext - Current query context
    * @returns Array of keyword completion items
    */
-  private createKeywordCompletions(queryContext: QueryContext): monaco.languages.CompletionItem[] {
-    const completions: monaco.languages.CompletionItem[] = []
+  private createKeywordCompletions(queryContext: QueryContext, position: Position): Array<languages.CompletionItem> {
+    const completions: Array<languages.CompletionItem> = []
     let keywordIndex = 0
 
     // Select appropriate keywords based on current clause context
-    let keywords: string[] = []
+    let keywords: Array<string> = []
     
     switch (queryContext.currentClause) {
       case 'SELECT':
@@ -417,11 +426,17 @@ export class NozzleCompletionProvider implements monaco.languages.CompletionItem
     keywords.forEach(keyword => {
       completions.push({
         label: keyword,
-        kind: monaco.languages.CompletionItemKind.Keyword,
+        kind: languages.CompletionItemKind.Keyword,
         detail: 'SQL Keyword',
         insertText: keyword,
         sortText: `${COMPLETION_PRIORITY.KEYWORD}-${keywordIndex.toString().padStart(3, '0')}`,
-        filterText: keyword
+        filterText: keyword,
+        range: {
+          startLineNumber: position.lineNumber,
+          startColumn: position.column,
+          endLineNumber: position.lineNumber,
+          endColumn: position.column
+        }
       })
       keywordIndex++
     })
@@ -435,19 +450,24 @@ export class NozzleCompletionProvider implements monaco.languages.CompletionItem
    * Generates SQL operator completions for WHERE, HAVING, and ON clauses.
    * 
    * @private
-   * @param queryContext - Current query context
    * @returns Array of operator completion items
    */
-  private createOperatorCompletions(queryContext: QueryContext): monaco.languages.CompletionItem[] {
+  private createOperatorCompletions(position: Position): Array<languages.CompletionItem> {
     const operators = ['=', '<>', '!=', '<', '>', '<=', '>=', 'LIKE', 'ILIKE', 'IN', 'NOT IN', 'BETWEEN', 'IS NULL', 'IS NOT NULL']
     
     return operators.map((operator, index) => ({
       label: operator,
-      kind: monaco.languages.CompletionItemKind.Operator,
+      kind: languages.CompletionItemKind.Operator,
       detail: 'SQL Operator',
       insertText: operator,
       sortText: `${COMPLETION_PRIORITY.OPERATOR}-${index.toString().padStart(3, '0')}`,
-      filterText: operator
+      filterText: operator,
+      range: {
+        startLineNumber: position.lineNumber,
+        startColumn: position.column,
+        endLineNumber: position.lineNumber,
+        endColumn: position.column
+      }
     }))
   }
 
@@ -459,18 +479,21 @@ export class NozzleCompletionProvider implements monaco.languages.CompletionItem
    * @private
    */
   private filterAndLimitSuggestions(
-    suggestions: monaco.languages.CompletionItem[], 
+    suggestions: Array<languages.CompletionItem>, 
     queryContext: QueryContext
-  ): monaco.languages.CompletionItem[] {
+  ): Array<languages.CompletionItem> {
     let filtered = suggestions
 
     // Apply prefix filtering if there's a current prefix
     if (queryContext.currentPrefix) {
       const lowerPrefix = queryContext.currentPrefix.toLowerCase()
-      filtered = suggestions.filter(suggestion => 
-        suggestion.label.toLowerCase().includes(lowerPrefix) ||
-        (suggestion.filterText && suggestion.filterText.toLowerCase().includes(lowerPrefix))
-      )
+      filtered = suggestions.filter(suggestion => {
+        const labelText = typeof suggestion.label === 'string' 
+          ? suggestion.label 
+          : suggestion.label.label
+        return labelText.toLowerCase().includes(lowerPrefix) ||
+          (suggestion.filterText && suggestion.filterText.toLowerCase().includes(lowerPrefix))
+      })
     }
 
     // Apply suggestion limit
@@ -489,12 +512,11 @@ export class NozzleCompletionProvider implements monaco.languages.CompletionItem
    * @private
    */
   private addRangeToSuggestions(
-    suggestions: monaco.languages.CompletionItem[],
-    model: monaco.editor.ITextModel,
-    position: monaco.Position,
+    suggestions: Array<languages.CompletionItem>,
+    position: Position,
     currentPrefix: string
-  ): monaco.languages.CompletionItem[] {
-    const range = this.calculateReplacementRange(model, position, currentPrefix)
+  ): Array<languages.CompletionItem> {
+    const range = this.calculateReplacementRange(position, currentPrefix)
 
     return suggestions.map(suggestion => ({
       ...suggestion,
@@ -510,20 +532,18 @@ export class NozzleCompletionProvider implements monaco.languages.CompletionItem
    * @private
    */
   private calculateReplacementRange(
-    model: monaco.editor.ITextModel,
-    position: monaco.Position,
+    position: Position,
     currentPrefix: string
-  ): monaco.Range {
-    const line = model.getLineContent(position.lineNumber)
+  ): IRange {
     const startColumn = position.column - currentPrefix.length
     const endColumn = position.column
 
-    return new monaco.Range(
-      position.lineNumber,
+    return {
+      startLineNumber: position.lineNumber,
       startColumn,
-      position.lineNumber,
+      endLineNumber: position.lineNumber,
       endColumn
-    )
+    }
   }
 
   /**
@@ -534,17 +554,22 @@ export class NozzleCompletionProvider implements monaco.languages.CompletionItem
    * @private
    */
   private getFallbackCompletions(
-    model: monaco.editor.ITextModel,
-    position: monaco.Position
-  ): monaco.languages.CompletionList {
+    position: Position
+  ): languages.CompletionList {
     const basicKeywords = ['SELECT', 'FROM', 'WHERE', 'JOIN', 'ORDER BY', 'GROUP BY', 'LIMIT']
     
-    const suggestions = basicKeywords.map((keyword, index) => ({
+    const suggestions = basicKeywords.map<languages.CompletionItem>((keyword, index) => ({
       label: keyword,
-      kind: monaco.languages.CompletionItemKind.Keyword,
+      kind: languages.CompletionItemKind.Keyword,
       detail: 'SQL Keyword',
       insertText: keyword,
-      sortText: index.toString().padStart(3, '0')
+      sortText: index.toString().padStart(3, '0'),
+      range: {
+        startLineNumber: position.lineNumber,
+        startColumn: position.column,
+        endLineNumber: position.lineNumber,
+        endColumn: position.column
+      }
     }))
 
     this.logDebug('Using fallback completions')
@@ -562,14 +587,10 @@ export class NozzleCompletionProvider implements monaco.languages.CompletionItem
    * Updates the metadata and UDF information when data changes.
    * This is called by the provider manager when fresh data is available.
    */
-  updateData(metadata: DatasetMetadata[], udfs: UserDefinedFunction[]): void {
+  updateData(metadata: ReadonlyArray<DatasetMetadata>, udfs: ReadonlyArray<UserDefinedFunction>): void {
     this.metadata = metadata
     this.udfs = udfs
     this.analyzer.clearCache() // Clear analysis cache when data changes
-    this.logDebug('Provider data updated', { 
-      tableCount: metadata.length, 
-      udfCount: udfs.length 
-    })
   }
 
   /**

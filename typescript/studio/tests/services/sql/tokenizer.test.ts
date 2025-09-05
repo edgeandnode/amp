@@ -3,8 +3,9 @@
  * Tests SQL token recognition and context analysis functionality
  */
 
-import { describe, test, expect, beforeEach, afterEach } from 'vitest'
-import { QueryContextAnalyzer } from '../../../src/services/sql/contextAnalyzer'
+import { afterEach,beforeEach, describe, expect, test } from 'vitest'
+
+import { QueryContextAnalyzer } from '../../../src/services/sql/QueryContextAnalyzer'
 
 describe('SQL Tokenization via Context Analyzer', () => {
   let analyzer: QueryContextAnalyzer

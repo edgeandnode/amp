@@ -17,14 +17,17 @@
  * @author SQL Intellisense System
  */
 
-// Monaco types are defined in types.ts to avoid import issues
+import type { Position } from 'monaco-editor/esm/vs/editor/editor.api';
+
 import type { 
+  CompletionConfig,
+  MonacoITextModel,
   QueryContext, 
   SqlClause, 
   SqlToken, 
-  SqlTokenType, 
-  CompletionConfig
+  SqlTokenType
 } from './types'
+
 import { DEFAULT_COMPLETION_CONFIG } from './types'
 
 /**
@@ -56,8 +59,8 @@ export class QueryContextAnalyzer {
    * @returns QueryContext describing completion opportunities
    */
   analyzeContext(
-    model: monaco.editor.ITextModel,
-    position: monaco.Position
+    model: MonacoITextModel,
+    position: Position
   ): QueryContext {
     try {
       const query = model.getValue()
@@ -101,8 +104,8 @@ export class QueryContextAnalyzer {
   private analyzeQueryInternal(
     query: string,
     offset: number,
-    model: monaco.editor.ITextModel,
-    position: monaco.Position
+    model: MonacoITextModel,
+    position: Position
   ): QueryContext {
     // Tokenize the query for analysis
     const tokens = this.tokenizeQuery(query)
@@ -111,7 +114,7 @@ export class QueryContextAnalyzer {
     const currentPrefix = this.getCurrentPrefix(model, position)
     
     // Check if cursor is in string or comment (should avoid completions)
-    const { inString, inComment } = this.getCursorStringCommentStatus(query, offset)
+    const { inComment, inString } = this.getCursorStringCommentStatus(query, offset)
     if (inString || inComment) {
       return this.createEmptyContext(currentPrefix, inString, inComment)
     }
@@ -152,8 +155,8 @@ export class QueryContextAnalyzer {
    * @param query - The SQL query string to tokenize
    * @returns Array of SQL tokens with position information
    */
-  private tokenizeQuery(query: string): SqlToken[] {
-    const tokens: SqlToken[] = []
+  private tokenizeQuery(query: string): Array<SqlToken> {
+    const tokens: Array<SqlToken> = []
     let position = 0
     let line = 1
     let column = 1
@@ -306,7 +309,7 @@ export class QueryContextAnalyzer {
    * 
    * @private
    */
-  private detectCurrentClause(tokens: SqlToken[], offset: number): SqlClause | null {
+  private detectCurrentClause(tokens: Array<SqlToken>, offset: number): SqlClause | null {
     // Find tokens before the cursor position
     const beforeCursor = tokens.filter(token => token.endOffset <= offset)
     
@@ -344,11 +347,11 @@ export class QueryContextAnalyzer {
    * 
    * @private
    */
-  private analyzeTablesAndAliases(tokens: SqlToken[]): {
-    availableTables: string[]
+  private analyzeTablesAndAliases(tokens: Array<SqlToken>): {
+    availableTables: Array<string>
     tableAliases: Map<string, string>
   } {
-    const availableTables: string[] = []
+    const availableTables: Array<string> = []
     const tableAliases = new Map<string, string>()
 
     // Look for FROM and JOIN clauses to find table references
@@ -382,7 +385,7 @@ export class QueryContextAnalyzer {
    * 
    * @private
    */
-  private extractTableReference(tokens: SqlToken[], startIndex: number): {
+  private extractTableReference(tokens: Array<SqlToken>, startIndex: number): {
     tableName: string | null
     alias: string | null
   } {
@@ -439,7 +442,7 @@ export class QueryContextAnalyzer {
    * @private
    */
   private analyzeExpectations(
-    tokens: SqlToken[], 
+    tokens: Array<SqlToken>, 
     offset: number, 
     currentClause: SqlClause | null
   ): {
@@ -485,6 +488,7 @@ export class QueryContextAnalyzer {
     }
 
     // Refine based on immediate context
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (lastToken) {
       if (lastToken.type === 'OPERATOR' && lastToken.value === '.') {
         // After dot, expect columns (table.column)
@@ -587,18 +591,13 @@ export class QueryContextAnalyzer {
    * Utility Methods
    */
 
-  private getCurrentPrefix(model: monaco.editor.ITextModel, position: monaco.Position): string {
+  private getCurrentPrefix(model: MonacoITextModel, position: Position): string {
     const line = model.getLineContent(position.lineNumber)
     const beforeCursor = line.substring(0, position.column - 1)
     
     // Find the last word boundary
     const match = beforeCursor.match(/(\w+)$/)
     return match ? match[1] : ''
-  }
-
-  private isCursorInStringOrComment(query: string, offset: number): boolean {
-    const { inString, inComment } = this.getCursorStringCommentStatus(query, offset)
-    return inString || inComment
   }
 
   private getCursorStringCommentStatus(query: string, offset: number): { inString: boolean, inComment: boolean } {
@@ -623,7 +622,7 @@ export class QueryContextAnalyzer {
     return { inString, inComment }
   }
 
-  private calculateSubqueryDepth(tokens: SqlToken[], offset: number): number {
+  private calculateSubqueryDepth(tokens: Array<SqlToken>, offset: number): number {
     // Count nested parentheses before cursor
     let depth = 0
     for (const token of tokens) {

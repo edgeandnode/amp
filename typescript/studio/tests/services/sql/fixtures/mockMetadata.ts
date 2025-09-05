@@ -3,7 +3,7 @@
  * Provides realistic test data representing Nozzle dataset metadata
  */
 
-import { DatasetMetadata } from "nozzl/Studio/Model"
+import type { DatasetMetadata } from "nozzl/Studio/Model"
 
 export const mockMetadata: ReadonlyArray<DatasetMetadata> = [
   {
@@ -109,7 +109,7 @@ export function getMetadataByTableName(
 /**
  * Helper function to get all column names from a dataset
  */
-export function getAllColumnNames(metadata: ReadonlyArray<DatasetMetadata>): string[] {
+export function getAllColumnNames(metadata: ReadonlyArray<DatasetMetadata>): Array<string> {
   return metadata.flatMap(dataset => 
     dataset.metadata_columns.map(col => col.name)
   )
@@ -118,6 +118,6 @@ export function getAllColumnNames(metadata: ReadonlyArray<DatasetMetadata>): str
 /**
  * Helper function to get all table names
  */
-export function getAllTableNames(metadata: ReadonlyArray<DatasetMetadata>): string[] {
+export function getAllTableNames(metadata: ReadonlyArray<DatasetMetadata>): Array<string> {
   return metadata.map(dataset => dataset.source)
 }

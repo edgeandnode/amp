@@ -14,83 +14,74 @@
  * @file types.ts
  * @author SQL Intellisense System
  */
-
+import type { IMarkdownString, IRange, languages, Position } from 'monaco-editor/esm/vs/editor/editor.api';
 import type { DatasetMetadata } from 'nozzl/Studio/Model'
 
 // Monaco Editor types - defined locally to avoid import issues
-declare namespace monaco {
-  export namespace languages {
-    export interface CompletionItem {
-      label: string | { label: string; detail?: string }
-      kind?: CompletionItemKind
-      detail?: string
-      documentation?: string | IMarkdownString
-      sortText?: string
-      filterText?: string
-      preselect?: boolean
-      insertText?: string
-      insertTextRules?: CompletionItemInsertTextRule
-      range?: Range
-      command?: Command
-    }
+// Using ES2015 module syntax instead of namespaces
 
-    export interface CompletionList {
-      suggestions: CompletionItem[]
-      incomplete?: boolean
-    }
+export interface MonacoCompletionItem {
+  label: string | { label: string; detail?: string }
+  kind?: languages.CompletionItemKind
+  detail?: string
+  documentation?: string | IMarkdownString
+  sortText?: string
+  filterText?: string
+  preselect?: boolean
+  insertText?: string
+  insertTextRules?: languages.CompletionItemInsertTextRule
+  range?: IRange | undefined
+  command?: MonacoCommand | undefined
+}
 
-    export interface Command {
-      id: string
-      title: string
-      arguments?: any[]
-    }
+export interface MonacoCommand {
+  id: string
+  title: string
+  arguments?: Array<any>
+}
 
-    export enum CompletionItemKind {
-      Function = 1,
-      Field = 3,
-      Class = 5,
-      Keyword = 17,
-      Operator = 11
-    }
+export enum MonacoCompletionItemKind {
+  Function = 1,
+  Field = 3,
+  Class = 5,
+  Keyword = 17,
+  Operator = 11
+}
 
-    export enum CompletionItemInsertTextRule {
-      InsertAsSnippet = 4
-    }
+export enum MonacoCompletionItemInsertTextRule {
+  InsertAsSnippet = 4
+}
 
-    export enum CompletionItemTag {
-      Deprecated = 1
-    }
-  }
+export enum MonacoCompletionItemTag {
+  Deprecated = 1
+}
 
-  export interface IMarkdownString {
-    value: string
-    isTrusted?: boolean
-  }
+export interface MonacoIMarkdownString {
+  value: string
+  isTrusted?: boolean
+}
 
-  export interface Range {
-    startLineNumber: number
-    startColumn: number
-    endLineNumber: number
-    endColumn: number
-  }
+export interface MonacoRange {
+  startLineNumber: number
+  startColumn: number
+  endLineNumber: number
+  endColumn: number
+}
 
-  export interface Position {
-    lineNumber: number
-    column: number
-  }
+export interface MonacoPosition {
+  lineNumber: number
+  column: number
+}
 
-  export namespace editor {
-    export interface ITextModel {
-      getValue(): string
-      getOffsetAt(position: Position): number
-      getLineContent(lineNumber: number): string
-      getWordAtPosition(position: Position): { word: string; startColumn: number; endColumn: number } | null
-    }
-  }
+export interface MonacoITextModel {
+  getValue: () => string
+  getOffsetAt: (position: Position) => number
+  getLineContent: (lineNumber: number) => string
+  getWordAtPosition: (position: Position) => { word: string; startColumn: number; endColumn: number } | null
+}
 
-  export interface CancellationToken {
-    isCancellationRequested: boolean
-  }
+export interface MonacoCancellationToken {
+  isCancellationRequested: boolean
 }
 
 /**
@@ -112,7 +103,7 @@ export interface UserDefinedFunction {
   sql: string
   
   /** Optional parameter names for snippet generation */
-  parameters?: string[]
+  parameters?: Array<string>
   
   /** Optional usage example for documentation */
   example?: string
@@ -150,7 +141,7 @@ export interface QueryContext {
   expectsOperator: boolean
   
   /** List of table names that are in scope at the current cursor position */
-  availableTables: string[]
+  availableTables: Array<string>
   
   /** Map of table aliases to their full table names (e.g., 'l' -> 'anvil.logs') */
   tableAliases: Map<string, string>
@@ -171,7 +162,7 @@ export interface QueryContext {
   subqueryDepth: number
   
   /** Parent query contexts for nested queries */
-  parentContexts: QueryContext[]
+  parentContexts: Array<QueryContext>
 }
 
 /**
@@ -252,7 +243,7 @@ export const DEFAULT_COMPLETION_CONFIG: CompletionConfig = {
  */
 export interface DisposableHandle {
   /** Cleanup function to dispose all registered providers and caches */
-  dispose(): void
+  dispose: () => void
 }
 
 /**
@@ -268,7 +259,7 @@ export interface CompletionItemOptions {
   label: string
   
   /** Monaco completion item kind (determines icon) */
-  kind: monaco.languages.CompletionItemKind
+  kind: MonacoCompletionItemKind
   
   /** Text to insert when completion is selected */
   insertText: string
@@ -277,7 +268,7 @@ export interface CompletionItemOptions {
   detail?: string
   
   /** Detailed documentation (supports markdown) */
-  documentation?: string | monaco.IMarkdownString
+  documentation?: string | MonacoIMarkdownString
   
   /** Sort order (lower values appear first) */
   sortText?: string
@@ -286,13 +277,13 @@ export interface CompletionItemOptions {
   preselect?: boolean
   
   /** Text replacement range */
-  range?: monaco.Range
+  range?: MonacoRange
   
   /** Whether to insert as snippet (for UDFs) */
   insertAsSnippet?: boolean
   
   /** Command to execute after insertion (e.g., trigger parameter hints) */
-  command?: monaco.languages.Command
+  command?: MonacoCommand
 }
 
 /**
@@ -308,7 +299,7 @@ export interface TableInfo {
   name: string
   
   /** Table columns with type information */
-  columns: ColumnInfo[]
+  columns: Array<ColumnInfo>
   
   /** Optional table description */
   description?: string
@@ -410,7 +401,7 @@ export interface ErrorRecovery {
   enabled: boolean
   
   /** Fallback completions to show on analysis failure */
-  fallbackCompletions: monaco.languages.CompletionItem[]
+  fallbackCompletions: Array<MonacoCompletionItem>
   
   /** Maximum number of fallback completions */
   maxFallbackItems: number
@@ -439,16 +430,6 @@ export interface PerformanceMetrics {
   
   /** Last update timestamp */
   lastUpdate: number
-}
-
-/**
- * Export all Monaco types that we extend or use
- * 
- * This ensures that consumers of this module can access Monaco types
- * without importing monaco-editor directly.
- */
-export type {
-  monaco
 }
 
 // Re-export DatasetMetadata type for convenience

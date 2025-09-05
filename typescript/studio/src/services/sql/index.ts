@@ -26,16 +26,19 @@
  */
 
 // Monaco editor will be available globally in browser - no need to import
+import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
 import type { DatasetMetadata } from 'nozzl/Studio/Model'
-import { QueryContextAnalyzer } from './contextAnalyzer'
-import { NozzleCompletionProvider } from './completionProvider'
-import { UdfSnippetGenerator } from './udfSnippets'
+
+import { NozzleCompletionProvider } from './NozzleCompletionProvider'
+import { QueryContextAnalyzer } from './QueryContextAnalyzer'
 import type {
-  UserDefinedFunction,
   CompletionConfig,
   DisposableHandle,
-  PerformanceMetrics
+  PerformanceMetrics,
+  UserDefinedFunction,
 } from './types'
+import { UdfSnippetGenerator } from './UDFSnippetGenerator'
+
 import { DEFAULT_COMPLETION_CONFIG } from './types'
 
 /**
@@ -46,13 +49,13 @@ import { DEFAULT_COMPLETION_CONFIG } from './types'
  * hover providers, and other language features.
  */
 class SqlProviderManager {
-  private completionProvider?: NozzleCompletionProvider
-  private contextAnalyzer?: QueryContextAnalyzer
-  private snippetGenerator?: UdfSnippetGenerator
+  private completionProvider?: NozzleCompletionProvider | undefined
+  private contextAnalyzer?: QueryContextAnalyzer | undefined
+  private snippetGenerator?: UdfSnippetGenerator | undefined
   
-  private completionDisposable?: monaco.IDisposable
-  private hoverDisposable?: monaco.IDisposable
-  private signatureDisposable?: monaco.IDisposable
+  private completionDisposable?: monaco.IDisposable | undefined
+  private hoverDisposable?: monaco.IDisposable | undefined
+  private signatureDisposable?: monaco.IDisposable | undefined
   
   private isDisposed = false
   private metrics: PerformanceMetrics = {
@@ -64,8 +67,8 @@ class SqlProviderManager {
   }
 
   constructor(
-    private metadata: DatasetMetadata[],
-    private udfs: UserDefinedFunction[],
+    private metadata: ReadonlyArray<DatasetMetadata>,
+    private udfs: ReadonlyArray<UserDefinedFunction>,
     private config: CompletionConfig = DEFAULT_COMPLETION_CONFIG
   ) {}
 
@@ -79,19 +82,6 @@ class SqlProviderManager {
    */
   setup(): DisposableHandle {
     try {
-      this.logDebug('Setting up Nozzle SQL providers', {
-        tableCount: this.metadata.length,
-        udfCount: this.udfs.length
-      })
-
-      // Check if Monaco is available
-      if (typeof window === 'undefined' || !window.monaco) {
-        this.logDebug('Monaco editor not yet available, providers will be set up when editor loads')
-        return { dispose: () => {} }
-      }
-
-      const monaco = window.monaco
-
       // Initialize core components
       this.contextAnalyzer = new QueryContextAnalyzer(this.config)
       this.completionProvider = new NozzleCompletionProvider(
@@ -110,7 +100,10 @@ class SqlProviderManager {
             this.metrics.totalRequests++
             
             const result = await this.completionProvider!.provideCompletionItems(
-              model, position, context, token
+              model,
+              position,
+              context,
+              token
             )
             
             const duration = performance.now() - startTime
@@ -123,7 +116,7 @@ class SqlProviderManager {
             this.logError('Completion provider failed', error)
             
             // Return fallback completions
-            return { suggestions: this.createFallbackCompletions() }
+            return { suggestions: this.createFallbackCompletions(position).map((suggestion) => suggestion) }
           }
         },
         // Trigger completions on space, dot, and newline
@@ -183,7 +176,7 @@ class SqlProviderManager {
    * @param metadata - Updated dataset metadata
    * @param udfs - Updated UDF definitions
    */
-  updateData(metadata: DatasetMetadata[], udfs: UserDefinedFunction[]): void {
+  updateData(metadata: ReadonlyArray<DatasetMetadata>, udfs: ReadonlyArray<UserDefinedFunction>): void {
     if (this.isDisposed) {
       this.logWarning('Attempted to update disposed provider manager')
       return
@@ -311,8 +304,8 @@ class SqlProviderManager {
    * @private
    */
   private provideSignatureHelp(
-    model: monaco.editor.ITextModel,
-    position: monaco.Position
+    _model: monaco.editor.ITextModel,
+    _position: monaco.Position
   ): monaco.languages.ProviderResult<monaco.languages.SignatureHelpResult> {
     // This is a placeholder for signature help implementation
     // Full implementation would require parsing function calls and parameter positions
@@ -326,7 +319,7 @@ class SqlProviderManager {
    * 
    * @private
    */
-  private createFallbackCompletions(): monaco.languages.CompletionItem[] {
+  private createFallbackCompletions(position: monaco.Position): ReadonlyArray<monaco.languages.CompletionItem> {
     const basicKeywords = [
       'SELECT', 'FROM', 'WHERE', 'JOIN', 'INNER JOIN', 'LEFT JOIN', 
       'GROUP BY', 'ORDER BY', 'HAVING', 'LIMIT', 'DISTINCT', 'AS'
@@ -337,7 +330,13 @@ class SqlProviderManager {
       kind: monaco.languages.CompletionItemKind.Keyword,
       detail: 'SQL Keyword',
       insertText: keyword,
-      sortText: index.toString().padStart(3, '0')
+      sortText: index.toString().padStart(3, '0'),
+      range: {
+        startColumn: position.column,
+        startLineNumber: position.lineNumber,
+        endColumn: position.column,
+        endLineNumber: position.lineNumber
+      }
     }))
   }
 
@@ -398,8 +397,8 @@ let activeProviderManager: SqlProviderManager | null = null
  * @returns Disposable handle for cleanup
  */
 export function setupNozzleSQLProviders(
-  metadata: DatasetMetadata[],
-  udfs: UserDefinedFunction[],
+  metadata: ReadonlyArray<DatasetMetadata>,
+  udfs: ReadonlyArray<UserDefinedFunction>,
   config?: Partial<CompletionConfig>
 ): DisposableHandle {
   // Dispose existing manager if present
@@ -436,8 +435,8 @@ export function setupNozzleSQLProviders(
  * @param udfs - Updated UDF definitions
  */
 export function updateProviderData(
-  metadata: DatasetMetadata[],
-  udfs: UserDefinedFunction[]
+  metadata: ReadonlyArray<DatasetMetadata>,
+  udfs: ReadonlyArray<UserDefinedFunction>
 ): void {
   if (activeProviderManager) {
     activeProviderManager.updateData(metadata, udfs)
@@ -480,7 +479,7 @@ export function areProvidersActive(): boolean {
 }
 
 // Export all types and classes for advanced usage
+export { NozzleCompletionProvider } from './NozzleCompletionProvider'
+export { QueryContextAnalyzer } from './QueryContextAnalyzer'
 export * from './types'
-export { QueryContextAnalyzer } from './contextAnalyzer'
-export { NozzleCompletionProvider } from './completionProvider'
-export { UdfSnippetGenerator, createUdfSnippet, createUdfCompletionItem } from './udfSnippets'
+export { createUdfCompletionItem, createUdfSnippet, UdfSnippetGenerator } from './UDFSnippetGenerator'

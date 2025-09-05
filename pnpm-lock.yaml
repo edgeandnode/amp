@@ -238,6 +238,9 @@ importers:
       effect:
         specifier: ^3.17.13
         version: 3.17.13
+      monaco-editor:
+        specifier: ^0.52.2
+        version: 0.52.2
       nozzl:
         specifier: workspace:*
         version: link:../nozzle

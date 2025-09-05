@@ -1,19 +1,24 @@
 "use client"
 
 import type { EditorProps as MonacoEditorProps } from "@monaco-editor/react"
-import MonacoEditor from "@monaco-editor/react"
+import MonacoEditor, { loader } from "@monaco-editor/react"
 import { useStore } from "@tanstack/react-form"
+import * as monaco from "monaco-editor"
+import editorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker"
 import { useEffect, useRef } from "react"
+
+import { useMetadataSuspenseQuery } from "@/hooks/useMetadataQuery"
+import { useUDFSuspenseQuery } from "@/hooks/useUDFQuery"
+import { setupNozzleSQLProviders, type DisposableHandle } from "@/services/sql"
 
 import { ErrorMessages } from "../Form/ErrorMessages"
 import { useFieldContext } from "../Form/form"
-import { useMetadataSuspenseQuery } from "../../hooks/useMetadataQuery"
-import { useUDFSuspenseQuery } from "../../hooks/useUDFQuery"
-import {
-  setupNozzleSQLProviders,
-  updateProviderData,
-  type DisposableHandle,
-} from "../../services/sql"
+
+self.MonacoEnvironment = {
+  getWorker() {
+    return new editorWorker()
+  },
+}
 
 export type EditorProps = Omit<
   MonacoEditorProps,
@@ -42,61 +47,6 @@ export function Editor({
   const providersRef = useRef<DisposableHandle | null>(null)
 
   /**
-   * Setup SQL providers when Monaco editor is available
-   */
-  const setupProviders = () => {
-    if (
-      metadataQuery.data &&
-      udfQuery.data &&
-      typeof window !== "undefined" &&
-      window.monaco
-    ) {
-      // Dispose existing providers first
-      if (providersRef.current) {
-        providersRef.current.dispose()
-      }
-
-      // Setup providers with initial data
-      providersRef.current = setupNozzleSQLProviders(
-        metadataQuery.data,
-        udfQuery.data,
-        {
-          // Enable debug logging in development
-          enableDebugLogging: process.env.NODE_ENV === "development",
-          // Allow completions without prefix for better UX (especially for columns in SELECT)
-          minPrefixLength: 0,
-          maxSuggestions: 50,
-        },
-      )
-
-      console.debug("[Editor] SQL intellisense providers initialized", {
-        tableCount: metadataQuery.data.length,
-        udfCount: udfQuery.data.length,
-      })
-    }
-  }
-
-  /**
-   * Effect: Update providers when data changes
-   *
-   * Handles hot-swapping of metadata and UDF data when the hooks
-   * refetch fresh data from the API.
-   */
-  useEffect(() => {
-    if (providersRef.current && metadataQuery.data && udfQuery.data) {
-      updateProviderData(metadataQuery.data, udfQuery.data)
-      console.debug(
-        "[Editor] SQL intellisense providers updated with fresh data",
-      )
-    }
-  }, [
-    metadataQuery.data,
-    udfQuery.data,
-    metadataQuery.dataUpdatedAt,
-    udfQuery.dataUpdatedAt,
-  ])
-
-  /**
    * Cleanup providers on unmount
    */
   useEffect(() => {
@@ -104,10 +54,12 @@ export function Editor({
       if (providersRef.current) {
         providersRef.current.dispose()
         providersRef.current = null
-        console.debug("[Editor] SQL intellisense providers disposed")
       }
     }
   }, [])
+
+  // use the installed monaco-editor type instead of it being brought down from a CDN
+  loader.config({ monaco })
 
   return (
     <div className="w-full h-full p-0 m-0 flex flex-col gap-y-3">
@@ -161,10 +113,22 @@ export function Editor({
           })
 
           // Setup SQL intellisense providers now that Monaco is available
-          setupProviders()
+          // Dispose existing providers first
+          if (providersRef.current) {
+            providersRef.current.dispose()
+          }
 
-          console.debug(
-            "[Editor] Monaco editor mounted with SQL intellisense configuration",
+          // Setup providers with initial data
+          providersRef.current = setupNozzleSQLProviders(
+            metadataQuery.data,
+            udfQuery.data,
+            {
+              // Enable debug logging in development
+              enableDebugLogging: process.env.NODE_ENV === "development",
+              // Allow completions without prefix for better UX (especially for columns in SELECT)
+              minPrefixLength: 0,
+              maxSuggestions: 50,
+            },
           )
         }}
       />

@@ -3,8 +3,9 @@
  * Tests SQL context analysis, clause detection, and cursor position handling
  */
 
-import { describe, test, expect, beforeEach, afterEach } from 'vitest'
-import { QueryContextAnalyzer } from '../../../src/services/sql/contextAnalyzer'
+import { afterEach,beforeEach, describe, expect, test } from 'vitest'
+
+import { QueryContextAnalyzer } from '../../../src/services/sql/QueryContextAnalyzer'
 
 describe('QueryContextAnalyzer', () => {
   let analyzer: QueryContextAnalyzer
@@ -346,7 +347,7 @@ describe('QueryContextAnalyzer', () => {
       }
     ]
 
-    test.each(testCases)('should analyze basic query: $name', ({ query, position, expected }) => {
+    test.each(testCases)('should analyze basic query: $name', ({ expected, position, query }) => {
       const model = createMockModel(query)
       const mockPosition = createMockPosition(position.lineNumber, position.column)
 
@@ -386,7 +387,7 @@ describe('QueryContextAnalyzer', () => {
       }
     ]
 
-    test.each(qualifiedTestCases)('should analyze qualified query: $name', ({ query, position, expected }) => {
+    test.each(qualifiedTestCases)('should analyze qualified query: $name', ({ expected, position, query }) => {
       const model = createMockModel(query)
       const mockPosition = createMockPosition(position.lineNumber, position.column)
 
@@ -436,7 +437,7 @@ describe('QueryContextAnalyzer', () => {
       }
     ]
 
-    test.each(stringCommentTestCases)('should analyze string/comment query: $name', ({ query, position, expected }) => {
+    test.each(stringCommentTestCases)('should analyze string/comment query: $name', ({ expected, position, query }) => {
       const model = createMockModel(query)
       const mockPosition = createMockPosition(position.lineNumber, position.column)
 

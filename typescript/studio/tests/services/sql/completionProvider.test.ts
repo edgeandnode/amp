@@ -3,31 +3,32 @@
  * Tests table/column/UDF completions, context filtering, and Monaco integration
  */
 
-import { describe, test, expect, beforeEach, afterEach } from 'vitest'
 import * as monaco from 'monaco-editor'
-import { NozzleCompletionProvider } from '../../../src/services/sql/completionProvider'
-import { QueryContextAnalyzer } from '../../../src/services/sql/contextAnalyzer'
+import { afterEach,beforeEach, describe, expect, test } from 'vitest'
+
+import { NozzleCompletionProvider } from '../../../src/services/sql/NozzleCompletionProvider'
+import { QueryContextAnalyzer } from '../../../src/services/sql/QueryContextAnalyzer'
+
 import {
+  assertCompletionContains,
+  assertCompletionDoesNotContain,
+  countCompletionsByKind,
+  createMockCancellationToken,
+  createMockCompletionContext,
+  createTestModel,
+  disposeTestModel,
+  extractCompletionLabels,
+  findCompletionByLabel,
   mockMetadata,
   mockMetadataEmpty,
   mockMetadataMinimal,
   mockUDFs,
-  mockUDFsEmpty,
-  createTestModel,
-  disposeTestModel,
-  createMockCompletionContext,
-  createMockCancellationToken,
-  extractCompletionLabels,
-  findCompletionByLabel,
-  assertCompletionContains,
-  assertCompletionDoesNotContain,
-  countCompletionsByKind
-} from './fixtures'
+  mockUDFsEmpty} from './fixtures'
 
 describe('NozzleCompletionProvider', () => {
   let provider: NozzleCompletionProvider
   let analyzer: QueryContextAnalyzer
-  let testModels: monaco.editor.ITextModel[] = []
+  let testModels: Array<monaco.editor.ITextModel> = []
 
   beforeEach(() => {
     analyzer = new QueryContextAnalyzer()
@@ -63,7 +64,7 @@ describe('NozzleCompletionProvider', () => {
       const result = await provider.provideCompletionItems(model, position, context, token)
 
       expect(result).toBeDefined()
-      expect(result!.suggestions).toBeDefined()
+      expect(result.suggestions).toBeDefined()
       
       const labels = extractCompletionLabels(result)
       expect(labels).toContain('anvil.logs')
@@ -97,7 +98,7 @@ describe('NozzleCompletionProvider', () => {
       const result = await emptyProvider.provideCompletionItems(model, position, context, token)
 
       expect(result).toBeDefined()
-      expect(result!.suggestions).toBeDefined()
+      expect(result.suggestions).toBeDefined()
       
       // Should still provide basic keyword suggestions
       const labels = extractCompletionLabels(result)
@@ -383,7 +384,7 @@ describe('NozzleCompletionProvider', () => {
       const result = await configuredProvider.provideCompletionItems(model, position, context, token)
 
       expect(result).toBeDefined()
-      expect(result!.suggestions).toHaveLength(0) // Should be empty due to short prefix
+      expect(result.suggestions).toHaveLength(0) // Should be empty due to short prefix
     })
 
     test('should respect maxSuggestions configuration', async () => {
@@ -402,7 +403,7 @@ describe('NozzleCompletionProvider', () => {
       const result = await configuredProvider.provideCompletionItems(model, position, context, token)
 
       expect(result).toBeDefined()
-      expect(result!.suggestions.length).toBeLessThanOrEqual(5)
+      expect(result.suggestions.length).toBeLessThanOrEqual(5)
     })
   })
 
@@ -416,10 +417,10 @@ describe('NozzleCompletionProvider', () => {
       const result = await provider.provideCompletionItems(model, position, context, token)
 
       expect(result).toBeDefined()
-      expect(result!.suggestions.length).toBeGreaterThan(0)
+      expect(result.suggestions.length).toBeGreaterThan(0)
       
       // Check that sort text starts with appropriate priorities
-      const firstSuggestion = result!.suggestions[0]
+      const firstSuggestion = result.suggestions[0]
       expect(firstSuggestion.sortText).toMatch(/^[1-5]/) // Priority prefix
     })
 
@@ -433,7 +434,7 @@ describe('NozzleCompletionProvider', () => {
       
       expect(result).toBeDefined()
       
-      const tableCompletions = result!.suggestions.filter(
+      const tableCompletions = result.suggestions.filter(
         item => item.kind === monaco.languages.CompletionItemKind.Class
       )
       
@@ -452,7 +453,7 @@ describe('NozzleCompletionProvider', () => {
       const result = await provider.provideCompletionItems(model, position, context, token)
 
       expect(result).toBeDefined()
-      expect(result!.suggestions).toBeDefined()
+      expect(result.suggestions).toBeDefined()
       
       // Should still provide completions even with malformed SQL
       const labels = extractCompletionLabels(result)
@@ -468,7 +469,7 @@ describe('NozzleCompletionProvider', () => {
       const result = await provider.provideCompletionItems(model, position, context, token)
 
       expect(result).toBeDefined()
-      expect(result!.suggestions).toBeDefined()
+      expect(result.suggestions).toBeDefined()
       
       // Should provide basic keyword suggestions
       const labels = extractCompletionLabels(result)
@@ -492,7 +493,7 @@ describe('NozzleCompletionProvider', () => {
         const result = await provider.provideCompletionItems(model, position, context, token)
 
         expect(result).toBeDefined()
-        expect(result!.suggestions).toBeDefined()
+        expect(result.suggestions).toBeDefined()
         
         // Should still provide fallback suggestions
         const labels = extractCompletionLabels(result)

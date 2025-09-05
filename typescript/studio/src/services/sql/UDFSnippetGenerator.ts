@@ -15,9 +15,10 @@
  * @file udfSnippets.ts
  * @author SQL Intellisense System
  */
+import type { IMarkdownString, Position } from "monaco-editor/esm/vs/editor/editor.api";
+import { languages } from "monaco-editor/esm/vs/editor/editor.api";
 
-// Monaco types are defined in types.ts to avoid import issues
-import type { UserDefinedFunction } from './types'
+import type { UserDefinedFunction } from './types';
 
 /**
  * UDF Snippet Configuration
@@ -280,13 +281,14 @@ export class UdfSnippetGenerator {
    */
   createCompletionItem(
     udf: UserDefinedFunction, 
-    sortText: string
-  ): monaco.languages.CompletionItem {
+    sortText: string,
+    position: Position
+  ): languages.CompletionItem {
     const snippet = this.createUdfSnippet(udf)
     const displayName = udf.name.replace('${dataset}', '{dataset}')
     
     // Create rich documentation
-    const documentation: monaco.IMarkdownString = {
+    const documentation: IMarkdownString = {
       value: [
         `**${displayName}** - Nozzle User-Defined Function`,
         '',
@@ -308,18 +310,24 @@ export class UdfSnippetGenerator {
 
     return {
       label: displayName,
-      kind: monaco.languages.CompletionItemKind.Function,
+      kind: languages.CompletionItemKind.Function,
       detail: this.createDetailText(udf),
       documentation,
       insertText: snippet,
-      insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+      insertTextRules: languages.CompletionItemInsertTextRule.InsertAsSnippet,
       sortText,
       filterText: udf.name,
       // Trigger parameter hints after insertion if configured
-      command: this.config.triggerParameterHints ? {
+      ...(this.config.triggerParameterHints ? {command: {
         id: 'editor.action.triggerParameterHints',
         title: 'Trigger Parameter Hints'
-      } : undefined
+      }} : {}),
+      range: {
+        startColumn: position.column,
+        startLineNumber: position.lineNumber,
+        endColumn: position.column,
+        endLineNumber: position.lineNumber
+      }
     }
   }
 
@@ -371,10 +379,10 @@ export class UdfSnippetGenerator {
    * @param udf - User-defined function definition
    * @returns Monaco hover information
    */
-  createHoverInfo(udf: UserDefinedFunction): monaco.languages.Hover {
+  createHoverInfo(udf: UserDefinedFunction): any { // TODO: Define Monaco Hover type
     const displayName = udf.name.replace('${dataset}', '{dataset}')
     
-    const contents: monaco.IMarkdownString = {
+    const contents: IMarkdownString = {
       value: [
         `### ${displayName}`,
         '',
@@ -435,8 +443,9 @@ export function createUdfSnippet(
 export function createUdfCompletionItem(
   udf: UserDefinedFunction,
   sortText: string,
+  position: Position,
   config?: UdfSnippetConfig
-): monaco.languages.CompletionItem {
+): languages.CompletionItem {
   const generator = new UdfSnippetGenerator(config)
-  return generator.createCompletionItem(udf, sortText)
+  return generator.createCompletionItem(udf, sortText, position)
 }

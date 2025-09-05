@@ -2,16 +2,17 @@
  * Simple test to verify all imports work correctly
  */
 
-import { describe, test, expect } from 'vitest'
-import { QueryContextAnalyzer } from '../../../src/services/sql/contextAnalyzer'
-import { NozzleCompletionProvider } from '../../../src/services/sql/completionProvider'
-import { UdfSnippetGenerator } from '../../../src/services/sql/udfSnippets'
+import { describe, expect,test } from 'vitest'
+
 import { 
-  setupNozzleSQLProviders, 
-  updateProviderData, 
+  areProvidersActive, 
   getProviderMetrics,
-  areProvidersActive 
-} from '../../../src/services/sql'
+  setupNozzleSQLProviders, 
+  updateProviderData} from '../../../src/services/sql'
+import { NozzleCompletionProvider } from '../../../src/services/sql/NozzleCompletionProvider'
+import { QueryContextAnalyzer } from '../../../src/services/sql/QueryContextAnalyzer'
+import { UdfSnippetGenerator } from '../../../src/services/sql/UDFSnippetGenerator'
+
 import { mockMetadata, mockUDFs } from './fixtures'
 
 describe('SQL Intellisense Imports', () => {
