@@ -1,10 +1,7 @@
 "use client"
 
-import type {UseSuspenseQueryOptions} from "@tanstack/react-query";
-import {
-  queryOptions,
-  useSuspenseQuery
-} from "@tanstack/react-query"
+import type { UseSuspenseQueryOptions } from "@tanstack/react-query"
+import { queryOptions, useSuspenseQuery } from "@tanstack/react-query"
 
 // Type declaration for the experimental userAgentData API
 interface NavigatorUAData {

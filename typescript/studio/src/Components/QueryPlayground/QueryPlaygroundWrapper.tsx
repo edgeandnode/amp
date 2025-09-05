@@ -6,13 +6,14 @@ import { createFormHook, useStore } from "@tanstack/react-form"
 import { Schema, String as EffectString } from "effect"
 import { useEffect, useMemo } from "react"
 
+import { RESERVED_FIELDS } from "@/constants"
 import { useDatasetsMutation } from "@/hooks/useDatasetMutation"
 import { useOSQuery } from "@/hooks/useOSQuery"
 import { classNames } from "@/utils/classnames"
-import { RESERVED_FIELDS } from "@/constants"
 
 import { fieldContext, formContext } from "../Form/form.ts"
 import { SubmitButton } from "../Form/SubmitButton.tsx"
+
 import { Editor } from "./Editor.tsx"
 import { MetadataBrowser } from "./MetadataBrowser.tsx"
 import { SchemaBrowser } from "./SchemaBrowser.tsx"
@@ -83,14 +84,13 @@ export function QueryPlaygroundWrapper() {
     // Pre-format column headers once
     const formattedHeaders = columns.map((col) => ({
       key: col,
-      display:
-        col
-          .split(".")
-          .pop()
-          ?.replace(/\[|\]/g, " ")
-          .replace(/_/g, " ")
-          .trim()
-          .toUpperCase() || col.toUpperCase(),
+      display: col
+        .split(".")
+        .pop()
+        ?.replace(/\[|\]/g, " ")
+        .replace(/_/g, " ")
+        .trim()
+        .toUpperCase() || col.toUpperCase(),
     }))
 
     return { columns, formattedHeaders, rows: data }
@@ -131,9 +131,7 @@ export function QueryPlaygroundWrapper() {
               <Tabs.Root
                 className="w-full flex flex-col divide-y divide-space-1400"
                 value={activeTab}
-                onValueChange={(idx: number) =>
-                  form.setFieldValue("activeTab", idx)
-                }
+                onValueChange={(idx: number) => form.setFieldValue("activeTab", idx)}
               >
                 <Tabs.List className="w-full flex items-baseline relative bg-transparent px-2 pt-2 pb-0">
                   {queryField.state.value.map((query, idx) => (
@@ -145,27 +143,29 @@ export function QueryPlaygroundWrapper() {
                       render={
                         <div>
                           {query.tab || ""}
-                          {queryField.state.value.length > 1 ? (
-                            <button
-                              type="button"
-                              className="size-fit p-1.5 rounded-full inline-flex items-center justify-center bg-transparent hover:bg-transparent cursor-pointer"
-                              onClick={() => {
-                                queryField.removeValue(idx)
-                                // set the active tab to curr - 1
-                                form.setFieldValue(
-                                  "activeTab",
-                                  Math.max(idx - 1, 0),
-                                )
-                              }}
-                            >
-                              <XIcon
-                                size={3}
-                                alt=""
-                                className="text-white"
-                                aria-hidden="true"
-                              />
-                            </button>
-                          ) : null}
+                          {queryField.state.value.length > 1 ?
+                            (
+                              <button
+                                type="button"
+                                className="size-fit p-1.5 rounded-full inline-flex items-center justify-center bg-transparent hover:bg-transparent cursor-pointer"
+                                onClick={() => {
+                                  queryField.removeValue(idx)
+                                  // set the active tab to curr - 1
+                                  form.setFieldValue(
+                                    "activeTab",
+                                    Math.max(idx - 1, 0),
+                                  )
+                                }}
+                              >
+                                <XIcon
+                                  size={3}
+                                  alt=""
+                                  className="text-white"
+                                  aria-hidden="true"
+                                />
+                              </button>
+                            ) :
+                            null}
                         </div>
                       }
                     />
@@ -200,12 +200,10 @@ export function QueryPlaygroundWrapper() {
                             if (!trimmed) return "New Query"
 
                             // Extract the main SQL operation
-                            const operation =
-                              trimmed.split(/\s+/)[0]?.toUpperCase() || "QUERY"
+                            const operation = trimmed.split(/\s+/)[0]?.toUpperCase() || "QUERY"
 
                             // Try to extract table name from FROM clause
-                            const fromMatch =
-                              trimmed.match(/from\s+([^\s,;]+)/i)
+                            const fromMatch = trimmed.match(/from\s+([^\s,;]+)/i)
                             const tableName = fromMatch?.[1] || ""
 
                             if (tableName) {
@@ -275,72 +273,76 @@ export function QueryPlaygroundWrapper() {
                 >
                   <circle r={3} cx={3} cy={3} />
                 </svg>
-                {status === "success"
-                  ? "Success"
-                  : status === "error"
-                    ? "Failure"
-                    : status === "pending"
-                      ? "Querying..."
-                      : "Waiting"}
+                {status === "success" ?
+                  "Success" :
+                  status === "error" ?
+                  "Failure" :
+                  status === "pending" ?
+                  "Querying..." :
+                  "Waiting"}
               </span>
             </div>
-            {tableData ? (
-              <div className="flow-root">
-                <div className="overflow-x-auto">
-                  <div className="inline-block min-w-full py-2 align-middle px-4">
-                    <table className="relative min-w-full divide-y divide-white/10">
-                      <thead>
-                        <tr className="divide-x divide-white/10">
-                          {tableData.formattedHeaders.map((header, colIdx) => (
-                            <th
-                              key={header.key}
-                              scope="col"
-                              className={classNames(
-                                "py-3.5 text-left text-space-500 text-10 font-medium",
-                                colIdx === 0 ? "pr-3 pl-4 sm:pl-0" : "px-3",
-                              )}
-                            >
-                              {header.display}
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-white/10">
-                        {tableData.rows.map((record, rowIdx) => (
-                          <tr key={rowIdx} className="divide-x divide-white/10">
-                            {tableData.columns.map((column, colIdx) => {
-                              const value = record[column]
-
-                              return (
-                                <td
-                                  key={column}
-                                  className={classNames(
-                                    "py-4 whitespace-nowrap",
-                                    colIdx === 0
-                                      ? "pr-3 pl-4 text-16 sm:pl-0 text-white"
-                                      : "px-3 text-14 text-space-500",
-                                  )}
-                                >
-                                  {value == null
-                                    ? null
-                                    : typeof value === "object"
-                                      ? JSON.stringify(value)
-                                      : String(value)}
-                                </td>
-                              )
-                            })}
+            {tableData ?
+              (
+                <div className="flow-root">
+                  <div className="overflow-x-auto">
+                    <div className="inline-block min-w-full py-2 align-middle px-4">
+                      <table className="relative min-w-full divide-y divide-white/10">
+                        <thead>
+                          <tr className="divide-x divide-white/10">
+                            {tableData.formattedHeaders.map((header, colIdx) => (
+                              <th
+                                key={header.key}
+                                scope="col"
+                                className={classNames(
+                                  "py-3.5 text-left text-space-500 text-10 font-medium",
+                                  colIdx === 0 ? "pr-3 pl-4 sm:pl-0" : "px-3",
+                                )}
+                              >
+                                {header.display}
+                              </th>
+                            ))}
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody className="divide-y divide-white/10">
+                          {tableData.rows.map((record, rowIdx) => (
+                            <tr key={rowIdx} className="divide-x divide-white/10">
+                              {tableData.columns.map((column, colIdx) => {
+                                const value = record[column]
+
+                                return (
+                                  <td
+                                    key={column}
+                                    className={classNames(
+                                      "py-4 whitespace-nowrap",
+                                      colIdx === 0 ?
+                                        "pr-3 pl-4 text-16 sm:pl-0 text-white" :
+                                        "px-3 text-14 text-space-500",
+                                    )}
+                                  >
+                                    {value == null ?
+                                      null :
+                                      typeof value === "object" ?
+                                      JSON.stringify(value) :
+                                      String(value)}
+                                  </td>
+                                )
+                              })}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ) : data != null && data.length === 0 ? (
-              <div className="flex items-center justify-center py-8 text-space-500">
-                No results found
-              </div>
-            ) : null}
+              ) :
+              data != null && data.length === 0 ?
+              (
+                <div className="flex items-center justify-center py-8 text-space-500">
+                  No results found
+                </div>
+              ) :
+              null}
           </div>
         </div>
       </div>
@@ -353,7 +355,6 @@ FROM anvil.logs
 WHERE topic0 = evm_topic('${event.signature}');`.trim()
             const tab = `SELECT ... ${event.name}`
             // update the query at the active tab to query the selected event
-            let newTab = false
             form.setFieldValue("queries", (curr) => {
               const updatedQueries = [...curr]
               const active = curr[activeTab]
@@ -361,33 +362,29 @@ WHERE topic0 = evm_topic('${event.signature}');`.trim()
                 updatedQueries[activeTab] = { tab, query }
               } else {
                 updatedQueries.push({ tab, query })
-                newTab = true
+                // set new tab the active tab
+                form.setFieldValue("activeTab", updatedQueries.length - 1)
               }
 
               return updatedQueries
             })
-            if (newTab) {
-              // set new tab the active tab
-              form.setFieldValue("activeTab", (curr) => curr + 1)
-            }
           }}
         />
         <MetadataBrowser
           onTableSelected={(table) => {
             const query = `SELECT
-  ${table.metadata_columns
-    .map((col) => {
-      if (RESERVED_FIELDS.has(col.name)) {
-        return `"${col.name}"`
-      }
-      return col.name
-    })
-    .join(",\n  ")}
+  ${
+              table.metadata_columns.map((col) => {
+                if (RESERVED_FIELDS.has(col.name)) {
+                  return `"${col.name}"`
+                }
+                return col.name
+              }).join(",\n  ")
+            }
 FROM ${table.source}
 LIMIT 10;`.trim()
             const tab = `SELECT ... ${table.source}`
             // update the query with the selected table and columns
-            let newTab = false
             form.setFieldValue("queries", (curr) => {
               const updatedQueries = [...curr]
               const active = curr[activeTab]
@@ -395,14 +392,11 @@ LIMIT 10;`.trim()
                 updatedQueries[activeTab] = { tab, query }
               } else {
                 updatedQueries.push({ tab, query })
-                newTab = true
+                // set new tab the active tab
+                form.setFieldValue("activeTab", updatedQueries.length - 1)
               }
               return updatedQueries
             })
-            if (newTab) {
-              // set new tab the active tab
-              form.setFieldValue("activeTab", (curr) => curr + 1)
-            }
           }}
         />
         <UDFBrowser />

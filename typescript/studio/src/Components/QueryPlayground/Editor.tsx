@@ -7,18 +7,17 @@ import { useStore } from "@tanstack/react-form"
 import { ErrorMessages } from "../Form/ErrorMessages"
 import { useFieldContext } from "../Form/form"
 
-export type EditorProps = Omit<
-  MonacoEditorProps,
-  "defaultLanguage" | "language"
-> & {
-  id: string
-  onSubmit?: () => void
-}
+export type EditorProps =
+  & Omit<MonacoEditorProps, "defaultLanguage" | "language">
+  & {
+    id: string
+    onSubmit?: () => void
+  }
 export function Editor({
   height = 450,
   id,
-  theme = "vs-dark",
   onSubmit,
+  theme = "vs-dark",
   ...rest
 }: Readonly<EditorProps>) {
   const field = useFieldContext<string>()
@@ -41,18 +40,17 @@ export function Editor({
         aria-describedby={hasErrors ? `${id}-invalid` : undefined}
         onMount={(editor) => {
           // Add keyboard shortcut for CMD+ENTER / CTRL+ENTER
+          // When user hits CMD/CTRL+ENTER, we submit the query
           editor.addCommand(
             // monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter
             2048 | 3, // KeyMod.CtrlCmd | KeyCode.Enter
             () => {
               onSubmit?.()
-            }
+            },
           )
         }}
       />
-      {hasErrors ? (
-        <ErrorMessages id={`${id}-invalid`} errors={errors} />
-      ) : null}
+      {hasErrors ? <ErrorMessages id={`${id}-invalid`} errors={errors} /> : null}
     </div>
   )
 }
