@@ -111,8 +111,9 @@ export class QueryContextAnalyzer {
     const currentPrefix = this.getCurrentPrefix(model, position)
     
     // Check if cursor is in string or comment (should avoid completions)
-    if (this.isCursorInStringOrComment(query, offset)) {
-      return this.createEmptyContext(currentPrefix)
+    const { inString, inComment } = this.getCursorStringCommentStatus(query, offset)
+    if (inString || inComment) {
+      return this.createEmptyContext(currentPrefix, inString, inComment)
     }
 
     // Find the clause where cursor is positioned
@@ -468,6 +469,8 @@ export class QueryContextAnalyzer {
         break
         
       case 'SELECT':
+      case 'GROUP_BY':
+      case 'ORDER_BY':
         expectations.column = true
         expectations.function = true
         break
@@ -594,6 +597,11 @@ export class QueryContextAnalyzer {
   }
 
   private isCursorInStringOrComment(query: string, offset: number): boolean {
+    const { inString, inComment } = this.getCursorStringCommentStatus(query, offset)
+    return inString || inComment
+  }
+
+  private getCursorStringCommentStatus(query: string, offset: number): { inString: boolean, inComment: boolean } {
     // Simple heuristic: check if cursor is between quotes or in comment
     const beforeCursor = query.substring(0, offset)
     
@@ -602,18 +610,17 @@ export class QueryContextAnalyzer {
     const doubleQuotes = (beforeCursor.match(/(?<!\\)"/g) || []).length
     
     // If odd number of quotes, we're inside a string
-    if (singleQuotes % 2 === 1 || doubleQuotes % 2 === 1) {
-      return true
+    const inString = singleQuotes % 2 === 1 || doubleQuotes % 2 === 1
+    if (inString) {
+      return { inString: true, inComment: false }
     }
 
     // Check for line comments
     const lastLineStart = beforeCursor.lastIndexOf('\n') + 1
     const currentLine = beforeCursor.substring(lastLineStart)
-    if (currentLine.includes('--')) {
-      return true
-    }
+    const inComment = currentLine.includes('--')
 
-    return false
+    return { inString, inComment }
   }
 
   private calculateSubqueryDepth(tokens: SqlToken[], offset: number): number {
@@ -660,7 +667,20 @@ export class QueryContextAnalyzer {
     this.logDebug('Context cache cleared')
   }
 
-  private createEmptyContext(currentPrefix = ''): QueryContext {
+  /**
+   * Get Cache Statistics
+   * 
+   * Returns cache statistics for testing and monitoring.
+   * 
+   * @returns Cache statistics
+   */
+  getCacheStats(): { contextCache: number } {
+    return {
+      contextCache: this.contextCache.size
+    }
+  }
+
+  private createEmptyContext(currentPrefix = '', inString = false, inComment = false): QueryContext {
     return {
       expectsTable: false,
       expectsColumn: false,
@@ -670,8 +690,8 @@ export class QueryContextAnalyzer {
       availableTables: [],
       tableAliases: new Map(),
       currentPrefix,
-      cursorInString: true,
-      cursorInComment: false,
+      cursorInString: inString,
+      cursorInComment: inComment,
       currentClause: null,
       subqueryDepth: 0,
       parentContexts: []

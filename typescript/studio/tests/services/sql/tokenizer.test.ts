@@ -17,14 +17,35 @@ describe('SQL Tokenization via Context Analyzer', () => {
     analyzer.clearCache()
   })
 
+  // Helper function to create proper mock models
+  const createMockModel = (query: string) => ({
+    getValue: () => query,
+    getOffsetAt: (position: any) => position.column - 1,
+    getLineContent: (lineNumber: number) => {
+      const lines = query.split('\n')
+      return lines[lineNumber - 1] || ''
+    },
+    getWordAtPosition: (position: any) => {
+      const line = query.split('\n')[position.lineNumber - 1] || ''
+      const beforeCursor = line.substring(0, position.column - 1)
+      const match = beforeCursor.match(/(\w+)$/)
+      if (match) {
+        const word = match[1]
+        const startColumn = position.column - word.length
+        return {
+          word,
+          startColumn,
+          endColumn: position.column
+        }
+      }
+      return null
+    }
+  })
+
   describe('Basic SQL Recognition', () => {
     test('should recognize SELECT keyword context', () => {
-      const mockModel = {
-        getValue: () => "SELECT * FROM users",
-        getOffsetAt: () => 8 // Position after "SELECT "
-      } as any
-      
-      const mockPosition = { lineNumber: 1, column: 8 } as any
+      const mockModel = createMockModel("SELECT * FROM users")
+      const mockPosition = { lineNumber: 1, column: 8 } // Position after "SELECT "
       
       const context = analyzer.analyzeContext(mockModel, mockPosition)
       
@@ -34,12 +55,8 @@ describe('SQL Tokenization via Context Analyzer', () => {
     })
 
     test('should recognize FROM keyword context', () => {
-      const mockModel = {
-        getValue: () => "SELECT * FROM ",
-        getOffsetAt: () => 15 // Position after "FROM "
-      } as any
-      
-      const mockPosition = { lineNumber: 1, column: 15 } as any
+      const mockModel = createMockModel("SELECT * FROM ")
+      const mockPosition = { lineNumber: 1, column: 15 } // Position after "FROM "
       
       const context = analyzer.analyzeContext(mockModel, mockPosition)
       
@@ -49,12 +66,8 @@ describe('SQL Tokenization via Context Analyzer', () => {
     })
 
     test('should recognize WHERE keyword context', () => {
-      const mockModel = {
-        getValue: () => "SELECT * FROM users WHERE ",
-        getOffsetAt: () => 27 // Position after "WHERE "
-      } as any
-      
-      const mockPosition = { lineNumber: 1, column: 27 } as any
+      const mockModel = createMockModel("SELECT * FROM users WHERE ")
+      const mockPosition = { lineNumber: 1, column: 27 } // Position after "WHERE "
       
       const context = analyzer.analyzeContext(mockModel, mockPosition)
       
@@ -66,12 +79,8 @@ describe('SQL Tokenization via Context Analyzer', () => {
 
   describe('String and Comment Detection', () => {
     test('should detect cursor in string literal', () => {
-      const mockModel = {
-        getValue: () => "SELECT * FROM users WHERE name = 'test'",
-        getOffsetAt: () => 37 // Position inside string
-      } as any
-      
-      const mockPosition = { lineNumber: 1, column: 37 } as any
+      const mockModel = createMockModel("SELECT * FROM users WHERE name = 'test'")
+      const mockPosition = { lineNumber: 1, column: 37 } // Position inside string
       
       const context = analyzer.analyzeContext(mockModel, mockPosition)
       
@@ -80,12 +89,8 @@ describe('SQL Tokenization via Context Analyzer', () => {
     })
 
     test('should detect cursor in line comment', () => {
-      const mockModel = {
-        getValue: () => "SELECT * FROM users -- comment here",
-        getOffsetAt: () => 35 // Position in comment
-      } as any
-      
-      const mockPosition = { lineNumber: 1, column: 35 } as any
+      const mockModel = createMockModel("SELECT * FROM users -- comment here")
+      const mockPosition = { lineNumber: 1, column: 35 } // Position in comment
       
       const context = analyzer.analyzeContext(mockModel, mockPosition)
       
@@ -96,12 +101,8 @@ describe('SQL Tokenization via Context Analyzer', () => {
 
   describe('Table and Alias Detection', () => {
     test('should detect table references', () => {
-      const mockModel = {
-        getValue: () => "SELECT * FROM anvil.logs WHERE ",
-        getOffsetAt: () => 32 // Position after WHERE
-      } as any
-      
-      const mockPosition = { lineNumber: 1, column: 32 } as any
+      const mockModel = createMockModel("SELECT * FROM anvil.logs WHERE ")
+      const mockPosition = { lineNumber: 1, column: 32 } // Position after WHERE
       
       const context = analyzer.analyzeContext(mockModel, mockPosition)
       
@@ -110,12 +111,8 @@ describe('SQL Tokenization via Context Analyzer', () => {
     })
 
     test('should detect table aliases', () => {
-      const mockModel = {
-        getValue: () => "SELECT * FROM anvil.logs l WHERE ",
-        getOffsetAt: () => 34 // Position after WHERE
-      } as any
-      
-      const mockPosition = { lineNumber: 1, column: 34 } as any
+      const mockModel = createMockModel("SELECT * FROM anvil.logs l WHERE ")
+      const mockPosition = { lineNumber: 1, column: 34 } // Position after WHERE
       
       const context = analyzer.analyzeContext(mockModel, mockPosition)
       
@@ -126,12 +123,8 @@ describe('SQL Tokenization via Context Analyzer', () => {
 
   describe('Error Recovery', () => {
     test('should handle empty query gracefully', () => {
-      const mockModel = {
-        getValue: () => "",
-        getOffsetAt: () => 0
-      } as any
-      
-      const mockPosition = { lineNumber: 1, column: 1 } as any
+      const mockModel = createMockModel("")
+      const mockPosition = { lineNumber: 1, column: 1 }
       
       const context = analyzer.analyzeContext(mockModel, mockPosition)
       
@@ -142,12 +135,8 @@ describe('SQL Tokenization via Context Analyzer', () => {
     })
 
     test('should handle malformed SQL gracefully', () => {
-      const mockModel = {
-        getValue: () => "SELECT FROM users", // Missing columns
-        getOffsetAt: () => 13 // Position after "FROM "
-      } as any
-      
-      const mockPosition = { lineNumber: 1, column: 13 } as any
+      const mockModel = createMockModel("SELECT FROM users") // Missing columns
+      const mockPosition = { lineNumber: 1, column: 13 } // Position after "FROM "
       
       const context = analyzer.analyzeContext(mockModel, mockPosition)
       
@@ -159,12 +148,8 @@ describe('SQL Tokenization via Context Analyzer', () => {
   describe('Caching', () => {
     test('should provide cache clearing functionality', () => {
       // Create some analysis to populate cache
-      const mockModel = {
-        getValue: () => "SELECT * FROM users",
-        getOffsetAt: () => 8
-      } as any
-      
-      const mockPosition = { lineNumber: 1, column: 8 } as any
+      const mockModel = createMockModel("SELECT * FROM users")
+      const mockPosition = { lineNumber: 1, column: 8 }
       
       analyzer.analyzeContext(mockModel, mockPosition)
       

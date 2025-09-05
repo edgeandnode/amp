@@ -200,7 +200,7 @@ describe('NozzleCompletionProvider', () => {
       expect(labels).toContain('evm_decode_log')
       expect(labels).toContain('evm_topic')
       expect(labels).toContain('attestation_hash')
-      expect(labels).toContain('dataset.eth_call')
+      expect(labels).toContain('{dataset}.eth_call')
     })
 
     test('should provide UDF snippets with placeholders', async () => {
