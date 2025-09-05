@@ -3,13 +3,15 @@
 import type { EditorProps as MonacoEditorProps } from "@monaco-editor/react"
 import MonacoEditor, { loader } from "@monaco-editor/react"
 import { useStore } from "@tanstack/react-form"
-import * as monaco from "monaco-editor"
+import * as monaco from "monaco-editor/esm/vs/editor/editor.api"
+// eslint-disable-next-line import-x/default
 import editorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker"
 import { useEffect, useRef } from "react"
 
 import { useMetadataSuspenseQuery } from "@/hooks/useMetadataQuery"
 import { useUDFSuspenseQuery } from "@/hooks/useUDFQuery"
-import { setupNozzleSQLProviders, type DisposableHandle } from "@/services/sql"
+import type { DisposableHandle } from "@/services/sql"
+import { setupNozzleSQLProviders } from "@/services/sql"
 
 import { ErrorMessages } from "../Form/ErrorMessages"
 import { useFieldContext } from "../Form/form"

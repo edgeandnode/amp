@@ -4,7 +4,7 @@
  */
 
 // Mock data exports
-export * from './mockMetadata'
-export * from './mockQueries'
-export * from './mockUDFs'
-export * from './testUtils'
+export * from "./mockMetadata"
+export * from "./mockQueries"
+export * from "./mockUDFs"
+export * from "./testUtils"

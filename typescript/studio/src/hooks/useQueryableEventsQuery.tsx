@@ -136,7 +136,8 @@ export function useQueryableEventsQuery({
           dispatch({ type: "SUCCESS", payload: parsedData.events })
           callbacksRef.current.onSuccess?.(parsedData.events)
         } catch (e) {
-          const error = e instanceof Error ? e : new Error("Failed to parse SSE data")
+          const error =
+            e instanceof Error ? e : new Error("Failed to parse SSE data")
           dispatch({ type: "ERROR", payload: error })
           callbacksRef.current.onError?.(error)
         }
@@ -164,7 +165,8 @@ export function useQueryableEventsQuery({
 
       eventSourceRef.current = es
     } catch (e) {
-      const error = e instanceof Error ? e : new Error("Failed to create SSE connection")
+      const error =
+        e instanceof Error ? e : new Error("Failed to create SSE connection")
       dispatch({ type: "ERROR", payload: error })
       callbacksRef.current.onError?.(error)
     }

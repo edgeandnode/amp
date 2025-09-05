@@ -3,13 +3,16 @@
  * Provides helpers for creating Monaco models and testing completion providers
  */
 
-import * as monaco from "monaco-editor"
 import { Effect } from "effect"
+import * as monaco from "monaco-editor/esm/vs/editor/editor.api"
 
 /**
  * Creates a Monaco editor model for testing
  */
-export function createTestModel(content: string, language = "sql"): monaco.editor.ITextModel {
+export function createTestModel(
+  content: string,
+  language = "sql",
+): monaco.editor.ITextModel {
   return monaco.editor.createModel(content, language)
 }
 
@@ -23,7 +26,10 @@ export function disposeTestModel(model: monaco.editor.ITextModel): void {
 /**
  * Creates a Monaco Position for testing
  */
-export function createTestPosition(line: number, column: number): monaco.Position {
+export function createTestPosition(
+  line: number,
+  column: number,
+): monaco.Position {
   return new monaco.Position(line, column)
 }
 
@@ -34,7 +40,7 @@ export function createTestRange(
   startLine: number,
   startColumn: number,
   endLine: number,
-  endColumn: number
+  endColumn: number,
 ): monaco.Range {
   return new monaco.Range(startLine, startColumn, endLine, endColumn)
 }
@@ -43,45 +49,48 @@ export function createTestRange(
  * Creates a mock completion context for testing
  */
 export function createMockCompletionContext(
-  triggerKind: monaco.languages.CompletionTriggerKind = monaco.languages.CompletionTriggerKind.Invoke,
-  triggerCharacter?: string
+  triggerKind: monaco.languages.CompletionTriggerKind = monaco.languages
+    .CompletionTriggerKind.Invoke,
+  triggerCharacter?: string,
 ): monaco.languages.CompletionContext {
   return {
     triggerKind,
-    triggerCharacter
+    triggerCharacter,
   }
 }
 
 /**
  * Creates a mock cancellation token for testing
  */
-export function createMockCancellationToken(isCancelled = false): monaco.CancellationToken {
+export function createMockCancellationToken(
+  isCancelled = false,
+): monaco.CancellationToken {
   return {
     isCancellationRequested: isCancelled,
-    onCancellationRequested: () => ({ dispose: () => {} })
+    onCancellationRequested: () => ({ dispose: () => {} }),
   }
 }
 
 /**
  * Helper to run Effect test cases with proper error handling
  */
-export async function runEffectTest<A>(
-  effect: Effect.Effect<A, any, any>
-): Promise<A> {
+export async function runEffectTest<TResult>(
+  effect: Effect.Effect<TResult, any, any>,
+): Promise<TResult> {
   return await Effect.runPromise(effect)
 }
 
 /**
  * Helper to run Effect test cases that should fail
  */
-export async function runEffectTestExpectError<E>(
-  effect: Effect.Effect<any, E, any>
-): Promise<E> {
+export async function runEffectTestExpectError<TError>(
+  effect: Effect.Effect<any, TError, any>,
+): Promise<TError> {
   try {
     await Effect.runPromise(effect)
     throw new Error("Expected effect to fail but it succeeded")
   } catch (error) {
-    return error as E
+    return error as TError
   }
 }
 
@@ -97,15 +106,15 @@ export interface TestSetup {
 export function createTestSetup(
   query: string,
   line: number,
-  column: number
+  column: number,
 ): TestSetup {
   const model = createTestModel(query)
   const position = createTestPosition(line, column)
-  
+
   return {
     model,
     position,
-    cleanup: () => disposeTestModel(model)
+    cleanup: () => disposeTestModel(model),
   }
 }
 
@@ -113,14 +122,14 @@ export function createTestSetup(
  * Helper to extract completion item labels from completion results
  */
 export function extractCompletionLabels(
-  completionList: monaco.languages.CompletionList | null
-): string[] {
-  if (!completionList || !completionList.suggestions) {
+  completionList: monaco.languages.CompletionList | null,
+): Array<string> {
+  if (!completionList?.suggestions) {
     return []
   }
-  
-  return completionList.suggestions.map(item => 
-    typeof item.label === 'string' ? item.label : item.label.label
+
+  return completionList.suggestions.map((item) =>
+    typeof item.label === "string" ? item.label : item.label.label,
   )
 }
 
@@ -129,14 +138,15 @@ export function extractCompletionLabels(
  */
 export function findCompletionByLabel(
   completionList: monaco.languages.CompletionList | null,
-  label: string
+  label: string,
 ): monaco.languages.CompletionItem | undefined {
-  if (!completionList || !completionList.suggestions) {
+  if (!completionList?.suggestions) {
     return undefined
   }
-  
-  return completionList.suggestions.find(item => {
-    const itemLabel = typeof item.label === 'string' ? item.label : item.label.label
+
+  return completionList.suggestions.find((item) => {
+    const itemLabel =
+      typeof item.label === "string" ? item.label : item.label.label
     return itemLabel === label
   })
 }
@@ -146,15 +156,15 @@ export function findCompletionByLabel(
  */
 export function assertCompletionContains(
   completionList: monaco.languages.CompletionList | null,
-  expectedLabels: string[]
+  expectedLabels: Array<string>,
 ): void {
   const actualLabels = extractCompletionLabels(completionList)
-  
+
   for (const expectedLabel of expectedLabels) {
     if (!actualLabels.includes(expectedLabel)) {
       throw new Error(
         `Expected completion to contain "${expectedLabel}". ` +
-        `Actual completions: [${actualLabels.join(', ')}]`
+          `Actual completions: [${actualLabels.join(", ")}]`,
       )
     }
   }
@@ -165,15 +175,15 @@ export function assertCompletionContains(
  */
 export function assertCompletionDoesNotContain(
   completionList: monaco.languages.CompletionList | null,
-  unexpectedLabels: string[]
+  unexpectedLabels: Array<string>,
 ): void {
   const actualLabels = extractCompletionLabels(completionList)
-  
+
   for (const unexpectedLabel of unexpectedLabels) {
     if (actualLabels.includes(unexpectedLabel)) {
       throw new Error(
         `Expected completion to NOT contain "${unexpectedLabel}". ` +
-        `Actual completions: [${actualLabels.join(', ')}]`
+          `Actual completions: [${actualLabels.join(", ")}]`,
       )
     }
   }
@@ -184,13 +194,13 @@ export function assertCompletionDoesNotContain(
  */
 export function countCompletionsByKind(
   completionList: monaco.languages.CompletionList | null,
-  kind: monaco.languages.CompletionItemKind
+  kind: monaco.languages.CompletionItemKind,
 ): number {
-  if (!completionList || !completionList.suggestions) {
+  if (!completionList?.suggestions) {
     return 0
   }
-  
-  return completionList.suggestions.filter(item => item.kind === kind).length
+
+  return completionList.suggestions.filter((item) => item.kind === kind).length
 }
 
 /**
@@ -198,15 +208,15 @@ export function countCompletionsByKind(
  */
 export async function measurePerformance<T>(
   operation: () => Promise<T>,
-  description: string
+  description: string,
 ): Promise<{ result: T; duration: number }> {
   const start = performance.now()
   const result = await operation()
   const end = performance.now()
   const duration = end - start
-  
+
   console.log(`${description}: ${duration.toFixed(2)}ms`)
-  
+
   return { result, duration }
 }
 
@@ -214,11 +224,11 @@ export async function measurePerformance<T>(
  * Helper to create multiple test models for batch testing
  */
 export function createTestBatch(
-  queries: Array<{ query: string; position: monaco.Position }>
+  queries: Array<{ query: string; position: monaco.Position }>,
 ): Array<{ model: monaco.editor.ITextModel; position: monaco.Position }> {
-  return queries.map(({ query, position }) => ({
+  return queries.map(({ position, query }) => ({
     model: createTestModel(query),
-    position
+    position,
   }))
 }
 
@@ -226,7 +236,7 @@ export function createTestBatch(
  * Helper to dispose multiple test models
  */
 export function disposeTestBatch(
-  batch: Array<{ model: monaco.editor.ITextModel; position: monaco.Position }>
+  batch: Array<{ model: monaco.editor.ITextModel; position: monaco.Position }>,
 ): void {
   batch.forEach(({ model }) => model.dispose())
 }
