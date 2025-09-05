@@ -2,6 +2,7 @@
   "kind": "evm-rpc",
   "name": "base",
   "network": "base",
+  "start_block": 33411770,
   "schema": {
     "blocks": {
       "timestamp": { "Timestamp": ["Nanosecond", "+00:00"] },

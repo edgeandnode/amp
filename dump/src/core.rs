@@ -31,7 +31,7 @@ pub async fn dump_tables(
     n_jobs: u16,
     partition_size: u64,
     microbatch_max_interval: u64,
-    range: (i64, Option<i64>),
+    end: Option<i64>,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
     only_finalized_blocks: bool,
 ) -> Result<(), BoxError> {
@@ -49,13 +49,13 @@ pub async fn dump_tables(
             tables,
             n_jobs,
             partition_size,
-            range,
+            end,
             metrics,
             only_finalized_blocks,
         )
         .await
     } else {
-        dump_user_tables(ctx, tables, microbatch_max_interval, n_jobs, range, metrics).await
+        dump_user_tables(ctx, tables, microbatch_max_interval, n_jobs, end, metrics).await
     }
 }
 
@@ -65,7 +65,7 @@ pub async fn dump_raw_tables(
     tables: &[Arc<PhysicalTable>],
     n_jobs: u16,
     partition_size: u64,
-    range: (i64, Option<i64>),
+    end: Option<i64>,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
     only_finalized_blocks: bool,
 ) -> Result<(), BoxError> {
@@ -106,7 +106,7 @@ pub async fn dump_raw_tables(
                 partition_size,
                 &parquet_opts,
                 compaction_opts,
-                range,
+                end,
                 &dataset.name,
                 metrics,
                 only_finalized_blocks,
@@ -132,7 +132,7 @@ pub async fn dump_user_tables(
     tables: &[Arc<PhysicalTable>],
     microbatch_max_interval: u64,
     n_jobs: u16,
-    range: (i64, Option<i64>),
+    end: Option<i64>,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
 ) -> Result<(), BoxError> {
     if n_jobs > 1 {
@@ -174,7 +174,7 @@ pub async fn dump_user_tables(
             &parquet_opts,
             &compaction_opts,
             microbatch_max_interval,
-            range,
+            end,
             metrics.clone(),
         )
         .await?;

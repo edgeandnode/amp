@@ -1,4 +1,4 @@
-use common::DatasetValue;
+use common::{BlockNum, DatasetValue};
 use schemars::JsonSchema;
 use serde::Deserialize;
 
@@ -14,6 +14,9 @@ pub struct DatasetDef {
     pub name: String,
     /// Network name, e.g., `mainnet`.
     pub network: String,
+    /// Dataset start block.
+    #[serde(default)]
+    pub start_block: BlockNum,
 }
 
 impl DatasetDef {
