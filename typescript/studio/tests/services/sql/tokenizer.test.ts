@@ -2,7 +2,7 @@
  * Unit tests for SQL Tokenization via QueryContextAnalyzer
  * Tests SQL token recognition and context analysis functionality
  */
-import {Position} from "monaco-editor/esm/vs/editor/editor.api"
+import { Position } from "monaco-editor/esm/vs/editor/editor.api"
 import { afterEach, beforeEach, describe, expect, test } from "vitest"
 
 import { QueryContextAnalyzer } from "../../../src/services/sql/QueryContextAnalyzer"

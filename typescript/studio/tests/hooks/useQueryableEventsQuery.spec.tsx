@@ -103,8 +103,7 @@ describe("useQueryableEventsQuery", () => {
             { name: "to", datatype: "address", indexed: true },
             { name: "value", datatype: "uint256", indexed: false },
           ],
-          signature:
-            "Transfer(address indexed from, address indexed to, uint256 value)",
+          signature: "Transfer(address indexed from, address indexed to, uint256 value)",
           source: ["./contracts/src/Counter.sol"],
         }),
       ],
@@ -151,8 +150,7 @@ describe("useQueryableEventsQuery", () => {
             { name: "to", datatype: "address", indexed: true },
             { name: "value", datatype: "uint256", indexed: false },
           ],
-          signature:
-            "Transfer(address indexed from, address indexed to, uint256 value)",
+          signature: "Transfer(address indexed from, address indexed to, uint256 value)",
           source: ["./contracts/src/Counter.sol"],
         }),
       ],
@@ -225,9 +223,7 @@ describe("useQueryableEventsQuery", () => {
   })
 
   it("should handle disabled state", () => {
-    const { result } = renderHook(() =>
-      useQueryableEventsQuery({ enabled: false }),
-    )
+    const { result } = renderHook(() => useQueryableEventsQuery({ enabled: false }))
 
     // Should not connect when disabled
     expect(result.current.isLoading).toBe(false)
@@ -266,9 +262,7 @@ describe("useQueryableEventsQuery", () => {
   })
 
   it("should handle retry functionality", () => {
-    const { result } = renderHook(() =>
-      useQueryableEventsQuery({ retry: true, retryDelay: 100 }),
-    )
+    const { result } = renderHook(() => useQueryableEventsQuery({ retry: true, retryDelay: 100 }))
 
     // Hook should start loading immediately when enabled
     expect(result.current.isLoading).toBe(true)
@@ -280,9 +274,7 @@ describe("useQueryableEventsQuery", () => {
   it("should handle callbacks configuration", () => {
     const onSuccess = vi.fn()
     const onError = vi.fn()
-    const { result } = renderHook(() =>
-      useQueryableEventsQuery({ onSuccess, onError }),
-    )
+    const { result } = renderHook(() => useQueryableEventsQuery({ onSuccess, onError }))
 
     // Should accept callback configurations and start loading
     expect(result.current.isLoading).toBe(true)
@@ -291,9 +283,7 @@ describe("useQueryableEventsQuery", () => {
   })
 
   it("should expose correct interface", () => {
-    const { result } = renderHook(() =>
-      useQueryableEventsQuery({ enabled: false }),
-    )
+    const { result } = renderHook(() => useQueryableEventsQuery({ enabled: false }))
 
     // Should expose the correct interface
     expect(result.current).toHaveProperty("data")

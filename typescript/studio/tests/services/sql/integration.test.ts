@@ -228,9 +228,7 @@ describe("SQL Intellisense Integration", () => {
 
       // Check that UDF completions have snippet format
       const evmDecodeCompletion = result!.suggestions.find(
-        (s) =>
-          (typeof s.label === "string" ? s.label : s.label.label) ===
-          "evm_decode_log",
+        (s) => (typeof s.label === "string" ? s.label : s.label.label) === "evm_decode_log",
       )
 
       expect(evmDecodeCompletion).toBeDefined()

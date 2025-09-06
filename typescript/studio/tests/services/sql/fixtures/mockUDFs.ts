@@ -39,8 +39,7 @@ export const mockUDFs: ReadonlyArray<UserDefinedFunction> = [
       "This is an aggregate UDF which takes any number of parameters of any type. Returns a hash over all the input parameters (columns) over all the rows.",
     sql: "attestation_hash(column1, column2, ...)",
     parameters: ["column1", "column2"],
-    example:
-      "SELECT attestation_hash(block_number, transaction_hash) FROM anvil.transactions",
+    example: "SELECT attestation_hash(block_number, transaction_hash) FROM anvil.transactions",
   },
   {
     name: "evm_decode_params",
@@ -48,8 +47,7 @@ export const mockUDFs: ReadonlyArray<UserDefinedFunction> = [
       "Decodes the Ethereum ABI-encoded parameters of a function. All of the function parameters and results must be named. The output of this function will be packed into a struct.",
     sql: "evm_decode_params(input_data, signature)",
     parameters: ["input_data", "signature"],
-    example:
-      "SELECT evm_decode_params(input, 'transfer(address to, uint256 amount)') FROM anvil.transactions",
+    example: "SELECT evm_decode_params(input, 'transfer(address to, uint256 amount)') FROM anvil.transactions",
   },
   {
     name: "evm_encode_params",
@@ -70,12 +68,10 @@ export const mockUDFs: ReadonlyArray<UserDefinedFunction> = [
   },
   {
     name: "evm_decode_type",
-    description:
-      "Decodes the given Solidity ABI-encoded value into an SQL value.",
+    description: "Decodes the given Solidity ABI-encoded value into an SQL value.",
     sql: "evm_decode_type(data, type)",
     parameters: ["data", "type"],
-    example:
-      "SELECT evm_decode_type(data, 'uint256') FROM anvil.logs WHERE LENGTH(data) = 32",
+    example: "SELECT evm_decode_type(data, 'uint256') FROM anvil.logs WHERE LENGTH(data) = 32",
   },
 ] as const
 

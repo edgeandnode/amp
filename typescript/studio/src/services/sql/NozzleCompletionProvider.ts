@@ -30,11 +30,7 @@ import { languages } from "monaco-editor/esm/vs/editor/editor.api"
 import type { DatasetMetadata } from "nozzl/Studio/Model"
 
 import { QueryContextAnalyzer } from "./QueryContextAnalyzer"
-import type {
-  CompletionConfig,
-  QueryContext,
-  UserDefinedFunction,
-} from "./types"
+import type { CompletionConfig, QueryContext, UserDefinedFunction } from "./types"
 
 import { COMPLETION_PRIORITY, DEFAULT_COMPLETION_CONFIG } from "./types"
 
@@ -51,9 +47,7 @@ import { COMPLETION_PRIORITY, DEFAULT_COMPLETION_CONFIG } from "./types"
  * - Performance optimizations with caching and filtering
  * - Error recovery for malformed queries
  */
-export class NozzleCompletionProvider
-  implements languages.CompletionItemProvider
-{
+export class NozzleCompletionProvider implements languages.CompletionItemProvider {
   private analyzer: QueryContextAnalyzer
   private config: CompletionConfig
 
@@ -588,10 +582,9 @@ export class NozzleCompletionProvider
     if (queryContext.currentPrefix) {
       const lowerPrefix = queryContext.currentPrefix.toLowerCase()
       filtered = suggestions.filter((suggestion) => {
-        const labelText =
-          typeof suggestion.label === "string"
-            ? suggestion.label
-            : suggestion.label.label
+        const labelText = typeof suggestion.label === "string"
+          ? suggestion.label
+          : suggestion.label.label
         return (
           labelText.toLowerCase().includes(lowerPrefix) ||
           (suggestion.filterText &&

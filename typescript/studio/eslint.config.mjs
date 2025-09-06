@@ -8,42 +8,21 @@ export default [
   ...rootConfig,
   ...tanstackConfig,
   {
-    ignores: ["prettier.config.js"],
+    ignores: ["prettier.config.js", "eslint.config.mjs"],
   },
   {
+    languageOptions: {
+      parserOptions: {
+        tsconfigRootDir: import.meta.dirname,
+        project: "./tsconfig.json",
+      },
+    },
     rules: {
-      // Disable @effect/dprint to avoid conflicts with import sorting
-      "@effect/dprint": "off",
-      // Disable tanstack's import/order rule to avoid conflicts with simple-import-sort
+      // Disable tanstack's import/order rule to avoid conflicts with @effect/dprint
       "import/order": "off",
       "import-x/order": "off",
-      // Disable sort-imports to avoid conflicts
+      // Disable sort-imports to avoid conflicts with @effect/dprint formatting
       "sort-imports": "off",
-      // Enable simple-import-sort for import sorting
-      "simple-import-sort/imports": [
-        "error",
-        {
-          groups: [
-            // Node.js builtins
-            ["^node:"],
-            // External packages
-            ["^@?\\w"],
-            // Internal packages
-            [
-              "^(@|components|utils|config|hooks|services|types|lib|styles)(/.*|$)",
-            ],
-            // Side effect imports
-            ["^\\u0000"],
-            // Parent imports
-            ["^\\.\\.(?!/?$)", "^\\.\\./?$"],
-            // Other relative imports
-            ["^\\./(?=.*/)(?!/?$)", "^\\.(?!/?$)", "^\\./?$"],
-            // Type imports
-            ["^.+\\.?types$", "^.+\\?types$"],
-          ],
-        },
-      ],
-      "simple-import-sort/exports": "error",
     },
   },
 ]

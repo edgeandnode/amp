@@ -22,10 +22,7 @@ self.MonacoEnvironment = {
   },
 }
 
-export type EditorProps = Omit<
-  MonacoEditorProps,
-  "defaultLanguage" | "language"
-> & {
+export type EditorProps = Omit<MonacoEditorProps, "defaultLanguage" | "language"> & {
   id: string
   onSubmit?: () => void
 }
@@ -134,9 +131,7 @@ export function Editor({
           )
         }}
       />
-      {hasErrors ? (
-        <ErrorMessages id={`${id}-invalid`} errors={errors} />
-      ) : null}
+      {hasErrors ? <ErrorMessages id={`${id}-invalid`} errors={errors} /> : null}
     </div>
   )
 }

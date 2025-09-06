@@ -95,14 +95,13 @@ export const mockMetadataLarge: ReadonlyArray<{
   destination: `dataset${i}_table${i}`,
   metadata_columns: Array.from({ length: 50 }, (__, j) => ({
     name: `column_${j}_${i}`,
-    datatype:
-      j % 4 === 0
-        ? "bigint"
-        : j % 4 === 1
-          ? "string"
-          : j % 4 === 2
-            ? "address"
-            : "bytes32",
+    datatype: j % 4 === 0 ?
+      "bigint"
+      : j % 4 === 1 ?
+      "string"
+      : j % 4 === 2 ?
+      "address"
+      : "bytes32",
   })),
 }))
 
@@ -122,9 +121,7 @@ export function getMetadataByTableName(
 export function getAllColumnNames(
   metadata: ReadonlyArray<DatasetMetadata>,
 ): Array<string> {
-  return metadata.flatMap((dataset) =>
-    dataset.metadata_columns.map((col) => col.name),
-  )
+  return metadata.flatMap((dataset) => dataset.metadata_columns.map((col) => col.name))
 }
 
 /**

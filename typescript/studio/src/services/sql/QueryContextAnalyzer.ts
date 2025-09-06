@@ -19,14 +19,7 @@
 
 import type { Position } from "monaco-editor/esm/vs/editor/editor.api"
 
-import type {
-  CompletionConfig,
-  MonacoITextModel,
-  QueryContext,
-  SqlClause,
-  SqlToken,
-  SqlTokenType,
-} from "./types"
+import type { CompletionConfig, MonacoITextModel, QueryContext, SqlClause, SqlToken, SqlTokenType } from "./types"
 
 import { DEFAULT_COMPLETION_CONFIG } from "./types"
 
@@ -128,8 +121,7 @@ export class QueryContextAnalyzer {
     const currentClause = this.detectCurrentClause(tokens, offset)
 
     // Analyze available tables and aliases
-    const { availableTables, tableAliases } =
-      this.analyzeTablesAndAliases(tokens)
+    const { availableTables, tableAliases } = this.analyzeTablesAndAliases(tokens)
 
     // Determine what types of completions are expected
     const expectations = this.analyzeExpectations(tokens, offset, currentClause)
@@ -266,7 +258,7 @@ export class QueryContextAnalyzer {
       }
 
       // String literals (single and double quotes)
-      if (char === "'" || char === '"') {
+      if (char === "'" || char === "\"") {
         const value = this.consumeString(query, position, char)
         tokens.push({
           type: "STRING",
@@ -476,8 +468,7 @@ export class QueryContextAnalyzer {
       tokens[i + 2].type === "IDENTIFIER"
     ) {
       alias = tokens[i + 2].value
-    }
-    // Pattern: "table alias" (without AS)
+    } // Pattern: "table alias" (without AS)
     else if (i < tokens.length && tokens[i].type === "IDENTIFIER") {
       alias = tokens[i].value
     }

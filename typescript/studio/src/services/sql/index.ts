@@ -31,12 +31,7 @@ import type { DatasetMetadata } from "nozzl/Studio/Model"
 
 import { NozzleCompletionProvider } from "./NozzleCompletionProvider"
 import { QueryContextAnalyzer } from "./QueryContextAnalyzer"
-import type {
-  CompletionConfig,
-  DisposableHandle,
-  PerformanceMetrics,
-  UserDefinedFunction,
-} from "./types"
+import type { CompletionConfig, DisposableHandle, PerformanceMetrics, UserDefinedFunction } from "./types"
 import { UdfSnippetGenerator } from "./UDFSnippetGenerator"
 
 import { DEFAULT_COMPLETION_CONFIG } from "./types"
@@ -93,41 +88,39 @@ class SqlProviderManager {
       this.snippetGenerator = new UdfSnippetGenerator()
 
       // Register completion provider
-      this.completionDisposable =
-        monaco.languages.registerCompletionItemProvider("sql", {
-          provideCompletionItems: async (model, position, context, token) => {
-            const startTime = performance.now()
-            try {
-              this.metrics.totalRequests++
+      this.completionDisposable = monaco.languages.registerCompletionItemProvider("sql", {
+        provideCompletionItems: async (model, position, context, token) => {
+          const startTime = performance.now()
+          try {
+            this.metrics.totalRequests++
 
-              const result =
-                await this.completionProvider!.provideCompletionItems(
-                  model,
-                  position,
-                  context,
-                  token,
-                )
+            const result = await this.completionProvider!.provideCompletionItems(
+              model,
+              position,
+              context,
+              token,
+            )
 
-              const duration = performance.now() - startTime
-              this.updateMetrics(duration, true)
+            const duration = performance.now() - startTime
+            this.updateMetrics(duration, true)
 
-              return result
-            } catch (error) {
-              const duration = performance.now() - startTime
-              this.updateMetrics(duration, false)
-              this.logError("Completion provider failed", error)
+            return result
+          } catch (error) {
+            const duration = performance.now() - startTime
+            this.updateMetrics(duration, false)
+            this.logError("Completion provider failed", error)
 
-              // Return fallback completions
-              return {
-                suggestions: this.createFallbackCompletions(position).map(
-                  (suggestion) => suggestion,
-                ),
-              }
+            // Return fallback completions
+            return {
+              suggestions: this.createFallbackCompletions(position).map(
+                (suggestion) => suggestion,
+              ),
             }
-          },
-          // Trigger completions on space, dot, and newline
-          triggerCharacters: [" ", ".", "\n", "\t"],
-        })
+          }
+        },
+        // Trigger completions on space, dot, and newline
+        triggerCharacters: [" ", ".", "\n", "\t"],
+      })
 
       // Register hover provider for UDF documentation
       this.hoverDisposable = monaco.languages.registerHoverProvider("sql", {
@@ -376,8 +369,7 @@ class SqlProviderManager {
 
     // Update average response time (simple moving average)
     const alpha = 0.1 // Smoothing factor
-    this.metrics.averageResponseTime =
-      alpha * duration + (1 - alpha) * this.metrics.averageResponseTime
+    this.metrics.averageResponseTime = alpha * duration + (1 - alpha) * this.metrics.averageResponseTime
 
     this.metrics.lastUpdate = Date.now()
   }
@@ -504,8 +496,4 @@ export function areProvidersActive(): boolean {
 export { NozzleCompletionProvider } from "./NozzleCompletionProvider"
 export { QueryContextAnalyzer } from "./QueryContextAnalyzer"
 export * from "./types"
-export {
-  createUdfCompletionItem,
-  createUdfSnippet,
-  UdfSnippetGenerator,
-} from "./UDFSnippetGenerator"
+export { createUdfCompletionItem, createUdfSnippet, UdfSnippetGenerator } from "./UDFSnippetGenerator"

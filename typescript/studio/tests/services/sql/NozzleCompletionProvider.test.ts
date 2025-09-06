@@ -307,10 +307,9 @@ describe("NozzleCompletionProvider", () => {
       expect(evmDecodeCompletion).toBeDefined()
       expect(evmDecodeCompletion!.documentation).toBeDefined()
 
-      const docValue =
-        typeof evmDecodeCompletion!.documentation === "string"
-          ? evmDecodeCompletion!.documentation
-          : evmDecodeCompletion!.documentation!.value
+      const docValue = typeof evmDecodeCompletion!.documentation === "string"
+        ? evmDecodeCompletion!.documentation
+        : evmDecodeCompletion!.documentation!.value
 
       expect(docValue).toContain("evm_decode_log")
       expect(docValue).toContain("Decodes an EVM event log")

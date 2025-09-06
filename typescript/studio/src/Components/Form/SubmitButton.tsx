@@ -39,29 +39,21 @@ export const SubmitButton = forwardRef<HTMLButtonElement, SubmitButtonProps>(
               "data-[state=success]:bg-green-600 data-[state=success]:hover:bg-green-500",
             )}
           >
-            {status === "success" ? (
-              <>
-                <CheckIcon
-                  className="text-white"
-                  aria-hidden="true"
-                  size={5}
-                  alt=""
-                />
-                {children}
-              </>
-            ) : status === "error" ? (
-              <>
-                <ExclamationMarkIcon
-                  className="text-white"
-                  aria-hidden="true"
-                  size={5}
-                  alt=""
-                />
-                Error
-              </>
-            ) : (
-              children
-            )}
+            {status === "success" ?
+              (
+                <>
+                  <CheckIcon className="text-white" aria-hidden="true" size={5} alt="" />
+                  {children}
+                </>
+              )
+              : status === "error" ?
+              (
+                <>
+                  <ExclamationMarkIcon className="text-white" aria-hidden="true" size={5} alt="" />
+                  Error
+                </>
+              )
+              : children}
           </Button>
         )}
       </form.Subscribe>

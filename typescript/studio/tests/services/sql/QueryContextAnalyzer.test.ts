@@ -2,7 +2,7 @@
  * Unit tests for QueryContextAnalyzer
  * Tests SQL context analysis, clause detection, and cursor position handling
  */
-
+import { Position } from "monaco-editor/esm/vs/editor/editor.api"
 import { afterEach, beforeEach, describe, expect, test } from "vitest"
 
 import { QueryContextAnalyzer } from "../../../src/services/sql/QueryContextAnalyzer"
@@ -45,10 +45,7 @@ describe("QueryContextAnalyzer", () => {
   })
 
   // Helper function to create test positions
-  const createMockPosition = (lineNumber: number, column: number) => ({
-    lineNumber,
-    column,
-  })
+  const createMockPosition = (lineNumber: number, column: number) => new Position(lineNumber, column)
 
   describe("Basic Clause Detection", () => {
     test("should detect FROM clause context", () => {

@@ -5,17 +5,11 @@
 
 import { describe, expect, test } from "vitest"
 
-import {
-  createUdfSnippet,
-  UdfSnippetGenerator,
-} from "../../../src/services/sql/UDFSnippetGenerator"
+import { createUdfSnippet, UdfSnippetGenerator } from "../../../src/services/sql/UDFSnippetGenerator"
 
 import { mockUDFs } from "./fixtures"
 
-import {
-  COMPLETION_PRIORITY,
-  DEFAULT_COMPLETION_CONFIG,
-} from "../../../src/services/sql/types"
+import { COMPLETION_PRIORITY, DEFAULT_COMPLETION_CONFIG } from "../../../src/services/sql/types"
 
 describe("SQL Intellisense Core Functionality", () => {
   describe("Configuration", () => {

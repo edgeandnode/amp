@@ -15,10 +15,7 @@
  * @file udfSnippets.ts
  * @author SQL Intellisense System
  */
-import type {
-  IMarkdownString,
-  Position,
-} from "monaco-editor/esm/vs/editor/editor.api"
+import type { IMarkdownString, Position } from "monaco-editor/esm/vs/editor/editor.api"
 import { languages } from "monaco-editor/esm/vs/editor/editor.api"
 
 import type { UserDefinedFunction } from "./types"
@@ -110,12 +107,12 @@ export class UdfSnippetGenerator {
    * @private
    */
   private createEvmDecodeLogSnippet(): string {
-    const topics = this.config.includeExampleValues
-      ? [
-          "0x${1:ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef}",
-          "${2:from_topic}",
-          "${3:to_topic}",
-        ]
+    const topics = this.config.includeExampleValues ?
+      [
+        "0x${1:ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef}",
+        "${2:from_topic}",
+        "${3:to_topic}",
+      ]
       : ["${1:topic1}", "${2:topic2}", "${3:topic3}"]
 
     const data = this.config.includeExampleValues
@@ -155,19 +152,19 @@ export class UdfSnippetGenerator {
       ? `\${1:${this.config.defaultDataset}}`
       : "${1:dataset}"
 
-    const params = this.config.includeExampleValues
-      ? [
-          "${2:0x0000000000000000000000000000000000000000}", // from_address
-          "${3:0x1234567890123456789012345678901234567890}", // to_address
-          "${4:0x70a08231}", // input_data (balanceOf signature)
-          "${5:latest}", // block
-        ]
+    const params = this.config.includeExampleValues ?
+      [
+        "${2:0x0000000000000000000000000000000000000000}", // from_address
+        "${3:0x1234567890123456789012345678901234567890}", // to_address
+        "${4:0x70a08231}", // input_data (balanceOf signature)
+        "${5:latest}", // block
+      ]
       : [
-          "${2:from_address}",
-          "${3:to_address}",
-          "${4:input_data}",
-          "${5:block}",
-        ]
+        "${2:from_address}",
+        "${3:to_address}",
+        "${4:input_data}",
+        "${5:block}",
+      ]
 
     return `${dataset}.eth_call(${params.join(", ")}, '${params[3]}')$0`
   }
@@ -336,13 +333,13 @@ export class UdfSnippetGenerator {
       sortText,
       filterText: udf.name,
       // Trigger parameter hints after insertion if configured
-      ...(this.config.triggerParameterHints
-        ? {
-            command: {
-              id: "editor.action.triggerParameterHints",
-              title: "Trigger Parameter Hints",
-            },
-          }
+      ...(this.config.triggerParameterHints ?
+        {
+          command: {
+            id: "editor.action.triggerParameterHints",
+            title: "Trigger Parameter Hints",
+          },
+        }
         : {}),
       range: {
         startColumn: position.column,

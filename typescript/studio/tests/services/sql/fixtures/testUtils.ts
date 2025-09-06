@@ -2,8 +2,6 @@
  * Test utilities for SQL intellisense testing
  * Provides helpers for creating Monaco models and testing completion providers
  */
-
-import { Effect } from "effect"
 import * as monaco from "monaco-editor/esm/vs/editor/editor.api"
 
 /**
@@ -49,13 +47,12 @@ export function createTestRange(
  * Creates a mock completion context for testing
  */
 export function createMockCompletionContext(
-  triggerKind: monaco.languages.CompletionTriggerKind = monaco.languages
-    .CompletionTriggerKind.Invoke,
-  triggerCharacter?: string,
+  triggerKind: monaco.languages.CompletionTriggerKind = monaco.languages.CompletionTriggerKind.Invoke,
+  triggerCharacter?: string | undefined,
 ): monaco.languages.CompletionContext {
   return {
     triggerKind,
-    triggerCharacter,
+    ...(triggerCharacter ? { triggerCharacter } : {}),
   }
 }
 
@@ -68,29 +65,6 @@ export function createMockCancellationToken(
   return {
     isCancellationRequested: isCancelled,
     onCancellationRequested: () => ({ dispose: () => {} }),
-  }
-}
-
-/**
- * Helper to run Effect test cases with proper error handling
- */
-export async function runEffectTest<TResult>(
-  effect: Effect.Effect<TResult, any, any>,
-): Promise<TResult> {
-  return await Effect.runPromise(effect)
-}
-
-/**
- * Helper to run Effect test cases that should fail
- */
-export async function runEffectTestExpectError<TError>(
-  effect: Effect.Effect<any, TError, any>,
-): Promise<TError> {
-  try {
-    await Effect.runPromise(effect)
-    throw new Error("Expected effect to fail but it succeeded")
-  } catch (error) {
-    return error as TError
   }
 }
 
@@ -128,9 +102,7 @@ export function extractCompletionLabels(
     return []
   }
 
-  return completionList.suggestions.map((item) =>
-    typeof item.label === "string" ? item.label : item.label.label,
-  )
+  return completionList.suggestions.map((item) => typeof item.label === "string" ? item.label : item.label.label)
 }
 
 /**
@@ -145,8 +117,7 @@ export function findCompletionByLabel(
   }
 
   return completionList.suggestions.find((item) => {
-    const itemLabel =
-      typeof item.label === "string" ? item.label : item.label.label
+    const itemLabel = typeof item.label === "string" ? item.label : item.label.label
     return itemLabel === label
   })
 }

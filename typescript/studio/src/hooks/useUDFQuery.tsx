@@ -1,9 +1,6 @@
 "use client"
 
-import type {
-  UseQueryOptions,
-  UseSuspenseQueryOptions,
-} from "@tanstack/react-query"
+import type { UseQueryOptions, UseSuspenseQueryOptions } from "@tanstack/react-query"
 import { queryOptions, useQuery, useSuspenseQuery } from "@tanstack/react-query"
 
 type UserDefinedFunction = {
@@ -86,8 +83,7 @@ Binary evm_encode_type(
   },
   {
     name: "evm_decode_type",
-    description:
-      "Decodes the given Solidity ABI-encoded value into an SQL value.",
+    description: "Decodes the given Solidity ABI-encoded value into an SQL value.",
     sql: `
 T evm_decode_type(
   Binary data,

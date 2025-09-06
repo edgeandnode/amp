@@ -2,11 +2,7 @@
 
 import { Accordion } from "@base-ui-components/react/accordion"
 import { Tooltip } from "@base-ui-components/react/tooltip"
-import {
-  FolderIcon,
-  FolderOpenIcon,
-  PlusIcon,
-} from "@graphprotocol/gds-react/icons"
+import { FolderIcon, FolderOpenIcon, PlusIcon } from "@graphprotocol/gds-react/icons"
 import type { DatasetMetadata } from "nozzl/Studio/Model"
 
 import { useMetadataSuspenseQuery } from "@/hooks/useMetadataQuery"

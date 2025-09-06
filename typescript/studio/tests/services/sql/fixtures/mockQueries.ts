@@ -131,8 +131,7 @@ export const udfQueries: Array<TestQuery> = [
  */
 export const complexQueries: Array<TestQuery> = [
   {
-    query:
-      "SELECT l.address FROM anvil.logs l JOIN anvil.transactions t ON l.transaction_hash = t.hash WHERE ",
+    query: "SELECT l.address FROM anvil.logs l JOIN anvil.transactions t ON l.transaction_hash = t.hash WHERE ",
     position: new monaco.Position(1, 101),
     expectedContext: {
       expectsColumn: true,
@@ -193,8 +192,7 @@ export const edgeCaseQueries: Array<TestQuery> = [
       expectsTable: true,
       currentClause: "FROM",
     },
-    description:
-      "Malformed query missing columns - should still provide table completion",
+    description: "Malformed query missing columns - should still provide table completion",
   },
   {
     query: "SELEC * FROM ",
@@ -202,8 +200,7 @@ export const edgeCaseQueries: Array<TestQuery> = [
     expectedContext: {
       expectsTable: true,
     },
-    description:
-      "Typo in SELECT keyword - should still provide table completion",
+    description: "Typo in SELECT keyword - should still provide table completion",
   },
   {
     query: "",
