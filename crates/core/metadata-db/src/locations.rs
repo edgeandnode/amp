@@ -12,6 +12,7 @@ use crate::{
     jobs::{Job, JobId},
 };
 
+pub mod events;
 mod location_id;
 mod pagination;
 

@@ -1,15 +1,13 @@
 use std::{collections::HashMap, sync::Arc};
 
 use backon::{ExponentialBuilder, Retryable};
-use metadata_db::{LocationId, MetadataDb};
+use metadata_db::{LocationId, LocationNotification, MetadataDb};
 use tokio::sync::{Mutex, watch};
 use tokio_stream::StreamExt;
 use tokio_util::task::AbortOnDropHandle;
-use tracing::{debug, error, instrument, trace, warn};
+use tracing::{debug, instrument, trace, warn};
 
 use crate::BoxError;
-
-const CHANGE_TRACKING_CHANNEL: &str = "change-tracking";
 
 struct NotificationMultiplexer {
     metadata_db: MetadataDb,
@@ -87,45 +85,28 @@ impl NotificationMultiplexer {
     #[instrument(skip(self))]
     async fn execute(self) -> Result<(), BoxError> {
         // Establish connection
-        let mut stream = self.metadata_db.listen(CHANGE_TRACKING_CHANNEL).await?;
+        let listener = self.metadata_db.listen_for_location_notifications().await?;
+        let mut stream = std::pin::pin!(listener.into_stream());
 
-        debug!(
-            "Connected to notification channel: {}",
-            CHANGE_TRACKING_CHANNEL
-        );
+        debug!("Connected to notification channel: change-tracking");
 
         while let Some(notification_result) = stream.next().await {
-            let notification = notification_result?;
+            let LocationNotification(location_id) = notification_result?;
 
-            let payload = notification.payload();
-            match payload.parse::<LocationId>() {
-                Ok(location_id) => {
-                    let watchers_guard = self.watchers.lock().await;
-                    let Some(sender) = watchers_guard.get(&location_id) else {
-                        trace!("No watcher registered for location_id: {}", location_id);
-                        continue;
-                    };
+            let watchers_guard = self.watchers.lock().await;
+            let Some(sender) = watchers_guard.get(&location_id) else {
+                trace!("No watcher registered for location_id: {}", location_id);
+                continue;
+            };
 
-                    match sender.send(()) {
-                        Ok(_) => trace!("Notified watchers for location_id: {}", location_id),
-                        Err(_) => trace!("No receivers for location_id: {}", location_id),
-                    }
-                }
-                Err(e) => {
-                    error!(
-                        "Failed to parse location_id from payload '{}': {}",
-                        payload, e
-                    );
-                }
+            match sender.send(()) {
+                Ok(_) => trace!("Notified watchers for location_id: {}", location_id),
+                Err(_) => trace!("No receivers for location_id: {}", location_id),
             }
         }
 
         // Stream ended, which typically means connection was closed
-        Err(format!(
-            "Listen connection closed for channel: {}",
-            CHANGE_TRACKING_CHANNEL
-        )
-        .into())
+        Err("Listen connection closed for channel: change-tracking".into())
     }
 }
 

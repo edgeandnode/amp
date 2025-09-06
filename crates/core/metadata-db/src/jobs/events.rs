@@ -1,19 +1,19 @@
-//! Worker node queue actions channel
+//! Job notifications channel
 //!
-//! This module provides a channel for worker nodes to send and receive notifications
-//! via Postgres's `LISTEN`/`NOTIFY` mechanism. This allows the worker nodes to be notified
-//! when a new job is available reducing the latency of the job scheduling.
+//! This module provides a channel for job notifications via Postgres's `LISTEN`/`NOTIFY`
+//! mechanism. This allows workers to be notified when job actions are required,
+//! reducing the latency of job scheduling and coordination.
 
 use futures::stream::{Stream, TryStreamExt as _};
 use sqlx::{Postgres, postgres::PgListener};
 
-use super::node_id::WorkerNodeId;
-use crate::jobs::JobId;
+use super::job_id::JobId;
+use crate::workers::WorkerNodeId;
 
-/// The worker actions PostgreSQL notification channel name
-const WORKER_ACTIONS_CHANNEL: &str = "worker_actions";
+/// The job actions PostgreSQL notification channel name
+const JOB_ACTIONS_CHANNEL: &str = "job_actions";
 
-/// Sends a notification with the given payload to the worker actions channel using the provided executor.
+/// Sends a notification with the given payload to the job actions channel using the provided executor.
 ///
 /// # Delivery Guarantees
 ///
@@ -27,7 +27,7 @@ where
     let payload_str =
         serde_json::to_string(&payload).map_err(JobNotifSendError::SerializationFailed)?;
 
-    let query = format!(r#"SELECT pg_notify('{}', $1)"#, WORKER_ACTIONS_CHANNEL);
+    let query = format!(r#"SELECT pg_notify('{}', $1)"#, JOB_ACTIONS_CHANNEL);
     sqlx::query(&query)
         .bind(&payload_str)
         .execute(exe)
@@ -36,7 +36,7 @@ where
     Ok(())
 }
 
-/// An error that can occur when sending a notification to the worker actions channel
+/// An error that can occur when sending a notification to the job actions channel
 #[derive(Debug, thiserror::Error)]
 pub enum JobNotifSendError {
     /// The notification payload serialization failed
@@ -56,7 +56,7 @@ pub async fn listen_url(url: &str) -> Result<JobNotifListener, sqlx::Error> {
     JobNotifListener::connect(url).await
 }
 
-/// A listener for notifications on the Metadata DB worker actions channel.
+/// A listener for notifications on the Metadata DB job actions channel.
 ///
 /// # Delivery Guarantees
 ///
@@ -65,10 +65,10 @@ pub async fn listen_url(url: &str) -> Result<JobNotifListener, sqlx::Error> {
 pub struct JobNotifListener(PgListener);
 
 impl JobNotifListener {
-    /// Connects to the worker actions channel using `LISTEN`
+    /// Connects to the job actions channel using `LISTEN`
     async fn connect(url: &str) -> Result<Self, sqlx::Error> {
         let mut listener = PgListener::connect(url).await?;
-        listener.listen(WORKER_ACTIONS_CHANNEL).await?;
+        listener.listen(JOB_ACTIONS_CHANNEL).await?;
         Ok(Self(listener))
     }
 
@@ -89,7 +89,7 @@ impl JobNotifListener {
     }
 }
 
-/// An error that can occur when listening for worker actions
+/// An error that can occur when listening for job actions
 #[derive(Debug, thiserror::Error)]
 pub enum JobNotifRecvError {
     /// An error occurred while receiving the notification
@@ -101,7 +101,7 @@ pub enum JobNotifRecvError {
     DeserializationFailed(#[source] serde_json::Error),
 }
 
-/// The payload of a worker action notification
+/// The payload of a job notification
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct JobNotification {
     pub node_id: WorkerNodeId,
