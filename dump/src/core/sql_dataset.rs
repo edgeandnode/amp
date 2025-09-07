@@ -200,11 +200,8 @@ pub async fn dump_table(
             }
         };
 
-        tracing::warn!(table = table.table_name(), start, end);
-
         if is_incr {
             for range in table.missing_ranges(start..=end).await? {
-                tracing::warn!(?range);
                 dump_sql_query(
                     &ctx,
                     &env,
