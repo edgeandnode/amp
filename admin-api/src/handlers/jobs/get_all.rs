@@ -20,7 +20,7 @@ const MAX_PAGE_LIMIT: usize = 1000;
 
 /// Query parameters for the jobs listing endpoint
 #[derive(Debug, Deserialize)]
-pub struct JobsQuery {
+pub struct QueryParams {
     /// Maximum number of jobs to return (default: 50, max: 1000)
     #[serde(default = "default_limit")]
     limit: usize,
@@ -60,7 +60,7 @@ fn default_limit() -> usize {
 #[tracing::instrument(skip_all, err)]
 pub async fn handler(
     State(ctx): State<Ctx>,
-    query: Result<Query<JobsQuery>, QueryRejection>,
+    query: Result<Query<QueryParams>, QueryRejection>,
 ) -> Result<Json<JobsResponse>, BoxRequestError> {
     let query = match query {
         Ok(Query(query)) => query,

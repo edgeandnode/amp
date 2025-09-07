@@ -12,7 +12,7 @@ use crate::ctx::Ctx;
 
 /// Query parameters for the delete jobs endpoint
 #[derive(Debug, serde::Deserialize)]
-pub struct DeleteJobsQuery {
+pub struct QueryParams {
     /// Status filter for which jobs to delete
     pub status: JobStatusFilter,
 }
@@ -64,7 +64,7 @@ pub struct DeleteJobsQuery {
 #[tracing::instrument(skip_all, err)]
 pub async fn handler(
     State(ctx): State<Ctx>,
-    query: Result<Query<DeleteJobsQuery>, QueryRejection>,
+    query: Result<Query<QueryParams>, QueryRejection>,
 ) -> Result<StatusCode, BoxRequestError> {
     let query = match query {
         Ok(Query(query)) => query,
