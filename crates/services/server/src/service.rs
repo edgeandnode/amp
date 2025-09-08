@@ -609,97 +609,15 @@ fn should_transform_plan(plan: &DetachedLogicalPlan) -> Result<bool, DataFusionE
     Ok(result)
 }
 
-// #[async_trait::async_trait]
-// impl FlightService for Service {
-//     type HandshakeStream = TonicStream<HandshakeResponse>;
-//     type ListFlightsStream = TonicStream<FlightInfo>;
-//     type DoGetStream = TonicStream<FlightData>;
-//     type DoPutStream = TonicStream<PutResult>;
-//     type DoActionStream = TonicStream<arrow_flight::Result>;
-//     type ListActionsStream = TonicStream<ActionType>;
-//     type DoExchangeStream = TonicStream<FlightData>;
-
-//     async fn poll_flight_info(
-//         &self,
-//         _request: Request<arrow_flight::FlightDescriptor>,
-//     ) -> Result<Response<arrow_flight::PollInfo>, Status> {
-//         return Err(Status::unimplemented("poll_flight_info"));
-//     }
-
-//     async fn do_exchange(
-//         &self,
-//         _request: Request<tonic::Streaming<FlightData>>,
-//     ) -> Result<Response<Self::DoExchangeStream>, Status> {
-//         return Err(Status::unimplemented("do_exchange"));
-//     }
-
-//     async fn handshake(
-//         &self,
-//         _request: Request<tonic::Streaming<HandshakeRequest>>,
-//     ) -> Result<Response<Self::HandshakeStream>, Status> {
-//         unimplemented!()
-//     }
-
-//     async fn list_flights(
-//         &self,
-//         _request: Request<arrow_flight::Criteria>,
-//     ) -> Result<Response<Self::ListFlightsStream>, Status> {
-//         return Err(Status::unimplemented("list_flights"));
-//     }
-
-//     async fn get_flight_info(
-//         &self,
-//         request: Request<FlightDescriptor>,
-//     ) -> Result<Response<FlightInfo>, Status> {
-//         let descriptor = request.into_inner();
-//         let info = self.get_flight_info(descriptor).await?;
-//         Ok(Response::new(info))
-//     }
-
-//     async fn get_schema(
-//         &self,
-//         _request: Request<arrow_flight::FlightDescriptor>,
-//     ) -> Result<Response<arrow_flight::SchemaResult>, Status> {
-//         return Err(Status::unimplemented("get_schema"));
-//     }
-
-//     async fn do_get(
-//         &self,
-//         request: Request<arrow_flight::Ticket>,
-//     ) -> Result<Response<Self::DoGetStream>, Status> {
-//         let ticket = request.into_inner();
-//         let data_stream = self.do_get(ticket).await?;
-//         Ok(Response::new(data_stream))
-//     }
-
-//     async fn do_put(
-//         &self,
-//         _request: Request<tonic::Streaming<FlightData>>,
-//     ) -> Result<Response<Self::DoPutStream>, Status> {
-//         return Err(Status::unimplemented("do_put"));
-//     }
-
-//     async fn list_actions(
-//         &self,
-//         _request: Request<arrow_flight::Empty>,
-//     ) -> Result<Response<Self::ListActionsStream>, Status> {
-//         return Err(Status::unimplemented("list_actions"));
-//     }
-
-//     async fn do_action(
-//         &self,
-//         _request: Request<arrow_flight::Action>,
-//     ) -> Result<Response<Self::DoActionStream>, Status> {
-//         return Err(Status::unimplemented("do_action"));
-//     }
-// }
-
 impl Service {
-    async fn plan_sql_query(
-        &self,
-        sql: &str,
-        resume_watermark: Option<ResumeWatermark>,
-    ) -> Result<(Bytes, Arc<DFSchema>), Error> {
+    // The magic that turns a SQL string into a DataFusion logical plan that can be
+    // sent back over the wire:
+    // - Parse the SQL query.
+    // - Infer depedencies and collect them into a catalog.
+    // - Build a DataFusion query context with empty tables from that catalog.
+    // - Use that context to plan the SQL query.
+    // - Serialize the plan to bytes using datafusion-protobufs.
+    async fn plan_sql_query(&self, sql: &str, resume_watermark: Option<ResumeWatermark>) -> Result<(Bytes, Arc<DFSchema>), Error> {
         let parsed_query = parse_sql(sql)?;
         let query_ctx = self
             .dataset_store
