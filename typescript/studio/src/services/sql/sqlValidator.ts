@@ -16,6 +16,7 @@
  * @author SQL Error Markers System
  */
 
+import * as monaco from "monaco-editor"
 import type { DatasetMetadata } from 'nozzl/Studio/Model'
 import { QueryContextAnalyzer } from './QueryContextAnalyzer'
 import type {

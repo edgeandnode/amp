@@ -158,7 +158,7 @@ export function Editor({
           
           // Skip validation for empty queries
           if (!query.trim()) {
-            window.monaco.editor.setModelMarkers(model, 'sql-validator', [])
+            monaco.editor.setModelMarkers(model, 'sql-validator', [])
             return
           }
 
@@ -178,16 +178,18 @@ export function Editor({
           }))
           
           // Set markers in Monaco Editor
-          window.monaco.editor.setModelMarkers(model, 'sql-validator', markers)
+          monaco.editor.setModelMarkers(model, 'sql-validator', markers)
           
           console.debug(`[Editor] Validation completed: ${errors.length} errors found`)
           
         } catch (error) {
           console.error('[Editor] SQL validation failed:', error)
           // Clear markers on validation error to prevent stale markers
-          const model = editor.getModel()
-          if (model) {
-            window.monaco.editor.setModelMarkers(model, 'sql-validator', [])
+          if (editor) {
+            const model = editor.getModel()
+            if (model) {
+              monaco.editor.setModelMarkers(model, 'sql-validator', [])
+            }
           }
         }
       }, 500) // 500ms debounce delay
@@ -310,6 +312,10 @@ export function Editor({
               // Allow completions without prefix for better UX (especially for columns in SELECT)
               minPrefixLength: 0,
               maxSuggestions: 50,
+              // Validation configuration
+              enableSqlValidation: validationLevel !== 'off',
+              validationLevel: validationLevel !== 'off' ? validationLevel : 'basic',
+              enablePartialValidation,
             },
           )
         }}
