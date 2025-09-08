@@ -1,9 +1,18 @@
 use std::{pin::Pin, sync::Arc};
 
 use arrow_flight::{
-    encode::{FlightDataEncoderBuilder, GRPC_TARGET_MAX_FLIGHT_SIZE_BYTES}, error::FlightError, flight_descriptor::DescriptorType, sql::{
-        server::FlightSqlService, ActionClosePreparedStatementRequest, ActionCreatePreparedStatementRequest, ActionCreatePreparedStatementResult, Any, CommandGetCatalogs, CommandGetDbSchemas, CommandGetSqlInfo, CommandGetTableTypes, CommandGetTables, CommandGetXdbcTypeInfo, CommandPreparedStatementQuery, CommandStatementQuery, ProstMessageExt, SqlInfo, TicketStatementQuery
-    }, Action, FlightData, FlightDescriptor, FlightEndpoint, FlightInfo, HandshakeRequest, HandshakeResponse, SchemaAsIpc, Ticket
+    Action, FlightData, FlightDescriptor, FlightEndpoint, FlightInfo, HandshakeRequest,
+    HandshakeResponse, SchemaAsIpc, Ticket,
+    encode::{FlightDataEncoderBuilder, GRPC_TARGET_MAX_FLIGHT_SIZE_BYTES},
+    error::FlightError,
+    flight_descriptor::DescriptorType,
+    sql::{
+        ActionClosePreparedStatementRequest, ActionCreatePreparedStatementRequest,
+        ActionCreatePreparedStatementResult, Any, CommandGetCatalogs, CommandGetDbSchemas,
+        CommandGetSqlInfo, CommandGetTableTypes, CommandGetTables, CommandGetXdbcTypeInfo,
+        CommandPreparedStatementQuery, CommandStatementQuery, ProstMessageExt, SqlInfo,
+        TicketStatementQuery, metadata::SqlInfoDataBuilder, server::FlightSqlService,
+    },
 };
 use async_stream::stream;
 use async_trait::async_trait;
@@ -54,6 +63,7 @@ use tracing::instrument;
 type TonicStream<T> = Pin<Box<dyn Stream<Item = Result<T, Status>> + Send + 'static>>;
 // TODO: Make this configurable via environment variable or config file
 const NOZZLE_CATALOG_NAME: &str = "nozzle";
+
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("ProtocolBuffers decoding error: {0}")]
@@ -1014,7 +1024,7 @@ impl FlightSqlService for Service {
 
         let datasets = self
             .dataset_store
-            .all_datasets()
+            .get_all_datasets()
             .await
             .map_err(|e| Status::internal(format!("Failed to list datasets: {}", e)))?;
 
@@ -1086,7 +1096,7 @@ impl FlightSqlService for Service {
 
         let datasets = self
             .dataset_store
-            .all_datasets()
+            .get_all_datasets()
             .await
             .map_err(|e| Status::internal(format!("Failed to list datasets: {}", e)))?;
 
@@ -1189,19 +1199,52 @@ impl FlightSqlService for Service {
 
     async fn get_flight_info_sql_info(
         &self,
-        _query: CommandGetSqlInfo,
-        _request: Request<FlightDescriptor>,
+        query: CommandGetSqlInfo,
+        request: Request<FlightDescriptor>,
     ) -> Result<Response<FlightInfo>, Status> {
-        unimplemented!()
+        let flight_descriptor = request.into_inner();
+        let ticket = Ticket {
+            ticket: query.as_any().encode_to_vec().into(),
+        };
+        let endpoint = FlightEndpoint::new().with_ticket(ticket);
+        let mut sql_info_builder = SqlInfoDataBuilder::new();
+        sql_info_builder.append(SqlInfo::FlightSqlServerName, "Nozzle Flight SQL Server");
+        sql_info_builder.append(SqlInfo::FlightSqlServerVersion, env!("CARGO_PKG_VERSION"));
+        let sql_info_data = sql_info_builder
+            .build()
+            .map_err(|e| Status::internal(format!("Failed to create SQL info data: {}", e)))?;
+
+        let flight_info = FlightInfo::new()
+            .try_with_schema(query.into_builder(&sql_info_data).schema().as_ref())
+            .map_err(|e| Status::internal(format!("Unable to encode schema: {}", e)))?
+            .with_endpoint(endpoint)
+            .with_descriptor(flight_descriptor);
+        Ok(Response::new(flight_info))
     }
 
     async fn do_get_sql_info(
         &self,
-        _query: CommandGetSqlInfo,
+        query: CommandGetSqlInfo,
         _request: Request<Ticket>,
     ) -> Result<Response<Pin<Box<dyn Stream<Item = Result<FlightData, Status>> + Send>>>, Status>
     {
-        unimplemented!()
+        let mut sql_info_builder = SqlInfoDataBuilder::new();
+        sql_info_builder.append(SqlInfo::FlightSqlServerName, "Nozzle Flight SQL Server");
+        sql_info_builder.append(SqlInfo::FlightSqlServerVersion, env!("CARGO_PKG_VERSION"));
+        let sql_info_data = sql_info_builder
+            .build()
+            .map_err(|e| Status::internal(format!("Failed to create SQL info data: {}", e)))?;
+
+        let builder = query.into_builder(&sql_info_data);
+        let schema = builder.schema();
+        let batch = builder.build();
+
+        let stream = FlightDataEncoderBuilder::new()
+            .with_schema(schema)
+            .build(futures::stream::once(async { batch }))
+            .map_err(|e| Status::internal(format!("Failed to encode flight data: {}", e)));
+
+        Ok(Response::new(Box::pin(stream)))
     }
 
     async fn get_flight_info_xdbc_type_info(
