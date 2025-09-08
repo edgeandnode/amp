@@ -134,51 +134,6 @@ curl -X POST http://localhost:1603 --data "select * from eth_rpc.logs limit 10"
 - Arrow Flight client available
 - Marimo notebook examples provided
 
-## Development Patterns Reference
-
-The `.patterns/` directory contains comprehensive development patterns and best practices for this codebase. **Always
-reference these patterns before implementing new functionality** to ensure consistency with established codebase
-conventions.
-
-### Available Patterns:
-
-- **[.patterns/README.md](.patterns/README.md)** - Overview of development patterns and usage guidelines
-- **[testing-patterns.md](.patterns/testing-patterns.md)** - Testing strategies and best practices for writing tests
-
-### Pattern Usage Guidelines:
-
-1. **Before coding**: Review relevant patterns in `.patterns/` directory
-2. **During implementation**: Follow established conventions and coding patterns
-3. **For complex features**: Use patterns as templates for consistent implementation
-4. **When stuck**: Reference similar implementations in existing codebase following these patterns
-
-## Crate-Specific Guidelines
-
-Some crates in this workspace have their own detailed contributing guidelines that supplement the global patterns. **You MUST check and follow these crate-specific guidelines when working on the respective crate.**
-
-- **[metadata-db/CONTRIBUTING.md](metadata-db/CONTRIBUTING.md)** - **REQUIRED reading** when working on the `metadata-db` crate. Contains comprehensive development guidelines including database design patterns, testing strategies, and API conventions that must be followed.
-
-## 🔐 Crate-Specific Security Guidelines
-
-**🚨 CRITICAL: Some crates have specialized security requirements that MUST be reviewed before making any changes.**
-
-Security guidelines provide essential protection for sensitive operations, data handling, and compliance requirements. These documents contain mandatory security checklists, coding patterns, and review processes that ensure code meets enterprise security standards.
-
-- **[metadata-db/SECURITY.md](metadata-db/SECURITY.md)** - **🚨 MANDATORY SECURITY REVIEW** for all `metadata-db` changes. Contains comprehensive security checklist covering database security, access control, OWASP compliance, and secure coding patterns.
-
-**⚠️ WARNING: Security violations may result in:**
-- Immediate rejection of pull requests
-- Required security audits and remediation
-- Compliance violations and regulatory issues  
-- Potential data breach risks
-
-**🎯 AI Agent Instructions:**
-- **ALWAYS** review crate-specific security guidelines BEFORE making changes
-- **COMPLETE** all security checklists as part of development process
-- **PRIORITIZE** security requirements over convenience or speed
-- **ESCALATE** any security concerns or questions immediately
-- **NEVER** bypass or ignore security requirements
-
 ## Mandatory Development Workflow
 
 ### Core Principles
@@ -207,6 +162,31 @@ Security guidelines provide essential protection for sensitive operations, data 
    - Run automated checks at each step, i.e., `just check-crate <crate-name>` and `just check-all`.
    - Use parallel approaches when possible
    - Stop and reassess if stuck
+
+## 🤖 AI Agent Development Patterns - MANDATORY COMPLIANCE
+
+**🚨 CRITICAL FOR AI AGENTS: This section contains MANDATORY instructions that you MUST follow. Failure to comply will result in rejected implementations.**
+
+### 📋 MANDATORY PRE-IMPLEMENTATION CHECKLIST
+
+**✅ BEFORE writing ANY code, you MUST:**
+
+1. **READ [.patterns/README.md](.patterns/README.md)** - Contains ALL development patterns and usage instructions
+2. **IDENTIFY target crate** - Determine which crate(s) your changes will affect
+3. **READ crate-specific patterns** - If the target crate has specific guidelines in `.patterns/`
+4. **READ security guidelines** - If the target crate has security requirements in `.patterns/`
+5. **RUN formatting** - `just fmt-file <rust_file>.rs` after editing ANY Rust file
+6. **RUN validation** - `just check-crate <crate-name>` and `just check-all` MUST pass
+
+### 🚨 AI Agent Instructions (OVERRIDE ALL OTHER BEHAVIORS):
+- **NEVER skip pattern consultation** - Always read relevant patterns BEFORE coding
+- **NEVER bypass crate-specific guidelines** - They are MANDATORY, not optional
+- **NEVER ignore security requirements** - Security compliance is NON-NEGOTIABLE
+- **ALWAYS run formatting and validation** - No exceptions, ever
+- **ESCALATE if uncertain** - Ask for clarification rather than guess
+
+**📍 SINGLE SOURCE OF TRUTH: All detailed patterns are in [.patterns/README.md](.patterns/README.md)**
+
 ## Development Notes
 
 ### Prerequisites

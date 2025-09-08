@@ -1,40 +1,40 @@
-# Nozzle Core Development Patterns
+Development Patterns
+====================
 
 ## 🎯 PURPOSE
+
 This directory provides reusable solutions and best practices for Nozzle Core development, ensuring consistency and quality across the Nozzle project Rust codebase.
-
-## 📚 AVAILABLE PATTERNS
-
-### Testing Patterns
-- **[testing-patterns.md](./testing-patterns.md)** - Testing strategies and best practices for writing tests.
 
 ## 🔧 HOW TO USE
 
 ### For Developers
 1. **Reference before implementing** - Check relevant patterns before starting new work
-2. **Follow established conventions** - Use patterns as templates for consistency
-3. **Contribute improvements** - Update patterns based on lessons learned
+2. **Check crate-specific guidelines** - **MANDATORY**: Review crate-specific code patterns and security guidelines for the target crate
+3. **Follow established conventions** - Use patterns as templates for consistency
+4. **Contribute improvements** - Update patterns based on lessons learned
 
 ### For Code Reviews
 1. **Validate pattern compliance** - Ensure implementations follow established patterns
-2. **Identify pattern violations** - Look for anti-patterns and forbidden practices
-3. **Suggest pattern usage** - Recommend appropriate patterns for specific use cases
+2. **Verify crate-specific adherence** - **CRITICAL**: Confirm crate-specific code patterns and security guidelines were followed
+3. **Identify pattern violations** - Look for anti-patterns and forbidden practices
+4. **Suggest pattern usage** - Recommend appropriate patterns for specific use cases
 
 ### For Documentation
 1. **Extract reusable patterns** - Identify common solutions for documentation
-2. **Update patterns** - Keep patterns current with library evolution
-3. **Cross-reference examples** - Link patterns to real codebase examples
+2. **Update crate-specific patterns** - Keep crate-specific guidelines current with implementation changes
+3. **Update patterns** - Keep patterns current with library evolution
+4. **Cross-reference examples** - Link patterns to real codebase examples
 
 ## 🚨 CRITICAL PRINCIPLES
+
+### Mandatory Patterns (ALWAYS USE)
+- **Immediate formatting**: `just fmt-file <rust_file>.rs` after editing ANY Rust file
+- **Compilation validation**: `just check-crate <crate-name>` and `just check-all` MUST pass
 
 ### Forbidden Patterns (NEVER USE)
 - **Unsafe code without documentation**: Any `unsafe` block without thorough safety comments
 - **Unwrapping without context**: Using `.unwrap()` or `.expect()` without clear justification
 - **Blocking in async contexts**: Using synchronous I/O in async functions
-
-### Mandatory Patterns (ALWAYS USE)
-- **Immediate formatting**: `just fmt` after editing Rust files
-- **Compilation validation**: `just check` and `just test-local` must pass
 
 ## 📈 PATTERN QUALITY METRICS
 
@@ -89,4 +89,25 @@ This directory provides reusable solutions and best practices for Nozzle Core de
 - Integration examples showing pattern composition
 - Anti-pattern identification and alternatives
 
-This patterns directory serves as the authoritative guide for Rust development in the Nozzle project, ensuring consistent, high-quality implementations across the entire codebase.
+## 📚 AVAILABLE PATTERNS
+
+### ⚛️ Core Development Patterns
+- **[testing-patterns.md](./testing-patterns.md)** - Testing strategies and best practices for writing tests.
+
+### 🏗️ Crate-Specific Development Guidelines
+
+**🚨 CRITICAL: The following patterns are MANDATORY when working on specific crates. AI agents and developers MUST review these before making any changes to the respective crates.**
+
+#### 🔧 `admin-api` Crate
+- **[admin-api/crate.md](./admin-api/crate.md)** - **REQUIRED reading** for all `admin-api` development. Contains mandatory patterns for HTTP handlers using Axum framework, error handling, response types, and documentation standards.
+- **[admin-api/security.md](./admin-api/security.md)** - **🚨 MANDATORY SECURITY REVIEW** for ALL `admin-api` changes. Comprehensive security checklist for HTTP API security, input validation, injection prevention, and network isolation patterns.
+
+#### 🗄️ `metadata-db` Crate  
+- **[metadata-db/crate.md](./metadata-db/crate.md)** - **REQUIRED reading** for all `metadata-db` development. Contains mandatory database design patterns, testing strategies, and API conventions.
+- **[metadata-db/security.md](./metadata-db/security.md)** - **🚨 MANDATORY SECURITY REVIEW** for ALL `metadata-db` changes. Comprehensive security checklist for database security, access control, OWASP compliance, and secure coding patterns.
+
+**⚠️ AI Agent Reminder: These crate-specific patterns override general patterns and MUST be consulted before implementing any functionality in the respective crates.**
+
+------
+
+This `/.patterns` directory serves as the authoritative guide for Rust development in the Nozzle project, ensuring consistent, high-quality implementations across the entire codebase.
