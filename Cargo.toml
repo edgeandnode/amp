@@ -65,7 +65,6 @@ tokio = { version = "1.36.0", features = [
     "test-util",
     "rt-multi-thread",
     "parking_lot",
-    "signal",
 ] }
 tokio-stream = "0.1.17"
 tokio-util = { version = "0.7.15", features = ["rt"] }
