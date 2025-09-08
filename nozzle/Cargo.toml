@@ -34,4 +34,3 @@ static_assertions.workspace = true
 
 [build-dependencies]
 vergen-gitcl = { version = "1.0.8", features = ["build"] }
-vergen-pretty = "1.0.1"

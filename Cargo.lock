@@ -1995,15 +1995,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c74b8349d32d297c9134b8c88677813a227df8f779daa29bfc29c183fe3dca6"
 
 [[package]]
-name = "convert_case"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "baaaa0ecca5b51987b9423ccdc971514dd8b0bb7b4060b983d3664dad3f1f89f"
-dependencies = [
- "unicode-segmentation",
-]
-
-[[package]]
 name = "core-foundation"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3387,7 +3378,6 @@ dependencies = [
  "tonic 0.12.3",
  "tonic-build",
  "tracing",
- "url",
 ]
 
 [[package]]
@@ -4963,7 +4953,6 @@ dependencies = [
  "tower-http",
  "tracing",
  "vergen-gitcl",
- "vergen-pretty",
 ]
 
 [[package]]
@@ -7136,9 +7125,7 @@ dependencies = [
  "common",
  "datafusion",
  "firehose-datasets",
- "fs-err",
  "futures",
- "object_store",
  "prost",
  "prost-build",
  "prost-reflect",
@@ -7151,7 +7138,6 @@ dependencies = [
  "tonic 0.12.3",
  "tonic-build",
  "tracing",
- "url",
 ]
 
 [[package]]
@@ -8001,18 +7987,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b07e6010c0f3e59fcb164e0163834597da68d1f864e2b8ca49f74de01e9c166"
 dependencies = [
  "anyhow",
- "derive_builder",
- "rustversion",
-]
-
-[[package]]
-name = "vergen-pretty"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "86fce764d393d83eb2125f0e86bee124001f4a19d23061eb4d12e8954f91eb15"
-dependencies = [
- "anyhow",
- "convert_case",
  "derive_builder",
  "rustversion",
 ]
