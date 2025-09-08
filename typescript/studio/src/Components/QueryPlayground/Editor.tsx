@@ -3,7 +3,7 @@
 import type { EditorProps as MonacoEditorProps } from "@monaco-editor/react"
 import MonacoEditor, { loader } from "@monaco-editor/react"
 import { useStore } from "@tanstack/react-form"
-import * as monaco from "monaco-editor/esm/vs/editor/editor.api"
+import * as monaco from "monaco-editor"
 // eslint-disable-next-line import-x/default
 import editorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker"
 import { useEffect, useRef } from "react"

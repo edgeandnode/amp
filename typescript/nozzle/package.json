@@ -28,6 +28,9 @@
   ],
   "scripts": {
     "build": "tsc -b --force tsconfig.build.json",
+    "build:studio": "cd ../studio && pnpm run build",
+    "copy-studio-dist": "tsx scripts/copy-studio-dist.ts",
+    "prepare-studio": "pnpm run build:studio && pnpm run copy-studio-dist",
     "nozzl": "bun ./src/cli/bun.ts"
   },
   "publishConfig": {
@@ -59,7 +62,7 @@
     "@effect/experimental": "^0.54.6",
     "@effect/platform": "^0.90.7",
     "@effect/platform-node": "^0.96.1",
-    "apache-arrow": "^20.0.0",
+    "apache-arrow": "^21.0.0",
     "effect": "^3.17.13"
   },
   "devDependencies": {

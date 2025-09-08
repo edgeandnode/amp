@@ -1,6 +1,7 @@
 import { createGrpcTransport } from "@connectrpc/connect-node"
 import { Command, Options } from "@effect/cli"
 import {
+  FileSystem,
   HttpApi,
   HttpApiBuilder,
   HttpApiEndpoint,
@@ -16,19 +17,7 @@ import {
   Path,
 } from "@effect/platform"
 import { NodeHttpServer } from "@effect/platform-node"
-import {
-  Cause,
-  Config,
-  Console,
-  Data,
-  Effect,
-  Layer,
-  Option,
-  Schema,
-  Stream,
-  String as EffectString,
-  Struct,
-} from "effect"
+import { Cause, Config, Console, Data, Effect, Layer, Option, Schema, Stream, Struct } from "effect"
 import { createServer } from "node:http"
 import { fileURLToPath } from "node:url"
 import open, { type AppName, apps } from "open"
@@ -156,7 +145,6 @@ const NozzleStudioApiLive = HttpApiBuilder.group(
               yield* loader.find().pipe(
                 Effect.map(Option.match({
                   onNone() {
-                    console.log("No nozzle config found :{")
                     return Stream.make([1]).pipe(
                       Stream.map(() => {
                         const jsonData = JSON.stringify({})
@@ -270,21 +258,25 @@ const ApiLive = HttpApiBuilder.httpApp.pipe(
 )
 
 const StudioFileRouter = Effect.gen(function*() {
+  const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
 
   const __filename = fileURLToPath(import.meta.url)
   const __dirname = path.dirname(__filename)
-  /**
-   * This resolves an issue when running the cli in dev mode locally vs published mode.
-   * In local dev mode, the __dirname will end with `commands` as this file will be ran from the ./commands directory.
-   * When running in the compiled dist mode, the __dirname will end with `dist`.
-   *
-   * @todo clean this up and figure out a better way to derive
-   */
-  const isLocal = EffectString.endsWith("commands")(__dirname)
-  const studioClientDist = isLocal
-    ? path.resolve(__dirname, "..", "..", "..", "..", "studio", "dist")
-    : path.resolve(__dirname, "studio", "dist")
+
+  const possibleStudioPaths = [
+    // attempt the compiled dist output on build
+    path.resolve(__dirname, "studio", "dist"),
+    // attempt local dev mode as a fallback
+    path.resolve(__dirname, "..", "..", "..", "..", "studio", "dist"),
+  ]
+  const findStudioDist = Effect.fnUntraced(function*() {
+    return yield* Effect.findFirst(possibleStudioPaths, (_) => fs.exists(_).pipe(Effect.orElseSucceed(() => false)))
+  })
+  const studioClientDist = yield* findStudioDist().pipe(
+    // default to first path
+    Effect.map((maybe) => Option.getOrElse(maybe, () => possibleStudioPaths[0])),
+  )
 
   return HttpRouter.empty.pipe(
     HttpRouter.get(
