@@ -156,8 +156,6 @@ conventions.
 
 Some crates in this workspace have their own detailed contributing guidelines that supplement the global patterns. **You MUST check and follow these crate-specific guidelines when working on the respective crate.**
 
-### metadata-db
-
 - **[metadata-db/CONTRIBUTING.md](metadata-db/CONTRIBUTING.md)** - **REQUIRED reading** when working on the `metadata-db` crate. Contains comprehensive development guidelines including database design patterns, testing strategies, and API conventions that must be followed.
 
 ## 🔐 Crate-Specific Security Guidelines
@@ -165,8 +163,6 @@ Some crates in this workspace have their own detailed contributing guidelines th
 **🚨 CRITICAL: Some crates have specialized security requirements that MUST be reviewed before making any changes.**
 
 Security guidelines provide essential protection for sensitive operations, data handling, and compliance requirements. These documents contain mandatory security checklists, coding patterns, and review processes that ensure code meets enterprise security standards.
-
-### `metadata-db` Security Requirements
 
 - **[metadata-db/SECURITY.md](metadata-db/SECURITY.md)** - **🚨 MANDATORY SECURITY REVIEW** for all `metadata-db` changes. Contains comprehensive security checklist covering database security, access control, OWASP compliance, and secure coding patterns.
 
@@ -183,6 +179,35 @@ Security guidelines provide essential protection for sensitive operations, data 
 - **ESCALATE** any security concerns or questions immediately
 - **NEVER** bypass or ignore security requirements
 
+## Mandatory Development Workflow
+
+### Core Principles
+- **Research → Plan → Implement**: Never jump straight to coding
+- **Reality Checkpoints**: Regularly validate progress and approach
+- **Zero Tolerance for Errors**: All automated checks must pass
+- **Clarity over Cleverness:** Choose clear, maintainable solutions
+- 
+### Structured Development Process
+
+1. **Research Phase**
+   - Understand the codebase and existing patterns
+   - Identify related modules and dependencies
+   - Review test files and usage examples
+   - Use multiple approaches for complex problems
+
+2. **Planning Phase**
+   - Create detailed implementation plan
+   - Identify validation checkpoints
+   - Consider edge cases and error handling
+   - Validate plan before implementation
+
+3. **Implementation Phase**
+   - Execute with frequent validation
+   - **🚨 CRITICAL**: IMMEDIATELY run `just fmt <rust_file.rs>` after editing ANY rust file
+   - Run automated checks at each step, i.e., `just check-crate <crate-name>` and `just check-all`.
+   - Use parallel approaches when possible
+   - Stop and reassess if stuck
+   -
 ## Development Notes
 
 ### Prerequisites
@@ -206,7 +231,7 @@ Security guidelines provide essential protection for sensitive operations, data 
 2. Maintain type safety
 3. Prefer async operations
 4. Always run `cargo test`
-5. Always run `cargo +nightly fmt`
+5. Always run `just fmt` to format the whole codebase
 6. Fix all warnings
 
 ### SQL Naming

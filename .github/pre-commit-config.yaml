@@ -3,11 +3,27 @@
 repos:
 - repo: local
   hooks:
-  - id: format
+  - id: rust-format
     name: Format Rust code
     language: system
     entry: cargo +nightly fmt --all
     types_or: [rust, cargo, cargo-lock]
-    stages: [pre-commit, pre-merge-commit, pre-push, manual]
+    stages: [pre-commit, pre-merge-commit, manual]
+    pass_filenames: false
+    require_serial: true
+  - id: rust-format-check
+    name: Check Rust code formatting
+    language: system
+    entry: just fmt-check
+    types_or: [rust, cargo, cargo-lock]
+    stages: [pre-push, manual]
+    pass_filenames: false
+    require_serial: true
+  - id: rust-check
+    name: Check all crates for compilation errors
+    language: system
+    entry: just check-all
+    types_or: [rust, cargo, cargo-lock]
+    stages: [pre-push, manual]
     pass_filenames: false
     require_serial: true
