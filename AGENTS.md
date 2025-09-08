@@ -207,7 +207,6 @@ Security guidelines provide essential protection for sensitive operations, data 
    - Run automated checks at each step, i.e., `just check-crate <crate-name>` and `just check-all`.
    - Use parallel approaches when possible
    - Stop and reassess if stuck
-   -
 ## Development Notes
 
 ### Prerequisites
