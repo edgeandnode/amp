@@ -288,6 +288,60 @@ const StudioFileRouter = Effect.gen(function*() {
       ),
     ),
     HttpRouter.get(
+      "/manifest.json",
+      HttpServerResponse.file(path.join(studioClientDist, "manifest.json")).pipe(
+        Effect.orElse(() => HttpServerResponse.empty({ status: 404 })),
+      ),
+    ),
+    // serves the favicon dir files
+    HttpRouter.get(
+      "/favicon/:file",
+      Effect.gen(function*() {
+        const file = yield* HttpRouter.params.pipe(
+          Effect.map(Struct.get("file")),
+          Effect.map(Option.fromNullable),
+        )
+
+        if (Option.isNone(file)) {
+          return HttpServerResponse.empty({ status: 404 })
+        }
+
+        const assets = path.join(studioClientDist, "favicon")
+        const normalized = path.normalize(
+          path.join(assets, ...file.value.split("/")),
+        )
+        if (!normalized.startsWith(assets)) {
+          return HttpServerResponse.empty({ status: 404 })
+        }
+
+        return yield* HttpServerResponse.file(normalized)
+      }).pipe(Effect.orElse(() => HttpServerResponse.empty({ status: 404 }))),
+    ),
+    // serves the logo dir files
+    HttpRouter.get(
+      "/logo/:file",
+      Effect.gen(function*() {
+        const file = yield* HttpRouter.params.pipe(
+          Effect.map(Struct.get("file")),
+          Effect.map(Option.fromNullable),
+        )
+
+        if (Option.isNone(file)) {
+          return HttpServerResponse.empty({ status: 404 })
+        }
+
+        const assets = path.join(studioClientDist, "logo")
+        const normalized = path.normalize(
+          path.join(assets, ...file.value.split("/")),
+        )
+        if (!normalized.startsWith(assets)) {
+          return HttpServerResponse.empty({ status: 404 })
+        }
+
+        return yield* HttpServerResponse.file(normalized)
+      }).pipe(Effect.orElse(() => HttpServerResponse.empty({ status: 404 }))),
+    ),
+    HttpRouter.get(
       "/assets/:file",
       Effect.gen(function*() {
         const file = yield* HttpRouter.params.pipe(
