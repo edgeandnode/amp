@@ -153,7 +153,7 @@ export namespace languages {
   }
 }
 
-// Mock editor namespace
+// Mock editor namespace  
 export namespace editor {
   export interface ITextModel {
     getValue(): string
@@ -161,6 +161,11 @@ export namespace editor {
     getLineContent(lineNumber: number): string
     getWordAtPosition(position: Position): { word: string; startColumn: number; endColumn: number } | null
     dispose(): void
+  }
+
+  // Add setModelMarkers mock
+  export function setModelMarkers(model: ITextModel, owner: string, markers: IMarkerData[]): void {
+    // Mock implementation - in real tests, this would update the editor's markers
   }
 
   export function createModel(content: string, language?: string): ITextModel {
@@ -228,3 +233,26 @@ export interface CancellationToken {
   isCancellationRequested: boolean
   onCancellationRequested(listener: () => void): IDisposable
 }
+
+// Mock MarkerSeverity for validation tests
+export enum MarkerSeverity {
+  Hint = 1,
+  Info = 2,
+  Warning = 4,
+  Error = 8
+}
+
+// Mock IMarkerData interface
+export interface IMarkerData {
+  code?: string
+  severity: MarkerSeverity
+  message: string
+  source?: string
+  startLineNumber: number
+  startColumn: number
+  endLineNumber: number
+  endColumn: number
+  relatedInformation?: any[]
+  tags?: any[]
+}
+

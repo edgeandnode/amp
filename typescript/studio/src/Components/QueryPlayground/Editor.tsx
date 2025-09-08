@@ -12,6 +12,7 @@ import { useUDFSuspenseQuery } from "../../hooks/useUDFQuery"
 import {
   setupNozzleSQLProviders,
   updateProviderData,
+  getActiveValidator,
   type DisposableHandle,
 } from "../../services/sql"
 
@@ -21,12 +22,17 @@ export type EditorProps = Omit<
 > & {
   id: string
   onSubmit?: () => void
+  // SQL Validation configuration
+  validationLevel?: 'basic' | 'standard' | 'full' | 'off'
+  enablePartialValidation?: boolean
 }
 export function Editor({
   height = 450,
   id,
   onSubmit,
   theme = "vs-dark",
+  validationLevel = 'full',
+  enablePartialValidation = true,
   ...rest
 }: Readonly<EditorProps>) {
   const field = useFieldContext<string>()
@@ -40,6 +46,8 @@ export function Editor({
 
   // Provider lifecycle management
   const providersRef = useRef<DisposableHandle | null>(null)
+  // Monaco editor instance ref for validation
+  const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null)
 
   /**
    * Setup SQL providers when Monaco editor is available
@@ -58,14 +66,18 @@ export function Editor({
 
       // Setup providers with initial data
       providersRef.current = setupNozzleSQLProviders(
-        metadataQuery.data,
-        udfQuery.data,
+        [...metadataQuery.data],
+        [...udfQuery.data],
         {
           // Enable debug logging in development
           enableDebugLogging: process.env.NODE_ENV === "development",
           // Allow completions without prefix for better UX (especially for columns in SELECT)
           minPrefixLength: 0,
           maxSuggestions: 50,
+          // Validation configuration
+          enableSqlValidation: validationLevel !== 'off',
+          validationLevel: validationLevel !== 'off' ? validationLevel : 'basic',
+          enablePartialValidation,
         },
       )
 
@@ -84,7 +96,7 @@ export function Editor({
    */
   useEffect(() => {
     if (providersRef.current && metadataQuery.data && udfQuery.data) {
-      updateProviderData(metadataQuery.data, udfQuery.data)
+      updateProviderData([...metadataQuery.data], [...udfQuery.data])
       console.debug(
         "[Editor] SQL intellisense providers updated with fresh data",
       )
@@ -97,6 +109,110 @@ export function Editor({
   ])
 
   /**
+   * Effect: SQL Validation with Error Markers
+   * 
+   * Sets up real-time SQL validation with Monaco Editor markers.
+   * Uses debouncing to avoid excessive validation during rapid typing.
+   * Includes error recovery to prevent crashes from validation failures.
+   */
+  useEffect(() => {
+    const editor = editorRef.current
+    let validator = getActiveValidator()
+    
+    // If validator is null but we have all required data, re-setup providers (fixes hot reload issue)
+    if (!validator && editor && metadataQuery.data && udfQuery.data && validationLevel !== 'off') {
+      console.debug('[Editor] Validator not available, re-setting up providers...')
+      setupProviders()
+      validator = getActiveValidator()
+    }
+    
+    // Check if validation is enabled and editor is available
+    if (!editor || !validator || !metadataQuery.data || !udfQuery.data || validationLevel === 'off') {
+      return
+    }
+
+    let timeoutId: NodeJS.Timeout | null = null
+    
+    const validateWithDebounce = () => {
+      if (timeoutId) {
+        clearTimeout(timeoutId)
+      }
+      
+      timeoutId = setTimeout(() => {
+        try {
+          const model = editor.getModel()
+          if (!model) return
+
+          const query = model.getValue()
+          
+          // Skip validation for empty queries
+          if (!query.trim()) {
+            window.monaco.editor.setModelMarkers(model, 'sql-validator', [])
+            return
+          }
+
+          // Perform validation
+          const errors = validator.validateQuery(query)
+          
+          // Convert validation errors to Monaco markers
+          const markers: monaco.editor.IMarkerData[] = errors.map(error => ({
+            severity: error.severity,
+            message: error.message,
+            startLineNumber: error.startLineNumber,
+            startColumn: error.startColumn,
+            endLineNumber: error.endLineNumber,
+            endColumn: error.endColumn,
+            code: error.code,
+            source: 'nozzle-sql-validator'
+          }))
+          
+          // Set markers in Monaco Editor
+          window.monaco.editor.setModelMarkers(model, 'sql-validator', markers)
+          
+          console.debug(`[Editor] Validation completed: ${errors.length} errors found`)
+          
+        } catch (error) {
+          console.error('[Editor] SQL validation failed:', error)
+          // Clear markers on validation error to prevent stale markers
+          const model = editor.getModel()
+          if (model) {
+            window.monaco.editor.setModelMarkers(model, 'sql-validator', [])
+          }
+        }
+      }, 500) // 500ms debounce delay
+    }
+
+    // Initial validation
+    validateWithDebounce()
+    
+    // Set up content change listener
+    const model = editor.getModel()
+    if (model) {
+      const disposable = model.onDidChangeContent(() => {
+        validateWithDebounce()
+      })
+      
+      // Cleanup function
+      return () => {
+        if (timeoutId) {
+          clearTimeout(timeoutId)
+        }
+        disposable.dispose()
+        // Clear markers on cleanup
+        window.monaco?.editor.setModelMarkers(model, 'sql-validator', [])
+        console.debug('[Editor] SQL validation disposed')
+      }
+    }
+
+    // Cleanup function for timeout
+    return () => {
+      if (timeoutId) {
+        clearTimeout(timeoutId)
+      }
+    }
+  }, [metadataQuery.data, udfQuery.data, validationLevel, enablePartialValidation, providersRef.current]) // Re-run when metadata, validation config, or providers change
+
+  /**
    * Cleanup providers on unmount
    */
   useEffect(() => {
@@ -106,6 +222,8 @@ export function Editor({
         providersRef.current = null
         console.debug("[Editor] SQL intellisense providers disposed")
       }
+      // Clear editor reference
+      editorRef.current = null
     }
   }, [])
 
@@ -123,6 +241,9 @@ export function Editor({
         aria-invalid={hasErrors ? "true" : undefined}
         aria-describedby={hasErrors ? `${id}-invalid` : undefined}
         onMount={(editor) => {
+          // Store editor reference for validation
+          editorRef.current = editor
+          
           // Add keyboard shortcut for CMD+ENTER / CTRL+ENTER
           // When user hits CMD/CTRL+ENTER, we submit the query
           editor.addCommand(

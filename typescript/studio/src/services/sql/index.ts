@@ -30,6 +30,7 @@ import type { DatasetMetadata } from 'nozzl/Studio/Model'
 import { QueryContextAnalyzer } from './contextAnalyzer'
 import { NozzleCompletionProvider } from './completionProvider'
 import { UdfSnippetGenerator } from './udfSnippets'
+import { SqlValidator } from './sqlValidator'
 import type {
   UserDefinedFunction,
   CompletionConfig,
@@ -49,6 +50,7 @@ class SqlProviderManager {
   private completionProvider?: NozzleCompletionProvider
   private contextAnalyzer?: QueryContextAnalyzer
   private snippetGenerator?: UdfSnippetGenerator
+  private validator?: SqlValidator
   
   private completionDisposable?: monaco.IDisposable
   private hoverDisposable?: monaco.IDisposable
@@ -101,6 +103,7 @@ class SqlProviderManager {
         this.config
       )
       this.snippetGenerator = new UdfSnippetGenerator()
+      this.validator = new SqlValidator(this.metadata, this.udfs, this.config)
 
       // Register completion provider
       this.completionDisposable = monaco.languages.registerCompletionItemProvider('sql', {
@@ -197,6 +200,10 @@ class SqlProviderManager {
         this.completionProvider.updateData(metadata, udfs)
       }
 
+      if (this.validator) {
+        this.validator.updateData(metadata, udfs)
+      }
+
       this.logDebug('Provider data updated', {
         tableCount: metadata.length,
         udfCount: udfs.length
@@ -216,6 +223,17 @@ class SqlProviderManager {
    */
   getMetrics(): PerformanceMetrics {
     return { ...this.metrics }
+  }
+
+  /**
+   * Get SQL Validator Instance
+   * 
+   * Returns the validator instance for direct access to validation functionality.
+   * 
+   * @returns SqlValidator instance or null if not initialized
+   */
+  getValidator(): SqlValidator | null {
+    return this.validator || null
   }
 
   /**
@@ -251,6 +269,11 @@ class SqlProviderManager {
       if (this.completionProvider) {
         this.completionProvider.dispose()
         this.completionProvider = undefined
+      }
+
+      if (this.validator) {
+        this.validator.dispose()
+        this.validator = undefined
       }
 
       if (this.contextAnalyzer) {
@@ -402,8 +425,15 @@ export function setupNozzleSQLProviders(
   udfs: UserDefinedFunction[],
   config?: Partial<CompletionConfig>
 ): DisposableHandle {
+  console.debug('[setupNozzleSQLProviders] Starting setup...', {
+    hasExistingManager: !!activeProviderManager,
+    metadataCount: metadata.length,
+    udfCount: udfs.length
+  })
+
   // Dispose existing manager if present
   if (activeProviderManager) {
+    console.debug('[setupNozzleSQLProviders] Disposing existing manager')
     activeProviderManager.dispose()
     activeProviderManager = null
   }
@@ -412,7 +442,10 @@ export function setupNozzleSQLProviders(
   const finalConfig = { ...DEFAULT_COMPLETION_CONFIG, ...config }
   activeProviderManager = new SqlProviderManager(metadata, udfs, finalConfig)
   
+  console.debug('[setupNozzleSQLProviders] Created new manager, calling setup()...')
   const disposable = activeProviderManager.setup()
+
+  console.debug('[setupNozzleSQLProviders] Setup completed, manager should be active:', !!activeProviderManager)
 
   // Return enhanced disposable that also cleans up the active manager
   return {
@@ -479,8 +512,26 @@ export function areProvidersActive(): boolean {
   return activeProviderManager !== null && !activeProviderManager['isDisposed']
 }
 
+/**
+ * Get Active SQL Validator
+ * 
+ * Returns the currently active SQL validator instance for direct validation access.
+ * 
+ * @returns SqlValidator instance or null if no provider is active
+ */
+export function getActiveValidator(): SqlValidator | null {
+  const validator = activeProviderManager ? activeProviderManager.getValidator() : null
+  console.debug('[getActiveValidator] Called:', {
+    hasActiveManager: !!activeProviderManager,
+    managerDisposed: activeProviderManager ? activeProviderManager['isDisposed'] : 'N/A',
+    hasValidator: !!validator
+  })
+  return validator
+}
+
 // Export all types and classes for advanced usage
 export * from './types'
 export { QueryContextAnalyzer } from './contextAnalyzer'
 export { NozzleCompletionProvider } from './completionProvider'
 export { UdfSnippetGenerator, createUdfSnippet, createUdfCompletionItem } from './udfSnippets'
+export { SqlValidator } from './sqlValidator'
