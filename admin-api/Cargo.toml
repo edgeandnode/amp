@@ -4,22 +4,20 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-# Serialization
-serde.workspace = true
-serde_json.workspace = true
-
-# Error handling and logging
-thiserror.workspace = true
-tracing.workspace = true
-
 axum.workspace = true
-rand.workspace = true
-tokio.workspace = true
-http-common = { path = "../http-common" }
 common = { path = "../common" }
 dataset-store = { path = "../dataset-store" }
-metadata-db = { path = "../metadata-db" }
-registry-service = { path = "../registry-service" }
 dump = { path = "../dump" }
-object_store.workspace = true
 futures.workspace = true
+http-common = { path = "../http-common" }
+metadata-db = { path = "../metadata-db" }
+object_store.workspace = true
+rand.workspace = true
+registry-service = { path = "../registry-service" }
+serde.workspace = true
+serde_json.workspace = true
+serde_with = "3.14.0"
+thiserror.workspace = true
+tokio.workspace = true
+toml.workspace = true
+tracing.workspace = true

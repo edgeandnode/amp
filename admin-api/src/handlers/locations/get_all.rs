@@ -19,7 +19,7 @@ const MAX_PAGE_LIMIT: usize = 1000;
 
 /// Query parameters for the locations listing endpoint
 #[derive(Debug, serde::Deserialize)]
-pub struct LocationsQuery {
+pub struct QueryParams {
     /// Maximum number of locations to return (default: 50, max: 1000)
     #[serde(default = "default_limit")]
     limit: usize,
@@ -57,7 +57,7 @@ fn default_limit() -> usize {
 #[tracing::instrument(skip_all, err)]
 pub async fn handler(
     State(ctx): State<Ctx>,
-    query: Result<Query<LocationsQuery>, QueryRejection>,
+    query: Result<Query<QueryParams>, QueryRejection>,
 ) -> Result<Json<LocationsResponse>, BoxRequestError> {
     let query = match query {
         Ok(Query(params)) => params,

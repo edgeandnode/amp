@@ -92,7 +92,7 @@ This directory provides reusable solutions and best practices for Nozzle Core de
 ## 📚 AVAILABLE PATTERNS
 
 ### ⚛️ Core Development Patterns
-- **[testing-patterns.md](./testing-patterns.md)** - Testing strategies and best practices for writing tests.
+- **[testing-patterns.md](./testing-patterns.md)** - **🚨 MANDATORY for ALL testing** - Testing strategies, GIVEN-WHEN-THEN structure, naming conventions, and three-tier testing strategy. MUST be consulted before writing ANY tests.
 
 ### 🏗️ Crate-Specific Development Guidelines
 

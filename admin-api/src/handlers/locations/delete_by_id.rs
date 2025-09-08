@@ -17,7 +17,7 @@ use crate::ctx::Ctx;
 
 /// Query parameters for the locations delete endpoint
 #[derive(Debug, serde::Deserialize)]
-pub struct DeleteQueryParams {
+pub struct QueryParams {
     /// Force deletion even if location is active
     #[serde(default)]
     force: bool,
@@ -64,7 +64,7 @@ pub struct DeleteQueryParams {
 pub async fn handler(
     State(ctx): State<Ctx>,
     path: Result<Path<LocationId>, PathRejection>,
-    query: Result<Query<DeleteQueryParams>, QueryRejection>,
+    query: Result<Query<QueryParams>, QueryRejection>,
 ) -> Result<StatusCode, BoxRequestError> {
     let location_id = match path {
         Ok(Path(path)) => path,
