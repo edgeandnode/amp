@@ -987,19 +987,73 @@ impl FlightSqlService for Service {
 
     async fn get_flight_info_schemas(
         &self,
-        _query: CommandGetDbSchemas,
-        _request: Request<FlightDescriptor>,
+        query: CommandGetDbSchemas,
+        request: Request<FlightDescriptor>,
     ) -> Result<Response<FlightInfo>, Status> {
-        unimplemented!()
+        let flight_descriptor = request.into_inner();
+        let ticket = Ticket {
+            ticket: query.as_any().encode_to_vec().into(),
+        };
+        let endpoint = FlightEndpoint::new().with_ticket(ticket);
+        let flight_info = FlightInfo::new()
+            .try_with_schema(&query.into_builder().schema())
+            .map_err(|e| Status::internal(format!("Unable to encode schema: {}", e)))?
+            .with_endpoint(endpoint)
+            .with_descriptor(flight_descriptor);
+        Ok(Response::new(flight_info))
     }
 
     async fn do_get_schemas(
         &self,
-        _query: CommandGetDbSchemas,
+        query: CommandGetDbSchemas,
         _request: Request<Ticket>,
     ) -> Result<Response<Pin<Box<dyn Stream<Item = Result<FlightData, Status>> + Send>>>, Status>
     {
-        unimplemented!()
+        let catalog_filter = query.catalog.clone();
+        let schema_filter = query.db_schema_filter_pattern.clone();
+
+        let datasets = self
+            .dataset_store
+            .all_datasets()
+            .await
+            .map_err(|e| Status::internal(format!("Failed to list datasets: {}", e)))?;
+
+        let mut builder = query.into_builder();
+        let catalog_name = NOZZLE_CATALOG_NAME;
+
+        let catalog_matches = if let Some(ref catalog_filter_val) = catalog_filter {
+            catalog_name == catalog_filter_val
+        } else {
+            true
+        };
+
+        if catalog_matches {
+            for dataset in datasets {
+                let schema_name = &dataset.name;
+
+                let schema_matches = if let Some(ref schema_pattern) = schema_filter {
+                    schema_name == schema_pattern || schema_pattern == "%"
+                } else {
+                    true
+                };
+
+                if schema_matches {
+                    builder.append(catalog_name, schema_name);
+                }
+            }
+        }
+
+        let schema = builder.schema();
+        let batch = builder
+            .build()
+            .map_err(|e| Status::internal(format!("Failed to build schema batch: {}", e)))?;
+
+        let stream = FlightDataEncoderBuilder::new()
+            .with_schema(schema)
+            .build(futures::stream::once(async { Ok(batch) }))
+            .map_err(|e| Status::internal(format!("Failed to encode flight data: {}", e)));
+
+        Ok(Response::new(Box::pin(stream)))
     }
 
     async fn get_flight_info_tables(
