@@ -1,15 +1,20 @@
 use std::{pin::Pin, sync::Arc};
 
 use arrow_flight::{
-    ActionType, FlightData, FlightDescriptor, FlightEndpoint, FlightInfo, HandshakeRequest,
-    HandshakeResponse, PutResult, SchemaAsIpc, Ticket,
-    encode::{FlightDataEncoderBuilder, GRPC_TARGET_MAX_FLIGHT_SIZE_BYTES},
-    error::FlightError,
+    Action, FlightData, FlightDescriptor, FlightEndpoint, FlightInfo, HandshakeRequest,
+    HandshakeResponse, Ticket,
+    encode::FlightDataEncoderBuilder,
     flight_descriptor::DescriptorType,
-    flight_service_server::FlightService,
-    sql::{Any, CommandStatementQuery},
+    sql::{
+        ActionClosePreparedStatementRequest, ActionCreatePreparedStatementRequest,
+        ActionCreatePreparedStatementResult, Any, CommandGetCatalogs, CommandGetDbSchemas,
+        CommandGetSqlInfo, CommandGetTableTypes, CommandGetTables, CommandGetXdbcTypeInfo,
+        CommandPreparedStatementQuery, CommandStatementQuery, SqlInfo, TicketStatementQuery,
+        server::FlightSqlService,
+    },
 };
 use async_stream::stream;
+use async_trait::async_trait;
 use axum::{
     http::StatusCode,
     response::{IntoResponse, Response as AxumResponse},
@@ -51,7 +56,7 @@ use metadata_db::MetadataDb;
 use prost::Message as _;
 use serde_json::json;
 use thiserror::Error;
-use tonic::{Request, Response, Status};
+use tonic::{Request, Response, Status, Streaming};
 use tracing::instrument;
 
 type TonicStream<T> = Pin<Box<dyn Stream<Item = Result<T, Status>> + Send + 'static>>;
@@ -409,94 +414,90 @@ fn should_transform_plan(plan: &DetachedLogicalPlan) -> Result<bool, DataFusionE
     Ok(result)
 }
 
-#[async_trait::async_trait]
-impl FlightService for Service {
-    type HandshakeStream = TonicStream<HandshakeResponse>;
-    type ListFlightsStream = TonicStream<FlightInfo>;
-    type DoGetStream = TonicStream<FlightData>;
-    type DoPutStream = TonicStream<PutResult>;
-    type DoActionStream = TonicStream<arrow_flight::Result>;
-    type ListActionsStream = TonicStream<ActionType>;
-    type DoExchangeStream = TonicStream<FlightData>;
+// #[async_trait::async_trait]
+// impl FlightService for Service {
+//     type HandshakeStream = TonicStream<HandshakeResponse>;
+//     type ListFlightsStream = TonicStream<FlightInfo>;
+//     type DoGetStream = TonicStream<FlightData>;
+//     type DoPutStream = TonicStream<PutResult>;
+//     type DoActionStream = TonicStream<arrow_flight::Result>;
+//     type ListActionsStream = TonicStream<ActionType>;
+//     type DoExchangeStream = TonicStream<FlightData>;
 
-    async fn poll_flight_info(
-        &self,
-        _request: Request<arrow_flight::FlightDescriptor>,
-    ) -> Result<Response<arrow_flight::PollInfo>, Status> {
-        return Err(Status::unimplemented("poll_flight_info"));
-    }
+//     async fn poll_flight_info(
+//         &self,
+//         _request: Request<arrow_flight::FlightDescriptor>,
+//     ) -> Result<Response<arrow_flight::PollInfo>, Status> {
+//         return Err(Status::unimplemented("poll_flight_info"));
+//     }
 
-    async fn do_exchange(
-        &self,
-        _request: Request<tonic::Streaming<FlightData>>,
-    ) -> Result<Response<Self::DoExchangeStream>, Status> {
-        return Err(Status::unimplemented("do_exchange"));
-    }
+//     async fn do_exchange(
+//         &self,
+//         _request: Request<tonic::Streaming<FlightData>>,
+//     ) -> Result<Response<Self::DoExchangeStream>, Status> {
+//         return Err(Status::unimplemented("do_exchange"));
+//     }
 
-    async fn handshake(
-        &self,
-        _request: Request<tonic::Streaming<HandshakeRequest>>,
-    ) -> Result<Response<Self::HandshakeStream>, Status> {
-        unimplemented!()
-    }
+//     async fn handshake(
+//         &self,
+//         _request: Request<tonic::Streaming<HandshakeRequest>>,
+//     ) -> Result<Response<Self::HandshakeStream>, Status> {
+//         unimplemented!()
+//     }
 
-    async fn list_flights(
-        &self,
-        _request: Request<arrow_flight::Criteria>,
-    ) -> Result<Response<Self::ListFlightsStream>, Status> {
-        return Err(Status::unimplemented("list_flights"));
-    }
+//     async fn list_flights(
+//         &self,
+//         _request: Request<arrow_flight::Criteria>,
+//     ) -> Result<Response<Self::ListFlightsStream>, Status> {
+//         return Err(Status::unimplemented("list_flights"));
+//     }
 
-    async fn get_flight_info(
-        &self,
-        request: Request<FlightDescriptor>,
-    ) -> Result<Response<FlightInfo>, Status> {
-        let resume_watermark = request
-            .metadata()
-            .get("nozzle-resume")
-            .and_then(|v| serde_json::from_slice(v.as_bytes()).ok());
-        let descriptor = request.into_inner();
-        let info = self.get_flight_info(descriptor, resume_watermark).await?;
-        Ok(Response::new(info))
-    }
+//     async fn get_flight_info(
+//         &self,
+//         request: Request<FlightDescriptor>,
+//     ) -> Result<Response<FlightInfo>, Status> {
+//         let descriptor = request.into_inner();
+//         let info = self.get_flight_info(descriptor).await?;
+//         Ok(Response::new(info))
+//     }
 
-    async fn get_schema(
-        &self,
-        _request: Request<arrow_flight::FlightDescriptor>,
-    ) -> Result<Response<arrow_flight::SchemaResult>, Status> {
-        return Err(Status::unimplemented("get_schema"));
-    }
+//     async fn get_schema(
+//         &self,
+//         _request: Request<arrow_flight::FlightDescriptor>,
+//     ) -> Result<Response<arrow_flight::SchemaResult>, Status> {
+//         return Err(Status::unimplemented("get_schema"));
+//     }
 
-    async fn do_get(
-        &self,
-        request: Request<arrow_flight::Ticket>,
-    ) -> Result<Response<Self::DoGetStream>, Status> {
-        let ticket = request.into_inner();
-        let data_stream = self.do_get(ticket).await?;
-        Ok(Response::new(data_stream))
-    }
+//     async fn do_get(
+//         &self,
+//         request: Request<arrow_flight::Ticket>,
+//     ) -> Result<Response<Self::DoGetStream>, Status> {
+//         let ticket = request.into_inner();
+//         let data_stream = self.do_get(ticket).await?;
+//         Ok(Response::new(data_stream))
+//     }
 
-    async fn do_put(
-        &self,
-        _request: Request<tonic::Streaming<FlightData>>,
-    ) -> Result<Response<Self::DoPutStream>, Status> {
-        return Err(Status::unimplemented("do_put"));
-    }
+//     async fn do_put(
+//         &self,
+//         _request: Request<tonic::Streaming<FlightData>>,
+//     ) -> Result<Response<Self::DoPutStream>, Status> {
+//         return Err(Status::unimplemented("do_put"));
+//     }
 
-    async fn list_actions(
-        &self,
-        _request: Request<arrow_flight::Empty>,
-    ) -> Result<Response<Self::ListActionsStream>, Status> {
-        return Err(Status::unimplemented("list_actions"));
-    }
+//     async fn list_actions(
+//         &self,
+//         _request: Request<arrow_flight::Empty>,
+//     ) -> Result<Response<Self::ListActionsStream>, Status> {
+//         return Err(Status::unimplemented("list_actions"));
+//     }
 
-    async fn do_action(
-        &self,
-        _request: Request<arrow_flight::Action>,
-    ) -> Result<Response<Self::DoActionStream>, Status> {
-        return Err(Status::unimplemented("do_action"));
-    }
-}
+//     async fn do_action(
+//         &self,
+//         _request: Request<arrow_flight::Action>,
+//     ) -> Result<Response<Self::DoActionStream>, Status> {
+//         return Err(Status::unimplemented("do_action"));
+//     }
+// }
 
 impl Service {
     #[instrument(skip(self))]
@@ -869,4 +870,244 @@ fn split_batch_for_grpc_response(
     }
 
     out
+}
+
+#[async_trait]
+impl FlightSqlService for Service {
+    type FlightService = Self;
+
+    async fn do_handshake(
+        &self,
+        _request: Request<Streaming<HandshakeRequest>>,
+    ) -> Result<
+        Response<Pin<Box<dyn Stream<Item = Result<HandshakeResponse, Status>> + Send>>>,
+        Status,
+    > {
+        // TODO: Implement proper authentication
+        Ok(Response::new(Box::pin(stream::empty())))
+    }
+
+    async fn get_flight_info_statement(
+        &self,
+        query: CommandStatementQuery,
+        request: Request<FlightDescriptor>,
+    ) -> Result<Response<FlightInfo>, Status> {
+        let resume_watermark = request
+            .metadata()
+            .get("nozzle-resume")
+            .and_then(|v| serde_json::from_slice(v.as_bytes()).ok());
+        let parsed_query = parse_sql(&query.query)
+            .map_err(|e| Status::invalid_argument(format!("SQL parse error: {}", e)))?;
+
+        let query_ctx = self
+            .dataset_store
+            .clone()
+            .planning_ctx_for_sql(&parsed_query)
+            .await
+            .map_err(|e| Status::internal(format!("Planning context error: {}", e)))?;
+
+        let (serialized_plan, schema) = query_ctx
+            .sql_to_remote_plan(parsed_query, resume_watermark)
+            .await
+            .map_err(|e| Status::internal(format!("Plan generation error: {}", e)))?;
+
+        let ticket_query = TicketStatementQuery {
+            statement_handle: serialized_plan,
+        };
+        let any_ticket = Any::pack(&ticket_query)
+            .map_err(|e| Status::internal(format!("Failed to pack ticket: {}", e)))?;
+        let ticket = Ticket::new(any_ticket.encode_to_vec());
+
+        let endpoint = FlightEndpoint {
+            ticket: Some(ticket),
+            location: vec![],
+            expiration_time: None,
+            app_metadata: Bytes::new(),
+        };
+
+        let info = FlightInfo {
+            flight_descriptor: Some(request.into_inner()),
+            schema: ipc_schema(&schema),
+            endpoint: vec![endpoint],
+            ordered: false,
+            total_records: -1,
+            total_bytes: -1,
+            app_metadata: Bytes::new(),
+        };
+
+        Ok(Response::new(info))
+    }
+
+    async fn do_get_statement(
+        &self,
+        ticket: TicketStatementQuery,
+        _request: Request<Ticket>,
+    ) -> Result<Response<Pin<Box<dyn Stream<Item = Result<FlightData, Status>> + Send>>>, Status>
+    {
+        let serialized_plan = ticket.statement_handle;
+
+        let remote_plan = common::query_context::remote_plan_from_bytes(&serialized_plan)
+            .map_err(|e| Status::internal(format!("Plan deserialization error: {}", e)))?;
+        let resume_watermark = remote_plan.resume_watermark.map(Into::into);
+
+        let table_refs = remote_plan.table_refs.into_iter().map(|t| t.into());
+
+        let catalog = self
+            .dataset_store
+            .load_physical_catalog(table_refs, remote_plan.function_refs, &self.env)
+            .await
+            .map_err(|e| Status::internal(format!("Catalog loading error: {}", e)))?;
+
+        let query_ctx = PlanningContext::new(catalog.logical().clone());
+        let plan = query_ctx
+            .plan_from_bytes(&remote_plan.serialized_plan)
+            .await
+            .map_err(|e| Status::internal(format!("Plan reconstruction error: {}", e)))?;
+
+        let schema: SchemaRef = plan.schema().as_ref().clone().into();
+
+        let dataset_store = self.dataset_store.clone();
+        let stream = self
+            .execute_plan(
+                catalog,
+                dataset_store,
+                plan,
+                remote_plan.is_streaming,
+                resume_watermark,
+            )
+            .await
+            .map_err(|e| Status::internal(format!("Plan execution error: {}", e)))?;
+
+        Ok(Response::new(flight_data_stream(stream, schema)))
+    }
+
+    async fn get_flight_info_catalogs(
+        &self,
+        _query: CommandGetCatalogs,
+        _request: Request<FlightDescriptor>,
+    ) -> Result<Response<FlightInfo>, Status> {
+        unimplemented!()
+    }
+
+    async fn do_get_catalogs(
+        &self,
+        _query: CommandGetCatalogs,
+        _request: Request<Ticket>,
+    ) -> Result<Response<Pin<Box<dyn Stream<Item = Result<FlightData, Status>> + Send>>>, Status>
+    {
+        unimplemented!()
+    }
+
+    async fn get_flight_info_schemas(
+        &self,
+        _query: CommandGetDbSchemas,
+        _request: Request<FlightDescriptor>,
+    ) -> Result<Response<FlightInfo>, Status> {
+        unimplemented!()
+    }
+
+    async fn do_get_schemas(
+        &self,
+        _query: CommandGetDbSchemas,
+        _request: Request<Ticket>,
+    ) -> Result<Response<Pin<Box<dyn Stream<Item = Result<FlightData, Status>> + Send>>>, Status>
+    {
+        unimplemented!()
+    }
+
+    async fn get_flight_info_tables(
+        &self,
+        _query: CommandGetTables,
+        _request: Request<FlightDescriptor>,
+    ) -> Result<Response<FlightInfo>, Status> {
+        unimplemented!()
+    }
+
+    async fn do_get_tables(
+        &self,
+        _query: CommandGetTables,
+        _request: Request<Ticket>,
+    ) -> Result<Response<Pin<Box<dyn Stream<Item = Result<FlightData, Status>> + Send>>>, Status>
+    {
+        unimplemented!()
+    }
+
+    async fn get_flight_info_table_types(
+        &self,
+        _query: CommandGetTableTypes,
+        _request: Request<FlightDescriptor>,
+    ) -> Result<Response<FlightInfo>, Status> {
+        unimplemented!()
+    }
+
+    async fn do_get_table_types(
+        &self,
+        _query: CommandGetTableTypes,
+        _request: Request<Ticket>,
+    ) -> Result<Response<Pin<Box<dyn Stream<Item = Result<FlightData, Status>> + Send>>>, Status>
+    {
+        unimplemented!()
+    }
+
+    async fn get_flight_info_sql_info(
+        &self,
+        _query: CommandGetSqlInfo,
+        _request: Request<FlightDescriptor>,
+    ) -> Result<Response<FlightInfo>, Status> {
+        unimplemented!()
+    }
+
+    async fn do_get_sql_info(
+        &self,
+        _query: CommandGetSqlInfo,
+        _request: Request<Ticket>,
+    ) -> Result<Response<Pin<Box<dyn Stream<Item = Result<FlightData, Status>> + Send>>>, Status>
+    {
+        unimplemented!()
+    }
+
+    async fn get_flight_info_xdbc_type_info(
+        &self,
+        _query: CommandGetXdbcTypeInfo,
+        _request: Request<FlightDescriptor>,
+    ) -> Result<Response<FlightInfo>, Status> {
+        unimplemented!()
+    }
+
+    async fn do_get_xdbc_type_info(
+        &self,
+        _query: CommandGetXdbcTypeInfo,
+        _request: Request<Ticket>,
+    ) -> Result<Response<Pin<Box<dyn Stream<Item = Result<FlightData, Status>> + Send>>>, Status>
+    {
+        unimplemented!()
+    }
+
+    async fn get_flight_info_prepared_statement(
+        &self,
+        _cmd: CommandPreparedStatementQuery,
+        _request: Request<FlightDescriptor>,
+    ) -> Result<Response<FlightInfo>, Status> {
+        unimplemented!()
+    }
+
+    async fn do_action_create_prepared_statement(
+        &self,
+        _query: ActionCreatePreparedStatementRequest,
+        _request: Request<Action>,
+    ) -> Result<ActionCreatePreparedStatementResult, Status> {
+        unimplemented!()
+    }
+
+    async fn do_action_close_prepared_statement(
+        &self,
+        _query: ActionClosePreparedStatementRequest,
+        _request: Request<Action>,
+    ) -> Result<(), Status> {
+        unimplemented!()
+    }
+
+    async fn register_sql_info(&self, _id: i32, _result: &SqlInfo) {
+        // No-op for now
+    }
 }
