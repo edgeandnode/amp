@@ -1,11 +1,13 @@
-use std::{pin::Pin, sync::Arc};
+use std::{
+    pin::Pin,
+    sync::{Arc, LazyLock},
+};
 
 use arrow_flight::{
     Action, FlightData, FlightDescriptor, FlightEndpoint, FlightInfo, HandshakeRequest,
     HandshakeResponse, SchemaAsIpc, Ticket,
     encode::{FlightDataEncoderBuilder, GRPC_TARGET_MAX_FLIGHT_SIZE_BYTES},
     error::FlightError,
-    flight_descriptor::DescriptorType,
     sql::{
         ActionClosePreparedStatementRequest, ActionCreatePreparedStatementRequest,
         ActionCreatePreparedStatementResult, Any, CommandGetCatalogs, CommandGetDbSchemas,
@@ -58,10 +60,8 @@ use http_common::{BoxRequestError, RequestError};
 use metadata_db::MetadataDb;
 use prost::Message as _;
 use serde_json::json;
-use std::sync::LazyLock;
 use thiserror::Error;
 use tonic::{Request, Response, Status, Streaming};
-use tracing::instrument;
 
 type TonicStream<T> = Pin<Box<dyn Stream<Item = Result<T, Status>> + Send + 'static>>;
 // TODO: Make this configurable via environment variable or config file
@@ -617,7 +617,11 @@ impl Service {
     // - Build a DataFusion query context with empty tables from that catalog.
     // - Use that context to plan the SQL query.
     // - Serialize the plan to bytes using datafusion-protobufs.
-    async fn plan_sql_query(&self, sql: &str, resume_watermark: Option<ResumeWatermark>) -> Result<(Bytes, Arc<DFSchema>), Error> {
+    async fn plan_sql_query(
+        &self,
+        sql: &str,
+        resume_watermark: Option<ResumeWatermark>,
+    ) -> Result<(Bytes, Arc<DFSchema>), Error> {
         let parsed_query = parse_sql(sql)?;
         let query_ctx = self
             .dataset_store
@@ -655,71 +659,6 @@ impl Service {
             .await?;
 
         Ok(flight_data_stream(stream, schema))
-    }
-
-    #[instrument(skip(self))]
-    async fn get_flight_info(
-        &self,
-        descriptor: FlightDescriptor,
-        resume_watermark: Option<ResumeWatermark>,
-    ) -> Result<FlightInfo, Error> {
-        let (serialized_plan, schema) = match DescriptorType::try_from(descriptor.r#type)
-            .map_err(|e| Error::PbDecodeError(e.to_string()))?
-        {
-            DescriptorType::Cmd => {
-                let msg = Any::decode(descriptor.cmd.as_ref())?;
-                if let Some(sql_query) = msg
-                    .unpack::<CommandStatementQuery>()
-                    .map_err(|e| Error::PbDecodeError(e.to_string()))?
-                {
-                    self.plan_sql_query(&sql_query.query, resume_watermark)
-                        .await?
-                } else {
-                    return Err(Error::UnsupportedFlightDescriptorCommand(msg.type_url));
-                }
-            }
-            DescriptorType::Path | DescriptorType::Unknown => {
-                return Err(Error::UnsupportedFlightDescriptorType(
-                    descriptor.r#type.to_string(),
-                ));
-            }
-        };
-
-        let endpoint = FlightEndpoint {
-            ticket: Some(Ticket::new(serialized_plan)),
-
-            // We may eventually want to leverage the load-balancing capabilities of Arrow Flight.
-            // But for now leaving `location` this empty is fine, per the docs
-            // https://arrow.apache.org/docs/format/Flight.html:
-            //
-            // > If the list is empty, the expectation is that the ticket can only be redeemed on the
-            // > current service where the ticket was generated.
-            location: vec![],
-
-            // We don't currently have anything to expire.
-            expiration_time: None,
-
-            app_metadata: Bytes::new(),
-        };
-
-        let info = FlightInfo {
-            flight_descriptor: Some(descriptor),
-            schema: ipc_schema(&schema),
-            endpoint: vec![endpoint],
-
-            // Not important.
-            ordered: false,
-            total_records: -1,
-            total_bytes: -1,
-            app_metadata: Bytes::new(),
-        };
-
-        Ok(info)
-    }
-
-    #[instrument(skip_all)]
-    async fn do_get(&self, ticket: arrow_flight::Ticket) -> Result<TonicStream<FlightData>, Error> {
-        self.execute_remote_plan(&ticket.ticket).await
     }
 }
 
@@ -1017,16 +956,16 @@ impl FlightSqlService for Service {
         request: Request<FlightDescriptor>,
     ) -> Result<Response<FlightInfo>, Status> {
         tracing::info!(method = "get_flight_info_statement", sql = %query.query, "FlightSQL method called");
-        
-        let resume_watermark = request
-        .metadata()
-        .get("nozzle-resume")
-        .and_then(|v| serde_json::from_slice(v.as_bytes()).ok());
 
-        let (serialized_plan, schema) = self
-            .plan_sql_query(&query.query, resume_watermark)
-            .await
-            .map_err(|e| Status::invalid_argument(format!("SQL planning error: {}", e)))?;
+        let resume_watermark = request
+            .metadata()
+            .get("nozzle-resume")
+            .and_then(|v| serde_json::from_slice(v.as_bytes()).ok());
+
+        let (serialized_plan, schema) =
+            self.plan_sql_query(&query.query, resume_watermark)
+                .await
+                .map_err(|e| Status::invalid_argument(format!("SQL planning error: {}", e)))?;
 
         let ticket_query = TicketStatementQuery {
             statement_handle: serialized_plan,
