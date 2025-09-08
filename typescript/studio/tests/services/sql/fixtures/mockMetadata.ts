@@ -3,9 +3,11 @@
  * Provides realistic test data representing Nozzle dataset metadata
  */
 
-import { DatasetMetadata } from "nozzl/Studio/Model"
+import type { DatasetMetadata } from "nozzl/Studio/Model"
 
-export const mockMetadata: ReadonlyArray<DatasetMetadata> = [
+export const mockMetadata: ReadonlyArray<
+  DatasetMetadata & { destination: string }
+> = [
   {
     source: "anvil.logs",
     destination: "anvil_logs",
@@ -16,8 +18,8 @@ export const mockMetadata: ReadonlyArray<DatasetMetadata> = [
       { name: "block_number", datatype: "bigint" },
       { name: "transaction_hash", datatype: "bytes32" },
       { name: "log_index", datatype: "int" },
-      { name: "transaction_index", datatype: "int" }
-    ]
+      { name: "transaction_index", datatype: "int" },
+    ],
   },
   {
     source: "anvil.transactions",
@@ -32,8 +34,8 @@ export const mockMetadata: ReadonlyArray<DatasetMetadata> = [
       { name: "input", datatype: "bytes" },
       { name: "block_number", datatype: "bigint" },
       { name: "transaction_index", datatype: "int" },
-      { name: "nonce", datatype: "bigint" }
-    ]
+      { name: "nonce", datatype: "bigint" },
+    ],
   },
   {
     source: "anvil.blocks",
@@ -55,23 +57,25 @@ export const mockMetadata: ReadonlyArray<DatasetMetadata> = [
       { name: "size", datatype: "bigint" },
       { name: "gas_limit", datatype: "bigint" },
       { name: "gas_used", datatype: "bigint" },
-      { name: "timestamp", datatype: "bigint" }
-    ]
-  }
+      { name: "timestamp", datatype: "bigint" },
+    ],
+  },
 ] as const
 
 /**
  * Minimal metadata for testing edge cases with few columns
  */
-export const mockMetadataMinimal: ReadonlyArray<DatasetMetadata> = [
+export const mockMetadataMinimal: ReadonlyArray<
+  Omit<DatasetMetadata, "source"> & { source: string; destination: string }
+> = [
   {
-    source: "test.simple",
+    source: "test.simple" as any,
     destination: "test_simple",
     metadata_columns: [
       { name: "id", datatype: "int" },
-      { name: "name", datatype: "string" }
-    ]
-  }
+      { name: "name", datatype: "string" },
+    ],
+  },
 ] as const
 
 /**
@@ -82,42 +86,49 @@ export const mockMetadataEmpty: ReadonlyArray<DatasetMetadata> = [] as const
 /**
  * Large metadata for performance testing
  */
-export const mockMetadataLarge: ReadonlyArray<DatasetMetadata> = Array.from(
-  { length: 100 },
-  (_, i) => ({
-    source: `dataset${i}.table${i}`,
-    destination: `dataset${i}_table${i}`,
-    metadata_columns: Array.from({ length: 50 }, (_, j) => ({
-      name: `column_${j}_${i}`,
-      datatype: j % 4 === 0 ? "bigint" : 
-                j % 4 === 1 ? "string" :
-                j % 4 === 2 ? "address" : "bytes32"
-    }))
-  })
-) as const
+export const mockMetadataLarge: ReadonlyArray<{
+  source: string
+  destination: string
+  metadata_columns: Array<{ name: string; datatype: string }>
+}> = Array.from({ length: 100 }, (_, i) => ({
+  source: `dataset${i}.table${i}`,
+  destination: `dataset${i}_table${i}`,
+  metadata_columns: Array.from({ length: 50 }, (__, j) => ({
+    name: `column_${j}_${i}`,
+    datatype: j % 4 === 0 ?
+      "bigint"
+      : j % 4 === 1 ?
+      "string"
+      : j % 4 === 2 ?
+      "address"
+      : "bytes32",
+  })),
+}))
 
 /**
  * Helper function to get metadata by table name
  */
 export function getMetadataByTableName(
-  metadata: ReadonlyArray<DatasetMetadata>, 
-  tableName: string
+  metadata: ReadonlyArray<DatasetMetadata>,
+  tableName: string,
 ): DatasetMetadata | undefined {
-  return metadata.find(m => m.source === tableName)
+  return metadata.find((m) => m.source === tableName)
 }
 
 /**
  * Helper function to get all column names from a dataset
  */
-export function getAllColumnNames(metadata: ReadonlyArray<DatasetMetadata>): string[] {
-  return metadata.flatMap(dataset => 
-    dataset.metadata_columns.map(col => col.name)
-  )
+export function getAllColumnNames(
+  metadata: ReadonlyArray<DatasetMetadata>,
+): Array<string> {
+  return metadata.flatMap((dataset) => dataset.metadata_columns.map((col) => col.name))
 }
 
 /**
  * Helper function to get all table names
  */
-export function getAllTableNames(metadata: ReadonlyArray<DatasetMetadata>): string[] {
-  return metadata.map(dataset => dataset.source)
+export function getAllTableNames(
+  metadata: ReadonlyArray<DatasetMetadata>,
+): Array<string> {
+  return metadata.map((dataset) => dataset.source)
 }

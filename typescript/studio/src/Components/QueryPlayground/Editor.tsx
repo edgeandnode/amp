@@ -1,9 +1,17 @@
 "use client"
 
 import type { EditorProps as MonacoEditorProps } from "@monaco-editor/react"
-import MonacoEditor from "@monaco-editor/react"
+import MonacoEditor, { loader } from "@monaco-editor/react"
 import { useStore } from "@tanstack/react-form"
+import * as monaco from "monaco-editor/esm/vs/editor/editor.api"
+// eslint-disable-next-line import-x/default
+import editorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker"
 import { useEffect, useRef } from "react"
+
+import { useMetadataSuspenseQuery } from "@/hooks/useMetadataQuery"
+import { useUDFSuspenseQuery } from "@/hooks/useUDFQuery"
+import type { DisposableHandle } from "@/services/sql"
+import { setupNozzleSQLProviders } from "@/services/sql"
 
 import { ErrorMessages } from "../Form/ErrorMessages"
 import { useFieldContext } from "../Form/form"
@@ -16,10 +24,13 @@ import {
   type DisposableHandle,
 } from "../../services/sql"
 
-export type EditorProps = Omit<
-  MonacoEditorProps,
-  "defaultLanguage" | "language"
-> & {
+self.MonacoEnvironment = {
+  getWorker() {
+    return new editorWorker()
+  },
+}
+
+export type EditorProps = Omit<MonacoEditorProps, "defaultLanguage" | "language"> & {
   id: string
   onSubmit?: () => void
   // SQL Validation configuration
@@ -220,12 +231,14 @@ export function Editor({
       if (providersRef.current) {
         providersRef.current.dispose()
         providersRef.current = null
-        console.debug("[Editor] SQL intellisense providers disposed")
       }
       // Clear editor reference
       editorRef.current = null
     }
   }, [])
+
+  // use the installed monaco-editor type instead of it being brought down from a CDN
+  loader.config({ monaco })
 
   return (
     <div className="w-full h-full p-0 m-0 flex flex-col gap-y-3">
@@ -282,16 +295,26 @@ export function Editor({
           })
 
           // Setup SQL intellisense providers now that Monaco is available
-          setupProviders()
+          // Dispose existing providers first
+          if (providersRef.current) {
+            providersRef.current.dispose()
+          }
 
-          console.debug(
-            "[Editor] Monaco editor mounted with SQL intellisense configuration",
+          // Setup providers with initial data
+          providersRef.current = setupNozzleSQLProviders(
+            metadataQuery.data,
+            udfQuery.data,
+            {
+              // Enable debug logging in development
+              enableDebugLogging: process.env.NODE_ENV === "development",
+              // Allow completions without prefix for better UX (especially for columns in SELECT)
+              minPrefixLength: 0,
+              maxSuggestions: 50,
+            },
           )
         }}
       />
-      {hasErrors ? (
-        <ErrorMessages id={`${id}-invalid`} errors={errors} />
-      ) : null}
+      {hasErrors ? <ErrorMessages id={`${id}-invalid`} errors={errors} /> : null}
     </div>
   )
 }

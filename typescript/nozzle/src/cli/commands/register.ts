@@ -1,32 +1,17 @@
 import * as Command from "@effect/cli/Command"
 import * as Options from "@effect/cli/Options"
-import * as Config from "effect/Config"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import * as Schema from "effect/Schema"
 import * as Registry from "../../api/Registry.ts"
 import * as ManifestContext from "../../ManifestContext.ts"
+import { configFile, manifestFile, registryUrl } from "../common.ts"
 
 export const register = Command.make("register", {
   args: {
-    config: Options.file("config").pipe(
-      Options.withAlias("c"),
-      Options.withDescription("The dataset definition config file to register"),
-      Options.optional,
-    ),
-    manifest: Options.file("manifest").pipe(
-      Options.withAlias("m"),
-      Options.withDescription("The dataset manifest file to register"),
-      Options.optional,
-    ),
-    registryUrl: Options.text("registry-url").pipe(
-      Options.withFallbackConfig(
-        Config.string("NOZZLE_REGISTRY_URL").pipe(Config.withDefault("http://localhost:1611")),
-      ),
-      Options.withDescription("The url of the registry server"),
-      Options.withSchema(Schema.URL),
-    ),
+    configFile: configFile.pipe(Options.optional),
+    manifestFile: manifestFile.pipe(Options.optional),
+    registryUrl,
   },
 }).pipe(
   Command.withDescription("Register a dataset definition or manifest"),
@@ -39,7 +24,7 @@ export const register = Command.make("register", {
     }),
   ),
   Command.provide(({ args }) =>
-    ManifestContext.layerFromFile({ manifest: args.manifest, config: args.config }).pipe(
+    ManifestContext.layerFromFile({ manifest: args.manifestFile, config: args.configFile }).pipe(
       Layer.provideMerge(Registry.layer(`${args.registryUrl}`)),
     )
   ),

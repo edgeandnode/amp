@@ -1,6 +1,3 @@
-pub mod sql_datasets;
-
-use core::fmt;
 use std::{
     collections::BTreeSet,
     num::NonZeroU32,
@@ -28,16 +25,23 @@ use datafusion::{
 use futures::{FutureExt as _, Stream, TryFutureExt as _, future::BoxFuture};
 use js_runtime::isolate_pool::IsolatePool;
 use metadata_db::MetadataDb;
-use object_store::ObjectMeta;
 use rand::seq::SliceRandom;
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
 use sql_datasets::SqlDataset;
-use thiserror::Error;
-use tracing::{error, instrument};
+use tracing::instrument;
 use url::Url;
 
-#[derive(Debug, Error)]
+mod dataset_kind;
+pub mod providers;
+pub mod sql_datasets;
+
+pub use self::dataset_kind::{DatasetKind, UnsupportedKindError};
+use self::providers::ProvidersConfigStore;
+
+/// Alias for TOML value type used in provider configurations.
+// TODO: #[deprecated(note = "use dataset_store::providers::ProviderConfig instead")]
+pub type ProviderConfigTomlValue = toml::Value;
+
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("failed to fetch: {0}")]
     FetchError(#[from] StoreError),
@@ -90,10 +94,11 @@ pub enum Error {
         network: String,
     },
 
-    #[error("provider environment substitution failed at {location}: {source}")]
-    ProviderEnvSubstitution {
+    #[error("provider configuration file is not valid UTF-8 at {location}: {source}")]
+    ProviderInvalidUtf8 {
         location: String,
-        source: Box<dyn std::error::Error + Send + Sync>,
+        #[source]
+        source: std::string::FromUtf8Error,
     },
 
     #[error("dataset '{0}' version '{1}' not found")]
@@ -103,62 +108,31 @@ pub enum Error {
     Unknown(BoxError),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum DatasetKind {
-    EvmRpc,
-    Firehose,
-    Substreams,
-    Sql, // Will be deprecated in favor of `Manifest`
-    Manifest,
-}
-
-impl DatasetKind {
-    pub fn as_str(&self) -> &str {
-        match self {
-            Self::EvmRpc => evm_rpc_datasets::DATASET_KIND,
-            Self::Firehose => firehose_datasets::DATASET_KIND,
-            Self::Substreams => substreams_datasets::DATASET_KIND,
-            Self::Sql => sql_datasets::DATASET_KIND,
-            Self::Manifest => common::manifest::DATASET_KIND,
-        }
-    }
-
-    pub fn is_raw(&self) -> bool {
-        match self {
-            Self::EvmRpc | Self::Firehose | Self::Substreams => true,
-            Self::Sql | Self::Manifest => false,
+impl From<providers::FetchError> for Error {
+    fn from(err: providers::FetchError) -> Self {
+        match err {
+            providers::FetchError::StoreFetchFailed(box_error) => {
+                // Try to downcast BoxError to StoreError, otherwise map to Unknown
+                match box_error.downcast::<StoreError>() {
+                    Ok(store_error) => Error::FetchError(*store_error),
+                    Err(box_error) => Error::Unknown(box_error),
+                }
+            }
+            providers::FetchError::TomlParseError(toml_error) => Error::Toml(toml_error),
+            providers::FetchError::InvalidUtf8 { location, source } => {
+                Error::ProviderInvalidUtf8 { location, source }
+            }
         }
     }
 }
 
-impl fmt::Display for DatasetKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::EvmRpc => f.write_str(evm_rpc_datasets::DATASET_KIND),
-            Self::Firehose => f.write_str(firehose_datasets::DATASET_KIND),
-            Self::Substreams => f.write_str(substreams_datasets::DATASET_KIND),
-            Self::Sql => f.write_str(sql_datasets::DATASET_KIND),
-            Self::Manifest => f.write_str(common::manifest::DATASET_KIND),
-        }
+impl From<UnsupportedKindError> for Error {
+    fn from(err: UnsupportedKindError) -> Self {
+        Error::UnsupportedKind(err.kind)
     }
 }
 
-impl FromStr for DatasetKind {
-    type Err = Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            evm_rpc_datasets::DATASET_KIND => Ok(Self::EvmRpc),
-            firehose_datasets::DATASET_KIND => Ok(Self::Firehose),
-            substreams_datasets::DATASET_KIND => Ok(Self::Substreams),
-            sql_datasets::DATASET_KIND => Ok(Self::Sql),
-            common::manifest::DATASET_KIND => Ok(Self::Manifest),
-            k => Err(Error::UnsupportedKind(k.to_string())),
-        }
-    }
-}
-
-#[derive(Debug, Error)]
+#[derive(Debug, thiserror::Error)]
 pub struct DatasetError {
     pub dataset: Option<String>,
 
@@ -207,8 +181,8 @@ impl From<(String, Error)> for DatasetError {
     }
 }
 
-impl fmt::Display for DatasetError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl std::fmt::Display for DatasetError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let e = &self.error;
         match &self.dataset {
             Some(dataset) if self.is_not_found() => {
@@ -223,24 +197,30 @@ impl fmt::Display for DatasetError {
 #[derive(Clone)]
 pub struct DatasetStore {
     config: Arc<Config>,
-    pub metadata_db: Arc<MetadataDb>,
+    metadata_db: Arc<MetadataDb>,
     // Cache maps dataset name to eth_call UDF.
     eth_call_cache: Arc<RwLock<HashMap<String, ScalarUDF>>>,
     // This cache maps dataset name to the dataset definition.
     dataset_cache: Arc<RwLock<HashMap<String, Dataset>>>,
-    // Cache of provider definitions.
-    providers_cache: Arc<RwLock<Option<Vec<ObjectMeta>>>>,
+    // Provider store for managing provider configurations and caching.
+    providers: ProvidersConfigStore,
 }
 
 impl DatasetStore {
     pub fn new(config: Arc<Config>, metadata_db: Arc<MetadataDb>) -> Arc<Self> {
+        let providers_store = ProvidersConfigStore::new(config.providers_store.prefixed_store());
         Arc::new(Self {
             config,
             metadata_db,
             eth_call_cache: Default::default(),
             dataset_cache: Default::default(),
-            providers_cache: Default::default(),
+            providers: providers_store,
         })
+    }
+
+    /// Get a reference to the providers configuration store
+    pub fn providers(&self) -> &ProvidersConfigStore {
+        &self.providers
     }
 
     pub async fn load_dataset(
@@ -381,9 +361,9 @@ impl DatasetStore {
         let common: DatasetDefsCommon = match raw_dataset {
             RawDataset::Toml(ref raw) => {
                 tracing::warn!("TOML dataset format is deprecated!");
-                toml::from_str::<DatasetDefsCommon>(raw)?.into()
+                toml::from_str::<DatasetDefsCommon>(raw)?
             }
-            RawDataset::Json(ref raw) => serde_json::from_str::<DatasetDefsCommon>(raw)?.into(),
+            RawDataset::Json(ref raw) => serde_json::from_str::<DatasetDefsCommon>(raw)?,
         };
 
         if common.name != dataset_name && common.kind != "manifest" {
@@ -437,12 +417,12 @@ impl DatasetStore {
                 (dataset, Some(store_schema))
             }
             DatasetKind::Sql => {
-                let store_dataset = Arc::clone(&self).sql_dataset(value).await?.dataset;
+                let store_dataset = Arc::clone(self).sql_dataset(value).await?.dataset;
                 (store_dataset, None)
             }
             DatasetKind::Manifest => {
                 let manifest = raw_dataset.to_manifest()?;
-                let dataset = manifest::dataset(manifest).map_err(|e| Error::Unknown(e))?;
+                let dataset = manifest::dataset(manifest).map_err(Error::Unknown)?;
                 (dataset, None)
             }
         };
@@ -501,7 +481,17 @@ impl DatasetStore {
         let value = raw_dataset.to_value()?;
         let kind = DatasetKind::from_str(&common.kind)?;
 
-        let provider = self.find_provider(kind, common.network.clone()).await?;
+        let Some(provider) = self.find_provider(kind, common.network.clone()).await else {
+            tracing::warn!(
+                provider_kind = %kind,
+                provider_network = %common.network,
+                "no providers available for the requested kind-network configuration"
+            );
+            return Err(Error::ProviderNotFound {
+                dataset_kind: kind,
+                network: common.network,
+            });
+        };
         Ok(match kind {
             DatasetKind::EvmRpc => BlockStreamClient::EvmRpc(
                 evm_rpc_datasets::client(provider, common.network, only_finalized_blocks).await?,
@@ -528,63 +518,61 @@ impl DatasetStore {
 
     async fn find_provider(
         &self,
-        dataset_kind: DatasetKind,
-        dataset_network: String,
-    ) -> Result<toml::Value, Error> {
-        let mut providers = self.all_providers().await?;
-        // Shuffle to provide load balancing across providers.
-        providers.shuffle(&mut rand::rng());
-        for obj in providers {
-            let location = obj.location.to_string();
-            let (kind, network, provider) = self.kind_network_provider(&location).await?;
-            if kind != dataset_kind || network != dataset_network {
-                continue;
-            }
-            return Ok(provider);
-        }
-        Err(Error::ProviderNotFound {
-            dataset_kind,
-            network: dataset_network,
-        })
-    }
-
-    async fn all_providers(&self) -> Result<Vec<ObjectMeta>, Error> {
-        if let Some(providers) = self.providers_cache.read().unwrap().as_ref() {
-            // Cache is already populated.
-            return Ok(providers.clone());
-        }
-        let providers = self
-            .providers_store()
-            .list_all_shallow()
+        kind: DatasetKind,
+        network: String,
+    ) -> Option<ProviderConfigTomlValue> {
+        // Collect matching provider configurations into a vector for shuffling
+        let mut matching_providers = self
+            .providers
+            .get_all()
             .await
-            .map_err(Error::FetchError)?;
-        *self.providers_cache.write().unwrap() = Some(providers.clone());
-        Ok(providers)
-    }
+            .values()
+            .filter(|prov| prov.kind == kind && prov.network == network)
+            .cloned()
+            .collect::<Vec<_>>();
 
-    async fn kind_network_provider(
-        &self,
-        location: &str,
-    ) -> Result<(DatasetKind, String, toml::Value), Error> {
-        let raw = self.providers_store().get_string(location).await?;
-        let mut toml_value: toml::Value = toml::from_str(&raw)?;
+        if matching_providers.is_empty() {
+            return None;
+        }
 
-        // Apply environment variable substitution
-        common::env_substitute::substitute_env_vars(&mut toml_value).map_err(|e| {
-            Error::ProviderEnvSubstitution {
-                location: location.to_string(),
-                source: Box::new(e),
+        // Try each provider in random order until we find one with successful env substitution
+        matching_providers.shuffle(&mut rand::rng());
+
+        'try_find_provider: for mut provider in matching_providers {
+            // Apply environment variable substitution to the `rest` table values
+            for (_key, value) in provider.rest.iter_mut() {
+                if let Err(err) = common::env_substitute::substitute_env_vars(value) {
+                    tracing::warn!(
+                        provider_kind = %kind,
+                        provider_network = %network,
+                        error = %err,
+                        "environment variable substitution failed for provider, trying next"
+                    );
+                    continue 'try_find_provider;
+                }
             }
-        })?;
 
-        let common_fields = ProviderDefsCommon::deserialize(toml_value.clone())?;
-        let kind = DatasetKind::from_str(&common_fields.kind)?;
-        Ok((kind, common_fields.network, toml_value))
+            tracing::debug!(
+                provider_kind = %kind,
+                provider_network = %network,
+                "successfully selected provider with environment substitution"
+            );
+
+            // Convert back to toml::Value for compatibility
+            // TODO: Remove conversion once the fn callers use ProviderConfig directly
+            let value = toml::Value::try_from(provider)
+                .expect("ProviderConfig structs should always be convertible to toml::Value");
+
+            return Some(value);
+        }
+
+        // If we get here, no suitable providers were found
+        None
     }
 
     /// Returns cached eth_call scalar UDF, otherwise loads the UDF and caches it.
     async fn eth_call_for_dataset(&self, dataset: &Dataset) -> Result<Option<ScalarUDF>, Error> {
-        #[derive(Deserialize)]
+        #[derive(serde::Deserialize)]
         struct EvmRpcProvider {
             url: Url,
             rate_limit_per_minute: Option<NonZeroU32>,
@@ -600,9 +588,21 @@ impl DatasetStore {
         }
 
         // Load the provider from the dataset definition.
-        let provider = self
+        let Some(provider) = self
             .find_provider(DatasetKind::EvmRpc, dataset.network.clone())
-            .await?;
+            .await
+        else {
+            tracing::warn!(
+                provider_kind = %DatasetKind::EvmRpc,
+                provider_network = %dataset.network,
+                "no providers available for the requested kind-network configuration"
+            );
+            return Err(Error::ProviderNotFound {
+                dataset_kind: DatasetKind::EvmRpc,
+                network: dataset.network.clone(),
+            });
+        };
+
         let provider: EvmRpcProvider = provider.try_into()?;
         // Cache the provider.
         let provider = evm::provider::new(provider.url, provider.rate_limit_per_minute);
@@ -635,7 +635,7 @@ impl DatasetStore {
     }
 
     /// Looks up the datasets for the given table references and loads them into a catalog.
-    pub async fn load_physical_catalog<'a>(
+    pub async fn load_physical_catalog(
         self: &Arc<Self>,
         table_refs: impl IntoIterator<Item = TableReference>,
         function_names: impl IntoIterator<Item = String>,
@@ -647,7 +647,7 @@ impl DatasetStore {
 
         let mut tables = Vec::new();
         for table in &logical_catalog.tables {
-            let physical_table = PhysicalTable::get_active(&table, self.metadata_db.clone())
+            let physical_table = PhysicalTable::get_active(table, self.metadata_db.clone())
                 .await
                 .map_err(DatasetError::unknown)?
                 .ok_or(DatasetError::unknown(format!(
@@ -719,7 +719,7 @@ impl DatasetStore {
                 let is_referenced = table_refs.iter().any(|table_ref| {
                     match (table_ref.schema(), table_ref.table()) {
                         (Some(schema), table_name) => {
-                            schema == &dataset_name && table_name == table.name()
+                            schema == dataset_name && table_name == table.name()
                         }
                         _ => false, // Unqualified table
                     }
@@ -746,10 +746,6 @@ impl DatasetStore {
         sql_datasets::dataset(self, dataset_def)
             .map_err(Error::SqlDatasetError)
             .boxed()
-    }
-
-    fn providers_store(&self) -> &Arc<Store> {
-        &self.config.providers_store
     }
 
     pub fn dataset_defs_store(&self) -> &Arc<Store> {
@@ -784,7 +780,7 @@ impl RawDataset {
 }
 
 /// All dataset definitions must have a kind, network and name. The name must match the filename. Schema is optional for TOML dataset format.
-#[derive(Deserialize, Serialize, JsonSchema)]
+#[derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
 pub struct DatasetDefsCommon {
     /// Dataset kind. See specific dataset definitions for supported values.
     pub kind: String,
@@ -797,19 +793,12 @@ pub struct DatasetDefsCommon {
 }
 
 /// A serializable representation of a collection of [`arrow::datatypes::Schema`]s, without any metadata.
-#[derive(Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
+#[derive(Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
 pub struct SerializableSchema(
     std::collections::HashMap<String, std::collections::HashMap<String, DataTypeJsonSchema>>,
 );
 
-/// All providers definitions must have a kind and network.
-#[derive(Deserialize)]
-struct ProviderDefsCommon {
-    kind: String,
-    network: String,
-}
-
-fn datasets_from_table_refs<'a>(
+fn datasets_from_table_refs(
     table_refs: impl Iterator<Item = TableReference>,
 ) -> Result<BTreeSet<String>, DatasetError> {
     let mut dataset_names = BTreeSet::new();
@@ -1000,152 +989,4 @@ pub async fn resolve_blocks_table(
                 table.name()
             ))
         })
-}
-
-#[cfg(test)]
-mod tests {
-
-    #[test]
-    fn test_env_substitution_in_toml_value() {
-        // Create local variable map
-        let mut vars = std::collections::HashMap::new();
-        vars.insert("TEST_URL".to_string(), "http://localhost:8545".to_string());
-        vars.insert("TEST_KIND".to_string(), "evm-rpc".to_string());
-
-        let lookup = |name: &str| vars.get(name).cloned();
-
-        // Create a TOML value with variable placeholders
-        let toml_str = r#"
-kind = "${TEST_KIND}"
-url = "${TEST_URL}"
-network = "mainnet"
-rate_limit_per_minute = 100
-"#;
-        let mut toml_value: toml::Value = toml::from_str(toml_str).unwrap();
-
-        // Apply variable substitution using local lookup
-        let result = common::env_substitute::substitute_vars(&mut toml_value, &lookup);
-        assert!(
-            result.is_ok(),
-            "Expected successful substitution, got: {:?}",
-            result
-        );
-
-        // Verify the substitution worked correctly
-        let url = toml_value.get("url").and_then(|v| v.as_str()).unwrap();
-        assert_eq!(url, "http://localhost:8545");
-
-        let kind = toml_value.get("kind").and_then(|v| v.as_str()).unwrap();
-        assert_eq!(kind, "evm-rpc");
-
-        let network = toml_value.get("network").and_then(|v| v.as_str()).unwrap();
-        assert_eq!(network, "mainnet");
-
-        let rate_limit = toml_value
-            .get("rate_limit_per_minute")
-            .and_then(|v| v.as_integer())
-            .unwrap();
-        assert_eq!(rate_limit, 100);
-    }
-
-    #[test]
-    fn test_missing_var_in_toml() {
-        // Empty variable map - no variables available
-        let vars: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-        let lookup = |name: &str| vars.get(name).cloned();
-
-        let toml_str = r#"
-kind = "evm-rpc"
-url = "${MISSING_VAR}"
-network = "mainnet"
-"#;
-        let mut toml_value: toml::Value = toml::from_str(toml_str).unwrap();
-
-        // Apply variable substitution - should fail
-        let result = common::env_substitute::substitute_vars(&mut toml_value, &lookup);
-        assert!(result.is_err(), "Expected error for missing variable");
-
-        // Check that it's the right type of error
-        match result.unwrap_err() {
-            common::env_substitute::Error::MissingVar(var_name) => {
-                assert_eq!(var_name, "MISSING_VAR");
-            }
-            other => panic!("Expected MissingVar error, got: {:?}", other),
-        }
-    }
-
-    #[test]
-    fn test_non_templated_toml_unchanged() {
-        // Variables map (not used since there are no variables in the TOML)
-        let vars: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-        let lookup = |name: &str| vars.get(name).cloned();
-
-        let toml_str = r#"
-kind = "evm-rpc"
-url = "http://hardcoded:8545"
-network = "mainnet"
-rate_limit_per_minute = 200
-"#;
-        let mut toml_value: toml::Value = toml::from_str(toml_str).unwrap();
-
-        // Apply variable substitution - should be no-op
-        let result = common::env_substitute::substitute_vars(&mut toml_value, &lookup);
-        assert!(
-            result.is_ok(),
-            "Expected successful substitution, got: {:?}",
-            result
-        );
-
-        // Verify values are unchanged
-        let url = toml_value.get("url").and_then(|v| v.as_str()).unwrap();
-        assert_eq!(url, "http://hardcoded:8545");
-
-        let kind = toml_value.get("kind").and_then(|v| v.as_str()).unwrap();
-        assert_eq!(kind, "evm-rpc");
-
-        let rate_limit = toml_value
-            .get("rate_limit_per_minute")
-            .and_then(|v| v.as_integer())
-            .unwrap();
-        assert_eq!(rate_limit, 200);
-    }
-
-    #[test]
-    fn test_callback_based_substitution() {
-        // Test the callback-based approach for custom variable sources
-        let mut vars = std::collections::HashMap::new();
-        vars.insert(
-            "CUSTOM_URL".to_string(),
-            "http://custom-endpoint:9999".to_string(),
-        );
-        vars.insert("CUSTOM_TOKEN".to_string(), "abc123token".to_string());
-
-        let lookup = |name: &str| vars.get(name).cloned();
-
-        let toml_str = r#"
-kind = "firehose"
-url = "${CUSTOM_URL}"
-token = "${CUSTOM_TOKEN}"
-network = "custom"
-"#;
-        let mut toml_value: toml::Value = toml::from_str(toml_str).unwrap();
-
-        // Apply variable substitution using custom lookup
-        let result = common::env_substitute::substitute_vars(&mut toml_value, &lookup);
-        assert!(
-            result.is_ok(),
-            "Expected successful substitution, got: {:?}",
-            result
-        );
-
-        // Verify the substitution worked correctly
-        let url = toml_value.get("url").and_then(|v| v.as_str()).unwrap();
-        assert_eq!(url, "http://custom-endpoint:9999");
-
-        let token = toml_value.get("token").and_then(|v| v.as_str()).unwrap();
-        assert_eq!(token, "abc123token");
-
-        let network = toml_value.get("network").and_then(|v| v.as_str()).unwrap();
-        assert_eq!(network, "custom");
-    }
 }

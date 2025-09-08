@@ -145,8 +145,11 @@ impl From<conn::ConnError> for Error {
 /// Connection pool to the metadata DB. Clones will refer to the same instance.
 #[derive(Clone, Debug)]
 pub struct MetadataDb {
-    pub pool: DbConnPool,
+    pool: DbConnPool,
+    #[cfg(feature = "temp-db")]
     pub(crate) url: Arc<str>,
+    #[cfg(not(feature = "temp-db"))]
+    url: Arc<str>,
     dead_worker_interval: Duration,
 }
 
@@ -557,55 +560,15 @@ impl MetadataDb {
         url: &Url,
         active: bool,
     ) -> Result<LocationId, sqlx::Error> {
-        // An empty `dataset_version` is represented as an empty string in the DB.
-        let dataset_version = table.dataset_version.unwrap_or("");
-        let mut tx = self.pool.begin().await?;
-
-        let query = "
-            INSERT INTO locations (dataset, dataset_version, tbl, bucket, path, url, active)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
-            ON CONFLICT DO NOTHING;
-        ";
-
-        sqlx::query(query)
-            .bind(table.dataset)
-            .bind(dataset_version)
-            .bind(table.table)
-            .bind(bucket)
-            .bind(path)
-            .bind(url.to_string())
-            .bind(active)
-            .execute(&mut *tx)
-            .await?;
-
-        let query = "
-            SELECT id
-            FROM locations
-            WHERE dataset = $1 AND dataset_version = $2 AND tbl = $3 AND url = $4
-        ";
-
-        let location_id: LocationId = sqlx::query_scalar(query)
-            .bind(table.dataset)
-            .bind(dataset_version)
-            .bind(table.table)
-            .bind(url.to_string())
-            .fetch_one(&mut *tx)
-            .await?;
-
-        tx.commit().await?;
-        Ok(location_id)
+        locations::insert(&*self.pool, table, bucket, path, url, active).await
     }
 
     pub async fn get_location_by_id(&self, id: LocationId) -> Result<Option<Location>, Error> {
-        sqlx::query_as("SELECT * FROM locations WHERE id = $1")
-            .bind(id)
-            .fetch_optional(&*self.pool)
-            .await
-            .map_err(Error::from)
+        Ok(locations::get_by_id(&*self.pool, id).await?)
     }
 
     pub async fn url_to_location_id(&self, url: &Url) -> Result<Option<LocationId>, Error> {
-        Ok(locations::url_to_location_id(&*self.pool, url).await?)
+        Ok(locations::url_to_id(&*self.pool, url).await?)
     }
 
     /// Returns the active location. The active location has meaning on both the write and read side:

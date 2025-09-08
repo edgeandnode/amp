@@ -1,6 +1,6 @@
 "use client"
 
-import type { UseQueryOptions } from "@tanstack/react-query"
+import type { UseQueryOptions, UseSuspenseQueryOptions } from "@tanstack/react-query"
 import { queryOptions, useQuery, useSuspenseQuery } from "@tanstack/react-query"
 
 type UserDefinedFunction = {
@@ -117,12 +117,23 @@ export function useUDFQuery(
   })
 }
 
-export function useUDFSuspenseQuery() {
+export function useUDFSuspenseQuery(
+  options: Omit<
+    UseSuspenseQueryOptions<
+      ReadonlyArray<UserDefinedFunction>,
+      Error,
+      ReadonlyArray<UserDefinedFunction>,
+      readonly ["Schema", "UDF"]
+    >,
+    "queryKey" | "queryFn"
+  > = {},
+) {
   return useSuspenseQuery({
     ...udfQueryOptions,
     staleTime: Number.POSITIVE_INFINITY,
     refetchOnMount: false,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
+    ...options,
   })
 }

@@ -42,28 +42,18 @@ export const SubmitButton = forwardRef<HTMLButtonElement, SubmitButtonProps>(
             {status === "success" ?
               (
                 <>
-                  <CheckIcon
-                    className="text-white"
-                    aria-hidden="true"
-                    size={5}
-                    alt=""
-                  />
+                  <CheckIcon className="text-white" aria-hidden="true" size={5} alt="" />
                   {children}
                 </>
-              ) :
-              status === "error" ?
+              )
+              : status === "error" ?
               (
                 <>
-                  <ExclamationMarkIcon
-                    className="text-white"
-                    aria-hidden="true"
-                    size={5}
-                    alt=""
-                  />
+                  <ExclamationMarkIcon className="text-white" aria-hidden="true" size={5} alt="" />
                   Error
                 </>
-              ) :
-              children}
+              )
+              : children}
           </Button>
         )}
       </form.Subscribe>

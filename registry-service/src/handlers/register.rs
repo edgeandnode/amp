@@ -1,9 +1,8 @@
-use std::sync::Arc;
-
 use axum::{Json, extract::State};
 use common::manifest::Manifest;
 use dataset_store::DatasetStore;
 use http_common::BoxRequestError;
+use metadata_db::MetadataDb;
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
@@ -22,31 +21,28 @@ pub struct RegisterResponse {
 
 #[instrument(skip_all, err)]
 pub async fn register_handler(
-    State(state): State<Arc<ServiceState>>,
+    State(ctx): State<ServiceState>,
     Json(payload): Json<RegisterRequest>,
 ) -> Result<Json<RegisterResponse>, BoxRequestError> {
     let manifest: Manifest =
         serde_json::from_str(&payload.manifest).map_err(|e| Error::InvalidManifest {
             source: Box::new(e),
         })?;
-    register_manifest(&state.dataset_store, &manifest).await?;
+    register_manifest(&ctx.dataset_store, &ctx.metadata_db, &manifest).await?;
     Ok(Json(RegisterResponse { success: true }))
 }
 
 #[instrument(skip_all)]
 pub async fn register_manifest(
-    dataset_store: &Arc<DatasetStore>,
+    dataset_store: &DatasetStore,
+    metadata_db: &MetadataDb,
     manifest: &Manifest,
 ) -> Result<(), Error> {
     let dataset_name = manifest.name.clone();
     let version = manifest.version.0.to_string();
 
     // Check if the dataset with the given name and version already exists in the registry.
-    if dataset_store
-        .metadata_db
-        .dataset_exists(&dataset_name, &version)
-        .await?
-    {
+    if metadata_db.dataset_exists(&dataset_name, &version).await? {
         return Err(Error::DatasetAlreadyExists {
             name: dataset_name,
             version,
@@ -61,10 +57,7 @@ pub async fn register_manifest(
         .put(&manifest_path, manifest_json.into())
         .await
         .map_err(|e| Error::DatasetStoreError(e.to_string()))?;
-    dataset_store
-        .metadata_db
-        .register_dataset(registry_info)
-        .await?;
+    metadata_db.register_dataset(registry_info).await?;
     tracing::info!(
         "Successfully registered manifest '{}' version '{}'",
         dataset_name,

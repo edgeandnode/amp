@@ -75,7 +75,17 @@ export class QueryableEventStream extends Schema.Class<QueryableEventStream>(
 export class DatasetMetadata extends Schema.Class<DatasetMetadata>("Nozzle/studio/models/DatasetMetadata")({
   metadata_columns: Schema.Array(Schema.Struct({
     name: Schema.NonEmptyTrimmedString,
-    datatype: Schema.Literal("address", "bigint", "int", "bytes32", "Uint32Array", "unknown", "string", "boolean"),
+    datatype: Schema.Literal(
+      "address",
+      "bigint",
+      "int",
+      "bytes32",
+      "Uint32Array",
+      "unknown",
+      "string",
+      "boolean",
+      "bytes",
+    ),
   })).annotations({
     identifier: "QueryableEventStream.metadata_columns",
     description:

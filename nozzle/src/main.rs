@@ -187,7 +187,7 @@ async fn main_inner() -> Result<(), BoxError> {
                     info!("Registering manifest: {}", dataset);
                     let manifest = std::fs::read_to_string(&dataset)?;
                     let manifest: Manifest = serde_json::from_str(&manifest)?;
-                    register_manifest(&dataset_store, &manifest).await?;
+                    register_manifest(&dataset_store, &metadata_db, &manifest).await?;
                     datasets_to_dump.push(manifest.to_identifier());
                 } else {
                     datasets_to_dump.push(dataset);

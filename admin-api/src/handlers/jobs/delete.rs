@@ -12,7 +12,7 @@ use crate::ctx::Ctx;
 
 /// Query parameters for the delete jobs endpoint
 #[derive(Debug, serde::Deserialize)]
-pub struct DeleteJobsQuery {
+pub struct QueryParams {
     /// Status filter for which jobs to delete
     pub status: JobStatusFilter,
 }
@@ -23,7 +23,7 @@ pub struct DeleteJobsQuery {
 ///
 /// ## Query Parameters
 /// - `status=terminal`: Delete all jobs in terminal states (Completed, Stopped, Failed)
-/// - `status=complete`: Delete all completed jobs
+/// - `status=completed`: Delete all completed jobs
 /// - `status=stopped`: Delete all stopped jobs
 /// - `status=error`: Delete all failed jobs
 ///
@@ -64,7 +64,7 @@ pub struct DeleteJobsQuery {
 #[tracing::instrument(skip_all, err)]
 pub async fn handler(
     State(ctx): State<Ctx>,
-    query: Result<Query<DeleteJobsQuery>, QueryRejection>,
+    query: Result<Query<QueryParams>, QueryRejection>,
 ) -> Result<StatusCode, BoxRequestError> {
     let query = match query {
         Ok(Query(query)) => query,
@@ -76,7 +76,7 @@ pub async fn handler(
 
     let deleted_count = match query.status {
         JobStatusFilter::Terminal => ctx.metadata_db.delete_all_terminal_jobs().await,
-        JobStatusFilter::Complete => {
+        JobStatusFilter::Completed => {
             ctx.metadata_db
                 .delete_all_jobs_by_status(JobStatus::Completed)
                 .await
@@ -108,7 +108,7 @@ pub enum JobStatusFilter {
     /// Delete all jobs in terminal states (Completed, Stopped, Failed)
     Terminal,
     /// Delete all completed jobs
-    Complete,
+    Completed,
     /// Delete all stopped jobs
     Stopped,
     /// Delete all failed jobs
@@ -119,7 +119,7 @@ impl std::fmt::Display for JobStatusFilter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             JobStatusFilter::Terminal => "terminal",
-            JobStatusFilter::Complete => "complete",
+            JobStatusFilter::Completed => "completed",
             JobStatusFilter::Stopped => "stopped",
             JobStatusFilter::Error => "error",
         }
@@ -133,7 +133,7 @@ impl std::str::FromStr for JobStatusFilter {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             s if s.eq_ignore_ascii_case("terminal") => Ok(JobStatusFilter::Terminal),
-            s if s.eq_ignore_ascii_case("complete") => Ok(JobStatusFilter::Complete),
+            s if s.eq_ignore_ascii_case("completed") => Ok(JobStatusFilter::Completed),
             s if s.eq_ignore_ascii_case("stopped") => Ok(JobStatusFilter::Stopped),
             s if s.eq_ignore_ascii_case("error") => Ok(JobStatusFilter::Error),
             _ => Err(format!("invalid status filter: {}", s).into()),

@@ -76,6 +76,7 @@ const deployDataset = HttpApiEndpoint.post("deployDataset")`/datasets`
   .addError(Error.DatasetAlreadyExists)
   .addError(Error.SchedulerError)
   .addError(Error.DatasetDefStoreError)
+  .addError(Error.DatasetStoreError)
   .addSuccess(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }))
   .setPayload(
     Schema.Struct({
@@ -106,6 +107,7 @@ export type DeployDatasetError =
   | Error.DatasetAlreadyExists
   | Error.SchedulerError
   | Error.DatasetDefStoreError
+  | Error.DatasetStoreError
 
 /**
  * The get datasets endpoint (GET /datasets).
@@ -197,7 +199,7 @@ const deleteAllJobs = HttpApiEndpoint.del("deleteAllJobs")`/jobs`
   .addSuccess(Schema.Void, { status: 204 })
   .setUrlParams(
     Schema.Struct({
-      status: Schema.Literal("terminal", "complete", "stopped", "error"),
+      status: Model.JobStatusParam,
     }),
   )
 
@@ -422,8 +424,8 @@ export class Admin extends Context.Tag("Nozzle/Admin")<Admin, {
    * @return The paginated jobs response.
    */
   readonly getJobs: (options?: {
-    limit?: number
-    lastJobId?: number
+    limit?: number | undefined
+    lastJobId?: number | undefined
   }) => Effect.Effect<Model.JobsResponse, HttpClientError.HttpClientError | GetJobsError>
 
   /**
@@ -581,21 +583,26 @@ export const make = Effect.fn(function*(url: string) {
     return result.datasets
   })
 
-  const getJobs = Effect.fn("getJobs")(function*(options?: { limit?: number; lastJobId?: number }) {
-    const result = yield* client.job.getJobs({
-      urlParams: {
-        limit: options?.limit,
-        lastJobId: options?.lastJobId,
-      },
-    }).pipe(
-      Effect.catchTags({
-        HttpApiDecodeError: Effect.die,
-        ParseError: Effect.die,
-      }),
-    )
+  const getJobs = Effect.fn("getJobs")(
+    function*(options?: {
+      limit?: number | undefined
+      lastJobId?: number | undefined
+    }) {
+      const result = yield* client.job.getJobs({
+        urlParams: {
+          limit: options?.limit,
+          lastJobId: options?.lastJobId,
+        },
+      }).pipe(
+        Effect.catchTags({
+          HttpApiDecodeError: Effect.die,
+          ParseError: Effect.die,
+        }),
+      )
 
-    return result
-  })
+      return result
+    },
+  )
 
   const getJobById = Effect.fn("getJobById")(function*(jobId: number) {
     const result = yield* client.job.getJobById({

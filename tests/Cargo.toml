@@ -41,6 +41,6 @@ firehose-datasets = { path = "../extractors/firehose-datasets" }
 rand.workspace = true
 schemars.workspace = true
 monitoring = { path = "../monitoring" }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest.workspace = true
 registry-service = { path = "../registry-service" }
 admin-api = { path = "../admin-api" }

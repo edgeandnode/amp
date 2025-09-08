@@ -151,21 +151,13 @@ export function QueryPlaygroundWrapper() {
                                 onClick={() => {
                                   queryField.removeValue(idx)
                                   // set the active tab to curr - 1
-                                  form.setFieldValue(
-                                    "activeTab",
-                                    Math.max(idx - 1, 0),
-                                  )
+                                  form.setFieldValue("activeTab", Math.max(idx - 1, 0))
                                 }}
                               >
-                                <XIcon
-                                  size={3}
-                                  alt=""
-                                  className="text-white"
-                                  aria-hidden="true"
-                                />
+                                <XIcon size={3} alt="" className="text-white" aria-hidden="true" />
                               </button>
-                            ) :
-                            null}
+                            )
+                            : null}
                         </div>
                       }
                     />
@@ -273,13 +265,13 @@ export function QueryPlaygroundWrapper() {
                 >
                   <circle r={3} cx={3} cy={3} />
                 </svg>
-                {status === "success" ?
-                  "Success" :
-                  status === "error" ?
-                  "Failure" :
-                  status === "pending" ?
-                  "Querying..." :
-                  "Waiting"}
+                {status === "success"
+                  ? "Success"
+                  : status === "error" ?
+                  "Failure"
+                  : status === "pending" ?
+                  "Querying..."
+                  : "Waiting"}
               </span>
             </div>
             {tableData ?
@@ -316,15 +308,15 @@ export function QueryPlaygroundWrapper() {
                                     className={classNames(
                                       "py-4 whitespace-nowrap",
                                       colIdx === 0 ?
-                                        "pr-3 pl-4 text-16 sm:pl-0 text-white" :
-                                        "px-3 text-14 text-space-500",
+                                        "pr-3 pl-4 text-16 sm:pl-0 text-white"
+                                        : "px-3 text-14 text-space-500",
                                     )}
                                   >
                                     {value == null ?
-                                      null :
-                                      typeof value === "object" ?
-                                      JSON.stringify(value) :
-                                      String(value)}
+                                      null
+                                      : typeof value === "object" ?
+                                      JSON.stringify(value)
+                                      : String(value)}
                                   </td>
                                 )
                               })}
@@ -335,14 +327,14 @@ export function QueryPlaygroundWrapper() {
                     </div>
                   </div>
                 </div>
-              ) :
-              data != null && data.length === 0 ?
+              )
+              : data != null && data.length === 0 ?
               (
                 <div className="flex items-center justify-center py-8 text-space-500">
                   No results found
                 </div>
-              ) :
-              null}
+              )
+              : null}
           </div>
         </div>
       </div>

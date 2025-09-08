@@ -1,7 +1,6 @@
 import * as Args from "@effect/cli/Args"
 import * as Command from "@effect/cli/Command"
 import * as Options from "@effect/cli/Options"
-import * as Config from "effect/Config"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -11,6 +10,7 @@ import * as Admin from "../../api/Admin.ts"
 import * as Registry from "../../api/Registry.ts"
 import * as ManifestContext from "../../ManifestContext.ts"
 import * as Model from "../../Model.ts"
+import { adminUrl, configFile, manifestFile, registryUrl } from "../common.ts"
 
 export const deploy = Command.make("deploy", {
   args: {
@@ -19,30 +19,10 @@ export const deploy = Command.make("deploy", {
       Args.withSchema(Schema.Union(Model.DatasetName, Model.DatasetNameAndVersion)),
       Args.optional,
     ),
-    manifest: Options.file("manifest").pipe(
-      Options.withAlias("m"),
-      Options.withDescription("The dataset manifest file to dump"),
-      Options.optional,
-    ),
-    config: Options.file("config").pipe(
-      Options.withAlias("c"),
-      Options.withDescription("The dataset definition config file to dump"),
-      Options.optional,
-    ),
-    registryUrl: Options.text("registry-url").pipe(
-      Options.withFallbackConfig(
-        Config.string("NOZZLE_REGISTRY_URL").pipe(Config.withDefault("http://localhost:1611")),
-      ),
-      Options.withDescription("The url of the registry server"),
-      Options.withSchema(Schema.URL),
-    ),
-    adminUrl: Options.text("admin-url").pipe(
-      Options.withFallbackConfig(
-        Config.string("NOZZLE_ADMIN_URL").pipe(Config.withDefault("http://localhost:1610")),
-      ),
-      Options.withDescription("The Admin API URL to use for the dump request"),
-      Options.withSchema(Schema.URL),
-    ),
+    manifestFile: manifestFile.pipe(Options.optional),
+    configFile: configFile.pipe(Options.optional),
+    registryUrl,
+    adminUrl,
   },
 }).pipe(
   Command.withDescription("Deploy a dataset"),
@@ -66,7 +46,7 @@ export const deploy = Command.make("deploy", {
     Option.match(args.dataset, {
       onSome: () => Layer.empty,
       onNone: () =>
-        ManifestContext.layerFromFile({ manifest: args.manifest, config: args.config }).pipe(
+        ManifestContext.layerFromFile({ manifest: args.manifestFile, config: args.configFile }).pipe(
           Layer.provide(Registry.layer(`${args.registryUrl}`)),
         ),
     }).pipe(Layer.merge(Admin.layer(`${args.adminUrl}`)))
