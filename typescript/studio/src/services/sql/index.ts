@@ -27,7 +27,7 @@
 
 // Monaco editor will be available globally in browser - no need to import
 import * as monaco from "monaco-editor/esm/vs/editor/editor.api"
-import type { DatasetMetadata } from "nozzl/Studio/Model"
+import type { DatasetSource } from "nozzl/Studio/Model"
 
 import { NozzleCompletionProvider } from "./NozzleCompletionProvider"
 import { QueryContextAnalyzer } from "./QueryContextAnalyzer"
@@ -62,7 +62,7 @@ class SqlProviderManager {
   }
 
   constructor(
-    private metadata: ReadonlyArray<DatasetMetadata>,
+    private metadata: ReadonlyArray<DatasetSource>,
     private udfs: ReadonlyArray<UserDefinedFunction>,
     private config: CompletionConfig = DEFAULT_COMPLETION_CONFIG,
   ) {}
@@ -178,7 +178,7 @@ class SqlProviderManager {
    * @param udfs - Updated UDF definitions
    */
   updateData(
-    metadata: ReadonlyArray<DatasetMetadata>,
+    metadata: ReadonlyArray<DatasetSource>,
     udfs: ReadonlyArray<UserDefinedFunction>,
   ): void {
     if (this.isDisposed) {
@@ -411,7 +411,7 @@ let activeProviderManager: SqlProviderManager | null = null
  * @returns Disposable handle for cleanup
  */
 export function setupNozzleSQLProviders(
-  metadata: ReadonlyArray<DatasetMetadata>,
+  metadata: ReadonlyArray<DatasetSource>,
   udfs: ReadonlyArray<UserDefinedFunction>,
   config?: Partial<CompletionConfig>,
 ): DisposableHandle {
@@ -449,7 +449,7 @@ export function setupNozzleSQLProviders(
  * @param udfs - Updated UDF definitions
  */
 export function updateProviderData(
-  metadata: ReadonlyArray<DatasetMetadata>,
+  metadata: ReadonlyArray<DatasetSource>,
   udfs: ReadonlyArray<UserDefinedFunction>,
 ): void {
   if (activeProviderManager) {

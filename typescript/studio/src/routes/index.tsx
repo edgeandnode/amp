@@ -1,8 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router"
 
 import { QueryPlaygroundWrapper } from "@/Components/QueryPlayground/QueryPlaygroundWrapper"
-import { metadataQueryOptions } from "@/hooks/useMetadataQuery"
 import { osQueryOptions } from "@/hooks/useOSQuery"
+import { sourcesQueryOptions } from "@/hooks/useSourcesQuery"
 import { udfQueryOptions } from "@/hooks/useUDFQuery"
 
 export const Route = createFileRoute("/")({
@@ -10,7 +10,7 @@ export const Route = createFileRoute("/")({
   async loader({ context }) {
     await context.queryClient.ensureQueryData(osQueryOptions)
     await context.queryClient.ensureQueryData(udfQueryOptions)
-    await context.queryClient.ensureQueryData(metadataQueryOptions)
+    await context.queryClient.ensureQueryData(sourcesQueryOptions)
   },
 })
 

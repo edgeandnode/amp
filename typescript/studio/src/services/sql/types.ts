@@ -15,7 +15,7 @@
  * @author SQL Intellisense System
  */
 import type { Position } from "monaco-editor/esm/vs/editor/editor.api"
-import type { DatasetMetadata } from "nozzl/Studio/Model"
+import type { DatasetSource } from "nozzl/Studio/Model"
 
 // Keep only MonacoITextModel as it's still used in QueryContextAnalyzer
 export interface MonacoITextModel {
@@ -191,8 +191,8 @@ export interface DisposableHandle {
 
 // Removed unused interfaces:
 // - CompletionItemOptions (no longer used after Monaco refactor)
-// - TableInfo (not used - we use DatasetMetadata directly)
-// - ColumnInfo (not used - we use DatasetMetadata directly)
+// - TableInfo (not used - we use DatasetSource directly)
+// - ColumnInfo (not used - we use DatasetSource directly)
 
 /**
  * SQL Token Types
@@ -285,5 +285,5 @@ export interface PerformanceMetrics {
   lastUpdate: number
 }
 
-// Re-export DatasetMetadata type for convenience
-export type { DatasetMetadata }
+// Re-export DatasetSource type for convenience
+export type { DatasetSource }

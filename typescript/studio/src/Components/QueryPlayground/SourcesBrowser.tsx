@@ -3,27 +3,27 @@
 import { Accordion } from "@base-ui-components/react/accordion"
 import { Tooltip } from "@base-ui-components/react/tooltip"
 import { FolderIcon, FolderOpenIcon, PlusIcon } from "@graphprotocol/gds-react/icons"
-import type { DatasetMetadata } from "nozzl/Studio/Model"
+import type { DatasetSource } from "nozzl/Studio/Model"
 
-import { useMetadataSuspenseQuery } from "@/hooks/useMetadataQuery"
+import { useSourcesSuspenseQuery } from "@/hooks/useSourcesQuery"
 
 import { ArrowIcon } from "../ArrowIcon.tsx"
 
-export type MetadataBrowserProps = {
-  onTableSelected: (table: DatasetMetadata) => void
+export type SourcesBrowserProps = {
+  onSourceSelected: (source: DatasetSource) => void
 }
-export function MetadataBrowser({
-  onTableSelected,
-}: Readonly<MetadataBrowserProps>) {
-  const { data: metadataTables } = useMetadataSuspenseQuery()
+export function SourcesBrowser({
+  onSourceSelected: onTableSelected,
+}: Readonly<SourcesBrowserProps>) {
+  const { data: sources } = useSourcesSuspenseQuery()
 
   return (
     <div className="flex flex-col gap-y-4 p-6">
-      <p className="text-14">Dataset Sources</p>
+      <p className="text-14">Sources</p>
       <Accordion.Root className="w-full box-border flex flex-col gap-y-3">
-        {metadataTables.map((metadata) => (
+        {sources.map((source) => (
           <Accordion.Item
-            key={metadata.source}
+            key={source.source}
             className="flex flex-col gap-y-2"
           >
             <Accordion.Header className="m-0 flex items-start gap-x-1 px-0 py-2">
@@ -46,7 +46,7 @@ export function MetadataBrowser({
                   alt=""
                 />
                 <div className="w-full flex flex-col gap-y-1 items-center justify-start">
-                  <span className="self-start text-14">{metadata.source}</span>
+                  <span className="self-start text-14">{source.source}</span>
                 </div>
               </Accordion.Trigger>
               <Tooltip.Provider>
@@ -54,10 +54,10 @@ export function MetadataBrowser({
                   <Tooltip.Trigger
                     type="button"
                     className="rounded-full p-2 bg-space-1200 hover:bg-space-1500 cursor-pointer inline-flex items-center justify-center shadow"
-                    onClick={() => onTableSelected(metadata)}
+                    onClick={() => onTableSelected(source)}
                   >
                     <PlusIcon
-                      alt={`Add ${metadata.source}`}
+                      alt={`Add ${source.source}`}
                       size={4}
                       className="text-white"
                       aria-hidden="true"
@@ -78,9 +78,9 @@ export function MetadataBrowser({
             </Accordion.Header>
             <Accordion.Panel className="box-border overflow-y-auto overflow-x-hidden border-l border-white/20 ml-4 pl-1">
               <div className="w-full flex flex-col gap-y-1">
-                {metadata.metadata_columns.map((column) => (
+                {source.metadata_columns.map((column) => (
                   <div
-                    key={`${metadata.source}__${column.name}`}
+                    key={`${source.source}__${column.name}`}
                     className="w-full flex items-center justify-between text-sm border-none outline-none px-4 py-1.5 rounded-4"
                   >
                     <span className="text-14">{column.name}</span>
