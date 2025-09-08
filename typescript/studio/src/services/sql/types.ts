@@ -98,6 +98,7 @@ declare namespace monaco {
     Warning = 4,
     Error = 8
   }
+}
 // Keep only MonacoITextModel as it's still used in QueryContextAnalyzer
 export interface MonacoITextModel {
   getValue: () => string

@@ -12,17 +12,17 @@ import { useMetadataSuspenseQuery } from "@/hooks/useMetadataQuery"
 import { useUDFSuspenseQuery } from "@/hooks/useUDFQuery"
 import type { DisposableHandle } from "@/services/sql"
 import { setupNozzleSQLProviders } from "@/services/sql"
+import { getActiveValidator } from "@/services/sql"
+import { updateProviderData } from "@/services/sql"
 
 import { ErrorMessages } from "../Form/ErrorMessages"
 import { useFieldContext } from "../Form/form"
-import { useMetadataSuspenseQuery } from "../../hooks/useMetadataQuery"
-import { useUDFSuspenseQuery } from "../../hooks/useUDFQuery"
-import {
-  setupNozzleSQLProviders,
-  updateProviderData,
-  getActiveValidator,
-  type DisposableHandle,
-} from "../../services/sql"
+// import {
+//   setupNozzleSQLProviders,
+//   updateProviderData,
+//   getActiveValidator,
+//   type DisposableHandle,
+// } from "../../services/sql"
 
 self.MonacoEnvironment = {
   getWorker() {

@@ -17,7 +17,7 @@
  */
 
 import type { DatasetMetadata } from 'nozzl/Studio/Model'
-import { QueryContextAnalyzer } from './contextAnalyzer'
+import { QueryContextAnalyzer } from './QueryContextAnalyzer'
 import type {
   UserDefinedFunction,
   CompletionConfig,
