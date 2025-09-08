@@ -19,7 +19,7 @@ export function SchemaBrowser({
 
   return (
     <div className="flex flex-col gap-y-4 p-6">
-      <p className="text-14">Schema</p>
+      <p className="text-14">Contract Events</p>
       <Accordion.Root className="w-full box-border flex flex-col justify-center gap-y-3">
         {queryableEvents.map((event) => (
           <Accordion.Item

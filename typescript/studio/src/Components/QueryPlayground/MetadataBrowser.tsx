@@ -19,7 +19,7 @@ export function MetadataBrowser({
 
   return (
     <div className="flex flex-col gap-y-4 p-6">
-      <p className="text-14">Dataset Metadata</p>
+      <p className="text-14">Dataset Sources</p>
       <Accordion.Root className="w-full box-border flex flex-col gap-y-3">
         {metadataTables.map((metadata) => (
           <Accordion.Item

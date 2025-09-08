@@ -531,7 +531,7 @@ export class QueryContextAnalyzer {
     }
 
     // Refine based on immediate context
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+
     if (lastToken) {
       if (lastToken.type === "OPERATOR" && lastToken.value === ".") {
         // After dot, expect columns (table.column)

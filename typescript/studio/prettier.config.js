@@ -4,7 +4,10 @@
 const config = {
   semi: false,
   singleQuote: false,
-  trailingComma: "all",
+  trailingComma: "es5",
+  printWidth: 120,
+  tabWidth: 2,
+  arrowParens: "always",
 }
 
 export default config

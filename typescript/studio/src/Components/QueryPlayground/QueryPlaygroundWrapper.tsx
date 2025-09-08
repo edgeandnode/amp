@@ -151,13 +151,21 @@ export function QueryPlaygroundWrapper() {
                                 onClick={() => {
                                   queryField.removeValue(idx)
                                   // set the active tab to curr - 1
-                                  form.setFieldValue("activeTab", Math.max(idx - 1, 0))
+                                  form.setFieldValue(
+                                    "activeTab",
+                                    Math.max(idx - 1, 0),
+                                  )
                                 }}
                               >
-                                <XIcon size={3} alt="" className="text-white" aria-hidden="true" />
+                                <XIcon
+                                  size={3}
+                                  alt=""
+                                  className="text-white"
+                                  aria-hidden="true"
+                                />
                               </button>
-                            )
-                            : null}
+                            ) :
+                            null}
                         </div>
                       }
                     />
@@ -267,10 +275,10 @@ export function QueryPlaygroundWrapper() {
                 </svg>
                 {status === "success"
                   ? "Success"
-                  : status === "error" ?
-                  "Failure"
-                  : status === "pending" ?
-                  "Querying..."
+                  : status === "error"
+                  ? "Failure"
+                  : status === "pending"
+                  ? "Querying..."
                   : "Waiting"}
               </span>
             </div>
@@ -307,15 +315,15 @@ export function QueryPlaygroundWrapper() {
                                     key={column}
                                     className={classNames(
                                       "py-4 whitespace-nowrap",
-                                      colIdx === 0 ?
-                                        "pr-3 pl-4 text-16 sm:pl-0 text-white"
+                                      colIdx === 0
+                                        ? "pr-3 pl-4 text-16 sm:pl-0 text-white"
                                         : "px-3 text-14 text-space-500",
                                     )}
                                   >
-                                    {value == null ?
-                                      null
-                                      : typeof value === "object" ?
-                                      JSON.stringify(value)
+                                    {value == null
+                                      ? null
+                                      : typeof value === "object"
+                                      ? JSON.stringify(value)
                                       : String(value)}
                                   </td>
                                 )
@@ -327,14 +335,14 @@ export function QueryPlaygroundWrapper() {
                     </div>
                   </div>
                 </div>
-              )
-              : data != null && data.length === 0 ?
+              ) :
+              data != null && data.length === 0 ?
               (
                 <div className="flex items-center justify-center py-8 text-space-500">
                   No results found
                 </div>
-              )
-              : null}
+              ) :
+              null}
           </div>
         </div>
       </div>
@@ -347,6 +355,7 @@ FROM anvil.logs
 WHERE topic0 = evm_topic('${event.signature}');`.trim()
             const tab = `SELECT ... ${event.name}`
             // update the query at the active tab to query the selected event
+            let setActiveTab = false
             form.setFieldValue("queries", (curr) => {
               const updatedQueries = [...curr]
               const active = curr[activeTab]
@@ -355,28 +364,31 @@ WHERE topic0 = evm_topic('${event.signature}');`.trim()
               } else {
                 updatedQueries.push({ tab, query })
                 // set new tab the active tab
-                form.setFieldValue("activeTab", updatedQueries.length - 1)
+                setActiveTab = true
               }
 
               return updatedQueries
             })
+            if (setActiveTab) {
+              form.setFieldValue("activeTab", (curr) => curr + 1)
+            }
           }}
         />
         <MetadataBrowser
           onTableSelected={(table) => {
+            const columns = table.metadata_columns.map((col) => {
+              if (RESERVED_FIELDS.has(col.name)) {
+                return `"${col.name}"`
+              }
+              return col.name
+            }).join(",\n  ")
             const query = `SELECT
-  ${
-              table.metadata_columns.map((col) => {
-                if (RESERVED_FIELDS.has(col.name)) {
-                  return `"${col.name}"`
-                }
-                return col.name
-              }).join(",\n  ")
-            }
+  ${columns}
 FROM ${table.source}
 LIMIT 10;`.trim()
             const tab = `SELECT ... ${table.source}`
             // update the query with the selected table and columns
+            let setActiveTab = false
             form.setFieldValue("queries", (curr) => {
               const updatedQueries = [...curr]
               const active = curr[activeTab]
@@ -385,10 +397,13 @@ LIMIT 10;`.trim()
               } else {
                 updatedQueries.push({ tab, query })
                 // set new tab the active tab
-                form.setFieldValue("activeTab", updatedQueries.length - 1)
+                setActiveTab = true
               }
               return updatedQueries
             })
+            if (setActiveTab) {
+              form.setFieldValue("activeTab", (curr) => curr + 1)
+            }
           }}
         />
         <UDFBrowser />

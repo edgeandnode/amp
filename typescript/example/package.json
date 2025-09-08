@@ -3,9 +3,6 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "scripts": {
-    "studio": "nozzl studio"
-  },
   "dependencies": {
     "@effect/platform": "^0.90.7",
     "effect": "^3.17.13",
@@ -15,6 +12,7 @@
     "typescript": "^5.8.3"
   },
   "scripts": {
-    "deploy:counter": "forge script contracts/script/Counter.s.sol --broadcast --rpc-url http://localhost:8545 --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+    "deploy:counter": "forge script contracts/script/Counter.s.sol --broadcast --rpc-url http://localhost:8545 --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+    "studio": "nozzl studio"
   }
 }
