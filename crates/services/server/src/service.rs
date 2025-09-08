@@ -2,7 +2,7 @@ use std::{pin::Pin, sync::Arc};
 
 use arrow_flight::{
     encode::{FlightDataEncoderBuilder, GRPC_TARGET_MAX_FLIGHT_SIZE_BYTES}, error::FlightError, flight_descriptor::DescriptorType, sql::{
-        server::FlightSqlService, ActionClosePreparedStatementRequest, ActionCreatePreparedStatementRequest, ActionCreatePreparedStatementResult, Any, CommandGetCatalogs, CommandGetDbSchemas, CommandGetSqlInfo, CommandGetTableTypes, CommandGetTables, CommandGetXdbcTypeInfo, CommandPreparedStatementQuery, CommandStatementQuery, SqlInfo, TicketStatementQuery
+        server::FlightSqlService, ActionClosePreparedStatementRequest, ActionCreatePreparedStatementRequest, ActionCreatePreparedStatementResult, Any, CommandGetCatalogs, CommandGetDbSchemas, CommandGetSqlInfo, CommandGetTableTypes, CommandGetTables, CommandGetXdbcTypeInfo, CommandPreparedStatementQuery, CommandStatementQuery, ProstMessageExt, SqlInfo, TicketStatementQuery
     }, Action, FlightData, FlightDescriptor, FlightEndpoint, FlightInfo, HandshakeRequest, HandshakeResponse, SchemaAsIpc, Ticket
 };
 use async_stream::stream;
@@ -52,7 +52,8 @@ use tonic::{Request, Response, Status, Streaming};
 use tracing::instrument;
 
 type TonicStream<T> = Pin<Box<dyn Stream<Item = Result<T, Status>> + Send + 'static>>;
-
+// TODO: Make this configurable via environment variable or config file
+const NOZZLE_CATALOG_NAME: &str = "nozzle";
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("ProtocolBuffers decoding error: {0}")]
@@ -946,19 +947,42 @@ impl FlightSqlService for Service {
 
     async fn get_flight_info_catalogs(
         &self,
-        _query: CommandGetCatalogs,
-        _request: Request<FlightDescriptor>,
+        query: CommandGetCatalogs,
+        request: Request<FlightDescriptor>,
     ) -> Result<Response<FlightInfo>, Status> {
-        unimplemented!()
+        let flight_descriptor = request.into_inner();
+        let ticket = Ticket {
+            ticket: query.as_any().encode_to_vec().into(),
+        };
+        let endpoint = FlightEndpoint::new().with_ticket(ticket);
+        let flight_info = FlightInfo::new()
+            .try_with_schema(&query.into_builder().schema())
+            .map_err(|e| Status::internal(format!("Unable to encode schema: {}", e)))?
+            .with_endpoint(endpoint)
+            .with_descriptor(flight_descriptor);
+        Ok(Response::new(flight_info))
     }
 
     async fn do_get_catalogs(
         &self,
-        _query: CommandGetCatalogs,
+        query: CommandGetCatalogs,
         _request: Request<Ticket>,
     ) -> Result<Response<Pin<Box<dyn Stream<Item = Result<FlightData, Status>> + Send>>>, Status>
     {
-        unimplemented!()
+        let mut builder = query.into_builder();
+        let catalog_name = NOZZLE_CATALOG_NAME;
+        builder.append(catalog_name);
+        let schema = builder.schema();
+        let batch = builder
+            .build()
+            .map_err(|e| Status::internal(format!("Failed to build catalog batch: {}", e)))?;
+
+        let stream = FlightDataEncoderBuilder::new()
+            .with_schema(schema)
+            .build(futures::stream::once(async { Ok(batch) }))
+            .map_err(|e| Status::internal(format!("Failed to encode flight data: {}", e)));
+
+        Ok(Response::new(Box::pin(stream)))
     }
 
     async fn get_flight_info_schemas(
