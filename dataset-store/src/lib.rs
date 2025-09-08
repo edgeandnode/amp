@@ -101,12 +101,6 @@ pub enum Error {
         source: std::string::FromUtf8Error,
     },
 
-    #[error("provider environment substitution failed at {location}: {source}")]
-    ProviderEnvSubstitution {
-        location: String,
-        source: Box<dyn std::error::Error + Send + Sync>,
-    },
-
     #[error("dataset '{0}' version '{1}' not found")]
     DatasetVersionNotFound(String, String),
 
@@ -117,9 +111,6 @@ pub enum Error {
 impl From<providers::FetchError> for Error {
     fn from(err: providers::FetchError) -> Self {
         match err {
-            providers::FetchError::EnvSubstitutionFailed { location, source } => {
-                Error::ProviderEnvSubstitution { location, source }
-            }
             providers::FetchError::StoreFetchFailed(box_error) => {
                 // Try to downcast BoxError to StoreError, otherwise map to Unknown
                 match box_error.downcast::<StoreError>() {
@@ -206,7 +197,7 @@ impl std::fmt::Display for DatasetError {
 #[derive(Clone)]
 pub struct DatasetStore {
     config: Arc<Config>,
-    pub metadata_db: Arc<MetadataDb>,
+    metadata_db: Arc<MetadataDb>,
     // Cache maps dataset name to eth_call UDF.
     eth_call_cache: Arc<RwLock<HashMap<String, ScalarUDF>>>,
     // This cache maps dataset name to the dataset definition.
@@ -225,6 +216,11 @@ impl DatasetStore {
             dataset_cache: Default::default(),
             providers: providers_store,
         })
+    }
+
+    /// Get a reference to the providers configuration store
+    pub fn providers(&self) -> &ProvidersConfigStore {
+        &self.providers
     }
 
     pub async fn load_dataset(
@@ -485,7 +481,17 @@ impl DatasetStore {
         let value = raw_dataset.to_value()?;
         let kind = DatasetKind::from_str(&common.kind)?;
 
-        let provider = self.find_provider(kind, common.network.clone()).await?;
+        let Some(provider) = self.find_provider(kind, common.network.clone()).await else {
+            tracing::warn!(
+                provider_kind = %kind,
+                provider_network = %common.network,
+                "no providers available for the requested kind-network configuration"
+            );
+            return Err(Error::ProviderNotFound {
+                dataset_kind: kind,
+                network: common.network,
+            });
+        };
         Ok(match kind {
             DatasetKind::EvmRpc => BlockStreamClient::EvmRpc(
                 evm_rpc_datasets::client(provider, common.network, only_finalized_blocks).await?,
@@ -514,7 +520,7 @@ impl DatasetStore {
         &self,
         kind: DatasetKind,
         network: String,
-    ) -> Result<ProviderConfigTomlValue, Error> {
+    ) -> Option<ProviderConfigTomlValue> {
         // Collect matching provider configurations into a vector for shuffling
         let mut matching_providers = self
             .providers
@@ -526,26 +532,42 @@ impl DatasetStore {
             .collect::<Vec<_>>();
 
         if matching_providers.is_empty() {
-            return Err(Error::ProviderNotFound {
-                dataset_kind: kind,
-                network,
-            });
+            return None;
         }
 
-        // Shuffle to provide load balancing across providers
+        // Try each provider in random order until we find one with successful env substitution
         matching_providers.shuffle(&mut rand::rng());
 
-        // Return the first (randomly selected) matching provider configuration
-        let Some(provider) = matching_providers.into_iter().next() else {
-            unreachable!("matching_providers should not be empty at this point")
-        };
+        'try_find_provider: for mut provider in matching_providers {
+            // Apply environment variable substitution to the `rest` table values
+            for (_key, value) in provider.rest.iter_mut() {
+                if let Err(err) = common::env_substitute::substitute_env_vars(value) {
+                    tracing::warn!(
+                        provider_kind = %kind,
+                        provider_network = %network,
+                        error = %err,
+                        "environment variable substitution failed for provider, trying next"
+                    );
+                    continue 'try_find_provider;
+                }
+            }
 
-        // Convert back to toml::Value for compatibility
-        // TODO: Remove conversion once the fn callers use ProviderConfig directly
-        let value = toml::Value::try_from(provider)
-            .expect("ProviderConfig structs should always be convertible to toml::Value");
+            tracing::debug!(
+                provider_kind = %kind,
+                provider_network = %network,
+                "successfully selected provider with environment substitution"
+            );
 
-        Ok(value)
+            // Convert back to toml::Value for compatibility
+            // TODO: Remove conversion once the fn callers use ProviderConfig directly
+            let value = toml::Value::try_from(provider)
+                .expect("ProviderConfig structs should always be convertible to toml::Value");
+
+            return Some(value);
+        }
+
+        // If we get here, no suitable providers were found
+        None
     }
 
     /// Returns cached eth_call scalar UDF, otherwise loads the UDF and caches it.
@@ -566,9 +588,21 @@ impl DatasetStore {
         }
 
         // Load the provider from the dataset definition.
-        let provider = self
+        let Some(provider) = self
             .find_provider(DatasetKind::EvmRpc, dataset.network.clone())
-            .await?;
+            .await
+        else {
+            tracing::warn!(
+                provider_kind = %DatasetKind::EvmRpc,
+                provider_network = %dataset.network,
+                "no providers available for the requested kind-network configuration"
+            );
+            return Err(Error::ProviderNotFound {
+                dataset_kind: DatasetKind::EvmRpc,
+                network: dataset.network.clone(),
+            });
+        };
+
         let provider: EvmRpcProvider = provider.try_into()?;
         // Cache the provider.
         let provider = evm::provider::new(provider.url, provider.rate_limit_per_minute);

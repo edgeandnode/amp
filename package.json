@@ -12,8 +12,8 @@
   "devDependencies": {
     "@effect/eslint-plugin": "^0.3.2",
     "@effect/language-service": "^0.38.1",
-    "@eslint/js": "^9.34.0",
-    "eslint": "^9.34.0",
+    "@eslint/js": "^9.35.0",
+    "eslint": "^9.35.0",
     "eslint-import-resolver-typescript": "^4.4.4",
     "eslint-plugin-import-x": "^4.16.1",
     "eslint-plugin-simple-import-sort": "^12.1.1",
@@ -23,10 +23,5 @@
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.42.0",
     "vitest": "^3.2.4"
-  },
-  "pnpm": {
-    "overrides": {
-      "typescript": "^5.8.3"
-    }
   }
 }

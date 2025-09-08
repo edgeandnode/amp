@@ -2,7 +2,7 @@
 //!
 //! This module provides functionality to manage external data source provider configurations
 //! (such as EVM RPC endpoints, Firehose endpoints, etc.) that datasets connect to.
-//! Provider configurations are defined as TOML files and support environment variable substitution.
+//! Provider configurations are defined as TOML files.
 //!
 //! ## Provider Configuration Structure
 //!
@@ -11,11 +11,6 @@
 //! - `network`: The blockchain network (e.g., "mainnet", "goerli", "polygon")
 //!
 //! Additional fields depend on the provider type.
-//!
-//! ## Environment Variable Substitution
-//!
-//! Provider configurations support environment variable templates using `${VAR_NAME}` syntax.
-//! This allows sensitive information like API keys and URLs to be configured externally.
 
 use std::{collections::BTreeMap, ops::Deref, sync::Arc};
 
@@ -148,8 +143,8 @@ where
     ///
     /// The returned guard holds a read lock on the internal cache. Holding this guard
     /// for extended periods can cause deadlocks with operations that require write access
-    /// (such as `register`, `delete`, or cache invalidation). Extract the needed data
-    /// immediately and drop the guard as soon as possible.
+    /// (such as `register` and `delete`). Extract the needed data immediately and drop
+    /// the guard as soon as possible.
     #[must_use]
     pub async fn get_all(&self) -> impl Deref<Target = BTreeMap<String, ProviderConfig>> + '_ {
         // Load and populate cache if empty
@@ -287,31 +282,10 @@ where
     }
 }
 
-/// Load and parse a single provider configuration file, handling all possible failure modes.
+/// Load and parse a single provider configuration file.
 ///
-/// This function implements a layered security approach to safely process provider
-/// configuration files that may contain sensitive information after environment
-/// variable substitution.
-///
-/// ## Security Design
-///
-/// The function processes files in distinct phases with increasing security sensitivity:
-///
-/// 1. **Pre-substitution phase**: File I/O, UTF-8 validation, TOML parsing,
-///    and structure validation. Errors in this phase are safe to log in full detail
-///    since they don't contain sensitive values.
-///
-/// 2. **Substitution phase**: Environment variables are substituted into
-///    the TOML structure. Errors here don't expose values but may reveal variable names.
-///
-/// 3. **Post-substitution phase**: The TOML may now contain secrets.
-///    Deserialization errors are carefully handled to avoid exposing sensitive field values.
-///
-/// ## Error Handling Strategy
-///
-/// - **Structural validation**: Ensures TOML root is a table before processing
-/// - **Graceful degradation**: Individual file failures don't prevent loading other provider configurations
-/// - **Sanitized errors**: Post-substitution errors avoid exposing sensitive configuration values
+/// Loads a provider configuration file from storage, parses it as TOML,
+/// and deserializes it into a [`ProviderConfig`] struct.
 ///
 /// Returns detailed error information suitable for structured logging and diagnostics.
 async fn load_and_parse_file(
@@ -344,47 +318,9 @@ async fn load_and_parse_file(
             source,
         })?;
 
-    // Parse TOML file and report any deserialization errors
-    let mut value = toml::from_str::<toml::Value>(&content).map_err(|source| {
+    // Parse TOML and deserialize directly to ProviderConfig
+    let provider = toml::from_str::<ProviderConfig>(&content).map_err(|source| {
         LoadFileError::TomlParseError {
-            path: path.clone(),
-            source,
-        }
-    })?;
-
-    // Ensure the parsed value is a table
-    // This rules out invalid structures like arrays or primitive types
-    if !value.is_table() {
-        return Err(LoadFileError::InvalidTomlStructure {
-            path: path.clone(),
-            found_type: value.type_str(),
-        });
-    }
-
-    //**********************************************************************
-    //*  /!\ ATTENTION /!\
-    //*  From this point onward, the data MAY contain sensitive information
-    //*  such as API keys, URLs, and other secrets.
-    //*  Be very careful to sanitize any error messages or logs.
-    //**********************************************************************
-
-    // Apply environment variable substitution.
-    common::env_substitute::substitute_env_vars(&mut value).map_err(|source| {
-        // No need to sanitize errors here - they do not expose sensitive data
-        LoadFileError::EnvSubstitutionFailed {
-            path: path.clone(),
-            source,
-        }
-    })?;
-
-    // Deserialize the toml::Value to ProviderConfig struct (with error sanitization)
-    // NOTE: The toml::Value type implements the serde::Deserializer trait
-    let provider = serde::de::Deserialize::deserialize(value).map_err(|source| {
-        // SECURITY: At this point we've validated that the TOML root is a table, and the `ProviderConfig`
-        // type has a simple structure (`kind`, `network`, and a generic `rest` field). Since we've
-        // ruled out structural issues and the `rest` field accepts any TOML table structure,
-        // deserialization errors are very unlikely and won't expose sensitive field values.
-        LoadFileError::DeserializationFailed {
             path: path.clone(),
             source,
         }
@@ -411,19 +347,6 @@ pub enum FetchError {
     /// deserialized into the expected types.
     #[error("TOML parse error: {0}")]
     TomlParseError(#[from] toml::de::Error),
-
-    /// Environment variable substitution failed during provider configuration parsing.
-    ///
-    /// This occurs when a provider configuration file contains environment variable
-    /// templates (like `${RPC_URL}`) but the substitution process fails, typically
-    /// due to missing environment variables or invalid template syntax.
-    #[error("provider environment substitution failed at {location}: {source}")]
-    EnvSubstitutionFailed {
-        /// The location (file path) where the substitution failed
-        location: String,
-        /// The underlying error that caused the substitution to fail
-        source: BoxError,
-    },
 
     /// Provider configuration file contains invalid UTF-8.
     ///
@@ -491,10 +414,6 @@ pub struct LoadError {
 /// These are used for structured logging and error handling during graceful degradation.
 #[derive(Debug, thiserror::Error)]
 pub enum LoadFileError {
-    /// File path has no filename component
-    #[error("File path has no filename component: {path}")]
-    NoFilename { path: String },
-
     /// Failed to fetch file from the underlying store
     #[error("Failed to fetch file from the object store: {source}")]
     StoreFetchFailed {
@@ -522,41 +441,16 @@ pub enum LoadFileError {
         path: String,
         source: toml::de::Error,
     },
-
-    /// TOML root is not a table/object
-    #[error("TOML file must contain a table/object at the root, found {found_type}")]
-    InvalidTomlStructure {
-        path: String,
-        found_type: &'static str,
-    },
-
-    /// Environment variable substitution failed
-    #[error("Environment substitution failed: {source}")]
-    EnvSubstitutionFailed {
-        path: String,
-        source: common::env_substitute::Error,
-    },
-
-    /// Failed to deserialize parsed TOML into ProviderConfig struct
-    #[error("Failed to deserialize provider configuration at {path}: {source}")]
-    DeserializationFailed {
-        path: String,
-        source: toml::de::Error,
-    },
 }
 
 impl LoadFileError {
     /// Get the file path associated with this error
     pub fn path(&self) -> &str {
         match self {
-            LoadFileError::NoFilename { path }
-            | LoadFileError::StoreFetchFailed { path, .. }
+            LoadFileError::StoreFetchFailed { path, .. }
             | LoadFileError::StoreReadFailed { path, .. }
             | LoadFileError::InvalidUtf8 { path, .. }
-            | LoadFileError::TomlParseError { path, .. }
-            | LoadFileError::InvalidTomlStructure { path, .. }
-            | LoadFileError::EnvSubstitutionFailed { path, .. }
-            | LoadFileError::DeserializationFailed { path, .. } => path,
+            | LoadFileError::TomlParseError { path, .. } => path,
         }
     }
 }

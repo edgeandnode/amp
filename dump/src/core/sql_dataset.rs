@@ -122,7 +122,7 @@ use common::{
     notification_multiplexer::NotificationMultiplexerHandle,
     query_context::{DetachedLogicalPlan, PlanningContext, QueryEnv},
 };
-use dataset_store::{DatasetStore, sql_datasets::SqlDataset};
+use dataset_store::sql_datasets::SqlDataset;
 use futures::StreamExt as _;
 use tracing::instrument;
 
@@ -187,8 +187,11 @@ pub async fn dump_table(
         let end = match end {
             Some(end) if end >= 0 => end as BlockNum,
             _ => {
-                let ctx = QueryContext::for_catalog(catalog.clone(), env.clone(), false).await?;
-                let Some(max_end_block) = ctx.max_end_block(&plan.clone().attach_to(&ctx)?).await?
+                let query_ctx =
+                    QueryContext::for_catalog(catalog.clone(), env.clone(), false).await?;
+                let Some(max_end_block) = query_ctx
+                    .max_end_block(&plan.clone().attach_to(&query_ctx)?)
+                    .await?
                 else {
                     tracing::warn!("no blocks to dump for {table_name}, dependencies are empty");
                     return Ok::<(), BoxError>(());
@@ -197,13 +200,10 @@ pub async fn dump_table(
             }
         };
 
-        tracing::warn!(table = table.table_name(), start, end);
-
         if is_incr {
             for range in table.missing_ranges(start..=end).await? {
-                tracing::warn!(?range);
                 dump_sql_query(
-                    &dataset_store,
+                    &ctx,
                     &env,
                     &catalog,
                     plan.clone(),
@@ -221,13 +221,13 @@ pub async fn dump_table(
             let physical_table: Arc<PhysicalTable> = PhysicalTable::next_revision(
                 table.table(),
                 &data_store,
-                dataset_store.metadata_db.clone(),
+                ctx.metadata_db.clone(),
                 false,
             )
             .await?
             .into();
             dump_sql_query(
-                &dataset_store,
+                &ctx,
                 &env,
                 &catalog,
                 plan.clone(),
@@ -256,7 +256,7 @@ pub async fn dump_table(
 
 #[instrument(skip_all, err)]
 async fn dump_sql_query(
-    dataset_store: &Arc<DatasetStore>,
+    ctx: &Ctx,
     env: &QueryEnv,
     catalog: &Catalog,
     query: DetachedLogicalPlan,
@@ -278,7 +278,7 @@ async fn dump_sql_query(
         StreamingQuery::spawn(
             env.clone(),
             catalog.clone(),
-            dataset_store.clone(),
+            ctx.dataset_store.clone(),
             query,
             *range.start(),
             Some(*range.end()),
@@ -331,7 +331,7 @@ async fn dump_sql_query(
                 } = writer.close(range, vec![]).await?;
 
                 commit_metadata(
-                    &dataset_store.metadata_db,
+                    &ctx.metadata_db,
                     parquet_meta,
                     object_meta,
                     physical_table.location_id(),

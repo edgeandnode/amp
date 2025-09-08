@@ -124,7 +124,7 @@ async fn url_to_location_id_finds_existing_location() {
         .expect("Failed to insert location");
 
     //* When
-    let found_id = locations::url_to_location_id(&mut *conn, &url)
+    let found_id = locations::url_to_id(&mut *conn, &url)
         .await
         .expect("Failed to search for location");
 
@@ -147,7 +147,7 @@ async fn url_to_location_id_returns_none_when_not_found() {
         .expect("Failed to parse nonexistent URL");
 
     //* When
-    let found_id = locations::url_to_location_id(&mut *conn, &url)
+    let found_id = locations::url_to_id(&mut *conn, &url)
         .await
         .expect("Failed to search for location");
 

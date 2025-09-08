@@ -1,4 +1,5 @@
-# Contributing
+🔧 `metadata-db` guidelines
+=========================
 
 This document serves as both human and AI agent context for understanding and contributing to the `metadata-db` crate.
 The goal is safe, coordinated distributed processing with strong consistency guarantees.
@@ -91,7 +92,7 @@ When contributing to `metadata-db`, ensure you follow these requirements:
 
 **Before Submitting:**
 
-- [ ] **🔐 SECURITY REVIEW**: Complete the comprehensive security checklist in [SECURITY.md](./SECURITY.md) - this is mandatory for all changes
+- [ ] **🔐 SECURITY REVIEW**: Complete the comprehensive security checklist in [security.md](./security.md) - this is mandatory for all changes
 - [ ] Run formatter: `just fmt`
 - [ ] Run unit tests: `cargo test -p metadata-db 'tests::' -- --skip 'tests::it_'`
 - [ ] Run in-tree integration tests: `cargo test -p metadata-db 'tests::it_'`
@@ -110,7 +111,7 @@ Security is fundamental to the metadata-db crate due to its role in managing sen
 - **Transaction management** requiring proper isolation and consistency
 - **Audit logging** for compliance with financial and regulatory standards
 
-**🚨 MANDATORY: Review [SECURITY.md](./SECURITY.md) before making any changes to this crate.**
+**🚨 MANDATORY: Review [security.md](./security.md) before making any changes to this crate.**
 
 The security guidelines cover:
 - SQL injection prevention and parameterized query requirements
@@ -126,7 +127,7 @@ The security guidelines cover:
 - Compliance violations
 - Data breach risks
 
-All contributors MUST complete the security checklist in [SECURITY.md](./SECURITY.md) as part of their development process.
+All contributors MUST complete the security checklist in [security.md](./security.md) as part of their development process.
 
 ## Crate Structure
 

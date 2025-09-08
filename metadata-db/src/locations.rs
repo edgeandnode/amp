@@ -16,7 +16,6 @@ mod location_id;
 mod pagination;
 
 /// Insert a location into the database and return its ID (idempotent operation)
-#[allow(dead_code)]
 pub async fn insert<'c, E>(
     exe: E,
     table: TableId<'_>,
@@ -38,7 +37,7 @@ where
         RETURNING id
     "};
 
-    let location_id: LocationId = sqlx::query_scalar(query)
+    let id: LocationId = sqlx::query_scalar(query)
         .bind(table.dataset)
         .bind(dataset_version)
         .bind(table.table)
@@ -48,32 +47,37 @@ where
         .bind(active)
         .fetch_one(exe)
         .await?;
-    Ok(location_id)
+    Ok(id)
 }
 
-/// Get location ID by URL only, returns first match if multiple exist
-pub async fn url_to_location_id<'c, E>(exe: E, url: &Url) -> Result<Option<LocationId>, sqlx::Error>
+/// Get a location by its ID
+pub async fn get_by_id<'c, E>(exe: E, id: LocationId) -> Result<Option<Location>, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
-    let query = indoc::indoc! {"
-        SELECT id
-        FROM locations
-        WHERE url = $1
-        LIMIT 1
-    "};
+    let query = "SELECT * FROM locations WHERE id = $1";
 
-    let location_id: Option<LocationId> = sqlx::query_scalar(query)
+    sqlx::query_as(query).bind(id).fetch_optional(exe).await
+}
+
+/// Get location ID by URL only, returns first match if multiple exist
+pub async fn url_to_id<'c, E>(exe: E, url: &Url) -> Result<Option<LocationId>, sqlx::Error>
+where
+    E: Executor<'c, Database = Postgres>,
+{
+    let query = "SELECT id FROM locations WHERE url = $1 LIMIT 1";
+
+    let id: Option<LocationId> = sqlx::query_scalar(query)
         .bind(url.as_str())
         .fetch_optional(exe)
         .await?;
-    Ok(location_id)
+    Ok(id)
 }
 
 /// Get a location by its ID
 pub async fn get_by_id_with_details<'c, E>(
     exe: E,
-    location_id: LocationId,
+    id: LocationId,
 ) -> Result<Option<LocationWithDetails>, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
@@ -116,7 +120,7 @@ where
     }
 
     let Some(row) = sqlx::query_as::<_, Row>(query)
-        .bind(location_id)
+        .bind(id)
         .fetch_optional(exe)
         .await?
     else {
@@ -203,7 +207,7 @@ where
 pub async fn mark_active_by_url<'c, E>(
     exe: E,
     table: TableId<'_>,
-    location_url: &Url,
+    url: &Url,
 ) -> Result<(), sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
@@ -220,7 +224,7 @@ where
         .bind(table.dataset)
         .bind(dataset_version)
         .bind(table.table)
-        .bind(location_url.as_str())
+        .bind(url.as_str())
         .execute(exe)
         .await?;
     Ok(())
@@ -271,7 +275,7 @@ where
 /// This will also delete all associated file_metadata entries due to CASCADE.
 /// Returns true if the location was deleted, false if it didn't exist.
 #[tracing::instrument(skip(exe), err)]
-pub async fn delete_by_id<'c, E>(exe: E, location_id: LocationId) -> Result<bool, sqlx::Error>
+pub async fn delete_by_id<'c, E>(exe: E, id: LocationId) -> Result<bool, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
 {
@@ -280,7 +284,7 @@ where
         WHERE id = $1
     "};
 
-    let result = sqlx::query(query).bind(location_id).execute(exe).await?;
+    let result = sqlx::query(query).bind(id).execute(exe).await?;
 
     Ok(result.rows_affected() > 0)
 }

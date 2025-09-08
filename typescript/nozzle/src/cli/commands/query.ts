@@ -2,7 +2,6 @@ import { createGrpcTransport } from "@connectrpc/connect-node"
 import * as Args from "@effect/cli/Args"
 import * as Command from "@effect/cli/Command"
 import * as Options from "@effect/cli/Options"
-import * as Config from "effect/Config"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as Match from "effect/Match"
@@ -11,6 +10,7 @@ import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import * as ArrowFlight from "../../api/ArrowFlight.ts"
 import * as Arrow from "../../Arrow.ts"
+import { flightUrl } from "../common.ts"
 
 export const query = Command.make("query", {
   args: {
@@ -25,13 +25,7 @@ export const query = Command.make("query", {
       Options.withDescription("The format to output the results in"),
       Options.withDefault("table"),
     ),
-    flight: Options.text("flight-url").pipe(
-      Options.withFallbackConfig(
-        Config.string("NOZZLE_ARROW_FLIGHT_URL").pipe(Config.withDefault("http://localhost:1602")),
-      ),
-      Options.withDescription("The Arrow Flight URL to use for the query"),
-      Options.withSchema(Schema.URL),
-    ),
+    flightUrl,
   },
 }).pipe(
   Command.withDescription("Perform a Nozzle SQL query"),
@@ -77,5 +71,5 @@ export const query = Command.make("query", {
       }))
     }),
   ),
-  Command.provide(({ args }) => ArrowFlight.layer(createGrpcTransport({ baseUrl: `${args.flight}` }))),
+  Command.provide(({ args }) => ArrowFlight.layer(createGrpcTransport({ baseUrl: `${args.flightUrl}` }))),
 )

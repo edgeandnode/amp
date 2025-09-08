@@ -14,7 +14,7 @@ pub mod handlers;
 mod scheduler;
 
 use ctx::Ctx;
-use handlers::{datasets, jobs, locations};
+use handlers::{datasets, jobs, locations, providers};
 use scheduler::Scheduler;
 
 pub async fn serve(
@@ -48,6 +48,14 @@ pub async fn serve(
         .route(
             "/locations/{id}",
             get(locations::get_by_id::handler).delete(locations::delete_by_id::handler),
+        )
+        .route(
+            "/providers",
+            get(providers::get_all::handler).post(providers::create::handler),
+        )
+        .route(
+            "/providers/{name}",
+            get(providers::get_by_id::handler).delete(providers::delete_by_id::handler),
         )
         .with_state(Ctx {
             config,
