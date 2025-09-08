@@ -740,13 +740,45 @@ export class SQLParser {
       limitClause = this.parseLimitClause()
     }
     
-    const endOffset = this.current > 0 ? this.tokens[this.current - 1].endOffset : startOffset
+    // Calculate endOffset from the last valid token or clause
+    let endOffset = startOffset
+    if (this.current > 0 && this.current <= this.tokens.length) {
+      endOffset = this.tokens[this.current - 1].endOffset
+    } else if (limitClause) {
+      endOffset = limitClause.endOffset
+    } else if (orderByClause) {
+      endOffset = orderByClause.endOffset
+    } else if (havingClause) {
+      endOffset = havingClause.endOffset
+    } else if (groupByClause) {
+      endOffset = groupByClause.endOffset
+    } else if (whereClause) {
+      endOffset = whereClause.endOffset
+    } else if (joinClauses.length > 0) {
+      endOffset = joinClauses[joinClauses.length - 1].endOffset
+    } else if (fromClause) {
+      endOffset = fromClause.endOffset
+    } else if (selectList) {
+      endOffset = selectList.endOffset
+    }
+    
+    // Build children array for AST traversal
+    const children: ASTNode[] = []
+    if (withClause) children.push(withClause)
+    if (selectList) children.push(selectList)
+    if (fromClause) children.push(fromClause)
+    if (joinClauses) children.push(...joinClauses)
+    if (whereClause) children.push(whereClause)
+    if (groupByClause) children.push(groupByClause)
+    if (havingClause) children.push(havingClause)
+    if (orderByClause) children.push(orderByClause)
+    if (limitClause) children.push(limitClause)
     
     return {
       type: 'SelectStatement',
       startOffset,
       endOffset,
-      children: [],
+      children,
       withClause,
       selectList,
       fromClause,
@@ -1651,6 +1683,11 @@ export class EnhancedContextAnalyzer {
       // Find the AST node at cursor position
       const currentNode = ast.findNodeAtOffset(cursorOffset)
       
+      // Check if AST is valid - if root has no range or too many errors, use fallback
+      if (ast.root.startOffset === ast.root.endOffset || ast.errors.length > 0 || !currentNode) {
+        return this.createFallbackContext(query, cursorOffset)
+      }
+      
       // Build scope hierarchy
       const scope = this.buildScopeHierarchy(ast.root, cursorOffset)
       
@@ -1972,8 +2009,26 @@ export class EnhancedContextAnalyzer {
    * Provides a basic context when parsing fails or context cannot be determined.
    */
   private createFallbackContext(query: string, cursorOffset: number): QueryContext {
+    // Use simple heuristics to determine context when AST parsing fails
+    const contextType = this.detectContextHeuristically(query, cursorOffset)
+    
+    const expectedCompletions: CompletionType[] = []
+    switch (contextType) {
+      case QueryContextType.SELECT_LIST:
+        expectedCompletions.push(CompletionType.COLUMN, CompletionType.FUNCTION, CompletionType.KEYWORD)
+        break
+      case QueryContextType.FROM_CLAUSE:
+        expectedCompletions.push(CompletionType.TABLE, CompletionType.CTE)
+        break
+      case QueryContextType.WHERE_CONDITION:
+        expectedCompletions.push(CompletionType.COLUMN, CompletionType.OPERATOR, CompletionType.FUNCTION)
+        break
+      default:
+        expectedCompletions.push(CompletionType.KEYWORD, CompletionType.FUNCTION)
+    }
+    
     return {
-      contextType: QueryContextType.UNKNOWN,
+      contextType,
       cursorOffset,
       currentNode: null,
       scope: {
@@ -1982,7 +2037,7 @@ export class EnhancedContextAnalyzer {
         ctes: new Map(),
         selectAliases: new Map()
       },
-      expectedCompletions: [CompletionType.KEYWORD, CompletionType.FUNCTION],
+      expectedCompletions,
       availableIdentifiers: {
         tables: [],
         columns: [],
@@ -1992,6 +2047,38 @@ export class EnhancedContextAnalyzer {
       },
       contextFilters: {}
     }
+  }
+  
+  private detectContextHeuristically(query: string, cursorOffset: number): QueryContextType {
+    const queryUpToCursor = query.substring(0, cursorOffset).trim()
+    
+    // Simple pattern matching for context detection
+    if (/\bSELECT\s*$/i.test(queryUpToCursor)) {
+      return QueryContextType.SELECT_LIST
+    }
+    
+    if (/\bFROM\s*$/i.test(queryUpToCursor)) {
+      return QueryContextType.FROM_CLAUSE
+    }
+    
+    if (/\bWHERE\s*$/i.test(queryUpToCursor)) {
+      return QueryContextType.WHERE_CONDITION
+    }
+    
+    if (/\bSELECT\s+\w+.*\bFROM\s*$/i.test(queryUpToCursor)) {
+      return QueryContextType.FROM_CLAUSE
+    }
+    
+    if (/\bSELECT\s+[\w\s,]*\bFROM\s+\w+.*\bWHERE\s*$/i.test(queryUpToCursor)) {
+      return QueryContextType.WHERE_CONDITION
+    }
+    
+    // If query starts with SELECT and we haven't matched FROM or WHERE patterns, assume SELECT_LIST
+    if (/\bSELECT\b/i.test(queryUpToCursor)) {
+      return QueryContextType.SELECT_LIST
+    }
+    
+    return QueryContextType.UNKNOWN
   }
 }
 

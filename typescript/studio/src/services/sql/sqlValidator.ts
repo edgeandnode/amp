@@ -505,13 +505,23 @@ export class SqlValidator {
           const parts = token.value.split('.')
           
           if (parts.length === 2) {
-            // Simple qualified reference: table.column
-            columnRefs.push({
-              name: parts[1],
-              tableName: parts[0], 
-              token: token,
-              clause: currentClause
-            })
+            // Check if this is a wildcard reference (table.* tokenized as single token ending with dot)
+            if (parts[1] === '' && i < tokens.length - 1 && tokens[i + 1].type === 'OPERATOR' && tokens[i + 1].value === '*') {
+              // This is table.* - skip it as wildcard is always valid
+              console.log(`[SqlValidator] Skipping wildcard reference: ${parts[0]}.*`)
+              i += 1 // Skip the * token
+              continue
+            }
+            
+            // Regular qualified reference: table.column (only if column name is not empty)
+            if (parts[1] !== '') {
+              columnRefs.push({
+                name: parts[1],
+                tableName: parts[0], 
+                token: token,
+                clause: currentClause
+              })
+            }
           } else if (parts.length === 3) {
             // Fully qualified reference: dataset.table.column
             const fullTableName = `${parts[0]}.${parts[1]}`
@@ -548,6 +558,12 @@ export class SqlValidator {
     tableAliasMap: Map<string, string>
   ): { error?: SqlValidationError } {
     
+    // Check if this identifier is a UDF first - UDFs should not be validated as columns
+    if (this.isUDF(columnRef.name)) {
+      console.log(`[SqlValidator] Skipping column validation for UDF: ${columnRef.name}`)
+      return {} // No error - this is a valid UDF
+    }
+    
     // If qualified (table.column), validate against specific table
     if (columnRef.tableName) {
       const fullTableName = tableAliasMap.get(columnRef.tableName) || columnRef.tableName
@@ -567,11 +583,12 @@ export class SqlValidator {
       
       const columnExists = this.columnExistsInTable(columnRef.name, table)
       console.log(`[SqlValidator] Column '${columnRef.name}' exists in table '${fullTableName}':`, columnExists)
-      console.log(`[SqlValidator] Available columns in table:`, table.metadata_columns?.map(c => c.name) || [])
+      const t = table as any
+      const columnNames = t.metadata_columns?.map((c: any) => c.name) || t.column_names || []
+      console.log(`[SqlValidator] Available columns in table:`, columnNames)
       
       if (!columnExists) {
         const suggestion = this.suggestSimilarColumn(columnRef.name, table)
-        const columnNames = table.metadata_columns?.map(c => c.name) || []
         const availableColumns = columnNames.slice(0, 5) // Show first 5 columns
         const moreColumns = columnNames.length > 5 ? ` and ${columnNames.length - 5} more` : ''
         
@@ -592,7 +609,7 @@ export class SqlValidator {
               columnName: columnRef.name, 
               tableName: fullTableName, 
               suggestion,
-              availableColumns: table.metadata_columns?.map(c => c.name) || []
+              availableColumns: columnNames
             }
           }
         }
@@ -600,6 +617,16 @@ export class SqlValidator {
     } else {
       // Unqualified column - check if it exists in any available table
       const availableTables = this.getAllAvailableTables(tableAliasMap)
+      console.log(`[SqlValidator] getAllAvailableTables returned:`, availableTables.map(t => {
+        const tb = t as any
+        return {
+          source: tb.source,
+          destination: tb.destination,
+          dataset_name: tb.dataset_name,
+          table_name: tb.table_name,
+          column_count: (tb.metadata_columns?.length || 0) + (tb.column_names?.length || 0)
+        }
+      }))
       const matchingTables = availableTables.filter(table => 
         this.columnExistsInTable(columnRef.name, table)
       )
@@ -616,7 +643,8 @@ export class SqlValidator {
         const tablesWithSuggestion: string[] = []
         
         for (const table of availableTables) {
-          const columnNames = table.metadata_columns?.map(c => c.name) || []
+          const t = table as any
+          const columnNames = t.metadata_columns?.map((c: any) => c.name) || t.column_names || []
           allColumns.push(...columnNames)
           for (const columnName of columnNames) {
             const distance = this.calculateStringDistance(columnRef.name, columnName)
@@ -628,7 +656,9 @@ export class SqlValidator {
               for (const checkTable of availableTables) {
                 if (this.columnExistsInTable(columnName, checkTable)) {
                   // Get the alias for this table from the tableAliasMap
-                  const tableAlias = this.getTableAlias(checkTable.source, tableAliasMap)
+                  const t = checkTable as any
+                  const sourceTableName = t.source || (t.dataset_name ? `${t.dataset_name}.${t.table_name}` : '')
+                  const tableAlias = this.getTableAlias(sourceTableName, tableAliasMap)
                   tablesWithSuggestion.push(tableAlias)
                 }
               }
@@ -726,30 +756,58 @@ export class SqlValidator {
 
   private findTable(tableName: string): DatasetMetadata | null {
     console.log(`[SqlValidator] findTable - searching for table: "${tableName}"`)
-    console.log(`[SqlValidator] findTable - available datasets:`, this.metadata.map(d => ({ source: d.source, destination: d.destination })))
+    console.log(`[SqlValidator] findTable - available datasets:`, this.metadata.map(d => ({ 
+      dataset_name: (d as any).dataset_name, 
+      table_name: (d as any).table_name, 
+      source: (d as any).source, 
+      destination: (d as any).destination 
+    })))
     
-    const result = this.metadata.find(dataset => 
-      dataset.source === tableName ||
-      dataset.destination === tableName
-    ) || null
+    const result = this.metadata.find(dataset => {
+      const d = dataset as any
+      // Check both possible structures
+      const fullTableName = d.dataset_name ? `${d.dataset_name}.${d.table_name}` : null
+      return d.source === tableName ||
+             d.destination === tableName ||
+             fullTableName === tableName
+    }) || null
     
-    console.log(`[SqlValidator] findTable - result:`, result ? { source: result.source, destination: result.destination } : null)
+    console.log(`[SqlValidator] findTable - result:`, result ? { 
+      dataset_name: (result as any).dataset_name, 
+      table_name: (result as any).table_name,
+      source: (result as any).source, 
+      destination: (result as any).destination 
+    } : null)
     return result
   }
 
   private columnExistsInTable(columnName: string, table: DatasetMetadata): boolean {
+    const t = table as any
     console.log(`[SqlValidator] columnExistsInTable - checking column "${columnName}" in table:`, { 
-      source: table.source, 
-      destination: table.destination,
-      columnCount: table.metadata_columns?.length || 0,
-      columns: table.metadata_columns?.map(c => c.name) || []
+      source: t.source, 
+      destination: t.destination,
+      dataset_name: t.dataset_name,
+      table_name: t.table_name,
+      metadata_columns_count: t.metadata_columns?.length || 0,
+      column_names_count: t.column_names?.length || 0,
+      metadata_columns: t.metadata_columns?.map((c: any) => c.name) || [],
+      column_names: t.column_names || []
     })
-    return table.metadata_columns ? table.metadata_columns.some(col => col.name === columnName) : false
+    
+    // Handle both structures: metadata_columns (objects) and column_names (strings)
+    if (t.metadata_columns) {
+      return t.metadata_columns.some((col: any) => col.name === columnName)
+    } else if (t.column_names) {
+      return t.column_names.includes(columnName)
+    }
+    return false
   }
 
   private suggestSimilarColumn(columnName: string, table: DatasetMetadata): string | null {
-    const columns = table.metadata_columns || []
-    if (columns.length === 0) {
+    const t = table as any
+    // Get column names from either structure
+    const columnNames = t.metadata_columns?.map((c: any) => c.name) || t.column_names || []
+    if (columnNames.length === 0) {
       return null
     }
 
@@ -757,12 +815,12 @@ export class SqlValidator {
     let bestMatch: string | null = null
     let bestScore = 0
 
-    for (const col of columns) {
-      const score = this.calculateStringSimilarity(input, col.name.toLowerCase())
+    for (const colName of columnNames) {
+      const score = this.calculateStringSimilarity(input, colName.toLowerCase())
       
       // Consider a match if similarity score is above threshold
       if (score > 0.3 && score > bestScore) {
-        bestMatch = col.name
+        bestMatch = colName
         bestScore = score
       }
     }
@@ -774,14 +832,32 @@ export class SqlValidator {
   private getAllAvailableTables(tableAliasMap: Map<string, string>): DatasetMetadata[] {
     const tableNames = new Set(Array.from(tableAliasMap.values()))
     console.log(`[SqlValidator] getAllAvailableTables - tableNames from alias map:`, Array.from(tableNames))
-    console.log(`[SqlValidator] getAllAvailableTables - available metadata sources:`, this.metadata.map(d => d.source))
+    console.log(`[SqlValidator] getAllAvailableTables - available metadata sources:`, this.metadata.map(d => {
+      const dt = d as any
+      return dt.source || (dt.dataset_name ? `${dt.dataset_name}.${dt.table_name}` : 'undefined')
+    }))
     
-    const result = this.metadata.filter(dataset => 
-      tableNames.has(dataset.source) ||
-      tableNames.has(dataset.destination)
-    )
+    const result = this.metadata.filter(dataset => {
+      const d = dataset as any
+      // Handle both metadata structures
+      const sourceMatch = d.source && tableNames.has(d.source)
+      const destinationMatch = d.destination && tableNames.has(d.destination)
+      const fullTableName = d.dataset_name ? `${d.dataset_name}.${d.table_name}` : null
+      const fullTableMatch = fullTableName && tableNames.has(fullTableName)
+      
+      return sourceMatch || destinationMatch || fullTableMatch
+    })
     
-    console.log(`[SqlValidator] getAllAvailableTables - filtered result:`, result.map(d => ({ source: d.source, destination: d.destination })))
+    console.log(`[SqlValidator] getAllAvailableTables - filtered result:`, result.map(d => {
+      const dt = d as any
+      return { 
+        source: dt.source, 
+        destination: dt.destination,
+        dataset_name: dt.dataset_name,
+        table_name: dt.table_name,
+        fullName: dt.dataset_name ? `${dt.dataset_name}.${dt.table_name}` : null
+      }
+    }))
     return result
   }
 
@@ -883,6 +959,17 @@ export class SqlValidator {
   }
 
   /**
+   * Check if UDF Exists
+   * 
+   * Checks if an identifier is a User Defined Function.
+   * 
+   * @private
+   */
+  private isUDF(name: string): boolean {
+    return this.udfs.some(udf => udf.name === name)
+  }
+
+  /**
    * Check if Table Exists
    * 
    * Checks if a table name exists in the metadata.
@@ -896,27 +983,36 @@ export class SqlValidator {
     
     if (this.metadata.length > 0) {
       console.log(`[SqlValidator] Available tables:`, this.metadata.map(d => ({
-        source: d.source,
-        destination: d.destination
+        source: (d as any).source,
+        destination: (d as any).destination,
+        dataset_name: (d as any).dataset_name,
+        table_name: (d as any).table_name
       })))
     } else {
       console.log(`[SqlValidator] No metadata available!`)
     }
     
     const exists = this.metadata.some(dataset => {
-      const sourceMatch = dataset.source === tableName
-      const destinationMatch = dataset.destination === tableName
+      const d = dataset as any
+      const sourceMatch = d.source === tableName
+      const destinationMatch = d.destination === tableName
+      const fullTableName = d.dataset_name ? `${d.dataset_name}.${d.table_name}` : null
+      const fullTableMatch = fullTableName === tableName
       
-      if (sourceMatch || destinationMatch) {
+      if (sourceMatch || destinationMatch || fullTableMatch) {
         console.log(`[SqlValidator] Found match for "${tableName}" in dataset:`, {
-          source: dataset.source,
-          destination: dataset.destination,
+          source: d.source,
+          destination: d.destination,
+          dataset_name: d.dataset_name,
+          table_name: d.table_name,
+          fullTableName,
           sourceMatch,
-          destinationMatch
+          destinationMatch,
+          fullTableMatch
         })
       }
       
-      return sourceMatch || destinationMatch
+      return sourceMatch || destinationMatch || fullTableMatch
     })
     
     console.log(`[SqlValidator] Table "${tableName}" exists: ${exists}`)

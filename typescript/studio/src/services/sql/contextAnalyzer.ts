@@ -185,9 +185,12 @@ export class QueryContextAnalyzer {
           column: startColumn
         })
         position += value.length
-        if (char === '\n') {
-          line++
-          column = 1
+        
+        // Count all newlines in the whitespace value, not just the first character
+        const newlines = (value.match(/\n/g) || []).length
+        if (newlines > 0) {
+          line += newlines
+          column = value.length - value.lastIndexOf('\n')
         } else {
           column += value.length
         }

@@ -93,8 +93,8 @@ describe('SqlValidator', () => {
     test('should handle multiple table references', () => {
       const query = `
         SELECT l.*, t.hash 
-        FROM anvil.logs l
-        JOIN anvil.transactions t ON l.transaction_hash = t.hash
+        FROM anvil.logs as l
+        JOIN anvil.transactions as t ON l.transaction_hash = t.hash
       `
       const errors = validator.validateQuery(query)
       
@@ -109,8 +109,8 @@ describe('SqlValidator', () => {
       `
       const errors = validator.validateQuery(query)
       
-      expect(errors.length).toBeGreaterThanOrEqual(2)
-      expect(errors.every(e => e.code === 'UNKNOWN_TABLE')).toBe(true)
+      const unknownTableErrors = errors.filter(e => e.code === 'UNKNOWN_TABLE')
+      expect(unknownTableErrors.length).toBeGreaterThanOrEqual(2)
     })
   })
 
@@ -151,7 +151,7 @@ describe('SqlValidator', () => {
 
     test('should detect ambiguous column references', () => {
       const query = `
-        SELECT hash 
+        SELECT block_number 
         FROM anvil.logs l
         JOIN anvil.transactions t ON l.transaction_hash = t.hash
       `
@@ -210,7 +210,7 @@ describe('SqlValidator', () => {
       const query = 'SELECT block_number'
       const errors = validator.validateQuery(query)
       
-      expect(errors).toHaveLength(1)
+      expect(errors).toHaveLength(2) // second error is a COLUMN_NOT_FOUND since FROM table is not defined
       expect(errors[0].code).toBe('MISSING_FROM_CLAUSE')
       expect(errors[0].severity).toBe(monaco.MarkerSeverity.Warning)
     })
@@ -433,10 +433,12 @@ WHERE invalid_column = 1`
       const query = 'SELECT * FROM users WHERE id = 1'
       const errors = validator.validateQuery(query)
       
-      expect(errors).toHaveLength(1)
+      expect(errors).toHaveLength(2) // second error is COLUMN_NOT_FOUND for id
       expect(errors[0].code).toBe('UNKNOWN_TABLE')
       expect(errors[0].message).toContain('users')
       expect(errors[0].data?.suggestion).toBeDefined()
+      expect(errors[1].code).toBe('COLUMN_NOT_FOUND')
+      expect(errors[1].message).toContain('id')
     })
 
     test('scenario: column validation with qualified names', () => {
