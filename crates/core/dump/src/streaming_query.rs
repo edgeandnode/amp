@@ -158,8 +158,9 @@ pub struct StreamingQuery {
     network: String,
     /// `blocks` table for the network associated with the catalog.
     blocks_table: Arc<PhysicalTable>,
-    /// Previously processed range. These may be provided by the consumer to resume a stream.
-    prev_range: Option<BlockRange>,
+    /// The watermark associated with the previously processed range. This may be provided by the
+    /// consumer to resume a stream.
+    prev_watermark: Option<Watermark>,
 }
 
 impl StreamingQuery {
@@ -219,7 +220,7 @@ impl StreamingQuery {
             network: network.to_string(),
             blocks_table: Arc::new(blocks_table),
             // TODO: Set from client to resume a stream after dropping a connection.
-            prev_range: None,
+            prev_watermark: None,
         };
 
         let join_handle =
@@ -292,7 +293,7 @@ impl StreamingQuery {
                 // If we reached the end block, we are done
                 return Ok(());
             }
-            self.prev_range = Some(range);
+            self.prev_watermark = Some(range.watermark());
         }
     }
 
@@ -355,7 +356,7 @@ impl StreamingQuery {
         &self,
         ctx: &QueryContext,
     ) -> Result<Option<StreamDirection>, BoxError> {
-        match &self.prev_range {
+        match &self.prev_watermark {
             // start stream
             None => {
                 let block = self
@@ -364,13 +365,13 @@ impl StreamingQuery {
                 Ok(block.map(StreamDirection::ForwardFrom))
             }
             // continue stream
-            Some(prev) if self.blocks_table_contains(ctx, &prev.watermark()).await? => {
-                let block = self.blocks_table_fetch(&ctx, prev.end() + 1, None).await?;
+            Some(prev) if self.blocks_table_contains(ctx, &prev).await? => {
+                let block = self.blocks_table_fetch(&ctx, prev.number + 1, None).await?;
                 Ok(block.map(StreamDirection::ForwardFrom))
             }
             // rewind stream due to reorg
             Some(prev) => {
-                let block = self.reorg_base(ctx, prev).await?;
+                let block = self.reorg_base(ctx, &prev).await?;
                 Ok(block.map(StreamDirection::ReorgFrom))
             }
         }
@@ -442,7 +443,7 @@ impl StreamingQuery {
     async fn reorg_base(
         &self,
         ctx: &QueryContext,
-        prev_range: &BlockRange,
+        prev_watermark: &Watermark,
     ) -> Result<Option<BlockRow>, BoxError> {
         // context for querying forked blocks
         let fork_ctx = {
@@ -453,9 +454,9 @@ impl StreamingQuery {
             QueryContext::for_catalog(catalog, ctx.env.clone(), true).await?
         };
 
-        let mut min_fork_block_num = prev_range.end();
+        let mut min_fork_block_num = prev_watermark.number;
         let mut fork: Option<BlockRow> = self
-            .blocks_table_fetch(&fork_ctx, prev_range.end(), Some(&prev_range.hash))
+            .blocks_table_fetch(&fork_ctx, prev_watermark.number, Some(&prev_watermark.hash))
             .await?;
         while let Some(block) = fork.take() {
             if self.blocks_table_contains(ctx, &block.watermark()).await? {
