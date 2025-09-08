@@ -1150,19 +1150,41 @@ impl FlightSqlService for Service {
 
     async fn get_flight_info_table_types(
         &self,
-        _query: CommandGetTableTypes,
-        _request: Request<FlightDescriptor>,
+        query: CommandGetTableTypes,
+        request: Request<FlightDescriptor>,
     ) -> Result<Response<FlightInfo>, Status> {
-        unimplemented!()
+        let flight_descriptor = request.into_inner();
+        let ticket = Ticket {
+            ticket: query.as_any().encode_to_vec().into(),
+        };
+        let endpoint = FlightEndpoint::new().with_ticket(ticket);
+        let flight_info = FlightInfo::new()
+            .try_with_schema(&query.into_builder().schema())
+            .map_err(|e| Status::internal(format!("Unable to encode schema: {}", e)))?
+            .with_endpoint(endpoint)
+            .with_descriptor(flight_descriptor);
+        Ok(Response::new(flight_info))
     }
 
     async fn do_get_table_types(
         &self,
-        _query: CommandGetTableTypes,
+        query: CommandGetTableTypes,
         _request: Request<Ticket>,
     ) -> Result<Response<Pin<Box<dyn Stream<Item = Result<FlightData, Status>> + Send>>>, Status>
     {
-        unimplemented!()
+        let mut builder = query.into_builder();
+        builder.append("TABLE");
+        let schema = builder.schema();
+        let batch = builder
+            .build()
+            .map_err(|e| Status::internal(format!("Failed to build table types batch: {}", e)))?;
+
+        let stream = FlightDataEncoderBuilder::new()
+            .with_schema(schema)
+            .build(futures::stream::once(async { Ok(batch) }))
+            .map_err(|e| Status::internal(format!("Failed to encode flight data: {}", e)));
+
+        Ok(Response::new(Box::pin(stream)))
     }
 
     async fn get_flight_info_sql_info(
