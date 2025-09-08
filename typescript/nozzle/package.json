@@ -45,7 +45,7 @@
   "dependencies": {
     "@effect/cli": "^0.69.2",
     "jiti": "^2.5.1",
-    "viem": "^2.37.3"
+    "viem": "^2.37.4"
   },
   "peerDependencies": {
     "@bufbuild/protobuf": "^2.2.5",

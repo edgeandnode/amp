@@ -49,7 +49,6 @@ export const make = Effect.gen(function*() {
 
   // Observe block changes in a sliding buffer
   const blockChanges = evmRpc.streamBlocks.pipe(
-    Stream.map((block) => block.number),
     Stream.buffer({ capacity: 1, strategy: "sliding" }),
   )
 
