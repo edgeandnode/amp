@@ -5,6 +5,7 @@ version.workspace = true
 
 [dependencies]
 arrow-flight.workspace = true
+arrow-string = "55"
 async-stream.workspace = true
 async-trait.workspace = true
 axum.workspace = true

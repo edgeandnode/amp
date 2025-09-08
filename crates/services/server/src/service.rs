@@ -213,6 +213,26 @@ static NOZZLE_XDBC_DATA: LazyLock<XdbcTypeInfoData> = LazyLock::new(|| {
         .expect("Failed to build XDBC type info data")
 });
 
+/// SQL LIKE pattern matching for Flight SQL filters
+fn sql_pattern_matches(text: &str, pattern: &str) -> bool {
+    use arrow::array::StringArray;
+    use arrow_string::like::like;
+
+    let text_array = StringArray::from(vec![text]);
+    let pattern_array = StringArray::from(vec![pattern]);
+
+    match like(&text_array, &pattern_array) {
+        Ok(result_array) => result_array.value(0),
+        Err(_) => {
+            tracing::warn!(
+                pattern,
+                "Failed to execute arrow-string LIKE operation, falling back to exact match"
+            );
+            text == pattern
+        }
+    }
+}
+
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("ProtocolBuffers decoding error: {0}")]
@@ -1211,7 +1231,7 @@ impl FlightSqlService for Service {
                 let schema_name = &dataset.name;
 
                 let schema_matches = if let Some(ref schema_pattern) = schema_filter {
-                    schema_name == schema_pattern || schema_pattern == "%"
+                    sql_pattern_matches(schema_name, schema_pattern)
                 } else {
                     true
                 };
@@ -1299,11 +1319,11 @@ impl FlightSqlService for Service {
 
                     let schema_matches = schema_filter
                         .as_ref()
-                        .map_or(true, |pattern| schema_name == pattern || pattern == "%");
+                        .map_or(true, |pattern| sql_pattern_matches(schema_name, pattern));
 
                     let table_matches = table_filter
                         .as_ref()
-                        .map_or(true, |pattern| table_name == pattern || pattern == "%");
+                        .map_or(true, |pattern| sql_pattern_matches(table_name, pattern));
 
                     if schema_matches && table_matches {
                         let schema_ref: &arrow::datatypes::Schema = table_schema.as_ref();
@@ -1526,5 +1546,39 @@ impl FlightSqlService for Service {
 
     async fn register_sql_info(&self, _id: i32, _result: &SqlInfo) {
         // No-op for now
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sql_pattern_matching() {
+        assert!(sql_pattern_matches("eth_rpc", "eth\\_rpc"));
+
+        // Test basic exact matching
+        assert!(sql_pattern_matches("test", "test"));
+        assert!(!sql_pattern_matches("test", "other"));
+
+        // Test wildcard patterns
+        assert!(sql_pattern_matches("test", "%"));
+        assert!(sql_pattern_matches("test", "te%"));
+        assert!(sql_pattern_matches("test", "%st"));
+        assert!(sql_pattern_matches("test", "t%t"));
+
+        // Test single character wildcard
+        assert!(sql_pattern_matches("test", "te_t"));
+        assert!(sql_pattern_matches("test", "_est"));
+        assert!(!sql_pattern_matches("test", "te_"));
+
+        // Test escaped percent
+        assert!(sql_pattern_matches("te%st", "te\\%st"));
+        assert!(!sql_pattern_matches("test", "te\\%st"));
+
+        // Test complex patterns
+        assert!(sql_pattern_matches("eth_rpc_test", "eth\\_rpc_%"));
+        assert!(sql_pattern_matches("transactions", "trans%"));
+        assert!(sql_pattern_matches("logs", "log_"));
     }
 }
