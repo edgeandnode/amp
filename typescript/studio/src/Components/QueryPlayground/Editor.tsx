@@ -65,7 +65,7 @@ export function Editor({
    */
   const setupProviders = () => {
     if (
-      metadataQuery.data &&
+      sourcesQuery.data &&
       udfQuery.data &&
       typeof window !== "undefined" &&
       window.monaco
@@ -77,7 +77,7 @@ export function Editor({
 
       // Setup providers with initial data
       providersRef.current = setupNozzleSQLProviders(
-        [...metadataQuery.data],
+        [...sourcesQuery.data],
         [...udfQuery.data],
         {
           // Enable debug logging in development
@@ -93,7 +93,7 @@ export function Editor({
       )
 
       console.debug("[Editor] SQL intellisense providers initialized", {
-        tableCount: metadataQuery.data.length,
+        tableCount: sourcesQuery.data.length,
         udfCount: udfQuery.data.length,
       })
     }
@@ -106,16 +106,16 @@ export function Editor({
    * refetch fresh data from the API.
    */
   useEffect(() => {
-    if (providersRef.current && metadataQuery.data && udfQuery.data) {
-      updateProviderData([...metadataQuery.data], [...udfQuery.data])
+    if (providersRef.current && sourcesQuery.data && udfQuery.data) {
+      updateProviderData([...sourcesQuery.data], [...udfQuery.data])
       console.debug(
         "[Editor] SQL intellisense providers updated with fresh data",
       )
     }
   }, [
-    metadataQuery.data,
+    sourcesQuery.data,
     udfQuery.data,
-    metadataQuery.dataUpdatedAt,
+    sourcesQuery.dataUpdatedAt,
     udfQuery.dataUpdatedAt,
   ])
 
@@ -131,14 +131,14 @@ export function Editor({
     let validator = getActiveValidator()
     
     // If validator is null but we have all required data, re-setup providers (fixes hot reload issue)
-    if (!validator && editor && metadataQuery.data && udfQuery.data && validationLevel !== 'off') {
+    if (!validator && editor && sourcesQuery.data && udfQuery.data && validationLevel !== 'off') {
       console.debug('[Editor] Validator not available, re-setting up providers...')
       setupProviders()
       validator = getActiveValidator()
     }
     
     // Check if validation is enabled and editor is available
-    if (!editor || !validator || !metadataQuery.data || !udfQuery.data || validationLevel === 'off') {
+    if (!editor || !validator || !sourcesQuery.data || !udfQuery.data || validationLevel === 'off') {
       return
     }
 
@@ -223,7 +223,7 @@ export function Editor({
         clearTimeout(timeoutId)
       }
     }
-  }, [metadataQuery.data, udfQuery.data, validationLevel, enablePartialValidation, providersRef.current]) // Re-run when metadata, validation config, or providers change
+  }, [sourcesQuery.data, udfQuery.data, validationLevel, enablePartialValidation, providersRef.current]) // Re-run when metadata, validation config, or providers change
 
   /**
    * Cleanup providers on unmount

@@ -17,7 +17,7 @@
  */
 
 import * as monaco from "monaco-editor"
-import type { DatasetMetadata } from 'nozzl/Studio/Model'
+import type { DatasetSource } from 'nozzl/Studio/Model'
 import { QueryContextAnalyzer } from './QueryContextAnalyzer'
 import type {
   UserDefinedFunction,
@@ -40,7 +40,7 @@ import {
  * including syntax checking and metadata validation.
  */
 export class SqlValidator {
-  private metadata: DatasetMetadata[]
+  private metadata: DatasetSource[]
   private udfs: UserDefinedFunction[]
   private config: CompletionConfig
   private contextAnalyzer: QueryContextAnalyzer
@@ -55,7 +55,7 @@ export class SqlValidator {
   }
 
   constructor(
-    metadata: DatasetMetadata[],
+    metadata: DatasetSource[],
     udfs: UserDefinedFunction[],
     config: CompletionConfig = DEFAULT_COMPLETION_CONFIG
   ) {
@@ -144,7 +144,7 @@ export class SqlValidator {
    * @param metadata - Updated dataset metadata
    * @param udfs - Updated UDF definitions  
    */
-  updateData(metadata: DatasetMetadata[], udfs: UserDefinedFunction[]): void {
+  updateData(metadata: DatasetSource[], udfs: UserDefinedFunction[]): void {
     this.metadata = metadata
     this.udfs = udfs
     
@@ -755,7 +755,7 @@ export class SqlValidator {
     return tableName // Return the full table name if no alias found
   }
 
-  private findTable(tableName: string): DatasetMetadata | null {
+  private findTable(tableName: string): DatasetSource | null {
     console.log(`[SqlValidator] findTable - searching for table: "${tableName}"`)
     console.log(`[SqlValidator] findTable - available datasets:`, this.metadata.map(d => ({ 
       dataset_name: (d as any).dataset_name, 
@@ -782,7 +782,7 @@ export class SqlValidator {
     return result
   }
 
-  private columnExistsInTable(columnName: string, table: DatasetMetadata): boolean {
+  private columnExistsInTable(columnName: string, table: DatasetSource): boolean {
     const t = table as any
     console.log(`[SqlValidator] columnExistsInTable - checking column "${columnName}" in table:`, { 
       source: t.source, 
@@ -804,7 +804,7 @@ export class SqlValidator {
     return false
   }
 
-  private suggestSimilarColumn(columnName: string, table: DatasetMetadata): string | null {
+  private suggestSimilarColumn(columnName: string, table: DatasetSource): string | null {
     const t = table as any
     // Get column names from either structure
     const columnNames = t.metadata_columns?.map((c: any) => c.name) || t.column_names || []
@@ -830,7 +830,7 @@ export class SqlValidator {
     return bestMatch
   }
 
-  private getAllAvailableTables(tableAliasMap: Map<string, string>): DatasetMetadata[] {
+  private getAllAvailableTables(tableAliasMap: Map<string, string>): DatasetSource[] {
     const tableNames = new Set(Array.from(tableAliasMap.values()))
     console.log(`[SqlValidator] getAllAvailableTables - tableNames from alias map:`, Array.from(tableNames))
     console.log(`[SqlValidator] getAllAvailableTables - available metadata sources:`, this.metadata.map(d => {
