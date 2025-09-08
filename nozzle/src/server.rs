@@ -166,12 +166,7 @@ async fn run_jsonl_server(
             "/",
             axum::routing::post(handle_jsonl_request).with_state(service),
         )
-        .layer(
-            tower_http::compression::CompressionLayer::new()
-                .br(true)
-                .gzip(true)
-                .deflate(true),
-        );
+        .layer(tower_http::compression::CompressionLayer::new().gzip(true));
     http_common::serve_at(addr, app).await
 }
 
