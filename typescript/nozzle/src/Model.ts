@@ -175,10 +175,24 @@ export const JobId = Schema.Number.pipe(
   }),
 )
 
+export const JobStatus = Schema.Literal("TERMINAL", "COMPLETED", "STOPPED", "ERROR").pipe(
+  Schema.annotations({
+    title: "JobStatus",
+    description: "the status of a job",
+  }),
+)
+
+export const JobStatusParam = Schema.Literal("terminal", "complete", "stopped", "error").pipe(
+  Schema.annotations({
+    title: "JobStatus",
+    description: "the status of a job",
+  }),
+)
+
 export const JobIdParam = Schema.NumberFromString.pipe(
   Schema.annotations({
-    title: "JobIdParam",
-    description: "job identifier as URL parameter",
+    title: "JobId",
+    description: "unique identifier for a job",
   }),
 )
 
@@ -191,17 +205,17 @@ export const LocationId = Schema.Number.pipe(
 
 export const LocationIdParam = Schema.NumberFromString.pipe(
   Schema.annotations({
-    title: "LocationIdParam",
-    description: "location identifier as URL parameter",
+    title: "LocationId",
+    description: "unique identifier for a location",
   }),
 )
 
 export class JobInfo extends Schema.Class<JobInfo>("JobInfo")({
   id: JobId,
-  createdAt: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("created_at")),
-  updatedAt: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("updated_at")),
+  createdAt: Schema.DateTimeUtc.pipe(Schema.propertySignature, Schema.fromKey("created_at")),
+  updatedAt: Schema.DateTimeUtc.pipe(Schema.propertySignature, Schema.fromKey("updated_at")),
   nodeId: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("node_id")),
-  status: Schema.String,
+  status: JobStatus,
   descriptor: Schema.Any,
 }) {}
 
