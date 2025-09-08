@@ -1045,6 +1045,7 @@ impl FlightSqlService for Service {
         Response<Pin<Box<dyn Stream<Item = Result<HandshakeResponse, Status>> + Send>>>,
         Status,
     > {
+        tracing::info!(method = "do_handshake", "FlightSQL method called");
         // TODO: Implement proper authentication
         Ok(Response::new(Box::pin(stream::empty())))
     }
@@ -1054,14 +1055,17 @@ impl FlightSqlService for Service {
         query: CommandStatementQuery,
         request: Request<FlightDescriptor>,
     ) -> Result<Response<FlightInfo>, Status> {
+        tracing::info!(method = "get_flight_info_statement", sql = %query.query, "FlightSQL method called");
+        
         let resume_watermark = request
-            .metadata()
-            .get("nozzle-resume")
-            .and_then(|v| serde_json::from_slice(v.as_bytes()).ok());
-        let (serialized_plan, schema) =
-            self.plan_sql_query(&query.query, resume_watermark)
-                .await
-                .map_err(|e| Status::invalid_argument(format!("SQL planning error: {}", e)))?;
+        .metadata()
+        .get("nozzle-resume")
+        .and_then(|v| serde_json::from_slice(v.as_bytes()).ok());
+
+        let (serialized_plan, schema) = self
+            .plan_sql_query(&query.query, resume_watermark)
+            .await
+            .map_err(|e| Status::invalid_argument(format!("SQL planning error: {}", e)))?;
 
         let ticket_query = TicketStatementQuery {
             statement_handle: serialized_plan,
@@ -1096,6 +1100,7 @@ impl FlightSqlService for Service {
         _request: Request<Ticket>,
     ) -> Result<Response<Pin<Box<dyn Stream<Item = Result<FlightData, Status>> + Send>>>, Status>
     {
+        tracing::info!(method = "do_get_statement", "FlightSQL method called");
         let stream = self
             .execute_remote_plan(&ticket.statement_handle)
             .await
@@ -1109,6 +1114,10 @@ impl FlightSqlService for Service {
         query: CommandGetCatalogs,
         request: Request<FlightDescriptor>,
     ) -> Result<Response<FlightInfo>, Status> {
+        tracing::info!(
+            method = "get_flight_info_catalogs",
+            "FlightSQL method called"
+        );
         let flight_descriptor = request.into_inner();
         let ticket = Ticket {
             ticket: query.as_any().encode_to_vec().into(),
@@ -1128,6 +1137,7 @@ impl FlightSqlService for Service {
         _request: Request<Ticket>,
     ) -> Result<Response<Pin<Box<dyn Stream<Item = Result<FlightData, Status>> + Send>>>, Status>
     {
+        tracing::info!(method = "do_get_catalogs", "FlightSQL method called");
         let mut builder = query.into_builder();
         let catalog_name = NOZZLE_CATALOG_NAME;
         builder.append(catalog_name);
@@ -1149,6 +1159,15 @@ impl FlightSqlService for Service {
         query: CommandGetDbSchemas,
         request: Request<FlightDescriptor>,
     ) -> Result<Response<FlightInfo>, Status> {
+        tracing::info!(
+            method = "get_flight_info_schemas",
+            catalog = query.catalog.as_deref().unwrap_or("<none>"),
+            db_schema_filter = query
+                .db_schema_filter_pattern
+                .as_deref()
+                .unwrap_or("<none>"),
+            "FlightSQL method called"
+        );
         let flight_descriptor = request.into_inner();
         let ticket = Ticket {
             ticket: query.as_any().encode_to_vec().into(),
@@ -1168,6 +1187,7 @@ impl FlightSqlService for Service {
         _request: Request<Ticket>,
     ) -> Result<Response<Pin<Box<dyn Stream<Item = Result<FlightData, Status>> + Send>>>, Status>
     {
+        tracing::info!(method = "do_get_schemas", "FlightSQL method called");
         let catalog_filter = query.catalog.clone();
         let schema_filter = query.db_schema_filter_pattern.clone();
 
@@ -1220,6 +1240,19 @@ impl FlightSqlService for Service {
         query: CommandGetTables,
         request: Request<FlightDescriptor>,
     ) -> Result<Response<FlightInfo>, Status> {
+        tracing::info!(
+            method = "get_flight_info_tables",
+            catalog = query.catalog.as_deref().unwrap_or("<none>"),
+            db_schema = query
+                .db_schema_filter_pattern
+                .as_deref()
+                .unwrap_or("<none>"),
+            table = query
+                .table_name_filter_pattern
+                .as_deref()
+                .unwrap_or("<none>"),
+            "FlightSQL method called"
+        );
         let flight_descriptor = request.into_inner();
         let ticket = Ticket {
             ticket: query.as_any().encode_to_vec().into(),
@@ -1239,6 +1272,7 @@ impl FlightSqlService for Service {
         _request: Request<Ticket>,
     ) -> Result<Response<Pin<Box<dyn Stream<Item = Result<FlightData, Status>> + Send>>>, Status>
     {
+        tracing::info!(method = "do_get_tables", "FlightSQL method called");
         let catalog_filter = query.catalog.clone();
         let schema_filter = query.db_schema_filter_pattern.clone();
         let table_filter = query.table_name_filter_pattern.clone();
@@ -1312,6 +1346,10 @@ impl FlightSqlService for Service {
         query: CommandGetTableTypes,
         request: Request<FlightDescriptor>,
     ) -> Result<Response<FlightInfo>, Status> {
+        tracing::info!(
+            method = "get_flight_info_table_types",
+            "FlightSQL method called"
+        );
         let flight_descriptor = request.into_inner();
         let ticket = Ticket {
             ticket: query.as_any().encode_to_vec().into(),
@@ -1331,6 +1369,7 @@ impl FlightSqlService for Service {
         _request: Request<Ticket>,
     ) -> Result<Response<Pin<Box<dyn Stream<Item = Result<FlightData, Status>> + Send>>>, Status>
     {
+        tracing::info!(method = "do_get_table_types", "FlightSQL method called");
         let mut builder = query.into_builder();
         builder.append("TABLE");
         let schema = builder.schema();
@@ -1351,6 +1390,11 @@ impl FlightSqlService for Service {
         query: CommandGetSqlInfo,
         request: Request<FlightDescriptor>,
     ) -> Result<Response<FlightInfo>, Status> {
+        tracing::info!(
+            method = "get_flight_info_sql_info",
+            sql_info_count = query.info.len(),
+            "FlightSQL method called"
+        );
         let flight_descriptor = request.into_inner();
         let ticket = Ticket {
             ticket: query.as_any().encode_to_vec().into(),
@@ -1377,6 +1421,7 @@ impl FlightSqlService for Service {
         _request: Request<Ticket>,
     ) -> Result<Response<Pin<Box<dyn Stream<Item = Result<FlightData, Status>> + Send>>>, Status>
     {
+        tracing::info!(method = "do_get_sql_info", "FlightSQL method called");
         let mut sql_info_builder = SqlInfoDataBuilder::new();
         sql_info_builder.append(SqlInfo::FlightSqlServerName, "Nozzle Flight SQL Server");
         sql_info_builder.append(SqlInfo::FlightSqlServerVersion, env!("CARGO_PKG_VERSION"));
@@ -1401,6 +1446,10 @@ impl FlightSqlService for Service {
         query: CommandGetXdbcTypeInfo,
         request: Request<FlightDescriptor>,
     ) -> Result<Response<FlightInfo>, Status> {
+        tracing::info!(
+            method = "get_flight_info_xdbc_type_info",
+            "FlightSQL method called"
+        );
         let flight_descriptor = request.into_inner();
         let ticket = Ticket {
             ticket: query.as_any().encode_to_vec().into(),
@@ -1423,6 +1472,7 @@ impl FlightSqlService for Service {
         _request: Request<Ticket>,
     ) -> Result<Response<Pin<Box<dyn Stream<Item = Result<FlightData, Status>> + Send>>>, Status>
     {
+        tracing::info!(method = "do_get_xdbc_type_info", "FlightSQL method called");
         // Build the XDBC type info batch using our static data
         let builder = query.into_builder(&*NOZZLE_XDBC_DATA);
         let schema = builder.schema();
@@ -1443,6 +1493,10 @@ impl FlightSqlService for Service {
         _cmd: CommandPreparedStatementQuery,
         _request: Request<FlightDescriptor>,
     ) -> Result<Response<FlightInfo>, Status> {
+        tracing::warn!(
+            method = "get_flight_info_prepared_statement",
+            "FlightSQL method called but not implemented"
+        );
         unimplemented!()
     }
 
@@ -1451,6 +1505,10 @@ impl FlightSqlService for Service {
         _query: ActionCreatePreparedStatementRequest,
         _request: Request<Action>,
     ) -> Result<ActionCreatePreparedStatementResult, Status> {
+        tracing::warn!(
+            method = "do_action_create_prepared_statement",
+            "FlightSQL method called but not implemented"
+        );
         unimplemented!()
     }
 
@@ -1459,6 +1517,10 @@ impl FlightSqlService for Service {
         _query: ActionClosePreparedStatementRequest,
         _request: Request<Action>,
     ) -> Result<(), Status> {
+        tracing::warn!(
+            method = "do_action_close_prepared_statement",
+            "FlightSQL method called but not implemented"
+        );
         unimplemented!()
     }
 
