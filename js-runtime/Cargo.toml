@@ -14,4 +14,4 @@ num_cpus = "1.16.0"
 tokio.workspace = true
 
 [dev-dependencies]
-hex = "0.4.3"
+hex.workspace = true

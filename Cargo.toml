@@ -91,6 +91,8 @@ opentelemetry_sdk = { version = "0.30" }
 tracing-opentelemetry = { version = "0.31", features = ["default"] }
 static_assertions = "1.1.0"
 backon = { version = "1.5.1", default-features = false, features = ["std", "tokio-sleep"] }
+anyhow = "1.0.80"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
 # Datafusion and Arrow crates
 arrow-flight = { version = "55", features = ["flight-sql-experimental"] }
