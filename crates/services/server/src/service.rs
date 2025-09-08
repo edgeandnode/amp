@@ -1058,19 +1058,94 @@ impl FlightSqlService for Service {
 
     async fn get_flight_info_tables(
         &self,
-        _query: CommandGetTables,
-        _request: Request<FlightDescriptor>,
+        query: CommandGetTables,
+        request: Request<FlightDescriptor>,
     ) -> Result<Response<FlightInfo>, Status> {
-        unimplemented!()
+        let flight_descriptor = request.into_inner();
+        let ticket = Ticket {
+            ticket: query.as_any().encode_to_vec().into(),
+        };
+        let endpoint = FlightEndpoint::new().with_ticket(ticket);
+        let flight_info = FlightInfo::new()
+            .try_with_schema(&query.into_builder().schema())
+            .map_err(|e| Status::internal(format!("Unable to encode schema: {}", e)))?
+            .with_endpoint(endpoint)
+            .with_descriptor(flight_descriptor);
+        Ok(Response::new(flight_info))
     }
 
     async fn do_get_tables(
         &self,
-        _query: CommandGetTables,
+        query: CommandGetTables,
         _request: Request<Ticket>,
     ) -> Result<Response<Pin<Box<dyn Stream<Item = Result<FlightData, Status>> + Send>>>, Status>
     {
-        unimplemented!()
+        let catalog_filter = query.catalog.clone();
+        let schema_filter = query.db_schema_filter_pattern.clone();
+        let table_filter = query.table_name_filter_pattern.clone();
+
+        let datasets = self
+            .dataset_store
+            .all_datasets()
+            .await
+            .map_err(|e| Status::internal(format!("Failed to list datasets: {}", e)))?;
+
+        let mut builder = query.into_builder();
+
+        let catalog_matches = catalog_filter
+            .as_ref()
+            .map_or(true, |filter| filter == NOZZLE_CATALOG_NAME);
+
+        if catalog_matches {
+            for dataset in datasets {
+                let dataset_arc = Arc::new(dataset);
+                for resolved_table in dataset_arc.resolved_tables() {
+                    let schema_name = resolved_table.catalog_schema();
+                    let table_name = resolved_table.name();
+                    let table_schema = resolved_table.schema();
+
+                    let schema_matches = schema_filter
+                        .as_ref()
+                        .map_or(true, |pattern| schema_name == pattern || pattern == "%");
+
+                    let table_matches = table_filter
+                        .as_ref()
+                        .map_or(true, |pattern| table_name == pattern || pattern == "%");
+
+                    if schema_matches && table_matches {
+                        let schema_ref: &arrow::datatypes::Schema = table_schema.as_ref();
+
+                        if let Err(e) = builder.append(
+                            NOZZLE_CATALOG_NAME,
+                            schema_name,
+                            table_name,
+                            "TABLE",
+                            schema_ref,
+                        ) {
+                            tracing::warn!(
+                                "Failed to append table {}.{}: {}",
+                                schema_name,
+                                table_name,
+                                e
+                            );
+                            continue;
+                        }
+                    }
+                }
+            }
+        }
+
+        let schema = builder.schema();
+        let batch = builder
+            .build()
+            .map_err(|e| Status::internal(format!("Failed to build table batch: {}", e)))?;
+
+        let stream = FlightDataEncoderBuilder::new()
+            .with_schema(schema)
+            .build(futures::stream::once(async { Ok(batch) }))
+            .map_err(|e| Status::internal(format!("Failed to encode flight data: {}", e)));
+
+        Ok(Response::new(Box::pin(stream)))
     }
 
     async fn get_flight_info_table_types(
