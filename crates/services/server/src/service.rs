@@ -1,17 +1,9 @@
 use std::{pin::Pin, sync::Arc};
 
 use arrow_flight::{
-    Action, FlightData, FlightDescriptor, FlightEndpoint, FlightInfo, HandshakeRequest,
-    HandshakeResponse, Ticket,
-    encode::FlightDataEncoderBuilder,
-    flight_descriptor::DescriptorType,
-    sql::{
-        ActionClosePreparedStatementRequest, ActionCreatePreparedStatementRequest,
-        ActionCreatePreparedStatementResult, Any, CommandGetCatalogs, CommandGetDbSchemas,
-        CommandGetSqlInfo, CommandGetTableTypes, CommandGetTables, CommandGetXdbcTypeInfo,
-        CommandPreparedStatementQuery, CommandStatementQuery, SqlInfo, TicketStatementQuery,
-        server::FlightSqlService,
-    },
+    encode::{FlightDataEncoderBuilder, GRPC_TARGET_MAX_FLIGHT_SIZE_BYTES}, error::FlightError, flight_descriptor::DescriptorType, sql::{
+        server::FlightSqlService, ActionClosePreparedStatementRequest, ActionCreatePreparedStatementRequest, ActionCreatePreparedStatementResult, Any, CommandGetCatalogs, CommandGetDbSchemas, CommandGetSqlInfo, CommandGetTableTypes, CommandGetTables, CommandGetXdbcTypeInfo, CommandPreparedStatementQuery, CommandStatementQuery, SqlInfo, TicketStatementQuery
+    }, Action, FlightData, FlightDescriptor, FlightEndpoint, FlightInfo, HandshakeRequest, HandshakeResponse, SchemaAsIpc, Ticket
 };
 use async_stream::stream;
 use async_trait::async_trait;
@@ -500,6 +492,50 @@ fn should_transform_plan(plan: &DetachedLogicalPlan) -> Result<bool, DataFusionE
 // }
 
 impl Service {
+    async fn plan_sql_query(
+        &self,
+        sql: &str,
+        resume_watermark: Option<ResumeWatermark>,
+    ) -> Result<(Bytes, Arc<DFSchema>), Error> {
+        let parsed_query = parse_sql(sql)?;
+        let query_ctx = self
+            .dataset_store
+            .clone()
+            .planning_ctx_for_sql(&parsed_query)
+            .await?;
+        query_ctx
+            .sql_to_remote_plan(parsed_query, resume_watermark)
+            .await
+            .map_err(Error::from)
+    }
+
+    async fn execute_remote_plan(
+        &self,
+        serialized_plan: &Bytes,
+    ) -> Result<TonicStream<FlightData>, Error> {
+        let remote_plan = common::remote_plan_from_bytes(serialized_plan)?;
+        let is_streaming = remote_plan.is_streaming;
+        let resume_watermark = remote_plan.resume_watermark.map(Into::into);
+        let table_refs = remote_plan.table_refs.into_iter().map(|t| t.into());
+
+        let catalog = self
+            .dataset_store
+            .get_physical_catalog(table_refs, remote_plan.function_refs, &self.env)
+            .await?;
+        let query_ctx = PlanningContext::new(catalog.logical().clone());
+        let plan = query_ctx
+            .plan_from_bytes(&remote_plan.serialized_plan)
+            .await?;
+        let schema: SchemaRef = plan.schema().as_ref().clone().into();
+
+        let dataset_store = self.dataset_store.clone();
+        let stream = self
+            .execute_plan(catalog, dataset_store, plan, is_streaming, resume_watermark)
+            .await?;
+
+        Ok(flight_data_stream(stream, schema))
+    }
+
     #[instrument(skip(self))]
     async fn get_flight_info(
         &self,
@@ -515,21 +551,7 @@ impl Service {
                     .unpack::<CommandStatementQuery>()
                     .map_err(|e| Error::PbDecodeError(e.to_string()))?
                 {
-                    // The magic that turns a SQL string into a DataFusion logical plan that can be
-                    // sent back over the wire:
-                    // - Parse the SQL query.
-                    // - Infer depedencies and collect them into a catalog.
-                    // - Build a DataFusion query context with empty tables from that catalog.
-                    // - Use that context to plan the SQL query.
-                    // - Serialize the plan to bytes using datafusion-protobufs.
-                    let query = parse_sql(&sql_query.query)?;
-                    let query_ctx = self
-                        .dataset_store
-                        .clone()
-                        .planning_ctx_for_sql(&query)
-                        .await?;
-                    query_ctx
-                        .sql_to_remote_plan(query, resume_watermark)
+                    self.plan_sql_query(&sql_query.query, resume_watermark)
                         .await?
                 } else {
                     return Err(Error::UnsupportedFlightDescriptorCommand(msg.type_url));
@@ -576,27 +598,7 @@ impl Service {
 
     #[instrument(skip_all)]
     async fn do_get(&self, ticket: arrow_flight::Ticket) -> Result<TonicStream<FlightData>, Error> {
-        let remote_plan = common::remote_plan_from_bytes(&ticket.ticket)?;
-        let is_streaming = remote_plan.is_streaming;
-        let resume_watermark = remote_plan.resume_watermark.map(Into::into);
-        let table_refs = remote_plan.table_refs.into_iter().map(|t| t.into());
-
-        let catalog = self
-            .dataset_store
-            .get_physical_catalog(table_refs, remote_plan.function_refs, &self.env)
-            .await?;
-        let query_ctx = PlanningContext::new(catalog.logical().clone());
-        let plan = query_ctx
-            .plan_from_bytes(&remote_plan.serialized_plan)
-            .await?;
-        let schema: SchemaRef = plan.schema().as_ref().clone().into();
-
-        let dataset_store = self.dataset_store.clone();
-        let stream = self
-            .execute_plan(catalog, dataset_store, plan, is_streaming, resume_watermark)
-            .await?;
-
-        Ok(flight_data_stream(stream, schema))
+        self.execute_remote_plan(&ticket.ticket).await
     }
 }
 
@@ -896,20 +898,10 @@ impl FlightSqlService for Service {
             .metadata()
             .get("nozzle-resume")
             .and_then(|v| serde_json::from_slice(v.as_bytes()).ok());
-        let parsed_query = parse_sql(&query.query)
-            .map_err(|e| Status::invalid_argument(format!("SQL parse error: {}", e)))?;
-
-        let query_ctx = self
-            .dataset_store
-            .clone()
-            .planning_ctx_for_sql(&parsed_query)
-            .await
-            .map_err(|e| Status::internal(format!("Planning context error: {}", e)))?;
-
-        let (serialized_plan, schema) = query_ctx
-            .sql_to_remote_plan(parsed_query, resume_watermark)
-            .await
-            .map_err(|e| Status::internal(format!("Plan generation error: {}", e)))?;
+        let (serialized_plan, schema) =
+            self.plan_sql_query(&query.query, resume_watermark)
+                .await
+                .map_err(|e| Status::invalid_argument(format!("SQL planning error: {}", e)))?;
 
         let ticket_query = TicketStatementQuery {
             statement_handle: serialized_plan,
@@ -944,41 +936,12 @@ impl FlightSqlService for Service {
         _request: Request<Ticket>,
     ) -> Result<Response<Pin<Box<dyn Stream<Item = Result<FlightData, Status>> + Send>>>, Status>
     {
-        let serialized_plan = ticket.statement_handle;
-
-        let remote_plan = common::query_context::remote_plan_from_bytes(&serialized_plan)
-            .map_err(|e| Status::internal(format!("Plan deserialization error: {}", e)))?;
-        let resume_watermark = remote_plan.resume_watermark.map(Into::into);
-
-        let table_refs = remote_plan.table_refs.into_iter().map(|t| t.into());
-
-        let catalog = self
-            .dataset_store
-            .load_physical_catalog(table_refs, remote_plan.function_refs, &self.env)
-            .await
-            .map_err(|e| Status::internal(format!("Catalog loading error: {}", e)))?;
-
-        let query_ctx = PlanningContext::new(catalog.logical().clone());
-        let plan = query_ctx
-            .plan_from_bytes(&remote_plan.serialized_plan)
-            .await
-            .map_err(|e| Status::internal(format!("Plan reconstruction error: {}", e)))?;
-
-        let schema: SchemaRef = plan.schema().as_ref().clone().into();
-
-        let dataset_store = self.dataset_store.clone();
         let stream = self
-            .execute_plan(
-                catalog,
-                dataset_store,
-                plan,
-                remote_plan.is_streaming,
-                resume_watermark,
-            )
+            .execute_remote_plan(&ticket.statement_handle)
             .await
             .map_err(|e| Status::internal(format!("Plan execution error: {}", e)))?;
 
-        Ok(Response::new(flight_data_stream(stream, schema)))
+        Ok(Response::new(stream))
     }
 
     async fn get_flight_info_catalogs(
