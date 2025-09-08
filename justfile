@@ -12,9 +12,15 @@ clean:
 
 ## Code formatting
 
-# Format Rust code (cargo fmt)
-fmt:
+alias fmt := fmt-all
+
+# Format Rust code (cargo fmt --all)
+fmt-all:
     cargo +nightly fmt --all
+
+# Format specific Rust files (cargo fmt <files>)
+fmt-file +FILES:
+    cargo +nightly fmt -- {{FILES}}
 
 # Check Rust code format (cargo fmt --check)
 fmt-check:
@@ -31,9 +37,17 @@ check *EXTRA_FLAGS:
 check-all *EXTRA_FLAGS:
     cargo check --tests {{EXTRA_FLAGS}}
 
+# Check specific crate with tests (cargo check -p <crate> --tests)
+check-crate CRATE:
+    cargo check --package {{CRATE}} --tests
+
 # Lint Rust code (cargo clippy)
 clippy *EXTRA_FLAGS:
     cargo clippy {{EXTRA_FLAGS}}
+
+# Lint specific crate (cargo clippy -p <crate> --tests)
+clippy-crate CRATE:
+    cargo clippy --package {{CRATE}} --tests
 
 # Lint all Rust code (cargo clippy --tests)
 clippy-all *EXTRA_FLAGS:
@@ -114,10 +128,13 @@ test-local *EXTRA_FLAGS:
     fi
 
 
-## Misc
+## Misco
+
+PRECOMMIT_CONFIG := ".github/pre-commit-config.yaml"
+PRECOMMIT_DEFAULT_HOOKS := "pre-commit pre-push"
 
 # Install Git hooks
-install-git-hooks:
+install-git-hooks HOOKS=PRECOMMIT_DEFAULT_HOOKS:
     #!/usr/bin/env bash
     set -e # Exit on error
 
@@ -135,11 +152,11 @@ install-git-hooks:
         exit 1
     fi
 
-    # Install the pre-commit hooks
-    pre-commit install --config .github/pre-commit-config.yaml
+    # Install all Git hooks (see PRECOMMIT_HOOKS for default hooks)
+    pre-commit install --config {{PRECOMMIT_CONFIG}} {{replace_regex(HOOKS, "\\s*([a-z-]+)\\s*", "--hook-type $1 ")}}
 
 # Remove Git hooks
-remove-git-hooks:
+remove-git-hooks HOOKS=PRECOMMIT_DEFAULT_HOOKS:
     #!/usr/bin/env bash
     set -e # Exit on error
 
@@ -157,5 +174,5 @@ remove-git-hooks:
         exit 1
     fi
 
-    # Remove the pre-commit hooks
-    pre-commit uninstall --config .github/pre-commit-config.yaml
+    # Remove all Git hooks (see PRECOMMIT_HOOKS for default hooks)
+    pre-commit uninstall --config {{PRECOMMIT_CONFIG}} {{replace_regex(HOOKS, "\\s*([a-z-]+)\\s*", "--hook-type $1 ")}}
