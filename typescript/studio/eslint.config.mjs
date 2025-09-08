@@ -4,9 +4,18 @@ import { tanstackConfig } from "@tanstack/eslint-config"
 
 import rootConfig from "../../eslint.config.mjs"
 
+// Filter out tanstack configs that conflict with root config plugins
+const filteredTanstackConfig = tanstackConfig.filter(config => {
+  // Skip configs that define the @typescript-eslint plugin since it's already in rootConfig
+  if (config.plugins && '@typescript-eslint' in config.plugins) {
+    return false
+  }
+  return true
+})
+
 export default [
   ...rootConfig,
-  ...tanstackConfig,
+  ...filteredTanstackConfig,
   {
     ignores: ["prettier.config.js", "eslint.config.mjs"],
   },
