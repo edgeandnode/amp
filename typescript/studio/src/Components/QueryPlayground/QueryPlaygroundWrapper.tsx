@@ -7,10 +7,11 @@ import { Schema, String as EffectString } from "effect"
 import { useEffect, useMemo } from "react"
 
 import { RESERVED_FIELDS } from "@/constants"
-import { useDatasetsMutation } from "@/hooks/useDatasetMutation"
 import { useOSQuery } from "@/hooks/useOSQuery"
+import { useDatasetsMutation } from "@/hooks/useQueryDatasetMutation"
 import { classNames } from "@/utils/classnames"
 
+import { ErrorMessages } from "../Form/ErrorMessages.tsx"
 import { fieldContext, formContext } from "../Form/form.ts"
 import { SubmitButton } from "../Form/SubmitButton.tsx"
 
@@ -51,7 +52,7 @@ export function QueryPlaygroundWrapper() {
   const { data: os } = useOSQuery()
   const correctKey = os === "MacOS" ? "CMD" : "CTRL"
 
-  const { data, mutateAsync, status } = useDatasetsMutation({
+  const { data, error, mutateAsync, status } = useDatasetsMutation({
     onError(error) {
       console.error("Failure performing dataset query", { error })
     },
@@ -343,6 +344,16 @@ export function QueryPlaygroundWrapper() {
                 </div>
               ) :
               null}
+            {error != null ?
+              (
+                <div className="w-full px-4">
+                  <ErrorMessages
+                    id="data"
+                    errors={[{ message: error.message }]}
+                  />
+                </div>
+              ) :
+              null}
           </div>
         </div>
       </div>
@@ -376,12 +387,14 @@ WHERE topic0 = evm_topic('${event.signature}');`.trim()
         />
         <SourcesBrowser
           onSourceSelected={(source) => {
-            const columns = source.metadata_columns.map((col) => {
-              if (RESERVED_FIELDS.has(col.name)) {
-                return `"${col.name}"`
-              }
-              return col.name
-            }).join(",\n  ")
+            const columns = source.metadata_columns
+              .map((col) => {
+                if (RESERVED_FIELDS.has(col.name)) {
+                  return `"${col.name}"`
+                }
+                return col.name
+              })
+              .join(",\n  ")
             const query = `SELECT
   ${columns}
 FROM ${source.source}
