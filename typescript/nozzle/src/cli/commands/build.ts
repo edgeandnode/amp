@@ -2,7 +2,6 @@ import * as Command from "@effect/cli/Command"
 import * as Options from "@effect/cli/Options"
 import * as FileSystem from "@effect/platform/FileSystem"
 import * as Path from "@effect/platform/Path"
-import * as Config from "effect/Config"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -11,26 +10,17 @@ import * as Schema from "effect/Schema"
 import * as Registry from "../../api/Registry.ts"
 import * as ManifestContext from "../../ManifestContext.ts"
 import * as Model from "../../Model.ts"
+import { configFile, registryUrl } from "../common.ts"
 
 export const build = Command.make("build", {
   args: {
-    config: Options.file("config", { exists: "yes" }).pipe(
-      Options.withAlias("c"),
-      Options.withDescription("The dataset definition config file to build to a manifest"),
-      Options.optional,
-    ),
+    config: configFile.pipe(Options.optional),
     output: Options.file("output", { exists: "either" }).pipe(
       Options.withAlias("o"),
       Options.withDescription("The output file to write the manifest to"),
       Options.optional,
     ),
-    registryUrl: Options.text("registry-url").pipe(
-      Options.withFallbackConfig(
-        Config.string("NOZZLE_REGISTRY_URL").pipe(Config.withDefault("http://localhost:1611")),
-      ),
-      Options.withDescription("The url of the registry server"),
-      Options.withSchema(Schema.URL),
-    ),
+    registryUrl,
   },
 }).pipe(
   Command.withDescription("Build a manifest from a dataset definition"),

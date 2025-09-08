@@ -1,11 +1,11 @@
 import { connectNodeAdapter, createGrpcTransport } from "@connectrpc/connect-node"
 import * as Command from "@effect/cli/Command"
 import * as Options from "@effect/cli/Options"
-import * as Config from "effect/Config"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { createServer, type Server } from "node:http"
 import * as ArrowFlight from "../../api/ArrowFlight.ts"
+import { flightUrl } from "../common.ts"
 
 export const proxy = Command.make("proxy", {
   args: {
@@ -14,18 +14,7 @@ export const proxy = Command.make("proxy", {
       Options.withSchema(Schema.Int.pipe(Schema.between(1, 65535))),
       Options.withDefault(8080),
     ),
-    admin: Options.text("admin-url").pipe(
-      Options.withFallbackConfig(Config.string("NOZZLE_ADMIN_URL").pipe(Config.withDefault("http://localhost:1610"))),
-      Options.withDescription("The admin URL to use for the proxy"),
-      Options.withSchema(Schema.URL),
-    ),
-    flight: Options.text("flight-url").pipe(
-      Options.withFallbackConfig(
-        Config.string("NOZZLE_ARROW_FLIGHT_URL").pipe(Config.withDefault("http://localhost:1602")),
-      ),
-      Options.withDescription("The Arrow Flight URL to use for the proxy"),
-      Options.withSchema(Schema.URL),
-    ),
+    flightUrl,
   },
 }).pipe(
   Command.withDescription("Launches a Connect proxy for the Arrow Flight server"),
@@ -61,5 +50,5 @@ export const proxy = Command.make("proxy", {
       yield* Effect.acquireRelease(acquire, release).pipe(Effect.zip(Effect.never))
     }, Effect.scoped),
   ),
-  Command.provide(({ args }) => ArrowFlight.layer(createGrpcTransport({ baseUrl: `${args.flight}` }))),
+  Command.provide(({ args }) => ArrowFlight.layer(createGrpcTransport({ baseUrl: `${args.flightUrl}` }))),
 )
