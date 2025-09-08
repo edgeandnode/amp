@@ -10,8 +10,10 @@ use arrow_flight::{
         ActionClosePreparedStatementRequest, ActionCreatePreparedStatementRequest,
         ActionCreatePreparedStatementResult, Any, CommandGetCatalogs, CommandGetDbSchemas,
         CommandGetSqlInfo, CommandGetTableTypes, CommandGetTables, CommandGetXdbcTypeInfo,
-        CommandPreparedStatementQuery, CommandStatementQuery, ProstMessageExt, SqlInfo,
-        TicketStatementQuery, metadata::SqlInfoDataBuilder, server::FlightSqlService,
+        CommandPreparedStatementQuery, CommandStatementQuery, Nullable, ProstMessageExt,
+        Searchable, SqlInfo, TicketStatementQuery, XdbcDataType,
+        metadata::{SqlInfoDataBuilder, XdbcTypeInfo, XdbcTypeInfoData, XdbcTypeInfoDataBuilder},
+        server::FlightSqlService,
     },
 };
 use async_stream::stream;
@@ -56,6 +58,7 @@ use http_common::{BoxRequestError, RequestError};
 use metadata_db::MetadataDb;
 use prost::Message as _;
 use serde_json::json;
+use std::sync::LazyLock;
 use thiserror::Error;
 use tonic::{Request, Response, Status, Streaming};
 use tracing::instrument;
@@ -63,6 +66,152 @@ use tracing::instrument;
 type TonicStream<T> = Pin<Box<dyn Stream<Item = Result<T, Status>> + Send + 'static>>;
 // TODO: Make this configurable via environment variable or config file
 const NOZZLE_CATALOG_NAME: &str = "nozzle";
+
+static NOZZLE_XDBC_DATA: LazyLock<XdbcTypeInfoData> = LazyLock::new(|| {
+    let mut builder = XdbcTypeInfoDataBuilder::new();
+
+    // BIGINT - for Int64 columns
+    builder.append(XdbcTypeInfo {
+        type_name: "BIGINT".into(),
+        data_type: XdbcDataType::XdbcBigint,
+        column_size: Some(20),
+        literal_prefix: None,
+        literal_suffix: None,
+        create_params: None,
+        nullable: Nullable::NullabilityNullable,
+        case_sensitive: false,
+        searchable: Searchable::Full,
+        unsigned_attribute: Some(false),
+        fixed_prec_scale: false,
+        auto_increment: None,
+        local_type_name: Some("BIGINT".into()),
+        minimum_scale: None,
+        maximum_scale: None,
+        sql_data_type: XdbcDataType::XdbcBigint,
+        datetime_subcode: None,
+        num_prec_radix: Some(10),
+        interval_precision: None,
+    });
+
+    // INTEGER - for Int32 columns
+    builder.append(XdbcTypeInfo {
+        type_name: "INTEGER".into(),
+        data_type: XdbcDataType::XdbcInteger,
+        column_size: Some(11),
+        literal_prefix: None,
+        literal_suffix: None,
+        create_params: None,
+        nullable: Nullable::NullabilityNullable,
+        case_sensitive: false,
+        searchable: Searchable::Full,
+        unsigned_attribute: Some(false),
+        fixed_prec_scale: false,
+        auto_increment: None,
+        local_type_name: Some("INTEGER".into()),
+        minimum_scale: None,
+        maximum_scale: None,
+        sql_data_type: XdbcDataType::XdbcInteger,
+        datetime_subcode: None,
+        num_prec_radix: Some(10),
+        interval_precision: None,
+    });
+
+    // VARCHAR - for Utf8 columns
+    builder.append(XdbcTypeInfo {
+        type_name: "VARCHAR".into(),
+        data_type: XdbcDataType::XdbcVarchar,
+        column_size: Some(i32::MAX),
+        literal_prefix: Some("'".into()),
+        literal_suffix: Some("'".into()),
+        create_params: Some(vec!["length".into()]),
+        nullable: Nullable::NullabilityNullable,
+        case_sensitive: true,
+        searchable: Searchable::Full,
+        unsigned_attribute: None,
+        fixed_prec_scale: false,
+        auto_increment: None,
+        local_type_name: Some("VARCHAR".into()),
+        minimum_scale: None,
+        maximum_scale: None,
+        sql_data_type: XdbcDataType::XdbcVarchar,
+        datetime_subcode: None,
+        num_prec_radix: None,
+        interval_precision: None,
+    });
+
+    // BOOLEAN - for Boolean columns
+    builder.append(XdbcTypeInfo {
+        type_name: "BOOLEAN".into(),
+        data_type: XdbcDataType::XdbcBit,
+        column_size: Some(1),
+        literal_prefix: None,
+        literal_suffix: None,
+        create_params: None,
+        nullable: Nullable::NullabilityNullable,
+        case_sensitive: false,
+        searchable: Searchable::Basic,
+        unsigned_attribute: None,
+        fixed_prec_scale: false,
+        auto_increment: None,
+        local_type_name: Some("BOOLEAN".into()),
+        minimum_scale: None,
+        maximum_scale: None,
+        sql_data_type: XdbcDataType::XdbcBit,
+        datetime_subcode: None,
+        num_prec_radix: None,
+        interval_precision: None,
+    });
+
+    // DOUBLE - for Float64 columns
+    builder.append(XdbcTypeInfo {
+        type_name: "DOUBLE".into(),
+        data_type: XdbcDataType::XdbcDouble,
+        column_size: Some(15),
+        literal_prefix: None,
+        literal_suffix: None,
+        create_params: None,
+        nullable: Nullable::NullabilityNullable,
+        case_sensitive: false,
+        searchable: Searchable::Full,
+        unsigned_attribute: Some(false),
+        fixed_prec_scale: false,
+        auto_increment: None,
+        local_type_name: Some("DOUBLE".into()),
+        minimum_scale: None,
+        maximum_scale: None,
+        sql_data_type: XdbcDataType::XdbcDouble,
+        datetime_subcode: None,
+        num_prec_radix: Some(2),
+        interval_precision: None,
+    });
+
+    // TIMESTAMP - for Timestamp columns
+    builder.append(XdbcTypeInfo {
+        type_name: "TIMESTAMP".into(),
+        data_type: XdbcDataType::XdbcTimestamp,
+        column_size: Some(23),
+        literal_prefix: Some("'".into()),
+        literal_suffix: Some("'".into()),
+        create_params: None,
+        nullable: Nullable::NullabilityNullable,
+        case_sensitive: false,
+        searchable: Searchable::Full,
+        unsigned_attribute: None,
+        fixed_prec_scale: false,
+        auto_increment: None,
+        local_type_name: Some("TIMESTAMP".into()),
+        minimum_scale: Some(0),
+        maximum_scale: Some(9),
+        sql_data_type: XdbcDataType::XdbcTimestamp,
+        datetime_subcode: None,
+        num_prec_radix: None,
+        interval_precision: None,
+    });
+
+    builder
+        .build()
+        .expect("Failed to build XDBC type info data")
+});
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -1249,19 +1398,44 @@ impl FlightSqlService for Service {
 
     async fn get_flight_info_xdbc_type_info(
         &self,
-        _query: CommandGetXdbcTypeInfo,
-        _request: Request<FlightDescriptor>,
+        query: CommandGetXdbcTypeInfo,
+        request: Request<FlightDescriptor>,
     ) -> Result<Response<FlightInfo>, Status> {
-        unimplemented!()
+        let flight_descriptor = request.into_inner();
+        let ticket = Ticket {
+            ticket: query.as_any().encode_to_vec().into(),
+        };
+        let endpoint = FlightEndpoint::new().with_ticket(ticket);
+
+        // Use our static XDBC data to get the schema
+        let flight_info = FlightInfo::new()
+            .try_with_schema(query.into_builder(&*NOZZLE_XDBC_DATA).schema().as_ref())
+            .map_err(|e| Status::internal(format!("Unable to encode XDBC schema: {}", e)))?
+            .with_endpoint(endpoint)
+            .with_descriptor(flight_descriptor);
+
+        Ok(Response::new(flight_info))
     }
 
     async fn do_get_xdbc_type_info(
         &self,
-        _query: CommandGetXdbcTypeInfo,
+        query: CommandGetXdbcTypeInfo,
         _request: Request<Ticket>,
     ) -> Result<Response<Pin<Box<dyn Stream<Item = Result<FlightData, Status>> + Send>>>, Status>
     {
-        unimplemented!()
+        // Build the XDBC type info batch using our static data
+        let builder = query.into_builder(&*NOZZLE_XDBC_DATA);
+        let schema = builder.schema();
+        let batch = builder.build().map_err(|e| {
+            Status::internal(format!("Failed to build XDBC type info batch: {}", e))
+        })?;
+
+        let stream = FlightDataEncoderBuilder::new()
+            .with_schema(schema)
+            .build(futures::stream::once(async { Ok(batch) }))
+            .map_err(|e| Status::internal(format!("Failed to encode XDBC flight data: {}", e)));
+
+        Ok(Response::new(Box::pin(stream)))
     }
 
     async fn get_flight_info_prepared_statement(
