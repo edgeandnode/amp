@@ -15,8 +15,8 @@ import { fieldContext, formContext } from "../Form/form.ts"
 import { SubmitButton } from "../Form/SubmitButton.tsx"
 
 import { Editor } from "./Editor.tsx"
-import { MetadataBrowser } from "./MetadataBrowser.tsx"
 import { SchemaBrowser } from "./SchemaBrowser.tsx"
+import { SourcesBrowser } from "./SourcesBrowser.tsx"
 import { UDFBrowser } from "./UDFBrowser.tsx"
 
 export const { useAppForm } = createFormHook({
@@ -374,9 +374,9 @@ WHERE topic0 = evm_topic('${event.signature}');`.trim()
             }
           }}
         />
-        <MetadataBrowser
-          onTableSelected={(table) => {
-            const columns = table.metadata_columns.map((col) => {
+        <SourcesBrowser
+          onSourceSelected={(source) => {
+            const columns = source.metadata_columns.map((col) => {
               if (RESERVED_FIELDS.has(col.name)) {
                 return `"${col.name}"`
               }
@@ -384,9 +384,9 @@ WHERE topic0 = evm_topic('${event.signature}');`.trim()
             }).join(",\n  ")
             const query = `SELECT
   ${columns}
-FROM ${table.source}
+FROM ${source.source}
 LIMIT 10;`.trim()
-            const tab = `SELECT ... ${table.source}`
+            const tab = `SELECT ... ${source.source}`
             // update the query with the selected table and columns
             let setActiveTab = false
             form.setFieldValue("queries", (curr) => {

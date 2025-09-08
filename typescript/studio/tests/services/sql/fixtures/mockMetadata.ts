@@ -3,10 +3,10 @@
  * Provides realistic test data representing Nozzle dataset metadata
  */
 
-import type { DatasetMetadata } from "nozzl/Studio/Model"
+import type { DatasetSource } from "nozzl/Studio/Model"
 
 export const mockMetadata: ReadonlyArray<
-  DatasetMetadata & { destination: string }
+  DatasetSource & { destination: string }
 > = [
   {
     source: "anvil.logs",
@@ -66,7 +66,7 @@ export const mockMetadata: ReadonlyArray<
  * Minimal metadata for testing edge cases with few columns
  */
 export const mockMetadataMinimal: ReadonlyArray<
-  Omit<DatasetMetadata, "source"> & { source: string; destination: string }
+  Omit<DatasetSource, "source"> & { source: string; destination: string }
 > = [
   {
     source: "test.simple" as any,
@@ -81,7 +81,7 @@ export const mockMetadataMinimal: ReadonlyArray<
 /**
  * Empty metadata for testing graceful degradation
  */
-export const mockMetadataEmpty: ReadonlyArray<DatasetMetadata> = [] as const
+export const mockMetadataEmpty: ReadonlyArray<DatasetSource> = [] as const
 
 /**
  * Large metadata for performance testing
@@ -109,9 +109,9 @@ export const mockMetadataLarge: ReadonlyArray<{
  * Helper function to get metadata by table name
  */
 export function getMetadataByTableName(
-  metadata: ReadonlyArray<DatasetMetadata>,
+  metadata: ReadonlyArray<DatasetSource>,
   tableName: string,
-): DatasetMetadata | undefined {
+): DatasetSource | undefined {
   return metadata.find((m) => m.source === tableName)
 }
 
@@ -119,7 +119,7 @@ export function getMetadataByTableName(
  * Helper function to get all column names from a dataset
  */
 export function getAllColumnNames(
-  metadata: ReadonlyArray<DatasetMetadata>,
+  metadata: ReadonlyArray<DatasetSource>,
 ): Array<string> {
   return metadata.flatMap((dataset) => dataset.metadata_columns.map((col) => col.name))
 }
@@ -128,7 +128,7 @@ export function getAllColumnNames(
  * Helper function to get all table names
  */
 export function getAllTableNames(
-  metadata: ReadonlyArray<DatasetMetadata>,
+  metadata: ReadonlyArray<DatasetSource>,
 ): Array<string> {
   return metadata.map((dataset) => dataset.source)
 }

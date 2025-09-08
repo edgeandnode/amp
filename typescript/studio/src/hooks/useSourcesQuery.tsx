@@ -3,14 +3,14 @@
 import type { UseSuspenseQueryOptions } from "@tanstack/react-query"
 import { queryOptions, useSuspenseQuery } from "@tanstack/react-query"
 import { Schema } from "effect"
-import { DatasetMetadata } from "nozzl/Studio/Model"
+import { DatasetSource } from "nozzl/Studio/Model"
 
 import * as Constants from "../constants.js"
 
-export const metadataQueryOptions = queryOptions({
-  queryKey: ["Query", "Metadata"] as const,
+export const sourcesQueryOptions = queryOptions({
+  queryKey: ["Query", "Sources"] as const,
   async queryFn() {
-    const response = await fetch(`${Constants.API_ORIGIN}/metadata`, {
+    const response = await fetch(`${Constants.API_ORIGIN}/sources`, {
       method: "GET",
     })
     if (response.status !== 200) {
@@ -20,23 +20,23 @@ export const metadataQueryOptions = queryOptions({
     }
     const json = await response.json()
 
-    return Schema.decodeUnknownSync(Schema.Array(DatasetMetadata))(json)
+    return Schema.decodeUnknownSync(Schema.Array(DatasetSource))(json)
   },
 })
 
-export function useMetadataSuspenseQuery(
+export function useSourcesSuspenseQuery(
   options: Omit<
     UseSuspenseQueryOptions<
-      ReadonlyArray<DatasetMetadata>,
+      ReadonlyArray<DatasetSource>,
       Error,
-      ReadonlyArray<DatasetMetadata>,
-      readonly ["Query", "Metadata"]
+      ReadonlyArray<DatasetSource>,
+      readonly ["Query", "Sources"]
     >,
     "queryKey" | "queryFn"
   > = {},
 ) {
   return useSuspenseQuery({
-    ...metadataQueryOptions,
+    ...sourcesQueryOptions,
     ...options,
   })
 }

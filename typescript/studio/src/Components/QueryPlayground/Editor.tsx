@@ -8,7 +8,7 @@ import * as monaco from "monaco-editor"
 import editorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker"
 import { useEffect, useRef } from "react"
 
-import { useMetadataSuspenseQuery } from "@/hooks/useMetadataQuery"
+import { useSourcesSuspenseQuery } from "@/hooks/useSourcesQuery"
 import { useUDFSuspenseQuery } from "@/hooks/useUDFQuery"
 import type { DisposableHandle } from "@/services/sql"
 import { setupNozzleSQLProviders } from "@/services/sql"
@@ -24,7 +24,7 @@ import { useFieldContext } from "../Form/form"
 //   type DisposableHandle,
 // } from "../../services/sql"
 
-self.MonacoEnvironment = {
+;(self as any).MonacoEnvironment = {
   getWorker() {
     return new editorWorker()
   },
@@ -52,7 +52,7 @@ export function Editor({
   const hasErrors = errors.length > 0 && touched
 
   // Data hooks for SQL intellisense
-  const metadataQuery = useMetadataSuspenseQuery()
+  const sourcesQuery = useSourcesSuspenseQuery()
   const udfQuery = useUDFSuspenseQuery()
 
   // Provider lifecycle management
@@ -304,7 +304,7 @@ export function Editor({
 
           // Setup providers with initial data
           providersRef.current = setupNozzleSQLProviders(
-            metadataQuery.data,
+            sourcesQuery.data,
             udfQuery.data,
             {
               // Enable debug logging in development

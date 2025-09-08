@@ -276,9 +276,9 @@ export class FoundryQueryableEventResolver extends Effect.Service<FoundryQueryab
 
       return {
         queryableEventsStream,
-        metadata() {
+        sources() {
           return Effect.succeed([
-            Model.DatasetMetadata.make({
+            Model.DatasetSource.make({
               metadata_columns: [
                 { name: "address", datatype: "address" },
                 { name: "block_num", datatype: "bigint" },
@@ -295,7 +295,7 @@ export class FoundryQueryableEventResolver extends Effect.Service<FoundryQueryab
               ],
               source: "anvil.logs",
             }),
-            Model.DatasetMetadata.make({
+            Model.DatasetSource.make({
               source: "anvil.transactions",
               metadata_columns: [
                 { name: "block_num", datatype: "bigint" },
@@ -321,7 +321,7 @@ export class FoundryQueryableEventResolver extends Effect.Service<FoundryQueryab
                 { name: "status", datatype: "boolean" },
               ],
             }),
-            Model.DatasetMetadata.make({
+            Model.DatasetSource.make({
               source: "anvil.blocks",
               metadata_columns: [
                 { name: "block_num", datatype: "string" },

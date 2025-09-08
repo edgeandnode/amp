@@ -27,7 +27,7 @@ import type {
   Position,
 } from "monaco-editor/esm/vs/editor/editor.api"
 import { languages } from "monaco-editor/esm/vs/editor/editor.api"
-import type { DatasetMetadata } from "nozzl/Studio/Model"
+import type { DatasetSource } from "nozzl/Studio/Model"
 
 import { QueryContextAnalyzer } from "./QueryContextAnalyzer"
 import type { CompletionConfig, QueryContext, UserDefinedFunction } from "./types"
@@ -101,7 +101,7 @@ export class NozzleCompletionProvider implements languages.CompletionItemProvide
   }
 
   constructor(
-    private metadata: ReadonlyArray<DatasetMetadata>,
+    private metadata: ReadonlyArray<DatasetSource>,
     private udfs: ReadonlyArray<UserDefinedFunction>,
     analyzer?: QueryContextAnalyzer,
     config: Partial<CompletionConfig> = DEFAULT_COMPLETION_CONFIG,
@@ -692,7 +692,7 @@ export class NozzleCompletionProvider implements languages.CompletionItemProvide
    * This is called by the provider manager when fresh data is available.
    */
   updateData(
-    metadata: ReadonlyArray<DatasetMetadata>,
+    metadata: ReadonlyArray<DatasetSource>,
     udfs: ReadonlyArray<UserDefinedFunction>,
   ): void {
     this.metadata = metadata

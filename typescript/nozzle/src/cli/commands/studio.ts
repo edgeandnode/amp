@@ -67,14 +67,13 @@ class NozzleStudioApiRouter extends HttpApiGroup.make("NozzleStudioApi")
       ),
   )
   .add(
-    HttpApiEndpoint.get("Metadata")`/metadata`
-      .addSuccess(Schema.Array(StudioModel.DatasetMetadata))
+    HttpApiEndpoint.get("Sources")`/sources`
+      .addSuccess(Schema.Array(StudioModel.DatasetSource))
       .annotateContext(
         OpenApi.annotations({
-          title: "Metadata about the nozzle dataset",
+          title: "Dataset sources",
           version: "v1",
-          description:
-            "Provides metadata about how to query the dataset. Things like metadata columns and the event source to query",
+          description: "Provides the sources the user can query",
         }),
       ),
   )
@@ -198,7 +197,7 @@ const NozzleStudioApiLive = HttpApiBuilder.group(
               }),
             )
           }))
-        .handle("Metadata", () => resolver.metadata())
+        .handle("Sources", () => resolver.sources())
         .handle("Query", ({ payload }) =>
           flight.table(payload.query).pipe(
             Effect.flatMap((table) => {
@@ -240,7 +239,10 @@ const NozzleStudioApiLive = HttpApiBuilder.group(
     }),
 )
 const NozzleStudioApiLayer = Layer.merge(
-  HttpApiBuilder.middlewareCors(),
+  HttpApiBuilder.middlewareCors({
+    allowedMethods: ["GET", "POST", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Accept", "Cache-Control", "Connection", "Authorization", "X-Requested-With"],
+  }),
   HttpApiScalar.layer({ path: "/api/docs" }),
 ).pipe(
   Layer.provideMerge(HttpApiBuilder.api(NozzleStudioApi)),
@@ -329,9 +331,9 @@ export const studio = Command.make("studio", {
   args: {
     port: Options.integer("port").pipe(
       Options.withAlias("p"),
-      Options.withDefault(3000),
+      Options.withDefault(1615),
       Options.withDescription(
-        "The port to run the nozzle dataset studio server on. Default 3000",
+        "The port to run the nozzle dataset studio server on. Default 1615",
       ),
     ),
     open: Options.boolean("open").pipe(
