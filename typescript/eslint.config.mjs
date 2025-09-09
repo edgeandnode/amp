@@ -111,6 +111,6 @@ export default tseslint.config(
     },
   },
   {
-    files: ["typescript/*/src/**/*", "typescript/*/scripts/**/*", "typescript/*/test/**/*"],
+    files: ["packages/*/src/**/*", "packages/*/scripts/**/*", "packages/*/test/**/*"],
   },
 )

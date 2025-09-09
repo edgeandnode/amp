@@ -31,7 +31,7 @@ sudo ln -s $(pwd)/target/release/nozzle /usr/local/bin/nozzle
 
 ## Usage
 
-Now, navigate to the `typescript/examples/` folder within this repository.
+Now, navigate to the `typescript/packages/examples/` folder within this repository.
 
 Ideally you'd run the following commands in seperate terminal windows/panes. These will run continously.
 
