@@ -405,10 +405,8 @@ class SqlProviderManager {
    * Logging Utilities
    */
 
-  private logDebug(message: string, data?: any): void {
-    if (this.config.enableDebugLogging) {
-      console.debug(`[SqlProviderManager] ${message}`, data)
-    }
+  private logDebug(_message: string, _data?: any): void {
+    // Debug logging removed for production
   }
 
   private logWarning(message: string, data?: any): void {
@@ -442,15 +440,9 @@ export function setupNozzleSQLProviders(
   udfs: ReadonlyArray<UserDefinedFunction>,
   config?: Partial<CompletionConfig>,
 ): DisposableHandle {
-  console.debug('[setupNozzleSQLProviders] Starting setup...', {
-    hasExistingManager: !!activeProviderManager,
-    metadataCount: metadata.length,
-    udfCount: udfs.length
-  })
 
   // Dispose existing manager if present
   if (activeProviderManager) {
-    console.debug('[setupNozzleSQLProviders] Disposing existing manager')
     activeProviderManager.dispose()
     activeProviderManager = null
   }
@@ -459,10 +451,7 @@ export function setupNozzleSQLProviders(
   const finalConfig = { ...DEFAULT_COMPLETION_CONFIG, ...config }
   activeProviderManager = new SqlProviderManager(metadata, udfs, finalConfig)
   
-  console.debug('[setupNozzleSQLProviders] Created new manager, calling setup()...')
   const disposable = activeProviderManager.setup()
-
-  console.debug('[setupNozzleSQLProviders] Setup completed, manager should be active:', !!activeProviderManager)
 
   // Return enhanced disposable that also cleans up the active manager
   return {
@@ -538,11 +527,6 @@ export function areProvidersActive(): boolean {
  */
 export function getActiveValidator(): SqlValidator | null {
   const validator = activeProviderManager ? activeProviderManager.getValidator() : null
-  console.debug('[getActiveValidator] Called:', {
-    hasActiveManager: !!activeProviderManager,
-    managerDisposed: activeProviderManager ? activeProviderManager['isDisposed'] : 'N/A',
-    hasValidator: !!validator
-  })
   return validator
 }
 

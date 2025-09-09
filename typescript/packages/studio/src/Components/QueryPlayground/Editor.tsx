@@ -123,11 +123,6 @@ export function Editor({
             )
 
             sqlProviderRef.current.setup(editor)
-
-            console.debug("[Editor] UnifiedSQLProvider initialized", {
-              tableCount: sourcesQuery.data.length,
-              udfCount: USER_DEFINED_FUNCTIONS.length,
-            })
           }
         }}
       />

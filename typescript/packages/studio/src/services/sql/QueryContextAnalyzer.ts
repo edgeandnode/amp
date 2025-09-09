@@ -797,10 +797,8 @@ export class QueryContextAnalyzer {
    * Logging Utilities
    */
 
-  private logDebug(message: string, data?: any): void {
-    if (this.config.enableDebugLogging) {
-      console.debug(`[QueryContextAnalyzer] ${message}`, data)
-    }
+  private logDebug(_message: string, _data?: any): void {
+    // Debug logging removed for production
   }
 
   private logError(message: string, error: any): void {

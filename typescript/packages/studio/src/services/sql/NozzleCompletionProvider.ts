@@ -713,10 +713,8 @@ export class NozzleCompletionProvider implements languages.CompletionItemProvide
    * Logging Utilities
    */
 
-  private logDebug(message: string, data?: any): void {
-    if (this.config.enableDebugLogging) {
-      console.debug(`[NozzleCompletionProvider] ${message}`, data)
-    }
+  private logDebug(_message: string, _data?: any): void {
+    // Debug logging removed for production
   }
 
   private logError(message: string, error: any): void {
