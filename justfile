@@ -128,7 +128,23 @@ test-local *EXTRA_FLAGS:
     fi
 
 
-## Misco
+## Codegen
+
+alias codegen := gen
+
+# Run all codegen tasks
+gen: gen-substreams-datasets-proto gen-firehose-datasets-proto
+
+# Generate Substreams protobuf bindings (cargo build ... --features=gen-proto)
+gen-substreams-datasets-proto:
+    cargo build -p substreams-datasets --features=gen-proto
+
+# Generate Firehose protobuf bindings (cargo build ... --features=gen-proto)
+gen-firehose-datasets-proto:
+    cargo build -p firehose-datasets --features=gen-proto
+
+
+## Misc
 
 PRECOMMIT_CONFIG := ".github/pre-commit-config.yaml"
 PRECOMMIT_DEFAULT_HOOKS := "pre-commit pre-push"

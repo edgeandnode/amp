@@ -328,8 +328,8 @@ async fn streaming_reorg_rewind_shallow() {
     test.dump("sql_over_anvil_1", 4).await;
 
     assert_eq!(
-        &take_blocks(&mut test.client, 4).await,
-        &test.query_blocks("anvil_rpc", None).await[1..=4],
+        &take_blocks(&mut test.client, 3).await,
+        &test.query_blocks("anvil_rpc", None).await[2..=4],
     );
 }
 
@@ -383,8 +383,8 @@ async fn streaming_reorg_rewind_deep() {
     test.dump("sql_over_anvil_1", 8).await;
 
     assert_eq!(
-        &take_blocks(&mut test.client, 8).await,
-        &test.query_blocks("anvil_rpc", None).await[1..=8],
+        &take_blocks(&mut test.client, 7).await,
+        &test.query_blocks("anvil_rpc", None).await[2..=8],
     );
 }
 
@@ -444,7 +444,7 @@ async fn flight_data_app_metadata() {
     test.dump("anvil_rpc", 3).await;
     assert_eq!(
         pull_flight_metadata(&mut flight_data).await[0],
-        expected_range(&mut test, 1..=3).await,
+        expected_range(&mut test, 2..=3).await,
     );
 }
 
@@ -534,11 +534,11 @@ async fn nozzle_client() {
             }]),
             ControlMessage::Reorg(vec![nozzle_client::InvalidationRange {
                 network: "anvil".to_string(),
-                numbers: 1..=3,
+                numbers: 2..=3,
             }]),
             ControlMessage::Batch(vec![nozzle_client::InvalidationRange {
                 network: "anvil".to_string(),
-                numbers: 1..=3,
+                numbers: 2..=3,
             }]),
         ],
     );

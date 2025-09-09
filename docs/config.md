@@ -79,9 +79,9 @@ Substreams, and then there are datasets defined as views on other datasets.
 
 Details for the raw datasets currently implemented:
 
-- EVM RPC [dataset docs](evm-rpc-datasets/README.md)
-- Firehose [dataset docs](firehose-datasets/README.md)
-- Substreams [dataset docs](substreams-datasets/README.md)
+- EVM RPC [dataset docs](../crates/extractors/evm-rpc/README.md)
+- Firehose [dataset docs](../crates/extractors/firehose/README.md)
+- Substreams [dataset docs](../crates/extractors/substreams/README.md)
 
 ## Datasets
 
