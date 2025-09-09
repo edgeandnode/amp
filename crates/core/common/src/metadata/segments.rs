@@ -56,6 +56,17 @@ pub struct Watermark {
 pub struct ResumeWatermark(BTreeMap<String, Watermark>);
 
 impl ResumeWatermark {
+    pub fn from_ranges(ranges: Vec<BlockRange>) -> Self {
+        let watermark = ranges
+            .into_iter()
+            .map(|r| {
+                let watermark = r.watermark();
+                (r.network, watermark)
+            })
+            .collect();
+        Self(watermark)
+    }
+
     pub fn to_watermark(self, network: &str) -> Result<Watermark, BoxError> {
         self.0
             .into_iter()
