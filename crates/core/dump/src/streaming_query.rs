@@ -458,10 +458,10 @@ impl StreamingQuery {
             .blocks_table_fetch(&fork_ctx, prev_range.end(), Some(&prev_range.hash))
             .await?;
         while let Some(block) = fork.take() {
-            min_fork_block_num = block.number;
             if self.blocks_table_contains(ctx, &block.watermark()).await? {
                 break;
             }
+            min_fork_block_num = block.number;
             fork = self
                 .blocks_table_fetch(
                     &fork_ctx,
