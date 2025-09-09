@@ -4,12 +4,12 @@ import { Accordion } from "@base-ui-components/react/accordion"
 import { FolderIcon, FolderOpenIcon } from "@graphprotocol/gds-react/icons"
 import { String } from "effect"
 
-import { useUDFSuspenseQuery } from "../../hooks/useUDFQuery"
+import { USER_DEFINED_FUNCTIONS } from "@/constants"
 
 /** @todo define way to add UDF to playground input */
 export type UDFBrowserProps = {}
 export function UDFBrowser() {
-  const { data: userDefinedFunctions } = useUDFSuspenseQuery()
+  const userDefinedFunctions = USER_DEFINED_FUNCTIONS
 
   return (
     <div className="flex flex-col gap-y-4 p-6">

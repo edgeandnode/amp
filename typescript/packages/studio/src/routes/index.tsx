@@ -4,7 +4,6 @@ import { QueryPlaygroundWrapper } from "@/Components/QueryPlayground/QueryPlaygr
 import { defaultQueryOptions } from "@/hooks/useDefaultQuery"
 import { osQueryOptions } from "@/hooks/useOSQuery"
 import { sourcesQueryOptions } from "@/hooks/useSourcesQuery"
-import { udfQueryOptions } from "@/hooks/useUDFQuery"
 
 export const Route = createFileRoute("/")({
   component: HomePage,
@@ -12,7 +11,6 @@ export const Route = createFileRoute("/")({
     await Promise.all([
       context.queryClient.ensureQueryData(defaultQueryOptions),
       context.queryClient.ensureQueryData(osQueryOptions),
-      context.queryClient.ensureQueryData(udfQueryOptions),
       context.queryClient.ensureQueryData(sourcesQueryOptions),
     ])
   },
