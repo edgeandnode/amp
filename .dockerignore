@@ -1,26 +1,9 @@
 # Ignore all files and directories by default.
 **/*
 
-# Include all crates.
-!admin-api/
-!client/
-!common/
-!dataset-store/
-!dump/
-!dump-check/
-!extractors/
-!generate-manifest/
-!http-common/
-!js-runtime/
-!metadata-db/
-!monitoring/
-!nozzle/
-!registry-service/
-!server/
+# Include all crates, tests and root workspace files.
+!crates/
 !tests/
-
-# Include root workspace files.
 !Dockerfile
 !Cargo.toml
 !Cargo.lock
-!rust-toolchain.toml

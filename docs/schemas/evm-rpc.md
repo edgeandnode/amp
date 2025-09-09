@@ -1,5 +1,5 @@
 # Schema
-Auto-generated file. See `schema_to_markdown` in `common/src/catalog/mod.rs`.
+Auto-generated file. See `schema_to_markdown` in `crates/core/common/src/catalog/mod.rs`.
 ## blocks
 ````
 +--------------------+---------------------------------------+-------------+

@@ -12,8 +12,8 @@ gen-proto = ["dep:prost-build", "dep:tonic-build"]
 anyhow.workspace = true
 async-stream.workspace = true
 chrono.workspace = true
-common = { path = "../../common" }
-firehose-datasets = { path = "../firehose-datasets" }
+common = { path = "../../core/common" }
+firehose-datasets = { path = "../firehose" }
 schemars.workspace = true
 futures.workspace = true
 tracing.workspace = true

@@ -5,12 +5,12 @@ edition.workspace = true
 
 [dependencies]
 axum.workspace = true
-common = { path = "../common" }
-dataset-store = { path = "../dataset-store" }
-dump = { path = "../dump" }
+common = { path = "../../core/common" }
+dataset-store = { path = "../../core/dataset-store" }
+dump = { path = "../../core/dump" }
 futures.workspace = true
 http-common = { path = "../http-common" }
-metadata-db = { path = "../metadata-db" }
+metadata-db = { path = "../../core/metadata-db" }
 object_store.workspace = true
 rand.workspace = true
 registry-service = { path = "../registry-service" }

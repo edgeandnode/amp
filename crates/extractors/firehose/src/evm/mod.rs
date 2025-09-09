@@ -22,7 +22,7 @@ pub fn dataset(dataset_cfg: common::DatasetValue) -> Result<Dataset, Error> {
 #[tokio::test]
 async fn print_schema_to_readme() {
     fs_err::write(
-        "../../docs/schemas/firehose-evm.md",
+        "../../../docs/schemas/firehose-evm.md",
         common::catalog::schema_to_markdown(tables::all("test_network")).await,
     )
     .unwrap();

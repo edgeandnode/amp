@@ -10,14 +10,14 @@ name = "dump_check"
 name = "dump-check"
 
 [dependencies]
-metadata-db = { path = "../metadata-db" }
+metadata-db = { path = "../../core/metadata-db" }
 atty.workspace = true
 clap.workspace = true
-common = { path = "../common" }
-dataset-store = { path = "../dataset-store" }
+common = { path = "../../core/common" }
+dataset-store = { path = "../../core/dataset-store" }
 futures.workspace = true
 human_bytes = { version = "0.4", default-features = false }
 indicatif = "0.17"
 tracing.workspace = true
 tokio.workspace = true
-monitoring = { path = "../monitoring" }
+monitoring = { path = "../../core/monitoring" }

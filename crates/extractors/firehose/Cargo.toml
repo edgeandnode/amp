@@ -4,7 +4,7 @@ edition.workspace = true
 version.workspace = true
 
 [dependencies]
-common = { path = "../../common" }
+common = { path = "../../core/common" }
 schemars.workspace = true
 async-stream.workspace = true
 futures.workspace = true

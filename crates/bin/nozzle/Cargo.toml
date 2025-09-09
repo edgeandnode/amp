@@ -9,27 +9,27 @@ default = ["snmalloc"]
 snmalloc = ["dep:snmalloc-rs"]
 
 [dependencies]
-metadata-db = { path = "../metadata-db" }
+metadata-db = { path = "../../core/metadata-db" }
 arrow-flight.workspace = true
 axum.workspace = true
 clap.workspace = true
-common = { path = "../common" }
+common = { path = "../../core/common" }
 datafusion.workspace = true
-dataset-store = { path = "../dataset-store" }
-dump = { path = "../dump" }
+dataset-store = { path = "../../core/dataset-store" }
+dump = { path = "../../core/dump" }
 generate-manifest = { path = "../generate-manifest" }
 futures.workspace = true
 tracing.workspace = true
-server = { path = "../server" }
+server = { path = "../../services/server" }
 snmalloc-rs = { version = "0.3.4", optional = true }
 tokio.workspace = true
 tonic.workspace = true
 tower-http = { version = "0.6.2", features = ["compression-gzip"] }
-admin-api = { path = "../admin-api" }
-registry-service = { path = "../registry-service" }
-http-common = { path = "../http-common" }
+admin-api = { path = "../../services/admin-api" }
+registry-service = { path = "../../services/registry-service" }
+http-common = { path = "../../services/http-common" }
 serde_json.workspace = true
-monitoring = { path = "../monitoring" }
+monitoring = { path = "../../core/monitoring" }
 static_assertions.workspace = true
 
 [build-dependencies]
