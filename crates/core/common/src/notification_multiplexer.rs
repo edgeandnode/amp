@@ -5,7 +5,7 @@ use metadata_db::{LocationId, LocationNotification, MetadataDb};
 use tokio::sync::{Mutex, watch};
 use tokio_stream::StreamExt;
 use tokio_util::task::AbortOnDropHandle;
-use tracing::{debug, instrument, trace, warn};
+use tracing::instrument;
 
 use crate::BoxError;
 
@@ -50,7 +50,7 @@ impl NotificationMultiplexerHandle {
 
         let (sender, receiver) = watch::channel(());
         watchers.insert(location_id, sender);
-        trace!("Created new watcher for location_id: {}", location_id);
+        tracing::trace!("Created new watcher for location_id: {}", location_id);
 
         receiver
     }
@@ -70,7 +70,7 @@ impl NotificationMultiplexer {
         })
         .retry(retry_policy().without_max_times())
         .notify(|err, dur| {
-            warn!(
+            tracing::warn!(
                 error = %err,
                 "NotificationMultiplexer execute failed. Retrying in {:.1}s",
                 dur.as_secs_f32()
@@ -88,20 +88,26 @@ impl NotificationMultiplexer {
         let listener = self.metadata_db.listen_for_location_notifications().await?;
         let mut stream = std::pin::pin!(listener.into_stream());
 
-        debug!("Connected to notification channel: change-tracking");
+        tracing::debug!("Connected to notification channel: change-tracking");
 
         while let Some(notification_result) = stream.next().await {
-            let LocationNotification(location_id) = notification_result?;
+            let location_id = match notification_result {
+                Ok(LocationNotification(location_id)) => location_id,
+                Err(err) => {
+                    tracing::error!(error = ?err, "Failed to parse location notification. Continuing.");
+                    continue;
+                }
+            };
 
             let watchers_guard = self.watchers.lock().await;
             let Some(sender) = watchers_guard.get(&location_id) else {
-                trace!("No watcher registered for location_id: {}", location_id);
+                tracing::trace!("No watcher registered for location_id: {}", location_id);
                 continue;
             };
 
             match sender.send(()) {
-                Ok(_) => trace!("Notified watchers for location_id: {}", location_id),
-                Err(_) => trace!("No receivers for location_id: {}", location_id),
+                Ok(_) => tracing::trace!("Notified watchers for location_id: {}", location_id),
+                Err(_) => tracing::trace!("No receivers for location_id: {}", location_id),
             }
         }
 
