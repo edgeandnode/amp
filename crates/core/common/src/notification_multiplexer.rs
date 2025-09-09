@@ -50,7 +50,7 @@ impl NotificationMultiplexerHandle {
 
         let (sender, receiver) = watch::channel(());
         watchers.insert(location_id, sender);
-        tracing::trace!("Created new watcher for location_id: {}", location_id);
+        tracing::trace!(%location_id, "Created new watcher");
 
         receiver
     }
@@ -94,20 +94,20 @@ impl NotificationMultiplexer {
             let location_id = match notification_result {
                 Ok(LocationNotification(location_id)) => location_id,
                 Err(err) => {
-                    tracing::error!(error = ?err, "Failed to parse location notification. Continuing.");
+                    tracing::error!(error = %err, "Failed to parse location notification. Continuing.");
                     continue;
                 }
             };
 
             let watchers_guard = self.watchers.lock().await;
             let Some(sender) = watchers_guard.get(&location_id) else {
-                tracing::trace!("No watcher registered for location_id: {}", location_id);
+                tracing::trace!( %location_id, "No watcher registered");
                 continue;
             };
 
             match sender.send(()) {
-                Ok(_) => tracing::trace!("Notified watchers for location_id: {}", location_id),
-                Err(_) => tracing::trace!("No receivers for location_id: {}", location_id),
+                Ok(_) => tracing::trace!(%location_id, "Notified watchers"),
+                Err(_) => tracing::trace!(%location_id, "No receivers"),
             }
         }
 
