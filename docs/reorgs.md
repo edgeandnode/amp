@@ -53,3 +53,20 @@ Clients should track block ranges from consecutive batches to handle reorgs. The
 3. Invalidate prior batches associated with block ranges that overlap with the current batch start block number up to the latest block number processed.
 
 For a reference implementation in Rust, see `nozzle_client::with_reorg` which automatically wraps query result streams to emit reorg events alongside data batches.
+
+#### Resuming Streams
+
+Nozzle supports resuming streaming queries by adding a `nozzle-resume` header to the `GetFlightInfo` request to the Nozzle server. The header value, "resume watermark" can be constructed from the `app_metadata` ranges of prior record batches. To avoid missing batches, construct the resume watermark from the ranges known to be fully processed.
+
+The `nozzle-resume` header value is expected to be JSON-serialized data with the following structure:
+
+```json
+{
+  "anvil": {
+    "number": 2,
+    "hash": "0x0deee2eaa7adb2b28c7fa731f79ea86e77e375f8ee0a0f2619ba6ec3eb2f68e6"
+  }
+}
+```
+
+The JSON value is expected to have a block number & hash entry for each network present in the ranges metadata.
