@@ -35,3 +35,18 @@ With that file in your `dataset_defs_dir`, you can dump the data:
   }
   ```
   will produce `transfers`, `mints`, and `burns` parquet files, where each column matches the field of the corresponding event message type. All non-repeated fields in the module output are dropped from the schema.
+
+## Protobuf Code Generation
+
+The library includes a build feature `gen-proto` that enables protobuf code generation during the build process.
+When enabled, the build script will generate Rust bindings from `.proto` files using prost and tonic
+for Substreams protocol support.
+
+To generate protobuf bindings, run:
+
+```bash
+cargo build -p substreams-datasets --features=gen-proto
+```
+
+This will generate Rust structs and gRPC client code from the Substreams protocol definitions
+and save them to `src/proto/`.
