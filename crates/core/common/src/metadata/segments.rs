@@ -4,7 +4,7 @@ use alloy::primitives::BlockHash;
 use metadata_db::FileId;
 use object_store::ObjectMeta;
 
-use crate::{BlockNum, block_range_intersection};
+use crate::{BlockNum, BoxError, block_range_intersection};
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub struct BlockRange {
@@ -42,12 +42,51 @@ impl BlockRange {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Watermark {
     /// The segment end block
     pub number: BlockNum,
     /// The hash associated with the segment end block
     pub hash: BlockHash,
+}
+
+/// Public interface for resuming a stream from a watermark.
+// TODO: unify with `Watermark` when adding support for multi-network streaming.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ResumeWatermark(BTreeMap<String, Watermark>);
+
+impl ResumeWatermark {
+    pub fn to_watermark(self, network: &str) -> Result<Watermark, BoxError> {
+        self.0
+            .into_iter()
+            .find(|(n, _)| n == network)
+            .map(|(_, w)| w)
+            .ok_or_else(|| format!("Expected resume watermark for network '{network}'").into())
+    }
+}
+
+// encoding to remote plan
+impl From<ResumeWatermark> for BTreeMap<String, (BlockNum, [u8; 32])> {
+    fn from(value: ResumeWatermark) -> Self {
+        value
+            .0
+            .into_iter()
+            .map(|(network, Watermark { number, hash })| (network, (number, hash.0)))
+            .collect()
+    }
+}
+// decoding from remote plan
+impl From<BTreeMap<String, (BlockNum, [u8; 32])>> for ResumeWatermark {
+    fn from(value: BTreeMap<String, (BlockNum, [u8; 32])>) -> Self {
+        let inner = value
+            .into_iter()
+            .map(|(network, (number, hash))| {
+                let hash = hash.into();
+                (network, Watermark { number, hash })
+            })
+            .collect();
+        Self(inner)
+    }
 }
 
 /// A block range associated with the matadata from a file in object storage.

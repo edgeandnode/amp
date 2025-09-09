@@ -7,7 +7,7 @@ use common::{
     BlockNum, BoxError, LogicalCatalog, SPECIAL_BLOCK_NUM,
     arrow::array::RecordBatch,
     catalog::physical::{Catalog, PhysicalTable},
-    metadata::segments::{BlockRange, Segment, Watermark},
+    metadata::segments::{BlockRange, ResumeWatermark, Segment, Watermark},
     notification_multiplexer::NotificationMultiplexerHandle,
     query_context::{DetachedLogicalPlan, PlanningContext, QueryContext, QueryEnv, parse_sql},
 };
@@ -175,6 +175,7 @@ impl StreamingQuery {
         plan: DetachedLogicalPlan,
         start_block: BlockNum,
         end_block: Option<BlockNum>,
+        resume_watermark: Option<ResumeWatermark>,
         multiplexer_handle: &NotificationMultiplexerHandle,
         is_sql_dataset: bool,
         microbatch_max_interval: u64,
@@ -207,6 +208,9 @@ impl StreamingQuery {
         let src_datasets = tables.iter().map(|t| t.dataset().name.as_str()).collect();
         let blocks_table = resolve_blocks_table(&dataset_store, &src_datasets, network).await?;
         let table_updates = TableUpdates::new(&catalog, multiplexer_handle).await;
+        let prev_watermark = resume_watermark
+            .map(|w| w.to_watermark(&network))
+            .transpose()?;
         let streaming_query = Self {
             query_env,
             catalog,
@@ -214,13 +218,12 @@ impl StreamingQuery {
             tx,
             start_block,
             end_block,
+            prev_watermark,
             table_updates,
             microbatch_max_interval,
             preserve_block_num,
             network: network.to_string(),
             blocks_table: Arc::new(blocks_table),
-            // TODO: Set from client to resume a stream after dropping a connection.
-            prev_watermark: None,
         };
 
         let join_handle =

@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     ops::RangeInclusive,
     sync::{Arc, LazyLock},
 };
@@ -59,6 +60,7 @@ use crate::{
     evm::udfs::{
         EvmDecodeLog, EvmDecodeParams, EvmDecodeType, EvmEncodeParams, EvmEncodeType, EvmTopic,
     },
+    metadata::segments::ResumeWatermark,
     plan_visitors::{
         constrain_by_block_num, extract_table_references_from_plan,
         forbid_underscore_prefixed_aliases, is_incremental, order_by_block_num,
@@ -148,6 +150,7 @@ pub struct PlanningContext {
 pub struct RemotePlan {
     pub serialized_plan: Vec<u8>,
     pub is_streaming: bool,
+    pub resume_watermark: Option<BTreeMap<String, (BlockNum, [u8; 32])>>,
     pub table_refs: Vec<String>,
     pub function_refs: Vec<String>,
 }
@@ -184,6 +187,7 @@ impl PlanningContext {
     pub async fn sql_to_remote_plan(
         &self,
         query: parser::Statement,
+        resume_watermark: Option<ResumeWatermark>,
     ) -> Result<(Bytes, DFSchemaRef), Error> {
         let is_streaming = is_streaming(&query);
         let ctx = self.datafusion_ctx()?;
@@ -197,6 +201,7 @@ impl PlanningContext {
         let remote_plan = RemotePlan {
             serialized_plan: serialized_plan.to_vec(),
             is_streaming,
+            resume_watermark: resume_watermark.map(Into::into),
             table_refs,
             function_refs: udfs.iter().map(|f| f.name().to_string()).collect(),
         };
