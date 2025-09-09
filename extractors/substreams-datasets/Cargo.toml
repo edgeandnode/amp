@@ -3,6 +3,11 @@ name = "substreams-datasets"
 edition.workspace = true
 version.workspace = true
 
+[features]
+# Enable protobuf code generation during build process. When enabled, the build script
+# will generate Rust bindings from .proto files using prost and tonic for Substreams protocol support
+gen-proto = ["dep:prost-build", "dep:tonic-build"]
+
 [dependencies]
 anyhow.workspace = true
 async-stream.workspace = true
@@ -23,8 +28,8 @@ tonic.workspace = true
 datafusion.workspace = true
 
 [build-dependencies]
-prost-build.workspace = true
-tonic-build.workspace = true
+prost-build = { workspace = true, optional = true }
+tonic-build = { workspace = true, optional = true }
 
 [dev-dependencies]
 serde_json.workspace = true
