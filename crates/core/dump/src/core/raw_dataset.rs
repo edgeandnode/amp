@@ -365,7 +365,12 @@ impl<S: BlockStreamer> DumpPartition<S> {
             for table_rows in dataset_rows {
                 if let Some(ref metrics) = self.metrics {
                     let num_rows: u64 = table_rows.rows.num_rows().try_into().unwrap();
-                    metrics.inc_raw_dataset_rows_by(num_rows, self.dataset_name.clone());
+                    let table_name = table_rows.table.name().to_string();
+                    metrics.inc_raw_dataset_rows_by(
+                        num_rows,
+                        self.dataset_name.clone(),
+                        table_name,
+                    );
                 }
 
                 writer.write(table_rows).await?;

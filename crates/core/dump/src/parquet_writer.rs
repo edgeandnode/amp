@@ -281,7 +281,8 @@ impl RawTableWriter {
         if let Some(ref metrics) = self.metrics {
             let num_bytes: u64 = rows.get_array_memory_size().try_into().unwrap();
             let dataset_name = self.table.dataset().name.clone();
-            metrics.inc_raw_dataset_bytes_written_by(num_bytes, dataset_name);
+            let table_name = self.table.table_name().to_string();
+            metrics.inc_raw_dataset_bytes_written_by(num_bytes, dataset_name, table_name);
         }
 
         self.current_range = match self.current_range.take() {

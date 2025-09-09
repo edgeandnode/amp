@@ -59,8 +59,11 @@ impl MetricsRegistry {
         }
     }
 
-    pub(crate) fn inc_sql_dataset_rows_by(&self, amount: u64, dataset: String) {
-        let kv_pairs = [telemetry::metrics::KeyValue::new("dataset", dataset)];
+    pub(crate) fn inc_sql_dataset_rows_by(&self, amount: u64, dataset: String, table: String) {
+        let kv_pairs = [
+            telemetry::metrics::KeyValue::new("dataset", dataset),
+            telemetry::metrics::KeyValue::new("table", table),
+        ];
         self.sql_dataset_rows.inc_by_with_kvs(amount, &kv_pairs);
     }
 
@@ -69,14 +72,25 @@ impl MetricsRegistry {
         self.sql_dataset_files_written.inc_with_kvs(&kv_pairs);
     }
 
-    pub(crate) fn inc_sql_dataset_bytes_written_by(&self, amount: u64, dataset: String) {
-        let kv_pairs = [telemetry::metrics::KeyValue::new("dataset", dataset)];
+    pub(crate) fn inc_sql_dataset_bytes_written_by(
+        &self,
+        amount: u64,
+        dataset: String,
+        table: String,
+    ) {
+        let kv_pairs = [
+            telemetry::metrics::KeyValue::new("dataset", dataset),
+            telemetry::metrics::KeyValue::new("table", table),
+        ];
         self.sql_dataset_bytes_written
             .inc_by_with_kvs(amount, &kv_pairs);
     }
 
-    pub(crate) fn inc_raw_dataset_rows_by(&self, amount: u64, dataset: String) {
-        let kv_pairs = [telemetry::metrics::KeyValue::new("dataset", dataset)];
+    pub(crate) fn inc_raw_dataset_rows_by(&self, amount: u64, dataset: String, table: String) {
+        let kv_pairs = [
+            telemetry::metrics::KeyValue::new("dataset", dataset),
+            telemetry::metrics::KeyValue::new("table", table),
+        ];
         self.raw_dataset_rows.inc_by_with_kvs(amount, &kv_pairs);
     }
 
@@ -85,8 +99,16 @@ impl MetricsRegistry {
         self.raw_dataset_files_written.inc_with_kvs(&kv_pairs);
     }
 
-    pub(crate) fn inc_raw_dataset_bytes_written_by(&self, amount: u64, dataset: String) {
-        let kv_pairs = [telemetry::metrics::KeyValue::new("dataset", dataset)];
+    pub(crate) fn inc_raw_dataset_bytes_written_by(
+        &self,
+        amount: u64,
+        dataset: String,
+        table: String,
+    ) {
+        let kv_pairs = [
+            telemetry::metrics::KeyValue::new("dataset", dataset),
+            telemetry::metrics::KeyValue::new("table", table),
+        ];
         self.raw_dataset_bytes_written
             .inc_by_with_kvs(amount, &kv_pairs);
     }
