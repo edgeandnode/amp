@@ -14,92 +14,30 @@
  * @file types.ts
  * @author SQL Intellisense System
  */
-import type { Position } from "monaco-editor/esm/vs/editor/editor.api"
+import type {
+  Position,
+  Range,
+  IMarkdownString,
+  MarkerSeverity,
+  CancellationToken,
+  editor,
+  languages
+} from "monaco-editor/esm/vs/editor/editor.api"
 import type { DatasetSource } from "nozzl/Studio/Model"
 
-// Monaco Editor types - defined locally to avoid import issues
-declare namespace monaco {
-  export namespace languages {
-    export interface CompletionItem {
-      label: string | { label: string; detail?: string }
-      kind?: CompletionItemKind
-      detail?: string
-      documentation?: string | IMarkdownString
-      sortText?: string
-      filterText?: string
-      preselect?: boolean
-      insertText?: string
-      insertTextRules?: CompletionItemInsertTextRule
-      range?: Range
-      command?: Command
-    }
-
-    export interface CompletionList {
-      suggestions: CompletionItem[]
-      incomplete?: boolean
-    }
-
-    export interface Command {
-      id: string
-      title: string
-      arguments?: any[]
-    }
-
-    export enum CompletionItemKind {
-      Function = 1,
-      Field = 3,
-      Class = 5,
-      Keyword = 17,
-      Operator = 11
-    }
-
-    export enum CompletionItemInsertTextRule {
-      InsertAsSnippet = 4
-    }
-
-    export enum CompletionItemTag {
-      Deprecated = 1
-    }
-  }
-
-  export interface IMarkdownString {
-    value: string
-    isTrusted?: boolean
-  }
-
-  export interface Range {
-    startLineNumber: number
-    startColumn: number
-    endLineNumber: number
-    endColumn: number
-  }
-
-  export interface Position {
-    lineNumber: number
-    column: number
-  }
-
-  export namespace editor {
-    export interface ITextModel {
-      getValue(): string
-      getOffsetAt(position: Position): number
-      getLineContent(lineNumber: number): string
-      getWordAtPosition(position: Position): { word: string; startColumn: number; endColumn: number } | null
-    }
-  }
-
-  export interface CancellationToken {
-    isCancellationRequested: boolean
-  }
-
-  export enum MarkerSeverity {
-    Hint = 1,
-    Info = 2, 
-    Warning = 4,
-    Error = 8
-  }
+// Re-export Monaco types for convenience
+export type {
+  Position,
+  Range,
+  IMarkdownString,
+  MarkerSeverity,
+  CancellationToken
 }
-// Keep only MonacoITextModel as it's still used in QueryContextAnalyzer
+
+// Re-export Monaco editor and languages namespaces
+export type { editor, languages }
+// Simplified interface for test mocks and minimal Monaco integration
+// This interface provides only the essential methods needed by our SQL analysis
 export interface MonacoITextModel {
   getValue: () => string
   getOffsetAt: (position: Position) => number
@@ -369,7 +307,7 @@ export interface SqlValidationError {
   message: string
   
   /** Error severity level (Error, Warning, Info) */
-  severity: monaco.MarkerSeverity
+  severity: MarkerSeverity
   
   /** Start line number (1-based) */
   startLineNumber: number
@@ -408,17 +346,9 @@ export interface ValidationCacheConfig {
   keyFunction: (query: string) => string
 }
 
-/**
- * Monaco Editor Marker Severity
- * 
- * Monaco marker severity levels for validation errors.
- */
-export enum MonacoMarkerSeverity {
-  Hint = 1,
-  Info = 2, 
-  Warning = 4,
-  Error = 8
-}
+// MonacoMarkerSeverity is now replaced by directly imported MarkerSeverity
+// This re-export is kept for backward compatibility during migration
+export type { MarkerSeverity as MonacoMarkerSeverity }
 
 /**
  * Validation Cache

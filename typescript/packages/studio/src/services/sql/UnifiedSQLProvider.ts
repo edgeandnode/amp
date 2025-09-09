@@ -14,6 +14,11 @@
  * @file UnifiedSQLProvider.ts
  */
 
+import type {
+  IDisposable,
+  Position,
+  editor
+} from "monaco-editor/esm/vs/editor/editor.api"
 import * as monaco from "monaco-editor/esm/vs/editor/editor.api"
 import type { DatasetSource } from "nozzl/Studio/Model"
 
@@ -38,7 +43,7 @@ export interface SQLProviderConfig {
  * Unified SQL Provider Interface
  */
 export interface ISQLProvider {
-  setup(editor: monaco.editor.IStandaloneCodeEditor): void
+  setup(editor: editor.IStandaloneCodeEditor): void
   dispose(): void
   getValidator(): SqlValidator | null
 }
@@ -59,11 +64,11 @@ export class UnifiedSQLProvider implements ISQLProvider {
   private snippetGenerator: UdfSnippetGenerator | undefined
   private validator: SqlValidator | undefined
 
-  private completionDisposable: monaco.IDisposable | undefined
-  private hoverDisposable: monaco.IDisposable | undefined
-  private signatureDisposable: monaco.IDisposable | undefined
+  private completionDisposable: IDisposable | undefined
+  private hoverDisposable: IDisposable | undefined
+  private signatureDisposable: IDisposable | undefined
 
-  private validationDisposable: monaco.IDisposable | undefined
+  private validationDisposable: IDisposable | undefined
   private validationTimeout: NodeJS.Timeout | undefined
 
   private isDisposed = false
@@ -77,7 +82,7 @@ export class UnifiedSQLProvider implements ISQLProvider {
   /**
    * Setup all providers and register with Monaco Editor
    */
-  setup(editor: monaco.editor.IStandaloneCodeEditor): void {
+  setup(editor: editor.IStandaloneCodeEditor): void {
     if (this.isDisposed) {
       throw new Error("Cannot setup disposed SQL provider")
     }
@@ -235,7 +240,7 @@ export class UnifiedSQLProvider implements ISQLProvider {
    * Setup validation with Monaco events
    * @private
    */
-  private setupValidation(editor: monaco.editor.IStandaloneCodeEditor): void {
+  private setupValidation(editor: editor.IStandaloneCodeEditor): void {
     if (this.config.validationLevel === "off" || !this.validator) {
       return
     }
@@ -256,7 +261,7 @@ export class UnifiedSQLProvider implements ISQLProvider {
 
       try {
         const errors = this.validator.validateQuery(query)
-        const markers: Array<monaco.editor.IMarkerData> = errors.map((error: any) => ({
+        const markers: Array<editor.IMarkerData> = errors.map((error: any) => ({
           severity: error.severity,
           message: error.message,
           startLineNumber: error.startLineNumber,
@@ -324,8 +329,8 @@ export class UnifiedSQLProvider implements ISQLProvider {
    * @private
    */
   private provideHover(
-    model: monaco.editor.ITextModel,
-    position: monaco.Position,
+    model: editor.ITextModel,
+    position: Position,
   ): monaco.languages.ProviderResult<monaco.languages.Hover> {
     const word = model.getWordAtPosition(position)
     if (!word) return null
@@ -347,8 +352,8 @@ export class UnifiedSQLProvider implements ISQLProvider {
    * @private
    */
   private provideSignatureHelp(
-    _model: monaco.editor.ITextModel,
-    _position: monaco.Position,
+    _model: editor.ITextModel,
+    _position: Position,
   ): monaco.languages.ProviderResult<monaco.languages.SignatureHelpResult> {
     // Placeholder for signature help implementation
     return null
@@ -359,7 +364,7 @@ export class UnifiedSQLProvider implements ISQLProvider {
    * @private
    */
   private createFallbackCompletions(
-    position: monaco.Position,
+    position: Position,
   ): Array<monaco.languages.CompletionItem> {
     const basicKeywords = [
       "SELECT",

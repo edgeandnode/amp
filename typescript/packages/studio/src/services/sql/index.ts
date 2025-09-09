@@ -25,7 +25,11 @@
  * @author SQL Intellisense System
  */
 
-// Monaco editor will be available globally in browser - no need to import
+import type {
+  IDisposable,
+  Position,
+  editor
+} from "monaco-editor/esm/vs/editor/editor.api"
 import * as monaco from "monaco-editor/esm/vs/editor/editor.api"
 import type { DatasetSource } from "nozzl/Studio/Model"
 
@@ -50,9 +54,9 @@ class SqlProviderManager {
   private snippetGenerator?: UdfSnippetGenerator | undefined
   private validator?: SqlValidator | undefined
 
-  private completionDisposable?: monaco.IDisposable | undefined
-  private hoverDisposable?: monaco.IDisposable | undefined
-  private signatureDisposable?: monaco.IDisposable | undefined
+  private completionDisposable?: IDisposable | undefined
+  private hoverDisposable?: IDisposable | undefined
+  private signatureDisposable?: IDisposable | undefined
 
   private isDisposed = false
   private metrics: PerformanceMetrics = {
@@ -294,8 +298,8 @@ class SqlProviderManager {
    * @private
    */
   private provideHover(
-    model: monaco.editor.ITextModel,
-    position: monaco.Position,
+    model: editor.ITextModel,
+    position: Position,
   ): monaco.languages.ProviderResult<monaco.languages.Hover> {
     // Get the word at the current position
     const word = model.getWordAtPosition(position)
@@ -330,8 +334,8 @@ class SqlProviderManager {
    * @private
    */
   private provideSignatureHelp(
-    _model: monaco.editor.ITextModel,
-    _position: monaco.Position,
+    _model: editor.ITextModel,
+    _position: Position,
   ): monaco.languages.ProviderResult<monaco.languages.SignatureHelpResult> {
     // This is a placeholder for signature help implementation
     // Full implementation would require parsing function calls and parameter positions
@@ -346,7 +350,7 @@ class SqlProviderManager {
    * @private
    */
   private createFallbackCompletions(
-    position: monaco.Position,
+    position: Position,
   ): ReadonlyArray<monaco.languages.CompletionItem> {
     const basicKeywords = [
       "SELECT",

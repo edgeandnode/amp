@@ -16,7 +16,7 @@
  * @author SQL Error Markers System
  */
 
-import * as monaco from "monaco-editor"
+import { MarkerSeverity } from "monaco-editor/esm/vs/editor/editor.api"
 import type { DatasetSource } from 'nozzl/Studio/Model'
 import { QueryContextAnalyzer } from './QueryContextAnalyzer'
 import type {
@@ -272,7 +272,7 @@ export class SqlValidator {
         if (parenDepth < 0) {
           errors.push({
             message: 'Unmatched closing parenthesis',
-            severity: monaco.MarkerSeverity.Error,
+            severity: MarkerSeverity.Error,
             ...this.getTokenPosition(token),
             code: 'UNMATCHED_CLOSING_PAREN'
           })
@@ -286,7 +286,7 @@ export class SqlValidator {
       const unmatchedParen = parenStack[parenStack.length - 1]
       errors.push({
         message: 'Unmatched opening parenthesis',
-        severity: monaco.MarkerSeverity.Error,
+        severity: MarkerSeverity.Error,
         ...this.getTokenPosition(unmatchedParen.token),
         code: 'UNMATCHED_OPENING_PAREN'
       })
@@ -316,7 +316,7 @@ export class SqlValidator {
       if (!fromToken) {
         errors.push({
           message: 'SELECT statement missing FROM clause',
-          severity: monaco.MarkerSeverity.Warning,
+          severity: MarkerSeverity.Warning,
           ...this.getTokenPosition(selectToken),
           code: 'MISSING_FROM_CLAUSE'
         })
@@ -356,7 +356,7 @@ export class SqlValidator {
           
         errors.push({
           message,
-          severity: monaco.MarkerSeverity.Error,
+          severity: MarkerSeverity.Error,
           ...this.getTokenPosition(tableRef.token),
           code: 'UNKNOWN_TABLE',
           data: { 
@@ -574,7 +574,7 @@ export class SqlValidator {
         return {
           error: {
             message: `Table '${columnRef.tableName}' not found for column '${columnRef.name}'`,
-            severity: monaco.MarkerSeverity.Error,
+            severity: MarkerSeverity.Error,
             ...this.getTokenPosition(columnRef.token),
             code: 'TABLE_NOT_FOUND'
           }
@@ -602,7 +602,7 @@ export class SqlValidator {
         return {
           error: {
             message,
-            severity: monaco.MarkerSeverity.Error,
+            severity: MarkerSeverity.Error,
             ...this.getTokenPosition(columnRef.token),
             code: 'COLUMN_NOT_FOUND',
             data: { 
@@ -688,7 +688,7 @@ export class SqlValidator {
         return {
           error: {
             message,
-            severity: monaco.MarkerSeverity.Error,
+            severity: MarkerSeverity.Error,
             ...this.getTokenPosition(columnRef.token),
             code: 'COLUMN_NOT_FOUND',
             data: suggestionData
@@ -701,7 +701,7 @@ export class SqlValidator {
         return {
           error: {
             message: `Column '${columnRef.name}' is ambiguous. Found in tables: ${tableNames}`,
-            severity: monaco.MarkerSeverity.Warning,
+            severity: MarkerSeverity.Warning,
             ...this.getTokenPosition(columnRef.token),
             code: 'AMBIGUOUS_COLUMN',
             data: { columnName: columnRef.name, tables: tableNames }
