@@ -230,7 +230,7 @@ fn extract_block_numbers(
 
 fn validate_block_ordering(block_nums: &[BlockNum]) -> Result<(), BoxError> {
     for window in block_nums.windows(2) {
-        if window[1] < window[0] {
+        if window[0] > window[1] {
             return Err(format!("Block numbers not ordered: {} > {}", window[0], window[1]).into());
         }
     }
