@@ -10,40 +10,200 @@ import { useEffect, useRef } from "react"
 
 import { useSourcesSuspenseQuery } from "@/hooks/useSourcesQuery"
 import { useUDFSuspenseQuery } from "@/hooks/useUDFQuery"
-import type { DisposableHandle } from "@/services/sql"
-import { setupNozzleSQLProviders } from "@/services/sql"
-import { getActiveValidator } from "@/services/sql"
-import { updateProviderData } from "@/services/sql"
+import { type DisposableHandle, getActiveValidator, setupNozzleSQLProviders } from "@/services/sql"
 
 import { ErrorMessages } from "../Form/ErrorMessages"
 import { useFieldContext } from "../Form/form"
-// import {
-//   setupNozzleSQLProviders,
-//   updateProviderData,
-//   getActiveValidator,
-//   type DisposableHandle,
-// } from "../../services/sql"
-
 ;(self as any).MonacoEnvironment = {
   getWorker() {
     return new editorWorker()
   },
 }
 
+interface EditorRefs {
+  sources: Array<any> | null
+  udfs: Array<any> | null
+  providersRef: React.MutableRefObject<DisposableHandle | null>
+  validatorRef: React.MutableRefObject<any | null>
+  validationTimeoutRef: React.MutableRefObject<NodeJS.Timeout | null>
+}
+
 export type EditorProps = Omit<MonacoEditorProps, "defaultLanguage" | "language"> & {
   id: string
   onSubmit?: () => void
   // SQL Validation configuration
-  validationLevel?: 'basic' | 'standard' | 'full' | 'off'
+  validationLevel?: "basic" | "standard" | "full" | "off"
   enablePartialValidation?: boolean
 }
+
+/**
+ * Setup validation with Monaco events
+ */
+function setupValidation(
+  editor: monaco.editor.IStandaloneCodeEditor,
+  model: monaco.editor.ITextModel,
+  refs: EditorRefs,
+  _props: EditorProps,
+) {
+  let validationTimeout: NodeJS.Timeout | null = null
+
+  const validateQuery = () => {
+    // Ensure we have fresh validator reference
+    if (!refs.validatorRef.current) {
+      refs.validatorRef.current = getActiveValidator()
+    }
+
+    const validator = refs.validatorRef.current
+    if (!validator) return
+
+    const query = model.getValue()
+
+    // Clear markers for empty queries
+    if (!query.trim()) {
+      monaco.editor.setModelMarkers(model, "sql-validator", [])
+      return
+    }
+
+    try {
+      const errors = validator.validateQuery(query)
+      const markers: Array<monaco.editor.IMarkerData> = errors.map((error: any) => ({
+        severity: error.severity,
+        message: error.message,
+        startLineNumber: error.startLineNumber,
+        startColumn: error.startColumn,
+        endLineNumber: error.endLineNumber,
+        endColumn: error.endColumn,
+        code: error.code,
+        source: "nozzle-sql-validator",
+      }))
+
+      monaco.editor.setModelMarkers(model, "sql-validator", markers)
+      console.debug(`[Editor] Validation completed: ${errors.length} errors found`)
+    } catch (error) {
+      console.error("[Editor] SQL validation failed:", error)
+      monaco.editor.setModelMarkers(model, "sql-validator", [])
+    }
+  }
+
+  // Initial validation
+  validateQuery()
+
+  // Setup debounced validation on content change
+  const contentChangeDisposable = model.onDidChangeContent(() => {
+    if (validationTimeout) {
+      clearTimeout(validationTimeout)
+    }
+
+    validationTimeout = setTimeout(() => {
+      validateQuery()
+      validationTimeout = null
+    }, 500) // 500ms debounce
+
+    // Store timeout ref for cleanup
+    refs.validationTimeoutRef.current = validationTimeout
+  })
+
+  // Cleanup on model disposal
+  model.onWillDispose(() => {
+    contentChangeDisposable.dispose()
+    if (validationTimeout) {
+      clearTimeout(validationTimeout)
+    }
+    monaco.editor.setModelMarkers(model, "sql-validator", [])
+  })
+}
+
+/**
+ * Setup Monaco editor with consolidated initialization
+ */
+function setupMonacoEditor(
+  editor: monaco.editor.IStandaloneCodeEditor,
+  refs: EditorRefs,
+  props: EditorProps,
+) {
+  const model = editor.getModel()
+  if (!model) return
+
+  // 1. Configure editor options
+  editor.updateOptions({
+    suggest: {
+      showWords: false, // Disable generic word suggestions to prioritize SQL completions
+      showKeywords: true, // Let our provider handle SQL keywords
+      filterGraceful: true, // Enable fuzzy matching
+      snippetsPreventQuickSuggestions: false, // Allow snippets with quick suggestions
+    },
+    quickSuggestions: {
+      strings: false, // Disable completions inside string literals
+      comments: false, // Disable completions inside comments
+      other: true, // Enable completions in other contexts
+    },
+    parameterHints: {
+      enabled: true, // Enable parameter hints for UDF functions
+      cycle: true, // Allow cycling through parameter hints
+    },
+    hover: {
+      enabled: true, // Enable hover information for UDF functions
+      delay: 300, // Show hover after 300ms
+    },
+    // Enhanced editing experience
+    wordWrap: "on",
+    minimap: { enabled: false }, // Disable minimap for better focus
+    renderLineHighlight: "gutter", // Highlight current line in gutter only
+  })
+
+  // 2. Add keyboard shortcuts
+  editor.addCommand(
+    monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter,
+    () => props.onSubmit?.(),
+  )
+
+  // 3. Initialize providers with current data
+  if (refs.sources && refs.udfs) {
+    refs.providersRef.current = setupNozzleSQLProviders(
+      refs.sources,
+      refs.udfs,
+      {
+        enableDebugLogging: process.env.NODE_ENV === "development",
+        minPrefixLength: 0,
+        maxSuggestions: 50,
+        enableSqlValidation: props.validationLevel !== "off",
+        validationLevel: props.validationLevel !== "off" ? props.validationLevel : "basic",
+        enablePartialValidation: props.enablePartialValidation,
+      },
+    )
+    refs.validatorRef.current = getActiveValidator()
+
+    console.debug("[Editor] SQL intellisense providers initialized", {
+      tableCount: refs.sources.length,
+      udfCount: refs.udfs.length,
+    })
+  }
+
+  // 4. Setup validation with Monaco events
+  if (props.validationLevel !== "off") {
+    setupValidation(editor, model, refs, props)
+  }
+
+  // 5. Register disposal handlers
+  editor.onDidDispose(() => {
+    if (refs.providersRef.current) {
+      refs.providersRef.current.dispose()
+      refs.providersRef.current = null
+    }
+    if (refs.validationTimeoutRef.current) {
+      clearTimeout(refs.validationTimeoutRef.current)
+      refs.validationTimeoutRef.current = null
+    }
+  })
+}
+
 export function Editor({
+  enablePartialValidation = true,
   height = 450,
   id,
   onSubmit,
   theme = "vs-dark",
-  validationLevel = 'full',
-  enablePartialValidation = true,
+  validationLevel = "full",
   ...rest
 }: Readonly<EditorProps>) {
   const field = useFieldContext<string>()
@@ -55,189 +215,20 @@ export function Editor({
   const sourcesQuery = useSourcesSuspenseQuery()
   const udfQuery = useUDFSuspenseQuery()
 
-  // Provider lifecycle management
-  const providersRef = useRef<DisposableHandle | null>(null)
-  // Monaco editor instance ref for validation
+  // Mutable refs for Monaco
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null)
+  const providersRef = useRef<DisposableHandle | null>(null)
+  const validatorRef = useRef<any | null>(null)
+  const validationTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
-  /**
-   * Setup SQL providers when Monaco editor is available
-   */
-  const setupProviders = () => {
-    if (
-      sourcesQuery.data &&
-      udfQuery.data &&
-      typeof window !== "undefined" &&
-      window.monaco
-    ) {
-      // Dispose existing providers first
-      if (providersRef.current) {
-        providersRef.current.dispose()
-      }
-
-      // Setup providers with initial data
-      providersRef.current = setupNozzleSQLProviders(
-        [...sourcesQuery.data],
-        [...udfQuery.data],
-        {
-          // Enable debug logging in development
-          enableDebugLogging: process.env.NODE_ENV === "development",
-          // Allow completions without prefix for better UX (especially for columns in SELECT)
-          minPrefixLength: 0,
-          maxSuggestions: 50,
-          // Validation configuration
-          enableSqlValidation: validationLevel !== 'off',
-          validationLevel: validationLevel !== 'off' ? validationLevel : 'basic',
-          enablePartialValidation,
-        },
-      )
-
-      console.debug("[Editor] SQL intellisense providers initialized", {
-        tableCount: sourcesQuery.data.length,
-        udfCount: udfQuery.data.length,
-      })
-    }
-  }
-
-  /**
-   * Effect: Update providers when data changes
-   *
-   * Handles hot-swapping of metadata and UDF data when the hooks
-   * refetch fresh data from the API.
-   */
-  useEffect(() => {
-    if (providersRef.current && sourcesQuery.data && udfQuery.data) {
-      updateProviderData([...sourcesQuery.data], [...udfQuery.data])
-      console.debug(
-        "[Editor] SQL intellisense providers updated with fresh data",
-      )
-    }
-  }, [
-    sourcesQuery.data,
-    udfQuery.data,
-    sourcesQuery.dataUpdatedAt,
-    udfQuery.dataUpdatedAt,
-  ])
-
-  /**
-   * Effect: SQL Validation with Error Markers
-   * 
-   * Sets up real-time SQL validation with Monaco Editor markers.
-   * Uses debouncing to avoid excessive validation during rapid typing.
-   * Includes error recovery to prevent crashes from validation failures.
-   */
-  useEffect(() => {
-    const editor = editorRef.current
-    let validator = getActiveValidator()
-    
-    // If validator is null but we have all required data, re-setup providers (fixes hot reload issue)
-    if (!validator && editor && sourcesQuery.data && udfQuery.data && validationLevel !== 'off') {
-      console.debug('[Editor] Validator not available, re-setting up providers...')
-      setupProviders()
-      validator = getActiveValidator()
-    }
-    
-    // Check if validation is enabled and editor is available
-    if (!editor || !validator || !sourcesQuery.data || !udfQuery.data || validationLevel === 'off') {
-      return
-    }
-
-    let timeoutId: NodeJS.Timeout | null = null
-    
-    const validateWithDebounce = () => {
-      if (timeoutId) {
-        clearTimeout(timeoutId)
-      }
-      
-      timeoutId = setTimeout(() => {
-        try {
-          const model = editor.getModel()
-          if (!model) return
-
-          const query = model.getValue()
-          
-          // Skip validation for empty queries
-          if (!query.trim()) {
-            monaco.editor.setModelMarkers(model, 'sql-validator', [])
-            return
-          }
-
-          // Perform validation
-          const errors = validator.validateQuery(query)
-          
-          // Convert validation errors to Monaco markers
-          const markers: monaco.editor.IMarkerData[] = errors.map(error => ({
-            severity: error.severity,
-            message: error.message,
-            startLineNumber: error.startLineNumber,
-            startColumn: error.startColumn,
-            endLineNumber: error.endLineNumber,
-            endColumn: error.endColumn,
-            code: error.code,
-            source: 'nozzle-sql-validator'
-          }))
-          
-          // Set markers in Monaco Editor
-          monaco.editor.setModelMarkers(model, 'sql-validator', markers)
-          
-          console.debug(`[Editor] Validation completed: ${errors.length} errors found`)
-          
-        } catch (error) {
-          console.error('[Editor] SQL validation failed:', error)
-          // Clear markers on validation error to prevent stale markers
-          if (editor) {
-            const model = editor.getModel()
-            if (model) {
-              monaco.editor.setModelMarkers(model, 'sql-validator', [])
-            }
-          }
-        }
-      }, 500) // 500ms debounce delay
-    }
-
-    // Initial validation
-    validateWithDebounce()
-    
-    // Set up content change listener
-    const model = editor.getModel()
-    if (model) {
-      const disposable = model.onDidChangeContent(() => {
-        validateWithDebounce()
-      })
-      
-      // Cleanup function
-      return () => {
-        if (timeoutId) {
-          clearTimeout(timeoutId)
-        }
-        disposable.dispose()
-        // Clear markers on cleanup
-        window.monaco?.editor.setModelMarkers(model, 'sql-validator', [])
-        console.debug('[Editor] SQL validation disposed')
-      }
-    }
-
-    // Cleanup function for timeout
-    return () => {
-      if (timeoutId) {
-        clearTimeout(timeoutId)
-      }
-    }
-  }, [sourcesQuery.data, udfQuery.data, validationLevel, enablePartialValidation, providersRef.current]) // Re-run when metadata, validation config, or providers change
-
-  /**
-   * Cleanup providers on unmount
-   */
+  // Single cleanup effect for unmount
   useEffect(() => {
     return () => {
-      if (providersRef.current) {
-        providersRef.current.dispose()
-        providersRef.current = null
-      }
-      // Clear editor reference
-      editorRef.current = null
+      // Cleanup all resources
+      if (providersRef.current) providersRef.current.dispose()
+      if (validationTimeoutRef.current) clearTimeout(validationTimeoutRef.current)
     }
-  }, [])
+  }, []) // Empty deps - only on unmount
 
   // use the installed monaco-editor type instead of it being brought down from a CDN
   loader.config({ monaco })
@@ -256,68 +247,22 @@ export function Editor({
         aria-invalid={hasErrors ? "true" : undefined}
         aria-describedby={hasErrors ? `${id}-invalid` : undefined}
         onMount={(editor) => {
-          // Store editor reference for validation
+          // Store editor reference
           editorRef.current = editor
-          
-          // Add keyboard shortcut for CMD+ENTER / CTRL+ENTER
-          // When user hits CMD/CTRL+ENTER, we submit the query
-          editor.addCommand(
-            // monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter
-            2048 | 3, // KeyMod.CtrlCmd | KeyCode.Enter
-            () => {
-              onSubmit?.()
-            },
-          )
 
-          // Enable SQL language features for better intellisense experience
-          editor.updateOptions({
-            suggest: {
-              showWords: false, // Disable generic word suggestions to prioritize SQL completions
-              showKeywords: true, // Let our provider handle SQL keywords
-              filterGraceful: true, // Enable fuzzy matching
-              snippetsPreventQuickSuggestions: false, // Allow snippets with quick suggestions
-            },
-            quickSuggestions: {
-              strings: false, // Disable completions inside string literals
-              comments: false, // Disable completions inside comments
-              other: true, // Enable completions in other contexts
-            },
-            parameterHints: {
-              enabled: true, // Enable parameter hints for UDF functions
-              cycle: true, // Allow cycling through parameter hints
-            },
-            hover: {
-              enabled: true, // Enable hover information for UDF functions
-              delay: 300, // Show hover after 300ms
-            },
-            // Enhanced editing experience
-            wordWrap: "on",
-            minimap: { enabled: false }, // Disable minimap for better focus
-            renderLineHighlight: "gutter", // Highlight current line in gutter only
+          // Setup Monaco editor with consolidated initialization
+          setupMonacoEditor(editor, {
+            sources: sourcesQuery.data ? [...sourcesQuery.data] : null,
+            udfs: udfQuery.data ? [...udfQuery.data] : null,
+            providersRef,
+            validatorRef,
+            validationTimeoutRef,
+          }, {
+            id,
+            validationLevel,
+            enablePartialValidation,
+            onSubmit,
           })
-
-          // Setup SQL intellisense providers now that Monaco is available
-          // Dispose existing providers first
-          if (providersRef.current) {
-            providersRef.current.dispose()
-          }
-
-          // Setup providers with initial data
-          providersRef.current = setupNozzleSQLProviders(
-            sourcesQuery.data,
-            udfQuery.data,
-            {
-              // Enable debug logging in development
-              enableDebugLogging: process.env.NODE_ENV === "development",
-              // Allow completions without prefix for better UX (especially for columns in SELECT)
-              minPrefixLength: 0,
-              maxSuggestions: 50,
-              // Validation configuration
-              enableSqlValidation: validationLevel !== 'off',
-              validationLevel: validationLevel !== 'off' ? validationLevel : 'basic',
-              enablePartialValidation,
-            },
-          )
         }}
       />
       {hasErrors ? <ErrorMessages id={`${id}-invalid`} errors={errors} /> : null}
