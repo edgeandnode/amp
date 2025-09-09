@@ -14,14 +14,14 @@
 
 import { describe, test, expect, beforeEach, afterEach } from 'vitest'
 import { SqlValidator } from '../../../src/services/sql/sqlValidator'
-import type { DatasetMetadata } from 'nozzl/Studio/Model'
-import type { UserDefinedFunction, CompletionConfig, SqlValidationError } from '../../../src/services/sql/types'
-import { mockMetadata, mockMetadataMinimal } from './fixtures/mockMetadata'
+import type { DatasetSource } from 'nozzl/Studio/Model'
+import type { UserDefinedFunction, CompletionConfig } from '../../../src/services/sql/types'
+import { mockMetadata } from './fixtures/mockMetadata'
 import { mockUDFs } from './fixtures/mockUDFs'
 import * as monaco from 'monaco-editor'
 
 // Test fixtures - convert existing fixtures to the format expected by SqlValidator  
-const convertMetadata = (metadata: ReadonlyArray<DatasetMetadata>): DatasetMetadata[] => {
+const convertMetadata = (metadata: ReadonlyArray<DatasetSource>): DatasetSource[] => {
   return metadata.map(dataset => ({
     dataset_name: dataset.source.split('.')[0],
     table_name: dataset.source.split('.')[1] || dataset.destination,

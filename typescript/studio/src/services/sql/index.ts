@@ -88,7 +88,7 @@ class SqlProviderManager {
         this.config,
       )
       this.snippetGenerator = new UdfSnippetGenerator()
-      this.validator = new SqlValidator(this.metadata, this.udfs, this.config)
+      this.validator = new SqlValidator([...this.metadata], [...this.udfs], this.config)
 
       // Register completion provider
       this.completionDisposable = monaco.languages.registerCompletionItemProvider("sql", {
@@ -198,7 +198,7 @@ class SqlProviderManager {
       }
 
       if (this.validator) {
-        this.validator.updateData(metadata, udfs)
+        this.validator.updateData([...metadata], [...udfs])
       }
 
       this.logDebug('Provider data updated', {

@@ -24,8 +24,7 @@ import type {
   CompletionConfig,
   SqlValidationError,
   ValidationCache,
-  SqlToken,
-  SqlTokenType
+  SqlToken
 } from './types'
 import { 
   DEFAULT_COMPLETION_CONFIG, 
@@ -345,7 +344,7 @@ export class SqlValidator {
     for (const tableRef of tableRefs) {
       if (!this.tableExists(tableRef.name)) {
         const suggestion = this.suggestSimilarTable(tableRef.name)
-        const availableTables = this.metadata.map(d => `${d.dataset_name}.${d.table_name}`).slice(0, 3)
+        const availableTables = this.metadata.map(d => d.source).slice(0, 3)
         const moreTables = this.metadata.length > 3 ? ` and ${this.metadata.length - 3} more` : ''
         
         let message: string
@@ -363,7 +362,7 @@ export class SqlValidator {
           data: { 
             tableName: tableRef.name, 
             suggestion,
-            availableTables: this.metadata.map(d => `${d.dataset_name}.${d.table_name}`)
+            availableTables: this.metadata.map(d => d.source)
           }
         })
       }
@@ -950,7 +949,7 @@ export class SqlValidator {
               console.log(`[SqlValidator] extractTableReferences - found alias: "${alias}"`)
             }
             
-            tableRefs.push({ name: tableName, token: tableToken, alias })
+            tableRefs.push({ name: tableName, token: tableToken, ...(alias && { alias }) })
           }
         }
       }
@@ -1029,7 +1028,7 @@ export class SqlValidator {
    */
   private suggestSimilarTable(tableName: string): string | null {
     const allTables = this.metadata.map(dataset => 
-      `${dataset.dataset_name}.${dataset.table_name}`
+      dataset.source
     )
     
     if (allTables.length === 0) {
@@ -1218,6 +1217,8 @@ export class SqlValidator {
    * 
    * @private
    */
+  // @ts-expect-error Unused helper function kept for future use
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   private getTextRangePosition(query: string, text: string, fromOffset: number = 0): {
     startLineNumber: number
     startColumn: number
@@ -1242,7 +1243,8 @@ export class SqlValidator {
     }
     return null
   }
-
+  // @ts-expect-error Unused helper function kept for future use
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   private findNextIdentifier(tokens: SqlToken[], startIndex: number): SqlToken | null {
     for (let i = startIndex; i < tokens.length; i++) {
       const token = tokens[i]

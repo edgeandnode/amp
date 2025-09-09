@@ -1,4 +1,4 @@
-import { resolve } from "node:path"
+import { resolve } from "path"
 
 import tailwindcss from "@tailwindcss/vite"
 import { tanstackRouter } from "@tanstack/router-plugin/vite"
