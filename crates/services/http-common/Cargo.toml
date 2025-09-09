@@ -1,0 +1,10 @@
+[package]
+name = "http-common"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde_json.workspace = true
+axum.workspace = true
+common = { path = "../../core/common" }
+tokio.workspace = true

@@ -63,6 +63,8 @@ jobs:
 
       - name: Install pnpm
         uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4
+        with:
+          package_json_file: typescript/package.json
 
       - name: Install Bun
         uses: oven-sh/setup-bun@735343b667d3e6f658f44d0eca948eb6282f2b76 # v2
@@ -70,6 +72,7 @@ jobs:
           bun-version: latest
 
       - name: pnpm install
+        working-directory: typescript
         run: pnpm install
 
       - uses: actions-rust-lang/setup-rust-toolchain@fb51252c7ba57d633bc668f941da052e410add48 # v1
@@ -153,14 +156,19 @@ jobs:
 
       - name: Install pnpm
         uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4
+        with:
+          package_json_file: typescript/package.json
 
       - name: Install dependencies
+        working-directory: typescript
         run: pnpm install
 
       - name: Check formatting
+        working-directory: typescript
         run: pnpm lint
 
       - name: Check types
+        working-directory: typescript
         run: pnpm check
 
   typescript-tests:
@@ -194,8 +202,11 @@ jobs:
 
       - name: Install pnpm
         uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4
+        with:
+          package_json_file: typescript/package.json
 
       - name: Install dependencies
+        working-directory: typescript
         run: pnpm install
 
       # TODO: Ideally we'd be using a binary built in a previous step here.
@@ -206,4 +217,5 @@ jobs:
         run: echo "$(pwd)/target/release" >> $GITHUB_PATH
 
       - name: Run tests
+        working-directory: typescript
         run: pnpm test

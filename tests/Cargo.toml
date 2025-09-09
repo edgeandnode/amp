@@ -12,14 +12,14 @@ name = "tests"
 [dependencies]
 alloy.workspace = true
 clap.workspace = true
-common = { path = "../common" }
+common = { path = "../crates/core/common" }
 dotenvy.workspace = true
-dataset-store = { path = "../dataset-store" }
-dump = { path = "../dump" }
-dump-check = { path = "../dump-check" }
-metadata-db = { path = "../metadata-db" }
-nozzle = { path = "../nozzle" }
-nozzle-client = { path = "../client" }
+dataset-store = { path = "../crates/core/dataset-store" }
+dump = { path = "../crates/core/dump" }
+dump-check = { path = "../crates/bin/dump-check" }
+metadata-db = { path = "../crates/core/metadata-db" }
+nozzle = { path = "../crates/bin/nozzle" }
+nozzle-client = { path = "../crates/client" }
 figment.workspace = true
 fs-err.workspace = true
 futures.workspace = true
@@ -34,13 +34,13 @@ serde_json.workspace = true
 serde.workspace = true
 serde_yaml.workspace = true
 tonic.workspace = true
-generate-manifest = { path = "../generate-manifest" }
-substreams-datasets = { path = "../extractors/substreams-datasets" }
-evm-rpc-datasets = { path = "../extractors/evm-rpc-datasets" }
-firehose-datasets = { path = "../extractors/firehose-datasets" }
+generate-manifest = { path = "../crates/bin/generate-manifest" }
+substreams-datasets = { path = "../crates/extractors/substreams" }
+evm-rpc-datasets = { path = "../crates/extractors/evm-rpc" }
+firehose-datasets = { path = "../crates/extractors/firehose" }
 rand.workspace = true
 schemars.workspace = true
-monitoring = { path = "../monitoring" }
+monitoring = { path = "../crates/core/monitoring" }
 reqwest.workspace = true
-registry-service = { path = "../registry-service" }
-admin-api = { path = "../admin-api" }
+registry-service = { path = "../crates/services/registry-service" }
+admin-api = { path = "../crates/services/admin-api" }

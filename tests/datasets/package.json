@@ -3,7 +3,7 @@
   "private": true,
   "dependencies": {
     "effect": "^3.14.5",
-    "nozzl": "link:../../typescript/nozzle"
+    "nozzl": "link:../../typescript/packages/nozzle"
   },
   "devDependencies": {
     "typescript": "^5.8.3"
