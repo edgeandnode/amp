@@ -9,7 +9,7 @@ To run this application:
 
 ```bash
 pnpm install
-pnpm start
+pnpm dev
 ```
 
 ## Building For Production
@@ -20,295 +20,100 @@ To build this application for production:
 pnpm build
 ```
 
-### Testing
+## Running nozzle locally to query anvil
 
-This project uses [Vitest](https://vitest.dev/) for testing. You can run the tests with:
-
-```bash
-pnpm test
-```
-
-### Styling
-
-This project uses [Tailwind CSS](https://tailwindcss.com/) for styling.
-
-### Linting & Formatting
-
-This project uses [eslint](https://eslint.org/) and [prettier](https://prettier.io/) for linting and formatting. Eslint is configured using [tanstack/eslint-config](https://tanstack.com/config/latest/docs/eslint). The following scripts are available:
+1. Install steps
 
 ```bash
-pnpm lint
-pnpm format
-pnpm check
+# cd into typescript dir
+pnpm install
 ```
 
-### T3Env
-
-- You can use T3Env to add type safety to your environment variables.
-- Add Environment variables to the `src/env.mjs` file.
-- Use the environment variables in your code.
-
-#### Usage
-
-```ts
-import { env } from "@/env"
-
-console.log(env.VITE_APP_TITLE)
-```
-
-### Routing
-
-This project uses [TanStack Router](https://tanstack.com/router). The initial setup is a file based router. Which means that the routes are managed as files in `src/routes`.
-
-#### Adding A Route
-
-To add a new route to your application just add another a new file in the `./src/routes` directory.
-
-TanStack will automatically generate the content of the route file for you.
-
-Now that you have two routes you can use a `Link` component to navigate between them.
-
-#### Adding Links
-
-To use SPA (Single Page Application) navigation you will need to import the `Link` component from `@tanstack/react-router`.
-
-```tsx
-import { Link } from "@tanstack/react-router"
-```
-
-Then anywhere in your JSX you can use it like so:
-
-```tsx
-<Link to="/about">About</Link>
-```
-
-This will create a link that will navigate to the `/about` route.
-
-More information on the `Link` component can be found in the [Link documentation](https://tanstack.com/router/v1/docs/framework/react/api/router/linkComponent).
-
-#### Using A Layout
-
-In the File Based Routing setup the layout is located in `src/routes/__root.tsx`. Anything you add to the root route will appear in all the routes. The route content will appear in the JSX where you use the `<Outlet />` component.
-
-Here is an example layout that includes a header:
-
-```tsx
-import { Outlet, createRootRoute } from "@tanstack/react-router"
-import { TanStackRouterDevtools } from "@tanstack/react-router-devtools"
-
-import { Link } from "@tanstack/react-router"
-
-export const Route = createRootRoute({
-  component: () => (
-    <>
-      <header>
-        <nav>
-          <Link to="/">Home</Link>
-          <Link to="/about">About</Link>
-        </nav>
-      </header>
-      <Outlet />
-      <TanStackRouterDevtools />
-    </>
-  ),
-})
-```
-
-The `<TanStackRouterDevtools />` component is not required so you can remove it if you don't want it in your layout.
-
-More information on layouts can be found in the [Layouts documentation](https://tanstack.com/router/latest/docs/framework/react/guide/routing-concepts#layouts).
-
-### Data Fetching
-
-There are multiple ways to fetch data in your application. You can use TanStack Query to fetch data from a server. But you can also use the `loader` functionality built into TanStack Router to load the data for a route before it's rendered.
-
-For example:
-
-```tsx
-const peopleRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/people",
-  loader: async () => {
-    const response = await fetch("https://swapi.dev/api/people")
-    return response.json() as Promise<{
-      results: {
-        name: string
-      }[]
-    }>
-  },
-  component: () => {
-    const data = peopleRoute.useLoaderData()
-    return (
-      <ul>
-        {data.results.map((person) => (
-          <li key={person.name}>{person.name}</li>
-        ))}
-      </ul>
-    )
-  },
-})
-```
-
-Loaders simplify your data fetching logic dramatically. Check out more information in the [Loader documentation](https://tanstack.com/router/latest/docs/framework/react/guide/data-loading#loader-parameters).
-
-#### React-Query
-
-React-Query is an excellent addition or alternative to route loading and integrating it into you application is a breeze.
-
-First add your dependencies:
+2. Spin up docker, from repo root (where `docker-compuse.yml` exists)
 
 ```bash
-pnpm add @tanstack/react-query @tanstack/react-query-devtools
+docker compose up -d
 ```
 
-Next we'll need to create a query client and provider. We recommend putting those in `main.tsx`.
+3. Create required `config.toml` for `nozzle` binary to run. In repo root
 
-```tsx
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-
-// ...
-
-const queryClient = new QueryClient()
-
-// ...
-
-if (!rootElement.innerHTML) {
-  const root = ReactDOM.createRoot(rootElement)
-
-  root.render(
-    <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
-    </QueryClientProvider>,
-  )
-}
+```toml
+data_dir = "data/"
+providers_dir = "providers/"
+dataset_defs_dir = "dataset-def-schemas/"
+metadata_db_url = "postgresql://postgres:postgres@localhost:5432/nozzle"
 ```
 
-You can also add TanStack Query Devtools to the root route (optional).
-
-```tsx
-import { ReactQueryDevtools } from "@tanstack/react-query-devtools"
-
-const rootRoute = createRootRoute({
-  component: () => (
-    <>
-      <Outlet />
-      <ReactQueryDevtools buttonPosition="top-right" />
-      <TanStackRouterDevtools />
-    </>
-  ),
-})
-```
-
-Now you can use `useQuery` to fetch your data.
-
-```tsx
-import { useQuery } from "@tanstack/react-query"
-
-import "./App.css"
-
-function App() {
-  const { data } = useQuery({
-    queryKey: ["people"],
-    queryFn: () =>
-      fetch("https://swapi.dev/api/people")
-        .then((res) => res.json())
-        .then((data) => data.results as { name: string }[]),
-    initialData: [],
-  })
-
-  return (
-    <div>
-      <ul>
-        {data.map((person) => (
-          <li key={person.name}>{person.name}</li>
-        ))}
-      </ul>
-    </div>
-  )
-}
-
-export default App
-```
-
-You can find out everything you need to know on how to use React-Query in the [React-Query documentation](https://tanstack.com/query/latest/docs/framework/react/overview).
-
-### State Management
-
-Another common requirement for React applications is state management. There are many options for state management in React. TanStack Store provides a great starting point for your project.
-
-First you need to add TanStack Store as a dependency:
+4. Create necessary directories, also in repo root
 
 ```bash
-pnpm add @tanstack/store
+mkdir data && mkdir providers && mkdir dataset-def-schemas
 ```
 
-Now let's create a simple counter in the `src/App.tsx` file as a demonstration.
+5. Create a provider toml config file for anvil in `./providers/anvil.toml`
 
-```tsx
-import { useStore } from "@tanstack/react-store"
-import { Store } from "@tanstack/store"
-import "./App.css"
-
-const countStore = new Store(0)
-
-function App() {
-  const count = useStore(countStore)
-  return (
-    <div>
-      <button onClick={() => countStore.setState((n) => n + 1)}>
-        Increment - {count}
-      </button>
-    </div>
-  )
-}
-
-export default App
+```toml
+kind = "evm-rpc"
+url = "http://localhost:8545"
+network = "anvil"
 ```
 
-One of the many nice features of TanStack Store is the ability to derive state from other state. That derived state will update when the base state updates.
+6. Start nozzle worker. Will remain running, need terminal window
 
-Let's check this out by doubling the count using derived state.
-
-```tsx
-import { useStore } from "@tanstack/react-store"
-import { Store, Derived } from "@tanstack/store"
-import "./App.css"
-
-const countStore = new Store(0)
-
-const doubledStore = new Derived({
-  fn: () => countStore.state * 2,
-  deps: [countStore],
-})
-doubledStore.mount()
-
-function App() {
-  const count = useStore(countStore)
-  const doubledCount = useStore(doubledStore)
-
-  return (
-    <div>
-      <button onClick={() => countStore.setState((n) => n + 1)}>
-        Increment - {count}
-      </button>
-      <div>Doubled - {doubledCount}</div>
-    </div>
-  )
-}
-
-export default App
+```bash
+NOZZLE_CONFIG=config.toml cargo run -p nozzle -- worker --node-id worker-1
 ```
 
-We use the `Derived` class to create a new store that is derived from another store. The `Derived` class has a `mount` method that will start the derived store updating.
+7. Start nozzle server. Will remain running, create new terminal window
 
-Once we've created the derived store we can use it in the `App` component just like we would any other store using the `useStore` hook.
+```bash
+NOZZLE_CONFIG=config.toml cargo run -p nozzle -- server
+```
 
-You can find out everything you need to know on how to use TanStack Store in the [TanStack Store documentation](https://tanstack.com/store/latest).
+8. Start anvil in `typescript/packages/example` dir (or any that has foundry). Will remain running, create new terminal window
 
-# Demo files
+```bash
+# cd into typescript/packages/example
+anvil
+```
 
-Files prefixed with `demo` can be safely deleted. They are there to provide a starting point for you to play around with the features you've installed.
+9. Deploy smart contract from `typescript/packages/example` directory (or any dir that is wired up with foundry and smart contracts). create new terminal window
 
-# Learn More
+```bash
+# cd into typescript/packages/example
+forge script contracts/script/Counter.s.sol --broadcast --rpc-url http://localhost:8545 --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
+```
 
-You can learn more about all of the offerings from TanStack in the [TanStack documentation](https://tanstack.com).
+10. Use `nozzle` to generate a manifest. Run in repo root
+
+```bash
+NOZZLE_CONFIG=config.toml cargo run --bin nozzle -- generate-manifest --network anvil --kind evm-rpc --name anvil -o dataset-def-schemas/anvil.json
+```
+
+11. Use `nozzle` to dump the dataset
+
+```bash
+NOZZLE_CONFIG=config.toml cargo run --release --bin nozzle -- dump --dataset anvil
+```
+
+12. Check to make sure dataset exists:
+
+```bash
+curl localhost:1610/datasets
+```
+
+13. Run studio cli cmd in `typescript/packages/example`
+
+```bash
+# cd into typescript/packages/example
+pnpm run studio --open
+# or
+bun nozzle studio --open
+```
+
+14. (Optional, if building on studio and want HMR for changes). Run studio dev in `typescript/packages/studio`
+
+```bash
+# cd into typescript/packages/studio
+pnpm run dev
+```
