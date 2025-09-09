@@ -16,6 +16,7 @@ import { fieldContext, formContext } from "../Form/form.ts"
 import { SubmitButton } from "../Form/SubmitButton.tsx"
 
 import { Editor } from "./Editor.tsx"
+import { NozzleConfigBrowser } from "./NozzleConfigBrowser.tsx"
 import { SchemaBrowser } from "./SchemaBrowser.tsx"
 import { SourcesBrowser } from "./SourcesBrowser.tsx"
 import { UDFBrowser } from "./UDFBrowser.tsx"
@@ -74,6 +75,26 @@ export function QueryPlaygroundWrapper() {
     },
   })
   const activeTab = useStore(form.store, (state) => state.values.activeTab)
+
+  const setQueryTabFromSelected = (tab: string, query: string) => {
+    let setActiveTab = false
+    form.setFieldValue("queries", (curr) => {
+      const updatedQueries = [...curr]
+      const active = curr[activeTab]
+      if (EffectString.isEmpty(active.query)) {
+        updatedQueries[activeTab] = { tab, query }
+      } else {
+        updatedQueries.push({ tab, query })
+        // set new tab the active tab
+        setActiveTab = true
+      }
+
+      return updatedQueries
+    })
+    if (setActiveTab) {
+      form.setFieldValue("activeTab", (curr) => curr + 1)
+    }
+  }
 
   // Memoize column extraction and formatting
   const tableData = useMemo(() => {
@@ -196,6 +217,13 @@ export function QueryPlaygroundWrapper() {
                       listeners={{
                         onChangeDebounceMs: 300,
                         onChange({ value }) {
+                          // if the tab title was set by the user selecting from the browser, then don't overwrite with this fn
+                          if (
+                            !value.startsWith("New") ||
+                            value !== "Dataset Query"
+                          ) {
+                            return
+                          }
                           const generateQueryTitle = (query: string) => {
                             const trimmed = query.trim().toLowerCase()
                             if (!trimmed) return "New Query"
@@ -358,6 +386,13 @@ export function QueryPlaygroundWrapper() {
         </div>
       </div>
       <div className="h-full border-l border-space-1500 flex flex-col gap-y-4 overflow-y-auto">
+        <NozzleConfigBrowser
+          onTableSelected={(table, def) => {
+            const query = def.input.sql
+            const tab = `SELECT ... ${table}`
+            setQueryTabFromSelected(tab, query)
+          }}
+        />
         <SchemaBrowser
           onEventSelected={(event) => {
             const query =
@@ -365,24 +400,7 @@ export function QueryPlaygroundWrapper() {
 FROM anvil.logs
 WHERE topic0 = evm_topic('${event.signature}');`.trim()
             const tab = `SELECT ... ${event.name}`
-            // update the query at the active tab to query the selected event
-            let setActiveTab = false
-            form.setFieldValue("queries", (curr) => {
-              const updatedQueries = [...curr]
-              const active = curr[activeTab]
-              if (EffectString.isEmpty(active.query)) {
-                updatedQueries[activeTab] = { tab, query }
-              } else {
-                updatedQueries.push({ tab, query })
-                // set new tab the active tab
-                setActiveTab = true
-              }
-
-              return updatedQueries
-            })
-            if (setActiveTab) {
-              form.setFieldValue("activeTab", (curr) => curr + 1)
-            }
+            setQueryTabFromSelected(tab, query)
           }}
         />
         <SourcesBrowser
@@ -400,23 +418,7 @@ WHERE topic0 = evm_topic('${event.signature}');`.trim()
 FROM ${source.source}
 LIMIT 10;`.trim()
             const tab = `SELECT ... ${source.source}`
-            // update the query with the selected table and columns
-            let setActiveTab = false
-            form.setFieldValue("queries", (curr) => {
-              const updatedQueries = [...curr]
-              const active = curr[activeTab]
-              if (EffectString.isEmpty(active.query)) {
-                updatedQueries[activeTab] = { tab, query }
-              } else {
-                updatedQueries.push({ tab, query })
-                // set new tab the active tab
-                setActiveTab = true
-              }
-              return updatedQueries
-            })
-            if (setActiveTab) {
-              form.setFieldValue("activeTab", (curr) => curr + 1)
-            }
+            setQueryTabFromSelected(tab, query)
           }}
         />
         <UDFBrowser />
