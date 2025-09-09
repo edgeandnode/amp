@@ -45,6 +45,12 @@ for Substreams protocol support.
 To generate protobuf bindings, run:
 
 ```bash
+just gen-substreams-datasets-proto
+```
+
+Or using the full `cargo build` command:
+
+```bash
 cargo build -p substreams-datasets --features=gen-proto
 ```
 
