@@ -17,7 +17,7 @@ import {
   Path,
 } from "@effect/platform"
 import { NodeHttpServer } from "@effect/platform-node"
-import { Cause, Config, Console, Data, Effect, Layer, Option, Schema, Stream, Struct } from "effect"
+import { Cause, Chunk, Config, Console, Data, Effect, Layer, Option, Schema, Stream, Struct } from "effect"
 import { createServer } from "node:http"
 import { fileURLToPath } from "node:url"
 import open, { type AppName, apps } from "open"
@@ -74,6 +74,44 @@ class NozzleStudioApiRouter extends HttpApiGroup.make("NozzleStudioApi")
           title: "Dataset sources",
           version: "v1",
           description: "Provides the sources the user can query",
+        }),
+      ),
+  )
+  .add(
+    HttpApiEndpoint.get("DefaultQuery")`/query/default`
+      .addSuccess(
+        StudioModel.DefaultQuery.annotations({
+          examples: [
+            {
+              title: "SELECT ... counts",
+              query: `SELECT c.block_hash, c.tx_hash, c.address, c.block_num, c.timestamp, c.event['count'] as count
+ FROM (
+  SELECT block_hash, tx_hash, block_num, timestamp, address, evm_decode_log(topic1, topic2, topic3, data, 'Count(uint256 count)') as event
+  FROM anvil.logs
+  WHERE topic0 = evm_topic('Count(uint256 count)')
+ ) as c`,
+            },
+            {
+              title: "SELECT ... count",
+              query:
+                `SELECT tx_hash, block_num, evm_decode_log(topic1, topic2, topic3, data, 'Count(uint256 count)') as event
+FROM anvil.logs
+WHERE topic0 = evm_topic('Count(uint256 count)');`,
+            },
+            {
+              title: "SELECT ... anvil.logs",
+              query: `SELECT * FROM anvil.logs LIMIT 10`,
+            },
+          ],
+        }),
+      )
+      .addError(HttpApiError.InternalServerError)
+      .annotateContext(
+        OpenApi.annotations({
+          title: "Default query",
+          version: "v1",
+          description:
+            "Builds a default query to hydrate in the initial tab on the playground. Derived in order of: 1. parsed nozzle config, 2. parsed contract artifacts, 3. dataset sources",
         }),
       ),
   )
@@ -198,6 +236,81 @@ const NozzleStudioApiLive = HttpApiBuilder.group(
             )
           }))
         .handle("Sources", () => resolver.sources())
+        .handle("DefaultQuery", () =>
+          Effect.gen(function*() {
+            // 1. Check for nozzle.config existence
+            const configPath = yield* loader.find()
+
+            if (Option.isSome(configPath)) {
+              // Found nozzle.config, try to build it
+              const manifest = yield* loader.build(configPath.value).pipe(
+                Effect.mapError(() => new HttpApiError.InternalServerError()),
+              )
+
+              // Get the first table from the manifest
+              const tables = Object.entries(manifest.tables)
+              if (tables.length > 0) {
+                const [tableName, table] = tables[0]
+                return {
+                  title: `SELECT ... ${tableName}`,
+                  query: table.input.sql.trim(),
+                }
+              }
+            }
+
+            // 2. Check if events can be derived from the QueryableEvents
+            const events = yield* resolver.events().pipe(
+              Effect.mapError(() => new HttpApiError.InternalServerError()),
+            )
+
+            if (!Chunk.isEmpty(events)) {
+              const firstEvent = Chunk.unsafeHead(events)
+              // Generate a query for the first event
+              const selectFields = firstEvent.params
+                .map((param) => `event['${param.name}'] as ${param.name}`)
+                .join(", ")
+
+              const query = `SELECT 
+  block_hash, 
+  tx_hash, 
+  address, 
+  block_num, 
+  timestamp, 
+  ${selectFields}
+FROM (
+  SELECT 
+    block_hash, 
+    tx_hash, 
+    block_num, 
+    timestamp, 
+    address, 
+    evm_decode_log(topic1, topic2, topic3, data, '${firstEvent.signature}') as event
+  FROM anvil.logs
+  WHERE topic0 = evm_topic('${firstEvent.signature}')
+) as decoded`
+
+              return {
+                title: `SELECT ... ${firstEvent.name}`,
+                query,
+              }
+            }
+
+            // 3. Use the first dataset source
+            const sources = yield* resolver.sources()
+            if (sources.length > 0) {
+              const firstSource = sources[0]
+              return {
+                title: `SELECT ... ${firstSource.source}`,
+                query: `SELECT * FROM ${firstSource.source} LIMIT 100`,
+              }
+            }
+
+            // Fallback if nothing is available
+            return {
+              title: "No default query available",
+              query: "-- No datasets or events found",
+            }
+          }))
         .handle("Query", ({ payload }) =>
           flight.table(payload.query).pipe(
             Effect.flatMap((table) => {

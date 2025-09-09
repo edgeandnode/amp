@@ -104,3 +104,12 @@ export class DatasetSource extends Schema.Class<DatasetSource>("Nozzle/studio/mo
     examples: ["anvil.logs"],
   }),
 }) {}
+
+export class DefaultQuery extends Schema.Class<DefaultQuery>("Nozzle/studio/models/DefaultQuery")({
+  title: Schema.NonEmptyTrimmedString.annotations({
+    identifier: "DefaultQuery.title",
+  }),
+  query: Schema.NonEmptyTrimmedString.annotations({
+    title: "DefaultQuery.query",
+  }),
+}) {}

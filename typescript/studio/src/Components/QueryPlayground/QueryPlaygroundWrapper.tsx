@@ -7,6 +7,7 @@ import { Schema, String as EffectString } from "effect"
 import { useEffect, useMemo } from "react"
 
 import { RESERVED_FIELDS } from "@/constants"
+import { useDefaultQuery } from "@/hooks/useDefaultQuery"
 import { useOSQuery } from "@/hooks/useOSQuery"
 import { useDatasetsMutation } from "@/hooks/useQueryDatasetMutation"
 import { classNames } from "@/utils/classnames"
@@ -43,15 +44,11 @@ const NozzleStudioQueryEditorForm = Schema.Struct({
 })
 type NozzleStudioQueryEditorForm = typeof NozzleStudioQueryEditorForm.Type
 
-const defaultValues: NozzleStudioQueryEditorForm = {
-  activeTab: 0,
-  /** @todo figure out default */
-  queries: [{ query: "", tab: "Dataset Query" }],
-}
-
 export function QueryPlaygroundWrapper() {
   const { data: os } = useOSQuery()
   const correctKey = os === "MacOS" ? "CMD" : "CTRL"
+
+  const { data: defQuery } = useDefaultQuery()
 
   const { data, error, mutateAsync, status } = useDatasetsMutation({
     onError(error) {
@@ -59,6 +56,10 @@ export function QueryPlaygroundWrapper() {
     },
   })
 
+  const defaultValues: NozzleStudioQueryEditorForm = {
+    activeTab: 0,
+    queries: [{ query: defQuery.query, tab: defQuery.title }],
+  }
   const form = useAppForm({
     defaultValues,
     validators: {
