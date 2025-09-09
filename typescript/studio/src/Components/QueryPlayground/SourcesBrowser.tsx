@@ -19,13 +19,15 @@ export function SourcesBrowser({
 
   return (
     <div className="flex flex-col gap-y-4 p-6">
-      <p className="text-14">Sources</p>
+      <div className="flex flex-col gap-y-1">
+        <p className="text-14">Sources</p>
+        <p className="text-10 text-space-700">
+          Root dataset source tables that can be queried.
+        </p>
+      </div>
       <Accordion.Root className="w-full box-border flex flex-col gap-y-3">
         {sources.map((source) => (
-          <Accordion.Item
-            key={source.source}
-            className="flex flex-col gap-y-2"
-          >
+          <Accordion.Item key={source.source} className="flex flex-col gap-y-2">
             <Accordion.Header className="m-0 flex items-start gap-x-1 px-0 py-2">
               <Accordion.Trigger
                 type="button"

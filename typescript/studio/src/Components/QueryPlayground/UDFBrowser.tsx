@@ -13,7 +13,12 @@ export function UDFBrowser() {
 
   return (
     <div className="flex flex-col gap-y-4 p-6">
-      <p className="text-14">User Defined Functions (UDFs)</p>
+      <div className="flex flex-col gap-y-1">
+        <p className="text-14">User Defined Functions (UDFs)</p>
+        <p className="text-10 text-space-700">
+          Nozzle provided "built-in" SQL functions that can be called to manipulate the query data.
+        </p>
+      </div>
       <Accordion.Root className="w-full box-border flex flex-col justify-center gap-y-3">
         {userDefinedFunctions.map((udf) => (
           <Accordion.Item key={udf.name} className="flex flex-col gap-y-2">

@@ -385,7 +385,7 @@ export function QueryPlaygroundWrapper() {
           </div>
         </div>
       </div>
-      <div className="h-full border-l border-space-1500 flex flex-col gap-y-4 overflow-y-auto">
+      <div className="h-full border-l border-space-1500 divide-y divide-space-1500 flex flex-col gap-y-4 overflow-y-auto">
         <NozzleConfigBrowser
           onTableSelected={(table, def) => {
             const query = def.input.sql.trim()

@@ -27,7 +27,7 @@ export function NozzleConfigBrowser({
       <div className="flex flex-col gap-y-1">
         <p className="text-14">Dataset Config</p>
         <p className="text-10 text-space-700">
-          These tables are derived from your nozzle config
+          Tables derived from your current nozzle config.
         </p>
       </div>
       <Accordion.Root className="w-full box-border flex flex-col justify-center gap-y-3">
