@@ -3,6 +3,11 @@ name = "firehose-datasets"
 edition.workspace = true
 version.workspace = true
 
+[features]
+# Enable protobuf code generation during build process. When enabled, the build script
+# will generate Rust bindings from .proto files using prost and tonic for Firehose protocol support
+gen-proto = ["dep:prost-build", "dep:tonic-build"]
+
 [dependencies]
 common = { path = "../../core/common" }
 schemars.workspace = true
@@ -19,8 +24,8 @@ toml.workspace = true
 tonic.workspace = true
 
 [build-dependencies]
-prost-build.workspace = true
-tonic-build.workspace = true
+prost-build = { workspace = true, optional = true }
+tonic-build = { workspace = true, optional = true }
 
 [dev-dependencies]
 fs-err.workspace = true
