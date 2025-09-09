@@ -542,6 +542,9 @@ export function getActiveValidator(): SqlValidator | null {
   return validator
 }
 
+// Export new unified provider
+export { UnifiedSQLProvider, type SQLProviderConfig, type ISQLProvider } from "./UnifiedSQLProvider"
+
 // Export all types and classes for advanced usage
 export { NozzleCompletionProvider } from "./NozzleCompletionProvider"
 export { QueryContextAnalyzer } from "./QueryContextAnalyzer"
