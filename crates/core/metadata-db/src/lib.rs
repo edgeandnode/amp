@@ -5,7 +5,7 @@ use futures::{
     stream::{BoxStream, Stream},
 };
 use sqlx::{
-    postgres::{PgListener, PgNotification, types::PgInterval},
+    postgres::types::PgInterval,
     types::chrono::{DateTime, NaiveDateTime, Utc},
 };
 use thiserror::Error;
@@ -32,15 +32,17 @@ pub use self::{
     jobs::{
         Job, JobId, JobIdFromStrError, JobIdI64ConvError, JobIdU64Error, JobStatus,
         JobStatusUpdateError, JobWithDetails,
+        events::{JobNotifAction, JobNotifListener, JobNotifRecvError, JobNotification},
     },
     locations::{
         Location, LocationId, LocationIdFromStrError, LocationIdI64ConvError, LocationIdU64Error,
         LocationWithDetails,
+        events::{
+            LocationNotifListener, LocationNotifRecvError, LocationNotifSendError,
+            LocationNotification,
+        },
     },
-    workers::{
-        Worker, WorkerNodeId,
-        events::{JobNotifAction, JobNotifListener, JobNotifRecvError, JobNotification},
-    },
+    workers::{Worker, WorkerNodeId},
 };
 use crate::registry::{Registry, insert_dataset_to_registry};
 
@@ -65,11 +67,14 @@ pub enum Error {
     #[error("Error executing database query: {0}")]
     DbError(#[from] sqlx::Error),
 
-    #[error("Error sending notification: {0}")]
-    NotificationSendError(#[from] workers::events::JobNotifSendError),
+    #[error("Error sending job notification: {0}")]
+    JobNotificationSendError(#[from] jobs::events::JobNotifSendError),
 
-    #[error("Error receiving notification: {0}")]
-    NotificationRecvError(#[from] workers::events::JobNotifRecvError),
+    #[error("Error receiving job notification: {0}")]
+    JobNotificationRecvError(#[from] jobs::events::JobNotifRecvError),
+
+    #[error("Error sending location notification: {0}")]
+    LocationNotificationSendError(#[from] locations::events::LocationNotifSendError),
 
     #[error(
         "Multiple active locations found for dataset={0}, dataset_version={1}, table={2}: {3:?}"
@@ -273,7 +278,7 @@ impl MetadataDb {
 impl MetadataDb {
     /// Listen to the worker actions notification channel for job notifications
     pub async fn listen_for_job_notifications(&self) -> Result<JobNotifListener, Error> {
-        workers::events::listen_url(&self.url)
+        jobs::events::listen_url(&self.url)
             .await
             .map_err(Into::into)
     }
@@ -307,8 +312,7 @@ impl MetadataDb {
         locations::assign_job_writer(&mut *tx, locations, job_id).await?;
 
         // Notify the worker about the new job
-        workers::events::notify(&mut *tx, JobNotification::start(node_id.to_owned(), job_id))
-            .await?;
+        jobs::events::notify(&mut *tx, JobNotification::start(node_id.to_owned(), job_id)).await?;
 
         tx.commit().await?;
 
@@ -357,7 +361,7 @@ impl MetadataDb {
         }
 
         // Send notification to worker
-        workers::events::notify(&mut *tx, JobNotification::stop(node_id.clone(), *job_id)).await?;
+        jobs::events::notify(&mut *tx, JobNotification::stop(node_id.clone(), *job_id)).await?;
 
         tx.commit().await?;
         Ok(())
@@ -635,6 +639,20 @@ impl MetadataDb {
     pub async fn delete_location_by_id(&self, location_id: LocationId) -> Result<bool, Error> {
         Ok(locations::delete_by_id(&*self.pool, location_id).await?)
     }
+
+    /// Notify that a location has changed
+    #[instrument(skip(self), err)]
+    pub async fn notify_location_change(&self, location_id: LocationId) -> Result<(), Error> {
+        locations::events::notify(&*self.pool, location_id).await?;
+        Ok(())
+    }
+
+    /// Listen for location change notifications
+    pub async fn listen_for_location_notifications(&self) -> Result<LocationNotifListener, Error> {
+        locations::events::listen_url(&self.url)
+            .await
+            .map_err(Into::into)
+    }
 }
 
 /// File metadata-related API
@@ -716,53 +734,6 @@ impl MetadataDb {
         files::delete(&*self.pool, file_id)
             .await
             .map_err(Error::DbError)
-    }
-}
-
-/// Generic notification API
-impl MetadataDb {
-    #[instrument(skip(self), err)]
-    pub async fn notify(&self, channel_name: &str, payload: &str) -> Result<(), Error> {
-        sqlx::query("SELECT pg_notify($1, $2)")
-            .bind(channel_name)
-            .bind(payload)
-            .execute(&*self.pool)
-            .await?;
-        Ok(())
-    }
-
-    #[instrument(skip(self), err)]
-    pub async fn notify_location_change(&self, location_id: LocationId) -> Result<(), Error> {
-        self.notify("change-tracking", &location_id.to_string())
-            .await
-    }
-
-    /// Listens on a PostgreSQL notification channel using LISTEN.
-    ///
-    /// # Connection management
-    ///
-    /// This does not take a connection from the pool, but instead establishes a new connection
-    /// to the database. This connection is maintained for the lifetime of the stream.
-    ///
-    /// # Error cases
-    ///
-    /// This stream will generally not return `Err`, except on failure to estabilish the intial
-    /// connection, because connection errors are retried.
-    ///
-    /// # Delivery Guarantees
-    ///
-    /// - Notifications sent before the LISTEN command is issued will not be delivered.
-    /// - Notifications may be lost during automatic retry of a closed DB connection.
-    #[instrument(skip(self), err)]
-    pub async fn listen(
-        &self,
-        channel_name: &str,
-    ) -> Result<impl Stream<Item = Result<PgNotification, sqlx::Error>> + use<>, Error> {
-        let mut channel = PgListener::connect(&self.url)
-            .await
-            .map_err(Error::ConnectionError)?;
-        channel.listen(channel_name).await.map_err(Error::DbError)?;
-        Ok(channel.into_stream())
     }
 }
 

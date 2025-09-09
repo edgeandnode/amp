@@ -1,4 +1,4 @@
-//! In-tree DB integration tests for the workers events system
+//! In-tree DB integration tests for the job events system
 
 use std::pin::pin;
 
@@ -8,11 +8,11 @@ use tokio::time::{Duration, timeout};
 
 use crate::{
     conn::DbConn,
-    jobs::JobId,
-    workers::{
+    jobs::{
+        JobId,
         events::{self, JobNotifAction, JobNotification},
-        node_id::WorkerNodeId,
     },
+    workers::WorkerNodeId,
 };
 
 #[tokio::test]
@@ -248,7 +248,7 @@ async fn invalid_payload_deserialization_error() {
     let mut stream = std::pin::pin!(listener.into_stream());
 
     //* When - Send invalid JSON payload directly via PostgreSQL
-    sqlx::query("SELECT pg_notify('worker_actions', $1)")
+    sqlx::query("SELECT pg_notify('job_actions', $1)")
         .bind("{invalid json}")
         .execute(&mut *conn)
         .await

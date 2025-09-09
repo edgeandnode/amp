@@ -8,6 +8,7 @@ use sqlx::types::{
     chrono::{DateTime, Utc},
 };
 
+pub mod events;
 mod job_id;
 mod job_status;
 mod pagination;
@@ -312,5 +313,6 @@ pub struct JobWithDetails {
 /// In-tree integration tests
 #[cfg(test)]
 mod tests {
+    mod it_events;
     mod it_jobs;
 }

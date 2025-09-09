@@ -69,12 +69,6 @@ tokio = { version = "1.36.0", features = [
 tokio-stream = "0.1.17"
 tokio-util = { version = "0.7.15", features = ["rt"] }
 url = { version = "2.5.0", features = ["serde"] }
-sqlx = { version = "0.8.3", features = [
-    "runtime-tokio",
-    "postgres",
-    "migrate",
-    "macros",
-] }
 uuid = { version = "1.11.0", features = ["v7"] }
 semver = { version = "1.0.18", features = ["serde"] }
 rand = "0.9.0"
