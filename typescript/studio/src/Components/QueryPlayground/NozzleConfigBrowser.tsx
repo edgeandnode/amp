@@ -3,34 +3,36 @@
 import { Accordion } from "@base-ui-components/react/accordion"
 import { Tooltip } from "@base-ui-components/react/tooltip"
 import { FolderIcon, FolderOpenIcon, PlusIcon } from "@graphprotocol/gds-react/icons"
-import type { QueryableEvent } from "nozzl/Studio/Model"
+import { String } from "effect"
+import type { Table } from "nozzl/Model"
 
-import { useQueryableEventsQuery } from "@/hooks/useQueryableEventsQuery"
+import { useNozzleConfigStreamQuery } from "@/hooks/useNozzleConfigStream"
 
 import { ArrowIcon } from "../ArrowIcon.tsx"
 
-export type SchemaBrowserProps = {
-  onEventSelected: (event: QueryableEvent) => void
+export type NozzleConfigBrowserProps = {
+  onTableSelected: (table: string, def: Table) => void
 }
-export function SchemaBrowser({
-  onEventSelected,
-}: Readonly<SchemaBrowserProps>) {
-  const { data: queryableEvents } = useQueryableEventsQuery()
+export function NozzleConfigBrowser({
+  onTableSelected,
+}: Readonly<NozzleConfigBrowserProps>) {
+  const { data: config } = useNozzleConfigStreamQuery()
+
+  if (config == null) {
+    return null
+  }
 
   return (
     <div className="flex flex-col gap-y-4 p-6">
       <div className="flex flex-col gap-y-1">
-        <p className="text-14">Contract Events</p>
+        <p className="text-14">Dataset Config</p>
         <p className="text-10 text-space-700">
-          Events parsed from your contract ABIs.
+          Tables derived from your current nozzle config.
         </p>
       </div>
       <Accordion.Root className="w-full box-border flex flex-col justify-center gap-y-3">
-        {queryableEvents.map((event) => (
-          <Accordion.Item
-            key={event.signature}
-            className="flex flex-col gap-y-2"
-          >
+        {Object.entries(config.tables).map(([table, def]) => (
+          <Accordion.Item key={table} className="flex flex-col gap-y-2">
             <Accordion.Header className="m-0 flex items-start gap-x-1 px-0 py-2">
               <Accordion.Trigger
                 type="button"
@@ -51,10 +53,7 @@ export function SchemaBrowser({
                   alt=""
                 />
                 <div className="w-full flex flex-col gap-y-1 items-center justify-start">
-                  <span className="self-start text-14">{event.name}</span>
-                  <span className="text-12 text-space-700 self-start">
-                    {event.source}
-                  </span>
+                  <span className="self-start text-14">{table}</span>
                 </div>
               </Accordion.Trigger>
               <Tooltip.Provider>
@@ -62,10 +61,11 @@ export function SchemaBrowser({
                   <Tooltip.Trigger
                     type="button"
                     className="rounded-full p-2 bg-space-1200 hover:bg-space-1500 cursor-pointer inline-flex items-center justify-center shadow"
-                    onClick={() => onEventSelected(event)}
+                    onClick={() =>
+                      onTableSelected(table, def)}
                   >
                     <PlusIcon
-                      alt={`Add ${event.name}`}
+                      alt={`Add ${table}`}
                       size={4}
                       className="text-white"
                       aria-hidden="true"
@@ -84,20 +84,12 @@ export function SchemaBrowser({
                 </Tooltip.Root>
               </Tooltip.Provider>
             </Accordion.Header>
-            <Accordion.Panel className="box-border overflow-y-auto overflow-x-hidden border-l border-white/20 ml-4 pl-1">
-              <div className="w-full flex flex-col gap-y-1">
-                {event.params.map((param) => (
-                  <div
-                    key={`${event.signature}__${param.name}`}
-                    className="w-full flex items-center justify-between text-sm border-none outline-none px-4 py-1.5 rounded-4"
-                  >
-                    <span className="text-14">{param.name}</span>
-                    <span className="ml-auto text-purple-200">
-                      {param.datatype}
-                    </span>
-                  </div>
-                ))}
-              </div>
+            <Accordion.Panel className="box-border overflow-y-auto overflow-x-hidden ml-4">
+              <pre className="bg-black text-white p-3 rounded-4 text-12 overflow-x-auto">
+                <code className="language-sql">
+                  {String.trim(def.input.sql)}
+                </code>
+              </pre>
             </Accordion.Panel>
           </Accordion.Item>
         ))}

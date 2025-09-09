@@ -13,7 +13,9 @@ import { useUDFSuspenseQuery } from "@/hooks/useUDFQuery"
 import { UnifiedSQLProvider } from "@/services/sql/UnifiedSQLProvider"
 
 import { ErrorMessages } from "../Form/ErrorMessages"
+// eslint-disable-next-line @effect/dprint
 import { useFieldContext } from "../Form/form"
+// eslint-disable-next-line import-x/newline-after-import
 ;(self as any).MonacoEnvironment = {
   getWorker() {
     return new editorWorker()

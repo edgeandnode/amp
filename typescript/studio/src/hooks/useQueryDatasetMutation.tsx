@@ -5,7 +5,7 @@ import { mutationOptions, useMutation } from "@tanstack/react-query"
 
 import * as Constants from "../constants.js"
 
-const datasetMutationOptions = mutationOptions<
+const queryDatasetMutationOptions = mutationOptions<
   ReadonlyArray<any>,
   Error,
   Readonly<{ query: string }>
@@ -17,11 +17,13 @@ const datasetMutationOptions = mutationOptions<
         method: "POST",
         body: JSON.stringify(vars),
       })
+
       if (response.status !== 200) {
         throw new Error(
           `Query endpoint did not return 200 [${response.status}]`,
         )
       }
+      /** @todo get a better error message from ArrowFlight */
       const json = await response.json()
 
       return json as ReadonlyArray<any>
@@ -39,7 +41,7 @@ export function useDatasetsMutation(
   > = {},
 ) {
   return useMutation({
-    ...datasetMutationOptions,
+    ...queryDatasetMutationOptions,
     ...options,
   })
 }

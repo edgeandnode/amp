@@ -1,6 +1,6 @@
 import { FileSystem, Path } from "@effect/platform"
 import { NodeFileSystem } from "@effect/platform-node"
-import { Array, Cause, Console, Effect, Either, Option, pipe, Schema, Stream } from "effect"
+import { Array, Cause, Chunk, Console, Effect, Either, Option, pipe, Schema, Stream } from "effect"
 import { load } from "js-toml"
 
 import * as Model from "./Model.js"
@@ -275,6 +275,27 @@ export class FoundryQueryableEventResolver extends Effect.Service<FoundryQueryab
         })
 
       return {
+        events: Effect.fn("QueryableEventsParser")(function*(cwd: string = ".") {
+          const parsedFoundryConfig = yield* fetchAndParseFoundryConfigToml(cwd)
+          if (Option.isNone(parsedFoundryConfig)) {
+            return Chunk.empty<Model.QueryableEvent>()
+          }
+          const foundryConfig = parsedFoundryConfig.value
+          const outpath = path.resolve(cwd, foundryConfig.profile.default.out)
+
+          // Read directory and process files directly
+          const files = yield* fs.readDirectory(outpath, { recursive: true })
+          const filteredFiles = Array.filter(files, (filepath) => Utils.foundryOutputPathIncluded(filepath))
+
+          // Decode events from each ABI file
+          const eventsArrays = yield* Effect.all(
+            Array.map(filteredFiles, (filepath) => decodeEventsFromAbi(outpath, filepath)),
+            { concurrency: "unbounded" },
+          )
+
+          // Flatten all events into a single Chunk
+          return Chunk.fromIterable(eventsArrays.flat())
+        }),
         queryableEventsStream,
         sources() {
           return Effect.succeed([

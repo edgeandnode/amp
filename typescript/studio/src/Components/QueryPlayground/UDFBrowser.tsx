@@ -2,6 +2,7 @@
 
 import { Accordion } from "@base-ui-components/react/accordion"
 import { FolderIcon, FolderOpenIcon } from "@graphprotocol/gds-react/icons"
+import { String } from "effect"
 
 import { useUDFSuspenseQuery } from "../../hooks/useUDFQuery"
 
@@ -12,7 +13,12 @@ export function UDFBrowser() {
 
   return (
     <div className="flex flex-col gap-y-4 p-6">
-      <p className="text-14">User Defined Functions (UDFs)</p>
+      <div className="flex flex-col gap-y-1">
+        <p className="text-14">User Defined Functions (UDFs)</p>
+        <p className="text-10 text-space-700">
+          Nozzle provided "built-in" SQL functions that can be called to manipulate the query data.
+        </p>
+      </div>
       <Accordion.Root className="w-full box-border flex flex-col justify-center gap-y-3">
         {userDefinedFunctions.map((udf) => (
           <Accordion.Item key={udf.name} className="flex flex-col gap-y-2">
@@ -40,14 +46,11 @@ export function UDFBrowser() {
                 </div>
               </Accordion.Trigger>
             </Accordion.Header>
-            <Accordion.Panel className="box-border overflow-y-auto overflow-x-hidden border-l border-white/20 ml-4 pl-4">
+            <Accordion.Panel className="box-border overflow-y-auto overflow-x-hidden ml-4">
               {/** Use actual code component here. this is garbage */}
-              <code
-                className="font-mono text-xs p-4 rounded-md bg-gray-50 dark:bg-black"
-                key={udf.name}
-              >
-                {udf.sql}
-              </code>
+              <pre className="bg-black text-white p-3 rounded-4 text-12 overflow-x-auto">
+                <code className="language-sql">{String.trim(udf.sql)}</code>
+              </pre>
             </Accordion.Panel>
           </Accordion.Item>
         ))}
