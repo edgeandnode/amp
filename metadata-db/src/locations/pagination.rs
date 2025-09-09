@@ -38,7 +38,7 @@ where
 pub async fn list_next_page<'c, E>(
     exe: E,
     limit: i64,
-    last_location_id: LocationId,
+    last_id: LocationId,
 ) -> Result<Vec<Location>, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
@@ -60,7 +60,7 @@ where
 
     let res = sqlx::query_as(query)
         .bind(limit)
-        .bind(last_location_id)
+        .bind(last_id)
         .fetch_all(exe)
         .await?;
     Ok(res)

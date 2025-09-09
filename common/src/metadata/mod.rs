@@ -8,7 +8,7 @@ use datafusion::parquet::{
     errors::ParquetError,
     file::metadata::{ParquetMetaData, ParquetMetaDataWriter},
 };
-use metadata_db::{FileId, FileMetadataRow, FooterBytes, LocationId};
+use metadata_db::{FileId, FileMetadata as FileMetadataRow, FooterBytes, LocationId};
 use object_store::{ObjectMeta, ObjectStore, path::Path};
 use url::Url;
 

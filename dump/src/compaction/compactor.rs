@@ -180,7 +180,7 @@ impl ParquetFileWriterOutput {
         let footer = &self.footer;
 
         metadata_db
-            .insert_metadata(
+            .register_file(
                 location_id,
                 file_name,
                 object_size,

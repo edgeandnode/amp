@@ -363,7 +363,7 @@ impl PhysicalTable {
             } = object_meta;
 
             metadata_db
-                .insert_metadata(
+                .register_file(
                     location_id,
                     file_name,
                     object_size,
@@ -576,7 +576,7 @@ impl PhysicalTable {
         &'a self,
     ) -> impl Stream<Item = Result<FileMetadata, BoxError>> + 'a {
         self.metadata_db
-            .stream_file_metadata(self.location_id)
+            .stream_files_by_location_id(self.location_id)
             .map(|row| row?.try_into())
     }
 }

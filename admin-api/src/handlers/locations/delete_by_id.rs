@@ -136,14 +136,14 @@ pub async fn handler(
 
     let file_paths: Vec<ObjectPath> = ctx
         .metadata_db
-        .stream_file_metadata(location.id)
+        .stream_files_by_location_id(location.id)
         .try_filter_map(|file_metadata| async move {
             match ObjectPath::parse(&file_metadata.file_name) {
                 Ok(path1) => Ok(Some(path1)),
                 Err(path_error) => {
                     tracing::warn!(
                         location_id = %location.id,
-                        file_metadata_id = file_metadata.id,
+                        file_metadata_id = %file_metadata.id,
                         file_name = %file_metadata.file_name,
                         error = ?path_error,
                         "Invalid file path filtered out from deletion"

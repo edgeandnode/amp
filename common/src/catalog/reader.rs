@@ -103,7 +103,7 @@ impl AsyncFileReader for NozzleReader {
                 .fetch(cache_key, || async move {
                     // Cache miss, fetch from database
                     let footer = metadata_db
-                        .get_footer_bytes(cache_key)
+                        .get_file_footer_bytes(cache_key)
                         .await
                         .map_err(|e| foyer::Error::Other(e.into()))?;
 
