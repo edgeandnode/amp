@@ -2,7 +2,7 @@
 
 A CLI to dump extractor interfaces to parquet files. Currently supports dumping EVM Firehose to a simplified schema and Substreams with schema inferred from the manifest.
 
-First, you will need to setup your config file and point `NOZZLE_CONFIG` to it. Please refer to [config.md](../docs/config.md) and [the sample config](../config.sample.toml) for that initial setup. Then also see the definition format for the desired dataset, such as the currently supported [firehose](../firehose-datasets/config.md) or [substreams](../substreams-datasets/config.md) datasets.
+First, you will need to setup your config file and point `NOZZLE_CONFIG` to it. Please refer to [config.md](../../../docs/config.md) and [the sample config](../../../config.sample.toml) for that initial setup. Then also see the definition format for the desired dataset, such as the currently supported [firehose](../../extractors/firehose/config.md) or [substreams](../../extractors/substreams/config.md) datasets.
 
 Once you have a config with a dataset definition directory setup, dump becomes very easy to use, as you can simply refer to the dataset by name. An example usage to dump first four million blocks of a dataset named `eth_firehose`, running two parallel jobs:
 
