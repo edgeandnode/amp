@@ -188,9 +188,7 @@ pub fn with_reorg(
             };
             let ranges = batch.metadata.ranges.clone();
             let invalidation: Vec<InvalidationRange> = ranges.iter().filter_map(|range| {
-                let Some(prev_range) = prev_ranges.iter().find(|r| r.network == range.network) else {
-                    return None;
-                };
+                let prev_range = prev_ranges.iter().find(|r| r.network == range.network)?;
                 if range.start() <= prev_range.end() {
                     return Some(InvalidationRange {
                         network: range.network.clone(),
