@@ -143,8 +143,8 @@ importers:
         specifier: ^2.5.1
         version: 2.5.1
       viem:
-        specifier: ^2.37.3
-        version: 2.37.3(typescript@5.9.2)(zod@3.24.4)
+        specifier: ^2.37.4
+        version: 2.37.4(typescript@5.9.2)(zod@3.24.4)
     devDependencies:
       '@bufbuild/buf':
         specifier: ^1.57.0
@@ -2523,8 +2523,8 @@ packages:
     resolution: {integrity: sha512-0/A9rDy9P7cJ+8w1c9WD9V//9Wj15Ce2MPz8Ri6032usz+NfePxx5AcN3bN+r6ZL6jEo066/yNYB3tn4pQEx+A==}
     hasBin: true
 
-  viem@2.37.3:
-    resolution: {integrity: sha512-hwoZqkFSy13GCFzIftgfIH8hNENvdlcHIvtLt73w91tL6rKmZjQisXWTahi1Vn5of8/JQ1FBKfwUus3YkDXwbw==}
+  viem@2.37.4:
+    resolution: {integrity: sha512-1ig5O6l1wJmaw3yrSrUimjRLQEZon2ymTqSDjdntu6Bry1/tLC2GClXeS3SiCzrifpLxzfCLQWDITYVTBA10KA==}
     peerDependencies:
       typescript: '>=5.0.4'
     peerDependenciesMeta:
@@ -4782,7 +4782,7 @@ snapshots:
 
   uuid@11.1.0: {}
 
-  viem@2.37.3(typescript@5.9.2)(zod@3.24.4):
+  viem@2.37.4(typescript@5.9.2)(zod@3.24.4):
     dependencies:
       '@noble/curves': 1.9.1
       '@noble/hashes': 1.8.0

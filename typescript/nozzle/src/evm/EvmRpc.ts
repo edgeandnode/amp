@@ -35,7 +35,7 @@ export class EvmRpc extends Context.Tag("Nozzle/EvmRpc")<EvmRpc, {
    *
    * In case of a reorg, the stream will be reset to the latest block number.
    */
-  readonly streamBlocks: Stream.Stream<Viem.Block<bigint, false, "latest">, EvmRpcError>
+  readonly streamBlocks: Stream.Stream<bigint, EvmRpcError>
 }>() {}
 
 export class EvmRpcError extends Data.TaggedError("EvmRpcError")<{
@@ -62,23 +62,25 @@ const make = (url: string) =>
       })
     })
 
-    const streamBlocks = Stream.asyncPush<Viem.Block<bigint, false, "latest">, EvmRpcError>((emit) =>
-      Effect.acquireRelease(
-        Effect.try({
-          try: () =>
-            rpc.watchBlocks({
-              onBlock: (block) => emit.single(block),
-              onError: (cause) => emit.fail(new EvmRpcError({ message: "Failed to watch blocks", cause })),
-              emitOnBegin: true,
-            }),
-          catch: (cause) => new EvmRpcError({ message: "Failed to watch blocks", cause }),
-        }),
-        (handle) => Effect.sync(handle).pipe(Effect.ignore),
-      )
+    const streamBlocks = Stream.concat(
+      Stream.fromEffect(getLatestBlockNumber),
+      Stream.asyncPush<bigint, EvmRpcError>((emit) =>
+        Effect.acquireRelease(
+          Effect.try({
+            try: () =>
+              rpc.watchBlockNumber({
+                onBlockNumber: (block) => emit.single(block),
+                onError: (cause) => emit.fail(new EvmRpcError({ message: "Failed to watch blocks", cause })),
+              }),
+            catch: (cause) => new EvmRpcError({ message: "Failed to watch blocks", cause }),
+          }),
+          (handle) => Effect.sync(handle).pipe(Effect.ignore),
+        )
+      ),
     )
 
     const sharedBlocks = yield* streamBlocks.pipe(
-      Stream.changesWith((a, b) => a.hash === b.hash),
+      Stream.changes,
       Stream.retry(
         Schedule.exponential("1 second").pipe(
           Schedule.jittered,
