@@ -9,8 +9,8 @@ import editorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker"
 import { useEffect, useRef } from "react"
 
 import { useSourcesSuspenseQuery } from "@/hooks/useSourcesQuery"
-import { useUDFSuspenseQuery } from "@/hooks/useUDFQuery"
 import { UnifiedSQLProvider } from "@/services/sql/UnifiedSQLProvider"
+import { USER_DEFINED_FUNCTIONS } from "@/constants"
 
 import { ErrorMessages } from "../Form/ErrorMessages"
 // eslint-disable-next-line @effect/dprint
@@ -46,7 +46,6 @@ export function Editor({
 
   // Data hooks for SQL intellisense (static data - loaded once)
   const sourcesQuery = useSourcesSuspenseQuery()
-  const udfQuery = useUDFSuspenseQuery()
 
   // Single SQL provider ref
   const sqlProviderRef = useRef<UnifiedSQLProvider | null>(null)
@@ -110,10 +109,10 @@ export function Editor({
           )
 
           // Initialize unified SQL provider with static data
-          if (sourcesQuery.data && udfQuery.data) {
+          if (sourcesQuery.data) {
             sqlProviderRef.current = new UnifiedSQLProvider(
               sourcesQuery.data,
-              udfQuery.data,
+              USER_DEFINED_FUNCTIONS,
               {
                 validationLevel,
                 enablePartialValidation,
@@ -127,7 +126,7 @@ export function Editor({
 
             console.debug("[Editor] UnifiedSQLProvider initialized", {
               tableCount: sourcesQuery.data.length,
-              udfCount: udfQuery.data.length,
+              udfCount: USER_DEFINED_FUNCTIONS.length,
             })
           }
         }}
