@@ -717,7 +717,7 @@ pub async fn spawn_compaction_and_await_completion(
         config,
         true,
         false,
-        Duration::ZERO,
+        Duration::from_millis(100),
     )
     .await;
 }

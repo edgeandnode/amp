@@ -242,7 +242,7 @@ impl Display for SegmentSize {
             size_string.push_str("null");
         }
 
-        write!(f, "{{{}}}", size_string)
+        write!(f, "{{ {} }}", size_string)
     }
 }
 
@@ -486,7 +486,8 @@ impl From<&CompactionConfig> for SegmentSizeLimit {
 
 impl Display for SegmentSizeLimit {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+        let size_string = format!("{}", self.0);
+        write!(f, "{}", size_string.replace("null", "unbounded"))
     }
 }
 
@@ -669,8 +670,16 @@ pub mod test {
         };
         assert_eq!(
             format!("{size}"),
-            r#"{"length": 12, "blocks": 100, "bytes": 1000, "rows": 500}"#
+            "{ length: 12, blocks: 100, bytes: 1000, rows: 500 }"
         );
+        let size = super::SegmentSize {
+            length: 0,
+            blocks: -1,
+            bytes: -1,
+            rows: -1,
+        };
+
+        assert_eq!(format!("{size}"), "{ null }");
     }
 
     #[test]
@@ -678,7 +687,9 @@ pub mod test {
         let limit = super::SegmentSizeLimit::new(100, 1000, -1, 2);
         assert_eq!(
             format!("{limit}"),
-            r#"{"length": 2, "blocks": 100, "bytes": 1000}"#
+            "{ length: 2, blocks: 100, bytes: 1000 }"
         );
+        let limit = super::SegmentSizeLimit::new(-1, -1, -1, 0);
+        assert_eq!(format!("{limit}"), "{ unbounded }");
     }
 }
