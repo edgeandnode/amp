@@ -27,7 +27,8 @@ use self::conn::{DbConn, DbConnPool};
 pub use self::temp::{KEEP_TEMP_DIRS, temp_metadata_db};
 pub use self::{
     files::{
-        FileId, FileIdFromStrError, FileIdI64ConvError, FileIdU64Error, FileMetadata, FooterBytes,
+        FileId, FileIdFromStrError, FileIdI64ConvError, FileIdU64Error, FileMetadata,
+        FileMetadataWithDetails, FooterBytes,
     },
     jobs::{
         Job, JobId, JobIdFromStrError, JobIdI64ConvError, JobIdU64Error, JobStatus,
@@ -689,11 +690,12 @@ impl MetadataDb {
     ///
     /// Returns a stream of file metadata rows that includes information from both
     /// the file_metadata and locations tables via a JOIN operation.
-    pub fn stream_files_by_location_id(
+    pub fn stream_files_by_location_id_with_details(
         &self,
         location_id: LocationId,
-    ) -> impl Stream<Item = Result<FileMetadata, Error>> + '_ {
-        files::stream(&*self.pool, location_id).map(|result| result.map_err(Error::DbError))
+    ) -> impl Stream<Item = Result<FileMetadataWithDetails, Error>> + '_ {
+        files::stream_with_details(&*self.pool, location_id)
+            .map(|result| result.map_err(Error::DbError))
     }
 
     /// List file metadata records for a specific location with cursor-based pagination support
@@ -716,6 +718,20 @@ impl MetadataDb {
             }
             None => Ok(files::pagination::list_first_page(&*self.pool, location_id, limit).await?),
         }
+    }
+
+    /// Get file metadata by ID with detailed location information
+    ///
+    /// Retrieves a single file metadata record joined with location data.
+    /// Returns the complete file metadata including location URL needed for object store operations.
+    /// Returns `None` if the file ID is not found.
+    pub async fn get_file_by_id_with_details(
+        &self,
+        file_id: FileId,
+    ) -> Result<Option<FileMetadataWithDetails>, Error> {
+        files::get_by_id_with_details(&*self.pool, file_id)
+            .await
+            .map_err(Error::DbError)
     }
 
     /// Retrieves footer bytes for a specific file.

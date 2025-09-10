@@ -136,7 +136,7 @@ pub async fn handler(
 
     let file_paths: Vec<ObjectPath> = ctx
         .metadata_db
-        .stream_files_by_location_id(location.id)
+        .stream_files_by_location_id_with_details(location.id)
         .try_filter_map(|file_metadata| async move {
             match ObjectPath::parse(&file_metadata.file_name) {
                 Ok(path1) => Ok(Some(path1)),
