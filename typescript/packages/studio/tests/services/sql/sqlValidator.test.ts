@@ -18,23 +18,11 @@ import type { DatasetSource } from 'nozzl/Studio/Model'
 import type { UserDefinedFunction, CompletionConfig } from '../../../src/services/sql/types'
 import { mockMetadata } from './fixtures/mockMetadata'
 import { mockUDFs } from './fixtures/mockUDFs'
-import * as monaco from 'monaco-editor'
+import { MarkerSeverity } from "monaco-editor/esm/vs/editor/editor.api"
 
-// Test fixtures - convert existing fixtures to the format expected by SqlValidator  
-const convertMetadata = (metadata: ReadonlyArray<DatasetSource>): DatasetSource[] => {
-  return metadata.map(dataset => ({
-    dataset_name: dataset.source.split('.')[0],
-    table_name: dataset.source.split('.')[1] || dataset.destination,
-    column_names: dataset.metadata_columns.map(col => col.name),
-    column_types: dataset.metadata_columns.map(col => col.datatype),
-    dataset_size: '100MB', // Mock value
-    record_count: 50000,    // Mock value
-    column_stats: {}        // Mock value
-  }))
-}
-
-const testDatasets = convertMetadata(mockMetadata)
-const testUdfs: UserDefinedFunction[] = mockUDFs
+// Use mock data directly - SqlValidator expects DatasetSource format
+const testDatasets = [...mockMetadata] as DatasetSource[]
+const testUdfs: UserDefinedFunction[] = [...mockUDFs]
 
 describe('SqlValidator', () => {
   let validator: SqlValidator
@@ -76,7 +64,7 @@ describe('SqlValidator', () => {
       expect(errors).toHaveLength(1)
       expect(errors[0].code).toBe('UNKNOWN_TABLE')
       expect(errors[0].message).toContain('unknown_table')
-      expect(errors[0].severity).toBe(monaco.MarkerSeverity.Error)
+      expect(errors[0].severity).toBe(MarkerSeverity.Error)
     })
 
     test('should suggest similar table names', () => {
@@ -129,7 +117,7 @@ describe('SqlValidator', () => {
       expect(errors).toHaveLength(1)
       expect(errors[0].code).toBe('COLUMN_NOT_FOUND')
       expect(errors[0].message).toContain('unknown_column')
-      expect(errors[0].severity).toBe(monaco.MarkerSeverity.Error)
+      expect(errors[0].severity).toBe(MarkerSeverity.Error)
     })
 
     test('should suggest similar column names', () => {
@@ -159,7 +147,7 @@ describe('SqlValidator', () => {
       
       expect(errors).toHaveLength(1)
       expect(errors[0].code).toBe('AMBIGUOUS_COLUMN')
-      expect(errors[0].severity).toBe(monaco.MarkerSeverity.Warning)
+      expect(errors[0].severity).toBe(MarkerSeverity.Warning)
       expect(errors[0].message).toContain('ambiguous')
     })
 
@@ -169,7 +157,7 @@ describe('SqlValidator', () => {
       
       expect(errors).toHaveLength(1)
       expect(errors[0].message).toContain('Available columns:')
-      expect(errors[0].data?.availableColumns).toEqual(testDatasets[0].column_names)
+      expect(errors[0].data?.availableColumns).toEqual(testDatasets[0].metadata_columns.map(col => col.name))
     })
   })
 
@@ -187,7 +175,7 @@ describe('SqlValidator', () => {
       
       expect(errors).toHaveLength(1)
       expect(errors[0].code).toBe('UNMATCHED_OPENING_PAREN')
-      expect(errors[0].severity).toBe(monaco.MarkerSeverity.Error)
+      expect(errors[0].severity).toBe(MarkerSeverity.Error)
     })
 
     test('should detect unmatched closing parentheses', () => {
@@ -196,7 +184,7 @@ describe('SqlValidator', () => {
       
       expect(errors).toHaveLength(1)
       expect(errors[0].code).toBe('UNMATCHED_CLOSING_PAREN')
-      expect(errors[0].severity).toBe(monaco.MarkerSeverity.Error)
+      expect(errors[0].severity).toBe(MarkerSeverity.Error)
     })
 
     test('should handle nested parentheses', () => {
@@ -212,7 +200,7 @@ describe('SqlValidator', () => {
       
       expect(errors).toHaveLength(2) // second error is a COLUMN_NOT_FOUND since FROM table is not defined
       expect(errors[0].code).toBe('MISSING_FROM_CLAUSE')
-      expect(errors[0].severity).toBe(monaco.MarkerSeverity.Warning)
+      expect(errors[0].severity).toBe(MarkerSeverity.Warning)
     })
   })
 
@@ -361,7 +349,7 @@ WHERE invalid_column = 1`
     test('should handle large queries efficiently', () => {
       const largeQuery = `
         SELECT 
-          ${testDatasets[0].column_names.join(',\n          ')}
+          ${testDatasets[0].metadata_columns.map(col => col.name).join(',\n          ')}
         FROM anvil.logs
         WHERE block_number > 100
           AND transaction_hash IS NOT NULL
