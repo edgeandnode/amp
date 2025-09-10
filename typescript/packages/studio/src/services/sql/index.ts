@@ -29,13 +29,12 @@ import type { editor, IDisposable, Position } from "monaco-editor/esm/vs/editor/
 import * as monaco from "monaco-editor/esm/vs/editor/editor.api"
 import type { DatasetSource } from "nozzl/Studio/Model"
 
-import { NozzleCompletionProvider } from "./NozzleCompletionProvider"
-import { QueryContextAnalyzer } from "./QueryContextAnalyzer"
-import { SqlValidator } from "./sqlValidator"
-import type { CompletionConfig, DisposableHandle, PerformanceMetrics, UserDefinedFunction } from "./types"
-import { UdfSnippetGenerator } from "./UDFSnippetGenerator"
-
-import { DEFAULT_COMPLETION_CONFIG } from "./types"
+import { NozzleCompletionProvider } from "./NozzleCompletionProvider.ts"
+import { QueryContextAnalyzer } from "./QueryContextAnalyzer.ts"
+import { SqlValidator } from "./SqlValidator.ts"
+import type { CompletionConfig, DisposableHandle, PerformanceMetrics, UserDefinedFunction } from "./types.ts"
+import { DEFAULT_COMPLETION_CONFIG } from "./types.ts"
+import { UdfSnippetGenerator } from "./UDFSnippetGenerator.ts"
 
 /**
  * SQL Provider Manager
@@ -55,6 +54,10 @@ class SqlProviderManager {
   private signatureDisposable?: IDisposable | undefined
 
   private isDisposed = false
+
+  get disposed(): boolean {
+    return this.isDisposed
+  }
   private metrics: PerformanceMetrics = {
     totalRequests: 0,
     averageResponseTime: 0,
@@ -62,6 +65,21 @@ class SqlProviderManager {
     failureCount: 0,
     lastUpdate: Date.now(),
   }
+
+  private static readonly FALLBACK_KEYWORDS = [
+    "SELECT",
+    "FROM",
+    "WHERE",
+    "JOIN",
+    "INNER JOIN",
+    "LEFT JOIN",
+    "GROUP BY",
+    "ORDER BY",
+    "HAVING",
+    "LIMIT",
+    "DISTINCT",
+    "AS",
+  ] as const
 
   constructor(
     private metadata: ReadonlyArray<DatasetSource>,
@@ -88,60 +106,24 @@ class SqlProviderManager {
         this.config,
       )
       this.snippetGenerator = new UdfSnippetGenerator()
-      this.validator = new SqlValidator([...this.metadata], [...this.udfs], this.config)
+      this.validator = new SqlValidator(this.metadata, this.udfs, this.config)
 
       // Register completion provider
       this.completionDisposable = monaco.languages.registerCompletionItemProvider("sql", {
-        provideCompletionItems: async (model, position, context, token) => {
-          const startTime = performance.now()
-          try {
-            this.metrics.totalRequests++
-
-            const result = await this.completionProvider!.provideCompletionItems(model, position, context, token)
-
-            const duration = performance.now() - startTime
-            this.updateMetrics(duration, true)
-
-            return result
-          } catch (error) {
-            const duration = performance.now() - startTime
-            this.updateMetrics(duration, false)
-            this.logError("Completion provider failed", error)
-
-            // Return fallback completions
-            return {
-              suggestions: this.createFallbackCompletions(position).map((suggestion) => suggestion),
-            }
-          }
-        },
-        // Trigger completions on space, dot, and newline
+        provideCompletionItems: this.handleCompletionRequest.bind(this),
         triggerCharacters: [" ", ".", "\n", "\t"],
       })
 
       // Register hover provider for UDF documentation
       this.hoverDisposable = monaco.languages.registerHoverProvider("sql", {
-        provideHover: (model, position) => {
-          try {
-            return this.provideHover(model, position)
-          } catch (error) {
-            this.logError("Hover provider failed", error)
-            return null
-          }
-        },
+        provideHover: this.handleHoverRequest.bind(this),
       })
 
       // Register signature help provider for UDF parameters
       this.signatureDisposable = monaco.languages.registerSignatureHelpProvider("sql", {
         signatureHelpTriggerCharacters: ["(", ","],
         signatureHelpRetriggerCharacters: [","],
-        provideSignatureHelp: (model, position) => {
-          try {
-            return this.provideSignatureHelp(model, position)
-          } catch (error) {
-            this.logError("Signature help provider failed", error)
-            return null
-          }
-        },
+        provideSignatureHelp: this.handleSignatureHelpRequest.bind(this),
       })
 
       this.logDebug("Nozzle SQL providers setup completed successfully")
@@ -185,7 +167,7 @@ class SqlProviderManager {
       }
 
       if (this.validator) {
-        this.validator.updateData([...metadata], [...udfs])
+        this.validator.updateData(metadata, udfs)
       }
 
       this.logDebug("Provider data updated", {
@@ -274,6 +256,70 @@ class SqlProviderManager {
   }
 
   /**
+   * Handle completion requests with metrics and error handling
+   * @private
+   */
+  private async handleCompletionRequest(
+    model: editor.ITextModel,
+    position: Position,
+    context: monaco.languages.CompletionContext,
+    token: monaco.CancellationToken,
+  ): Promise<monaco.languages.CompletionList> {
+    const startTime = performance.now()
+    try {
+      this.metrics.totalRequests++
+
+      if (!this.completionProvider) {
+        return { suggestions: [] }
+      }
+
+      const result = await this.completionProvider.provideCompletionItems(model, position, context, token)
+      const duration = performance.now() - startTime
+      this.updateMetrics(duration, true)
+
+      return result || { suggestions: [] }
+    } catch (error) {
+      const duration = performance.now() - startTime
+      this.updateMetrics(duration, false)
+      this.logError("Completion provider failed", error)
+
+      return { suggestions: this.createFallbackCompletions(position) }
+    }
+  }
+
+  /**
+   * Handle hover requests with error handling
+   * @private
+   */
+  private handleHoverRequest(
+    model: editor.ITextModel,
+    position: Position,
+  ): monaco.languages.ProviderResult<monaco.languages.Hover> {
+    try {
+      return this.provideHover(model, position)
+    } catch (error) {
+      this.logError("Hover provider failed", error)
+      return null
+    }
+  }
+
+  /**
+   * Handle signature help requests with error handling
+   * @private
+   */
+  private handleSignatureHelpRequest(
+    model: editor.ITextModel,
+    position: Position,
+  ): monaco.languages.ProviderResult<monaco.languages.SignatureHelpResult> {
+    try {
+      return this.provideSignatureHelp(model, position)
+    } catch (error) {
+      this.logError("Signature help provider failed", error)
+      return null
+    }
+  }
+
+  /**
    * Provide Hover Information
    *
    * Provides hover information for UDF functions.
@@ -284,25 +330,15 @@ class SqlProviderManager {
     model: editor.ITextModel,
     position: Position,
   ): monaco.languages.ProviderResult<monaco.languages.Hover> {
-    // Get the word at the current position
     const word = model.getWordAtPosition(position)
-    if (!word) {
-      return null
-    }
+    if (!word) return null
 
     // Check if it's a UDF function
     const udf = this.udfs.find((u) => u.name === word.word || u.name.replace("${dataset}", "{dataset}") === word.word)
 
-    if (!udf) {
-      return null
-    }
+    if (!udf || !this.snippetGenerator) return null
 
-    // Generate hover information using snippet generator
-    if (this.snippetGenerator) {
-      return this.snippetGenerator.createHoverInfo(udf)
-    }
-
-    return null
+    return this.snippetGenerator.createHoverInfo(udf)
   }
 
   /**
@@ -316,8 +352,7 @@ class SqlProviderManager {
     _model: editor.ITextModel,
     _position: Position,
   ): monaco.languages.ProviderResult<monaco.languages.SignatureHelpResult> {
-    // This is a placeholder for signature help implementation
-    // Full implementation would require parsing function calls and parameter positions
+    // Placeholder for signature help implementation
     return null
   }
 
@@ -328,35 +363,30 @@ class SqlProviderManager {
    *
    * @private
    */
-  private createFallbackCompletions(position: Position): ReadonlyArray<monaco.languages.CompletionItem> {
-    const basicKeywords = [
-      "SELECT",
-      "FROM",
-      "WHERE",
-      "JOIN",
-      "INNER JOIN",
-      "LEFT JOIN",
-      "GROUP BY",
-      "ORDER BY",
-      "HAVING",
-      "LIMIT",
-      "DISTINCT",
-      "AS",
-    ]
+  private createFallbackCompletions(position: Position): Array<monaco.languages.CompletionItem> {
+    const range = {
+      startColumn: position.column,
+      startLineNumber: position.lineNumber,
+      endColumn: position.column,
+      endLineNumber: position.lineNumber,
+    }
 
-    return basicKeywords.map((keyword, index) => ({
-      label: keyword,
-      kind: monaco.languages.CompletionItemKind.Keyword,
-      detail: "SQL Keyword",
-      insertText: keyword,
-      sortText: index.toString().padStart(3, "0"),
-      range: {
-        startColumn: position.column,
-        startLineNumber: position.lineNumber,
-        endColumn: position.column,
-        endLineNumber: position.lineNumber,
-      },
-    }))
+    const completions = new Array<monaco.languages.CompletionItem>(SqlProviderManager.FALLBACK_KEYWORDS.length)
+    for (let i = 0; i < SqlProviderManager.FALLBACK_KEYWORDS.length; i++) {
+      const keyword = SqlProviderManager.FALLBACK_KEYWORDS[i]
+      const sortText = i < 10 ? `00${i}` : i < 100 ? `0${i}` : `${i}`
+
+      completions[i] = {
+        label: keyword,
+        kind: monaco.languages.CompletionItemKind.Keyword,
+        detail: "SQL Keyword",
+        insertText: keyword,
+        sortText,
+        range,
+      }
+    }
+
+    return completions
   }
 
   /**
@@ -381,16 +411,15 @@ class SqlProviderManager {
   /**
    * Logging Utilities
    */
-
-  private logDebug(_message: string, _data?: any): void {
+  private logDebug(_message: string, _data?: unknown): void {
     // Debug logging removed for production
   }
 
-  private logWarning(message: string, data?: any): void {
+  private logWarning(message: string, data?: unknown): void {
     console.warn(`[SqlProviderManager] ${message}`, data)
   }
 
-  private logError(message: string, error: any): void {
+  private logError(message: string, error: unknown): void {
     console.error(`[SqlProviderManager] ${message}`, error)
   }
 }
@@ -491,7 +520,7 @@ export function disposeAllProviders(): void {
  * @returns True if providers are active
  */
 export function areProvidersActive(): boolean {
-  return activeProviderManager !== null && !activeProviderManager["isDisposed"]
+  return activeProviderManager !== null && !activeProviderManager.disposed
 }
 
 /**
@@ -512,6 +541,6 @@ export { type ISQLProvider, type SQLProviderConfig, UnifiedSQLProvider } from ".
 // Export all types and classes for advanced usage
 export { NozzleCompletionProvider } from "./NozzleCompletionProvider"
 export { QueryContextAnalyzer } from "./QueryContextAnalyzer"
-export { SqlValidator } from "./sqlValidator"
+export { SqlValidator } from "./SqlValidator.ts"
 export * from "./types"
 export { createUdfCompletionItem, createUdfSnippet, UdfSnippetGenerator } from "./UDFSnippetGenerator"

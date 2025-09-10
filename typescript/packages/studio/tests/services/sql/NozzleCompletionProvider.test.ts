@@ -315,6 +315,25 @@ describe("NozzleCompletionProvider", () => {
       expect(labels).toContain("<>")
       expect(labels).toContain("LIKE")
     })
+
+    test("should provide ASC/DESC completions after ORDER BY column", async () => {
+      const model = createAndTrackModel("SELECT * FROM anvil.logs ORDER BY address ")
+      const position = new monaco.Position(1, 44) // After "address "
+      const context = createMockCompletionContext()
+      const token = createMockCancellationToken()
+
+      const result = await provider.provideCompletionItems(model, position, context, token)
+
+      expect(result).toBeDefined()
+
+      const labels = extractCompletionLabels(result ?? null)
+
+      // Should contain ORDER BY direction keywords
+      expect(labels).toContain("ASC")
+      expect(labels).toContain("DESC")
+      expect(labels).toContain("NULLS FIRST")
+      expect(labels).toContain("NULLS LAST")
+    })
   })
 
   describe("Context-Aware Filtering", () => {

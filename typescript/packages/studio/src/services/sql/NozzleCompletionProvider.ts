@@ -16,9 +16,6 @@
  * @file completionProvider.ts
  * @author SQL Intellisense System
  */
-
-// Monaco types are defined in types.ts to avoid import issues
-import { Array } from "effect"
 import type {
   CancellationToken,
   editor,
@@ -29,10 +26,9 @@ import type {
 import { languages } from "monaco-editor/esm/vs/editor/editor.api"
 import type { DatasetSource } from "nozzl/Studio/Model"
 
-import { QueryContextAnalyzer } from "./QueryContextAnalyzer"
-import type { CompletionConfig, QueryContext, UserDefinedFunction } from "./types"
-
-import { COMPLETION_PRIORITY, DEFAULT_COMPLETION_CONFIG } from "./types"
+import { QueryContextAnalyzer } from "./QueryContextAnalyzer.ts"
+import type { CompletionConfig, QueryContext, UserDefinedFunction } from "./types.ts"
+import { COMPLETION_PRIORITY, DEFAULT_COMPLETION_CONFIG } from "./types.ts"
 
 /**
  * Nozzle SQL Completion Provider
@@ -128,36 +124,46 @@ export class NozzleCompletionProvider implements languages.CompletionItemProvide
       }
 
       // Generate completions based on context
-      let suggestions: Array<languages.CompletionItem> = []
+      const suggestions: Array<languages.CompletionItem> = []
 
       // 1. Table completions (highest priority in appropriate contexts)
       if (queryContext.expectsTable) {
         const tableCompletions = this.createTableCompletions(position)
-        suggestions = Array.appendAll(tableCompletions)(suggestions)
+        for (const completion of tableCompletions) {
+          suggestions.push(completion)
+        }
       }
 
       // 2. Column completions (context-filtered)
       if (queryContext.expectsColumn) {
         const columnCompletions = this.createColumnCompletions(queryContext, position)
-        suggestions = Array.appendAll(columnCompletions)(suggestions)
+        for (const completion of columnCompletions) {
+          suggestions.push(completion)
+        }
       }
 
       // 3. UDF function completions
       if (queryContext.expectsFunction) {
         const udfCompletions = this.createUDFCompletions(position)
-        suggestions = Array.appendAll(udfCompletions)(suggestions)
+        for (const completion of udfCompletions) {
+          suggestions.push(completion)
+        }
       }
 
       // 4. SQL keyword completions
       if (queryContext.expectsKeyword) {
         const keywordCompletions = this.createKeywordCompletions(queryContext, position)
-        suggestions = Array.appendAll(keywordCompletions)(suggestions)
+        for (const completion of keywordCompletions) {
+          suggestions.push(completion)
+        }
       }
 
       // 5. Operator completions
       if (queryContext.expectsOperator) {
         const operatorCompletions = this.createOperatorCompletions(position)
-        suggestions = Array.appendAll(operatorCompletions)(suggestions)
+        for (const completion of operatorCompletions) {
+          suggestions.push(completion)
+        }
       }
 
       // Filter by prefix and apply limits
@@ -360,41 +366,30 @@ export class NozzleCompletionProvider implements languages.CompletionItemProvide
    * @param udf - User-defined function definition
    * @returns Monaco snippet string
    */
+  private readonly udfSnippets: Record<string, string> = {
+    "evm_decode_log": "evm_decode_log(${1:topic1}, ${2:topic2}, ${3:topic3}, ${4:data}, '${5:signature}')$0",
+    "evm_topic": "evm_topic('${1:signature}')$0",
+    "${dataset}.eth_call": "${1:dataset}.eth_call(${2:from_address}, ${3:to_address}, ${4:input_data}, '${5:block}')$0",
+    "evm_decode_params": "evm_decode_params(${1:input_data}, '${2:signature}')$0",
+    "evm_encode_params": "evm_encode_params(${1:arg1}, ${2:arg2}, '${3:signature}')$0",
+    "evm_encode_type": "evm_encode_type(${1:value}, '${2:type}')$0",
+    "evm_decode_type": "evm_decode_type(${1:data}, '${2:type}')$0",
+    "attestation_hash": "attestation_hash(${1:column1}${2:, ${3:column2}})$0",
+  }
+
   private createUDFSnippet(udf: UserDefinedFunction): string {
-    // Special handling for different UDF types
-    switch (udf.name) {
-      case "evm_decode_log":
-        return "evm_decode_log(${1:topic1}, ${2:topic2}, ${3:topic3}, ${4:data}, '${5:signature}')$0"
-
-      case "evm_topic":
-        return "evm_topic('${1:signature}')$0"
-
-      case "${dataset}.eth_call":
-        return "${1:dataset}.eth_call(${2:from_address}, ${3:to_address}, ${4:input_data}, '${5:block}')$0"
-
-      case "evm_decode_params":
-        return "evm_decode_params(${1:input_data}, '${2:signature}')$0"
-
-      case "evm_encode_params":
-        return "evm_encode_params(${1:arg1}, ${2:arg2}, '${3:signature}')$0"
-
-      case "evm_encode_type":
-        return "evm_encode_type(${1:value}, '${2:type}')$0"
-
-      case "evm_decode_type":
-        return "evm_decode_type(${1:data}, '${2:type}')$0"
-
-      case "attestation_hash":
-        return "attestation_hash(${1:column1}${2:, ${3:column2}})$0"
-
-      default:
-        // Generic fallback using parameters if available
-        if (udf.parameters && udf.parameters.length > 0) {
-          const params = udf.parameters.map((param, i) => `\${${i + 1}:${param}}`).join(", ")
-          return `${udf.name}(${params})$0`
-        }
-        return `${udf.name}(\${1})$0`
+    // Use predefined snippet if available
+    const snippet = this.udfSnippets[udf.name]
+    if (snippet) {
+      return snippet
     }
+
+    // Generic fallback using parameters if available
+    if (udf.parameters && udf.parameters.length > 0) {
+      const params = udf.parameters.map((param, i) => `\${${i + 1}:${param}}`).join(", ")
+      return `${udf.name}(${params})$0`
+    }
+    return `${udf.name}(\${1})$0`
   }
 
   /**
@@ -426,6 +421,10 @@ export class NozzleCompletionProvider implements languages.CompletionItemProvide
         break
       case "JOIN":
         keywords = ["ON", "WHERE", "GROUP BY", "ORDER BY"]
+        break
+      case "ORDER_BY":
+        // In ORDER BY context, suggest direction keywords
+        keywords = ["ASC", "DESC", "NULLS FIRST", "NULLS LAST", ",", "LIMIT"]
         break
       default:
         // Provide general keywords when context is unclear
@@ -506,26 +505,33 @@ export class NozzleCompletionProvider implements languages.CompletionItemProvide
     suggestions: Array<languages.CompletionItem>,
     queryContext: QueryContext,
   ): Array<languages.CompletionItem> {
-    let filtered = suggestions
-
     // Apply prefix filtering if there's a current prefix
     if (queryContext.currentPrefix) {
       const lowerPrefix = queryContext.currentPrefix.toLowerCase()
-      filtered = suggestions.filter((suggestion) => {
+      const filtered: Array<languages.CompletionItem> = []
+
+      for (const suggestion of suggestions) {
+        // Stop if we've reached the limit
+        if (filtered.length >= this.config.maxSuggestions) {
+          break
+        }
+
         const labelText = typeof suggestion.label === "string" ? suggestion.label : suggestion.label.label
-        return (
+        if (
           labelText.toLowerCase().includes(lowerPrefix) ||
           (suggestion.filterText && suggestion.filterText.toLowerCase().includes(lowerPrefix))
-        )
-      })
+        ) {
+          filtered.push(suggestion)
+        }
+      }
+
+      return filtered
     }
 
-    // Apply suggestion limit
-    if (filtered.length > this.config.maxSuggestions) {
-      filtered = filtered.slice(0, this.config.maxSuggestions)
-    }
-
-    return filtered
+    // No prefix filtering needed, just apply limit
+    return suggestions.length > this.config.maxSuggestions
+      ? suggestions.slice(0, this.config.maxSuggestions)
+      : suggestions
   }
 
   /**
@@ -556,14 +562,11 @@ export class NozzleCompletionProvider implements languages.CompletionItemProvide
    * @private
    */
   private calculateReplacementRange(position: Position, currentPrefix: string): IRange {
-    const startColumn = position.column - currentPrefix.length
-    const endColumn = position.column
-
     return {
       startLineNumber: position.lineNumber,
-      startColumn,
+      startColumn: position.column - currentPrefix.length,
       endLineNumber: position.lineNumber,
-      endColumn,
+      endColumn: position.column,
     }
   }
 

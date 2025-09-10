@@ -12,19 +12,29 @@
  * - Progressive validation levels (basic, standard, full)
  * - Error recovery and fallback handling
  *
- * @file sqlValidator.ts
+ * @file SqlValidator.ts
  * @author SQL Error Markers System
  */
-
+import { Array as EffectArray } from "effect"
 import { MarkerSeverity } from "monaco-editor/esm/vs/editor/editor.api"
 import type { DatasetSource } from "nozzl/Studio/Model"
-import { QueryContextAnalyzer } from "./QueryContextAnalyzer"
-import type { CompletionConfig, SqlToken, SqlValidationError, UserDefinedFunction, ValidationCache } from "./types"
+
+import { QueryContextAnalyzer } from "./QueryContextAnalyzer.ts"
+import type {
+  CompletionConfig,
+  ExtendedDatasetSource,
+  SqlToken,
+  SqlValidationError,
+  UserDefinedFunction,
+  ValidationCache,
+} from "./types.ts"
 import {
   DEFAULT_COMPLETION_CONFIG,
   DEFAULT_VALIDATION_CACHE_CONFIG,
+  getColumnNames,
+  getFullTableName,
   ValidationCache as ValidationCacheImpl,
-} from "./types"
+} from "./types.ts"
 
 /**
  * SQL Validator
@@ -33,8 +43,8 @@ import {
  * including syntax checking and metadata validation.
  */
 export class SqlValidator {
-  private metadata: Array<DatasetSource>
-  private udfs: Array<UserDefinedFunction>
+  private metadata: ReadonlyArray<DatasetSource>
+  private udfs: ReadonlyArray<UserDefinedFunction>
   private config: CompletionConfig
   private contextAnalyzer: QueryContextAnalyzer
   private validationCache: ValidationCache
@@ -48,8 +58,8 @@ export class SqlValidator {
   }
 
   constructor(
-    metadata: Array<DatasetSource>,
-    udfs: Array<UserDefinedFunction>,
+    metadata: ReadonlyArray<DatasetSource>,
+    udfs: ReadonlyArray<UserDefinedFunction>,
     config: CompletionConfig = DEFAULT_COMPLETION_CONFIG,
   ) {
     this.metadata = metadata
@@ -128,7 +138,7 @@ export class SqlValidator {
    * @param metadata - Updated dataset metadata
    * @param udfs - Updated UDF definitions
    */
-  updateData(metadata: Array<DatasetSource>, udfs: Array<UserDefinedFunction>): void {
+  updateData(metadata: ReadonlyArray<DatasetSource>, udfs: ReadonlyArray<UserDefinedFunction>): void {
     this.metadata = metadata
     this.udfs = udfs
 
@@ -189,21 +199,16 @@ export class SqlValidator {
 
     // Tokenize query for analysis
     const tokens = this.tokenizeQuery(query)
+    const level = this.config.validationLevel
 
-    // Phase 1: Basic validation level includes syntax validation
-    if (
-      this.config.validationLevel === "basic" ||
-      this.config.validationLevel === "standard" ||
-      this.config.validationLevel === "full"
-    ) {
-      const syntaxErrors = this.validateSyntax(tokens)
-      for (const error of syntaxErrors) {
-        errors.push(error)
-      }
+    // Phase 1: All levels include syntax validation
+    const syntaxErrors = this.validateSyntax(tokens)
+    for (const error of syntaxErrors) {
+      errors.push(error)
     }
 
-    // Phase 2: Standard level adds table validation
-    if (this.config.validationLevel === "standard" || this.config.validationLevel === "full") {
+    // Phase 2: Standard and full levels add table validation
+    if (level === "standard" || level === "full") {
       const tableErrors = this.validateTableReferences(tokens)
       for (const error of tableErrors) {
         errors.push(error)
@@ -211,7 +216,7 @@ export class SqlValidator {
     }
 
     // Phase 3: Full level adds column validation
-    if (this.config.validationLevel === "full") {
+    if (level === "full") {
       const columnErrors = this.validateColumnReferences(tokens)
       for (const error of columnErrors) {
         errors.push(error)
@@ -337,6 +342,11 @@ export class SqlValidator {
     const tableRefs = this.extractTableReferences(tokens)
 
     for (const tableRef of tableRefs) {
+      // Skip validation for subquery placeholders
+      if (tableRef.isSubquery) {
+        continue
+      }
+
       if (!this.tableExists(tableRef.name)) {
         const suggestion = this.suggestSimilarTable(tableRef.name)
         const availableTables = this.metadata.map((d) => d.source).slice(0, 3)
@@ -437,6 +447,17 @@ export class SqlValidator {
       if (token.type === "IDENTIFIER" && ["SELECT", "WHERE", "GROUP", "ORDER", "HAVING"].includes(currentClause)) {
         // Skip if this identifier is actually a table name (comes after FROM/JOIN)
         if (this.isTableReference(tokens, i)) {
+          continue
+        }
+
+        // Skip SQL keywords that might appear as identifiers (ASC, DESC, NULLS, FIRST, LAST, etc.)
+        const upperValue = token.value.toUpperCase()
+        if (["ASC", "DESC", "NULLS", "FIRST", "LAST", "BY"].includes(upperValue)) {
+          continue
+        }
+
+        // Skip identifiers that are aliases (come after AS keyword or after a column/expression)
+        if (this.isAlias(tokens, i)) {
           continue
         }
 
@@ -558,6 +579,14 @@ export class SqlValidator {
     // If qualified (table.column), validate against specific table
     if (columnRef.tableName) {
       const fullTableName = tableAliasMap.get(columnRef.tableName) || columnRef.tableName
+
+      // Check if this is a subquery alias (fullTableName starts with __subquery_)
+      if (fullTableName.startsWith("__subquery_")) {
+        // This is a subquery alias - skip validation to avoid false positives
+        // TODO: Implement proper subquery column validation
+        return {} // No error - assume subquery alias is valid
+      }
+
       const table = this.findTable(fullTableName)
 
       if (!table) {
@@ -571,9 +600,8 @@ export class SqlValidator {
         }
       }
 
-      const columnExists = this.columnExistsInTable(columnRef.name, table)
-      const t = table as any
-      const columnNames = t.metadata_columns?.map((c: any) => c.name) || t.column_names || []
+      const columnNames = getColumnNames(table as ExtendedDatasetSource)
+      const columnExists = columnNames.includes(columnRef.name)
 
       if (!columnExists) {
         const suggestion = this.suggestSimilarColumn(columnRef.name, table)
@@ -609,7 +637,10 @@ export class SqlValidator {
     } else {
       // Unqualified column - check if it exists in any available table
       const availableTables = this.getAllAvailableTables(tableAliasMap)
-      const matchingTables = availableTables.filter((table) => this.columnExistsInTable(columnRef.name, table))
+      const matchingTables = availableTables.filter((table) => {
+        const columnNames = getColumnNames(table as ExtendedDatasetSource)
+        return columnNames.includes(columnRef.name)
+      })
 
       if (matchingTables.length === 0) {
         // Find best suggestion from all available columns and track which tables have it
@@ -619,8 +650,7 @@ export class SqlValidator {
         const tablesWithSuggestion: Array<string> = []
 
         for (const table of availableTables) {
-          const t = table as any
-          const columnNames = t.metadata_columns?.map((c: any) => c.name) || t.column_names || []
+          const columnNames = getColumnNames(table as ExtendedDatasetSource)
           for (const columnName of columnNames) allColumns.push(columnName)
           for (const columnName of columnNames) {
             const distance = this.calculateStringDistance(columnRef.name, columnName)
@@ -630,10 +660,11 @@ export class SqlValidator {
               // Reset and find all tables that have this suggested column
               tablesWithSuggestion.length = 0
               for (const checkTable of availableTables) {
-                if (this.columnExistsInTable(columnName, checkTable)) {
+                const checkColumnNames = getColumnNames(checkTable as ExtendedDatasetSource)
+                if (checkColumnNames.includes(columnName)) {
                   // Get the alias for this table from the tableAliasMap
-                  const t = checkTable as any
-                  const sourceTableName = t.source || (t.dataset_name ? `${t.dataset_name}.${t.table_name}` : "")
+                  const extTable = checkTable as ExtendedDatasetSource
+                  const sourceTableName = extTable.source || getFullTableName(extTable) || ""
                   const tableAlias = this.getTableAlias(sourceTableName, tableAliasMap)
                   tablesWithSuggestion.push(tableAlias)
                 }
@@ -643,10 +674,18 @@ export class SqlValidator {
         }
 
         let message: string
-        const suggestionData: any = {
+
+        type Suggestion = {
+          columnName: string
+          suggestion: string | null
+          availableColumns: Array<string>
+          suggestedTables: Array<string>
+        }
+        const suggestionData: Suggestion = {
           columnName: columnRef.name,
           suggestion: bestSuggestion,
           availableColumns: allColumns.slice(0, 10), // Limit for performance
+          suggestedTables: [],
         }
 
         if (bestSuggestion && tablesWithSuggestion.length > 0) {
@@ -701,7 +740,9 @@ export class SqlValidator {
    *
    * @private
    */
-  private buildTableAliasMap(tableRefs: Array<{ name: string; token: SqlToken; alias?: string }>): Map<string, string> {
+  private buildTableAliasMap(
+    tableRefs: Array<{ name: string; token: SqlToken; alias?: string; isSubquery?: boolean }>,
+  ): Map<string, string> {
     const aliasMap = new Map<string, string>()
 
     for (const tableRef of tableRefs) {
@@ -709,8 +750,10 @@ export class SqlValidator {
       if (tableRef.alias) {
         aliasMap.set(tableRef.alias, tableRef.name)
       }
-      // Also map table name to itself for direct references
-      aliasMap.set(tableRef.name, tableRef.name)
+      // Also map table name to itself for direct references (only for non-subqueries)
+      if (!tableRef.isSubquery) {
+        aliasMap.set(tableRef.name, tableRef.name)
+      }
     }
 
     return aliasMap
@@ -732,31 +775,17 @@ export class SqlValidator {
 
   private findTable(tableName: string): DatasetSource | null {
     const result = this.metadata.find((dataset) => {
-      const d = dataset as any
+      const d = dataset as ExtendedDatasetSource
       // Check both possible structures
-      const fullTableName = d.dataset_name ? `${d.dataset_name}.${d.table_name}` : null
+      const fullTableName = getFullTableName(d)
       return d.source === tableName || d.destination === tableName || fullTableName === tableName
     }) || null
 
     return result
   }
 
-  private columnExistsInTable(columnName: string, table: DatasetSource): boolean {
-    const t = table as any
-
-    // Handle both structures: metadata_columns (objects) and column_names (strings)
-    if (t.metadata_columns) {
-      return t.metadata_columns.some((col: any) => col.name === columnName)
-    } else if (t.column_names) {
-      return t.column_names.includes(columnName)
-    }
-    return false
-  }
-
   private suggestSimilarColumn(columnName: string, table: DatasetSource): string | null {
-    const t = table as any
-    // Get column names from either structure
-    const columnNames = t.metadata_columns?.map((c: any) => c.name) || t.column_names || []
+    const columnNames = getColumnNames(table as ExtendedDatasetSource)
     if (columnNames.length === 0) {
       return null
     }
@@ -783,11 +812,11 @@ export class SqlValidator {
     const tableNames = new Set(Array.from(tableAliasMap.values()))
 
     const result = this.metadata.filter((dataset) => {
-      const d = dataset as any
+      const d = dataset as ExtendedDatasetSource
       // Handle both metadata structures
       const sourceMatch = d.source && tableNames.has(d.source)
       const destinationMatch = d.destination && tableNames.has(d.destination)
-      const fullTableName = d.dataset_name ? `${d.dataset_name}.${d.table_name}` : null
+      const fullTableName = getFullTableName(d)
       const fullTableMatch = fullTableName && tableNames.has(fullTableName)
 
       return sourceMatch || destinationMatch || fullTableMatch
@@ -818,14 +847,87 @@ export class SqlValidator {
   }
 
   /**
+   * Check if Identifier is an Alias
+   *
+   * Determines if an identifier is being used as an alias (after AS keyword or after a column/table).
+   *
+   * @private
+   */
+  private isAlias(tokens: Array<SqlToken>, index: number): boolean {
+    // Case 1: Explicit AS alias (... AS alias_name)
+    if (index > 0) {
+      let prevIndex = index - 1
+
+      // Skip whitespace tokens
+      while (prevIndex >= 0 && tokens[prevIndex].type === "WHITESPACE") {
+        prevIndex--
+      }
+
+      if (prevIndex >= 0 && tokens[prevIndex].type === "KEYWORD" && tokens[prevIndex].value.toUpperCase() === "AS") {
+        return true
+      }
+    }
+
+    // Case 2: Implicit alias (column_name alias_name or table_name alias_name)
+    // Look for pattern: IDENTIFIER [WHITESPACE] IDENTIFIER where second IDENTIFIER is current token
+    if (index > 0) {
+      let prevIndex = index - 1
+
+      // Skip exactly one whitespace token
+      if (prevIndex >= 0 && tokens[prevIndex].type === "WHITESPACE") {
+        prevIndex--
+      }
+
+      // Check if previous token is an identifier (could be column/table name)
+      if (prevIndex >= 0 && tokens[prevIndex].type === "IDENTIFIER") {
+        // Make sure we're not in a qualified name (table.column)
+        if (
+          prevIndex === 0 ||
+          (tokens[prevIndex - 1].type !== "DELIMITER" || tokens[prevIndex - 1].value !== ".")
+        ) {
+          // Check if this looks like an alias pattern by looking at what comes after
+          let nextIndex = index + 1
+          while (nextIndex < tokens.length && tokens[nextIndex].type === "WHITESPACE") {
+            nextIndex++
+          }
+
+          // If next token is comma, FROM, or another clause keyword, this is likely an alias
+          if (nextIndex < tokens.length) {
+            const nextToken = tokens[nextIndex]
+            if (nextToken.type === "DELIMITER" && nextToken.value === ",") {
+              return true // column AS alias,
+            }
+            if (nextToken.type === "KEYWORD") {
+              const nextKeyword = nextToken.value.toUpperCase()
+              if (["FROM", "WHERE", "GROUP", "ORDER", "HAVING", "LIMIT", ")"].includes(nextKeyword)) {
+                return true // column AS alias FROM...
+              }
+            }
+            if (nextToken.type === "DELIMITER" && nextToken.value === ")") {
+              return true // subquery) AS alias
+            }
+          } else {
+            // End of query, likely an alias
+            return true
+          }
+        }
+      }
+    }
+
+    return false
+  }
+
+  /**
    * Extract Table References
    *
    * Extracts table names from FROM and JOIN clauses.
    *
    * @private
    */
-  private extractTableReferences(tokens: Array<SqlToken>): Array<{ name: string; token: SqlToken; alias?: string }> {
-    const tableRefs: Array<{ name: string; token: SqlToken; alias?: string }> = []
+  private extractTableReferences(
+    tokens: Array<SqlToken>,
+  ): Array<{ name: string; token: SqlToken; alias?: string; isSubquery?: boolean }> {
+    const tableRefs: Array<{ name: string; token: SqlToken; alias?: string; isSubquery?: boolean }> = []
 
     for (let i = 0; i < tokens.length - 1; i++) {
       const token = tokens[i]
@@ -834,6 +936,55 @@ export class SqlValidator {
         const keyword = token.value.toUpperCase()
 
         if (keyword === "FROM" || keyword === "JOIN") {
+          // Skip whitespace to find the next meaningful token
+          let nextIndex = i + 1
+          while (nextIndex < tokens.length && tokens[nextIndex].type === "WHITESPACE") {
+            nextIndex++
+          }
+
+          // Check if this is a subquery (starts with opening parenthesis)
+          if (nextIndex < tokens.length && tokens[nextIndex].type === "DELIMITER" && tokens[nextIndex].value === "(") {
+            // This is a subquery - find the matching closing parenthesis
+            const closingParenIndex = this.findMatchingClosingParen(tokens, nextIndex)
+            if (closingParenIndex !== -1) {
+              // Look for alias after the closing parenthesis
+              let aliasIndex = closingParenIndex + 1
+
+              // Skip whitespace
+              while (aliasIndex < tokens.length && tokens[aliasIndex].type === "WHITESPACE") {
+                aliasIndex++
+              }
+
+              // Check for AS keyword
+              if (
+                aliasIndex < tokens.length &&
+                tokens[aliasIndex].type === "KEYWORD" &&
+                tokens[aliasIndex].value.toUpperCase() === "AS"
+              ) {
+                aliasIndex++
+                // Skip whitespace after AS
+                while (aliasIndex < tokens.length && tokens[aliasIndex].type === "WHITESPACE") {
+                  aliasIndex++
+                }
+              }
+
+              // Look for the alias identifier
+              if (aliasIndex < tokens.length && tokens[aliasIndex].type === "IDENTIFIER") {
+                const alias = tokens[aliasIndex].value
+                // Add this as a subquery reference with a placeholder name
+                tableRefs.push({
+                  name: `__subquery_${alias}__`,
+                  token: tokens[aliasIndex],
+                  alias,
+                  isSubquery: true,
+                })
+              }
+            }
+            // Continue to also process any inner table references
+            continue
+          }
+
+          // Handle regular table references
           const tableTokenIndex = this.findNextIdentifierIndex(tokens, i + 1)
           if (tableTokenIndex !== -1) {
             const tableToken = tokens[tableTokenIndex]
@@ -888,6 +1039,28 @@ export class SqlValidator {
   }
 
   /**
+   * Find the matching closing parenthesis for an opening parenthesis
+   * @private
+   */
+  private findMatchingClosingParen(tokens: Array<SqlToken>, openParenIndex: number): number {
+    let depth = 1
+    for (let i = openParenIndex + 1; i < tokens.length; i++) {
+      const token = tokens[i]
+      if (token.type === "DELIMITER") {
+        if (token.value === "(") {
+          depth++
+        } else if (token.value === ")") {
+          depth--
+          if (depth === 0) {
+            return i
+          }
+        }
+      }
+    }
+    return -1 // No matching closing parenthesis found
+  }
+
+  /**
    * Check if UDF Exists
    *
    * Checks if an identifier is a User Defined Function.
@@ -906,17 +1079,15 @@ export class SqlValidator {
    * @private
    */
   private tableExists(tableName: string): boolean {
-    const exists = this.metadata.some((dataset) => {
-      const d = dataset as any
+    return EffectArray.some(this.metadata, (dataset) => {
+      const d = dataset as ExtendedDatasetSource
       const sourceMatch = d.source === tableName
       const destinationMatch = d.destination === tableName
-      const fullTableName = d.dataset_name ? `${d.dataset_name}.${d.table_name}` : null
+      const fullTableName = getFullTableName(d)
       const fullTableMatch = fullTableName === tableName
 
       return sourceMatch || destinationMatch || fullTableMatch
     })
-
-    return exists
   }
 
   /**
@@ -949,48 +1120,6 @@ export class SqlValidator {
 
     // If no good match found, suggest the first available table
     return bestMatch || (allTables.length > 0 ? allTables[0] : null)
-  }
-
-  /**
-   * Calculate String Similarity
-   *
-   * Uses Levenshtein distance to calculate similarity between strings.
-   * Returns a score between 0 and 1, where 1 is exact match.
-   *
-   * @private
-   */
-  private calculateStringSimilarity(str1: string, str2: string): number {
-    const len1 = str1.length
-    const len2 = str2.length
-    const matrix: Array<Array<number>> = []
-
-    // Initialize matrix
-    for (let i = 0; i <= len1; i++) {
-      matrix[i] = [i]
-    }
-    for (let j = 0; j <= len2; j++) {
-      matrix[0][j] = j
-    }
-
-    // Calculate Levenshtein distance
-    for (let i = 1; i <= len1; i++) {
-      for (let j = 1; j <= len2; j++) {
-        if (str1.charAt(i - 1) === str2.charAt(j - 1)) {
-          matrix[i][j] = matrix[i - 1][j - 1]
-        } else {
-          matrix[i][j] = Math.min(
-            matrix[i - 1][j - 1] + 1, // substitution
-            matrix[i][j - 1] + 1, // insertion
-            matrix[i - 1][j] + 1, // deletion
-          )
-        }
-      }
-    }
-
-    // Convert distance to similarity score
-    const maxLen = Math.max(len1, len2)
-    const distance = matrix[len1][len2]
-    return maxLen === 0 ? 1 : (maxLen - distance) / maxLen
   }
 
   /**
@@ -1034,6 +1163,22 @@ export class SqlValidator {
     }
 
     return matrix[len1][len2]
+  }
+
+  /**
+   * Calculate String Similarity
+   *
+   * Uses Levenshtein distance to calculate similarity between strings.
+   * Returns a score between 0 and 1, where 1 is exact match.
+   *
+   * @private
+   */
+  private calculateStringSimilarity(str1: string, str2: string): number {
+    const maxLen = Math.max(str1.length, str2.length)
+    if (maxLen === 0) return 1
+
+    const distance = this.calculateStringDistance(str1, str2)
+    return (maxLen - distance) / maxLen
   }
 
   /**
@@ -1149,8 +1294,8 @@ export class SqlValidator {
     }
     return null
   }
-  // @ts-expect-error Unused helper function kept for future use
 
+  // @ts-expect-error Unused helper function kept for future use
   private findNextIdentifier(tokens: Array<SqlToken>, startIndex: number): SqlToken | null {
     for (let i = startIndex; i < tokens.length; i++) {
       const token = tokens[i]
@@ -1187,12 +1332,11 @@ export class SqlValidator {
   /**
    * Logging Utilities
    */
-
-  private logDebug(_message: string, _data?: any): void {
+  private logDebug<TData = unknown>(_message: string, _data?: TData): void {
     // Debug logging removed for production
   }
 
-  private logError(message: string, error: any): void {
+  private logError<TData = unknown>(message: string, error: TData): void {
     console.error(`[SqlValidator] ${message}`, error)
   }
 }

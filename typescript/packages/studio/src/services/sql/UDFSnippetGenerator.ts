@@ -18,7 +18,8 @@
 import type { IMarkdownString, Position } from "monaco-editor/esm/vs/editor/editor.api"
 import { languages } from "monaco-editor/esm/vs/editor/editor.api"
 
-import type { UserDefinedFunction } from "./types"
+import type { UserDefinedFunctionName } from "../../constants.ts"
+import type { UserDefinedFunction } from "./types.ts"
 
 /**
  * UDF Snippet Configuration
@@ -56,6 +57,18 @@ export const DEFAULT_UDF_SNIPPET_CONFIG: UdfSnippetConfig = {
  * Provides intelligent parameter placeholders and tab navigation.
  */
 export class UdfSnippetGenerator {
+  // Map function names to their snippet generation methods for O(1) lookup
+  private readonly snippetGenerators = new Map<UserDefinedFunctionName, () => string>([
+    ["evm_decode_log", () => this.createEvmDecodeLogSnippet()],
+    ["evm_topic", () => this.createEvmTopicSnippet()],
+    ["${dataset}.eth_call", () => this.createEthCallSnippet()],
+    ["evm_decode_params", () => this.createEvmDecodeParamsSnippet()],
+    ["evm_encode_params", () => this.createEvmEncodeParamsSnippet()],
+    ["evm_encode_type", () => this.createEvmEncodeTypeSnippet()],
+    ["evm_decode_type", () => this.createEvmDecodeTypeSnippet()],
+    ["attestation_hash", () => this.createAttestationHashSnippet()],
+  ])
+
   constructor(private config: UdfSnippetConfig = DEFAULT_UDF_SNIPPET_CONFIG) {}
 
   /**
@@ -68,35 +81,9 @@ export class UdfSnippetGenerator {
    * @returns Monaco snippet string with tabstops
    */
   createUdfSnippet(udf: UserDefinedFunction): string {
-    // Handle special UDF cases with custom parameter logic
-    switch (udf.name) {
-      case "evm_decode_log":
-        return this.createEvmDecodeLogSnippet()
-
-      case "evm_topic":
-        return this.createEvmTopicSnippet()
-
-      case "${dataset}.eth_call":
-        return this.createEthCallSnippet()
-
-      case "evm_decode_params":
-        return this.createEvmDecodeParamsSnippet()
-
-      case "evm_encode_params":
-        return this.createEvmEncodeParamsSnippet()
-
-      case "evm_encode_type":
-        return this.createEvmEncodeTypeSnippet()
-
-      case "evm_decode_type":
-        return this.createEvmDecodeTypeSnippet()
-
-      case "attestation_hash":
-        return this.createAttestationHashSnippet()
-
-      default:
-        return this.createGenericUdfSnippet(udf)
-    }
+    // Use O(1) map lookup instead of O(n) switch statement
+    const generator = this.snippetGenerators.get(udf.name)
+    return generator ? generator() : this.createGenericUdfSnippet(udf)
   }
 
   /**
@@ -107,16 +94,10 @@ export class UdfSnippetGenerator {
    * @private
    */
   private createEvmDecodeLogSnippet(): string {
-    const topics = this.config.includeExampleValues
-      ? ["0x${1:ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef}", "${2:from_topic}", "${3:to_topic}"]
-      : ["${1:topic1}", "${2:topic2}", "${3:topic3}"]
-
-    const data = this.config.includeExampleValues ? "${4:0x000...}" : "${4:data}"
-    const signature = this.config.includeExampleValues
-      ? "${5:Transfer(address indexed from, address indexed to, uint256 value)}"
-      : "${5:event_signature}"
-
-    return `evm_decode_log(${topics.join(", ")}, ${data}, '${signature}')$0`
+    if (this.config.includeExampleValues) {
+      return "evm_decode_log(0x${1:ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef}, ${2:from_topic}, ${3:to_topic}, ${4:0x000...}, '${5:Transfer(address indexed from, address indexed to, uint256 value)}')$0"
+    }
+    return "evm_decode_log(${1:topic1}, ${2:topic2}, ${3:topic3}, ${4:data}, '${5:event_signature}')$0"
   }
 
   /**
@@ -127,11 +108,9 @@ export class UdfSnippetGenerator {
    * @private
    */
   private createEvmTopicSnippet(): string {
-    const signature = this.config.includeExampleValues
-      ? "${1:Transfer(address indexed from, address indexed to, uint256 value)}"
-      : "${1:event_signature}"
-
-    return `evm_topic('${signature}')$0`
+    return this.config.includeExampleValues
+      ? "evm_topic('${1:Transfer(address indexed from, address indexed to, uint256 value)}')$0"
+      : "evm_topic('${1:event_signature}')$0"
   }
 
   /**
@@ -142,18 +121,11 @@ export class UdfSnippetGenerator {
    * @private
    */
   private createEthCallSnippet(): string {
-    const dataset = this.config.includeExampleValues ? `\${1:${this.config.defaultDataset}}` : "${1:dataset}"
-
-    const params = this.config.includeExampleValues
-      ? [
-        "${2:0x0000000000000000000000000000000000000000}", // from_address
-        "${3:0x1234567890123456789012345678901234567890}", // to_address
-        "${4:0x70a08231}", // input_data (balanceOf signature)
-        "${5:latest}", // block
-      ]
-      : ["${2:from_address}", "${3:to_address}", "${4:input_data}", "${5:block}"]
-
-    return `${dataset}.eth_call(${params.join(", ")}, '${params[3]}')$0`
+    if (this.config.includeExampleValues) {
+      const dataset = `\${1:${this.config.defaultDataset}}`
+      return `${dataset}.eth_call(\${2:0x0000000000000000000000000000000000000000}, \${3:0x1234567890123456789012345678901234567890}, \${4:0x70a08231}, '\${5:latest}')$0`
+    }
+    return "${1:dataset}.eth_call(${2:from_address}, ${3:to_address}, ${4:input_data}, '${5:block}')$0"
   }
 
   /**
@@ -164,13 +136,9 @@ export class UdfSnippetGenerator {
    * @private
    */
   private createEvmDecodeParamsSnippet(): string {
-    const inputData = this.config.includeExampleValues ? "${1:0xa9059cbb...}" : "${1:input_data}"
-
-    const signature = this.config.includeExampleValues
-      ? "${2:transfer(address to, uint256 amount)}"
-      : "${2:function_signature}"
-
-    return `evm_decode_params(${inputData}, '${signature}')$0`
+    return this.config.includeExampleValues
+      ? "evm_decode_params(${1:0xa9059cbb...}, '${2:transfer(address to, uint256 amount)}')$0"
+      : "evm_decode_params(${1:input_data}, '${2:function_signature}')$0"
   }
 
   /**
@@ -280,25 +248,21 @@ export class UdfSnippetGenerator {
     const displayName = udf.name.replace("${dataset}", "{dataset}")
 
     // Create rich documentation
+    const exampleSection = udf.example ? `\n\n**Example:**\n\`\`\`sql\n${udf.example}\n\`\`\`` : ""
+    const parameterHints = this.generateParameterHints(udf)
+    const parameterSection = parameterHints ? `\n\n${parameterHints}` : ""
+
     const documentation: IMarkdownString = {
-      value: [
-        `**${displayName}** - Nozzle User-Defined Function`,
-        "",
-        udf.description,
-        "",
-        "**SQL Signature:**",
-        "```sql",
-        udf.sql.trim(),
-        "```",
-        "",
-        udf.example ? `**Example:**\n\`\`\`sql\n${udf.example}\n\`\`\`` : "",
-        "",
-        "💡 **Tip:** Use Tab to navigate between parameters after insertion",
-        "",
-        this.generateParameterHints(udf),
-      ]
-        .filter((line) => line !== "")
-        .join("\n"),
+      value: `**${displayName}** - Nozzle User-Defined Function
+
+${udf.description}
+
+**SQL Signature:**
+\`\`\`sql
+${udf.sql.trim()}
+\`\`\`${exampleSection}
+
+💡 **Tip:** Use Tab to navigate between parameters after insertion${parameterSection}`,
       isTrusted: true,
     }
 
@@ -359,11 +323,8 @@ export class UdfSnippetGenerator {
       return ""
     }
 
-    const hints = udf.parameters.map((param, index) => {
-      return `**${param}**: Parameter ${index + 1}`
-    })
-
-    return ["**Parameters:**", ...hints].join("\n")
+    const hints = udf.parameters.map((param, index) => `**${param}**: Parameter ${index + 1}`).join("\n")
+    return `**Parameters:**\n${hints}`
   }
 
   /**
@@ -377,24 +338,18 @@ export class UdfSnippetGenerator {
   createHoverInfo(udf: UserDefinedFunction): any {
     // TODO: Define Monaco Hover type
     const displayName = udf.name.replace("${dataset}", "{dataset}")
+    const exampleSection = udf.example ? `\n\n**Example:**\n\`\`\`sql\n${udf.example}\n\`\`\`` : ""
+    const returnSection = udf.returnType ? `\n\n**Returns:** ${udf.returnType}` : ""
 
     const contents: IMarkdownString = {
-      value: [
-        `### ${displayName}`,
-        "",
-        udf.description,
-        "",
-        "**SQL Signature:**",
-        "```sql",
-        udf.sql.trim(),
-        "```",
-        "",
-        udf.example ? `**Example:**\n\`\`\`sql\n${udf.example}\n\`\`\`` : "",
-        "",
-        udf.returnType ? `**Returns:** ${udf.returnType}` : "",
-      ]
-        .filter((line) => line !== "")
-        .join("\n"),
+      value: `### ${displayName}
+
+${udf.description}
+
+**SQL Signature:**
+\`\`\`sql
+${udf.sql.trim()}
+\`\`\`${exampleSection}${returnSection}`,
       isTrusted: true,
     }
 

@@ -199,45 +199,6 @@ export function QueryPlaygroundWrapper() {
                   <Tabs.Panel key={`queries[${idx}].editor_panel`} className="w-full h-full overflow-hidden p-4">
                     <form.AppField
                       name={`queries[${idx}].query` as const}
-                      listeners={{
-                        onChangeDebounceMs: 300,
-                        onChange({ value }) {
-                          // if the tab title was set by the user selecting from the browser, then don't overwrite with this fn
-                          if (!value.startsWith("New") || value !== "Dataset Query") {
-                            return
-                          }
-                          const generateQueryTitle = (query: string) => {
-                            const trimmed = query.trim().toLowerCase()
-                            if (!trimmed) {
-                              return "New Query"
-                            }
-
-                            // Extract the main SQL operation
-                            const operation = trimmed.split(/\s+/)[0]?.toUpperCase() || "QUERY"
-
-                            // Try to extract table name from FROM clause
-                            const fromMatch = trimmed.match(/from\s+([^\s,;]+)/i)
-                            const tableName = fromMatch?.[1] || ""
-
-                            if (tableName) {
-                              return `${operation} ... ${tableName}`
-                            }
-
-                            // Fallback to just the operation if no table found
-                            return operation
-                          }
-
-                          const title = generateQueryTitle(value)
-                          form.setFieldValue("queries", (curr) => {
-                            const updated = [...curr]
-                            updated[activeTab] = {
-                              ...updated[activeTab],
-                              tab: title,
-                            }
-                            return updated
-                          })
-                        },
-                      }}
                     >
                       {(field) => (
                         <field.Editor

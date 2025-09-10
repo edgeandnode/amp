@@ -25,6 +25,8 @@ import type {
 } from "monaco-editor/esm/vs/editor/editor.api"
 import type { DatasetSource } from "nozzl/Studio/Model"
 
+import type { UserDefinedFunctionName } from "../../constants.ts"
+
 // Re-export Monaco types for convenience
 export type { CancellationToken, IMarkdownString, MarkerSeverity, Position, Range }
 
@@ -49,7 +51,7 @@ export interface MonacoITextModel {
  */
 export interface UserDefinedFunction {
   /** The function name (e.g., 'evm_decode_log', '${dataset}.eth_call') */
-  name: string
+  name: UserDefinedFunctionName
 
   /** Human-readable description of the function's purpose */
   description: string
@@ -499,3 +501,55 @@ export interface PerformanceMetrics {
 
 // Re-export DatasetSource type for convenience
 export type { DatasetSource }
+
+/**
+ * Extended DatasetSource type to handle different metadata structures
+ * Some datasets have additional properties or alternative column formats
+ */
+export type ExtendedDatasetSource = DatasetSource & {
+  // Alternative properties that may exist in some datasets
+  destination?: string
+  dataset_name?: string
+  table_name?: string
+  column_names?: Array<string>
+}
+
+/**
+ * Type guard to check if dataset has metadata_columns
+ */
+export function hasMetadataColumns(dataset: ExtendedDatasetSource): dataset is ExtendedDatasetSource & {
+  metadata_columns: Array<{ name: string; datatype: string }>
+} {
+  return "metadata_columns" in dataset && Array.isArray(dataset.metadata_columns)
+}
+
+/**
+ * Type guard to check if dataset has column_names
+ */
+export function hasColumnNames(dataset: ExtendedDatasetSource): dataset is ExtendedDatasetSource & {
+  column_names: Array<string>
+} {
+  return "column_names" in dataset && Array.isArray(dataset.column_names)
+}
+
+/**
+ * Helper to get column names from dataset regardless of structure
+ */
+export function getColumnNames(dataset: ExtendedDatasetSource): Array<string> {
+  if (hasMetadataColumns(dataset)) {
+    return dataset.metadata_columns.map((col) => col.name)
+  } else if (hasColumnNames(dataset)) {
+    return dataset.column_names
+  }
+  return []
+}
+
+/**
+ * Helper to get full table name from dataset
+ */
+export function getFullTableName(dataset: ExtendedDatasetSource): string | null {
+  if (dataset.dataset_name && dataset.table_name) {
+    return `${dataset.dataset_name}.${dataset.table_name}`
+  }
+  return null
+}

@@ -9,8 +9,19 @@ export const API_ORIGIN = import.meta.env.MODE === "production"
 
 export const RESERVED_FIELDS = new Set(["from", "select", "limit", "order"])
 
+export const UserDefinedFunctionName = Schema.Literal(
+  "evm_decode_log",
+  "evm_topic",
+  "${dataset}.eth_call",
+  "attestation_hash",
+  "evm_decode_params",
+  "evm_encode_params",
+  "evm_encode_type",
+  "evm_decode_type",
+)
+export type UserDefinedFunctionName = typeof UserDefinedFunctionName.Type
 export const UserDefinedFunction = Schema.Struct({
-  name: Schema.NonEmptyTrimmedString,
+  name: UserDefinedFunctionName,
   description: Schema.String,
   sql: Schema.String,
 })

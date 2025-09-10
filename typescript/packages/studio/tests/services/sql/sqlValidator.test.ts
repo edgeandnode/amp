@@ -9,16 +9,17 @@
  * - Validation levels (basic, standard, full)
  * - Performance and caching
  *
- * @file sqlValidator.test.ts
+ * @file SqlValidator.test.ts
  */
 
 import { MarkerSeverity } from "monaco-editor/esm/vs/editor/editor.api"
 import type { DatasetSource } from "nozzl/Studio/Model"
 import { afterEach, beforeEach, describe, expect, test } from "vitest"
-import { SqlValidator } from "../../../src/services/sql/sqlValidator"
-import type { CompletionConfig, UserDefinedFunction } from "../../../src/services/sql/types"
-import { mockMetadata } from "./fixtures/mockMetadata"
-import { mockUDFs } from "./fixtures/mockUDFs"
+
+import { SqlValidator } from "../../../src/services/sql/SqlValidator.ts"
+import type { CompletionConfig, UserDefinedFunction } from "../../../src/services/sql/types.ts"
+import { mockMetadata } from "./fixtures/mockMetadata.ts"
+import { mockUDFs } from "./fixtures/mockUDFs.ts"
 
 // Use mock data directly - SqlValidator expects DatasetSource format
 const testDatasets = [...mockMetadata] as Array<DatasetSource>
@@ -86,6 +87,108 @@ describe("SqlValidator", () => {
       `
       const errors = validator.validateQuery(query)
 
+      expect(errors).toHaveLength(0)
+    })
+
+    test("should handle ORDER BY with ASC/DESC keywords", () => {
+      const query = "SELECT block_number FROM anvil.logs ORDER BY address DESC"
+      const errors = validator.validateQuery(query)
+
+      expect(errors).toHaveLength(0)
+    })
+
+    test("should handle ORDER BY with multiple columns and directions", () => {
+      const query = "SELECT block_number FROM anvil.logs ORDER BY address ASC, block_number DESC"
+      const errors = validator.validateQuery(query)
+
+      expect(errors).toHaveLength(0)
+    })
+
+    test("should handle ORDER BY with NULLS FIRST/LAST", () => {
+      const query = "SELECT block_number FROM anvil.logs ORDER BY address DESC NULLS FIRST"
+      const errors = validator.validateQuery(query)
+
+      expect(errors).toHaveLength(0)
+    })
+
+    test("should handle column aliases with AS keyword", () => {
+      const query = "SELECT block_number AS block_num FROM anvil.logs"
+      const errors = validator.validateQuery(query)
+
+      expect(errors).toHaveLength(0)
+    })
+
+    test("should handle column aliases without AS keyword", () => {
+      const query = "SELECT block_number block_num FROM anvil.logs"
+      const errors = validator.validateQuery(query)
+
+      expect(errors).toHaveLength(0)
+    })
+
+    test("should handle table aliases with AS keyword", () => {
+      const query = "SELECT l.block_number FROM anvil.logs AS l"
+      const errors = validator.validateQuery(query)
+
+      expect(errors).toHaveLength(0)
+    })
+
+    test("should handle table aliases without AS keyword", () => {
+      const query = "SELECT l.block_number FROM anvil.logs l"
+      const errors = validator.validateQuery(query)
+
+      expect(errors).toHaveLength(0)
+    })
+
+    test("should handle complex query with multiple aliases", () => {
+      const query = `
+        SELECT 
+          l.block_number AS block_num,
+          l.address addr,
+          t.hash AS tx_hash
+        FROM anvil.logs AS l
+        JOIN anvil.transactions t ON l.transaction_hash = t.hash
+      `
+      const errors = validator.validateQuery(query)
+
+      expect(errors).toHaveLength(0)
+    })
+
+    test("should resolve table aliases in qualified column references", () => {
+      const query = "SELECT c.block_number FROM anvil.logs AS c"
+      const errors = validator.validateQuery(query)
+
+      expect(errors).toHaveLength(0)
+    })
+
+    test("should resolve table aliases without AS keyword in qualified column references", () => {
+      const query = "SELECT c.block_number FROM anvil.logs c"
+      const errors = validator.validateQuery(query)
+
+      expect(errors).toHaveLength(0)
+    })
+
+    test("should correctly report column not found when using alias with non-existent column", () => {
+      const query = "SELECT c.block_hash FROM anvil.logs AS c"
+      const errors = validator.validateQuery(query)
+
+      expect(errors).toHaveLength(1)
+      expect(errors[0].code).toBe("COLUMN_NOT_FOUND")
+      expect(errors[0].message).toContain("Column 'block_hash' not found in table 'anvil.logs'")
+      // Should NOT say "Table 'c' not found" - the alias should be resolved
+      expect(errors[0].message).not.toContain("Table 'c' not found")
+    })
+
+    test("should handle subquery aliases without validation errors", () => {
+      const query = `
+        SELECT c.block_hash, c.event 
+        FROM (
+          SELECT block_number, address, evm_decode_log(topics, data, 'Count(uint256 count)') as event
+          FROM anvil.logs
+        ) AS c
+      `
+      const errors = validator.validateQuery(query)
+
+      // Should not report errors for subquery columns since we can't validate them properly yet
       expect(errors).toHaveLength(0)
     })
 

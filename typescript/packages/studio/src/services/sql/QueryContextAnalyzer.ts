@@ -16,12 +16,10 @@
  * @file contextAnalyzer.ts
  * @author SQL Intellisense System
  */
-
 import type { Position } from "monaco-editor/esm/vs/editor/editor.api"
 
-import type { CompletionConfig, MonacoITextModel, QueryContext, SqlClause, SqlToken, SqlTokenType } from "./types"
-
-import { DEFAULT_COMPLETION_CONFIG } from "./types"
+import type { CompletionConfig, MonacoITextModel, QueryContext, SqlClause, SqlToken, SqlTokenType } from "./types.ts"
+import { DEFAULT_COMPLETION_CONFIG } from "./types.ts"
 
 /**
  * Query Context Analyzer
@@ -36,6 +34,55 @@ import { DEFAULT_COMPLETION_CONFIG } from "./types"
 export class QueryContextAnalyzer {
   private contextCache = new Map<string, { context: QueryContext; timestamp: number }>()
   private config: CompletionConfig
+
+  // SQL Keywords for identification - static to avoid re-creation
+  private static readonly SQL_KEYWORDS = new Set([
+    "SELECT",
+    "FROM",
+    "WHERE",
+    "JOIN",
+    "INNER",
+    "LEFT",
+    "RIGHT",
+    "ON",
+    "GROUP",
+    "BY",
+    "ORDER",
+    "HAVING",
+    "LIMIT",
+    "DISTINCT",
+    "AS",
+    "WITH",
+    "AND",
+    "OR",
+    "NOT",
+    "IN",
+    "EXISTS",
+    "LIKE",
+    "ILIKE",
+    "BETWEEN",
+    "IS",
+    "NULL",
+    "TRUE",
+    "FALSE",
+  ])
+
+  private static readonly SQL_OPERATORS = new Set([
+    "=",
+    "<",
+    ">",
+    "<=",
+    ">=",
+    "<>",
+    "!=",
+    "+",
+    "-",
+    "*",
+    "/",
+    "%",
+    "||",
+  ])
+  private static readonly SQL_DELIMITERS = new Set([",", "(", ")", ".", ";"])
 
   constructor(config: Partial<CompletionConfig> = DEFAULT_COMPLETION_CONFIG) {
     this.config = {
@@ -153,38 +200,6 @@ export class QueryContextAnalyzer {
     let line = 1
     let column = 1
 
-    // SQL Keywords for identification
-    const keywords = new Set([
-      "SELECT",
-      "FROM",
-      "WHERE",
-      "JOIN",
-      "INNER",
-      "LEFT",
-      "RIGHT",
-      "ON",
-      "GROUP",
-      "BY",
-      "ORDER",
-      "HAVING",
-      "LIMIT",
-      "DISTINCT",
-      "AS",
-      "WITH",
-      "AND",
-      "OR",
-      "NOT",
-      "IN",
-      "EXISTS",
-      "LIKE",
-      "ILIKE",
-      "BETWEEN",
-      "IS",
-      "NULL",
-      "TRUE",
-      "FALSE",
-    ])
-
     while (position < query.length) {
       const startPos = position
       const startLine = line
@@ -291,7 +306,7 @@ export class QueryContextAnalyzer {
         const value = this.consumeIdentifier(query, position)
         const upperValue = value.toUpperCase()
         tokens.push({
-          type: keywords.has(upperValue) ? "KEYWORD" : "IDENTIFIER",
+          type: QueryContextAnalyzer.SQL_KEYWORDS.has(upperValue) ? "KEYWORD" : "IDENTIFIER",
           value,
           startOffset: startPos,
           endOffset: position + value.length,
@@ -328,39 +343,33 @@ export class QueryContextAnalyzer {
    *
    * @private
    */
-  private detectCurrentClause(tokens: Array<SqlToken>, offset: number): SqlClause | null {
-    // Find tokens before the cursor position
-    const beforeCursor = tokens.filter((token) => token.endOffset <= offset)
+  private static readonly CLAUSE_KEYWORDS: Record<string, SqlClause> = {
+    SELECT: "SELECT",
+    FROM: "FROM",
+    WHERE: "WHERE",
+    JOIN: "JOIN",
+    INNER: "JOIN",
+    LEFT: "JOIN",
+    RIGHT: "JOIN",
+    ON: "ON",
+    GROUP: "GROUP_BY",
+    HAVING: "HAVING",
+    ORDER: "ORDER_BY",
+    LIMIT: "LIMIT",
+    WITH: "WITH",
+  }
 
-    // Look backwards for clause keywords
-    for (let i = beforeCursor.length - 1; i >= 0; i--) {
-      const token = beforeCursor[i]
+  private detectCurrentClause(tokens: Array<SqlToken>, offset: number): SqlClause | null {
+    // Look backwards for clause keywords - more efficient than filtering first
+    for (let i = tokens.length - 1; i >= 0; i--) {
+      const token = tokens[i]
+      if (token.endOffset > offset) continue
+
       if (token.type === "KEYWORD") {
         const keyword = token.value.toUpperCase()
-        switch (keyword) {
-          case "SELECT":
-            return "SELECT"
-          case "FROM":
-            return "FROM"
-          case "WHERE":
-            return "WHERE"
-          case "JOIN":
-          case "INNER":
-          case "LEFT":
-          case "RIGHT":
-            return "JOIN"
-          case "ON":
-            return "ON"
-          case "GROUP":
-            return "GROUP_BY"
-          case "HAVING":
-            return "HAVING"
-          case "ORDER":
-            return "ORDER_BY"
-          case "LIMIT":
-            return "LIMIT"
-          case "WITH":
-            return "WITH"
+        const clause = QueryContextAnalyzer.CLAUSE_KEYWORDS[keyword]
+        if (clause) {
+          return clause
         }
       }
     }
@@ -421,11 +430,15 @@ export class QueryContextAnalyzer {
     tableName: string | null
     alias: string | null
   } {
-    // Skip whitespace
-    let i = startIndex
-    while (i < tokens.length && tokens[i].type === "WHITESPACE") {
-      i++
+    // Helper function to skip whitespace
+    const skipWhitespace = (index: number): number => {
+      while (index < tokens.length && tokens[index].type === "WHITESPACE") {
+        index++
+      }
+      return index
     }
+
+    let i = skipWhitespace(startIndex)
 
     if (i >= tokens.length || tokens[i].type !== "IDENTIFIER") {
       return { tableName: null, alias: null }
@@ -446,10 +459,7 @@ export class QueryContextAnalyzer {
       i += 2
     }
 
-    // Skip whitespace
-    while (i < tokens.length && tokens[i].type === "WHITESPACE") {
-      i++
-    }
+    i = skipWhitespace(i)
 
     // Check for alias
     let alias: string | null = null
@@ -489,12 +499,17 @@ export class QueryContextAnalyzer {
     keyword: boolean
     operator: boolean
   } {
-    // Find the token immediately before the cursor
-    const beforeCursor = tokens.filter((token) => token.endOffset <= offset)
-    const lastToken = beforeCursor[beforeCursor.length - 1]
+    // Find the last token before cursor more efficiently
+    let lastToken: SqlToken | undefined
+    for (let i = tokens.length - 1; i >= 0; i--) {
+      if (tokens[i].endOffset <= offset) {
+        lastToken = tokens[i]
+        break
+      }
+    }
 
-    // Default expectations based on clause
-    let expectations = {
+    // Initialize expectations
+    const expectations = {
       table: false,
       column: false,
       function: false,
@@ -502,6 +517,7 @@ export class QueryContextAnalyzer {
       operator: false,
     }
 
+    // Set expectations based on clause
     switch (currentClause) {
       case "FROM":
       case "JOIN":
@@ -525,20 +541,20 @@ export class QueryContextAnalyzer {
     }
 
     // Refine based on immediate context
+    if (lastToken?.type === "OPERATOR" && lastToken.value === ".") {
+      // After dot, expect only columns (table.column)
+      expectations.table = false
+      expectations.column = true
+      expectations.function = false
+      expectations.keyword = false
+      expectations.operator = false
+    } else if (lastToken?.type === "IDENTIFIER") {
+      // After identifier, might expect operators or keywords
+      expectations.operator = true
 
-    if (lastToken) {
-      if (lastToken.type === "OPERATOR" && lastToken.value === ".") {
-        // After dot, expect columns (table.column)
-        expectations = {
-          table: false,
-          column: true,
-          function: false,
-          keyword: false,
-          operator: false,
-        }
-      } else if (lastToken.type === "IDENTIFIER") {
-        // After identifier, might expect operators or keywords
-        expectations.operator = true
+      // In ORDER BY context after column name, expect ASC/DESC keywords
+      if (currentClause === "ORDER_BY") {
+        expectations.keyword = true
       }
     }
 
@@ -621,11 +637,8 @@ export class QueryContextAnalyzer {
   }
 
   private classifyOperatorOrDelimiter(value: string): SqlTokenType {
-    const operators = new Set(["=", "<", ">", "<=", ">=", "<>", "!=", "+", "-", "*", "/", "%", "||"])
-    const delimiters = new Set([",", "(", ")", ".", ";"])
-
-    if (operators.has(value)) return "OPERATOR"
-    if (delimiters.has(value)) return "DELIMITER"
+    if (QueryContextAnalyzer.SQL_OPERATORS.has(value)) return "OPERATOR"
+    if (QueryContextAnalyzer.SQL_DELIMITERS.has(value)) return "DELIMITER"
     return "UNKNOWN"
   }
 

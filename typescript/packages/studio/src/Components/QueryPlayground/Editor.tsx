@@ -14,7 +14,8 @@ import { UnifiedSQLProvider } from "@/services/sql/UnifiedSQLProvider"
 
 import { ErrorMessages } from "../Form/ErrorMessages"
 import { useFieldContext } from "../Form/form"
-;(self as any).MonacoEnvironment = {
+
+self.MonacoEnvironment = {
   getWorker() {
     return new editorWorker()
   },

@@ -13,16 +13,15 @@
  *
  * @file UnifiedSQLProvider.ts
  */
-
 import type { editor, IDisposable, Position } from "monaco-editor/esm/vs/editor/editor.api"
 import * as monaco from "monaco-editor/esm/vs/editor/editor.api"
 import type { DatasetSource } from "nozzl/Studio/Model"
 
-import { NozzleCompletionProvider } from "./NozzleCompletionProvider"
-import { QueryContextAnalyzer } from "./QueryContextAnalyzer"
-import { SqlValidator } from "./sqlValidator"
-import type { CompletionConfig, UserDefinedFunction } from "./types"
-import { UdfSnippetGenerator } from "./UDFSnippetGenerator"
+import { NozzleCompletionProvider } from "./NozzleCompletionProvider.ts"
+import { QueryContextAnalyzer } from "./QueryContextAnalyzer.ts"
+import { SqlValidator } from "./SqlValidator.ts"
+import type { CompletionConfig, UserDefinedFunction } from "./types.ts"
+import { UdfSnippetGenerator } from "./UDFSnippetGenerator.ts"
 
 /**
  * Configuration for SQL Provider
@@ -39,9 +38,9 @@ export interface SQLProviderConfig {
  * Unified SQL Provider Interface
  */
 export interface ISQLProvider {
-  setup(editor: editor.IStandaloneCodeEditor): void
-  dispose(): void
-  getValidator(): SqlValidator | null
+  setup: (editor: editor.IStandaloneCodeEditor) => void
+  dispose: () => void
+  getValidator: () => SqlValidator | null
 }
 
 /**
@@ -68,6 +67,21 @@ export class UnifiedSQLProvider implements ISQLProvider {
   private validationTimeout: NodeJS.Timeout | undefined
 
   private isDisposed = false
+
+  private static readonly FALLBACK_KEYWORDS = [
+    "SELECT",
+    "FROM",
+    "WHERE",
+    "JOIN",
+    "INNER JOIN",
+    "LEFT JOIN",
+    "GROUP BY",
+    "ORDER BY",
+    "HAVING",
+    "LIMIT",
+    "DISTINCT",
+    "AS",
+  ] as const
 
   constructor(
     private readonly sources: ReadonlyArray<DatasetSource>,
@@ -186,44 +200,20 @@ export class UnifiedSQLProvider implements ISQLProvider {
   private registerMonacoProviders(): void {
     // Register completion provider
     this.completionDisposable = monaco.languages.registerCompletionItemProvider("sql", {
-      provideCompletionItems: async (model, position, context, token) => {
-        try {
-          if (!this.completionProvider) return { suggestions: [] }
-
-          const result = await this.completionProvider.provideCompletionItems(model, position, context, token)
-          return result
-        } catch (error) {
-          this.logError("Completion provider failed", error)
-          return { suggestions: this.createFallbackCompletions(position) }
-        }
-      },
+      provideCompletionItems: this.handleCompletionRequest.bind(this),
       triggerCharacters: [" ", ".", "\n", "\t"],
     })
 
     // Register hover provider for UDF documentation
     this.hoverDisposable = monaco.languages.registerHoverProvider("sql", {
-      provideHover: (model, position) => {
-        try {
-          return this.provideHover(model, position)
-        } catch (error) {
-          this.logError("Hover provider failed", error)
-          return null
-        }
-      },
+      provideHover: this.handleHoverRequest.bind(this),
     })
 
     // Register signature help provider for UDF parameters
     this.signatureDisposable = monaco.languages.registerSignatureHelpProvider("sql", {
       signatureHelpTriggerCharacters: ["(", ","],
       signatureHelpRetriggerCharacters: [","],
-      provideSignatureHelp: (model, position) => {
-        try {
-          return this.provideSignatureHelp(model, position)
-        } catch (error) {
-          this.logError("Signature help provider failed", error)
-          return null
-        }
-      },
+      provideSignatureHelp: this.handleSignatureHelpRequest.bind(this),
     })
   }
 
@@ -283,7 +273,7 @@ export class UnifiedSQLProvider implements ISQLProvider {
       this.validationTimeout = setTimeout(() => {
         validateQuery()
         this.validationTimeout = undefined
-      }, 500) as NodeJS.Timeout // 500ms debounce
+      }, 500)
     })
 
     // Cleanup on model disposal
@@ -313,6 +303,59 @@ export class UnifiedSQLProvider implements ISQLProvider {
     editor.onDidDispose(() => {
       this.validationDisposable?.dispose()
     })
+  }
+
+  /**
+   * Handle completion requests with error handling
+   * @private
+   */
+  private async handleCompletionRequest(
+    model: editor.ITextModel,
+    position: Position,
+    context: monaco.languages.CompletionContext,
+    token: monaco.CancellationToken,
+  ): Promise<monaco.languages.CompletionList> {
+    try {
+      if (!this.completionProvider) return { suggestions: [] }
+
+      const result = await this.completionProvider.provideCompletionItems(model, position, context, token)
+      return result || { suggestions: [] }
+    } catch (error) {
+      this.logError("Completion provider failed", error)
+      return { suggestions: this.createFallbackCompletions(position) }
+    }
+  }
+
+  /**
+   * Handle hover requests with error handling
+   * @private
+   */
+  private handleHoverRequest(
+    model: editor.ITextModel,
+    position: Position,
+  ): monaco.languages.ProviderResult<monaco.languages.Hover> {
+    try {
+      return this.provideHover(model, position)
+    } catch (error) {
+      this.logError("Hover provider failed", error)
+      return null
+    }
+  }
+
+  /**
+   * Handle signature help requests with error handling
+   * @private
+   */
+  private handleSignatureHelpRequest(
+    model: editor.ITextModel,
+    position: Position,
+  ): monaco.languages.ProviderResult<monaco.languages.SignatureHelpResult> {
+    try {
+      return this.provideSignatureHelp(model, position)
+    } catch (error) {
+      this.logError("Signature help provider failed", error)
+      return null
+    }
   }
 
   /**
@@ -351,45 +394,40 @@ export class UnifiedSQLProvider implements ISQLProvider {
    * @private
    */
   private createFallbackCompletions(position: Position): Array<monaco.languages.CompletionItem> {
-    const basicKeywords = [
-      "SELECT",
-      "FROM",
-      "WHERE",
-      "JOIN",
-      "INNER JOIN",
-      "LEFT JOIN",
-      "GROUP BY",
-      "ORDER BY",
-      "HAVING",
-      "LIMIT",
-      "DISTINCT",
-      "AS",
-    ]
+    const range = {
+      startColumn: position.column,
+      startLineNumber: position.lineNumber,
+      endColumn: position.column,
+      endLineNumber: position.lineNumber,
+    }
 
-    return basicKeywords.map((keyword, index) => ({
-      label: keyword,
-      kind: monaco.languages.CompletionItemKind.Keyword,
-      detail: "SQL Keyword",
-      insertText: keyword,
-      sortText: index.toString().padStart(3, "0"),
-      range: {
-        startColumn: position.column,
-        startLineNumber: position.lineNumber,
-        endColumn: position.column,
-        endLineNumber: position.lineNumber,
-      },
-    }))
+    const completions = new Array<monaco.languages.CompletionItem>(UnifiedSQLProvider.FALLBACK_KEYWORDS.length)
+    for (let i = 0; i < UnifiedSQLProvider.FALLBACK_KEYWORDS.length; i++) {
+      const keyword = UnifiedSQLProvider.FALLBACK_KEYWORDS[i]
+      const sortText = i < 10 ? `00${i}` : i < 100 ? `0${i}` : `${i}`
+
+      completions[i] = {
+        label: keyword,
+        kind: monaco.languages.CompletionItemKind.Keyword,
+        detail: "SQL Keyword",
+        insertText: keyword,
+        sortText,
+        range,
+      }
+    }
+
+    return completions
   }
 
   /**
    * Logging utilities
    * @private
    */
-  private logDebug(_message: string, _data?: any): void {
+  private logDebug(_message: string, _data?: unknown): void {
     // Debug logging removed for production
   }
 
-  private logError(message: string, error: any): void {
+  private logError(message: string, error: unknown): void {
     console.error(`[UnifiedSQLProvider] ${message}`, error)
   }
 }
