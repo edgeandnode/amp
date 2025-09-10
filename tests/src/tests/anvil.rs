@@ -290,7 +290,6 @@ async fn streaming_reorg_desync() {
     );
 
     test.dump("sql_over_anvil_1", 4).await;
-    test.dump("sql_over_anvil_1", 4).await;
 
     check_batch(&mut test.client, 8).await;
 }
@@ -337,7 +336,6 @@ async fn streaming_reorg_rewind_shallow() {
     test.mine(2).await;
     test.dump("anvil_rpc", 4).await;
     test.dump("anvil_rpc", 4).await;
-    test.dump("sql_over_anvil_1", 4).await;
     test.dump("sql_over_anvil_1", 4).await;
 
     assert_eq!(
@@ -390,9 +388,6 @@ async fn streaming_reorg_rewind_deep() {
     test.mine(2).await;
     test.dump("anvil_rpc", 8).await;
     test.dump("anvil_rpc", 8).await;
-    test.dump("sql_over_anvil_1", 8).await;
-    test.dump("sql_over_anvil_1", 8).await;
-    test.dump("sql_over_anvil_1", 8).await;
     test.dump("sql_over_anvil_1", 8).await;
 
     assert_eq!(

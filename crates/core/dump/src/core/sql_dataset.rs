@@ -202,23 +202,24 @@ pub async fn dump_table(
         };
 
         if is_incr {
-            for range in table.missing_ranges(start..=end).await? {
-                dump_sql_query(
-                    &ctx,
-                    &env,
-                    &catalog,
-                    plan.clone(),
-                    range,
-                    None,
-                    table.clone(),
-                    &parquet_opts,
-                    &compaction_opts,
-                    microbatch_max_interval,
-                    &ctx.notification_multiplexer,
-                    metrics.clone(),
-                )
-                .await?;
-            }
+            let latest_range = table.latest_range().await?;
+            let start = if latest_range.is_some() { 0 } else { start };
+            let resume_watermark = latest_range.map(|r| ResumeWatermark::from_ranges(vec![r]));
+            dump_sql_query(
+                &ctx,
+                &env,
+                &catalog,
+                plan.clone(),
+                start..=end,
+                resume_watermark,
+                table.clone(),
+                &parquet_opts,
+                &compaction_opts,
+                microbatch_max_interval,
+                &ctx.notification_multiplexer,
+                metrics.clone(),
+            )
+            .await?;
         } else {
             let physical_table: Arc<PhysicalTable> = PhysicalTable::next_revision(
                 table.table(),
@@ -288,7 +289,7 @@ async fn dump_sql_query(
             Some(*range.end()),
             resume_watermark,
             notification_multiplexer,
-            true,
+            Some(physical_table.clone()),
             microbatch_max_interval,
         )
         .await?
