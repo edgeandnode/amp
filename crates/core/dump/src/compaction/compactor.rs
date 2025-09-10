@@ -1,6 +1,7 @@
 use std::{
     fmt::{Debug, Display, Formatter},
-    sync::Arc, time::Duration,
+    sync::Arc,
+    time::Duration,
 };
 
 use common::{catalog::physical::PhysicalTable, metadata::segments::BlockRange};
@@ -9,8 +10,7 @@ use metadata_db::{FileId, MetadataDb};
 
 use crate::{
     compaction::{
-        CompactionProperties, CompactionResult, CompactorError,
-        NozzleCompactorTaskType,
+        CompactionProperties, CompactionResult, CompactorError, NozzleCompactorTaskType,
         group::{CompactionFile, CompactionGroupGenerator},
     },
     parquet_writer::{ParquetFileWriter, ParquetFileWriterOutput},
