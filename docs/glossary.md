@@ -11,16 +11,34 @@ A column definition consisting of a triple `(name, type, nullable)`, where the `
 A list of [fields](#field) that defines the structure of data in a table or query result.
 
 ### Query
-A SQL query string or a [DataFusion](#datafusion) logical plan ([spec](https://docs.rs/datafusion/latest/datafusion/logical_expr/enum.LogicalPlan.html)). The query output conforms to a statically-known [schema](#schema).
+A SQL query string or a [DataFusion](#datafusion) logical
+plan ([spec](https://docs.rs/datafusion/latest/datafusion/logical_expr/enum.LogicalPlan.html)).
+The query output conforms to a statically-known [schema](#schema).
 
 ### View
 A named [query](#query) that is part of a [dataset](#dataset). Can be referred to in queries, as in `select * from dataset.view`.
 
+### Table
+A named collection of data with a fixed [schema](#schema) that can be queried using SQL.
+Tables are the primary interface for accessing data within a [dataset](#dataset).
+
+**Key characteristics:**
+- Has a defined [schema](#schema) (list of [fields](#field) with names, types, and nullability)
+- Physically stored as [Parquet](#parquet) files, typically partitioned by block ranges for blockchain data
+- Accessible via SQL [queries](#query) as `dataset.table_name`
+- Can be queried through [Arrow Flight](#arrow-flight) or HTTP JSON APIs
+
+Tables contain the actual materialized data that users query, whether extracted directly from blockchain sources or
+computed from SQL transformations.
+
 ### Dataset
-A collection of [views](#view) that represents a unit of ownership, publishing and versioning. Datasets define how data is extracted, transformed, and materialized into [Parquet](#parquet) files for querying.
+A collection of [tables](#table) that represents a unit of ownership, publishing and versioning.
+Datasets define how data is extracted, transformed, and materialized into [Parquet](#parquet) files for querying.
 
 ### Dataset Manifest
-A structured definition file that specifies a [dataset's](#dataset) configuration, including its [kind](#dataset-kind), data sources, transformations, [schema](#schema), and dependencies. Acts as the blueprint for how Nozzle should process and materialize the dataset.
+A structured definition file that specifies a [dataset's](#dataset) configuration, including its [kind](#dataset-kind),
+data sources, transformations, [schema](#schema), and dependencies.
+Acts as the blueprint for how Nozzle should process and materialize the dataset.
 
 ### Dataset Kind
 The implementation type that determines how a [dataset](#dataset) processes data:
@@ -35,7 +53,18 @@ A high-level classification grouping [datasets](#dataset) by their data processi
 - **Derived**: Transforms and combines data from existing datasets (_derived_ [kind](#dataset-kind))
 
 ### User-defined Dataset
-[Datasets](#dataset) created and configured by Nozzle users through custom [dataset manifests](#dataset-manifest). Currently **limited to derived datasets only**, as extractor datasets are built into the core system. Enables users to create custom data transformations and [views](#view) without modifying Nozzle's core code.
+[Datasets](#dataset) created and configured by Nozzle users through custom [dataset manifests](#dataset-manifest), as
+opposed to datasets built into the core system.
+These enable users to create custom data processing without modifying Nozzle's core code.
+
+> [!NOTE]
+> User-defined datasets are currently _limited to derived datasets only_. 
+> Raw extractor datasets ([evm-rpc](#dataset-kind), [firehose](#dataset-kind), [substreams](#dataset-kind)) are built 
+> into Nozzle's core > system and cannot be user-defined at this time.
+
+**Key distinctions:**
+- A [derived dataset](#dataset-category) _CAN_ be a user-defined dataset (when created by users via manifests)
+- A user-defined dataset _MIGHT NOT_ be a derived dataset (future extensibility may allow user-defined raw datasets)
 
 ## Physical
 
