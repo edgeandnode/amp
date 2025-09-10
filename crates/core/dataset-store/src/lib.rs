@@ -613,11 +613,11 @@ impl DatasetStore {
         // Cache the provider.
         let provider = if provider.url.scheme() == "ipc" {
             evm::provider::new_ipc(
-                std::path::PathBuf::from(provider.url.path()),
+                provider.url.path(),
                 provider.rate_limit_per_minute,
             )
             .await
-            .map_err(|e| Error::IpcConnectionError(e))?
+            .map_err(Error::IpcConnectionError)?
         } else {
             evm::provider::new(provider.url, provider.rate_limit_per_minute)
         };
