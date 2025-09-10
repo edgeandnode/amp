@@ -105,6 +105,10 @@ impl NozzleCompactorTaskType for Collector {
         opts.collector_interval
     }
 
+    fn active(opts: &Arc<CompactionProperties>) -> bool {
+        opts.collector_active
+    }
+
     fn deactivate(opts: &mut Arc<CompactionProperties>) {
         Arc::make_mut(opts).collector_active = false;
     }

@@ -96,6 +96,10 @@ impl NozzleCompactorTaskType for Compactor {
         opts.compactor_interval
     }
 
+    fn active(opts: &Arc<CompactionProperties>) -> bool {
+        opts.compactor_active
+    }
+
     fn deactivate(opts: &mut Arc<CompactionProperties>) {
         Arc::make_mut(opts).compactor_active = false;
     }

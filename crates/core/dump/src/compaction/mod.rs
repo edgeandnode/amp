@@ -137,7 +137,7 @@ impl<T: NozzleCompactorTaskType> NozzleCompactorTask<T> {
                 .elapsed_since_previous()
                 // if None, consider it ready
                 .map_or(true, |elapsed| elapsed >= T::interval(&self.opts))
-            && self.opts.compactor_active
+            && T::active(&self.opts)
     }
 
     pub async fn spawn(&mut self) {
@@ -174,6 +174,8 @@ pub trait NozzleCompactorTaskType: Debug + Display + Sized + Send + 'static {
     fn run<'a>(self) -> BoxFuture<'a, Result<Self, Self::Error>>;
 
     fn interval(opts: &Arc<CompactionProperties>) -> Duration;
+
+    fn active(opts: &Arc<CompactionProperties>) -> bool;
 
     fn deactivate(opts: &mut Arc<CompactionProperties>);
 
