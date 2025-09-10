@@ -33,6 +33,7 @@ alloy = { version = "1.0.9", default-features = false, features = [
     "json-rpc",
     "node-bindings",
     "provider-http",
+    "provider-ipc",
     "rpc",
     "rpc-types",
     "reqwest-rustls-tls",

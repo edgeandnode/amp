@@ -73,6 +73,12 @@ pub enum Error {
     #[error("unsupported function name: {0}")]
     UnsupportedFunctionName(String),
 
+    #[error("provider configuration error: {0}")]
+    ProviderConfigError(BoxError),
+
+    #[error("IPC connection error: {0}")]
+    IpcConnectionError(BoxError),
+
     #[error("EVM RPC error: {0}")]
     EvmRpcError(#[from] evm_rpc_datasets::Error),
 
@@ -605,7 +611,16 @@ impl DatasetStore {
 
         let provider: EvmRpcProvider = provider.try_into()?;
         // Cache the provider.
-        let provider = evm::provider::new(provider.url, provider.rate_limit_per_minute);
+        let provider = if provider.url.scheme() == "ipc" {
+            evm::provider::new_ipc(
+                std::path::PathBuf::from(provider.url.path()),
+                provider.rate_limit_per_minute,
+            )
+            .await
+            .map_err(|e| Error::IpcConnectionError(e))?
+        } else {
+            evm::provider::new(provider.url, provider.rate_limit_per_minute)
+        };
         let udf =
             AsyncScalarUDF::new(Arc::new(EthCall::new(&dataset.name, provider))).into_scalar_udf();
         self.eth_call_cache
