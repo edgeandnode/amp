@@ -157,7 +157,8 @@ impl DeletionOutput {
 
         let size = file_ids.len();
 
-        Ok(table.object_store()
+        Ok(table
+            .object_store()
             .delete_stream(stream::iter(file_paths).boxed())
             .enumerate()
             .fold(Self::with_capacity(size), move |mut acc, (idx, result)| {

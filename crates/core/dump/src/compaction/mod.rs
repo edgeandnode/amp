@@ -19,7 +19,7 @@ use tokio::task::JoinHandle;
 
 use crate::compaction::{collector::Collector, compactor::Compactor, error::CompactionErrorExt};
 pub use crate::compaction::{
-    error::{CompactorError, CompactionResult, CollectorError, DeletionResult},
+    error::{CollectorError, CompactionResult, CompactorError, DeletionResult},
     size::{SegmentSize, SegmentSizeLimit},
 };
 

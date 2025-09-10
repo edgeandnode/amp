@@ -9,7 +9,7 @@ use metadata_db::{FileId, MetadataDb};
 
 use crate::{
     compaction::{
-        CompactorError, CompactionProperties, CompactionResult, FILE_LOCK_DURATION,
+        CompactionProperties, CompactionResult, CompactorError, FILE_LOCK_DURATION,
         NozzleCompactorTaskType,
         group::{CompactionFile, CompactionGroupGenerator},
     },

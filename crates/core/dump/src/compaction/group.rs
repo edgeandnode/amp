@@ -24,8 +24,7 @@ use futures::{
 use metadata_db::FileId;
 
 use crate::compaction::{
-    CompactorError, CompactionProperties, CompactionResult, SegmentSize,
-    compactor::CompactionGroup,
+    CompactionProperties, CompactionResult, CompactorError, SegmentSize, compactor::CompactionGroup,
 };
 pub struct CompactionFile {
     pub file_id: FileId,
