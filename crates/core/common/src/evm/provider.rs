@@ -16,6 +16,8 @@ use governor::{DefaultDirectRateLimiter, Quota, RateLimiter};
 use tower::{Layer, Service};
 use url::Url;
 
+use crate::BoxError;
+
 pub fn new(url: Url, rate_limit: Option<NonZeroU32>) -> RootProvider<AnyNetwork> {
     let client_builder = ClientBuilder::default();
 
