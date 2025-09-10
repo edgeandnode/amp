@@ -12,18 +12,14 @@ import { ArrowIcon } from "../ArrowIcon.tsx"
 export type SourcesBrowserProps = {
   onSourceSelected: (source: DatasetSource) => void
 }
-export function SourcesBrowser({
-  onSourceSelected: onTableSelected,
-}: Readonly<SourcesBrowserProps>) {
+export function SourcesBrowser({ onSourceSelected: onTableSelected }: Readonly<SourcesBrowserProps>) {
   const { data: sources } = useSourcesSuspenseQuery()
 
   return (
     <div className="flex flex-col gap-y-4 p-6">
       <div className="flex flex-col gap-y-1">
         <p className="text-14">Sources</p>
-        <p className="text-10 text-space-700">
-          Root dataset source tables that can be queried.
-        </p>
+        <p className="text-10 text-space-700">Root dataset source tables that can be queried.</p>
       </div>
       <Accordion.Root className="w-full box-border flex flex-col gap-y-3">
         {sources.map((source) => (
@@ -58,12 +54,7 @@ export function SourcesBrowser({
                     className="rounded-full p-2 bg-space-1200 hover:bg-space-1500 cursor-pointer inline-flex items-center justify-center shadow"
                     onClick={() => onTableSelected(source)}
                   >
-                    <PlusIcon
-                      alt={`Add ${source.source}`}
-                      size={4}
-                      className="text-white"
-                      aria-hidden="true"
-                    />
+                    <PlusIcon alt={`Add ${source.source}`} size={4} className="text-white" aria-hidden="true" />
                   </Tooltip.Trigger>
                   <Tooltip.Portal>
                     <Tooltip.Positioner sideOffset={10} side="left">
@@ -86,9 +77,7 @@ export function SourcesBrowser({
                     className="w-full flex items-center justify-between text-sm border-none outline-none px-4 py-1.5 rounded-4"
                   >
                     <span className="text-14">{column.name}</span>
-                    <span className="ml-auto text-purple-200">
-                      {column.datatype}
-                    </span>
+                    <span className="ml-auto text-purple-200">{column.datatype}</span>
                   </div>
                 ))}
               </div>

@@ -7,9 +7,7 @@ import { useCallback, useEffect, useReducer, useRef } from "react"
 
 import * as Constants from "../constants.js"
 
-const QueryEventStreamInstanceDecoder = Schema.decodeUnknownSync(
-  Schema.parseJson(QueryableEventStream),
-)
+const QueryEventStreamInstanceDecoder = Schema.decodeUnknownSync(Schema.parseJson(QueryableEventStream))
 
 export interface UseQueryableEventsQueryOptions {
   enabled?: boolean
@@ -152,10 +150,7 @@ export function useQueryableEventsQuery({
         cleanup()
 
         if (callbacksRef.current.retry && callbacksRef.current.enabled) {
-          retryTimeoutRef.current = setTimeout(
-            connect,
-            callbacksRef.current.retryDelay,
-          )
+          retryTimeoutRef.current = setTimeout(connect, callbacksRef.current.retryDelay)
         }
       }
 

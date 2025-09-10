@@ -96,19 +96,14 @@ export const mockUDFsEmpty: ReadonlyArray<UserDefinedFunction> = [] as const
 /**
  * Helper function to get UDF by name
  */
-export function getUDFByName(
-  udfs: ReadonlyArray<UserDefinedFunction>,
-  name: string,
-): UserDefinedFunction | undefined {
+export function getUDFByName(udfs: ReadonlyArray<UserDefinedFunction>, name: string): UserDefinedFunction | undefined {
   return udfs.find((udf) => udf.name === name)
 }
 
 /**
  * Helper function to get all UDF names
  */
-export function getAllUDFNames(
-  udfs: ReadonlyArray<UserDefinedFunction>,
-): Array<string> {
+export function getAllUDFNames(udfs: ReadonlyArray<UserDefinedFunction>): Array<string> {
   return udfs.map((udf) => udf.name)
 }
 

@@ -8,14 +8,12 @@ import * as monaco from "monaco-editor"
 import editorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker"
 import { useEffect, useRef } from "react"
 
+import { USER_DEFINED_FUNCTIONS } from "@/constants"
 import { useSourcesSuspenseQuery } from "@/hooks/useSourcesQuery"
 import { UnifiedSQLProvider } from "@/services/sql/UnifiedSQLProvider"
-import { USER_DEFINED_FUNCTIONS } from "@/constants"
 
 import { ErrorMessages } from "../Form/ErrorMessages"
-// eslint-disable-next-line @effect/dprint
 import { useFieldContext } from "../Form/form"
-// eslint-disable-next-line import-x/newline-after-import
 ;(self as any).MonacoEnvironment = {
   getWorker() {
     return new editorWorker()
@@ -103,24 +101,17 @@ export function Editor({
           })
 
           // Add keyboard shortcuts
-          editor.addCommand(
-            monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter,
-            () => onSubmit?.(),
-          )
+          editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => onSubmit?.())
 
           // Initialize unified SQL provider with static data
           if (sourcesQuery.data) {
-            sqlProviderRef.current = new UnifiedSQLProvider(
-              sourcesQuery.data,
-              USER_DEFINED_FUNCTIONS,
-              {
-                validationLevel,
-                enablePartialValidation,
-                enableDebugLogging: process.env.NODE_ENV === "development",
-                minPrefixLength: 0,
-                maxSuggestions: 50,
-              },
-            )
+            sqlProviderRef.current = new UnifiedSQLProvider(sourcesQuery.data, USER_DEFINED_FUNCTIONS, {
+              validationLevel,
+              enablePartialValidation,
+              enableDebugLogging: process.env.NODE_ENV === "development",
+              minPrefixLength: 0,
+              maxSuggestions: 50,
+            })
 
             sqlProviderRef.current.setup(editor)
           }

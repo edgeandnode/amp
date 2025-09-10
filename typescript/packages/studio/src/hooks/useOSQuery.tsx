@@ -56,10 +56,7 @@ export const osQueryOptions = queryOptions<OS, Error, OS, readonly ["OS"]>({
 })
 
 export function useOSQuery(
-  options: Omit<
-    UseSuspenseQueryOptions<OS, Error, OS, readonly ["OS"]>,
-    "queryKey" | "queryFn"
-  > = {},
+  options: Omit<UseSuspenseQueryOptions<OS, Error, OS, readonly ["OS"]>, "queryKey" | "queryFn"> = {},
 ) {
   return useSuspenseQuery({
     ...osQueryOptions,

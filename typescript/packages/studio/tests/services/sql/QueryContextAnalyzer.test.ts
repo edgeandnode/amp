@@ -167,9 +167,7 @@ describe("QueryContextAnalyzer", () => {
     })
 
     test("should detect multiple tables in JOIN", () => {
-      const model = createMockModel(
-        "SELECT * FROM anvil.logs l JOIN anvil.transactions t ON l.tx_hash = t.hash WHERE ",
-      )
+      const model = createMockModel("SELECT * FROM anvil.logs l JOIN anvil.transactions t ON l.tx_hash = t.hash WHERE ")
       const position = createMockPosition(1, 82)
 
       const context = analyzer.analyzeContext(model, position)
@@ -346,30 +344,22 @@ describe("QueryContextAnalyzer", () => {
       },
     ]
 
-    test.each(testCases)(
-      "should analyze basic query: $name",
-      ({ expected, position, query }) => {
-        const model = createMockModel(query)
-        const mockPosition = createMockPosition(
-          position.lineNumber,
-          position.column,
-        )
+    test.each(testCases)("should analyze basic query: $name", ({ expected, position, query }) => {
+      const model = createMockModel(query)
+      const mockPosition = createMockPosition(position.lineNumber, position.column)
 
-        const context = analyzer.analyzeContext(model, mockPosition)
+      const context = analyzer.analyzeContext(model, mockPosition)
 
-        expect(context.currentClause).toBe(expected.currentClause)
-        expect(context.expectsTable).toBe(expected.expectsTable ?? false)
-        expect(context.expectsColumn).toBe(expected.expectsColumn || false)
-        expect(context.expectsFunction).toBe(expected.expectsFunction ?? false)
-        expect(context.expectsOperator).toBe(expected.expectsOperator ?? false)
+      expect(context.currentClause).toBe(expected.currentClause)
+      expect(context.expectsTable).toBe(expected.expectsTable ?? false)
+      expect(context.expectsColumn).toBe(expected.expectsColumn || false)
+      expect(context.expectsFunction).toBe(expected.expectsFunction ?? false)
+      expect(context.expectsOperator).toBe(expected.expectsOperator ?? false)
 
-        if (expected.availableTablesContains) {
-          expect(context.availableTables).toContain(
-            expected.availableTablesContains,
-          )
-        }
-      },
-    )
+      if (expected.availableTablesContains) {
+        expect(context.availableTables).toContain(expected.availableTablesContains)
+      }
+    })
 
     const qualifiedTestCases = [
       {
@@ -394,28 +384,20 @@ describe("QueryContextAnalyzer", () => {
       },
     ]
 
-    test.each(qualifiedTestCases)(
-      "should analyze qualified query: $name",
-      ({ expected, position, query }) => {
-        const model = createMockModel(query)
-        const mockPosition = createMockPosition(
-          position.lineNumber,
-          position.column,
-        )
+    test.each(qualifiedTestCases)("should analyze qualified query: $name", ({ expected, position, query }) => {
+      const model = createMockModel(query)
+      const mockPosition = createMockPosition(position.lineNumber, position.column)
 
-        const context = analyzer.analyzeContext(model, mockPosition)
+      const context = analyzer.analyzeContext(model, mockPosition)
 
-        expect(context.currentClause).toBe(expected.currentClause)
-        expect(context.expectsTable).toBe(expected.expectsTable ?? false)
-        expect(context.expectsColumn).toBe(expected.expectsColumn || false)
+      expect(context.currentClause).toBe(expected.currentClause)
+      expect(context.expectsTable).toBe(expected.expectsTable ?? false)
+      expect(context.expectsColumn).toBe(expected.expectsColumn || false)
 
-        if (expected.availableTablesContains) {
-          expect(context.availableTables).toContain(
-            expected.availableTablesContains,
-          )
-        }
-      },
-    )
+      if (expected.availableTablesContains) {
+        expect(context.availableTables).toContain(expected.availableTablesContains)
+      }
+    })
 
     const stringCommentTestCases = [
       {
@@ -452,35 +434,25 @@ describe("QueryContextAnalyzer", () => {
       },
     ]
 
-    test.each(stringCommentTestCases)(
-      "should analyze string/comment query: $name",
-      ({ expected, position, query }) => {
-        const model = createMockModel(query)
-        const mockPosition = createMockPosition(
-          position.lineNumber,
-          position.column,
-        )
+    test.each(stringCommentTestCases)("should analyze string/comment query: $name", ({ expected, position, query }) => {
+      const model = createMockModel(query)
+      const mockPosition = createMockPosition(position.lineNumber, position.column)
 
-        const context = analyzer.analyzeContext(model, mockPosition)
+      const context = analyzer.analyzeContext(model, mockPosition)
 
-        expect(context.cursorInString).toBe(expected.cursorInString || false)
-        expect(context.cursorInComment).toBe(expected.cursorInComment || false)
+      expect(context.cursorInString).toBe(expected.cursorInString || false)
+      expect(context.cursorInComment).toBe(expected.cursorInComment || false)
 
-        if (!expected.cursorInString && !expected.cursorInComment) {
-          expect(context.currentClause).toBe(expected.currentClause)
-          expect(context.expectsColumn).toBe(expected.expectsColumn || false)
-          expect(context.expectsFunction).toBe(
-            expected.expectsFunction ?? false,
-          )
-          expect(context.currentPrefix).toBe(expected.currentPrefix ?? "")
+      if (!expected.cursorInString && !expected.cursorInComment) {
+        expect(context.currentClause).toBe(expected.currentClause)
+        expect(context.expectsColumn).toBe(expected.expectsColumn || false)
+        expect(context.expectsFunction).toBe(expected.expectsFunction ?? false)
+        expect(context.currentPrefix).toBe(expected.currentPrefix ?? "")
 
-          if (expected.availableTablesContains) {
-            expect(context.availableTables).toContain(
-              expected.availableTablesContains,
-            )
-          }
+        if (expected.availableTablesContains) {
+          expect(context.availableTables).toContain(expected.availableTablesContains)
         }
-      },
-    )
+      }
+    })
   })
 })

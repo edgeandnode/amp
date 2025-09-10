@@ -107,13 +107,8 @@ export function QueryPlaygroundWrapper() {
     // Pre-format column headers once
     const formattedHeaders = columns.map((col) => ({
       key: col,
-      display: col
-        .split(".")
-        .pop()
-        ?.replace(/\[|\]/g, " ")
-        .replace(/_/g, " ")
-        .trim()
-        .toUpperCase() || col.toUpperCase(),
+      display: col.split(".").pop()?.replace(/\[|\]/g, " ").replace(/_/g, " ").trim().toUpperCase() ||
+        col.toUpperCase(),
     }))
 
     return { columns, formattedHeaders, rows: data }
@@ -174,18 +169,10 @@ export function QueryPlaygroundWrapper() {
                                 onClick={() => {
                                   queryField.removeValue(idx)
                                   // set the active tab to curr - 1
-                                  form.setFieldValue(
-                                    "activeTab",
-                                    Math.max(idx - 1, 0),
-                                  )
+                                  form.setFieldValue("activeTab", Math.max(idx - 1, 0))
                                 }}
                               >
-                                <XIcon
-                                  size={3}
-                                  alt=""
-                                  className="text-white"
-                                  aria-hidden="true"
-                                />
+                                <XIcon size={3} alt="" className="text-white" aria-hidden="true" />
                               </button>
                             ) :
                             null}
@@ -209,25 +196,21 @@ export function QueryPlaygroundWrapper() {
                   </Tabs.Tab>
                 </Tabs.List>
                 {queryField.state.value.map((_, idx) => (
-                  <Tabs.Panel
-                    key={`queries[${idx}].editor_panel`}
-                    className="w-full h-full overflow-hidden p-4"
-                  >
+                  <Tabs.Panel key={`queries[${idx}].editor_panel`} className="w-full h-full overflow-hidden p-4">
                     <form.AppField
                       name={`queries[${idx}].query` as const}
                       listeners={{
                         onChangeDebounceMs: 300,
                         onChange({ value }) {
                           // if the tab title was set by the user selecting from the browser, then don't overwrite with this fn
-                          if (
-                            !value.startsWith("New") ||
-                            value !== "Dataset Query"
-                          ) {
+                          if (!value.startsWith("New") || value !== "Dataset Query") {
                             return
                           }
                           const generateQueryTitle = (query: string) => {
                             const trimmed = query.trim().toLowerCase()
-                            if (!trimmed) return "New Query"
+                            if (!trimmed) {
+                              return "New Query"
+                            }
 
                             // Extract the main SQL operation
                             const operation = trimmed.split(/\s+/)[0]?.toUpperCase() || "QUERY"
@@ -271,18 +254,13 @@ export function QueryPlaygroundWrapper() {
             )}
           </form.AppField>
           <div className="w-full flex items-center justify-between h-16 px-4">
-            <span className="text-12 text-space-700">
-              Enter to new line, {correctKey} + ENTER to run
-            </span>
+            <span className="text-12 text-space-700">Enter to new line, {correctKey} + ENTER to run</span>
             <form.AppForm>
               <form.SubmitButton status={"idle"}>Run</form.SubmitButton>
             </form.AppForm>
           </div>
           <div>
-            <div
-              data-query-result-status={status}
-              className="w-full flex items-center gap-x-1.5 h-16 px-4"
-            >
+            <div data-query-result-status={status} className="w-full flex items-center gap-x-1.5 h-16 px-4">
               <span className="text-14 text-space-400">Result</span>
               <span
                 data-query-result-status={status}
@@ -367,19 +345,12 @@ export function QueryPlaygroundWrapper() {
                 </div>
               ) :
               data != null && data.length === 0 ?
-              (
-                <div className="flex items-center justify-center py-8 text-space-500">
-                  No results found
-                </div>
-              ) :
+              <div className="flex items-center justify-center py-8 text-space-500">No results found</div> :
               null}
             {error != null ?
               (
                 <div className="w-full px-4">
-                  <ErrorMessages
-                    id="data"
-                    errors={[{ message: error.message }]}
-                  />
+                  <ErrorMessages id="data" errors={[{ message: error.message }]} />
                 </div>
               ) :
               null}

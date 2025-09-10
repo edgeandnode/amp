@@ -6,9 +6,7 @@ import { useCallback, useEffect, useReducer, useRef } from "react"
 
 import * as Constants from "../constants.js"
 
-const DatasetManifestInstanceDecoder = Schema.decodeUnknownSync(
-  Schema.parseJson(DatasetManifest),
-)
+const DatasetManifestInstanceDecoder = Schema.decodeUnknownSync(Schema.parseJson(DatasetManifest))
 
 export interface UseNozzleConfigStreamQueryOptions {
   enabled?: boolean
@@ -151,10 +149,7 @@ export function useNozzleConfigStreamQuery({
         cleanup()
 
         if (callbacksRef.current.retry && callbacksRef.current.enabled) {
-          retryTimeoutRef.current = setTimeout(
-            connect,
-            callbacksRef.current.retryDelay,
-          )
+          retryTimeoutRef.current = setTimeout(connect, callbacksRef.current.retryDelay)
         }
       }
 

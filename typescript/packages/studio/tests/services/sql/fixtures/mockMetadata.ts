@@ -5,9 +5,7 @@
 
 import type { DatasetSource } from "nozzl/Studio/Model"
 
-export const mockMetadata: ReadonlyArray<
-  DatasetSource & { destination: string }
-> = [
+export const mockMetadata: ReadonlyArray<DatasetSource & { destination: string }> = [
   {
     source: "anvil.logs",
     destination: "anvil_logs",
@@ -95,13 +93,7 @@ export const mockMetadataLarge: ReadonlyArray<{
   destination: `dataset${i}_table${i}`,
   metadata_columns: Array.from({ length: 50 }, (__, j) => ({
     name: `column_${j}_${i}`,
-    datatype: j % 4 === 0 ?
-      "bigint"
-      : j % 4 === 1 ?
-      "string"
-      : j % 4 === 2 ?
-      "address"
-      : "bytes32",
+    datatype: j % 4 === 0 ? "bigint" : j % 4 === 1 ? "string" : j % 4 === 2 ? "address" : "bytes32",
   })),
 }))
 
@@ -118,17 +110,13 @@ export function getMetadataByTableName(
 /**
  * Helper function to get all column names from a dataset
  */
-export function getAllColumnNames(
-  metadata: ReadonlyArray<DatasetSource>,
-): Array<string> {
+export function getAllColumnNames(metadata: ReadonlyArray<DatasetSource>): Array<string> {
   return metadata.flatMap((dataset) => dataset.metadata_columns.map((col) => col.name))
 }
 
 /**
  * Helper function to get all table names
  */
-export function getAllTableNames(
-  metadata: ReadonlyArray<DatasetSource>,
-): Array<string> {
+export function getAllTableNames(metadata: ReadonlyArray<DatasetSource>): Array<string> {
   return metadata.map((dataset) => dataset.source)
 }

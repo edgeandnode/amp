@@ -25,17 +25,13 @@
  * @author SQL Intellisense System
  */
 
-import type {
-  IDisposable,
-  Position,
-  editor
-} from "monaco-editor/esm/vs/editor/editor.api"
+import type { editor, IDisposable, Position } from "monaco-editor/esm/vs/editor/editor.api"
 import * as monaco from "monaco-editor/esm/vs/editor/editor.api"
 import type { DatasetSource } from "nozzl/Studio/Model"
 
 import { NozzleCompletionProvider } from "./NozzleCompletionProvider"
 import { QueryContextAnalyzer } from "./QueryContextAnalyzer"
-import { SqlValidator } from './sqlValidator'
+import { SqlValidator } from "./sqlValidator"
 import type { CompletionConfig, DisposableHandle, PerformanceMetrics, UserDefinedFunction } from "./types"
 import { UdfSnippetGenerator } from "./UDFSnippetGenerator"
 
@@ -101,12 +97,7 @@ class SqlProviderManager {
           try {
             this.metrics.totalRequests++
 
-            const result = await this.completionProvider!.provideCompletionItems(
-              model,
-              position,
-              context,
-              token,
-            )
+            const result = await this.completionProvider!.provideCompletionItems(model, position, context, token)
 
             const duration = performance.now() - startTime
             this.updateMetrics(duration, true)
@@ -119,9 +110,7 @@ class SqlProviderManager {
 
             // Return fallback completions
             return {
-              suggestions: this.createFallbackCompletions(position).map(
-                (suggestion) => suggestion,
-              ),
+              suggestions: this.createFallbackCompletions(position).map((suggestion) => suggestion),
             }
           }
         },
@@ -142,21 +131,18 @@ class SqlProviderManager {
       })
 
       // Register signature help provider for UDF parameters
-      this.signatureDisposable = monaco.languages.registerSignatureHelpProvider(
-        "sql",
-        {
-          signatureHelpTriggerCharacters: ["(", ","],
-          signatureHelpRetriggerCharacters: [","],
-          provideSignatureHelp: (model, position) => {
-            try {
-              return this.provideSignatureHelp(model, position)
-            } catch (error) {
-              this.logError("Signature help provider failed", error)
-              return null
-            }
-          },
+      this.signatureDisposable = monaco.languages.registerSignatureHelpProvider("sql", {
+        signatureHelpTriggerCharacters: ["(", ","],
+        signatureHelpRetriggerCharacters: [","],
+        provideSignatureHelp: (model, position) => {
+          try {
+            return this.provideSignatureHelp(model, position)
+          } catch (error) {
+            this.logError("Signature help provider failed", error)
+            return null
+          }
         },
-      )
+      })
 
       this.logDebug("Nozzle SQL providers setup completed successfully")
 
@@ -184,10 +170,7 @@ class SqlProviderManager {
    * @param metadata - Updated dataset metadata
    * @param udfs - Updated UDF definitions
    */
-  updateData(
-    metadata: ReadonlyArray<DatasetSource>,
-    udfs: ReadonlyArray<UserDefinedFunction>,
-  ): void {
+  updateData(metadata: ReadonlyArray<DatasetSource>, udfs: ReadonlyArray<UserDefinedFunction>): void {
     if (this.isDisposed) {
       this.logWarning("Attempted to update disposed provider manager")
       return
@@ -205,7 +188,7 @@ class SqlProviderManager {
         this.validator.updateData([...metadata], [...udfs])
       }
 
-      this.logDebug('Provider data updated', {
+      this.logDebug("Provider data updated", {
         tableCount: metadata.length,
         udfCount: udfs.length,
       })
@@ -227,9 +210,9 @@ class SqlProviderManager {
 
   /**
    * Get SQL Validator Instance
-   * 
+   *
    * Returns the validator instance for direct access to validation functionality.
-   * 
+   *
    * @returns SqlValidator instance or null if not initialized
    */
   getValidator(): SqlValidator | null {
@@ -308,11 +291,7 @@ class SqlProviderManager {
     }
 
     // Check if it's a UDF function
-    const udf = this.udfs.find(
-      (u) =>
-        u.name === word.word ||
-        u.name.replace("${dataset}", "{dataset}") === word.word,
-    )
+    const udf = this.udfs.find((u) => u.name === word.word || u.name.replace("${dataset}", "{dataset}") === word.word)
 
     if (!udf) {
       return null
@@ -349,9 +328,7 @@ class SqlProviderManager {
    *
    * @private
    */
-  private createFallbackCompletions(
-    position: Position,
-  ): ReadonlyArray<monaco.languages.CompletionItem> {
+  private createFallbackCompletions(position: Position): ReadonlyArray<monaco.languages.CompletionItem> {
     const basicKeywords = [
       "SELECT",
       "FROM",
@@ -440,7 +417,6 @@ export function setupNozzleSQLProviders(
   udfs: ReadonlyArray<UserDefinedFunction>,
   config?: Partial<CompletionConfig>,
 ): DisposableHandle {
-
   // Dispose existing manager if present
   if (activeProviderManager) {
     activeProviderManager.dispose()
@@ -450,7 +426,7 @@ export function setupNozzleSQLProviders(
   // Create and setup new manager
   const finalConfig = { ...DEFAULT_COMPLETION_CONFIG, ...config }
   activeProviderManager = new SqlProviderManager(metadata, udfs, finalConfig)
-  
+
   const disposable = activeProviderManager.setup()
 
   // Return enhanced disposable that also cleans up the active manager
@@ -520,9 +496,9 @@ export function areProvidersActive(): boolean {
 
 /**
  * Get Active SQL Validator
- * 
+ *
  * Returns the currently active SQL validator instance for direct validation access.
- * 
+ *
  * @returns SqlValidator instance or null if no provider is active
  */
 export function getActiveValidator(): SqlValidator | null {
@@ -531,11 +507,11 @@ export function getActiveValidator(): SqlValidator | null {
 }
 
 // Export new unified provider
-export { UnifiedSQLProvider, type SQLProviderConfig, type ISQLProvider } from "./UnifiedSQLProvider"
+export { type ISQLProvider, type SQLProviderConfig, UnifiedSQLProvider } from "./UnifiedSQLProvider"
 
 // Export all types and classes for advanced usage
 export { NozzleCompletionProvider } from "./NozzleCompletionProvider"
 export { QueryContextAnalyzer } from "./QueryContextAnalyzer"
+export { SqlValidator } from "./sqlValidator"
 export * from "./types"
 export { createUdfCompletionItem, createUdfSnippet, UdfSnippetGenerator } from "./UDFSnippetGenerator"
-export { SqlValidator } from './sqlValidator'

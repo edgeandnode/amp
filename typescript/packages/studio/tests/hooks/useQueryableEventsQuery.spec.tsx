@@ -122,9 +122,7 @@ describe("useQueryableEventsQuery", () => {
     })
 
     expect(result.current.data).toEqual(mockEventData.events)
-    expect(global.EventSource).toHaveBeenCalledWith(
-      "http://test-api.com/events/stream",
-    )
+    expect(global.EventSource).toHaveBeenCalledWith("http://test-api.com/events/stream")
   })
 
   it("should handle multiple SSE messages", async () => {
@@ -197,9 +195,7 @@ describe("useQueryableEventsQuery", () => {
 
   it("should handle malformed SSE data gracefully", async () => {
     // Mock console.warn to verify it's called
-    const consoleWarnSpy = vi
-      .spyOn(console, "warn")
-      .mockImplementation(() => {})
+    const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
 
     const { result } = renderHook(() => useQueryableEventsQuery())
 
@@ -253,9 +249,7 @@ describe("useQueryableEventsQuery", () => {
     result.current.refetch()
 
     await waitFor(() => {
-      expect(global.EventSource).toHaveBeenCalledWith(
-        "http://test-api.com/events/stream",
-      )
+      expect(global.EventSource).toHaveBeenCalledWith("http://test-api.com/events/stream")
     })
   })
 

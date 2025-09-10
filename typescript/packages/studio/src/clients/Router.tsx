@@ -17,10 +17,7 @@ export function createDatasetWorksAppRouter() {
     defaultOptions: {
       dehydrate: {
         shouldDehydrateQuery(query) {
-          return (
-            defaultShouldDehydrateQuery(query) ||
-            query.state.status === "pending"
-          )
+          return defaultShouldDehydrateQuery(query) || query.state.status === "pending"
         },
       },
     },
@@ -58,6 +55,4 @@ export function createDatasetWorksAppRouter() {
   })
 }
 
-export type DatasetWorksAppRouter = ReturnType<
-  typeof createDatasetWorksAppRouter
->
+export type DatasetWorksAppRouter = ReturnType<typeof createDatasetWorksAppRouter>
