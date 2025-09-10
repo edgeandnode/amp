@@ -70,7 +70,6 @@ where
                fm.location_id,
                fm.file_name,
                l.url,
-               l.active,
                fm.object_size,
                fm.object_e_tag,
                fm.object_version,
@@ -102,7 +101,6 @@ where
                fm.location_id,
                fm.file_name,
                l.url,
-               l.active,
                fm.object_size,
                fm.object_e_tag,
                fm.object_version,
@@ -191,9 +189,6 @@ pub struct FileMetadataWithDetails {
     /// Storage location URL (parsed during deserialization)
     #[sqlx(try_from = "&'a str")]
     pub url: Url,
-    /// Whether the file's location is active
-    #[sqlx(rename = "active")]
-    pub location_active: bool,
     /// Size of the file in bytes
     pub object_size: Option<i64>,
     /// Object store ETag for version tracking

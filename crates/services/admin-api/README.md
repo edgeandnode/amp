@@ -166,15 +166,6 @@ This endpoint provides all available information about a file, including the hea
 
 See [`handlers/files/get_by_id.rs`](src/handlers/files/get_by_id.rs) for more detailed information about this endpoint.
 
-#### `DELETE /files/{file_id}`
-Deletes a specific file both from the object store and metadata database by its ID.
-The `file_id` parameter must be a positive integer identifying the file.
-Accepts optional `force` query parameter to override safety checks for active locations.
-Performs a two-stage deletion process with safety checks: first verifies file's location is not active (unless force=true), then attempts to delete from object store (continues if file not found), and finally removes the metadata record from the database.
-Files in active locations require `force=true` to prevent accidental deletion from currently active data sources.
-Returns 204 No Content upon successful deletion, 409 Conflict for active location files without force, or appropriate error codes for validation or system failures.
-
-See [`handlers/files/delete_by_id.rs`](src/handlers/files/delete_by_id.rs) for more detailed information about this endpoint.
 
 ### Location Management
 

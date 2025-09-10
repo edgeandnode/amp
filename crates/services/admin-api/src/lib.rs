@@ -53,10 +53,7 @@ pub async fn serve(
             "/locations/{location_id}/files",
             get(locations::get_files::handler),
         )
-        .route(
-            "/files/{file_id}",
-            get(files::get_by_id::handler).delete(files::delete_by_id::handler),
-        )
+        .route("/files/{file_id}", get(files::get_by_id::handler))
         .route(
             "/providers",
             get(providers::get_all::handler).post(providers::create::handler),
