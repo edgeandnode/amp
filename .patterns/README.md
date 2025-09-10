@@ -92,6 +92,7 @@ This directory provides reusable solutions and best practices for Nozzle Core de
 ## 📚 AVAILABLE PATTERNS
 
 ### ⚛️ Core Development Patterns
+- **[cargo-workspace-patterns.md](./cargo-workspace-patterns.md)** - **🚨 MANDATORY for ALL workspace operations** - Comprehensive workspace management, crate organization rules, dependency management with `cargo add`/`cargo remove`, and workspace structure guidelines. MUST be consulted before creating crates or managing dependencies.
 - **[testing-patterns.md](./testing-patterns.md)** - **🚨 MANDATORY for ALL testing** - Testing strategies, GIVEN-WHEN-THEN structure, naming conventions, and three-tier testing strategy. MUST be consulted before writing ANY tests.
 
 ### 🏗️ Crate-Specific Development Guidelines

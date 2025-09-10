@@ -5,11 +5,13 @@ version.workspace = true
 build = "build.rs"
 
 [features]
+# Default features (enabled by default)
 default = ["snmalloc"]
+# Enable snmalloc memory allocator for improved performance
 snmalloc = ["dep:snmalloc-rs"]
 
 [dependencies]
-metadata-db = { path = "../../core/metadata-db" }
+admin-api = { path = "../../services/admin-api" }
 arrow-flight.workspace = true
 axum.workspace = true
 clap.workspace = true
@@ -17,20 +19,20 @@ common = { path = "../../core/common" }
 datafusion.workspace = true
 dataset-store = { path = "../../core/dataset-store" }
 dump = { path = "../../core/dump" }
-generate-manifest = { path = "../generate-manifest" }
 futures.workspace = true
-tracing.workspace = true
+generate-manifest = { path = "../generate-manifest" }
+http-common = { path = "../../services/http-common" }
+metadata-db = { path = "../../core/metadata-db" }
+monitoring = { path = "../../core/monitoring" }
+registry-service = { path = "../../services/registry-service" }
+serde_json.workspace = true
 server = { path = "../../services/server" }
 snmalloc-rs = { version = "0.3.4", optional = true }
+static_assertions.workspace = true
 tokio.workspace = true
 tonic.workspace = true
 tower-http = { version = "0.6.2", features = ["compression-gzip"] }
-admin-api = { path = "../../services/admin-api" }
-registry-service = { path = "../../services/registry-service" }
-http-common = { path = "../../services/http-common" }
-serde_json.workspace = true
-monitoring = { path = "../../core/monitoring" }
-static_assertions.workspace = true
+tracing.workspace = true
 
 [build-dependencies]
 vergen-gitcl = { version = "1.0.8", features = ["build"] }
