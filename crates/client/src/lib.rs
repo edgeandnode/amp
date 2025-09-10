@@ -11,7 +11,11 @@ use std::{
 use arrow_flight::{FlightData, sql::client::FlightSqlServiceClient};
 use async_stream::stream;
 use bytes::Bytes;
-use common::{BlockNum, arrow::array::RecordBatch, metadata::segments::BlockRange};
+use common::{
+    BlockNum,
+    arrow::array::RecordBatch,
+    metadata::segments::{BlockRange, ResumeWatermark},
+};
 use futures::{Stream, StreamExt as _, stream::BoxStream};
 use serde::Deserialize;
 use tonic::{Streaming, transport::Endpoint};
@@ -74,8 +78,23 @@ impl SqlClient {
         &mut self,
         sql: S,
         transaction_id: Option<Bytes>,
+        resume_watermark: Option<&ResumeWatermark>,
     ) -> Result<ResultStream, Error> {
-        let flight_info = self.client.execute(sql.to_string(), transaction_id).await?;
+        self.client.set_header(
+            "nozzle-resume",
+            resume_watermark
+                .map(|value| serde_json::to_string(value).unwrap())
+                .unwrap_or_default(),
+        );
+        let flight_info = match self.client.execute(sql.to_string(), transaction_id).await {
+            Ok(flight_info) => flight_info,
+            Err(err) => {
+                // Unset the nozzle-resume header after GetFlightInfo, since otherwise it gets
+                // retained for subsequent requests.
+                self.client.set_header("nozzle-resume", "");
+                return Err(err.into());
+            }
+        };
         let ticket = flight_info
             .endpoint
             .into_iter()
@@ -169,9 +188,7 @@ pub fn with_reorg(
             };
             let ranges = batch.metadata.ranges.clone();
             let invalidation: Vec<InvalidationRange> = ranges.iter().filter_map(|range| {
-                let Some(prev_range) = prev_ranges.iter().find(|r| r.network == range.network) else {
-                    return None;
-                };
+                let prev_range = prev_ranges.iter().find(|r| r.network == range.network)?;
                 if range.start() <= prev_range.end() {
                     return Some(InvalidationRange {
                         network: range.network.clone(),

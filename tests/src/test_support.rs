@@ -105,33 +105,91 @@ pub struct TestEnv {
 impl TestEnv {
     /// Create a new test environment with a temp metadata database and data directory.
     pub async fn temp(test_name: &str) -> Result<Self, BoxError> {
-        Self::new(test_name, true, None).await
+        Self::new(test_name, true, "config.toml").await
     }
 
     /// Same as [Self::temp] but accepts a custom config file name. Use this to run tests with
     /// different configuration options.
     pub async fn temp_with_config(test_name: &str, config_name: &str) -> Result<Self, BoxError> {
-        Self::new_with_config(test_name, true, config_name, None).await
+        Self::new(test_name, true, config_name).await
     }
 
     /// Create a new test environment with a temp metadata database, but the blessed data directory.
     pub async fn blessed(test_name: &str) -> Result<Self, BoxError> {
-        Self::new(test_name, false, None).await
+        Self::new(test_name, false, "config.toml").await
     }
 
-    pub async fn new(
+    /// Create a basic test environment without any Anvil or provider configuration.
+    /// This is used for tests that don't need external blockchain connections.
+    pub async fn new(test_name: &str, temp: bool, config_name: &str) -> Result<Self, BoxError> {
+        let db = TempMetadataDb::new(*KEEP_TEMP_DIRS, DEFAULT_POOL_SIZE).await;
+        let mut figment = Figment::from(Json::string(&format!(
+            r#"{{ "metadata_db_url": "{}" }}"#,
+            db.url(),
+        )));
+        let mut temp_dirs = vec![];
+
+        if temp {
+            let temp_dir = tempfile::Builder::new()
+                .disable_cleanup(*KEEP_TEMP_DIRS)
+                .tempdir()?;
+            let data_path = temp_dir.path();
+            info!("Temporary data dir {}", data_path.display());
+            figment = figment.merge(Figment::from(Json::string(&format!(
+                r#"{{ "data_dir": "{}" }}"#,
+                data_path.display(),
+            ))));
+            temp_dirs.push(temp_dir);
+        }
+
+        let config = load_test_config(Some(figment), config_name).await?;
+        let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
+        let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
+
+        let (bound, server) = nozzle::server::run(
+            config.clone(),
+            metadata_db.clone(),
+            false,
+            true,
+            true,
+            true,
+            true,
+            None,
+        )
+        .await?;
+        tokio::spawn(server);
+
+        let worker = Worker::new(
+            config.clone(),
+            metadata_db.clone(),
+            WorkerNodeId::from_str(test_name).unwrap(),
+            None,
+        );
+        tokio::spawn(worker.run());
+
+        Ok(Self {
+            config: config.clone(),
+            metadata_db,
+            dataset_store,
+            server_addrs: bound,
+            _temp_db: db,
+            _temp_dirs: temp_dirs,
+        })
+    }
+
+    pub async fn new_with_ipc(
         test_name: &str,
         temp: bool,
-        anvil_url: Option<&str>,
+        ipc_path: &str,
     ) -> Result<Self, BoxError> {
-        Self::new_with_config(test_name, temp, "config.toml", anvil_url).await
+        Self::new_with_config_ipc(test_name, temp, "config.toml", ipc_path).await
     }
 
-    pub async fn new_with_config(
+    pub async fn new_with_config_ipc(
         test_name: &str,
         temp: bool,
         config_name: &str,
-        anvil_url: Option<&str>,
+        ipc_path: &str,
     ) -> Result<Self, BoxError> {
         let db = TempMetadataDb::new(*KEEP_TEMP_DIRS, DEFAULT_POOL_SIZE).await;
         let mut figment = Figment::from(Json::string(&format!(
@@ -153,26 +211,28 @@ impl TestEnv {
             temp_dirs.push(temp_dir);
         }
 
-        if let Some(anvil_url) = anvil_url {
-            let tmp_providers = tempfile::tempdir()?;
-            info!("Temporary provider dir {}", tmp_providers.path().display());
-            for config_base in TEST_CONFIG_BASE_DIRS {
-                let path = format!("{config_base}/providers/rpc_anvil.toml");
-                if !std::fs::exists(&path)? {
-                    continue;
-                }
-                let text = std::fs::read_to_string(&path)?;
-                std::fs::write(
-                    tmp_providers.path().join("rpc_anvil.toml"),
-                    text.replace("http://localhost:8545", anvil_url),
-                )?;
-            }
-            figment = figment.merge(Figment::from(Json::string(&format!(
-                r#"{{ "providers_dir": "{}" }}"#,
-                tmp_providers.path().display(),
-            ))));
-            temp_dirs.push(tmp_providers);
-        }
+        // Create temporary provider config with IPC path
+        let tmp_providers = tempfile::tempdir()?;
+        info!("Temporary provider dir {}", tmp_providers.path().display());
+
+        // Create an IPC-based provider configuration using ipc:// URL
+        let ipc_provider_config = format!(
+            r#"kind = "evm-rpc"
+network = "anvil"
+url = "ipc://{}""#,
+            ipc_path
+        );
+
+        std::fs::write(
+            tmp_providers.path().join("rpc_anvil.toml"),
+            ipc_provider_config,
+        )?;
+
+        figment = figment.merge(Figment::from(Json::string(&format!(
+            r#"{{ "providers_dir": "{}" }}"#,
+            tmp_providers.path().display(),
+        ))));
+        temp_dirs.push(tmp_providers);
 
         let config = load_test_config(Some(figment), config_name).await?;
         let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();

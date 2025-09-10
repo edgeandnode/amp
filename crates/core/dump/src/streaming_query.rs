@@ -7,7 +7,7 @@ use common::{
     BlockNum, BoxError, LogicalCatalog, SPECIAL_BLOCK_NUM,
     arrow::array::RecordBatch,
     catalog::physical::{Catalog, PhysicalTable},
-    metadata::segments::{BlockRange, Segment, Watermark},
+    metadata::segments::{BlockRange, ResumeWatermark, Segment, Watermark},
     notification_multiplexer::NotificationMultiplexerHandle,
     query_context::{DetachedLogicalPlan, PlanningContext, QueryContext, QueryEnv, parse_sql},
 };
@@ -158,8 +158,9 @@ pub struct StreamingQuery {
     network: String,
     /// `blocks` table for the network associated with the catalog.
     blocks_table: Arc<PhysicalTable>,
-    /// Previously processed range. These may be provided by the consumer to resume a stream.
-    prev_range: Option<BlockRange>,
+    /// The watermark associated with the previously processed range. This may be provided by the
+    /// consumer to resume a stream.
+    prev_watermark: Option<Watermark>,
 }
 
 impl StreamingQuery {
@@ -174,6 +175,7 @@ impl StreamingQuery {
         plan: DetachedLogicalPlan,
         start_block: BlockNum,
         end_block: Option<BlockNum>,
+        resume_watermark: Option<ResumeWatermark>,
         multiplexer_handle: &NotificationMultiplexerHandle,
         is_sql_dataset: bool,
         microbatch_max_interval: u64,
@@ -206,6 +208,9 @@ impl StreamingQuery {
         let src_datasets = tables.iter().map(|t| t.dataset().name.as_str()).collect();
         let blocks_table = resolve_blocks_table(&dataset_store, &src_datasets, network).await?;
         let table_updates = TableUpdates::new(&catalog, multiplexer_handle).await;
+        let prev_watermark = resume_watermark
+            .map(|w| w.to_watermark(&network))
+            .transpose()?;
         let streaming_query = Self {
             query_env,
             catalog,
@@ -213,13 +218,12 @@ impl StreamingQuery {
             tx,
             start_block,
             end_block,
+            prev_watermark,
             table_updates,
             microbatch_max_interval,
             preserve_block_num,
             network: network.to_string(),
             blocks_table: Arc::new(blocks_table),
-            // TODO: Set from client to resume a stream after dropping a connection.
-            prev_range: None,
         };
 
         let join_handle =
@@ -292,7 +296,7 @@ impl StreamingQuery {
                 // If we reached the end block, we are done
                 return Ok(());
             }
-            self.prev_range = Some(range);
+            self.prev_watermark = Some(range.watermark());
         }
     }
 
@@ -355,7 +359,7 @@ impl StreamingQuery {
         &self,
         ctx: &QueryContext,
     ) -> Result<Option<StreamDirection>, BoxError> {
-        match &self.prev_range {
+        match &self.prev_watermark {
             // start stream
             None => {
                 let block = self
@@ -364,13 +368,13 @@ impl StreamingQuery {
                 Ok(block.map(StreamDirection::ForwardFrom))
             }
             // continue stream
-            Some(prev) if self.blocks_table_contains(ctx, &prev.watermark()).await? => {
-                let block = self.blocks_table_fetch(&ctx, prev.end() + 1, None).await?;
+            Some(prev) if self.blocks_table_contains(ctx, &prev).await? => {
+                let block = self.blocks_table_fetch(&ctx, prev.number + 1, None).await?;
                 Ok(block.map(StreamDirection::ForwardFrom))
             }
             // rewind stream due to reorg
             Some(prev) => {
-                let block = self.reorg_base(ctx, prev).await?;
+                let block = self.reorg_base(ctx, &prev).await?;
                 Ok(block.map(StreamDirection::ReorgFrom))
             }
         }
@@ -442,7 +446,7 @@ impl StreamingQuery {
     async fn reorg_base(
         &self,
         ctx: &QueryContext,
-        prev_range: &BlockRange,
+        prev_watermark: &Watermark,
     ) -> Result<Option<BlockRow>, BoxError> {
         // context for querying forked blocks
         let fork_ctx = {
@@ -453,9 +457,9 @@ impl StreamingQuery {
             QueryContext::for_catalog(catalog, ctx.env.clone(), true).await?
         };
 
-        let mut min_fork_block_num = prev_range.end();
+        let mut min_fork_block_num = prev_watermark.number;
         let mut fork: Option<BlockRow> = self
-            .blocks_table_fetch(&fork_ctx, prev_range.end(), Some(&prev_range.hash))
+            .blocks_table_fetch(&fork_ctx, prev_watermark.number, Some(&prev_watermark.hash))
             .await?;
         while let Some(block) = fork.take() {
             if self.blocks_table_contains(ctx, &block.watermark()).await? {

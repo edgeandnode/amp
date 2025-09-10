@@ -5,11 +5,12 @@
 The Admin API provides a RESTful HTTP interface for managing Nozzle's ETL
 operations.
 This crate implements an Axum-based web server that exposes endpoints for
-dataset management, job control, and worker location administration.
+dataset management, job control, worker location administration, file management, and provider configuration.
 The API serves as the primary administrative interface for monitoring and
 controlling the Nozzle data pipeline,
 allowing operators to deploy datasets, trigger data extraction jobs, monitor
-job progress, and manage distributed worker locations.
+job progress, manage distributed worker locations, configure external data providers,
+and perform direct operations on Parquet files and their metadata.
 
 ## Crate Structure
 
@@ -23,10 +24,14 @@ src/
 │   ├── common.rs       # Shared utilities for handlers
 │   ├── datasets/       # Dataset management endpoints
 │   ├── datasets.rs     # Dataset handler module
+│   ├── files/          # File management endpoints
+│   ├── files.rs        # File handler module
 │   ├── jobs/           # Job management endpoints
 │   ├── jobs.rs         # Job handler module
 │   ├── locations/      # Worker location endpoints
-│   └── locations.rs    # Location handler module
+│   ├── locations.rs    # Location handler module
+│   ├── providers/      # Provider configuration endpoints
+│   └── providers.rs    # Provider handler module
 ├── lib.rs              # Main server setup and routing
 └── scheduler.rs        # Job scheduling utilities
 ```
@@ -149,6 +154,19 @@ This endpoint is typically used for periodic cleanup and administrative maintena
 
 See [`handlers/jobs/delete.rs`](src/handlers/jobs/delete.rs) for more detailed information about this endpoint.
 
+### File Management
+
+File endpoints provide CRUD operations for managing Parquet files stored in the system. These endpoints allow direct manipulation of individual files and their metadata within storage locations.
+
+#### `GET /files/{file_id}`
+Retrieves detailed information about a specific file by its ID.
+The `file_id` parameter must be a positive integer identifying the file.
+Returns comprehensive file information including location URL, size, version details, and complete Parquet metadata as JSON.
+This endpoint provides all available information about a file, including the heavy metadata JSON field.
+
+See [`handlers/files/get_by_id.rs`](src/handlers/files/get_by_id.rs) for more detailed information about this endpoint.
+
+
 ### Location Management
 
 Location endpoints manage distributed worker nodes and their availability for
@@ -171,6 +189,15 @@ and associated job details.
 
 See [`handlers/locations/get_by_id.rs`](src/handlers/locations/get_by_id.rs) for more detailed information about this endpoint.
 
+#### `GET /locations/{location_id}/files`
+Lists all files within a specific location with pagination support.
+The `location_id` parameter must be a positive integer identifying the location.
+Accepts optional query parameters including `limit` for maximum files per page (default: 50, max: 1000) and `last_file_id` for pagination cursor.
+Returns paginated file listing with essential file information (ID, name, size) optimized for bulk operations.
+This endpoint uses lightweight file metadata without the heavy Parquet JSON metadata for optimal performance.
+
+See [`handlers/locations/get_files.rs`](src/handlers/locations/get_files.rs) for more detailed information about this endpoint.
+
 #### `DELETE /locations/{id}`
 Removes a worker location from the system using the specified location
 identifier.
@@ -180,3 +207,43 @@ Performs comprehensive cleanup including deleting associated files from object
 store and removing location metadata from the database.
 
 See [`handlers/locations/delete_by_id.rs`](src/handlers/locations/delete_by_id.rs) for more detailed information about this endpoint.
+
+### Provider Management
+
+Provider endpoints manage external data source configurations including EVM RPC endpoints, Firehose connections, and Substreams providers. These endpoints allow creating, retrieving, and deleting provider configurations that are used by datasets for data extraction.
+
+#### `GET /providers`
+Lists all provider configurations available in the system.
+Returns complete provider information including configuration details for all registered providers.
+This endpoint accesses cached provider configurations from the dataset store and filters out any providers that cannot be converted to valid API format.
+
+**Security Note:** This endpoint returns the complete provider configuration including all configuration details. Ensure that sensitive information such as API keys and credentials are not stored in provider configuration files.
+
+See [`handlers/providers/get_all.rs`](src/handlers/providers/get_all.rs) for more detailed information about this endpoint.
+
+#### `POST /providers`
+Creates a new provider configuration and stores it in the dataset store.
+Accepts a JSON payload containing provider configuration with required fields including `name` (unique identifier), `kind` (provider type such as "evm-rpc", "firehose", "substreams"), `network` (blockchain network), and additional provider-specific configuration fields.
+Converts JSON configuration data to TOML format for internal storage.
+Returns 201 Created upon successful creation, 409 Conflict if provider name already exists.
+
+See [`handlers/providers/create.rs`](src/handlers/providers/create.rs) for more detailed information about this endpoint.
+
+#### `GET /providers/{name}`
+Retrieves detailed information about a specific provider configuration by its name.
+The `name` parameter is the unique identifier of the provider to retrieve.
+Returns complete provider configuration including all stored configuration details.
+
+**Security Note:** This endpoint returns the complete provider configuration including all configuration details. Ensure that sensitive information such as API keys and credentials are properly filtered before storage.
+
+See [`handlers/providers/get_by_id.rs`](src/handlers/providers/get_by_id.rs) for more detailed information about this endpoint.
+
+#### `DELETE /providers/{name}`
+Deletes a specific provider configuration by its name from the dataset store.
+The `name` parameter is the unique identifier of the provider to delete.
+Performs comprehensive cleanup by removing both the configuration file from storage and the cached entry.
+Returns 204 No Content upon successful deletion, 404 Not Found if provider doesn't exist.
+
+**Safety Warning:** Once deleted, the provider configuration cannot be recovered. Any datasets using this provider may fail until a new provider is configured.
+
+See [`handlers/providers/delete_by_id.rs`](src/handlers/providers/delete_by_id.rs) for more detailed information about this endpoint.

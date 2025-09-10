@@ -1,0 +1,4 @@
+kind = "firehose"
+url = "${FIREHOSE_ETH_BASE_URL}"
+token = "${FIREHOSE_ETH_BASE_TOKEN}"
+network = "base"

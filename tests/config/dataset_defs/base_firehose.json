@@ -1,0 +1,163 @@
+{
+  "kind": "firehose",
+  "network": "base",
+  "name": "base_firehose",
+  "start_block": 33411770,
+  "schema": {
+    "logs": {
+      "timestamp": {
+        "Timestamp": ["Nanosecond", "+00:00"]
+      },
+      "topic1": {
+        "FixedSizeBinary": 32
+      },
+      "data": "Binary",
+      "tx_hash": {
+        "FixedSizeBinary": 32
+      },
+      "topic0": {
+        "FixedSizeBinary": 32
+      },
+      "topic3": {
+        "FixedSizeBinary": 32
+      },
+      "block_num": "UInt64",
+      "block_hash": {
+        "FixedSizeBinary": 32
+      },
+      "tx_index": "UInt32",
+      "address": {
+        "FixedSizeBinary": 20
+      },
+      "topic2": {
+        "FixedSizeBinary": 32
+      },
+      "log_index": "UInt32"
+    },
+    "blocks": {
+      "gas_limit": "UInt64",
+      "transactions_root": {
+        "FixedSizeBinary": 32
+      },
+      "logs_bloom": "Binary",
+      "mix_hash": {
+        "FixedSizeBinary": 32
+      },
+      "nonce": "UInt64",
+      "base_fee_per_gas": {
+        "Decimal128": [38, 0]
+      },
+      "withdrawals_root": {
+        "FixedSizeBinary": 32
+      },
+      "parent_beacon_root": {
+        "FixedSizeBinary": 32
+      },
+      "state_root": {
+        "FixedSizeBinary": 32
+      },
+      "parent_hash": {
+        "FixedSizeBinary": 32
+      },
+      "receipt_root": {
+        "FixedSizeBinary": 32
+      },
+      "hash": {
+        "FixedSizeBinary": 32
+      },
+      "block_num": "UInt64",
+      "ommers_hash": {
+        "FixedSizeBinary": 32
+      },
+      "difficulty": {
+        "Decimal128": [38, 0]
+      },
+      "extra_data": "Binary",
+      "timestamp": {
+        "Timestamp": ["Nanosecond", "+00:00"]
+      },
+      "gas_used": "UInt64",
+      "miner": {
+        "FixedSizeBinary": 20
+      },
+      "blob_gas_used": "UInt64",
+      "excess_blob_gas": "UInt64"
+    },
+    "transactions": {
+      "end_ordinal": "UInt64",
+      "block_num": "UInt64",
+      "nonce": "UInt64",
+      "s": "Binary",
+      "to": "Binary",
+      "max_fee_per_gas": {
+        "Decimal128": [38, 0]
+      },
+      "max_priority_fee_per_gas": {
+        "Decimal128": [38, 0]
+      },
+      "from": {
+        "FixedSizeBinary": 20
+      },
+      "status": "Int32",
+      "type": "Int32",
+      "begin_ordinal": "UInt64",
+      "v": "Binary",
+      "tx_hash": {
+        "FixedSizeBinary": 32
+      },
+      "gas_used": "UInt64",
+      "gas_price": {
+        "Decimal128": [38, 0]
+      },
+      "value": {
+        "Decimal128": [38, 0]
+      },
+      "block_hash": {
+        "FixedSizeBinary": 32
+      },
+      "gas_limit": "UInt64",
+      "return_data": "Binary",
+      "r": "Binary",
+      "public_key": "Binary",
+      "timestamp": {
+        "Timestamp": ["Nanosecond", "+00:00"]
+      },
+      "tx_index": "UInt32",
+      "input": "Binary"
+    },
+    "calls": {
+      "block_num": "UInt64",
+      "parent_index": "UInt32",
+      "value": {
+        "Decimal128": [38, 0]
+      },
+      "call_type": "Int32",
+      "gas_limit": "UInt64",
+      "tx_index": "UInt32",
+      "index": "UInt32",
+      "end_ordinal": "UInt64",
+      "depth": "UInt32",
+      "block_hash": {
+        "FixedSizeBinary": 32
+      },
+      "tx_hash": {
+        "FixedSizeBinary": 32
+      },
+      "return_data": "Binary",
+      "input": "Binary",
+      "gas_consumed": "UInt64",
+      "executed_code": "Boolean",
+      "address": {
+        "FixedSizeBinary": 20
+      },
+      "selfdestruct": "Boolean",
+      "begin_ordinal": "UInt64",
+      "timestamp": {
+        "Timestamp": ["Nanosecond", "+00:00"]
+      },
+      "caller": {
+        "FixedSizeBinary": 20
+      }
+    }
+  }
+}

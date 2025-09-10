@@ -101,6 +101,8 @@ jobs:
         env:
           FIREHOSE_ETH_MAINNET_URL: ${{ secrets.FIREHOSE_ETH_MAINNET_URL }}
           FIREHOSE_ETH_MAINNET_TOKEN: ${{ secrets.FIREHOSE_ETH_MAINNET_TOKEN }}
+          FIREHOSE_ETH_BASE_URL: ${{ secrets.FIREHOSE_ETH_BASE_URL }}
+          FIREHOSE_ETH_BASE_TOKEN: ${{ secrets.FIREHOSE_ETH_MAINNET_TOKEN }} # Token is the same for both networks
           RPC_ETH_MAINNET_URL: ${{ secrets.RPC_ETH_MAINNET_URL }}
           RPC_ETH_BASE_URL: ${{ secrets.RPC_ETH_BASE_URL }}
 

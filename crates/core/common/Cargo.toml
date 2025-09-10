@@ -4,40 +4,40 @@ edition.workspace = true
 version.workspace = true
 
 [dependencies]
-metadata-db = { path = "../metadata-db", features = ["temp-db"] }
-schemars.workspace = true
 alloy.workspace = true
+async-trait.workspace = true
+axum.workspace = true
+backon.workspace = true
+bincode.workspace = true
 bytes.workspace = true
-datafusion-proto.workspace = true
 datafusion.workspace = true
+datafusion-proto.workspace = true
 datafusion-tracing.workspace = true
 figment.workspace = true
+foyer = "0.18"
 fs-err.workspace = true
 futures.workspace = true
+governor.workspace = true
+indoc.workspace = true
 itertools.workspace = true
-tracing.workspace = true
+js-runtime = { path = "../js-runtime" }
+metadata-db = { path = "../metadata-db", features = ["temp-db"] }
 object_store.workspace = true
+regex.workspace = true
+schemars.workspace = true
+semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 stable-hash = { git = "https://github.com/graphprotocol/stable-hash" }
 thiserror.workspace = true
 tokio.workspace = true
-toml.workspace = true
-url.workspace = true
-uuid.workspace = true
-semver.workspace = true
-async-trait.workspace = true
-backon.workspace = true
-bincode.workspace = true
-js-runtime = { path = "../js-runtime" }
-indoc.workspace = true
 tokio-stream.workspace = true
 tokio-util.workspace = true
-axum.workspace = true
-regex.workspace = true
-governor.workspace = true
+toml.workspace = true
 tower.workspace = true
-foyer = "0.18"
+tracing.workspace = true
+url.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 chrono.workspace = true

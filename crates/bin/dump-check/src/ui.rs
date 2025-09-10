@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{io::IsTerminal, sync::Arc};
 
 use dump_check::metrics;
 use human_bytes::human_bytes;
@@ -9,7 +9,7 @@ pub(crate) async fn ui(metrics: Option<Arc<metrics::MetricsRegistry>>, blocks: u
         return;
     };
 
-    if atty::is(atty::Stream::Stdout) {
+    if std::io::stdout().is_terminal() {
         nice_ui(metrics, blocks).await;
     } else {
         log_ui(metrics, blocks).await;

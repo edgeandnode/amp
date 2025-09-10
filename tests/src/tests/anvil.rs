@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc, usize};
 
 use alloy::{
-    node_bindings::{Anvil, AnvilInstance},
+    node_bindings::Anvil,
     primitives::BlockHash,
     providers::{Provider as _, ext::AnvilApi as _},
     rpc::types::anvil::ReorgOptions,
@@ -9,7 +9,12 @@ use alloy::{
 use arrow_flight::{
     FlightData, flight_service_client::FlightServiceClient, sql::client::FlightSqlServiceClient,
 };
-use common::{BlockNum, metadata::segments::BlockRange, query_context::parse_sql};
+use common::{
+    BlockNum,
+    arrow::array::{FixedSizeBinaryArray, UInt64Array},
+    metadata::segments::{BlockRange, ResumeWatermark},
+    query_context::parse_sql,
+};
 use dataset_store::DatasetStore;
 use futures::StreamExt as _;
 use monitoring::logging;
@@ -27,24 +32,32 @@ pub(crate) struct AnvilTestContext {
     pub(crate) env: TestEnv,
     client: TestClient,
     provider: alloy::providers::DynProvider,
-    _anvil: AnvilInstance,
+    _anvil: alloy::node_bindings::AnvilInstance,
+    _ipc: tempfile::NamedTempFile,
 }
 
 impl AnvilTestContext {
     pub(crate) async fn setup(test_name: &str) -> Self {
         logging::init();
-        let anvil = Anvil::new().port(0_u16).spawn();
-        let url = anvil.endpoint_url();
-        let env = TestEnv::new(test_name, true, Some(url.as_str()))
+
+        // Generate unique IPC path for this test using tempfile
+        let temp = tempfile::Builder::new().prefix("anvil").tempfile().unwrap();
+        let anvil = Anvil::new().ipc_path(temp.path().to_string_lossy()).spawn();
+        let path = anvil.ipc_path();
+        let env = TestEnv::new_with_ipc(test_name, true, path).await.unwrap();
+
+        let client = TestClient::connect(&env).await.unwrap();
+        let provider = alloy::providers::ProviderBuilder::new()
+            .connect_ipc(path.to_string().into())
             .await
             .unwrap();
-        let client = TestClient::connect(&env).await.unwrap();
-        let provider = alloy::providers::ProviderBuilder::new().connect_http(url);
+
         Self {
             env,
             client,
             provider: provider.erased(),
             _anvil: anvil,
+            _ipc: temp,
         }
     }
 
@@ -480,7 +493,7 @@ async fn nozzle_client() {
     let endpoint = format!("grpc://{}", test.env.server_addrs.flight_addr);
     let mut client = nozzle_client::SqlClient::new(&endpoint).await.unwrap();
     test.dump("anvil_rpc", 0).await;
-    let stream = client.query(query, None).await.unwrap();
+    let stream = client.query(query, None, None).await.unwrap();
     #[derive(Debug, PartialEq, Eq)]
     enum ControlMessage {
         Batch(Vec<nozzle_client::InvalidationRange>),
@@ -576,4 +589,91 @@ async fn dump_finalized() {
     assert_eq!(max_dump_block(&test).await, last_block - 64);
     test.dump("anvil_rpc", last_block).await;
     assert_eq!(max_dump_block(&test).await, last_block);
+}
+
+#[tokio::test]
+async fn client_stream_resume() {
+    let mut test = AnvilTestContext::setup("client_stream_resume").await;
+
+    let endpoint = format!("grpc://{}", test.env.server_addrs.flight_addr);
+    let query = "SELECT block_num, hash, parent_hash FROM anvil_rpc.blocks SETTINGS stream = true";
+    let mut client = nozzle_client::SqlClient::new(&endpoint).await.unwrap();
+
+    #[derive(Debug)]
+    struct Records {
+        records: Vec<BlockRow>,
+        watermark: ResumeWatermark,
+    }
+
+    async fn stream_blocks(
+        client: &mut nozzle_client::SqlClient,
+        query: &str,
+        latest_block: BlockNum,
+        resume_watermark: Option<&ResumeWatermark>,
+    ) -> Records {
+        println!("{:?}", resume_watermark);
+        let mut stream = client.query(query, None, resume_watermark).await.unwrap();
+        let mut records: Vec<BlockRow> = Default::default();
+        while let Some(result) = stream.next().await {
+            let batch = result.unwrap();
+            let block_num_array = batch
+                .data
+                .column(0)
+                .as_any()
+                .downcast_ref::<UInt64Array>()
+                .unwrap();
+            let hash_array = batch
+                .data
+                .column(1)
+                .as_any()
+                .downcast_ref::<FixedSizeBinaryArray>()
+                .unwrap();
+            let parent_hash_array = batch
+                .data
+                .column(2)
+                .as_any()
+                .downcast_ref::<FixedSizeBinaryArray>()
+                .unwrap();
+            for i in 0..batch.data.num_rows() {
+                records.push(BlockRow {
+                    block_num: block_num_array.value(i),
+                    hash: BlockHash::from_slice(hash_array.value(i)),
+                    parent_hash: BlockHash::from_slice(parent_hash_array.value(i)),
+                });
+            }
+            let end_block = batch.metadata.ranges[0].end();
+            let watermark = ResumeWatermark::from_ranges(batch.metadata.ranges);
+            if end_block == latest_block {
+                return Records { records, watermark };
+            }
+        }
+        panic!("ran out of response batches")
+    }
+
+    test.mine(1).await;
+    test.dump("anvil_rpc", 1).await;
+    let stream1 = stream_blocks(&mut client, query, 1, None).await;
+    // stream blocks [0, 1]
+    assert_eq!(stream1.records, test.query_blocks("anvil_rpc", None).await);
+
+    test.mine(1).await;
+    test.dump("anvil_rpc", 2).await;
+    let stream2 = stream_blocks(&mut client, query, 2, Some(&stream1.watermark)).await;
+    // stream blocks [2]
+    assert_eq!(
+        stream2.records,
+        test.query_blocks("anvil_rpc", None).await[2..=2],
+    );
+
+    test.reorg(2).await;
+    test.mine(1).await;
+    test.dump("anvil_rpc", 3).await;
+    test.dump("anvil_rpc", 3).await;
+    test.dump("anvil_rpc", 3).await;
+    let stream3 = stream_blocks(&mut client, query, 3, Some(&stream2.watermark)).await;
+    // stream blocks [1', 2', 3]
+    assert_eq!(
+        stream3.records,
+        test.query_blocks("anvil_rpc", None).await[1..=3],
+    );
 }

@@ -19,7 +19,7 @@ use common::{
     arrow::{self, array::RecordBatch, datatypes::SchemaRef, ipc::writer::IpcDataGenerator},
     catalog::physical::Catalog,
     config::Config,
-    metadata::segments::BlockRange,
+    metadata::segments::{BlockRange, ResumeWatermark},
     notification_multiplexer::{self, NotificationMultiplexerHandle},
     query_context::{
         DetachedLogicalPlan, Error as CoreError, PlanningContext, QueryContext, QueryEnv, parse_sql,
@@ -214,7 +214,7 @@ impl Service {
             .await
             .map_err(|err| Error::from(err))?;
         let is_streaming = common::stream_helpers::is_streaming(&query);
-        self.execute_plan(catalog, dataset_store, plan, is_streaming)
+        self.execute_plan(catalog, dataset_store, plan, is_streaming, None)
             .await
     }
 
@@ -225,6 +225,7 @@ impl Service {
         dataset_store: Arc<DatasetStore>,
         plan: DetachedLogicalPlan,
         is_streaming: bool,
+        resume_watermark: Option<ResumeWatermark>,
     ) -> Result<QueryResultStream, Error> {
         // is_incremental returns an error if query contains DDL, DML, etc.
         let is_incr = plan
@@ -283,6 +284,7 @@ impl Service {
                 plan,
                 earliest_block,
                 None,
+                resume_watermark,
                 &self.notification_multiplexer,
                 false,
                 self.config.microbatch_max_interval,
@@ -353,8 +355,12 @@ impl FlightService for Service {
         &self,
         request: Request<FlightDescriptor>,
     ) -> Result<Response<FlightInfo>, Status> {
+        let resume_watermark = request
+            .metadata()
+            .get("nozzle-resume")
+            .and_then(|v| serde_json::from_slice(v.as_bytes()).ok());
         let descriptor = request.into_inner();
-        let info = self.get_flight_info(descriptor).await?;
+        let info = self.get_flight_info(descriptor, resume_watermark).await?;
         Ok(Response::new(info))
     }
 
@@ -398,7 +404,11 @@ impl FlightService for Service {
 
 impl Service {
     #[instrument(skip(self))]
-    async fn get_flight_info(&self, descriptor: FlightDescriptor) -> Result<FlightInfo, Error> {
+    async fn get_flight_info(
+        &self,
+        descriptor: FlightDescriptor,
+        resume_watermark: Option<ResumeWatermark>,
+    ) -> Result<FlightInfo, Error> {
         let (serialized_plan, schema) = match DescriptorType::try_from(descriptor.r#type)
             .map_err(|e| Error::PbDecodeError(e.to_string()))?
         {
@@ -421,7 +431,9 @@ impl Service {
                         .clone()
                         .planning_ctx_for_sql(&query)
                         .await?;
-                    query_ctx.sql_to_remote_plan(query).await?
+                    query_ctx
+                        .sql_to_remote_plan(query, resume_watermark)
+                        .await?
                 } else {
                     return Err(Error::UnsupportedFlightDescriptorCommand(msg.type_url));
                 }
@@ -468,6 +480,8 @@ impl Service {
     #[instrument(skip_all)]
     async fn do_get(&self, ticket: arrow_flight::Ticket) -> Result<TonicStream<FlightData>, Error> {
         let remote_plan = common::query_context::remote_plan_from_bytes(&ticket.ticket)?;
+        let is_streaming = remote_plan.is_streaming;
+        let resume_watermark = remote_plan.resume_watermark.map(Into::into);
         let table_refs = remote_plan.table_refs.into_iter().map(|t| t.into());
 
         let catalog = self
@@ -482,7 +496,7 @@ impl Service {
 
         let dataset_store = self.dataset_store.clone();
         let stream = self
-            .execute_plan(catalog, dataset_store, plan, remote_plan.is_streaming)
+            .execute_plan(catalog, dataset_store, plan, is_streaming, resume_watermark)
             .await?;
 
         Ok(flight_data_stream(stream, schema))

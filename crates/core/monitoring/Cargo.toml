@@ -6,7 +6,6 @@ version.workspace = true
 [dependencies]
 tracing-subscriber.workspace = true
 tracing.workspace = true
-atty.workspace = true
 opentelemetry.workspace = true
 opentelemetry-otlp.workspace = true
 opentelemetry_sdk.workspace = true
