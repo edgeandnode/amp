@@ -25,12 +25,17 @@
  * @author SQL Intellisense System
  */
 
-// Monaco editor will be available globally in browser - no need to import
+import type {
+  IDisposable,
+  Position,
+  editor
+} from "monaco-editor/esm/vs/editor/editor.api"
 import * as monaco from "monaco-editor/esm/vs/editor/editor.api"
 import type { DatasetSource } from "nozzl/Studio/Model"
 
 import { NozzleCompletionProvider } from "./NozzleCompletionProvider"
 import { QueryContextAnalyzer } from "./QueryContextAnalyzer"
+import { SqlValidator } from './sqlValidator'
 import type { CompletionConfig, DisposableHandle, PerformanceMetrics, UserDefinedFunction } from "./types"
 import { UdfSnippetGenerator } from "./UDFSnippetGenerator"
 
@@ -47,10 +52,11 @@ class SqlProviderManager {
   private completionProvider?: NozzleCompletionProvider | undefined
   private contextAnalyzer?: QueryContextAnalyzer | undefined
   private snippetGenerator?: UdfSnippetGenerator | undefined
+  private validator?: SqlValidator | undefined
 
-  private completionDisposable?: monaco.IDisposable | undefined
-  private hoverDisposable?: monaco.IDisposable | undefined
-  private signatureDisposable?: monaco.IDisposable | undefined
+  private completionDisposable?: IDisposable | undefined
+  private hoverDisposable?: IDisposable | undefined
+  private signatureDisposable?: IDisposable | undefined
 
   private isDisposed = false
   private metrics: PerformanceMetrics = {
@@ -86,6 +92,7 @@ class SqlProviderManager {
         this.config,
       )
       this.snippetGenerator = new UdfSnippetGenerator()
+      this.validator = new SqlValidator([...this.metadata], [...this.udfs], this.config)
 
       // Register completion provider
       this.completionDisposable = monaco.languages.registerCompletionItemProvider("sql", {
@@ -194,7 +201,11 @@ class SqlProviderManager {
         this.completionProvider.updateData(metadata, udfs)
       }
 
-      this.logDebug("Provider data updated", {
+      if (this.validator) {
+        this.validator.updateData([...metadata], [...udfs])
+      }
+
+      this.logDebug('Provider data updated', {
         tableCount: metadata.length,
         udfCount: udfs.length,
       })
@@ -212,6 +223,17 @@ class SqlProviderManager {
    */
   getMetrics(): PerformanceMetrics {
     return { ...this.metrics }
+  }
+
+  /**
+   * Get SQL Validator Instance
+   * 
+   * Returns the validator instance for direct access to validation functionality.
+   * 
+   * @returns SqlValidator instance or null if not initialized
+   */
+  getValidator(): SqlValidator | null {
+    return this.validator || null
   }
 
   /**
@@ -249,6 +271,11 @@ class SqlProviderManager {
         this.completionProvider = undefined
       }
 
+      if (this.validator) {
+        this.validator.dispose()
+        this.validator = undefined
+      }
+
       if (this.contextAnalyzer) {
         this.contextAnalyzer.clearCache()
         this.contextAnalyzer = undefined
@@ -271,8 +298,8 @@ class SqlProviderManager {
    * @private
    */
   private provideHover(
-    model: monaco.editor.ITextModel,
-    position: monaco.Position,
+    model: editor.ITextModel,
+    position: Position,
   ): monaco.languages.ProviderResult<monaco.languages.Hover> {
     // Get the word at the current position
     const word = model.getWordAtPosition(position)
@@ -307,8 +334,8 @@ class SqlProviderManager {
    * @private
    */
   private provideSignatureHelp(
-    _model: monaco.editor.ITextModel,
-    _position: monaco.Position,
+    _model: editor.ITextModel,
+    _position: Position,
   ): monaco.languages.ProviderResult<monaco.languages.SignatureHelpResult> {
     // This is a placeholder for signature help implementation
     // Full implementation would require parsing function calls and parameter positions
@@ -323,7 +350,7 @@ class SqlProviderManager {
    * @private
    */
   private createFallbackCompletions(
-    position: monaco.Position,
+    position: Position,
   ): ReadonlyArray<monaco.languages.CompletionItem> {
     const basicKeywords = [
       "SELECT",
@@ -378,10 +405,8 @@ class SqlProviderManager {
    * Logging Utilities
    */
 
-  private logDebug(message: string, data?: any): void {
-    if (this.config.enableDebugLogging) {
-      console.debug(`[SqlProviderManager] ${message}`, data)
-    }
+  private logDebug(_message: string, _data?: any): void {
+    // Debug logging removed for production
   }
 
   private logWarning(message: string, data?: any): void {
@@ -415,6 +440,7 @@ export function setupNozzleSQLProviders(
   udfs: ReadonlyArray<UserDefinedFunction>,
   config?: Partial<CompletionConfig>,
 ): DisposableHandle {
+
   // Dispose existing manager if present
   if (activeProviderManager) {
     activeProviderManager.dispose()
@@ -424,7 +450,7 @@ export function setupNozzleSQLProviders(
   // Create and setup new manager
   const finalConfig = { ...DEFAULT_COMPLETION_CONFIG, ...config }
   activeProviderManager = new SqlProviderManager(metadata, udfs, finalConfig)
-
+  
   const disposable = activeProviderManager.setup()
 
   // Return enhanced disposable that also cleans up the active manager
@@ -492,8 +518,24 @@ export function areProvidersActive(): boolean {
   return activeProviderManager !== null && !activeProviderManager["isDisposed"]
 }
 
+/**
+ * Get Active SQL Validator
+ * 
+ * Returns the currently active SQL validator instance for direct validation access.
+ * 
+ * @returns SqlValidator instance or null if no provider is active
+ */
+export function getActiveValidator(): SqlValidator | null {
+  const validator = activeProviderManager ? activeProviderManager.getValidator() : null
+  return validator
+}
+
+// Export new unified provider
+export { UnifiedSQLProvider, type SQLProviderConfig, type ISQLProvider } from "./UnifiedSQLProvider"
+
 // Export all types and classes for advanced usage
 export { NozzleCompletionProvider } from "./NozzleCompletionProvider"
 export { QueryContextAnalyzer } from "./QueryContextAnalyzer"
 export * from "./types"
 export { createUdfCompletionItem, createUdfSnippet, UdfSnippetGenerator } from "./UDFSnippetGenerator"
+export { SqlValidator } from './sqlValidator'

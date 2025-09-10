@@ -14,10 +14,30 @@
  * @file types.ts
  * @author SQL Intellisense System
  */
-import type { Position } from "monaco-editor/esm/vs/editor/editor.api"
+import type {
+  Position,
+  Range,
+  IMarkdownString,
+  MarkerSeverity,
+  CancellationToken,
+  editor,
+  languages
+} from "monaco-editor/esm/vs/editor/editor.api"
 import type { DatasetSource } from "nozzl/Studio/Model"
 
-// Keep only MonacoITextModel as it's still used in QueryContextAnalyzer
+// Re-export Monaco types for convenience
+export type {
+  Position,
+  Range,
+  IMarkdownString,
+  MarkerSeverity,
+  CancellationToken
+}
+
+// Re-export Monaco editor and languages namespaces
+export type { editor, languages }
+// Simplified interface for test mocks and minimal Monaco integration
+// This interface provides only the essential methods needed by our SQL analysis
 export interface MonacoITextModel {
   getValue: () => string
   getOffsetAt: (position: Position) => number
@@ -158,6 +178,16 @@ export interface CompletionConfig {
 
   /** Whether to log debug information for completion analysis */
   enableDebugLogging: boolean
+
+  // SQL Validation Feature Flags
+  /** Whether to enable SQL validation and error markers */
+  enableSqlValidation: boolean
+  
+  /** Validation level: 'basic' (syntax only), 'standard' (+ tables), 'full' (+ columns) */
+  validationLevel: 'basic' | 'standard' | 'full'
+  
+  /** Whether to enable validation for incomplete/partial queries as user types */
+  enablePartialValidation: boolean
 }
 
 /**
@@ -172,8 +202,33 @@ export const DEFAULT_COMPLETION_CONFIG: CompletionConfig = {
   enableSnippets: true, // Enable UDF snippets by default
   enableContextFiltering: true, // Enable smart context filtering
   enableAliasResolution: true, // Enable table alias support
-  contextCacheTTL: 30 * 1000, // 30 second cache TTL
-  enableDebugLogging: false, // Disable debug logging in production
+  contextCacheTTL: 30 * 1000,  // 30 second cache TTL
+  enableDebugLogging: false,   // Disable debug logging in production
+  
+  // SQL Validation defaults
+  enableSqlValidation: true,   // Enable validation by default
+  validationLevel: 'standard', // Start with table validation
+  enablePartialValidation: true // Enable validation while typing
+}
+
+/**
+ * Default validation cache configuration
+ * 
+ * Provides default caching configuration for validation results.
+ */
+export const DEFAULT_VALIDATION_CACHE_CONFIG: ValidationCacheConfig = {
+  maxEntries: 100,                    // Cache up to 100 queries
+  ttl: 5 * 60 * 1000,                // 5 minute TTL
+  keyFunction: (query: string) => {   // Simple hash function for cache keys
+    let hash = 0
+    const trimmed = query.trim().toLowerCase()
+    for (let i = 0; i < trimmed.length; i++) {
+      const char = trimmed.charCodeAt(i)
+      hash = ((hash << 5) - hash) + char
+      hash = hash & hash // Convert to 32-bit integer
+    }
+    return hash.toString()
+  }
 }
 
 /**
@@ -237,6 +292,171 @@ export interface SqlToken {
 
   /** Column number (1-based) */
   column: number
+}
+
+/**
+ * SQL Validation Error
+ * 
+ * Represents a validation error found in a SQL query with position information
+ * compatible with Monaco Editor's marker system.
+ * 
+ * @interface SqlValidationError
+ */
+export interface SqlValidationError {
+  /** Human-readable error message */
+  message: string
+  
+  /** Error severity level (Error, Warning, Info) */
+  severity: MarkerSeverity
+  
+  /** Start line number (1-based) */
+  startLineNumber: number
+  
+  /** Start column number (1-based) */
+  startColumn: number
+  
+  /** End line number (1-based) */
+  endLineNumber: number
+  
+  /** End column number (1-based) */
+  endColumn: number
+  
+  /** Error code for categorization */
+  code?: string
+  
+  /** Additional error data for debugging */
+  data?: any
+}
+
+/**
+ * Validation Cache Configuration
+ * 
+ * Configuration for validation result caching to improve performance.
+ * 
+ * @interface ValidationCacheConfig  
+ */
+export interface ValidationCacheConfig {
+  /** Maximum number of cached validation results */
+  maxEntries: number
+  
+  /** Time-to-live for cached results in milliseconds */
+  ttl: number
+  
+  /** Function to generate cache keys from query strings */
+  keyFunction: (query: string) => string
+}
+
+// MonacoMarkerSeverity is now replaced by directly imported MarkerSeverity
+// This re-export is kept for backward compatibility during migration
+export type { MarkerSeverity as MonacoMarkerSeverity }
+
+/**
+ * Validation Cache
+ * 
+ * LRU cache for validation results to improve performance.
+ * Implements a simple least-recently-used eviction policy.
+ */
+export class ValidationCache {
+  private cache = new Map<string, { errors: SqlValidationError[]; timestamp: number; accessCount: number }>()
+  private accessOrder: string[] = []
+  private config: ValidationCacheConfig
+
+  constructor(config: ValidationCacheConfig = DEFAULT_VALIDATION_CACHE_CONFIG) {
+    this.config = config
+  }
+
+  /**
+   * Get cached validation results for a query
+   */
+  get(query: string): SqlValidationError[] | null {
+    const key = this.config.keyFunction(query)
+    const entry = this.cache.get(key)
+    
+    if (!entry) {
+      return null
+    }
+
+    // Check if entry has expired
+    if (Date.now() - entry.timestamp > this.config.ttl) {
+      this.delete(key)
+      return null
+    }
+
+    // Update access order and count
+    entry.accessCount++
+    this.moveToEnd(key)
+    
+    return entry.errors
+  }
+
+  /**
+   * Set validation results in cache
+   */
+  set(query: string, errors: SqlValidationError[]): void {
+    const key = this.config.keyFunction(query)
+    
+    // If cache is full, evict least recently used
+    if (this.cache.size >= this.config.maxEntries && !this.cache.has(key)) {
+      this.evictLRU()
+    }
+
+    this.cache.set(key, {
+      errors: [...errors], // Create defensive copy
+      timestamp: Date.now(),
+      accessCount: 1
+    })
+    
+    this.moveToEnd(key)
+  }
+
+  /**
+   * Clear all cached entries
+   */
+  clear(): void {
+    this.cache.clear()
+    this.accessOrder = []
+  }
+
+  /**
+   * Get cache statistics
+   */
+  getStats(): {
+    size: number
+    maxSize: number
+    hitRate: number
+  } {
+    const totalAccess = Array.from(this.cache.values())
+      .reduce((sum, entry) => sum + entry.accessCount, 0)
+    
+    return {
+      size: this.cache.size,
+      maxSize: this.config.maxEntries,
+      hitRate: totalAccess > 0 ? this.cache.size / totalAccess : 0
+    }
+  }
+
+  private moveToEnd(key: string): void {
+    const index = this.accessOrder.indexOf(key)
+    if (index > -1) {
+      this.accessOrder.splice(index, 1)
+    }
+    this.accessOrder.push(key)
+  }
+
+  private evictLRU(): void {
+    if (this.accessOrder.length > 0) {
+      const lruKey = this.accessOrder.shift()!
+      this.cache.delete(lruKey)
+    }
+  }
+
+  private delete(key: string): void {
+    this.cache.delete(key)
+    const index = this.accessOrder.indexOf(key)
+    if (index > -1) {
+      this.accessOrder.splice(index, 1)
+    }
+  }
 }
 
 /**

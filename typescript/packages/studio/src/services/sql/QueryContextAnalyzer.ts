@@ -210,9 +210,12 @@ export class QueryContextAnalyzer {
           column: startColumn,
         })
         position += value.length
-        if (char === "\n") {
-          line++
-          column = 1
+        
+        // Count all newlines in the whitespace value, not just the first character
+        const newlines = (value.match(/\n/g) || []).length
+        if (newlines > 0) {
+          line += newlines
+          column = value.length - value.lastIndexOf('\n')
         } else {
           column += value.length
         }
@@ -794,10 +797,8 @@ export class QueryContextAnalyzer {
    * Logging Utilities
    */
 
-  private logDebug(message: string, data?: any): void {
-    if (this.config.enableDebugLogging) {
-      console.debug(`[QueryContextAnalyzer] ${message}`, data)
-    }
+  private logDebug(_message: string, _data?: any): void {
+    // Debug logging removed for production
   }
 
   private logError(message: string, error: any): void {
