@@ -5,6 +5,7 @@ use std::{
     process::{ExitStatus, Stdio},
     str::FromStr as _,
     sync::Arc,
+    time::Duration,
 };
 
 use common::{
@@ -22,7 +23,9 @@ use common::{
 };
 use dataset_store::DatasetStore;
 use dump::{
-    compaction::{SegmentSizeLimit, compactor::Compactor},
+    compaction::{
+        NozzleCompactorTaskType, SegmentSizeLimit, collector::Collector, compactor::Compactor,
+    },
     consistency_check,
     worker::Worker,
 };
@@ -677,7 +680,7 @@ pub async fn restore_blessed_dataset(
 
 /// Spawn a compaction for the given table and wait for it to complete.
 /// The compaction is configured to compact all files into a single file.
-pub async fn spawn_compaction_and_await_completion(
+async fn spawn_compaction_task_and_await_completion<T: NozzleCompactorTaskType>(
     table: &Arc<PhysicalTable>,
     config: &Arc<Config>,
 ) {
@@ -686,13 +689,28 @@ pub async fn spawn_compaction_and_await_completion(
     let mut opts = dump::compaction_opts(&config.compaction, &parquet_writer_props);
     opts.active = true;
     opts.size_limit = SegmentSizeLimit::new(1, 1, 1, length);
+    let duration = Duration::from_secs(100);
+    opts.collector_interval = duration;
 
-    let mut compactor = Compactor::start(table, &Arc::new(opts));
+    let mut task = T::start(table, &Arc::new(opts));
 
-    compactor.spawn().await;
+    task.spawn().await;
 
-    // Wait for compaction to finish
-    while !compactor.is_finished() {
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    while !task.is_finished() {
+        tokio::time::sleep(duration).await;
     }
+}
+
+pub async fn spawn_compaction_and_await_completion(
+    table: &Arc<PhysicalTable>,
+    config: &Arc<Config>,
+) {
+    spawn_compaction_task_and_await_completion::<Compactor>(table, config).await;
+}
+
+pub async fn spawn_collection_and_await_completion(
+    table: &Arc<PhysicalTable>,
+    config: &Arc<Config>,
+) {
+    spawn_compaction_task_and_await_completion::<Collector>(table, config).await;
 }

@@ -1,4 +1,8 @@
-use std::{sync::Arc, time::Duration};
+use std::{
+    fmt::{Debug, Display, Formatter},
+    sync::Arc,
+    time::Duration,
+};
 
 use common::{Timestamp, catalog::physical::PhysicalTable};
 use futures::{
@@ -10,40 +14,29 @@ use object_store::{Error as ObjectStoreError, ObjectStore, path::Path};
 
 use crate::{
     compaction::{
-        CompactionProperties, DeletionTask,
-        error::{DeletionError, DeletionResult},
+        CompactionProperties, NozzleCompactorTaskType,
+        error::{CollectorError, DeletionResult},
     },
     consistency_check,
 };
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Collector {
-    pub table: Arc<PhysicalTable>,
-    pub opts: Arc<CompactionProperties>,
+    pub(super) table: Arc<PhysicalTable>,
+    pub(super) opts: Arc<CompactionProperties>,
+}
+
+impl Debug for Collector {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Garbage Collector {{ table: {} }}",
+            self.table.table_ref()
+        )
+    }
 }
 
 impl Collector {
-    /// Starts the deletion task by spawning a new asynchronous task
-    /// that returns a new Collector.
-    pub fn start(table: &Arc<PhysicalTable>, opts: &Arc<CompactionProperties>) -> DeletionTask {
-        DeletionTask {
-            task: tokio::spawn(future::ok(Collector::new(table, opts)).boxed()),
-            table: Arc::clone(table),
-            opts: Arc::clone(opts),
-            previous: None,
-        }
-    }
-
-    pub(super) fn new<'a>(
-        table: &'a Arc<PhysicalTable>,
-        opts: &'a Arc<CompactionProperties>,
-    ) -> Self {
-        Collector {
-            table: Arc::clone(table),
-            opts: Arc::clone(opts),
-        }
-    }
-
     pub(super) async fn collect(self) -> DeletionResult<Self> {
         let table = Arc::clone(&self.table);
 
@@ -60,15 +53,14 @@ impl Collector {
         match DeletionOutput::try_from_manifest_stream(object_store, expired_stream, now).await {
             Ok(output) if output.len() > 0 => {
                 output.update_manifest(&metadata_db).await.map_err(
-                    DeletionError::manifest_update_error(
-                        self.clone(),
+                    CollectorError::manifest_update_error(
                         [output.successes, output.not_found].concat(),
                     ),
                 )?;
 
                 if let Err(error) = consistency_check(&self.table)
                     .await
-                    .map_err(DeletionError::consistency_check_error(&self))
+                    .map_err(CollectorError::consistency_check_error)
                 {
                     tracing::error!("{error}");
                     return Ok(self);
@@ -82,6 +74,36 @@ impl Collector {
                 Ok(self)
             }
         }
+    }
+}
+
+impl Display for Collector {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Garbage Collector {{ table: {}, opts: {} }}",
+            self.table.table_ref(),
+            self.opts
+        )
+    }
+}
+
+impl NozzleCompactorTaskType for Collector {
+    type Error = CollectorError;
+
+    fn new(table: &Arc<PhysicalTable>, opts: &Arc<CompactionProperties>) -> Self {
+        Collector {
+            table: Arc::clone(table),
+            opts: Arc::clone(opts),
+        }
+    }
+
+    fn run<'a>(self) -> future::BoxFuture<'a, Result<Self, Self::Error>> {
+        self.collect().boxed()
+    }
+
+    fn interval(opts: &Arc<CompactionProperties>) -> Duration {
+        opts.collector_interval
     }
 }
 

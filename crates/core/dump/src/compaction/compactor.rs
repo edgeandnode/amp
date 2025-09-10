@@ -1,43 +1,45 @@
-use std::sync::Arc;
+use std::{
+    fmt::{Debug, Display, Formatter},
+    sync::Arc,
+};
 
 use common::{catalog::physical::PhysicalTable, metadata::segments::BlockRange};
-use futures::{FutureExt, StreamExt, TryStreamExt, future, stream};
+use futures::{FutureExt, StreamExt, TryStreamExt, future::BoxFuture, stream};
 use metadata_db::{FileId, MetadataDb};
 
 use crate::{
     compaction::{
-        CompactionError, CompactionProperties, CompactionResult, CompactionTask,
-        FILE_LOCK_DURATION,
+        CompactorError, CompactionProperties, CompactionResult, FILE_LOCK_DURATION,
+        NozzleCompactorTaskType,
         group::{CompactionFile, CompactionGroupGenerator},
     },
     parquet_writer::{ParquetFileWriter, ParquetFileWriterOutput},
 };
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Compactor {
     pub(super) table: Arc<PhysicalTable>,
     pub(super) opts: Arc<CompactionProperties>,
 }
-// INTEGRATE WITH THE FAILFAST JOINSET
+
+impl Debug for Compactor {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Compactor {{ table: {} }}", self.table.table_ref())
+    }
+}
+
+impl Display for Compactor {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Compactor {{ opts: {}, table: {} }}",
+            self.opts,
+            self.table.table_ref()
+        )
+    }
+}
+
 impl Compactor {
-    /// Starts the compaction task by spawning a new asynchronous task
-    /// that returns a new compactor.
-    pub fn start(table: &Arc<PhysicalTable>, opts: &Arc<CompactionProperties>) -> CompactionTask {
-        CompactionTask {
-            task: tokio::spawn(future::ok(Compactor::new(table, opts)).boxed()),
-            table: Arc::clone(table),
-            opts: Arc::clone(opts),
-            previous: None,
-        }
-    }
-
-    pub(super) fn new(table: &Arc<PhysicalTable>, opts: &Arc<CompactionProperties>) -> Self {
-        Compactor {
-            table: Arc::clone(table),
-            opts: Arc::clone(opts),
-        }
-    }
-
     #[tracing::instrument(skip_all, err)]
     pub(super) async fn compact(self) -> CompactionResult<Self> {
         let table = Arc::clone(&self.table);
@@ -73,6 +75,25 @@ impl Compactor {
         }
 
         Ok(self)
+    }
+}
+
+impl NozzleCompactorTaskType for Compactor {
+    type Error = CompactorError;
+
+    fn new(table: &Arc<PhysicalTable>, opts: &Arc<CompactionProperties>) -> Self {
+        Compactor {
+            table: Arc::clone(table),
+            opts: Arc::clone(opts),
+        }
+    }
+
+    fn run<'a>(self) -> BoxFuture<'a, Result<Self, Self::Error>> {
+        self.compact().boxed()
+    }
+
+    fn interval(opts: &Arc<CompactionProperties>) -> std::time::Duration {
+        opts.compactor_interval
     }
 }
 
@@ -125,8 +146,7 @@ impl CompactionGroup {
             self.opts.parquet_writer_props.clone(),
             range.start(),
         )
-        .map_err(CompactionError::create_writer_error(
-            &self.table,
+        .map_err(CompactorError::create_writer_error(
             &self.opts.parquet_writer_props,
         ))?;
 
@@ -142,7 +162,7 @@ impl CompactionGroup {
         writer
             .close(range, file_ids)
             .await
-            .map_err(|err| CompactionError::FileWriteError { err })
+            .map_err(|err| CompactorError::FileWriteError { err })
     }
 
     pub async fn compact(self) -> CompactionResult<Vec<FileId>> {
@@ -153,14 +173,12 @@ impl CompactionGroup {
         output
             .commit_metadata(Arc::clone(&metadata_db))
             .await
-            .map_err(CompactionError::metadata_commit_error(
-                output.object_meta.location.as_ref(),
-            ))?;
+            .map_err(CompactorError::metadata_commit_error)?;
 
         output
             .upsert_gc_manifest(Arc::clone(&metadata_db))
             .await
-            .map_err(CompactionError::manifest_update_error(&output.parent_ids))?;
+            .map_err(CompactorError::manifest_update_error(&output.parent_ids))?;
 
         Ok(output.parent_ids)
     }

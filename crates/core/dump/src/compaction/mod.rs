@@ -5,7 +5,7 @@ pub mod group;
 pub mod size;
 
 use std::{
-    fmt::{Display, Formatter},
+    fmt::{Debug, Display, Formatter},
     sync::Arc,
     time::Duration,
 };
@@ -14,12 +14,12 @@ use common::{
     Timestamp, catalog::physical::PhysicalTable,
     parquet::file::properties::WriterProperties as ParquetWriterProperties,
 };
-use futures::{FutureExt, TryFutureExt};
+use futures::{FutureExt, TryFutureExt, future::BoxFuture};
 use tokio::task::JoinHandle;
 
-use crate::compaction::{collector::Collector, compactor::Compactor};
+use crate::compaction::{collector::Collector, compactor::Compactor, error::CompactionErrorExt};
 pub use crate::compaction::{
-    error::{CompactionError, CompactionResult, DeletionError, DeletionResult},
+    error::{CompactorError, CompactionResult, CollectorError, DeletionResult},
     size::{SegmentSize, SegmentSizeLimit},
 };
 
@@ -39,22 +39,18 @@ pub struct CompactionProperties {
 
 impl Display for CompactionProperties {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        f.debug_map()
-            .entry(&"metadata_concurrency", &self.metadata_concurrency)
-            .entry(&"write_concurrency", &self.write_concurrency)
-            .entry(&"size_limit", &self.size_limit)
-            .entry(
-                &"collector_interval_secs",
-                &self.collector_interval.as_secs(),
-            )
-            .entry(
-                &"compactor_interval_secs",
-                &self.compactor_interval.as_secs(),
-            )
-            .finish()
+        write!(
+            f,
+            " {{ {active}, {compactor_interval}, {collector_interval}, {metadata_concurrency}, {write_concurrency}, {size_limit} }}",
+            active = format!("active: {}", self.active),
+            compactor_interval = format!("compactor_interval: {:?}", self.compactor_interval),
+            collector_interval = format!("collector_interval: {:?}", self.collector_interval),
+            metadata_concurrency = format!("metadata_concurrency: {}", self.metadata_concurrency),
+            write_concurrency = format!("write_concurrency: {}", self.write_concurrency),
+            size_limit = format!("size_limit: {}", self.size_limit),
+        )
     }
 }
-
 pub struct NozzleCompactor {
     compaction_task: CompactionTask,
     deletion_task: DeletionTask,
@@ -91,18 +87,21 @@ impl NozzleCompactor {
     /// Block until the current deletion task is finished
     /// and then trigger another deletion
     pub async fn run_deletion(&mut self) {
-        self.deletion_task.run().await;
+        self.deletion_task.spawn().await;
     }
 }
 
-pub struct CompactionTask {
-    task: JoinHandle<CompactionResult<Compactor>>,
+pub type CompactionTask = NozzleCompactorTask<Compactor>;
+pub type DeletionTask = NozzleCompactorTask<Collector>;
+
+pub struct NozzleCompactorTask<T: NozzleCompactorTaskType> {
+    task: JoinHandle<Result<T, T::Error>>,
     table: Arc<PhysicalTable>,
     opts: Arc<CompactionProperties>,
     previous: Option<Timestamp>,
 }
 
-impl CompactionTask {
+impl<T: NozzleCompactorTaskType> NozzleCompactorTask<T> {
     pub fn abort(&self) {
         self.task.abort();
     }
@@ -123,32 +122,24 @@ impl CompactionTask {
             && self
                 .elapsed_since_previous()
                 // if None, consider it ready
-                .map_or(true, |elapsed| elapsed >= self.opts.compactor_interval)
+                .map_or(true, |elapsed| elapsed >= T::interval(&self.opts))
             && self.opts.active
     }
 
     pub async fn spawn(&mut self) {
         let task = &mut self.task;
 
-        let compactor = match task
-            .map_err(CompactionError::join_error(Compactor::new(
-                &self.table,
-                &self.opts,
-            )))
+        let inner = match task
+            .map_err(|join_err| T::handle_error(&self.table, &mut self.opts, join_err))
             .await
         {
-            Ok(Ok(compactor)) => {
+            Ok(Ok(inner)) | Err(inner) => {
                 self.previous = Some(Timestamp::now());
-                compactor
+                inner
             }
-            Err(CompactionError::JoinError { compactor, err }) => {
-                tracing::error!("{err}");
-                compactor
-            }
-            _ => panic!("Unexpected error while waiting for compaction task"),
+            Ok(Err(err)) => T::handle_error(&self.table, &mut self.opts, err),
         };
-
-        self.task = tokio::spawn(compactor.compact());
+        self.task = tokio::spawn(inner.run());
     }
 
     fn try_run(&mut self) {
@@ -160,72 +151,49 @@ impl CompactionTask {
     }
 }
 
-pub struct DeletionTask {
-    task: JoinHandle<DeletionResult<Collector>>,
-    table: Arc<PhysicalTable>,
-    opts: Arc<CompactionProperties>,
-    previous: Option<Timestamp>,
-}
+pub trait NozzleCompactorTaskType: Debug + Display + Sized + Send + 'static {
+    type Error: CompactionErrorExt;
 
-impl DeletionTask {
-    pub fn abort(&self) {
-        self.task.abort();
+    fn new(table: &Arc<PhysicalTable>, opts: &Arc<CompactionProperties>) -> Self;
+
+    /// Run the task
+    fn run<'a>(self) -> BoxFuture<'a, Result<Self, Self::Error>>;
+
+    fn interval(opts: &Arc<CompactionProperties>) -> Duration;
+
+    /// Handle errors from the previous run
+    ///
+    /// If the error is recoverable, return `self` to retry
+    fn handle_error(
+        table: &Arc<PhysicalTable>,
+        opts: &mut Arc<CompactionProperties>,
+        err: impl Into<<Self as NozzleCompactorTaskType>::Error>,
+    ) -> Self {
+        let this = Self::new(table, opts);
+        let err = err.into();
+        if err.is_cancellation() {
+            let opts = Arc::make_mut(opts);
+            opts.active = false;
+            tracing::warn!("{this:?} was cancelled");
+            return this;
+        } else if err.is_recoverable() {
+            tracing::warn!("Recoverable error occurred in {this}: {err}");
+            this
+        } else {
+            panic!("Unrecoverable error occurred in {this}: {err}");
+        }
     }
 
-    pub fn elapsed_since_previous(&self) -> Option<Duration> {
-        self.previous.map(|previous| {
-            let now = Timestamp::now();
-            now.0.saturating_sub(previous.0)
-        })
-    }
-
-    pub fn is_finished(&self) -> bool {
-        self.task.is_finished()
-    }
-
-    fn ready(&self) -> bool {
-        self.is_finished()
-            && self
-                .elapsed_since_previous()
-                // if None, consider it ready
-                .map_or(true, |elapsed| elapsed >= self.opts.collector_interval)
-            && self.opts.active
-    }
-
-    async fn run(&mut self) {
-        let task = &mut self.task;
-
-        let collector = match task
-            .map_err(DeletionError::join_error(Collector::new(
-                &self.table,
-                &self.opts,
-            )))
-            .now_or_never()
-            .expect("We already checked is_finished")
-        {
-            Ok(Ok(collector)) => {
-                self.previous = Some(Timestamp::now());
-                collector
-            }
-            Ok(Err(DeletionError::JoinError { collector, err }))
-            | Err(DeletionError::JoinError { collector, err }) => {
-                tracing::error!("{err}");
-                collector
-            }
-            Ok(Err(DeletionError::FileDeleteError { collector, .. }))
-            | Ok(Err(DeletionError::FileStreamError { collector, .. }))
-            | Ok(Err(DeletionError::ManifestDeleteError { collector, .. })) => collector,
-            _ => unreachable!("Unexpected error while waiting for compaction task"),
-        };
-
-        self.task = tokio::spawn(collector.collect());
-    }
-
-    fn try_run(&mut self) {
-        if self.ready() {
-            self.run()
-                .now_or_never()
-                .expect("We already checked is_finished");
+    fn start(
+        table: &Arc<PhysicalTable>,
+        opts: &Arc<CompactionProperties>,
+    ) -> NozzleCompactorTask<Self> {
+        let task = tokio::spawn(Self::new(table, opts).run());
+        NozzleCompactorTask {
+            task,
+            table: Arc::clone(table),
+            opts: Arc::clone(opts),
+            previous: None,
         }
     }
 }
