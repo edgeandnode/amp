@@ -689,8 +689,9 @@ async fn spawn_compaction_task_and_await_completion<T: NozzleCompactorTaskType>(
     let mut opts = dump::compaction_opts(&config.compaction, &parquet_writer_props);
     opts.active = true;
     opts.size_limit = SegmentSizeLimit::new(1, 1, 1, length);
-    let duration = Duration::from_secs(100);
-    opts.collector_interval = duration;
+    let duration = Duration::from_millis(10);
+    opts.collector_interval = Duration::ZERO;
+    opts.collector_interval = Duration::ZERO;
 
     let mut task = T::start(table, &Arc::new(opts));
 
