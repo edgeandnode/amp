@@ -28,9 +28,11 @@ pub const FILE_LOCK_DURATION: Duration = Duration::from_secs(60 * 60); // 1 hour
 
 #[derive(Debug, Clone)]
 pub struct CompactionProperties {
-    pub active: bool,
+    pub compactor_active: bool,
+    pub collector_active: bool,
     pub compactor_interval: Duration,
     pub collector_interval: Duration,
+    pub file_lock_duration: Duration,
     pub metadata_concurrency: usize,
     pub write_concurrency: usize,
     pub parquet_writer_props: ParquetWriterProperties,
@@ -39,12 +41,24 @@ pub struct CompactionProperties {
 
 impl Display for CompactionProperties {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        let active = format!(
+            "active: {}",
+            if self.compactor_active && self.collector_active {
+                "[ compactor, collector ]"
+            } else if self.compactor_active {
+                "compactor"
+            } else if self.collector_active {
+                "collector"
+            } else {
+                "false"
+            }
+        );
         write!(
             f,
-            " {{ {active}, {compactor_interval}, {collector_interval}, {metadata_concurrency}, {write_concurrency}, {size_limit} }}",
-            active = format!("active: {}", self.active),
+            " {{ {active}, {compactor_interval}, {collector_interval}, {file_lock_duration}, {metadata_concurrency}, {write_concurrency}, {size_limit} }}",
             compactor_interval = format!("compactor_interval: {:?}", self.compactor_interval),
             collector_interval = format!("collector_interval: {:?}", self.collector_interval),
+            file_lock_duration = format!("file_lock_duration: {:?}", self.file_lock_duration),
             metadata_concurrency = format!("metadata_concurrency: {}", self.metadata_concurrency),
             write_concurrency = format!("write_concurrency: {}", self.write_concurrency),
             size_limit = format!("size_limit: {}", self.size_limit),
@@ -123,7 +137,7 @@ impl<T: NozzleCompactorTaskType> NozzleCompactorTask<T> {
                 .elapsed_since_previous()
                 // if None, consider it ready
                 .map_or(true, |elapsed| elapsed >= T::interval(&self.opts))
-            && self.opts.active
+            && self.opts.compactor_active
     }
 
     pub async fn spawn(&mut self) {
@@ -161,6 +175,8 @@ pub trait NozzleCompactorTaskType: Debug + Display + Sized + Send + 'static {
 
     fn interval(opts: &Arc<CompactionProperties>) -> Duration;
 
+    fn deactivate(opts: &mut Arc<CompactionProperties>);
+
     /// Handle errors from the previous run
     ///
     /// If the error is recoverable, return `self` to retry
@@ -172,8 +188,7 @@ pub trait NozzleCompactorTaskType: Debug + Display + Sized + Send + 'static {
         let this = Self::new(table, opts);
         let err = err.into();
         if err.is_cancellation() {
-            let opts = Arc::make_mut(opts);
-            opts.active = false;
+            Self::deactivate(opts);
             tracing::warn!("{this:?} was cancelled");
             return this;
         } else if err.is_recoverable() {

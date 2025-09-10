@@ -226,26 +226,23 @@ impl<'a> From<&'a ArrowReaderMetadata> for SegmentSize {
 
 impl Display for SegmentSize {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        f.debug_map()
-            .entries((0..4).filter_map(|i| {
-                match i {
-                    0 => Some(("length", self.length as i64)),
-                    1 => self
-                        .blocks
-                        .is_positive()
-                        .then_some(("blocks", self.blocks as i64)),
-                    2 => self
-                        .bytes
-                        .is_positive()
-                        .then_some(("bytes", self.bytes as i64)),
-                    3 => self
-                        .rows
-                        .is_positive()
-                        .then_some(("rows", self.rows as i64)),
-                    _ => None,
-                }
-            }))
-            .finish()
+        let mut size_string = (0..4)
+            .filter_map(|i| match i {
+                0 if self.length != 0 => Some(format!("length: {}, ", self.length)),
+                1 if self.blocks.is_positive() => Some(format!("blocks: {}, ", self.blocks)),
+                2 if self.bytes.is_positive() => Some(format!("bytes: {}, ", self.bytes)),
+                3 if self.rows.is_positive() => Some(format!("rows: {}", self.rows)),
+                _ => None,
+            })
+            .collect::<String>();
+
+        if size_string.ends_with(", ") {
+            size_string.truncate(size_string.len() - 2);
+        } else if size_string.is_empty() {
+            size_string.push_str("null");
+        }
+
+        write!(f, "{{{}}}", size_string)
     }
 }
 

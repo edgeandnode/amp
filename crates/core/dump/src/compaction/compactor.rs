@@ -1,6 +1,6 @@
 use std::{
     fmt::{Debug, Display, Formatter},
-    sync::Arc,
+    sync::Arc, time::Duration,
 };
 
 use common::{catalog::physical::PhysicalTable, metadata::segments::BlockRange};
@@ -9,7 +9,7 @@ use metadata_db::{FileId, MetadataDb};
 
 use crate::{
     compaction::{
-        CompactionProperties, CompactionResult, CompactorError, FILE_LOCK_DURATION,
+        CompactionProperties, CompactionResult, CompactorError,
         NozzleCompactorTaskType,
         group::{CompactionFile, CompactionGroupGenerator},
     },
@@ -95,6 +95,10 @@ impl NozzleCompactorTaskType for Compactor {
     fn interval(opts: &Arc<CompactionProperties>) -> std::time::Duration {
         opts.compactor_interval
     }
+
+    fn deactivate(opts: &mut Arc<CompactionProperties>) {
+        Arc::make_mut(opts).compactor_active = false;
+    }
 }
 
 pub struct CompactionGroup {
@@ -167,6 +171,7 @@ impl CompactionGroup {
 
     pub async fn compact(self) -> CompactionResult<Vec<FileId>> {
         let metadata_db = self.table.metadata_db();
+        let duration = self.opts.file_lock_duration;
 
         let output = self.write_and_finish().await?;
 
@@ -176,7 +181,7 @@ impl CompactionGroup {
             .map_err(CompactorError::metadata_commit_error)?;
 
         output
-            .upsert_gc_manifest(Arc::clone(&metadata_db))
+            .upsert_gc_manifest(Arc::clone(&metadata_db), duration)
             .await
             .map_err(CompactorError::manifest_update_error(&output.parent_ids))?;
 
@@ -213,9 +218,10 @@ impl ParquetFileWriterOutput {
     async fn upsert_gc_manifest(
         &self,
         metadata_db: Arc<MetadataDb>,
+        duration: Duration,
     ) -> Result<(), metadata_db::Error> {
         metadata_db
-            .upsert_gc_manifest(self.location_id, &self.parent_ids, FILE_LOCK_DURATION)
+            .upsert_gc_manifest(self.location_id, &self.parent_ids, duration)
             .await
     }
 }

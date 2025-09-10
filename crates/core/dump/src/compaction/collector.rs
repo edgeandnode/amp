@@ -104,6 +104,10 @@ impl NozzleCompactorTaskType for Collector {
     fn interval(opts: &Arc<CompactionProperties>) -> Duration {
         opts.collector_interval
     }
+
+    fn deactivate(opts: &mut Arc<CompactionProperties>) {
+        Arc::make_mut(opts).collector_active = false;
+    }
 }
 
 #[derive(Debug)]

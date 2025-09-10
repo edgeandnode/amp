@@ -683,22 +683,28 @@ pub async fn restore_blessed_dataset(
 async fn spawn_compaction_task_and_await_completion<T: NozzleCompactorTaskType>(
     table: &Arc<PhysicalTable>,
     config: &Arc<Config>,
+    compactor_active: bool,
+    collector_active: bool,
+    file_lock_duration: Duration,
 ) {
     let length = table.files().await.unwrap().len();
     let parquet_writer_props = dump::parquet_opts(&config.parquet);
     let mut opts = dump::compaction_opts(&config.compaction, &parquet_writer_props);
-    opts.active = true;
+    opts.compactor_active = compactor_active;
+    opts.collector_active = collector_active;
+
+    opts.file_lock_duration = file_lock_duration;
+    opts.collector_interval = Duration::ZERO;
+    opts.compactor_interval = Duration::ZERO;
+
     opts.size_limit = SegmentSizeLimit::new(1, 1, 1, length);
-    let duration = Duration::from_millis(10);
-    opts.collector_interval = Duration::ZERO;
-    opts.collector_interval = Duration::ZERO;
 
     let mut task = T::start(table, &Arc::new(opts));
 
     task.spawn().await;
 
     while !task.is_finished() {
-        tokio::time::sleep(duration).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
 
@@ -706,12 +712,26 @@ pub async fn spawn_compaction_and_await_completion(
     table: &Arc<PhysicalTable>,
     config: &Arc<Config>,
 ) {
-    spawn_compaction_task_and_await_completion::<Compactor>(table, config).await;
+    spawn_compaction_task_and_await_completion::<Compactor>(
+        table,
+        config,
+        true,
+        false,
+        Duration::ZERO,
+    )
+    .await;
 }
 
 pub async fn spawn_collection_and_await_completion(
     table: &Arc<PhysicalTable>,
     config: &Arc<Config>,
 ) {
-    spawn_compaction_task_and_await_completion::<Collector>(table, config).await;
+    spawn_compaction_task_and_await_completion::<Collector>(
+        table,
+        config,
+        false,
+        true,
+        Duration::ZERO,
+    )
+    .await;
 }
