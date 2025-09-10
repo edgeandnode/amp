@@ -1,7 +1,7 @@
 mod client;
 pub mod tables;
 
-use std::num::NonZeroU32;
+use std::{num::NonZeroU32, path::PathBuf};
 
 use alloy::transports::http::reqwest::Url;
 pub use client::JsonRpcClient;
@@ -86,17 +86,32 @@ pub async fn client(
 ) -> Result<JsonRpcClient, Error> {
     let provider: EvmRpcProvider = provider.try_into()?;
     let request_limit = u16::max(1, provider.concurrent_request_limit.unwrap_or(1024));
+    let client = if provider.url.scheme() == "ipc" {
+        let path = provider.url.path();
+        JsonRpcClient::new_ipc(
+            PathBuf::from(path),
+            network,
+            request_limit,
+            provider.rpc_batch_size,
+            provider.rate_limit_per_minute,
+            provider.fetch_receipts_per_tx,
+            final_blocks_only,
+        )
+        .await
+        .map_err(Error::Client)?
+    } else {
+        JsonRpcClient::new(
+            provider.url,
+            network,
+            request_limit,
+            provider.rpc_batch_size,
+            provider.rate_limit_per_minute,
+            provider.fetch_receipts_per_tx,
+            final_blocks_only,
+        )
+        .map_err(Error::Client)?
+    };
 
-    let client = JsonRpcClient::new(
-        provider.url,
-        network,
-        request_limit,
-        provider.rpc_batch_size,
-        provider.rate_limit_per_minute,
-        provider.fetch_receipts_per_tx,
-        final_blocks_only,
-    )
-    .map_err(Error::Client)?;
     Ok(client)
 }
 

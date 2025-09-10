@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc, usize};
 
 use alloy::{
-    node_bindings::{Anvil, AnvilInstance},
+    node_bindings::Anvil,
     primitives::BlockHash,
     providers::{Provider as _, ext::AnvilApi as _},
     rpc::types::anvil::ReorgOptions,
@@ -27,24 +27,32 @@ pub(crate) struct AnvilTestContext {
     pub(crate) env: TestEnv,
     client: TestClient,
     provider: alloy::providers::DynProvider,
-    _anvil: AnvilInstance,
+    _anvil: alloy::node_bindings::AnvilInstance,
+    _ipc: tempfile::NamedTempFile,
 }
 
 impl AnvilTestContext {
     pub(crate) async fn setup(test_name: &str) -> Self {
         logging::init();
-        let anvil = Anvil::new().port(0_u16).spawn();
-        let url = anvil.endpoint_url();
-        let env = TestEnv::new(test_name, true, Some(url.as_str()))
+
+        // Generate unique IPC path for this test using tempfile
+        let temp = tempfile::Builder::new().prefix("anvil").tempfile().unwrap();
+        let anvil = Anvil::new().ipc_path(temp.path().to_string_lossy()).spawn();
+        let path = anvil.ipc_path();
+        let env = TestEnv::new_with_ipc(test_name, true, path).await.unwrap();
+
+        let client = TestClient::connect(&env).await.unwrap();
+        let provider = alloy::providers::ProviderBuilder::new()
+            .connect_ipc(path.to_string().into())
             .await
             .unwrap();
-        let client = TestClient::connect(&env).await.unwrap();
-        let provider = alloy::providers::ProviderBuilder::new().connect_http(url);
+
         Self {
             env,
             client,
             provider: provider.erased(),
             _anvil: anvil,
+            _ipc: temp,
         }
     }
 
