@@ -8,9 +8,8 @@ use datafusion::parquet::{
     errors::ParquetError,
     file::metadata::{ParquetMetaData, ParquetMetaDataWriter},
 };
-use metadata_db::{FileId, FileMetadata as FileMetadataRow, FooterBytes, LocationId};
+use metadata_db::{FileId, FileMetadataWithDetails as FileMetadataRow, FooterBytes, LocationId};
 use object_store::{ObjectMeta, ObjectStore, path::Path};
-use url::Url;
 
 use crate::{
     BoxError,
@@ -41,9 +40,10 @@ impl TryFrom<FileMetadataRow> for FileMetadata {
             object_e_tag: e_tag,
             object_version: version,
             metadata,
+            ..
         }: FileMetadataRow,
     ) -> Result<Self, Self::Error> {
-        let url = Url::parse(&url)?.join(&file_name)?;
+        let url = url.join(&file_name)?;
         let location = Path::from_url_path(url.path())?;
 
         let parquet_meta: parquet::ParquetMeta = serde_json::from_value(metadata)?;

@@ -199,6 +199,28 @@ impl JsonRpcClient {
         })
     }
 
+    pub async fn new_ipc(
+        path: std::path::PathBuf,
+        network: String,
+        request_limit: u16,
+        batch_size: usize,
+        rate_limit: Option<NonZeroU32>,
+        fetch_receipts_per_tx: bool,
+        final_blocks_only: bool,
+    ) -> Result<Self, BoxError> {
+        assert!(request_limit >= 1);
+        let client = evm::provider::new_ipc(path, rate_limit).await?;
+        let limiter = tokio::sync::Semaphore::new(request_limit as usize).into();
+        Ok(Self {
+            client,
+            network,
+            limiter,
+            batch_size,
+            fetch_receipts_per_tx,
+            final_blocks_only,
+        })
+    }
+
     /// Create a stream that fetches blocks from start_block to end_block. One method is called at a time.
     /// This is used when batch_size is set to 1 in the provider config.
     fn unbatched_block_stream(

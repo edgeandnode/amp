@@ -1,5 +1,7 @@
 use std::{
+    future::Future,
     num::NonZeroU32,
+    path::Path,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -13,6 +15,8 @@ use alloy::{
 use governor::{DefaultDirectRateLimiter, Quota, RateLimiter};
 use tower::{Layer, Service};
 use url::Url;
+
+use crate::BoxError;
 
 pub fn new(url: Url, rate_limit: Option<NonZeroU32>) -> RootProvider<AnyNetwork> {
     let client_builder = ClientBuilder::default();
@@ -28,6 +32,32 @@ pub fn new(url: Url, rate_limit: Option<NonZeroU32>) -> RootProvider<AnyNetwork>
         .disable_recommended_fillers()
         .network::<AnyNetwork>()
         .connect_client(client)
+}
+
+pub async fn new_ipc<P: AsRef<Path>>(
+    path: P,
+    rate_limit: Option<NonZeroU32>,
+) -> Result<RootProvider<AnyNetwork>, BoxError> {
+    let client_builder = ClientBuilder::default();
+
+    let client = match rate_limit {
+        Some(rate_limit) => {
+            client_builder
+                .layer(RateLimitLayer::new(rate_limit))
+                .ipc(path.as_ref().to_path_buf().into())
+                .await?
+        }
+        None => {
+            client_builder
+                .ipc(path.as_ref().to_path_buf().into())
+                .await?
+        }
+    };
+
+    Ok(ProviderBuilder::new()
+        .disable_recommended_fillers()
+        .network::<AnyNetwork>()
+        .connect_client(client))
 }
 
 struct RateLimitLayer {

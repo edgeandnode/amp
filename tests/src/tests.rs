@@ -88,7 +88,7 @@ async fn evm_rpc_single_dump_fetch_receipts_per_tx() {
 async fn evm_rpc_base_single_dump() {
     logging::init();
 
-    let dataset_name = "base";
+    let dataset_name = "base_rpc";
     let test_env = TestEnv::temp("evm_rpc_base_single_dump").await.unwrap();
     let block = test_env
         .dataset_store
@@ -116,7 +116,7 @@ async fn evm_rpc_base_single_dump() {
 async fn evm_rpc_base_single_dump_fetch_receipts_per_tx() {
     logging::init();
 
-    let dataset_name = "base";
+    let dataset_name = "base_rpc";
     let test_env = TestEnv::temp_with_config(
         "evm_rpc_base_single_dump_fetch_receipts_per_tx",
         "per_tx_receipt_config.toml",
@@ -167,6 +167,27 @@ async fn eth_firehose_single_dump() {
         .expect("blessed data differed from provider");
 
     let temp_dump = SnapshotContext::temp_dump(&test_env, &dataset_name, block, 1)
+        .await
+        .expect("temp dump failed");
+    temp_dump.assert_eq(&blessed).await.unwrap();
+}
+
+#[tokio::test]
+async fn base_firehose_single_dump() {
+    logging::init();
+
+    let dataset_name = "base_firehose";
+    let test_env = TestEnv::temp("base_firehose_single_dump").await.unwrap();
+    let blessed = SnapshotContext::blessed(&test_env, &dataset_name)
+        .await
+        .unwrap();
+
+    // Check the dataset directly against the Firehose provider with `check_blocks`.
+    check_blocks(&test_env, dataset_name, 33_411_770, 33_411_770)
+        .await
+        .expect("blessed data differed from provider");
+    // Now dump the dataset to a temporary directory and check it again against the blessed files.
+    let temp_dump = SnapshotContext::temp_dump(&test_env, &dataset_name, 33_411_770, 1)
         .await
         .expect("temp dump failed");
     temp_dump.assert_eq(&blessed).await.unwrap();
