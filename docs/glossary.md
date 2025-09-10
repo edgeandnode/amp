@@ -60,7 +60,7 @@ These enable users to create custom data processing without modifying Nozzle's c
 > [!NOTE]
 > User-defined datasets are currently _limited to derived datasets only_. 
 > Raw extractor datasets ([evm-rpc](#dataset-kind), [firehose](#dataset-kind), [substreams](#dataset-kind)) are built 
-> into Nozzle's core > system and cannot be user-defined at this time.
+> into Nozzle's core and cannot be user-defined at this time.
 
 **Key distinctions:**
 - A [derived dataset](#dataset-category) _CAN_ be a user-defined dataset (when created by users via manifests)
