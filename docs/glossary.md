@@ -52,20 +52,6 @@ A high-level classification grouping [datasets](#dataset) by their data processi
 - **Raw** (a.k.a. **Extractor Datasets**): Extracts data directly from external blockchain sources (includes _evm-rpc_, _firehose_, and _substreams_ [kinds](#dataset-kind))
 - **Derived**: Transforms and combines data from existing datasets (_derived_ [kind](#dataset-kind))
 
-### User-defined Dataset
-[Datasets](#dataset) created and configured by Nozzle users through custom [dataset manifests](#dataset-manifest), as
-opposed to datasets built into the core system.
-These enable users to create custom data processing without modifying Nozzle's core code.
-
-> [!NOTE]
-> User-defined datasets are currently _limited to derived datasets only_. 
-> Raw extractor datasets ([evm-rpc](#dataset-kind), [firehose](#dataset-kind), [substreams](#dataset-kind)) are built 
-> into Nozzle's core and cannot be user-defined at this time.
-
-**Key distinctions:**
-- A [derived dataset](#dataset-category) _CAN_ be a user-defined dataset (when created by users via manifests)
-- A user-defined dataset _MIGHT NOT_ be a derived dataset (future extensibility may allow user-defined raw datasets)
-
 ## Physical
 
 Nozzle currently adopts the FDAP stack for its physical layer, see https://www.influxdata.com/glossary/fdap-stack/.
