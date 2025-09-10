@@ -42,7 +42,6 @@ alloy = { version = "1.0.9", default-features = false, features = [
 anyhow = "1.0.80"
 async-stream = "0.3.6"
 async-trait = "0.1.80"
-atty = "0.2.14"
 axum = { version = "0.8.0", default-features = false, features = ["json", "query", "tokio", "http1"] }
 backon = { version = "1.5.1", default-features = false, features = ["std", "tokio-sleep"] }
 bincode = "2.0.1"

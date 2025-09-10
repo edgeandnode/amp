@@ -1,6 +1,6 @@
 //! A set of utilities to enable logging configuration using tracing_subscriber.
 
-use std::sync::Once;
+use std::{io::IsTerminal, sync::Once};
 
 use opentelemetry::trace::TracerProvider;
 use tracing_subscriber::{
@@ -21,7 +21,7 @@ pub fn init() {
 
         tracing_subscriber::fmt()
             .with_env_filter(env_filter)
-            .with_ansi(atty::is(atty::Stream::Stderr))
+            .with_ansi(std::io::stderr().is_terminal())
             .init();
 
         tracing::info!("log level: {}", nozzle_log_level);
