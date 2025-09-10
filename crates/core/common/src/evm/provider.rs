@@ -35,7 +35,7 @@ pub fn new(url: Url, rate_limit: Option<NonZeroU32>) -> RootProvider<AnyNetwork>
 pub async fn new_ipc<P: AsRef<Path>>(
     path: P,
     rate_limit: Option<NonZeroU32>,
-) -> Result<RootProvider<AnyNetwork>, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<RootProvider<AnyNetwork>, BoxError> {
     let client_builder = ClientBuilder::default();
 
     let client = match rate_limit {
