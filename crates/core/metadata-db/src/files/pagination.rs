@@ -24,8 +24,7 @@ where
                l.url,
                fm.object_size,
                fm.object_e_tag,
-               fm.object_version,
-               fm.metadata
+               fm.object_version
         FROM file_metadata fm
         JOIN locations l ON fm.location_id = l.id
         WHERE fm.location_id = $1
@@ -62,8 +61,7 @@ where
                l.url,
                fm.object_size,
                fm.object_e_tag,
-               fm.object_version,
-               fm.metadata
+               fm.object_version
         FROM file_metadata fm
         JOIN locations l ON fm.location_id = l.id
         WHERE fm.location_id = $1 AND fm.id < $3

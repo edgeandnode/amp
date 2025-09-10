@@ -14,7 +14,7 @@ pub mod handlers;
 mod scheduler;
 
 use ctx::Ctx;
-use handlers::{datasets, jobs, locations, providers};
+use handlers::{datasets, files, jobs, locations, providers};
 use scheduler::Scheduler;
 
 pub async fn serve(
@@ -48,6 +48,14 @@ pub async fn serve(
         .route(
             "/locations/{id}",
             get(locations::get_by_id::handler).delete(locations::delete_by_id::handler),
+        )
+        .route(
+            "/locations/{location_id}/files",
+            get(locations::get_files::handler),
+        )
+        .route(
+            "/files/{file_id}",
+            get(files::get_by_id::handler).delete(files::delete_by_id::handler),
         )
         .route(
             "/providers",

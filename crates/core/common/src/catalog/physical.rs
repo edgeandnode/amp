@@ -576,7 +576,7 @@ impl PhysicalTable {
         &'a self,
     ) -> impl Stream<Item = Result<FileMetadata, BoxError>> + 'a {
         self.metadata_db
-            .stream_files_by_location_id(self.location_id)
+            .stream_files_by_location_id_with_details(self.location_id)
             .map(|row| row?.try_into())
     }
 }
