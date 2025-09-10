@@ -14,9 +14,7 @@ export const sourcesQueryOptions = queryOptions({
       method: "GET",
     })
     if (response.status !== 200) {
-      throw new Error(
-        `Sources endpoint did not return 200 [${response.status}]`,
-      )
+      throw new Error(`Sources endpoint did not return 200 [${response.status}]`)
     }
     const json = await response.json()
 

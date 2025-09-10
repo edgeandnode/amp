@@ -15,24 +15,18 @@
  * @author SQL Intellisense System
  */
 import type {
-  Position,
-  Range,
-  IMarkdownString,
-  MarkerSeverity,
   CancellationToken,
   editor,
-  languages
+  IMarkdownString,
+  languages,
+  MarkerSeverity,
+  Position,
+  Range,
 } from "monaco-editor/esm/vs/editor/editor.api"
 import type { DatasetSource } from "nozzl/Studio/Model"
 
 // Re-export Monaco types for convenience
-export type {
-  Position,
-  Range,
-  IMarkdownString,
-  MarkerSeverity,
-  CancellationToken
-}
+export type { CancellationToken, IMarkdownString, MarkerSeverity, Position, Range }
 
 // Re-export Monaco editor and languages namespaces
 export type { editor, languages }
@@ -42,9 +36,7 @@ export interface MonacoITextModel {
   getValue: () => string
   getOffsetAt: (position: Position) => number
   getLineContent: (lineNumber: number) => string
-  getWordAtPosition: (
-    position: Position,
-  ) => { word: string; startColumn: number; endColumn: number } | null
+  getWordAtPosition: (position: Position) => { word: string; startColumn: number; endColumn: number } | null
 }
 
 /**
@@ -182,10 +174,10 @@ export interface CompletionConfig {
   // SQL Validation Feature Flags
   /** Whether to enable SQL validation and error markers */
   enableSqlValidation: boolean
-  
+
   /** Validation level: 'basic' (syntax only), 'standard' (+ tables), 'full' (+ columns) */
-  validationLevel: 'basic' | 'standard' | 'full'
-  
+  validationLevel: "basic" | "standard" | "full"
+
   /** Whether to enable validation for incomplete/partial queries as user types */
   enablePartialValidation: boolean
 }
@@ -202,33 +194,34 @@ export const DEFAULT_COMPLETION_CONFIG: CompletionConfig = {
   enableSnippets: true, // Enable UDF snippets by default
   enableContextFiltering: true, // Enable smart context filtering
   enableAliasResolution: true, // Enable table alias support
-  contextCacheTTL: 30 * 1000,  // 30 second cache TTL
-  enableDebugLogging: false,   // Disable debug logging in production
-  
+  contextCacheTTL: 30 * 1000, // 30 second cache TTL
+  enableDebugLogging: false, // Disable debug logging in production
+
   // SQL Validation defaults
-  enableSqlValidation: true,   // Enable validation by default
-  validationLevel: 'standard', // Start with table validation
-  enablePartialValidation: true // Enable validation while typing
+  enableSqlValidation: true, // Enable validation by default
+  validationLevel: "standard", // Start with table validation
+  enablePartialValidation: true, // Enable validation while typing
 }
 
 /**
  * Default validation cache configuration
- * 
+ *
  * Provides default caching configuration for validation results.
  */
 export const DEFAULT_VALIDATION_CACHE_CONFIG: ValidationCacheConfig = {
-  maxEntries: 100,                    // Cache up to 100 queries
-  ttl: 5 * 60 * 1000,                // 5 minute TTL
-  keyFunction: (query: string) => {   // Simple hash function for cache keys
+  maxEntries: 100, // Cache up to 100 queries
+  ttl: 5 * 60 * 1000, // 5 minute TTL
+  keyFunction: (query: string) => {
+    // Simple hash function for cache keys
     let hash = 0
     const trimmed = query.trim().toLowerCase()
     for (let i = 0; i < trimmed.length; i++) {
       const char = trimmed.charCodeAt(i)
-      hash = ((hash << 5) - hash) + char
+      hash = (hash << 5) - hash + char
       hash = hash & hash // Convert to 32-bit integer
     }
     return hash.toString()
-  }
+  },
 }
 
 /**
@@ -296,52 +289,52 @@ export interface SqlToken {
 
 /**
  * SQL Validation Error
- * 
+ *
  * Represents a validation error found in a SQL query with position information
  * compatible with Monaco Editor's marker system.
- * 
+ *
  * @interface SqlValidationError
  */
 export interface SqlValidationError {
   /** Human-readable error message */
   message: string
-  
+
   /** Error severity level (Error, Warning, Info) */
   severity: MarkerSeverity
-  
+
   /** Start line number (1-based) */
   startLineNumber: number
-  
+
   /** Start column number (1-based) */
   startColumn: number
-  
+
   /** End line number (1-based) */
   endLineNumber: number
-  
+
   /** End column number (1-based) */
   endColumn: number
-  
+
   /** Error code for categorization */
   code?: string
-  
+
   /** Additional error data for debugging */
   data?: any
 }
 
 /**
  * Validation Cache Configuration
- * 
+ *
  * Configuration for validation result caching to improve performance.
- * 
- * @interface ValidationCacheConfig  
+ *
+ * @interface ValidationCacheConfig
  */
 export interface ValidationCacheConfig {
   /** Maximum number of cached validation results */
   maxEntries: number
-  
+
   /** Time-to-live for cached results in milliseconds */
   ttl: number
-  
+
   /** Function to generate cache keys from query strings */
   keyFunction: (query: string) => string
 }
@@ -352,13 +345,13 @@ export type { MarkerSeverity as MonacoMarkerSeverity }
 
 /**
  * Validation Cache
- * 
+ *
  * LRU cache for validation results to improve performance.
  * Implements a simple least-recently-used eviction policy.
  */
 export class ValidationCache {
-  private cache = new Map<string, { errors: SqlValidationError[]; timestamp: number; accessCount: number }>()
-  private accessOrder: string[] = []
+  private cache = new Map<string, { errors: Array<SqlValidationError>; timestamp: number; accessCount: number }>()
+  private accessOrder: Array<string> = []
   private config: ValidationCacheConfig
 
   constructor(config: ValidationCacheConfig = DEFAULT_VALIDATION_CACHE_CONFIG) {
@@ -368,10 +361,10 @@ export class ValidationCache {
   /**
    * Get cached validation results for a query
    */
-  get(query: string): SqlValidationError[] | null {
+  get(query: string): Array<SqlValidationError> | null {
     const key = this.config.keyFunction(query)
     const entry = this.cache.get(key)
-    
+
     if (!entry) {
       return null
     }
@@ -385,16 +378,16 @@ export class ValidationCache {
     // Update access order and count
     entry.accessCount++
     this.moveToEnd(key)
-    
+
     return entry.errors
   }
 
   /**
    * Set validation results in cache
    */
-  set(query: string, errors: SqlValidationError[]): void {
+  set(query: string, errors: Array<SqlValidationError>): void {
     const key = this.config.keyFunction(query)
-    
+
     // If cache is full, evict least recently used
     if (this.cache.size >= this.config.maxEntries && !this.cache.has(key)) {
       this.evictLRU()
@@ -403,9 +396,9 @@ export class ValidationCache {
     this.cache.set(key, {
       errors: [...errors], // Create defensive copy
       timestamp: Date.now(),
-      accessCount: 1
+      accessCount: 1,
     })
-    
+
     this.moveToEnd(key)
   }
 
@@ -425,13 +418,12 @@ export class ValidationCache {
     maxSize: number
     hitRate: number
   } {
-    const totalAccess = Array.from(this.cache.values())
-      .reduce((sum, entry) => sum + entry.accessCount, 0)
-    
+    const totalAccess = Array.from(this.cache.values()).reduce((sum, entry) => sum + entry.accessCount, 0)
+
     return {
       size: this.cache.size,
       maxSize: this.config.maxEntries,
-      hitRate: totalAccess > 0 ? this.cache.size / totalAccess : 0
+      hitRate: totalAccess > 0 ? this.cache.size / totalAccess : 0,
     }
   }
 

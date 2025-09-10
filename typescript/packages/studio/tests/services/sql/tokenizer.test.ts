@@ -80,9 +80,7 @@ describe("SQL Tokenization via Context Analyzer", () => {
 
   describe("String and Comment Detection", () => {
     test("should detect cursor in string literal", () => {
-      const mockModel = createMockModel(
-        "SELECT * FROM users WHERE name = 'test'",
-      )
+      const mockModel = createMockModel("SELECT * FROM users WHERE name = 'test'")
       const mockPosition = new Position(1, 37) // Position inside string
 
       const context = analyzer.analyzeContext(mockModel, mockPosition)

@@ -1,12 +1,6 @@
 {
   "extends": "../../tsconfig.base.jsonc",
-  "include": [
-    "**/*.ts",
-    "**/*.tsx",
-    "eslint.config.mjs",
-    "prettier.config.js",
-    "vite.config.js"
-  ],
+  "include": ["**/*.ts", "**/*.tsx", "eslint.config.mjs", "prettier.config.js", "vite.config.js"],
   "compilerOptions": {
     "target": "ES2022",
     "jsx": "react-jsx",

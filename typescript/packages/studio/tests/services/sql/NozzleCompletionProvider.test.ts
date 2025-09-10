@@ -59,12 +59,7 @@ describe("NozzleCompletionProvider", () => {
       const context = createMockCompletionContext()
       const token = createMockCancellationToken()
 
-      const result = await provider.provideCompletionItems(
-        model,
-        position,
-        context,
-        token,
-      )
+      const result = await provider.provideCompletionItems(model, position, context, token)
 
       expect(result).toBeDefined()
       if (result) {
@@ -83,40 +78,24 @@ describe("NozzleCompletionProvider", () => {
       const context = createMockCompletionContext()
       const token = createMockCancellationToken()
 
-      const result = await provider.provideCompletionItems(
-        model,
-        position,
-        context,
-        token,
-      )
+      const result = await provider.provideCompletionItems(model, position, context, token)
       const logsCompletion = findCompletionByLabel(result ?? null, "anvil.logs")
 
       expect(logsCompletion).toBeDefined()
-      expect(logsCompletion!.kind).toBe(
-        monaco.languages.CompletionItemKind.Class,
-      )
+      expect(logsCompletion!.kind).toBe(monaco.languages.CompletionItemKind.Class)
       expect(logsCompletion!.detail).toContain("Table")
       expect(logsCompletion!.detail).toContain("7 columns")
       expect(logsCompletion!.documentation).toBeDefined()
     })
 
     test("should handle empty metadata gracefully", async () => {
-      const emptyProvider = new NozzleCompletionProvider(
-        mockMetadataEmpty,
-        mockUDFs,
-        analyzer,
-      )
+      const emptyProvider = new NozzleCompletionProvider(mockMetadataEmpty, mockUDFs, analyzer)
       const model = createAndTrackModel("SELECT * FROM ")
       const position = new monaco.Position(1, 15)
       const context = createMockCompletionContext()
       const token = createMockCancellationToken()
 
-      const result = await emptyProvider.provideCompletionItems(
-        model,
-        position,
-        context,
-        token,
-      )
+      const result = await emptyProvider.provideCompletionItems(model, position, context, token)
 
       expect(result).toBeDefined()
       if (result) {
@@ -128,10 +107,7 @@ describe("NozzleCompletionProvider", () => {
       expect(labels.length).toBeGreaterThan(0)
 
       // But no table completions
-      const tableCount = countCompletionsByKind(
-        result ?? null,
-        monaco.languages.CompletionItemKind.Class,
-      )
+      const tableCount = countCompletionsByKind(result ?? null, monaco.languages.CompletionItemKind.Class)
       expect(tableCount).toBe(0)
     })
   })
@@ -143,12 +119,7 @@ describe("NozzleCompletionProvider", () => {
       const context = createMockCompletionContext()
       const token = createMockCancellationToken()
 
-      const result = await provider.provideCompletionItems(
-        model,
-        position,
-        context,
-        token,
-      )
+      const result = await provider.provideCompletionItems(model, position, context, token)
 
       expect(result).toBeDefined()
 
@@ -167,12 +138,7 @@ describe("NozzleCompletionProvider", () => {
       const context = createMockCompletionContext()
       const token = createMockCancellationToken()
 
-      const result = await provider.provideCompletionItems(
-        model,
-        position,
-        context,
-        token,
-      )
+      const result = await provider.provideCompletionItems(model, position, context, token)
 
       expect(result).toBeDefined()
 
@@ -191,18 +157,11 @@ describe("NozzleCompletionProvider", () => {
       const context = createMockCompletionContext()
       const token = createMockCancellationToken()
 
-      const result = await provider.provideCompletionItems(
-        model,
-        position,
-        context,
-        token,
-      )
+      const result = await provider.provideCompletionItems(model, position, context, token)
       const addressCompletion = findCompletionByLabel(result ?? null, "address")
 
       expect(addressCompletion).toBeDefined()
-      expect(addressCompletion!.kind).toBe(
-        monaco.languages.CompletionItemKind.Field,
-      )
+      expect(addressCompletion!.kind).toBe(monaco.languages.CompletionItemKind.Field)
       expect(addressCompletion!.detail).toContain("address")
       expect(addressCompletion!.detail).toContain("anvil.logs")
       expect(addressCompletion!.documentation).toBeDefined()
@@ -214,12 +173,7 @@ describe("NozzleCompletionProvider", () => {
       const context = createMockCompletionContext()
       const token = createMockCancellationToken()
 
-      const result = await provider.provideCompletionItems(
-        model,
-        position,
-        context,
-        token,
-      )
+      const result = await provider.provideCompletionItems(model, position, context, token)
 
       expect(result).toBeDefined()
 
@@ -239,12 +193,7 @@ describe("NozzleCompletionProvider", () => {
       const context = createMockCompletionContext()
       const token = createMockCancellationToken()
 
-      const result = await provider.provideCompletionItems(
-        model,
-        position,
-        context,
-        token,
-      )
+      const result = await provider.provideCompletionItems(model, position, context, token)
 
       expect(result).toBeDefined()
 
@@ -263,28 +212,14 @@ describe("NozzleCompletionProvider", () => {
       const context = createMockCompletionContext()
       const token = createMockCancellationToken()
 
-      const result = await provider.provideCompletionItems(
-        model,
-        position,
-        context,
-        token,
-      )
-      const evmDecodeCompletion = findCompletionByLabel(
-        result ?? null,
-        "evm_decode_log",
-      )
+      const result = await provider.provideCompletionItems(model, position, context, token)
+      const evmDecodeCompletion = findCompletionByLabel(result ?? null, "evm_decode_log")
 
       expect(evmDecodeCompletion).toBeDefined()
-      expect(evmDecodeCompletion!.kind).toBe(
-        monaco.languages.CompletionItemKind.Function,
-      )
+      expect(evmDecodeCompletion!.kind).toBe(monaco.languages.CompletionItemKind.Function)
       expect(evmDecodeCompletion!.insertText).toContain("${1:")
-      expect(evmDecodeCompletion!.insertTextRules).toBe(
-        monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-      )
-      expect(evmDecodeCompletion!.command?.id).toBe(
-        "editor.action.triggerParameterHints",
-      )
+      expect(evmDecodeCompletion!.insertTextRules).toBe(monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet)
+      expect(evmDecodeCompletion!.command?.id).toBe("editor.action.triggerParameterHints")
     })
 
     test("should provide UDF documentation", async () => {
@@ -293,16 +228,8 @@ describe("NozzleCompletionProvider", () => {
       const context = createMockCompletionContext()
       const token = createMockCancellationToken()
 
-      const result = await provider.provideCompletionItems(
-        model,
-        position,
-        context,
-        token,
-      )
-      const evmDecodeCompletion = findCompletionByLabel(
-        result ?? null,
-        "evm_decode_log",
-      )
+      const result = await provider.provideCompletionItems(model, position, context, token)
+      const evmDecodeCompletion = findCompletionByLabel(result ?? null, "evm_decode_log")
 
       expect(evmDecodeCompletion).toBeDefined()
       expect(evmDecodeCompletion!.documentation).toBeDefined()
@@ -316,30 +243,18 @@ describe("NozzleCompletionProvider", () => {
     })
 
     test("should handle empty UDFs gracefully", async () => {
-      const emptyUDFProvider = new NozzleCompletionProvider(
-        mockMetadata,
-        mockUDFsEmpty,
-        analyzer,
-      )
+      const emptyUDFProvider = new NozzleCompletionProvider(mockMetadata, mockUDFsEmpty, analyzer)
       const model = createAndTrackModel("SELECT ")
       const position = new monaco.Position(1, 8)
       const context = createMockCompletionContext()
       const token = createMockCancellationToken()
 
-      const result = await emptyUDFProvider.provideCompletionItems(
-        model,
-        position,
-        context,
-        token,
-      )
+      const result = await emptyUDFProvider.provideCompletionItems(model, position, context, token)
 
       expect(result).toBeDefined()
 
       // Should not crash and should still provide other completions
-      const functionCount = countCompletionsByKind(
-        result ?? null,
-        monaco.languages.CompletionItemKind.Function,
-      )
+      const functionCount = countCompletionsByKind(result ?? null, monaco.languages.CompletionItemKind.Function)
       expect(functionCount).toBe(0)
     })
   })
@@ -351,12 +266,7 @@ describe("NozzleCompletionProvider", () => {
       const context = createMockCompletionContext()
       const token = createMockCancellationToken()
 
-      const result = await provider.provideCompletionItems(
-        model,
-        position,
-        context,
-        token,
-      )
+      const result = await provider.provideCompletionItems(model, position, context, token)
 
       expect(result).toBeDefined()
 
@@ -375,12 +285,7 @@ describe("NozzleCompletionProvider", () => {
       const context = createMockCompletionContext()
       const token = createMockCancellationToken()
 
-      const result = await provider.provideCompletionItems(
-        model,
-        position,
-        context,
-        token,
-      )
+      const result = await provider.provideCompletionItems(model, position, context, token)
 
       expect(result).toBeDefined()
 
@@ -394,19 +299,12 @@ describe("NozzleCompletionProvider", () => {
     })
 
     test("should provide operator completions in WHERE clause", async () => {
-      const model = createAndTrackModel(
-        "SELECT * FROM anvil.logs WHERE address ",
-      )
+      const model = createAndTrackModel("SELECT * FROM anvil.logs WHERE address ")
       const position = new monaco.Position(1, 40)
       const context = createMockCompletionContext()
       const token = createMockCancellationToken()
 
-      const result = await provider.provideCompletionItems(
-        model,
-        position,
-        context,
-        token,
-      )
+      const result = await provider.provideCompletionItems(model, position, context, token)
 
       expect(result).toBeDefined()
 
@@ -421,19 +319,12 @@ describe("NozzleCompletionProvider", () => {
 
   describe("Context-Aware Filtering", () => {
     test("should not provide suggestions inside string literals", async () => {
-      const model = createAndTrackModel(
-        "SELECT * FROM anvil.logs WHERE address = 'cursor here'",
-      )
+      const model = createAndTrackModel("SELECT * FROM anvil.logs WHERE address = 'cursor here'")
       const position = new monaco.Position(1, 50) // Inside string
       const context = createMockCompletionContext()
       const token = createMockCancellationToken()
 
-      const result = await provider.provideCompletionItems(
-        model,
-        position,
-        context,
-        token,
-      )
+      const result = await provider.provideCompletionItems(model, position, context, token)
 
       expect(result).toBeDefined()
 
@@ -448,12 +339,7 @@ describe("NozzleCompletionProvider", () => {
       const context = createMockCompletionContext()
       const token = createMockCancellationToken()
 
-      const result = await provider.provideCompletionItems(
-        model,
-        position,
-        context,
-        token,
-      )
+      const result = await provider.provideCompletionItems(model, position, context, token)
 
       expect(result).toBeDefined()
 
@@ -468,12 +354,7 @@ describe("NozzleCompletionProvider", () => {
       const context = createMockCompletionContext()
       const token = createMockCancellationToken()
 
-      const result = await provider.provideCompletionItems(
-        model,
-        position,
-        context,
-        token,
-      )
+      const result = await provider.provideCompletionItems(model, position, context, token)
 
       expect(result).toBeDefined()
 
@@ -488,24 +369,14 @@ describe("NozzleCompletionProvider", () => {
     })
 
     test("should respect minPrefixLength configuration", async () => {
-      const configuredProvider = new NozzleCompletionProvider(
-        mockMetadata,
-        mockUDFs,
-        analyzer,
-        { minPrefixLength: 3 },
-      )
+      const configuredProvider = new NozzleCompletionProvider(mockMetadata, mockUDFs, analyzer, { minPrefixLength: 3 })
 
       const model = createAndTrackModel("SELECT a")
       const position = new monaco.Position(1, 9)
       const context = createMockCompletionContext()
       const token = createMockCancellationToken()
 
-      const result = await configuredProvider.provideCompletionItems(
-        model,
-        position,
-        context,
-        token,
-      )
+      const result = await configuredProvider.provideCompletionItems(model, position, context, token)
 
       expect(result).toBeDefined()
       if (result) {
@@ -514,24 +385,14 @@ describe("NozzleCompletionProvider", () => {
     })
 
     test("should respect maxSuggestions configuration", async () => {
-      const configuredProvider = new NozzleCompletionProvider(
-        mockMetadata,
-        mockUDFs,
-        analyzer,
-        { maxSuggestions: 5 },
-      )
+      const configuredProvider = new NozzleCompletionProvider(mockMetadata, mockUDFs, analyzer, { maxSuggestions: 5 })
 
       const model = createAndTrackModel("SELECT ")
       const position = new monaco.Position(1, 8)
       const context = createMockCompletionContext()
       const token = createMockCancellationToken()
 
-      const result = await configuredProvider.provideCompletionItems(
-        model,
-        position,
-        context,
-        token,
-      )
+      const result = await configuredProvider.provideCompletionItems(model, position, context, token)
 
       expect(result).toBeDefined()
       if (result) {
@@ -547,12 +408,7 @@ describe("NozzleCompletionProvider", () => {
       const context = createMockCompletionContext()
       const token = createMockCancellationToken()
 
-      const result = await provider.provideCompletionItems(
-        model,
-        position,
-        context,
-        token,
-      )
+      const result = await provider.provideCompletionItems(model, position, context, token)
 
       expect(result).toBeDefined()
       if (result) {
@@ -570,12 +426,7 @@ describe("NozzleCompletionProvider", () => {
       const context = createMockCompletionContext()
       const token = createMockCancellationToken()
 
-      const result = await provider.provideCompletionItems(
-        model,
-        position,
-        context,
-        token,
-      )
+      const result = await provider.provideCompletionItems(model, position, context, token)
 
       expect(result).toBeDefined()
 
@@ -597,12 +448,7 @@ describe("NozzleCompletionProvider", () => {
       const context = createMockCompletionContext()
       const token = createMockCancellationToken()
 
-      const result = await provider.provideCompletionItems(
-        model,
-        position,
-        context,
-        token,
-      )
+      const result = await provider.provideCompletionItems(model, position, context, token)
 
       expect(result).toBeDefined()
       if (result) {
@@ -620,12 +466,7 @@ describe("NozzleCompletionProvider", () => {
       const context = createMockCompletionContext()
       const token = createMockCancellationToken()
 
-      const result = await provider.provideCompletionItems(
-        model,
-        position,
-        context,
-        token,
-      )
+      const result = await provider.provideCompletionItems(model, position, context, token)
 
       expect(result).toBeDefined()
       if (result) {
@@ -651,12 +492,7 @@ describe("NozzleCompletionProvider", () => {
       }
 
       try {
-        const result = await provider.provideCompletionItems(
-          model,
-          position,
-          context,
-          token,
-        )
+        const result = await provider.provideCompletionItems(model, position, context, token)
 
         expect(result).toBeDefined()
         if (result) {
@@ -679,12 +515,7 @@ describe("NozzleCompletionProvider", () => {
       const context = createMockCompletionContext()
       const token = createMockCancellationToken(true) // Cancelled
 
-      const result = await provider.provideCompletionItems(
-        model,
-        position,
-        context,
-        token,
-      )
+      const result = await provider.provideCompletionItems(model, position, context, token)
 
       // Should handle cancelled requests gracefully
       expect(result).toBeDefined()
@@ -698,12 +529,7 @@ describe("NozzleCompletionProvider", () => {
       const context = createMockCompletionContext()
       const token = createMockCancellationToken()
 
-      const result = await provider.provideCompletionItems(
-        model,
-        position,
-        context,
-        token,
-      )
+      const result = await provider.provideCompletionItems(model, position, context, token)
 
       expect(result).toBeDefined()
 

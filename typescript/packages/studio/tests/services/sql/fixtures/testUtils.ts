@@ -7,10 +7,7 @@ import * as monaco from "monaco-editor/esm/vs/editor/editor.api"
 /**
  * Creates a Monaco editor model for testing
  */
-export function createTestModel(
-  content: string,
-  language = "sql",
-): monaco.editor.ITextModel {
+export function createTestModel(content: string, language = "sql"): monaco.editor.ITextModel {
   return monaco.editor.createModel(content, language)
 }
 
@@ -24,10 +21,7 @@ export function disposeTestModel(model: monaco.editor.ITextModel): void {
 /**
  * Creates a Monaco Position for testing
  */
-export function createTestPosition(
-  line: number,
-  column: number,
-): monaco.Position {
+export function createTestPosition(line: number, column: number): monaco.Position {
   return new monaco.Position(line, column)
 }
 
@@ -59,9 +53,7 @@ export function createMockCompletionContext(
 /**
  * Creates a mock cancellation token for testing
  */
-export function createMockCancellationToken(
-  isCancelled = false,
-): monaco.CancellationToken {
+export function createMockCancellationToken(isCancelled = false): monaco.CancellationToken {
   return {
     isCancellationRequested: isCancelled,
     onCancellationRequested: () => ({ dispose: () => {} }),
@@ -77,11 +69,7 @@ export interface TestSetup {
   cleanup: () => void
 }
 
-export function createTestSetup(
-  query: string,
-  line: number,
-  column: number,
-): TestSetup {
+export function createTestSetup(query: string, line: number, column: number): TestSetup {
   const model = createTestModel(query)
   const position = createTestPosition(line, column)
 
@@ -95,14 +83,12 @@ export function createTestSetup(
 /**
  * Helper to extract completion item labels from completion results
  */
-export function extractCompletionLabels(
-  completionList: monaco.languages.CompletionList | null,
-): Array<string> {
+export function extractCompletionLabels(completionList: monaco.languages.CompletionList | null): Array<string> {
   if (!completionList?.suggestions) {
     return []
   }
 
-  return completionList.suggestions.map((item) => typeof item.label === "string" ? item.label : item.label.label)
+  return completionList.suggestions.map((item) => (typeof item.label === "string" ? item.label : item.label.label))
 }
 
 /**
@@ -134,8 +120,7 @@ export function assertCompletionContains(
   for (const expectedLabel of expectedLabels) {
     if (!actualLabels.includes(expectedLabel)) {
       throw new Error(
-        `Expected completion to contain "${expectedLabel}". ` +
-          `Actual completions: [${actualLabels.join(", ")}]`,
+        `Expected completion to contain "${expectedLabel}". ` + `Actual completions: [${actualLabels.join(", ")}]`,
       )
     }
   }
@@ -206,8 +191,6 @@ export function createTestBatch(
 /**
  * Helper to dispose multiple test models
  */
-export function disposeTestBatch(
-  batch: Array<{ model: monaco.editor.ITextModel; position: monaco.Position }>,
-): void {
+export function disposeTestBatch(batch: Array<{ model: monaco.editor.ITextModel; position: monaco.Position }>): void {
   batch.forEach(({ model }) => model.dispose())
 }

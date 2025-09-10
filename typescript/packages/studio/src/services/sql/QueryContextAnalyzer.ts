@@ -34,10 +34,7 @@ import { DEFAULT_COMPLETION_CONFIG } from "./types"
  * This provides good performance while handling most real-world queries.
  */
 export class QueryContextAnalyzer {
-  private contextCache = new Map<
-    string,
-    { context: QueryContext; timestamp: number }
-  >()
+  private contextCache = new Map<string, { context: QueryContext; timestamp: number }>()
   private config: CompletionConfig
 
   constructor(config: Partial<CompletionConfig> = DEFAULT_COMPLETION_CONFIG) {
@@ -109,10 +106,7 @@ export class QueryContextAnalyzer {
     const currentPrefix = this.getCurrentPrefix(model, position)
 
     // Check if cursor is in string or comment (should avoid completions)
-    const { inComment, inString } = this.getCursorStringCommentStatus(
-      query,
-      offset,
-    )
+    const { inComment, inString } = this.getCursorStringCommentStatus(query, offset)
     if (inString || inComment) {
       return this.createEmptyContext(currentPrefix, inString, inComment)
     }
@@ -210,12 +204,12 @@ export class QueryContextAnalyzer {
           column: startColumn,
         })
         position += value.length
-        
+
         // Count all newlines in the whitespace value, not just the first character
         const newlines = (value.match(/\n/g) || []).length
         if (newlines > 0) {
           line += newlines
-          column = value.length - value.lastIndexOf('\n')
+          column = value.length - value.lastIndexOf("\n")
         } else {
           column += value.length
         }
@@ -334,10 +328,7 @@ export class QueryContextAnalyzer {
    *
    * @private
    */
-  private detectCurrentClause(
-    tokens: Array<SqlToken>,
-    offset: number,
-  ): SqlClause | null {
+  private detectCurrentClause(tokens: Array<SqlToken>, offset: number): SqlClause | null {
     // Find tokens before the cursor position
     const beforeCursor = tokens.filter((token) => token.endOffset <= offset)
 
@@ -630,21 +621,7 @@ export class QueryContextAnalyzer {
   }
 
   private classifyOperatorOrDelimiter(value: string): SqlTokenType {
-    const operators = new Set([
-      "=",
-      "<",
-      ">",
-      "<=",
-      ">=",
-      "<>",
-      "!=",
-      "+",
-      "-",
-      "*",
-      "/",
-      "%",
-      "||",
-    ])
+    const operators = new Set(["=", "<", ">", "<=", ">=", "<>", "!=", "+", "-", "*", "/", "%", "||"])
     const delimiters = new Set([",", "(", ")", ".", ";"])
 
     if (operators.has(value)) return "OPERATOR"
@@ -656,10 +633,7 @@ export class QueryContextAnalyzer {
    * Utility Methods
    */
 
-  private getCurrentPrefix(
-    model: MonacoITextModel,
-    position: Position,
-  ): string {
+  private getCurrentPrefix(model: MonacoITextModel, position: Position): string {
     const line = model.getLineContent(position.lineNumber)
     const beforeCursor = line.substring(0, position.column - 1)
 
@@ -668,10 +642,7 @@ export class QueryContextAnalyzer {
     return match ? match[1] : ""
   }
 
-  private getCursorStringCommentStatus(
-    query: string,
-    offset: number,
-  ): { inString: boolean; inComment: boolean } {
+  private getCursorStringCommentStatus(query: string, offset: number): { inString: boolean; inComment: boolean } {
     // Simple heuristic: check if cursor is between quotes or in comment
     const beforeCursor = query.substring(0, offset)
 
@@ -693,10 +664,7 @@ export class QueryContextAnalyzer {
     return { inString, inComment }
   }
 
-  private calculateSubqueryDepth(
-    tokens: Array<SqlToken>,
-    offset: number,
-  ): number {
+  private calculateSubqueryDepth(tokens: Array<SqlToken>, offset: number): number {
     // Count nested parentheses before cursor
     let depth = 0
     for (const token of tokens) {
@@ -753,11 +721,7 @@ export class QueryContextAnalyzer {
     }
   }
 
-  private createEmptyContext(
-    currentPrefix = "",
-    inString = false,
-    inComment = false,
-  ): QueryContext {
+  private createEmptyContext(currentPrefix = "", inString = false, inComment = false): QueryContext {
     return {
       expectsTable: false,
       expectsColumn: false,

@@ -72,31 +72,8 @@ export class NozzleCompletionProvider implements languages.CompletionItemProvide
       "EXCEPT",
       "INTERSECT",
     ],
-    functions: [
-      "COUNT",
-      "SUM",
-      "AVG",
-      "MIN",
-      "MAX",
-      "DISTINCT",
-      "CASE",
-      "WHEN",
-      "THEN",
-      "ELSE",
-      "END",
-    ],
-    operators: [
-      "AND",
-      "OR",
-      "NOT",
-      "IN",
-      "EXISTS",
-      "BETWEEN",
-      "LIKE",
-      "ILIKE",
-      "IS NULL",
-      "IS NOT NULL",
-    ],
+    functions: ["COUNT", "SUM", "AVG", "MIN", "MAX", "DISTINCT", "CASE", "WHEN", "THEN", "ELSE", "END"],
+    operators: ["AND", "OR", "NOT", "IN", "EXISTS", "BETWEEN", "LIKE", "ILIKE", "IS NULL", "IS NOT NULL"],
     modifiers: ["ASC", "DESC", "DISTINCT", "ALL", "AS"],
   }
 
@@ -161,10 +138,7 @@ export class NozzleCompletionProvider implements languages.CompletionItemProvide
 
       // 2. Column completions (context-filtered)
       if (queryContext.expectsColumn) {
-        const columnCompletions = this.createColumnCompletions(
-          queryContext,
-          position,
-        )
+        const columnCompletions = this.createColumnCompletions(queryContext, position)
         suggestions = Array.appendAll(columnCompletions)(suggestions)
       }
 
@@ -176,10 +150,7 @@ export class NozzleCompletionProvider implements languages.CompletionItemProvide
 
       // 4. SQL keyword completions
       if (queryContext.expectsKeyword) {
-        const keywordCompletions = this.createKeywordCompletions(
-          queryContext,
-          position,
-        )
+        const keywordCompletions = this.createKeywordCompletions(queryContext, position)
         suggestions = Array.appendAll(keywordCompletions)(suggestions)
       }
 
@@ -190,17 +161,10 @@ export class NozzleCompletionProvider implements languages.CompletionItemProvide
       }
 
       // Filter by prefix and apply limits
-      const filteredSuggestions = this.filterAndLimitSuggestions(
-        suggestions,
-        queryContext,
-      )
+      const filteredSuggestions = this.filterAndLimitSuggestions(suggestions, queryContext)
 
       // Add range information for text replacement
-      const suggestionsWithRange = this.addRangeToSuggestions(
-        filteredSuggestions,
-        position,
-        queryContext.currentPrefix,
-      )
+      const suggestionsWithRange = this.addRangeToSuggestions(filteredSuggestions, position, queryContext.currentPrefix)
 
       return {
         suggestions: suggestionsWithRange,
@@ -221,16 +185,12 @@ export class NozzleCompletionProvider implements languages.CompletionItemProvide
    * @private
    * @returns Array of table completion items
    */
-  private createTableCompletions(
-    position: Position,
-  ): Array<languages.CompletionItem> {
+  private createTableCompletions(position: Position): Array<languages.CompletionItem> {
     const completions: Array<languages.CompletionItem> = []
 
     this.metadata.forEach((dataset, index) => {
       // Create detailed documentation showing table schema
-      const columnList = dataset.metadata_columns
-        .map((col) => `- \`${col.name}\` (${col.datatype})`)
-        .join("\n")
+      const columnList = dataset.metadata_columns.map((col) => `- \`${col.name}\` (${col.datatype})`).join("\n")
 
       const documentation: IMarkdownString = {
         value: [
@@ -281,19 +241,13 @@ export class NozzleCompletionProvider implements languages.CompletionItemProvide
    * @param queryContext - Current query context
    * @returns Array of column completion items
    */
-  private createColumnCompletions(
-    queryContext: QueryContext,
-    position: Position,
-  ): Array<languages.CompletionItem> {
+  private createColumnCompletions(queryContext: QueryContext, position: Position): Array<languages.CompletionItem> {
     const completions: Array<languages.CompletionItem> = []
     let columnIndex = 0
 
     this.metadata.forEach((dataset) => {
       // Skip tables not in scope (unless no tables are specified, then include all)
-      if (
-        queryContext.availableTables.length > 0 &&
-        !queryContext.availableTables.includes(dataset.source)
-      ) {
+      if (queryContext.availableTables.length > 0 && !queryContext.availableTables.includes(dataset.source)) {
         return
       }
 
@@ -342,9 +296,7 @@ export class NozzleCompletionProvider implements languages.CompletionItemProvide
    * @param queryContext - Current query context
    * @returns Array of UDF completion items
    */
-  private createUDFCompletions(
-    position: Position,
-  ): Array<languages.CompletionItem> {
+  private createUDFCompletions(position: Position): Array<languages.CompletionItem> {
     const completions: Array<languages.CompletionItem> = []
 
     this.udfs.forEach((udf, index) => {
@@ -438,9 +390,7 @@ export class NozzleCompletionProvider implements languages.CompletionItemProvide
       default:
         // Generic fallback using parameters if available
         if (udf.parameters && udf.parameters.length > 0) {
-          const params = udf.parameters
-            .map((param, i) => `\${${i + 1}:${param}}`)
-            .join(", ")
+          const params = udf.parameters.map((param, i) => `\${${i + 1}:${param}}`).join(", ")
           return `${udf.name}(${params})$0`
         }
         return `${udf.name}(\${1})$0`
@@ -456,10 +406,7 @@ export class NozzleCompletionProvider implements languages.CompletionItemProvide
    * @param queryContext - Current query context
    * @returns Array of keyword completion items
    */
-  private createKeywordCompletions(
-    queryContext: QueryContext,
-    position: Position,
-  ): Array<languages.CompletionItem> {
+  private createKeywordCompletions(queryContext: QueryContext, position: Position): Array<languages.CompletionItem> {
     const completions: Array<languages.CompletionItem> = []
     let keywordIndex = 0
 
@@ -468,25 +415,10 @@ export class NozzleCompletionProvider implements languages.CompletionItemProvide
 
     switch (queryContext.currentClause) {
       case "SELECT":
-        keywords = [
-          "DISTINCT",
-          "FROM",
-          "WHERE",
-          "GROUP BY",
-          "ORDER BY",
-          "LIMIT",
-        ]
+        keywords = ["DISTINCT", "FROM", "WHERE", "GROUP BY", "ORDER BY", "LIMIT"]
         break
       case "FROM":
-        keywords = [
-          "WHERE",
-          "JOIN",
-          "INNER JOIN",
-          "LEFT JOIN",
-          "RIGHT JOIN",
-          "GROUP BY",
-          "ORDER BY",
-        ]
+        keywords = ["WHERE", "JOIN", "INNER JOIN", "LEFT JOIN", "RIGHT JOIN", "GROUP BY", "ORDER BY"]
         break
       case "WHERE":
       case "HAVING":
@@ -529,9 +461,7 @@ export class NozzleCompletionProvider implements languages.CompletionItemProvide
    * @private
    * @returns Array of operator completion items
    */
-  private createOperatorCompletions(
-    position: Position,
-  ): Array<languages.CompletionItem> {
+  private createOperatorCompletions(position: Position): Array<languages.CompletionItem> {
     const operators = [
       "=",
       "<>",
@@ -582,13 +512,10 @@ export class NozzleCompletionProvider implements languages.CompletionItemProvide
     if (queryContext.currentPrefix) {
       const lowerPrefix = queryContext.currentPrefix.toLowerCase()
       filtered = suggestions.filter((suggestion) => {
-        const labelText = typeof suggestion.label === "string"
-          ? suggestion.label
-          : suggestion.label.label
+        const labelText = typeof suggestion.label === "string" ? suggestion.label : suggestion.label.label
         return (
           labelText.toLowerCase().includes(lowerPrefix) ||
-          (suggestion.filterText &&
-            suggestion.filterText.toLowerCase().includes(lowerPrefix))
+          (suggestion.filterText && suggestion.filterText.toLowerCase().includes(lowerPrefix))
         )
       })
     }
@@ -628,10 +555,7 @@ export class NozzleCompletionProvider implements languages.CompletionItemProvide
    *
    * @private
    */
-  private calculateReplacementRange(
-    position: Position,
-    currentPrefix: string,
-  ): IRange {
+  private calculateReplacementRange(position: Position, currentPrefix: string): IRange {
     const startColumn = position.column - currentPrefix.length
     const endColumn = position.column
 
@@ -651,31 +575,21 @@ export class NozzleCompletionProvider implements languages.CompletionItemProvide
    * @private
    */
   private getFallbackCompletions(position: Position): languages.CompletionList {
-    const basicKeywords = [
-      "SELECT",
-      "FROM",
-      "WHERE",
-      "JOIN",
-      "ORDER BY",
-      "GROUP BY",
-      "LIMIT",
-    ]
+    const basicKeywords = ["SELECT", "FROM", "WHERE", "JOIN", "ORDER BY", "GROUP BY", "LIMIT"]
 
-    const suggestions = basicKeywords.map<languages.CompletionItem>(
-      (keyword, index) => ({
-        label: keyword,
-        kind: languages.CompletionItemKind.Keyword,
-        detail: "SQL Keyword",
-        insertText: keyword,
-        sortText: index.toString().padStart(3, "0"),
-        range: {
-          startLineNumber: position.lineNumber,
-          startColumn: position.column,
-          endLineNumber: position.lineNumber,
-          endColumn: position.column,
-        },
-      }),
-    )
+    const suggestions = basicKeywords.map<languages.CompletionItem>((keyword, index) => ({
+      label: keyword,
+      kind: languages.CompletionItemKind.Keyword,
+      detail: "SQL Keyword",
+      insertText: keyword,
+      sortText: index.toString().padStart(3, "0"),
+      range: {
+        startLineNumber: position.lineNumber,
+        startColumn: position.column,
+        endLineNumber: position.lineNumber,
+        endColumn: position.column,
+      },
+    }))
 
     this.logDebug("Using fallback completions")
     return { suggestions }
@@ -691,10 +605,7 @@ export class NozzleCompletionProvider implements languages.CompletionItemProvide
    * Updates the metadata and UDF information when data changes.
    * This is called by the provider manager when fresh data is available.
    */
-  updateData(
-    metadata: ReadonlyArray<DatasetSource>,
-    udfs: ReadonlyArray<UserDefinedFunction>,
-  ): void {
+  updateData(metadata: ReadonlyArray<DatasetSource>, udfs: ReadonlyArray<UserDefinedFunction>): void {
     this.metadata = metadata
     this.udfs = udfs
     this.analyzer.clearCache() // Clear analysis cache when data changes

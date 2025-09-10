@@ -14,11 +14,7 @@
  * @file UnifiedSQLProvider.ts
  */
 
-import type {
-  IDisposable,
-  Position,
-  editor
-} from "monaco-editor/esm/vs/editor/editor.api"
+import type { editor, IDisposable, Position } from "monaco-editor/esm/vs/editor/editor.api"
 import * as monaco from "monaco-editor/esm/vs/editor/editor.api"
 import type { DatasetSource } from "nozzl/Studio/Model"
 
@@ -194,12 +190,7 @@ export class UnifiedSQLProvider implements ISQLProvider {
         try {
           if (!this.completionProvider) return { suggestions: [] }
 
-          const result = await this.completionProvider.provideCompletionItems(
-            model,
-            position,
-            context,
-            token,
-          )
+          const result = await this.completionProvider.provideCompletionItems(model, position, context, token)
           return result
         } catch (error) {
           this.logError("Completion provider failed", error)
@@ -336,11 +327,7 @@ export class UnifiedSQLProvider implements ISQLProvider {
     if (!word) return null
 
     // Check if it's a UDF function
-    const udf = this.udfs.find(
-      (u) =>
-        u.name === word.word ||
-        u.name.replace("${dataset}", "{dataset}") === word.word,
-    )
+    const udf = this.udfs.find((u) => u.name === word.word || u.name.replace("${dataset}", "{dataset}") === word.word)
 
     if (!udf || !this.snippetGenerator) return null
 
@@ -363,9 +350,7 @@ export class UnifiedSQLProvider implements ISQLProvider {
    * Create fallback completions when main provider fails
    * @private
    */
-  private createFallbackCompletions(
-    position: Position,
-  ): Array<monaco.languages.CompletionItem> {
+  private createFallbackCompletions(position: Position): Array<monaco.languages.CompletionItem> {
     const basicKeywords = [
       "SELECT",
       "FROM",

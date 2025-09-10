@@ -144,18 +144,9 @@ describe("SQL Intellisense Integration", () => {
       // For integration testing, we'll directly test the completion provider
       // since Monaco's internal provider registration is complex to mock
       const contextAnalyzer = new QueryContextAnalyzer()
-      const completionProvider = new NozzleCompletionProvider(
-        mockMetadata,
-        mockUDFs,
-        contextAnalyzer,
-      )
+      const completionProvider = new NozzleCompletionProvider(mockMetadata, mockUDFs, contextAnalyzer)
 
-      const result = await completionProvider.provideCompletionItems(
-        model,
-        position,
-        context,
-        token,
-      )
+      const result = await completionProvider.provideCompletionItems(model, position, context, token)
 
       expect(result).toBeDefined()
 
@@ -174,18 +165,9 @@ describe("SQL Intellisense Integration", () => {
       const token = createMockCancellationToken()
 
       const contextAnalyzer = new QueryContextAnalyzer()
-      const completionProvider = new NozzleCompletionProvider(
-        mockMetadata,
-        mockUDFs,
-        contextAnalyzer,
-      )
+      const completionProvider = new NozzleCompletionProvider(mockMetadata, mockUDFs, contextAnalyzer)
 
-      const result = await completionProvider.provideCompletionItems(
-        model,
-        position,
-        context,
-        token,
-      )
+      const result = await completionProvider.provideCompletionItems(model, position, context, token)
 
       expect(result).toBeDefined()
 
@@ -206,18 +188,9 @@ describe("SQL Intellisense Integration", () => {
       const token = createMockCancellationToken()
 
       const contextAnalyzer = new QueryContextAnalyzer()
-      const completionProvider = new NozzleCompletionProvider(
-        mockMetadata,
-        mockUDFs,
-        contextAnalyzer,
-      )
+      const completionProvider = new NozzleCompletionProvider(mockMetadata, mockUDFs, contextAnalyzer)
 
-      const result = await completionProvider.provideCompletionItems(
-        model,
-        position,
-        context,
-        token,
-      )
+      const result = await completionProvider.provideCompletionItems(model, position, context, token)
 
       expect(result).toBeDefined()
 
@@ -232,13 +205,9 @@ describe("SQL Intellisense Integration", () => {
       )
 
       expect(evmDecodeCompletion).toBeDefined()
-      expect(evmDecodeCompletion!.kind).toBe(
-        monaco.languages.CompletionItemKind.Function,
-      )
+      expect(evmDecodeCompletion!.kind).toBe(monaco.languages.CompletionItemKind.Function)
       expect(evmDecodeCompletion!.insertText).toContain("${1:")
-      expect(evmDecodeCompletion!.insertTextRules).toBe(
-        monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-      )
+      expect(evmDecodeCompletion!.insertTextRules).toBe(monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet)
 
       completionProvider.dispose()
     })
@@ -252,18 +221,9 @@ describe("SQL Intellisense Integration", () => {
       const token = createMockCancellationToken()
 
       const contextAnalyzer = new QueryContextAnalyzer()
-      const completionProvider = new NozzleCompletionProvider(
-        mockMetadata,
-        mockUDFs,
-        contextAnalyzer,
-      )
+      const completionProvider = new NozzleCompletionProvider(mockMetadata, mockUDFs, contextAnalyzer)
 
-      const result = await completionProvider.provideCompletionItems(
-        model,
-        position,
-        context,
-        token,
-      )
+      const result = await completionProvider.provideCompletionItems(model, position, context, token)
 
       expect(result).toBeDefined()
 
@@ -298,18 +258,9 @@ describe("SQL Intellisense Integration", () => {
       const token = createMockCancellationToken()
 
       const contextAnalyzer = new QueryContextAnalyzer()
-      const completionProvider = new NozzleCompletionProvider(
-        mockMetadata,
-        mockUDFs,
-        contextAnalyzer,
-      )
+      const completionProvider = new NozzleCompletionProvider(mockMetadata, mockUDFs, contextAnalyzer)
 
-      const result = await completionProvider.provideCompletionItems(
-        model,
-        position,
-        context,
-        token,
-      )
+      const result = await completionProvider.provideCompletionItems(model, position, context, token)
 
       expect(result).toBeDefined()
       expect(result!.suggestions).toBeDefined()
@@ -330,18 +281,9 @@ describe("SQL Intellisense Integration", () => {
       const token = createMockCancellationToken()
 
       const contextAnalyzer = new QueryContextAnalyzer()
-      const completionProvider = new NozzleCompletionProvider(
-        mockMetadata,
-        mockUDFs,
-        contextAnalyzer,
-      )
+      const completionProvider = new NozzleCompletionProvider(mockMetadata, mockUDFs, contextAnalyzer)
 
-      const result = await completionProvider.provideCompletionItems(
-        model,
-        position,
-        context,
-        token,
-      )
+      const result = await completionProvider.provideCompletionItems(model, position, context, token)
 
       expect(result).toBeDefined()
       expect(result!.suggestions).toBeDefined()
@@ -360,18 +302,9 @@ describe("SQL Intellisense Integration", () => {
       const token = createMockCancellationToken()
 
       const contextAnalyzer = new QueryContextAnalyzer()
-      const completionProvider = new NozzleCompletionProvider(
-        mockMetadata,
-        mockUDFs,
-        contextAnalyzer,
-      )
+      const completionProvider = new NozzleCompletionProvider(mockMetadata, mockUDFs, contextAnalyzer)
 
-      const result = await completionProvider.provideCompletionItems(
-        model,
-        position,
-        context,
-        token,
-      )
+      const result = await completionProvider.provideCompletionItems(model, position, context, token)
 
       expect(result).toBeDefined()
       expect(result!.suggestions).toBeDefined()
@@ -399,33 +332,19 @@ describe("SQL Intellisense Integration", () => {
       const token = createMockCancellationToken()
 
       const contextAnalyzer = new QueryContextAnalyzer()
-      const completionProvider = new NozzleCompletionProvider(
-        mockMetadata,
-        mockUDFs,
-        contextAnalyzer,
-      )
+      const completionProvider = new NozzleCompletionProvider(mockMetadata, mockUDFs, contextAnalyzer)
 
       // Verify cache is initially empty
       expect(contextAnalyzer.getCacheStats().contextCache).toBe(0)
 
       // First call - should populate cache
-      const result1 = await completionProvider.provideCompletionItems(
-        model,
-        position,
-        context,
-        token,
-      )
+      const result1 = await completionProvider.provideCompletionItems(model, position, context, token)
 
       // Verify cache now has one entry
       expect(contextAnalyzer.getCacheStats().contextCache).toBe(1)
 
       // Second call with identical parameters - should use cache
-      const result2 = await completionProvider.provideCompletionItems(
-        model,
-        position,
-        context,
-        token,
-      )
+      const result2 = await completionProvider.provideCompletionItems(model, position, context, token)
 
       // Cache should still have one entry (same query cached)
       expect(contextAnalyzer.getCacheStats().contextCache).toBe(1)
@@ -478,27 +397,15 @@ describe("SQL Intellisense Integration", () => {
       const token = createMockCancellationToken()
 
       const contextAnalyzer = new QueryContextAnalyzer(config)
-      const completionProvider = new NozzleCompletionProvider(
-        mockMetadata,
-        mockUDFs,
-        contextAnalyzer,
-        config,
-      )
+      const completionProvider = new NozzleCompletionProvider(mockMetadata, mockUDFs, contextAnalyzer, config)
 
-      const result = await completionProvider.provideCompletionItems(
-        model,
-        position,
-        context,
-        token,
-      )
+      const result = await completionProvider.provideCompletionItems(model, position, context, token)
 
       expect(result).toBeDefined()
       expect(result!.suggestions).toBeDefined()
 
       // Should respect maxSuggestions
-      expect(result!.suggestions.length).toBeLessThanOrEqual(
-        config.maxSuggestions,
-      )
+      expect(result!.suggestions.length).toBeLessThanOrEqual(config.maxSuggestions)
 
       completionProvider.dispose()
     })

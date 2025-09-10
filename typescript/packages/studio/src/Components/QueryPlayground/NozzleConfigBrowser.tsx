@@ -13,9 +13,7 @@ import { ArrowIcon } from "../ArrowIcon.tsx"
 export type NozzleConfigBrowserProps = {
   onTableSelected: (table: string, def: Table) => void
 }
-export function NozzleConfigBrowser({
-  onTableSelected,
-}: Readonly<NozzleConfigBrowserProps>) {
+export function NozzleConfigBrowser({ onTableSelected }: Readonly<NozzleConfigBrowserProps>) {
   const { data: config } = useNozzleConfigStreamQuery()
 
   if (config == null) {
@@ -26,9 +24,7 @@ export function NozzleConfigBrowser({
     <div className="flex flex-col gap-y-4 p-6">
       <div className="flex flex-col gap-y-1">
         <p className="text-14">Dataset Config</p>
-        <p className="text-10 text-space-700">
-          Tables derived from your current nozzle config.
-        </p>
+        <p className="text-10 text-space-700">Tables derived from your current nozzle config.</p>
       </div>
       <Accordion.Root className="w-full box-border flex flex-col justify-center gap-y-3">
         {Object.entries(config.tables).map(([table, def]) => (
@@ -64,12 +60,7 @@ export function NozzleConfigBrowser({
                     onClick={() =>
                       onTableSelected(table, def)}
                   >
-                    <PlusIcon
-                      alt={`Add ${table}`}
-                      size={4}
-                      className="text-white"
-                      aria-hidden="true"
-                    />
+                    <PlusIcon alt={`Add ${table}`} size={4} className="text-white" aria-hidden="true" />
                   </Tooltip.Trigger>
                   <Tooltip.Portal>
                     <Tooltip.Positioner sideOffset={10} side="left">
@@ -86,9 +77,7 @@ export function NozzleConfigBrowser({
             </Accordion.Header>
             <Accordion.Panel className="box-border overflow-y-auto overflow-x-hidden ml-4">
               <pre className="bg-black text-white p-3 rounded-4 text-12 overflow-x-auto">
-                <code className="language-sql">
-                  {String.trim(def.input.sql)}
-                </code>
+                <code className="language-sql">{String.trim(def.input.sql)}</code>
               </pre>
             </Accordion.Panel>
           </Accordion.Item>

@@ -44,11 +44,7 @@ describe("SQL Intellisense Imports", () => {
 
   test("should create completion provider instance", () => {
     const analyzer = new QueryContextAnalyzer()
-    const provider = new NozzleCompletionProvider(
-      mockMetadata,
-      mockUDFs,
-      analyzer,
-    )
+    const provider = new NozzleCompletionProvider(mockMetadata, mockUDFs, analyzer)
     expect(provider).toBeInstanceOf(NozzleCompletionProvider)
   })
 

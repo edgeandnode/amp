@@ -5,11 +5,7 @@ import { mutationOptions, useMutation } from "@tanstack/react-query"
 
 import * as Constants from "../constants.js"
 
-const queryDatasetMutationOptions = mutationOptions<
-  ReadonlyArray<any>,
-  Error,
-  Readonly<{ query: string }>
->({
+const queryDatasetMutationOptions = mutationOptions<ReadonlyArray<any>, Error, Readonly<{ query: string }>>({
   mutationKey: ["Dataset", "Query"] as const,
   async mutationFn(vars) {
     try {
@@ -19,9 +15,7 @@ const queryDatasetMutationOptions = mutationOptions<
       })
 
       if (response.status !== 200) {
-        throw new Error(
-          `Query endpoint did not return 200 [${response.status}]`,
-        )
+        throw new Error(`Query endpoint did not return 200 [${response.status}]`)
       }
       /** @todo get a better error message from ArrowFlight */
       const json = await response.json()

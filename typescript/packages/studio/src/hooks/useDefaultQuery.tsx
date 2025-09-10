@@ -14,9 +14,7 @@ export const defaultQueryOptions = queryOptions({
       method: "GET",
     })
     if (response.status !== 200) {
-      throw new Error(
-        `Default query endpoint did not return 200 [${response.status}]`,
-      )
+      throw new Error(`Default query endpoint did not return 200 [${response.status}]`)
     }
     const json = await response.json()
 
@@ -26,12 +24,7 @@ export const defaultQueryOptions = queryOptions({
 
 export function useDefaultQuery(
   options: Omit<
-    UseSuspenseQueryOptions<
-      DefaultQuery,
-      Error,
-      DefaultQuery,
-      readonly ["Query", "Default"]
-    >,
+    UseSuspenseQueryOptions<DefaultQuery, Error, DefaultQuery, readonly ["Query", "Default"]>,
     "queryKey" | "queryFn"
   > = {},
 ) {
