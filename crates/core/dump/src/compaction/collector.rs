@@ -41,7 +41,6 @@ impl Collector {
         let table = Arc::clone(&self.table);
 
         let location_id = table.location_id();
-        let object_store = table.object_store();
 
         let now = Timestamp::now();
         let secs = now.0.as_secs() as i64;
@@ -50,7 +49,7 @@ impl Collector {
 
         let expired_stream = metadata_db.stream_expired_files(location_id, secs, nsecs);
 
-        match DeletionOutput::try_from_manifest_stream(object_store, expired_stream, now).await {
+        match DeletionOutput::try_from_manifest_stream(table, expired_stream, now).await {
             Ok(output) if output.len() > 0 => {
                 output.update_manifest(&metadata_db).await.map_err(
                     CollectorError::manifest_update_error(
@@ -128,7 +127,7 @@ impl DeletionOutput {
     }
 
     pub async fn try_from_manifest_stream<'a>(
-        object_store: Arc<dyn ObjectStore>,
+        table: Arc<PhysicalTable>,
         expired_stream: BoxStream<'a, Result<GcManifestRow, metadata_db::Error>>,
         now: Timestamp,
     ) -> Result<Self, metadata_db::Error> {
@@ -138,7 +137,7 @@ impl DeletionOutput {
                 |(mut file_ids, mut file_paths),
                  GcManifestRow {
                      file_id,
-                     file_path,
+                     file_path: file_name,
                      expiration,
                      ..
                  }| {
@@ -146,8 +145,9 @@ impl DeletionOutput {
                         .saturating_sub(now.0)
                         .is_zero()
                     {
+                        let url = table.url().join(&file_name).expect("Invalid file path");
                         file_ids.push(file_id);
-                        file_paths.push(Ok(Path::from(file_path)));
+                        file_paths.push(Ok(Path::from(url.path())));
                     }
 
                     future::ok((file_ids, file_paths))
@@ -157,7 +157,7 @@ impl DeletionOutput {
 
         let size = file_ids.len();
 
-        Ok(object_store
+        Ok(table.object_store()
             .delete_stream(stream::iter(file_paths).boxed())
             .enumerate()
             .fold(Self::with_capacity(size), move |mut acc, (idx, result)| {
