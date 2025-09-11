@@ -299,6 +299,7 @@ async fn dump_sql_query(
 
     let dataset_name = physical_table.dataset().name.clone();
     let table_name = physical_table.table_name();
+    let location_id = *physical_table.location_id();
 
     let mut compactor = NozzleCompactor::start(physical_table.clone(), compaction_opts.clone());
 
@@ -321,11 +322,13 @@ async fn dump_sql_query(
                         num_rows,
                         dataset_name.clone(),
                         table_name.to_string(),
+                        location_id,
                     );
                     metrics.inc_sql_dataset_bytes_written_by(
                         num_bytes,
                         dataset_name.clone(),
                         table_name.to_string(),
+                        location_id,
                     );
                 }
             }
