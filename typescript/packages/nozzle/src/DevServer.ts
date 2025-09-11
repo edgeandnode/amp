@@ -44,8 +44,8 @@ export const make = Effect.gen(function*() {
     })),
   )
 
-  // Deploy the anvil dataset
-  yield* admin.deployDataset(Anvil.dataset.name, Anvil.dataset.version, Anvil.dataset)
+  // Register the anvil dataset
+  yield* admin.registerDataset(Anvil.dataset.name, Anvil.dataset.version, Anvil.dataset)
 
   // Observe block changes in a sliding buffer
   const blockChanges = evmRpc.streamBlocks.pipe(
@@ -70,8 +70,8 @@ export const make = Effect.gen(function*() {
       )
     ),
     Stream.tap((manifest) =>
-      admin.deployDataset(manifest.name, manifest.version).pipe(
-        Effect.tapError(() => Effect.logError(`Failed to deploy manifest ${manifest.name}@${manifest.version}`)),
+      admin.registerDataset(manifest.name, manifest.version).pipe(
+        Effect.tapError(() => Effect.logError(`Failed to register manifest ${manifest.name}@${manifest.version}`)),
         Effect.ignore,
       )
     ),
@@ -85,16 +85,14 @@ export const make = Effect.gen(function*() {
 
         const dependencies = Object.values(manifest.dependencies)
         yield* Effect.forEach(dependencies, (dependency) =>
-          admin.dumpDataset(dependency.name, {
-            version: dependency.version,
+          admin.dumpDatasetVersion(dependency.name, dependency.version, {
             endBlock: Number(block),
           }), {
           concurrency: "unbounded",
           discard: true,
         })
 
-        yield* admin.dumpDataset(manifest.name, {
-          version: manifest.version,
+        yield* admin.dumpDatasetVersion(manifest.name, manifest.version, {
           endBlock: Number(block),
         })
       }).pipe(

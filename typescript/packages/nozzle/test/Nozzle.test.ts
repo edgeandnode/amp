@@ -54,21 +54,19 @@ layer(environment, {
   )
 
   it.effect(
-    "deploy and dump the root dataset",
+    "register and dump the root dataset",
     Effect.fn(function*() {
       const admin = yield* Admin.Admin
       const rpc = yield* EvmRpc.EvmRpc
       const block = yield* rpc.getLatestBlockNumber
 
-      // Deploy and dump the root dataset.
-      yield* admin.deployDataset(Anvil.dataset.name, Anvil.dataset.version, Anvil.dataset)
-      yield* admin.dumpDataset(Anvil.dataset.name, {
+      // Register and dump the root dataset.
+      yield* admin.registerDataset(Anvil.dataset.name, Anvil.dataset.version, Anvil.dataset)
+      yield* admin.dumpDatasetVersion(Anvil.dataset.name, Anvil.dataset.version, {
         endBlock: Number(block),
-        version: Anvil.dataset.version,
-        waitForCompletion: true,
       })
 
-      const response = yield* admin.getDatasetById(Anvil.dataset.name)
+      const response = yield* admin.getDataset(Anvil.dataset.name)
       assertInstanceOf(response, Model.DatasetInfo)
       deepStrictEqual(response.name, Anvil.dataset.name)
     }),
@@ -79,7 +77,7 @@ layer(environment, {
     "can fetch a root dataset",
     Effect.fn(function*() {
       const api = yield* Admin.Admin
-      const result = yield* api.getDatasetById("anvil")
+      const result = yield* api.getDataset("anvil")
       assertInstanceOf(result, Model.DatasetInfo)
       assertEquals(result.kind, "evm-rpc")
       assertEquals(result.name, "anvil")
@@ -110,23 +108,21 @@ layer(environment, {
   )
 
   it.effect(
-    "deploy and dump the example dataset",
+    "register and dump the example dataset",
     Effect.fn(function*() {
       const admin = yield* Admin.Admin
       const rpc = yield* EvmRpc.EvmRpc
       const block = yield* rpc.getLatestBlockNumber
       const fixtures = yield* Fixtures.Fixtures
 
-      // Deploy and dump the example manifest.
+      // Register and dump the example manifest.
       const dataset = yield* fixtures.load("manifest.json", Model.DatasetManifest)
-      yield* admin.deployDataset(dataset.name, dataset.version)
-      yield* admin.dumpDataset(dataset.name, {
+      yield* admin.registerDataset(dataset.name, dataset.version)
+      yield* admin.dumpDatasetVersion(dataset.name, dataset.version, {
         endBlock: Number(block),
-        version: dataset.version,
-        waitForCompletion: true,
       })
 
-      const response = yield* admin.getDatasetById(dataset.name)
+      const response = yield* admin.getDataset(dataset.name)
       assertInstanceOf(response, Model.DatasetInfo)
       deepStrictEqual(response.name, dataset.name)
     }),

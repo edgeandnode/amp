@@ -26,11 +26,6 @@ export const dump = Command.make("dump", {
       Options.withDescription("The block number to end at, inclusive"),
       Options.optional,
     ),
-    waitForCompletion: Options.boolean("wait").pipe(
-      Options.withAlias("w"),
-      Options.withDefault(false),
-      Options.withDescription("Wait for the dump to complete before returning"),
-    ),
     registryUrl,
     adminUrl,
   },
@@ -47,21 +42,18 @@ export const dump = Command.make("dump", {
       })
 
       const [name, version] = dataset.split("@") as [string, string | undefined]
-      if (args.waitForCompletion) {
-        yield* Console.log(`Starting dump for dataset ${dataset} up to block ${args.endBlock}`)
-      }
 
-      yield* admin.dumpDataset(name, {
-        version,
-        endBlock: args.endBlock.pipe(Option.getOrUndefined),
-        waitForCompletion: args.waitForCompletion,
-      })
-
-      if (args.waitForCompletion) {
-        yield* Console.log(`Dump completed for dataset ${dataset}`)
+      if (version) {
+        yield* admin.dumpDatasetVersion(name, version, {
+          endBlock: args.endBlock.pipe(Option.getOrUndefined),
+        })
       } else {
-        yield* Console.log(`Dump scheduled for dataset ${dataset}`)
+        yield* admin.dumpDataset(name, {
+          endBlock: args.endBlock.pipe(Option.getOrUndefined),
+        })
       }
+
+      yield* Console.log(`Dump scheduled for dataset ${dataset}`)
     }),
   ),
   Command.provide(({ args }) =>

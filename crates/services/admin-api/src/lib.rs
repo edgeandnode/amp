@@ -28,13 +28,20 @@ pub async fn serve(
 
     // Register the routes
     let app = Router::new()
-        .route("/deploy", post(datasets::deploy::handler))
         .route(
             "/datasets",
-            get(datasets::get_all::handler).post(datasets::deploy::handler),
+            get(datasets::get_all::handler).post(datasets::register::handler),
         )
-        .route("/datasets/{id}", get(datasets::get_by_id::handler))
-        .route("/datasets/{id}/dump", post(datasets::dump::handler))
+        .route("/datasets/{name}", get(datasets::get_by_id::handler))
+        .route(
+            "/datasets/{name}/versions/{version}",
+            get(datasets::get_by_id::handler_with_version),
+        )
+        .route("/datasets/{name}/dump", post(datasets::dump::handler))
+        .route(
+            "/datasets/{name}/versions/{version}/dump",
+            post(datasets::dump::handler_with_version),
+        )
         .route(
             "/jobs",
             get(jobs::get_all::handler).delete(jobs::delete::handler),
