@@ -7,12 +7,17 @@ use std::{
 
 use async_stream::stream;
 use common::{
-    BlockNum, BlockStreamer, BoxError, DataTypeJsonSchema, Dataset, DatasetValue, LogicalCatalog,
-    RawDatasetRows, SPECIAL_BLOCK_NUM, Store,
+    BlockNum, BlockStreamer, BoxError, Dataset, DatasetValue, LogicalCatalog, RawDatasetRows,
+    Store,
     catalog::physical::{Catalog, PhysicalTable},
     config::Config,
     evm::{self, udfs::EthCall},
-    manifest::{self, Manifest, Version},
+    manifest::{
+        self,
+        common::{Manifest as CommonManifest, SerializableSchema},
+        derived::{Manifest, Version},
+        sql_datasets::SqlDataset,
+    },
     query_context::{self, PlanningContext, QueryEnv},
     sql_visitors::all_function_names,
     store::StoreError,
@@ -26,7 +31,6 @@ use futures::{FutureExt as _, Stream, TryFutureExt as _, future::BoxFuture};
 use js_runtime::isolate_pool::IsolatePool;
 use metadata_db::MetadataDb;
 use rand::seq::SliceRandom;
-use sql_datasets::SqlDataset;
 use tracing::instrument;
 use url::Url;
 
@@ -342,12 +346,12 @@ impl DatasetStore {
             .map_err(|e| (dataset, e).into())
     }
 
-    /// Loads a [RawDataset] and [common](DatasetDefsCommon) data for a TOML or JSON file with the
+    /// Loads a [RawDataset] and [common](CommonManifest) data for a TOML or JSON file with the
     /// given name.
     async fn common_data_and_dataset(
         &self,
         dataset_name: &str,
-    ) -> Result<(DatasetDefsCommon, RawDataset), Error> {
+    ) -> Result<(CommonManifest, RawDataset), Error> {
         use Error::*;
         let raw_dataset = self
             .dataset_defs_store()
@@ -364,12 +368,12 @@ impl DatasetStore {
             })
             .await?;
 
-        let common: DatasetDefsCommon = match raw_dataset {
+        let common: CommonManifest = match raw_dataset {
             RawDataset::Toml(ref raw) => {
                 tracing::warn!("TOML dataset format is deprecated!");
-                toml::from_str::<DatasetDefsCommon>(raw)?
+                toml::from_str::<CommonManifest>(raw)?
             }
-            RawDataset::Json(ref raw) => serde_json::from_str::<DatasetDefsCommon>(raw)?,
+            RawDataset::Json(ref raw) => serde_json::from_str::<CommonManifest>(raw)?,
         };
 
         if common.name != dataset_name && common.kind != "manifest" {
@@ -388,7 +392,7 @@ impl DatasetStore {
         let manifest: Manifest =
             serde_json::from_str(&raw_manifest).map_err(Error::ManifestError)?;
         let queries = manifest.queries().map_err(Error::SqlParseError)?;
-        let dataset = manifest::dataset(manifest).map_err(Error::Unknown)?;
+        let dataset = manifest::derived::dataset(manifest).map_err(Error::Unknown)?;
         Ok(SqlDataset { dataset, queries })
     }
 
@@ -428,7 +432,7 @@ impl DatasetStore {
             }
             DatasetKind::Manifest => {
                 let manifest = raw_dataset.to_manifest()?;
-                let dataset = manifest::dataset(manifest).map_err(Error::Unknown)?;
+                let dataset = manifest::derived::dataset(manifest).map_err(Error::Unknown)?;
                 (dataset, None)
             }
         };
@@ -753,7 +757,7 @@ impl DatasetStore {
     /// Each `.sql` file in the directory with the same name as the dataset will be loaded as a table.
     fn sql_dataset(
         self: Arc<Self>,
-        dataset_def: common::DatasetValue,
+        dataset_def: DatasetValue,
     ) -> BoxFuture<'static, Result<SqlDataset, Error>> {
         sql_datasets::dataset(self, dataset_def)
             .map_err(Error::SqlDatasetError)
@@ -790,25 +794,6 @@ impl RawDataset {
         Ok(value)
     }
 }
-
-/// All dataset definitions must have a kind, network and name. The name must match the filename. Schema is optional for TOML dataset format.
-#[derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
-pub struct DatasetDefsCommon {
-    /// Dataset kind. See specific dataset definitions for supported values.
-    pub kind: String,
-    /// Network name, e.g. "mainnet".
-    pub network: String,
-    /// Dataset name.
-    pub name: String,
-    /// Dataset schema. Lists the tables defined by this dataset.
-    pub schema: Option<SerializableSchema>,
-}
-
-/// A serializable representation of a collection of [`arrow::datatypes::Schema`]s, without any metadata.
-#[derive(Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
-pub struct SerializableSchema(
-    std::collections::HashMap<String, std::collections::HashMap<String, DataTypeJsonSchema>>,
-);
 
 fn datasets_from_table_refs(
     table_refs: impl Iterator<Item = TableReference>,
@@ -884,56 +869,6 @@ impl BlockStreamer for BlockStreamClient {
             Self::Firehose(client) => client.latest_block().await,
             Self::Substreams(client) => client.latest_block().await,
         }
-    }
-}
-
-impl From<Vec<common::catalog::logical::Table>> for SerializableSchema {
-    fn from(tables: Vec<common::catalog::logical::Table>) -> Self {
-        let inner = tables
-            .into_iter()
-            .map(|table| {
-                let inner_map = table
-                    .schema()
-                    .fields()
-                    .iter()
-                    .filter(|&field| field.name() != SPECIAL_BLOCK_NUM)
-                    .fold(std::collections::HashMap::new(), |mut acc, field| {
-                        acc.insert(
-                            field.name().clone(),
-                            DataTypeJsonSchema(field.data_type().clone()),
-                        );
-                        acc
-                    });
-                (table.name().to_string().clone(), inner_map)
-            })
-            .collect();
-
-        Self(inner)
-    }
-}
-
-impl From<&[common::catalog::logical::Table]> for SerializableSchema {
-    fn from(tables: &[common::catalog::logical::Table]) -> Self {
-        let inner = tables
-            .iter()
-            .map(|table| {
-                let inner_map = table
-                    .schema()
-                    .fields()
-                    .iter()
-                    .filter(|&field| field.name() != SPECIAL_BLOCK_NUM)
-                    .fold(std::collections::HashMap::new(), |mut acc, field| {
-                        acc.insert(
-                            field.name().clone(),
-                            DataTypeJsonSchema(field.data_type().clone()),
-                        );
-                        acc
-                    });
-                (table.name().to_string().clone(), inner_map)
-            })
-            .collect();
-
-        Self(inner)
     }
 }
 

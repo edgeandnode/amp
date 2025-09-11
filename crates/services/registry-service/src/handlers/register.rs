@@ -1,5 +1,5 @@
 use axum::{Json, extract::State};
-use common::manifest::Manifest;
+use common::manifest::derived::Manifest;
 use dataset_store::DatasetStore;
 use http_common::BoxRequestError;
 use metadata_db::MetadataDb;

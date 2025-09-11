@@ -1,9 +1,6 @@
 //! Dataset deploy handler
-use std::str::FromStr;
-
 use axum::{Json, extract::State, http::StatusCode};
-use common::manifest::{self, Manifest, Version};
-use dataset_store::DatasetDefsCommon;
+use common::manifest::{self, common::Manifest as CommonManifest, derived::Manifest};
 use http_common::BoxRequestError;
 use object_store::path::Path;
 use registry_service::handlers::register::register_manifest;
@@ -72,7 +69,9 @@ pub async fn handler_inner(
 ) -> Result<(StatusCode, &'static str), Error> {
     validate_dataset_name(&payload.dataset_name)
         .map_err(|e| Error::InvalidRequest(format!("invalid dataset name: {e}").into()))?;
-    let dataset_version = Version::from_str(&payload.version)
+    let dataset_version = payload
+        .version
+        .parse()
         .map_err(|e| Error::InvalidRequest(format!("invalid dataset version: {e}").into()))?;
     let dataset = ctx
         .store
@@ -92,9 +91,8 @@ pub async fn handler_inner(
                 .map_err(Error::SchedulerError)?;
         }
         (None, Some(manifest_str)) => {
-            let common: DatasetDefsCommon =
-                serde_json::from_str::<DatasetDefsCommon>(&manifest_str)
-                    .map_err(|e| Error::InvalidManifest(e.to_string()))?;
+            let common = serde_json::from_str::<CommonManifest>(&manifest_str)
+                .map_err(|e| Error::InvalidManifest(e.to_string()))?;
 
             match common.kind.as_str() {
                 "manifest" => {
@@ -117,7 +115,7 @@ pub async fn handler_inner(
                         payload.version
                     );
 
-                    let dataset = manifest::dataset(manifest)
+                    let dataset = manifest::derived::dataset(manifest)
                         .map_err(|e| Error::InvalidManifest(e.to_string()))?;
                     ctx.scheduler.schedule_dataset_dump(dataset, None).await?;
                 }

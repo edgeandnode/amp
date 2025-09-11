@@ -1,7 +1,7 @@
 use std::{path::PathBuf, sync::Arc};
 
 use clap::Parser as _;
-use common::{BoxError, config::Config, manifest::Manifest};
+use common::{BoxError, config::Config, manifest::derived::Manifest};
 use dataset_store::DatasetStore;
 use dump::worker::Worker;
 use metadata_db::MetadataDb;
