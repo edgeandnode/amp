@@ -16,7 +16,7 @@ import { MarkerSeverity } from "monaco-editor/esm/vs/editor/editor.api"
 import type { DatasetSource } from "nozzl/Studio/Model"
 import { afterEach, beforeEach, describe, expect, test } from "vitest"
 
-import { SqlValidator } from "../../../src/services/sql/SqlValidator.ts"
+import { SqlValidation } from "../../../src/services/sql/SqlValidation.ts"
 import type { CompletionConfig, UserDefinedFunction } from "../../../src/services/sql/types.ts"
 import { mockMetadata } from "./fixtures/mockMetadata.ts"
 import { mockUDFs } from "./fixtures/mockUDFs.ts"
@@ -26,7 +26,7 @@ const testDatasets = [...mockMetadata] as Array<DatasetSource>
 const testUdfs: Array<UserDefinedFunction> = [...mockUDFs]
 
 describe("SqlValidator", () => {
-  let validator: SqlValidator
+  let validator: SqlValidation
   let config: CompletionConfig
 
   beforeEach(() => {
@@ -43,7 +43,7 @@ describe("SqlValidator", () => {
       enablePartialValidation: true,
     }
 
-    validator = new SqlValidator(testDatasets, testUdfs, config)
+    validator = new SqlValidation(testDatasets, testUdfs, config)
   })
 
   afterEach(() => {
@@ -310,7 +310,7 @@ describe("SqlValidator", () => {
   describe("Validation Levels", () => {
     test("basic level should only validate syntax", () => {
       const basicConfig = { ...config, validationLevel: "basic" as const }
-      const basicValidator = new SqlValidator(testDatasets, testUdfs, basicConfig)
+      const basicValidator = new SqlValidation(testDatasets, testUdfs, basicConfig)
 
       const query = "SELECT unknown_column FROM unknown_table WHERE (unclosed_paren"
       const errors = basicValidator.validateQuery(query)
@@ -324,7 +324,7 @@ describe("SqlValidator", () => {
 
     test("standard level should validate syntax and tables", () => {
       const standardConfig = { ...config, validationLevel: "standard" as const }
-      const standardValidator = new SqlValidator(testDatasets, testUdfs, standardConfig)
+      const standardValidator = new SqlValidation(testDatasets, testUdfs, standardConfig)
 
       const query = "SELECT unknown_column FROM unknown_table WHERE (unclosed_paren"
       const errors = standardValidator.validateQuery(query)
@@ -351,7 +351,7 @@ describe("SqlValidator", () => {
 
     test("should skip validation when disabled", () => {
       const disabledConfig = { ...config, enableSqlValidation: false }
-      const disabledValidator = new SqlValidator(testDatasets, testUdfs, disabledConfig)
+      const disabledValidator = new SqlValidation(testDatasets, testUdfs, disabledConfig)
 
       const query = "SELECT unknown_column FROM unknown_table WHERE (unclosed_paren"
       const errors = disabledValidator.validateQuery(query)

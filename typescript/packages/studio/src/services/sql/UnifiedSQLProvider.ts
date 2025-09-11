@@ -19,7 +19,7 @@ import type { DatasetSource } from "nozzl/Studio/Model"
 
 import { NozzleCompletionProvider } from "./NozzleCompletionProvider.ts"
 import { QueryContextAnalyzer } from "./QueryContextAnalyzer.ts"
-import { SqlValidator } from "./SqlValidator.ts"
+import { SqlValidation } from "./SqlValidation.ts"
 import type { CompletionConfig, UserDefinedFunction } from "./types.ts"
 import { UdfSnippetGenerator } from "./UDFSnippetGenerator.ts"
 
@@ -40,7 +40,7 @@ export interface SQLProviderConfig {
 export interface ISQLProvider {
   setup: (editor: editor.IStandaloneCodeEditor) => void
   dispose: () => void
-  getValidator: () => SqlValidator | null
+  getValidator: () => SqlValidation | null
 }
 
 /**
@@ -57,7 +57,7 @@ export class UnifiedSQLProvider implements ISQLProvider {
   private completionProvider: NozzleCompletionProvider | undefined
   private contextAnalyzer: QueryContextAnalyzer | undefined
   private snippetGenerator: UdfSnippetGenerator | undefined
-  private validator: SqlValidator | undefined
+  private validator: SqlValidation | undefined
 
   private completionDisposable: IDisposable | undefined
   private hoverDisposable: IDisposable | undefined
@@ -113,7 +113,7 @@ export class UnifiedSQLProvider implements ISQLProvider {
   /**
    * Get the SQL validator instance
    */
-  getValidator(): SqlValidator | null {
+  getValidator(): SqlValidation | null {
     return this.validator || null
   }
 
@@ -189,7 +189,7 @@ export class UnifiedSQLProvider implements ISQLProvider {
     this.snippetGenerator = new UdfSnippetGenerator()
 
     if (this.config.validationLevel !== "off") {
-      this.validator = new SqlValidator([...this.sources], [...this.udfs], completionConfig)
+      this.validator = new SqlValidation([...this.sources], [...this.udfs], completionConfig)
     }
   }
 

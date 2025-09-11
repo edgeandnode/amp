@@ -42,7 +42,7 @@ import {
  * Main validator class that provides comprehensive SQL validation
  * including syntax checking and metadata validation.
  */
-export class SqlValidator {
+export class SqlValidation {
   private metadata: ReadonlyArray<DatasetSource>
   private udfs: ReadonlyArray<UserDefinedFunction>
   private config: CompletionConfig

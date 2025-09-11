@@ -31,7 +31,7 @@ import type { DatasetSource } from "nozzl/Studio/Model"
 
 import { NozzleCompletionProvider } from "./NozzleCompletionProvider.ts"
 import { QueryContextAnalyzer } from "./QueryContextAnalyzer.ts"
-import { SqlValidator } from "./SqlValidator.ts"
+import { SqlValidation } from "./SqlValidation.ts"
 import type { CompletionConfig, DisposableHandle, PerformanceMetrics, UserDefinedFunction } from "./types.ts"
 import { DEFAULT_COMPLETION_CONFIG } from "./types.ts"
 import { UdfSnippetGenerator } from "./UDFSnippetGenerator.ts"
@@ -47,7 +47,7 @@ class SqlProviderManager {
   private completionProvider?: NozzleCompletionProvider | undefined
   private contextAnalyzer?: QueryContextAnalyzer | undefined
   private snippetGenerator?: UdfSnippetGenerator | undefined
-  private validator?: SqlValidator | undefined
+  private validator?: SqlValidation | undefined
 
   private completionDisposable?: IDisposable | undefined
   private hoverDisposable?: IDisposable | undefined
@@ -106,7 +106,7 @@ class SqlProviderManager {
         this.config,
       )
       this.snippetGenerator = new UdfSnippetGenerator()
-      this.validator = new SqlValidator(this.metadata, this.udfs, this.config)
+      this.validator = new SqlValidation(this.metadata, this.udfs, this.config)
 
       // Register completion provider
       this.completionDisposable = monaco.languages.registerCompletionItemProvider("sql", {
@@ -197,7 +197,7 @@ class SqlProviderManager {
    *
    * @returns SqlValidator instance or null if not initialized
    */
-  getValidator(): SqlValidator | null {
+  getValidator(): SqlValidation | null {
     return this.validator || null
   }
 
@@ -530,7 +530,7 @@ export function areProvidersActive(): boolean {
  *
  * @returns SqlValidator instance or null if no provider is active
  */
-export function getActiveValidator(): SqlValidator | null {
+export function getActiveValidator(): SqlValidation | null {
   const validator = activeProviderManager ? activeProviderManager.getValidator() : null
   return validator
 }
@@ -541,6 +541,6 @@ export { type ISQLProvider, type SQLProviderConfig, UnifiedSQLProvider } from ".
 // Export all types and classes for advanced usage
 export { NozzleCompletionProvider } from "./NozzleCompletionProvider"
 export { QueryContextAnalyzer } from "./QueryContextAnalyzer"
-export { SqlValidator } from "./SqlValidator.ts"
+export { SqlValidation } from "./SqlValidation.ts"
 export * from "./types"
 export { createUdfCompletionItem, createUdfSnippet, UdfSnippetGenerator } from "./UDFSnippetGenerator"
