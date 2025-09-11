@@ -29,7 +29,7 @@ pub(super) async fn dataset(
     }
 
     let defs_store = store.dataset_defs_store();
-    let mut files = defs_store.list(def.name.clone());
+    let mut files = defs_store.list(def.name.as_str());
 
     // List all `.sql` files in the dataset dir and infer the output schema to get `Table`s.
     let mut tables: Vec<Table> = vec![];
@@ -79,7 +79,7 @@ pub(super) async fn dataset(
         dataset: Dataset {
             kind: def.kind,
             network: def.network,
-            name: def.name,
+            name: def.name.to_string(),
             version: None,
             start_block: None,
             tables,

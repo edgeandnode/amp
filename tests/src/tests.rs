@@ -10,7 +10,7 @@ use alloy::{
 use common::{
     BlockNum, BoxError,
     manifest::{
-        common::{Manifest as CommonManifest, SerializableSchema},
+        common::{Manifest as CommonManifest, Schema},
         derived::Manifest,
     },
     metadata::segments::BlockRange,
@@ -437,7 +437,7 @@ async fn generate_manifest_evm_rpc_builtin() {
     .unwrap();
 
     let out: CommonManifest = serde_json::from_slice(&out).unwrap();
-    let builtin_schema: SerializableSchema = evm_rpc_datasets::tables::all(&network).into();
+    let builtin_schema: Schema = evm_rpc_datasets::tables::all(&network).into();
 
     assert_eq!(out.network, network);
     assert_eq!(out.kind, kind);
@@ -467,7 +467,7 @@ async fn generate_manifest_firehose_builtin() {
     .unwrap();
 
     let out: CommonManifest = serde_json::from_slice(&out).unwrap();
-    let builtin_schema: SerializableSchema = firehose_datasets::evm::tables::all(&network).into();
+    let builtin_schema: Schema = firehose_datasets::evm::tables::all(&network).into();
 
     assert_eq!(out.network, network);
     assert_eq!(out.kind, kind);

@@ -16,8 +16,9 @@ use datafusion::{
 };
 use metadata_db::registry::Registry;
 
+use super::common::{DataType, Name, Version, VersionReq};
 use crate::{
-    BoxError, DataTypeJsonSchema, Dataset, Table as LogicalTable,
+    BoxError, Dataset, Table as LogicalTable,
     catalog::logical::{Function as LogicalFunction, FunctionSource as LogicalFunctionSource},
     query_context::{self, parse_sql},
     utils::dfs,
@@ -36,7 +37,7 @@ pub const DATASET_KIND: &str = "manifest";
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct Manifest {
     /// Dataset name. Must be unique within the network
-    pub name: String,
+    pub name: Name,
     /// Network name, e.g., `mainnet`, `sepolia`
     pub network: String,
     /// Semver version of the dataset, e.g. `1.0.0`
@@ -72,8 +73,8 @@ impl Manifest {
     /// Extract registry metadata from the manifest for publication.
     pub fn extract_registry_info(&self) -> Registry {
         let owner = self.dependencies.first_key_value().unwrap().1.owner.clone();
-        let dataset = self.name.clone();
-        let version = self.version.0.to_string();
+        let dataset = self.name.to_string();
+        let version = self.version.to_string();
         let filename = self.to_filename();
         let manifest_path = object_store::path::Path::from(filename.clone()).to_string();
         Registry {
@@ -125,77 +126,6 @@ pub enum ManifestKind {
     Manifest,
 }
 
-/// Semver version wrapper with JSON schema support.
-///
-/// Provides serialization and version manipulation utilities for dataset versioning.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct Version(pub semver::Version);
-
-impl Version {
-    /// Convert the Semver version to a string with underscores.
-    ///
-    /// Example: SemverVersion(1, 0, 0) -> String("1_0_0").
-    pub fn to_underscore_version(&self) -> String {
-        self.0.to_string().replace('.', "_")
-    }
-
-    /// Convert a Semver version string to a string with underscores.
-    ///
-    /// Example: String("1.0.0") -> String("1_0_0").
-    pub fn version_identifier(version: &str) -> Result<String, BoxError> {
-        let version = version.parse::<Self>()?;
-        Ok(version.to_underscore_version())
-    }
-
-    pub fn from_version_identifier(v_identifier: &str) -> Result<Self, BoxError> {
-        v_identifier.replace("_", ".").parse().map_err(Into::into)
-    }
-}
-
-impl std::fmt::Display for Version {
-    #[inline]
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-impl std::str::FromStr for Version {
-    type Err = semver::Error;
-
-    #[inline]
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        s.parse().map(Self)
-    }
-}
-
-#[cfg(feature = "schemars")]
-impl schemars::JsonSchema for Version {
-    fn schema_name() -> std::borrow::Cow<'static, str> {
-        "Version".into()
-    }
-
-    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
-        String::json_schema(generator)
-    }
-}
-
-/// Semver version requirement wrapper with JSON schema support.
-///
-/// Used for specifying dependency version constraints in derived datasets.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct VersionReq(pub semver::VersionReq);
-
-#[cfg(feature = "schemars")]
-impl schemars::JsonSchema for VersionReq {
-    fn schema_name() -> std::borrow::Cow<'static, str> {
-        "VersionReq".into()
-    }
-
-    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
-        String::json_schema(generator)
-    }
-}
-
 /// External dataset dependency specification.
 ///
 /// Defines a dependency on another dataset with version constraints.
@@ -233,9 +163,9 @@ pub struct Table {
 pub struct Function {
     // TODO: Support SQL type names, see https://datafusion.apache.org/user-guide/sql/data_types.html
     /// Arrow data types for function input parameters
-    pub input_types: Vec<DataTypeJsonSchema>,
+    pub input_types: Vec<DataType>,
     /// Arrow data type for function return value
-    pub output_type: DataTypeJsonSchema,
+    pub output_type: DataType,
     /// Function implementation source code and metadata
     pub source: FunctionSource,
 }
@@ -294,7 +224,7 @@ pub struct Field {
     pub name: String,
     /// Arrow data type of the field
     #[serde(rename = "type")]
-    pub type_: DataTypeJsonSchema,
+    pub type_: DataType,
     /// Whether the field can contain null values
     pub nullable: bool,
 }
@@ -308,7 +238,7 @@ impl From<DFSchemaRef> for TableSchema {
                     .iter()
                     .map(|f| Field {
                         name: f.name().clone(),
-                        type_: DataTypeJsonSchema(f.data_type().clone()),
+                        type_: f.data_type().clone().into(),
                         nullable: f.is_nullable(),
                     })
                     .collect(),
@@ -339,7 +269,7 @@ pub fn dataset(manifest: Manifest) -> Result<Dataset, BoxError> {
     Ok(Dataset {
         kind: DATASET_KIND.to_string(),
         network: manifest.network,
-        name: manifest.name,
+        name: manifest.name.to_string(),
         version: Some(manifest.version),
         start_block: None,
         tables,

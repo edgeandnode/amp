@@ -39,12 +39,12 @@ pub async fn register_manifest(
     manifest: &Manifest,
 ) -> Result<(), Error> {
     let dataset_name = manifest.name.clone();
-    let version = manifest.version.0.to_string();
+    let version = manifest.version.to_string();
 
     // Check if the dataset with the given name and version already exists in the registry.
     if metadata_db.dataset_exists(&dataset_name, &version).await? {
         return Err(Error::DatasetAlreadyExists {
-            name: dataset_name,
+            name: dataset_name.to_string(),
             version,
         });
     }
