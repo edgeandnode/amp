@@ -1,5 +1,5 @@
 use admin_api::handlers::datasets::deploy::DeployRequest;
-use common::manifest::Manifest;
+use common::manifest::derived::Manifest;
 use registry_service::handlers::register::RegisterRequest;
 use reqwest::StatusCode;
 

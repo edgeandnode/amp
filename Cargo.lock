@@ -3006,7 +3006,6 @@ dependencies = [
  "object_store",
  "parking_lot",
  "rand 0.9.2",
- "schemars 1.0.4",
  "serde",
  "serde_json",
  "substreams-datasets",
