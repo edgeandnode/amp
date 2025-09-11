@@ -51,8 +51,8 @@ impl DatasetKind {
             Self::EvmRpc => evm_rpc_datasets::DATASET_KIND,
             Self::Firehose => firehose_datasets::DATASET_KIND,
             Self::Substreams => substreams_datasets::DATASET_KIND,
-            Self::Sql => crate::sql_datasets::DATASET_KIND,
-            Self::Manifest => common::manifest::DATASET_KIND,
+            Self::Sql => common::manifest::sql_datasets::DATASET_KIND,
+            Self::Manifest => common::manifest::derived::DATASET_KIND,
         }
     }
 }
@@ -63,8 +63,8 @@ impl std::fmt::Display for DatasetKind {
             Self::EvmRpc => f.write_str(evm_rpc_datasets::DATASET_KIND),
             Self::Firehose => f.write_str(firehose_datasets::DATASET_KIND),
             Self::Substreams => f.write_str(substreams_datasets::DATASET_KIND),
-            Self::Sql => f.write_str(crate::sql_datasets::DATASET_KIND),
-            Self::Manifest => f.write_str(common::manifest::DATASET_KIND),
+            Self::Sql => f.write_str(common::manifest::sql_datasets::DATASET_KIND),
+            Self::Manifest => f.write_str(common::manifest::derived::DATASET_KIND),
         }
     }
 }
@@ -77,8 +77,8 @@ impl std::str::FromStr for DatasetKind {
             evm_rpc_datasets::DATASET_KIND => Ok(Self::EvmRpc),
             firehose_datasets::DATASET_KIND => Ok(Self::Firehose),
             substreams_datasets::DATASET_KIND => Ok(Self::Substreams),
-            crate::sql_datasets::DATASET_KIND => Ok(Self::Sql),
-            common::manifest::DATASET_KIND => Ok(Self::Manifest),
+            common::manifest::sql_datasets::DATASET_KIND => Ok(Self::Sql),
+            common::manifest::derived::DATASET_KIND => Ok(Self::Manifest),
             k => Err(UnsupportedKindError {
                 kind: k.to_string(),
             }),

@@ -1,8 +1,9 @@
-use std::{io, str::FromStr};
+use std::io;
 
-use common::BoxError;
-use dataset_store::SerializableSchema;
-use substreams_datasets;
+use common::{
+    BoxError,
+    manifest::common::{Manifest, SerializableSchema},
+};
 
 pub async fn run<T: io::Write>(
     network: String,
@@ -13,7 +14,7 @@ pub async fn run<T: io::Write>(
     w: &mut T,
 ) -> Result<(), BoxError> {
     // Validate dataset kind.
-    let dataset_kind = dataset_store::DatasetKind::from_str(&kind)?;
+    let dataset_kind = kind.parse()?;
 
     let schema: SerializableSchema = match dataset_kind {
         dataset_store::DatasetKind::EvmRpc => evm_rpc_datasets::tables::all(&network).into(),
@@ -45,7 +46,7 @@ pub async fn run<T: io::Write>(
             return Err("`DatasetKind::Manifest` doesn't support dataset generation".into());
         }
     };
-    let dataset = serde_json::to_vec(&dataset_store::DatasetDefsCommon {
+    let dataset = serde_json::to_vec(&Manifest {
         network,
         kind,
         name,
