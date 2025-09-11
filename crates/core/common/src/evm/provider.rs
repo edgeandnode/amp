@@ -9,7 +9,7 @@ use std::{
 
 use alloy::{
     network::AnyNetwork,
-    providers::{ProviderBuilder, RootProvider},
+    providers::{ProviderBuilder, RootProvider, WsConnect},
     rpc::client::ClientBuilder,
 };
 use governor::{DefaultDirectRateLimiter, Quota, RateLimiter};
@@ -58,6 +58,37 @@ pub async fn new_ipc<P: AsRef<Path>>(
         .disable_recommended_fillers()
         .network::<AnyNetwork>()
         .connect_client(client))
+}
+
+pub async fn new_ws(
+    url: Url,
+    rate_limit: Option<NonZeroU32>,
+) -> Result<RootProvider<AnyNetwork>, BoxError> {
+    let ws_connect = WsConnect::new(url);
+
+    let provider = match rate_limit {
+        Some(rate_limit) => {
+            let client_builder = ClientBuilder::default();
+            let client = client_builder
+                .layer(RateLimitLayer::new(rate_limit))
+                .ws(ws_connect)
+                .await?;
+
+            ProviderBuilder::new()
+                .disable_recommended_fillers()
+                .network::<AnyNetwork>()
+                .connect_client(client)
+        }
+        None => {
+            ProviderBuilder::new()
+                .disable_recommended_fillers()
+                .network::<AnyNetwork>()
+                .connect_ws(ws_connect)
+                .await?
+        }
+    };
+
+    Ok(provider)
 }
 
 struct RateLimitLayer {
