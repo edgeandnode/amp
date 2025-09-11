@@ -58,3 +58,56 @@ export const SubmitButton = forwardRef<HTMLButtonElement, SubmitButtonProps>(({ 
     </form.Subscribe>
   )
 })
+
+/**
+ * Use if the SubmitButton will be part of a button group for a dropdown.
+ * Otherwise, use the SubmitButton
+ */
+export const SubmitButtonGroup = forwardRef<HTMLButtonElement, SubmitButtonProps>(
+  ({ children, status, ...rest }, ref) => {
+    const form = useFormContext()
+
+    return (
+      <form.Subscribe
+        selector={(state) => ({
+          canSubmit: state.canSubmit,
+          isSubmitting: state.isSubmitting,
+          valid: state.isValid && state.errors.length === 0,
+          dirty: state.isDirty,
+        })}
+      >
+        {({ canSubmit, valid }) => (
+          <Button
+            ref={ref}
+            {...rest}
+            type="submit"
+            disabled={!canSubmit || !valid}
+            data-state={status}
+            className={classNames(
+              "relative inline-flex items-center rounded-l-4 bg-space-1400 px-3 py-1.5 text-12 text-white text-gray-900 inset-ring-1 inset-ring-space-1200 hover:bg-space-1200 focus:z-10",
+              "disabled:bg-space-1500 disabled:text-white/80 disabled:hover:bg-space-1500 disabled:focus-visible:outline-space-1200 disabled:cursor-not-allowed",
+              "data-[state=error]:bg-red-600 data-[state=error]:hover:bg-red-500 data-[state=error]:focus-visible:bg-red-500 data-[state=success]:focus-visible:bg-green-500",
+              "data-[state=success]:bg-green-600 data-[state=success]:hover:bg-green-500",
+            )}
+          >
+            {status === "success" ?
+              (
+                <>
+                  <CheckIcon className="text-white" aria-hidden="true" size={5} alt="" />
+                  {children}
+                </>
+              ) :
+              status === "error" ?
+              (
+                <>
+                  <ExclamationMarkIcon className="text-white" aria-hidden="true" size={5} alt="" />
+                  Error
+                </>
+              ) :
+              children}
+          </Button>
+        )}
+      </form.Subscribe>
+    )
+  },
+)
