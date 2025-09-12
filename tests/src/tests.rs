@@ -17,6 +17,7 @@ use common::{
     query_context::parse_sql,
 };
 use dataset_store::DatasetStore;
+use futures::StreamExt;
 use generate_manifest;
 use monitoring::logging;
 use schemars::schema_for;

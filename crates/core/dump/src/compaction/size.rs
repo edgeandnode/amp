@@ -8,7 +8,7 @@ use std::{
 
 use chrono::{DateTime, Utc};
 use common::{
-    BLOCK_NUM, SPECIAL_BLOCK_NUM, Timestamp,
+    BLOCK_NUM, SPECIAL_BLOCK_NUM,
     metadata::parquet::{GENERATION_METADATA_KEY, PARQUET_METADATA_KEY, ParquetMeta},
 };
 use datafusion::parquet::{
@@ -270,15 +270,13 @@ pub struct SegmentSize {
 
 impl Default for SegmentSize {
     fn default() -> Self {
-        let created_at = Timestamp::now().0.as_micros();
-
         Self {
             length: 0,
             blocks: 0,
             bytes: 0,
             rows: 0,
             generation: Generation::default(),
-            created_at,
+            created_at: 0,
         }
     }
 }
