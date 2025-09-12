@@ -1,9 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Manifest",
+  "description": "Complete manifest definition for a derived dataset.\n\nA manifest defines a derived dataset with explicit dependencies, tables, and functions.\nDerived datasets transform and combine data from existing datasets using SQL queries.\nThis is the replacement for the legacy SQL dataset format, providing better\nversioning, dependency management, and schema validation.",
   "type": "object",
   "properties": {
     "dependencies": {
+      "description": "External dataset dependencies with version requirements",
       "type": "object",
       "additionalProperties": {
         "$ref": "#/$defs/Dependency"
@@ -11,6 +13,7 @@
       "default": {}
     },
     "functions": {
+      "description": "User-defined function definitions mapped by function name",
       "type": "object",
       "additionalProperties": {
         "$ref": "#/$defs/Function"
@@ -18,17 +21,19 @@
       "default": {}
     },
     "kind": {
+      "description": "Manifest kind, always [`ManifestKind::Manifest`]",
       "$ref": "#/$defs/ManifestKind"
     },
     "name": {
-      "description": "Dataset name.",
-      "type": "string"
+      "description": "Dataset name. Must be unique within the network",
+      "$ref": "#/$defs/Name"
     },
     "network": {
-      "description": "Network name, e.g., `mainnet`.",
+      "description": "Network name, e.g., `mainnet`, `sepolia`",
       "type": "string"
     },
     "tables": {
+      "description": "Table definitions mapped by table name",
       "type": "object",
       "additionalProperties": {
         "$ref": "#/$defs/Table"
@@ -36,7 +41,7 @@
       "default": {}
     },
     "version": {
-      "description": "Semver version of the dataset, e.g. `1.0.0`.",
+      "description": "Semver version of the dataset, e.g. `1.0.0`",
       "$ref": "#/$defs/Version"
     }
   },
@@ -48,10 +53,11 @@
   ],
   "$defs": {
     "ArrowSchema": {
+      "description": "Arrow schema representation for serialization.",
       "type": "object",
       "properties": {
         "fields": {
-          "description": "List of Fields in the schema.",
+          "description": "Ordered list of fields in the schema",
           "type": "array",
           "items": {
             "$ref": "#/$defs/Field"
@@ -67,16 +73,19 @@
       "type": "string"
     },
     "Dependency": {
+      "description": "External dataset dependency specification.\n\nDefines a dependency on another dataset with version constraints.",
       "type": "object",
       "properties": {
         "name": {
+          "description": "Name of the dependency dataset",
           "type": "string"
         },
         "owner": {
+          "description": "Owner/organization of the dependency dataset",
           "type": "string"
         },
         "version": {
-          "description": "Semver version requirement for the dependency, e.g. `^1.0.0` or `>=1.0.0 <2.0.0`.",
+          "description": "Semver version requirement for the dependency, e.g. `^1.0.0` or `>=1.0.0 <2.0.0`",
           "$ref": "#/$defs/VersionReq"
         }
       },
@@ -87,18 +96,19 @@
       ]
     },
     "Field": {
+      "description": "Arrow field definition with name, type, and nullability.",
       "type": "object",
       "properties": {
         "name": {
-          "description": "Field name.",
+          "description": "Field name",
           "type": "string"
         },
         "nullable": {
-          "description": "Boolean indicating whether the field is nullable.",
+          "description": "Whether the field can contain null values",
           "type": "boolean"
         },
         "type": {
-          "description": "Data type.",
+          "description": "Arrow data type of the field",
           "$ref": "#/$defs/DataType"
         }
       },
@@ -109,18 +119,22 @@
       ]
     },
     "Function": {
+      "description": "User-defined function specification.\n\nDefines a custom function with input/output types and implementation source.",
       "type": "object",
       "properties": {
         "inputTypes": {
+          "description": "Arrow data types for function input parameters",
           "type": "array",
           "items": {
             "$ref": "#/$defs/DataType"
           }
         },
         "outputType": {
+          "description": "Arrow data type for function return value",
           "$ref": "#/$defs/DataType"
         },
         "source": {
+          "description": "Function implementation source code and metadata",
           "$ref": "#/$defs/FunctionSource"
         }
       },
@@ -131,12 +145,15 @@
       ]
     },
     "FunctionSource": {
+      "description": "Source code and metadata for a user-defined function.",
       "type": "object",
       "properties": {
         "filename": {
+          "description": "Filename where the function is defined",
           "type": "string"
         },
         "source": {
+          "description": "Function implementation source code",
           "type": "string"
         }
       },
@@ -146,23 +163,35 @@
       ]
     },
     "ManifestKind": {
-      "type": "string",
-      "enum": [
-        "manifest"
+      "description": "Kind discriminator for derived datasets.",
+      "oneOf": [
+        {
+          "description": "Standard manifest dataset type",
+          "type": "string",
+          "const": "manifest"
+        }
       ]
     },
+    "Name": {
+      "description": "A validated dataset name that enforces naming conventions and constraints.\n\nDataset names must follow strict rules to ensure compatibility across systems,\nfile systems, and network protocols. This type provides compile-time guarantees\nthat all instances contain valid dataset names.\n\n## Format Requirements\n\nA valid dataset name must:\n- **Start** with a lowercase letter (`a-z`) or underscore (`_`)\n- **Contain** only lowercase letters (`a-z`), digits (`0-9`), and underscores (`_`)\n- **Not be empty** (minimum length of 1 character)\n- **Have no spaces** or special characters (except underscore)",
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[a-z_][a-z0-9_]*$"
+    },
     "Table": {
+      "description": "Table definition within a derived dataset.\n\nDefines a table with its input source, schema, and network.",
       "type": "object",
       "properties": {
         "input": {
-          "description": "Table input, which can be a View.",
+          "description": "Table input source (currently only Views are supported)",
           "$ref": "#/$defs/TableInput"
         },
         "network": {
+          "description": "Network this table belongs to",
           "type": "string"
         },
         "schema": {
-          "description": "Table schema, which is an Arrow Schema.",
+          "description": "Arrow schema definition for the table",
           "$ref": "#/$defs/TableSchema"
         }
       },
@@ -173,17 +202,20 @@
       ]
     },
     "TableInput": {
+      "description": "Input source for a table definition.\n\nCurrently only SQL views are supported as table inputs.",
       "anyOf": [
         {
+          "description": "SQL view as table input",
           "$ref": "#/$defs/View"
         }
       ]
     },
     "TableSchema": {
+      "description": "Schema definition for a table.",
       "type": "object",
       "properties": {
         "arrow": {
-          "description": "Arrow schema of the table.",
+          "description": "Arrow schema definition",
           "$ref": "#/$defs/ArrowSchema"
         }
       },
@@ -192,16 +224,19 @@
       ]
     },
     "Version": {
+      "description": "Semver version wrapper with JSON schema support and version manipulation utilities.\n\nProvides serialization and version manipulation utilities for dataset versioning.",
       "type": "string"
     },
     "VersionReq": {
+      "description": "Semver version requirement wrapper with JSON schema support.\n\nUsed for specifying dependency version constraints in derived datasets.",
       "type": "string"
     },
     "View": {
+      "description": "SQL view definition for table input.",
       "type": "object",
       "properties": {
         "sql": {
-          "description": "SQL query defining the view.",
+          "description": "SQL query defining the view",
           "type": "string"
         }
       },

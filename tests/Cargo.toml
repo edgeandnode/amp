@@ -12,7 +12,7 @@ name = "tests"
 [dependencies]
 alloy.workspace = true
 clap.workspace = true
-common = { path = "../crates/core/common" }
+common = { path = "../crates/core/common", features = ["schemars"] }
 dotenvy.workspace = true
 dataset-store = { path = "../crates/core/dataset-store" }
 dump = { path = "../crates/core/dump" }

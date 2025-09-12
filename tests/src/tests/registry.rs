@@ -1,4 +1,4 @@
-use common::manifest::{Manifest, Version};
+use common::manifest::{common::Version, derived::Manifest};
 use registry_service::handlers::register::{RegisterRequest, RegisterResponse};
 use reqwest::StatusCode;
 

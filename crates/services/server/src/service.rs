@@ -301,9 +301,8 @@ fn should_transform_plan(plan: &DetachedLogicalPlan) -> Result<bool, DataFusionE
     let mut result = true;
     plan.apply(|node| {
         match node {
-            LogicalPlan::EmptyRelation(_) | LogicalPlan::Aggregate(_) => {
-                // If any node is an empty relation or aggregate function, trying to propagate the `SPECIAL_BLOCK_NUM` will
-                // probably cause problems.
+            // Trying to propagate the `SPECIAL_BLOCK_NUM` will probably cause problems for these.
+            LogicalPlan::EmptyRelation(_) | LogicalPlan::Aggregate(_) | LogicalPlan::Join(_) => {
                 result = false;
                 Ok(TreeNodeRecursion::Stop)
             }

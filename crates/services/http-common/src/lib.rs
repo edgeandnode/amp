@@ -8,6 +8,7 @@ use axum::{
 use common::BoxResult;
 use serde_json::json;
 use tokio::net::TcpListener;
+use tower_http::cors::CorsLayer;
 
 pub type BoxRequestError = Box<dyn RequestError>;
 
@@ -41,6 +42,8 @@ pub async fn serve_at(
         .await?
         .tap_io(|tcp_stream| tcp_stream.set_nodelay(true).unwrap());
     let addr = listener.local_addr()?;
+
+    let router = router.layer(CorsLayer::permissive());
     let server = async move { axum::serve(listener, router).await.map_err(Into::into) };
     Ok((addr, server))
 }

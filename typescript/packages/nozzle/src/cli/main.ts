@@ -22,6 +22,7 @@ import { deploy } from "./commands/deploy.ts"
 import { dev } from "./commands/dev.ts"
 import { dump } from "./commands/dump.ts"
 import { jobs } from "./commands/jobs.ts"
+import { locations } from "./commands/locations.ts"
 import { proxy } from "./commands/proxy.ts"
 import { query } from "./commands/query.ts"
 import { register } from "./commands/register.ts"
@@ -37,7 +38,7 @@ const nozzle = Command.make("nozzle", {
   },
 }).pipe(
   Command.withDescription("The Nozzle Command Line Interface"),
-  Command.withSubcommands([build, register, dev, codegen, dump, jobs, query, proxy, deploy]),
+  Command.withSubcommands([build, register, dev, codegen, dump, jobs, locations, query, proxy, deploy]),
   Command.provide(({ args }) => Logger.minimumLogLevel(args.logs)),
 )
 
