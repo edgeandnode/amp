@@ -36,6 +36,7 @@ const locationId = HttpApiSchema.param("locationId", Model.LocationIdParam)
  * The dump dataset endpoint (POST /datasets/{name}/dump).
  */
 const dumpDataset = HttpApiEndpoint.post("dumpDataset")`/datasets/${datasetName}/dump`
+  .addError(Error.DatasetNotFound)
   .addError(Error.InvalidRequest)
   .addError(Error.DatasetStoreError)
   .addError(Error.InvalidSelector)
@@ -55,6 +56,7 @@ const dumpDataset = HttpApiEndpoint.post("dumpDataset")`/datasets/${datasetName}
 const dumpDatasetVersion = HttpApiEndpoint.post(
   "dumpDatasetVersion",
 )`/datasets/${datasetName}/versions/${datasetVersion}/dump`
+  .addError(Error.DatasetNotFound)
   .addError(Error.InvalidRequest)
   .addError(Error.DatasetStoreError)
   .addError(Error.InvalidSelector)
@@ -79,6 +81,7 @@ const dumpDatasetVersion = HttpApiEndpoint.post(
  * - MetadataDbError: Database error while polling job status.
  */
 export type DumpDatasetError =
+  | Error.DatasetNotFound
   | Error.InvalidRequest
   | Error.DatasetStoreError
   | Error.InvalidSelector
@@ -433,7 +436,9 @@ export class Admin extends Context.Tag("Nozzle/Admin")<Admin, {
    */
   readonly dumpDataset: (
     name: string,
-    options?: { endBlock?: number | undefined } | undefined,
+    options?: {
+      endBlock?: number | undefined
+    } | undefined,
   ) => Effect.Effect<string, HttpClientError.HttpClientError | DumpDatasetError>
 
   /**
@@ -447,7 +452,9 @@ export class Admin extends Context.Tag("Nozzle/Admin")<Admin, {
   readonly dumpDatasetVersion: (
     name: string,
     version: string,
-    options?: { endBlock?: number | undefined } | undefined,
+    options?: {
+      endBlock?: number | undefined
+    } | undefined,
   ) => Effect.Effect<string, HttpClientError.HttpClientError | DumpDatasetError>
 
   /**

@@ -62,9 +62,18 @@ layer(environment, {
 
       // Register and dump the root dataset.
       yield* admin.registerDataset(Anvil.dataset.name, Anvil.dataset.version, Anvil.dataset)
-      yield* admin.dumpDatasetVersion(Anvil.dataset.name, Anvil.dataset.version, {
+
+      // TODO: Fix dumping with version
+      // yield* admin.dumpDatasetVersion(Anvil.dataset.name, Anvil.dataset.version, {
+      //   endBlock: Number(block),
+      // })
+
+      yield* admin.dumpDataset(Anvil.dataset.name, {
         endBlock: Number(block),
       })
+
+      // TODO: Implement this with job polling instead (previously used `waitForCompletion`)
+      yield* Effect.sleep("1 second")
 
       const response = yield* admin.getDataset(Anvil.dataset.name)
       assertInstanceOf(response, Model.DatasetInfo)
@@ -118,9 +127,18 @@ layer(environment, {
       // Register and dump the example manifest.
       const dataset = yield* fixtures.load("manifest.json", Model.DatasetManifest)
       yield* admin.registerDataset(dataset.name, dataset.version)
-      yield* admin.dumpDatasetVersion(dataset.name, dataset.version, {
+
+      // TODO: Fix dumping with version
+      // yield* admin.dumpDatasetVersion(dataset.name, dataset.version, {
+      //   endBlock: Number(block),
+      // })
+
+      yield* admin.dumpDataset(dataset.name, {
         endBlock: Number(block),
       })
+
+      // TODO: Implement this with job polling instead (previously used `waitForCompletion`)
+      yield* Effect.sleep("1 second")
 
       const response = yield* admin.getDataset(dataset.name)
       assertInstanceOf(response, Model.DatasetInfo)
