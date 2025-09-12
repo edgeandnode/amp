@@ -273,26 +273,37 @@ async fn register_manifest(
     metadata_db: &MetadataDb,
     manifest: &Manifest,
 ) -> Result<(), RegisterError> {
-    let name = &manifest.name;
-    let version = &manifest.version;
-
     // Check if the dataset with the given name and version already exists in the registry.
     if metadata_db
-        .dataset_exists(name, &version.to_string())
+        .dataset_exists(&manifest.name, &manifest.version)
         .await
         .map_err(RegisterError::ExistenceCheck)?
     {
         return Err(RegisterError::DatasetExists {
-            name: name.clone(),
-            version: version.clone(),
+            name: manifest.name.clone(),
+            version: manifest.version.clone(),
         });
     }
 
-    let registry_info = manifest.extract_registry_info();
+    // Extract dataset owner from dependencies
+    let dataset_owner = manifest
+        .dependencies
+        .first_key_value()
+        .unwrap()
+        .1
+        .owner
+        .clone();
+
+    // Prepare manifest data for storage
+    let dataset_name_str = manifest.name.to_string();
+    let manifest_filename = manifest.to_filename();
+    let manifest_path_str = object_store::path::Path::from(manifest_filename).to_string();
     let manifest_json = serde_json::to_string(&manifest)
         .map_err(|err| RegisterError::ManifestSerialization(err.to_string()))?;
+
+    // Store manifest in dataset definitions store
     let dataset_defs_store = dataset_store.dataset_defs_store();
-    let manifest_path = object_store::path::Path::from(registry_info.manifest.clone());
+    let manifest_path = object_store::path::Path::from(manifest_path_str.clone());
 
     dataset_defs_store
         .prefixed_store()
@@ -300,8 +311,14 @@ async fn register_manifest(
         .await
         .map_err(RegisterError::ManifestStorage)?;
 
+    // Register dataset metadata in database
     metadata_db
-        .register_dataset(registry_info)
+        .register_dataset(
+            &dataset_owner,
+            &dataset_name_str,
+            &manifest.version,
+            &manifest_path_str,
+        )
         .await
         .map_err(RegisterError::MetadataRegistration)?;
 

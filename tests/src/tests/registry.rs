@@ -106,11 +106,27 @@ impl AdminApiTestContext {
 
     /// Verify dataset exists in database
     async fn verify_dataset_registered(&self, dataset_name: &str, version: &str) -> bool {
+        let version = version.parse::<Version>().expect("valid semver version");
         self.env
             .metadata_db
             .dataset_exists(dataset_name, version)
             .await
             .unwrap()
+    }
+
+    /// Get registry info for a dataset
+    async fn get_registry_info(
+        &self,
+        name: &str,
+        version: &str,
+    ) -> metadata_db::DatasetWithDetails {
+        let version = version.parse::<Version>().expect("valid semver version");
+        self.env
+            .metadata_db
+            .get_dataset_with_details(name, version)
+            .await
+            .expect("Registry info lookup failed")
+            .expect("Registry info should exist")
     }
 }
 
@@ -129,17 +145,14 @@ async fn test_register_success() {
             .await
     );
     let registry_info = ctx
-        .env
-        .metadata_db
         .get_registry_info("register_test_dataset", "1.0.0")
-        .await
-        .expect("Registry info should exist");
+        .await;
 
-    assert_eq!(registry_info.dataset, "register_test_dataset");
-    assert_eq!(registry_info.version, "1.0.0");
+    assert_eq!(registry_info.name, "register_test_dataset");
+    assert_eq!(registry_info.version.to_string(), "1.0.0");
     assert_eq!(registry_info.owner, "test_owner");
     assert_eq!(
-        registry_info.manifest.to_string(),
+        registry_info.manifest_path.to_string(),
         "register_test_dataset__1_0_0.json"
     );
 }
@@ -249,13 +262,10 @@ async fn test_register_multiple_versions() {
                 .await
         );
         let registry_info = ctx
-            .env
-            .metadata_db
             .get_registry_info("register_test_multi_version_dataset", version)
-            .await
-            .expect("Registry info should exist");
+            .await;
         assert_eq!(
-            registry_info.manifest.to_string(),
+            registry_info.manifest_path.to_string(),
             format!(
                 "register_test_multi_version_dataset__{}.json",
                 Version::version_identifier(version).unwrap()

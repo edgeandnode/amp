@@ -52,6 +52,30 @@ impl std::ops::Deref for Version {
     }
 }
 
+impl AsRef<semver::Version> for Version {
+    fn as_ref(&self) -> &semver::Version {
+        &self.0
+    }
+}
+
+impl From<metadata_db::DatasetVersionOwned> for Version {
+    fn from(value: metadata_db::DatasetVersionOwned) -> Self {
+        Self(value.into_inner())
+    }
+}
+
+impl From<Version> for metadata_db::DatasetVersionOwned {
+    fn from(value: Version) -> Self {
+        metadata_db::DatasetVersion::from_owned(value.0)
+    }
+}
+
+impl<'a> From<&'a Version> for metadata_db::DatasetVersion<'a> {
+    fn from(value: &'a Version) -> Self {
+        metadata_db::DatasetVersion::from_ref(&value.0)
+    }
+}
+
 impl PartialEq<semver::Version> for Version {
     fn eq(&self, other: &semver::Version) -> bool {
         self.0 == *other

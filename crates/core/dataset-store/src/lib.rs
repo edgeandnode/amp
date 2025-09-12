@@ -169,7 +169,7 @@ impl DatasetError {
     pub fn is_not_found(&self) -> bool {
         matches!(
             &self.error,
-            Error::FetchError(e) if e.is_not_found()
+            Error::FetchError(err) if err.is_not_found()
         ) || matches!(&self.error, Error::DatasetVersionNotFound(_, _))
     }
 }
@@ -271,9 +271,10 @@ impl DatasetStore {
         let dataset_identifier = match version {
             Some(version) => self
                 .metadata_db
-                .get_dataset(name, &version.to_string())
+                .get_dataset_manifest_path(name, version)
                 .await
                 .map_err(|err| DatasetError::from((name, Error::MetadataDbError(err))))?
+                .map(|manifest_path| manifest_path.trim_end_matches(".json").to_string())
                 .ok_or_else(|| {
                     DatasetError::from((
                         name,
@@ -281,18 +282,16 @@ impl DatasetStore {
                     ))
                 })?,
             None => {
-                let latest_version = self
+                match self
                     .metadata_db
-                    .get_latest_dataset_version(name)
+                    .get_dataset_latest_version_with_details(name)
                     .await
-                    .map_err(|err| DatasetError::from((name, Error::MetadataDbError(err))))?;
-                match latest_version {
-                    Some((dataset, version)) => {
-                        let version_identifier =
-                            Version::version_identifier(&version).map_err(|err| {
-                                DatasetError::from((dataset.as_str(), Error::Unknown(err.into())))
-                            })?;
-                        format!("{}__{}", dataset, version_identifier)
+                    .map_err(|err| DatasetError::from((name, Error::MetadataDbError(err))))?
+                    .map(|details| details.version)
+                {
+                    Some(version) => {
+                        let version_identifier = Version::from(version).to_underscore_version();
+                        format!("{}__{}", name, version_identifier)
                     }
                     None => name.to_string(),
                 }
