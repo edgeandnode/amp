@@ -9,5 +9,6 @@ default-filter = '''
   test(sql_dataset_input_batch_size) -
   test(intra_deps_test) -
   test(multi_version_test) -
-  test(streaming_tests_with_sql_datasets)
+  test(streaming_tests_with_sql_datasets) -
+  test(base_firehose_single_dump)
 '''

@@ -3,6 +3,7 @@ name = "dataset-store"
 edition.workspace = true
 version.workspace = true
 
+
 [dependencies]
 async-stream.workspace = true
 metadata-db = { path = "../metadata-db" }
@@ -11,7 +12,6 @@ js-runtime = { path = "../js-runtime" }
 evm-rpc-datasets = { path = "../../extractors/evm-rpc" }
 firehose-datasets = { path = "../../extractors/firehose" }
 substreams-datasets = { path = "../../extractors/substreams" }
-schemars.workspace = true
 toml = { workspace = true, features = ["preserve_order"] }
 thiserror.workspace = true
 object_store.workspace = true

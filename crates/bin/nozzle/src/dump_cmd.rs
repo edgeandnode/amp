@@ -6,16 +6,11 @@ use std::{
 };
 
 use common::{
-    BoxError, Store,
-    catalog::physical::PhysicalTable,
-    config::Config,
-    manifest::{self, Version},
-    notification_multiplexer,
-    store::ObjectStoreUrl,
-    utils::dfs,
+    BoxError, Store, catalog::physical::PhysicalTable, config::Config, manifest::common::Version,
+    notification_multiplexer, store::ObjectStoreUrl, utils::dfs,
 };
 use datafusion::sql::resolve::resolve_table_references;
-use dataset_store::{DatasetStore, sql_datasets};
+use dataset_store::DatasetStore;
 use metadata_db::MetadataDb;
 use monitoring::telemetry;
 use static_assertions::const_assert;
@@ -170,8 +165,10 @@ pub async fn datasets_and_dependencies(
     while !datasets.is_empty() {
         let dataset = store.load_dataset(&datasets.pop().unwrap(), None).await?;
         let sql_dataset = match dataset.kind.as_str() {
-            sql_datasets::DATASET_KIND => store.load_sql_dataset(&dataset.name).await?,
-            manifest::DATASET_KIND => {
+            common::manifest::sql_datasets::DATASET_KIND => {
+                store.load_sql_dataset(&dataset.name).await?
+            }
+            common::manifest::derived::DATASET_KIND => {
                 store
                     .load_manifest_dataset(&dataset.name, dataset.version.as_ref().unwrap())
                     .await?

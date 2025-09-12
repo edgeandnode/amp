@@ -8,7 +8,9 @@ use datafusion::{
 use js_runtime::isolate_pool::IsolatePool;
 use serde::Deserialize;
 
-use crate::{BLOCK_NUM, BlockNum, BoxError, SPECIAL_BLOCK_NUM, js_udf::JsUdf, manifest::Version};
+use crate::{
+    BLOCK_NUM, BlockNum, BoxError, SPECIAL_BLOCK_NUM, js_udf::JsUdf, manifest::common::Version,
+};
 
 /// Identifies a dataset and its data schema.
 #[derive(Clone, Debug)]
@@ -54,7 +56,7 @@ impl Dataset {
     }
 
     pub fn dataset_version(&self) -> Option<String> {
-        self.version.as_ref().map(|v| v.0.to_string())
+        self.version.as_ref().map(|v| v.to_string())
     }
 
     pub fn to_identifier(&self) -> String {

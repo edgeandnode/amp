@@ -1,8 +1,7 @@
-use std::{str::FromStr, sync::Arc};
+use std::sync::Arc;
 
-use common::{BoxError, catalog::physical::PhysicalTable, manifest::Version};
+use common::{BoxError, catalog::physical::PhysicalTable};
 use metadata_db::JobId;
-use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
 pub use crate::core::Ctx;
@@ -42,7 +41,7 @@ impl Job {
             JobDesc::Dump { end_block } => {
                 let mut tables = vec![];
                 for location in output_locations {
-                    let dataset_version = Version::from_str(&location.dataset_version).ok();
+                    let dataset_version = location.dataset_version.parse().ok();
                     let dataset = Arc::new(
                         ctx.dataset_store
                             .load_dataset(&location.dataset, dataset_version.as_ref())
@@ -119,7 +118,7 @@ impl std::fmt::Debug for Job {
 
 /// The logical descriptor of an job, as stored in the `descriptor` column of the `jobs`
 /// metadata DB table.
-#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum JobDesc {
     Dump { end_block: Option<i64> },
 }

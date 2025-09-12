@@ -39,7 +39,6 @@ use futures::Stream;
 use metadata::segments::BlockRange;
 use metadata_db::FileId;
 pub use query_context::QueryContext;
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 pub use store::Store;
 
@@ -194,24 +193,5 @@ pub fn block_range_intersection(
         Some(start..=end)
     } else {
         None
-    }
-}
-
-/// Wrapper to implement [`JsonSchema`] for [`datafusion::arrow::datatypes::DataType`].
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct DataTypeJsonSchema(pub datafusion::arrow::datatypes::DataType);
-
-impl JsonSchema for DataTypeJsonSchema {
-    fn schema_name() -> std::borrow::Cow<'static, str> {
-        "DataType".into()
-    }
-
-    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
-        let mut schema = String::json_schema(generator);
-        schema.as_object_mut().unwrap().insert(
-            "description".to_string(),
-            serde_json::json!("Arrow data type, e.g. `Int32`, `Utf8`, etc."),
-        );
-        schema
     }
 }

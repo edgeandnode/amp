@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use axum::{Json, extract::State, http::StatusCode};
 use common::{
-    manifest::TableSchema,
+    manifest::derived::TableSchema,
     query_context::{Error as QueryContextError, parse_sql, prepend_special_block_num_field},
 };
 use http_common::{BoxRequestError, RequestError};

@@ -1,18 +1,17 @@
-pub mod job;
-pub mod metrics;
-
-use std::{str::FromStr, sync::Arc};
+use std::sync::Arc;
 
 use common::{
     BoxError, LogicalCatalog, QueryContext,
     catalog::physical::{Catalog, PhysicalTable},
-    manifest::Version,
     query_context::QueryEnv,
 };
 use dataset_store::DatasetStore;
 use futures::future::try_join_all;
 use job::Job;
 use metadata_db::{MetadataDb, TableId};
+
+pub mod job;
+pub mod metrics;
 
 pub async fn dump_check(
     dataset_name: &str,
@@ -26,10 +25,7 @@ pub async fn dump_check(
     end_block: u64,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
 ) -> Result<(), BoxError> {
-    let dataset_version = match dataset_version {
-        Some(version) => Some(Version::from_str(version)?),
-        None => None,
-    };
+    let dataset_version = dataset_version.map(|v| v.parse()).transpose()?;
     let dataset = dataset_store
         .load_dataset(&dataset_name, dataset_version.as_ref())
         .await?;

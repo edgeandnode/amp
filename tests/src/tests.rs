@@ -7,8 +7,16 @@ use alloy::{
     providers::{DynProvider, Provider, ext::AnvilApi as _},
     transports::http::reqwest,
 };
-use common::{BlockNum, BoxError, metadata::segments::BlockRange, query_context::parse_sql};
-use dataset_store::{DatasetDefsCommon, DatasetStore, SerializableSchema};
+use common::{
+    BlockNum, BoxError,
+    manifest::{
+        common::{Manifest as CommonManifest, Schema},
+        derived::Manifest,
+    },
+    metadata::segments::BlockRange,
+    query_context::parse_sql,
+};
+use dataset_store::DatasetStore;
 use futures::StreamExt;
 use generate_manifest;
 use monitoring::logging;
@@ -429,8 +437,8 @@ async fn generate_manifest_evm_rpc_builtin() {
     .await
     .unwrap();
 
-    let out: DatasetDefsCommon = serde_json::from_slice(&out).unwrap();
-    let builtin_schema: SerializableSchema = evm_rpc_datasets::tables::all(&network).into();
+    let out: CommonManifest = serde_json::from_slice(&out).unwrap();
+    let builtin_schema: Schema = evm_rpc_datasets::tables::all(&network).into();
 
     assert_eq!(out.network, network);
     assert_eq!(out.kind, kind);
@@ -459,8 +467,8 @@ async fn generate_manifest_firehose_builtin() {
     .await
     .unwrap();
 
-    let out: DatasetDefsCommon = serde_json::from_slice(&out).unwrap();
-    let builtin_schema: SerializableSchema = firehose_datasets::evm::tables::all(&network).into();
+    let out: CommonManifest = serde_json::from_slice(&out).unwrap();
+    let builtin_schema: Schema = firehose_datasets::evm::tables::all(&network).into();
 
     assert_eq!(out.network, network);
     assert_eq!(out.kind, kind);
@@ -491,7 +499,7 @@ async fn generate_manifest_substreams() {
     .await
     .unwrap();
 
-    let out: DatasetDefsCommon = serde_json::from_slice(&out).unwrap();
+    let out: CommonManifest = serde_json::from_slice(&out).unwrap();
     let dataset_def = substreams_datasets::dataset::DatasetDef {
         kind: kind.clone(),
         network: network.clone(),
@@ -677,9 +685,9 @@ fn generate_json_schemas() {
             "Firehose",
             schema_for!(firehose_datasets::dataset::DatasetDef),
         ),
-        ("Common", schema_for!(dataset_store::DatasetDefsCommon)),
-        ("Sql", schema_for!(dataset_store::sql_datasets::DatasetDef)),
-        ("Manifest", schema_for!(common::manifest::Manifest)),
+        ("Common", schema_for!(CommonManifest)),
+        ("Sql", schema_for!(common::manifest::sql_datasets::Manifest)),
+        ("Manifest", schema_for!(Manifest)),
     ];
 
     for (name, schema) in json_schemas {

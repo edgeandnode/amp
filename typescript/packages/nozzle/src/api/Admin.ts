@@ -470,8 +470,8 @@ export class Admin extends Context.Tag("Nozzle/Admin")<Admin, {
    * @return The paginated locations response.
    */
   readonly getLocations: (options?: {
-    limit?: number
-    lastLocationId?: number
+    limit?: number | undefined
+    lastLocationId?: number | undefined
   }) => Effect.Effect<Model.LocationsResponse, HttpClientError.HttpClientError | GetLocationsError>
 
   /**
@@ -658,7 +658,10 @@ export const make = Effect.fn(function*(url: string) {
     )
   })
 
-  const getLocations = Effect.fn("getLocations")(function*(options?: { limit?: number; lastLocationId?: number }) {
+  const getLocations = Effect.fn("getLocations")(function*(options?: {
+    limit?: number | undefined
+    lastLocationId?: number | undefined
+  }) {
     const result = yield* client.location.getLocations({
       urlParams: {
         limit: options?.limit,

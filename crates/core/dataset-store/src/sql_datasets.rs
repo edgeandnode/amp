@@ -3,72 +3,33 @@ use std::{
     sync::Arc,
 };
 
+// Re-export types from common for backward compatibility
+pub use common::manifest::sql_datasets::Error;
 use common::{
-    BoxError, Dataset, DatasetValue, SPECIAL_BLOCK_NUM, Table,
-    manifest::sort_tables_by_dependencies,
+    BoxError, Dataset, SPECIAL_BLOCK_NUM, Table,
+    manifest::{
+        derived::sort_tables_by_dependencies,
+        sql_datasets::{DATASET_KIND, Manifest, SqlDataset},
+    },
     query_context::{parse_sql, prepend_special_block_num_field},
 };
 use datafusion::sql::parser;
 use futures::StreamExt as _;
 use object_store::ObjectMeta;
-use schemars::JsonSchema;
-use serde::Deserialize;
 
 use crate::DatasetStore;
-
-#[derive(thiserror::Error, Debug)]
-pub enum Error {
-    #[error("TOML parse error: {0}")]
-    Toml(#[from] toml::de::Error),
-    #[error("JSON parse error: {0}")]
-    Json(#[from] serde_json::Error),
-}
-
-pub struct SqlDataset {
-    pub dataset: Dataset,
-
-    /// Maps a table name to the query that defines that table.
-    pub queries: BTreeMap<String, parser::Statement>,
-}
-
-impl SqlDataset {
-    pub fn name(&self) -> &str {
-        &self.dataset.name
-    }
-}
-
-pub const DATASET_KIND: &str = "sql";
-
-#[derive(Debug, Deserialize, JsonSchema)]
-pub struct DatasetDef {
-    /// Dataset kind, must be `sql`.
-    pub kind: String,
-    /// Network name, e.g., `mainnet`.
-    pub network: String,
-    /// Dataset name.
-    pub name: String,
-}
-
-impl DatasetDef {
-    pub fn from_value(value: common::DatasetValue) -> Result<Self, Error> {
-        match value {
-            DatasetValue::Toml(value) => value.try_into().map_err(From::from),
-            DatasetValue::Json(value) => serde_json::from_value(value).map_err(From::from),
-        }
-    }
-}
 
 pub(super) async fn dataset(
     store: Arc<DatasetStore>,
     dataset_def: common::DatasetValue,
 ) -> Result<SqlDataset, BoxError> {
-    let def = DatasetDef::from_value(dataset_def)?;
+    let def = Manifest::from_value(dataset_def)?;
     if def.kind != DATASET_KIND {
         return Err(format!("expected dataset kind '{DATASET_KIND}', got '{}'", def.kind).into());
     }
 
     let defs_store = store.dataset_defs_store();
-    let mut files = defs_store.list(def.name.clone());
+    let mut files = defs_store.list(def.name.as_str());
 
     // List all `.sql` files in the dataset dir and infer the output schema to get `Table`s.
     let mut tables: Vec<Table> = vec![];
@@ -118,7 +79,7 @@ pub(super) async fn dataset(
         dataset: Dataset {
             kind: def.kind,
             network: def.network,
-            name: def.name,
+            name: def.name.to_string(),
             version: None,
             start_block: None,
             tables,
