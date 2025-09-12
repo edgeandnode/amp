@@ -14,8 +14,8 @@ use common::{
     evm::{self, udfs::EthCall},
     manifest::{
         self,
-        common::{Manifest as CommonManifest, SerializableSchema},
-        derived::{Manifest, Version},
+        common::{Manifest as CommonManifest, Schema, Version},
+        derived::Manifest,
         sql_datasets::SqlDataset,
     },
     query_context::{self, PlanningContext, QueryEnv},
@@ -377,7 +377,10 @@ impl DatasetStore {
         };
 
         if common.name != dataset_name && common.kind != "manifest" {
-            return Err(NameMismatch(common.name, dataset_name.to_string()));
+            return Err(NameMismatch(
+                common.name.to_string(),
+                dataset_name.to_string(),
+            ));
         }
 
         Ok((common, raw_dataset))
@@ -409,12 +412,11 @@ impl DatasetStore {
         let value = raw_dataset.to_value()?;
         let (dataset, ground_truth_schema) = match kind {
             DatasetKind::EvmRpc => {
-                let builtin_schema: SerializableSchema =
-                    evm_rpc_datasets::tables::all(&common.network).into();
+                let builtin_schema: Schema = evm_rpc_datasets::tables::all(&common.network).into();
                 (evm_rpc_datasets::dataset(value)?, Some(builtin_schema))
             }
             DatasetKind::Firehose => {
-                let builtin_schema: SerializableSchema =
+                let builtin_schema: Schema =
                     firehose_datasets::evm::tables::all(&common.network).into();
                 (
                     firehose_datasets::evm::dataset(value)?,
@@ -423,7 +425,7 @@ impl DatasetStore {
             }
             DatasetKind::Substreams => {
                 let dataset = substreams_datasets::dataset(value).await?;
-                let store_schema: SerializableSchema = dataset.tables.as_slice().into();
+                let store_schema: Schema = dataset.tables.as_slice().into();
                 (dataset, Some(store_schema))
             }
             DatasetKind::Sql => {

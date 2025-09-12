@@ -99,11 +99,11 @@ pub async fn handler_inner(
                     let manifest: Manifest = serde_json::from_str(&manifest_str)
                         .map_err(|e| Error::InvalidManifest(e.to_string()))?;
                     if manifest.name != payload.dataset_name
-                        || manifest.version.0.to_string() != payload.version
+                        || manifest.version.to_string() != payload.version
                     {
                         return Err(Error::ManifestValidationError(
-                            manifest.name,
-                            manifest.version.0.to_string(),
+                            manifest.name.to_string(),
+                            manifest.version.to_string(),
                         ));
                     }
                     register_manifest(&ctx.store, &ctx.metadata_db, &manifest)

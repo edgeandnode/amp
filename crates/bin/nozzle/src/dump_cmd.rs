@@ -6,7 +6,7 @@ use std::{
 };
 
 use common::{
-    BoxError, Store, catalog::physical::PhysicalTable, config::Config, manifest::derived::Version,
+    BoxError, Store, catalog::physical::PhysicalTable, config::Config, manifest::common::Version,
     notification_multiplexer, store::ObjectStoreUrl, utils::dfs,
 };
 use datafusion::sql::resolve::resolve_table_references;
