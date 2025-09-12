@@ -169,7 +169,7 @@ impl CompactionGroup {
             .map_err(|err| CompactorError::FileWriteError { err })
     }
 
-    #[tracing::instrument(skip_all, err, fields(table=%self.table.table_ref(), algorithm=%self.opts.compactor.algorithm.kind()))]
+    #[tracing::instrument(skip_all, err)]
     pub async fn compact(self) -> CompactionResult<()> {
         let number_of_files = self.streams.len();
         let metadata_db = self.table.metadata_db();

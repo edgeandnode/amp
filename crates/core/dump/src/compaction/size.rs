@@ -291,7 +291,13 @@ impl Add for SegmentSize {
             rows: self.rows + other.rows,
             length: self.length + other.length,
             generation: self.generation.max(other.generation),
-            created_at: self.created_at.max(other.created_at),
+            created_at: if self.created_at == 0 {
+                other.created_at
+            } else if other.created_at == 0 {
+                self.created_at
+            } else {
+                self.created_at.min(other.created_at)
+            },
         }
     }
 }
@@ -325,7 +331,13 @@ impl AddAssign for SegmentSize {
         self.rows += other.rows;
         self.length += other.length;
         self.generation = self.generation.max(other.generation);
-        self.created_at = self.created_at.min(other.created_at);
+        self.created_at = if self.created_at == 0 {
+            other.created_at
+        } else if other.created_at == 0 {
+            self.created_at
+        } else {
+            self.created_at.min(other.created_at)
+        };
     }
 }
 

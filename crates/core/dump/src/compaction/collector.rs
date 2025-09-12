@@ -37,6 +37,7 @@ impl Debug for Collector {
 }
 
 impl Collector {
+    #[tracing::instrument(err)]
     pub(super) async fn collect(self) -> DeletionResult<Self> {
         let table = Arc::clone(&self.table);
 
@@ -165,6 +166,7 @@ impl DeletionOutput {
             )
             .await?;
 
+        tracing::info!("Deleting {} expired files", file_ids.len());
         let size = file_ids.len();
 
         Ok(table

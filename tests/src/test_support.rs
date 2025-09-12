@@ -763,7 +763,7 @@ async fn spawn_compaction_task_and_await_completion<T: NozzleCompactorTaskType>(
     task.spawn().await;
 
     while !task.is_finished() {
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(Duration::from_millis(200)).await;
     }
 }
 
