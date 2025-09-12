@@ -19,7 +19,7 @@ use tokio::task::JoinHandle;
 
 use crate::compaction::{collector::Collector, compactor::Compactor, error::CompactionErrorExt};
 pub use crate::compaction::{
-    error::{CollectorError, CompactionResult, CompactorError, DeletionResult},
+    error::{CollectionResult, CollectorError, CompactionResult, CompactorError},
     size::{SegmentSize, SegmentSizeLimit},
 };
 
@@ -95,13 +95,13 @@ impl NozzleCompactor {
     /// Block until the current compaction task is finished
     /// and then trigger another compaction
     pub async fn run_compaction(&mut self) {
-        self.compaction_task.spawn().await;
+        self.compaction_task.join_current_then_spawn_new().await;
     }
 
     /// Block until the current deletion task is finished
     /// and then trigger another deletion
     pub async fn run_deletion(&mut self) {
-        self.deletion_task.spawn().await;
+        self.deletion_task.join_current_then_spawn_new().await;
     }
 }
 
@@ -140,7 +140,7 @@ impl<T: NozzleCompactorTaskType> NozzleCompactorTask<T> {
             && T::active(&self.opts)
     }
 
-    pub async fn spawn(&mut self) {
+    pub async fn join_current_then_spawn_new(&mut self) {
         let task = &mut self.task;
 
         let inner = match task
@@ -158,7 +158,7 @@ impl<T: NozzleCompactorTaskType> NozzleCompactorTask<T> {
 
     fn try_run(&mut self) {
         if self.is_ready() {
-            self.spawn()
+            self.join_current_then_spawn_new()
                 .now_or_never()
                 .expect("We already checked is_finished");
         }

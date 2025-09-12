@@ -761,7 +761,7 @@ async fn spawn_compaction_task_and_await_completion<T: NozzleCompactorTaskType>(
 
     let mut task = T::start(table, &Arc::new(opts));
 
-    task.spawn().await;
+    task.join_current_then_spawn_new().await;
 
     while !task.is_finished() {
         tokio::time::sleep(Duration::from_millis(100)).await;

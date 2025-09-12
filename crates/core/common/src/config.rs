@@ -120,9 +120,7 @@ where
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct CompactionConfig {
-    #[serde(skip)]
     pub compactor_enabled: bool,
-    #[serde(skip)]
     pub collector_enabled: bool,
     pub metadata_concurrency: usize,
     pub write_concurrency: usize,

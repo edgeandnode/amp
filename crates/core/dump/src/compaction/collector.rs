@@ -15,7 +15,7 @@ use object_store::{Error as ObjectStoreError, ObjectStore, path::Path};
 use crate::{
     compaction::{
         CompactionProperties, NozzleCompactorTaskType,
-        error::{CollectorError, DeletionResult},
+        error::{CollectionResult, CollectorError},
     },
     consistency_check,
 };
@@ -37,7 +37,7 @@ impl Debug for Collector {
 }
 
 impl Collector {
-    pub(super) async fn collect(self) -> DeletionResult<Self> {
+    pub(super) async fn collect(self) -> CollectionResult<Self> {
         let table = Arc::clone(&self.table);
 
         let location_id = table.location_id();
@@ -138,27 +138,32 @@ impl DeletionOutput {
         table: Arc<PhysicalTable>,
         expired_stream: BoxStream<'a, Result<GcManifestRow, metadata_db::Error>>,
         now: Timestamp,
-    ) -> Result<Self, metadata_db::Error> {
+    ) -> CollectionResult<Self> {
         let (file_ids, file_paths) = expired_stream
+            .map_err(CollectorError::file_stream_error)
             .try_fold(
                 (Vec::new(), Vec::new()),
-                |(mut file_ids, mut file_paths),
-                 GcManifestRow {
-                     file_id,
-                     file_path: file_name,
-                     expiration,
-                     ..
-                 }| {
+                async |(mut file_ids, mut file_paths),
+                       GcManifestRow {
+                           file_id,
+                           file_path: file_name,
+                           expiration,
+                           ..
+                       }| {
                     if Duration::from_micros(expiration.and_utc().timestamp_micros() as u64)
                         .saturating_sub(now.0)
                         .is_zero()
                     {
-                        let url = table.url().join(&file_name).expect("Invalid file path");
+                        let url = table
+                            .url()
+                            .join(&file_name)
+                            .map_err(CollectorError::parse_error(file_id))?;
+
                         file_ids.push(file_id);
                         file_paths.push(Ok(Path::from(url.path())));
                     }
 
-                    future::ok((file_ids, file_paths))
+                    Ok((file_ids, file_paths))
                 },
             )
             .await?;

@@ -21,7 +21,7 @@ use crate::{
 };
 
 pub type CompactionResult<T> = Result<T, CompactorError>;
-pub type DeletionResult<T> = Result<T, CollectorError>;
+pub type CollectionResult<T> = Result<T, CollectorError>;
 
 pub trait CompactionErrorExt: std::error::Error + From<JoinError> + Send + Sync + 'static {
     type Task: NozzleCompactorTaskType<Error = Self>;
@@ -118,7 +118,7 @@ impl Display for CompactorError {
                 )
             }
             CompactorError::FileWriteError { err, .. } => {
-                write!(f, "Error occured while writing compacted file: {err}")
+                write!(f, "Error occurred while writing compacted file: {err}")
             }
             CompactorError::MetadataCommitError { err, .. } => {
                 write!(f, "Error committing new metadata record: {err}",)
@@ -205,6 +205,10 @@ where
         err: metadata_db::Error,
         file_ids: Vec<FileId>,
     },
+    ParseError {
+        file_id: FileId,
+        err: url::ParseError,
+    },
 }
 
 impl From<JoinError> for CollectorError {
@@ -229,8 +233,16 @@ impl CollectorError {
         Self::Consistency { error }
     }
 
+    pub fn file_stream_error(err: metadata_db::Error) -> Self {
+        Self::FileStreamError { err }
+    }
+
     pub fn manifest_update_error(file_ids: Vec<FileId>) -> impl FnOnce(metadata_db::Error) -> Self {
         move |err| CollectorError::ManifestDeleteError { err, file_ids }
+    }
+
+    pub fn parse_error(file_id: FileId) -> impl FnOnce(url::ParseError) -> Self {
+        move |err| CollectorError::ParseError { file_id, err }
     }
 }
 
@@ -257,6 +269,9 @@ impl Display for CollectorError {
                     "Error deleting file IDs {file_ids:?} from GC manifest: {err}",
                 )
             }
+            Self::ParseError { file_id, err } => {
+                write!(f, "URL parse error for file {file_id}: {err}")
+            }
         }
     }
 }
@@ -277,6 +292,7 @@ impl Error for CollectorError {
             CollectorError::FileStreamError { err, .. } => err.source(),
             CollectorError::JoinError { err, .. } => err.source(),
             CollectorError::ManifestDeleteError { err, .. } => err.source(),
+            CollectorError::ParseError { err, .. } => err.source(),
         }
     }
 }
