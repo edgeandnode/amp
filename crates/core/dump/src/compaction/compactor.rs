@@ -42,7 +42,7 @@ impl Display for Compactor {
 }
 
 impl Compactor {
-    #[tracing::instrument(skip_all, err, fields(table=%self.table.table_ref(), algorithm=%self.opts.algorithm.kind()))]
+    #[tracing::instrument(skip_all, err, fields(table=%self.table.table_ref(), algorithm=%self.opts.compactor.algorithm.kind()))]
     pub(super) async fn compact(self) -> CompactionResult<Self> {
         let table = Arc::clone(&self.table);
         let opts = Arc::clone(&self.opts);
@@ -81,15 +81,15 @@ impl NozzleCompactorTaskType for Compactor {
     }
 
     fn interval(opts: &Arc<CompactionProperties>) -> std::time::Duration {
-        opts.compactor_interval
+        opts.compactor.min_interval
     }
 
     fn active(opts: &Arc<CompactionProperties>) -> bool {
-        opts.compactor_active
+        opts.compactor.active
     }
 
     fn deactivate(opts: &mut Arc<CompactionProperties>) {
-        Arc::make_mut(opts).compactor_active = false;
+        Arc::make_mut(opts).compactor.active = false;
     }
 }
 
@@ -146,11 +146,11 @@ impl CompactionGroup {
 
         let mut writer = ParquetFileWriter::new(
             Arc::clone(&self.table),
-            self.opts.parquet_writer_props.clone(),
+            self.opts.compactor.writer.clone(),
             range.start(),
         )
         .map_err(CompactorError::create_writer_error(
-            &self.opts.parquet_writer_props,
+            &self.opts.compactor.writer,
         ))?;
 
         let mut parent_ids = Vec::with_capacity(self.streams.len());
@@ -169,11 +169,11 @@ impl CompactionGroup {
             .map_err(|err| CompactorError::FileWriteError { err })
     }
 
-    #[tracing::instrument(skip_all, err, fields(table=%self.table.table_ref(), algorithm=%self.opts.algorithm.kind()))]
+    #[tracing::instrument(skip_all, err, fields(table=%self.table.table_ref(), algorithm=%self.opts.compactor.algorithm.kind()))]
     pub async fn compact(self) -> CompactionResult<()> {
         let number_of_files = self.streams.len();
         let metadata_db = self.table.metadata_db();
-        let duration = self.opts.file_lock_duration;
+        let duration = *self.opts.collector.file_lock_timeout;
 
         let output = self.write_and_finish().await?;
 

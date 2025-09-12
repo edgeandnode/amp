@@ -9,7 +9,6 @@ use std::{
 use chrono::{DateTime, Utc};
 use common::{
     BLOCK_NUM, SPECIAL_BLOCK_NUM, Timestamp,
-    config::CompactionConfig,
     metadata::parquet::{GENERATION_METADATA_KEY, PARQUET_METADATA_KEY, ParquetMeta},
 };
 use datafusion::parquet::{
@@ -590,7 +589,7 @@ pub fn le_bytes_to_nonzero_i64_opt(bytes: &[u8]) -> Result<Option<NonZeroI64>, T
 /// - The `length` field specifies the minimum number of files required for compaction
 /// - Multiple dimensions can be active simultaneously
 /// ```
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy)]
 pub struct SegmentSizeLimit(
     /// The size limit for the file
     /// If a limit is set to -1, it means that dimension is not considered for the limit.
@@ -619,6 +618,13 @@ impl SegmentSizeLimit {
             },
             overflow.into(),
         )
+    }
+
+    pub fn default_bounded() -> Self {
+        let mut this = Self::default();
+        this.0.bytes = 512 * 1024 * 1024;
+        this.1 = 1.5.into();
+        this
     }
 
     pub fn is_unbounded(&self) -> bool {
@@ -698,22 +704,6 @@ impl SegmentSizeLimit {
 /// 2. Result for the length (file count) dimension
 /// 3. Result for the generation dimension
 pub(super) type SizeCheckResult = (TestResult, TestResult, TestResult);
-
-impl From<&CompactionConfig> for SegmentSizeLimit {
-    fn from(config: &CompactionConfig) -> Self {
-        Self(
-            SegmentSize {
-                blocks: config.block_threshold,
-                bytes: config.byte_threshold,
-                rows: config.row_threshold,
-                length: config.min_file_count,
-                generation: Generation::default(),
-                ..Default::default()
-            },
-            Overflow::default(),
-        )
-    }
-}
 
 impl Display for SegmentSizeLimit {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
@@ -1011,16 +1001,9 @@ pub mod test {
             )
         );
 
-        let size = super::SegmentSize {
-            length: 0,
-            blocks: -1,
-            bytes: -1,
-            rows: -1,
-            generation: super::Generation::default(),
-            created_at: 0,
-        };
+        let size = super::SegmentSize::default();
 
-        assert_eq!(format!("{size}"), "{ null }");
+        assert_eq!(format!("{size}"), "{ null }", "Testing default null size");
     }
 
     #[test]
@@ -1053,15 +1036,12 @@ pub mod test {
             "We are testing if the generation and rows limits are omitted because they are 0 and -1 respectively, overflow is shown as 4"
         );
 
-        let limit = super::SegmentSizeLimit::new(
-            -1,
-            -1,
-            -1,
-            0,
-            super::Generation::default(),
-            super::Overflow::default(),
-        );
+        let limit = super::SegmentSizeLimit::default();
 
-        assert_eq!(format!("{limit}"), "{ unbounded }");
+        assert_eq!(
+            format!("{limit}"),
+            "{ unbounded }",
+            "Testing default unbounded size limit"
+        );
     }
 }

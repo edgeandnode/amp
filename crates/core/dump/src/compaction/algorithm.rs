@@ -4,7 +4,7 @@ use std::{
     time::Duration,
 };
 
-use common::Timestamp;
+use common::{Timestamp, config::AlgorithmConfig};
 
 use crate::compaction::{
     Generation, SegmentSize, SegmentSizeLimit, compactor::CompactionGroup, plan::CompactionFile,
@@ -55,7 +55,7 @@ use crate::compaction::{
 /// can be compacted regardless of generation.
 #[derive(Clone, Copy)]
 pub struct CompactionAlgorithm {
-    pub base_duration: Duration,
+    pub base_cooldown: Duration,
     pub upper_bound: SegmentSizeLimit,
     pub lower_bound: SegmentSizeLimit,
 }
@@ -68,7 +68,7 @@ impl CompactionAlgorithm {
 
         let unbounded_lower = self.lower_bound.is_unbounded();
 
-        if unbounded_lower && self.base_duration.is_zero() {
+        if unbounded_lower && self.base_cooldown.is_zero() {
             "Exponential Compaction"
         } else if unbounded_lower {
             "Relaxed Exponential Compaction"
@@ -90,7 +90,7 @@ impl CompactionAlgorithm {
             return FileState::Live;
         }
 
-        let is_hot = segment.is_hot(self.base_duration);
+        let is_hot = segment.is_hot(self.base_cooldown);
 
         match is_hot {
             TestResult::Skipped => return FileState::Hot,
@@ -101,7 +101,9 @@ impl CompactionAlgorithm {
 
     /// Predicate function to determine if two files can be compacted together.
     ///
-    /// Returns `true` if
+    /// Returns `true` if the candidate file can be compacted with the group,
+    /// `false` otherwise. The decision is based on the combined size of the
+    /// files, their states (Live, Hot, Cold), and their generations.
     pub fn predicate<'a>(&self, group: &CompactionGroup, candidate: &CompactionFile) -> bool {
         let state = self
             .file_state(&group.size)
@@ -113,7 +115,8 @@ impl CompactionAlgorithm {
 
         if state == FileState::Live {
             // For live files, only compact if size limit is not exceeded.
-            // If it's the tail file, also require length limit to be exceeded.
+            // If it's the tail file, also require length limit to be exceeded
+            // (for cases where a minimum number of segments is desired before compaction).
             return !*size_exceeded && (!candidate.is_tail || *length_exceeded);
         } else if state == FileState::Hot {
             // For hot files, only compact if size limit is not exceeded,
@@ -130,7 +133,7 @@ impl CompactionAlgorithm {
 impl Debug for CompactionAlgorithm {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct(self.kind())
-            .field("base_duration", &self.base_duration)
+            .field("base_duration", &self.base_cooldown)
             .field("upper_bound", &self.upper_bound)
             .field("lower_bound", &self.lower_bound)
             .finish()
@@ -141,27 +144,43 @@ impl Display for CompactionAlgorithm {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let kind = self.kind().trim_end_matches(" Compaction");
         match kind {
-            "Eager" => write!(
-                f,
-                "{{ algorithm: {}, upper_bound: {} }}",
-                kind, self.upper_bound
-            ),
-            "Exponential" => write!(
-                f,
-                "{{ algorithm: {}, upper_bound: {} }}",
-                kind, self.upper_bound
-            ),
+            "Eager" => write!(f, "{{ kind: {}, upper_bound: {} }}", kind, self.upper_bound),
+            "Exponential" => write!(f, "{{ kind: {}, upper_bound: {} }}", kind, self.upper_bound),
             "Relaxed Exponential" => write!(
                 f,
-                "{{ algorithm: {}, base_duration: {:?}, upper_bound: {} }}",
-                kind, self.base_duration, self.upper_bound
+                "{{ kind: {}, base_duration: {:?}, upper_bound: {} }}",
+                kind, self.base_cooldown, self.upper_bound
             ),
             "Hybrid" => write!(
                 f,
-                "{{ algorithm: {}, base_duration: {:?}, upper_bound: {}, lower_bound: {} }}",
-                kind, self.base_duration, self.upper_bound, self.lower_bound
+                "{{ kind: {}, base_duration: {:?}, upper_bound: {}, lower_bound: {} }}",
+                kind, self.base_cooldown, self.upper_bound, self.lower_bound
             ),
             _ => unreachable!("Unexpected compaction algorithm kind"),
+        }
+    }
+}
+
+impl<'a> From<&'a AlgorithmConfig> for CompactionAlgorithm {
+    fn from(value: &'a AlgorithmConfig) -> Self {
+        CompactionAlgorithm {
+            base_cooldown: value.base_cooldown,
+            upper_bound: SegmentSizeLimit::new(
+                value.upper_bound.block_threshold,
+                value.upper_bound.byte_threshold,
+                value.upper_bound.row_threshold,
+                value.upper_bound.file_count_threshold,
+                Generation::default(),
+                value.overflow,
+            ),
+            lower_bound: SegmentSizeLimit::new(
+                value.lower_bound.block_threshold,
+                value.lower_bound.byte_threshold,
+                value.lower_bound.row_threshold,
+                value.lower_bound.file_count_threshold,
+                value.lower_bound.generation_threshold,
+                value.overflow,
+            ),
         }
     }
 }
@@ -237,12 +256,12 @@ impl Display for Cooldown {
 /// favor of other tests. However, if all tests are skipped,
 /// the overall result is considered false when dereferenced.
 ///
-/// TestResult values can be constructed from `Option<bool>`,
+/// [`TestResult`] values can be constructed from [`Option<bool>`],
 /// where `Some(bool)` maps to `Activated(bool)` and `None`
 /// maps to `Skipped`. Internal values are not exposed, and
 /// can only be accessed via dereferencing.
 #[derive(Debug)]
-pub(super) enum TestResult {
+pub enum TestResult {
     Activated(bool),
     Skipped,
 }
@@ -352,6 +371,9 @@ impl PartialEq for TestResult {
     }
 }
 
+/// Represents the state of a file for compaction purposes.
+/// The states are ordered like so:
+/// `Live < Hot < Cold`
 #[derive(Debug, PartialEq, Eq, Ord)]
 pub enum FileState {
     Live,

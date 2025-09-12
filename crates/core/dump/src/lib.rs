@@ -10,11 +10,10 @@ pub mod streaming_query;
 pub mod worker;
 
 pub use core::*;
-use std::time::Duration;
 
 pub use metrics::RECOMMENDED_METRICS_EXPORT_INTERVAL;
 
-use crate::compaction::{CompactionProperties, FILE_LOCK_DURATION, SegmentSizeLimit};
+use crate::compaction::CompactionProperties;
 
 pub fn default_partition_size() -> u64 {
     4096 * 1024 * 1024 // 4 GB
@@ -44,26 +43,5 @@ pub fn compaction_opts(
     config: &common::config::CompactionConfig,
     parquet_writer_props: &ParquetWriterProperties,
 ) -> CompactionProperties {
-    let size_limit = SegmentSizeLimit::from(config);
-    let metadata_concurrency = config.metadata_concurrency;
-    let table_concurrency = config.write_concurrency;
-    let compactor_interval = Duration::from_secs(config.compactor_interval_secs);
-    let collector_interval = Duration::from_secs(config.collector_interval_secs);
-    let parquet_writer_props = parquet_writer_props.clone();
-    let file_lock_duration = config
-        .file_lock_duration_secs
-        .map(Duration::from_secs)
-        .unwrap_or(FILE_LOCK_DURATION);
-
-    CompactionProperties {
-        compactor_active: config.compactor_enabled,
-        collector_active: config.collector_enabled,
-        compactor_interval,
-        collector_interval,
-        file_lock_duration,
-        metadata_concurrency,
-        write_concurrency: table_concurrency,
-        parquet_writer_props,
-        size_limit,
-    }
+    CompactionProperties::from_config(config, parquet_writer_props)
 }

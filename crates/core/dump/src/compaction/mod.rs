@@ -3,75 +3,27 @@ pub mod collector;
 pub mod compactor;
 pub mod error;
 mod overflow;
-pub mod plan;
+mod plan;
 pub mod size;
 
 use std::{
-    fmt::{Debug, Display, Formatter},
-    sync::Arc,
-    time::Duration,
+    fmt::{Debug, Display, Formatter}, ops::Deref, sync::Arc, time::Duration
 };
 
 use alloy::transports::BoxFuture;
-use common::{
-    Timestamp, catalog::physical::PhysicalTable,
-    parquet::file::properties::WriterProperties as ParquetWriterProperties,
-};
+use common::{Timestamp, config::{CompactionConfig, CompactionTaskConfig as TaskConfig}, catalog::physical::PhysicalTable};
 use futures::{FutureExt, TryFutureExt, future};
 use tokio::task::JoinHandle;
 
-use crate::compaction::{
-    algorithm::CompactionAlgorithm, collector::Collector, compactor::Compactor,
-    error::CompactionErrorExt,
-};
 pub use crate::compaction::{
+    algorithm::{CompactionAlgorithm, TestResult},
     error::{CollectorError, CompactionResult, CompactorError, DeletionResult},
     overflow::Overflow,
     size::{Generation, SegmentSize, SegmentSizeLimit},
 };
+use crate::{ParquetWriterProperties, compaction::{collector::Collector, compactor::Compactor, error::CompactionErrorExt}};
 
-/// Duration collector must wait prior to deleting files
-pub const FILE_LOCK_DURATION: Duration = Duration::from_secs(60 * 60); // 1 hour
 
-#[derive(Debug, Clone)]
-pub struct CompactionProperties {
-    pub compactor_active: bool,
-    pub collector_active: bool,
-    pub compactor_interval: Duration,
-    pub collector_interval: Duration,
-    pub file_lock_duration: Duration,
-    pub metadata_concurrency: usize,
-    pub write_concurrency: usize,
-    pub parquet_writer_props: ParquetWriterProperties,
-    pub algorithm: CompactionAlgorithm,
-}
-
-impl Display for CompactionProperties {
-    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        let active = format!(
-            "active: {}",
-            if self.compactor_active && self.collector_active {
-                "[ compactor, collector ]"
-            } else if self.compactor_active {
-                "compactor"
-            } else if self.collector_active {
-                "collector"
-            } else {
-                "false"
-            }
-        );
-        write!(
-            f,
-            " {{ {active}, {compactor_interval}, {collector_interval}, {file_lock_duration}, {metadata_concurrency}, {write_concurrency}, {algorithm} }}",
-            compactor_interval = format!("compactor_interval: {:?}", self.compactor_interval),
-            collector_interval = format!("collector_interval: {:?}", self.collector_interval),
-            file_lock_duration = format!("file_lock_duration: {:?}", self.file_lock_duration),
-            metadata_concurrency = format!("metadata_concurrency: {}", self.metadata_concurrency),
-            write_concurrency = format!("write_concurrency: {}", self.write_concurrency),
-            algorithm = format!("algorithm: {}", self.algorithm),
-        )
-    }
-}
 pub struct NozzleCompactor {
     compaction_task: CompactionTask,
     deletion_task: DeletionTask,
@@ -223,5 +175,165 @@ pub trait NozzleCompactorTaskType: Debug + Display + Send + Sized + 'static {
             opts: Arc::clone(opts),
             previous: None,
         }
+    }
+}
+
+
+#[derive(Debug, Clone)]
+pub struct CompactionProperties {
+    pub compactor: CompactorProperties,
+    pub collector: CollectorProperties,
+}
+
+impl Display for CompactionProperties {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{{ compactor: {}, collector: {} }}",
+            self.compactor, self.collector
+        )
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CompactorProperties {
+    pub active: bool,
+    pub algorithm: CompactionAlgorithm,
+    pub min_interval: Duration,
+    pub metadata_concurrency: usize,
+    pub write_concurrency: usize,
+    pub writer: ParquetWriterProperties,
+}
+
+impl CompactorProperties {
+    fn fallback(writer: ParquetWriterProperties) -> Self {
+        CompactorProperties {
+            active: false,
+            algorithm: CompactionAlgorithm {
+                base_cooldown: Duration::from_secs(60),
+                upper_bound: SegmentSizeLimit::default_bounded(),
+                lower_bound: SegmentSizeLimit::default(),
+            },
+            min_interval: Duration::ZERO,
+            metadata_concurrency: 4,
+            write_concurrency: 1,
+            writer,
+        }
+    }
+}
+
+impl CompactionProperties {
+    pub fn from_config(config: &CompactionConfig, writer: &ParquetWriterProperties) -> Self {
+        let compactor = if let TaskConfig::Compactor {
+            active,
+            ref algorithm,
+            min_interval,
+            metadata_concurrency,
+            write_concurrency,
+        } = config.compactor
+        {
+            CompactorProperties {
+                active,
+                algorithm: CompactionAlgorithm::from(algorithm),
+                min_interval,
+                metadata_concurrency,
+                write_concurrency,
+                writer: writer.clone(),
+            }
+        } else {
+            CompactorProperties::fallback(writer.clone())
+        };
+        let collector = if let TaskConfig::Collector {
+            active,
+            min_interval,
+            file_lock_timeout,
+        } = config.collector
+        {
+            CollectorProperties {
+                active,
+                min_interval,
+                file_lock_timeout: file_lock_timeout.into(),
+            }
+        } else {
+            CollectorProperties::default()
+        };
+
+        CompactionProperties {
+            compactor,
+            collector,
+        }
+    }
+}
+
+impl Display for CompactorProperties {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{{ active: {}, algorithm: {}, min_interval: {:?}, metadata_concurrency: {}, write_concurrency: {} }}",
+            self.active,
+            self.algorithm,
+            self.min_interval,
+            self.metadata_concurrency,
+            self.write_concurrency
+        )
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CollectorProperties {
+    pub active: bool,
+    pub file_lock_timeout: FileLockTimeout,
+    pub min_interval: Duration,
+}
+
+impl Display for CollectorProperties {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{{ active: {}, file_lock_timeout: {}, min_interval: {:?} }}",
+            self.active, self.file_lock_timeout, self.min_interval
+        )
+    }
+}
+
+impl Default for CollectorProperties {
+    fn default() -> Self {
+        CollectorProperties {
+            active: false,
+            file_lock_timeout: FileLockTimeout::default(),
+            min_interval: Duration::ZERO,
+        }
+    }
+}
+
+/// Timeout duration for file lock during deletion
+/// Minimum value is 100 milliseconds
+/// Default is 1 hour
+#[derive(Debug, Clone)]
+pub struct FileLockTimeout(Duration);
+
+impl From<Duration> for FileLockTimeout {
+    fn from(value: Duration) -> Self {
+        FileLockTimeout(value.max(Duration::from_millis(100)))
+    }
+}
+
+impl Default for FileLockTimeout {
+    fn default() -> Self {
+        FileLockTimeout(Duration::from_secs(60 * 60)) // 1 hour
+    }
+}
+
+impl Deref for FileLockTimeout {
+    type Target = Duration;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Display for FileLockTimeout {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.0)
     }
 }

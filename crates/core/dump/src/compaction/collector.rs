@@ -47,6 +47,8 @@ impl Collector {
         let nsecs = now.0.subsec_nanos();
         let metadata_db = table.metadata_db();
 
+        // Create a stream of expired files to delete, is immediately collected afterwards
+        // in DeletionOutput::try_from_manifest_stream
         let expired_stream = metadata_db.stream_expired_files(location_id, secs, nsecs);
 
         match DeletionOutput::try_from_manifest_stream(table, expired_stream, now).await {
@@ -102,15 +104,15 @@ impl NozzleCompactorTaskType for Collector {
     }
 
     fn interval(opts: &Arc<CompactionProperties>) -> Duration {
-        opts.collector_interval
+        opts.collector.min_interval
     }
 
     fn active(opts: &Arc<CompactionProperties>) -> bool {
-        opts.collector_active
+        opts.collector.active
     }
 
     fn deactivate(opts: &mut Arc<CompactionProperties>) {
-        Arc::make_mut(opts).collector_active = false;
+        Arc::make_mut(opts).collector.active = false;
     }
 }
 

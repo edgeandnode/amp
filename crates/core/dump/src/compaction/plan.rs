@@ -147,7 +147,7 @@ impl<'a> CompactionPlan<'a> {
                 CompactionFile::try_new(reader_factory, partition_index, segment, is_tail)
                     .map_err(CompactorError::from)
             })
-            .buffered(opts.metadata_concurrency)
+            .buffered(opts.compactor.metadata_concurrency)
             .boxed();
         let current_group = CompactionGroup::new_empty(&opts, &table);
 
@@ -163,7 +163,7 @@ impl<'a> CompactionPlan<'a> {
     }
 
     pub fn try_compact_all(self) -> BoxStream<'a, CompactionResult<()>> {
-        let write_concurrency = self.opts.write_concurrency;
+        let write_concurrency = self.opts.compactor.write_concurrency;
         self.map(CompactionGroup::compact)
             .buffer_unordered(write_concurrency)
             .boxed()
@@ -176,7 +176,7 @@ impl<'a> Stream for CompactionPlan<'a> {
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
-        let algorithm = this.opts.algorithm;
+        let algorithm = this.opts.compactor.algorithm;
         Poll::Ready({
             // Loop through files, grouping them according to the compaction algorithm.
             loop {

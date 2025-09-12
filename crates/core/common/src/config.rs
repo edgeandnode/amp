@@ -117,38 +117,105 @@ where
     Compression::from_str(&s).map_err(serde::de::Error::custom)
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(default)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct CompactionConfig {
-    #[serde(skip)]
-    pub compactor_enabled: bool,
-    #[serde(skip)]
-    pub collector_enabled: bool,
-    pub metadata_concurrency: usize,
-    pub write_concurrency: usize,
-    pub collector_interval_secs: u64,
-    pub compactor_interval_secs: u64,
-    pub file_lock_duration_secs: Option<u64>,
-    pub block_threshold: i64,
-    pub byte_threshold: i64,
-    pub row_threshold: i64,
-    pub min_file_count: usize,
+    #[serde(default = "CompactionTaskConfig::default_compactor")]
+    pub compactor: CompactionTaskConfig,
+    #[serde(default = "CompactionTaskConfig::default_collector")]
+    pub collector: CompactionTaskConfig,
 }
 
-impl Default for CompactionConfig {
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CompactionTaskConfig {
+    Compactor {
+        active: bool,
+        algorithm: AlgorithmConfig,
+        min_interval: Duration,
+        metadata_concurrency: usize,
+        write_concurrency: usize,
+    },
+    Collector {
+        active: bool,
+        min_interval: Duration,
+        file_lock_timeout: Duration,
+    },
+}
+
+impl CompactionTaskConfig {
+    pub fn default_compactor() -> Self {
+        Self::Compactor {
+            active: false,
+            algorithm: AlgorithmConfig::default(),
+            min_interval: Duration::ZERO,
+            metadata_concurrency: 4,
+            write_concurrency: 1,
+        }
+    }
+    pub fn default_collector() -> Self {
+        Self::Collector {
+            active: false,
+            min_interval: Duration::ZERO,
+            file_lock_timeout: Duration::ZERO,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(default)]
+pub struct AlgorithmConfig {
+    pub base_cooldown: Duration,
+    pub upper_bound: SegmentSizeLimitConfig,
+    pub lower_bound: SegmentSizeLimitConfig,
+    pub overflow: f64,
+}
+
+impl Default for AlgorithmConfig {
     fn default() -> Self {
         Self {
-            compactor_enabled: false,
-            collector_enabled: false,
-            metadata_concurrency: 10,
-            write_concurrency: 1,
-            collector_interval_secs: 30 * 60,
-            compactor_interval_secs: 0,
-            file_lock_duration_secs: None,
+            base_cooldown: Duration::from_secs(60),
+            upper_bound: SegmentSizeLimitConfig::default(),
+            lower_bound: SegmentSizeLimitConfig::unbounded(),
+            overflow: 1.5,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(default)]
+pub struct SegmentSizeLimitConfig {
+    #[serde(alias = "blocks")]
+    pub block_threshold: i64,
+    #[serde(alias = "bytes")]
+    pub byte_threshold: i64,
+    #[serde(alias = "rows")]
+    pub row_threshold: i64,
+    #[serde(alias = "file_count")]
+    pub file_count_threshold: usize,
+    #[serde(alias = "generation")]
+    pub generation_threshold: u64,
+}
+
+impl Default for SegmentSizeLimitConfig {
+    fn default() -> Self {
+        Self {
+            block_threshold: -1,
+            byte_threshold: 512 * 1024 * 1024, // 512MB
+            row_threshold: -1,
+            file_count_threshold: 1,
+            generation_threshold: 0,
+        }
+    }
+}
+
+impl SegmentSizeLimitConfig {
+    fn unbounded() -> Self {
+        Self {
             block_threshold: -1,
             byte_threshold: -1,
             row_threshold: -1,
-            min_file_count: 2,
+            file_count_threshold: 0,
+            generation_threshold: 0,
         }
     }
 }
@@ -197,7 +264,7 @@ pub struct ConfigFile {
     #[serde(default)]
     pub parquet: ParquetConfig,
     pub opentelemetry: Option<OpenTelemetryConfig>,
-    #[serde(default)]
+    #[serde(flatten)]
     pub compaction: CompactionConfig,
 }
 
@@ -295,13 +362,7 @@ impl Config {
             ));
         };
 
-        let mut compaction = config_file.compaction;
-
-        compaction.compactor_enabled = compaction.block_threshold > 0
-            || compaction.byte_threshold > 0
-            || compaction.row_threshold > 0;
-
-        compaction.min_file_count = compaction.min_file_count.max(2);
+        let compaction = config_file.compaction;
 
         Ok(Self {
             data_store: Arc::new(data_store),
