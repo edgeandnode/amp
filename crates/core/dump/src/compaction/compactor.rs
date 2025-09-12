@@ -26,7 +26,12 @@ pub struct Compactor {
 
 impl Debug for Compactor {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Compactor {{ table: {} }}", self.table.table_ref())
+        write!(
+            f,
+            "Compactor {{ table: {}, algorithm: {} }}",
+            self.table.table_ref(),
+            self.opts.compactor.algorithm.kind()
+        )
     }
 }
 
@@ -42,7 +47,7 @@ impl Display for Compactor {
 }
 
 impl Compactor {
-    #[tracing::instrument(skip_all, err, fields(table=%self.table.table_ref(), algorithm=%self.opts.compactor.algorithm.kind()))]
+    #[tracing::instrument(err)]
     pub(super) async fn compact(self) -> CompactionResult<Self> {
         let table = Arc::clone(&self.table);
         let opts = Arc::clone(&self.opts);
