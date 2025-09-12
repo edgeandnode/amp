@@ -757,7 +757,7 @@ async fn spawn_compaction_task_and_await_completion<T: NozzleCompactorTaskType>(
     opts.collector_interval = Duration::ZERO;
     opts.compactor_interval = Duration::ZERO;
 
-    opts.size_limit = SegmentSizeLimit::new(1, 1, 1, length);
+    opts.size_limit = SegmentSizeLimit::new(1, 1, 1, length, 0);
 
     let mut task = T::start(table, &Arc::new(opts));
 

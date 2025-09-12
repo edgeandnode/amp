@@ -97,7 +97,7 @@ impl NozzleCompactorTaskType for Collector {
         }
     }
 
-    fn run<'a>(self) -> future::BoxFuture<'a, Result<Self, Self::Error>> {
+    fn run(self) -> future::BoxFuture<'static, Result<Self, Self::Error>> {
         self.collect().boxed()
     }
 

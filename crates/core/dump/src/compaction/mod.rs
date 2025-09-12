@@ -1,7 +1,9 @@
+pub mod algorithm;
 pub mod collector;
 pub mod compactor;
 pub mod error;
-pub mod group;
+mod overflow;
+pub mod plan;
 pub mod size;
 
 use std::{
@@ -10,17 +12,22 @@ use std::{
     time::Duration,
 };
 
+use alloy::transports::BoxFuture;
 use common::{
     Timestamp, catalog::physical::PhysicalTable,
     parquet::file::properties::WriterProperties as ParquetWriterProperties,
 };
-use futures::{FutureExt, TryFutureExt, future::BoxFuture};
+use futures::{FutureExt, TryFutureExt, future};
 use tokio::task::JoinHandle;
 
-use crate::compaction::{collector::Collector, compactor::Compactor, error::CompactionErrorExt};
+use crate::compaction::{
+    algorithm::CompactionAlgorithm, collector::Collector, compactor::Compactor,
+    error::CompactionErrorExt,
+};
 pub use crate::compaction::{
     error::{CollectorError, CompactionResult, CompactorError, DeletionResult},
-    size::{SegmentSize, SegmentSizeLimit},
+    overflow::Overflow,
+    size::{Generation, SegmentSize, SegmentSizeLimit},
 };
 
 /// Duration collector must wait prior to deleting files
@@ -36,7 +43,7 @@ pub struct CompactionProperties {
     pub metadata_concurrency: usize,
     pub write_concurrency: usize,
     pub parquet_writer_props: ParquetWriterProperties,
-    pub size_limit: SegmentSizeLimit,
+    pub algorithm: CompactionAlgorithm,
 }
 
 impl Display for CompactionProperties {
@@ -55,13 +62,13 @@ impl Display for CompactionProperties {
         );
         write!(
             f,
-            " {{ {active}, {compactor_interval}, {collector_interval}, {file_lock_duration}, {metadata_concurrency}, {write_concurrency}, {size_limit} }}",
+            " {{ {active}, {compactor_interval}, {collector_interval}, {file_lock_duration}, {metadata_concurrency}, {write_concurrency}, {algorithm} }}",
             compactor_interval = format!("compactor_interval: {:?}", self.compactor_interval),
             collector_interval = format!("collector_interval: {:?}", self.collector_interval),
             file_lock_duration = format!("file_lock_duration: {:?}", self.file_lock_duration),
             metadata_concurrency = format!("metadata_concurrency: {}", self.metadata_concurrency),
             write_concurrency = format!("write_concurrency: {}", self.write_concurrency),
-            size_limit = format!("size_limit: {}", self.size_limit),
+            algorithm = format!("algorithm: {}", self.algorithm),
         )
     }
 }
@@ -153,6 +160,7 @@ impl<T: NozzleCompactorTaskType> NozzleCompactorTask<T> {
             }
             Ok(Err(err)) => T::handle_error(&self.table, &mut self.opts, err),
         };
+
         self.task = tokio::spawn(inner.run());
     }
 
@@ -165,13 +173,13 @@ impl<T: NozzleCompactorTaskType> NozzleCompactorTask<T> {
     }
 }
 
-pub trait NozzleCompactorTaskType: Debug + Display + Sized + Send + 'static {
+pub trait NozzleCompactorTaskType: Debug + Display + Send + Sized + 'static {
     type Error: CompactionErrorExt;
 
     fn new(table: &Arc<PhysicalTable>, opts: &Arc<CompactionProperties>) -> Self;
 
     /// Run the task
-    fn run<'a>(self) -> BoxFuture<'a, Result<Self, Self::Error>>;
+    fn run(self) -> BoxFuture<'static, Result<Self, Self::Error>>;
 
     fn interval(opts: &Arc<CompactionProperties>) -> Duration;
 
@@ -204,8 +212,11 @@ pub trait NozzleCompactorTaskType: Debug + Display + Sized + Send + 'static {
     fn start(
         table: &Arc<PhysicalTable>,
         opts: &Arc<CompactionProperties>,
-    ) -> NozzleCompactorTask<Self> {
-        let task = tokio::spawn(Self::new(table, opts).run());
+    ) -> NozzleCompactorTask<Self>
+    where
+        Self: Send,
+    {
+        let task = tokio::spawn(future::ok(Self::new(table, opts)));
         NozzleCompactorTask {
             task,
             table: Arc::clone(table),

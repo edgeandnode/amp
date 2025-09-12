@@ -3212,6 +3212,7 @@ version = "0.1.0"
 dependencies = [
  "alloy",
  "backon",
+ "chrono",
  "common",
  "datafusion",
  "dataset-store",

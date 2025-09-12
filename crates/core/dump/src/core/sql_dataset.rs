@@ -336,7 +336,7 @@ async fn dump_sql_query(
                     object_meta,
                     footer,
                     ..
-                } = writer.close(range, vec![]).await?;
+                } = writer.close(range, vec![], 0u64).await?;
 
                 commit_metadata(
                     &ctx.metadata_db,

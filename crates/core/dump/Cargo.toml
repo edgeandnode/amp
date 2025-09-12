@@ -6,6 +6,7 @@ version.workspace = true
 [dependencies]
 metadata-db = { path = "../metadata-db" }
 common = { path = "../common" }
+chrono.workspace = true
 datafusion.workspace = true
 dataset-store = { path = "../dataset-store" }
 futures.workspace = true

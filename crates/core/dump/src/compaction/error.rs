@@ -39,7 +39,7 @@ pub trait CompactionErrorExt: std::error::Error + From<JoinError> + Send + Sync 
 #[derive(Debug)]
 pub enum CompactorError
 where
-    Self: CompactionErrorExt,
+    Self: CompactionErrorExt + Send + Sync + 'static,
 {
     /// Catching errors while building the canonical chain for a table
     CanonicalChainError { err: BoxError },
