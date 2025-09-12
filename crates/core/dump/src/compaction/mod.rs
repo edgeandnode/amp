@@ -7,11 +7,18 @@ mod plan;
 pub mod size;
 
 use std::{
-    fmt::{Debug, Display, Formatter}, ops::Deref, sync::Arc, time::Duration
+    fmt::{Debug, Display, Formatter},
+    ops::Deref,
+    sync::Arc,
+    time::Duration,
 };
 
 use alloy::transports::BoxFuture;
-use common::{Timestamp, config::{CompactionConfig, CompactionTaskConfig as TaskConfig}, catalog::physical::PhysicalTable};
+use common::{
+    Timestamp,
+    catalog::physical::PhysicalTable,
+    config::{CompactionConfig, CompactionTaskConfig as TaskConfig},
+};
 use futures::{FutureExt, TryFutureExt, future};
 use tokio::task::JoinHandle;
 
@@ -21,8 +28,10 @@ pub use crate::compaction::{
     overflow::Overflow,
     size::{Generation, SegmentSize, SegmentSizeLimit},
 };
-use crate::{ParquetWriterProperties, compaction::{collector::Collector, compactor::Compactor, error::CompactionErrorExt}};
-
+use crate::{
+    ParquetWriterProperties,
+    compaction::{collector::Collector, compactor::Compactor, error::CompactionErrorExt},
+};
 
 pub struct NozzleCompactor {
     compaction_task: CompactionTask,
@@ -177,7 +186,6 @@ pub trait NozzleCompactorTaskType: Debug + Display + Send + Sized + 'static {
         }
     }
 }
-
 
 #[derive(Debug, Clone)]
 pub struct CompactionProperties {

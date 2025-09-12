@@ -747,17 +747,16 @@ async fn spawn_compaction_task_and_await_completion<T: NozzleCompactorTaskType>(
     collector_active: bool,
     file_lock_duration: Duration,
 ) {
-    let length = table.files().await.unwrap().len();
     let parquet_writer_props = dump::parquet_opts(&config.parquet);
     let mut opts = dump::compaction_opts(&config.compaction, &parquet_writer_props);
-    opts.compactor_active = compactor_active;
-    opts.collector_active = collector_active;
+    opts.compactor.active = compactor_active;
+    opts.collector.active = collector_active;
 
-    opts.file_lock_duration = file_lock_duration;
-    opts.collector_interval = Duration::ZERO;
-    opts.compactor_interval = Duration::ZERO;
+    opts.collector.file_lock_timeout = file_lock_duration.into();
+    opts.collector.min_interval = Duration::ZERO;
+    opts.compactor.min_interval = Duration::ZERO;
 
-    opts.size_limit = SegmentSizeLimit::new(1, 1, 1, length, 0);
+    opts.compactor.algorithm.upper_bound = SegmentSizeLimit::default_bounded();
 
     let mut task = T::start(table, &Arc::new(opts));
 
