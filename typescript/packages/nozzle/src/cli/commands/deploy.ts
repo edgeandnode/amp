@@ -25,7 +25,7 @@ export const deploy = Command.make("deploy", {
     adminUrl,
   },
 }).pipe(
-  Command.withDescription("Deploy a dataset"),
+  Command.withDescription("Register a dataset"),
   Command.withHandler(
     Effect.fn(function*({ args }) {
       const manifest = yield* ManifestContext.ManifestContext.pipe(Effect.serviceOption)
@@ -37,9 +37,9 @@ export const deploy = Command.make("deploy", {
       })
 
       const [name, version] = dataset.split("@")
-      yield* admin.deployDataset(name, version)
+      yield* admin.registerDataset(name, version)
 
-      yield* Console.log(`Deployed dataset ${dataset}`)
+      yield* Console.log(`Registered dataset ${dataset}`)
     }),
   ),
   Command.provide(({ args }) =>

@@ -1,5 +1,5 @@
 mod anvil;
-mod deploy;
+mod register_dataset;
 mod registry;
 
 use alloy::{

@@ -124,7 +124,11 @@ export const layer = (config: TestingOptions = {}) =>
     })
 
     const nozzle = Nozzle.layer({
-      nozzleExecutable: config.nozzleExecutable,
+      nozzleExecutable: Option.fromNullable(config.nozzleExecutable).pipe(
+        Option.getOrElse(() =>
+          path.resolve(import.meta.dirname, "..", "..", "..", "..", "..", "target", "release", "nozzle")
+        ),
+      ),
       nozzleArgs: config.nozzleArgs,
       printOutput: nozzleOutput,
       adminPort,

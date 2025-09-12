@@ -1,16 +1,16 @@
-use admin_api::handlers::datasets::deploy::DeployRequest;
+use admin_api::handlers::datasets::register::RegisterRequest;
 use common::manifest::derived::Manifest;
-use registry_service::handlers::register::RegisterRequest;
+use registry_service::handlers::register::RegisterRequest as RegistryRegisterRequest;
 use reqwest::StatusCode;
 
 use crate::test_support::TestEnv;
 
-struct DeployTestContext {
+struct RegisterTestCtx {
     env: TestEnv,
     client: reqwest::Client,
 }
 
-impl DeployTestContext {
+impl RegisterTestCtx {
     async fn setup(test_name: &str) -> Self {
         let env = TestEnv::temp(test_name).await.unwrap();
         let client = reqwest::Client::new();
@@ -25,9 +25,9 @@ impl DeployTestContext {
         format!("http://{}", self.env.server_addrs.registry_service_addr)
     }
 
-    async fn deploy(&self, request: DeployRequest) -> reqwest::Response {
+    async fn register(&self, request: RegisterRequest) -> reqwest::Response {
         self.client
-            .post(&format!("{}/deploy", self.admin_url()))
+            .post(&format!("{}/datasets", self.admin_url()))
             .json(&request)
             .send()
             .await
@@ -36,7 +36,7 @@ impl DeployTestContext {
 
     async fn register_dataset(&self, manifest: &Manifest) -> reqwest::Response {
         let manifest_json = serde_json::to_string(manifest).unwrap();
-        let payload = RegisterRequest {
+        let payload = RegistryRegisterRequest {
             manifest: manifest_json,
         };
 
@@ -115,116 +115,130 @@ impl DeployTestContext {
         manifest
     }
 
-    async fn verify_dataset_exists(&self, dataset_name: &str, version: &str) -> bool {
+    async fn verify_dataset_exists(&self, name: &str, version: &str) -> bool {
         self.env
             .metadata_db
-            .dataset_exists(dataset_name, version)
+            .dataset_exists(name, version)
             .await
             .unwrap()
     }
 }
 
 #[tokio::test]
-async fn test_deploy_registered_dataset() {
-    let ctx = DeployTestContext::setup("test_deploy_registered_dataset").await;
+async fn register_existing_dataset_without_manifest_succeeds() {
+    let ctx = RegisterTestCtx::setup("test_register_existing_dataset").await;
 
     // Register dataset
-    let manifest = DeployTestContext::create_test_manifest("deploy_test", "1.0.0", "test_owner");
+    let manifest = RegisterTestCtx::create_test_manifest("register_test", "1.0.0", "test_owner");
     let register_response = ctx.register_dataset(&manifest).await;
     assert_eq!(register_response.status(), StatusCode::OK);
 
-    // Deploy the registered dataset without manifest in payload
-    let deploy_request = DeployRequest {
-        dataset_name: "deploy_test".to_string(),
-        version: "1.0.0".to_string(),
+    // Register the existing dataset without manifest in payload
+    let register_request = RegisterRequest {
+        name: "register_test".parse().expect("valid dataset name"),
+        version: "1.0.0".parse().expect("valid version"),
         manifest: None,
     };
 
-    let response = ctx.deploy(deploy_request).await;
+    let response = ctx.register(register_request).await;
     assert_eq!(response.status(), StatusCode::OK);
-
-    let response_text = response.text().await.unwrap();
-    assert_eq!(response_text, "DEPLOYMENT_SUCCESSFUL");
 }
 
 #[tokio::test]
-async fn test_deploy_with_new_manifest() {
-    let ctx = DeployTestContext::setup("test_deploy_with_new_manifest").await;
+async fn register_new_dataset_with_manifest_succeeds() {
+    let ctx = RegisterTestCtx::setup("test_register_with_new_manifest").await;
 
     let manifest =
-        DeployTestContext::create_test_manifest("deploy_test_new", "1.0.0", "test_owner");
+        RegisterTestCtx::create_test_manifest("register_test_new", "1.0.0", "test_owner");
     let manifest_json = serde_json::to_string(&manifest).unwrap();
 
-    let deploy_request = DeployRequest {
-        dataset_name: "deploy_test_new".to_string(),
-        version: "1.0.0".to_string(),
+    let register_request = RegisterRequest {
+        name: "register_test_new".parse().expect("valid dataset name"),
+        version: "1.0.0".parse().expect("valid version"),
         manifest: Some(manifest_json),
     };
 
-    let response = ctx.deploy(deploy_request).await;
+    let response = ctx.register(register_request).await;
     assert_eq!(response.status(), StatusCode::OK);
 
-    let response_text = response.text().await.unwrap();
-    assert_eq!(response_text, "DEPLOYMENT_SUCCESSFUL");
-
-    assert!(ctx.verify_dataset_exists("deploy_test_new", "1.0.0").await);
+    assert!(
+        ctx.verify_dataset_exists("register_test_new", "1.0.0")
+            .await
+    );
 }
 
 #[tokio::test]
-async fn test_deploy_invalid_dataset_name() {
-    let ctx = DeployTestContext::setup("test_deploy_invalid_dataset_name").await;
+async fn register_with_invalid_dataset_name_fails() {
+    let ctx = RegisterTestCtx::setup("test_register_invalid_dataset_name").await;
 
-    let deploy_request = DeployRequest {
-        dataset_name: "invalid dataset name".to_string(), // Contains spaces
-        version: "1.0.0".to_string(),
-        manifest: None,
-    };
+    // This test expects deserialization to fail, so we need to construct the JSON manually
+    // since .parse() would panic before we can test the HTTP error
+    let json_payload = serde_json::json!({
+        "name": "invalid dataset name", // Contains spaces
+        "version": "1.0.0",
+        "manifest": null
+    });
 
-    let response = ctx.deploy(deploy_request).await;
+    let response = ctx
+        .client
+        .post(&format!("{}/datasets", ctx.admin_url()))
+        .json(&json_payload)
+        .send()
+        .await
+        .unwrap();
+
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
     let error_response: serde_json::Value = response.json().await.unwrap();
     let error_code = error_response["error_code"].as_str().unwrap();
     let error_message = error_response["error_message"].as_str().unwrap();
-    assert_eq!(error_code, "INVALID_REQUEST");
-    assert!(error_message.contains("invalid dataset name"));
+    assert_eq!(error_code, "INVALID_PAYLOAD_FORMAT");
+    assert!(error_message.contains("invalid request format"));
 }
 
 #[tokio::test]
-async fn test_deploy_invalid_version() {
-    let ctx = DeployTestContext::setup("test_deploy_invalid_version").await;
+async fn register_with_invalid_version_fails() {
+    let ctx = RegisterTestCtx::setup("test_register_invalid_version").await;
 
-    let deploy_request = DeployRequest {
-        dataset_name: "test_dataset".to_string(),
-        version: "not_a_version".to_string(), // Invalid semver
-        manifest: None,
-    };
+    // This test expects deserialization to fail, so we need to construct the JSON manually
+    let json_payload = serde_json::json!({
+        "name": "test_dataset",
+        "version": "not_a_version", // Invalid semver
+        "manifest": null
+    });
 
-    let response = ctx.deploy(deploy_request).await;
+    let response = ctx
+        .client
+        .post(&format!("{}/datasets", ctx.admin_url()))
+        .json(&json_payload)
+        .send()
+        .await
+        .unwrap();
+
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
     let error_response: serde_json::Value = response.json().await.unwrap();
     let error_code = error_response["error_code"].as_str().unwrap();
     let error_message = error_response["error_message"].as_str().unwrap();
-    assert_eq!(error_code, "INVALID_REQUEST");
-    assert!(error_message.contains("invalid dataset version"));
+    assert_eq!(error_code, "INVALID_PAYLOAD_FORMAT");
+    assert!(error_message.contains("invalid request format"));
 }
 
 #[tokio::test]
-async fn test_deploy_manifest_validation_error() {
-    let ctx = DeployTestContext::setup("test_deploy_manifest_validation_error").await;
+async fn register_with_mismatched_manifest_fails() {
+    let ctx = RegisterTestCtx::setup("test_register_manifest_validation_error").await;
 
-    let manifest = DeployTestContext::create_test_manifest("wrong_name", "2.0.0", "test_owner");
+    let manifest = RegisterTestCtx::create_test_manifest("wrong_name", "2.0.0", "test_owner");
     let manifest_json = serde_json::to_string(&manifest).unwrap();
 
     // Request with different name and version than in manifest
-    let deploy_request = DeployRequest {
-        dataset_name: "different_name".to_string(),
-        version: "1.0.0".to_string(),
+    let register_request = RegisterRequest {
+        name: "different_name".parse().expect("valid dataset name"),
+        version: "1.0.0".parse().expect("valid version"),
         manifest: Some(manifest_json),
     };
 
-    let response = ctx.deploy(deploy_request).await;
+    let response = ctx.register(register_request).await;
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
     let error_response: serde_json::Value = response.json().await.unwrap();
@@ -235,27 +249,29 @@ async fn test_deploy_manifest_validation_error() {
 }
 
 #[tokio::test]
-async fn test_deploy_dataset_already_exists() {
-    let ctx = DeployTestContext::setup("test_deploy_dataset_already_exists").await;
+async fn register_existing_dataset_with_manifest_fails() {
+    let ctx = RegisterTestCtx::setup("test_register_dataset_already_exists").await;
 
     // Register dataset
-    let manifest = DeployTestContext::create_test_manifest(
-        "deploy_test_existing_dataset",
+    let manifest = RegisterTestCtx::create_test_manifest(
+        "register_test_existing_dataset",
         "1.0.0",
         "test_owner",
     );
     let register_response = ctx.register_dataset(&manifest).await;
     assert_eq!(register_response.status(), StatusCode::OK);
 
-    // Try to deploy the same dataset with a manifest (should fail)
+    // Try to register the same dataset with a manifest (should fail)
     let manifest_json = serde_json::to_string(&manifest).unwrap();
-    let deploy_request = DeployRequest {
-        dataset_name: "deploy_test_existing_dataset".to_string(),
-        version: "1.0.0".to_string(),
+    let register_request = RegisterRequest {
+        name: "register_test_existing_dataset"
+            .parse()
+            .expect("valid dataset name"),
+        version: "1.0.0".parse().expect("valid version"),
         manifest: Some(manifest_json),
     };
 
-    let response = ctx.deploy(deploy_request).await;
+    let response = ctx.register(register_request).await;
     assert_eq!(response.status(), StatusCode::CONFLICT);
 
     let error_response: serde_json::Value = response.json().await.unwrap();
@@ -266,17 +282,17 @@ async fn test_deploy_dataset_already_exists() {
 }
 
 #[tokio::test]
-async fn test_deploy_missing_manifest() {
-    let ctx = DeployTestContext::setup("test_deploy_missing_manifest").await;
+async fn register_nonexistent_dataset_without_manifest_fails() {
+    let ctx = RegisterTestCtx::setup("test_register_missing_manifest").await;
 
-    // Try to deploy a non-existent dataset without a manifest
-    let deploy_request = DeployRequest {
-        dataset_name: "non_existent_dataset".to_string(),
-        version: "1.0.0".to_string(),
+    // Try to register a non-existent dataset without a manifest
+    let register_request = RegisterRequest {
+        name: "non_existent_dataset".parse().expect("valid dataset name"),
+        version: "1.0.0".parse().expect("valid version"),
         manifest: None,
     };
 
-    let response = ctx.deploy(deploy_request).await;
+    let response = ctx.register(register_request).await;
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
     let error_response: serde_json::Value = response.json().await.unwrap();
@@ -287,16 +303,16 @@ async fn test_deploy_missing_manifest() {
 }
 
 #[tokio::test]
-async fn test_deploy_invalid_manifest_json() {
-    let ctx = DeployTestContext::setup("test_deploy_invalid_manifest_json").await;
+async fn register_with_invalid_manifest_json_fails() {
+    let ctx = RegisterTestCtx::setup("test_register_invalid_manifest_json").await;
 
-    let deploy_request = DeployRequest {
-        dataset_name: "deploy_test_dataset".to_string(),
-        version: "1.0.0".to_string(),
+    let register_request = RegisterRequest {
+        name: "register_test_dataset".parse().expect("valid dataset name"),
+        version: "1.0.0".parse().expect("valid version"),
         manifest: Some("this is not valid json".to_string()),
     };
 
-    let response = ctx.deploy(deploy_request).await;
+    let response = ctx.register(register_request).await;
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
     let error_response: serde_json::Value = response.json().await.unwrap();
@@ -307,48 +323,49 @@ async fn test_deploy_invalid_manifest_json() {
 }
 
 #[tokio::test]
-async fn test_deploy_multiple_versions() {
-    let ctx = DeployTestContext::setup("test_deploy_multiple_versions").await;
+async fn register_multiple_versions_of_same_dataset_succeeds() {
+    let ctx = RegisterTestCtx::setup("test_register_multiple_versions").await;
 
     let versions = vec!["1.0.0", "1.1.0", "2.0.0"];
 
-    // Deploy multiple versions of the same dataset
+    // Register multiple versions of the same dataset
     for version in &versions {
-        let manifest = DeployTestContext::create_test_manifest(
-            "deploy_test_multi_version_deploy",
+        let manifest = RegisterTestCtx::create_test_manifest(
+            "register_test_multi_version",
             version,
             "test_owner",
         );
         let manifest_json = serde_json::to_string(&manifest).unwrap();
 
-        let deploy_request = DeployRequest {
-            dataset_name: "deploy_test_multi_version_deploy".to_string(),
-            version: version.to_string(),
+        let register_request = RegisterRequest {
+            name: "register_test_multi_version"
+                .parse()
+                .expect("valid dataset name"),
+            version: version.parse().expect("valid version"),
             manifest: Some(manifest_json),
         };
 
-        let response = ctx.deploy(deploy_request).await;
+        let response = ctx.register(register_request).await;
         assert_eq!(response.status(), StatusCode::OK);
-
-        let response_text = response.text().await.unwrap();
-        assert_eq!(response_text, "DEPLOYMENT_SUCCESSFUL");
     }
 
     // Verify all versions exist
     for version in &versions {
         assert!(
-            ctx.verify_dataset_exists("deploy_test_multi_version_deploy", version)
+            ctx.verify_dataset_exists("register_test_multi_version", version)
                 .await
         );
     }
 
-    // Now try to deploy an existing version again without manifest
-    let deploy_request = DeployRequest {
-        dataset_name: "deploy_test_multi_version_deploy".to_string(),
-        version: "1.0.0".to_string(),
+    // Now try to register an existing version again without manifest
+    let register_request = RegisterRequest {
+        name: "register_test_multi_version"
+            .parse()
+            .expect("valid dataset name"),
+        version: "1.0.0".parse().expect("valid version"),
         manifest: None,
     };
 
-    let response = ctx.deploy(deploy_request).await;
+    let response = ctx.register(register_request).await;
     assert_eq!(response.status(), StatusCode::OK);
 }

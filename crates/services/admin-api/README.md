@@ -59,10 +59,10 @@ and active storage locations for each table.
 
 See [`handlers/datasets/get_all.rs`](src/handlers/datasets/get_all.rs) for more detailed information about this endpoint.
 
-#### `GET /datasets/{id}`
-Retrieves detailed information about a specific dataset by its ID,
+#### `GET /datasets/{name}`
+Retrieves detailed information about a specific dataset by its name,
 including its tables and active locations.
-The `id` parameter specifies the dataset name to retrieve and must be a valid
+The `name` parameter specifies the dataset name to retrieve and must be a valid
 dataset name format.
 Returns dataset information including name, type, version details,
 and complete list of tables with their network associations and storage
@@ -70,33 +70,37 @@ locations.
 
 See [`handlers/datasets/get_by_id.rs`](src/handlers/datasets/get_by_id.rs) for more detailed information about this endpoint.
 
-#### `POST /datasets` (alias for `/deploy`)
-Deploys a new dataset configuration to the system.
-Accepts a JSON payload containing `dataset_name`, `version`,
+#### `GET /datasets/{name}/versions/{version}`
+Retrieves detailed information about a specific version of a dataset.
+This endpoint provides version-specific dataset information when you need to access a particular version rather than the latest version.
+The `name` parameter specifies the dataset name and the `version` parameter specifies the exact version to retrieve.
+Returns dataset information including name, type, version details, and complete list of tables with their network associations and storage locations for the specified version.
+
+See [`handlers/datasets/get_by_id.rs`](src/handlers/datasets/get_by_id.rs) for more detailed information about this endpoint.
+
+#### `POST /datasets`
+Registers a new dataset configuration to the system.
+Accepts a JSON payload containing `name`, `version`,
 and optional `manifest` fields.
-Supports multiple deployment scenarios including existing datasets,
+Supports multiple registration scenarios including existing datasets,
 new manifest datasets, and new dataset definitions.
-Returns deployment success confirmation upon successful completion.
+Returns registration success confirmation upon successful completion.
 
-See [`handlers/datasets/deploy.rs`](src/handlers/datasets/deploy.rs) for more detailed information about this endpoint.
+See [`handlers/datasets/register.rs`](src/handlers/datasets/register.rs) for more detailed information about this endpoint.
 
-#### `POST /deploy`
-Primary endpoint for dataset deployment operations.
-Accepts a JSON payload containing `dataset_name`, `version`,
-and optional `manifest` fields.
-Handles manifest registration for new datasets and schedules dataset dump jobs
-via the scheduler.
-
-See [`handlers/datasets/deploy.rs`](src/handlers/datasets/deploy.rs) for more detailed information about this endpoint.
-
-#### `POST /datasets/{id}/dump`
+#### `POST /datasets/{name}/dump`
 Triggers a data extraction job for the specified dataset.
-The `id` parameter identifies the target dataset name,
+The `name` parameter identifies the target dataset name,
 and the request accepts a JSON payload with `end_block` (optional last block
-number) and `wait_for_completion` (optional boolean, default false) options.
-Supports both asynchronous mode that returns immediately with job scheduling
-confirmation, and synchronous mode that waits for job completion and returns
-completion confirmation.
+number) option. Returns immediately with job scheduling confirmation.
+
+See [`handlers/datasets/dump.rs`](src/handlers/datasets/dump.rs) for more detailed information about this endpoint.
+
+#### `POST /datasets/{name}/versions/{version}/dump`
+Triggers a data extraction job for a specific version of a dataset.
+This endpoint allows you to run extraction jobs against a particular dataset version rather than the latest version.
+The `name` parameter identifies the target dataset name, the `version` parameter specifies the dataset version to use, and the request accepts a JSON payload with `end_block` (optional last block number) option.
+Returns immediately with job scheduling confirmation.
 
 See [`handlers/datasets/dump.rs`](src/handlers/datasets/dump.rs) for more detailed information about this endpoint.
 

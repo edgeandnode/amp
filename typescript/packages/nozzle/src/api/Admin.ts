@@ -13,9 +13,14 @@ import * as Model from "../Model.ts"
 import * as Error from "./Error.ts"
 
 /**
- * The dataset ID parameter (GET /datasets/{datasetId}).
+ * The dataset name parameter (GET /datasets/{name}).
  */
-const datasetId = HttpApiSchema.param("datasetId", Model.DatasetName)
+const datasetName = HttpApiSchema.param("name", Model.DatasetName)
+
+/**
+ * The dataset version parameter (GET /datasets/{name}/versions/{version}).
+ */
+const datasetVersion = HttpApiSchema.param("version", Model.DatasetVersion)
 
 /**
  * The job ID parameter (GET /jobs/{jobId}, DELETE /jobs/{jobId}, PUT /jobs/{jobId}/stop).
@@ -28,21 +33,40 @@ const jobId = HttpApiSchema.param("jobId", Model.JobIdParam)
 const locationId = HttpApiSchema.param("locationId", Model.LocationIdParam)
 
 /**
- * The dump dataset endpoint (POST /datasets/{datasetId}/dump).
+ * The dump dataset endpoint (POST /datasets/{name}/dump).
  */
-const dumpDataset = HttpApiEndpoint.post("dumpDataset")`/datasets/${datasetId}/dump`
+const dumpDataset = HttpApiEndpoint.post("dumpDataset")`/datasets/${datasetName}/dump`
+  .addError(Error.DatasetNotFound)
   .addError(Error.InvalidRequest)
   .addError(Error.DatasetStoreError)
-  .addError(Error.InvalidDatasetId)
+  .addError(Error.InvalidSelector)
   .addError(Error.UnexpectedJobStatus)
   .addError(Error.SchedulerError)
   .addError(Error.MetadataDbError)
   .addSuccess(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }))
   .setPayload(
     Schema.Struct({
-      version: Model.DatasetVersion.pipe(Schema.optional),
       endBlock: Schema.Number.pipe(Schema.optional, Schema.fromKey("end_block")),
-      waitForCompletion: Schema.Boolean.pipe(Schema.optional, Schema.fromKey("wait_for_completion")),
+    }),
+  )
+
+/**
+ * The dump dataset with version endpoint (POST /datasets/{name}/versions/{version}/dump).
+ */
+const dumpDatasetVersion = HttpApiEndpoint.post(
+  "dumpDatasetVersion",
+)`/datasets/${datasetName}/versions/${datasetVersion}/dump`
+  .addError(Error.DatasetNotFound)
+  .addError(Error.InvalidRequest)
+  .addError(Error.DatasetStoreError)
+  .addError(Error.InvalidSelector)
+  .addError(Error.UnexpectedJobStatus)
+  .addError(Error.SchedulerError)
+  .addError(Error.MetadataDbError)
+  .addSuccess(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }))
+  .setPayload(
+    Schema.Struct({
+      endBlock: Schema.Number.pipe(Schema.optional, Schema.fromKey("end_block")),
     }),
   )
 
@@ -51,23 +75,24 @@ const dumpDataset = HttpApiEndpoint.post("dumpDataset")`/datasets/${datasetId}/d
  *
  * - InvalidRequest: Invalid request parameters.
  * - DatasetStoreError: Failed to load dataset from store.
- * - InvalidDatasetId: The dataset ID is invalid.
+ * - InvalidSelector: The dataset selector is invalid.
  * - UnexpectedJobStatus: The job status is unexpected.
  * - SchedulerError: Failed to schedule the dump job.
  * - MetadataDbError: Database error while polling job status.
  */
 export type DumpDatasetError =
+  | Error.DatasetNotFound
   | Error.InvalidRequest
   | Error.DatasetStoreError
-  | Error.InvalidDatasetId
+  | Error.InvalidSelector
   | Error.UnexpectedJobStatus
   | Error.SchedulerError
   | Error.MetadataDbError
 
 /**
- * The deploy dataset endpoint (POST /datasets).
+ * The register dataset endpoint (POST /datasets).
  */
-const deployDataset = HttpApiEndpoint.post("deployDataset")`/datasets`
+const registerDataset = HttpApiEndpoint.post("registerDataset")`/datasets`
   .addError(Error.InvalidRequest)
   .addError(Error.InvalidManifest)
   .addError(Error.ManifestValidationError)
@@ -80,14 +105,14 @@ const deployDataset = HttpApiEndpoint.post("deployDataset")`/datasets`
   .addSuccess(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }))
   .setPayload(
     Schema.Struct({
-      datasetName: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("dataset_name")),
+      name: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("name")),
       version: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("version")),
       manifest: Schema.parseJson(Schema.Union(Model.DatasetManifest, Model.DatasetRpc)).pipe(Schema.optional),
     }),
   )
 
 /**
- * Error type for the `deployDataset` endpoint.
+ * Error type for the `registerDataset` endpoint.
  *
  * - InvalidRequest: Invalid request parameters or dataset name format.
  * - InvalidManifest: The manifest is semantically invalid.
@@ -95,10 +120,11 @@ const deployDataset = HttpApiEndpoint.post("deployDataset")`/datasets`
  * - ManifestRegistrationError: Failed to register manifest in system.
  * - ManifestRequired: Dataset not found and manifest not provided.
  * - DatasetAlreadyExists: Dataset exists and manifest provided (conflict).
- * - SchedulerError: Failure in scheduling the dataset dump after deployment.
+ * - SchedulerError: Failure in scheduling the dataset dump after registration.
  * - DatasetDefStoreError: Failure in dataset definition store operations.
+ * - DatasetStoreError: Failed to load dataset from store.
  */
-export type DeployDatasetError =
+export type RegisterDatasetError =
   | Error.InvalidRequest
   | Error.InvalidManifest
   | Error.ManifestValidationError
@@ -130,22 +156,42 @@ const getDatasets = HttpApiEndpoint.get("getDatasets")`/datasets`
 export type GetDatasetsError = Error.DatasetStoreError | Error.MetadataDbError
 
 /**
- * The get dataset by ID endpoint (GET /datasets/{datasetId}).
+ * The get dataset by name endpoint (GET /datasets/{name}).
  */
-const getDatasetById = HttpApiEndpoint.get("getDatasetById")`/datasets/${datasetId}`
-  .addError(Error.InvalidDatasetId)
+const getDataset = HttpApiEndpoint.get("getDataset")`/datasets/${datasetName}`
+  .addError(Error.InvalidSelector)
   .addError(Error.DatasetNotFound)
   .addError(Error.DatasetStoreError)
   .addSuccess(Model.DatasetInfo)
 
 /**
- * Error type for the `getDatasetById` endpoint.
+ * Error type for the `getDataset` endpoint.
  *
- * - InvalidDatasetId: The dataset ID is invalid.
+ * - InvalidSelector: The dataset selector is invalid.
  * - DatasetNotFound: The dataset was not found.
  * - DatasetStoreError: Failed to load dataset from store.
  */
-export type GetDatasetByIdError = Error.InvalidDatasetId | Error.DatasetNotFound | Error.DatasetStoreError
+export type GetDatasetError = Error.InvalidSelector | Error.DatasetNotFound | Error.DatasetStoreError
+
+/**
+ * The get dataset by name and version endpoint (GET /datasets/{name}/versions/{version}).
+ */
+const getDatasetVersion = HttpApiEndpoint.get(
+  "getDatasetVersion",
+)`/datasets/${datasetName}/versions/${datasetVersion}`
+  .addError(Error.InvalidSelector)
+  .addError(Error.DatasetNotFound)
+  .addError(Error.DatasetStoreError)
+  .addSuccess(Model.DatasetInfo)
+
+/**
+ * Error type for the `getDatasetVersion` endpoint.
+ *
+ * - InvalidSelector: The dataset selector is invalid.
+ * - DatasetNotFound: The dataset was not found.
+ * - DatasetStoreError: Failed to load dataset from store.
+ */
+export type GetDatasetVersionError = Error.InvalidSelector | Error.DatasetNotFound | Error.DatasetStoreError
 
 /**
  * The get jobs endpoint (GET /jobs).
@@ -313,9 +359,11 @@ export type DeleteLocationByIdError = Error.InvalidLocationId | Error.LocationNo
  * The api group for the dataset endpoints.
  */
 export class DatasetGroup extends HttpApiGroup.make("dataset")
-  .add(deployDataset)
+  .add(registerDataset)
   .add(dumpDataset)
-  .add(getDatasetById)
+  .add(dumpDatasetVersion)
+  .add(getDataset)
+  .add(getDatasetVersion)
   .add(getDatasets)
 {}
 
@@ -360,12 +408,6 @@ export interface DumpDatasetOptions {
    * The block up to which to dump.
    */
   readonly endBlock?: number | undefined
-  /**
-   * Whether to wait for the dump to complete before returning.
-   *
-   * @default false
-   */
-  readonly waitForCompletion?: boolean | undefined
 }
 
 /**
@@ -373,39 +415,69 @@ export interface DumpDatasetOptions {
  */
 export class Admin extends Context.Tag("Nozzle/Admin")<Admin, {
   /**
-   * Deploy a dataset manifest.
+   * Register a dataset manifest.
    *
-   * @param name The name of the dataset to deploy.
-   * @param version The version of the dataset to deploy.
-   * @return Whether the deployment was successful.
+   * @param name The name of the dataset to register.
+   * @param version The version of the dataset to register.
+   * @return Whether the registration was successful.
    */
-  readonly deployDataset: (
+  readonly registerDataset: (
     name: string,
     version: string,
     manifest?: Model.DatasetManifest | Model.DatasetRpc,
-  ) => Effect.Effect<string, HttpClientError.HttpClientError | DeployDatasetError>
+  ) => Effect.Effect<string, HttpClientError.HttpClientError | RegisterDatasetError>
 
   /**
    * Dump a dataset.
    *
-   * @param datasetId The ID of the dataset to dump.
+   * @param name The name of the dataset to dump.
    * @param options The options for dumping.
    * @return Whether the dump or dump scheduling was successful.
    */
   readonly dumpDataset: (
-    datasetId: string,
-    options?: DumpDatasetOptions | undefined,
+    name: string,
+    options?: {
+      endBlock?: number | undefined
+    } | undefined,
   ) => Effect.Effect<string, HttpClientError.HttpClientError | DumpDatasetError>
 
   /**
-   * Get a dataset by ID.
+   * Dump a dataset with a specific version.
    *
-   * @param datasetId The ID of the dataset to get.
+   * @param name The name of the dataset to dump.
+   * @param version The version of the dataset to dump.
+   * @param options The options for dumping.
+   * @return Whether the dump or dump scheduling was successful.
+   */
+  readonly dumpDatasetVersion: (
+    name: string,
+    version: string,
+    options?: {
+      endBlock?: number | undefined
+    } | undefined,
+  ) => Effect.Effect<string, HttpClientError.HttpClientError | DumpDatasetError>
+
+  /**
+   * Get a dataset by name.
+   *
+   * @param name The name of the dataset to get.
    * @return The dataset information.
    */
-  readonly getDatasetById: (
-    datasetId: string,
-  ) => Effect.Effect<Model.DatasetInfo, HttpClientError.HttpClientError | GetDatasetByIdError>
+  readonly getDataset: (
+    name: string,
+  ) => Effect.Effect<Model.DatasetInfo, HttpClientError.HttpClientError | GetDatasetError>
+
+  /**
+   * Get a dataset by name and version.
+   *
+   * @param name The name of the dataset to get.
+   * @param version The version of the dataset to get.
+   * @return The dataset information.
+   */
+  readonly getDatasetVersion: (
+    name: string,
+    version: string,
+  ) => Effect.Effect<Model.DatasetInfo, HttpClientError.HttpClientError | GetDatasetVersionError>
 
   /**
    * Get all datasets.
@@ -505,11 +577,11 @@ export const make = Effect.fn(function*(url: string) {
     baseUrl: url,
   })
 
-  const deployDataset = Effect.fn("deployDataset")(
+  const registerDataset = Effect.fn("registerDataset")(
     function*(name: string, version: string, manifest?: Model.DatasetManifest | Model.DatasetRpc) {
-      const request = client.dataset.deployDataset({
+      const request = client.dataset.registerDataset({
         payload: {
-          datasetName: name,
+          name,
           version,
           manifest,
         },
@@ -527,21 +599,17 @@ export const make = Effect.fn(function*(url: string) {
   )
 
   const dumpDataset = Effect.fn("dumpDataset")(function*(
-    datasetId: string,
+    name: string,
     options?: {
-      version?: string | undefined
       endBlock?: number | undefined
-      waitForCompletion?: boolean | undefined
     },
   ) {
     const request = client.dataset.dumpDataset({
       path: {
-        datasetId,
+        name,
       },
       payload: {
-        version: options?.version,
         endBlock: options?.endBlock,
-        waitForCompletion: options?.waitForCompletion,
       },
     })
 
@@ -555,10 +623,55 @@ export const make = Effect.fn(function*(url: string) {
     return result
   })
 
-  const getDatasetById = Effect.fn("getDatasetById")(function*(datasetId: string) {
-    const request = client.dataset.getDatasetById({
+  const dumpDatasetVersion = Effect.fn("dumpDatasetVersion")(function*(
+    name: string,
+    version: string,
+    options?: {
+      endBlock?: number | undefined
+    },
+  ) {
+    const request = client.dataset.dumpDatasetVersion({
       path: {
-        datasetId,
+        name,
+        version,
+      },
+      payload: {
+        endBlock: options?.endBlock,
+      },
+    })
+
+    const result = yield* request.pipe(
+      Effect.catchTags({
+        HttpApiDecodeError: Effect.die,
+        ParseError: Effect.die,
+      }),
+    )
+
+    return result
+  })
+
+  const getDataset = Effect.fn("getDataset")(function*(name: string) {
+    const request = client.dataset.getDataset({
+      path: {
+        name,
+      },
+    })
+
+    const result = yield* request.pipe(
+      Effect.catchTags({
+        HttpApiDecodeError: Effect.die,
+        ParseError: Effect.die,
+      }),
+    )
+
+    return result
+  })
+
+  const getDatasetVersion = Effect.fn("getDatasetVersion")(function*(name: string, version: string) {
+    const request = client.dataset.getDatasetVersion({
+      path: {
+        name,
+        version,
       },
     })
 
@@ -707,8 +820,10 @@ export const make = Effect.fn(function*(url: string) {
 
   return {
     dumpDataset,
-    deployDataset,
-    getDatasetById,
+    dumpDatasetVersion,
+    registerDataset,
+    getDataset,
+    getDatasetVersion,
     getDatasets,
     getJobs,
     getJobById,
