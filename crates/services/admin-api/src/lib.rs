@@ -32,6 +32,10 @@ pub async fn serve(
             "/datasets",
             get(datasets::get_all::handler).post(datasets::register::handler),
         )
+        .route(
+            "/datasets/schema/analyze",
+            post(datasets::schema_analyze::handler),
+        )
         .route("/datasets/{name}", get(datasets::get_by_id::handler))
         .route(
             "/datasets/{name}/versions/{version}",

@@ -88,6 +88,15 @@ Returns registration success confirmation upon successful completion.
 
 See [`handlers/datasets/register.rs`](src/handlers/datasets/register.rs) for more detailed information about this endpoint.
 
+#### `POST /datasets/schema/analyze`
+Analyzes SQL queries to determine their output schema by validating them against all registered datasets in the system.
+This endpoint provides comprehensive SQL validation and schema inference by parsing SQL syntax, loading actual dataset definitions from the registry, creating planning context with real table schemas, and using DataFusion's query planner to determine output schema without execution.
+Accepts a JSON payload with `sql_query` (required SQL query to analyze) and `is_sql_dataset` (optional boolean flag indicating if this is a SQL dataset, which affects block number field inclusion).
+Returns the determined output schema and list of networks referenced by the query.
+The validation works with real registered datasets and their actual schemas, ensuring datasets exist, tables are valid, and column references are correct.
+
+See [`handlers/datasets/schema_analyze.rs`](src/handlers/datasets/schema_analyze.rs) for more detailed information about this endpoint.
+
 #### `POST /datasets/{name}/dump`
 Triggers a data extraction job for the specified dataset.
 The `name` parameter identifies the target dataset name,
