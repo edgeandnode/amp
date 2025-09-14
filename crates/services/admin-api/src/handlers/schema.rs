@@ -1,5 +1,3 @@
-use std::collections::BTreeSet;
-
 use axum::{Json, extract::State, http::StatusCode};
 use common::{
     manifest::derived::TableSchema,
@@ -12,7 +10,7 @@ use tracing::instrument;
 
 use crate::{ctx::Ctx, handlers::common::NonEmptyString};
 
-/// Handler for the `/datasets/schema/analyze` endpoint that provides SQL schema analysis.
+/// Handler for the `/schema` endpoint that provides SQL schema analysis.
 ///
 /// This endpoint performs comprehensive SQL validation and schema inference by:
 /// 1. **Parsing SQL**: Validates syntax using DataFusion's SQL parser
@@ -67,15 +65,17 @@ pub async fn handler(
         schema
     };
 
-    let networks: BTreeSet<String> = query_ctx
+    let mut networks: Vec<String> = query_ctx
         .catalog()
         .iter()
         .map(|t| t.table().network().to_string())
         .collect();
+    networks.sort();
+    networks.dedup();
 
     Ok(Json(OutputSchemaResponse {
         schema: schema.into(),
-        networks: networks.into_iter().collect(),
+        networks,
     }))
 }
 
