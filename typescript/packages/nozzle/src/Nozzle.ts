@@ -14,7 +14,6 @@ import * as String from "effect/String"
 import * as Admin from "./api/Admin.ts"
 import * as ArrowFlight from "./api/ArrowFlight.ts"
 import * as JsonLines from "./api/JsonLines.ts"
-import * as Registry from "./api/Registry.ts"
 import * as Model from "./Model.ts"
 import * as Utils from "./Utils.ts"
 
@@ -107,13 +106,6 @@ export interface NozzleOptions {
   readonly adminPort?: number | undefined
 
   /**
-   * The port to run the registry service on.
-   *
-   * @default 1611
-   */
-  readonly registryPort?: number | undefined
-
-  /**
    * The port to run the json-lines service on.
    *
    * @default 1603
@@ -143,7 +135,6 @@ export const make = Effect.fn(function*(options: NozzleOptions = {}) {
     nozzleExecutable = "nozzle",
     printOutput = "none",
     providerDefinitions = [],
-    registryPort = 1611,
     tempDirectory = undefined,
   } = options
 
@@ -169,7 +160,6 @@ export const make = Effect.fn(function*(options: NozzleOptions = {}) {
     |spill_location = []
     |flight_addr = "0.0.0.0:${arrowFlightPort}"
     |jsonl_addr = "0.0.0.0:${jsonLinesPort}"
-    |registry_service_addr = "0.0.0.0:${registryPort}"
     |admin_api_addr = "0.0.0.0:${adminPort}"
   `
 
@@ -208,7 +198,6 @@ export const make = Effect.fn(function*(options: NozzleOptions = {}) {
   // This effect waits for all ports to be open.
   const open = Effect.all([
     Utils.waitForPort(adminPort),
-    Utils.waitForPort(registryPort),
     Utils.waitForPort(jsonLinesPort),
     Utils.waitForPort(arrowFlightPort),
   ], {
@@ -250,13 +239,11 @@ export const layer = (options: NozzleOptions = {}) => {
     adminPort = 1610,
     arrowFlightPort = 1602,
     jsonLinesPort = 1603,
-    registryPort = 1611,
   } = options
 
   return make(options).pipe(
     Layer.scoped(Nozzle),
     Layer.merge(Admin.layer(`http://localhost:${adminPort}`)),
-    Layer.merge(Registry.layer(`http://localhost:${registryPort}`)),
     Layer.merge(JsonLines.layer(`http://localhost:${jsonLinesPort}`)),
     Layer.merge(ArrowFlight.layer(createGrpcTransport({ baseUrl: `http://localhost:${arrowFlightPort}` }))),
   )

@@ -7,10 +7,9 @@ import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Admin from "../../api/Admin.ts"
-import * as Registry from "../../api/Registry.ts"
 import * as ManifestContext from "../../ManifestContext.ts"
 import * as Model from "../../Model.ts"
-import { adminUrl, configFile, manifestFile, registryUrl } from "../common.ts"
+import { adminUrl, configFile, manifestFile } from "../common.ts"
 
 export const dump = Command.make("dump", {
   args: {
@@ -26,7 +25,6 @@ export const dump = Command.make("dump", {
       Options.withDescription("The block number to end at, inclusive"),
       Options.optional,
     ),
-    registryUrl,
     adminUrl,
   },
 }).pipe(
@@ -61,7 +59,7 @@ export const dump = Command.make("dump", {
       onSome: () => Layer.empty,
       onNone: () =>
         ManifestContext.layerFromFile({ manifest: args.manifestFile, config: args.configFile }).pipe(
-          Layer.provide(Registry.layer(`${args.registryUrl}`)),
+          Layer.provide(Admin.layer(`${args.adminUrl}`)),
         ),
     }).pipe(Layer.merge(Admin.layer(`${args.adminUrl}`)))
   ),

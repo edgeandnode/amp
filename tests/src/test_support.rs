@@ -153,7 +153,6 @@ impl TestEnv {
             true,
             true,
             true,
-            true,
             None,
         )
         .await?;
@@ -242,7 +241,6 @@ url = "ipc://{}""#,
             config.clone(),
             metadata_db.clone(),
             false,
-            true,
             true,
             true,
             true,
@@ -614,10 +612,6 @@ impl DatasetPackage {
         let status = tokio::process::Command::new("pnpm")
             .args(&["nozzl", "build"])
             .env(
-                "NOZZLE_REGISTRY_URL",
-                &format!("http://{}", bound_addrs.registry_service_addr),
-            )
-            .env(
                 "NOZZLE_ADMIN_URL",
                 &format!("http://{}", bound_addrs.admin_api_addr),
             )
@@ -646,43 +640,6 @@ impl DatasetPackage {
         }
         let status = tokio::process::Command::new("pnpm")
             .args(&args)
-            .env(
-                "NOZZLE_REGISTRY_URL",
-                &format!("http://{}", bound_addrs.registry_service_addr),
-            )
-            .env(
-                "NOZZLE_ADMIN_URL",
-                &format!("http://{}", bound_addrs.admin_api_addr),
-            )
-            .current_dir(&self.path)
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
-            .status()
-            .await?;
-
-        if status != ExitStatus::default() {
-            return Err(BoxError::from(format!(
-                "Failed to register dataset {}: pnpm nozzl register failed with exit code {status}",
-                self.name,
-            )));
-        }
-
-        Ok(())
-    }
-
-    #[instrument(skip_all, err)]
-    pub async fn deploy(&self, bound_addrs: BoundAddrs) -> Result<(), BoxError> {
-        let mut args = vec!["nozzl", "deploy"];
-        if let Some(config) = &self.config {
-            args.push("--config");
-            args.push(config);
-        }
-        let status = tokio::process::Command::new("pnpm")
-            .args(&args)
-            .env(
-                "NOZZLE_REGISTRY_URL",
-                &format!("http://{}", bound_addrs.registry_service_addr),
-            )
             .env(
                 "NOZZLE_ADMIN_URL",
                 &format!("http://{}", bound_addrs.admin_api_addr),

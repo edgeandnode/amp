@@ -6,8 +6,6 @@ use dataset_store::DatasetStore;
 use dump::worker::Worker;
 use metadata_db::MetadataDb;
 use nozzle::dump_cmd;
-use registry_service::handlers::register::register_manifest;
-use tracing::info;
 
 #[cfg(feature = "snmalloc")]
 #[global_allocator]
@@ -85,9 +83,6 @@ enum Command {
         /// Enable JSON Lines Server.
         #[arg(long, env = "JSONL_SERVER")]
         jsonl_server: bool,
-        /// Enable Registry Server.
-        #[arg(long, env = "REGISTRY_SERVER")]
-        registry_server: bool,
         /// Enable Admin API Server.
         #[arg(long, env = "ADMIN_SERVER")]
         admin_server: bool,
@@ -157,7 +152,7 @@ async fn main_inner() -> Result<(), BoxError> {
         .map(|meter| Arc::new(dump::metrics::MetricsRegistry::new(meter)));
 
     // Log version info
-    info!(
+    tracing::info!(
         "built on {}, git describe {}",
         env!("VERGEN_BUILD_DATE"),
         env!("VERGEN_GIT_DESCRIBE"),
@@ -184,7 +179,7 @@ async fn main_inner() -> Result<(), BoxError> {
 
             for dataset in datasets {
                 if dataset.ends_with(".json") {
-                    info!("Registering manifest: {}", dataset);
+                    tracing::info!("Registering manifest: {}", dataset);
                     let manifest = std::fs::read_to_string(&dataset)?;
                     let manifest: Manifest = serde_json::from_str(&manifest)?;
                     register_manifest(&dataset_store, &metadata_db, &manifest).await?;
@@ -216,13 +211,11 @@ async fn main_inner() -> Result<(), BoxError> {
             dev,
             mut flight_server,
             mut jsonl_server,
-            mut registry_server,
             mut admin_server,
         } => {
-            if !flight_server && !jsonl_server && !registry_server && !admin_server {
+            if !flight_server && !jsonl_server && !admin_server {
                 flight_server = true;
                 jsonl_server = true;
-                registry_server = true;
                 admin_server = true;
             }
 
@@ -232,7 +225,6 @@ async fn main_inner() -> Result<(), BoxError> {
                 dev,
                 flight_server,
                 jsonl_server,
-                registry_server,
                 admin_server,
                 metrics_registry,
             )
@@ -278,10 +270,10 @@ async fn main_inner() -> Result<(), BoxError> {
                 .as_ref()
                 .ok_or("metadata_db.url is required for migrate command")?;
 
-            info!("Running migrations on metadata database...");
+            tracing::info!("Running migrations on metadata database...");
             let _metadata_db =
                 MetadataDb::connect_with_config(url, config.metadata_db.pool_size, true).await?;
-            info!("Migrations completed successfully");
+            tracing::info!("Migrations completed successfully");
 
             Ok(())
         }
@@ -306,4 +298,40 @@ async fn load_config_and_metadata_db(
     let config = Arc::new(Config::load(config, true, None, allow_temp_db).await?);
     let metadata_db = config.metadata_db().await?.into();
     Ok((config, metadata_db))
+}
+
+async fn register_manifest(
+    dataset_store: &DatasetStore,
+    metadata_db: &MetadataDb,
+    manifest: &Manifest,
+) -> Result<(), BoxError> {
+    let name = &manifest.name;
+    let version = &manifest.version;
+
+    // Check if the dataset with the given name and version already exists in the registry.
+    if metadata_db
+        .dataset_exists(name, &version.to_string())
+        .await?
+    {
+        return Err(format!("Dataset '{name}' version '{version}' already registered").into());
+    }
+
+    let registry_info = manifest.extract_registry_info();
+    let manifest_json = serde_json::to_string(&manifest)
+        .map_err(|err| format!("Failed to serialize manifest to JSON: {err}"))?;
+    let dataset_defs_store = dataset_store.dataset_defs_store();
+    let manifest_path = object_store::path::Path::from(registry_info.manifest.clone());
+
+    dataset_defs_store
+        .prefixed_store()
+        .put(&manifest_path, manifest_json.into())
+        .await
+        .map_err(|err| format!("Failed to store manifest in dataset definitions store: {err}"))?;
+
+    metadata_db
+        .register_dataset(registry_info)
+        .await
+        .map_err(|err| format!("Failed to register dataset in metadata database: {err}"))?;
+
+    Ok(())
 }
