@@ -293,10 +293,9 @@ impl Config {
 
         let mut compaction = config_file.compaction;
 
-        compaction.compactor_enabled = compaction.block_threshold > 0
-            || compaction.byte_threshold > 0
-            || compaction.row_threshold > 0;
-
+        // Enforce minimum values for compaction config
+        compaction.metadata_concurrency = compaction.metadata_concurrency.max(1);
+        compaction.write_concurrency = compaction.write_concurrency.max(1);
         compaction.min_file_count = compaction.min_file_count.max(2);
 
         Ok(Self {
