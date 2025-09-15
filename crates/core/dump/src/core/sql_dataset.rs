@@ -202,7 +202,7 @@ pub async fn dump_table(
         };
 
         if is_incr {
-            let latest_range = table.latest_range().await?;
+            let latest_range = table.canonical_chain().await?.map(|c| c.last().clone());
             let resume_watermark = latest_range.map(|r| ResumeWatermark::from_ranges(vec![r]));
             dump_sql_query(
                 &ctx,

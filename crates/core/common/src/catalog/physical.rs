@@ -30,7 +30,7 @@ use crate::{
     metadata::{
         FileMetadata, nozzle_metadata_from_parquet_file,
         parquet::ParquetMeta,
-        segments::{BlockRange, Chain, Segment, canonical_chain, missing_ranges},
+        segments::{Chain, Segment, canonical_chain, missing_ranges},
     },
     store::Store,
 };
@@ -496,12 +496,6 @@ impl PhysicalTable {
     ) -> Result<Vec<RangeInclusive<BlockNum>>, BoxError> {
         let segments = self.segments().await?;
         Ok(missing_ranges(segments, desired))
-    }
-
-    pub async fn latest_range(&self) -> Result<Option<BlockRange>, BoxError> {
-        let segments = self.segments().await?;
-        let latest_segment = segments.iter().max_by_key(|s| s.object.last_modified);
-        Ok(latest_segment.map(|s| s.range.clone()))
     }
 
     pub async fn canonical_chain(&self) -> Result<Option<Chain>, BoxError> {
