@@ -196,7 +196,10 @@ impl<T: BlockStreamer + Send> BlockStreamer for BlockStreamerWithRetry<T> {
         end: BlockNum,
     ) -> impl Stream<Item = Result<RawDatasetRows, BoxError>> + Send {
         const DEBUG_RETRY_LIMIT: u16 = 8;
+        const DEBUG_RETRY_DELAY: Duration = Duration::from_millis(50);
         const WARN_RETRY_LIMIT: u16 = 16;
+        const WARN_RETRY_DELAY: Duration = Duration::from_millis(100);
+        const ERROR_RETRY_DELAY: Duration = Duration::from_millis(300);
 
         let mut current_block = start;
         let mut blocks_sent = 0;
@@ -218,14 +221,14 @@ impl<T: BlockStreamer + Send> BlockStreamer for BlockStreamerWithRetry<T> {
                             if num_retries < DEBUG_RETRY_LIMIT {
                                 num_retries += 1;
                                 tracing::debug!(block = %current_block, error = ?e, "Block streaming failed, retrying");
-                                tokio::time::sleep(Duration::from_millis(50)).await;
+                                tokio::time::sleep(DEBUG_RETRY_DELAY).await;
                             } else if num_retries < WARN_RETRY_LIMIT {
                                 num_retries += 1;
                                 tracing::warn!(block = %current_block, error = ?e, "Block streaming failed, retrying");
-                                tokio::time::sleep(Duration::from_millis(100)).await;
+                                tokio::time::sleep(WARN_RETRY_DELAY).await;
                             } else {
                                 tracing::error!(block = %current_block, error = ?e, "Block streaming failed, retrying");
-                                tokio::time::sleep(Duration::from_millis(300)).await;
+                                tokio::time::sleep(ERROR_RETRY_DELAY).await;
                             }
                             current_block = start + blocks_sent;
                             continue 'retry;
