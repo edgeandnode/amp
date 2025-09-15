@@ -1,13 +1,6 @@
 import * as Path from "@effect/platform/Path"
 import { layer } from "@effect/vitest"
-import {
-  assertEquals,
-  assertFailure,
-  assertInstanceOf,
-  assertSome,
-  assertSuccess,
-  deepStrictEqual,
-} from "@effect/vitest/utils"
+import { assertEquals, assertFailure, assertInstanceOf, assertSome, deepStrictEqual } from "@effect/vitest/utils"
 import * as Array from "effect/Array"
 import * as Cause from "effect/Cause"
 import * as Duration from "effect/Duration"
@@ -19,7 +12,6 @@ import * as Anvil from "nozzl/Anvil"
 import * as Admin from "nozzl/api/Admin"
 import * as Errors from "nozzl/api/Error"
 import * as JsonLines from "nozzl/api/JsonLines"
-import * as Registry from "nozzl/api/Registry"
 import * as EvmRpc from "nozzl/evm/EvmRpc"
 import * as Model from "nozzl/Model"
 import * as Fixtures from "./utils/Fixtures.ts"
@@ -29,7 +21,6 @@ const environment = Testing.layer({
   nozzleOutput: "both",
   anvilOutput: "both",
   adminPort: 51610,
-  registryPort: 51611,
   jsonLinesPort: 51603,
   arrowFlightPort: 51602,
   anvilPort: 58545,
@@ -97,21 +88,9 @@ layer(environment, {
   it.effect(
     "can fetch the output schema of a root dataset",
     Effect.fn(function*() {
-      const api = yield* Registry.Registry
+      const api = yield* Admin.Admin
       const result = yield* api.getOutputSchema("SELECT * FROM anvil.transactions")
       assertInstanceOf(result, Model.OutputSchema)
-    }),
-    { sequential: true, timeout: Duration.toMillis("10 seconds") },
-  )
-
-  it.effect(
-    "can register a dataset",
-    Effect.fn(function*() {
-      const registry = yield* Registry.Registry
-      const fixtures = yield* Fixtures.Fixtures
-      const dataset = yield* fixtures.load("manifest.json", Model.DatasetManifest)
-      const result = yield* registry.register(dataset).pipe(Effect.exit)
-      assertSuccess(result, { success: true })
     }),
     { sequential: true, timeout: Duration.toMillis("10 seconds") },
   )
@@ -126,7 +105,7 @@ layer(environment, {
 
       // Register and dump the example manifest.
       const dataset = yield* fixtures.load("manifest.json", Model.DatasetManifest)
-      yield* admin.registerDataset(dataset.name, dataset.version)
+      yield* admin.registerDataset(dataset.name, dataset.version, dataset)
 
       // TODO: Fix dumping with version
       // yield* admin.dumpDatasetVersion(dataset.name, dataset.version, {

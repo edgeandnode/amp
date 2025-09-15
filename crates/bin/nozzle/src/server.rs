@@ -23,7 +23,6 @@ use tracing::instrument;
 pub struct BoundAddrs {
     pub flight_addr: SocketAddr,
     pub jsonl_addr: SocketAddr,
-    pub registry_service_addr: SocketAddr,
     pub admin_api_addr: SocketAddr,
 }
 
@@ -33,7 +32,6 @@ pub async fn run(
     dev: bool,
     enable_flight: bool,
     enable_jsonl: bool,
-    enable_registry: bool,
     enable_admin: bool,
     metrics: Option<Arc<dump::metrics::MetricsRegistry>>,
 ) -> Result<(BoundAddrs, impl Future<Output = BoxResult<()>>), BoxError> {
@@ -68,7 +66,6 @@ pub async fn run(
     let mut bound_addrs = BoundAddrs {
         flight_addr: config.addrs.flight_addr,
         jsonl_addr: config.addrs.jsonl_addr,
-        registry_service_addr: config.addrs.registry_service_addr,
         admin_api_addr: config.addrs.admin_api_addr,
     };
 
@@ -106,25 +103,6 @@ pub async fn run(
         services_futures.push(jsonl_server);
         bound_addrs.jsonl_addr = jsonl_addr;
         tracing::info!("Serving JSON lines at {}", jsonl_addr);
-    }
-
-    // Start Registry Server if enabled
-    if enable_registry {
-        let (registry_service_addr, registry_service) = registry_service::serve(
-            config.addrs.registry_service_addr,
-            config.clone(),
-            metadata_db,
-        )
-        .await?;
-        let registry_service = registry_service
-            .map_err(|e| {
-                tracing::error!("Registry service error: {}", e);
-                e
-            })
-            .boxed();
-        services_futures.push(registry_service);
-        bound_addrs.registry_service_addr = registry_service_addr;
-        tracing::info!("Registry service running at {}", registry_service_addr);
     }
 
     // Start Admin API Server if enabled

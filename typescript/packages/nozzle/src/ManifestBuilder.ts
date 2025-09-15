@@ -1,6 +1,6 @@
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
-import * as Registry from "./api/Registry.ts"
+import * as Admin from "./api/Admin.ts"
 import * as Model from "./Model.ts"
 
 export class ManifestBuilderError extends Data.TaggedError("ManifestBuilderError")<{
@@ -11,7 +11,7 @@ export class ManifestBuilderError extends Data.TaggedError("ManifestBuilderError
 
 export class ManifestBuilder extends Effect.Service<ManifestBuilder>()("Nozzle/ManifestBuilder", {
   effect: Effect.gen(function*() {
-    const client = yield* Registry.Registry
+    const client = yield* Admin.Admin
     const build = (manifest: Model.DatasetDefinition) =>
       Effect.gen(function*() {
         const tables = yield* Effect.forEach(

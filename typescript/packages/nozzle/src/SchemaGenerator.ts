@@ -1,7 +1,7 @@
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as String from "effect/String"
-import * as Registry from "./api/Registry.ts"
+import * as Admin from "./api/Admin.ts"
 import type * as Model from "./Model.ts"
 
 export class SchemaGeneratorError extends Data.TaggedError("SchemaGeneratorError")<{
@@ -11,7 +11,7 @@ export class SchemaGeneratorError extends Data.TaggedError("SchemaGeneratorError
 
 export class SchemaGenerator extends Effect.Service<SchemaGenerator>()("Nozzle/SchemaGenerator", {
   effect: Effect.gen(function*() {
-    const api = yield* Registry.Registry
+    const api = yield* Admin.Admin
 
     const fromTable = (schema: Model.TableSchema, name: string) => {
       const output: Array<string> = []

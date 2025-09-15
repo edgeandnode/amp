@@ -13,7 +13,7 @@ use metadata_db::MetadataDb;
 use object_store::path::Path;
 use tracing::instrument;
 
-use crate::ctx::Ctx;
+use crate::{ctx::Ctx, handlers::common::NonEmptyString};
 
 /// Handler for the `POST /datasets` endpoint
 ///
@@ -28,7 +28,7 @@ use crate::ctx::Ctx;
 /// ## Request Body
 /// - `dataset_name`: Name of the dataset to be registered (must be valid dataset name)
 /// - `version`: Version of the dataset to register (must be valid version string)
-/// - `manifest`: Optional JSON string representation of the dataset manifest
+/// - `manifest`: JSON string representation of the dataset manifest
 ///
 /// ## Response
 /// - **200 OK**: Dataset successfully registered
@@ -82,93 +82,76 @@ pub async fn handler(
         .await
         .map_err(Error::StoreError)?;
 
-    match (dataset, payload.manifest) {
-        (Some(_dataset), None) => {
+    // Check if dataset already exists with this name and version
+    if dataset.is_some() {
+        return Err(Error::DatasetAlreadyExists(
+            payload.name.to_string(),
+            payload.version.to_string(),
+        )
+        .into());
+    }
+
+    let common = serde_json::from_str::<CommonManifest>(payload.manifest.as_str())
+        .map_err(|err| Error::InvalidManifest(err.to_string()))?;
+
+    match common.kind.as_str() {
+        "manifest" => {
+            let manifest: Manifest = serde_json::from_str(payload.manifest.as_str())
+                .map_err(|err| Error::InvalidManifest(err.to_string()))?;
+            if manifest.name != payload.name || manifest.version != payload.version {
+                return Err(Error::ManifestValidationError(
+                    manifest.name.to_string(),
+                    manifest.version.to_string(),
+                )
+                .into());
+            }
+            register_manifest(&ctx.store, &ctx.metadata_db, &manifest)
+                .await
+                .map_err(Error::ManifestRegistrationError)?;
             tracing::info!(
-                "Registering existing dataset '{}' version '{}'",
+                "Registered manifest for dataset '{}' version '{}'",
                 payload.name,
                 payload.version
             );
         }
-        (None, Some(manifest_str)) => {
-            let common = serde_json::from_str::<CommonManifest>(&manifest_str)
-                .map_err(|err| Error::InvalidManifest(err.to_string()))?;
+        _ => {
+            let manifest_str = payload.manifest.to_string();
+            let format_extension = if manifest_str.starts_with('{') {
+                "json"
+            } else {
+                "toml"
+            };
+            let path = Path::from(format!("{}.{}", payload.name, format_extension));
+            ctx.config
+                .dataset_defs_store
+                .prefixed_store()
+                .put(&path, manifest_str.into())
+                .await
+                .map_err(Error::DatasetDefStoreError)?;
 
-            match common.kind.as_str() {
-                "manifest" => {
-                    let manifest: Manifest = serde_json::from_str(&manifest_str)
-                        .map_err(|err| Error::InvalidManifest(err.to_string()))?;
-                    if manifest.name != payload.name || manifest.version != payload.version {
-                        return Err(Error::ManifestValidationError(
-                            manifest.name.to_string(),
-                            manifest.version.to_string(),
-                        )
-                        .into());
-                    }
-                    register_manifest(&ctx.store, &ctx.metadata_db, &manifest)
-                        .await
-                        .map_err(Error::ManifestRegistrationError)?;
-                    tracing::info!(
-                        "Registered manifest for dataset '{}' version '{}'",
-                        payload.name,
-                        payload.version
-                    );
-                }
-                _ => {
-                    let format_extension = if manifest_str.starts_with('{') {
-                        "json"
-                    } else {
-                        "toml"
-                    };
-                    let path = Path::from(format!("{}.{}", payload.name, format_extension));
-                    ctx.config
-                        .dataset_defs_store
-                        .prefixed_store()
-                        .put(&path, manifest_str.into())
-                        .await
-                        .map_err(Error::DatasetDefStoreError)?;
-
-                    let _dataset = ctx
-                        .store
-                        .load_dataset(&payload.name, None)
-                        .await
-                        .map_err(Error::StoreError)?;
-                }
-            }
-        }
-        (None, None) => {
-            return Err(Error::ManifestRequired(
-                payload.name.to_string(),
-                payload.version.to_string(),
-            )
-            .into());
-        }
-        (Some(_), Some(_)) => {
-            return Err(Error::DatasetAlreadyExists(
-                payload.name.to_string(),
-                payload.version.to_string(),
-            )
-            .into());
+            let _dataset = ctx
+                .store
+                .load_dataset(&payload.name, None)
+                .await
+                .map_err(Error::StoreError)?;
         }
     }
 
-    Ok(StatusCode::OK)
+    Ok(StatusCode::CREATED)
 }
 
 /// Request payload for dataset registration
 ///
-/// Contains the dataset name, version, and optionally a manifest.
-/// If manifest is provided, it will be registered in the local registry.
+/// Contains the dataset name, version, and manifest.
+/// The manifest will be registered in the local registry.
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct RegisterRequest {
     /// Name of the dataset to be registered (automatically validated)
     pub name: Name,
     /// Version of the dataset to register
     pub version: Version,
-    /// Optional JSON string representation of the dataset manifest
-    /// If provided, it will be registered in the local registry
-    #[serde(default)]
-    pub manifest: Option<String>,
+    /// JSON string representation of the dataset manifest (required)
+    pub manifest: NonEmptyString,
 }
 
 /// Errors that can occur during dataset registration
@@ -212,17 +195,6 @@ pub enum Error {
     /// - System-level registration errors
     #[error("Failed to register manifest: {0}")]
     ManifestRegistrationError(#[from] RegisterError),
-
-    /// Manifest is required but not provided
-    ///
-    /// This occurs when:
-    /// - Dataset doesn't exist in registry
-    /// - No manifest provided with the request
-    /// - Cannot register dataset without manifest or existing definition
-    #[error(
-        "Dataset not found in registry and manifest is not provided with request for dataset '{0}' version '{1}'"
-    )]
-    ManifestRequired(String, String),
 
     /// Dataset already exists with the given configuration
     ///
@@ -268,7 +240,6 @@ impl RequestError for Error {
             Error::InvalidManifest(_) => "INVALID_MANIFEST",
             Error::ManifestValidationError(_, _) => "MANIFEST_VALIDATION_ERROR",
             Error::ManifestRegistrationError(_) => "MANIFEST_REGISTRATION_ERROR",
-            Error::ManifestRequired(_, _) => "MANIFEST_REQUIRED",
             Error::DatasetAlreadyExists(_, _) => "DATASET_ALREADY_EXISTS",
             Error::DatasetDefStoreError(_) => "DATASET_DEF_STORE_ERROR",
             Error::StoreError(_) => "STORE_ERROR",
@@ -282,7 +253,6 @@ impl RequestError for Error {
             Error::InvalidManifest(_) => StatusCode::BAD_REQUEST,
             Error::ManifestValidationError(_, _) => StatusCode::BAD_REQUEST,
             Error::ManifestRegistrationError(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::ManifestRequired(_, _) => StatusCode::BAD_REQUEST,
             Error::DatasetAlreadyExists(_, _) => StatusCode::CONFLICT,
             Error::DatasetDefStoreError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::StoreError(_) => StatusCode::INTERNAL_SERVER_ERROR,

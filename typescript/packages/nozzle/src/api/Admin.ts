@@ -97,17 +97,15 @@ const registerDataset = HttpApiEndpoint.post("registerDataset")`/datasets`
   .addError(Error.InvalidManifest)
   .addError(Error.ManifestValidationError)
   .addError(Error.ManifestRegistrationError)
-  .addError(Error.ManifestRequired)
   .addError(Error.DatasetAlreadyExists)
-  .addError(Error.SchedulerError)
   .addError(Error.DatasetDefStoreError)
   .addError(Error.DatasetStoreError)
-  .addSuccess(HttpApiSchema.withEncoding(Schema.String, { kind: "Text" }))
+  .addSuccess(Schema.Void, { status: 201 })
   .setPayload(
     Schema.Struct({
       name: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("name")),
       version: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("version")),
-      manifest: Schema.parseJson(Schema.Union(Model.DatasetManifest, Model.DatasetRpc)).pipe(Schema.optional),
+      manifest: Schema.parseJson(Schema.Union(Model.DatasetManifest, Model.DatasetRpc)),
     }),
   )
 
@@ -118,9 +116,7 @@ const registerDataset = HttpApiEndpoint.post("registerDataset")`/datasets`
  * - InvalidManifest: The manifest is semantically invalid.
  * - ManifestValidationError: Manifest name/version doesn't match request parameters.
  * - ManifestRegistrationError: Failed to register manifest in system.
- * - ManifestRequired: Dataset not found and manifest not provided.
  * - DatasetAlreadyExists: Dataset exists and manifest provided (conflict).
- * - SchedulerError: Failure in scheduling the dataset dump after registration.
  * - DatasetDefStoreError: Failure in dataset definition store operations.
  * - DatasetStoreError: Failed to load dataset from store.
  */
@@ -129,9 +125,7 @@ export type RegisterDatasetError =
   | Error.InvalidManifest
   | Error.ManifestValidationError
   | Error.ManifestRegistrationError
-  | Error.ManifestRequired
   | Error.DatasetAlreadyExists
-  | Error.SchedulerError
   | Error.DatasetDefStoreError
   | Error.DatasetStoreError
 
@@ -356,6 +350,26 @@ const deleteLocationById = HttpApiEndpoint.del("deleteLocationById")`/locations/
 export type DeleteLocationByIdError = Error.InvalidLocationId | Error.LocationNotFound | Error.MetadataDbError
 
 /**
+ * The output schema endpoint (POST /schema).
+ */
+const getOutputSchema = HttpApiEndpoint.post("getOutputSchema")`/schema`
+  .addError(Error.DatasetStoreError)
+  .addSuccess(Model.OutputSchema)
+  .setPayload(
+    Schema.Struct({
+      sqlQuery: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("sql_query")),
+      isSqlDataset: Schema.Boolean.pipe(Schema.optional, Schema.fromKey("is_sql_dataset")),
+    }),
+  )
+
+/**
+ * Error type for the `getOutputSchema` endpoint.
+ *
+ * - DatasetStoreError: Failure in dataset storage operations.
+ */
+export type GetOutputSchemaError = Error.DatasetStoreError
+
+/**
  * The api group for the dataset endpoints.
  */
 export class DatasetGroup extends HttpApiGroup.make("dataset")
@@ -388,12 +402,20 @@ export class LocationGroup extends HttpApiGroup.make("location")
 {}
 
 /**
+ * The api group for the schema endpoints.
+ */
+export class SchemaGroup extends HttpApiGroup.make("schema")
+  .add(getOutputSchema)
+{}
+
+/**
  * The api definition for the admin api.
  */
 export class Api extends HttpApi.make("admin")
   .add(DatasetGroup)
   .add(JobGroup)
   .add(LocationGroup)
+  .add(SchemaGroup)
 {}
 
 /**
@@ -411,6 +433,18 @@ export interface DumpDatasetOptions {
 }
 
 /**
+ * Options for schema retrieval.
+ */
+export interface GetSchemaOptions {
+  /**
+   * Whether this is a sql dataset.
+   *
+   * @default true
+   */
+  readonly isSqlDataset?: boolean | undefined
+}
+
+/**
  * Service definition for the admin api.
  */
 export class Admin extends Context.Tag("Nozzle/Admin")<Admin, {
@@ -419,13 +453,14 @@ export class Admin extends Context.Tag("Nozzle/Admin")<Admin, {
    *
    * @param name The name of the dataset to register.
    * @param version The version of the dataset to register.
+   * @param manifest The dataset manifest to register.
    * @return Whether the registration was successful.
    */
   readonly registerDataset: (
     name: string,
     version: string,
-    manifest?: Model.DatasetManifest | Model.DatasetRpc,
-  ) => Effect.Effect<string, HttpClientError.HttpClientError | RegisterDatasetError>
+    manifest: Model.DatasetManifest | Model.DatasetRpc,
+  ) => Effect.Effect<void, HttpClientError.HttpClientError | RegisterDatasetError>
 
   /**
    * Dump a dataset.
@@ -564,6 +599,18 @@ export class Admin extends Context.Tag("Nozzle/Admin")<Admin, {
   readonly deleteLocationById: (
     locationId: number,
   ) => Effect.Effect<void, HttpClientError.HttpClientError | DeleteLocationByIdError>
+
+  /**
+   * Gets the schema of a dataset.
+   *
+   * @param sql - The SQL query to get the schema for.
+   * @param options - Options for the schema retrieval.
+   * @returns An effect that resolves to the table schema.
+   */
+  readonly getOutputSchema: (
+    sql: string,
+    options?: GetSchemaOptions,
+  ) => Effect.Effect<Model.OutputSchema, HttpClientError.HttpClientError | GetOutputSchemaError>
 }>() {}
 
 /**
@@ -578,7 +625,7 @@ export const make = Effect.fn(function*(url: string) {
   })
 
   const registerDataset = Effect.fn("registerDataset")(
-    function*(name: string, version: string, manifest?: Model.DatasetManifest | Model.DatasetRpc) {
+    function*(name: string, version: string, manifest: Model.DatasetManifest | Model.DatasetRpc) {
       const request = client.dataset.registerDataset({
         payload: {
           name,
@@ -818,6 +865,24 @@ export const make = Effect.fn(function*(url: string) {
     )
   })
 
+  const getOutputSchema = Effect.fn("getOutputSchema")(function*(sql: string, options?: GetSchemaOptions) {
+    const request = client.schema.getOutputSchema({
+      payload: {
+        sqlQuery: sql,
+        isSqlDataset: options?.isSqlDataset ?? true,
+      },
+    })
+
+    const result = yield* request.pipe(
+      Effect.catchTags({
+        ParseError: Effect.die,
+        HttpApiDecodeError: Effect.die,
+      }),
+    )
+
+    return result
+  })
+
   return {
     dumpDataset,
     dumpDatasetVersion,
@@ -833,6 +898,7 @@ export const make = Effect.fn(function*(url: string) {
     getLocations,
     getLocationById,
     deleteLocationById,
+    getOutputSchema,
   }
 })
 

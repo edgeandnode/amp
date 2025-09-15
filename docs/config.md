@@ -25,8 +25,7 @@ the env var name with `NOZZLE_CONFIG_`. For example, to override the `data_dir` 
 The following optional configuration keys allow you to control the hostname and port that each service binds to:
 
 - `flight_addr`: Arrow Flight RPC server address (default: `0.0.0.0:1602`)
-- `jsonl_addr`: JSON Lines server address (default: `0.0.0.0:1603`)  
-- `registry_service_addr`: Registry service address (default: `0.0.0.0:1611`)
+- `jsonl_addr`: JSON Lines server address (default: `0.0.0.0:1603`)
 - `admin_api_addr`: Admin API server address (default: `0.0.0.0:1610`)
 
 ## Logging

@@ -8,7 +8,6 @@ import * as Option from "effect/Option"
 import * as Stream from "effect/Stream"
 import * as Anvil from "./Anvil.ts"
 import * as Admin from "./api/Admin.ts"
-import * as Registry from "./api/Registry.ts"
 import * as ConfigLoader from "./ConfigLoader.ts"
 import * as EvmRpc from "./evm/EvmRpc.ts"
 import * as Model from "./Model.js"
@@ -32,7 +31,6 @@ export class DevServer extends Context.Tag("Nozzle/DevServer")<DevServer, void>(
  */
 export const make = Effect.gen(function*() {
   const admin = yield* Admin.Admin
-  const registry = yield* Registry.Registry
   const evmRpc = yield* EvmRpc.EvmRpc
   const configLoader = yield* ConfigLoader.ConfigLoader
 
@@ -64,13 +62,7 @@ export const make = Effect.gen(function*() {
       return new Model.DatasetManifest({ ...manifest, version })
     }),
     Stream.tap((manifest) =>
-      registry.register(manifest).pipe(
-        Effect.tapError(() => Effect.logError(`Failed to register manifest ${manifest.name}@${manifest.version}`)),
-        Effect.ignore,
-      )
-    ),
-    Stream.tap((manifest) =>
-      admin.registerDataset(manifest.name, manifest.version).pipe(
+      admin.registerDataset(manifest.name, manifest.version, manifest).pipe(
         Effect.tapError(() => Effect.logError(`Failed to register manifest ${manifest.name}@${manifest.version}`)),
         Effect.ignore,
       )

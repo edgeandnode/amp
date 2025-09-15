@@ -46,7 +46,6 @@ pub struct Config {
 pub struct Addrs {
     pub flight_addr: SocketAddr,
     pub jsonl_addr: SocketAddr,
-    pub registry_service_addr: SocketAddr,
     pub admin_api_addr: SocketAddr,
 }
 
@@ -187,7 +186,6 @@ pub struct ConfigFile {
     pub microbatch_max_interval: Option<u64>,
     pub flight_addr: Option<String>,
     pub jsonl_addr: Option<String>,
-    pub registry_service_addr: Option<String>,
     pub admin_api_addr: Option<String>,
     #[serde(default)]
     pub parquet: ParquetConfig,
@@ -378,7 +376,6 @@ impl Default for Addrs {
         Self {
             flight_addr: ([0, 0, 0, 0], 1602).into(),
             jsonl_addr: ([0, 0, 0, 0], 1603).into(),
-            registry_service_addr: ([0, 0, 0, 0], 1611).into(),
             admin_api_addr: ([0, 0, 0, 0], 1610).into(),
         }
     }
@@ -411,11 +408,6 @@ impl Addrs {
                 &config_file.jsonl_addr,
                 default_addrs.jsonl_addr,
                 "jsonl_addr",
-            )?,
-            registry_service_addr: parse_addr(
-                &config_file.registry_service_addr,
-                default_addrs.registry_service_addr,
-                "registry_service_addr",
             )?,
             admin_api_addr: parse_addr(
                 &config_file.admin_api_addr,

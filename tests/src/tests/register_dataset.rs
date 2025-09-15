@@ -1,6 +1,5 @@
 use admin_api::handlers::datasets::register::RegisterRequest;
 use common::manifest::derived::Manifest;
-use registry_service::handlers::register::RegisterRequest as RegistryRegisterRequest;
 use reqwest::StatusCode;
 
 use crate::test_support::TestEnv;
@@ -21,10 +20,6 @@ impl RegisterTestCtx {
         format!("http://{}", self.env.server_addrs.admin_api_addr)
     }
 
-    fn registry_url(&self) -> String {
-        format!("http://{}", self.env.server_addrs.registry_service_addr)
-    }
-
     async fn register(&self, request: RegisterRequest) -> reqwest::Response {
         self.client
             .post(&format!("{}/datasets", self.admin_url()))
@@ -36,16 +31,13 @@ impl RegisterTestCtx {
 
     async fn register_dataset(&self, manifest: &Manifest) -> reqwest::Response {
         let manifest_json = serde_json::to_string(manifest).unwrap();
-        let payload = RegistryRegisterRequest {
-            manifest: manifest_json,
+        let request = RegisterRequest {
+            name: manifest.name.clone(),
+            version: manifest.version.clone(),
+            manifest: manifest_json.parse().expect("Valid JSON"),
         };
 
-        self.client
-            .post(&format!("{}/register", self.registry_url()))
-            .json(&payload)
-            .send()
-            .await
-            .unwrap()
+        self.register(request).await
     }
 
     fn create_test_manifest(name: &str, version: &str, owner: &str) -> Manifest {
@@ -125,26 +117,6 @@ impl RegisterTestCtx {
 }
 
 #[tokio::test]
-async fn register_existing_dataset_without_manifest_succeeds() {
-    let ctx = RegisterTestCtx::setup("test_register_existing_dataset").await;
-
-    // Register dataset
-    let manifest = RegisterTestCtx::create_test_manifest("register_test", "1.0.0", "test_owner");
-    let register_response = ctx.register_dataset(&manifest).await;
-    assert_eq!(register_response.status(), StatusCode::OK);
-
-    // Register the existing dataset without manifest in payload
-    let register_request = RegisterRequest {
-        name: "register_test".parse().expect("valid dataset name"),
-        version: "1.0.0".parse().expect("valid version"),
-        manifest: None,
-    };
-
-    let response = ctx.register(register_request).await;
-    assert_eq!(response.status(), StatusCode::OK);
-}
-
-#[tokio::test]
 async fn register_new_dataset_with_manifest_succeeds() {
     let ctx = RegisterTestCtx::setup("test_register_with_new_manifest").await;
 
@@ -155,11 +127,11 @@ async fn register_new_dataset_with_manifest_succeeds() {
     let register_request = RegisterRequest {
         name: "register_test_new".parse().expect("valid dataset name"),
         version: "1.0.0".parse().expect("valid version"),
-        manifest: Some(manifest_json),
+        manifest: manifest_json.parse().expect("Valid JSON"),
     };
 
     let response = ctx.register(register_request).await;
-    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.status(), StatusCode::CREATED);
 
     assert!(
         ctx.verify_dataset_exists("register_test_new", "1.0.0")
@@ -235,7 +207,7 @@ async fn register_with_mismatched_manifest_fails() {
     let register_request = RegisterRequest {
         name: "different_name".parse().expect("valid dataset name"),
         version: "1.0.0".parse().expect("valid version"),
-        manifest: Some(manifest_json),
+        manifest: manifest_json.parse().expect("Valid JSON"),
     };
 
     let response = ctx.register(register_request).await;
@@ -259,7 +231,7 @@ async fn register_existing_dataset_with_manifest_fails() {
         "test_owner",
     );
     let register_response = ctx.register_dataset(&manifest).await;
-    assert_eq!(register_response.status(), StatusCode::OK);
+    assert_eq!(register_response.status(), StatusCode::CREATED);
 
     // Try to register the same dataset with a manifest (should fail)
     let manifest_json = serde_json::to_string(&manifest).unwrap();
@@ -268,7 +240,7 @@ async fn register_existing_dataset_with_manifest_fails() {
             .parse()
             .expect("valid dataset name"),
         version: "1.0.0".parse().expect("valid version"),
-        manifest: Some(manifest_json),
+        manifest: manifest_json.parse().expect("Valid JSON"),
     };
 
     let response = ctx.register(register_request).await;
@@ -282,34 +254,13 @@ async fn register_existing_dataset_with_manifest_fails() {
 }
 
 #[tokio::test]
-async fn register_nonexistent_dataset_without_manifest_fails() {
-    let ctx = RegisterTestCtx::setup("test_register_missing_manifest").await;
-
-    // Try to register a non-existent dataset without a manifest
-    let register_request = RegisterRequest {
-        name: "non_existent_dataset".parse().expect("valid dataset name"),
-        version: "1.0.0".parse().expect("valid version"),
-        manifest: None,
-    };
-
-    let response = ctx.register(register_request).await;
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-
-    let error_response: serde_json::Value = response.json().await.unwrap();
-    let error_code = error_response["error_code"].as_str().unwrap();
-    let error_message = error_response["error_message"].as_str().unwrap();
-    assert_eq!(error_code, "MANIFEST_REQUIRED");
-    assert!(error_message.contains("manifest is not provided with request"));
-}
-
-#[tokio::test]
 async fn register_with_invalid_manifest_json_fails() {
     let ctx = RegisterTestCtx::setup("test_register_invalid_manifest_json").await;
 
     let register_request = RegisterRequest {
         name: "register_test_dataset".parse().expect("valid dataset name"),
         version: "1.0.0".parse().expect("valid version"),
-        manifest: Some("this is not valid json".to_string()),
+        manifest: "this is not valid json".parse().expect("non-empty string"),
     };
 
     let response = ctx.register(register_request).await;
@@ -342,11 +293,11 @@ async fn register_multiple_versions_of_same_dataset_succeeds() {
                 .parse()
                 .expect("valid dataset name"),
             version: version.parse().expect("valid version"),
-            manifest: Some(manifest_json),
+            manifest: manifest_json.parse().expect("Valid JSON"),
         };
 
         let response = ctx.register(register_request).await;
-        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.status(), StatusCode::CREATED);
     }
 
     // Verify all versions exist
@@ -356,16 +307,4 @@ async fn register_multiple_versions_of_same_dataset_succeeds() {
                 .await
         );
     }
-
-    // Now try to register an existing version again without manifest
-    let register_request = RegisterRequest {
-        name: "register_test_multi_version"
-            .parse()
-            .expect("valid dataset name"),
-        version: "1.0.0".parse().expect("valid version"),
-        manifest: None,
-    };
-
-    let response = ctx.register(register_request).await;
-    assert_eq!(response.status(), StatusCode::OK);
 }
