@@ -9,6 +9,8 @@ arrow-string = "55"
 async-stream.workspace = true
 async-trait.workspace = true
 axum.workspace = true
+base64 = "0.22.1"
+bincode.workspace = true
 bytes.workspace = true
 common = { path = "../../core/common" }
 datafusion.workspace = true
@@ -19,7 +21,10 @@ http-common = { path = "../http-common" }
 metadata-db = { path = "../../core/metadata-db" }
 monitoring = { path = "../../core/monitoring" }
 prost.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_bytes = "0.11.17"
 serde_json.workspace = true
+sha2 = "0.10.9"
 thiserror.workspace = true
 tonic.workspace = true
 tracing.workspace = true

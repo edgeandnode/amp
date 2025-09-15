@@ -81,11 +81,19 @@ impl PlanningContext {
     pub async fn sql_to_remote_plan(
         &self,
         query: parser::Statement,
+        param_values: Vec<datafusion::common::ScalarValue>,
         resume_watermark: Option<ResumeWatermark>,
     ) -> Result<(Bytes, DFSchemaRef), Error> {
         let is_streaming = is_streaming(&query);
         let ctx = self.datafusion_ctx()?;
-        let plan = crate::query_context::sql_to_plan(&ctx, query).await?;
+        let mut plan = crate::query_context::sql_to_plan(&ctx, query).await?;
+
+        if !param_values.is_empty() {
+            plan = plan
+                .with_param_values(param_values)
+                .map_err(Error::PlanningError)?;
+        }
+
         let schema = plan.schema().clone();
         let serialized_plan =
             logical_plan_to_bytes_with_extension_codec(&plan, &TableProviderCodec)

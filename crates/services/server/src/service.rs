@@ -12,10 +12,10 @@ use arrow_flight::{
         ActionClosePreparedStatementRequest, ActionCreatePreparedStatementRequest,
         ActionCreatePreparedStatementResult, Any, CommandGetCatalogs, CommandGetDbSchemas,
         CommandGetSqlInfo, CommandGetTableTypes, CommandGetTables, CommandGetXdbcTypeInfo,
-        CommandPreparedStatementQuery, CommandStatementQuery, Nullable, ProstMessageExt,
-        Searchable, SqlInfo, TicketStatementQuery, XdbcDataType,
+        CommandPreparedStatementQuery, CommandStatementQuery, DoPutPreparedStatementResult,
+        Nullable, ProstMessageExt, Searchable, SqlInfo, TicketStatementQuery, XdbcDataType,
         metadata::{SqlInfoDataBuilder, XdbcTypeInfo, XdbcTypeInfoData, XdbcTypeInfoDataBuilder},
-        server::FlightSqlService,
+        server::{FlightSqlService, PeekableFlightDataStream},
     },
 };
 use async_stream::stream;
@@ -66,6 +66,16 @@ use tonic::{Request, Response, Status, Streaming};
 type TonicStream<T> = Pin<Box<dyn Stream<Item = Result<T, Status>> + Send + 'static>>;
 // TODO: Make this configurable via environment variable or config file
 const NOZZLE_CATALOG_NAME: &str = "nozzle";
+
+/// Statement handle that can be either a prepared SQL query or a serialized plan
+#[derive(Clone, Debug, bincode::Encode, bincode::Decode)]
+enum StatementHandle {
+    PreparedStatement {
+        query: String,
+        schema_bytes: Vec<u8>,
+    },
+    SerializedPlan(Vec<u8>),
+}
 
 static NOZZLE_XDBC_DATA: LazyLock<XdbcTypeInfoData> = LazyLock::new(|| {
     let mut builder = XdbcTypeInfoDataBuilder::new();
@@ -235,6 +245,40 @@ static NOZZLE_XDBC_DATA: LazyLock<XdbcTypeInfoData> = LazyLock::new(|| {
         .build()
         .expect("Failed to build XDBC type info data")
 });
+
+async fn extract_parameter_values(
+    request: Request<PeekableFlightDataStream>,
+) -> Result<Vec<datafusion::common::ScalarValue>, Status> {
+    use arrow_flight::decode::FlightRecordBatchStream;
+    use datafusion::common::ScalarValue;
+    use futures::StreamExt;
+
+    let mut batch_stream = FlightRecordBatchStream::new_from_flight_data(
+        request
+            .into_inner()
+            .map(|result| result.map_err(FlightError::from)),
+    );
+
+    let mut all_params = Vec::new();
+
+    while let Some(batch_result) = batch_stream.next().await {
+        let batch =
+            batch_result.map_err(|e| Status::invalid_argument(format!("Decode error: {}", e)))?;
+        if batch.num_rows() > 0 {
+            let batch_params: Result<Vec<_>, Status> = batch
+                .columns()
+                .iter()
+                .map(|col| {
+                    ScalarValue::try_from_array(col, 0)
+                        .map_err(|e| Status::invalid_argument(format!("Extract error: {}", e)))
+                })
+                .collect();
+            all_params.extend(batch_params?);
+        }
+    }
+
+    Ok(all_params)
+}
 
 /// SQL LIKE pattern matching for Flight SQL filters
 fn sql_pattern_matches(text: &str, pattern: &str) -> bool {
@@ -610,6 +654,15 @@ fn should_transform_plan(plan: &DetachedLogicalPlan) -> Result<bool, DataFusionE
 }
 
 impl Service {
+    async fn plan_sql_query(
+        &self,
+        sql: &str,
+        resume_watermark: Option<ResumeWatermark>,
+    ) -> Result<(Bytes, Arc<DFSchema>), Error> {
+        self.plan_sql_query_with_params(sql, Vec::new(), resume_watermark)
+            .await
+    }
+
     // The magic that turns a SQL string into a DataFusion logical plan that can be
     // sent back over the wire:
     // - Parse the SQL query.
@@ -617,9 +670,10 @@ impl Service {
     // - Build a DataFusion query context with empty tables from that catalog.
     // - Use that context to plan the SQL query.
     // - Serialize the plan to bytes using datafusion-protobufs.
-    async fn plan_sql_query(
+    async fn plan_sql_query_with_params(
         &self,
         sql: &str,
+        param_values: Vec<datafusion::common::ScalarValue>,
         resume_watermark: Option<ResumeWatermark>,
     ) -> Result<(Bytes, Arc<DFSchema>), Error> {
         let parsed_query = parse_sql(sql)?;
@@ -629,7 +683,7 @@ impl Service {
             .planning_ctx_for_sql(&parsed_query)
             .await?;
         query_ctx
-            .sql_to_remote_plan(parsed_query, resume_watermark)
+            .sql_to_remote_plan(parsed_query, param_values, resume_watermark)
             .await
             .map_err(Error::from)
     }
@@ -967,8 +1021,14 @@ impl FlightSqlService for Service {
                 .await
                 .map_err(|e| Status::invalid_argument(format!("SQL planning error: {}", e)))?;
 
+        let handle = StatementHandle::SerializedPlan(serialized_plan.to_vec());
+        let handle_bytes = Bytes::from(
+            bincode::encode_to_vec(&handle, bincode::config::standard()).map_err(|e| {
+                Status::internal(format!("Failed to encode statement handle: {}", e))
+            })?,
+        );
         let ticket_query = TicketStatementQuery {
-            statement_handle: serialized_plan,
+            statement_handle: handle_bytes,
         };
         let any_ticket = Any::pack(&ticket_query)
             .map_err(|e| Status::internal(format!("Failed to pack ticket: {}", e)))?;
@@ -1000,11 +1060,28 @@ impl FlightSqlService for Service {
         _request: Request<Ticket>,
     ) -> Result<Response<Pin<Box<dyn Stream<Item = Result<FlightData, Status>> + Send>>>, Status>
     {
-        tracing::info!(method = "do_get_statement", "FlightSQL method called");
-        let stream = self
-            .execute_remote_plan(&ticket.statement_handle)
-            .await
-            .map_err(|e| Status::internal(format!("Plan execution error: {}", e)))?;
+        let (handle, _): (StatementHandle, usize) =
+            bincode::decode_from_slice(&ticket.statement_handle, bincode::config::standard())
+                .map_err(|e| {
+                    Status::invalid_argument(format!("Invalid statement handle: {}", e))
+                })?;
+
+        let stream = match handle {
+            StatementHandle::PreparedStatement { query, .. } => {
+                let (serialized_plan, _schema) = self
+                    .plan_sql_query(&query, None)
+                    .await
+                    .map_err(|e| Status::internal(format!("SQL planning error: {}", e)))?;
+
+                self.execute_remote_plan(&serialized_plan)
+                    .await
+                    .map_err(|e| Status::internal(format!("SQL execution error: {}", e)))?
+            }
+            StatementHandle::SerializedPlan(plan) => self
+                .execute_remote_plan(&Bytes::from(plan))
+                .await
+                .map_err(|e| Status::internal(format!("Plan execution error: {}", e)))?,
+        };
 
         Ok(Response::new(stream))
     }
@@ -1388,28 +1465,219 @@ impl FlightSqlService for Service {
         Ok(Response::new(Box::pin(stream)))
     }
 
-    async fn get_flight_info_prepared_statement(
-        &self,
-        _cmd: CommandPreparedStatementQuery,
-        _request: Request<FlightDescriptor>,
-    ) -> Result<Response<FlightInfo>, Status> {
-        tracing::warn!(
-            method = "get_flight_info_prepared_statement",
-            "FlightSQL method called but not implemented"
-        );
-        unimplemented!()
-    }
-
     async fn do_action_create_prepared_statement(
         &self,
-        _query: ActionCreatePreparedStatementRequest,
+        query: ActionCreatePreparedStatementRequest,
         _request: Request<Action>,
     ) -> Result<ActionCreatePreparedStatementResult, Status> {
-        tracing::warn!(
+        tracing::info!(
             method = "do_action_create_prepared_statement",
-            "FlightSQL method called but not implemented"
+            query = %query.query,
+            "FlightSQL method called"
         );
-        unimplemented!()
+
+        let parsed_query = parse_sql(&query.query)
+            .map_err(|e| Status::invalid_argument(format!("SQL parsing error: {}", e)))?;
+
+        let query_ctx = self
+            .dataset_store
+            .clone()
+            .planning_ctx_for_sql(&parsed_query)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to create planning context: {}", e)))?;
+
+        let dataset_schema = query_ctx
+            .sql_output_schema(parsed_query)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to get dataset schema: {}", e)))?;
+
+        // Return empty parameter schema
+        // TODO: This is a hack, we need to infer the parameter schema with datafusion
+        // but datafusion cannot infer all parameters at this point, leaving this empty is FlightSQL compliant
+        let empty_schema = Arc::new(arrow::datatypes::Schema::empty());
+        let parameter_schema = Arc::new(
+            DFSchema::try_from(empty_schema.as_ref().clone()).map_err(|e| {
+                Status::internal(format!("Failed to create empty parameter schema: {}", e))
+            })?,
+        );
+
+        let dataset_schema_bytes = ipc_schema(&dataset_schema);
+        let parameter_schema_bytes = ipc_schema(&parameter_schema);
+
+        let handle = StatementHandle::PreparedStatement {
+            query: query.query.clone(),
+            schema_bytes: dataset_schema_bytes.to_vec(),
+        };
+        let handle_bytes = Bytes::from(
+            bincode::encode_to_vec(&handle, bincode::config::standard()).map_err(|e| {
+                Status::internal(format!("Failed to encode prepared statement handle: {}", e))
+            })?,
+        );
+
+        tracing::debug!(
+            "Created prepared statement with {} parameter fields",
+            parameter_schema.fields().len()
+        );
+
+        Ok(ActionCreatePreparedStatementResult {
+            prepared_statement_handle: handle_bytes,
+            dataset_schema: dataset_schema_bytes,
+            parameter_schema: parameter_schema_bytes,
+        })
+    }
+
+    async fn do_put_prepared_statement_query(
+        &self,
+        query: CommandPreparedStatementQuery,
+        request: Request<PeekableFlightDataStream>,
+    ) -> Result<DoPutPreparedStatementResult, Status> {
+        tracing::info!(
+            method = "do_put_prepared_statement_query",
+            "FlightSQL method called"
+        );
+
+        let (handle, _): (StatementHandle, usize) = bincode::decode_from_slice(
+            &query.prepared_statement_handle,
+            bincode::config::standard(),
+        )
+        .map_err(|e| Status::invalid_argument(format!("Invalid statement handle: {}", e)))?;
+
+        let sql_query = match handle {
+            StatementHandle::PreparedStatement { query, .. } => query,
+            StatementHandle::SerializedPlan(_) => {
+                return Err(Status::internal(
+                    "Expected PreparedStatement handle, got SerializedPlan",
+                ));
+            }
+        };
+
+        tracing::debug!(query = %sql_query, "Executing prepared statement with parameters");
+
+        // Extract parameter values directly from FlightData stream and apply them using DataFusion's parameter binding
+        let param_values = extract_parameter_values(request).await?;
+
+        tracing::debug!(
+            "Extracted {} parameters from FlightData stream",
+            param_values.len()
+        );
+        let (serialized_plan, _schema) = self
+            .plan_sql_query_with_params(&sql_query, param_values, None)
+            .await
+            .map_err(|e| Status::internal(format!("SQL planning error: {}", e)))?;
+
+        let handle = StatementHandle::SerializedPlan(serialized_plan.to_vec());
+        let handle_bytes = Bytes::from(
+            bincode::encode_to_vec(&handle, bincode::config::standard()).map_err(|e| {
+                Status::internal(format!("Failed to encode prepared statement handle: {}", e))
+            })?,
+        );
+
+        Ok(DoPutPreparedStatementResult {
+            prepared_statement_handle: Some(handle_bytes),
+        })
+    }
+
+    async fn get_flight_info_prepared_statement(
+        &self,
+        cmd: CommandPreparedStatementQuery,
+        request: Request<FlightDescriptor>,
+    ) -> Result<Response<FlightInfo>, Status> {
+        tracing::info!(
+            method = "get_flight_info_prepared_statement",
+            "FlightSQL method called"
+        );
+        let (handle, _): (StatementHandle, usize) =
+            bincode::decode_from_slice(&cmd.prepared_statement_handle, bincode::config::standard())
+                .map_err(|e| {
+                    Status::invalid_argument(format!("Invalid prepared statement handle: {}", e))
+                })?;
+
+        let flight_descriptor = request.into_inner();
+
+        let handle_bytes = Bytes::from(
+            bincode::encode_to_vec(&handle, bincode::config::standard()).map_err(|e| {
+                Status::internal(format!(
+                    "Failed to encode statement handle for ticket: {}",
+                    e
+                ))
+            })?,
+        );
+        let ticket_query = TicketStatementQuery {
+            statement_handle: handle_bytes,
+        };
+        let any_ticket = Any::pack(&ticket_query).map_err(|e| {
+            Status::internal(format!("Failed to pack prepared statement ticket: {}", e))
+        })?;
+        let ticket = Ticket::new(any_ticket.encode_to_vec());
+        let endpoint = FlightEndpoint::new().with_ticket(ticket);
+
+        let schema_bytes = match &handle {
+            StatementHandle::PreparedStatement { schema_bytes, .. } => {
+                Bytes::from(schema_bytes.clone())
+            }
+            _ => {
+                return Err(Status::invalid_argument(
+                    "Expected PreparedStatement handle for prepared statement query",
+                ));
+            }
+        };
+
+        let flight_info = FlightInfo {
+            flight_descriptor: Some(flight_descriptor),
+            schema: schema_bytes,
+            endpoint: vec![endpoint],
+            ordered: false,
+            total_records: -1,
+            total_bytes: -1,
+            app_metadata: Bytes::new(),
+        };
+
+        Ok(Response::new(flight_info))
+    }
+
+    async fn do_get_prepared_statement(
+        &self,
+        query: CommandPreparedStatementQuery,
+        _request: Request<Ticket>,
+    ) -> Result<Response<Pin<Box<dyn Stream<Item = Result<FlightData, Status>> + Send>>>, Status>
+    {
+        tracing::info!(
+            method = "do_get_prepared_statement",
+            "FlightSQL method called"
+        );
+        let (handle, _): (StatementHandle, usize) = bincode::decode_from_slice(
+            &query.prepared_statement_handle,
+            bincode::config::standard(),
+        )
+        .map_err(|e| {
+            Status::invalid_argument(format!("Invalid prepared statement handle: {}", e))
+        })?;
+
+        let stream = match handle {
+            StatementHandle::PreparedStatement { query, .. } => {
+                if query.is_empty() {
+                    return Err(Status::internal("Prepared statement query is empty"));
+                }
+
+                let (serialized_plan, _schema) =
+                    self.plan_sql_query(&query, None).await.map_err(|e| {
+                        Status::internal(format!("Prepared statement planning error: {}", e))
+                    })?;
+
+                self.execute_remote_plan(&serialized_plan)
+                    .await
+                    .map_err(|e| {
+                        Status::internal(format!("Prepared statement execution error: {}", e))
+                    })?
+            }
+            StatementHandle::SerializedPlan(_) => {
+                return Err(Status::internal(
+                    "Expected PreparedStatement for prepared statement, got SerializedPlan",
+                ));
+            }
+        };
+
+        Ok(Response::new(stream))
     }
 
     async fn do_action_close_prepared_statement(
@@ -1417,11 +1685,11 @@ impl FlightSqlService for Service {
         _query: ActionClosePreparedStatementRequest,
         _request: Request<Action>,
     ) -> Result<(), Status> {
-        tracing::warn!(
+        tracing::info!(
             method = "do_action_close_prepared_statement",
-            "FlightSQL method called but not implemented"
+            "FlightSQL method called"
         );
-        unimplemented!()
+        Ok(())
     }
 
     async fn register_sql_info(&self, _id: i32, _result: &SqlInfo) {
