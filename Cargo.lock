@@ -2009,6 +2009,7 @@ name = "common"
 version = "0.1.0"
 dependencies = [
  "alloy",
+ "async-stream",
  "async-trait",
  "axum 0.8.4",
  "backon",

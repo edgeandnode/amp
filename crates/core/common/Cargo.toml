@@ -6,6 +6,7 @@ version.workspace = true
 [dependencies]
 alloy.workspace = true
 async-trait.workspace = true
+async-stream.workspace = true
 axum.workspace = true
 backon.workspace = true
 bincode.workspace = true

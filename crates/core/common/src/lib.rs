@@ -35,7 +35,7 @@ use datafusion::{
     parquet::file::metadata::ParquetMetaData,
 };
 pub use foyer::Cache;
-use futures::Stream;
+use futures::{Stream, StreamExt};
 use metadata::segments::BlockRange;
 use metadata_db::FileId;
 pub use query_context::QueryContext;
@@ -176,6 +176,69 @@ pub trait BlockStreamer: Clone + 'static {
     ) -> impl Future<Output = impl Stream<Item = Result<RawDatasetRows, BoxError>> + Send> + Send;
 
     fn latest_block(&mut self) -> impl Future<Output = Result<BlockNum, BoxError>> + Send;
+}
+
+impl<T: BlockStreamer> BlockStreamerExt for T {}
+
+pub trait BlockStreamerExt: BlockStreamer {
+    fn with_retry(self) -> BlockStreamerWithRetry<Self> {
+        BlockStreamerWithRetry(self)
+    }
+}
+
+#[derive(Clone)]
+pub struct BlockStreamerWithRetry<T: BlockStreamer>(T);
+
+impl<T: BlockStreamer + Send> BlockStreamer for BlockStreamerWithRetry<T> {
+    async fn block_stream(
+        self,
+        start: BlockNum,
+        end: BlockNum,
+    ) -> impl Stream<Item = Result<RawDatasetRows, BoxError>> + Send {
+        const DEBUG_RETRY_LIMIT: u16 = 8;
+        const WARN_RETRY_LIMIT: u16 = 16;
+
+        let mut current_block = start;
+        let mut blocks_sent = 0;
+        let mut num_retries = 0;
+
+        async_stream::stream! {
+            'retry: loop {
+                let inner_stream = self.0.clone().block_stream(current_block, end).await;
+                futures::pin_mut!(inner_stream);
+                while let Some(block) = inner_stream.next().await {
+                    match &block {
+                        Ok(_) => {
+                            num_retries = 0;
+                            blocks_sent += 1;
+                            yield block;
+                        }
+                        Err(e) => {
+                            // Progressively more severe logging and longer retry interval.
+                            if num_retries < DEBUG_RETRY_LIMIT {
+                                num_retries += 1;
+                                tracing::debug!(block = %current_block, error = ?e, "Block streaming failed, retrying");
+                                tokio::time::sleep(Duration::from_millis(50)).await;
+                            } else if num_retries < WARN_RETRY_LIMIT {
+                                num_retries += 1;
+                                tracing::warn!(block = %current_block, error = ?e, "Block streaming failed, retrying");
+                                tokio::time::sleep(Duration::from_millis(100)).await;
+                            } else {
+                                tracing::error!(block = %current_block, error = ?e, "Block streaming failed, retrying");
+                                tokio::time::sleep(Duration::from_millis(300)).await;
+                            }
+                            current_block = start + blocks_sent;
+                            continue 'retry;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn latest_block(&mut self) -> impl Future<Output = Result<BlockNum, BoxError>> + Send {
+        self.0.latest_block()
+    }
 }
 
 pub enum DatasetValue {
