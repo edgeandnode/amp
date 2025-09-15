@@ -232,6 +232,7 @@ impl<T: BlockStreamer + Send> BlockStreamer for BlockStreamerWithRetry<T> {
                         }
                     }
                 }
+                break 'retry;
             }
         }
     }
