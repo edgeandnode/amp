@@ -302,7 +302,9 @@ async fn dump_sql_query(
         microbatch_start,
     )?;
 
-    let dataset = physical_table.dataset().name.clone();
+    let dataset_name = physical_table.dataset().name.clone();
+    let table_name = physical_table.table_name();
+    let location_id = *physical_table.location_id();
 
     let mut compactor = NozzleCompactor::start(physical_table.clone(), compaction_opts.clone());
 
@@ -321,8 +323,18 @@ async fn dump_sql_query(
                 if let Some(ref metrics) = metrics {
                     let num_rows: u64 = batch.num_rows().try_into().unwrap();
                     let num_bytes: u64 = batch.get_array_memory_size().try_into().unwrap();
-                    metrics.inc_sql_dataset_rows_by(num_rows, dataset.clone());
-                    metrics.inc_sql_dataset_bytes_written_by(num_bytes, dataset.clone());
+                    metrics.inc_sql_dataset_rows_by(
+                        num_rows,
+                        dataset_name.clone(),
+                        table_name.to_string(),
+                        location_id,
+                    );
+                    metrics.inc_sql_dataset_bytes_written_by(
+                        num_bytes,
+                        dataset_name.clone(),
+                        table_name.to_string(),
+                        location_id,
+                    );
                 }
             }
             QueryMessage::BlockComplete(_) => {
@@ -358,7 +370,7 @@ async fn dump_sql_query(
                 )?;
 
                 if let Some(ref metrics) = metrics {
-                    metrics.inc_sql_dataset_files_written(dataset.clone());
+                    metrics.inc_sql_dataset_files_written(dataset_name.clone());
                 }
             }
         }
