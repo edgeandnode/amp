@@ -195,23 +195,3 @@ pub fn block_range_intersection(
         None
     }
 }
-
-/// Wrapper to implement [`JsonSchema`] for [`datafusion::arrow::datatypes::DataType`].
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct DataTypeJsonSchema(pub datafusion::arrow::datatypes::DataType);
-
-#[cfg(feature = "schemars")]
-impl schemars::JsonSchema for DataTypeJsonSchema {
-    fn schema_name() -> std::borrow::Cow<'static, str> {
-        "DataType".into()
-    }
-
-    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
-        let mut schema = String::json_schema(generator);
-        schema.as_object_mut().unwrap().insert(
-            "description".to_string(),
-            serde_json::json!("Arrow data type, e.g. `Int32`, `Utf8`, etc."),
-        );
-        schema
-    }
-}

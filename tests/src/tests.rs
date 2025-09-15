@@ -1,5 +1,5 @@
 mod anvil;
-mod deploy;
+mod register_dataset;
 mod registry;
 
 use alloy::{
@@ -10,7 +10,7 @@ use alloy::{
 use common::{
     BlockNum, BoxError,
     manifest::{
-        common::{Manifest as CommonManifest, SerializableSchema},
+        common::{Manifest as CommonManifest, Schema},
         derived::Manifest,
     },
     metadata::segments::BlockRange,
@@ -206,9 +206,6 @@ async fn sql_over_eth_firehose_dump() {
     let dataset_name = "sql_over_eth_firehose";
 
     let test_env = TestEnv::temp("sql_over_eth_firehose").await.unwrap();
-    let blessed = SnapshotContext::blessed(&test_env, &dataset_name)
-        .await
-        .unwrap();
     let block = test_env
         .dataset_store
         .load_dataset("eth_firehose", None)
@@ -224,6 +221,9 @@ async fn sql_over_eth_firehose_dump() {
     let temp_dump = SnapshotContext::temp_dump(&test_env, &dataset_name, block, 1)
         .await
         .expect("temp dump failed");
+    let blessed = SnapshotContext::blessed(&test_env, &dataset_name)
+        .await
+        .unwrap();
     temp_dump.assert_eq(&blessed).await.unwrap();
 }
 
@@ -437,7 +437,7 @@ async fn generate_manifest_evm_rpc_builtin() {
     .unwrap();
 
     let out: CommonManifest = serde_json::from_slice(&out).unwrap();
-    let builtin_schema: SerializableSchema = evm_rpc_datasets::tables::all(&network).into();
+    let builtin_schema: Schema = evm_rpc_datasets::tables::all(&network).into();
 
     assert_eq!(out.network, network);
     assert_eq!(out.kind, kind);
@@ -467,7 +467,7 @@ async fn generate_manifest_firehose_builtin() {
     .unwrap();
 
     let out: CommonManifest = serde_json::from_slice(&out).unwrap();
-    let builtin_schema: SerializableSchema = firehose_datasets::evm::tables::all(&network).into();
+    let builtin_schema: Schema = firehose_datasets::evm::tables::all(&network).into();
 
     assert_eq!(out.network, network);
     assert_eq!(out.kind, kind);

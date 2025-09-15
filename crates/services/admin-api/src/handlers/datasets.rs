@@ -1,8 +1,8 @@
 //! Datasets HTTP handlers
 
-pub mod deploy;
+pub mod dataset_info;
 pub mod dump;
 pub mod get_all;
 pub mod get_by_id;
-
-mod error;
+pub mod register;
+mod tracing;

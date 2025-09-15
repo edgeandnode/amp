@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 
 use datafusion::sql::parser;
 
-use crate::{Dataset, DatasetValue};
+use crate::{Dataset, DatasetValue, manifest::common::Name};
 
 /// Dataset kind constant for legacy SQL datasets.
 pub const DATASET_KIND: &str = "sql";
@@ -39,20 +39,20 @@ impl SqlDataset {
 #[derive(Debug, serde::Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct Manifest {
+    /// Dataset name, must match the filename
+    pub name: Name,
     /// Dataset kind, must be "sql"
     pub kind: String,
     /// Network name, e.g., "mainnet", "sepolia"
     pub network: String,
-    /// Dataset name, must match the filename
-    pub name: String,
 }
 
 impl Manifest {
     /// Parse a dataset definition from TOML or JSON value.
     pub fn from_value(value: DatasetValue) -> Result<Self, Error> {
         match value {
-            DatasetValue::Toml(value) => value.try_into().map_err(From::from),
-            DatasetValue::Json(value) => serde_json::from_value(value).map_err(From::from),
+            DatasetValue::Toml(value) => value.try_into().map_err(Into::into),
+            DatasetValue::Json(value) => serde_json::from_value(value).map_err(Into::into),
         }
     }
 }

@@ -86,21 +86,22 @@ pub async fn client(
 ) -> Result<JsonRpcClient, Error> {
     let provider: EvmRpcProvider = provider.try_into()?;
     let request_limit = u16::max(1, provider.concurrent_request_limit.unwrap_or(1024));
-    let client = if provider.url.scheme() == "ipc" {
-        let path = provider.url.path();
-        JsonRpcClient::new_ipc(
-            PathBuf::from(path),
-            network,
-            request_limit,
-            provider.rpc_batch_size,
-            provider.rate_limit_per_minute,
-            provider.fetch_receipts_per_tx,
-            final_blocks_only,
-        )
-        .await
-        .map_err(Error::Client)?
-    } else {
-        JsonRpcClient::new(
+    let client = match provider.url.scheme() {
+        "ipc" => {
+            let path = provider.url.path();
+            JsonRpcClient::new_ipc(
+                PathBuf::from(path),
+                network,
+                request_limit,
+                provider.rpc_batch_size,
+                provider.rate_limit_per_minute,
+                provider.fetch_receipts_per_tx,
+                final_blocks_only,
+            )
+            .await
+            .map_err(Error::Client)?
+        }
+        "ws" | "wss" => JsonRpcClient::new_ws(
             provider.url,
             network,
             request_limit,
@@ -109,7 +110,18 @@ pub async fn client(
             provider.fetch_receipts_per_tx,
             final_blocks_only,
         )
-        .map_err(Error::Client)?
+        .await
+        .map_err(Error::Client)?,
+        _ => JsonRpcClient::new(
+            provider.url,
+            network,
+            request_limit,
+            provider.rpc_batch_size,
+            provider.rate_limit_per_minute,
+            provider.fetch_receipts_per_tx,
+            final_blocks_only,
+        )
+        .map_err(Error::Client)?,
     };
 
     Ok(client)

@@ -2,7 +2,7 @@ use std::io;
 
 use common::{
     BoxError,
-    manifest::common::{Manifest, SerializableSchema},
+    manifest::common::{Manifest, Name, Schema},
 };
 
 pub async fn run<T: io::Write>(
@@ -13,10 +13,11 @@ pub async fn run<T: io::Write>(
     module: Option<String>,
     w: &mut T,
 ) -> Result<(), BoxError> {
-    // Validate dataset kind.
-    let dataset_kind = kind.parse()?;
+    // Validate dataset name and kind
+    let name = name.parse::<Name>()?;
+    let kind = kind.parse()?;
 
-    let schema: SerializableSchema = match dataset_kind {
+    let schema: Schema = match kind {
         dataset_store::DatasetKind::EvmRpc => evm_rpc_datasets::tables::all(&network).into(),
         dataset_store::DatasetKind::Firehose => {
             firehose_datasets::evm::tables::all(&network).into()
@@ -29,9 +30,9 @@ pub async fn run<T: io::Write>(
                 );
             };
             let dataset_def = substreams_datasets::dataset::DatasetDef {
-                kind: kind.clone(),
+                kind: kind.to_string(),
                 network: network.clone(),
-                name: name.clone(),
+                name: name.to_string(),
                 manifest,
                 module,
             };
@@ -48,7 +49,7 @@ pub async fn run<T: io::Write>(
     };
     let dataset = serde_json::to_vec(&Manifest {
         network,
-        kind,
+        kind: kind.to_string(),
         name,
         schema: Some(schema),
     })?;

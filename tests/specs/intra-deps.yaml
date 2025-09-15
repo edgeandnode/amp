@@ -6,6 +6,11 @@
   deploy: intra_deps
   end: 15000020
 
+- name: dump_intra_deps
+  dataset: intra_deps
+  end: 15000020
+  config: nozzle.config.ts
+
 - name: query_blocks_base
   query: SELECT * from intra_deps.zz_blocks_base order by block_num limit 1
   results: |
