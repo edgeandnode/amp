@@ -14,9 +14,13 @@ use datafusion::{
     common::DFSchemaRef,
     sql::{parser, resolve::resolve_table_references},
 };
+use datasets_common::{
+    manifest::{DataType, VersionReq},
+    name::Name,
+    version::Version,
+};
 use metadata_db::registry::Registry;
 
-use super::common::{DataType, Name, Version, VersionReq};
 use crate::{
     BoxError, Dataset, Table as LogicalTable,
     catalog::logical::{Function as LogicalFunction, FunctionSource as LogicalFunctionSource},

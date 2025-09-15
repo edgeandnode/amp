@@ -1,5 +1,6 @@
 use admin_api::handlers::datasets::register::RegisterRequest;
-use common::manifest::{common::Version, derived::Manifest};
+use common::manifest::derived::Manifest;
+use datasets_common::version::Version;
 use reqwest::StatusCode;
 
 use crate::test_support::TestEnv;

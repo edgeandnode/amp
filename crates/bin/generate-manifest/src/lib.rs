@@ -1,8 +1,9 @@
 use std::io;
 
-use common::{
-    BoxError,
-    manifest::common::{Manifest, Name, Schema},
+use common::{BoxError, manifest::common::schema_from_tables};
+use datasets_common::{
+    manifest::{Manifest, Schema},
+    name::Name,
 };
 
 pub async fn run<T: io::Write>(
@@ -18,9 +19,11 @@ pub async fn run<T: io::Write>(
     let kind = kind.parse()?;
 
     let schema: Schema = match kind {
-        dataset_store::DatasetKind::EvmRpc => evm_rpc_datasets::tables::all(&network).into(),
+        dataset_store::DatasetKind::EvmRpc => {
+            schema_from_tables(evm_rpc_datasets::tables::all(&network))
+        }
         dataset_store::DatasetKind::Firehose => {
-            firehose_datasets::evm::tables::all(&network).into()
+            schema_from_tables(firehose_datasets::evm::tables::all(&network))
         }
         dataset_store::DatasetKind::Substreams => {
             let (Some(manifest), Some(module)) = (manifest, module) else {
@@ -36,9 +39,7 @@ pub async fn run<T: io::Write>(
                 manifest,
                 module,
             };
-            substreams_datasets::tables(dataset_def)
-                .await
-                .map(Into::into)?
+            schema_from_tables(substreams_datasets::tables(dataset_def).await?)
         }
         dataset_store::DatasetKind::Sql => {
             return Err("`DatasetKind::Sql` doesn't support dataset generation".into());

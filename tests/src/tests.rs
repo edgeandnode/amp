@@ -9,14 +9,12 @@ use alloy::{
 };
 use common::{
     BlockNum, BoxError,
-    manifest::{
-        common::{Manifest as CommonManifest, Schema},
-        derived::Manifest,
-    },
+    manifest::{common::schema_from_tables, derived::Manifest},
     metadata::segments::BlockRange,
     query_context::parse_sql,
 };
 use dataset_store::DatasetStore;
+use datasets_common::manifest::Manifest as CommonManifest;
 use generate_manifest;
 use monitoring::logging;
 use schemars::schema_for;
@@ -437,7 +435,7 @@ async fn generate_manifest_evm_rpc_builtin() {
     .unwrap();
 
     let out: CommonManifest = serde_json::from_slice(&out).unwrap();
-    let builtin_schema: Schema = evm_rpc_datasets::tables::all(&network).into();
+    let builtin_schema = schema_from_tables(evm_rpc_datasets::tables::all(&network));
 
     assert_eq!(out.network, network);
     assert_eq!(out.kind, kind);
@@ -467,7 +465,7 @@ async fn generate_manifest_firehose_builtin() {
     .unwrap();
 
     let out: CommonManifest = serde_json::from_slice(&out).unwrap();
-    let builtin_schema: Schema = firehose_datasets::evm::tables::all(&network).into();
+    let builtin_schema = schema_from_tables(firehose_datasets::evm::tables::all(&network));
 
     assert_eq!(out.network, network);
     assert_eq!(out.kind, kind);
@@ -507,10 +505,7 @@ async fn generate_manifest_substreams() {
         module,
     };
 
-    let schema = substreams_datasets::tables(dataset_def)
-        .await
-        .map(Into::into)
-        .unwrap();
+    let schema = schema_from_tables(substreams_datasets::tables(dataset_def).await.unwrap());
 
     assert_eq!(out.network, network);
     assert_eq!(out.kind, kind);

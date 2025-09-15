@@ -5,12 +5,11 @@ use datafusion::{
     logical_expr::{ScalarUDF, async_udf::AsyncScalarUDF},
     sql::TableReference,
 };
+use datasets_common::version::Version;
 use js_runtime::isolate_pool::IsolatePool;
 use serde::Deserialize;
 
-use crate::{
-    BLOCK_NUM, BlockNum, BoxError, SPECIAL_BLOCK_NUM, js_udf::JsUdf, manifest::common::Version,
-};
+use crate::{BLOCK_NUM, BlockNum, BoxError, SPECIAL_BLOCK_NUM, js_udf::JsUdf};
 
 /// Identifies a dataset and its data schema.
 #[derive(Clone, Debug)]

@@ -14,7 +14,7 @@ use common::{
     evm::{self, udfs::EthCall},
     manifest::{
         self,
-        common::{Manifest as CommonManifest, Schema, Version},
+        common::{schema_from_table_slice, schema_from_tables},
         derived::Manifest,
         sql_datasets::SqlDataset,
     },
@@ -27,6 +27,7 @@ use datafusion::{
     logical_expr::{ScalarUDF, async_udf::AsyncScalarUDF},
     sql::{TableReference, parser, resolve::resolve_table_references},
 };
+use datasets_common::{manifest::Manifest as CommonManifest, version::Version};
 use futures::{FutureExt as _, Stream, TryFutureExt as _, future::BoxFuture};
 use js_runtime::isolate_pool::IsolatePool;
 use metadata_db::MetadataDb;
@@ -235,22 +236,22 @@ impl DatasetStore {
 
     pub async fn load_dataset(
         self: &Arc<Self>,
-        dataset: &str,
+        name: &str,
         version: Option<&Version>,
     ) -> Result<Dataset, DatasetError> {
-        let dataset_identifier = self.load_dataset_from_registry(dataset, version).await?;
+        let dataset_identifier = self.load_dataset_from_registry(name, version).await?;
         self.clone()
             .load_dataset_inner(&dataset_identifier)
             .await
-            .map_err(|e| (dataset, e).into())
+            .map_err(|err| (name, err).into())
     }
 
     pub async fn try_load_dataset(
         self: &Arc<Self>,
-        dataset: &str,
+        name: &str,
         version: Option<&Version>,
     ) -> Result<Option<Dataset>, DatasetError> {
-        match self.load_dataset(dataset, version).await {
+        match self.load_dataset(name, version).await {
             Ok(dataset) => Ok(Some(dataset)),
             Err(e) => {
                 if e.is_not_found() {
@@ -264,36 +265,36 @@ impl DatasetStore {
 
     pub async fn load_dataset_from_registry(
         self: &Arc<Self>,
-        dataset: &str,
+        name: &str,
         version: Option<&Version>,
     ) -> Result<String, DatasetError> {
         let dataset_identifier = match version {
             Some(version) => self
                 .metadata_db
-                .get_dataset(dataset, &version.to_string())
+                .get_dataset(name, &version.to_string())
                 .await
-                .map_err(|e| DatasetError::from((dataset, Error::MetadataDbError(e))))?
+                .map_err(|err| DatasetError::from((name, Error::MetadataDbError(err))))?
                 .ok_or_else(|| {
                     DatasetError::from((
-                        dataset,
-                        Error::DatasetVersionNotFound(dataset.to_string(), version.to_string()),
+                        name,
+                        Error::DatasetVersionNotFound(name.to_string(), version.to_string()),
                     ))
                 })?,
             None => {
                 let latest_version = self
                     .metadata_db
-                    .get_latest_dataset_version(dataset)
+                    .get_latest_dataset_version(name)
                     .await
-                    .map_err(|e| DatasetError::from((dataset, Error::MetadataDbError(e))))?;
+                    .map_err(|err| DatasetError::from((name, Error::MetadataDbError(err))))?;
                 match latest_version {
                     Some((dataset, version)) => {
                         let version_identifier =
-                            Version::version_identifier(&version).map_err(|e| {
-                                DatasetError::from((dataset.as_str(), Error::Unknown(e)))
+                            Version::version_identifier(&version).map_err(|err| {
+                                DatasetError::from((dataset.as_str(), Error::Unknown(err.into())))
                             })?;
                         format!("{}__{}", dataset, version_identifier)
                     }
-                    None => dataset.to_string(),
+                    None => name.to_string(),
                 }
             }
         };
@@ -305,7 +306,7 @@ impl DatasetStore {
             .dataset_defs_store()
             .list_all_shallow()
             .await
-            .map_err(|e| DatasetError::no_context(e.into()))?;
+            .map_err(|err| DatasetError::no_context(err.into()))?;
 
         let mut datasets = Vec::new();
         for obj in all_objs {
@@ -327,7 +328,7 @@ impl DatasetStore {
         self.clone()
             .load_sql_dataset_inner(dataset)
             .await
-            .map_err(|e| (dataset, e).into())
+            .map_err(|err| (dataset, err).into())
     }
 
     /// It's a hack for this to return a `SqlDataset`. Soon we should deprecate `SqlDataset` and
@@ -343,7 +344,7 @@ impl DatasetStore {
         self.clone()
             .load_manifest_dataset_inner(&dataset_identifier)
             .await
-            .map_err(|e| (dataset, e).into())
+            .map_err(|err| (dataset, err).into())
     }
 
     /// Loads a [RawDataset] and [common](CommonManifest) data for a TOML or JSON file with the
@@ -412,12 +413,13 @@ impl DatasetStore {
         let value = raw_dataset.to_value()?;
         let (dataset, ground_truth_schema) = match kind {
             DatasetKind::EvmRpc => {
-                let builtin_schema: Schema = evm_rpc_datasets::tables::all(&common.network).into();
+                let builtin_schema =
+                    schema_from_tables(evm_rpc_datasets::tables::all(&common.network));
                 (evm_rpc_datasets::dataset(value)?, Some(builtin_schema))
             }
             DatasetKind::Firehose => {
-                let builtin_schema: Schema =
-                    firehose_datasets::evm::tables::all(&common.network).into();
+                let builtin_schema =
+                    schema_from_tables(firehose_datasets::evm::tables::all(&common.network));
                 (
                     firehose_datasets::evm::dataset(value)?,
                     Some(builtin_schema),
@@ -425,7 +427,7 @@ impl DatasetStore {
             }
             DatasetKind::Substreams => {
                 let dataset = substreams_datasets::dataset(value).await?;
-                let store_schema: Schema = dataset.tables.as_slice().into();
+                let store_schema = schema_from_table_slice(dataset.tables.as_slice());
                 (dataset, Some(store_schema))
             }
             DatasetKind::Sql => {
@@ -481,7 +483,7 @@ impl DatasetStore {
     ) -> Result<impl BlockStreamer, DatasetError> {
         self.load_client_inner(dataset, only_finalized_blocks)
             .await
-            .map_err(|e| (dataset, e).into())
+            .map_err(|err| (dataset, err).into())
     }
 
     async fn load_client_inner(
@@ -722,7 +724,7 @@ impl DatasetStore {
             let udf = self
                 .eth_call_for_dataset(&dataset)
                 .await
-                .map_err(|e| (dataset_name.clone(), e))?;
+                .map_err(|err| (dataset_name.clone(), err))?;
             if let Some(udf) = udf {
                 udfs.push(udf);
             }

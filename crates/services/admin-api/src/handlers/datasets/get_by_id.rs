@@ -3,7 +3,7 @@ use axum::{
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
 };
-use common::manifest::common::{Name, Version};
+use datasets_common::{name::Name, version::Version};
 use http_common::{BoxRequestError, RequestError};
 use metadata_db::TableId;
 

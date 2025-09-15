@@ -7,8 +7,9 @@
 use std::collections::BTreeMap;
 
 use datafusion::sql::parser;
+use datasets_common::name::Name;
 
-use crate::{Dataset, DatasetValue, manifest::common::Name};
+use crate::{Dataset, DatasetValue};
 
 /// Dataset kind constant for legacy SQL datasets.
 pub const DATASET_KIND: &str = "sql";

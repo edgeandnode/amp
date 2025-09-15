@@ -7,6 +7,7 @@ edition.workspace = true
 axum.workspace = true
 common = { path = "../../core/common" }
 dataset-store = { path = "../../core/dataset-store" }
+datasets-common = { version = "0.1.0", path = "../../core/datasets-common" }
 dump = { path = "../../core/dump" }
 futures.workspace = true
 http-common = { path = "../http-common" }
