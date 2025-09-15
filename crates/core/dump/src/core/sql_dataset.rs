@@ -203,7 +203,6 @@ pub async fn dump_table(
 
         if is_incr {
             let latest_range = table.latest_range().await?;
-            let start = if latest_range.is_some() { 0 } else { start };
             let resume_watermark = latest_range.map(|r| ResumeWatermark::from_ranges(vec![r]));
             dump_sql_query(
                 &ctx,
