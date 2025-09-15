@@ -154,6 +154,7 @@ pub struct StreamingQuery {
     table_updates: TableUpdates,
     tx: mpsc::Sender<QueryMessage>,
     microbatch_max_interval: u64,
+    destination: Option<Arc<PhysicalTable>>,
     preserve_block_num: bool,
     network: String,
     /// `blocks` table for the network associated with the catalog.
@@ -177,13 +178,13 @@ impl StreamingQuery {
         end_block: Option<BlockNum>,
         resume_watermark: Option<ResumeWatermark>,
         multiplexer_handle: &NotificationMultiplexerHandle,
-        is_sql_dataset: bool,
+        destination: Option<Arc<PhysicalTable>>,
         microbatch_max_interval: u64,
     ) -> Result<StreamingQueryHandle, BoxError> {
         let (tx, rx) = mpsc::channel(10);
 
         // Preserve `_block_num` for SQL materializaiton or if explicitly selected in the schema.
-        let preserve_block_num = is_sql_dataset
+        let preserve_block_num = destination.is_some()
             || plan
                 .schema()
                 .fields()
@@ -221,6 +222,7 @@ impl StreamingQuery {
             prev_watermark,
             table_updates,
             microbatch_max_interval,
+            destination,
             preserve_block_num,
             network: network.to_string(),
             blocks_table: Arc::new(blocks_table),
@@ -474,6 +476,22 @@ impl StreamingQuery {
                 )
                 .await?;
         }
+
+        // If we're dumping a SQL dataset, we must rewind to the start of the canonical segment
+        // boudary. Otherwise, the new segments may not form a canonical chain.
+        if let Some(destination) = self.destination.as_ref()
+            && let Some(destination_chain) = destination.canonical_chain().await?
+        {
+            min_fork_block_num = *destination_chain
+                .0
+                .iter()
+                .rev()
+                .map(|s| &s.range.numbers)
+                .find(|r| r.contains(&min_fork_block_num))
+                .unwrap_or(&(0..=0))
+                .start();
+        }
+
         self.blocks_table_fetch(ctx, min_fork_block_num, None).await
     }
 

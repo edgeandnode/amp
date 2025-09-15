@@ -7,7 +7,6 @@ export * as Admin from "./api/Admin.ts"
 export * as ArrowFlight from "./api/ArrowFlight.ts"
 export * as ApiError from "./api/Error.ts"
 export * as JsonLines from "./api/JsonLines.ts"
-export * as Registry from "./api/Registry.ts"
 export * as Arrow from "./Arrow.ts"
 export * as Model from "./Model.ts"
 

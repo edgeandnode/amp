@@ -1,5 +1,5 @@
 mod anvil;
-mod deploy;
+mod register_dataset;
 mod registry;
 
 use alloy::{
@@ -207,9 +207,6 @@ async fn sql_over_eth_firehose_dump() {
     let dataset_name = "sql_over_eth_firehose";
 
     let test_env = TestEnv::temp("sql_over_eth_firehose").await.unwrap();
-    let blessed = SnapshotContext::blessed(&test_env, &dataset_name)
-        .await
-        .unwrap();
     let block = test_env
         .dataset_store
         .load_dataset("eth_firehose", None)
@@ -225,6 +222,9 @@ async fn sql_over_eth_firehose_dump() {
     let temp_dump = SnapshotContext::temp_dump(&test_env, &dataset_name, block, 1)
         .await
         .expect("temp dump failed");
+    let blessed = SnapshotContext::blessed(&test_env, &dataset_name)
+        .await
+        .unwrap();
     temp_dump.assert_eq(&blessed).await.unwrap();
 }
 

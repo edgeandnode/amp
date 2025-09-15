@@ -44,9 +44,6 @@ metadata_db_url = "postgres://<pg_url>"
 # JSON Lines server address  
 # jsonl_addr = "0.0.0.0:1603"
 
-# Registry service address
-# registry_service_addr = "0.0.0.0:1611"
-
 # Admin API server address
 # admin_api_addr = "0.0.0.0:1610"
 

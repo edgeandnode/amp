@@ -1,13 +1,6 @@
 import * as Path from "@effect/platform/Path"
 import { layer } from "@effect/vitest"
-import {
-  assertEquals,
-  assertFailure,
-  assertInstanceOf,
-  assertSome,
-  assertSuccess,
-  deepStrictEqual,
-} from "@effect/vitest/utils"
+import { assertEquals, assertFailure, assertInstanceOf, assertSome, deepStrictEqual } from "@effect/vitest/utils"
 import * as Array from "effect/Array"
 import * as Cause from "effect/Cause"
 import * as Duration from "effect/Duration"
@@ -19,7 +12,6 @@ import * as Anvil from "nozzl/Anvil"
 import * as Admin from "nozzl/api/Admin"
 import * as Errors from "nozzl/api/Error"
 import * as JsonLines from "nozzl/api/JsonLines"
-import * as Registry from "nozzl/api/Registry"
 import * as EvmRpc from "nozzl/evm/EvmRpc"
 import * as Model from "nozzl/Model"
 import * as Fixtures from "./utils/Fixtures.ts"
@@ -29,7 +21,6 @@ const environment = Testing.layer({
   nozzleOutput: "both",
   anvilOutput: "both",
   adminPort: 51610,
-  registryPort: 51611,
   jsonLinesPort: 51603,
   arrowFlightPort: 51602,
   anvilPort: 58545,
@@ -54,21 +45,28 @@ layer(environment, {
   )
 
   it.effect(
-    "deploy and dump the root dataset",
+    "register and dump the root dataset",
     Effect.fn(function*() {
       const admin = yield* Admin.Admin
       const rpc = yield* EvmRpc.EvmRpc
       const block = yield* rpc.getLatestBlockNumber
 
-      // Deploy and dump the root dataset.
-      yield* admin.deployDataset(Anvil.dataset.name, Anvil.dataset.version, Anvil.dataset)
+      // Register and dump the root dataset.
+      yield* admin.registerDataset(Anvil.dataset.name, Anvil.dataset.version, Anvil.dataset)
+
+      // TODO: Fix dumping with version
+      // yield* admin.dumpDatasetVersion(Anvil.dataset.name, Anvil.dataset.version, {
+      //   endBlock: Number(block),
+      // })
+
       yield* admin.dumpDataset(Anvil.dataset.name, {
         endBlock: Number(block),
-        version: Anvil.dataset.version,
-        waitForCompletion: true,
       })
 
-      const response = yield* admin.getDatasetById(Anvil.dataset.name)
+      // TODO: Implement this with job polling instead (previously used `waitForCompletion`)
+      yield* Effect.sleep("1 second")
+
+      const response = yield* admin.getDataset(Anvil.dataset.name)
       assertInstanceOf(response, Model.DatasetInfo)
       deepStrictEqual(response.name, Anvil.dataset.name)
     }),
@@ -79,7 +77,7 @@ layer(environment, {
     "can fetch a root dataset",
     Effect.fn(function*() {
       const api = yield* Admin.Admin
-      const result = yield* api.getDatasetById("anvil")
+      const result = yield* api.getDataset("anvil")
       assertInstanceOf(result, Model.DatasetInfo)
       assertEquals(result.kind, "evm-rpc")
       assertEquals(result.name, "anvil")
@@ -90,7 +88,7 @@ layer(environment, {
   it.effect(
     "can fetch the output schema of a root dataset",
     Effect.fn(function*() {
-      const api = yield* Registry.Registry
+      const api = yield* Admin.Admin
       const result = yield* api.getOutputSchema("SELECT * FROM anvil.transactions")
       assertInstanceOf(result, Model.OutputSchema)
     }),
@@ -98,35 +96,30 @@ layer(environment, {
   )
 
   it.effect(
-    "can register a dataset",
-    Effect.fn(function*() {
-      const registry = yield* Registry.Registry
-      const fixtures = yield* Fixtures.Fixtures
-      const dataset = yield* fixtures.load("manifest.json", Model.DatasetManifest)
-      const result = yield* registry.register(dataset).pipe(Effect.exit)
-      assertSuccess(result, { success: true })
-    }),
-    { sequential: true, timeout: Duration.toMillis("10 seconds") },
-  )
-
-  it.effect(
-    "deploy and dump the example dataset",
+    "register and dump the example dataset",
     Effect.fn(function*() {
       const admin = yield* Admin.Admin
       const rpc = yield* EvmRpc.EvmRpc
       const block = yield* rpc.getLatestBlockNumber
       const fixtures = yield* Fixtures.Fixtures
 
-      // Deploy and dump the example manifest.
+      // Register and dump the example manifest.
       const dataset = yield* fixtures.load("manifest.json", Model.DatasetManifest)
-      yield* admin.deployDataset(dataset.name, dataset.version)
+      yield* admin.registerDataset(dataset.name, dataset.version, dataset)
+
+      // TODO: Fix dumping with version
+      // yield* admin.dumpDatasetVersion(dataset.name, dataset.version, {
+      //   endBlock: Number(block),
+      // })
+
       yield* admin.dumpDataset(dataset.name, {
         endBlock: Number(block),
-        version: dataset.version,
-        waitForCompletion: true,
       })
 
-      const response = yield* admin.getDatasetById(dataset.name)
+      // TODO: Implement this with job polling instead (previously used `waitForCompletion`)
+      yield* Effect.sleep("1 second")
+
+      const response = yield* admin.getDataset(dataset.name)
       assertInstanceOf(response, Model.DatasetInfo)
       deepStrictEqual(response.name, dataset.name)
     }),

@@ -10,8 +10,8 @@ import * as Schema from "effect/Schema"
  * - Internal scheduler state errors
  *
  * Applies to:
- * - POST /datasets/{id}/dump - When scheduling dataset dumps
- * - POST /deploy - When scheduling deployment jobs
+ * - POST /datasets/{name}/dump - When scheduling dataset dumps
+ * - POST /datasets - When scheduling registration jobs
  */
 export class SchedulerError extends Schema.Class<SchedulerError>("SchedulerError")(
   {
@@ -92,7 +92,7 @@ export class DatasetStoreError extends Schema.Class<DatasetStoreError>("DatasetS
  * - Configuration directory issues
  *
  * Applies to:
- * - POST /deploy - When loading dataset definitions for deployment
+ * - POST /datasets - When loading dataset definitions for registration
  * - Any operation that requires reading dataset definition files
  */
 export class DatasetDefStoreError extends Schema.Class<DatasetDefStoreError>("DatasetDefStoreError")(
@@ -113,7 +113,7 @@ export class DatasetDefStoreError extends Schema.Class<DatasetDefStoreError>("Da
  * Causes:
  * - Dataset ID does not exist in the system
  * - Dataset has been deleted
- * - Dataset not yet deployed
+ * - Dataset not yet registered
  *
  * Applies to:
  * - GET /datasets/{id} - When dataset ID doesn't exist
@@ -133,28 +133,29 @@ export class DatasetNotFound extends Schema.Class<DatasetNotFound>("DatasetNotFo
 }
 
 /**
- * InvalidDatasetId - The provided dataset ID is malformed or invalid.
+ * InvalidSelector - The provided dataset selector (name/version) is malformed or invalid.
  *
  * Causes:
- * - Dataset ID contains invalid characters
- * - Dataset ID format does not match expected pattern
- * - Empty or null dataset ID
+ * - Dataset name contains invalid characters or doesn't follow naming conventions
+ * - Dataset name is empty or malformed
+ * - Version syntax is invalid (e.g., malformed semver)
+ * - Path parameter extraction fails for dataset selection
  *
  * Applies to:
- * - GET /datasets/{id} - When ID format is invalid
- * - POST /datasets/{id}/dump - When ID format is invalid
- * - Any endpoint accepting dataset ID parameter
+ * - GET /datasets/{name} - When dataset name format is invalid
+ * - GET /datasets/{name}/versions/{version} - When name or version format is invalid
+ * - Any endpoint accepting dataset selector parameters
  */
-export class InvalidDatasetId extends Schema.Class<InvalidDatasetId>("InvalidDatasetId")(
+export class InvalidSelector extends Schema.Class<InvalidSelector>("InvalidSelector")(
   {
-    code: Schema.Literal("INVALID_DATASET_ID").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
+    code: Schema.Literal("INVALID_SELECTOR").pipe(Schema.propertySignature, Schema.fromKey("error_code")),
     message: Schema.String.pipe(Schema.propertySignature, Schema.fromKey("error_message")),
   },
   {
     [HttpApiSchema.AnnotationStatus]: 400,
   },
 ) {
-  readonly _tag = "InvalidDatasetId" as const
+  readonly _tag = "InvalidSelector" as const
 }
 
 /**
@@ -168,7 +169,7 @@ export class InvalidDatasetId extends Schema.Class<InvalidDatasetId>("InvalidDat
  * - Request validation failures
  *
  * Applies to:
- * - POST /deploy - Invalid deployment request
+ * - POST /datasets - Invalid registration request
  * - POST /datasets/{id}/dump - Invalid dump parameters
  * - Any endpoint with request validation
  */
@@ -195,7 +196,7 @@ export class InvalidRequest extends Schema.Class<InvalidRequest>("InvalidRequest
  * - Invalid dataset configuration
  *
  * Applies to:
- * - POST /deploy - During manifest validation
+ * - POST /datasets - During manifest validation
  * - Dataset initialization
  * - Different from ManifestParseError (syntax vs semantics)
  */
@@ -367,12 +368,12 @@ export class LimitInvalid extends Schema.Class<LimitInvalid>("LimitInvalid")(
  * DatasetAlreadyExists - The dataset already exists with the provided manifest.
  *
  * Causes:
- * - Attempting to deploy a dataset that already exists when a manifest is provided
+ * - Attempting to register a dataset that already exists when a manifest is provided
  * - Conflict between existing dataset and new manifest
  *
  * Applies to:
  * - POST /datasets - When dataset exists and manifest is provided
- * - POST /deploy - When dataset exists and manifest is provided
+ * - POST /datasets - When dataset exists and manifest is provided
  */
 export class DatasetAlreadyExists extends Schema.Class<DatasetAlreadyExists>("DatasetAlreadyExists")(
   {
@@ -391,12 +392,12 @@ export class DatasetAlreadyExists extends Schema.Class<DatasetAlreadyExists>("Da
  *
  * Causes:
  * - Dataset does not exist in registry
- * - No manifest provided with deployment request
- * - Cannot deploy without dataset definition
+ * - No manifest provided with registration request
+ * - Cannot register without dataset definition
  *
  * Applies to:
  * - POST /datasets - When dataset not found and no manifest provided
- * - POST /deploy - When dataset not found and no manifest provided
+ * - POST /datasets - When dataset not found and no manifest provided
  */
 export class ManifestRequired extends Schema.Class<ManifestRequired>("ManifestRequired")(
   {
@@ -416,11 +417,11 @@ export class ManifestRequired extends Schema.Class<ManifestRequired>("ManifestRe
  * Causes:
  * - Manifest contains different name than request parameter
  * - Manifest contains different version than request parameter
- * - Mismatch between manifest content and deployment request
+ * - Mismatch between manifest content and registration request
  *
  * Applies to:
  * - POST /datasets - During manifest validation
- * - POST /deploy - During manifest validation
+ * - POST /datasets - During manifest validation
  */
 export class ManifestValidationError extends Schema.Class<ManifestValidationError>("ManifestValidationError")(
   {
@@ -444,7 +445,7 @@ export class ManifestValidationError extends Schema.Class<ManifestValidationErro
  *
  * Applies to:
  * - POST /datasets - During manifest registration
- * - POST /deploy - During manifest registration
+ * - POST /datasets - During manifest registration
  */
 export class ManifestRegistrationError extends Schema.Class<ManifestRegistrationError>("ManifestRegistrationError")(
   {

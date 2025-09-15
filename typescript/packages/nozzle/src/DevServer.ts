@@ -8,7 +8,6 @@ import * as Option from "effect/Option"
 import * as Stream from "effect/Stream"
 import * as Anvil from "./Anvil.ts"
 import * as Admin from "./api/Admin.ts"
-import * as Registry from "./api/Registry.ts"
 import * as ConfigLoader from "./ConfigLoader.ts"
 import * as EvmRpc from "./evm/EvmRpc.ts"
 import * as Model from "./Model.js"
@@ -32,7 +31,6 @@ export class DevServer extends Context.Tag("Nozzle/DevServer")<DevServer, void>(
  */
 export const make = Effect.gen(function*() {
   const admin = yield* Admin.Admin
-  const registry = yield* Registry.Registry
   const evmRpc = yield* EvmRpc.EvmRpc
   const configLoader = yield* ConfigLoader.ConfigLoader
 
@@ -44,8 +42,8 @@ export const make = Effect.gen(function*() {
     })),
   )
 
-  // Deploy the anvil dataset
-  yield* admin.deployDataset(Anvil.dataset.name, Anvil.dataset.version, Anvil.dataset)
+  // Register the anvil dataset
+  yield* admin.registerDataset(Anvil.dataset.name, Anvil.dataset.version, Anvil.dataset)
 
   // Observe block changes in a sliding buffer
   const blockChanges = evmRpc.streamBlocks.pipe(
@@ -64,14 +62,8 @@ export const make = Effect.gen(function*() {
       return new Model.DatasetManifest({ ...manifest, version })
     }),
     Stream.tap((manifest) =>
-      registry.register(manifest).pipe(
+      admin.registerDataset(manifest.name, manifest.version, manifest).pipe(
         Effect.tapError(() => Effect.logError(`Failed to register manifest ${manifest.name}@${manifest.version}`)),
-        Effect.ignore,
-      )
-    ),
-    Stream.tap((manifest) =>
-      admin.deployDataset(manifest.name, manifest.version).pipe(
-        Effect.tapError(() => Effect.logError(`Failed to deploy manifest ${manifest.name}@${manifest.version}`)),
         Effect.ignore,
       )
     ),
@@ -85,16 +77,14 @@ export const make = Effect.gen(function*() {
 
         const dependencies = Object.values(manifest.dependencies)
         yield* Effect.forEach(dependencies, (dependency) =>
-          admin.dumpDataset(dependency.name, {
-            version: dependency.version,
+          admin.dumpDatasetVersion(dependency.name, dependency.version, {
             endBlock: Number(block),
           }), {
           concurrency: "unbounded",
           discard: true,
         })
 
-        yield* admin.dumpDataset(manifest.name, {
-          version: manifest.version,
+        yield* admin.dumpDatasetVersion(manifest.name, manifest.version, {
           endBlock: Number(block),
         })
       }).pipe(
