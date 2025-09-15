@@ -4,11 +4,13 @@ use axum::{
     http::StatusCode,
 };
 use datasets_common::{name::Name, version::Version};
-use http_common::{BoxRequestError, RequestError};
 use metadata_db::TableId;
 
 use super::tracing::display_selector_version;
-use crate::ctx::Ctx;
+use crate::{
+    ctx::Ctx,
+    handlers::error::{ErrorResponse, IntoErrorResponse},
+};
 
 /// Handler for dataset retrieval endpoint without version
 ///
@@ -31,10 +33,28 @@ use crate::ctx::Ctx;
 /// - `DATASET_STORE_ERROR`: Failed to load dataset from the dataset store
 /// - `METADATA_DB_ERROR`: Database error while retrieving active locations for tables
 #[tracing::instrument(skip_all, err)]
+#[cfg_attr(
+    feature = "utoipa",
+    utoipa::path(
+        get,
+        path = "/datasets/{id}",
+        tag = "datasets",
+        operation_id = "datasets_get",
+        params(
+            ("id" = String, Path, description = "Dataset name")
+        ),
+        responses(
+            (status = 200, description = "Successfully retrieved dataset information", body = DatasetInfo),
+            (status = 400, description = "Invalid dataset name", body = crate::handlers::error::ErrorResponse),
+            (status = 404, description = "Dataset not found", body = crate::handlers::error::ErrorResponse),
+            (status = 500, description = "Internal server error", body = crate::handlers::error::ErrorResponse)
+        )
+    )
+)]
 pub async fn handler(
     State(ctx): State<Ctx>,
     path: Result<Path<Name>, PathRejection>,
-) -> Result<Json<DatasetInfo>, BoxRequestError> {
+) -> Result<Json<DatasetInfo>, ErrorResponse> {
     let name = match path {
         Ok(Path(name)) => name,
         Err(err) => {
@@ -68,10 +88,29 @@ pub async fn handler(
 /// - `DATASET_STORE_ERROR`: Failed to load dataset from the dataset store
 /// - `METADATA_DB_ERROR`: Database error while retrieving active locations for tables
 #[tracing::instrument(skip_all, err)]
+#[cfg_attr(
+    feature = "utoipa",
+    utoipa::path(
+        get,
+        path = "/datasets/{name}/versions/{version}",
+        tag = "datasets",
+        operation_id = "datasets_get_version",
+        params(
+            ("name" = String, Path, description = "Dataset name"),
+            ("version" = String, Path, description = "Dataset version")
+        ),
+        responses(
+            (status = 200, description = "Successfully retrieved dataset information", body = DatasetInfo),
+            (status = 400, description = "Invalid dataset name or version", body = crate::handlers::error::ErrorResponse),
+            (status = 404, description = "Dataset not found", body = crate::handlers::error::ErrorResponse),
+            (status = 500, description = "Internal server error", body = crate::handlers::error::ErrorResponse)
+        )
+    )
+)]
 pub async fn handler_with_version(
     State(ctx): State<Ctx>,
     path: Result<Path<(Name, Version)>, PathRejection>,
-) -> Result<Json<DatasetInfo>, BoxRequestError> {
+) -> Result<Json<DatasetInfo>, ErrorResponse> {
     let (name, version) = match path {
         Ok(Path((name, version))) => (name, version),
         Err(err) => {
@@ -88,7 +127,7 @@ async fn handler_inner(
     ctx: Ctx,
     name: Name,
     version: Option<Version>,
-) -> Result<Json<DatasetInfo>, BoxRequestError> {
+) -> Result<Json<DatasetInfo>, ErrorResponse> {
     tracing::debug!(
         dataset_name=%name,
         dataset_version=%display_selector_version(&version),
@@ -172,19 +211,23 @@ async fn handler_inner(
 
 /// Represents dataset information for API responses from the dataset store
 #[derive(Debug, serde::Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct DatasetInfo {
-    /// The name of the dataset
+    /// The name of the dataset (validated identifier)
+    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub name: Name,
-    /// The version of the dataset
+    /// The version of the dataset using semantic versioning (e.g., "1.0.0")
+    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub version: Version,
-    /// The kind of dataset (e.g., "subgraph", "firehose")
+    /// The kind/type of dataset (e.g., "evm-rpc", "firehose", "substreams", "sql")
     pub kind: String,
-    /// List of tables contained in the dataset
+    /// List of tables contained in the dataset with their details
     pub tables: Vec<TableInfo>,
 }
 
 /// Represents table information within a dataset
 #[derive(Debug, serde::Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct TableInfo {
     /// The name of the table
     pub name: String,
@@ -242,7 +285,7 @@ pub enum Error {
     MetadataDbError(#[from] metadata_db::Error),
 }
 
-impl RequestError for Error {
+impl IntoErrorResponse for Error {
     fn error_code(&self) -> &'static str {
         match self {
             Error::InvalidSelector(_) => "INVALID_SELECTOR",

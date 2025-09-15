@@ -22,6 +22,7 @@ members = [
     "crates/extractors/substreams",
     "crates/extractors/substreams/gen",
     "crates/services/admin-api",
+    "crates/services/admin-api/gen",
     "crates/services/http-common",
     "crates/services/server",
     "tests",
@@ -90,6 +91,7 @@ tokio-stream = "0.1.17"
 tokio-util = { version = "0.7.15", features = ["rt"] }
 toml = "0.8.10"
 tower = "0.5.2"
+tower-http = "0.6.2"
 tracing = "0.1"
 tracing-opentelemetry = { version = "0.31", features = ["default"] }
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }

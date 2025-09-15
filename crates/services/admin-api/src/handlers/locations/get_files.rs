@@ -8,10 +8,12 @@ use axum::{
     },
     http::StatusCode,
 };
-use http_common::{BoxRequestError, RequestError};
 use metadata_db::{FileId, LocationId};
 
-use crate::ctx::Ctx;
+use crate::{
+    ctx::Ctx,
+    handlers::error::{ErrorResponse, IntoErrorResponse},
+};
 
 /// Default number of files returned per page
 const DEFAULT_PAGE_LIMIT: usize = 50;
@@ -21,11 +23,13 @@ const MAX_PAGE_LIMIT: usize = 1000;
 
 /// Query parameters for the files listing endpoint
 #[derive(Debug, serde::Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct QueryParams {
     /// Maximum number of files to return (default: 50, max: 1000)
     #[serde(default = "default_limit")]
     limit: usize,
     /// ID of the last file from the previous page for pagination
+    #[cfg_attr(feature = "utoipa", schema(value_type = Option<i64>))]
     last_file_id: Option<FileId>,
 }
 
@@ -39,8 +43,10 @@ fn default_limit() -> usize {
 /// containing only the most relevant information needed for file browsing
 /// within a location context.
 #[derive(Debug, serde::Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct FileListInfo {
-    /// Unique identifier for this file
+    /// Unique identifier for this file (64-bit integer)
+    #[cfg_attr(feature = "utoipa", schema(value_type = i64))]
     pub id: FileId,
     /// Name of the file (e.g., "blocks_0000000000_0000099999.parquet")
     pub file_name: String,
@@ -70,11 +76,13 @@ impl From<metadata_db::FileMetadata> for FileListInfo {
 /// This response structure provides paginated file data with
 /// cursor-based pagination support for efficient traversal.
 #[derive(Debug, serde::Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct LocationFilesResponse {
-    /// List of files in this page
+    /// List of files in this page with minimal information
     pub files: Vec<FileListInfo>,
-    /// Cursor for the next page of results (None if no more results)
+    /// Cursor for the next page of results - use as last_file_id in next request (None if no more results)
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "utoipa", schema(value_type = Option<i64>))]
     pub next_cursor: Option<FileId>,
 }
 
@@ -108,11 +116,28 @@ pub struct LocationFilesResponse {
 /// - Calls the metadata DB to list files with pagination for the specified location
 /// - Returns a structured response with minimal file info and next cursor
 #[tracing::instrument(skip_all, err)]
+#[cfg_attr(
+    feature = "utoipa",
+    utoipa::path(
+        get,
+        path = "/locations/{location_id}/files",
+        tag = "locations",
+        operation_id = "locations_list_files",
+        params(
+            ("location_id" = i64, Path, description = "Location ID")
+        ),
+        responses(
+            (status = 200, description = "Successfully retrieved location files", body = LocationFilesResponse),
+            (status = 400, description = "Invalid location ID or query parameters"),
+            (status = 500, description = "Internal server error")
+        )
+    )
+)]
 pub async fn handler(
     State(ctx): State<Ctx>,
     path: Result<Path<LocationId>, PathRejection>,
     query: Result<Query<QueryParams>, QueryRejection>,
-) -> Result<Json<LocationFilesResponse>, BoxRequestError> {
+) -> Result<Json<LocationFilesResponse>, ErrorResponse> {
     let location_id = match path {
         Ok(Path(path)) => path,
         Err(err) => {
@@ -215,7 +240,7 @@ pub enum Error {
     MetadataDbError(#[from] metadata_db::Error),
 }
 
-impl RequestError for Error {
+impl IntoErrorResponse for Error {
     /// Returns the error code string for API responses
     ///
     /// These error codes are returned in the API response body to help

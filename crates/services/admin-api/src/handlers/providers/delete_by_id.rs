@@ -5,9 +5,11 @@ use axum::{
     http::StatusCode,
 };
 use dataset_store::providers::DeleteError;
-use http_common::{BoxRequestError, RequestError};
 
-use crate::ctx::Ctx;
+use crate::{
+    ctx::Ctx,
+    handlers::error::{ErrorResponse, IntoErrorResponse},
+};
 
 /// Handler for the `DELETE /providers/{name}` endpoint
 ///
@@ -37,10 +39,28 @@ use crate::ctx::Ctx;
 /// - Once deleted, the provider configuration cannot be recovered
 /// - Any datasets using this provider may fail until a new provider is configured
 #[tracing::instrument(skip_all, err)]
+#[cfg_attr(
+    feature = "utoipa",
+    utoipa::path(
+        delete,
+        path = "/providers/{name}",
+        tag = "providers",
+        operation_id = "providers_delete",
+        params(
+            ("name" = String, Path, description = "Provider name")
+        ),
+        responses(
+            (status = 204, description = "Provider successfully deleted"),
+            (status = 400, description = "Invalid provider name"),
+            (status = 404, description = "Provider not found"),
+            (status = 500, description = "Internal server error")
+        )
+    )
+)]
 pub async fn handler(
     State(ctx): State<Ctx>,
     path: Result<Path<String>, PathRejection>,
-) -> Result<StatusCode, BoxRequestError> {
+) -> Result<StatusCode, ErrorResponse> {
     let name = match path {
         Ok(Path(name)) => name,
         Err(err) => {
@@ -114,7 +134,7 @@ pub enum Error {
     StoreError(#[from] DeleteError),
 }
 
-impl RequestError for Error {
+impl IntoErrorResponse for Error {
     fn error_code(&self) -> &'static str {
         match self {
             Error::InvalidName { .. } => "INVALID_PROVIDER_NAME",

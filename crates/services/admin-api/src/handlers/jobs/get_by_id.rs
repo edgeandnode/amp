@@ -5,11 +5,13 @@ use axum::{
     extract::{Path, State, rejection::PathRejection},
     http::StatusCode,
 };
-use http_common::{BoxRequestError, RequestError};
 use metadata_db::JobId;
 
 use super::job_info::JobInfo;
-use crate::ctx::Ctx;
+use crate::{
+    ctx::Ctx,
+    handlers::error::{ErrorResponse, IntoErrorResponse},
+};
 
 /// Handler for the `GET /jobs/{id}` endpoint
 ///
@@ -34,10 +36,28 @@ use crate::ctx::Ctx;
 /// - Queries the metadata database for the job with full details
 /// - Returns appropriate HTTP status codes and error messages
 #[tracing::instrument(skip_all, err)]
+#[cfg_attr(
+    feature = "utoipa",
+    utoipa::path(
+        get,
+        path = "/jobs/{id}",
+        tag = "jobs",
+        operation_id = "jobs_get",
+        params(
+            ("id" = String, Path, description = "Job ID")
+        ),
+        responses(
+            (status = 200, description = "Successfully retrieved job information", body = JobInfo),
+            (status = 400, description = "Invalid job ID"),
+            (status = 404, description = "Job not found"),
+            (status = 500, description = "Internal server error")
+        )
+    )
+)]
 pub async fn handler(
     State(ctx): State<Ctx>,
     path: Result<Path<JobId>, PathRejection>,
-) -> Result<Json<JobInfo>, BoxRequestError> {
+) -> Result<Json<JobInfo>, ErrorResponse> {
     let id = match path {
         Ok(Path(path)) => path,
         Err(err) => {
@@ -90,7 +110,7 @@ pub enum Error {
     MetadataDbError(#[from] metadata_db::Error),
 }
 
-impl RequestError for Error {
+impl IntoErrorResponse for Error {
     fn error_code(&self) -> &'static str {
         match self {
             Error::InvalidId { .. } => "INVALID_JOB_ID",

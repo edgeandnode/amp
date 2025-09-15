@@ -13,6 +13,8 @@
 /// - The **original string is preserved** including any leading/trailing whitespace
 /// - Once created, the string is guaranteed to contain at least one non-whitespace character
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "utoipa", schema(value_type = String))]
 pub struct NonEmptyString(String);
 
 impl NonEmptyString {

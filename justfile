@@ -166,22 +166,13 @@ gen: \
     gen-derived-dataset-manifest-schema \
     gen-evm-rpc-dataset-manifest-schema \
     gen-firehose-dataset-manifest-schema \
-    gen-substreams-dataset-manifest-schema
+    gen-substreams-dataset-manifest-schema \
+    gen-admin-api-openapi-spec
 # TODO: Uncomment to enable protobuf bindings generation
 #    gen-substreams-datasets-proto \
 #    gen-firehose-datasets-proto \
 
-## Protobuf bindings generation
-
-# Generate Substreams protobuf bindings (RUSTFLAGS="--cfg gen_proto" cargo build)
-gen-substreams-datasets-proto:
-    RUSTFLAGS="--cfg gen_proto" cargo build -p substreams-datasets
-
-# Generate Firehose protobuf bindings (RUSTFLAGS="--cfg gen_proto" cargo build)
-gen-firehose-datasets-proto:
-    RUSTFLAGS="--cfg gen_proto" cargo build -p firehose-datasets
-
-## JSON Schema generation
+### JSON Schema generation
 
 SCHEMAS_DIR := "docs/dataset-def-schemas"
 
@@ -221,6 +212,27 @@ gen-substreams-dataset-manifest-schema DEST_DIR=SCHEMAS_DIR:
     @mkdir -p {{DEST_DIR}}
     @cp -f $(ls -t target/debug/build/datasets-substreams-gen-*/out/schema.json | head -1) {{DEST_DIR}}/substreams.spec.json
     @echo "Schema generated and copied to {{DEST_DIR}}/substreams.spec.json"
+
+### OpenAPI specification generation
+
+OPENAPI_SCHEMAS_DIR := "docs/openapi-specs"
+
+# Generate the admin API OpenAPI specification
+gen-admin-api-openapi-spec DEST_DIR=OPENAPI_SCHEMAS_DIR:
+    RUSTFLAGS="--cfg gen_openapi_spec" cargo build -p admin-api-gen
+    @mkdir -p {{DEST_DIR}}
+    @cp -f $(ls -t target/debug/build/admin-api-gen-*/out/openapi.spec.json | head -1) {{DEST_DIR}}/admin.spec.json
+    @echo "Schema generated and copied to {{DEST_DIR}}/admin.spec.json"
+
+### Protobuf bindings generation
+
+# Generate Substreams protobuf bindings (RUSTFLAGS="--cfg gen_proto" cargo build)
+gen-substreams-datasets-proto:
+    RUSTFLAGS="--cfg gen_proto" cargo build -p substreams-datasets
+
+# Generate Firehose protobuf bindings (RUSTFLAGS="--cfg gen_proto" cargo build)
+gen-firehose-datasets-proto:
+    RUSTFLAGS="--cfg gen_proto" cargo build -p firehose-datasets
 
 
 ## Misc

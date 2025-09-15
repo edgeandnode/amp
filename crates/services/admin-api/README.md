@@ -2,15 +2,25 @@
 
 ## Summary
 
-The Admin API provides a RESTful HTTP interface for managing Nozzle's ETL
-operations.
-This crate implements an Axum-based web server that exposes endpoints for
-dataset management, job control, worker location administration, file management, and provider configuration.
-The API serves as the primary administrative interface for monitoring and
-controlling the Nozzle data pipeline,
-allowing operators to deploy datasets, trigger data extraction jobs, monitor
-job progress, manage distributed worker locations, configure external data providers,
-and perform direct operations on Parquet files and their metadata.
+The Admin API provides a RESTful HTTP interface for managing Nozzle's ETL operations. This crate implements an Axum-based web server that exposes endpoints for dataset management, job control, storage location administration, file management, and provider configuration.
+
+The API serves as the primary administrative interface for monitoring and controlling the Nozzle data pipeline, allowing operators to:
+- Deploy and manage datasets with versioning support
+- Trigger and monitor data extraction jobs
+- Manage distributed storage locations
+- Configure external data providers (EVM RPC, Firehose, Substreams)
+- Perform operations on Parquet files and their metadata
+
+## API Documentation
+
+Complete API documentation is available in the generated OpenAPI specification at [`docs/openapi-specs/admin.spec.json`](../../docs/openapi-specs/admin.spec.json).
+
+The OpenAPI spec provides comprehensive documentation for all endpoints, including:
+- Request/response schemas
+- Pagination details
+- Error handling
+- Usage examples
+- Data format specifications
 
 ## Crate Structure
 
@@ -22,263 +32,28 @@ src/
 ├── handlers.rs         # Handler module declarations
 ├── handlers/
 │   ├── common.rs       # Shared utilities for handlers
+│   ├── error.rs        # Error response types
 │   ├── datasets/       # Dataset management endpoints
-│   ├── datasets.rs     # Dataset handler module
 │   ├── files/          # File management endpoints
-│   ├── files.rs        # File handler module
 │   ├── jobs/           # Job management endpoints
-│   ├── jobs.rs         # Job handler module
-│   ├── locations/      # Worker location endpoints
-│   ├── locations.rs    # Location handler module
-│   ├── providers/      # Provider configuration endpoints
-│   └── providers.rs    # Provider handler module
+│   ├── locations/      # Storage location endpoints
+│   └── providers/      # Provider configuration endpoints
 ├── lib.rs              # Main server setup and routing
 └── scheduler.rs        # Job scheduling utilities
 ```
 
-### Handler Registration and Routing
+### Handler Registration
 
-Handlers are registered in [`src/lib.rs`](src/lib.rs) using Axum's routing
-system.
-Each endpoint is mapped to its corresponding handler function using the HTTP
-method routing helpers (`get()`, `post()`, `put()`, `delete()`).
+Handlers are registered in [`src/lib.rs`](src/lib.rs) using Axum's routing system. Each endpoint is mapped to its corresponding handler function using HTTP method routing helpers (`get()`, `post()`, `put()`, `delete()`).
 
-## API Reference
+## OpenAPI Spec Generation
 
-### Dataset Management
+OpenAPI specifications for the Admin API can be generated from the code annotations. This generates comprehensive API documentation including all endpoints, schemas, and usage examples.
 
-Dataset endpoints handle the lifecycle of data extraction configurations and
-provide information about available datasets and their tables.
+To generate the OpenAPI specification, run:
 
-#### `GET /datasets`
-Lists all registered datasets from the metadata database registry with cursor-based pagination.
-Returns dataset information including names, versions, and owners from the metadata database.
-Supports pagination through query parameters: `limit` (default: 50, max: 1000) and `last_dataset_id` (format: "name:version").
-Results are ordered by dataset name ASC and version DESC (newest first within each dataset).
+```bash
+just gen-admin-api-openapi-spec
+```
 
-**Cursor Format Notes:**
-- The `last_dataset_id` cursor uses the format `"name:version"` (e.g., `"eth_mainnet:1.0.0"`)
-- The colon `:` character is valid per RFC 3986 and doesn't require URL encoding
-- Both encoded (`eth_mainnet%3A1.0.0`) and unencoded (`eth_mainnet:1.0.0`) formats are accepted
-- For maximum compatibility across different browsers and systems, URL encoding the colon as `%3A` is recommended
-
-This endpoint queries the metadata database registry, which contains all datasets that have been registered
-and processed through the system, providing a comprehensive view of available datasets with their ownership information.
-
-See [`handlers/datasets/get_all.rs`](src/handlers/datasets/get_all.rs) for more detailed information about this endpoint.
-
-#### `GET /datasets/{name}`
-Retrieves detailed information about a specific dataset by its name,
-including its tables and active locations.
-The `name` parameter specifies the dataset name to retrieve and must be a valid
-dataset name format.
-Returns dataset information including name, type, version details,
-and complete list of tables with their network associations and storage
-locations.
-
-See [`handlers/datasets/get_by_id.rs`](src/handlers/datasets/get_by_id.rs) for more detailed information about this endpoint.
-
-#### `GET /datasets/{name}/versions`
-Lists all versions for a specific dataset from the metadata database registry with cursor-based pagination.
-The `name` parameter specifies the dataset name to retrieve versions for and must be a valid dataset name format.
-Returns version information for the specified dataset ordered by version DESC (newest first).
-Supports pagination through query parameters: `limit` (default: 50, max: 1000) and `last_version` (version string, e.g., "1.0.0").
-
-This endpoint queries the metadata database registry to provide a comprehensive view of all available versions for a specific dataset, enabling version-aware operations and historical data access.
-
-See [`handlers/datasets/get_versions.rs`](src/handlers/datasets/get_versions.rs) for more detailed information about this endpoint.
-
-#### `GET /datasets/{name}/versions/{version}`
-Retrieves detailed information about a specific version of a dataset.
-This endpoint provides version-specific dataset information when you need to access a particular version rather than the latest version.
-The `name` parameter specifies the dataset name and the `version` parameter specifies the exact version to retrieve.
-Returns dataset information including name, type, version details, and complete list of tables with their network associations and storage locations for the specified version.
-
-See [`handlers/datasets/get_by_id.rs`](src/handlers/datasets/get_by_id.rs) for more detailed information about this endpoint.
-
-#### `POST /datasets`
-Registers a new dataset configuration to the system.
-Accepts a JSON payload containing `name`, `version`, and `manifest` fields.
-Supports two main registration scenarios: derived datasets (kind="manifest")
-which are registered in both object store and metadata database,
-and SQL datasets (other kinds) which store dataset definitions in object store.
-Returns HTTP 201 Created upon successful registration.
-
-See [`handlers/datasets/register.rs`](src/handlers/datasets/register.rs) for more detailed information about this endpoint.
-
-#### `POST /datasets/{name}/dump`
-Triggers a data extraction job for the specified dataset.
-The `name` parameter identifies the target dataset name,
-and the request accepts a JSON payload with `end_block` (optional last block
-number) option. Returns immediately with job scheduling confirmation.
-
-See [`handlers/datasets/dump.rs`](src/handlers/datasets/dump.rs) for more detailed information about this endpoint.
-
-#### `POST /datasets/{name}/versions/{version}/dump`
-Triggers a data extraction job for a specific version of a dataset.
-This endpoint allows you to run extraction jobs against a particular dataset version rather than the latest version.
-The `name` parameter identifies the target dataset name, the `version` parameter specifies the dataset version to use, and the request accepts a JSON payload with `end_block` (optional last block number) option.
-Returns immediately with job scheduling confirmation.
-
-See [`handlers/datasets/dump.rs`](src/handlers/datasets/dump.rs) for more detailed information about this endpoint.
-
-### Job Management
-
-Job endpoints provide control and monitoring capabilities for data extraction
-and processing jobs.
-
-#### `GET /jobs`
-Lists all jobs in the system with pagination support.
-Accepts optional query parameters including `limit` for maximum jobs per page
-(default: 50, max: 1000) and `last_job_id` for pagination cursor.
-Returns paginated job data with job information and next cursor for continued
-pagination.
-
-See [`handlers/jobs/get_all.rs`](src/handlers/jobs/get_all.rs) for more detailed information about this endpoint.
-
-#### `GET /jobs/{id}`
-Retrieves detailed information about a specific job by its ID.
-The `id` parameter must be a valid JobId identifier.
-Returns comprehensive job information including status, progress,
-and execution details.
-
-See [`handlers/jobs/get_by_id.rs`](src/handlers/jobs/get_by_id.rs) for more detailed information about this endpoint.
-
-#### `PUT /jobs/{id}/stop`
-Stops a running job using the specified job ID.
-The `id` parameter must be a valid JobId identifier.
-This is an idempotent operation that handles job termination requests safely
-by transitioning running or scheduled jobs to stop-requested state and
-notifying workers.
-
-See [`handlers/jobs/stop.rs`](src/handlers/jobs/stop.rs) for more detailed information about this endpoint.
-
-#### `DELETE /jobs/{id}`
-Deletes a specific job by its ID if it's in a terminal state.
-The `id` parameter must be a valid JobId identifier.
-Only jobs in terminal states (Completed, Stopped, Failed) can be deleted.
-Non-terminal jobs are protected from accidental deletion.
-Returns 404 if job doesn't exist, 409 if job exists but isn't in terminal state.
-
-See [`handlers/jobs/delete_by_id.rs`](src/handlers/jobs/delete_by_id.rs) for more detailed information about this endpoint.
-
-#### `DELETE /jobs?status=<filter>`
-Deletes jobs based on status filter. Supports deleting jobs by various status criteria.
-This is a bulk cleanup operation for finalized jobs.
-The `status` query parameter accepts the following values
-- `terminal`: Delete all jobs in terminal states (Completed, Stopped, Failed)
-- `complete`: Delete all completed jobs
-- `stopped`: Delete all stopped jobs  
-- `error`: Delete all failed jobs
-
-Only removes jobs that have completed their lifecycle and are safe to delete.
-This endpoint is typically used for periodic cleanup and administrative maintenance.
-
-See [`handlers/jobs/delete.rs`](src/handlers/jobs/delete.rs) for more detailed information about this endpoint.
-
-### File Management
-
-File endpoints provide CRUD operations for managing Parquet files stored in the system. These endpoints allow direct manipulation of individual files and their metadata within storage locations.
-
-#### `GET /files/{file_id}`
-Retrieves detailed information about a specific file by its ID.
-The `file_id` parameter must be a positive integer identifying the file.
-Returns comprehensive file information including location URL, size, version details, and complete Parquet metadata as JSON.
-This endpoint provides all available information about a file, including the heavy metadata JSON field.
-
-See [`handlers/files/get_by_id.rs`](src/handlers/files/get_by_id.rs) for more detailed information about this endpoint.
-
-
-### Location Management
-
-Location endpoints manage distributed worker nodes and their availability for
-job execution.
-
-#### `GET /locations`
-Lists all worker locations with pagination support.
-Accepts optional query parameters including `limit` for maximum locations per
-page (default: 50, max: 1000) and `last_location_id` for pagination cursor.
-Returns paginated location data with next cursor for continued pagination.
-
-See [`handlers/locations/get_all.rs`](src/handlers/locations/get_all.rs) for more detailed information about this endpoint.
-
-#### `GET /locations/{id}`
-Retrieves detailed information about a specific worker location using the
-provided location identifier.
-The `id` parameter must be a positive integer identifying the location.
-Returns comprehensive location information including URL, status,
-and associated job details.
-
-See [`handlers/locations/get_by_id.rs`](src/handlers/locations/get_by_id.rs) for more detailed information about this endpoint.
-
-#### `GET /locations/{location_id}/files`
-Lists all files within a specific location with pagination support.
-The `location_id` parameter must be a positive integer identifying the location.
-Accepts optional query parameters including `limit` for maximum files per page (default: 50, max: 1000) and `last_file_id` for pagination cursor.
-Returns paginated file listing with essential file information (ID, name, size) optimized for bulk operations.
-This endpoint uses lightweight file metadata without the heavy Parquet JSON metadata for optimal performance.
-
-See [`handlers/locations/get_files.rs`](src/handlers/locations/get_files.rs) for more detailed information about this endpoint.
-
-#### `DELETE /locations/{id}`
-Removes a worker location from the system using the specified location
-identifier.
-The `id` parameter must be a positive integer identifying the location.
-Accepts optional `force` query parameter to override safety checks.
-Performs comprehensive cleanup including deleting associated files from object
-store and removing location metadata from the database.
-
-See [`handlers/locations/delete_by_id.rs`](src/handlers/locations/delete_by_id.rs) for more detailed information about this endpoint.
-
-### Provider Management
-
-Provider endpoints manage external data source configurations including EVM RPC endpoints, Firehose connections, and Substreams providers. These endpoints allow creating, retrieving, and deleting provider configurations that are used by datasets for data extraction.
-
-#### `GET /providers`
-Lists all provider configurations available in the system.
-Returns complete provider information including configuration details for all registered providers.
-This endpoint accesses cached provider configurations from the dataset store and filters out any providers that cannot be converted to valid API format.
-
-**Security Note:** This endpoint returns the complete provider configuration including all configuration details. Ensure that sensitive information such as API keys and credentials are not stored in provider configuration files.
-
-See [`handlers/providers/get_all.rs`](src/handlers/providers/get_all.rs) for more detailed information about this endpoint.
-
-#### `POST /providers`
-Creates a new provider configuration and stores it in the dataset store.
-Accepts a JSON payload containing provider configuration with required fields including `name` (unique identifier), `kind` (provider type such as "evm-rpc", "firehose", "substreams"), `network` (blockchain network), and additional provider-specific configuration fields.
-Converts JSON configuration data to TOML format for internal storage.
-Returns 201 Created upon successful creation, 409 Conflict if provider name already exists.
-
-See [`handlers/providers/create.rs`](src/handlers/providers/create.rs) for more detailed information about this endpoint.
-
-#### `GET /providers/{name}`
-Retrieves detailed information about a specific provider configuration by its name.
-The `name` parameter is the unique identifier of the provider to retrieve.
-Returns complete provider configuration including all stored configuration details.
-
-**Security Note:** This endpoint returns the complete provider configuration including all configuration details. Ensure that sensitive information such as API keys and credentials are properly filtered before storage.
-
-See [`handlers/providers/get_by_id.rs`](src/handlers/providers/get_by_id.rs) for more detailed information about this endpoint.
-
-#### `DELETE /providers/{name}`
-Deletes a specific provider configuration by its name from the dataset store.
-The `name` parameter is the unique identifier of the provider to delete.
-Performs comprehensive cleanup by removing both the configuration file from storage and the cached entry.
-Returns 204 No Content upon successful deletion, 404 Not Found if provider doesn't exist.
-
-**Safety Warning:** Once deleted, the provider configuration cannot be recovered. Any datasets using this provider may fail until a new provider is configured.
-
-See [`handlers/providers/delete_by_id.rs`](src/handlers/providers/delete_by_id.rs) for more detailed information about this endpoint.
-
-### Schema Analysis
-
-Schema analysis endpoint provides SQL query validation and schema inference capabilities.
-
-#### `POST /schema`
-Analyzes SQL queries to determine their output schema by validating them against all registered datasets in the system.
-This endpoint provides comprehensive SQL validation and schema inference by parsing SQL syntax, loading actual dataset definitions from the registry, creating planning context with real table schemas, and using DataFusion's query planner to determine output schema without execution.
-Accepts a JSON payload with `sql_query` (required SQL query to analyze) and `is_sql_dataset` (optional boolean flag indicating if this is a SQL dataset, which affects block number field inclusion).
-Returns the determined output schema and list of networks referenced by the query.
-The validation works with real registered datasets and their actual schemas, ensuring datasets exist, tables are valid, and column references are correct.
-
-See [`handlers/schema.rs`](src/handlers/schema.rs) for more detailed information about this endpoint.
+This will generate the OpenAPI spec from the handler utoipa annotations and copy it to `docs/openapi-specs/admin.spec.json`.
