@@ -251,3 +251,16 @@ Returns 204 No Content upon successful deletion, 404 Not Found if provider doesn
 **Safety Warning:** Once deleted, the provider configuration cannot be recovered. Any datasets using this provider may fail until a new provider is configured.
 
 See [`handlers/providers/delete_by_id.rs`](src/handlers/providers/delete_by_id.rs) for more detailed information about this endpoint.
+
+### Schema Analysis
+
+Schema analysis endpoint provides SQL query validation and schema inference capabilities.
+
+#### `POST /schema`
+Analyzes SQL queries to determine their output schema by validating them against all registered datasets in the system.
+This endpoint provides comprehensive SQL validation and schema inference by parsing SQL syntax, loading actual dataset definitions from the registry, creating planning context with real table schemas, and using DataFusion's query planner to determine output schema without execution.
+Accepts a JSON payload with `sql_query` (required SQL query to analyze) and `is_sql_dataset` (optional boolean flag indicating if this is a SQL dataset, which affects block number field inclusion).
+Returns the determined output schema and list of networks referenced by the query.
+The validation works with real registered datasets and their actual schemas, ensuring datasets exist, tables are valid, and column references are correct.
+
+See [`handlers/schema.rs`](src/handlers/schema.rs) for more detailed information about this endpoint.

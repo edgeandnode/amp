@@ -14,7 +14,7 @@ pub mod handlers;
 mod scheduler;
 
 use ctx::Ctx;
-use handlers::{datasets, files, jobs, locations, providers};
+use handlers::{datasets, files, jobs, locations, providers, schema};
 use scheduler::Scheduler;
 
 pub async fn serve(
@@ -42,6 +42,7 @@ pub async fn serve(
             "/datasets/{name}/versions/{version}/dump",
             post(datasets::dump::handler_with_version),
         )
+        .route("/files/{file_id}", get(files::get_by_id::handler))
         .route(
             "/jobs",
             get(jobs::get_all::handler).delete(jobs::delete::handler),
@@ -60,7 +61,6 @@ pub async fn serve(
             "/locations/{location_id}/files",
             get(locations::get_files::handler),
         )
-        .route("/files/{file_id}", get(files::get_by_id::handler))
         .route(
             "/providers",
             get(providers::get_all::handler).post(providers::create::handler),
@@ -69,6 +69,7 @@ pub async fn serve(
             "/providers/{name}",
             get(providers::get_by_id::handler).delete(providers::delete_by_id::handler),
         )
+        .route("/schema", post(schema::handler))
         .with_state(Ctx {
             config,
             metadata_db,
