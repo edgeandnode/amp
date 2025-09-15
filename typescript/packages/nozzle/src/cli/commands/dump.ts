@@ -7,10 +7,9 @@ import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Admin from "../../api/Admin.ts"
-import * as Registry from "../../api/Registry.ts"
 import * as ManifestContext from "../../ManifestContext.ts"
 import * as Model from "../../Model.ts"
-import { adminUrl, configFile, manifestFile, registryUrl } from "../common.ts"
+import { adminUrl, configFile, manifestFile } from "../common.ts"
 
 export const dump = Command.make("dump", {
   args: {
@@ -26,12 +25,6 @@ export const dump = Command.make("dump", {
       Options.withDescription("The block number to end at, inclusive"),
       Options.optional,
     ),
-    waitForCompletion: Options.boolean("wait").pipe(
-      Options.withAlias("w"),
-      Options.withDefault(false),
-      Options.withDescription("Wait for the dump to complete before returning"),
-    ),
-    registryUrl,
     adminUrl,
   },
 }).pipe(
@@ -47,21 +40,18 @@ export const dump = Command.make("dump", {
       })
 
       const [name, version] = dataset.split("@") as [string, string | undefined]
-      if (args.waitForCompletion) {
-        yield* Console.log(`Starting dump for dataset ${dataset} up to block ${args.endBlock}`)
-      }
 
-      yield* admin.dumpDataset(name, {
-        version,
-        endBlock: args.endBlock.pipe(Option.getOrUndefined),
-        waitForCompletion: args.waitForCompletion,
-      })
-
-      if (args.waitForCompletion) {
-        yield* Console.log(`Dump completed for dataset ${dataset}`)
+      if (version) {
+        yield* admin.dumpDatasetVersion(name, version, {
+          endBlock: args.endBlock.pipe(Option.getOrUndefined),
+        })
       } else {
-        yield* Console.log(`Dump scheduled for dataset ${dataset}`)
+        yield* admin.dumpDataset(name, {
+          endBlock: args.endBlock.pipe(Option.getOrUndefined),
+        })
       }
+
+      yield* Console.log(`Dump scheduled for dataset ${dataset}`)
     }),
   ),
   Command.provide(({ args }) =>
@@ -69,7 +59,7 @@ export const dump = Command.make("dump", {
       onSome: () => Layer.empty,
       onNone: () =>
         ManifestContext.layerFromFile({ manifest: args.manifestFile, config: args.configFile }).pipe(
-          Layer.provide(Registry.layer(`${args.registryUrl}`)),
+          Layer.provide(Admin.layer(`${args.adminUrl}`)),
         ),
     }).pipe(Layer.merge(Admin.layer(`${args.adminUrl}`)))
   ),

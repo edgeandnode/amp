@@ -202,23 +202,23 @@ pub async fn dump_table(
         };
 
         if is_incr {
-            for range in table.missing_ranges(start..=end).await? {
-                dump_sql_query(
-                    &ctx,
-                    &env,
-                    &catalog,
-                    plan.clone(),
-                    range,
-                    None,
-                    table.clone(),
-                    &parquet_opts,
-                    &compaction_opts,
-                    microbatch_max_interval,
-                    &ctx.notification_multiplexer,
-                    metrics.clone(),
-                )
-                .await?;
-            }
+            let latest_range = table.canonical_chain().await?.map(|c| c.last().clone());
+            let resume_watermark = latest_range.map(|r| ResumeWatermark::from_ranges(vec![r]));
+            dump_sql_query(
+                &ctx,
+                &env,
+                &catalog,
+                plan.clone(),
+                start..=end,
+                resume_watermark,
+                table.clone(),
+                &parquet_opts,
+                &compaction_opts,
+                microbatch_max_interval,
+                &ctx.notification_multiplexer,
+                metrics.clone(),
+            )
+            .await?;
         } else {
             let physical_table: Arc<PhysicalTable> = PhysicalTable::next_revision(
                 table.table(),
@@ -288,7 +288,7 @@ async fn dump_sql_query(
             Some(*range.end()),
             resume_watermark,
             notification_multiplexer,
-            true,
+            Some(physical_table.clone()),
             microbatch_max_interval,
         )
         .await?
@@ -302,7 +302,9 @@ async fn dump_sql_query(
         microbatch_start,
     )?;
 
-    let dataset = physical_table.dataset().name.clone();
+    let dataset_name = physical_table.dataset().name.clone();
+    let table_name = physical_table.table_name();
+    let location_id = *physical_table.location_id();
 
     let mut compactor = NozzleCompactor::start(physical_table.clone(), compaction_opts.clone());
 
@@ -321,8 +323,18 @@ async fn dump_sql_query(
                 if let Some(ref metrics) = metrics {
                     let num_rows: u64 = batch.num_rows().try_into().unwrap();
                     let num_bytes: u64 = batch.get_array_memory_size().try_into().unwrap();
-                    metrics.inc_sql_dataset_rows_by(num_rows, dataset.clone());
-                    metrics.inc_sql_dataset_bytes_written_by(num_bytes, dataset.clone());
+                    metrics.inc_sql_dataset_rows_by(
+                        num_rows,
+                        dataset_name.clone(),
+                        table_name.to_string(),
+                        location_id,
+                    );
+                    metrics.inc_sql_dataset_bytes_written_by(
+                        num_bytes,
+                        dataset_name.clone(),
+                        table_name.to_string(),
+                        location_id,
+                    );
                 }
             }
             QueryMessage::BlockComplete(_) => {
@@ -358,7 +370,7 @@ async fn dump_sql_query(
                 )?;
 
                 if let Some(ref metrics) = metrics {
-                    metrics.inc_sql_dataset_files_written(dataset.clone());
+                    metrics.inc_sql_dataset_files_written(dataset_name.clone());
                 }
             }
         }

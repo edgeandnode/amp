@@ -7,10 +7,10 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
-import * as Registry from "../../api/Registry.ts"
+import * as Admin from "../../api/Admin.ts"
 import * as ManifestContext from "../../ManifestContext.ts"
 import * as Model from "../../Model.ts"
-import { configFile, registryUrl } from "../common.ts"
+import { adminUrl, configFile } from "../common.ts"
 
 export const build = Command.make("build", {
   args: {
@@ -20,7 +20,7 @@ export const build = Command.make("build", {
       Options.withDescription("The output file to write the manifest to"),
       Options.optional,
     ),
-    registryUrl,
+    adminUrl,
   },
 }).pipe(
   Command.withDescription("Build a manifest from a dataset definition"),
@@ -43,6 +43,6 @@ export const build = Command.make("build", {
     }),
   ),
   Command.provide(({ args }) =>
-    ManifestContext.layerFromConfigFile(args.config).pipe(Layer.provide(Registry.layer(`${args.registryUrl}`)))
+    ManifestContext.layerFromConfigFile(args.config).pipe(Layer.provide(Admin.layer(`${args.adminUrl}`)))
   ),
 )

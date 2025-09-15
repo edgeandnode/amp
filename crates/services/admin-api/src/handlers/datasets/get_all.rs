@@ -1,11 +1,8 @@
-//! Dataset get all handler
-
-use axum::{Json, extract::State};
-use common::Dataset;
-use http_common::BoxRequestError;
+use axum::{Json, extract::State, http::StatusCode};
+use http_common::{BoxRequestError, RequestError};
 use metadata_db::TableId;
 
-use super::error::Error;
+use super::dataset_info::{DatasetInfo, TableInfo};
 use crate::ctx::Ctx;
 
 /// Handler for the `GET /datasets` endpoint
@@ -18,7 +15,7 @@ use crate::ctx::Ctx;
 /// - **500 Internal Server Error**: Dataset store or database connection error
 ///
 /// ## Error Codes
-/// - `STORE_ERROR`: Failed to retrieve datasets from the dataset store
+/// - `DATASET_STORE_ERROR`: Failed to retrieve datasets from the dataset store
 /// - `METADATA_DB_ERROR`: Database error while retrieving active locations for tables
 ///
 /// ## Behavior
@@ -38,91 +35,106 @@ use crate::ctx::Ctx;
 pub async fn handler(State(ctx): State<Ctx>) -> Result<Json<DatasetsResponse>, BoxRequestError> {
     let datasets_with_provider = ctx.store.all_datasets().await.map_err(|err| {
         tracing::debug!(error=?err, "failed to get all datasets");
-        Error::StoreError(err.into())
+        Error::DatasetStoreError(err)
     })?;
 
-    let datasets_response = try_into_datasets_response(&ctx, datasets_with_provider).await?;
-
-    Ok(Json(datasets_response))
-}
-
-/// Transforms dataset objects into response types with location information
-async fn try_into_datasets_response(
-    ctx: &Ctx,
-    datasets: impl IntoIterator<Item = Dataset>,
-) -> Result<DatasetsResponse, Error> {
-    let mut dataset_infos = Vec::new();
-    for dataset in datasets {
+    let mut datasets = Vec::new();
+    for dataset in datasets_with_provider {
         // Get table information for each table in the dataset
-        let mut table_infos = Vec::with_capacity(dataset.tables.len());
+        let mut tables = Vec::with_capacity(dataset.tables.len());
         let dataset_version = match dataset.kind.as_str() {
             "manifest" => dataset.dataset_version(),
             _ => None,
         };
 
         for table in dataset.tables {
+            let name = table.name().to_string();
+            let network = table.network().to_string();
+
+            // Resolve active location for this table
             let table_id = TableId {
                 dataset: &dataset.name,
                 dataset_version: dataset_version.as_deref(),
                 table: table.name(),
             };
 
-            // Resolve active location for this table
             let active_location = ctx
                 .metadata_db
                 .get_active_location(table_id)
                 .await
                 .map_err(|err| {
-                    tracing::debug!(table=%table.name(), error=?err, "failed to get active location for table");
+                    tracing::debug!(
+                        table = %table.name(),
+                        error = ?err,
+                        "failed to get active location for table"
+                    );
                     Error::MetadataDbError(err)
                 })?
                 .map(|(url, _)| url.to_string());
 
-            table_infos.push(TableInfo {
-                name: table.name().to_string(),
+            tables.push(TableInfo {
+                name,
                 active_location,
-                network: table.network().to_string(),
+                network,
             });
         }
 
-        dataset_infos.push(DatasetInfo {
+        datasets.push(DatasetInfo {
             name: dataset.name,
             kind: dataset.kind,
-            tables: table_infos,
+            tables,
         });
     }
 
-    Ok(DatasetsResponse {
-        datasets: dataset_infos,
-    })
+    Ok(Json(DatasetsResponse { datasets }))
 }
 
-/// API response containing dataset information
+/// API response containing multiple dataset information
+///
+/// This response type is specific to the get_all handler and contains
+/// a collection of datasets with their detailed information.
 #[derive(Debug, serde::Serialize)]
 pub struct DatasetsResponse {
     /// List of datasets available in the system
     pub datasets: Vec<DatasetInfo>,
 }
 
-/// Represents dataset information for the API response
-#[derive(Debug, serde::Serialize)]
-pub struct DatasetInfo {
-    /// The name of the dataset
-    pub name: String,
-    /// The kind of dataset (e.g., "subgraph", "firehose")
-    pub kind: String,
-    /// List of tables contained in the dataset
-    pub tables: Vec<TableInfo>,
+/// Errors that can occur during dataset listing
+///
+/// This enum represents all possible error conditions when handling
+/// a request to list all datasets in the system.
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    /// Dataset store error while retrieving datasets
+    ///
+    /// This occurs when:
+    /// - The dataset store is not accessible
+    /// - There's a configuration error in the store
+    /// - I/O errors while reading dataset definitions
+    #[error("dataset store error: {0}")]
+    DatasetStoreError(#[from] dataset_store::DatasetError),
+    /// Metadata database error while retrieving active locations
+    ///
+    /// This occurs when:
+    /// - Database connection is lost
+    /// - SQL query errors while fetching table locations
+    /// - Database schema inconsistencies
+    #[error("metadata database error: {0}")]
+    MetadataDbError(#[from] metadata_db::Error),
 }
 
-/// Represents table information within a dataset
-#[derive(Debug, serde::Serialize)]
-pub struct TableInfo {
-    /// The name of the table
-    pub name: String,
-    /// Currently active location URL for this table
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub active_location: Option<String>,
-    /// Associated network for this table
-    pub network: String,
+impl RequestError for Error {
+    fn error_code(&self) -> &'static str {
+        match self {
+            Error::DatasetStoreError(_) => "DATASET_STORE_ERROR",
+            Error::MetadataDbError(_) => "METADATA_DB_ERROR",
+        }
+    }
+
+    fn status_code(&self) -> StatusCode {
+        match self {
+            Error::DatasetStoreError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::MetadataDbError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
 }

@@ -42,5 +42,4 @@ rand.workspace = true
 schemars.workspace = true
 monitoring = { path = "../crates/core/monitoring" }
 reqwest.workspace = true
-registry-service = { path = "../crates/services/registry-service" }
 admin-api = { path = "../crates/services/admin-api" }

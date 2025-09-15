@@ -15,7 +15,6 @@ members = [
     "crates/extractors/substreams",
     "crates/services/admin-api",
     "crates/services/http-common",
-    "crates/services/registry-service",
     "crates/services/server",
     "tests",
 ]

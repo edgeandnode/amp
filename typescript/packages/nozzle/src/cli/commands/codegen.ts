@@ -4,10 +4,10 @@ import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
-import * as Registry from "../../api/Registry.ts"
+import * as Admin from "../../api/Admin.ts"
 import * as ManifestContext from "../../ManifestContext.ts"
 import * as SchemaGenerator from "../../SchemaGenerator.ts"
-import { configFile, manifestFile, registryUrl } from "../common.ts"
+import { adminUrl, configFile, manifestFile } from "../common.ts"
 
 export const codegen = Command.make("codegen", {
   args: {
@@ -18,7 +18,7 @@ export const codegen = Command.make("codegen", {
     ),
     configFile: configFile.pipe(Options.optional),
     manifestFile: manifestFile.pipe(Options.optional),
-    registryUrl,
+    adminUrl,
   },
 }).pipe(
   Command.withDescription("Generate schema definition code for a dataset"),
@@ -38,6 +38,6 @@ export const codegen = Command.make("codegen", {
     Option.match(args.query, {
       onSome: () => Layer.empty,
       onNone: () => ManifestContext.layerFromFile({ config: args.configFile, manifest: args.manifestFile }),
-    }).pipe(Layer.merge(SchemaGenerator.SchemaGenerator.Default), Layer.provide(Registry.layer(`${args.registryUrl}`)))
+    }).pipe(Layer.merge(SchemaGenerator.SchemaGenerator.Default), Layer.provide(Admin.layer(`${args.adminUrl}`)))
   ),
 )

@@ -58,13 +58,6 @@ export interface TestingOptions {
   readonly adminPort?: number | undefined
 
   /**
-   * The port to run the registry service on.
-   *
-   * @default 1611
-   */
-  readonly registryPort?: number | undefined
-
-  /**
    * The port to run the json-lines service on.
    *
    * @default 1603
@@ -89,7 +82,6 @@ export const defaultOptions: TestingOptions = {
   arrowFlightPort: 1602,
   jsonLinesPort: 1603,
   nozzleOutput: "both",
-  registryPort: 1611,
   nozzleArgs: [],
   nozzleExecutable: "nozzle",
   anvilWorkingDirectory: undefined,
@@ -112,7 +104,6 @@ export const layer = (config: TestingOptions = {}) =>
       arrowFlightPort,
       jsonLinesPort,
       nozzleOutput,
-      registryPort,
     } = { ...defaultOptions, ...config }
 
     const anvil = Anvil.layer({
@@ -124,11 +115,14 @@ export const layer = (config: TestingOptions = {}) =>
     })
 
     const nozzle = Nozzle.layer({
-      nozzleExecutable: config.nozzleExecutable,
+      nozzleExecutable: Option.fromNullable(config.nozzleExecutable).pipe(
+        Option.getOrElse(() =>
+          path.resolve(import.meta.dirname, "..", "..", "..", "..", "..", "target", "release", "nozzle")
+        ),
+      ),
       nozzleArgs: config.nozzleArgs,
       printOutput: nozzleOutput,
       adminPort,
-      registryPort,
       jsonLinesPort,
       arrowFlightPort,
       providerDefinitions: {
