@@ -79,11 +79,6 @@ impl Manifest {
         format!("{}__{}", self.name, version_str)
     }
 
-    /// Generate the filename for this manifest.
-    pub fn to_filename(&self) -> String {
-        format!("{}.json", self.to_identifier())
-    }
-
     /// Extract all SQL queries from table views.
     pub fn queries(&self) -> Result<BTreeMap<String, parser::Statement>, query_context::Error> {
         let mut queries = BTreeMap::new();

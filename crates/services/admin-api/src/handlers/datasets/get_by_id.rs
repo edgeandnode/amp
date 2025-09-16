@@ -100,9 +100,9 @@ async fn handler_inner(
 
     // Load the dataset from the store
     // If version is None, the latest version is used
-    let dataset = ctx
+    let Some(dataset) = ctx
         .store
-        .load_dataset(&name, version.as_ref())
+        .try_load_dataset(&name, version.as_ref())
         .await
         .map_err(|err| {
             tracing::debug!(
@@ -111,15 +111,15 @@ async fn handler_inner(
                 error=?err,
                 "failed to load dataset"
             );
-            if err.is_not_found() {
-                Error::NotFound {
-                    name: name.clone(),
-                    version: version.clone(),
-                }
-            } else {
-                Error::DatasetStoreError(err)
-            }
-        })?;
+            Error::DatasetStoreError(err)
+        })?
+    else {
+        return Err(Error::NotFound {
+            name: name.clone(),
+            version: version.clone(),
+        }
+        .into());
+    };
 
     let mut tables = Vec::with_capacity(dataset.tables.len());
     let dataset_version = match dataset.kind.as_str() {

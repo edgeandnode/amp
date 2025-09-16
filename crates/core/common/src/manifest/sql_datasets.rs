@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use datafusion::sql::parser;
 use datasets_common::name::Name;
 
-use crate::{Dataset, DatasetValue};
+use crate::Dataset;
 
 /// Dataset kind constant for legacy SQL datasets.
 pub const DATASET_KIND: &str = "sql";
@@ -46,16 +46,6 @@ pub struct Manifest {
     pub kind: String,
     /// Network name, e.g., "mainnet", "sepolia"
     pub network: String,
-}
-
-impl Manifest {
-    /// Parse a dataset definition from TOML or JSON value.
-    pub fn from_value(value: DatasetValue) -> Result<Self, Error> {
-        match value {
-            DatasetValue::Toml(value) => value.try_into().map_err(Into::into),
-            DatasetValue::Json(value) => serde_json::from_value(value).map_err(Into::into),
-        }
-    }
 }
 
 /// Errors that can occur when parsing SQL dataset definitions.

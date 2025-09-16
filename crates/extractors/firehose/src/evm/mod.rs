@@ -5,8 +5,8 @@ pub mod tables;
 
 use common::Dataset;
 
-pub fn dataset(dataset_cfg: common::DatasetValue) -> Result<Dataset, Error> {
-    let dataset_def = DatasetDef::from_value(dataset_cfg)?;
+pub fn dataset(dataset_cfg: serde_json::Value) -> Result<Dataset, Error> {
+    let dataset_def: DatasetDef = serde_json::from_value(dataset_cfg)?;
     Ok(Dataset {
         kind: dataset_def.kind,
         name: dataset_def.name,

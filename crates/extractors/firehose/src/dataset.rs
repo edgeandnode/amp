@@ -1,8 +1,6 @@
-use common::{BlockNum, DatasetValue};
+use common::BlockNum;
 use schemars::JsonSchema;
 use serde::Deserialize;
-
-use crate::Error;
 
 pub const DATASET_KIND: &str = "firehose";
 
@@ -17,15 +15,6 @@ pub struct DatasetDef {
     /// Dataset start block.
     #[serde(default)]
     pub start_block: BlockNum,
-}
-
-impl DatasetDef {
-    pub fn from_value(value: common::DatasetValue) -> Result<Self, Error> {
-        match value {
-            DatasetValue::Toml(value) => value.try_into().map_err(From::from),
-            DatasetValue::Json(value) => serde_json::from_value(value).map_err(From::from),
-        }
-    }
 }
 
 #[derive(Debug, Deserialize)]

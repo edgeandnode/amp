@@ -7,7 +7,6 @@ use common::manifest::derived::Manifest;
 use dataset_store::RegistrationError;
 use datasets_common::{manifest::Manifest as CommonManifest, name::Name, version::Version};
 use http_common::{BoxRequestError, RequestError};
-use object_store::path::Path;
 
 use crate::{ctx::Ctx, handlers::common::NonEmptyString};
 
@@ -70,14 +69,13 @@ pub async fn handler(
         }
     };
 
-    let dataset = ctx
-        .store
-        .try_load_dataset(&payload.name, Some(&payload.version))
+    // Check if dataset already exists in metadata database
+    if ctx
+        .metadata_db
+        .dataset_exists(&payload.name, &payload.version)
         .await
-        .map_err(Error::StoreError)?;
-
-    // Check if dataset already exists with this name and version
-    if dataset.is_some() {
+        .map_err(Error::MetadataDbError)?
+    {
         return Err(Error::DatasetAlreadyExists(
             payload.name.to_string(),
             payload.version.to_string(),
@@ -99,8 +97,9 @@ pub async fn handler(
                 )
                 .into());
             }
+
             ctx.store
-                .register_manifest(&manifest.name, &manifest.version, &manifest)
+                .register_manifest(&payload.name, &payload.version, &manifest)
                 .await
                 .map_err(Error::ManifestRegistrationError)?;
             tracing::info!(
@@ -112,24 +111,23 @@ pub async fn handler(
         // SQL datasets
         _ => {
             // Validate manifest JSON body
-            let _: serde_json::Value = serde_json::from_str(payload.manifest.as_str())
+            let manifest: serde_json::Value = serde_json::from_str(payload.manifest.as_str())
                 .map_err(|err| Error::InvalidManifest(err.to_string()))?;
 
-            // Store dataset definition in the dataset definitions store
-            ctx.config
-                .dataset_defs_store
-                .prefixed_store()
-                .put(
-                    &Path::from(format!("{}.json", payload.name)),
-                    payload.manifest.into_inner().into(),
-                )
+            ctx.store
+                .register_manifest(&payload.name, &payload.version, &manifest)
                 .await
-                .map_err(Error::DatasetDefStoreError)?;
+                .map_err(Error::ManifestRegistrationError)?;
+            tracing::info!(
+                "Registered manifest for dataset '{}' version '{}'",
+                payload.name,
+                payload.version
+            );
 
             // Attempt to load the dataset to ensure it's registered
             let _ = ctx
                 .store
-                .load_dataset(&payload.name, None)
+                .load_dataset(&payload.name, &payload.version)
                 .await
                 .map_err(Error::StoreError)?;
         }
@@ -192,7 +190,7 @@ pub enum Error {
     /// - Registry information extraction failed
     /// - System-level registration errors
     #[error("Failed to register manifest: {0}")]
-    ManifestRegistrationError(#[from] RegistrationError),
+    ManifestRegistrationError(RegistrationError),
 
     /// Dataset already exists with the given configuration
     ///

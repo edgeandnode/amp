@@ -171,7 +171,7 @@ pub async fn datasets_and_dependencies(
             }
             common::manifest::derived::DATASET_KIND => {
                 store
-                    .load_manifest_dataset(&dataset.name, dataset.version.as_ref().unwrap())
+                    .load_derived_dataset(&dataset.name, dataset.version.as_ref().unwrap())
                     .await?
             }
             _ => {

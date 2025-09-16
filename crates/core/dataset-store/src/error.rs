@@ -20,9 +20,9 @@ pub enum Error {
     #[error("unsupported dataset kind '{0}'")]
     UnsupportedKind(String),
 
-    #[error("dataset field 'name = \"{0}\"' does not match filename '{1}'")]
-    NameMismatch(String, String),
-
+    // TODO: Re-enable name check. Recover dataset name from the filename --------------------------------------
+    // #[error("dataset field 'name = \"{0}\"' does not match filename '{1}'")]
+    // NameMismatch(String, String),
     #[error("Schema mismatch")]
     SchemaMismatch,
 
@@ -69,8 +69,8 @@ pub enum Error {
         source: std::string::FromUtf8Error,
     },
 
-    #[error("dataset '{0}' version '{1}' not found")]
-    DatasetVersionNotFound(String, String),
+    #[error("dataset '{0}' version '{1:?}' not found")]
+    DatasetVersionNotFound(String, Option<String>),
 
     #[error("{0}")]
     Unknown(BoxError),

@@ -5,7 +5,7 @@ use std::{num::NonZeroU32, path::PathBuf};
 
 use alloy::transports::http::reqwest::Url;
 pub use client::JsonRpcClient;
-use common::{BlockNum, BoxError, Dataset, DatasetValue, store::StoreError};
+use common::{BlockNum, BoxError, Dataset, store::StoreError};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json;
@@ -37,15 +37,6 @@ pub struct DatasetDef {
     pub start_block: BlockNum,
 }
 
-impl DatasetDef {
-    fn from_value(value: common::DatasetValue) -> Result<Self, Error> {
-        match value {
-            DatasetValue::Toml(value) => value.try_into().map_err(From::from),
-            DatasetValue::Json(value) => serde_json::from_value(value).map_err(From::from),
-        }
-    }
-}
-
 #[serde_as]
 #[derive(Debug, Deserialize)]
 pub(crate) struct EvmRpcProvider {
@@ -66,8 +57,8 @@ fn default_rpc_batch_size() -> usize {
     100
 }
 
-pub fn dataset(dataset_cfg: common::DatasetValue) -> Result<Dataset, Error> {
-    let def = DatasetDef::from_value(dataset_cfg)?;
+pub fn dataset(dataset_cfg: serde_json::Value) -> Result<Dataset, Error> {
+    let def: DatasetDef = serde_json::from_value(dataset_cfg)?;
     Ok(Dataset {
         kind: def.kind,
         name: def.name,

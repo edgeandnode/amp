@@ -135,7 +135,7 @@ test-it *EXTRA_FLAGS:
     set -e # Exit on error
 
     if command -v "cargo-nextest" &> /dev/null; then
-        cargo nextest run {{EXTRA_FLAGS}} --package tests
+        cargo nextest run {{EXTRA_FLAGS}} --test-threads=1 --no-fail-fast --package tests
     else
         >&2 echo "================================================================="
         >&2 echo "WARNING: cargo-nextest not found - using 'cargo test' fallback ⚠️"
