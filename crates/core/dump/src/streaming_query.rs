@@ -75,13 +75,14 @@ impl TableUpdates {
 }
 
 /// Represents a message from the streaming query, which can be either data or a completion signal.
-/// Receiving `Completed(n)` indicates that the query has emitted all outputs up to block number `n`.
 ///
 /// Completion points do not necessarily follow increments of 1, as the query progresses in batches.
 pub enum QueryMessage {
     MicrobatchStart { range: BlockRange, is_reorg: bool },
     Data(RecordBatch),
     MicrobatchEnd(BlockRange),
+
+    //// Indicates that the query has emitted all outputs up to the given block number.
     BlockComplete(BlockNum),
 }
 
