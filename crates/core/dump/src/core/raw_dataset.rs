@@ -97,9 +97,8 @@ use tracing::instrument;
 
 use super::{Ctx, block_ranges, tasks::FailFastJoinSet};
 use crate::{
-    compaction::CompactionProperties,
-    metrics,
-    parquet_writer::{ParquetWriterProperties, RawDatasetWriter},
+    compaction::CompactionProperties, metrics, parquet_writer::ParquetWriterProperties,
+    raw_dataset_writer::RawDatasetWriter,
 };
 
 /// Dumps a raw dataset by extracting blockchain data from specified block ranges

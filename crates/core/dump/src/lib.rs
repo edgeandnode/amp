@@ -6,6 +6,7 @@ pub mod compaction;
 mod core;
 pub mod metrics;
 mod parquet_writer;
+mod raw_dataset_writer;
 pub mod streaming_query;
 pub mod worker;
 
