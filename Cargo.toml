@@ -19,6 +19,7 @@ members = [
     "generate-manifest",
     "monitoring",
     "client",
+    "ve"
 ]
 
 resolver = "2"
