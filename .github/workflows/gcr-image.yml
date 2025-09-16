@@ -125,7 +125,7 @@ jobs:
 
       - name: Deploy to Cloud Run
         if: steps.auth.outcome == 'success'
-        uses: google-github-actions/deploy-cloudrun@v2
+        uses: google-github-actions/deploy-cloudrun@251330ba9a8a34bfbc1622895f42e1d53fd14522 # v2
         with:
           project_id: ${{ env.PROJECT_NAME }}-${{ inputs.environment }}
           service: ${{ env.PROJECT_NAME }}-${{ inputs.environment }}
