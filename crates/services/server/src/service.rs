@@ -15,15 +15,13 @@ use axum::{
 };
 use bytes::{BufMut, Bytes, BytesMut};
 use common::{
-    BoxError, SPECIAL_BLOCK_NUM,
+    BoxError, DetachedLogicalPlan, PlanningContext, QueryContext, SPECIAL_BLOCK_NUM,
     arrow::{self, array::RecordBatch, datatypes::SchemaRef, ipc::writer::IpcDataGenerator},
     catalog::physical::Catalog,
     config::Config,
     metadata::segments::{BlockRange, ResumeWatermark},
     notification_multiplexer::{self, NotificationMultiplexerHandle},
-    query_context::{
-        DetachedLogicalPlan, Error as CoreError, PlanningContext, QueryContext, QueryEnv, parse_sql,
-    },
+    query_context::{Error as CoreError, QueryEnv, parse_sql},
 };
 use datafusion::{
     common::{DFSchema, tree_node::TreeNodeRecursion},
@@ -478,7 +476,7 @@ impl Service {
 
     #[instrument(skip_all)]
     async fn do_get(&self, ticket: arrow_flight::Ticket) -> Result<TonicStream<FlightData>, Error> {
-        let remote_plan = common::query_context::remote_plan_from_bytes(&ticket.ticket)?;
+        let remote_plan = common::remote_plan_from_bytes(&ticket.ticket)?;
         let is_streaming = remote_plan.is_streaming;
         let resume_watermark = remote_plan.resume_watermark.map(Into::into);
         let table_refs = remote_plan.table_refs.into_iter().map(|t| t.into());

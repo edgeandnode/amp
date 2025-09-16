@@ -4,12 +4,13 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use alloy::{hex::ToHexExt as _, primitives::BlockHash};
 use common::{
-    BlockNum, BoxError, LogicalCatalog, SPECIAL_BLOCK_NUM,
+    BlockNum, BoxError, DetachedLogicalPlan, LogicalCatalog, PlanningContext, QueryContext,
+    SPECIAL_BLOCK_NUM,
     arrow::array::RecordBatch,
     catalog::physical::{Catalog, PhysicalTable},
     metadata::segments::{BlockRange, ResumeWatermark, Segment, Watermark},
     notification_multiplexer::NotificationMultiplexerHandle,
-    query_context::{DetachedLogicalPlan, PlanningContext, QueryContext, QueryEnv, parse_sql},
+    query_context::{QueryEnv, parse_sql},
 };
 use datafusion::common::cast::as_fixed_size_binary_array;
 use dataset_store::{DatasetStore, resolve_blocks_table};

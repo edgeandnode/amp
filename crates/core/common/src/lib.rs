@@ -9,6 +9,7 @@ pub mod manifest;
 pub mod metadata;
 pub mod notification_multiplexer;
 pub mod plan_visitors;
+pub mod planning_context;
 pub mod query_context;
 pub mod sql_visitors;
 pub mod store;
@@ -38,7 +39,10 @@ pub use foyer::Cache;
 use futures::{Stream, StreamExt};
 use metadata::segments::BlockRange;
 use metadata_db::FileId;
-pub use query_context::QueryContext;
+pub use planning_context::{
+    DetachedLogicalPlan, PlanningContext, RemotePlan, remote_plan_from_bytes,
+};
+pub use query_context::{Error as QueryError, QueryContext};
 use serde::{Deserialize, Serialize};
 pub use store::Store;
 

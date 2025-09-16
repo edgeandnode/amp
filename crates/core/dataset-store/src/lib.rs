@@ -8,7 +8,7 @@ use std::{
 use async_stream::stream;
 use common::{
     BlockNum, BlockStreamer, BlockStreamerExt, BoxError, Dataset, DatasetValue, LogicalCatalog,
-    RawDatasetRows, Store,
+    PlanningContext, RawDatasetRows, Store,
     catalog::physical::{Catalog, PhysicalTable},
     config::Config,
     evm::{self, udfs::EthCall},
@@ -18,7 +18,7 @@ use common::{
         derived::Manifest,
         sql_datasets::SqlDataset,
     },
-    query_context::{self, PlanningContext, QueryEnv},
+    query_context::{self, QueryEnv},
     sql_visitors::all_function_names,
     store::StoreError,
 };

@@ -117,12 +117,12 @@
 use std::{ops::RangeInclusive, sync::Arc};
 
 use common::{
-    BlockNum, BoxError, QueryContext,
+    BlockNum, BoxError, DetachedLogicalPlan, PlanningContext, QueryContext,
+    query_context::QueryEnv,
     catalog::physical::{Catalog, PhysicalTable},
     manifest::sql_datasets::SqlDataset,
     metadata::segments::ResumeWatermark,
     notification_multiplexer::NotificationMultiplexerHandle,
-    query_context::{DetachedLogicalPlan, PlanningContext, QueryEnv},
 };
 use futures::StreamExt as _;
 use tracing::instrument;
