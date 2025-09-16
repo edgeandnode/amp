@@ -7,8 +7,8 @@ use std::{
 
 use async_stream::stream;
 use common::{
-    BlockNum, BlockStreamer, BoxError, Dataset, DatasetValue, LogicalCatalog, RawDatasetRows,
-    Store,
+    BlockNum, BlockStreamer, BlockStreamerExt, BoxError, Dataset, DatasetValue, LogicalCatalog,
+    RawDatasetRows, Store,
     catalog::physical::{Catalog, PhysicalTable},
     config::Config,
     evm::{self, udfs::EthCall},
@@ -484,6 +484,7 @@ impl DatasetStore {
         self.load_client_inner(dataset, only_finalized_blocks)
             .await
             .map_err(|err| (dataset, err).into())
+            .map(|client| client.with_retry())
     }
 
     async fn load_client_inner(
