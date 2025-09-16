@@ -1,6 +1,6 @@
 {
   "extends": "../../tsconfig.base.jsonc",
-  "include": ["examples", "nozzle.config.ts"],
+  "include": ["examples", "nozzle.config.ts", "test", "src"],
   "references": [{ "path": "../nozzle/tsconfig.src.json" }],
   "compilerOptions": {
     "noEmit": true

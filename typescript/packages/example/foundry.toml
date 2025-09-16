@@ -5,5 +5,16 @@ libs = ["contracts/lib"]
 test = "contracts/test"
 script = "contracts/script"
 cache_path = "contracts/cache"
+via_ir = true
+optimizer = true
+optimizer_runs = 200
 
-# See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
+[lint]
+ignore = [
+    "contracts/src/*Verifier.sol",
+]
+
+[fmt]
+ignore = [
+    "contracts/src/*Verifier.sol",
+]
