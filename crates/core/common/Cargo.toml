@@ -13,6 +13,7 @@ bytes.workspace = true
 datafusion.workspace = true
 datafusion-proto.workspace = true
 datafusion-tracing.workspace = true
+datasets-common = { path = "../datasets-common" }
 figment.workspace = true
 foyer = "0.18"
 fs-err.workspace = true

@@ -6,11 +6,12 @@ use std::{
 };
 
 use common::{
-    BoxError, Store, catalog::physical::PhysicalTable, config::Config, manifest::common::Version,
-    notification_multiplexer, store::ObjectStoreUrl, utils::dfs,
+    BoxError, Store, catalog::physical::PhysicalTable, config::Config, notification_multiplexer,
+    store::ObjectStoreUrl, utils::dfs,
 };
 use datafusion::sql::resolve::resolve_table_references;
 use dataset_store::DatasetStore;
+use datasets_common::version::Version;
 use metadata_db::MetadataDb;
 use monitoring::telemetry;
 use static_assertions::const_assert;

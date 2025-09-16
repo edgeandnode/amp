@@ -6,6 +6,7 @@ members = [
     "crates/client",
     "crates/core/common",
     "crates/core/dataset-store",
+    "crates/core/datasets-common",
     "crates/core/dump",
     "crates/core/js-runtime",
     "crates/core/metadata-db",

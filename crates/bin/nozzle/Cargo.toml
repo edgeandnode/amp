@@ -18,6 +18,7 @@ clap.workspace = true
 common = { path = "../../core/common" }
 datafusion.workspace = true
 dataset-store = { path = "../../core/dataset-store" }
+datasets-common = { path = "../../core/datasets-common" }
 dump = { path = "../../core/dump" }
 futures.workspace = true
 generate-manifest = { path = "../generate-manifest" }

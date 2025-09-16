@@ -1,6 +1,6 @@
 //! Tracing utilities for dataset handlers
 
-use common::manifest::common::Version;
+use datasets_common::version::Version;
 
 /// Format a dataset selector version for display purposes
 ///

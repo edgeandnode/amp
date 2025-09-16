@@ -59,6 +59,7 @@ const NOZZLE_CRATES: &[&str] = &[
     "admin_api",
     "common",
     "dataset_store",
+    "datasets_common",
     "dump",
     "dump_check",
     "evm_rpc_datasets",
