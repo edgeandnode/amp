@@ -30,6 +30,11 @@ impl NonEmptyString {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// Consumes the NonEmptyString and returns the inner String
+    pub fn into_inner(self) -> String {
+        self.0
+    }
 }
 
 impl AsRef<str> for NonEmptyString {
