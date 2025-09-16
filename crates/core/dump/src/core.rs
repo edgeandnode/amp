@@ -21,7 +21,7 @@ use crate::metrics;
 
 mod block_ranges;
 mod raw_dataset;
-mod sql_dataset;
+mod sql_dump;
 mod tasks;
 
 /// Dumps a set of tables. All tables must belong to the same dataset.
@@ -166,7 +166,7 @@ pub async fn dump_user_tables(
             }
         };
 
-        sql_dataset::dump_table(
+        sql_dump::dump_table(
             ctx.clone(),
             dataset,
             &env,
