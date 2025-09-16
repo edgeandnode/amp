@@ -286,7 +286,7 @@ impl Service {
                 None,
                 resume_watermark,
                 &self.notification_multiplexer,
-                false,
+                None,
                 self.config.microbatch_max_interval,
             )
             .await

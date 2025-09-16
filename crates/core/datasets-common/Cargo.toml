@@ -1,0 +1,14 @@
+[package]
+name = "datasets-common"
+edition.workspace = true
+version.workspace = true
+
+[features]
+schemars = ["dep:schemars"]
+
+[dependencies]
+datafusion = { workspace = true }
+schemars = { workspace = true, optional = true }
+serde = { workspace = true }
+semver = { workspace = true }
+thiserror = { workspace = true }

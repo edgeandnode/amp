@@ -31,6 +31,7 @@ dependencies = [
  "axum-test",
  "common",
  "dataset-store",
+ "datasets-common",
  "dump",
  "futures",
  "http-common",
@@ -2019,6 +2020,7 @@ dependencies = [
  "datafusion",
  "datafusion-proto",
  "datafusion-tracing",
+ "datasets-common",
  "figment",
  "foyer",
  "fs-err",
@@ -3083,6 +3085,7 @@ dependencies = [
  "async-stream",
  "common",
  "datafusion",
+ "datasets-common",
  "evm-rpc-datasets",
  "firehose-datasets",
  "futures",
@@ -3100,6 +3103,17 @@ dependencies = [
  "toml 0.8.23",
  "tracing",
  "url",
+]
+
+[[package]]
+name = "datasets-common"
+version = "0.1.0"
+dependencies = [
+ "datafusion",
+ "schemars 1.0.4",
+ "semver 1.0.26",
+ "serde",
+ "thiserror",
 ]
 
 [[package]]
@@ -3928,6 +3942,7 @@ version = "0.1.0"
 dependencies = [
  "common",
  "dataset-store",
+ "datasets-common",
  "evm-rpc-datasets",
  "firehose-datasets",
  "serde_json",
@@ -5160,6 +5175,7 @@ dependencies = [
  "common",
  "datafusion",
  "dataset-store",
+ "datasets-common",
  "dump",
  "futures",
  "generate-manifest",
@@ -7482,6 +7498,7 @@ dependencies = [
  "clap",
  "common",
  "dataset-store",
+ "datasets-common",
  "dotenvy",
  "dump",
  "dump-check",

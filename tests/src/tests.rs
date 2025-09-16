@@ -9,14 +9,12 @@ use alloy::{
 };
 use common::{
     BlockNum, BoxError,
-    manifest::{
-        common::{Manifest as CommonManifest, Schema},
-        derived::Manifest,
-    },
+    manifest::{common::schema_from_tables, derived::Manifest},
     metadata::segments::BlockRange,
     query_context::parse_sql,
 };
 use dataset_store::DatasetStore;
+use datasets_common::manifest::Manifest as CommonManifest;
 use generate_manifest;
 use monitoring::logging;
 use schemars::schema_for;
@@ -206,9 +204,6 @@ async fn sql_over_eth_firehose_dump() {
     let dataset_name = "sql_over_eth_firehose";
 
     let test_env = TestEnv::temp("sql_over_eth_firehose").await.unwrap();
-    let blessed = SnapshotContext::blessed(&test_env, &dataset_name)
-        .await
-        .unwrap();
     let block = test_env
         .dataset_store
         .load_dataset("eth_firehose", None)
@@ -224,6 +219,9 @@ async fn sql_over_eth_firehose_dump() {
     let temp_dump = SnapshotContext::temp_dump(&test_env, &dataset_name, block, 1)
         .await
         .expect("temp dump failed");
+    let blessed = SnapshotContext::blessed(&test_env, &dataset_name)
+        .await
+        .unwrap();
     temp_dump.assert_eq(&blessed).await.unwrap();
 }
 
@@ -437,7 +435,7 @@ async fn generate_manifest_evm_rpc_builtin() {
     .unwrap();
 
     let out: CommonManifest = serde_json::from_slice(&out).unwrap();
-    let builtin_schema: Schema = evm_rpc_datasets::tables::all(&network).into();
+    let builtin_schema = schema_from_tables(evm_rpc_datasets::tables::all(&network));
 
     assert_eq!(out.network, network);
     assert_eq!(out.kind, kind);
@@ -467,7 +465,7 @@ async fn generate_manifest_firehose_builtin() {
     .unwrap();
 
     let out: CommonManifest = serde_json::from_slice(&out).unwrap();
-    let builtin_schema: Schema = firehose_datasets::evm::tables::all(&network).into();
+    let builtin_schema = schema_from_tables(firehose_datasets::evm::tables::all(&network));
 
     assert_eq!(out.network, network);
     assert_eq!(out.kind, kind);
@@ -507,10 +505,7 @@ async fn generate_manifest_substreams() {
         module,
     };
 
-    let schema = substreams_datasets::tables(dataset_def)
-        .await
-        .map(Into::into)
-        .unwrap();
+    let schema = schema_from_tables(substreams_datasets::tables(dataset_def).await.unwrap());
 
     assert_eq!(out.network, network);
     assert_eq!(out.kind, kind);

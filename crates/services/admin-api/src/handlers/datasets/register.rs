@@ -3,11 +3,9 @@ use axum::{
     extract::{State, rejection::JsonRejection},
     http::StatusCode,
 };
-use common::manifest::{
-    common::{Manifest as CommonManifest, Name, Version},
-    derived::Manifest,
-};
+use common::manifest::derived::Manifest;
 use dataset_store::DatasetStore;
+use datasets_common::{manifest::Manifest as CommonManifest, name::Name, version::Version};
 use http_common::{BoxRequestError, RequestError};
 use metadata_db::MetadataDb;
 use object_store::path::Path;
