@@ -19,7 +19,6 @@ use datasets_common::{
     name::Name,
     version::Version,
 };
-use metadata_db::registry::Registry;
 
 use crate::{
     BoxError, Dataset, Table as LogicalTable,
@@ -72,21 +71,6 @@ impl Manifest {
                 )
             })
             .collect()
-    }
-
-    /// Extract registry metadata from the manifest for publication.
-    pub fn extract_registry_info(&self) -> Registry {
-        let owner = self.dependencies.first_key_value().unwrap().1.owner.clone();
-        let dataset = self.name.to_string();
-        let version = self.version.to_string();
-        let filename = self.to_filename();
-        let manifest_path = object_store::path::Path::from(filename.clone()).to_string();
-        Registry {
-            owner,
-            dataset,
-            version,
-            manifest: manifest_path,
-        }
     }
 
     /// Generate a unique identifier for this manifest including version.

@@ -8,6 +8,7 @@ schemars = ["dep:schemars"]
 
 [dependencies]
 datafusion = { workspace = true }
+metadata-db = { path = "../metadata-db" }
 schemars = { workspace = true, optional = true }
 serde = { workspace = true }
 semver = { workspace = true }

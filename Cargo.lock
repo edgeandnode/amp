@@ -3110,6 +3110,7 @@ name = "datasets-common"
 version = "0.1.0"
 dependencies = [
  "datafusion",
+ "metadata-db",
  "schemars 1.0.4",
  "semver 1.0.26",
  "serde",
@@ -5053,6 +5054,7 @@ dependencies = [
  "indoc",
  "metadata-db",
  "pgtemp",
+ "semver 1.0.26",
  "serde",
  "serde_json",
  "sqlx",
