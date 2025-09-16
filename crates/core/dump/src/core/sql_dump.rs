@@ -1,4 +1,4 @@
-//! # SQL Datasets dump implementation
+//! # SQL dump implementation
 //!
 //! This module implements the core logic for dumping SQL-based datasets to Parquet files.
 //! Unlike raw dataset dumps that extract blockchain data directly, SQL dataset dumps execute
@@ -6,22 +6,21 @@
 //!
 //! ## Overview
 //!
-//! SQL datasets allow users to define custom transformations and aggregations over blockchain
-//! data using SQL queries. Each SQL dataset consists of one or more tables, where each table
+//! Derived datasets allow users to define custom transformations and aggregations over blockchain
+//! data using SQL queries. Each derived dataset consists of one or more tables, where each table
 //! is defined by a SQL query that can reference other datasets as data sources. The dump
 //! process executes these queries and materializes the results as Parquet files.
 //!
-//! ## Dataset Types
+//! ## Table Types
 //!
-//! SQL datasets can be either incremental or non-incremental:
+//! Tables can be either incremental or non-incremental:
 //!
-//! - **Incremental Datasets**: Process data in block ranges and can be updated incrementally
-//!   as new blocks become available. These datasets maintain state about which block ranges
+//! - **Incremental Tables**: Process data in block ranges and can be updated incrementally
+//!   as new blocks become available. These tables maintain state about which block ranges
 //!   have been processed and only compute results for new or missing ranges.
 //!
-//! - **Non-Incremental Datasets**: Recompute the entire dataset on each dump operation.
-//!   These are typically used for queries that require global aggregations or when the
-//!   result depends on the complete dataset state.
+//! - **Non-Incremental Tables**: Recompute the entire table on each dump operation.
+//!   These are typically used for queries that require global aggregations or joins.
 //!
 //! ## Dump Process
 //!
@@ -52,10 +51,7 @@
 //!
 //! ## Incremental Processing Strategy
 //!
-//! For incremental datasets, the dump process implements sophisticated block range management:
-//!
-//! - **Gap Detection**: Identifies which block ranges haven't been processed yet by
-//!   computing the complement of already-processed ranges within the target range.
+//! For incremental tables, the dump process implements sophisticated block range management:
 //!
 //! - **Batch Processing**: Splits large unprocessed ranges into smaller batches based
 //!   on the configured `microbatch_max_interval` parameter. This prevents memory
@@ -90,29 +86,13 @@
 //! - **Atomic Batch Processing**: Each batch is processed atomically, ensuring that
 //!   partial results are not recorded in case of failures.
 //!
-//! - **Parallel Task Management**: Uses a specialized join set (`DumpPartitionTasksJoinSet`)
+//! - **Parallel Task Management**: Uses a specialized join set (`FailFastJoinSet`)
 //!   to coordinate concurrent table processing tasks, ensuring that if any table processing
 //!   fails, all remaining tasks are immediately terminated to prevent partial dumps.
 //!
 //! - **Metadata Consistency**: Commits metadata updates only after successful
 //!   completion of each batch, maintaining consistency between data files and
 //!   processing state.
-//!
-//! ## Performance Considerations
-//!
-//! The implementation includes several optimizations for handling complex SQL workloads:
-//!
-//! - **Streaming Execution**: Uses streaming query execution to process large result
-//!   sets without loading everything into memory simultaneously.
-//!
-//! - **Configurable Batch Sizes**: Allows tuning of batch sizes to balance memory
-//!   usage, query complexity, and processing throughput.
-//!
-//! - **Parallel Table Processing**: Processes multiple tables concurrently when they
-//!   don't have interdependencies, maximizing resource utilization.
-//!
-//! - **Incremental Updates**: Avoids reprocessing already-computed data by maintaining
-//!   precise tracking of processed block ranges per table.
 
 use std::{ops::RangeInclusive, sync::Arc};
 
