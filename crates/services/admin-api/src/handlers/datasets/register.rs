@@ -40,17 +40,14 @@ use crate::{ctx::Ctx, handlers::common::NonEmptyString};
 /// - `INVALID_MANIFEST`: Manifest JSON parsing or structure error
 /// - `MANIFEST_VALIDATION_ERROR`: Manifest name/version doesn't match request parameters
 /// - `MANIFEST_REGISTRATION_ERROR`: Failed to register manifest in system
-/// - `MANIFEST_REQUIRED`: No existing dataset found and no manifest provided
-/// - `DATASET_ALREADY_EXISTS`: Dataset exists and manifest provided (conflict)
+/// - `DATASET_ALREADY_EXISTS`: Dataset with same name and version already exists
 /// - `DATASET_DEF_STORE_ERROR`: Failed to store dataset definition
 /// - `STORE_ERROR`: Failed to load or access dataset store
 ///
 /// ## Behavior
-/// This handler supports multiple registration scenarios:
-/// 1. **Existing dataset without manifest**: Registers existing dataset in local registry
-/// 2. **New manifest dataset**: Registers manifest in local registry
-/// 3. **New dataset definition**: Stores dataset definition in local registry
-/// 4. **Conflict cases**: Returns appropriate errors for invalid combinations
+/// This handler supports two main registration scenarios:
+/// 1. **Derived dataset**: Registers a derived dataset manifest (kind="manifest") in both object store and metadata database
+/// 2. **SQL dataset**: Stores dataset definition JSON in object store and loads the dataset to ensure registration
 ///
 /// The handler:
 /// - Validates dataset name and version format
@@ -65,15 +62,16 @@ use crate::{ctx::Ctx, handlers::common::NonEmptyString};
 #[tracing::instrument(skip_all, err)]
 pub async fn handler(
     State(ctx): State<Ctx>,
-    json_payload: Result<Json<RegisterRequest>, JsonRejection>,
+    payload: Result<Json<RegisterRequest>, JsonRejection>,
 ) -> Result<StatusCode, BoxRequestError> {
-    let Json(payload) = match json_payload {
-        Ok(payload) => payload,
+    let payload = match payload {
+        Ok(Json(payload)) => payload,
         Err(err) => {
             tracing::error!("Failed to parse request JSON: {}", err);
             return Err(Error::InvalidPayloadFormat.into());
         }
     };
+
     let dataset = ctx
         .store
         .try_load_dataset(&payload.name, Some(&payload.version))
@@ -112,22 +110,25 @@ pub async fn handler(
                 payload.version
             );
         }
+        // SQL datasets
         _ => {
-            let manifest_str = payload.manifest.to_string();
-            let format_extension = if manifest_str.starts_with('{') {
-                "json"
-            } else {
-                "toml"
-            };
-            let path = Path::from(format!("{}.{}", payload.name, format_extension));
+            // Validate manifest JSON body
+            let _: serde_json::Value = serde_json::from_str(payload.manifest.as_str())
+                .map_err(|err| Error::InvalidManifest(err.to_string()))?;
+
+            // Store dataset definition in the dataset definitions store
             ctx.config
                 .dataset_defs_store
                 .prefixed_store()
-                .put(&path, manifest_str.into())
+                .put(
+                    &Path::from(format!("{}.json", payload.name)),
+                    payload.manifest.into_inner().into(),
+                )
                 .await
                 .map_err(Error::DatasetDefStoreError)?;
 
-            let _dataset = ctx
+            // Attempt to load the dataset to ensure it's registered
+            let _ = ctx
                 .store
                 .load_dataset(&payload.name, None)
                 .await
