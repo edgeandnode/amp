@@ -317,14 +317,8 @@ async fn register_manifest(
         .into());
     }
 
-    // Extract dataset owner from dependencies
-    let dataset_owner = manifest
-        .dependencies
-        .first_key_value()
-        .unwrap()
-        .1
-        .owner
-        .clone();
+    // TODO: Extract dataset owner from manifest
+    let dataset_owner = "no-owner";
 
     // Prepare manifest data for storage
     let dataset_name = manifest.name.to_string();
@@ -346,7 +340,7 @@ async fn register_manifest(
     // Register dataset metadata in database
     metadata_db
         .register_dataset(
-            &dataset_owner,
+            dataset_owner,
             &dataset_name,
             &manifest.version,
             &manifest_path_str,
