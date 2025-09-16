@@ -151,7 +151,7 @@ pub async fn dump(
         for table in tables {
             let end = match end {
                 None => latest_block,
-                Some(end) => BlockNum::max(end, latest_block),
+                Some(end) => BlockNum::min(end, latest_block),
             };
             let missing_ranges = table.missing_ranges(start..=end).await?;
             missing_ranges_by_table.insert(table.table().name().to_string(), missing_ranges);
