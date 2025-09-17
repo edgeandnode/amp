@@ -71,11 +71,8 @@ async function readStdin(): Promise<string> {
  */
 async function generateBoardProof(request: BoardCircuitInput): Promise<ProofResponse> {
   try {
-    console.error("Loading board circuit tester...")
     const boardTester = await loadBoardCircuitTester()
-    console.error("Generating board proof...")
     const proofOutput = await boardTester.prove(request)
-    console.error("Board proof generated successfully")
 
     return {
       success: true,
@@ -94,7 +91,6 @@ async function generateBoardProof(request: BoardCircuitInput): Promise<ProofResp
       },
     }
   } catch (error) {
-    console.error("Board proof generation failed:", error)
     return {
       success: false,
       error: `Board proof generation failed: ${error}`,
@@ -107,11 +103,8 @@ async function generateBoardProof(request: BoardCircuitInput): Promise<ProofResp
  */
 async function generateShotProof(request: ShotCircuitInput): Promise<ProofResponse> {
   try {
-    console.error("Loading shot circuit tester...")
     const shotTester = await loadShotCircuitTester()
-    console.error("Generating shot proof...")
     const proofOutput = await shotTester.prove(request)
-    console.error("Shot proof generated successfully")
 
     return {
       success: true,
@@ -130,7 +123,6 @@ async function generateShotProof(request: ShotCircuitInput): Promise<ProofRespon
       },
     }
   } catch (error) {
-    console.error("Shot proof generation failed:", error)
     return {
       success: false,
       error: `Shot proof generation failed: ${error}`,
@@ -143,8 +135,17 @@ async function generateShotProof(request: ShotCircuitInput): Promise<ProofRespon
  */
 async function main() {
   try {
-    // Read and parse input
-    const inputStr = await readStdin()
+    // Read input from CLI args or stdin for backward compatibility
+    let inputStr: string
+
+    if (process.argv.length > 2) {
+      // Use CLI argument
+      inputStr = process.argv[2]
+    } else {
+      // Fall back to stdin for backward compatibility
+      inputStr = await readStdin()
+    }
+
     let request: any
 
     try {
