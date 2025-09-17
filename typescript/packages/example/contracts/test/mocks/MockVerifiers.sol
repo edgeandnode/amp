@@ -22,10 +22,10 @@ contract MockBoardVerifier {
 }
 
 /**
- * @title Mock Shot Verifier
- * @dev Mock zkSNARK verifier for shot proofs (always returns true for testing)
+ * @title Mock Impact Verifier
+ * @dev Mock zkSNARK verifier for impact proofs (always returns true for testing)
  */
-contract MockShotVerifier {
+contract MockImpactVerifier {
     bool public shouldReturnTrue = true;
 
     function verifyProof(uint256[2] memory, uint256[2][2] memory, uint256[2] memory, uint256[8] memory)

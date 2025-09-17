@@ -1,31 +1,20 @@
 #!/usr/bin/env node
+
 /**
  * FFI Proof Generator for Battleship ZK-SNARK Tests
  *
  * This script is called by Solidity tests via FFI to generate real ZK proofs.
  * It reads JSON input from stdin and outputs proof data as JSON to stdout.
- *
- * Usage: echo '{"type":"board","input":{...}}' | bun run test/ffi.ts
  */
 
 import {
   type BoardCircuitInput,
+  type ImpactCircuitInput,
   loadBoardCircuitTester,
-  loadShotCircuitTester,
-  type ShotCircuitInput,
+  loadImpactCircuitTester,
 } from "./utils.ts"
 
-export interface BoardProofRequest {
-  type: "board"
-  input: BoardCircuitInput
-}
-
-export interface ShotProofRequest {
-  type: "shot"
-  input: ShotCircuitInput
-}
-
-export type ProofRequest = BoardProofRequest | ShotProofRequest
+export type ProofRequest = BoardCircuitInput | ImpactCircuitInput
 
 export interface ProofResponse {
   success: boolean
@@ -34,36 +23,8 @@ export interface ProofResponse {
     piA: [string, string]
     piB: [[string, string], [string, string]]
     piC: [string, string]
-    publicInputs: Array<string>
+    publicSignals: Array<string>
   }
-  publicOutputs?: {
-    commitment?: string
-    initialStateCommitment?: string
-    newCommitment?: string
-    remainingShips?: number
-  }
-}
-
-/**
- * Read input from stdin
- */
-async function readStdin(): Promise<string> {
-  return new Promise((resolve, reject) => {
-    let input = ""
-
-    process.stdin.setEncoding("utf8")
-    process.stdin.on("data", (chunk) => {
-      input += chunk
-    })
-
-    process.stdin.on("end", () => {
-      resolve(input.trim())
-    })
-
-    process.stdin.on("error", (error) => {
-      reject(error)
-    })
-  })
 }
 
 /**
@@ -83,11 +44,7 @@ async function generateBoardProof(request: BoardCircuitInput): Promise<ProofResp
           [proofOutput.proof.pi_b[1][1].toString(), proofOutput.proof.pi_b[1][0].toString()],
         ],
         piC: [proofOutput.proof.pi_c[0].toString(), proofOutput.proof.pi_c[1].toString()],
-        publicInputs: proofOutput.publicSignals.map((signal) => signal.toString()),
-      },
-      publicOutputs: {
-        commitment: proofOutput.publicSignals[0].toString(),
-        initialStateCommitment: proofOutput.publicSignals[1].toString(),
+        publicSignals: proofOutput.publicSignals.map((signal) => signal.toString()),
       },
     }
   } catch (error) {
@@ -101,9 +58,9 @@ async function generateBoardProof(request: BoardCircuitInput): Promise<ProofResp
 /**
  * Generate shot proof using existing test utilities
  */
-async function generateShotProof(request: ShotCircuitInput): Promise<ProofResponse> {
+async function generateImpactProof(request: ImpactCircuitInput): Promise<ProofResponse> {
   try {
-    const shotTester = await loadShotCircuitTester()
+    const shotTester = await loadImpactCircuitTester()
     const proofOutput = await shotTester.prove(request)
 
     return {
@@ -115,17 +72,13 @@ async function generateShotProof(request: ShotCircuitInput): Promise<ProofRespon
           [proofOutput.proof.pi_b[1][1].toString(), proofOutput.proof.pi_b[1][0].toString()],
         ],
         piC: [proofOutput.proof.pi_c[0].toString(), proofOutput.proof.pi_c[1].toString()],
-        publicInputs: proofOutput.publicSignals.map((signal) => signal.toString()),
-      },
-      publicOutputs: {
-        newCommitment: proofOutput.publicSignals[0].toString(), // Index 0 contains newCommitment
-        remainingShips: Number(proofOutput.publicSignals[1].toString()),
+        publicSignals: proofOutput.publicSignals.map((signal) => signal.toString()),
       },
     }
   } catch (error) {
     return {
       success: false,
-      error: `Shot proof generation failed: ${error}`,
+      error: `Impact proof generation failed: ${error}`,
     }
   }
 }
@@ -135,21 +88,12 @@ async function generateShotProof(request: ShotCircuitInput): Promise<ProofRespon
  */
 async function main() {
   try {
-    // Read input from CLI args or stdin for backward compatibility
-    let inputStr: string
-
-    if (process.argv.length > 2) {
-      // Use CLI argument
-      inputStr = process.argv[2]
-    } else {
-      // Fall back to stdin for backward compatibility
-      inputStr = await readStdin()
-    }
-
+    const inputStr = process.argv[2]
+    const inputJson = process.argv[3]
     let request: any
 
     try {
-      request = JSON.parse(inputStr)
+      request = JSON.parse(inputJson)
     } catch (error) {
       const response: ProofResponse = {
         success: false,
@@ -162,14 +106,14 @@ async function main() {
     // Generate proof or commitment based on type
     let response: ProofResponse
 
-    if (request.type === "board") {
-      response = await generateBoardProof(request.input)
-    } else if (request.type === "shot") {
-      response = await generateShotProof(request.input)
+    if (inputStr === "board") {
+      response = await generateBoardProof(request)
+    } else if (inputStr === "impact") {
+      response = await generateImpactProof(request)
     } else {
       response = {
         success: false,
-        error: `Unknown request type: ${request.type}`,
+        error: `Unknown request type: ${inputStr}`,
       }
     }
 

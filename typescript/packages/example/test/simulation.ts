@@ -1,9 +1,9 @@
 import {
   type BoardCircuitInput,
+  type ImpactCircuitInput,
   loadBoardCircuitTester,
-  loadShotCircuitTester,
+  loadImpactCircuitTester,
   poseidonHashSalt,
-  type ShotCircuitInput,
 } from "./utils.ts"
 
 // Types for board simulation
@@ -19,7 +19,7 @@ interface ExpectedResult {
 interface ShotRecord {
   readonly x: number
   readonly y: number
-  readonly claimed: ShotCircuitInput
+  readonly claimed: ImpactCircuitInput
   readonly actual: ExpectedResult
   readonly circuitOutputs: {
     readonly newCommitment: string
@@ -29,7 +29,11 @@ interface ShotRecord {
 
 export interface BoardSimulation {
   // Shoot with optional override callback
-  fireShot: (x: number, y: number, override?: (input: ShotCircuitInput) => ShotCircuitInput) => Promise<ExpectedResult>
+  fireShot: (
+    x: number,
+    y: number,
+    override?: (input: ImpactCircuitInput) => ImpactCircuitInput,
+  ) => Promise<ExpectedResult>
 
   // State getters
   getRemainingShips: () => number
@@ -57,7 +61,7 @@ export const createBoardSimulation = async (
   initialHitCounts?: Array<number>,
 ): Promise<BoardSimulation> => {
   const board = await loadBoardCircuitTester()
-  const shot = await loadShotCircuitTester()
+  const impact = await loadImpactCircuitTester()
 
   const boardWitness = await board.witness(boardInput)
   const boardCommitment = `${boardWitness[1]}`
@@ -140,7 +144,7 @@ export const createBoardSimulation = async (
     }
   }
 
-  const fireShot = async (x: number, y: number, override?: (input: ShotCircuitInput) => ShotCircuitInput) => {
+  const fireShot = async (x: number, y: number, override?: (input: ImpactCircuitInput) => ImpactCircuitInput) => {
     // Validate coordinates
     if (x < 0 || x >= 10 || y < 0 || y >= 10) {
       throw new Error(`Invalid coordinates: (${x}, ${y})`)
@@ -155,7 +159,7 @@ export const createBoardSimulation = async (
     const actual = calculateActualResult(x, y)
 
     // Build default circuit input with correct values
-    let shotInput: ShotCircuitInput = {
+    let shotInput: ImpactCircuitInput = {
       previousCommitment,
       targetX: x,
       targetY: y,
@@ -173,7 +177,7 @@ export const createBoardSimulation = async (
     }
 
     // Execute circuit
-    const shotWitness = await shot.witness(shotInput)
+    const shotWitness = await impact.witness(shotInput)
 
     // Extract circuit outputs
     newCommitment = shotWitness[1].toString()
@@ -257,7 +261,7 @@ export const createBoardSimulation = async (
   }
 }
 
-export const cheatOverride = (override: Partial<ShotCircuitInput>) => (input: ShotCircuitInput) => ({
+export const cheatOverride = (override: Partial<ImpactCircuitInput>) => (input: ImpactCircuitInput) => ({
   ...input,
   ...override,
 })

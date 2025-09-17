@@ -8,7 +8,7 @@ include "./ship.circom";
  * @dev Main circuit for validating complete Battleship board setup
  * @notice Proves that a board commitment represents a valid ship arrangement
  */
-template BattleshipBoard() {
+template Board() {
     // Private inputs: ship positions and salt
     signal input carrier[3];     // [x, y, orientation] - Length 5
     signal input battleship[3];  // [x, y, orientation] - Length 4  
@@ -143,4 +143,4 @@ template BattleshipBoard() {
 }
 
 // Instantiate the main component
-component main = BattleshipBoard();
+component main = Board();

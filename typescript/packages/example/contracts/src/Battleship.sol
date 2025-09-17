@@ -8,7 +8,7 @@ interface IBoardVerifier {
         returns (bool);
 }
 
-interface IShotVerifier {
+interface IImpactVerifier {
     function verifyProof(uint256[2] memory a, uint256[2][2] memory b, uint256[2] memory c, uint256[8] memory input)
         external
         view
@@ -30,14 +30,14 @@ contract Battleship {
         uint256[2] piA; // π_A: G1 point (x, y)
         uint256[2][2] piB; // π_B: G2 point [[x1, x2], [y1, y2]]
         uint256[2] piC; // π_C: G1 point (x, y)
-        uint256[8] publicInputs; // 8 public inputs
+        uint256[8] publicSignals; // [newCommitment, remainingShips, previousCommitment, targetX, targetY, claimedResult, claimedShipId, boardCommitment]
     }
 
     struct BoardProof {
         uint256[2] piA; // π_A: G1 point (x, y)
         uint256[2][2] piB; // π_B: G2 point [[x1, x2], [y1, y2]]
         uint256[2] piC; // π_C: G1 point (x, y)
-        uint256[2] publicInputs; // [boardCommitment, initialStateCommitment]
+        uint256[2] publicSignals; // [boardCommitment, initialStateCommitment]
     }
 
     struct Game {
@@ -55,7 +55,7 @@ contract Battleship {
     }
 
     IBoardVerifier public immutable BOARD_VERIFIER;
-    IShotVerifier public immutable SHOT_VERIFIER;
+    IImpactVerifier public immutable IMPACT_VERIFIER;
 
     uint256 public nextGameId;
     mapping(uint256 => Game) public games;
@@ -93,16 +93,16 @@ contract Battleship {
     error GameAlreadyStarted();
     error AlreadyShot();
 
-    constructor(address _boardVerifier, address _shotVerifier) {
+    constructor(address _boardVerifier, address _impactVerifier) {
         BOARD_VERIFIER = IBoardVerifier(_boardVerifier);
-        SHOT_VERIFIER = IShotVerifier(_shotVerifier);
+        IMPACT_VERIFIER = IImpactVerifier(_impactVerifier);
     }
 
     /**
      * @dev Create a new 2-player game with board commitment
      */
     function createGame(BoardProof memory proof) external payable returns (uint256 gameId) {
-        if (!BOARD_VERIFIER.verifyProof(proof.piA, proof.piB, proof.piC, proof.publicInputs)) {
+        if (!BOARD_VERIFIER.verifyProof(proof.piA, proof.piB, proof.piC, proof.publicSignals)) {
             revert InvalidBoardProof();
         }
 
@@ -114,8 +114,8 @@ contract Battleship {
         game.prizePool = msg.value; // Initialize with creator's stake
 
         // Store board and initial state commitments
-        game.boardCommitments[0] = bytes32(proof.publicInputs[0]);
-        game.stateCommitments[0] = bytes32(proof.publicInputs[1]);
+        game.boardCommitments[0] = bytes32(proof.publicSignals[0]);
+        game.stateCommitments[0] = bytes32(proof.publicSignals[1]);
 
         emit GameCreated(gameId, msg.sender);
     }
@@ -134,7 +134,7 @@ contract Battleship {
         Game storage game = games[gameId];
 
         // Verify board is valid
-        if (!BOARD_VERIFIER.verifyProof(proof.piA, proof.piB, proof.piC, proof.publicInputs)) {
+        if (!BOARD_VERIFIER.verifyProof(proof.piA, proof.piB, proof.piC, proof.publicSignals)) {
             revert InvalidBoardProof();
         }
 
@@ -142,8 +142,8 @@ contract Battleship {
         game.prizePool += msg.value; // Add joining player's stake to prize pool
 
         // Store board and initial state commitments
-        game.boardCommitments[1] = bytes32(proof.publicInputs[0]);
-        game.stateCommitments[1] = bytes32(proof.publicInputs[1]);
+        game.boardCommitments[1] = bytes32(proof.publicSignals[0]);
+        game.stateCommitments[1] = bytes32(proof.publicSignals[1]);
 
         // Set random starting player (0 or 1)
         game.startingPlayer = uint8(randomPlayer(gameId));
@@ -236,8 +236,22 @@ contract Battleship {
         if (msg.sender != responder) revert NotYourTurn();
 
         // Verify proof coordinates match the pending shot
-        if (impactProof.publicInputs[1] != game.lastShotX || impactProof.publicInputs[2] != game.lastShotY) {
+        if (
+            uint8(impactProof.publicSignals[3]) != game.lastShotX
+                || uint8(impactProof.publicSignals[4]) != game.lastShotY
+        ) {
             revert WrongCoordinates();
+        }
+
+        // Verify the previous state commitment matches defender's current commitment
+        uint8 defenderIndex = (responder == game.players[0]) ? 0 : 1;
+        if (uint256(game.stateCommitments[defenderIndex]) != impactProof.publicSignals[2]) {
+            revert CommitmentMismatch();
+        }
+
+        // Verify the board commitment matches defender's commitment
+        if (uint256(game.boardCommitments[defenderIndex]) != impactProof.publicSignals[7]) {
+            revert CommitmentMismatch();
         }
 
         // Check if this position has already been shot by the attacker
@@ -247,26 +261,16 @@ contract Battleship {
         }
 
         // Verify zkSNARK proof for the impact
-        if (!SHOT_VERIFIER.verifyProof(impactProof.piA, impactProof.piB, impactProof.piC, impactProof.publicInputs)) {
+        if (!IMPACT_VERIFIER.verifyProof(impactProof.piA, impactProof.piB, impactProof.piC, impactProof.publicSignals))
+        {
             revert InvalidShotProof();
         }
 
         // Extract impact result from proof
-        Impact result = Impact(impactProof.publicInputs[3]);
-
-        // Verify the previous state commitment matches defender's current commitment
-        uint8 defenderIndex = (responder == game.players[0]) ? 0 : 1;
-        if (uint256(game.stateCommitments[defenderIndex]) != impactProof.publicInputs[0]) {
-            revert CommitmentMismatch();
-        }
-
-        // Verify the board commitment matches defender's commitment (5th public input)
-        if (uint256(game.boardCommitments[defenderIndex]) != impactProof.publicInputs[5]) {
-            revert CommitmentMismatch();
-        }
+        Impact result = Impact(impactProof.publicSignals[5]);
 
         // Update defender's state commitment with the new commitment from proof
-        game.stateCommitments[defenderIndex] = bytes32(impactProof.publicInputs[6]);
+        game.stateCommitments[defenderIndex] = bytes32(impactProof.publicSignals[6]);
 
         // Record this shot in the attacker's shot grid
         recordShot(gameId, attackerIndex, game.lastShotX, game.lastShotY);
@@ -275,7 +279,7 @@ contract Battleship {
         emit ImpactReported(gameId, msg.sender, result);
 
         // Check if game is over (all ships sunk)
-        if (result == Impact.SUNK && isGameOver(impactProof.publicInputs)) {
+        if (result == Impact.SUNK && isGameOver(impactProof.publicSignals)) {
             // Attacker (lastPlayer) wins - defender has no ships left
             address winner = game.lastPlayer;
             game.winner = winner;
@@ -320,11 +324,11 @@ contract Battleship {
         return game.players[0] == addr || game.players[1] == addr;
     }
 
-    function isGameOver(uint256[8] memory publicInputs) internal pure returns (bool) {
-        // publicInputs[7] contains the remaining ships count after this shot
-        // publicInputs = [previousCommitment, targetX, targetY, claimedResult, claimedShipId, boardCommitment, newCommitment, remainingShips]
+    function isGameOver(uint256[8] memory publicSignals) internal pure returns (bool) {
+        // publicSignals[7] contains the remaining ships count after this shot
+        // publicSignals = [previousCommitment, targetX, targetY, claimedResult, claimedShipId, boardCommitment, newCommitment, remainingShips]
         // Game is over when remaining ships = 0
-        uint256 remainingShips = publicInputs[7];
+        uint256 remainingShips = publicSignals[1];
         return remainingShips == 0;
     }
 
@@ -345,6 +349,18 @@ contract Battleship {
 
     function isGameEnded(uint256 gameId) public view returns (bool) {
         return games[gameId].winner != address(0);
+    }
+
+    function getStateCommitment(uint256 gameId, address player) public view returns (bytes32) {
+        if (player == games[gameId].players[0]) return games[gameId].stateCommitments[0];
+        if (player == games[gameId].players[1]) return games[gameId].stateCommitments[1];
+        revert InvalidPlayer();
+    }
+
+    function getBoardCommitment(uint256 gameId, address player) public view returns (bytes32) {
+        if (player == games[gameId].players[0]) return games[gameId].boardCommitments[0];
+        if (player == games[gameId].players[1]) return games[gameId].boardCommitments[1];
+        revert InvalidPlayer();
     }
 
     function getOtherPlayer(uint256 gameId, address player) public view returns (address) {

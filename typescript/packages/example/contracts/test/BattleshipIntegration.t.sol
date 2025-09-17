@@ -3,12 +3,31 @@ pragma solidity ^0.8.20;
 
 import {Battleship} from "../src/Battleship.sol";
 import {BattleshipTestHelper} from "./helpers/BattleshipTestHelper.sol";
+import {MockBoardVerifier, MockImpactVerifier} from "./mocks/MockVerifiers.sol";
 /**
  * @title BattleshipIntegration Test Suite
  * @dev Full game scenarios and integration testing for Battleship contract
  */
 
 contract BattleshipIntegrationTest is BattleshipTestHelper {
+    MockBoardVerifier public bv;
+    MockImpactVerifier public iv;
+
+    function setUp() public {
+        bv = new MockBoardVerifier();
+        iv = new MockImpactVerifier();
+        bs = new Battleship(address(bv), address(iv));
+
+        vm.deal(alice, 100 ether);
+        vm.deal(bob, 100 ether);
+        vm.deal(charlie, 100 ether);
+    }
+
+    function setMockVerifierResult(bool boardVerifierResult, bool impactVerifierResult) public {
+        bv.setShouldReturnTrue(boardVerifierResult);
+        iv.setShouldReturnTrue(impactVerifierResult);
+    }
+
     // ═══════════════════════════════════════════════════════════════════
     // Complete Game Scenarios
     // ═══════════════════════════════════════════════════════════════════
@@ -18,7 +37,7 @@ contract BattleshipIntegrationTest is BattleshipTestHelper {
 
         // Alice attacks first
         vm.prank(alice);
-        battleship.attack(gameId, 3, 4);
+        bs.attack(gameId, 3, 4);
 
         // Bob responds with HIT and counter-attacks
         respondAndCounter(gameId, bob, Battleship.Impact.HIT, 5, 6);
@@ -37,9 +56,9 @@ contract BattleshipIntegrationTest is BattleshipTestHelper {
         respondAndCounterWithShips(gameId, alice, Battleship.Impact.SUNK, 9, 0, 0); // 0 ships left - GAME OVER
 
         // Verify game ended correctly with automatic victory
-        assertTrue(battleship.isGameEnded(gameId));
+        assertTrue(bs.isGameEnded(gameId));
 
-        Battleship.Game memory gameState = battleship.getGameInfo(gameId);
+        Battleship.Game memory gameState = bs.getGameInfo(gameId);
         assertEq(gameState.prizePool, 0); // Prize pool emptied
         assertEq(gameState.winner, bob); // Bob was the attacker (lastPlayer) who gets the win
 
@@ -54,24 +73,24 @@ contract BattleshipIntegrationTest is BattleshipTestHelper {
         uint256 game2 = setupTwoPlayerGame(alice, charlie, 3 ether, charlie);
 
         // Verify games are independent with different stakes
-        Battleship.Game memory gameState1 = battleship.getGameInfo(game1);
-        Battleship.Game memory gameState2 = battleship.getGameInfo(game2);
+        Battleship.Game memory gameState1 = bs.getGameInfo(game1);
+        Battleship.Game memory gameState2 = bs.getGameInfo(game2);
         assertEq(gameState1.prizePool, 2 ether);
         assertEq(gameState2.prizePool, 6 ether);
 
         // Play moves in game1 (Alice vs Bob)
         vm.prank(alice);
-        battleship.attack(game1, 1, 1);
+        bs.attack(game1, 1, 1);
         respondAndCounter(game1, bob, Battleship.Impact.HIT, 2, 2);
 
         // Play moves in game2 (Charlie vs Alice)
         vm.prank(charlie);
-        battleship.attack(game2, 5, 5);
+        bs.attack(game2, 5, 5);
         respondAndCounter(game2, alice, Battleship.Impact.MISS, 7, 7);
 
         // Verify games remain independent - moves in one don't affect the other
-        Battleship.Game memory updatedGameState1 = battleship.getGameInfo(game1);
-        Battleship.Game memory updatedGameState2 = battleship.getGameInfo(game2);
+        Battleship.Game memory updatedGameState1 = bs.getGameInfo(game1);
+        Battleship.Game memory updatedGameState2 = bs.getGameInfo(game2);
 
         assertEq(updatedGameState1.lastShotX, 2);
         assertEq(updatedGameState1.lastShotY, 2);
@@ -83,57 +102,61 @@ contract BattleshipIntegrationTest is BattleshipTestHelper {
 
         // End game1 while game2 continues
         vm.prank(alice);
-        battleship.forfeitGame(game1);
+        bs.forfeitGame(game1);
 
         // Verify only game1 ended, game2 still active
-        assertTrue(battleship.isGameEnded(game1));
-        assertFalse(battleship.isGameEnded(game2));
+        assertTrue(bs.isGameEnded(game1));
+        assertFalse(bs.isGameEnded(game2));
 
         // Bob gets game1 payout, game2 stakes unchanged
-        Battleship.Game memory endGameState1 = battleship.getGameInfo(game1);
-        Battleship.Game memory endGameState2 = battleship.getGameInfo(game2);
+        Battleship.Game memory endGameState1 = bs.getGameInfo(game1);
+        Battleship.Game memory endGameState2 = bs.getGameInfo(game2);
         assertEq(endGameState1.prizePool, 0); // Game1 pool emptied
         assertEq(endGameState2.prizePool, 6 ether); // Game2 pool unchanged
     }
 
     function test_InvalidMoveSequences() public {
         uint256 gameId = setupTwoPlayerGame(alice, bob, 1 ether, alice);
+        Battleship.ImpactProof memory proof;
 
         // Alice makes initial attack
         vm.prank(alice);
-        battleship.attack(gameId, 2, 3);
+        bs.attack(gameId, 2, 3);
 
         // Test 1: Alice tries to attack again without waiting for Bob's response
         vm.expectRevert(Battleship.InvalidMove.selector);
         vm.prank(alice);
-        battleship.attack(gameId, 4, 5);
+        bs.attack(gameId, 4, 5);
 
         // Test 2: Bob tries to respond when Alice should respond (wrong turn)
         respondAndCounter(gameId, bob, Battleship.Impact.HIT, 6, 7);
 
         // Now Alice should respond, but Bob tries to respond again
+        proof = getMockShotProof(gameId, bob, Battleship.Impact.MISS);
         vm.expectRevert(Battleship.NotYourTurn.selector);
         vm.prank(bob);
-        battleship.respondAndCounter(gameId, getMockShotProof(6, 7, Battleship.Impact.MISS), 8, 9);
+        bs.respondAndCounter(gameId, proof, 8, 9);
 
         // Test 3: Alice responds properly
         respondAndCounter(gameId, alice, Battleship.Impact.MISS, 1, 1);
 
         // Test 4: Try to attack with invalid coordinates (>= 10)
+        proof = getMockShotProof(gameId, bob, Battleship.Impact.HIT);
         vm.expectRevert(Battleship.InvalidCoordinates.selector);
         vm.prank(bob);
-        battleship.respondAndCounter(gameId, getMockShotProof(1, 1, Battleship.Impact.HIT), 10, 5);
+        bs.respondAndCounter(gameId, proof, 10, 5);
 
+        proof = getMockShotProof(gameId, bob, Battleship.Impact.HIT);
         vm.expectRevert(Battleship.InvalidCoordinates.selector);
         vm.prank(bob);
-        battleship.respondAndCounter(gameId, getMockShotProof(1, 1, Battleship.Impact.HIT), 5, 10);
+        bs.respondAndCounter(gameId, proof, 5, 10);
 
         // Test 5: Valid move to continue game
         respondAndCounter(gameId, bob, Battleship.Impact.HIT, 0, 0);
 
         // Verify game is still active and properly tracks moves
-        assertFalse(battleship.isGameEnded(gameId));
-        Battleship.Game memory gameState = battleship.getGameInfo(gameId);
+        assertFalse(bs.isGameEnded(gameId));
+        Battleship.Game memory gameState = bs.getGameInfo(gameId);
         assertEq(gameState.lastShotX, 0);
         assertEq(gameState.lastShotY, 0);
         assertEq(gameState.lastPlayer, bob);
@@ -143,7 +166,7 @@ contract BattleshipIntegrationTest is BattleshipTestHelper {
         uint256 gameId = setupTwoPlayerGame(alice, bob, 3 ether, alice);
 
         vm.prank(alice);
-        battleship.attack(gameId, 0, 1);
+        bs.attack(gameId, 0, 1);
 
         respondAndCounter(gameId, bob, Battleship.Impact.MISS, 2, 3);
         respondAndCounter(gameId, alice, Battleship.Impact.HIT, 4, 5);
@@ -160,11 +183,11 @@ contract BattleshipIntegrationTest is BattleshipTestHelper {
         emit Battleship.GameEnded(gameId, bob);
 
         vm.prank(alice);
-        battleship.forfeitGame(gameId);
+        bs.forfeitGame(gameId);
 
         // Verify game ended and payout
-        assertTrue(battleship.isGameEnded(gameId));
-        Battleship.Game memory gameState = battleship.getGameInfo(gameId);
+        assertTrue(bs.isGameEnded(gameId));
+        Battleship.Game memory gameState = bs.getGameInfo(gameId);
         assertEq(gameState.winner, bob);
         assertEq(gameState.prizePool, 0);
         assertEq(bob.balance, bobInitialBalance + 6 ether);
@@ -181,34 +204,34 @@ contract BattleshipIntegrationTest is BattleshipTestHelper {
         uint256 aliceBalanceAfterCreate = alice.balance;
 
         // Game exists but not started
-        assertTrue(battleship.isGameValid(gameId));
-        assertFalse(battleship.isGameStarted(gameId));
-        assertFalse(battleship.isGameEnded(gameId));
+        assertTrue(bs.isGameValid(gameId));
+        assertFalse(bs.isGameStarted(gameId));
+        assertFalse(bs.isGameEnded(gameId));
 
         // Alice can cancel the game and get her stake back
         vm.prank(alice);
-        battleship.cancelGame(gameId);
+        bs.cancelGame(gameId);
 
         // Verify Alice got her full stake refunded
         assertEq(alice.balance, aliceBalanceAfterCreate + stake);
 
         // Game should no longer be valid (cancelled games are invalid)
-        assertFalse(battleship.isGameValid(gameId));
+        assertFalse(bs.isGameValid(gameId));
 
         // Prize pool should be emptied
-        Battleship.Game memory cancelledGame = battleship.getGameInfo(gameId);
+        Battleship.Game memory cancelledGame = bs.getGameInfo(gameId);
         assertEq(cancelledGame.prizePool, 0);
 
         // Test that only creator can cancel
         uint256 gameId2 = createGame(alice, stake);
         vm.expectRevert(Battleship.NotAPlayer.selector);
         vm.prank(bob);
-        battleship.cancelGame(gameId2);
+        bs.cancelGame(gameId2);
 
         // Test that cancelled games cannot be joined (cancelled games are invalid)
         vm.expectRevert(Battleship.InvalidGameId.selector);
         vm.prank(bob);
-        battleship.joinGame{value: stake}(gameId, mockBoardProof());
+        bs.joinGame{value: stake}(gameId, mockBoardProof());
     }
 
     function test_WinnerPayout_FullAmount() public {
@@ -219,13 +242,13 @@ contract BattleshipIntegrationTest is BattleshipTestHelper {
 
         // Alice forfeits, Bob wins full prize pool
         vm.prank(alice);
-        battleship.forfeitGame(gameId);
+        bs.forfeitGame(gameId);
 
         // Bob receives full 20 ether (both stakes)
         assertEq(bob.balance, bobInitialBalance + (stake * 2));
 
         // Prize pool is emptied
-        Battleship.Game memory finalGame = battleship.getGameInfo(gameId);
+        Battleship.Game memory finalGame = bs.getGameInfo(gameId);
         assertEq(finalGame.prizePool, 0);
     }
 
@@ -233,7 +256,7 @@ contract BattleshipIntegrationTest is BattleshipTestHelper {
         uint256 gameId = setupTwoPlayerGame(alice, bob, 0, alice);
 
         vm.prank(alice);
-        battleship.attack(gameId, 1, 2);
+        bs.attack(gameId, 1, 2);
 
         respondAndCounter(gameId, bob, Battleship.Impact.MISS, 3, 4);
         respondAndCounter(gameId, alice, Battleship.Impact.HIT, 5, 6);
@@ -244,15 +267,15 @@ contract BattleshipIntegrationTest is BattleshipTestHelper {
 
         // Alice forfeits
         vm.prank(alice);
-        battleship.forfeitGame(gameId);
+        bs.forfeitGame(gameId);
 
         // No ETH changes hands
         assertEq(alice.balance, aliceInitialBalance);
         assertEq(bob.balance, bobInitialBalance);
 
         // But game still ends properly
-        assertTrue(battleship.isGameEnded(gameId));
-        Battleship.Game memory zeroStakeGame = battleship.getGameInfo(gameId);
+        assertTrue(bs.isGameEnded(gameId));
+        Battleship.Game memory zeroStakeGame = bs.getGameInfo(gameId);
         assertEq(zeroStakeGame.winner, bob);
     }
 
@@ -265,7 +288,7 @@ contract BattleshipIntegrationTest is BattleshipTestHelper {
             uint256 bobInitialBalance = bob.balance;
 
             vm.prank(alice);
-            battleship.forfeitGame(gameId);
+            bs.forfeitGame(gameId);
 
             // Verify correct payout
             assertEq(bob.balance, bobInitialBalance + (stakes[i] * 2));
@@ -280,7 +303,7 @@ contract BattleshipIntegrationTest is BattleshipTestHelper {
         uint256 gameId = setupTwoPlayerGame(alice, bob, 1 ether, alice);
 
         vm.prank(alice);
-        battleship.attack(gameId, 0, 0);
+        bs.attack(gameId, 0, 0);
 
         // Extended sequence of 15 respond-and-counter cycles
         respondAndCounter(gameId, bob, Battleship.Impact.MISS, 1, 1);
@@ -300,10 +323,10 @@ contract BattleshipIntegrationTest is BattleshipTestHelper {
         respondAndCounter(gameId, bob, Battleship.Impact.MISS, 1, 3);
 
         // Verify game is still consistent after extended play
-        assertTrue(battleship.isGameStarted(gameId));
-        assertFalse(battleship.isGameEnded(gameId));
+        assertTrue(bs.isGameStarted(gameId));
+        assertFalse(bs.isGameEnded(gameId));
 
-        Battleship.Game memory extendedGame = battleship.getGameInfo(gameId);
+        Battleship.Game memory extendedGame = bs.getGameInfo(gameId);
         assertEq(extendedGame.prizePool, 2 ether);
         assertEq(extendedGame.lastPlayer, bob);
     }
@@ -313,7 +336,7 @@ contract BattleshipIntegrationTest is BattleshipTestHelper {
 
         // Initial attack
         vm.prank(alice);
-        battleship.attack(gameId, 0, 0);
+        bs.attack(gameId, 0, 0);
 
         // Execute alternating impact pattern explicitly
         respondAndCounter(gameId, bob, Battleship.Impact.MISS, 1, 1); // i=0, bob
@@ -324,7 +347,7 @@ contract BattleshipIntegrationTest is BattleshipTestHelper {
         respondAndCounter(gameId, alice, Battleship.Impact.SUNK, 6, 6); // i=5, alice
 
         // Verify game completed the sequence
-        Battleship.Game memory alternatingGame = battleship.getGameInfo(gameId);
+        Battleship.Game memory alternatingGame = bs.getGameInfo(gameId);
         assertEq(alternatingGame.lastShotX, 6); // Last i+1 is 6 (i=5, so i+1=6)
         assertEq(alternatingGame.lastShotY, 6);
     }
@@ -333,19 +356,19 @@ contract BattleshipIntegrationTest is BattleshipTestHelper {
         uint256 gameId = setupTwoPlayerGame(alice, bob, 2 ether, alice);
 
         vm.prank(alice);
-        battleship.attack(gameId, 5, 5);
+        bs.attack(gameId, 5, 5);
 
         // Player2 responds with ship sunk, but still has ships remaining (alice is now lastPlayer)
         respondAndCounterWithShips(gameId, bob, Battleship.Impact.SUNK, 1, 1, 3); // 3 ships left
-        assertFalse(battleship.isGameEnded(gameId));
+        assertFalse(bs.isGameEnded(gameId));
 
         // Player1 responds with ship sunk, bob still has ships (bob is now lastPlayer)
         respondAndCounterWithShips(gameId, alice, Battleship.Impact.SUNK, 2, 2, 2); // 2 ships left
-        assertFalse(battleship.isGameEnded(gameId));
+        assertFalse(bs.isGameEnded(gameId));
 
         // Player2 responds with ship sunk, alice still has ships (alice is now lastPlayer)
         respondAndCounterWithShips(gameId, bob, Battleship.Impact.SUNK, 3, 3, 1); // 1 ship left
-        assertFalse(battleship.isGameEnded(gameId));
+        assertFalse(bs.isGameEnded(gameId));
 
         // Player1 sinks bob's final ship - game should end automatically
         uint256 aliceBalanceBeforeFinal = alice.balance;
@@ -354,8 +377,8 @@ contract BattleshipIntegrationTest is BattleshipTestHelper {
         respondAndCounterWithShips(gameId, alice, Battleship.Impact.SUNK, 4, 4, 0); // 0 ships left - GAME OVER
 
         // Verify game ended correctly
-        assertTrue(battleship.isGameEnded(gameId));
-        Battleship.Game memory eliminatedGame = battleship.getGameInfo(gameId);
+        assertTrue(bs.isGameEnded(gameId));
+        Battleship.Game memory eliminatedGame = bs.getGameInfo(gameId);
         assertEq(eliminatedGame.prizePool, 0); // Prize pool should be emptied
 
         // The winner should be the attacker (lastPlayer), which is Bob
@@ -374,17 +397,17 @@ contract BattleshipIntegrationTest is BattleshipTestHelper {
         uint256 gameId = setupTwoPlayerGame(alice, bob, 1 ether, alice);
 
         vm.prank(alice);
-        battleship.attack(gameId, 5, 5);
+        bs.attack(gameId, 5, 5);
 
         respondAndCounter(gameId, bob, Battleship.Impact.HIT, 2, 3);
         respondAndCounter(gameId, alice, Battleship.Impact.MISS, 7, 1);
         respondAndCounter(gameId, bob, Battleship.Impact.SUNK, 8, 2);
 
         // Verify the game progressed as expected
-        assertFalse(battleship.isGameEnded(gameId));
+        assertFalse(bs.isGameEnded(gameId));
 
         // Check the last shot coordinates
-        Battleship.Game memory scenarioGame = battleship.getGameInfo(gameId);
+        Battleship.Game memory scenarioGame = bs.getGameInfo(gameId);
         assertEq(scenarioGame.lastShotX, 8);
         assertEq(scenarioGame.lastShotY, 2);
     }
@@ -392,18 +415,18 @@ contract BattleshipIntegrationTest is BattleshipTestHelper {
     function test_ShipPlacementValidation() public {
         // Create games to test ship placement validation
         vm.prank(alice);
-        uint256 gameId1 = battleship.createGame{value: 1 ether}(mockBoardProof());
+        uint256 gameId1 = bs.createGame{value: 1 ether}(mockBoardProof());
 
         vm.prank(bob);
-        uint256 gameId2 = battleship.createGame{value: 1 ether}(mockBoardProof());
+        uint256 gameId2 = bs.createGame{value: 1 ether}(mockBoardProof());
 
         vm.prank(charlie);
-        uint256 gameId3 = battleship.createGame{value: 1 ether}(mockBoardProof());
+        uint256 gameId3 = bs.createGame{value: 1 ether}(mockBoardProof());
 
         // All should be valid
-        assertTrue(battleship.isGameValid(gameId1));
-        assertTrue(battleship.isGameValid(gameId2));
-        assertTrue(battleship.isGameValid(gameId3));
+        assertTrue(bs.isGameValid(gameId1));
+        assertTrue(bs.isGameValid(gameId2));
+        assertTrue(bs.isGameValid(gameId3));
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -419,7 +442,7 @@ contract BattleshipIntegrationTest is BattleshipTestHelper {
         emit Battleship.GameCreated(0, alice);
 
         uint256 gameId = createGame(alice, stake);
-        assertEq(battleship.nextGameId(), 1);
+        assertEq(bs.nextGameId(), 1);
 
         // Phase 2: Player Joining
         vm.expectEmit(true, true, false, true);
@@ -429,13 +452,13 @@ contract BattleshipIntegrationTest is BattleshipTestHelper {
         emit Battleship.GameStarted(gameId);
 
         vm.prank(bob);
-        battleship.joinGame{value: stake}(gameId, mockBoardProof());
+        bs.joinGame{value: stake}(gameId, mockBoardProof());
 
         // Phase 3: Gameplay - explicit move sequence
         (address alice, address bob) = getGamePlayers(gameId);
 
         vm.prank(alice);
-        battleship.attack(gameId, 1, 1);
+        bs.attack(gameId, 1, 1);
 
         respondAndCounter(gameId, bob, Battleship.Impact.MISS, 2, 2);
         respondAndCounter(gameId, alice, Battleship.Impact.HIT, 3, 3);
@@ -452,14 +475,14 @@ contract BattleshipIntegrationTest is BattleshipTestHelper {
         emit Battleship.GameEnded(gameId, bob);
 
         vm.prank(alice);
-        battleship.forfeitGame(gameId);
+        bs.forfeitGame(gameId);
 
         // Phase 5: Verification
-        assertTrue(battleship.isGameEnded(gameId));
+        assertTrue(bs.isGameEnded(gameId));
         assertEq(bob.balance, winnerInitialBalance + (stake * 2));
 
         // Get game state
-        Battleship.Game memory lifecycleGame = battleship.getGameInfo(gameId);
+        Battleship.Game memory lifecycleGame = bs.getGameInfo(gameId);
 
         assertEq(lifecycleGame.prizePool, 0);
         assertEq(lifecycleGame.winner, bob);

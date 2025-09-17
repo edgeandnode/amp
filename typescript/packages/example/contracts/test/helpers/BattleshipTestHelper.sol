@@ -3,16 +3,13 @@ pragma solidity ^0.8.20;
 
 import {Test} from "forge-std/Test.sol";
 import {Battleship} from "../../src/Battleship.sol";
-import {MockBoardVerifier, MockShotVerifier} from "../mocks/MockVerifiers.sol";
 
 /**
  * @title BattleshipTestHelper
  * @dev Test utilities for Battleship game testing
  */
-contract BattleshipTestHelper is Test {
-    Battleship public battleship;
-    MockBoardVerifier public mockBoardVerifier;
-    MockShotVerifier public mockShotVerifier;
+abstract contract BattleshipTestHelper is Test {
+    Battleship public bs;
 
     // Test addresses
     address public alice = makeAddr("alice");
@@ -32,59 +29,45 @@ contract BattleshipTestHelper is Test {
             piA: [uint256(1), uint256(2)],
             piB: [[uint256(3), uint256(4)], [uint256(5), uint256(6)]],
             piC: [uint256(7), uint256(8)],
-            publicInputs: [MOCK_BOARD_COMMITMENT, MOCK_INITIAL_STATE_COMMITMENT]
+            publicSignals: [MOCK_BOARD_COMMITMENT, MOCK_INITIAL_STATE_COMMITMENT]
         });
-    }
-
-    function setUp() public virtual {
-        // Deploy mock verifiers
-        mockBoardVerifier = new MockBoardVerifier();
-        mockShotVerifier = new MockShotVerifier();
-
-        // Deploy battleship contract
-        battleship = new Battleship(address(mockBoardVerifier), address(mockShotVerifier));
-
-        // Give test addresses some ETH
-        vm.deal(alice, 100 ether);
-        vm.deal(bob, 100 ether);
-        vm.deal(charlie, 100 ether);
     }
 
     /**
      * @dev Generate a mock shot proof
      */
-    function getMockShotProof(uint8 x, uint8 y, Battleship.Impact result)
+    function getMockShotProof(uint256 gameId, address player, Battleship.Impact result)
         public
-        pure
         returns (Battleship.ImpactProof memory)
     {
         // Default to 5 remaining ships (not game over) and standard commitment
-        return getMockShotProofWithShips(x, y, result, 5, MOCK_BOARD_COMMITMENT);
+        return getMockShotProofWithShips(gameId, player, result, 5);
     }
 
     /**
      * @dev Generate a mock shot proof with specific remaining ships count and commitment
      */
-    function getMockShotProofWithShips(
-        uint8 x,
-        uint8 y,
-        Battleship.Impact result,
-        uint256 remainingShips,
-        uint256 boardCommitment
-    ) public pure returns (Battleship.ImpactProof memory) {
+    function getMockShotProofWithShips(uint256 gameId, address player, Battleship.Impact result, uint256 remainingShips)
+        public
+        view
+        returns (Battleship.ImpactProof memory)
+    {
+        Battleship.Game memory gameState = bs.getGameInfo(gameId);
+        bytes32 previousCommitment = bs.getStateCommitment(gameId, player);
+        bytes32 boardCommitment = bs.getBoardCommitment(gameId, player);
         return Battleship.ImpactProof({
             piA: [uint256(1), uint256(2)],
             piB: [[uint256(3), uint256(4)], [uint256(5), uint256(6)]],
             piC: [uint256(7), uint256(8)],
-            publicInputs: [
-                MOCK_INITIAL_STATE_COMMITMENT, // previousCommitment (index 0)
-                uint256(x), // targetX (index 1)
-                uint256(y), // targetY (index 2)
-                uint256(result), // claimedResult (index 3)
-                uint256(255), // claimedShipId (index 4) - 255 for not sunk
-                boardCommitment, // boardCommitment (index 5)
-                MOCK_INITIAL_STATE_COMMITMENT, // newCommitment (index 6) - same for miss
-                remainingShips // remainingShips (index 7)
+            publicSignals: [
+                uint256(previousCommitment), // newCommitment (index 0) - same for miss
+                remainingShips, // remainingShips (index 1)
+                uint256(previousCommitment), // previousCommitment (index 2)
+                uint256(gameState.lastShotX), // targetX (index 3)
+                uint256(gameState.lastShotY), // targetY (index 4)
+                uint256(result), // claimedResult (index 5)
+                uint256(255), // claimedShipId (index 6) - 255 for not sunk
+                uint256(boardCommitment) // boardCommitment (index 7)
             ]
         });
     }
@@ -104,7 +87,7 @@ contract BattleshipTestHelper is Test {
 
         // Make first attack
         vm.prank(firstPlayer);
-        battleship.attack(gameId, targetX, targetY);
+        bs.attack(gameId, targetX, targetY);
     }
 
     /**
@@ -133,17 +116,16 @@ contract BattleshipTestHelper is Test {
         uint256 remainingShips
     ) public {
         // Get current shot coordinates
-        Battleship.Game memory gameState = battleship.getGameInfo(gameId);
+        Battleship.Game memory gameState = bs.getGameInfo(gameId);
+        Battleship.ImpactProof memory proof = getMockShotProofWithShips({
+            gameId: gameId,
+            player: responder,
+            result: impact,
+            remainingShips: remainingShips
+        });
 
         vm.prank(responder);
-        battleship.respondAndCounter(
-            gameId,
-            getMockShotProofWithShips(
-                gameState.lastShotX, gameState.lastShotY, impact, remainingShips, MOCK_BOARD_COMMITMENT
-            ),
-            counterX,
-            counterY
-        );
+        bs.respondAndCounter(gameId, proof, counterX, counterY);
     }
 
     /**
@@ -156,7 +138,7 @@ contract BattleshipTestHelper is Test {
         uint256 expectedPrizePool,
         address expectedWinner
     ) public view {
-        Battleship.Game memory gameState = battleship.getGameInfo(gameId);
+        Battleship.Game memory gameState = bs.getGameInfo(gameId);
 
         assertEq(gameState.players[0], expectedPlayer0, "Player 0 mismatch");
         assertEq(gameState.players[1], expectedPlayer1, "Player 1 mismatch");
@@ -165,18 +147,10 @@ contract BattleshipTestHelper is Test {
     }
 
     /**
-     * @dev Enable/disable mock verifier responses
-     */
-    function setMockVerifierResult(bool boardResult, bool shotResult) public {
-        mockBoardVerifier.setShouldReturnTrue(boardResult);
-        mockShotVerifier.setShouldReturnTrue(shotResult);
-    }
-
-    /**
      * @dev Get the starting and non-starting players for a game
      */
     function getGamePlayers(uint256 gameId) public view returns (address startingPlayer, address otherPlayer) {
-        Battleship.Game memory gameState = battleship.getGameInfo(gameId);
+        Battleship.Game memory gameState = bs.getGameInfo(gameId);
         startingPlayer = gameState.players[gameState.startingPlayer];
         otherPlayer = gameState.players[1 - gameState.startingPlayer];
     }
@@ -188,7 +162,7 @@ contract BattleshipTestHelper is Test {
      */
     function setStartingPlayer(uint256 gameId, address startingPlayer) public {
         // Get game players to determine the correct index
-        Battleship.Game memory gameState = battleship.getGameInfo(gameId);
+        Battleship.Game memory gameState = bs.getGameInfo(gameId);
 
         uint8 playerIndex;
         if (gameState.players[0] == startingPlayer) {
@@ -214,13 +188,13 @@ contract BattleshipTestHelper is Test {
 
         // startingPlayer is packed with other fields in slot 10
         // Read current value to preserve other fields (lastShotX, lastShotY, lastPlayer)
-        bytes32 currentValue = vm.load(address(battleship), startingPlayerSlot);
+        bytes32 currentValue = vm.load(address(bs), startingPlayerSlot);
 
         // startingPlayer is at byte 22 (after 1+1+20 bytes for the other fields)
         // Clear byte 22 and set the new startingPlayer value
         bytes32 mask = ~(bytes32(uint256(0xff)) << (22 * 8)); // Clear byte 22
         bytes32 newValue = (currentValue & mask) | (bytes32(uint256(playerIndex)) << (22 * 8));
-        vm.store(address(battleship), startingPlayerSlot, newValue);
+        vm.store(address(bs), startingPlayerSlot, newValue);
     }
 
     /**
@@ -228,7 +202,7 @@ contract BattleshipTestHelper is Test {
      */
     function createGame(address creator, uint256 stake) public returns (uint256 gameId) {
         vm.prank(creator);
-        gameId = battleship.createGame{value: stake}(mockBoardProof());
+        gameId = bs.createGame{value: stake}(mockBoardProof());
     }
 
     /**
@@ -236,7 +210,7 @@ contract BattleshipTestHelper is Test {
      */
     function joinGame(uint256 gameId, address joiner, uint256 stake) public {
         vm.prank(joiner);
-        battleship.joinGame{value: stake}(gameId, mockBoardProof());
+        bs.joinGame{value: stake}(gameId, mockBoardProof());
     }
 
     /**

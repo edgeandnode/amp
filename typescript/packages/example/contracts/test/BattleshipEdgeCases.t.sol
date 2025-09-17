@@ -3,12 +3,31 @@ pragma solidity ^0.8.20;
 
 import {Battleship} from "../src/Battleship.sol";
 import {BattleshipTestHelper} from "./helpers/BattleshipTestHelper.sol";
+import {MockBoardVerifier, MockImpactVerifier} from "./mocks/MockVerifiers.sol";
 
 /**
  * @title BattleshipEdgeCases Test Suite
  * @dev Edge cases and error conditions testing for Battleship contract
  */
 contract BattleshipEdgeCasesTest is BattleshipTestHelper {
+    MockBoardVerifier public bv;
+    MockImpactVerifier public iv;
+
+    function setUp() public {
+        bv = new MockBoardVerifier();
+        iv = new MockImpactVerifier();
+        bs = new Battleship(address(bv), address(iv));
+
+        vm.deal(alice, 100 ether);
+        vm.deal(bob, 100 ether);
+        vm.deal(charlie, 100 ether);
+    }
+
+    function setMockVerifierResult(bool boardVerifierResult, bool impactVerifierResult) public {
+        bv.setShouldReturnTrue(boardVerifierResult);
+        iv.setShouldReturnTrue(impactVerifierResult);
+    }
+
     function test_BoundaryCoordinates() public {
         // Test all corner coordinates with explicit starting player (alice)
         uint8[2][4] memory corners = [[0, 0], [0, 9], [9, 0], [9, 9]];
@@ -17,9 +36,9 @@ contract BattleshipEdgeCasesTest is BattleshipTestHelper {
             uint256 newGameId = setupTwoPlayerGame(alice, bob, 0.1 ether, alice);
 
             vm.prank(alice);
-            battleship.attack(newGameId, corners[i][0], corners[i][1]);
+            bs.attack(newGameId, corners[i][0], corners[i][1]);
 
-            Battleship.Game memory gameState = battleship.getGameInfo(newGameId);
+            Battleship.Game memory gameState = bs.getGameInfo(newGameId);
             assertEq(gameState.lastShotX, corners[i][0]);
             assertEq(gameState.lastShotY, corners[i][1]);
         }
@@ -35,20 +54,20 @@ contract BattleshipEdgeCasesTest is BattleshipTestHelper {
 
         // Create a game with the receiver contract
         vm.prank(address(receiver));
-        uint256 gameId = battleship.createGame{value: 1 ether}(mockBoardProof());
+        uint256 gameId = bs.createGame{value: 1 ether}(mockBoardProof());
 
         vm.prank(bob);
-        battleship.joinGame{value: 1 ether}(gameId, mockBoardProof());
+        bs.joinGame{value: 1 ether}(gameId, mockBoardProof());
 
         // Bob forfeits - receiver contract should get payout
         uint256 receiverInitialBalance = address(receiver).balance;
 
         vm.prank(bob);
-        battleship.forfeitGame(gameId);
+        bs.forfeitGame(gameId);
 
         // Verify the game ended correctly and payout occurred
-        assertTrue(battleship.isGameEnded(gameId));
-        Battleship.Game memory gameState = battleship.getGameInfo(gameId);
+        assertTrue(bs.isGameEnded(gameId));
+        Battleship.Game memory gameState = bs.getGameInfo(gameId);
         assertEq(gameState.prizePool, 0);
         assertEq(gameState.winner, address(receiver));
 
@@ -65,12 +84,12 @@ contract BattleshipEdgeCasesTest is BattleshipTestHelper {
 
         // Alice forfeits
         vm.prank(alice);
-        battleship.forfeitGame(gameId);
+        bs.forfeitGame(gameId);
 
         // Try to forfeit again - should fail
         vm.expectRevert(Battleship.GameAlreadyEnded.selector);
         vm.prank(alice);
-        battleship.forfeitGame(gameId);
+        bs.forfeitGame(gameId);
 
         // Verify Alice's balance didn't change (she lost)
         assertEq(alice.balance, aliceInitialBalance);
@@ -84,13 +103,14 @@ contract BattleshipEdgeCasesTest is BattleshipTestHelper {
 
         // Alice attacks first (explicit starting player)
         vm.prank(alice);
-        battleship.attack(gameId, 3, 3);
+        bs.attack(gameId, 3, 3);
 
         // Bob responds (shot verifier fails)
+        Battleship.ImpactProof memory proof = getMockShotProof(gameId, bob, Battleship.Impact.MISS);
         vm.expectRevert(Battleship.InvalidShotProof.selector);
 
         vm.prank(bob);
-        battleship.respondAndCounter(gameId, getMockShotProof(3, 3, Battleship.Impact.MISS), 7, 7);
+        bs.respondAndCounter(gameId, proof, 7, 7);
     }
 
     function test_VerifierFailureDuringGameCreation() public {
@@ -99,7 +119,7 @@ contract BattleshipEdgeCasesTest is BattleshipTestHelper {
 
         // Create a game successfully
         uint256 gameId = createGame(alice, 1 ether);
-        assertTrue(battleship.isGameValid(gameId));
+        assertTrue(bs.isGameValid(gameId));
 
         // Break board verifier
         setMockVerifierResult(false, true);
@@ -107,11 +127,11 @@ contract BattleshipEdgeCasesTest is BattleshipTestHelper {
         // Bob's join should fail
         vm.expectRevert(Battleship.InvalidBoardProof.selector);
         vm.prank(bob);
-        battleship.joinGame{value: 1 ether}(gameId, mockBoardProof());
+        bs.joinGame{value: 1 ether}(gameId, mockBoardProof());
 
         // Game should still exist but not be started
-        assertTrue(battleship.isGameValid(gameId));
-        assertFalse(battleship.isGameStarted(gameId));
+        assertTrue(bs.isGameValid(gameId));
+        assertFalse(bs.isGameStarted(gameId));
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -123,10 +143,10 @@ contract BattleshipEdgeCasesTest is BattleshipTestHelper {
         uint256 bobInitialBalance = bob.balance;
 
         vm.prank(alice);
-        battleship.forfeitGame(gameId);
+        bs.forfeitGame(gameId);
 
         // Bob wins but gets no additional ETH
-        Battleship.Game memory gameState = battleship.getGameInfo(gameId);
+        Battleship.Game memory gameState = bs.getGameInfo(gameId);
         assertEq(gameState.winner, bob);
         assertEq(gameState.prizePool, 0);
         assertEq(bob.balance, bobInitialBalance);
@@ -139,7 +159,7 @@ contract BattleshipEdgeCasesTest is BattleshipTestHelper {
         uint256 bobInitialBalance = bob.balance;
 
         vm.prank(alice);
-        battleship.forfeitGame(gameId);
+        bs.forfeitGame(gameId);
 
         // Bob should receive 100 ether (2 * 50)
         assertEq(bob.balance, bobInitialBalance + (largeStake * 2));
@@ -162,7 +182,7 @@ contract BattleshipEdgeCasesTest is BattleshipTestHelper {
         emit Battleship.GameStarted(gameId);
 
         vm.prank(bob);
-        battleship.joinGame{value: stake}(gameId, mockBoardProof());
+        bs.joinGame{value: stake}(gameId, mockBoardProof());
     }
 
     function test_MultipleEventsInOneTransaction() public {

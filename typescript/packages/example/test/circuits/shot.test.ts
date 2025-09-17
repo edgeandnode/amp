@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest"
-import { loadBoardCircuitTester, loadShotCircuitTester, poseidonHashSalt } from "../utils.ts"
+import { loadBoardCircuitTester, loadImpactCircuitTester, poseidonHashSalt } from "../utils.ts"
 
 const standardShips = [
   [0, 0, 0], // Carrier: (0,0) to (4,0) horizontal
@@ -26,13 +26,13 @@ const generateBoardCommitment = async (ships: Array<Array<number>>, salt: number
 describe("shot circuit", () => {
   describe("miss scenarios", () => {
     test("shot at empty water", async () => {
-      const shot = await loadShotCircuitTester()
+      const impact = await loadImpactCircuitTester()
       const salt = 12345
       const previousHitCounts = [0, 0, 0, 0, 0]
       const previousCommitment = await poseidonHashSalt(previousHitCounts, salt)
       const boardCommitment = await generateBoardCommitment(standardShips, salt)
 
-      await expect(shot.witness({
+      await expect(impact.witness({
         // Public inputs
         previousCommitment,
         targetX: 5,
@@ -48,13 +48,13 @@ describe("shot circuit", () => {
     })
 
     test("shot at corner empty space", async () => {
-      const shot = await loadShotCircuitTester()
+      const impact = await loadImpactCircuitTester()
       const salt = 54321
       const previousHitCounts = [1, 0, 2, 0, 1] // Some ships already hit
       const previousCommitment = await poseidonHashSalt(previousHitCounts, salt)
       const boardCommitment = await generateBoardCommitment(standardShips, salt)
 
-      await expect(shot.witness({
+      await expect(impact.witness({
         // Public inputs
         previousCommitment,
         boardCommitment,
@@ -72,13 +72,13 @@ describe("shot circuit", () => {
 
   describe("hit scenarios", () => {
     test("first hit on carrier", async () => {
-      const shot = await loadShotCircuitTester()
+      const impact = await loadImpactCircuitTester()
       const salt = 98765
       const previousHitCounts = [0, 0, 0, 0, 0]
       const previousCommitment = await poseidonHashSalt(previousHitCounts, salt)
       const boardCommitment = await generateBoardCommitment(standardShips, salt)
 
-      await expect(shot.witness({
+      await expect(impact.witness({
         // Public inputs
         previousCommitment,
         boardCommitment,
@@ -94,13 +94,13 @@ describe("shot circuit", () => {
     })
 
     test("hit partially damaged battleship", async () => {
-      const shot = await loadShotCircuitTester()
+      const impact = await loadImpactCircuitTester()
       const salt = 11111
       const previousHitCounts = [2, 1, 0, 0, 0] // Battleship already hit once
       const previousCommitment = await poseidonHashSalt(previousHitCounts, salt)
       const boardCommitment = await generateBoardCommitment(standardShips, salt)
 
-      await expect(shot.witness({
+      await expect(impact.witness({
         // Public inputs
         previousCommitment,
         boardCommitment,
@@ -116,13 +116,13 @@ describe("shot circuit", () => {
     })
 
     test("hit destroyer", async () => {
-      const shot = await loadShotCircuitTester()
+      const impact = await loadImpactCircuitTester()
       const salt = 22222
       const previousHitCounts = [0, 0, 0, 0, 0]
       const previousCommitment = await poseidonHashSalt(previousHitCounts, salt)
       const boardCommitment = await generateBoardCommitment(standardShips, salt)
 
-      await expect(shot.witness({
+      await expect(impact.witness({
         // Public inputs
         previousCommitment,
         boardCommitment,
@@ -140,13 +140,13 @@ describe("shot circuit", () => {
 
   describe("sunk scenarios", () => {
     test("sink destroyer with second hit", async () => {
-      const shot = await loadShotCircuitTester()
+      const impact = await loadImpactCircuitTester()
       const salt = 33333
       const previousHitCounts = [0, 0, 0, 0, 1] // Destroyer hit once
       const previousCommitment = await poseidonHashSalt(previousHitCounts, salt)
       const boardCommitment = await generateBoardCommitment(standardShips, salt)
 
-      await expect(shot.witness({
+      await expect(impact.witness({
         // Public inputs
         previousCommitment,
         boardCommitment,
@@ -162,13 +162,13 @@ describe("shot circuit", () => {
     })
 
     test("sink cruiser with final hit", async () => {
-      const shot = await loadShotCircuitTester()
+      const impact = await loadImpactCircuitTester()
       const salt = 44444
       const previousHitCounts = [1, 0, 2, 0, 0] // Cruiser hit twice
       const previousCommitment = await poseidonHashSalt(previousHitCounts, salt)
       const boardCommitment = await generateBoardCommitment(standardShips, salt)
 
-      await expect(shot.witness({
+      await expect(impact.witness({
         // Public inputs
         previousCommitment,
         boardCommitment,
@@ -184,13 +184,13 @@ describe("shot circuit", () => {
     })
 
     test("sink carrier with final hit", async () => {
-      const shot = await loadShotCircuitTester()
+      const impact = await loadImpactCircuitTester()
       const salt = 55555
       const previousHitCounts = [4, 2, 0, 3, 2] // Carrier hit 4 times, destroyer sunk, submarine sunk
       const previousCommitment = await poseidonHashSalt(previousHitCounts, salt)
       const boardCommitment = await generateBoardCommitment(standardShips, salt)
 
-      await expect(shot.witness({
+      await expect(impact.witness({
         // Public inputs
         previousCommitment,
         boardCommitment,
@@ -208,13 +208,13 @@ describe("shot circuit", () => {
 
   describe("game over scenarios", () => {
     test("sink final ship ends game", async () => {
-      const shot = await loadShotCircuitTester()
+      const impact = await loadImpactCircuitTester()
       const salt = 66666
       const previousHitCounts = [5, 4, 3, 3, 1] // Only destroyer partially hit
       const previousCommitment = await poseidonHashSalt(previousHitCounts, salt)
       const boardCommitment = await generateBoardCommitment(standardShips, salt)
 
-      await expect(shot.witness({
+      await expect(impact.witness({
         // Public inputs
         previousCommitment,
         boardCommitment,
@@ -232,13 +232,13 @@ describe("shot circuit", () => {
 
   describe("invalid shot claims", () => {
     test("claim hit but shot misses", async () => {
-      const shot = await loadShotCircuitTester()
+      const impact = await loadImpactCircuitTester()
       const salt = 77777
       const previousHitCounts = [0, 0, 0, 0, 0]
       const previousCommitment = await poseidonHashSalt(previousHitCounts, salt)
       const boardCommitment = await generateBoardCommitment(standardShips, salt)
 
-      await expect(shot.witness({
+      await expect(impact.witness({
         // Public inputs
         previousCommitment,
         targetX: 9,
@@ -254,13 +254,13 @@ describe("shot circuit", () => {
     })
 
     test("claim miss but shot actually hits", async () => {
-      const shot = await loadShotCircuitTester()
+      const impact = await loadImpactCircuitTester()
       const salt = 88888
       const previousHitCounts = [0, 0, 0, 0, 0]
       const previousCommitment = await poseidonHashSalt(previousHitCounts, salt)
       const boardCommitment = await generateBoardCommitment(standardShips, salt)
 
-      await expect(shot.witness({
+      await expect(impact.witness({
         // Public inputs
         previousCommitment,
         targetX: 0,
@@ -276,13 +276,13 @@ describe("shot circuit", () => {
     })
 
     test("wrong ship id when sinking", async () => {
-      const shot = await loadShotCircuitTester()
+      const impact = await loadImpactCircuitTester()
       const salt = 99999
       const previousHitCounts = [0, 0, 0, 0, 1] // Destroyer partially hit
       const previousCommitment = await poseidonHashSalt(previousHitCounts, salt)
       const boardCommitment = await generateBoardCommitment(standardShips, salt)
 
-      await expect(shot.witness({
+      await expect(impact.witness({
         // Public inputs
         previousCommitment,
         targetX: 0,
@@ -300,14 +300,14 @@ describe("shot circuit", () => {
 
   describe("edge cases", () => {
     test("shot at coordinate boundary", async () => {
-      const shot = await loadShotCircuitTester()
+      const impact = await loadImpactCircuitTester()
       const salt = 30303
       const previousHitCounts = [0, 0, 0, 0, 0]
       const previousCommitment = await poseidonHashSalt(previousHitCounts, salt)
       const boardCommitment = await generateBoardCommitment(standardShips, salt)
 
       // This should actually be valid since it correctly identifies the hit
-      await expect(shot.witness({
+      await expect(impact.witness({
         // Public inputs
         previousCommitment,
         targetX: 0,
@@ -323,13 +323,13 @@ describe("shot circuit", () => {
     })
 
     test("shot at maximum coordinates", async () => {
-      const shot = await loadShotCircuitTester()
+      const impact = await loadImpactCircuitTester()
       const salt = 40404
       const previousHitCounts = [0, 0, 0, 0, 0]
       const previousCommitment = await poseidonHashSalt(previousHitCounts, salt)
       const boardCommitment = await generateBoardCommitment(standardShips, salt)
 
-      await expect(shot.witness({
+      await expect(impact.witness({
         // Public inputs
         previousCommitment,
         targetX: 9,
@@ -345,13 +345,13 @@ describe("shot circuit", () => {
     })
 
     test("multiple ships partially damaged", async () => {
-      const shot = await loadShotCircuitTester()
+      const impact = await loadImpactCircuitTester()
       const salt = 50505
       const previousHitCounts = [2, 1, 2, 1, 1] // All ships partially hit
       const previousCommitment = await poseidonHashSalt(previousHitCounts, salt)
       const boardCommitment = await generateBoardCommitment(standardShips, salt)
 
-      await expect(shot.witness({
+      await expect(impact.witness({
         // Public inputs
         previousCommitment,
         targetX: 2,
@@ -369,13 +369,13 @@ describe("shot circuit", () => {
 
   describe("commitment chain validation", () => {
     test("valid commitment chain progression", async () => {
-      const shot = await loadShotCircuitTester()
+      const impact = await loadImpactCircuitTester()
       const salt = 60606
 
       let hitCounts = [0, 0, 0, 0, 0]
       const commitment1 = await poseidonHashSalt(hitCounts, salt)
 
-      await expect(shot.witness({
+      await expect(impact.witness({
         previousCommitment: commitment1,
         targetX: 9,
         targetY: 9,
@@ -391,7 +391,7 @@ describe("shot circuit", () => {
       const previousCounts = [...hitCounts]
       hitCounts = [1, 0, 0, 0, 0]
 
-      await expect(shot.witness({
+      await expect(impact.witness({
         // Public inputs
         previousCommitment: commitment1,
         targetX: 0,
@@ -407,14 +407,14 @@ describe("shot circuit", () => {
     })
 
     test("broken commitment chain", async () => {
-      const shot = await loadShotCircuitTester()
+      const impact = await loadImpactCircuitTester()
       const salt = 70707
       const hitCounts = [0, 0, 0, 0, 0]
       const wrongCommitment = await poseidonHashSalt([1, 0, 0, 0, 0], salt)
       // const correctCommitment = await poseidonHashSalt([0, 0, 0, 0, 0], salt)
       const boardCommitment = await generateBoardCommitment(standardShips, salt)
 
-      await expect(shot.witness({
+      await expect(impact.witness({
         // Public inputs
         previousCommitment: wrongCommitment,
         targetX: 0,

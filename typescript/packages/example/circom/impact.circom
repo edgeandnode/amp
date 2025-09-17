@@ -54,27 +54,27 @@ template CoordinateHitsShip(shipLength) {
 }
 
 /**
- * @dev Main shot verification circuit with commitment chain
+ * @dev Main impact verification circuit with commitment chain
  */
-template BattleshipShot() {
+template Impact() {
     // Constants
     var SHIP_LENGTHS[5] = [5, 4, 3, 3, 2];
 
+    // Public outputs (computed by circuit)
+    signal output newCommitment;        // New state commitment
+    signal output remainingShips;       // Number of ships remaining after this attack
+
     // Public inputs
     signal input previousCommitment;    // Previous state commitment
-    signal input targetX;               // X coordinate of shot
-    signal input targetY;               // Y coordinate of shot
+    signal input targetX;               // X coordinate of impact
+    signal input targetY;               // Y coordinate of impact
     signal input claimedResult;         // 0=miss, 1=hit, 2=sunk
     signal input claimedShipId;         // 0-4 if sunk, 255 otherwise
     signal input boardCommitment;       // Original board commitment for validation
 
-    // Public outputs (computed by circuit)
-    signal output newCommitment;        // New state commitment
-    signal output remainingShips;       // Number of ships remaining after this shot
-
     // Private inputs
     signal input ships[5][3];           // [x, y, orientation] for each ship
-    signal input previousHitCounts[5];  // Hit counts before this shot
+    signal input previousHitCounts[5];  // Hit counts before this attack
     signal input salt;                  // Random salt for commitment
 
     // Step 1: Verify board commitment matches ship positions
@@ -182,7 +182,7 @@ template BattleshipShot() {
         sunkCheckers[i].in[1] <== SHIP_LENGTHS[i];
         shipSunkFlags[i] <== sunkCheckers[i].out;
         
-        // Check if ship was already sunk before this shot
+        // Check if ship was already sunk before this attack
         alreadySunkCheckers[i] = IsEqual();
         alreadySunkCheckers[i].in[0] <== previousHitCounts[i];
         alreadySunkCheckers[i].in[1] <== SHIP_LENGTHS[i];
@@ -197,7 +197,7 @@ template BattleshipShot() {
     }
     remainingShips <== remainingShipsCount;
 
-    // Step 5.2: Validate elimination logic - newly sunk ships must be hit by this shot
+    // Step 5.2: Validate elimination logic - newly sunk ships must be hit by this attack
     signal newlySunkValidationResults[5];
     signal wasNewlySunk[5];
 
@@ -294,4 +294,4 @@ template BattleshipShot() {
 }
 
 // Instantiate the main component with public inputs specified  
-component main {public [previousCommitment, targetX, targetY, claimedResult, claimedShipId, boardCommitment]} = BattleshipShot();
+component main {public [previousCommitment, targetX, targetY, claimedResult, claimedShipId, boardCommitment]} = Impact();

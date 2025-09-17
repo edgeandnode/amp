@@ -42,7 +42,7 @@ const loadZkey = (circuit: string): Promise<Uint8Array> => {
  * @param circuit - The circuit to load the VKEY file for.
  */
 const loadVkey = (circuit: string): Promise<Uint8Array> => {
-  return loadArtifact(`vkey_${circuit}.json`)
+  return loadArtifact(`${circuit}_vkey.json`)
 }
 
 /**
@@ -171,7 +171,7 @@ export class CircuitTester<I = any> {
 /**
  * Shot circuit input
  */
-export interface ShotCircuitInput {
+export interface ImpactCircuitInput {
   // Public inputs
   readonly previousCommitment: string
   readonly targetX: number
@@ -217,9 +217,9 @@ const createSingletonCircuitTester = <I = any>(circuit: string) => (): Promise<C
 }
 
 /**
- * Load the shot circuit tester instance.
+ * Load the impact circuit tester instance.
  */
-export const loadShotCircuitTester = createSingletonCircuitTester<ShotCircuitInput>("shot")
+export const loadImpactCircuitTester = createSingletonCircuitTester<ImpactCircuitInput>("impact")
 
 /**
  * Load the board circuit tester instance.

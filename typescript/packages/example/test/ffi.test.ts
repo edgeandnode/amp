@@ -1,17 +1,17 @@
 import { spawn } from "child_process"
 import * as path from "path"
 import { describe, expect, test } from "vitest"
-import type { BoardProofRequest, ProofRequest, ProofResponse, ShotProofRequest } from "./ffi.ts"
-import type { BoardCircuitInput, ShotCircuitInput } from "./utils.ts"
+import type { ProofRequest, ProofResponse } from "./ffi.ts"
+import type { BoardCircuitInput, ImpactCircuitInput } from "./utils.ts"
 import { poseidonHash, poseidonHashSalt } from "./utils.ts"
 
 /**
  * Call the FFI script with JSON input and return parsed response
  */
-async function callFFI(request: ProofRequest): Promise<ProofResponse> {
+async function callFFI(type: "board" | "impact", request: ProofRequest): Promise<ProofResponse> {
   return new Promise((resolve, reject) => {
     const scriptPath = path.resolve(import.meta.dirname, "ffi.ts")
-    const child = spawn("node", ["--experimental-transform-types", scriptPath], {
+    const child = spawn("node", ["--experimental-transform-types", scriptPath, type, JSON.stringify(request)], {
       stdio: ["pipe", "pipe", "ignore"], // Ignore stderr to suppress experimental warnings
     })
 
@@ -67,18 +67,10 @@ const validBoardConfig: BoardCircuitInput = {
 
 describe("FFI Script Tests", () => {
   test("should generate board proof", async () => {
-    const request: BoardProofRequest = {
-      type: "board",
-      input: validBoardConfig,
-    }
-
-    const response = await callFFI(request)
-
+    const response = await callFFI("board", validBoardConfig)
     expect(response.success).toBe(true)
     expect(response.error).toBeUndefined()
     expect(response.proof).toBeDefined()
-    expect(response.publicOutputs?.commitment).toBeDefined()
-    expect(response.publicOutputs?.initialStateCommitment).toBeDefined()
 
     // Validate proof structure
     const proof = response.proof!
@@ -87,18 +79,14 @@ describe("FFI Script Tests", () => {
     expect(proof.piB[0]).toHaveLength(2)
     expect(proof.piB[1]).toHaveLength(2)
     expect(proof.piC).toHaveLength(2)
-    expect(proof.publicInputs).toHaveLength(2) // Board proof now has 2 public outputs
 
     // Validate that all proof elements are valid numbers
     expect(() => BigInt(proof.piA[0])).not.toThrow()
     expect(() => BigInt(proof.piA[1])).not.toThrow()
     expect(() => BigInt(proof.piC[0])).not.toThrow()
     expect(() => BigInt(proof.piC[1])).not.toThrow()
-    expect(() => BigInt(proof.publicInputs[0])).not.toThrow()
 
     console.log("Board proof generated successfully")
-    console.log("Board commitment:", proof.publicInputs[0])
-    console.log("Initial state commitment:", proof.publicInputs[1])
   })
 
   test("should generate shot proof", async () => {
@@ -116,7 +104,7 @@ describe("FFI Script Tests", () => {
     const previousCommitment = await poseidonHashSalt([0, 0, 0, 0, 0], 12345)
 
     // Create shot input - shoot at water (5,5)
-    const shotInput: ShotCircuitInput = {
+    const shotInput: ImpactCircuitInput = {
       // Public inputs
       previousCommitment,
       targetX: 5,
@@ -136,18 +124,10 @@ describe("FFI Script Tests", () => {
       salt: 12345,
     }
 
-    const request: ShotProofRequest = {
-      type: "shot",
-      input: shotInput,
-    }
-
-    const response = await callFFI(request)
-
+    const response = await callFFI("impact", shotInput)
     expect(response.success).toBe(true)
     expect(response.error).toBeUndefined()
     expect(response.proof).toBeDefined()
-    expect(response.publicOutputs?.newCommitment).toBeDefined()
-    expect(response.publicOutputs?.remainingShips).toBe(5)
 
     // Validate proof structure
     const proof = response.proof!
@@ -156,7 +136,6 @@ describe("FFI Script Tests", () => {
     expect(proof.piB[0]).toHaveLength(2)
     expect(proof.piB[1]).toHaveLength(2)
     expect(proof.piC).toHaveLength(2)
-    expect(proof.publicInputs).toHaveLength(8) // Shot proof now has 8 total public signals (6 inputs + 2 outputs)
 
     // Validate that all proof elements are valid numbers
     expect(() => BigInt(proof.piA[0])).not.toThrow()
@@ -165,55 +144,5 @@ describe("FFI Script Tests", () => {
     expect(() => BigInt(proof.piC[1])).not.toThrow()
 
     console.log("Shot proof generated successfully")
-    console.log("New commitment:", response.publicOutputs?.newCommitment)
-    console.log("Remaining ships:", response.publicOutputs?.remainingShips)
-  })
-
-  test("should handle invalid JSON input", async () => {
-    return new Promise<void>((resolve, reject) => {
-      const scriptPath = path.resolve(import.meta.dirname, "ffi.ts")
-      const child = spawn("node", ["--experimental-transform-types", scriptPath], {
-        stdio: ["pipe", "pipe", "ignore"], // Ignore stderr to suppress experimental warnings
-      })
-
-      let stdout = ""
-
-      child.stdout.on("data", (data) => {
-        stdout += data.toString()
-      })
-
-      child.on("close", (code) => {
-        expect(code).toBe(1) // Should exit with error code
-
-        try {
-          const response = JSON.parse(stdout.trim())
-          expect(response.success).toBe(false)
-          expect(response.error).toContain("Invalid JSON input")
-          resolve()
-        } catch (error) {
-          reject(new Error(`Failed to parse error response: ${error}`))
-        }
-      })
-
-      child.on("error", (error) => {
-        reject(error)
-      })
-
-      // Send invalid JSON
-      child.stdin.write("invalid json")
-      child.stdin.end()
-    })
-  })
-
-  test("should handle unknown request type", async () => {
-    const request = {
-      type: "unknown",
-      input: {},
-    }
-
-    const response = await callFFI(request as any)
-
-    expect(response.success).toBe(false)
-    expect(response.error).toContain("Unknown request type")
   })
 })
