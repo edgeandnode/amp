@@ -3,43 +3,13 @@ import { spawn } from "child_process"
 import * as path from "path"
 import type { BoardCircuitInput, ShotCircuitInput } from "./utils.ts"
 import { poseidonHash, poseidonHashSalt } from "./utils.ts"
-
-/**
- * Test interfaces matching the FFI script
- */
-interface BoardProofRequest {
-  type: "board"
-  input: BoardCircuitInput
-}
-
-interface ShotProofRequest {
-  type: "shot"
-  input: ShotCircuitInput
-}
-
-type FFIRequest = BoardProofRequest | ShotProofRequest
-
-interface ProofResponse {
-  success: boolean
-  error?: string
-  proof?: {
-    piA: [string, string]
-    piB: [[string, string], [string, string]]
-    piC: [string, string]
-    publicInputs: string[]
-  }
-  publicOutputs?: {
-    commitment?: string
-    initialStateCommitment?: string
-    newCommitment?: string
-    remainingShips?: number
-  }
-}
+import type { ProofRequest, ProofResponse } from "./ffi.ts"
+import type { BoardProofRequest, ShotProofRequest } from "./ffi.ts"
 
 /**
  * Call the FFI script with JSON input and return parsed response
  */
-async function callFFI(request: FFIRequest): Promise<ProofResponse> {
+async function callFFI(request: ProofRequest): Promise<ProofResponse> {
   return new Promise((resolve, reject) => {
     const scriptPath = path.resolve(import.meta.dirname, "ffi.ts")
     const child = spawn("node", ["--experimental-transform-types", scriptPath], {

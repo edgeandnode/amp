@@ -13,23 +13,21 @@ import {
   loadShotCircuitTester,
   type BoardCircuitInput,
   type ShotCircuitInput,
-  poseidonHash,
-  poseidonHashSalt
 } from "./utils.ts"
 
-interface BoardProofRequest {
+export interface BoardProofRequest {
   type: "board"
   input: BoardCircuitInput
 }
 
-interface ShotProofRequest {
+export interface ShotProofRequest {
   type: "shot"
   input: ShotCircuitInput
 }
 
-type ProofRequest = BoardProofRequest | ShotProofRequest
+export type ProofRequest = BoardProofRequest | ShotProofRequest
 
-interface ProofResponse {
+export interface ProofResponse {
   success: boolean
   error?: string
   proof?: {
