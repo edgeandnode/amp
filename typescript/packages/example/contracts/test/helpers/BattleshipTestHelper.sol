@@ -19,8 +19,10 @@ contract BattleshipTestHelper is Test {
     address public bob = makeAddr("bob");
     address public charlie = makeAddr("charlie");
 
-    // Shared mock board commitment - since mock verifiers always return true, we don't need player-specific values
+    // Shared mock commitments - since mock verifiers always return true, we don't need player-specific values
     uint256 public constant MOCK_BOARD_COMMITMENT = 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef;
+    uint256 public constant MOCK_INITIAL_STATE_COMMITMENT =
+        0xfedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321;
 
     /**
      * @dev Get shared mock board proof - since mock verifiers always return true, we can reuse the same proof
@@ -30,7 +32,7 @@ contract BattleshipTestHelper is Test {
             piA: [uint256(1), uint256(2)],
             piB: [[uint256(3), uint256(4)], [uint256(5), uint256(6)]],
             piC: [uint256(7), uint256(8)],
-            publicInputs: [MOCK_BOARD_COMMITMENT]
+            publicInputs: [MOCK_BOARD_COMMITMENT, MOCK_INITIAL_STATE_COMMITMENT]
         });
     }
 
@@ -75,13 +77,14 @@ contract BattleshipTestHelper is Test {
             piB: [[uint256(3), uint256(4)], [uint256(5), uint256(6)]],
             piC: [uint256(7), uint256(8)],
             publicInputs: [
-                boardCommitment, // previousCommitment (index 0)
-                boardCommitment, // newCommitment (index 1) - same for miss
-                uint256(x), // targetX (index 2)
-                uint256(y), // targetY (index 3)
-                uint256(result), // claimedResult (index 4)
-                uint256(255), // claimedShipId (index 5) - 255 for not sunk
-                remainingShips // claimedRemainingShips (index 6)
+                MOCK_INITIAL_STATE_COMMITMENT, // previousCommitment (index 0)
+                uint256(x), // targetX (index 1)
+                uint256(y), // targetY (index 2)
+                uint256(result), // claimedResult (index 3)
+                uint256(255), // claimedShipId (index 4) - 255 for not sunk
+                boardCommitment, // boardCommitment (index 5)
+                MOCK_INITIAL_STATE_COMMITMENT, // newCommitment (index 6) - same for miss
+                remainingShips // remainingShips (index 7)
             ]
         });
     }
@@ -130,22 +133,14 @@ contract BattleshipTestHelper is Test {
         uint256 remainingShips
     ) public {
         // Get current shot coordinates
-        (
-            ,
-            ,
-            ,
-            ,
-            uint8 lastShotX,
-            uint8 lastShotY,
-            ,
-            ,
-            
-        ) = battleship.getGameInfo(gameId);
+        Battleship.Game memory gameState = battleship.getGameInfo(gameId);
 
         vm.prank(responder);
         battleship.respondAndCounter(
             gameId,
-            getMockShotProofWithShips(lastShotX, lastShotY, impact, remainingShips, MOCK_BOARD_COMMITMENT),
+            getMockShotProofWithShips(
+                gameState.lastShotX, gameState.lastShotY, impact, remainingShips, MOCK_BOARD_COMMITMENT
+            ),
             counterX,
             counterY
         );
@@ -161,22 +156,12 @@ contract BattleshipTestHelper is Test {
         uint256 expectedPrizePool,
         address expectedWinner
     ) public view {
-        (
-            address[2] memory players,
-            ,
-            ,
-            uint256 prizePool,
-            ,
-            ,
-            ,
-            ,
-            address winner
-        ) = battleship.getGameInfo(gameId);
+        Battleship.Game memory gameState = battleship.getGameInfo(gameId);
 
-        assertEq(players[0], expectedPlayer0, "Player 0 mismatch");
-        assertEq(players[1], expectedPlayer1, "Player 1 mismatch");
-        assertEq(prizePool, expectedPrizePool, "Prize pool mismatch");
-        assertEq(winner, expectedWinner, "Winner mismatch");
+        assertEq(gameState.players[0], expectedPlayer0, "Player 0 mismatch");
+        assertEq(gameState.players[1], expectedPlayer1, "Player 1 mismatch");
+        assertEq(gameState.prizePool, expectedPrizePool, "Prize pool mismatch");
+        assertEq(gameState.winner, expectedWinner, "Winner mismatch");
     }
 
     /**
@@ -191,19 +176,9 @@ contract BattleshipTestHelper is Test {
      * @dev Get the starting and non-starting players for a game
      */
     function getGamePlayers(uint256 gameId) public view returns (address startingPlayer, address otherPlayer) {
-        (
-            address[2] memory players,
-            ,
-            ,
-            ,
-            ,
-            ,
-            ,
-            uint8 startingPlayerIndex,
-            
-        ) = battleship.getGameInfo(gameId);
-        startingPlayer = players[startingPlayerIndex];
-        otherPlayer = players[1 - startingPlayerIndex];
+        Battleship.Game memory gameState = battleship.getGameInfo(gameId);
+        startingPlayer = gameState.players[gameState.startingPlayer];
+        otherPlayer = gameState.players[1 - gameState.startingPlayer];
     }
 
     /**
@@ -213,22 +188,12 @@ contract BattleshipTestHelper is Test {
      */
     function setStartingPlayer(uint256 gameId, address startingPlayer) public {
         // Get game players to determine the correct index
-        (
-            address[2] memory players,
-            ,
-            ,
-            ,
-            ,
-            ,
-            ,
-            ,
-            
-        ) = battleship.getGameInfo(gameId);
+        Battleship.Game memory gameState = battleship.getGameInfo(gameId);
 
         uint8 playerIndex;
-        if (players[0] == startingPlayer) {
+        if (gameState.players[0] == startingPlayer) {
             playerIndex = 0;
-        } else if (players[1] == startingPlayer) {
+        } else if (gameState.players[1] == startingPlayer) {
             playerIndex = 1;
         } else {
             revert("Player not in game");
@@ -238,15 +203,16 @@ contract BattleshipTestHelper is Test {
         // Game struct layout in storage (updated):
         // Slot 0-1: address[2] players
         // Slot 2-3: bytes32[2] boardCommitments
-        // Slot 4-5: uint256[2] shotGrids
-        // Slot 6: uint256 stakeAmount
-        // Slot 7: uint256 prizePool
-        // Slot 8: uint8 lastShotX + uint8 lastShotY + address lastPlayer + uint8 startingPlayer (packed)
-        // Slot 9: address winner
+        // Slot 4-5: bytes32[2] stateCommitments
+        // Slot 6-7: uint256[2] shotGrids
+        // Slot 8: uint256 stakeAmount
+        // Slot 9: uint256 prizePool
+        // Slot 10: uint8 lastShotX + uint8 lastShotY + address lastPlayer + uint8 startingPlayer (packed)
+        // Slot 11: address winner
         bytes32 gameSlot = keccak256(abi.encode(gameId, uint256(1)));
-        bytes32 startingPlayerSlot = bytes32(uint256(gameSlot) + 8);
+        bytes32 startingPlayerSlot = bytes32(uint256(gameSlot) + 10);
 
-        // startingPlayer is packed with other fields in slot 8
+        // startingPlayer is packed with other fields in slot 10
         // Read current value to preserve other fields (lastShotX, lastShotY, lastPlayer)
         bytes32 currentValue = vm.load(address(battleship), startingPlayerSlot);
 

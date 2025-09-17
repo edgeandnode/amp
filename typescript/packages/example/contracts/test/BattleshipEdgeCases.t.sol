@@ -19,19 +19,9 @@ contract BattleshipEdgeCasesTest is BattleshipTestHelper {
             vm.prank(alice);
             battleship.attack(newGameId, corners[i][0], corners[i][1]);
 
-            (
-                ,
-                ,
-                ,
-                ,
-                uint8 recordedX,
-                uint8 recordedY,
-                ,
-                ,
-                
-            ) = battleship.getGameInfo(newGameId);
-            assertEq(recordedX, corners[i][0]);
-            assertEq(recordedY, corners[i][1]);
+            Battleship.Game memory gameState = battleship.getGameInfo(newGameId);
+            assertEq(gameState.lastShotX, corners[i][0]);
+            assertEq(gameState.lastShotY, corners[i][1]);
         }
     }
 
@@ -58,19 +48,9 @@ contract BattleshipEdgeCasesTest is BattleshipTestHelper {
 
         // Verify the game ended correctly and payout occurred
         assertTrue(battleship.isGameEnded(gameId));
-        (
-            ,
-            ,
-            ,
-            uint256 prizePool,
-            ,
-            ,
-            ,
-            ,
-            address winner
-        ) = battleship.getGameInfo(gameId);
-        assertEq(prizePool, 0);
-        assertEq(winner, address(receiver));
+        Battleship.Game memory gameState = battleship.getGameInfo(gameId);
+        assertEq(gameState.prizePool, 0);
+        assertEq(gameState.winner, address(receiver));
 
         // Verify receiver got the correct payout (2 ETH)
         assertEq(address(receiver).balance, receiverInitialBalance + 2 ether);
@@ -146,19 +126,9 @@ contract BattleshipEdgeCasesTest is BattleshipTestHelper {
         battleship.forfeitGame(gameId);
 
         // Bob wins but gets no additional ETH
-        (
-            ,
-            ,
-            ,
-            uint256 prizePool,
-            ,
-            ,
-            ,
-            ,
-            address winner
-        ) = battleship.getGameInfo(gameId);
-        assertEq(winner, bob);
-        assertEq(prizePool, 0);
+        Battleship.Game memory gameState = battleship.getGameInfo(gameId);
+        assertEq(gameState.winner, bob);
+        assertEq(gameState.prizePool, 0);
         assertEq(bob.balance, bobInitialBalance);
     }
 

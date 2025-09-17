@@ -41,35 +41,15 @@ contract BattleshipGameLoopTest is BattleshipTestHelper {
         uint256 stake = 5 ether;
         uint256 gameId = createGame(alice, stake);
 
-        (
-            ,
-            ,
-            ,
-            uint256 prizePool,
-            ,
-            ,
-            ,
-            ,
-            
-        ) = battleship.getGameInfo(gameId);
-        assertEq(prizePool, stake);
+        Battleship.Game memory gameState = battleship.getGameInfo(gameId);
+        assertEq(gameState.prizePool, stake);
     }
 
     function test_CreateGame_ZeroStake() public {
         uint256 gameId = createGame(alice, 0);
 
-        (
-            ,
-            ,
-            ,
-            uint256 prizePool,
-            ,
-            ,
-            ,
-            ,
-            
-        ) = battleship.getGameInfo(gameId);
-        assertEq(prizePool, 0);
+        Battleship.Game memory gameState = battleship.getGameInfo(gameId);
+        assertEq(gameState.prizePool, 0);
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -151,20 +131,10 @@ contract BattleshipGameLoopTest is BattleshipTestHelper {
         vm.prank(alice);
         battleship.attack(gameId, 5, 5);
 
-        (
-            ,
-            ,
-            ,
-            ,
-            uint8 lastShotX,
-            uint8 lastShotY,
-            address lastPlayer,
-            ,
-            
-        ) = battleship.getGameInfo(gameId);
-        assertEq(lastShotX, 5);
-        assertEq(lastShotY, 5);
-        assertEq(lastPlayer, alice);
+        Battleship.Game memory gameState = battleship.getGameInfo(gameId);
+        assertEq(gameState.lastShotX, 5);
+        assertEq(gameState.lastShotY, 5);
+        assertEq(gameState.lastPlayer, alice);
     }
 
     function test_Attack_WrongStartingPlayer() public {
@@ -227,20 +197,10 @@ contract BattleshipGameLoopTest is BattleshipTestHelper {
 
         respondAndCounter(gameId, responder, Battleship.Impact.HIT, 7, 7);
 
-        (
-            ,
-            ,
-            ,
-            ,
-            uint8 lastShotX,
-            uint8 lastShotY,
-            address lastPlayer,
-            ,
-            
-        ) = battleship.getGameInfo(gameId);
-        assertEq(lastShotX, 7);
-        assertEq(lastShotY, 7);
-        assertEq(lastPlayer, responder);
+        Battleship.Game memory gameState = battleship.getGameInfo(gameId);
+        assertEq(gameState.lastShotX, 7);
+        assertEq(gameState.lastShotY, 7);
+        assertEq(gameState.lastPlayer, responder);
     }
 
     function test_RespondAndCounter_WrongCoordinates() public {
@@ -261,45 +221,29 @@ contract BattleshipGameLoopTest is BattleshipTestHelper {
         setMockVerifierResult(true, false); // Shot verifier returns false
 
         // Get current shot coordinates
-        (
-            ,
-            ,
-            ,
-            ,
-            uint8 lastShotX,
-            uint8 lastShotY,
-            ,
-            ,
-            
-        ) = battleship.getGameInfo(gameId);
+        Battleship.Game memory gameState = battleship.getGameInfo(gameId);
 
         vm.expectRevert(Battleship.InvalidShotProof.selector);
 
         vm.prank(bob);
-        battleship.respondAndCounter(gameId, getMockShotProof(lastShotX, lastShotY, Battleship.Impact.MISS), 7, 7);
+        battleship.respondAndCounter(
+            gameId, getMockShotProof(gameState.lastShotX, gameState.lastShotY, Battleship.Impact.MISS), 7, 7
+        );
     }
 
     function test_RespondAndCounter_WrongPlayer() public {
         uint256 gameId = setupGameWithFirstAttack(alice, bob, alice, 1 ether, 3, 3);
 
         // Get current shot coordinates
-        (
-            ,
-            ,
-            ,
-            ,
-            uint8 lastShotX,
-            uint8 lastShotY,
-            ,
-            ,
-            
-        ) = battleship.getGameInfo(gameId);
+        Battleship.Game memory gameState = battleship.getGameInfo(gameId);
 
         vm.expectRevert(Battleship.NotYourTurn.selector);
 
         // First player tries to respond to their own attack
         vm.prank(alice);
-        battleship.respondAndCounter(gameId, getMockShotProof(lastShotX, lastShotY, Battleship.Impact.MISS), 7, 7);
+        battleship.respondAndCounter(
+            gameId, getMockShotProof(gameState.lastShotX, gameState.lastShotY, Battleship.Impact.MISS), 7, 7
+        );
     }
 
     function test_RespondAndCounter_CommitmentMismatch() public {
@@ -319,24 +263,14 @@ contract BattleshipGameLoopTest is BattleshipTestHelper {
         uint256 gameId = setupGameWithFirstAttack(alice, bob, alice, 1 ether, 3, 3);
 
         // Get current shot coordinates
-        (
-            ,
-            ,
-            ,
-            ,
-            uint8 lastShotX,
-            uint8 lastShotY,
-            ,
-            ,
-            
-        ) = battleship.getGameInfo(gameId);
+        Battleship.Game memory gameState = battleship.getGameInfo(gameId);
 
         vm.expectRevert(Battleship.InvalidCoordinates.selector);
 
         vm.prank(bob);
         battleship.respondAndCounter(
             gameId,
-            getMockShotProof(lastShotX, lastShotY, Battleship.Impact.MISS),
+            getMockShotProof(gameState.lastShotX, gameState.lastShotY, Battleship.Impact.MISS),
             10, // X out of bounds
             7
         );
@@ -374,38 +308,18 @@ contract BattleshipGameLoopTest is BattleshipTestHelper {
         respondAndCounter(gameId, bob, Battleship.Impact.MISS, 4, 4);
 
         // Verify final state
-        (
-            ,
-            ,
-            ,
-            ,
-            uint8 lastShotX,
-            uint8 lastShotY,
-            address lastPlayer,
-            ,
-            
-        ) = battleship.getGameInfo(gameId);
-        assertEq(lastShotX, 4);
-        assertEq(lastShotY, 4);
-        assertEq(lastPlayer, bob);
+        Battleship.Game memory gameState = battleship.getGameInfo(gameId);
+        assertEq(gameState.lastShotX, 4);
+        assertEq(gameState.lastShotY, 4);
+        assertEq(gameState.lastPlayer, bob);
     }
 
     function test_GameFlow_RandomStartingPlayer() public {
         // Test multiple games to verify randomness (though with fixed block data, it won't be truly random)
         for (uint256 i = 0; i < 5; i++) {
             uint256 gameId = setupTwoPlayerGame(alice, bob, 1 ether, alice);
-            (
-                ,
-                ,
-                ,
-                ,
-                ,
-                ,
-                ,
-                uint8 startingPlayerIndex,
-                
-            ) = battleship.getGameInfo(gameId);
-            assertEq(startingPlayerIndex, 0); // Alice is player 0 and starting player
+            Battleship.Game memory gameState = battleship.getGameInfo(gameId);
+            assertEq(gameState.startingPlayer, 0); // Alice is player 0 and starting player
 
             // Advance block to change entropy for next game
             vm.roll(block.number + 1);
@@ -428,19 +342,9 @@ contract BattleshipGameLoopTest is BattleshipTestHelper {
         assertFalse(battleship.isGameEnded(gameId));
 
         // Verify last shot was recorded
-        (
-            ,
-            ,
-            ,
-            ,
-            uint8 lastShotX,
-            uint8 lastShotY,
-            ,
-            ,
-            
-        ) = battleship.getGameInfo(gameId);
-        assertEq(lastShotX, 1);
-        assertEq(lastShotY, 0);
+        Battleship.Game memory gameState = battleship.getGameInfo(gameId);
+        assertEq(gameState.lastShotX, 1);
+        assertEq(gameState.lastShotY, 0);
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -496,19 +400,9 @@ contract BattleshipGameLoopTest is BattleshipTestHelper {
         assertTrue(battleship.isGameEnded(gameId));
 
         // Verify winner and payout
-        (
-            ,
-            ,
-            ,
-            uint256 prizePool,
-            ,
-            ,
-            ,
-            ,
-            address winner
-        ) = battleship.getGameInfo(gameId);
-        assertEq(winner, alice);
-        assertEq(prizePool, 0); // Prize pool should be emptied
+        Battleship.Game memory gameState = battleship.getGameInfo(gameId);
+        assertEq(gameState.winner, alice);
+        assertEq(gameState.prizePool, 0); // Prize pool should be emptied
         assertEq(alice.balance, attackerInitialBalance + 2 ether); // Winner gets full prize pool
     }
 
@@ -538,19 +432,9 @@ contract BattleshipGameLoopTest is BattleshipTestHelper {
         battleship.forfeitGame(gameId);
 
         // Bob should win and get the prize
-        (
-            ,
-            ,
-            ,
-            uint256 prizePool,
-            ,
-            ,
-            ,
-            ,
-            address winner
-        ) = battleship.getGameInfo(gameId);
-        assertEq(winner, bob);
-        assertEq(prizePool, 0);
+        Battleship.Game memory gameState = battleship.getGameInfo(gameId);
+        assertEq(gameState.winner, bob);
+        assertEq(gameState.prizePool, 0);
         assertEq(bob.balance, bobInitialBalance + 2 ether);
     }
 
@@ -579,26 +463,16 @@ contract BattleshipGameLoopTest is BattleshipTestHelper {
     function test_GetGameInfo() public {
         uint256 gameId = setupTwoPlayerGame(alice, bob, 1 ether);
 
-        (
-            address[2] memory players,
-            bytes32[2] memory boardCommitments,
-            ,
-            uint256 prizePool,
-            ,
-            ,
-            address lastPlayer,
-            uint8 startingPlayer,
-            address winner
-        ) = battleship.getGameInfo(gameId);
+        Battleship.Game memory gameState = battleship.getGameInfo(gameId);
 
-        assertEq(players[0], alice);
-        assertEq(players[1], bob);
-        assertEq(uint256(boardCommitments[0]), MOCK_BOARD_COMMITMENT);
-        assertEq(uint256(boardCommitments[1]), MOCK_BOARD_COMMITMENT);
-        assertEq(prizePool, 2 ether);
-        assertEq(lastPlayer, address(0));
-        assertTrue(startingPlayer == 0 || startingPlayer == 1);
-        assertEq(winner, address(0));
+        assertEq(gameState.players[0], alice);
+        assertEq(gameState.players[1], bob);
+        assertEq(uint256(gameState.boardCommitments[0]), MOCK_BOARD_COMMITMENT);
+        assertEq(uint256(gameState.boardCommitments[1]), MOCK_BOARD_COMMITMENT);
+        assertEq(gameState.prizePool, 2 ether);
+        assertEq(gameState.lastPlayer, address(0));
+        assertTrue(gameState.startingPlayer == 0 || gameState.startingPlayer == 1);
+        assertEq(gameState.winner, address(0));
     }
 
     function test_IsGameValid() public {

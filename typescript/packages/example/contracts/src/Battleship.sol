@@ -236,7 +236,7 @@ contract Battleship {
         if (msg.sender != responder) revert NotYourTurn();
 
         // Verify proof coordinates match the pending shot
-        if (impactProof.publicInputs[2] != game.lastShotX || impactProof.publicInputs[3] != game.lastShotY) {
+        if (impactProof.publicInputs[1] != game.lastShotX || impactProof.publicInputs[2] != game.lastShotY) {
             revert WrongCoordinates();
         }
 
@@ -252,7 +252,7 @@ contract Battleship {
         }
 
         // Extract impact result from proof
-        Impact result = Impact(impactProof.publicInputs[4]);
+        Impact result = Impact(impactProof.publicInputs[3]);
 
         // Verify the previous state commitment matches defender's current commitment
         uint8 defenderIndex = (responder == game.players[0]) ? 0 : 1;
@@ -260,7 +260,7 @@ contract Battleship {
             revert CommitmentMismatch();
         }
 
-        // Verify the board commitment matches defender's commitment (6th public input)
+        // Verify the board commitment matches defender's commitment (5th public input)
         if (uint256(game.boardCommitments[defenderIndex]) != impactProof.publicInputs[5]) {
             revert CommitmentMismatch();
         }
@@ -330,35 +330,8 @@ contract Battleship {
 
     // View functions - minimal state queries
 
-    function getGameInfo(uint256 gameId)
-        external
-        view
-        returns (
-            address[2] memory players,
-            bytes32[2] memory boardCommitments,
-            bytes32[2] memory stateCommitments,
-            uint256[2] memory shotGrids,
-            uint256 prizePool,
-            uint8 lastShotX,
-            uint8 lastShotY,
-            address lastPlayer,
-            uint8 startingPlayer,
-            address winner
-        )
-    {
-        Game storage game = games[gameId];
-        return (
-            game.players,
-            game.boardCommitments,
-            game.stateCommitments,
-            game.shotGrids,
-            game.prizePool,
-            game.lastShotX,
-            game.lastShotY,
-            game.lastPlayer,
-            game.startingPlayer,
-            game.winner
-        );
+    function getGameInfo(uint256 gameId) external view returns (Game memory) {
+        return games[gameId];
     }
 
     // Helper functions to check game state

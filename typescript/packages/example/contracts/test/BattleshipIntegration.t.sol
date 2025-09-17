@@ -39,19 +39,9 @@ contract BattleshipIntegrationTest is BattleshipTestHelper {
         // Verify game ended correctly with automatic victory
         assertTrue(battleship.isGameEnded(gameId));
 
-        (
-            ,
-            ,
-            ,
-            uint256 prizePool,
-            ,
-            ,
-            ,
-            ,
-            address winner
-        ) = battleship.getGameInfo(gameId);
-        assertEq(prizePool, 0); // Prize pool emptied
-        assertEq(winner, bob); // Bob was the attacker (lastPlayer) who gets the win
+        Battleship.Game memory gameState = battleship.getGameInfo(gameId);
+        assertEq(gameState.prizePool, 0); // Prize pool emptied
+        assertEq(gameState.winner, bob); // Bob was the attacker (lastPlayer) who gets the win
 
         // Verify Bob got the full payout (4 ether total)
         assertEq(bob.balance, bobBalanceBeforeWin + 4 ether);
@@ -64,30 +54,10 @@ contract BattleshipIntegrationTest is BattleshipTestHelper {
         uint256 game2 = setupTwoPlayerGame(alice, charlie, 3 ether, charlie);
 
         // Verify games are independent with different stakes
-        (
-            ,
-            ,
-            ,
-            uint256 prizePool1,
-            ,
-            ,
-            ,
-            ,
-            
-        ) = battleship.getGameInfo(game1);
-        (
-            ,
-            ,
-            ,
-            uint256 prizePool2,
-            ,
-            ,
-            ,
-            ,
-            
-        ) = battleship.getGameInfo(game2);
-        assertEq(prizePool1, 2 ether);
-        assertEq(prizePool2, 6 ether);
+        Battleship.Game memory gameState1 = battleship.getGameInfo(game1);
+        Battleship.Game memory gameState2 = battleship.getGameInfo(game2);
+        assertEq(gameState1.prizePool, 2 ether);
+        assertEq(gameState2.prizePool, 6 ether);
 
         // Play moves in game1 (Alice vs Bob)
         vm.prank(alice);
@@ -100,36 +70,16 @@ contract BattleshipIntegrationTest is BattleshipTestHelper {
         respondAndCounter(game2, alice, Battleship.Impact.MISS, 7, 7);
 
         // Verify games remain independent - moves in one don't affect the other
-        (
-            ,
-            ,
-            ,
-            ,
-            uint8 lastX1,
-            uint8 lastY1,
-            address lastPlayer1b,
-            ,
-            
-        ) = battleship.getGameInfo(game1);
-        (
-            ,
-            ,
-            ,
-            ,
-            uint8 lastX2,
-            uint8 lastY2,
-            address lastPlayer2b,
-            ,
-            
-        ) = battleship.getGameInfo(game2);
+        Battleship.Game memory updatedGameState1 = battleship.getGameInfo(game1);
+        Battleship.Game memory updatedGameState2 = battleship.getGameInfo(game2);
 
-        assertEq(lastX1, 2);
-        assertEq(lastY1, 2);
-        assertEq(lastPlayer1b, bob);
+        assertEq(updatedGameState1.lastShotX, 2);
+        assertEq(updatedGameState1.lastShotY, 2);
+        assertEq(updatedGameState1.lastPlayer, bob);
 
-        assertEq(lastX2, 7);
-        assertEq(lastY2, 7);
-        assertEq(lastPlayer2b, alice);
+        assertEq(updatedGameState2.lastShotX, 7);
+        assertEq(updatedGameState2.lastShotY, 7);
+        assertEq(updatedGameState2.lastPlayer, alice);
 
         // End game1 while game2 continues
         vm.prank(alice);
@@ -140,30 +90,10 @@ contract BattleshipIntegrationTest is BattleshipTestHelper {
         assertFalse(battleship.isGameEnded(game2));
 
         // Bob gets game1 payout, game2 stakes unchanged
-        (
-            ,
-            ,
-            ,
-            uint256 finalPool1,
-            ,
-            ,
-            ,
-            ,
-            
-        ) = battleship.getGameInfo(game1);
-        (
-            ,
-            ,
-            ,
-            uint256 finalPool2,
-            ,
-            ,
-            ,
-            ,
-            
-        ) = battleship.getGameInfo(game2);
-        assertEq(finalPool1, 0); // Game1 pool emptied
-        assertEq(finalPool2, 6 ether); // Game2 pool unchanged
+        Battleship.Game memory endGameState1 = battleship.getGameInfo(game1);
+        Battleship.Game memory endGameState2 = battleship.getGameInfo(game2);
+        assertEq(endGameState1.prizePool, 0); // Game1 pool emptied
+        assertEq(endGameState2.prizePool, 6 ether); // Game2 pool unchanged
     }
 
     function test_InvalidMoveSequences() public {
@@ -203,20 +133,10 @@ contract BattleshipIntegrationTest is BattleshipTestHelper {
 
         // Verify game is still active and properly tracks moves
         assertFalse(battleship.isGameEnded(gameId));
-        (
-            ,
-            ,
-            ,
-            ,
-            uint8 lastX,
-            uint8 lastY,
-            address lastPlayer,
-            ,
-            
-        ) = battleship.getGameInfo(gameId);
-        assertEq(lastX, 0);
-        assertEq(lastY, 0);
-        assertEq(lastPlayer, bob);
+        Battleship.Game memory gameState = battleship.getGameInfo(gameId);
+        assertEq(gameState.lastShotX, 0);
+        assertEq(gameState.lastShotY, 0);
+        assertEq(gameState.lastPlayer, bob);
     }
 
     function test_CompleteGameWithForfeit() public {
@@ -244,19 +164,9 @@ contract BattleshipIntegrationTest is BattleshipTestHelper {
 
         // Verify game ended and payout
         assertTrue(battleship.isGameEnded(gameId));
-        (
-            ,
-            ,
-            ,
-            uint256 prizePool,
-            ,
-            ,
-            ,
-            ,
-            address winner
-        ) = battleship.getGameInfo(gameId);
-        assertEq(winner, bob);
-        assertEq(prizePool, 0);
+        Battleship.Game memory gameState = battleship.getGameInfo(gameId);
+        assertEq(gameState.winner, bob);
+        assertEq(gameState.prizePool, 0);
         assertEq(bob.balance, bobInitialBalance + 6 ether);
         assertEq(alice.balance, aliceInitialBalance); // Alice forfeited, no additional loss
     }
@@ -286,18 +196,8 @@ contract BattleshipIntegrationTest is BattleshipTestHelper {
         assertFalse(battleship.isGameValid(gameId));
 
         // Prize pool should be emptied
-        (
-            ,
-            ,
-            ,
-            uint256 prizePool,
-            ,
-            ,
-            ,
-            ,
-            
-        ) = battleship.getGameInfo(gameId);
-        assertEq(prizePool, 0);
+        Battleship.Game memory cancelledGame = battleship.getGameInfo(gameId);
+        assertEq(cancelledGame.prizePool, 0);
 
         // Test that only creator can cancel
         uint256 gameId2 = createGame(alice, stake);
@@ -325,18 +225,8 @@ contract BattleshipIntegrationTest is BattleshipTestHelper {
         assertEq(bob.balance, bobInitialBalance + (stake * 2));
 
         // Prize pool is emptied
-        (
-            ,
-            ,
-            ,
-            uint256 prizePool,
-            ,
-            ,
-            ,
-            ,
-            
-        ) = battleship.getGameInfo(gameId);
-        assertEq(prizePool, 0);
+        Battleship.Game memory finalGame = battleship.getGameInfo(gameId);
+        assertEq(finalGame.prizePool, 0);
     }
 
     function test_ZeroStakeGame_FullFlow() public {
@@ -362,18 +252,8 @@ contract BattleshipIntegrationTest is BattleshipTestHelper {
 
         // But game still ends properly
         assertTrue(battleship.isGameEnded(gameId));
-        (
-            ,
-            ,
-            ,
-            ,
-            ,
-            ,
-            ,
-            ,
-            address winner
-        ) = battleship.getGameInfo(gameId);
-        assertEq(winner, bob);
+        Battleship.Game memory zeroStakeGame = battleship.getGameInfo(gameId);
+        assertEq(zeroStakeGame.winner, bob);
     }
 
     function test_MultipleStakeLevels() public {
@@ -423,19 +303,9 @@ contract BattleshipIntegrationTest is BattleshipTestHelper {
         assertTrue(battleship.isGameStarted(gameId));
         assertFalse(battleship.isGameEnded(gameId));
 
-        (
-            ,
-            ,
-            ,
-            uint256 prizePool,
-            ,
-            ,
-            address lastPlayer,
-            ,
-            
-        ) = battleship.getGameInfo(gameId);
-        assertEq(prizePool, 2 ether);
-        assertEq(lastPlayer, bob);
+        Battleship.Game memory extendedGame = battleship.getGameInfo(gameId);
+        assertEq(extendedGame.prizePool, 2 ether);
+        assertEq(extendedGame.lastPlayer, bob);
     }
 
     function test_AlternatingImpactTypes() public {
@@ -454,19 +324,9 @@ contract BattleshipIntegrationTest is BattleshipTestHelper {
         respondAndCounter(gameId, alice, Battleship.Impact.SUNK, 6, 6); // i=5, alice
 
         // Verify game completed the sequence
-        (
-            ,
-            ,
-            ,
-            ,
-            uint8 lastShotX,
-            uint8 lastShotY,
-            ,
-            ,
-            
-        ) = battleship.getGameInfo(gameId);
-        assertEq(lastShotX, 6); // Last i+1 is 6 (i=5, so i+1=6)
-        assertEq(lastShotY, 6);
+        Battleship.Game memory alternatingGame = battleship.getGameInfo(gameId);
+        assertEq(alternatingGame.lastShotX, 6); // Last i+1 is 6 (i=5, so i+1=6)
+        assertEq(alternatingGame.lastShotY, 6);
     }
 
     function test_AutomaticGameEndWhenEliminated() public {
@@ -495,21 +355,11 @@ contract BattleshipIntegrationTest is BattleshipTestHelper {
 
         // Verify game ended correctly
         assertTrue(battleship.isGameEnded(gameId));
-        (
-            ,
-            ,
-            ,
-            uint256 prizePool,
-            ,
-            ,
-            ,
-            ,
-            address winner
-        ) = battleship.getGameInfo(gameId);
-        assertEq(prizePool, 0); // Prize pool should be emptied
+        Battleship.Game memory eliminatedGame = battleship.getGameInfo(gameId);
+        assertEq(eliminatedGame.prizePool, 0); // Prize pool should be emptied
 
         // The winner should be the attacker (lastPlayer), which is Bob
-        assertEq(winner, bob);
+        assertEq(eliminatedGame.winner, bob);
 
         // Verify Bob (the winner) received full payout (4 ether total)
         assertEq(bob.balance, bobBalanceBeforeFinal + 4 ether);
@@ -534,19 +384,9 @@ contract BattleshipIntegrationTest is BattleshipTestHelper {
         assertFalse(battleship.isGameEnded(gameId));
 
         // Check the last shot coordinates
-        (
-            ,
-            ,
-            ,
-            ,
-            uint8 lastShotX,
-            uint8 lastShotY,
-            ,
-            ,
-            
-        ) = battleship.getGameInfo(gameId);
-        assertEq(lastShotX, 8);
-        assertEq(lastShotY, 2);
+        Battleship.Game memory scenarioGame = battleship.getGameInfo(gameId);
+        assertEq(scenarioGame.lastShotX, 8);
+        assertEq(scenarioGame.lastShotY, 2);
     }
 
     function test_ShipPlacementValidation() public {
@@ -618,18 +458,10 @@ contract BattleshipIntegrationTest is BattleshipTestHelper {
         assertTrue(battleship.isGameEnded(gameId));
         assertEq(bob.balance, winnerInitialBalance + (stake * 2));
 
-        (
-            ,
-            ,
-            ,
-            uint256 finalPrizePool,
-            ,
-            ,
-            ,
-            ,
-            address winner
-        ) = battleship.getGameInfo(gameId);
-        assertEq(finalPrizePool, 0);
-        assertEq(winner, bob);
+        // Get game state
+        Battleship.Game memory lifecycleGame = battleship.getGameInfo(gameId);
+
+        assertEq(lifecycleGame.prizePool, 0);
+        assertEq(lifecycleGame.winner, bob);
     }
 }
