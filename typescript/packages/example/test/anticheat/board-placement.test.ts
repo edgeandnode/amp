@@ -1,5 +1,5 @@
-import { beforeAll, describe, expect, test } from "vitest"
-import { type BoardCircuitInput, type CircuitTester, loadBoardCircuitTester } from "../utils.ts"
+import { describe, expect, test } from "vitest"
+import { type BoardCircuitInput, loadBoardCircuitTester } from "../utils.ts"
 
 /**
  * Anti-Cheat Tests: Board Circuit - Ship Placement Integrity
@@ -10,12 +10,6 @@ import { type BoardCircuitInput, type CircuitTester, loadBoardCircuitTester } fr
  * - BR-3: Orientation Validation
  */
 describe("board placement integrity", () => {
-  let board: CircuitTester<BoardCircuitInput>
-
-  beforeAll(async () => {
-    board = await loadBoardCircuitTester()
-  })
-
   const validBoard: BoardCircuitInput = {
     carrier: [0, 0, 0], // Length 5, horizontal
     battleship: [0, 1, 0], // Length 4, horizontal
@@ -27,6 +21,7 @@ describe("board placement integrity", () => {
 
   describe("BR-1: Ship Size Validation", () => {
     test("should enforce exact carrier length (5 cells)", async () => {
+      const board = await loadBoardCircuitTester()
       // Test carrier placed too close to right edge (would be length 4)
       const invalidCarrier: BoardCircuitInput = {
         ...validBoard,
@@ -37,6 +32,7 @@ describe("board placement integrity", () => {
     })
 
     test("should enforce exact battleship length (4 cells)", async () => {
+      const board = await loadBoardCircuitTester()
       // Test battleship placed too close to bottom edge (would be length 3)
       const invalidBattleship: BoardCircuitInput = {
         ...validBoard,
@@ -47,6 +43,7 @@ describe("board placement integrity", () => {
     })
 
     test("should enforce exact cruiser length (3 cells)", async () => {
+      const board = await loadBoardCircuitTester()
       // Test cruiser at right edge horizontally
       const invalidCruiser: BoardCircuitInput = {
         ...validBoard,
@@ -57,6 +54,7 @@ describe("board placement integrity", () => {
     })
 
     test("should enforce exact submarine length (3 cells)", async () => {
+      const board = await loadBoardCircuitTester()
       // Test submarine at bottom edge vertically
       const invalidSubmarine: BoardCircuitInput = {
         ...validBoard,
@@ -67,6 +65,7 @@ describe("board placement integrity", () => {
     })
 
     test("should enforce exact destroyer length (2 cells)", async () => {
+      const board = await loadBoardCircuitTester()
       // Test destroyer at very edge
       const invalidDestroyer: BoardCircuitInput = {
         ...validBoard,
@@ -77,6 +76,7 @@ describe("board placement integrity", () => {
     })
 
     test("should reject ships that would require negative coordinates", async () => {
+      const board = await loadBoardCircuitTester()
       // Ships can't extend backwards from position (0,0)
       // This tests the lower boundary validation
       const validMinimalBoard: BoardCircuitInput = {
@@ -95,6 +95,7 @@ describe("board placement integrity", () => {
 
   describe("BR-2: Coordinate Boundary Validation", () => {
     test("should reject ships with x coordinates >= 10", async () => {
+      const board = await loadBoardCircuitTester()
       const outOfBoundsX: BoardCircuitInput = {
         ...validBoard,
         carrier: [10, 0, 0], // x=10 is out of bounds (valid range: 0-9)
@@ -104,6 +105,7 @@ describe("board placement integrity", () => {
     })
 
     test("should reject ships with y coordinates >= 10", async () => {
+      const board = await loadBoardCircuitTester()
       const outOfBoundsY: BoardCircuitInput = {
         ...validBoard,
         battleship: [0, 10, 0], // y=10 is out of bounds (valid range: 0-9)
@@ -113,6 +115,7 @@ describe("board placement integrity", () => {
     })
 
     test("should reject ships with negative coordinates", async () => {
+      const board = await loadBoardCircuitTester()
       // Note: Depending on circuit implementation, this might be caught by type constraints
       // or need explicit validation
       const negativeX: BoardCircuitInput = {
@@ -124,6 +127,7 @@ describe("board placement integrity", () => {
     })
 
     test("should accept ships at valid boundary positions", async () => {
+      const board = await loadBoardCircuitTester()
       const boundaryBoard: BoardCircuitInput = {
         carrier: [5, 0, 0], // Horizontal, ends at x=9 (valid)
         battleship: [6, 1, 0], // Horizontal, ends at x=9 (valid)
@@ -137,6 +141,7 @@ describe("board placement integrity", () => {
     })
 
     test("should reject ships extending beyond right boundary", async () => {
+      const board = await loadBoardCircuitTester()
       const extendsBeyondRight: BoardCircuitInput = {
         ...validBoard,
         carrier: [6, 0, 0], // Starts at x=6, extends to x=10 (out of bounds)
@@ -146,6 +151,7 @@ describe("board placement integrity", () => {
     })
 
     test("should reject ships extending beyond bottom boundary", async () => {
+      const board = await loadBoardCircuitTester()
       const extendsBeyondBottom: BoardCircuitInput = {
         ...validBoard,
         battleship: [0, 7, 1], // Starts at y=7, extends to y=10 (out of bounds)
@@ -157,6 +163,7 @@ describe("board placement integrity", () => {
 
   describe("BR-3: Orientation Validation", () => {
     test("should reject invalid orientation values", async () => {
+      const board = await loadBoardCircuitTester()
       const invalidOrientation: BoardCircuitInput = {
         ...validBoard,
         carrier: [0, 0, 2], // Invalid orientation (must be 0 or 1)
@@ -166,6 +173,7 @@ describe("board placement integrity", () => {
     })
 
     test("should reject negative orientation values", async () => {
+      const board = await loadBoardCircuitTester()
       const negativeOrientation: BoardCircuitInput = {
         ...validBoard,
         battleship: [0, 1, -1], // Invalid negative orientation
@@ -175,6 +183,7 @@ describe("board placement integrity", () => {
     })
 
     test("should accept only binary orientation values", async () => {
+      const board = await loadBoardCircuitTester()
       // Test all valid orientations
       const horizontalBoard: BoardCircuitInput = {
         carrier: [0, 0, 0], // All horizontal (orientation = 0)
@@ -199,6 +208,7 @@ describe("board placement integrity", () => {
     })
 
     test("should reject large invalid orientation values", async () => {
+      const board = await loadBoardCircuitTester()
       const largeOrientation: BoardCircuitInput = {
         ...validBoard,
         destroyer: [0, 4, 999], // Invalid large orientation value
@@ -208,6 +218,7 @@ describe("board placement integrity", () => {
     })
 
     test("should validate orientation affects ship placement correctly", async () => {
+      const board = await loadBoardCircuitTester()
       // Test that vertical ships actually place vertically
       const verticalShipAtEdge: BoardCircuitInput = {
         carrier: [0, 5, 1], // Vertical carrier starting at y=5, should end at y=9

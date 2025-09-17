@@ -1,5 +1,5 @@
-import { beforeAll, describe, expect, test } from "vitest"
-import { type BoardCircuitInput, type CircuitTester, loadBoardCircuitTester } from "../utils.ts"
+import { describe, expect, test } from "vitest"
+import { type BoardCircuitInput, loadBoardCircuitTester } from "../utils.ts"
 
 /**
  * Anti-Cheat Tests: Board Circuit - Configuration Integrity
@@ -9,12 +9,6 @@ import { type BoardCircuitInput, type CircuitTester, loadBoardCircuitTester } fr
  * - BR-7: Ship Continuity Validation
  */
 describe("board configuration integrity", () => {
-  let board: CircuitTester<BoardCircuitInput>
-
-  beforeAll(async () => {
-    board = await loadBoardCircuitTester()
-  })
-
   const validBoard: BoardCircuitInput = {
     carrier: [0, 0, 0], // Length 5
     battleship: [0, 1, 0], // Length 4
@@ -26,12 +20,14 @@ describe("board configuration integrity", () => {
 
   describe("BR-6: Ship Count Validation", () => {
     test("should enforce exactly 5 ships total", async () => {
+      const board = await loadBoardCircuitTester()
       // This is implicitly tested by the circuit requiring all 5 ship inputs
       // But we can test that the total cell count is exactly 17
       await expect(board.witness(validBoard)).resolves.toBeDefined()
     })
 
     test("should enforce exactly one carrier (length 5)", async () => {
+      const board = await loadBoardCircuitTester()
       // Circuit structure enforces this, but test boundary conditions
       const carrierAtEdge: BoardCircuitInput = {
         ...validBoard,
@@ -50,6 +46,7 @@ describe("board configuration integrity", () => {
     })
 
     test("should enforce exactly one battleship (length 4)", async () => {
+      const board = await loadBoardCircuitTester()
       const battleshipAtEdge: BoardCircuitInput = {
         ...validBoard,
         battleship: [6, 1, 0], // Battleship at right edge (positions 6,7,8,9)
@@ -66,6 +63,7 @@ describe("board configuration integrity", () => {
     })
 
     test("should enforce exactly one cruiser (length 3)", async () => {
+      const board = await loadBoardCircuitTester()
       const cruiserAtEdge: BoardCircuitInput = {
         ...validBoard,
         cruiser: [7, 2, 0], // Cruiser at right edge (positions 7,8,9)
@@ -75,6 +73,7 @@ describe("board configuration integrity", () => {
     })
 
     test("should enforce exactly one submarine (length 3)", async () => {
+      const board = await loadBoardCircuitTester()
       const submarineVertical: BoardCircuitInput = {
         ...validBoard,
         submarine: [0, 7, 1], // Submarine vertical at bottom edge (positions y=7,8,9)
@@ -84,6 +83,7 @@ describe("board configuration integrity", () => {
     })
 
     test("should enforce exactly one destroyer (length 2)", async () => {
+      const board = await loadBoardCircuitTester()
       const destroyerAtCorner: BoardCircuitInput = {
         ...validBoard,
         destroyer: [8, 9, 0], // Destroyer at bottom-right corner (positions 8,9 on row 9)
@@ -93,6 +93,7 @@ describe("board configuration integrity", () => {
     })
 
     test("should validate total ship cell count equals 17", async () => {
+      const board = await loadBoardCircuitTester()
       // 5 + 4 + 3 + 3 + 2 = 17 total cells must be occupied
       // This is enforced by ship length requirements and no overlaps
       const validVariation: BoardCircuitInput = {
@@ -110,6 +111,7 @@ describe("board configuration integrity", () => {
 
   describe("BR-7: Ship Continuity Validation", () => {
     test("should enforce horizontal ship continuity", async () => {
+      const board = await loadBoardCircuitTester()
       // Horizontal ships must form straight lines
       const validHorizontalBoard: BoardCircuitInput = {
         carrier: [0, 0, 0], // (0,0), (1,0), (2,0), (3,0), (4,0)
@@ -124,6 +126,7 @@ describe("board configuration integrity", () => {
     })
 
     test("should enforce vertical ship continuity", async () => {
+      const board = await loadBoardCircuitTester()
       const validVerticalBoard: BoardCircuitInput = {
         carrier: [0, 0, 1], // (0,0), (0,1), (0,2), (0,3), (0,4)
         battleship: [1, 0, 1], // (1,0), (1,1), (1,2), (1,3)
@@ -137,6 +140,8 @@ describe("board configuration integrity", () => {
     })
 
     test("should reject ships with gaps", async () => {
+      const board = await loadBoardCircuitTester()
+
       // This test depends on circuit implementation
       // If the circuit calculates cell positions from start position + orientation + length,
       // then gaps are impossible. But if it takes explicit cell lists, this would be tested.
@@ -156,9 +161,10 @@ describe("board configuration integrity", () => {
     })
 
     test("should validate ships form straight lines only", async () => {
+      const board = await loadBoardCircuitTester()
+
       // With position + orientation design, ships can only be straight
       // Test that orientation values properly control direction
-
       const mixedOrientations: BoardCircuitInput = {
         carrier: [0, 0, 0], // Horizontal
         battleship: [1, 1, 1], // Vertical
@@ -172,6 +178,8 @@ describe("board configuration integrity", () => {
     })
 
     test("should handle ships at board boundaries correctly", async () => {
+      const board = await loadBoardCircuitTester()
+
       // Test continuity at edges where ships touch boundaries
       const boundaryShips: BoardCircuitInput = {
         carrier: [0, 0, 0], // Left edge horizontal
@@ -186,6 +194,8 @@ describe("board configuration integrity", () => {
     })
 
     test("should validate each ship type maintains proper continuity", async () => {
+      const board = await loadBoardCircuitTester()
+
       // Test that each specific ship type forms correct continuous shape
       // Using non-overlapping positions
       const shipContinuityTests = [
@@ -252,6 +262,8 @@ describe("board configuration integrity", () => {
     })
 
     test("should enforce continuity across all ship orientations", async () => {
+      const board = await loadBoardCircuitTester()
+
       // Test that both horizontal (0) and vertical (1) orientations work correctly
       const orientationTests = [
         {

@@ -1,5 +1,5 @@
-import { beforeAll, describe, expect, test } from "vitest"
-import { type BoardCircuitInput, type CircuitTester, loadBoardCircuitTester } from "../utils.ts"
+import { describe, expect, test } from "vitest"
+import { type BoardCircuitInput, loadBoardCircuitTester } from "../utils.ts"
 
 /**
  * Anti-Cheat Tests: Board Circuit - Ship Overlap Prevention
@@ -9,12 +9,6 @@ import { type BoardCircuitInput, type CircuitTester, loadBoardCircuitTester } fr
  * - BR-5: Complete Overlap Detection
  */
 describe("board overlap prevention", () => {
-  let board: CircuitTester<BoardCircuitInput>
-
-  beforeAll(async () => {
-    board = await loadBoardCircuitTester()
-  })
-
   const validBoard: BoardCircuitInput = {
     carrier: [0, 0, 0], // Horizontal (0,0) to (4,0)
     battleship: [0, 1, 0], // Horizontal (0,1) to (3,1)
@@ -26,6 +20,7 @@ describe("board overlap prevention", () => {
 
   describe("BR-4: Coordinate Uniqueness", () => {
     test("should reject direct ship cell overlaps", async () => {
+      const board = await loadBoardCircuitTester()
       // Place carrier and battleship at same position
       const directOverlap: BoardCircuitInput = {
         ...validBoard,
@@ -37,6 +32,7 @@ describe("board overlap prevention", () => {
     })
 
     test("should reject partial overlaps between ships", async () => {
+      const board = await loadBoardCircuitTester()
       // Carrier and battleship sharing some cells
       const partialOverlap: BoardCircuitInput = {
         ...validBoard,
@@ -48,6 +44,7 @@ describe("board overlap prevention", () => {
     })
 
     test("should reject single cell overlaps", async () => {
+      const board = await loadBoardCircuitTester()
       // Ships sharing exactly one cell
       const singleCellOverlap: BoardCircuitInput = {
         ...validBoard,
@@ -59,6 +56,7 @@ describe("board overlap prevention", () => {
     })
 
     test("should ensure all 17 ship cells are unique", async () => {
+      const board = await loadBoardCircuitTester()
       // Total cells: 5 + 4 + 3 + 3 + 2 = 17
       // Each cell position must be unique across all ships
       const edgeCaseOverlap: BoardCircuitInput = {
@@ -74,6 +72,7 @@ describe("board overlap prevention", () => {
     })
 
     test("should accept ships with no overlaps", async () => {
+      const board = await loadBoardCircuitTester()
       const nonOverlappingBoard: BoardCircuitInput = {
         carrier: [0, 0, 0], // (0,0) to (4,0)
         battleship: [0, 1, 0], // (0,1) to (3,1)
@@ -89,6 +88,7 @@ describe("board overlap prevention", () => {
 
   describe("BR-5: Complete Overlap Detection", () => {
     test("should detect overlaps between horizontal ships", async () => {
+      const board = await loadBoardCircuitTester()
       const horizontalOverlap: BoardCircuitInput = {
         carrier: [1, 1, 0], // (1,1) to (5,1)
         battleship: [3, 1, 0], // (3,1) to (6,1) - overlaps at (3,1), (4,1), (5,1)
@@ -102,6 +102,7 @@ describe("board overlap prevention", () => {
     })
 
     test("should detect overlaps between vertical ships", async () => {
+      const board = await loadBoardCircuitTester()
       const verticalOverlap: BoardCircuitInput = {
         carrier: [1, 1, 1], // (1,1) to (1,5)
         battleship: [1, 3, 1], // (1,3) to (1,6) - overlaps at (1,3), (1,4), (1,5)
@@ -115,6 +116,7 @@ describe("board overlap prevention", () => {
     })
 
     test("should detect overlaps between horizontal and vertical ships", async () => {
+      const board = await loadBoardCircuitTester()
       const mixedOrientationOverlap: BoardCircuitInput = {
         carrier: [2, 2, 0], // (2,2) to (6,2) horizontal
         battleship: [4, 0, 1], // (4,0) to (4,3) vertical - overlaps at (4,2)
@@ -128,6 +130,7 @@ describe("board overlap prevention", () => {
     })
 
     test("should detect complex multi-ship overlaps", async () => {
+      const board = await loadBoardCircuitTester()
       // Multiple ships sharing the same area
       const multiShipOverlap: BoardCircuitInput = {
         carrier: [2, 2, 0], // (2,2) to (6,2)
@@ -142,6 +145,7 @@ describe("board overlap prevention", () => {
     })
 
     test("should handle edge case overlaps at board boundaries", async () => {
+      const board = await loadBoardCircuitTester()
       const boundaryOverlap: BoardCircuitInput = {
         carrier: [5, 9, 0], // (5,9) to (9,9) - at bottom edge
         battleship: [9, 6, 1], // (9,6) to (9,9) - at right edge, overlaps carrier at (9,9)
@@ -155,6 +159,7 @@ describe("board overlap prevention", () => {
     })
 
     test("should detect overlaps involving all ship types", async () => {
+      const board = await loadBoardCircuitTester()
       // Test that overlap detection works for every pair of ship types
       const carrierBattleshipOverlap: BoardCircuitInput = {
         carrier: [0, 0, 0], // (0,0) to (4,0)
@@ -169,6 +174,7 @@ describe("board overlap prevention", () => {
     })
 
     test("should accept ships that are adjacent but not overlapping", async () => {
+      const board = await loadBoardCircuitTester()
       const adjacentButValid: BoardCircuitInput = {
         carrier: [0, 0, 0], // (0,0) to (4,0)
         battleship: [0, 1, 0], // (0,1) to (3,1) - adjacent to carrier
@@ -182,6 +188,7 @@ describe("board overlap prevention", () => {
     })
 
     test("should handle minimum separation requirements", async () => {
+      const board = await loadBoardCircuitTester()
       // Ships can be adjacent (touching edges) but not overlapping
       const touchingEdges: BoardCircuitInput = {
         carrier: [0, 0, 0], // (0,0) to (4,0)

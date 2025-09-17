@@ -1,5 +1,5 @@
-import { beforeAll, describe, expect, test } from "vitest"
-import { type BoardCircuitInput, type CircuitTester, loadBoardCircuitTester } from "../utils.ts"
+import { describe, expect, test } from "vitest"
+import { type BoardCircuitInput, loadBoardCircuitTester } from "../utils.ts"
 
 /**
  * Anti-Cheat Tests: Board Circuit - Commitment Integrity
@@ -10,12 +10,6 @@ import { type BoardCircuitInput, type CircuitTester, loadBoardCircuitTester } fr
  * - BR-10: Salt Uniqueness Enforcement
  */
 describe("board commitment integrity", () => {
-  let board: CircuitTester<BoardCircuitInput>
-
-  beforeAll(async () => {
-    board = await loadBoardCircuitTester()
-  })
-
   const standardBoard: BoardCircuitInput = {
     carrier: [0, 0, 0],
     battleship: [0, 1, 0],
@@ -30,6 +24,7 @@ describe("board commitment integrity", () => {
       const board1 = { ...standardBoard }
       const board2 = { ...standardBoard }
 
+      const board = await loadBoardCircuitTester()
       const witness1 = await board.witness(board1)
       const witness2 = await board.witness(board2)
 
@@ -43,6 +38,7 @@ describe("board commitment integrity", () => {
         carrier: [1, 0, 0], // Different carrier position
       }
 
+      const board = await loadBoardCircuitTester()
       const witness1 = await board.witness(board1)
       const witness2 = await board.witness(board2)
 
@@ -67,6 +63,7 @@ describe("board commitment integrity", () => {
         salt: 12345,
       }
 
+      const board = await loadBoardCircuitTester()
       const witness1 = await board.witness(board1)
       const witness2 = await board.witness(board2)
 
@@ -83,6 +80,7 @@ describe("board commitment integrity", () => {
         salt: 54321,
       }
 
+      const board = await loadBoardCircuitTester()
       const witness1 = await board.witness(board1)
       const witness2 = await board.witness(board2)
 
@@ -93,6 +91,7 @@ describe("board commitment integrity", () => {
   describe("BR-9: Commitment Binding", () => {
     test("should bind commitment to exact ship configuration", async () => {
       const boardConfig = { ...standardBoard }
+      const board = await loadBoardCircuitTester()
       const witness = await board.witness(boardConfig)
       const commitment = witness[1].toString()
 
@@ -107,6 +106,7 @@ describe("board commitment integrity", () => {
       // rather than accepting an external commitment input
 
       const validBoard = { ...standardBoard }
+      const board = await loadBoardCircuitTester()
       const witness = await board.witness(validBoard)
 
       // The circuit should generate a specific commitment for this configuration
@@ -114,6 +114,7 @@ describe("board commitment integrity", () => {
     })
 
     test("should ensure commitment changes with any configuration change", async () => {
+      const board = await loadBoardCircuitTester()
       const originalWitness = await board.witness(standardBoard)
       const originalCommitment = originalWitness[1]
 
@@ -135,6 +136,7 @@ describe("board commitment integrity", () => {
 
   describe("BR-10: Salt Uniqueness Enforcement", () => {
     test("should require salt contribution to commitment uniqueness", async () => {
+      const board = await loadBoardCircuitTester()
       const sameBoardDifferentSalts = [
         { ...standardBoard, salt: 11111 },
         { ...standardBoard, salt: 22222 },
@@ -154,9 +156,10 @@ describe("board commitment integrity", () => {
     })
 
     test("should enforce salt as private input", async () => {
+      const board = await loadBoardCircuitTester()
+
       // Salt should be a private input that affects the commitment
       // but is not revealed in the public outputs
-
       const boardWithSalt = { ...standardBoard, salt: 98765 }
       const witness = await board.witness(boardWithSalt)
 
@@ -166,9 +169,10 @@ describe("board commitment integrity", () => {
     })
 
     test("should prevent commitment precomputation attacks", async () => {
+      const board = await loadBoardCircuitTester()
+
       // Different salts should produce sufficiently different commitments
       // to prevent precomputation attacks
-
       const saltVariants = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
       const commitments = new Set()
 
@@ -183,10 +187,11 @@ describe("board commitment integrity", () => {
     })
 
     test("should ensure salt affects commitment calculation", async () => {
+      const board = await loadBoardCircuitTester()
+
       // Test that salt is actually used in commitment generation
       // by checking that the same ship configuration with different salts
       // produces different commitments
-
       const zeroSalt = { ...standardBoard, salt: 0 }
       const maxSalt = { ...standardBoard, salt: 999999999 }
 
@@ -200,6 +205,8 @@ describe("board commitment integrity", () => {
     })
 
     test("should validate salt range and constraints", async () => {
+      const board = await loadBoardCircuitTester()
+
       // Test edge cases for salt values
       const saltEdgeCases = [
         { ...standardBoard, salt: 0 }, // Minimum

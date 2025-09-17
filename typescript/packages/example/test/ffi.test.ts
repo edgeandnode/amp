@@ -1,10 +1,9 @@
-import { describe, test, expect } from "vitest"
 import { spawn } from "child_process"
 import * as path from "path"
+import { describe, expect, test } from "vitest"
+import type { BoardProofRequest, ProofRequest, ProofResponse, ShotProofRequest } from "./ffi.ts"
 import type { BoardCircuitInput, ShotCircuitInput } from "./utils.ts"
 import { poseidonHash, poseidonHashSalt } from "./utils.ts"
-import type { ProofRequest, ProofResponse } from "./ffi.ts"
-import type { BoardProofRequest, ShotProofRequest } from "./ffi.ts"
 
 /**
  * Call the FFI script with JSON input and return parsed response
@@ -13,7 +12,7 @@ async function callFFI(request: ProofRequest): Promise<ProofResponse> {
   return new Promise((resolve, reject) => {
     const scriptPath = path.resolve(import.meta.dirname, "ffi.ts")
     const child = spawn("node", ["--experimental-transform-types", scriptPath], {
-      stdio: ["pipe", "pipe", "ignore"] // Ignore stderr to suppress experimental warnings
+      stdio: ["pipe", "pipe", "ignore"], // Ignore stderr to suppress experimental warnings
     })
 
     // Add timeout for the entire test
@@ -58,27 +57,19 @@ async function callFFI(request: ProofRequest): Promise<ProofResponse> {
  * Valid ship configuration for testing
  */
 const validBoardConfig: BoardCircuitInput = {
-  carrier: [0, 0, 0],      // (0,0) horizontal, length 5: (0,0)-(4,0)
-  battleship: [0, 1, 0],   // (0,1) horizontal, length 4: (0,1)-(3,1)
-  cruiser: [0, 2, 0],      // (0,2) horizontal, length 3: (0,2)-(2,2)
-  submarine: [0, 3, 0],    // (0,3) horizontal, length 3: (0,3)-(2,3)
-  destroyer: [0, 4, 0],    // (0,4) horizontal, length 2: (0,4)-(1,4)
-  salt: 12345
+  carrier: [0, 0, 0], // (0,0) horizontal, length 5: (0,0)-(4,0)
+  battleship: [0, 1, 0], // (0,1) horizontal, length 4: (0,1)-(3,1)
+  cruiser: [0, 2, 0], // (0,2) horizontal, length 3: (0,2)-(2,2)
+  submarine: [0, 3, 0], // (0,3) horizontal, length 3: (0,3)-(2,3)
+  destroyer: [0, 4, 0], // (0,4) horizontal, length 2: (0,4)-(1,4)
+  salt: 12345,
 }
 
 describe("FFI Script Tests", () => {
-
-  test("should have accessible FFI script", () => {
-    const scriptPath = path.resolve(import.meta.dirname, "ffi.ts")
-    expect(() => {
-      require('fs').accessSync(scriptPath, require('fs').constants.F_OK | require('fs').constants.R_OK)
-    }).not.toThrow()
-  })
-
   test("should generate board proof", async () => {
     const request: BoardProofRequest = {
       type: "board",
-      input: validBoardConfig
+      input: validBoardConfig,
     }
 
     const response = await callFFI(request)
@@ -114,11 +105,11 @@ describe("FFI Script Tests", () => {
     // Generate board commitment directly in test using utils
     const boardCommitment = await poseidonHash([
       ...validBoardConfig.carrier,
-      ...validBoardConfig.battleship, 
+      ...validBoardConfig.battleship,
       ...validBoardConfig.cruiser,
       ...validBoardConfig.submarine,
       ...validBoardConfig.destroyer,
-      validBoardConfig.salt
+      validBoardConfig.salt,
     ])
 
     // Generate initial state commitment (all ships with 0 hits)
@@ -133,21 +124,21 @@ describe("FFI Script Tests", () => {
       claimedResult: 0, // MISS
       claimedShipId: 255, // No ship hit
       boardCommitment,
-      // Private inputs  
+      // Private inputs
       ships: [
         validBoardConfig.carrier,
         validBoardConfig.battleship,
         validBoardConfig.cruiser,
         validBoardConfig.submarine,
-        validBoardConfig.destroyer
+        validBoardConfig.destroyer,
       ],
       previousHitCounts: [0, 0, 0, 0, 0],
-      salt: 12345
+      salt: 12345,
     }
 
     const request: ShotProofRequest = {
       type: "shot",
-      input: shotInput
+      input: shotInput,
     }
 
     const response = await callFFI(request)
@@ -182,7 +173,7 @@ describe("FFI Script Tests", () => {
     return new Promise<void>((resolve, reject) => {
       const scriptPath = path.resolve(import.meta.dirname, "ffi.ts")
       const child = spawn("node", ["--experimental-transform-types", scriptPath], {
-        stdio: ["pipe", "pipe", "ignore"] // Ignore stderr to suppress experimental warnings
+        stdio: ["pipe", "pipe", "ignore"], // Ignore stderr to suppress experimental warnings
       })
 
       let stdout = ""
@@ -217,7 +208,7 @@ describe("FFI Script Tests", () => {
   test("should handle unknown request type", async () => {
     const request = {
       type: "unknown",
-      input: {}
+      input: {},
     }
 
     const response = await callFFI(request as any)

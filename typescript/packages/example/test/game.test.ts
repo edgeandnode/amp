@@ -1,18 +1,9 @@
-import { beforeAll, describe, expect, test } from "vitest"
-import {
-  type BoardSimulation,
-  cheatHit,
-  cheatHitCounts,
-  cheatMiss,
-  cheatOverride,
-  cheatSunk,
-  createBoardSimulation,
-} from "./simulation.ts"
+import { describe, expect, test } from "vitest"
+import { cheatHit, cheatHitCounts, cheatMiss, cheatOverride, cheatSunk, createBoardSimulation } from "./simulation.ts"
 
 describe("battleship game simulation", () => {
-  let sim: BoardSimulation
-  beforeAll(async () => {
-    sim = await createBoardSimulation({
+  test("complete game - normal gameplay", async () => {
+    const sim = await createBoardSimulation({
       carrier: [0, 0, 0], // (0,0) to (4,0) horizontal
       battleship: [0, 1, 0], // (0,1) to (3,1) horizontal
       cruiser: [0, 2, 0], // (0,2) to (2,2) horizontal
@@ -20,9 +11,7 @@ describe("battleship game simulation", () => {
       destroyer: [0, 4, 0], // (0,4) to (1,4) horizontal
       salt: 12345,
     })
-  })
 
-  test("complete game - normal gameplay", async () => {
     // Eliminate carrier (5 hits)
     await sim.fireShot(0, 0) // Hit
     expect(sim.getRemainingShips()).toBe(5)
@@ -65,7 +54,7 @@ describe("battleship game simulation", () => {
   })
 
   test("miss shots", async () => {
-    const missingSim = await createBoardSimulation({
+    const sim = await createBoardSimulation({
       carrier: [0, 0, 0],
       battleship: [0, 1, 0],
       cruiser: [0, 2, 0],
@@ -75,17 +64,17 @@ describe("battleship game simulation", () => {
     })
 
     // Shoot at empty spaces
-    await missingSim.fireShot(5, 5) // Miss
-    expect(missingSim.getRemainingShips()).toBe(5)
-    expect(missingSim.getCellState(5, 5)).toBe("miss")
+    await sim.fireShot(5, 5) // Miss
+    expect(sim.getRemainingShips()).toBe(5)
+    expect(sim.getCellState(5, 5)).toBe("miss")
 
-    await missingSim.fireShot(9, 9) // Miss
-    expect(missingSim.getRemainingShips()).toBe(5)
-    expect(missingSim.getCellState(9, 9)).toBe("miss")
+    await sim.fireShot(9, 9) // Miss
+    expect(sim.getRemainingShips()).toBe(5)
+    expect(sim.getCellState(9, 9)).toBe("miss")
   })
 
   test("duplicate shot validation", async () => {
-    const dupeSim = await createBoardSimulation({
+    const sim = await createBoardSimulation({
       carrier: [0, 0, 0],
       battleship: [0, 1, 0],
       cruiser: [0, 2, 0],
@@ -95,23 +84,22 @@ describe("battleship game simulation", () => {
     })
 
     // First shot should succeed
-    await dupeSim.fireShot(0, 0) // Hit carrier
-    expect(dupeSim.getCellState(0, 0)).toBe("hit")
+    await sim.fireShot(0, 0) // Hit carrier
+    expect(sim.getCellState(0, 0)).toBe("hit")
 
     // Second shot to same location should fail
-    await expect(dupeSim.fireShot(0, 0)).rejects.toThrow("already been shot")
+    await expect(sim.fireShot(0, 0)).rejects.toThrow("already been shot")
 
     // Miss and then shoot same spot again
-    await dupeSim.fireShot(5, 5) // Miss
-    expect(dupeSim.getCellState(5, 5)).toBe("miss")
+    await sim.fireShot(5, 5) // Miss
+    expect(sim.getCellState(5, 5)).toBe("miss")
 
-    await expect(dupeSim.fireShot(5, 5)).rejects.toThrow("already been shot")
+    await expect(sim.fireShot(5, 5)).rejects.toThrow("already been shot")
   })
 
   describe("security tests - cheat attempts", () => {
-    let cheatSim: BoardSimulation
-    beforeAll(async () => {
-      cheatSim = await createBoardSimulation({
+    test("cheat: claim miss when actually hit", async () => {
+      const sim = await createBoardSimulation({
         carrier: [2, 2, 0], // (2,2) to (6,2) horizontal
         battleship: [2, 3, 0], // (2,3) to (5,3) horizontal
         cruiser: [2, 4, 0], // (2,4) to (4,4) horizontal
@@ -119,55 +107,95 @@ describe("battleship game simulation", () => {
         destroyer: [2, 6, 0], // (2,6) to (3,6) horizontal
         salt: 99999,
       })
-    })
 
-    test("cheat: claim miss when actually hit", async () => {
       // Shot will hit carrier, but we claim miss
-      await expect(cheatSim.fireShot(2, 2, cheatMiss())).rejects.toThrow() // Circuit should reject
+      await expect(sim.fireShot(2, 2, cheatMiss())).rejects.toThrow() // Circuit should reject
     })
 
     test("cheat: claim hit when actually miss", async () => {
+      const sim = await createBoardSimulation({
+        carrier: [2, 2, 0], // (2,2) to (6,2) horizontal
+        battleship: [2, 3, 0], // (2,3) to (5,3) horizontal
+        cruiser: [2, 4, 0], // (2,4) to (4,4) horizontal
+        submarine: [2, 5, 0], // (2,5) to (4,5) horizontal
+        destroyer: [2, 6, 0], // (2,6) to (3,6) horizontal
+        salt: 99999,
+      })
+
       // Shot will miss, but we claim hit
-      await expect(cheatSim.fireShot(0, 0, cheatHit())).rejects.toThrow() // Circuit should reject
+      await expect(sim.fireShot(0, 0, cheatHit())).rejects.toThrow() // Circuit should reject
     })
 
     test("cheat: claim wrong ship hit", async () => {
+      const sim = await createBoardSimulation({
+        carrier: [2, 2, 0], // (2,2) to (6,2) horizontal
+        battleship: [2, 3, 0], // (2,3) to (5,3) horizontal
+        cruiser: [2, 4, 0], // (2,4) to (4,4) horizontal
+        submarine: [2, 5, 0], // (2,5) to (4,5) horizontal
+        destroyer: [2, 6, 0], // (2,6) to (3,6) horizontal
+        salt: 99999,
+      })
+
       // Shot hits carrier (ship 0), but claim battleship (ship 1)
-      await expect(cheatSim.fireShot(3, 2, cheatHit(1))).rejects.toThrow() // Circuit should reject
+      await expect(sim.fireShot(3, 2, cheatHit(1))).rejects.toThrow() // Circuit should reject
     })
 
     test("cheat: premature sunk claim", async () => {
+      const sim = await createBoardSimulation({
+        carrier: [2, 2, 0], // (2,2) to (6,2) horizontal
+        battleship: [2, 3, 0], // (2,3) to (5,3) horizontal
+        cruiser: [2, 4, 0], // (2,4) to (4,4) horizontal
+        submarine: [2, 5, 0], // (2,5) to (4,5) horizontal
+        destroyer: [2, 6, 0], // (2,6) to (3,6) horizontal
+        salt: 99999,
+      })
+
       // First hit on carrier, but claim it's sunk
-      await expect(cheatSim.fireShot(4, 2, cheatSunk(0))).rejects.toThrow() // Circuit should reject
+      await expect(sim.fireShot(4, 2, cheatSunk(0))).rejects.toThrow() // Circuit should reject
     })
 
     test("cheat: manipulate hit counts", async () => {
+      const sim = await createBoardSimulation({
+        carrier: [2, 2, 0], // (2,2) to (6,2) horizontal
+        battleship: [2, 3, 0], // (2,3) to (5,3) horizontal
+        cruiser: [2, 4, 0], // (2,4) to (4,4) horizontal
+        submarine: [2, 5, 0], // (2,5) to (4,5) horizontal
+        destroyer: [2, 6, 0], // (2,6) to (3,6) horizontal
+        salt: 99999,
+      })
+
       // Hit carrier
-      await cheatSim.fireShot(2, 2)
+      await sim.fireShot(2, 2)
       // Try to reset hit counts to 0
-      await expect(cheatSim.fireShot(5, 2, cheatHitCounts([0, 0, 0, 0, 0]))).rejects.toThrow() // Circuit should reject wrong previous state
+      await expect(sim.fireShot(5, 2, cheatHitCounts([0, 0, 0, 0, 0]))).rejects.toThrow() // Circuit should reject wrong previous state
     })
 
     test("cheat: wrong commitment", async () => {
+      const sim = await createBoardSimulation({
+        carrier: [2, 2, 0], // (2,2) to (6,2) horizontal
+        battleship: [2, 3, 0], // (2,3) to (5,3) horizontal
+        cruiser: [2, 4, 0], // (2,4) to (4,4) horizontal
+        submarine: [2, 5, 0], // (2,5) to (4,5) horizontal
+        destroyer: [2, 6, 0], // (2,6) to (3,6) horizontal
+        salt: 99999,
+      })
+
       // Use fake previous commitment
-      await expect(cheatSim.fireShot(
-        6,
-        2,
-        cheatOverride({
-          previousCommitment: "123456789", // Fake commitment
-        }),
-      )).rejects.toThrow() // Circuit should reject
+      await expect(sim.fireShot(6, 2, cheatOverride({ previousCommitment: "123456789" }))).rejects.toThrow() // Circuit should reject
     })
 
     test("cheat: manipulate board commitment", async () => {
+      const sim = await createBoardSimulation({
+        carrier: [2, 2, 0], // (2,2) to (6,2) horizontal
+        battleship: [2, 3, 0], // (2,3) to (5,3) horizontal
+        cruiser: [2, 4, 0], // (2,4) to (4,4) horizontal
+        submarine: [2, 5, 0], // (2,5) to (4,5) horizontal
+        destroyer: [2, 6, 0], // (2,6) to (3,6) horizontal
+        salt: 99999,
+      })
+
       // Try to use different board commitment
-      await expect(cheatSim.fireShot(
-        1,
-        1,
-        cheatOverride({
-          boardCommitment: "123456789", // Fake commitment
-        }),
-      )).rejects.toThrow() // Circuit should reject
+      await expect(sim.fireShot(1, 1, cheatOverride({ boardCommitment: "123456789" }))).rejects.toThrow() // Circuit should reject
     })
   })
 })
