@@ -17,8 +17,9 @@ template BattleshipBoard() {
     signal input destroyer[3];   // [x, y, orientation] - Length 2
     signal input salt;   // Random salt for commitment uniqueness
 
-    // Public output: board commitment
+    // Public outputs: board commitment and initial state commitment
     signal output commitment;
+    signal output initialStateCommitment;
 
     // Validate each ship individually first (early exit on placement errors)
     component validateCarrier = ValidateShip(5);
@@ -124,8 +125,21 @@ template BattleshipBoard() {
     hasher.inputs[14] <== destroyer[2];
     hasher.inputs[15] <== salt;
 
-    // Output the commitment
+    // Output the board commitment
     commitment <== hasher.out;
+
+    // Generate initial state commitment for shot circuit
+    // Initial hit counts are always [0, 0, 0, 0, 0] with the same salt
+    component initialStateHasher = Poseidon(6);
+    initialStateHasher.inputs[0] <== 0;  // carrier hit count
+    initialStateHasher.inputs[1] <== 0;  // battleship hit count
+    initialStateHasher.inputs[2] <== 0;  // cruiser hit count
+    initialStateHasher.inputs[3] <== 0;  // submarine hit count
+    initialStateHasher.inputs[4] <== 0;  // destroyer hit count
+    initialStateHasher.inputs[5] <== salt;
+
+    // Output the initial state commitment
+    initialStateCommitment <== initialStateHasher.out;
 }
 
 // Instantiate the main component

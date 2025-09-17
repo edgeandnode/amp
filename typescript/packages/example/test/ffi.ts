@@ -40,6 +40,7 @@ interface ProofResponse {
   }
   publicOutputs?: {
     commitment?: string
+    initialStateCommitment?: string
     newCommitment?: string
     remainingShips?: number
   }
@@ -72,8 +73,11 @@ async function readStdin(): Promise<string> {
  */
 async function generateBoardProof(request: BoardCircuitInput): Promise<ProofResponse> {
   try {
+    console.error("Loading board circuit tester...")
     const boardTester = await loadBoardCircuitTester()
+    console.error("Generating board proof...")
     const proofOutput = await boardTester.prove(request)
+    console.error("Board proof generated successfully")
     
     return {
       success: true,
@@ -87,10 +91,12 @@ async function generateBoardProof(request: BoardCircuitInput): Promise<ProofResp
         publicInputs: proofOutput.publicSignals.map(signal => signal.toString())
       },
       publicOutputs: {
-        commitment: proofOutput.publicSignals[0].toString()
+        commitment: proofOutput.publicSignals[0].toString(),
+        initialStateCommitment: proofOutput.publicSignals[1].toString()
       }
     }
   } catch (error) {
+    console.error("Board proof generation failed:", error)
     return {
       success: false,
       error: `Board proof generation failed: ${error}`
@@ -103,11 +109,12 @@ async function generateBoardProof(request: BoardCircuitInput): Promise<ProofResp
  */
 async function generateShotProof(request: ShotCircuitInput): Promise<ProofResponse> {
   try {
+    console.error("Loading shot circuit tester...")
     const shotTester = await loadShotCircuitTester()
+    console.error("Generating shot proof...")
     const proofOutput = await shotTester.prove(request)
-    
-    // The shot circuit has 6 public inputs and 2 public outputs
-    // publicSignals[0-5] are the inputs, publicSignals[6-7] are the outputs
+    console.error("Shot proof generated successfully")
+
     return {
       success: true,
       proof: {
@@ -117,14 +124,15 @@ async function generateShotProof(request: ShotCircuitInput): Promise<ProofRespon
           [proofOutput.proof.pi_b[1][1].toString(), proofOutput.proof.pi_b[1][0].toString()]
         ],
         piC: [proofOutput.proof.pi_c[0].toString(), proofOutput.proof.pi_c[1].toString()],
-        publicInputs: proofOutput.publicSignals.slice(0, 6).map(signal => signal.toString())
+        publicInputs: proofOutput.publicSignals.map(signal => signal.toString())
       },
       publicOutputs: {
-        newCommitment: proofOutput.publicSignals[6].toString(),
-        remainingShips: Number(proofOutput.publicSignals[7].toString())
+        newCommitment: proofOutput.publicSignals[0].toString(), // Index 0 contains newCommitment
+        remainingShips: Number(proofOutput.publicSignals[1].toString())
       }
     }
   } catch (error) {
+    console.error("Shot proof generation failed:", error)
     return {
       success: false,
       error: `Shot proof generation failed: ${error}`
@@ -169,7 +177,7 @@ async function main() {
     
     // Output result
     console.log(JSON.stringify(response))
-    
+    process.exit(0)
   } catch (error) {
     const response: ProofResponse = {
       success: false,
@@ -181,11 +189,4 @@ async function main() {
 }
 
 // Run main function
-main().catch((error) => {
-  const response: ProofResponse = {
-    success: false,
-    error: `Fatal error: ${error}`
-  }
-  console.log(JSON.stringify(response))
-  process.exit(1)
-})
+main()

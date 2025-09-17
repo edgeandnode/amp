@@ -30,6 +30,7 @@ interface ProofResponse {
   }
   publicOutputs?: {
     commitment?: string
+    initialStateCommitment?: string
     newCommitment?: string
     remainingShips?: number
   }
@@ -40,25 +41,27 @@ interface ProofResponse {
  */
 async function callFFI(request: FFIRequest): Promise<ProofResponse> {
   return new Promise((resolve, reject) => {
-    const scriptPath = path.resolve(import.meta.dirname, "ffi-mock.ts")
-    const child = spawn("bun", ["run", scriptPath], {
-      stdio: ["pipe", "pipe", "pipe"]
+    const scriptPath = path.resolve(import.meta.dirname, "ffi.ts")
+    const child = spawn("node", ["--experimental-transform-types", scriptPath], {
+      stdio: ["pipe", "pipe", "ignore"] // Ignore stderr to suppress experimental warnings
     })
 
+    // Add timeout for the entire test
+    const timeout = setTimeout(() => {
+      child.kill()
+      reject(new Error("FFI call timed out after 35 seconds"))
+    }, 35000) // 35 seconds total timeout
+
     let stdout = ""
-    let stderr = ""
 
     child.stdout.on("data", (data) => {
       stdout += data.toString()
     })
 
-    child.stderr.on("data", (data) => {
-      stderr += data.toString()
-    })
-
     child.on("close", (code) => {
+      clearTimeout(timeout)
       if (code !== 0) {
-        reject(new Error(`FFI script failed with code ${code}:\nstderr: ${stderr}\nstdout: ${stdout}`))
+        reject(new Error(`FFI script failed with code ${code}:\nstdout: ${stdout}`))
         return
       }
 
@@ -71,6 +74,7 @@ async function callFFI(request: FFIRequest): Promise<ProofResponse> {
     })
 
     child.on("error", (error) => {
+      clearTimeout(timeout)
       reject(error)
     })
 
@@ -94,6 +98,13 @@ const validBoardConfig: BoardCircuitInput = {
 
 describe("FFI Script Tests", () => {
 
+  test("should have accessible FFI script", () => {
+    const scriptPath = path.resolve(import.meta.dirname, "ffi.ts")
+    expect(() => {
+      require('fs').accessSync(scriptPath, require('fs').constants.F_OK | require('fs').constants.R_OK)
+    }).not.toThrow()
+  })
+
   test("should generate board proof", async () => {
     const request: BoardProofRequest = {
       type: "board",
@@ -106,6 +117,7 @@ describe("FFI Script Tests", () => {
     expect(response.error).toBeUndefined()
     expect(response.proof).toBeDefined()
     expect(response.publicOutputs?.commitment).toBeDefined()
+    expect(response.publicOutputs?.initialStateCommitment).toBeDefined()
 
     // Validate proof structure
     const proof = response.proof!
@@ -114,7 +126,7 @@ describe("FFI Script Tests", () => {
     expect(proof.piB[0]).toHaveLength(2)
     expect(proof.piB[1]).toHaveLength(2)
     expect(proof.piC).toHaveLength(2)
-    expect(proof.publicInputs).toHaveLength(1) // Board proof has 1 public input
+    expect(proof.publicInputs).toHaveLength(2) // Board proof now has 2 public outputs
 
     // Validate that all proof elements are valid numbers
     expect(() => BigInt(proof.piA[0])).not.toThrow()
@@ -124,7 +136,8 @@ describe("FFI Script Tests", () => {
     expect(() => BigInt(proof.publicInputs[0])).not.toThrow()
 
     console.log("Board proof generated successfully")
-    console.log("Commitment from proof:", proof.publicInputs[0])
+    console.log("Board commitment:", proof.publicInputs[0])
+    console.log("Initial state commitment:", proof.publicInputs[1])
   })
 
   test("should generate shot proof", async () => {
@@ -182,7 +195,7 @@ describe("FFI Script Tests", () => {
     expect(proof.piB[0]).toHaveLength(2)
     expect(proof.piB[1]).toHaveLength(2)
     expect(proof.piC).toHaveLength(2)
-    expect(proof.publicInputs).toHaveLength(6) // Shot proof has 6 public inputs
+    expect(proof.publicInputs).toHaveLength(8) // Shot proof now has 8 total public signals (6 inputs + 2 outputs)
 
     // Validate that all proof elements are valid numbers
     expect(() => BigInt(proof.piA[0])).not.toThrow()
@@ -198,8 +211,8 @@ describe("FFI Script Tests", () => {
   test("should handle invalid JSON input", async () => {
     return new Promise<void>((resolve, reject) => {
       const scriptPath = path.resolve(import.meta.dirname, "ffi.ts")
-      const child = spawn("bun", ["run", scriptPath], {
-        stdio: ["pipe", "pipe", "pipe"]
+      const child = spawn("node", ["--experimental-transform-types", scriptPath], {
+        stdio: ["pipe", "pipe", "ignore"] // Ignore stderr to suppress experimental warnings
       })
 
       let stdout = ""

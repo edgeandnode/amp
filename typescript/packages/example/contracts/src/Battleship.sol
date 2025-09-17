@@ -2,14 +2,14 @@
 pragma solidity ^0.8.20;
 
 interface IBoardVerifier {
-    function verifyProof(uint256[2] memory a, uint256[2][2] memory b, uint256[2] memory c, uint256[1] memory input)
+    function verifyProof(uint256[2] memory a, uint256[2][2] memory b, uint256[2] memory c, uint256[2] memory input)
         external
         view
         returns (bool);
 }
 
 interface IShotVerifier {
-    function verifyProof(uint256[2] memory a, uint256[2][2] memory b, uint256[2] memory c, uint256[7] memory input)
+    function verifyProof(uint256[2] memory a, uint256[2][2] memory b, uint256[2] memory c, uint256[8] memory input)
         external
         view
         returns (bool);
@@ -30,19 +30,20 @@ contract Battleship {
         uint256[2] piA; // π_A: G1 point (x, y)
         uint256[2][2] piB; // π_B: G2 point [[x1, x2], [y1, y2]]
         uint256[2] piC; // π_C: G1 point (x, y)
-        uint256[7] publicInputs; // 7 public inputs
+        uint256[8] publicInputs; // 8 public inputs
     }
 
     struct BoardProof {
         uint256[2] piA; // π_A: G1 point (x, y)
         uint256[2][2] piB; // π_B: G2 point [[x1, x2], [y1, y2]]
         uint256[2] piC; // π_C: G1 point (x, y)
-        uint256[1] publicInputs; // [commitment]
+        uint256[2] publicInputs; // [boardCommitment, initialStateCommitment]
     }
 
     struct Game {
         address[2] players; // Exactly 2 players
         bytes32[2] boardCommitments; // Board commitments for players[0] and players[1]
+        bytes32[2] stateCommitments; // Current state commitments for players[0] and players[1]
         uint256[2] shotGrids; // Per-player shot tracking (100-bit grid per player)
         uint256 stakeAmount; // Individual stake amount required
         uint256 prizePool; // Total ETH in the game (stakes)
@@ -112,8 +113,9 @@ contract Battleship {
         game.stakeAmount = msg.value;
         game.prizePool = msg.value; // Initialize with creator's stake
 
-        // Store board commitment
+        // Store board and initial state commitments
         game.boardCommitments[0] = bytes32(proof.publicInputs[0]);
+        game.stateCommitments[0] = bytes32(proof.publicInputs[1]);
 
         emit GameCreated(gameId, msg.sender);
     }
@@ -139,8 +141,9 @@ contract Battleship {
         game.players[1] = msg.sender;
         game.prizePool += msg.value; // Add joining player's stake to prize pool
 
-        // Store board commitment
+        // Store board and initial state commitments
         game.boardCommitments[1] = bytes32(proof.publicInputs[0]);
+        game.stateCommitments[1] = bytes32(proof.publicInputs[1]);
 
         // Set random starting player (0 or 1)
         game.startingPlayer = uint8(randomPlayer(gameId));
@@ -184,6 +187,7 @@ contract Battleship {
         // Clear the game state - this effectively cancels the game
         game.players[0] = address(0);
         game.boardCommitments[0] = bytes32(0);
+        game.stateCommitments[0] = bytes32(0);
         game.prizePool = 0;
         game.stakeAmount = 0;
 
@@ -250,11 +254,19 @@ contract Battleship {
         // Extract impact result from proof
         Impact result = Impact(impactProof.publicInputs[4]);
 
-        // Verify the board commitment matches defender's commitment
+        // Verify the previous state commitment matches defender's current commitment
         uint8 defenderIndex = (responder == game.players[0]) ? 0 : 1;
-        if (uint256(game.boardCommitments[defenderIndex]) != impactProof.publicInputs[0]) {
+        if (uint256(game.stateCommitments[defenderIndex]) != impactProof.publicInputs[0]) {
             revert CommitmentMismatch();
         }
+
+        // Verify the board commitment matches defender's commitment (6th public input)
+        if (uint256(game.boardCommitments[defenderIndex]) != impactProof.publicInputs[5]) {
+            revert CommitmentMismatch();
+        }
+
+        // Update defender's state commitment with the new commitment from proof
+        game.stateCommitments[defenderIndex] = bytes32(impactProof.publicInputs[6]);
 
         // Record this shot in the attacker's shot grid
         recordShot(gameId, attackerIndex, game.lastShotX, game.lastShotY);
@@ -308,11 +320,11 @@ contract Battleship {
         return game.players[0] == addr || game.players[1] == addr;
     }
 
-    function isGameOver(uint256[7] memory publicInputs) internal pure returns (bool) {
-        // publicInputs[6] contains the remaining ships count after this shot
-        // publicInputs = [previousCommitment, newCommitment, targetX, targetY, claimedResult, claimedShipId, claimedRemainingShips]
+    function isGameOver(uint256[8] memory publicInputs) internal pure returns (bool) {
+        // publicInputs[7] contains the remaining ships count after this shot
+        // publicInputs = [previousCommitment, targetX, targetY, claimedResult, claimedShipId, boardCommitment, newCommitment, remainingShips]
         // Game is over when remaining ships = 0
-        uint256 remainingShips = publicInputs[6];
+        uint256 remainingShips = publicInputs[7];
         return remainingShips == 0;
     }
 
@@ -324,6 +336,7 @@ contract Battleship {
         returns (
             address[2] memory players,
             bytes32[2] memory boardCommitments,
+            bytes32[2] memory stateCommitments,
             uint256[2] memory shotGrids,
             uint256 prizePool,
             uint8 lastShotX,
@@ -337,6 +350,7 @@ contract Battleship {
         return (
             game.players,
             game.boardCommitments,
+            game.stateCommitments,
             game.shotGrids,
             game.prizePool,
             game.lastShotX,
