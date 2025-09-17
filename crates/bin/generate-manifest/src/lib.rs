@@ -22,6 +22,9 @@ pub async fn run<T: io::Write>(
         dataset_store::DatasetKind::EvmRpc => {
             schema_from_tables(evm_rpc_datasets::tables::all(&network))
         }
+        dataset_store::DatasetKind::EthBeacon => {
+            schema_from_tables(eth_beacon_datasets::all_tables(network.clone()))
+        }
         dataset_store::DatasetKind::Firehose => {
             schema_from_tables(firehose_datasets::evm::tables::all(&network))
         }

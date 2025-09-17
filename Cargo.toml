@@ -12,6 +12,7 @@ members = [
     "crates/core/metadata-db",
     "crates/core/monitoring",
     "crates/extractors/evm-rpc",
+    "crates/extractors/eth-beacon",
     "crates/extractors/firehose",
     "crates/extractors/substreams",
     "crates/services/admin-api",

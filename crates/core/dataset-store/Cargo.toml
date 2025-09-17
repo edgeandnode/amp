@@ -9,6 +9,7 @@ async-stream.workspace = true
 common = { path = "../common" }
 datafusion.workspace = true
 datasets-common = { path = "../datasets-common" }
+eth-beacon-datasets = { version = "0.1.0", path = "../../extractors/eth-beacon" }
 evm-rpc-datasets = { path = "../../extractors/evm-rpc" }
 firehose-datasets = { path = "../../extractors/firehose" }
 futures.workspace = true

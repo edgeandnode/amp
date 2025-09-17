@@ -57,6 +57,34 @@ async fn evm_rpc_single_dump() {
 }
 
 #[tokio::test]
+async fn eth_beacon_single_dump() {
+    logging::init();
+
+    let dataset_name = "eth_beacon";
+    let test_env = TestEnv::temp("eth_beacon_single_dump").await.unwrap();
+    let block = test_env
+        .dataset_store
+        .load_dataset(dataset_name, None)
+        .await
+        .unwrap()
+        .start_block
+        .unwrap();
+
+    let blessed = SnapshotContext::blessed(&test_env, &dataset_name)
+        .await
+        .unwrap();
+
+    check_blocks(&test_env, dataset_name, block, block)
+        .await
+        .expect("blessed data differed from provider");
+
+    let temp_dump = SnapshotContext::temp_dump(&test_env, &dataset_name, block, 1)
+        .await
+        .expect("temp dump failed");
+    temp_dump.assert_eq(&blessed).await.unwrap();
+}
+
+#[tokio::test]
 async fn evm_rpc_single_dump_fetch_receipts_per_tx() {
     logging::init();
 

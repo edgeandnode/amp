@@ -62,6 +62,7 @@ const NOZZLE_CRATES: &[&str] = &[
     "datasets_common",
     "dump",
     "dump_check",
+    "eth_beacon_datasets",
     "evm_rpc_datasets",
     "firehose_datasets",
     "generate_manifest",
