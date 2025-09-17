@@ -17,6 +17,7 @@ node_modules/
 dist/
 build/
 *.tsbuildinfo
+*.ptau
 .idea
 .vscode/
 config.toml
