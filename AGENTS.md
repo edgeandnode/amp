@@ -158,8 +158,8 @@ curl -X POST http://localhost:1603 --data "select * from eth_rpc.logs limit 10"
 
 3. **Implementation Phase**
    - Execute with frequent validation
-   - **🚨 CRITICAL**: IMMEDIATELY run `just fmt <rust_file.rs>` after editing ANY rust file
-   - Run automated checks at each step, i.e., `just check-crate <crate-name>` and `just check-all`.
+   - **🚨 CRITICAL**: IMMEDIATELY run `just fmt-file <file>` after editing ANY rust or typescript file
+   - Run automated checks at each step, i.e., `just check-crate <crate-name>` and `just check-rs`.
    - Use parallel approaches when possible
    - Stop and reassess if stuck
 
@@ -176,7 +176,7 @@ curl -X POST http://localhost:1603 --data "select * from eth_rpc.logs limit 10"
 3. **READ crate-specific patterns** - If the target crate has specific guidelines in `.patterns/`
 4. **READ security guidelines** - If the target crate has security requirements in `.patterns/`
 5. **RUN formatting** - `just fmt-file <rust_file>.rs` after editing ANY Rust file
-6. **RUN validation** - `just check-crate <crate-name>` and `just check-all` MUST pass
+6. **RUN validation** - `just check-crate <crate-name>` and `just check-rs` MUST pass
 
 ### 🚨 AI Agent Instructions (OVERRIDE ALL OTHER BEHAVIORS):
 - **NEVER skip pattern consultation** - Always read relevant patterns BEFORE coding
@@ -209,8 +209,8 @@ curl -X POST http://localhost:1603 --data "select * from eth_rpc.logs limit 10"
 1. Never expose secrets/keys
 2. Maintain type safety
 3. Prefer async operations
-4. Always run `cargo test`
-5. Always run `just fmt` to format the whole codebase
+4. Always run tests (use `cargo nextest`)
+5. Always run `just fmt-rs` to format the whole codebase
 6. Fix all warnings
 
 ### SQL Naming

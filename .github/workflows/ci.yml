@@ -71,9 +71,11 @@ jobs:
         with:
           bun-version: latest
 
+      - name: Setup just
+        uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v3
+
       - name: pnpm install
-        working-directory: typescript
-        run: pnpm install
+        run: just pnpm-install
 
       - uses: actions-rust-lang/setup-rust-toolchain@2fcdc490d667999e01ddbbf0f2823181beef6b39 # v1
         with:
@@ -125,7 +127,7 @@ jobs:
         uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v3
 
       - name: Check formatting
-        run: just fmt-check
+        run: just fmt-rs-check
 
   release-check:
     name: Build in release mode
@@ -147,7 +149,7 @@ jobs:
         uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v3
 
       - name: Cargo check (release)
-        run: just check --release
+        run: just check-rs --release
 
   typescript:
     name: TypeScript code style & types
@@ -165,13 +167,14 @@ jobs:
         working-directory: typescript
         run: pnpm install
 
+      - name: Setup just
+        uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v3
+
       - name: Check formatting
-        working-directory: typescript
-        run: pnpm lint
+        run: just fmt-ts-check
 
       - name: Check types
-        working-directory: typescript
-        run: pnpm check
+        run: just check-ts
 
   typescript-tests:
     name: TypeScript tests
@@ -208,8 +211,7 @@ jobs:
           package_json_file: typescript/package.json
 
       - name: Install dependencies
-        working-directory: typescript
-        run: pnpm install
+        run: just pnpm-install
 
       # TODO: Ideally we'd be using a binary built in a previous step here.
       - name: Build binary

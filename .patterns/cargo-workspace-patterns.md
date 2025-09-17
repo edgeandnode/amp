@@ -10,8 +10,8 @@ Comprehensive workspace management strategies for Rust multi-crate projects, wit
 
 ### Mandatory Workspace Operations
 - **Workspace root execution**: ALL `cargo` commands MUST be issued from the root of the workspace (where the workspace `Cargo.toml` file lives)
-- **Immediate formatting**: `just fmt` for entire workspace or `just fmt-file <rust_file>.rs` for individual files
-- **Compilation validation**: `just check-all` and `just check-crate <crate-name>` MUST pass
+- **Immediate formatting**: `just fmt-rs` for entire workspace or `just fmt-file <rust_file>.rs` for individual files
+- **Compilation validation**: `just check-rs` and `just check-crate <crate-name>` MUST pass
 
 ### Mandatory Cargo.toml Ordering
 - **Workspace members**: Root `Cargo.toml` `members` array MUST be ordered alphabetically

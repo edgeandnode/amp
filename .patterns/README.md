@@ -29,7 +29,7 @@ This directory provides reusable solutions and best practices for Nozzle Core de
 
 ### Mandatory Patterns (ALWAYS USE)
 - **Immediate formatting**: `just fmt-file <rust_file>.rs` after editing ANY Rust file
-- **Compilation validation**: `just check-crate <crate-name>` and `just check-all` MUST pass
+- **Compilation validation**: `just check-crate <crate-name>` and `just check-rs` MUST pass
 
 ### Forbidden Patterns (NEVER USE)
 - **Unsafe code without documentation**: Any `unsafe` block without thorough safety comments
