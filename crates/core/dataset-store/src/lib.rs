@@ -486,6 +486,7 @@ impl DatasetStore {
             .map(|client| client.with_retry())
     }
 
+    #[instrument(skip(self), err)]
     async fn load_client_inner(
         &self,
         dataset_name: &str,
@@ -495,7 +496,9 @@ impl DatasetStore {
         let value = raw_dataset.to_value()?;
         let kind = DatasetKind::from_str(&common.kind)?;
 
-        let Some(provider) = self.find_provider(kind, common.network.clone()).await else {
+        let Some((provider_name, provider)) =
+            self.find_provider(kind, common.network.clone()).await
+        else {
             tracing::warn!(
                 provider_kind = %kind,
                 provider_network = %common.network,
@@ -508,17 +511,29 @@ impl DatasetStore {
         };
         Ok(match kind {
             DatasetKind::EvmRpc => BlockStreamClient::EvmRpc(
-                evm_rpc_datasets::client(provider, common.network, only_finalized_blocks).await?,
+                evm_rpc_datasets::client(
+                    provider,
+                    common.network,
+                    provider_name,
+                    only_finalized_blocks,
+                )
+                .await?,
             ),
             DatasetKind::Firehose => BlockStreamClient::Firehose(
-                firehose_datasets::Client::new(provider, common.network, only_finalized_blocks)
-                    .await?,
+                firehose_datasets::Client::new(
+                    provider,
+                    common.network,
+                    provider_name,
+                    only_finalized_blocks,
+                )
+                .await?,
             ),
             DatasetKind::Substreams => BlockStreamClient::Substreams(
                 substreams_datasets::Client::new(
                     provider,
                     value,
                     common.network,
+                    provider_name,
                     only_finalized_blocks,
                 )
                 .await?,
@@ -534,15 +549,15 @@ impl DatasetStore {
         &self,
         kind: DatasetKind,
         network: String,
-    ) -> Option<ProviderConfigTomlValue> {
+    ) -> Option<(String, ProviderConfigTomlValue)> {
         // Collect matching provider configurations into a vector for shuffling
         let mut matching_providers = self
             .providers
             .get_all()
             .await
-            .values()
-            .filter(|prov| prov.kind == kind && prov.network == network)
-            .cloned()
+            .iter()
+            .filter(|(_, prov)| prov.kind == kind && prov.network == network)
+            .map(|(name, prov)| (name.clone(), prov.clone()))
             .collect::<Vec<_>>();
 
         if matching_providers.is_empty() {
@@ -552,7 +567,7 @@ impl DatasetStore {
         // Try each provider in random order until we find one with successful env substitution
         matching_providers.shuffle(&mut rand::rng());
 
-        'try_find_provider: for mut provider in matching_providers {
+        'try_find_provider: for (provider_name, mut provider) in matching_providers {
             // Apply environment variable substitution to the `rest` table values
             for (_key, value) in provider.rest.iter_mut() {
                 if let Err(err) = common::env_substitute::substitute_env_vars(value) {
@@ -577,7 +592,7 @@ impl DatasetStore {
             let value = toml::Value::try_from(provider)
                 .expect("ProviderConfig structs should always be convertible to toml::Value");
 
-            return Some(value);
+            return Some((provider_name, value));
         }
 
         // If we get here, no suitable providers were found
@@ -602,7 +617,7 @@ impl DatasetStore {
         }
 
         // Load the provider from the dataset definition.
-        let Some(provider) = self
+        let Some((_provider_name, provider)) = self
             .find_provider(DatasetKind::EvmRpc, dataset.network.clone())
             .await
         else {
@@ -872,6 +887,14 @@ impl BlockStreamer for BlockStreamClient {
             Self::EvmRpc(client) => client.latest_block().await,
             Self::Firehose(client) => client.latest_block().await,
             Self::Substreams(client) => client.latest_block().await,
+        }
+    }
+
+    fn provider_name(&self) -> &str {
+        match self {
+            Self::EvmRpc(client) => client.provider_name(),
+            Self::Firehose(client) => client.provider_name(),
+            Self::Substreams(client) => client.provider_name(),
         }
     }
 }

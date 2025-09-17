@@ -36,7 +36,7 @@ use common::{
 };
 use futures::{Stream, future::try_join_all};
 use thiserror::Error;
-use tracing::{error, warn};
+use tracing::{error, instrument, warn};
 
 use crate::tables::transactions::{Transaction, TransactionRowsBuilder};
 
@@ -170,6 +170,7 @@ impl BatchingRpcWrapper {
 pub struct JsonRpcClient {
     client: alloy::providers::RootProvider<AnyNetwork>,
     network: String,
+    provider_name: String,
     limiter: Arc<tokio::sync::Semaphore>,
     batch_size: usize,
     fetch_receipts_per_tx: bool,
@@ -180,6 +181,7 @@ impl JsonRpcClient {
     pub fn new(
         url: Url,
         network: String,
+        provider_name: String,
         request_limit: u16,
         batch_size: usize,
         rate_limit: Option<NonZeroU32>,
@@ -192,6 +194,7 @@ impl JsonRpcClient {
         Ok(Self {
             client,
             network,
+            provider_name,
             limiter,
             batch_size,
             fetch_receipts_per_tx,
@@ -202,6 +205,7 @@ impl JsonRpcClient {
     pub async fn new_ipc(
         path: std::path::PathBuf,
         network: String,
+        provider_name: String,
         request_limit: u16,
         batch_size: usize,
         rate_limit: Option<NonZeroU32>,
@@ -214,6 +218,7 @@ impl JsonRpcClient {
         Ok(Self {
             client,
             network,
+            provider_name,
             limiter,
             batch_size,
             fetch_receipts_per_tx,
@@ -224,6 +229,7 @@ impl JsonRpcClient {
     pub async fn new_ws(
         url: Url,
         network: String,
+        provider_name: String,
         request_limit: u16,
         batch_size: usize,
         rate_limit: Option<NonZeroU32>,
@@ -236,11 +242,16 @@ impl JsonRpcClient {
         Ok(Self {
             client,
             network,
+            provider_name,
             limiter,
             batch_size,
             fetch_receipts_per_tx,
             final_blocks_only,
         })
+    }
+
+    pub fn provider_name(&self) -> &str {
+        &self.provider_name
     }
 
     /// Create a stream that fetches blocks from start_block to end_block. One method is called at a time.
@@ -486,6 +497,7 @@ impl BlockStreamer for JsonRpcClient {
         }
     }
 
+    #[instrument(skip(self), err)]
     async fn latest_block(&mut self) -> Result<BlockNum, BoxError> {
         let number = match self.final_blocks_only {
             true => BlockNumberOrTag::Finalized,
@@ -494,6 +506,10 @@ impl BlockStreamer for JsonRpcClient {
         let _permit = self.limiter.acquire();
         let block = self.client.get_block_by_number(number).await?;
         Ok(block.map(|b| b.header.number).unwrap_or(0))
+    }
+
+    fn provider_name(&self) -> &str {
+        &self.provider_name
     }
 }
 
