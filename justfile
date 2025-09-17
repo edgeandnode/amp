@@ -5,36 +5,68 @@ default:
 
 ## Workspace management
 
-# Clean workspace (cargo clean)
-clean:
+alias clean := cargo-clean
+
+# Clean cargo workspace (cargo clean)
+cargo-clean:
     cargo clean
 
+# PNPM install (pnpm install)
+[working-directory: 'typescript']
+pnpm-install:
+    pnpm install
 
-## Code formatting
 
-alias fmt := fmt-all
+## Code formatting and linting
+
+alias fmt := fmt-rs
+alias fmt-check := fmt-rs-check
+
+# Format specific files (Rust or TypeScript based on extension)
+fmt-file FILE:
+    #!/usr/bin/env bash
+    case "{{FILE}}" in
+        *.rs) just fmt-rs-file "{{FILE}}" ;;
+        *.ts|*.tsx) just fmt-ts-file "{{FILE}}" ;;
+    esac
 
 # Format Rust code (cargo fmt --all)
-fmt-all:
+fmt-rs:
     cargo +nightly fmt --all
 
-# Format specific Rust files (cargo fmt <files>)
-fmt-file +FILES:
-    cargo +nightly fmt -- {{FILES}}
-
 # Check Rust code format (cargo fmt --check)
-fmt-check:
+fmt-rs-check:
     cargo +nightly fmt --all -- --check
 
+# Format specific Rust file (cargo fmt <file>)
+fmt-rs-file FILE:
+    cargo +nightly fmt -- {{FILE}}
 
-## Linting
+# Format TypeScript code (pnpm format)
+[working-directory: 'typescript']
+fmt-ts:
+    pnpm format
 
-# Check Rust code (cargo check)
-check *EXTRA_FLAGS:
-    cargo check {{EXTRA_FLAGS}}
+# Check TypeScript code format (pnpm lint)
+[working-directory: 'typescript']
+fmt-ts-check:
+    pnpm lint
 
-# Check all Rust code (cargo check --tests)
-check-all *EXTRA_FLAGS:
+# Format specific TypeScript file (pnpm lint --fix <file>)
+[working-directory: 'typescript']
+fmt-ts-file FILE:
+    pnpm lint --fix {{replace_regex(FILE, '^(.*/)?typescript/', '')}}
+
+
+## Check
+
+alias check := check-rs
+
+# Check Rust and TypeScript code
+check-all: check-rs check-ts
+
+# Check Rust code (cargo check --tests)
+check-rs *EXTRA_FLAGS:
     cargo check --tests {{EXTRA_FLAGS}}
 
 # Check specific crate with tests (cargo check -p <crate> --tests)
@@ -52,6 +84,11 @@ clippy-crate CRATE:
 # Lint all Rust code (cargo clippy --tests)
 clippy-all *EXTRA_FLAGS:
     cargo clippy --tests {{EXTRA_FLAGS}}
+
+# Check typescript code (pnpm check)
+[working-directory: 'typescript']
+check-ts:
+    pnpm check
 
 
 ## Testing
