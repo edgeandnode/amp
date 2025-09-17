@@ -180,6 +180,8 @@ pub trait BlockStreamer: Clone + 'static {
     ) -> impl Future<Output = impl Stream<Item = Result<RawDatasetRows, BoxError>> + Send> + Send;
 
     fn latest_block(&mut self) -> impl Future<Output = Result<BlockNum, BoxError>> + Send;
+
+    fn provider_name(&self) -> &str;
 }
 
 impl<T: BlockStreamer> BlockStreamerExt for T {}
@@ -246,6 +248,10 @@ impl<T: BlockStreamer + Send> BlockStreamer for BlockStreamerWithRetry<T> {
 
     fn latest_block(&mut self) -> impl Future<Output = Result<BlockNum, BoxError>> + Send {
         self.0.latest_block()
+    }
+
+    fn provider_name(&self) -> &str {
+        self.0.provider_name()
     }
 }
 

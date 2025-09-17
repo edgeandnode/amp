@@ -125,6 +125,8 @@ pub async fn dump(
         .load_client(dataset_name, only_finalized_blocks)
         .await?;
 
+    tracing::info!("connected to provider: {}", client.provider_name());
+
     let mut start = tables[0].dataset().start_block.unwrap_or(0);
     let end = match end {
         None => None,

@@ -82,6 +82,7 @@ pub fn dataset(dataset_cfg: common::DatasetValue) -> Result<Dataset, Error> {
 pub async fn client(
     provider: toml::Value,
     network: String,
+    provider_name: String,
     final_blocks_only: bool,
 ) -> Result<JsonRpcClient, Error> {
     let provider: EvmRpcProvider = provider.try_into()?;
@@ -92,6 +93,7 @@ pub async fn client(
             JsonRpcClient::new_ipc(
                 PathBuf::from(path),
                 network,
+                provider_name,
                 request_limit,
                 provider.rpc_batch_size,
                 provider.rate_limit_per_minute,
@@ -104,6 +106,7 @@ pub async fn client(
         "ws" | "wss" => JsonRpcClient::new_ws(
             provider.url,
             network,
+            provider_name,
             request_limit,
             provider.rpc_batch_size,
             provider.rate_limit_per_minute,
@@ -115,6 +118,7 @@ pub async fn client(
         _ => JsonRpcClient::new(
             provider.url,
             network,
+            provider_name,
             request_limit,
             provider.rpc_batch_size,
             provider.rate_limit_per_minute,

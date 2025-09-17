@@ -11,6 +11,7 @@ use tonic::{
     service::{Interceptor, interceptor::InterceptedService},
     transport::{ClientTlsConfig, Endpoint, Uri},
 };
+use tracing::instrument;
 
 use crate::{
     Error,
@@ -25,6 +26,7 @@ pub struct Client {
     endpoint: Endpoint,
     auth: AuthInterceptor,
     network: String,
+    provider_name: String,
     final_blocks_only: bool,
 }
 
@@ -33,6 +35,7 @@ impl Client {
     pub async fn new(
         provider: toml::Value,
         network: String,
+        provider_name: String,
         final_blocks_only: bool,
     ) -> Result<Self, Error> {
         let FirehoseProvider { url, token } = provider.try_into()?;
@@ -46,6 +49,7 @@ impl Client {
                 endpoint,
                 auth,
                 network,
+                provider_name,
                 final_blocks_only,
             }
         };
@@ -58,6 +62,10 @@ impl Client {
 
     pub fn network(&self) -> String {
         self.network.to_string()
+    }
+
+    pub fn provider_name(&self) -> &str {
+        &self.provider_name
     }
 
     async fn connect(
@@ -209,10 +217,15 @@ impl BlockStreamer for Client {
         }
     }
 
+    #[instrument(skip(self), err)]
     async fn latest_block(&mut self) -> Result<BlockNum, BoxError> {
         let stream = self.blocks(-1, 0).await?;
         let mut stream = std::pin::pin!(stream);
         let block = stream.next().await;
         Ok(block.transpose()?.map(|block| block.number).unwrap_or(0))
+    }
+
+    fn provider_name(&self) -> &str {
+        &self.provider_name
     }
 }
