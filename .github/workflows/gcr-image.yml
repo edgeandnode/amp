@@ -20,7 +20,8 @@ concurrency:
 
 env:
   REGION: us-central1
-  PROJECT_NAME: nozzle
+  PROJECT_NAME: amp
+  CGP_PROJECT_ID_SUFFIX: 472411
 
 jobs:
   build_and_push:
@@ -42,7 +43,7 @@ jobs:
         run: |
           REPO_BASE_NAME=`basename ${{ github.repository }}`
           REGISTRY=${{ env.REGION }}-docker.pkg.dev
-          REGISTRY_PATH="${REGISTRY}/${{ env.PROJECT_NAME }}-${{ inputs.environment }}/${{ env.PROJECT_NAME }}"
+          REGISTRY_PATH="${REGISTRY}/${{ env.PROJECT_NAME }}-${{ inputs.environment }}-${{ env.CGP_PROJECT_ID_SUFFIX }}/${{ env.PROJECT_NAME }}"
           echo "registry=${REGISTRY}" >> $GITHUB_OUTPUT
           echo "image_name=${REGISTRY_PATH}/${REPO_BASE_NAME}" >> $GITHUB_OUTPUT
         shell: bash
@@ -66,8 +67,8 @@ jobs:
       #   id: auth
       #   uses: google-github-actions/auth@b7593ed2efd1c1617e1b0254da33b86225adb2a5 # v2
       #   with:
-      #     project_id: 'nozzle-production'
-      #     workload_identity_provider: 'projects/nozzle-staging/locations/global/workloadIdentityPools/github-pipeline/providers/github-pipeline'
+      #     project_id: 'amp-production'
+      #     workload_identity_provider: 'projects/amp-staging/locations/global/workloadIdentityPools/github-pipeline/providers/github-pipeline'
 
       # Authenticate to GCP based on environment
       # This will need to change if we want to deploy to production using this PR
@@ -77,9 +78,9 @@ jobs:
         uses: google-github-actions/auth@b7593ed2efd1c1617e1b0254da33b86225adb2a5 # v2
         with:
           token_format: access_token
-          project_id: ${{ env.PROJECT_NAME }}-${{ inputs.environment }}
-          workload_identity_provider: ${{ inputs.environment == 'production' && secrets.PRODUCTION_WORKLOAD_IDENTITY_PROVIDER || secrets.STAGING_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ inputs.environment == 'production' && secrets.PRODUCTION_SERVICE_ACCOUNT_EMAIL || secrets.STAGING_SERVICE_ACCOUNT_EMAIL }}
+          project_id: "${{ env.PROJECT_NAME }}-${{ inputs.environment }}-${{ env.CGP_PROJECT_ID_SUFFIX }}"
+          workload_identity_provider: ${{ inputs.environment == 'production' && secrets.AMP_PRODUCTION_WORKLOAD_IDENTITY_PROVIDER || secrets.AMP_STAGING_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ inputs.environment == 'production' && secrets.AMP_PRODUCTION_SERVICE_ACCOUNT_EMAIL || secrets.AMP_STAGING_SERVICE_ACCOUNT_EMAIL }}
           export_environment_variables: true
           create_credentials_file: true
           # request_reason: '${{ env.PROJECT_NAME}} build and push to GCR' # this will add X-Goog-Request-Reason for audit logs
@@ -88,7 +89,7 @@ jobs:
         if: steps.auth.outcome == 'success'
         uses: google-github-actions/setup-gcloud@26f734c2779b00b7dda794207734c511110a4368 # v3
         with:
-          version: '>= 363.0.0'
+          version: ">= 363.0.0"
 
       - name: Docker Auth
         if: steps.auth.outcome == 'success'
@@ -127,7 +128,7 @@ jobs:
         if: steps.auth.outcome == 'success'
         uses: google-github-actions/deploy-cloudrun@251330ba9a8a34bfbc1622895f42e1d53fd14522 # v2
         with:
-          project_id: ${{ env.PROJECT_NAME }}-${{ inputs.environment }}
+          project_id: ${{ env.PROJECT_NAME }}-${{ inputs.environment }}-${{ env.CGP_PROJECT_ID_SUFFIX }}
           service: ${{ env.PROJECT_NAME }}-${{ inputs.environment }}
           image: ${{ steps.metadata.outputs.tags }}
           region: ${{ env.REGION }}
