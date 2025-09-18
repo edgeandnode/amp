@@ -1,4 +1,8 @@
-use std::{sync::Arc, time::Duration};
+use std::{
+    fmt::{Debug, Display, Formatter},
+    sync::Arc,
+    time::Duration,
+};
 
 use common::{Timestamp, catalog::physical::PhysicalTable};
 use futures::{
@@ -10,65 +14,53 @@ use object_store::{Error as ObjectStoreError, ObjectStore, path::Path};
 
 use crate::{
     compaction::{
-        CompactionProperties, DeletionTask,
-        error::{DeletionError, DeletionResult},
+        CompactionProperties, NozzleCompactorTaskType,
+        error::{CollectionResult, CollectorError},
     },
     consistency_check,
 };
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Collector {
-    pub table: Arc<PhysicalTable>,
-    pub opts: Arc<CompactionProperties>,
+    pub(super) table: Arc<PhysicalTable>,
+    pub(super) opts: Arc<CompactionProperties>,
+}
+
+impl Debug for Collector {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Garbage Collector {{ table: {} }}",
+            self.table.table_ref()
+        )
+    }
 }
 
 impl Collector {
-    /// Starts the deletion task by spawning a new asynchronous task
-    /// that returns a new Collector.
-    pub fn start(table: &Arc<PhysicalTable>, opts: &Arc<CompactionProperties>) -> DeletionTask {
-        DeletionTask {
-            task: tokio::spawn(future::ok(Collector::new(table, opts)).boxed()),
-            table: Arc::clone(table),
-            opts: Arc::clone(opts),
-            previous: None,
-        }
-    }
+    pub(super) async fn collect(self) -> CollectionResult<Self> {
+        let metadata_db = self.table.metadata_db();
 
-    pub(super) fn new<'a>(
-        table: &'a Arc<PhysicalTable>,
-        opts: &'a Arc<CompactionProperties>,
-    ) -> Self {
-        Collector {
-            table: Arc::clone(table),
-            opts: Arc::clone(opts),
-        }
-    }
-
-    pub(super) async fn collect(self) -> DeletionResult<Self> {
-        let table = Arc::clone(&self.table);
-
-        let location_id = table.location_id();
-        let object_store = table.object_store();
+        let location_id = self.table.location_id();
 
         let now = Timestamp::now();
         let secs = now.0.as_secs() as i64;
         let nsecs = now.0.subsec_nanos();
-        let metadata_db = table.metadata_db();
 
         let expired_stream = metadata_db.stream_expired_files(location_id, secs, nsecs);
 
-        match DeletionOutput::try_from_manifest_stream(object_store, expired_stream, now).await {
+        match DeletionOutput::try_from_manifest_stream(Arc::clone(&self.table), expired_stream, now)
+            .await
+        {
             Ok(output) if output.len() > 0 => {
                 output.update_manifest(&metadata_db).await.map_err(
-                    DeletionError::manifest_update_error(
-                        self.clone(),
+                    CollectorError::manifest_update_error(
                         [output.successes, output.not_found].concat(),
                     ),
                 )?;
 
                 if let Err(error) = consistency_check(&self.table)
                     .await
-                    .map_err(DeletionError::consistency_check_error(&self))
+                    .map_err(CollectorError::consistency_check_error)
                 {
                     tracing::error!("{error}");
                     return Ok(self);
@@ -82,6 +74,44 @@ impl Collector {
                 Ok(self)
             }
         }
+    }
+}
+
+impl Display for Collector {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Garbage Collector {{ table: {}, opts: {} }}",
+            self.table.table_ref(),
+            self.opts
+        )
+    }
+}
+
+impl NozzleCompactorTaskType for Collector {
+    type Error = CollectorError;
+
+    fn new(table: &Arc<PhysicalTable>, opts: &Arc<CompactionProperties>) -> Self {
+        Collector {
+            table: Arc::clone(table),
+            opts: Arc::clone(opts),
+        }
+    }
+
+    fn run<'a>(self) -> future::BoxFuture<'a, Result<Self, Self::Error>> {
+        self.collect().boxed()
+    }
+
+    fn interval(opts: &Arc<CompactionProperties>) -> Duration {
+        opts.collector_interval
+    }
+
+    fn active(opts: &Arc<CompactionProperties>) -> bool {
+        opts.collector_active
+    }
+
+    fn deactivate(opts: &mut Arc<CompactionProperties>) {
+        Arc::make_mut(opts).collector_active = false;
     }
 }
 
@@ -106,36 +136,43 @@ impl DeletionOutput {
     }
 
     pub async fn try_from_manifest_stream<'a>(
-        object_store: Arc<dyn ObjectStore>,
+        table: Arc<PhysicalTable>,
         expired_stream: BoxStream<'a, Result<GcManifestRow, metadata_db::Error>>,
         now: Timestamp,
-    ) -> Result<Self, metadata_db::Error> {
+    ) -> CollectionResult<Self> {
         let (file_ids, file_paths) = expired_stream
+            .map_err(CollectorError::file_stream_error)
             .try_fold(
                 (Vec::new(), Vec::new()),
-                |(mut file_ids, mut file_paths),
-                 GcManifestRow {
-                     file_id,
-                     file_path,
-                     expiration,
-                     ..
-                 }| {
+                async |(mut file_ids, mut file_paths),
+                       GcManifestRow {
+                           file_id,
+                           file_path: file_name,
+                           expiration,
+                           ..
+                       }| {
                     if Duration::from_micros(expiration.and_utc().timestamp_micros() as u64)
                         .saturating_sub(now.0)
                         .is_zero()
                     {
+                        let url = table
+                            .url()
+                            .join(&file_name)
+                            .map_err(CollectorError::parse_error(file_id))?;
+
                         file_ids.push(file_id);
-                        file_paths.push(Ok(Path::from(file_path)));
+                        file_paths.push(Ok(Path::from(url.path())));
                     }
 
-                    future::ok((file_ids, file_paths))
+                    Ok((file_ids, file_paths))
                 },
             )
             .await?;
 
         let size = file_ids.len();
 
-        Ok(object_store
+        Ok(table
+            .object_store()
             .delete_stream(stream::iter(file_paths).boxed())
             .enumerate()
             .fold(Self::with_capacity(size), move |mut acc, (idx, result)| {

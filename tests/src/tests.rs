@@ -15,6 +15,7 @@ use common::{
 };
 use dataset_store::DatasetStore;
 use datasets_common::manifest::Manifest as CommonManifest;
+use futures::StreamExt;
 use generate_manifest;
 use monitoring::logging;
 use schemars::schema_for;
@@ -24,7 +25,7 @@ use crate::{
     test_client::TestClient,
     test_support::{
         self, SnapshotContext, TestEnv, check_blocks, restore_blessed_dataset,
-        spawn_compaction_and_await_completion,
+        spawn_collection_and_await_completion, spawn_compaction_and_await_completion,
     },
 };
 
@@ -675,6 +676,17 @@ async fn sql_dataset_input_batch_size() {
     // 6. After compaction, we expect an additional file to be created, with all data in it.
     let file_count_after = table.files().await.unwrap().len();
     assert_eq!(file_count_after, 5);
+
+    spawn_collection_and_await_completion(table, &test_env.config).await;
+    // 7. After collection, we expect the original 4 files to be deleted,
+    // leaving only the compacted file.
+    let file_count_final = table
+        .object_store()
+        .list(Some(table.path()))
+        .collect::<Vec<_>>()
+        .await
+        .len();
+    assert_eq!(file_count_final, 1);
 
     let mut test_client = TestClient::connect(&test_env).await.unwrap();
     let res = test_client
