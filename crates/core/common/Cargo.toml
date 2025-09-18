@@ -30,7 +30,6 @@ metadata-db = { path = "../metadata-db", features = ["temp-db"] }
 object_store.workspace = true
 regex.workspace = true
 schemars = { workspace = true, optional = true }
-semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 stable-hash = { git = "https://github.com/graphprotocol/stable-hash" }

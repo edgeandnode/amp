@@ -319,6 +319,11 @@ impl DatasetStore {
                     schema_from_tables(evm_rpc_datasets::tables::all(&common.network));
                 (evm_rpc_datasets::dataset(value)?, Some(builtin_schema))
             }
+            DatasetKind::EthBeacon => {
+                let builtin_schema =
+                    schema_from_tables(eth_beacon_datasets::all_tables(common.network.clone()));
+                (eth_beacon_datasets::dataset(value)?, Some(builtin_schema))
+            }
             DatasetKind::Firehose => {
                 let builtin_schema =
                     schema_from_tables(firehose_datasets::evm::tables::all(&common.network));
@@ -422,6 +427,12 @@ impl DatasetStore {
                 )
                 .await?,
             ),
+            DatasetKind::EthBeacon => BlockStreamClient::EthBeacon(eth_beacon_datasets::client(
+                provider,
+                common.network,
+                provider_name,
+                only_finalized_blocks,
+            )?),
             DatasetKind::Firehose => BlockStreamClient::Firehose(
                 firehose_datasets::Client::new(
                     provider,
@@ -745,6 +756,7 @@ fn datasets_from_table_refs(
 #[derive(Clone)]
 enum BlockStreamClient {
     EvmRpc(evm_rpc_datasets::JsonRpcClient),
+    EthBeacon(eth_beacon_datasets::BeaconClient),
     Firehose(firehose_datasets::Client),
     Substreams(substreams_datasets::Client),
 }
@@ -762,6 +774,12 @@ impl BlockStreamer for BlockStreamClient {
                 Self::EvmRpc(client) => {
                     let stream = client.block_stream(start_block, end_block).await;
                     for await item in stream {
+                        yield item;
+                    }
+                }
+                Self::EthBeacon(client) => {
+                let stream = client.block_stream(start_block, end_block).await;
+                   for await item in stream {
                         yield item;
                     }
                 }
@@ -784,6 +802,7 @@ impl BlockStreamer for BlockStreamClient {
     async fn latest_block(&mut self) -> Result<BlockNum, BoxError> {
         match self {
             Self::EvmRpc(client) => client.latest_block().await,
+            Self::EthBeacon(client) => client.latest_block().await,
             Self::Firehose(client) => client.latest_block().await,
             Self::Substreams(client) => client.latest_block().await,
         }
@@ -792,6 +811,7 @@ impl BlockStreamer for BlockStreamClient {
     fn provider_name(&self) -> &str {
         match self {
             Self::EvmRpc(client) => client.provider_name(),
+            Self::EthBeacon(client) => client.provider_name(),
             Self::Firehose(client) => client.provider_name(),
             Self::Substreams(client) => client.provider_name(),
         }

@@ -44,6 +44,9 @@ pub enum Error {
     #[error("EVM RPC error: {0}")]
     EvmRpcError(#[from] evm_rpc_datasets::Error),
 
+    #[error("eth-beacon error: {0}")]
+    EthBeacon(#[from] eth_beacon_datasets::Error),
+
     #[error("firehose error: {0}")]
     FirehoseError(#[from] firehose_datasets::Error),
 

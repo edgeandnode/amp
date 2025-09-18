@@ -22,6 +22,8 @@
 pub enum DatasetKind {
     /// Ethereum-compatible JSON-RPC dataset for direct blockchain access.
     EvmRpc,
+    /// Ethereum Beacon node (consensus layer) dataset.
+    EthBeacon,
     /// StreamingFast Firehose dataset for high-throughput blockchain streaming.
     Firehose,
     /// Substreams dataset for processing custom blockchain transformations.
@@ -39,7 +41,10 @@ impl DatasetKind {
     /// infrastructure, while derived datasets (`Sql`, `Manifest`) process data from
     /// other datasets.
     pub fn is_raw(&self) -> bool {
-        matches!(self, Self::EvmRpc | Self::Firehose | Self::Substreams)
+        matches!(
+            self,
+            Self::EvmRpc | Self::EthBeacon | Self::Firehose | Self::Substreams
+        )
     }
 
     /// Returns the string representation of this dataset kind.
@@ -49,6 +54,7 @@ impl DatasetKind {
     pub fn as_str(&self) -> &str {
         match self {
             Self::EvmRpc => evm_rpc_datasets::DATASET_KIND,
+            Self::EthBeacon => eth_beacon_datasets::DATASET_KIND,
             Self::Firehose => firehose_datasets::DATASET_KIND,
             Self::Substreams => substreams_datasets::DATASET_KIND,
             Self::Sql => common::manifest::sql_datasets::DATASET_KIND,
@@ -61,6 +67,7 @@ impl std::fmt::Display for DatasetKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::EvmRpc => f.write_str(evm_rpc_datasets::DATASET_KIND),
+            Self::EthBeacon => f.write_str(evm_rpc_datasets::DATASET_KIND),
             Self::Firehose => f.write_str(firehose_datasets::DATASET_KIND),
             Self::Substreams => f.write_str(substreams_datasets::DATASET_KIND),
             Self::Sql => f.write_str(common::manifest::sql_datasets::DATASET_KIND),
@@ -75,6 +82,7 @@ impl std::str::FromStr for DatasetKind {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             evm_rpc_datasets::DATASET_KIND => Ok(Self::EvmRpc),
+            eth_beacon_datasets::DATASET_KIND => Ok(Self::EthBeacon),
             firehose_datasets::DATASET_KIND => Ok(Self::Firehose),
             substreams_datasets::DATASET_KIND => Ok(Self::Substreams),
             common::manifest::sql_datasets::DATASET_KIND => Ok(Self::Sql),
