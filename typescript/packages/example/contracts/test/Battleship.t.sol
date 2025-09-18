@@ -112,12 +112,24 @@ contract BattleshipTest is TestBase {
         aliceState = counterAttack(aliceState, Battleship.Impact.HIT, 4, 1, 6);
         // Bob responds (HIT submarine) and counter attacks (1,8)
         bobState = counterAttack(bobState, Battleship.Impact.HIT, 3, 1, 8);
-        // Alice responds (SUNK destroyer) - GAME OVER! Alice has no ships left
-        aliceState = counterAttack(aliceState, Battleship.Impact.SUNK, 4, 1, 8);
 
         // =======================================================
         // GAME OVER
         // =======================================================
+
+        uint256 bobBalanceBefore = bob.balance;
+        uint256 aliceBalanceBefore = alice.balance;
+
+        // Bob wins the game
+        vm.expectEmit(true, true, false, true);
+        emit Battleship.GameEnded(bobState.gameId, bob);
+
+        // Alice responds (SUNK destroyer) - GAME OVER! Alice has no ships left
+        aliceState = counterAttack(aliceState, Battleship.Impact.SUNK, 4, 1, 8);
+
+        // Bob won the prize pool and Alice got nothing
+        assertEq(bob.balance, bobBalanceBefore + 2 ether);
+        assertEq(alice.balance, aliceBalanceBefore);
 
         logBoardState(aliceState);
         logBoardState(bobState);
