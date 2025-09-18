@@ -1,55 +1,43 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.20;
 
-import {Test} from "forge-std/Test.sol";
+import {Vm} from "forge-std/Vm.sol";
 import {Battleship} from "../../src/Battleship.sol";
-import {IImpactVerifier, IBoardVerifier} from "../../src/Battleship.sol";
+import {BoardLibrary} from "./BoardLibrary.sol";
 
-interface ICircuitProver {
-    function requestBoardProof(
-        uint8[3] memory carrier,
-        uint8[3] memory battleship,
-        uint8[3] memory cruiser,
-        uint8[3] memory submarine,
-        uint8[3] memory destroyer,
-        uint256 salt
-    ) external returns (Battleship.BoardProof memory);
+library ProofLibrary {
+    Vm private constant vm = Vm(address(uint160(uint256(keccak256("hevm cheat code")))));
 
-    function requestImpactProof(
-        uint256 previousCommitment,
-        uint8 targetX,
-        uint8 targetY,
-        uint8 claimedResult,
-        uint8 claimedShipId,
-        uint256 boardCommitment,
-        uint8[3][5] memory ships,
-        uint8[5] memory previousHitCounts,
-        uint256 salt
-    ) external returns (Battleship.ImpactProof memory);
-}
+    uint256 public constant MOCK_BOARD_COMMITMENT = 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef;
+    uint256 public constant MOCK_STATE_COMMITMENT = 0xfedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321;
 
-contract BattleshipCircuitProver is Test, ICircuitProver {
-    IImpactVerifier public impactVerifier;
-    IBoardVerifier public boardVerifier;
-
-    constructor(address _boardVerifier, address _impactVerifier) {
-        boardVerifier = IBoardVerifier(_boardVerifier);
-        impactVerifier = IImpactVerifier(_impactVerifier);
+    enum ProofType {
+        BOARD,
+        IMPACT
     }
 
     /**
-     * @dev Create board proof request JSON using proper Foundry serialization
+     * @dev Create a real board proof
      */
-    function requestBoardProof(
+    function createBoardProof(BoardLibrary.BoardConfig memory config) internal returns (Battleship.BoardProof memory) {
+        return createBoardProof(
+            config.carrier, config.battleship, config.cruiser, config.submarine, config.destroyer, config.salt
+        );
+    }
+
+    /**
+     * @dev Create a real board proof
+     */
+    function createBoardProof(
         uint8[3] memory carrier,
         uint8[3] memory battleship,
         uint8[3] memory cruiser,
         uint8[3] memory submarine,
         uint8[3] memory destroyer,
         uint256 salt
-    ) external returns (Battleship.BoardProof memory) {
+    ) internal returns (Battleship.BoardProof memory) {
         // Create input object first
-        string memory inputObj = "boardInput";
+        string memory input = "";
 
         // Convert ship arrays to uint256[] for Foundry serialization
         uint256[] memory carrierArray = new uint256[](3);
@@ -67,20 +55,20 @@ contract BattleshipCircuitProver is Test, ICircuitProver {
         }
 
         // Serialize input object
-        vm.serializeUint(inputObj, "carrier", carrierArray);
-        vm.serializeUint(inputObj, "battleship", battleshipArray);
-        vm.serializeUint(inputObj, "cruiser", cruiserArray);
-        vm.serializeUint(inputObj, "submarine", submarineArray);
-        vm.serializeUint(inputObj, "destroyer", destroyerArray);
+        vm.serializeUint(input, "carrier", carrierArray);
+        vm.serializeUint(input, "battleship", battleshipArray);
+        vm.serializeUint(input, "cruiser", cruiserArray);
+        vm.serializeUint(input, "submarine", submarineArray);
+        vm.serializeUint(input, "destroyer", destroyerArray);
 
-        string memory result = requestProof("board", vm.serializeUint(inputObj, "salt", salt));
+        string memory result = createProof(ProofType.BOARD, vm.serializeUint(input, "salt", salt));
         return parseBoardProofResponse(result);
     }
 
     /**
-     * @dev Create impact proof request JSON using proper Foundry serialization
+     * @dev Create a real impact proof
      */
-    function requestImpactProof(
+    function createImpactProof(
         uint256 previousCommitment,
         uint8 targetX,
         uint8 targetY,
@@ -90,9 +78,9 @@ contract BattleshipCircuitProver is Test, ICircuitProver {
         uint8[3][5] memory ships,
         uint8[5] memory previousHitCounts,
         uint256 salt
-    ) external returns (Battleship.ImpactProof memory) {
-        string memory result = requestProof(
-            "impact",
+    ) internal returns (Battleship.ImpactProof memory) {
+        string memory result = createProof(
+            ProofType.IMPACT,
             string.concat(
                 "{",
                 '"previousCommitment":"',
@@ -129,9 +117,9 @@ contract BattleshipCircuitProver is Test, ICircuitProver {
     }
 
     /**
-     * @dev Helper to format ships array as proper JSON nested array
+     * @dev Helper to format ships array as json
      */
-    function formatShipsArray(uint8[3][5] memory ships) internal pure returns (string memory) {
+    function formatShipsArray(uint8[3][5] memory ships) private pure returns (string memory) {
         return string.concat(
             "[",
             formatShip(ships[0]),
@@ -148,16 +136,16 @@ contract BattleshipCircuitProver is Test, ICircuitProver {
     }
 
     /**
-     * @dev Helper to format a single ship as JSON array
+     * @dev Helper to format a single ship array as json
      */
-    function formatShip(uint8[3] memory ship) internal pure returns (string memory) {
+    function formatShip(uint8[3] memory ship) private pure returns (string memory) {
         return string.concat("[", vm.toString(ship[0]), ",", vm.toString(ship[1]), ",", vm.toString(ship[2]), "]");
     }
 
     /**
-     * @dev Helper to format hit counts array as JSON
+     * @dev Helper to format hit counts array as json
      */
-    function formatHitCountsArray(uint8[5] memory hitCounts) internal pure returns (string memory) {
+    function formatHitCountsArray(uint8[5] memory hitCounts) private pure returns (string memory) {
         return string.concat(
             "[",
             vm.toString(hitCounts[0]),
@@ -174,21 +162,21 @@ contract BattleshipCircuitProver is Test, ICircuitProver {
     }
 
     /**
-     * @dev Shared FFI helper function
+     * @dev Create a real board or impact proof
      */
-    function requestProof(string memory command, string memory request) internal returns (string memory) {
+    function createProof(ProofType proofType, string memory proofRequest) private returns (string memory) {
         string memory script = "../test/ffi.ts";
         string[] memory cmd = new string[](6);
         cmd[0] = "node";
         cmd[1] = "--disable-warning=ExperimentalWarning";
         cmd[2] = "--experimental-transform-types";
         cmd[3] = script;
-        cmd[4] = command;
-        cmd[5] = request;
+        cmd[4] = proofType == ProofType.BOARD ? "board" : "impact";
+        cmd[5] = proofRequest;
 
         bytes memory result = vm.ffi(cmd);
         string memory response = string(result);
-        require(vm.parseJsonBool(response, ".success"), "FFI call failed");
+        require(vm.parseJsonBool(response, ".success"), "Proof creation failed");
 
         return response;
     }
@@ -196,11 +184,7 @@ contract BattleshipCircuitProver is Test, ICircuitProver {
     /**
      * @dev Parse board proof response into structured data
      */
-    function parseBoardProofResponse(string memory response)
-        internal
-        pure
-        returns (Battleship.BoardProof memory data)
-    {
+    function parseBoardProofResponse(string memory response) private pure returns (Battleship.BoardProof memory data) {
         // Extract proof components
         uint256[] memory piAArray = vm.parseJsonUintArray(response, ".proof.piA");
         data.piA[0] = piAArray[0];
@@ -229,7 +213,7 @@ contract BattleshipCircuitProver is Test, ICircuitProver {
      * @dev Parse impact proof response into structured data
      */
     function parseImpactProofResponse(string memory response)
-        internal
+        private
         pure
         returns (Battleship.ImpactProof memory data)
     {
@@ -259,16 +243,66 @@ contract BattleshipCircuitProver is Test, ICircuitProver {
     }
 
     /**
-     * @dev Verify board proof with BoardVerifier
+     * @dev Get mock board proof
      */
-    function verifyBoardProof(Battleship.BoardProof memory data) internal view returns (bool) {
-        return boardVerifier.verifyProof(data.piA, data.piB, data.piC, data.publicSignals);
+    function mockBoardProof() public pure returns (Battleship.BoardProof memory) {
+        return mockBoardProof(MOCK_BOARD_COMMITMENT, MOCK_STATE_COMMITMENT);
     }
 
     /**
-     * @dev Verify impact proof with ImpactVerifier
+     * @dev Get mock board proof
      */
-    function verifyImpactProof(Battleship.ImpactProof memory data) internal view returns (bool) {
-        return impactVerifier.verifyProof(data.piA, data.piB, data.piC, data.publicSignals);
+    function mockBoardProof(bytes32 boardCommitment, bytes32 stateCommitment)
+        public
+        pure
+        returns (Battleship.BoardProof memory)
+    {
+        return mockBoardProof(uint256(boardCommitment), uint256(stateCommitment));
+    }
+
+    /**
+     * @dev Get mock board proof
+     */
+    function mockBoardProof(uint256 boardCommitment, uint256 stateCommitment)
+        public
+        pure
+        returns (Battleship.BoardProof memory)
+    {
+        return Battleship.BoardProof({
+            piA: [uint256(1), uint256(2)],
+            piB: [[uint256(3), uint256(4)], [uint256(5), uint256(6)]],
+            piC: [uint256(7), uint256(8)],
+            publicSignals: [boardCommitment, stateCommitment]
+        });
+    }
+
+    /**
+     * @dev Create a mock impact proof
+     */
+    function mockImpactProof(
+        uint256 newCommitment,
+        uint256 remainingShips,
+        uint256 previousCommitment,
+        uint256 targetX,
+        uint256 targetY,
+        Battleship.Impact claimedResult,
+        uint256 claimedShipId,
+        uint256 boardCommitment
+    ) public pure returns (Battleship.ImpactProof memory) {
+        return Battleship.ImpactProof({
+            piA: [uint256(1), uint256(2)],
+            piB: [[uint256(3), uint256(4)], [uint256(5), uint256(6)]],
+            piC: [uint256(7), uint256(8)],
+            publicSignals: [
+                newCommitment, // newCommitment (index 0) - same for miss
+                remainingShips, // remainingShips (index 1)
+                previousCommitment, // previousCommitment (index 2)
+                targetX, // targetX (index 3)
+                targetY, // targetY (index 4)
+                uint256(claimedResult), // claimedResult (index 5)
+                claimedShipId, // claimedShipId (index 6) - 255 for not sunk
+                boardCommitment // boardCommitment (index 7)
+            ]
+        });
     }
 }

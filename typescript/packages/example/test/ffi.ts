@@ -130,5 +130,8 @@ async function main() {
   }
 }
 
+// Mute stderr to supress any warnings from the circuits.
+process.stderr.write = () => true
+
 // Run main function
 main()

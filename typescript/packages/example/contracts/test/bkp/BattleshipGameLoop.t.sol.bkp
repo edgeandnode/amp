@@ -2,31 +2,13 @@
 pragma solidity ^0.8.20;
 
 import {Battleship} from "../src/Battleship.sol";
-import {BattleshipTestHelper} from "./helpers/BattleshipTestHelper.sol";
-import {MockBoardVerifier, MockImpactVerifier} from "./mocks/MockVerifiers.sol";
+import {MockTestBase} from "./helpers/MockTestBase.sol";
 
 /**
  * @title BattleshipGameLoop Test Suite
  * @dev Core game mechanics testing for Battleship contract
  */
-contract BattleshipGameLoopTest is BattleshipTestHelper {
-    MockBoardVerifier public bv;
-    MockImpactVerifier public iv;
-
-    function setUp() public {
-        bv = new MockBoardVerifier();
-        iv = new MockImpactVerifier();
-        bs = new Battleship(address(bv), address(iv));
-
-        vm.deal(alice, 100 ether);
-        vm.deal(bob, 100 ether);
-        vm.deal(charlie, 100 ether);
-    }
-
-    function setMockVerifierResult(bool boardVerifierResult, bool impactVerifierResult) public {
-        bv.setShouldReturnTrue(boardVerifierResult);
-        iv.setShouldReturnTrue(impactVerifierResult);
-    }
+contract BattleshipGameLoopTest is MockTestBase {
     // ═══════════════════════════════════════════════════════════════════
     // Setup & Initialization Tests
     // ═══════════════════════════════════════════════════════════════════

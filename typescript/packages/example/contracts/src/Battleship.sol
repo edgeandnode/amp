@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.20;
 
+import {console} from "forge-std/console.sol";
+
 interface IBoardVerifier {
     function verifyProof(uint256[2] memory a, uint256[2][2] memory b, uint256[2] memory c, uint256[2] memory input)
         external
@@ -215,6 +217,9 @@ contract Battleship {
         game.lastShotY = targetY;
         game.lastPlayer = msg.sender;
 
+        // Record this shot in the attacker's shot grid
+        recordShot(gameId, msg.sender, game.lastShotX, game.lastShotY);
+
         emit ShotFired(gameId, msg.sender, targetX, targetY);
     }
 
@@ -232,8 +237,12 @@ contract Battleship {
         if (game.lastPlayer == address(0)) revert InvalidMove();
 
         // Responder is the other player (not the one who just attacked)
-        address responder = getOtherPlayer(gameId, game.lastPlayer);
-        if (msg.sender != responder) revert NotYourTurn();
+        if (msg.sender != getOtherPlayer(gameId, game.lastPlayer)) revert NotYourTurn();
+
+        // Check if this counter attack position has already been shot
+        if (hasBeenShot(gameId, msg.sender, counterX, counterY)) {
+            revert AlreadyShot();
+        }
 
         // Verify proof coordinates match the pending shot
         if (
@@ -244,7 +253,7 @@ contract Battleship {
         }
 
         // Verify the previous state commitment matches defender's current commitment
-        uint8 defenderIndex = (responder == game.players[0]) ? 0 : 1;
+        uint8 defenderIndex = (msg.sender == game.players[0]) ? 0 : 1;
         if (uint256(game.stateCommitments[defenderIndex]) != impactProof.publicSignals[2]) {
             revert CommitmentMismatch();
         }
@@ -252,12 +261,6 @@ contract Battleship {
         // Verify the board commitment matches defender's commitment
         if (uint256(game.boardCommitments[defenderIndex]) != impactProof.publicSignals[7]) {
             revert CommitmentMismatch();
-        }
-
-        // Check if this position has already been shot by the attacker
-        uint8 attackerIndex = getPlayerIndex(gameId, game.lastPlayer);
-        if (hasBeenShot(gameId, attackerIndex, game.lastShotX, game.lastShotY)) {
-            revert AlreadyShot();
         }
 
         // Verify zkSNARK proof for the impact
@@ -270,10 +273,7 @@ contract Battleship {
         Impact result = Impact(impactProof.publicSignals[5]);
 
         // Update defender's state commitment with the new commitment from proof
-        game.stateCommitments[defenderIndex] = bytes32(impactProof.publicSignals[6]);
-
-        // Record this shot in the attacker's shot grid
-        recordShot(gameId, attackerIndex, game.lastShotX, game.lastShotY);
+        game.stateCommitments[defenderIndex] = bytes32(impactProof.publicSignals[0]);
 
         // Emit impact report
         emit ImpactReported(gameId, msg.sender, result);
@@ -296,8 +296,11 @@ contract Battleship {
         // Validate counter-attack coordinates
         if (counterX >= 10 || counterY >= 10) revert InvalidCoordinates();
 
-        // Update game state: responder becomes the new attacker
-        game.lastPlayer = responder;
+        // Record this shot in the attacker's shot grid
+        recordShot(gameId, msg.sender, counterX, counterY);
+
+        // Update game state
+        game.lastPlayer = msg.sender;
         game.lastShotX = counterX;
         game.lastShotY = counterY;
 
@@ -370,12 +373,14 @@ contract Battleship {
     }
 
     // Shot grid management functions
-    function hasBeenShot(uint256 gameId, uint8 playerIndex, uint8 x, uint8 y) internal view returns (bool) {
+    function hasBeenShot(uint256 gameId, address player, uint8 x, uint8 y) internal view returns (bool) {
+        uint8 playerIndex = getPlayerIndex(gameId, player);
         uint256 position = uint256(y) * 10 + uint256(x); // 0-99
         return (games[gameId].shotGrids[playerIndex] >> position) & 1 == 1;
     }
 
-    function recordShot(uint256 gameId, uint8 playerIndex, uint8 x, uint8 y) internal {
+    function recordShot(uint256 gameId, address player, uint8 x, uint8 y) internal {
+        uint8 playerIndex = getPlayerIndex(gameId, player);
         uint256 position = uint256(y) * 10 + uint256(x);
         games[gameId].shotGrids[playerIndex] |= (1 << position);
     }
