@@ -296,7 +296,7 @@ struct DumpPartition<S: BlockStreamer> {
     /// The name of the dataset
     dataset_name: String,
     /// The metadata database
-    metadata_db: Arc<MetadataDb>,
+    metadata_db: MetadataDb,
     /// The tables to write to
     catalog: Catalog,
     /// The block ranges to scan

@@ -93,7 +93,7 @@ pub async fn bless(test_env: &TestEnv, dataset_name: &str, end: u64) -> Result<(
 
 pub struct TestEnv {
     pub config: Arc<Config>,
-    pub metadata_db: Arc<MetadataDb>,
+    pub metadata_db: MetadataDb,
     pub dataset_store: Arc<DatasetStore>,
     pub server_addrs: BoundAddrs,
 
@@ -143,7 +143,7 @@ impl TestEnv {
         }
 
         let config = load_test_config(Some(figment), config_name).await?;
-        let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
+        let metadata_db: MetadataDb = config.metadata_db().await?.into();
         let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
 
         let (bound, server) = nozzle::server::run(
@@ -234,7 +234,7 @@ url = "ipc://{}""#,
         temp_dirs.push(tmp_providers);
 
         let config = load_test_config(Some(figment), config_name).await?;
-        let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
+        let metadata_db: MetadataDb = config.metadata_db().await?.into();
         let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
 
         let (bound, server) = nozzle::server::run(
@@ -362,7 +362,7 @@ pub(crate) async fn dump_dataset(
 ) -> Result<(), BoxError> {
     // dump the dataset
     let partition_size_mb = 100;
-    let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
+    let metadata_db: MetadataDb = config.metadata_db().await?.into();
 
     let physical_tables = dump(
         config.clone(),
@@ -392,7 +392,7 @@ pub(crate) async fn dump_dataset(
 pub(crate) async fn catalog_for_dataset(
     dataset_name: &str,
     dataset_store: &Arc<DatasetStore>,
-    metadata_db: Arc<MetadataDb>,
+    metadata_db: MetadataDb,
 ) -> Result<Catalog, BoxError> {
     let dataset = dataset_store.load_dataset(dataset_name, None).await?;
     let mut tables: Vec<Arc<PhysicalTable>> = Vec::new();
@@ -663,7 +663,7 @@ impl DatasetPackage {
 
 pub async fn restore_blessed_dataset(
     dataset: &str,
-    metadata_db: &Arc<MetadataDb>,
+    metadata_db: &MetadataDb,
 ) -> Result<Vec<Arc<PhysicalTable>>, BoxError> {
     let config = load_test_config(None, "config.toml").await?;
     let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());

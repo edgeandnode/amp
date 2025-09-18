@@ -50,7 +50,7 @@ pub type ProviderConfigTomlValue = toml::Value;
 
 #[derive(Clone)]
 pub struct DatasetStore {
-    metadata_db: Arc<MetadataDb>,
+    metadata_db: MetadataDb,
     // Cache maps dataset name to eth_call UDF.
     eth_call_cache: Arc<RwLock<HashMap<String, ScalarUDF>>>,
     // This cache maps dataset name to the dataset definition.
@@ -62,7 +62,7 @@ pub struct DatasetStore {
 }
 
 impl DatasetStore {
-    pub fn new(config: Arc<Config>, metadata_db: Arc<MetadataDb>) -> Arc<Self> {
+    pub fn new(config: Arc<Config>, metadata_db: MetadataDb) -> Arc<Self> {
         let providers_store = ProvidersConfigStore::new(config.providers_store.prefixed_store());
         Arc::new(Self {
             metadata_db,

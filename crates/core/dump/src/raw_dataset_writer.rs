@@ -21,7 +21,7 @@ const MAX_PARTITION_BLOCK_RANGE: u64 = 1_000_000;
 pub struct RawDatasetWriter {
     writers: BTreeMap<String, RawTableWriter>,
 
-    metadata_db: Arc<MetadataDb>,
+    metadata_db: MetadataDb,
 }
 
 impl RawDatasetWriter {
@@ -29,7 +29,7 @@ impl RawDatasetWriter {
     /// one entry per table in that dataset.
     pub fn new(
         catalog: Catalog,
-        metadata_db: Arc<MetadataDb>,
+        metadata_db: MetadataDb,
         opts: ParquetWriterProperties,
         compaction_opts: &Arc<CompactionProperties>,
         partition_size: u64,

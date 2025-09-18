@@ -189,7 +189,7 @@ pub async fn dump_user_tables(
 #[derive(Clone)]
 pub struct Ctx {
     pub config: Arc<Config>,
-    pub metadata_db: Arc<MetadataDb>,
+    pub metadata_db: MetadataDb,
     pub dataset_store: Arc<DatasetStore>,
     pub data_store: Arc<DataStore>,
     /// Shared notification multiplexer for streaming queries
