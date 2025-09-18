@@ -249,17 +249,17 @@ impl DatasetStore {
             .map_err(|err| (dataset, err).into())
     }
 
-    /// Loads a [RawDataset] and [common](CommonManifest) data for a TOML or JSON file with the
+    /// Loads a [DatasetSrc] and [common](CommonManifest) data for a TOML or JSON file with the
     /// given name.
     async fn common_data_and_dataset(
         &self,
         dataset_name: &str,
-    ) -> Result<(CommonManifest, RawDataset), Error> {
+    ) -> Result<(CommonManifest, DatasetSrc), Error> {
         use Error::*;
-        let raw_dataset = self
+        let dataset_src = self
             .dataset_defs_store
             .get_string(format!("{}.toml", dataset_name))
-            .map_ok(RawDataset::Toml)
+            .map_ok(DatasetSrc::Toml)
             .or_else(|err| async move {
                 if !err.is_not_found() {
                     return Err(err);
@@ -267,16 +267,16 @@ impl DatasetStore {
                 self.dataset_defs_store
                     .get_string(format!("{}.json", dataset_name))
                     .await
-                    .map(RawDataset::Json)
+                    .map(DatasetSrc::Json)
             })
             .await?;
 
-        let common: CommonManifest = match raw_dataset {
-            RawDataset::Toml(ref raw) => {
+        let common: CommonManifest = match &dataset_src {
+            DatasetSrc::Toml(src) => {
                 tracing::warn!("TOML dataset format is deprecated!");
-                toml::from_str::<CommonManifest>(raw)?
+                toml::from_str::<CommonManifest>(src)?
             }
-            RawDataset::Json(ref raw) => serde_json::from_str::<CommonManifest>(raw)?,
+            DatasetSrc::Json(src) => serde_json::from_str::<CommonManifest>(src)?,
         };
 
         if common.name != dataset_name && common.kind != "manifest" {
@@ -286,7 +286,7 @@ impl DatasetStore {
             ));
         }
 
-        Ok((common, raw_dataset))
+        Ok((common, dataset_src))
     }
 
     async fn load_manifest_dataset_inner(
@@ -310,9 +310,9 @@ impl DatasetStore {
             return Ok(dataset.clone());
         }
 
-        let (common, raw_dataset) = self.common_data_and_dataset(dataset_identifier).await?;
+        let (common, dataset_src) = self.common_data_and_dataset(dataset_identifier).await?;
         let kind = DatasetKind::from_str(&common.kind)?;
-        let value = raw_dataset.to_value()?;
+        let value = dataset_src.to_value()?;
         let (dataset, ground_truth_schema) = match kind {
             DatasetKind::EvmRpc => {
                 let builtin_schema =
@@ -342,7 +342,7 @@ impl DatasetStore {
                 (store_dataset, None)
             }
             DatasetKind::Manifest => {
-                let manifest = raw_dataset.to_manifest()?;
+                let manifest = dataset_src.to_manifest()?;
                 let dataset = manifest::derived::dataset(manifest).map_err(Error::Unknown)?;
                 (dataset, None)
             }
@@ -698,17 +698,17 @@ impl DatasetStore {
     }
 }
 
-/// Represents a raw dataset definition, either in TOML or JSON format.
-enum RawDataset {
+/// Represents a dataset definition source text, either in TOML or JSON format.
+enum DatasetSrc {
     Toml(String),
     Json(String),
 }
 
-impl RawDataset {
+impl DatasetSrc {
     pub fn to_manifest(&self) -> Result<Manifest, Error> {
         let manifest = match self {
-            RawDataset::Toml(raw) => toml::from_str(raw)?,
-            RawDataset::Json(raw) => serde_json::from_str(raw)?,
+            DatasetSrc::Toml(src) => toml::from_str(src)?,
+            DatasetSrc::Json(src) => serde_json::from_str(src)?,
         };
 
         Ok(manifest)
@@ -716,8 +716,8 @@ impl RawDataset {
 
     fn to_value(&self) -> Result<DatasetValue, Error> {
         let value = match self {
-            RawDataset::Toml(raw) => DatasetValue::Toml(toml::Value::from_str(raw)?),
-            RawDataset::Json(raw) => DatasetValue::Json(serde_json::Value::from_str(raw)?),
+            DatasetSrc::Toml(src) => DatasetValue::Toml(toml::Value::from_str(src)?),
+            DatasetSrc::Json(src) => DatasetValue::Json(serde_json::Value::from_str(src)?),
         };
 
         Ok(value)
