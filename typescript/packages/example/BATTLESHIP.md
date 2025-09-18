@@ -1,498 +1,304 @@
-# Battleship ZkSnark Implementation Documentation
+# Battleship ZK-SNARK Implementation Documentation
 
 This document provides comprehensive technical documentation for the trustless Battleship game implementation using ZK-SNARKs for anti-cheat mechanisms.
 
-## System Overview
+## Executive Summary
 
-### Architecture
-The system implements a complete trustless Battleship game using:
-- **Circom circuits** for zero-knowledge proofs of valid game states
-- **Solidity smart contracts** for on-chain game logic and proof verification
-- **TypeScript test suite** using Vitest for comprehensive circuit and contract testing
-- **Groth16 proving system** for efficient proof generation and verification
+This implementation creates a fully trustless, on-chain Battleship game where players cannot cheat due to cryptographic guarantees provided by Zero-Knowledge Succinct Non-Interactive Arguments of Knowledge (ZK-SNARKs).
 
-### Core Principle
-Every player response in the game requires a ZK-SNARK proof, ensuring no cheating is possible. The system proves:
-1. **Board validity**: Ship placements follow game rules (no overlaps, within bounds)
-2. **Shot responses**: Hit/miss/sunk claims are truthful based on private board state
+### Key Features
 
-## Circuit Architecture
+- **Zero Trust**: No trusted third parties required - all game rules enforced cryptographically
+- **Complete Privacy**: Ship positions remain secret until game end
+- **Anti-Cheat**: Impossible to make invalid moves, lie about hits/misses, or cheat in any way
+- **Verifiable**: All game states and transitions are cryptographically provable
+- **On-Chain**: Complete game state lives on Ethereum with economic incentives
 
-### 1. Board Validation Circuit (`board.circom`)
+### Core Components
 
-**Purpose**: Proves a board commitment represents a valid 5-ship arrangement
+- **Board Circuit** (`board.circom`): Validates ship placement and generates commitments
+- **Impact Circuit** (`impact.circom`): Verifies hit/miss claims with state transitions
+- **Smart Contract** (`Battleship.sol`): Manages game lifecycle and proof verification
+- **Test Suite**: Comprehensive anti-cheat and game simulation tests
 
-**Public Outputs**:
-- `commitment`: Poseidon hash of ship positions and salt
+## Architecture Overview
 
-**Private Inputs**:
-- Ship positions: `carrier[3]`, `battleship[3]`, `cruiser[3]`, `submarine[3]`, `destroyer[3]`
-- Each ship: `[x, y, orientation]` where orientation: 0=horizontal, 1=vertical
-- `salt`: Random value for commitment uniqueness
+The system consists of three main layers working together:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        Client Layer                         │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌──────────────┐ │
+│  │   Ship Setup    │  │ Proof Generation│  │   Game UI    │ │
+│  └─────────────────┘  └─────────────────┘  └──────────────┘ │
+└─────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────┐
+│                      Circuit Layer                          │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌──────────────┐ │
+│  │ Board Circuit   │  │ Impact Circuit  │  │ Proof System │ │
+│  │ (Placement)     │  │ (Hit/Miss)      │  │ (Groth16)    │ │
+│  └─────────────────┘  └─────────────────┘  └──────────────┘ │
+└─────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────┐
+│                     Blockchain Layer                        │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌──────────────┐ │
+│  │ Battleship.sol  │  │ Board Verifier  │  │Shot Verifier │ │
+│  │ (Game Logic)    │  │ Contract        │  │ Contract     │ │
+│  └─────────────────┘  └─────────────────┘  └──────────────┘ │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Data Flow
+
+1. **Setup Phase**: Players generate board commitments using the Board Circuit
+2. **Game Phase**: Each shot requires an Impact Circuit proof to verify hit/miss claims
+3. **Verification**: Smart contract validates all proofs and manages game state
+4. **Settlement**: Winner determined cryptographically, funds distributed automatically
+
+## ZK-SNARK Circuits
+
+### Board Circuit (`board.circom`)
+
+**Purpose**: Validates that a player's ship arrangement follows game rules and generates cryptographic commitments.
+
+**Inputs**:
+- **Private**: Ship positions `[x, y, orientation]` for 5 ships + salt
+- **Public**: None (only outputs)
+
+**Outputs**:
+- `commitment`: Poseidon hash of all ship positions + salt
+- `initialStateCommitment`: Starting state for shot verification chain
 
 **Validation Logic**:
-1. **Individual ship validation**: Each ship placement checked for bounds and orientation
-2. **Overlap detection**: Optimized O(n²) coordinate uniqueness check using encoded coordinates
-3. **Commitment generation**: Poseidon hash of all ship data + salt
+1. **Ship Placement**: Each ship must be placed within 10x10 grid bounds
+2. **Orientation**: Ships can only be horizontal (0) or vertical (1)
+3. **No Overlaps**: All 17 ship coordinates must be unique (pairwise comparison)
+4. **Ship Lengths**: Carrier(5), Battleship(4), Cruiser(3), Submarine(3), Destroyer(2)
 
-**Key Optimizations**:
-- Coordinate encoding: `x*10 + y` for efficient comparison
-- Early exit on invalid placements
-- 136 pairwise comparisons for 17 total ship coordinates
+### Impact Circuit (`impact.circom`)
 
-### 2. Impact Verification Circuit (`impact.circom`)
-
-**Purpose**: Verifies hit/miss/sunk claims using commitment chain to track game state
+**Purpose**: Verifies hit/miss claims and maintains commitment chain for game state integrity.
 
 **Public Inputs**:
 - `previousCommitment`: Previous game state hash
-- `targetX`, `targetY`: Shot coordinates (0-9)
-- `claimedResult`: 0=miss, 1=hit, 2=sunk
-- `claimedShipId`: 0-4 if sunk, 255 otherwise
-- `boardCommitment`: Original board commitment for validation
-
-**Public Outputs**:
-- `newCommitment`: New game state hash after shot
-- `remainingShips`: Ships remaining after shot
+- `targetX`, `targetY`: Coordinates being attacked
+- `claimedResult`: Player's claim (0=miss, 1=hit, 2=sunk)
+- `claimedShipId`: Which ship was sunk (0-4, or 255 if none)
+- `boardCommitment`: Original board commitment from setup
 
 **Private Inputs**:
-- `ships[5][3]`: All ship positions [x, y, orientation]
-- `previousHitCounts[5]`: Hit counts per ship before shot
-- `salt`: Commitment salt
+- `ships[5][3]`: All ship positions and orientations
+- `previousHitCounts[5]`: Hit count per ship before this attack
+- `salt`: Same salt used in board commitment
 
-**Verification Steps**:
-1. **Previous state verification**: Validate previousCommitment matches previousHitCounts + salt
-2. **Ship coordinate generation**: Generate all ship cell positions
-3. **Hit detection**: Check if shot coordinates hit any ship
-4. **State transition**: Calculate new hit counts and check for sunk ships
-5. **Result validation**: Verify claimed result matches actual impact
-6. **New commitment**: Generate and verify new state commitment
+**Public Outputs**:
+- `newCommitment`: Updated game state hash after this attack
+- `remainingShips`: Number of ships not yet sunk
 
-**Commitment Chain**:
-- State tracked as `Poseidon([hitCount0, hitCount1, hitCount2, hitCount3, hitCount4, salt])`
-- Ensures continuous game state integrity
-- Prevents replay attacks and state manipulation
+**Verification Logic**:
+1. **Board Consistency**: Verify ships match original board commitment
+2. **State Consistency**: Verify previous hit counts match previous commitment  
+3. **Hit Detection**: Check if attack coordinates hit any ship
+4. **State Transition**: Calculate new hit counts and remaining ships
+5. **Claim Validation**: Verify player's claimed result matches actual outcome
+6. **Commitment Update**: Generate new state commitment for next round
 
-### 3. Supporting Circuits
+### Helper Circuits
 
-#### Ship Validation (`ship.circom`)
-- `ValidateShip(shipLength)`: Validates individual ship placement
-- Ensures ships are within 10x10 board bounds
-- Validates orientation (0 or 1)
+**Ship Circuit (`ship.circom`)**:
+- `ValidateShip`: Validates individual ship placement
+- `GenerateShipCoords`: Calculates all coordinates for a ship
 
-#### Utility Functions (`utils.circom`)
-- `InBounds()`: Coordinate boundary checking (0-9)
-- `CoordEqual()`: Coordinate comparison
-- `GenerateShipCoords(shipLength)`: Generate all ship cell positions
-- `ValidOrientation()`: Ensure orientation is binary (0 or 1)
+**Utils Circuit (`utils.circom`)**:
+- `InBounds`: Checks coordinate bounds (0-9)
+- `CoordEqual`: Coordinate equality comparison
+- `ShipInBounds`: Validates all ship coordinates in bounds
 
-## Smart Contract Architecture
+### Game Lifecycle
 
-### Main Contract (`Battleship.sol`)
+1. **Creation**:
+   - Player submits board proof and stake
+   - Game created with unique ID
+   - Waiting for second player
 
-**Core Components**:
-- **Game State**: Tracks 2-player games with board commitments, stakes, and move history
-- **Proof Verification**: Integrates Groth16 verifiers for board and unoact proofs
-- **Turn Management**: Enforces proper game flow and turn order
+2. **Joining**:
+   - Second player submits board proof and matching stake
+   - Random starting player selected
+   - Game begins immediately
 
-**Key Structures**:
-```solidity
-struct Game {
-    address[2] players;
-    bytes32[2] boardCommitments;
-    uint256[2] shotGrids; // 100-bit grid per player for duplicate shot prevention
-    uint256 stakeAmount;
-    uint256 prizePool;
-    uint8 lastShotX, lastShotY;
-    address lastPlayer;
-    uint8 startingPlayer;
-    address winner;
-}
+3. **First Attack**:
+   - Only allowed for first move
+   - Starting player attacks with coordinates
+   - Shot recorded in attacker's grid
 
-struct BoardProof {
-    uint256[2] piA;
-    uint256[2][2] piB;
-    uint256[2] piC;
-    uint256[1] publicInputs; // [commitment]
-}
+4. **Respond & Counter**:
+   - Defender submits impact proof for previous shot
+   - Proof verified against multiple commitments
+   - If game not over, defender counter-attacks
+   - Process repeats
 
-struct ImpactProof {
-    uint256[2] piA;
-    uint256[2][2] piB;
-    uint256[2] piC;
-    uint256[7] publicInputs; // [previousCommitment, targetX, targetY, claimedResult, claimedShipId, boardCommitment, newCommitment, remainingShips]
-}
+5. **Game End**:
+   - Triggered when impact proof shows 0 remaining ships
+   - Winner gets entire prize pool
+   - Game marked as ended
+
+## Game Mechanics
+
+### Ship Types and Lengths
+- **Carrier**: 5 cells
+- **Battleship**: 4 cells  
+- **Cruiser**: 3 cells
+- **Submarine**: 3 cells
+- **Destroyer**: 2 cells
+
+**Total**: 17 cells occupied on 10×10 grid (83 empty cells)
+
+### Placement Rules
+- Ships can be horizontal (orientation=0) or vertical (orientation=1)
+- Ships must be entirely within 10×10 grid (coordinates 0-9)
+- Ships cannot overlap (all 17 coordinates must be unique)
+- Ships cannot be adjacent (no additional constraint in current implementation)
+
+### Game Flow
+
+1. **Setup Phase**:
+   - Each player generates board commitment with Board Circuit
+   - Players join game by submitting board proof + stake
+   - Starting player randomly selected
+
+2. **Attack Phase**:
+   - Current attacker chooses coordinates (0-9, 0-9)
+   - Coordinates recorded in attacker's shot grid
+   - Cannot attack same coordinates twice
+
+3. **Response Phase**:
+   - Defender generates impact proof using Impact Circuit
+   - Proof reveals hit/miss/sunk result
+   - State commitment updated with new hit counts
+   - If no ships remain, attacker wins
+   - If ships remain, defender counter-attacks
+
+4. **Victory Conditions**:
+   - Game ends when impact proof shows 0 remaining ships
+   - Winner receives entire prize pool (both stakes)
+   - Players can forfeit at any time (opponent wins)
+
+### Turn Structure
+
+```
+Game Start (Random starter)
+    ↓
+Player A Attacks (coordinates)
+    ↓  
+Player B Responds (impact proof) → Game End?
+    ↓                                  ↓
+Player B Counter-Attacks           Winner Gets Prize Pool
+    ↓
+Player A Responds (impact proof) → Game End?
+    ↓                                  ↓
+Player A Counter-Attacks           Winner Gets Prize Pool
+    ↓
+    ... (continues until victory)
 ```
 
-**Game Flow**:
-1. **createGame()**: Create game with board proof, deposit stake
-2. **joinGame()**: Join with matching stake and board proof (random starting player selected)
-3. **attack()**: Fire initial shot (starting player only)
-4. **respondAndCounter()**: Respond to shot with proof + counter-attack
-5. **forfeitGame()**: Forfeit game and give opponent victory
-6. **cancelGame()**: Cancel game before second player joins (creator only)
-7. Auto-victory when defender has 0 ships remaining
+## Anti-Cheat Mechanisms
 
-**Security Features**:
-- All responses require valid ZK-SNARK proofs
-- Commitment matching prevents board substitution
-- Turn validation prevents unauthorized moves
-- Duplicate shot prevention via shot grid tracking (100-bit grid per player)
-- Coordinate validation for shot responses
-- Automatic prize distribution on victory
-- Starting player randomization using block entropy
+This implementation prevents all known cheating vectors through cryptographic constraints:
 
-### Verifier Contracts
+### 1. Invalid Ship Placement Prevention
 
-**BoardVerifier.sol**:
-- Groth16 verifier for board validation circuit
-- Input: `[commitment]` (1 element)
-- Generated by snarkjs from circuit trusted setup
+**Problem**: Players might place ships outside bounds, overlap ships, or use wrong ship lengths.
 
-**ImpactVerifier.sol**:
-- Groth16 verifier for impact verification circuit  
-- Input: `[previousCommitment, targetX, targetY, claimedResult, claimedShipId, boardCommitment, newCommitment, remainingShips]` (8 elements: 6 inputs + 2 outputs)
-- Generated by snarkjs from circuit trusted setup
+**Solution**: Board Circuit validates:
+- All coordinates within 0-9 bounds
+- No coordinate appears twice (overlap detection)
+- Correct ship lengths enforced by circuit structure
+- Only valid orientations (0 or 1)
 
-## Test Infrastructure
+### 2. False Hit/Miss Claims Prevention
 
-### Circuit Testing (`test/circuits/`)
+**Problem**: Players might lie about whether attacks hit their ships.
 
-**Framework**: Vitest with TypeScript integration
+**Solution**: Impact Circuit cryptographically verifies:
+- Exact ship coordinates against board commitment
+- Whether attack coordinates intersect any ship
+- Correct hit/miss/sunk determination
+- State transition consistency
 
-**Test Structure**:
-- `board.test.ts`: Board validation circuit tests
-- `impact.test.ts`: Impact verification circuit tests
-- `utils.ts`: Circuit testing utilities and helpers
+### 3. State Manipulation Prevention
 
-**Circuit Tester Class**:
-```typescript
-class CircuitTester<I> {
-  witness(input: I): Promise<WitnessOutput>  // Generate witness
-  prove(input: I): Promise<ProofOutput>      // Generate proof
-  verify(proof, signals): Promise<boolean>   // Verify proof
-}
-```
+**Problem**: Players might manipulate hit counts or game state between rounds.
 
-**Testing Capabilities**:
-- Direct circuit witness calculation
-- Full proof generation and verification
-- Comprehensive constraint validation
-- Edge case and error condition testing
-- BoardSimulation utility for game state testing
-- Anti-cheat scenario validation
+**Solution**: Commitment chain prevents tampering:
+- Each state commitment cryptographically binds hit counts
+- Previous commitment must match current private state
+- New commitment computed deterministically
+- No way to forge valid state transitions
 
-### Smart Contract Testing (`contracts/test/`)
+### 4. Ship Movement Prevention
 
-**Framework**: Forge (Foundry) with Solidity
+**Problem**: Players might move ships during gameplay.
 
-**Test Suites**:
-- `BattleshipIntegration.t.sol`: Full game scenarios
-- `BattleshipGameLoop.t.sol`: Turn mechanics
-- `BattleshipEdgeCases.t.sol`: Error conditions
-- `BattleshipCircuitValidation.t.sol`: Proof validation
+**Solution**: Board commitment prevents ship movement:
+- Board commitment generated once during setup
+- Impact proofs must use same ship positions
+- Any change in ship positions breaks board commitment verification
+- Immutable ship positions guaranteed
 
-**Helper Infrastructure**:
-- `BattleshipTestHelper.sol`: Common test utilities
-- `MockVerifiers.sol`: Mock proofs for unit testing
+### 5. Double-Spend Shot Prevention
 
-## Circuit Testing Infrastructure
+**Problem**: Players might attack same coordinates multiple times.
 
-### BoardSimulation Testing Utility
+**Solution**: Smart contract shot grid tracking:
+- 100-bit packed storage per player (10×10 grid)
+- Each shot sets corresponding bit
+- Duplicate shots automatically rejected
+- On-chain enforcement with bit operations
 
-The implementation includes a sophisticated `BoardSimulation` utility for comprehensive game state testing:
+### 6. Commitment Consistency Enforcement
 
-**Features**:
-- Complete game state simulation with ship placement
-- Hit/miss/sunk detection and validation
-- Commitment chain tracking throughout game progression
-- Anti-cheat scenario testing with override capabilities
-- Visual board representation for debugging
+**Problem**: Players might use different commitments in different proofs.
 
-**Key Methods**:
-```typescript
-interface BoardSimulation {
-  fireShot(x: number, y: number, override?: ShotOverride): Promise<ExpectedResult>
-  getRemainingShips(): number
-  getCommitment(): string
-  getHitCounts(): Array<number>
-  isShipSunk(shipId: number): boolean
-  getCellState(x: number, y: number): CellState
-  visualizeBoard(): string
-}
-```
-
-**Anti-Cheat Testing**:
-The simulation supports cheat attempt validation:
-- `cheatMiss()`: Claim miss when actually hit
-- `cheatHit()`: Claim hit when actually miss  
-- `cheatSunk()`: Premature sunk claims
-- `cheatHitCounts()`: Manipulate previous hit counts
-- `cheatOverride()`: Custom proof manipulation
-
-### Circuit Testing Utilities
-
-**Circuit Tester Class** (`utils.ts`):
-- Singleton pattern for efficient test execution
-- WASM witness calculator integration
-- Full Groth16 proof generation and verification
-- Support for both board and shot circuits
-
-**Utility Functions**:
-- `validShips()`: Generate valid ship placements
-- `overlappingShips()`: Create invalid overlapping configurations  
-- `outOfBoundsShips()`: Generate boundary violation scenarios
-- `poseidonHash()`: Commitment generation utilities
-- `validateShipPlacement()`: Complete validation logic
-
-## Build System and Workflow
-
-### Package.json Scripts
-
-**Circuit Operations**:
-```bash
-pnpm run compile:board    # Compile board circuit with circom
-pnpm run compile:impact     # Compile impact circuit with circom
-pnpm run build           # Compile both circuits
-```
-
-**Trusted Setup**:
-```bash
-pnpm run setup:board      # Generate initial proving key
-pnpm run setup:impact       # Generate initial proving key  
-pnpm run setup           # Setup both circuits
-```
-
-**Key Contribution** (Security Critical):
-```bash
-pnpm run contribute:board # Add randomness to ceremony
-pnpm run contribute:impact  # Add randomness to ceremony
-pnpm run contribute      # Contribute to both ceremonies
-```
-
-**Verifier Export**:
-```bash
-pnpm run export:board    # Generate Solidity verifier
-pnpm run export:impact   # Generate Solidity verifier
-pnpm run export          # Export both verifiers
-```
-
-**Automated Build**:
-```bash
-./build-circuits.sh         # Automated build with entropy generation
-./build-circuits.sh board   # Build only board circuit
-./build-circuits.sh impact  # Build only impact circuit
-```
-
-**Testing**:
-```bash
-pnpm run test                # Run vitest (circuit tests)
-pnpm run test:run            # Single test run
-pnpm run test:watch          # Watch mode for development
-(cd contracts && forge test) # Smart contract tests (from contracts directory)
-```
-
-### Automated Build Process
-
-The `build-circuits.sh` script provides fully automated circuit compilation:
-
-**Features**:
-- Automatic entropy generation for trusted setup ceremony
-- Sequential circuit compilation (board and impact)
-- Automated proving key generation and contribution
-- Support for individual circuit builds
-- Error handling and build validation
-
-**Process Flow**:
-1. Generate random entropy using OpenSSL
-2. Compile circuit with circom
-3. Setup initial proving key with Powers of Tau
-4. Contribute entropy to ceremony
-5. Validate successful compilation
-
-**Usage Examples**:
-```bash
-./build-circuits.sh          # Build both circuits
-./build-circuits.sh board    # Build only board circuit  
-./build-circuits.sh impact   # Build only impact circuit
-```
-
-### Build Artifacts
-
-**Circuit Outputs** (`circom/build/`):
-- `{circuit}.r1cs`: R1CS constraint system
-- `{circuit}_js/{circuit}.wasm`: WASM witness generator
-- `{circuit}_0000.zkey`: Initial proving key
-- `{circuit}_final.zkey`: Final proving key (post-ceremony)
-- `vkey_{circuit}.json`: Verification key
-
-**Dependencies**:
-- `powersOfTau28_hez_final_14.ptau`: Powers of tau ceremony file
-- Pre-compiled for circuits up to 2^14 constraints
-
-## Development Workflow Guide
-
-### Quick Start Development Process
-
-1. **Initial Setup**:
-```bash
-pnpm install                  # Install dependencies
-```
-
-2. **Circuit Development**:
-```bash
-pnpm run build               # Compile circuits
-./build-circuits.sh          # Full automated build with setup
-```
-
-3. **Testing**:
-```bash
-pnpm test                     # Run circuit tests
-pnpm run test:watch           # Development mode
-(cd contracts && forge test)  # Smart contract tests (from contracts directory)
-```
-
-4. **Contract Development**:
-```bash
-(cd contracts && forge build)  # Compile contracts
-(cd contracts && forge test)   # Run contract tests
-pnpm run deploy:counter        # Deploy to local testnet
-```
-
-### Circuit Development Best Practices
-
-1. **Iterative Testing**: Use `pnpm run test:watch` for rapid feedback
-2. **Constraint Validation**: Always validate circuit constraints with edge cases
-3. **Commitment Testing**: Verify commitment chain integrity in impact circuits
-4. **Anti-Cheat Testing**: Use BoardSimulation with cheat scenarios
-5. **Performance Testing**: Monitor proof generation times and circuit size
-
-### Contract Development Best Practices
-
-1. **Mock Testing**: Use MockVerifiers for unit tests
-2. **Integration Testing**: Test full game scenarios with BattleshipTestHelper
-3. **Security Testing**: Validate all proof verification paths
-4. **Gas Optimization**: Monitor gas costs for verifier calls
-5. **Error Handling**: Test all revert conditions and error states
-
-### Dependencies and Tools
-
-**Core Dependencies**:
-- `circom`: Circuit compiler
-- `snarkjs`: Proof generation and verification
-- `circomlibjs`: Poseidon hash utilities
-- `forge`: Solidity testing framework
-
-**Testing Dependencies**:
-- `vitest`: TypeScript test runner
-- `circom_runtime`: WASM witness calculator
-- Custom utilities for simulation and testing
-
-## Game Constraints and Rules
-
-### Ship Configuration
-- **Carrier**: Length 5
-- **Battleship**: Length 4  
-- **Cruiser**: Length 3
-- **Submarine**: Length 3
-- **Destroyer**: Length 2
-- **Total**: 17 occupied cells
-
-### Board Rules
-- 10x10 grid (coordinates 0-9)
-- Ships placed horizontally (0) or vertically (1)
-- No overlapping ships
-- All ship cells must be within bounds
-
-### Game Mechanics
-- 2-player turn-based gameplay
-- Equal stakes required from both players
-- Random starting player selection
-- Continuous turn alternation until victory
-- Winner takes full prize pool
-
-### Victory Conditions
-- Game ends when any player's last ship is sunk
-- Automatic victory detection via remaining ships count
-- Prize distribution to attacking player (last to move)
+**Solution**: Multi-layer commitment verification:
+- Board commitment stored on-chain during setup
+- State commitments updated deterministically each round
+- Impact proofs must reference exact stored commitments
+- Cross-verification prevents inconsistencies
 
 ## Security Considerations
 
-### ZK-SNARK Security
-- **Trusted Setup**: Requires secure ceremony for proving keys
-- **Circuit Soundness**: Comprehensive constraint validation prevents cheating
-- **Privacy**: Ship positions remain private until game end
-- **Completeness**: Valid moves always generate valid proofs
+### Trust Assumptions
 
-### Smart Contract Security  
-- **Proof Validation**: All responses require valid ZK-SNARK verification
-- **State Integrity**: Commitment chain prevents state manipulation
-- **Turn Validation**: Strict turn order enforcement
-- **Economic Security**: Stake-based incentive alignment
+**Trusted Components**:
+- **Circuit Implementation**: Circuits must correctly encode game rules
+- **Trusted Setup**: Powers of Tau ceremony must be secure
+- **Ethereum**: Blockchain security for contract execution
 
-### Known Limitations
-- **Setup Trust**: Initial trusted setup ceremony required
-- **Gas Costs**: Proof verification consumes significant gas
-- **Proving Time**: Client-side proof generation takes time
-- **Circuit Size**: Large circuits require more resources
+**Trustless Components**:
+- **Player Actions**: No trust required between players
+- **Game Outcomes**: Cryptographically guaranteed to be correct
+- **Economic Settlement**: Automatic based on proofs
 
-## Development Guidelines
+### Commitment Scheme Security
 
-### Circuit Development
-- Test individual templates before integration
-- Use assertion templates for constraint validation
-- Optimize for constraint count and proving time
-- Validate all edge cases thoroughly
+**Properties Required**:
+- **Hiding**: Commitments reveal nothing about committed values
+- **Binding**: Impossible to change committed value after reveal
+- **Completeness**: Valid commitments always verify correctly
+- **Soundness**: Invalid proofs always reject
 
-### Smart Contract Development  
-- Always verify proofs on-chain
-- Validate public inputs match expected ranges
-- Handle all error conditions gracefully
-- Test with both valid and invalid proofs
+**Implementation Security**:
+- **Hash Function**: Poseidon hash resistant to known attacks
+- **Randomness**: High-entropy salt prevents rainbow table attacks  
+- **Determinism**: Same input always produces same commitment
+- **Non-Malleability**: Cannot modify commitments without detection
 
-### Testing Strategy
-- Unit test individual circuit components
-- Integration test full game scenarios
-- Property-based testing for edge cases
-- Gas optimization testing for contract calls
-
-## Performance Characteristics
-
-### Circuit Complexity
-- **Board Circuit**: ~5K-10K constraints (estimated)
-- **Shot Circuit**: ~10K-15K constraints (estimated)
-- **Proving Time**: 1-5 seconds per proof (browser)
-- **Verification Time**: <1ms on-chain
-
-### Gas Costs (estimated)
-- **Board Verification**: ~200K gas
-- **Shot Verification**: ~250K gas  
-- **Game Creation**: ~150K gas
-- **Move Execution**: ~300K gas total
-
-## Future Enhancement Opportunities
-
-### Circuit Optimizations
-- Reduce constraint count through algorithmic improvements
-- Implement batched proof verification
-- Explore alternative proving systems (PLONK, FRI-based)
-
-### Smart Contract Features
-- Tournament modes with multiple games
-- Spectator modes with selective reveal
-- Replay system for game history
-- Rating and leaderboard systems
-
-### User Experience
-- Web-based game interface
-- Real-time game state updates
-- Mobile-friendly proof generation
-- Automated proof management
-
-This documentation serves as the definitive reference for understanding and extending the Battleship ZK-SNARK implementation. All technical decisions, constraints, and architectural patterns are captured to enable future development by AI agents and human developers alike.
-
-# TODO (for human):
-
-- Consider optimizing smart contract input (some zk proof public inputs are known to the smart contract and could be passed from it instead)
-- Effect-ify (e.g. ffi.ts, etc.)
-- Create SDK for web app
+**Key Management**:
+- **Salt Generation**: Cryptographically secure random number generation
+- **Salt Storage**: Client-side storage with backup mechanisms
+- **Salt Loss**: Game becomes unplayable if salt lost
+- **Recommendation**: Deterministic salt derivation from master seed
