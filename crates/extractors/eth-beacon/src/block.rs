@@ -23,7 +23,11 @@ pub fn schema() -> Schema {
         Field::new("parent_root", DataType::FixedSizeBinary(32), false),
         Field::new("state_root", DataType::FixedSizeBinary(32), false),
         Field::new("randao_reveal", DataType::FixedSizeBinary(96), false),
-        Field::new("eth1_data_deposit_root", DataType::FixedSizeBinary(32), false),
+        Field::new(
+            "eth1_data_deposit_root",
+            DataType::FixedSizeBinary(32),
+            false,
+        ),
         Field::new("eth1_data_deposit_count", DataType::UInt64, false),
         Field::new("eth1_data_block_hash", DataType::FixedSizeBinary(32), false),
         Field::new("graffiti", DataType::FixedSizeBinary(32), false),
