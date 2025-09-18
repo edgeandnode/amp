@@ -100,6 +100,11 @@ pub fn timestamp_type() -> DataType {
 /// Remember to call `.with_timezone_utc()` after creating a Timestamp array.
 pub(crate) type TimestampArrayType = arrow::array::TimestampNanosecondArray;
 
+pub trait RawDatasetKind: Send + Sync {
+    fn kind(&self) -> &'static str;
+    fn all_tables(&self, network: &str) -> Vec<Table>;
+}
+
 /// A record batch associated with a single block of chain data, for populating raw datasets.
 pub struct RawTableRows {
     pub table: Table,

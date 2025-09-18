@@ -27,7 +27,7 @@ pub enum Error {
     SchemaMismatch,
 
     #[error("`schema` field is missing, but required for dataset kind {dataset_kind}")]
-    SchemaMissing { dataset_kind: DatasetKind },
+    SchemaMissing { dataset_kind: String },
 
     #[error("unsupported table name: {0}")]
     UnsupportedName(BoxError),

@@ -8,16 +8,11 @@ use std::{
 use async_stream::stream;
 use common::{
     BlockNum, BlockStreamer, BlockStreamerExt, BoxError, Dataset, DatasetValue, LogicalCatalog,
-    PlanningContext, RawDatasetRows, Store,
+    PlanningContext, RawDatasetKind, RawDatasetRows, Store,
     catalog::physical::{Catalog, PhysicalTable},
     config::Config,
     evm::{self, udfs::EthCall},
-    manifest::{
-        self,
-        common::{schema_from_table_slice, schema_from_tables},
-        derived::Manifest,
-        sql_datasets::SqlDataset,
-    },
+    manifest::{self, common::schema_from_tables, derived::Manifest, sql_datasets::SqlDataset},
     query_context::QueryEnv,
     sql_visitors::all_function_names,
 };
@@ -48,9 +43,9 @@ pub use self::{
 // TODO: #[deprecated(note = "use dataset_store::providers::ProviderConfig instead")]
 pub type ProviderConfigTomlValue = toml::Value;
 
-#[derive(Clone)]
 pub struct DatasetStore {
     metadata_db: MetadataDb,
+    raw_dataset_kinds: HashMap<&'static str, Box<dyn RawDatasetKind>>,
     // Cache maps dataset name to eth_call UDF.
     eth_call_cache: Arc<RwLock<HashMap<String, ScalarUDF>>>,
     // This cache maps dataset name to the dataset definition.
@@ -64,8 +59,13 @@ pub struct DatasetStore {
 impl DatasetStore {
     pub fn new(config: Arc<Config>, metadata_db: MetadataDb) -> Arc<Self> {
         let providers_store = ProvidersConfigStore::new(config.providers_store.prefixed_store());
+        let raw_dataset_kinds = [Box::new(evm_rpc_datasets::EvmRpc) as Box<dyn RawDatasetKind>]
+            .into_iter()
+            .map(|d| (d.kind(), d))
+            .collect();
         Arc::new(Self {
             metadata_db,
+            raw_dataset_kinds,
             eth_call_cache: Default::default(),
             dataset_cache: Default::default(),
             providers: providers_store,
@@ -311,46 +311,33 @@ impl DatasetStore {
         }
 
         let (common, dataset_src) = self.common_data_and_dataset(dataset_identifier).await?;
-        let kind = DatasetKind::from_str(&common.kind)?;
         let value = dataset_src.to_value()?;
-        let (dataset, ground_truth_schema) = match kind {
-            DatasetKind::EvmRpc => {
+        let raw_dataset_kind = self.raw_dataset_kinds.get(common.kind.as_str());
+        let (dataset, ground_truth_schema) = match raw_dataset_kind {
+            Some(raw_dataset_kind) => {
                 let builtin_schema =
-                    schema_from_tables(evm_rpc_datasets::tables::all(&common.network));
+                    schema_from_tables(raw_dataset_kind.all_tables(&common.network));
                 (evm_rpc_datasets::dataset(value)?, Some(builtin_schema))
             }
-            DatasetKind::EthBeacon => {
-                let builtin_schema =
-                    schema_from_tables(eth_beacon_datasets::all_tables(common.network.clone()));
-                (eth_beacon_datasets::dataset(value)?, Some(builtin_schema))
-            }
-            DatasetKind::Firehose => {
-                let builtin_schema =
-                    schema_from_tables(firehose_datasets::evm::tables::all(&common.network));
-                (
-                    firehose_datasets::evm::dataset(value)?,
-                    Some(builtin_schema),
-                )
-            }
-            DatasetKind::Substreams => {
-                let dataset = substreams_datasets::dataset(value).await?;
-                let store_schema = schema_from_table_slice(dataset.tables.as_slice());
-                (dataset, Some(store_schema))
-            }
-            DatasetKind::Sql => {
-                let store_dataset = Arc::clone(self).sql_dataset(value).await?.dataset;
-                (store_dataset, None)
-            }
-            DatasetKind::Manifest => {
-                let manifest = dataset_src.to_manifest()?;
-                let dataset = manifest::derived::dataset(manifest).map_err(Error::Unknown)?;
-                (dataset, None)
-            }
+            None => match common.kind.as_str() {
+                common::manifest::sql_datasets::DATASET_KIND => {
+                    let store_dataset = Arc::clone(self).sql_dataset(value).await?.dataset;
+                    (store_dataset, None)
+                }
+                common::manifest::derived::DATASET_KIND => {
+                    let manifest = dataset_src.to_manifest()?;
+                    let dataset = manifest::derived::dataset(manifest).map_err(Error::Unknown)?;
+                    (dataset, None)
+                }
+                kind => return Err(Error::UnsupportedKind(kind.to_string())),
+            },
         };
 
         if let Some(ground_truth_schema) = ground_truth_schema {
             let Some(loaded_schema) = common.schema else {
-                return Err(Error::SchemaMissing { dataset_kind: kind });
+                return Err(Error::SchemaMissing {
+                    dataset_kind: common.kind,
+                });
             };
             if loaded_schema != ground_truth_schema {
                 return Err(Error::SchemaMismatch);

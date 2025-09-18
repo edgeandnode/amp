@@ -5,12 +5,24 @@ use std::{num::NonZeroU32, path::PathBuf};
 
 use alloy::transports::http::reqwest::Url;
 pub use client::JsonRpcClient;
-use common::{BlockNum, BoxError, Dataset, DatasetValue, store::StoreError};
+use common::{BlockNum, BoxError, Dataset, DatasetValue, RawDatasetKind, store::StoreError};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json;
 use serde_with::serde_as;
 pub const DATASET_KIND: &str = "evm-rpc";
+
+pub struct EvmRpc;
+
+impl RawDatasetKind for EvmRpc {
+    fn kind(&self) -> &'static str {
+        DATASET_KIND
+    }
+
+    fn all_tables(&self, network: &str) -> Vec<common::Table> {
+        tables::all(network)
+    }
+}
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
