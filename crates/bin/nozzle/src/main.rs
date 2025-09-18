@@ -182,7 +182,10 @@ async fn main_inner() -> Result<(), BoxError> {
                     tracing::info!("Registering manifest: {}", dataset);
                     let manifest = std::fs::read_to_string(&dataset)?;
                     let manifest: Manifest = serde_json::from_str(&manifest)?;
-                    register_manifest(&dataset_store, &metadata_db, &manifest).await?;
+                    dataset_store
+                        .register_manifest(&manifest.name, &manifest.version, &manifest)
+                        .await
+                        .map_err(|err| -> BoxError { err.to_string().into() })?;
                     datasets_to_dump.push(manifest.to_identifier());
                 } else {
                     datasets_to_dump.push(dataset);
@@ -298,55 +301,4 @@ async fn load_config_and_metadata_db(
     let config = Arc::new(Config::load(config, true, None, allow_temp_db).await?);
     let metadata_db = config.metadata_db().await?.into();
     Ok((config, metadata_db))
-}
-
-async fn register_manifest(
-    dataset_store: &DatasetStore,
-    metadata_db: &MetadataDb,
-    manifest: &Manifest,
-) -> Result<(), BoxError> {
-    // Check if the dataset with the given name and version already exists in the registry.
-    if metadata_db
-        .dataset_exists(&manifest.name, &manifest.version)
-        .await?
-    {
-        return Err(format!(
-            "Dataset '{}' version '{}' already registered",
-            manifest.name, manifest.version
-        )
-        .into());
-    }
-
-    // TODO: Extract dataset owner from manifest
-    let dataset_owner = "no-owner";
-
-    // Prepare manifest data for storage
-    let dataset_name = manifest.name.to_string();
-    let manifest_filename = manifest.to_filename();
-    let manifest_path_str = object_store::path::Path::from(manifest_filename).to_string();
-    let manifest_json = serde_json::to_string(&manifest)
-        .map_err(|err| format!("Failed to serialize manifest to JSON: {err}"))?;
-
-    // Store manifest in dataset definitions store
-    let dataset_defs_store = dataset_store.dataset_defs_store();
-    let manifest_path = object_store::path::Path::from(manifest_path_str.clone());
-
-    dataset_defs_store
-        .prefixed_store()
-        .put(&manifest_path, manifest_json.into())
-        .await
-        .map_err(|err| format!("Failed to store manifest in dataset definitions store: {err}"))?;
-
-    // Register dataset metadata in database
-    metadata_db
-        .register_dataset(
-            dataset_owner,
-            &dataset_name,
-            &manifest.version,
-            &manifest_path_str,
-        )
-        .await
-        .map_err(|err| format!("Failed to register dataset in metadata database: {err}"))?;
-
-    Ok(())
 }

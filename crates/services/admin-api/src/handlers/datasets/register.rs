@@ -4,12 +4,10 @@ use axum::{
     http::StatusCode,
 };
 use common::manifest::derived::Manifest;
-use dataset_store::DatasetStore;
+use dataset_store::RegistrationError;
 use datasets_common::{manifest::Manifest as CommonManifest, name::Name, version::Version};
 use http_common::{BoxRequestError, RequestError};
-use metadata_db::MetadataDb;
 use object_store::path::Path;
-use tracing::instrument;
 
 use crate::{ctx::Ctx, handlers::common::NonEmptyString};
 
@@ -101,7 +99,8 @@ pub async fn handler(
                 )
                 .into());
             }
-            register_manifest(&ctx.store, &ctx.metadata_db, &manifest)
+            ctx.store
+                .register_manifest(&manifest.name, &manifest.version, &manifest)
                 .await
                 .map_err(Error::ManifestRegistrationError)?;
             tracing::info!(
@@ -193,7 +192,7 @@ pub enum Error {
     /// - Registry information extraction failed
     /// - System-level registration errors
     #[error("Failed to register manifest: {0}")]
-    ManifestRegistrationError(#[from] RegisterError),
+    ManifestRegistrationError(#[from] RegistrationError),
 
     /// Dataset already exists with the given configuration
     ///
@@ -258,87 +257,4 @@ impl RequestError for Error {
             Error::MetadataDbError(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
-}
-
-/// Register a manifest in the dataset store and metadata database
-///
-/// This function validates and registers a dataset manifest by:
-/// 1. Checking if the dataset already exists with the given name and version
-/// 2. Extracting registry information from the manifest
-/// 3. Storing the manifest JSON in the dataset definitions store
-/// 4. Registering the dataset metadata in the database
-#[instrument(skip_all, err)]
-async fn register_manifest(
-    dataset_store: &DatasetStore,
-    metadata_db: &MetadataDb,
-    manifest: &Manifest,
-) -> Result<(), RegisterError> {
-    // Check if the dataset with the given name and version already exists in the registry.
-    if metadata_db
-        .dataset_exists(&manifest.name, &manifest.version)
-        .await
-        .map_err(RegisterError::ExistenceCheck)?
-    {
-        return Err(RegisterError::DatasetExists {
-            name: manifest.name.clone(),
-            version: manifest.version.clone(),
-        });
-    }
-
-    // TODO: Extract dataset owner from manifest
-    let dataset_owner = "no-owner";
-
-    // Prepare manifest data for storage
-    let dataset_name_str = manifest.name.to_string();
-    let manifest_filename = manifest.to_filename();
-    let manifest_path_str = object_store::path::Path::from(manifest_filename).to_string();
-    let manifest_json = serde_json::to_string(&manifest)
-        .map_err(|err| RegisterError::ManifestSerialization(err.to_string()))?;
-
-    // Store manifest in dataset definitions store
-    let dataset_defs_store = dataset_store.dataset_defs_store();
-    let manifest_path = object_store::path::Path::from(manifest_path_str.clone());
-
-    dataset_defs_store
-        .prefixed_store()
-        .put(&manifest_path, manifest_json.into())
-        .await
-        .map_err(RegisterError::ManifestStorage)?;
-
-    // Register dataset metadata in database
-    metadata_db
-        .register_dataset(
-            dataset_owner,
-            &dataset_name_str,
-            &manifest.version,
-            &manifest_path_str,
-        )
-        .await
-        .map_err(RegisterError::MetadataRegistration)?;
-
-    Ok(())
-}
-
-/// Errors specific to manifest registration operations
-#[derive(Debug, thiserror::Error)]
-pub enum RegisterError {
-    /// Dataset already exists in the registry
-    #[error("Dataset '{name}' version '{version}' already registered")]
-    DatasetExists { name: Name, version: Version },
-
-    /// Failed to serialize manifest to JSON
-    #[error("Failed to serialize manifest to JSON: {0}")]
-    ManifestSerialization(String),
-
-    /// Failed to store manifest in dataset definitions store
-    #[error("Failed to store manifest in dataset definitions store: {0}")]
-    ManifestStorage(object_store::Error),
-
-    /// Failed to register dataset in metadata database
-    #[error("Failed to register dataset in metadata database: {0}")]
-    MetadataRegistration(metadata_db::Error),
-
-    /// Failed to check if dataset exists in metadata database
-    #[error("Failed to check dataset existence in metadata database: {0}")]
-    ExistenceCheck(metadata_db::Error),
 }

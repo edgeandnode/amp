@@ -18,16 +18,15 @@ use common::{
         derived::Manifest,
         sql_datasets::SqlDataset,
     },
-    query_context::{self, QueryEnv},
+    query_context::QueryEnv,
     sql_visitors::all_function_names,
-    store::StoreError,
 };
 use datafusion::{
     common::HashMap,
     logical_expr::{ScalarUDF, async_udf::AsyncScalarUDF},
     sql::{TableReference, parser, resolve::resolve_table_references},
 };
-use datasets_common::{manifest::Manifest as CommonManifest, version::Version};
+use datasets_common::{manifest::Manifest as CommonManifest, name::Name, version::Version};
 use futures::{FutureExt as _, Stream, TryFutureExt as _, future::BoxFuture};
 use js_runtime::isolate_pool::IsolatePool;
 use metadata_db::MetadataDb;
@@ -36,178 +35,21 @@ use tracing::instrument;
 use url::Url;
 
 mod dataset_kind;
+mod error;
 pub mod providers;
 pub mod sql_datasets;
 
-pub use self::dataset_kind::{DatasetKind, UnsupportedKindError};
 use self::providers::ProvidersConfigStore;
-
+pub use self::{
+    dataset_kind::{DatasetKind, UnsupportedKindError},
+    error::{DatasetError, Error, RegistrationError},
+};
 /// Alias for TOML value type used in provider configurations.
 // TODO: #[deprecated(note = "use dataset_store::providers::ProviderConfig instead")]
 pub type ProviderConfigTomlValue = toml::Value;
 
-#[derive(Debug, thiserror::Error)]
-pub enum Error {
-    #[error("failed to fetch: {0}")]
-    FetchError(#[from] StoreError),
-
-    #[error("TOML parse error: {0}")]
-    Toml(#[from] toml::de::Error),
-
-    #[error("JSON parse error: {0}")]
-    Json(#[from] serde_json::Error),
-
-    #[error("Metadata db error: {0}")]
-    MetadataDbError(#[from] metadata_db::Error),
-
-    #[error("unsupported dataset kind '{0}'")]
-    UnsupportedKind(String),
-
-    #[error("dataset field 'name = \"{0}\"' does not match filename '{1}'")]
-    NameMismatch(String, String),
-
-    #[error("Schema mismatch")]
-    SchemaMismatch,
-
-    #[error("`schema` field is missing, but required for dataset kind {dataset_kind}")]
-    SchemaMissing { dataset_kind: DatasetKind },
-
-    #[error("unsupported table name: {0}")]
-    UnsupportedName(BoxError),
-
-    #[error("unsupported function name: {0}")]
-    UnsupportedFunctionName(String),
-
-    #[error("provider configuration error: {0}")]
-    ProviderConfigError(BoxError),
-
-    #[error("IPC connection error: {0}")]
-    IpcConnectionError(BoxError),
-
-    #[error("EVM RPC error: {0}")]
-    EvmRpcError(#[from] evm_rpc_datasets::Error),
-
-    #[error("firehose error: {0}")]
-    FirehoseError(#[from] firehose_datasets::Error),
-
-    #[error("error loading sql dataset: {0}")]
-    SqlDatasetError(BoxError),
-
-    #[error("error deserializing manifest: {0}")]
-    ManifestError(serde_json::Error),
-
-    #[error("error parsing SQL: {0}")]
-    SqlParseError(query_context::Error),
-
-    #[error("provider not found for dataset kind '{dataset_kind}' and network '{network}'")]
-    ProviderNotFound {
-        dataset_kind: DatasetKind,
-        network: String,
-    },
-
-    #[error("provider configuration file is not valid UTF-8 at {location}: {source}")]
-    ProviderInvalidUtf8 {
-        location: String,
-        #[source]
-        source: std::string::FromUtf8Error,
-    },
-
-    #[error("dataset '{0}' version '{1}' not found")]
-    DatasetVersionNotFound(String, String),
-
-    #[error("{0}")]
-    Unknown(BoxError),
-}
-
-impl From<providers::FetchError> for Error {
-    fn from(err: providers::FetchError) -> Self {
-        match err {
-            providers::FetchError::StoreFetchFailed(box_error) => {
-                // Try to downcast BoxError to StoreError, otherwise map to Unknown
-                match box_error.downcast::<StoreError>() {
-                    Ok(store_error) => Error::FetchError(*store_error),
-                    Err(box_error) => Error::Unknown(box_error),
-                }
-            }
-            providers::FetchError::TomlParseError(toml_error) => Error::Toml(toml_error),
-            providers::FetchError::InvalidUtf8 { location, source } => {
-                Error::ProviderInvalidUtf8 { location, source }
-            }
-        }
-    }
-}
-
-impl From<UnsupportedKindError> for Error {
-    fn from(err: UnsupportedKindError) -> Self {
-        Error::UnsupportedKind(err.kind)
-    }
-}
-
-#[derive(Debug, thiserror::Error)]
-pub struct DatasetError {
-    pub dataset: Option<String>,
-
-    #[source]
-    error: Error,
-}
-
-impl DatasetError {
-    fn no_context(error: Error) -> Self {
-        Self {
-            dataset: None,
-            error,
-        }
-    }
-
-    fn unknown(error: impl Into<BoxError>) -> Self {
-        Self {
-            dataset: None,
-            error: Error::Unknown(error.into()),
-        }
-    }
-
-    pub fn is_not_found(&self) -> bool {
-        matches!(
-            &self.error,
-            Error::FetchError(err) if err.is_not_found()
-        ) || matches!(&self.error, Error::DatasetVersionNotFound(_, _))
-    }
-}
-
-impl From<(&str, Error)> for DatasetError {
-    fn from((dataset, error): (&str, Error)) -> Self {
-        Self {
-            dataset: Some(dataset.to_string()),
-            error,
-        }
-    }
-}
-
-impl From<(String, Error)> for DatasetError {
-    fn from((dataset, error): (String, Error)) -> Self {
-        Self {
-            dataset: Some(dataset),
-            error,
-        }
-    }
-}
-
-impl std::fmt::Display for DatasetError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let e = &self.error;
-        match &self.dataset {
-            Some(dataset) if self.is_not_found() => {
-                write!(f, "dataset '{}' not found, full error: {}", dataset, e)
-            }
-            Some(dataset) => write!(f, "error with dataset '{}': {}", dataset, e),
-            None => write!(f, "{}", e),
-        }
-    }
-}
-
 #[derive(Clone)]
 pub struct DatasetStore {
-    config: Arc<Config>,
     metadata_db: Arc<MetadataDb>,
     // Cache maps dataset name to eth_call UDF.
     eth_call_cache: Arc<RwLock<HashMap<String, ScalarUDF>>>,
@@ -215,23 +57,84 @@ pub struct DatasetStore {
     dataset_cache: Arc<RwLock<HashMap<String, Dataset>>>,
     // Provider store for managing provider configurations and caching.
     providers: ProvidersConfigStore,
+    // Store for dataset definitions (manifests).
+    pub(crate) dataset_defs_store: Arc<Store>,
 }
 
 impl DatasetStore {
     pub fn new(config: Arc<Config>, metadata_db: Arc<MetadataDb>) -> Arc<Self> {
         let providers_store = ProvidersConfigStore::new(config.providers_store.prefixed_store());
         Arc::new(Self {
-            config,
             metadata_db,
             eth_call_cache: Default::default(),
             dataset_cache: Default::default(),
             providers: providers_store,
+            dataset_defs_store: config.dataset_defs_store.clone(),
         })
     }
 
     /// Get a reference to the providers configuration store
     pub fn providers(&self) -> &ProvidersConfigStore {
         &self.providers
+    }
+
+    /// Register a dataset manifest in both the dataset store and metadata database.
+    /// Validates the manifest doesn't already exist, serializes it to JSON, stores it
+    /// in the dataset definitions store, and records metadata in the database.
+    pub async fn register_manifest<M>(
+        &self,
+        name: &Name,
+        version: &Version,
+        manifest: &M,
+    ) -> Result<(), RegistrationError>
+    where
+        M: serde::Serialize,
+    {
+        // Check if the dataset with the given name and version already exists in the registry.
+        if self
+            .metadata_db
+            .dataset_exists(name, version)
+            .await
+            .map_err(RegistrationError::ExistenceCheck)?
+        {
+            return Err(RegistrationError::DatasetExists {
+                name: name.clone(),
+                version: version.clone(),
+            });
+        }
+
+        // Prepare manifest data for storage
+        let manifest_json =
+            serde_json::to_string(&manifest).map_err(RegistrationError::ManifestSerialization)?;
+
+        // Store manifest in dataset definitions store
+        let manifest_path = object_store::path::Path::from(format!(
+            "{}__{}.json",
+            name,
+            version.to_underscore_version()
+        ));
+
+        self.dataset_defs_store
+            .prefixed_store()
+            .put(&manifest_path, manifest_json.into())
+            .await
+            .map_err(RegistrationError::ManifestStorage)?;
+
+        // TODO: Extract the dataset owner from the manifest
+        let dataset_owner = "no-owner";
+
+        // Register dataset metadata in database
+        self.metadata_db
+            .register_dataset(
+                dataset_owner,
+                name.as_str(),
+                version,
+                manifest_path.as_ref(),
+            )
+            .await
+            .map_err(RegistrationError::MetadataRegistration)?;
+
+        Ok(())
     }
 
     pub async fn load_dataset(
@@ -302,10 +205,10 @@ impl DatasetStore {
 
     pub async fn all_datasets(self: &Arc<Self>) -> Result<Vec<Dataset>, DatasetError> {
         let all_objs = self
-            .dataset_defs_store()
+            .dataset_defs_store
             .list_all_shallow()
             .await
-            .map_err(|err| DatasetError::no_context(err.into()))?;
+            .map_err(DatasetError::no_context)?;
 
         let mut datasets = Vec::new();
         for obj in all_objs {
@@ -354,14 +257,14 @@ impl DatasetStore {
     ) -> Result<(CommonManifest, RawDataset), Error> {
         use Error::*;
         let raw_dataset = self
-            .dataset_defs_store()
+            .dataset_defs_store
             .get_string(format!("{}.toml", dataset_name))
             .map_ok(RawDataset::Toml)
             .or_else(|err| async move {
                 if !err.is_not_found() {
                     return Err(err);
                 }
-                self.dataset_defs_store()
+                self.dataset_defs_store
                     .get_string(format!("{}.json", dataset_name))
                     .await
                     .map(RawDataset::Json)
@@ -391,7 +294,7 @@ impl DatasetStore {
         dataset_name: &str,
     ) -> Result<SqlDataset, Error> {
         let filename = format!("{}.json", dataset_name);
-        let raw_manifest = self.dataset_defs_store().get_string(filename).await?;
+        let raw_manifest = self.dataset_defs_store.get_string(filename).await?;
         let manifest: Manifest =
             serde_json::from_str(&raw_manifest).map_err(Error::ManifestError)?;
         let queries = manifest.queries().map_err(Error::SqlParseError)?;
@@ -781,10 +684,6 @@ impl DatasetStore {
         sql_datasets::dataset(self, dataset_def)
             .map_err(Error::SqlDatasetError)
             .boxed()
-    }
-
-    pub fn dataset_defs_store(&self) -> &Arc<Store> {
-        &self.config.dataset_defs_store
     }
 }
 
