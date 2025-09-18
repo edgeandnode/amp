@@ -30,6 +30,7 @@ pub struct Client {
     tables: Tables,
     package: Package,
     output_module: String,
+    provider_name: String,
     final_blocks_only: bool,
 }
 
@@ -60,6 +61,7 @@ impl Client {
         provider: toml::Value,
         dataset: DatasetValue,
         network: String,
+        provider_name: String,
         final_blocks_only: bool,
     ) -> Result<Self, Error> {
         let provider: SubstreamsProvider = provider.try_into()?;
@@ -95,12 +97,17 @@ impl Client {
             package,
             tables,
             output_module: dataset_def.module,
+            provider_name,
             final_blocks_only,
         })
     }
 
     pub fn tables(&self) -> &Vec<Table> {
         &self.tables.tables
+    }
+
+    pub fn provider_name(&self) -> &str {
+        &self.provider_name
     }
 
     /// Both `start` and `stop` are inclusive. Could be abstracted to handle multiple chains, but for
@@ -219,5 +226,9 @@ impl BlockStreamer for Client {
             .transpose()?
             .map(|b| b.clock.map(|c| c.number).unwrap_or(b.final_block_height))
             .unwrap_or(0))
+    }
+
+    fn provider_name(&self) -> &str {
+        &self.provider_name
     }
 }

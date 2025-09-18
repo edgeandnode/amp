@@ -80,11 +80,11 @@ See [`handlers/datasets/get_by_id.rs`](src/handlers/datasets/get_by_id.rs) for m
 
 #### `POST /datasets`
 Registers a new dataset configuration to the system.
-Accepts a JSON payload containing `name`, `version`,
-and optional `manifest` fields.
-Supports multiple registration scenarios including existing datasets,
-new manifest datasets, and new dataset definitions.
-Returns registration success confirmation upon successful completion.
+Accepts a JSON payload containing `name`, `version`, and `manifest` fields.
+Supports two main registration scenarios: derived datasets (kind="manifest")
+which are registered in both object store and metadata database,
+and SQL datasets (other kinds) which store dataset definitions in object store.
+Returns HTTP 201 Created upon successful registration.
 
 See [`handlers/datasets/register.rs`](src/handlers/datasets/register.rs) for more detailed information about this endpoint.
 

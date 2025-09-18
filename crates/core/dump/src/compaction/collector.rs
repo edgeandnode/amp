@@ -38,18 +38,19 @@ impl Debug for Collector {
 
 impl Collector {
     pub(super) async fn collect(self) -> CollectionResult<Self> {
-        let table = Arc::clone(&self.table);
+        let metadata_db = self.table.metadata_db();
 
-        let location_id = table.location_id();
+        let location_id = self.table.location_id();
 
         let now = Timestamp::now();
         let secs = now.0.as_secs() as i64;
         let nsecs = now.0.subsec_nanos();
-        let metadata_db = table.metadata_db();
 
         let expired_stream = metadata_db.stream_expired_files(location_id, secs, nsecs);
 
-        match DeletionOutput::try_from_manifest_stream(table, expired_stream, now).await {
+        match DeletionOutput::try_from_manifest_stream(Arc::clone(&self.table), expired_stream, now)
+            .await
+        {
             Ok(output) if output.len() > 0 => {
                 output.update_manifest(&metadata_db).await.map_err(
                     CollectorError::manifest_update_error(

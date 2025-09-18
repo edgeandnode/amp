@@ -23,7 +23,7 @@ pub async fn serve(
 ) -> BoxResult<(SocketAddr, impl Future<Output = BoxResult<()>>)> {
     let metadata_db = config.metadata_db().await?;
 
-    let store = DatasetStore::new(config.clone(), Arc::new(metadata_db.clone()));
+    let store = DatasetStore::new(config.clone(), metadata_db.clone());
     let scheduler = Scheduler::new(config.clone(), metadata_db.clone());
 
     // Register the routes

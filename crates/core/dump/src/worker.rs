@@ -36,7 +36,7 @@ impl Worker {
     /// Create a new worker instance
     pub fn new(
         config: Arc<Config>,
-        metadata_db: Arc<MetadataDb>,
+        metadata_db: MetadataDb,
         node_id: WorkerNodeId,
         metrics: Option<Arc<metrics::MetricsRegistry>>,
     ) -> Self {
@@ -48,7 +48,7 @@ impl Worker {
         reconcile_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
         let notification_multiplexer =
-            Arc::new(notification_multiplexer::spawn((*metadata_db).clone()));
+            Arc::new(notification_multiplexer::spawn(metadata_db.clone()));
 
         Self {
             node_id,

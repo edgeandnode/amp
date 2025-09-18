@@ -17,7 +17,7 @@ pub async fn dump_check(
     dataset_name: &str,
     dataset_version: Option<&str>,
     dataset_store: &Arc<DatasetStore>,
-    metadata_db: Arc<MetadataDb>,
+    metadata_db: MetadataDb,
     env: &QueryEnv,
     batch_size: u64,
     n_jobs: u8,

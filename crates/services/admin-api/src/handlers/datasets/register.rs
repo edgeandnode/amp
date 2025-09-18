@@ -3,15 +3,11 @@ use axum::{
     extract::{State, rejection::JsonRejection},
     http::StatusCode,
 };
-use common::manifest::{
-    common::{Manifest as CommonManifest, Name, Version},
-    derived::Manifest,
-};
-use dataset_store::DatasetStore;
+use common::manifest::derived::Manifest;
+use dataset_store::RegistrationError;
+use datasets_common::{manifest::Manifest as CommonManifest, name::Name, version::Version};
 use http_common::{BoxRequestError, RequestError};
-use metadata_db::MetadataDb;
 use object_store::path::Path;
-use tracing::instrument;
 
 use crate::{ctx::Ctx, handlers::common::NonEmptyString};
 
@@ -42,17 +38,14 @@ use crate::{ctx::Ctx, handlers::common::NonEmptyString};
 /// - `INVALID_MANIFEST`: Manifest JSON parsing or structure error
 /// - `MANIFEST_VALIDATION_ERROR`: Manifest name/version doesn't match request parameters
 /// - `MANIFEST_REGISTRATION_ERROR`: Failed to register manifest in system
-/// - `MANIFEST_REQUIRED`: No existing dataset found and no manifest provided
-/// - `DATASET_ALREADY_EXISTS`: Dataset exists and manifest provided (conflict)
+/// - `DATASET_ALREADY_EXISTS`: Dataset with same name and version already exists
 /// - `DATASET_DEF_STORE_ERROR`: Failed to store dataset definition
 /// - `STORE_ERROR`: Failed to load or access dataset store
 ///
 /// ## Behavior
-/// This handler supports multiple registration scenarios:
-/// 1. **Existing dataset without manifest**: Registers existing dataset in local registry
-/// 2. **New manifest dataset**: Registers manifest in local registry
-/// 3. **New dataset definition**: Stores dataset definition in local registry
-/// 4. **Conflict cases**: Returns appropriate errors for invalid combinations
+/// This handler supports two main registration scenarios:
+/// 1. **Derived dataset**: Registers a derived dataset manifest (kind="manifest") in both object store and metadata database
+/// 2. **SQL dataset**: Stores dataset definition JSON in object store and loads the dataset to ensure registration
 ///
 /// The handler:
 /// - Validates dataset name and version format
@@ -67,15 +60,16 @@ use crate::{ctx::Ctx, handlers::common::NonEmptyString};
 #[tracing::instrument(skip_all, err)]
 pub async fn handler(
     State(ctx): State<Ctx>,
-    json_payload: Result<Json<RegisterRequest>, JsonRejection>,
+    payload: Result<Json<RegisterRequest>, JsonRejection>,
 ) -> Result<StatusCode, BoxRequestError> {
-    let Json(payload) = match json_payload {
-        Ok(payload) => payload,
+    let payload = match payload {
+        Ok(Json(payload)) => payload,
         Err(err) => {
             tracing::error!("Failed to parse request JSON: {}", err);
             return Err(Error::InvalidPayloadFormat.into());
         }
     };
+
     let dataset = ctx
         .store
         .try_load_dataset(&payload.name, Some(&payload.version))
@@ -105,7 +99,8 @@ pub async fn handler(
                 )
                 .into());
             }
-            register_manifest(&ctx.store, &ctx.metadata_db, &manifest)
+            ctx.store
+                .register_manifest(&manifest.name, &manifest.version, &manifest)
                 .await
                 .map_err(Error::ManifestRegistrationError)?;
             tracing::info!(
@@ -114,22 +109,25 @@ pub async fn handler(
                 payload.version
             );
         }
+        // SQL datasets
         _ => {
-            let manifest_str = payload.manifest.to_string();
-            let format_extension = if manifest_str.starts_with('{') {
-                "json"
-            } else {
-                "toml"
-            };
-            let path = Path::from(format!("{}.{}", payload.name, format_extension));
+            // Validate manifest JSON body
+            let _: serde_json::Value = serde_json::from_str(payload.manifest.as_str())
+                .map_err(|err| Error::InvalidManifest(err.to_string()))?;
+
+            // Store dataset definition in the dataset definitions store
             ctx.config
                 .dataset_defs_store
                 .prefixed_store()
-                .put(&path, manifest_str.into())
+                .put(
+                    &Path::from(format!("{}.json", payload.name)),
+                    payload.manifest.into_inner().into(),
+                )
                 .await
                 .map_err(Error::DatasetDefStoreError)?;
 
-            let _dataset = ctx
+            // Attempt to load the dataset to ensure it's registered
+            let _ = ctx
                 .store
                 .load_dataset(&payload.name, None)
                 .await
@@ -194,7 +192,7 @@ pub enum Error {
     /// - Registry information extraction failed
     /// - System-level registration errors
     #[error("Failed to register manifest: {0}")]
-    ManifestRegistrationError(#[from] RegisterError),
+    ManifestRegistrationError(#[from] RegistrationError),
 
     /// Dataset already exists with the given configuration
     ///
@@ -259,76 +257,4 @@ impl RequestError for Error {
             Error::MetadataDbError(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
-}
-
-/// Register a manifest in the dataset store and metadata database
-///
-/// This function validates and registers a dataset manifest by:
-/// 1. Checking if the dataset already exists with the given name and version
-/// 2. Extracting registry information from the manifest
-/// 3. Storing the manifest JSON in the dataset definitions store
-/// 4. Registering the dataset metadata in the database
-#[instrument(skip_all, err)]
-async fn register_manifest(
-    dataset_store: &DatasetStore,
-    metadata_db: &MetadataDb,
-    manifest: &Manifest,
-) -> Result<(), RegisterError> {
-    let name = &manifest.name;
-    let version = &manifest.version;
-
-    // Check if the dataset with the given name and version already exists in the registry.
-    if metadata_db
-        .dataset_exists(name, &version.to_string())
-        .await
-        .map_err(RegisterError::ExistenceCheck)?
-    {
-        return Err(RegisterError::DatasetExists {
-            name: name.clone(),
-            version: version.clone(),
-        });
-    }
-
-    let registry_info = manifest.extract_registry_info();
-    let manifest_json = serde_json::to_string(&manifest)
-        .map_err(|err| RegisterError::ManifestSerialization(err.to_string()))?;
-    let dataset_defs_store = dataset_store.dataset_defs_store();
-    let manifest_path = object_store::path::Path::from(registry_info.manifest.clone());
-
-    dataset_defs_store
-        .prefixed_store()
-        .put(&manifest_path, manifest_json.into())
-        .await
-        .map_err(RegisterError::ManifestStorage)?;
-
-    metadata_db
-        .register_dataset(registry_info)
-        .await
-        .map_err(RegisterError::MetadataRegistration)?;
-
-    Ok(())
-}
-
-/// Errors specific to manifest registration operations
-#[derive(Debug, thiserror::Error)]
-pub enum RegisterError {
-    /// Dataset already exists in the registry
-    #[error("Dataset '{name}' version '{version}' already registered")]
-    DatasetExists { name: Name, version: Version },
-
-    /// Failed to serialize manifest to JSON
-    #[error("Failed to serialize manifest to JSON: {0}")]
-    ManifestSerialization(String),
-
-    /// Failed to store manifest in dataset definitions store
-    #[error("Failed to store manifest in dataset definitions store: {0}")]
-    ManifestStorage(object_store::Error),
-
-    /// Failed to register dataset in metadata database
-    #[error("Failed to register dataset in metadata database: {0}")]
-    MetadataRegistration(metadata_db::Error),
-
-    /// Failed to check if dataset exists in metadata database
-    #[error("Failed to check dataset existence in metadata database: {0}")]
-    ExistenceCheck(metadata_db::Error),
 }

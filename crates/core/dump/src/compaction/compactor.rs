@@ -174,18 +174,18 @@ impl CompactionGroup {
     }
 
     pub async fn compact(self) -> CompactionResult<Vec<FileId>> {
-        let metadata_db = self.table.metadata_db();
+        let metadata_db = self.table.metadata_db().clone();
         let duration = self.opts.file_lock_duration;
 
         let output = self.write_and_finish().await?;
 
         output
-            .commit_metadata(Arc::clone(&metadata_db))
+            .commit_metadata(metadata_db.clone())
             .await
             .map_err(CompactorError::metadata_commit_error)?;
 
         output
-            .upsert_gc_manifest(Arc::clone(&metadata_db), duration)
+            .upsert_gc_manifest(Arc::new(metadata_db), duration)
             .await
             .map_err(CompactorError::manifest_update_error(&output.parent_ids))?;
 
@@ -194,10 +194,7 @@ impl CompactionGroup {
 }
 
 impl ParquetFileWriterOutput {
-    async fn commit_metadata(
-        &self,
-        metadata_db: Arc<MetadataDb>,
-    ) -> Result<(), metadata_db::Error> {
+    async fn commit_metadata(&self, metadata_db: MetadataDb) -> Result<(), metadata_db::Error> {
         let location_id = self.location_id;
         let file_name = self.object_meta.location.filename().unwrap().to_string();
         let object_size = self.object_meta.size;

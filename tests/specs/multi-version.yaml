@@ -1,26 +1,25 @@
-- name: dump_eth_firehose
-  dataset: eth_firehose
-  end: 15000020
+- name: restore_eth_firehose
+  restore: eth_firehose
 
 - name: deploy_multi_version_v1
   deploy: multi_version
   config: v1.config.ts
-  end: 15000020
+  end: 15000000
 
 - name: dump_multi_version_v1
   dataset: multi_version
   config: v1.config.ts
-  end: 15000020
+  end: 15000000
 
 - name: deploy_multi_version_v2
   deploy: multi_version
   config: v2.config.ts
-  end: 15000020
+  end: 15000000
 
 - name: dump_multi_version_v2
   dataset: multi_version
   config: v2.config.ts
-  end: 15000020
+  end: 15000000
 
 # Test queries with versioned dataset names
 - name: query_v1_versioned_name
@@ -63,19 +62,19 @@
   query: SELECT count(*) as total_blocks FROM multi_version__0_0_1.blocks
   results: |
     [
-      {"total_blocks":21}
+      {"total_blocks":1}
     ]
 
 - name: query_v2_count
   query: SELECT count(*) as total_blocks FROM multi_version__0_0_2.blocks
   results: |
     [
-      {"total_blocks":21}
+      {"total_blocks":1}
     ]
 
 - name: query_same_table_union
   query: select gas_limit,block_num,hash from multi_version.blocks union select gas_limit,block_num,hash from multi_version__0_0_2.blocks order by block_num limit 3
   results: |
     [
-      {"block_num":15000000,"gas_limit":30000000,"hash":"9a71a95be3fe957457b11817587e5af4c7e24836d5b383c430ff25b9286a457f"},{"block_num":15000001,"gas_limit":30000000,"hash":"7a7d7c23bb8c5e340eead8537bb5e2f3e125bfa0b588cf07e4aa140ba374295e"},{"block_num":15000002,"gas_limit":30000000,"hash":"b8aeee482d9cdf68868e758983a47bc24012398848b8f64f159966ff0530642b"}
+      {"block_num":15000000,"gas_limit":30000000,"hash":"9a71a95be3fe957457b11817587e5af4c7e24836d5b383c430ff25b9286a457f"}
     ]

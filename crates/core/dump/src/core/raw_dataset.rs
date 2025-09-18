@@ -97,9 +97,8 @@ use tracing::instrument;
 
 use super::{Ctx, block_ranges, tasks::FailFastJoinSet};
 use crate::{
-    compaction::CompactionProperties,
-    metrics,
-    parquet_writer::{ParquetWriterProperties, RawDatasetWriter},
+    compaction::CompactionProperties, metrics, parquet_writer::ParquetWriterProperties,
+    raw_dataset_writer::RawDatasetWriter,
 };
 
 /// Dumps a raw dataset by extracting blockchain data from specified block ranges
@@ -126,33 +125,57 @@ pub async fn dump(
         .load_client(dataset_name, only_finalized_blocks)
         .await?;
 
-    let start = tables[0].dataset().start_block.unwrap_or(0);
-    let latest_block = client.latest_block().await?;
-    let end = block_ranges::resolve_relative(start, end, latest_block)?;
+    tracing::info!("connected to provider: {}", client.provider_name());
 
-    let mut missing_ranges_by_table: BTreeMap<String, Vec<RangeInclusive<BlockNum>>> =
-        Default::default();
-    for table in tables {
-        missing_ranges_by_table.insert(
-            table.table().name().to_string(),
-            table.missing_ranges(start..=end).await?,
-        );
-    }
-
-    // Use the union of missing table block ranges.
-    let missing_dataset_ranges = {
-        let ranges: Vec<RangeInclusive<BlockNum>> = missing_ranges_by_table
-            .values()
-            .flatten()
-            .cloned()
-            .collect();
-        merge_ranges(ranges)
+    let mut start = tables[0].dataset().start_block.unwrap_or(0);
+    let end = match end {
+        None => None,
+        Some(end) => Some(block_ranges::resolve_relative(
+            start,
+            Some(end),
+            client.latest_block().await?,
+        )?),
     };
 
-    if missing_dataset_ranges.is_empty() {
-        tracing::info!("no blocks to dump for {dataset_name}");
-        return Ok(());
-    } else {
+    let mut timer = tokio::time::interval(Duration::from_secs(1));
+    timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        timer.tick().await;
+
+        let latest_block = client.latest_block().await?;
+        if latest_block < start {
+            continue;
+        }
+
+        let mut missing_ranges_by_table: BTreeMap<String, Vec<RangeInclusive<BlockNum>>> =
+            Default::default();
+        for table in tables {
+            let end = match end {
+                None => latest_block,
+                Some(end) => BlockNum::min(end, latest_block),
+            };
+            let missing_ranges = table.missing_ranges(start..=end).await?;
+            missing_ranges_by_table.insert(table.table().name().to_string(), missing_ranges);
+        }
+
+        // Use the union of missing table block ranges.
+        let missing_dataset_ranges = {
+            let ranges: Vec<RangeInclusive<BlockNum>> = missing_ranges_by_table
+                .values()
+                .flatten()
+                .cloned()
+                .collect();
+            merge_ranges(ranges)
+        };
+        if missing_dataset_ranges.is_empty() {
+            if let Some(end) = end
+                && end <= latest_block
+            {
+                tracing::info!("no blocks to dump for {dataset_name}");
+                return Ok(());
+            }
+            continue;
+        }
         tracing::info!(
             "dumping dataset {dataset_name} for ranges {}",
             missing_dataset_ranges
@@ -161,45 +184,49 @@ pub async fn dump(
                 .collect::<Vec<String>>()
                 .join(", ")
         );
+
+        // Split them across the target number of jobs as to balance the number of blocks per job.
+        let missing_dataset_ranges =
+            split_and_partition(missing_dataset_ranges, n_jobs as u64, 2000);
+
+        let jobs = missing_dataset_ranges
+            .into_iter()
+            .enumerate()
+            .map(|(i, ranges)| DumpPartition {
+                block_streamer: client.clone(),
+                metadata_db: ctx.metadata_db.clone(),
+                catalog: catalog.clone(),
+                ranges,
+                parquet_opts: parquet_opts.clone(),
+                compaction_opts: Arc::clone(&compaction_opts),
+                partition_size,
+                missing_ranges_by_table: missing_ranges_by_table.clone(),
+                id: i as u32,
+                dataset_name: dataset_name.to_string(),
+                metrics: metrics.clone(),
+            });
+
+        // Spawn the jobs, starting them with a 1 second delay between each.
+        // Note that tasks spawned in the join set start executing immediately in parallel
+        let mut join_set = FailFastJoinSet::<Result<(), BoxError>>::new();
+        for job in jobs {
+            join_set.spawn(job.run());
+        }
+
+        // Wait for all the jobs to finish, returning an error if any job panics or fails
+        if let Err(err) = join_set.try_wait_all().await {
+            tracing::error!(dataset=%dataset_name, error=%err, "dataset dump failed");
+            return Err(err.into_box_error());
+        }
+
+        if let Some(end) = end
+            && latest_block >= end
+        {
+            return Ok(());
+        }
+
+        start = latest_block + 1;
     }
-
-    // Split them across the target number of jobs as to balance the number of blocks per job.
-    let missing_dataset_ranges = split_and_partition(missing_dataset_ranges, n_jobs as u64, 2000);
-
-    let jobs = missing_dataset_ranges
-        .into_iter()
-        .enumerate()
-        .map(|(i, ranges)| DumpPartition {
-            block_streamer: client.clone(),
-            metadata_db: ctx.metadata_db.clone(),
-            catalog: catalog.clone(),
-            ranges,
-            parquet_opts: parquet_opts.clone(),
-            compaction_opts: Arc::clone(&compaction_opts),
-            partition_size,
-            missing_ranges_by_table: missing_ranges_by_table.clone(),
-            id: i as u32,
-            dataset_name: dataset_name.to_string(),
-            metrics: metrics.clone(),
-        });
-
-    // Spawn the jobs, starting them with a 1 second delay between each.
-    // Note that tasks spawned in the join set start executing immediately in parallel
-    let mut join_set = FailFastJoinSet::<Result<(), BoxError>>::new();
-    for job in jobs {
-        join_set.spawn(job.run());
-
-        // Stagger the start of each job by 1s in an attempt to avoid client rate limits
-        tokio::time::sleep(Duration::from_secs(1)).await;
-    }
-
-    // Wait for all the jobs to finish, returning an error if any job panics or fails
-    if let Err(err) = join_set.try_wait_all().await {
-        tracing::error!(dataset=%dataset_name, error=%err, "dataset dump failed");
-        return Err(err.into_box_error());
-    }
-
-    Ok(())
 }
 
 /// Splits block ranges into at most `n` partitions where each partition is as equal in total
@@ -269,7 +296,7 @@ struct DumpPartition<S: BlockStreamer> {
     /// The name of the dataset
     dataset_name: String,
     /// The metadata database
-    metadata_db: Arc<MetadataDb>,
+    metadata_db: MetadataDb,
     /// The tables to write to
     catalog: Catalog,
     /// The block ranges to scan

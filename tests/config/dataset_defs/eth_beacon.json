@@ -1,0 +1,21 @@
+{
+  "kind": "eth-beacon",
+  "name": "eth_beacon",
+  "network": "mainnet-beacon",
+  "start_block": 12000000,
+  "schema": {
+    "blocks": {
+      "block_num": "UInt64",
+      "version": "Utf8",
+      "signature": { "FixedSizeBinary": 96 },
+      "proposer_index": "UInt64",
+      "parent_root": { "FixedSizeBinary": 32 },
+      "state_root": { "FixedSizeBinary": 32 },
+      "randao_reveal": { "FixedSizeBinary": 96 },
+      "eth1_data_deposit_root": { "FixedSizeBinary": 32 },
+      "eth1_data_deposit_count": "UInt64",
+      "eth1_data_block_hash": { "FixedSizeBinary": 32 },
+      "graffiti": { "FixedSizeBinary": 32 }
+    }
+  }
+}

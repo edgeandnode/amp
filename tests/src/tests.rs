@@ -9,14 +9,12 @@ use alloy::{
 };
 use common::{
     BlockNum, BoxError,
-    manifest::{
-        common::{Manifest as CommonManifest, Schema},
-        derived::Manifest,
-    },
+    manifest::{common::schema_from_tables, derived::Manifest},
     metadata::segments::BlockRange,
     query_context::parse_sql,
 };
 use dataset_store::DatasetStore;
+use datasets_common::manifest::Manifest as CommonManifest;
 use futures::StreamExt;
 use generate_manifest;
 use monitoring::logging;
@@ -37,6 +35,34 @@ async fn evm_rpc_single_dump() {
 
     let dataset_name = "eth_rpc";
     let test_env = TestEnv::temp("evm_rpc_single_dump").await.unwrap();
+    let block = test_env
+        .dataset_store
+        .load_dataset(dataset_name, None)
+        .await
+        .unwrap()
+        .start_block
+        .unwrap();
+
+    let blessed = SnapshotContext::blessed(&test_env, &dataset_name)
+        .await
+        .unwrap();
+
+    check_blocks(&test_env, dataset_name, block, block)
+        .await
+        .expect("blessed data differed from provider");
+
+    let temp_dump = SnapshotContext::temp_dump(&test_env, &dataset_name, block, 1)
+        .await
+        .expect("temp dump failed");
+    temp_dump.assert_eq(&blessed).await.unwrap();
+}
+
+#[tokio::test]
+async fn eth_beacon_single_dump() {
+    logging::init();
+
+    let dataset_name = "eth_beacon";
+    let test_env = TestEnv::temp("eth_beacon_single_dump").await.unwrap();
     let block = test_env
         .dataset_store
         .load_dataset(dataset_name, None)
@@ -438,7 +464,7 @@ async fn generate_manifest_evm_rpc_builtin() {
     .unwrap();
 
     let out: CommonManifest = serde_json::from_slice(&out).unwrap();
-    let builtin_schema: Schema = evm_rpc_datasets::tables::all(&network).into();
+    let builtin_schema = schema_from_tables(evm_rpc_datasets::tables::all(&network));
 
     assert_eq!(out.network, network);
     assert_eq!(out.kind, kind);
@@ -468,7 +494,7 @@ async fn generate_manifest_firehose_builtin() {
     .unwrap();
 
     let out: CommonManifest = serde_json::from_slice(&out).unwrap();
-    let builtin_schema: Schema = firehose_datasets::evm::tables::all(&network).into();
+    let builtin_schema = schema_from_tables(firehose_datasets::evm::tables::all(&network));
 
     assert_eq!(out.network, network);
     assert_eq!(out.kind, kind);
@@ -508,10 +534,7 @@ async fn generate_manifest_substreams() {
         module,
     };
 
-    let schema = substreams_datasets::tables(dataset_def)
-        .await
-        .map(Into::into)
-        .unwrap();
+    let schema = schema_from_tables(substreams_datasets::tables(dataset_def).await.unwrap());
 
     assert_eq!(out.network, network);
     assert_eq!(out.kind, kind);

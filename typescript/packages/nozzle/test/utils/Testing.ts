@@ -110,7 +110,7 @@ export const layer = (config: TestingOptions = {}) =>
       httpPort: anvilPort,
       printOutput: anvilOutput,
       workingDirectory: Option.fromNullable(config.anvilWorkingDirectory).pipe(
-        Option.getOrElse(() => path.resolve(import.meta.dirname, "..", "..", "..", "example")),
+        Option.getOrElse(() => path.resolve(import.meta.dirname, "..", "..", "..", "example", "contracts")),
       ),
     })
 

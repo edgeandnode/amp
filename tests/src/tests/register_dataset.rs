@@ -1,5 +1,6 @@
 use admin_api::handlers::datasets::register::RegisterRequest;
 use common::manifest::derived::Manifest;
+use datasets_common::version::Version;
 use reqwest::StatusCode;
 
 use crate::test_support::TestEnv;
@@ -108,6 +109,7 @@ impl RegisterTestCtx {
     }
 
     async fn verify_dataset_exists(&self, name: &str, version: &str) -> bool {
+        let version = version.parse::<Version>().expect("Invalid version");
         self.env
             .metadata_db
             .dataset_exists(name, version)
