@@ -8,45 +8,34 @@ use common::arrow::array::ArrowNativeTypeOp;
 use serde::{Deserialize, Serialize};
 
 /// Represents a ratio of two integers, for example `3/2` or `1.5`. Simplifies
-/// floating point math into integer math for more precise calculations.
-///
-/// This is used while making a best-effort decision on whether to compact segments
+/// floating point math into integer math for more predictable behavior. This
+/// is used while making a best-effort decision on whether to compact segments
 /// based on their [`SegmentSize`].
 ///
-/// For example, an Overflow of `4/3` means
-/// that two segments should be compacted
-/// if their combined size is at least `4/3`
-/// of the upper bound segment size.
-/// This means that if the upper bound is `300MB`,
-/// two segments should be compacted if their combined size
-/// is at least `400MB`.
+/// For example, an Overflow of `4/3` means two segments should be compacted
+/// if their combined size is at least `4/3` of the upper bound segment size.
+/// This means that if the upper bound is `300MB`, two segments should be
+/// compacted if their combined size is at least `400MB`. This helps to avoid
+/// situations where a tiny segment (e.g. `2MB`) is attempting to merge with a
+/// large segment (e.g. `299MB`), which would result in a segment of `301MB`
+/// and thus exceed the upper bound by a small margin.
 ///
-/// This helps to avoid situations where a tiny segment
-/// (e.g. `2MB`) is attempting to merge with a large
-/// segment (e.g. `299MB`), which would result in a
-/// segment of `301MB` and thus exceed the upper bound
-/// by a small margin.
-///
-/// Overflows may be specified as either a `u64`
-/// or a `f64`. When specified as a `u64`, the denominator
-/// is assumed to be `1`. When specified as a `f64`,
-/// it is converted to a fraction with a denominator
-/// of `PRECISION` and then reduced to its simplest form.
+/// Overflows may be specified as either a `u64`,`f64`, or a fraction. When
+/// specified as a `u64`, the denominator is assumed to be `1`. When specified
+/// as a `f64`, it is converted to a fraction with a denominator of `PRECISION`
+/// and then reduced to its simplest form.
 ///
 /// # Generics
-/// - `PRECISION`: The precision to use when converting
-///  a `f64` to a fraction. Defaults to `10000`. This means
-/// that a `f64` value of `1.2345` would be converted
-/// to `12345/10000` and then reduced to `2469/2000` which
-/// is represented as `Overflow(2469, 2000)`.
+/// - `PRECISION`: The precision to use when converting a `f64` to a fraction.
+/// Defaults to `10000`. This means that a `f64` value of `1.2345` would be
+/// converted to `12345/10000` and then reduced to `2469/2000` represented as
+/// `Overflow(2469, 2000)`.
 ///
 /// # Member Variables
 /// - `0`: The numerator of the overflow.
 /// - `1`: The denominator of the overflow.
-/// ```
 #[derive(Clone, Copy)]
-pub struct OverflowFactory<const PRECISION: u64 = 10000>(pub(super) u64, pub(super) u64);
-pub type Overflow = OverflowFactory<10000>;
+pub struct Overflow<const PRECISION: u64 = 10000>(pub(super) u64, pub(super) u64);
 
 impl Overflow {
     #[cfg(test)]
@@ -61,7 +50,7 @@ impl Overflow {
     }
 }
 
-impl<const PRECISION: u64> OverflowFactory<PRECISION> {
+impl<const PRECISION: u64> Overflow<PRECISION> {
     #[inline]
     pub fn soft_limit<T: TryInto<u64> + TryFrom<u64> + Copy>(&self, value: T) -> T {
         if let Ok(value) = value.try_into()
@@ -103,13 +92,13 @@ impl<const PRECISION: u64> OverflowFactory<PRECISION> {
     }
 }
 
-impl<const N: u64> Debug for OverflowFactory<N> {
+impl<const N: u64> Debug for Overflow<N> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "Overflow( {self}, precision: {N} )")
     }
 }
 
-impl<const N: u64> Display for OverflowFactory<N> {
+impl<const N: u64> Display for Overflow<N> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         if self.1 == 1 {
             write!(f, "{}", self.0)
@@ -119,13 +108,13 @@ impl<const N: u64> Display for OverflowFactory<N> {
     }
 }
 
-impl<const N: u64> Default for OverflowFactory<N> {
+impl<const N: u64> Default for Overflow<N> {
     fn default() -> Self {
         Self(1, 1)
     }
 }
 
-impl<const N: u64> From<u64> for OverflowFactory<N> {
+impl<const N: u64> From<u64> for Overflow<N> {
     fn from(value: u64) -> Self {
         if let Some(value) = NonZero::new(value) {
             Self(value.get(), 1)
@@ -135,7 +124,7 @@ impl<const N: u64> From<u64> for OverflowFactory<N> {
     }
 }
 
-impl<const PRECISION: u64> From<f64> for OverflowFactory<PRECISION> {
+impl<const PRECISION: u64> From<f64> for Overflow<PRECISION> {
     /// Converts a floating point number to an `Overflow` ratio.
     /// The float is multiplied by the `PRECISION` constant to
     /// convert it to a fraction, then reduced to its simplest form.
@@ -163,45 +152,51 @@ impl<const PRECISION: u64> From<f64> for OverflowFactory<PRECISION> {
     }
 }
 
-impl<const PRECISION: u64> FromStr for OverflowFactory<PRECISION> {
+impl<const PRECISION: u64> FromStr for Overflow<PRECISION> {
     type Err = String;
 
     fn from_str(v: &str) -> Result<Self, Self::Err> {
         let is_fractional =
             v.matches('/').count() == 1 && v.split('/').all(|part| !part.trim().is_empty());
         let is_decimal = v.contains('.') && v.parse::<f64>().is_ok();
+
         if is_fractional && is_decimal {
             Err("Overflow cannot be both a decimal and a fraction".into())
         } else if is_fractional {
             let parts = v.trim().split('/').map(str::trim).collect::<Vec<&str>>();
+
             let numerator = parts[0]
                 .trim()
                 .parse::<u64>()
                 .map_err(|_| String::from("Invalid numerator in overflow fraction"))?;
+
             let denominator = parts[1]
                 .trim()
                 .parse::<u64>()
                 .ok()
                 .and_then(NonZero::new)
                 .ok_or_else(|| String::from("Invalid denominator in overflow fraction"))?;
-            let mut overflow = OverflowFactory(numerator, denominator.get());
+
+            let mut overflow = Overflow(numerator, denominator.get());
             overflow.reduce();
+
             Ok(overflow)
         } else if is_decimal {
             let parts = v.trim().split('.').map(str::trim).collect::<Vec<&str>>();
             let integer_part = parts[0];
             let fractional_part = parts[1];
-            let mut fractional_length = parts[1].len().min(PRECISION as usize);
+            let mut fractional_length = parts[1].len().min(PRECISION.to_string().len() - 1);
 
             while fractional_length > 0 {
                 if let Some(precision) = 10u64.checked_pow(fractional_length as u32) {
                     let numerator_part =
                         integer_part.to_string() + &fractional_part[..fractional_length];
+
                     let numerator = numerator_part
                         .parse::<u64>()
                         .map_err(|_| format!("Invalid overflow decimal: {numerator_part}"))?;
 
-                    let mut overflow = OverflowFactory(numerator, precision);
+                    let mut overflow = Overflow(numerator, precision);
                     overflow.reduce();
 
                     return Ok(overflow);
@@ -209,25 +204,26 @@ impl<const PRECISION: u64> FromStr for OverflowFactory<PRECISION> {
                     fractional_length -= 1;
                 }
             }
+
             Err(String::from("Invalid overflow decimal"))
         } else {
             let value = v
                 .trim()
                 .parse::<u64>()
                 .map_err(|_| String::from("Invalid overflow value"))?;
-            Ok(OverflowFactory::<PRECISION>::from(value))
+            Ok(Overflow::<PRECISION>::from(value))
         }
     }
 }
 
-impl<'de, const PRECISION: u64> Deserialize<'de> for OverflowFactory<PRECISION> {
+impl<'de, const PRECISION: u64> Deserialize<'de> for Overflow<PRECISION> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
         struct OverflowVisitor<const N: u64>;
         impl<'de, const N: u64> serde::de::Visitor<'de> for OverflowVisitor<N> {
-            type Value = OverflowFactory<N>;
+            type Value = Overflow<N>;
 
             fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
                 formatter.write_str("a positive integer or float representing overflow")
@@ -237,7 +233,7 @@ impl<'de, const PRECISION: u64> Deserialize<'de> for OverflowFactory<PRECISION> 
             where
                 E: serde::de::Error,
             {
-                Ok(OverflowFactory::<N>::from(value))
+                Ok(Overflow::<N>::from(value))
             }
 
             fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
@@ -247,7 +243,7 @@ impl<'de, const PRECISION: u64> Deserialize<'de> for OverflowFactory<PRECISION> 
                 if let Ok(v) = u64::try_from(v)
                     && let Some(v) = NonZero::new(v)
                 {
-                    Ok(OverflowFactory::<N>::from(v.get()))
+                    Ok(Overflow::<N>::from(v.get()))
                 } else {
                     Err(E::custom("Overflow must be a positive integer"))
                 }
@@ -257,20 +253,21 @@ impl<'de, const PRECISION: u64> Deserialize<'de> for OverflowFactory<PRECISION> 
             where
                 E: serde::de::Error,
             {
-                Ok(OverflowFactory::<N>::from(value))
+                Ok(Overflow::<N>::from(value))
             }
+
             fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
             where
                 E: serde::de::Error,
             {
-                OverflowFactory::<N>::from_str(v).map_err(E::custom)
+                Overflow::<N>::from_str(v).map_err(E::custom)
             }
         }
         deserializer.deserialize_any(OverflowVisitor::<PRECISION>)
     }
 }
 
-impl<const N: u64> Serialize for OverflowFactory<N> {
+impl<const N: u64> Serialize for Overflow<N> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -319,7 +316,7 @@ mod tests {
         assert_eq!(overflow.0, 2469);
         assert_eq!(overflow.1, 2000);
 
-        let overflow: super::OverflowFactory<10> = (1.0 / 3.0).into();
+        let overflow: super::Overflow<10> = (1.0 / 3.0).into();
         assert_eq!(overflow.0, 3);
         assert_eq!(overflow.1, 10);
     }
@@ -349,7 +346,7 @@ mod tests {
         assert_eq!(overflow.0, 1);
         assert_eq!(overflow.1, 1);
         const PRECISION: u64 = 100;
-        let mut overflow = super::OverflowFactory::<PRECISION>(250, 100);
+        let mut overflow = super::Overflow::<PRECISION>(250, 100);
         overflow.reduce();
         assert_eq!(overflow.0, 5);
         assert_eq!(overflow.1, 2);
