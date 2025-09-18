@@ -195,7 +195,7 @@ pub trait BlockStreamerExt: BlockStreamer {
 #[derive(Clone)]
 pub struct BlockStreamerWithRetry<T: BlockStreamer>(T);
 
-impl<T: BlockStreamer + Send> BlockStreamer for BlockStreamerWithRetry<T> {
+impl<T: BlockStreamer + Send + Sync> BlockStreamer for BlockStreamerWithRetry<T> {
     async fn block_stream(
         self,
         start: BlockNum,
@@ -246,8 +246,27 @@ impl<T: BlockStreamer + Send> BlockStreamer for BlockStreamerWithRetry<T> {
         }
     }
 
-    fn latest_block(&mut self) -> impl Future<Output = Result<BlockNum, BoxError>> + Send {
-        self.0.latest_block()
+    async fn latest_block(&mut self) -> Result<BlockNum, BoxError> {
+        use backon::{ExponentialBuilder, Retryable};
+
+        (|| async {
+            let mut inner = self.0.clone();
+            inner.latest_block().await
+        })
+        .retry(
+            ExponentialBuilder::default()
+                .with_min_delay(Duration::from_secs(2))
+                .with_max_delay(Duration::from_secs(20))
+                .with_max_times(10),
+        )
+        .notify(|err, dur| {
+            tracing::warn!(
+                error = %err,
+                "Failed to get latest block. Retrying in {:.1}s",
+                dur.as_secs_f32()
+            );
+        })
+        .await
     }
 
     fn provider_name(&self) -> &str {

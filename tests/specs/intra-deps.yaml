@@ -1,14 +1,13 @@
-- name: dump_eth_firehose
-  dataset: eth_firehose
-  end: 15000020
+- name: restore_eth_firehose
+  restore: eth_firehose
 
 - name: deploy_intra_deps
   deploy: intra_deps
-  end: 15000020
+  end: 15000000
 
 - name: dump_intra_deps
   dataset: intra_deps
-  end: 15000020
+  end: 15000000
   config: nozzle.config.ts
 
 - name: query_blocks_base
@@ -36,21 +35,21 @@
   query: SELECT count(*) as total_blocks from intra_deps.zz_blocks_base
   results: |
     [
-      {"total_blocks":21}
+      {"total_blocks":1}
     ]
 
 - name: query_count_blocks_derived
   query: SELECT count(*) as total_blocks from intra_deps.aa_blocks_derived
   results: |
     [
-      {"total_blocks":21}
+      {"total_blocks":1}
     ]
 
 - name: query_count_mm_blocks_derived
   query: SELECT count(*) as total_blocks from intra_deps.mm_blocks_derived
   results: |
     [
-      {"total_blocks":21}
+      {"total_blocks":1}
     ]
 
 - name: query_non_existent_field_aa_blocks_derived
