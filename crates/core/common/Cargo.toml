@@ -3,6 +3,9 @@ name = "common"
 edition.workspace = true
 version.workspace = true
 
+[features]
+schemars = ["dep:schemars", "datasets-common/schemars"]
+
 [dependencies]
 alloy.workspace = true
 async-trait.workspace = true
