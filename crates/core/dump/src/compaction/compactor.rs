@@ -146,19 +146,16 @@ impl CompactionGroup {
     }
 
     pub async fn compact(self) -> CompactionResult<Vec<FileId>> {
-        let metadata_db = self.table.metadata_db();
+        let metadata_db = self.table.metadata_db().clone();
 
         let output = self.write_and_finish().await?;
 
-        output
-            .commit_metadata(Arc::clone(&metadata_db))
-            .await
-            .map_err(CompactionError::metadata_commit_error(
-                output.object_meta.location.as_ref(),
-            ))?;
+        output.commit_metadata(metadata_db.clone()).await.map_err(
+            CompactionError::metadata_commit_error(output.object_meta.location.as_ref()),
+        )?;
 
         output
-            .upsert_gc_manifest(Arc::clone(&metadata_db))
+            .upsert_gc_manifest(metadata_db)
             .await
             .map_err(CompactionError::manifest_update_error(&output.parent_ids))?;
 
@@ -167,10 +164,7 @@ impl CompactionGroup {
 }
 
 impl ParquetFileWriterOutput {
-    async fn commit_metadata(
-        &self,
-        metadata_db: Arc<MetadataDb>,
-    ) -> Result<(), metadata_db::Error> {
+    async fn commit_metadata(&self, metadata_db: MetadataDb) -> Result<(), metadata_db::Error> {
         let location_id = self.location_id;
         let file_name = self.object_meta.location.filename().unwrap().to_string();
         let object_size = self.object_meta.size;
@@ -192,10 +186,7 @@ impl ParquetFileWriterOutput {
             .await
     }
 
-    async fn upsert_gc_manifest(
-        &self,
-        metadata_db: Arc<MetadataDb>,
-    ) -> Result<(), metadata_db::Error> {
+    async fn upsert_gc_manifest(&self, metadata_db: MetadataDb) -> Result<(), metadata_db::Error> {
         metadata_db
             .upsert_gc_manifest(self.location_id, &self.parent_ids, FILE_LOCK_DURATION)
             .await

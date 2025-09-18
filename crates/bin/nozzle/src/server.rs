@@ -28,7 +28,7 @@ pub struct BoundAddrs {
 
 pub async fn run(
     config: Arc<Config>,
-    metadata_db: Arc<MetadataDb>,
+    metadata_db: MetadataDb,
     dev: bool,
     enable_flight: bool,
     enable_jsonl: bool,

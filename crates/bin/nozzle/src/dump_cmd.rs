@@ -19,7 +19,7 @@ use tracing::{info, warn};
 
 pub async fn dump(
     config: Arc<Config>,
-    metadata_db: Arc<MetadataDb>,
+    metadata_db: MetadataDb,
     mut datasets: Vec<String>,
     ignore_deps: bool,
     end_block: Option<i64>,
@@ -105,8 +105,7 @@ pub async fn dump(
         physical_datasets.push(tables);
     }
 
-    let notification_multiplexer =
-        Arc::new(notification_multiplexer::spawn((*metadata_db).clone()));
+    let notification_multiplexer = Arc::new(notification_multiplexer::spawn(metadata_db.clone()));
 
     let ctx = dump::Ctx {
         config: config.clone(),

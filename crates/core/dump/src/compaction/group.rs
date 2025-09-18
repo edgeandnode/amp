@@ -101,7 +101,7 @@ impl CompactionGroupGenerator<'_> {
 
         let reader_factory: Arc<NozzleReaderFactory> = Arc::new(NozzleReaderFactory {
             location_id: table.location_id(),
-            metadata_db: Arc::clone(&table.metadata_db()),
+            metadata_db: table.metadata_db().clone(),
             object_store: Arc::clone(&table.object_store()),
             parquet_footer_cache: ParquetFooterCache::builder(1).build(),
         });

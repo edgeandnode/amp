@@ -293,7 +293,7 @@ async fn main_inner() -> Result<(), BoxError> {
 async fn load_config_and_metadata_db(
     config_path: Option<&String>,
     allow_temp_db: bool,
-) -> Result<(Arc<Config>, Arc<MetadataDb>), BoxError> {
+) -> Result<(Arc<Config>, MetadataDb), BoxError> {
     let Some(config) = config_path else {
         return Err("--config parameter is mandatory".into());
     };
