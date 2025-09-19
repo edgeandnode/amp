@@ -458,6 +458,7 @@ async fn generate_manifest_evm_rpc_builtin() {
         name.clone(),
         None,
         None,
+        None,
         &mut out,
     )
     .await
@@ -486,6 +487,7 @@ async fn generate_manifest_firehose_builtin() {
         network.clone(),
         kind.clone(),
         name.clone(),
+        None,
         None,
         None,
         &mut out,
@@ -520,6 +522,7 @@ async fn generate_manifest_substreams() {
         name.clone(),
         Some(manifest.clone()),
         Some(module.clone()),
+        None,
         &mut out,
     )
     .await
@@ -558,6 +561,7 @@ async fn generate_manifest_sql() {
         name.clone(),
         None,
         None,
+        None,
         &mut out,
     )
     .await
@@ -580,6 +584,7 @@ async fn generate_manifest_manifest_builtin() {
         network.clone(),
         kind.clone(),
         name.clone(),
+        None,
         None,
         None,
         &mut out,
@@ -608,6 +613,7 @@ async fn generate_manifest_bad_dataset_kind() {
         name.clone(),
         manifest,
         module,
+        None,
         &mut out,
     )
     .await

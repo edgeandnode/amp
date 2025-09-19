@@ -115,6 +115,12 @@ enum Command {
         /// Substreams output module name, required for DatasetKind::Substreams.
         #[arg(long, env = "GM_SS_MODULE")]
         module: Option<String>,
+
+        /// How frequently to run the dump job, in minutes. This option is ignored for SQL queries
+        /// that can be executed incrementally. By default, dumping non-incremental SQL queries
+        /// will exit after executing once.
+        #[arg(long, env = "GM_RUN_EVERY_MINS")]
+        run_every_mins: Option<u32>,
     },
     /// Run migrations on the metadata database
     Migrate,
@@ -244,6 +250,7 @@ async fn main_inner() -> Result<(), BoxError> {
             out,
             manifest,
             module,
+            run_every_mins,
         } => {
             if let Some(mut out) = out {
                 if out.is_dir() {
@@ -251,10 +258,28 @@ async fn main_inner() -> Result<(), BoxError> {
                 }
 
                 let mut out = std::fs::File::create(out)?;
-                generate_manifest::run(network, kind, name, manifest, module, &mut out).await
+                generate_manifest::run(
+                    network,
+                    kind,
+                    name,
+                    manifest,
+                    module,
+                    run_every_mins,
+                    &mut out,
+                )
+                .await
             } else {
                 let mut stdout = std::io::stdout();
-                generate_manifest::run(network, kind, name, manifest, module, &mut stdout).await
+                generate_manifest::run(
+                    network,
+                    kind,
+                    name,
+                    manifest,
+                    module,
+                    run_every_mins,
+                    &mut stdout,
+                )
+                .await
             }
         }
         Command::Migrate => {

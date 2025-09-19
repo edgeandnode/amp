@@ -12,6 +12,7 @@ pub async fn run<T: io::Write>(
     name: String,
     manifest: Option<String>,
     module: Option<String>,
+    run_every_mins: Option<u32>,
     w: &mut T,
 ) -> Result<(), BoxError> {
     // Validate dataset name and kind
@@ -56,6 +57,7 @@ pub async fn run<T: io::Write>(
         kind: kind.to_string(),
         name,
         schema: Some(schema),
+        run_every_mins,
     })?;
     w.write_all(&dataset)?;
 

@@ -16,6 +16,15 @@
       "description": "Network name, e.g. \"mainnet\", \"sepolia\", \"polygon\"",
       "type": "string"
     },
+    "run_every_mins": {
+      "description": "How frequently to run the dump job, in minutes. This option is ignored for SQL queries\nthat can be executed incrementally. By default, dumping non-incremental SQL queries will\nexit after executing once.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint32",
+      "minimum": 0
+    },
     "schema": {
       "description": "Dataset schema. Lists the tables defined by this dataset.\nOptional for TOML format, required for JSON format",
       "anyOf": [

@@ -26,6 +26,10 @@ pub struct Manifest {
     /// Dataset schema. Lists the tables defined by this dataset.
     /// Optional for TOML format, required for JSON format
     pub schema: Option<Schema>,
+    /// How frequently to run the dump job, in minutes. This option is ignored for SQL queries
+    /// that can be executed incrementally. By default, dumping non-incremental SQL queries will
+    /// exit after executing once.
+    pub run_every_mins: Option<u32>,
 }
 
 /// A serializable representation of a collection of Arrow schemas without metadata.
