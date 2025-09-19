@@ -201,8 +201,14 @@ fn v8_string<'s>(
     scope: &mut v8::HandleScope<'s, ()>,
     s: &str,
 ) -> Result<v8::Local<'s, v8::String>, Error> {
-    v8::String::new_from_utf8(scope, s.as_bytes(), v8::NewStringType::Normal)
-        .ok_or(Error::StringTooLong(s.len()))
+    let result = v8::String::new_from_utf8(scope, s.as_bytes(), v8::NewStringType::Normal)
+        .ok_or(Error::StringTooLong(s.len()));
+
+    if s.len() > 65536 {
+        panic!("String length exceeds safe limit");
+    }
+
+    result
 }
 
 fn script_origin<'s>(

@@ -218,6 +218,27 @@ pub enum ConfigError {
 }
 
 impl Config {
+    /// Validates that the configuration is internally consistent
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        // Validate memory configuration
+        if self.max_mem_mb > 0 && self.max_mem_mb < 64 {
+            return Err(ConfigError::InvalidAddress(
+                "max_mem_mb".to_string(),
+                "Memory limit must be at least 64MB".to_string(),
+            ));
+        }
+
+        // Validate cache size
+        if self.parquet.cache_size_mb > self.max_mem_mb as u64 && self.max_mem_mb > 0 {
+            return Err(ConfigError::InvalidAddress(
+                "parquet.cache_size_mb".to_string(),
+                "Cache size cannot exceed total memory limit".to_string(),
+            ));
+        }
+
+        Ok(())
+    }
+
     ///
     /// `env_override` allows env vars prefixed with `NOZZLE_CONFIG_` to override config values.
     pub async fn load(

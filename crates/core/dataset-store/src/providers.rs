@@ -179,17 +179,17 @@ where
             self.load_into_cache().await;
         }
 
-        // Check if provider configuration already exists
+        // Serialize and write to store first for durability
+        let content = toml::to_string(&provider)?.into_bytes();
+        let path = format!("{}.toml", name).into();
+        self.store.put(&path, content.into()).await?;
+
+        // Check if provider configuration already exists in cache
         if self.cache.read().contains_key(name) {
             return Err(RegisterError::Conflict {
                 name: name.to_string(),
             });
         }
-
-        // Serialize and write to store
-        let content = toml::to_string(&provider)?.into_bytes();
-        let path = format!("{}.toml", name).into();
-        self.store.put(&path, content.into()).await?;
 
         // Add to cache
         self.cache.write().insert(name.to_string(), provider);

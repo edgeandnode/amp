@@ -28,6 +28,26 @@ The following optional configuration keys allow you to control the hostname and 
 - `jsonl_addr`: JSON Lines server address (default: `0.0.0.0:1603`)
 - `admin_api_addr`: Admin API server address (default: `0.0.0.0:1610`)
 
+# Performance Tuning
+
+## Memory Configuration
+
+Nozzle provides several memory-related configuration options to optimize performance:
+
+- `max_mem_mb`: Maximum memory usage in megabytes (default: unlimited)
+- `parquet.cache_size_mb`: Size of the Parquet metadata cache in megabytes (default: 1024)
+
+**Note**: When `max_mem_mb` is set, ensure that `parquet.cache_size_mb` does not exceed the total memory limit.
+
+## Compaction Settings
+
+The compaction system helps optimize storage by merging smaller files:
+
+- `compaction.compactor_enabled`: Enable automatic compaction (default: false)
+- `compaction.collector_enabled`: Enable collection of compaction candidates (default: false)
+- `compaction.metadata_concurrency`: Number of concurrent metadata operations (default: 10)
+- `compaction.write_concurrency`: Number of concurrent write operations (default: 1)
+
 ## Logging
 
 Simplified control of the logging verbosity level is offered by the `NOZZLE_LOG` env var. It accepts

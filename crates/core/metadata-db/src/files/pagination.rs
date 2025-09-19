@@ -64,7 +64,7 @@ where
                fm.object_version
         FROM file_metadata fm
         JOIN locations l ON fm.location_id = l.id
-        WHERE fm.location_id = $1 AND fm.id < $3
+        WHERE fm.location_id = $1 AND fm.id <= $3
         ORDER BY fm.id DESC
         LIMIT $2
     "#};
