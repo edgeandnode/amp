@@ -5,6 +5,7 @@ use std::{
     process::{ExitStatus, Stdio},
     str::FromStr as _,
     sync::Arc,
+    time::Duration,
 };
 
 use common::{
@@ -22,7 +23,9 @@ use common::{
 };
 use dataset_store::DatasetStore;
 use dump::{
-    compaction::{SegmentSizeLimit, compactor::Compactor},
+    compaction::{
+        NozzleCompactorTaskType, SegmentSizeLimit, collector::Collector, compactor::Compactor,
+    },
     consistency_check,
     worker::Worker,
 };
@@ -93,7 +96,7 @@ pub async fn bless(test_env: &TestEnv, dataset_name: &str, end: u64) -> Result<(
 
 pub struct TestEnv {
     pub config: Arc<Config>,
-    pub metadata_db: Arc<MetadataDb>,
+    pub metadata_db: MetadataDb,
     pub dataset_store: Arc<DatasetStore>,
     pub server_addrs: BoundAddrs,
 
@@ -143,7 +146,7 @@ impl TestEnv {
         }
 
         let config = load_test_config(Some(figment), config_name).await?;
-        let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
+        let metadata_db: MetadataDb = config.metadata_db().await?.into();
         let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
 
         let (bound, server) = nozzle::server::run(
@@ -234,7 +237,7 @@ url = "ipc://{}""#,
         temp_dirs.push(tmp_providers);
 
         let config = load_test_config(Some(figment), config_name).await?;
-        let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
+        let metadata_db: MetadataDb = config.metadata_db().await?.into();
         let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
 
         let (bound, server) = nozzle::server::run(
@@ -362,7 +365,7 @@ pub(crate) async fn dump_dataset(
 ) -> Result<(), BoxError> {
     // dump the dataset
     let partition_size_mb = 100;
-    let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
+    let metadata_db: MetadataDb = config.metadata_db().await?.into();
 
     let physical_tables = dump(
         config.clone(),
@@ -392,7 +395,7 @@ pub(crate) async fn dump_dataset(
 pub(crate) async fn catalog_for_dataset(
     dataset_name: &str,
     dataset_store: &Arc<DatasetStore>,
-    metadata_db: Arc<MetadataDb>,
+    metadata_db: MetadataDb,
 ) -> Result<Catalog, BoxError> {
     let dataset = dataset_store.load_dataset(dataset_name, None).await?;
     let mut tables: Vec<Arc<PhysicalTable>> = Vec::new();
@@ -663,7 +666,7 @@ impl DatasetPackage {
 
 pub async fn restore_blessed_dataset(
     dataset: &str,
-    metadata_db: &Arc<MetadataDb>,
+    metadata_db: &MetadataDb,
 ) -> Result<Vec<Arc<PhysicalTable>>, BoxError> {
     let config = load_test_config(None, "config.toml").await?;
     let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
@@ -694,22 +697,58 @@ pub async fn restore_blessed_dataset(
 
 /// Spawn a compaction for the given table and wait for it to complete.
 /// The compaction is configured to compact all files into a single file.
-pub async fn spawn_compaction_and_await_completion(
+async fn spawn_compaction_task_and_await_completion<T: NozzleCompactorTaskType>(
     table: &Arc<PhysicalTable>,
     config: &Arc<Config>,
+    compactor_active: bool,
+    collector_active: bool,
+    file_lock_duration: Duration,
 ) {
     let length = table.files().await.unwrap().len();
     let parquet_writer_props = dump::parquet_opts(&config.parquet);
     let mut opts = dump::compaction_opts(&config.compaction, &parquet_writer_props);
-    opts.active = true;
+    opts.compactor_active = compactor_active;
+    opts.collector_active = collector_active;
+
+    opts.file_lock_duration = file_lock_duration;
+    opts.collector_interval = Duration::ZERO;
+    opts.compactor_interval = Duration::ZERO;
+
     opts.size_limit = SegmentSizeLimit::new(1, 1, 1, length);
 
-    let mut compactor = Compactor::start(table, &Arc::new(opts));
+    let mut task = T::start(table, &Arc::new(opts));
 
-    compactor.spawn().await;
+    task.join_current_then_spawn_new().await;
 
-    // Wait for compaction to finish
-    while !compactor.is_finished() {
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    while !task.is_finished() {
+        tokio::time::sleep(Duration::from_millis(100)).await;
     }
+}
+
+pub async fn spawn_compaction_and_await_completion(
+    table: &Arc<PhysicalTable>,
+    config: &Arc<Config>,
+) {
+    spawn_compaction_task_and_await_completion::<Compactor>(
+        table,
+        config,
+        true,
+        false,
+        Duration::from_millis(100),
+    )
+    .await;
+}
+
+pub async fn spawn_collection_and_await_completion(
+    table: &Arc<PhysicalTable>,
+    config: &Arc<Config>,
+) {
+    spawn_compaction_task_and_await_completion::<Collector>(
+        table,
+        config,
+        false,
+        true,
+        Duration::ZERO,
+    )
+    .await;
 }

@@ -6,11 +6,12 @@ use std::{
 };
 
 use common::{
-    BoxError, Store, catalog::physical::PhysicalTable, config::Config, manifest::common::Version,
-    notification_multiplexer, store::ObjectStoreUrl, utils::dfs,
+    BoxError, Store, catalog::physical::PhysicalTable, config::Config, notification_multiplexer,
+    store::ObjectStoreUrl, utils::dfs,
 };
 use datafusion::sql::resolve::resolve_table_references;
 use dataset_store::DatasetStore;
+use datasets_common::version::Version;
 use metadata_db::MetadataDb;
 use monitoring::telemetry;
 use static_assertions::const_assert;
@@ -18,7 +19,7 @@ use tracing::{info, warn};
 
 pub async fn dump(
     config: Arc<Config>,
-    metadata_db: Arc<MetadataDb>,
+    metadata_db: MetadataDb,
     mut datasets: Vec<String>,
     ignore_deps: bool,
     end_block: Option<i64>,
@@ -104,8 +105,7 @@ pub async fn dump(
         physical_datasets.push(tables);
     }
 
-    let notification_multiplexer =
-        Arc::new(notification_multiplexer::spawn((*metadata_db).clone()));
+    let notification_multiplexer = Arc::new(notification_multiplexer::spawn(metadata_db.clone()));
 
     let ctx = dump::Ctx {
         config: config.clone(),

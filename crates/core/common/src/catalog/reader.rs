@@ -22,7 +22,7 @@ use object_store::ObjectStore;
 #[derive(Debug, Clone)]
 pub struct NozzleReaderFactory {
     pub location_id: LocationId,
-    pub metadata_db: Arc<MetadataDb>,
+    pub metadata_db: MetadataDb,
     pub object_store: Arc<dyn ObjectStore>,
     pub parquet_footer_cache: Cache<FileId, Arc<ParquetMetaData>>,
 }
@@ -37,7 +37,7 @@ impl ParquetFileReaderFactory for NozzleReaderFactory {
     ) -> DataFusionResult<Box<dyn AsyncFileReader + Send>> {
         let path = file_meta.location();
         let file_metrics = ParquetFileMetrics::new(partition_index, path.as_ref(), metrics);
-        let metadata_db = Arc::clone(&self.metadata_db);
+        let metadata_db = self.metadata_db.clone();
         let store = Arc::clone(&self.object_store);
         let inner = ParquetObjectReader::new(store, path.clone())
             .with_file_size(file_meta.object_meta.size);
@@ -67,7 +67,7 @@ impl ParquetFileReaderFactory for NozzleReaderFactory {
 pub struct NozzleReader {
     pub location_id: LocationId,
     pub file_id: FileId,
-    pub metadata_db: Arc<MetadataDb>,
+    pub metadata_db: MetadataDb,
     pub file_metrics: ParquetFileMetrics,
     pub inner: ParquetObjectReader,
     pub parquet_footer_cache: Cache<FileId, Arc<ParquetMetaData>>,
@@ -93,7 +93,7 @@ impl AsyncFileReader for NozzleReader {
         &'a mut self,
         _options: Option<&'a ArrowReaderOptions>,
     ) -> BoxFuture<'a, ParquetResult<Arc<ParquetMetaData>>> {
-        let metadata_db = Arc::clone(&self.metadata_db);
+        let metadata_db = self.metadata_db.clone();
         let cache = self.parquet_footer_cache.clone();
 
         Box::pin(async move {

@@ -14,10 +14,10 @@ use tracing::instrument;
 use url::Url;
 
 mod conn;
+mod datasets;
 mod files;
 mod jobs;
 mod locations;
-pub mod registry;
 #[cfg(feature = "temp-db")]
 pub mod temp;
 mod workers;
@@ -26,6 +26,9 @@ use self::conn::{DbConn, DbConnPool};
 #[cfg(feature = "temp-db")]
 pub use self::temp::{KEEP_TEMP_DIRS, temp_metadata_db};
 pub use self::{
+    datasets::{
+        DatasetWithDetails, Version as DatasetVersion, VersionOwned as DatasetVersionOwned,
+    },
     files::{
         FileId, FileIdFromStrError, FileIdI64ConvError, FileIdU64Error, FileMetadata,
         FileMetadataWithDetails, FooterBytes,
@@ -45,7 +48,6 @@ pub use self::{
     },
     workers::{Worker, WorkerNodeId},
 };
-use crate::registry::{Registry, insert_dataset_to_registry};
 
 /// Frequency on which to send a heartbeat.
 pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
@@ -753,102 +755,78 @@ impl MetadataDb {
     }
 }
 
-/// Registry API
+/// Dataset registry API
 impl MetadataDb {
-    pub async fn register_dataset(&self, registry: Registry) -> Result<(), Error> {
-        let mut tx = self.pool.begin().await?;
-        insert_dataset_to_registry(&mut *tx, registry).await?;
-        tx.commit().await?;
-        Ok(())
-    }
-
-    pub async fn dataset_exists(&self, dataset_name: &str, version: &str) -> Result<bool, Error> {
-        let sql = "
-            SELECT COUNT(*) FROM registry 
-            WHERE dataset = $1 AND version = $2
-        ";
-        let count: i64 = sqlx::query_scalar(sql)
-            .bind(dataset_name)
-            .bind(version)
-            .fetch_one(&*self.pool)
-            .await?;
-        Ok(count > 0)
-    }
-
-    pub async fn get_manifest(
-        &self,
-        dataset: &str,
-        version: &str,
-    ) -> Result<Option<String>, Error> {
-        let sql = "
-            SELECT manifest FROM registry 
-            WHERE dataset = $1 AND version = $2
-        ";
-        let result = sqlx::query_scalar(sql)
-            .bind(dataset)
-            .bind(version)
-            .fetch_optional(&*self.pool)
-            .await?;
-        Ok(result)
-    }
-
+    /// Register a new dataset in the registry
+    ///
+    /// Creates a new dataset entry with the specified owner, name, version, and manifest.
+    /// The combination of dataset name and version must be unique across all datasets.
     #[instrument(skip(self), err)]
-    pub async fn get_latest_dataset_version(
+    pub async fn register_dataset(
         &self,
-        dataset_name: &str,
-    ) -> Result<Option<(String, String)>, Error> {
-        let sql = "
-            SELECT version FROM registry 
-            WHERE dataset = $1
-            ORDER BY version DESC
-            LIMIT 1
-        ";
-
-        let version: Option<String> = sqlx::query_scalar(sql)
-            .bind(&dataset_name)
-            .fetch_optional(&*self.pool)
-            .await?;
-        match version {
-            Some(version) => Ok(Some((dataset_name.to_string(), version))),
-            None => Ok(None),
-        }
+        owner: &str,
+        name: &str,
+        version: impl Into<DatasetVersion<'_>> + std::fmt::Debug,
+        manifest_path: &str,
+    ) -> Result<(), Error> {
+        datasets::insert(&*self.pool, owner, name, version.into(), manifest_path)
+            .await
+            .map_err(Into::into)
     }
 
-    #[instrument(skip(self), err)]
-    pub async fn get_dataset(
+    /// Check if a dataset exists for the given name and version
+    ///
+    /// Returns `true` if a dataset with the specified name and version exists in the registry.
+    pub async fn dataset_exists(
         &self,
-        dataset_name: &str,
-        version: &str,
+        name: &str,
+        version: impl Into<DatasetVersion<'_>>,
+    ) -> Result<bool, Error> {
+        datasets::exists_by_name_and_version(&*self.pool, name, version.into())
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Get complete dataset registry information
+    ///
+    /// Retrieves a dataset record with full details including metadata.
+    /// Returns `None` if no dataset is found with the specified name and version.
+    pub async fn get_dataset_with_details(
+        &self,
+        name: &str,
+        version: impl Into<DatasetVersion<'_>>,
+    ) -> Result<Option<DatasetWithDetails>, Error> {
+        datasets::get_by_name_and_version_with_details(&*self.pool, name, version.into())
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Get manifest content for a dataset
+    ///
+    /// Retrieves the manifest string stored for the specified dataset.
+    /// Returns `None` if no dataset is found with the specified name and version.
+    pub async fn get_dataset_manifest_path(
+        &self,
+        name: &str,
+        version: impl Into<DatasetVersion<'_>>,
     ) -> Result<Option<String>, Error> {
-        let sql = "
-            SELECT manifest FROM registry 
-            WHERE dataset = $1 AND version = $2
-            LIMIT 1
-        ";
-
-        let dataset: Option<String> = sqlx::query_scalar(sql)
-            .bind(&dataset_name)
-            .bind(&version)
-            .fetch_optional(&*self.pool)
-            .await?;
-        match dataset {
-            Some(dataset) => Ok(Some(dataset.trim_end_matches(".json").to_string())),
-            None => Ok(None),
-        }
+        datasets::get_manifest_path_by_name_and_version(&*self.pool, name, version.into())
+            .await
+            .map_err(Into::into)
     }
 
-    pub async fn get_registry_info(
+    /// Get the latest version for a dataset
+    ///
+    /// Finds the most recent version available for the specified dataset name.
+    /// Returns the complete dataset details if found, `None` if no dataset exists with that name.
+    #[instrument(skip(self), err)]
+    pub async fn get_dataset_latest_version_with_details(
         &self,
-        dataset_name: &str,
-        version: &str,
-    ) -> Result<Registry, sqlx::Error> {
-        let sql = "SELECT owner, dataset, version, manifest FROM registry WHERE dataset = $1 AND version = $2";
-        let dataset = sqlx::query_as(sql)
-            .bind(&dataset_name)
-            .bind(&version)
-            .fetch_one(&*self.pool)
-            .await?;
-        Ok(dataset)
+        name: &str,
+    ) -> Result<Option<DatasetWithDetails>, Error> {
+        datasets::get_latest_version_by_name_with_details(&*self.pool, name)
+            .await
+            .map_err(Into::into)
     }
 }
 
@@ -868,7 +846,7 @@ pub struct GcManifestRow {
 impl MetadataDb {
     pub async fn delete_file_ids(&self, file_ids: &[FileId]) -> Result<(), Error> {
         let sql = "
-        DELETE FROM gc_manifest
+        DELETE FROM file_metadata
          WHERE file_id = ANY($1);
         ";
 
@@ -894,7 +872,7 @@ impl MetadataDb {
             INSERT INTO gc_manifest (location_id, file_id, file_path, expiration)
             SELECT $1
                   , file.id
-                  , locations.url || file_metadata.file_name
+                  , file_metadata.file_name
                   , NOW() + $3
                FROM UNNEST ($2) AS file(id)
          INNER JOIN file_metadata ON file_metadata.id = file.id

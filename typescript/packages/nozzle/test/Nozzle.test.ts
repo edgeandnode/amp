@@ -39,7 +39,7 @@ layer(environment, {
       const anvil = yield* Anvil.Anvil
 
       // Run the counter script to deploy the `Counter.sol` contract and generate some events.
-      yield* anvil.runScript(path.join("contracts", "script", "Counter.s.sol:CounterScript"))
+      yield* anvil.runScript(path.join("script", "Counter.s.sol:CounterScript"))
     }),
     { sequential: true, timeout: Duration.toMillis("10 seconds") },
   )

@@ -6,7 +6,6 @@ use clap::Parser;
 use common::{BoxError, config::Config};
 use dataset_store::DatasetStore;
 use dump_check::metrics;
-use metadata_db::MetadataDb;
 use monitoring::{
     logging,
     telemetry::{self, metrics::provider_flush_shutdown},
@@ -72,7 +71,7 @@ async fn main() -> Result<(), BoxError> {
     } = args;
 
     let config = Arc::new(Config::load(config_path, true, None, false).await?);
-    let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
+    let metadata_db = config.metadata_db().await?;
     let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
 
     if end_block == 0 {

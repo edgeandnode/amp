@@ -1,4 +1,4 @@
-//! This module provides a `WorkerMetadataDb` struct, a newtype wrapper around `Arc<MetadataDb>`
+//! This module provides a `WorkerMetadataDb` struct, a newtype wrapper around `MetadataDb`
 //! that exposes methods for interacting with the workers and jobs tables in the metadata DB.
 //!
 //! This wrapper is intended to be used by the dump worker to abstract away the direct
@@ -6,7 +6,7 @@
 //! worker.
 //!
 //! All the methods in this module are retryable on connection errors.
-use std::{future::Future, sync::Arc};
+use std::future::Future;
 
 use backon::{ExponentialBuilder, Retryable};
 use metadata_db::{Error as MetadataDbError, JobNotifListener, MetadataDb};
@@ -15,14 +15,14 @@ pub use metadata_db::{
     JobStatus, WorkerNodeId,
 };
 
-/// A newtype wrapper around `Arc<MetadataDb>` that provides methods for interacting with the
+/// A newtype wrapper around `MetadataDb` that provides methods for interacting with the
 /// jobs and workers tables in the database.
 #[derive(Clone)]
-pub struct WorkerMetadataDb(Arc<MetadataDb>);
+pub struct WorkerMetadataDb(MetadataDb);
 
 impl WorkerMetadataDb {
     /// Creates a new `JobsMetadataDb` instance.
-    pub fn new(db: Arc<MetadataDb>) -> Self {
+    pub fn new(db: MetadataDb) -> Self {
         Self(db)
     }
 

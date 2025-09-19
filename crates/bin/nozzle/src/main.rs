@@ -182,7 +182,10 @@ async fn main_inner() -> Result<(), BoxError> {
                     tracing::info!("Registering manifest: {}", dataset);
                     let manifest = std::fs::read_to_string(&dataset)?;
                     let manifest: Manifest = serde_json::from_str(&manifest)?;
-                    register_manifest(&dataset_store, &metadata_db, &manifest).await?;
+                    dataset_store
+                        .register_manifest(&manifest.name, &manifest.version, &manifest)
+                        .await
+                        .map_err(|err| -> BoxError { err.to_string().into() })?;
                     datasets_to_dump.push(manifest.to_identifier());
                 } else {
                     datasets_to_dump.push(dataset);
@@ -290,7 +293,7 @@ async fn main_inner() -> Result<(), BoxError> {
 async fn load_config_and_metadata_db(
     config_path: Option<&String>,
     allow_temp_db: bool,
-) -> Result<(Arc<Config>, Arc<MetadataDb>), BoxError> {
+) -> Result<(Arc<Config>, MetadataDb), BoxError> {
     let Some(config) = config_path else {
         return Err("--config parameter is mandatory".into());
     };
@@ -298,40 +301,4 @@ async fn load_config_and_metadata_db(
     let config = Arc::new(Config::load(config, true, None, allow_temp_db).await?);
     let metadata_db = config.metadata_db().await?.into();
     Ok((config, metadata_db))
-}
-
-async fn register_manifest(
-    dataset_store: &DatasetStore,
-    metadata_db: &MetadataDb,
-    manifest: &Manifest,
-) -> Result<(), BoxError> {
-    let name = &manifest.name;
-    let version = &manifest.version;
-
-    // Check if the dataset with the given name and version already exists in the registry.
-    if metadata_db
-        .dataset_exists(name, &version.to_string())
-        .await?
-    {
-        return Err(format!("Dataset '{name}' version '{version}' already registered").into());
-    }
-
-    let registry_info = manifest.extract_registry_info();
-    let manifest_json = serde_json::to_string(&manifest)
-        .map_err(|err| format!("Failed to serialize manifest to JSON: {err}"))?;
-    let dataset_defs_store = dataset_store.dataset_defs_store();
-    let manifest_path = object_store::path::Path::from(registry_info.manifest.clone());
-
-    dataset_defs_store
-        .prefixed_store()
-        .put(&manifest_path, manifest_json.into())
-        .await
-        .map_err(|err| format!("Failed to store manifest in dataset definitions store: {err}"))?;
-
-    metadata_db
-        .register_dataset(registry_info)
-        .await
-        .map_err(|err| format!("Failed to register dataset in metadata database: {err}"))?;
-
-    Ok(())
 }

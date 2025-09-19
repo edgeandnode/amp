@@ -21,7 +21,7 @@ use crate::metrics;
 
 mod block_ranges;
 mod raw_dataset;
-mod sql_dataset;
+mod sql_dump;
 mod tasks;
 
 /// Dumps a set of tables. All tables must belong to the same dataset.
@@ -97,7 +97,10 @@ pub async fn dump_raw_tables(
 
     let kind = DatasetKind::from_str(&dataset.kind)?;
     match kind {
-        DatasetKind::EvmRpc | DatasetKind::Firehose | DatasetKind::Substreams => {
+        DatasetKind::EvmRpc
+        | DatasetKind::EthBeacon
+        | DatasetKind::Firehose
+        | DatasetKind::Substreams => {
             raw_dataset::dump(
                 ctx,
                 n_jobs,
@@ -166,7 +169,7 @@ pub async fn dump_user_tables(
             }
         };
 
-        sql_dataset::dump_table(
+        sql_dump::dump_table(
             ctx.clone(),
             dataset,
             &env,
@@ -189,7 +192,7 @@ pub async fn dump_user_tables(
 #[derive(Clone)]
 pub struct Ctx {
     pub config: Arc<Config>,
-    pub metadata_db: Arc<MetadataDb>,
+    pub metadata_db: MetadataDb,
     pub dataset_store: Arc<DatasetStore>,
     pub data_store: Arc<DataStore>,
     /// Shared notification multiplexer for streaming queries

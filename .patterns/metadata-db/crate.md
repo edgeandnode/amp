@@ -93,7 +93,7 @@ When contributing to `metadata-db`, ensure you follow these requirements:
 **Before Submitting:**
 
 - [ ] **🔐 SECURITY REVIEW**: Complete the comprehensive security checklist in [security.md](./security.md) - this is mandatory for all changes
-- [ ] Run formatter: `just fmt`
+- [ ] Run formatter: `just fmt-rs`
 - [ ] Run unit tests: `cargo test -p metadata-db 'tests::' -- --skip 'tests::it_'`
 - [ ] Run in-tree integration tests: `cargo test -p metadata-db 'tests::it_'`
 - [ ] Run integration tests: `cargo test -p metadata-db 'tests::it_' --test '*'`

@@ -4,12 +4,13 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use alloy::{hex::ToHexExt as _, primitives::BlockHash};
 use common::{
-    BlockNum, BoxError, LogicalCatalog, SPECIAL_BLOCK_NUM,
+    BlockNum, BoxError, DetachedLogicalPlan, LogicalCatalog, PlanningContext, QueryContext,
+    SPECIAL_BLOCK_NUM,
     arrow::array::RecordBatch,
     catalog::physical::{Catalog, PhysicalTable},
     metadata::segments::{BlockRange, ResumeWatermark, Segment, Watermark},
     notification_multiplexer::NotificationMultiplexerHandle,
-    query_context::{DetachedLogicalPlan, PlanningContext, QueryContext, QueryEnv, parse_sql},
+    query_context::{QueryEnv, parse_sql},
 };
 use datafusion::common::cast::as_fixed_size_binary_array;
 use dataset_store::{DatasetStore, resolve_blocks_table};
@@ -74,13 +75,14 @@ impl TableUpdates {
 }
 
 /// Represents a message from the streaming query, which can be either data or a completion signal.
-/// Receiving `Completed(n)` indicates that the query has emitted all outputs up to block number `n`.
 ///
 /// Completion points do not necessarily follow increments of 1, as the query progresses in batches.
 pub enum QueryMessage {
     MicrobatchStart { range: BlockRange, is_reorg: bool },
     Data(RecordBatch),
     MicrobatchEnd(BlockRange),
+
+    //// Indicates that the query has emitted all outputs up to the given block number.
     BlockComplete(BlockNum),
 }
 

@@ -166,7 +166,7 @@ pub struct PhysicalTable {
     /// Location ID in the metadata database.
     location_id: LocationId,
     /// Metadata database to use for this table.
-    metadata_db: Arc<MetadataDb>,
+    metadata_db: MetadataDb,
     /// Object store for accessing the data files.
     object_store: Arc<dyn ObjectStore>,
 }
@@ -178,7 +178,7 @@ impl PhysicalTable {
         table: ResolvedTable,
         url: Url,
         location_id: LocationId,
-        metadata_db: Arc<MetadataDb>,
+        metadata_db: MetadataDb,
     ) -> Result<Self, BoxError> {
         let path = Path::from_url_path(url.path()).unwrap();
         let object_store_url = url.clone().try_into()?;
@@ -201,7 +201,7 @@ impl PhysicalTable {
     pub async fn next_revision(
         table: &ResolvedTable,
         data_store: &Store,
-        metadata_db: Arc<MetadataDb>,
+        metadata_db: MetadataDb,
         set_active: bool,
     ) -> Result<Self, BoxError> {
         let dataset_name = &table.dataset().name;
@@ -247,7 +247,7 @@ impl PhysicalTable {
     pub async fn restore_latest_revision(
         table: &ResolvedTable,
         data_store: Arc<Store>,
-        metadata_db: Arc<MetadataDb>,
+        metadata_db: MetadataDb,
     ) -> Result<Option<Self>, BoxError> {
         let dataset_name = &table.dataset().name;
         let dataset_version = match table.dataset().kind.as_str() {
@@ -269,7 +269,7 @@ impl PhysicalTable {
             table,
             &table_id,
             Arc::clone(&data_store),
-            Arc::clone(&metadata_db),
+            metadata_db.clone(),
         )
         .await
     }
@@ -277,7 +277,7 @@ impl PhysicalTable {
     /// Attempt to get the active revision of a table.
     pub async fn get_active(
         table: &ResolvedTable,
-        metadata_db: Arc<MetadataDb>,
+        metadata_db: MetadataDb,
     ) -> Result<Option<Self>, BoxError> {
         let dataset_name = &table.dataset().name;
         let dataset_version = match table.dataset().kind.as_str() {
@@ -319,7 +319,7 @@ impl PhysicalTable {
         table: &ResolvedTable,
         table_id: &TableId<'_>,
         data_store: Arc<Store>,
-        metadata_db: Arc<MetadataDb>,
+        metadata_db: MetadataDb,
     ) -> Result<Option<Self>, BoxError> {
         if let Some((path, url, prefix)) = revisions.values().last() {
             Self::restore(table, table_id, prefix, path, url, data_store, metadata_db)
@@ -338,7 +338,7 @@ impl PhysicalTable {
         path: &Path,
         url: &Url,
         data_store: Arc<Store>,
-        metadata_db: Arc<MetadataDb>,
+        metadata_db: MetadataDb,
     ) -> Result<Self, BoxError> {
         let location_id = metadata_db
             .register_location(*table_id, data_store.bucket(), prefix, url, false)
@@ -474,8 +474,8 @@ impl PhysicalTable {
         self.table.network()
     }
 
-    pub fn metadata_db(&self) -> Arc<MetadataDb> {
-        Arc::clone(&self.metadata_db)
+    pub fn metadata_db(&self) -> &MetadataDb {
+        &self.metadata_db
     }
 
     pub fn object_store(&self) -> Arc<dyn ObjectStore> {
@@ -557,7 +557,7 @@ impl PhysicalTable {
         // Create a reader factory with the cache
         let reader_factory_with_cache = NozzleReaderFactory {
             location_id: self.location_id,
-            metadata_db: Arc::clone(&self.metadata_db),
+            metadata_db: self.metadata_db.clone(),
             object_store: Arc::clone(&self.object_store),
             parquet_footer_cache,
         };

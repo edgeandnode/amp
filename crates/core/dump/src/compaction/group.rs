@@ -24,8 +24,7 @@ use futures::{
 use metadata_db::FileId;
 
 use crate::compaction::{
-    CompactionError, CompactionProperties, CompactionResult, SegmentSize,
-    compactor::CompactionGroup,
+    CompactionProperties, CompactionResult, CompactorError, SegmentSize, compactor::CompactionGroup,
 };
 pub struct CompactionFile {
     pub file_id: FileId,
@@ -91,17 +90,17 @@ impl CompactionGroupGenerator<'_> {
     ) -> CompactionResult<Self> {
         let chain = table
             .canonical_chain()
-            .map_err(CompactionError::chain_error(table.as_ref()))
+            .map_err(CompactorError::chain_error)
             .await?
             .ok_or(format!("Compaction chain not found for table {}", table.table_ref()).into())
-            .map_err(CompactionError::chain_error(table.as_ref()))?;
+            .map_err(CompactorError::chain_error)?;
 
         let remain = chain.0.len();
         tracing::info!("Scanning {remain} segments for compaction");
 
         let reader_factory: Arc<NozzleReaderFactory> = Arc::new(NozzleReaderFactory {
             location_id: table.location_id(),
-            metadata_db: Arc::clone(&table.metadata_db()),
+            metadata_db: table.metadata_db().clone(),
             object_store: Arc::clone(&table.object_store()),
             parquet_footer_cache: ParquetFooterCache::builder(1).build(),
         });

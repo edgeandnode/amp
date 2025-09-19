@@ -9,6 +9,7 @@ pub mod manifest;
 pub mod metadata;
 pub mod notification_multiplexer;
 pub mod plan_visitors;
+pub mod planning_context;
 pub mod query_context;
 pub mod sql_visitors;
 pub mod store;
@@ -35,10 +36,13 @@ use datafusion::{
     parquet::file::metadata::ParquetMetaData,
 };
 pub use foyer::Cache;
-use futures::Stream;
+use futures::{Stream, StreamExt};
 use metadata::segments::BlockRange;
 use metadata_db::FileId;
-pub use query_context::QueryContext;
+pub use planning_context::{
+    DetachedLogicalPlan, PlanningContext, RemotePlan, remote_plan_from_bytes,
+};
+pub use query_context::{Error as QueryError, QueryContext};
 use serde::{Deserialize, Serialize};
 pub use store::Store;
 
@@ -176,6 +180,98 @@ pub trait BlockStreamer: Clone + 'static {
     ) -> impl Future<Output = impl Stream<Item = Result<RawDatasetRows, BoxError>> + Send> + Send;
 
     fn latest_block(&mut self) -> impl Future<Output = Result<BlockNum, BoxError>> + Send;
+
+    fn provider_name(&self) -> &str;
+}
+
+impl<T: BlockStreamer> BlockStreamerExt for T {}
+
+pub trait BlockStreamerExt: BlockStreamer {
+    fn with_retry(self) -> BlockStreamerWithRetry<Self> {
+        BlockStreamerWithRetry(self)
+    }
+}
+
+#[derive(Clone)]
+pub struct BlockStreamerWithRetry<T: BlockStreamer>(T);
+
+impl<T: BlockStreamer + Send + Sync> BlockStreamer for BlockStreamerWithRetry<T> {
+    async fn block_stream(
+        self,
+        start: BlockNum,
+        end: BlockNum,
+    ) -> impl Stream<Item = Result<RawDatasetRows, BoxError>> + Send {
+        const DEBUG_RETRY_LIMIT: u16 = 8;
+        const DEBUG_RETRY_DELAY: Duration = Duration::from_millis(50);
+        const WARN_RETRY_LIMIT: u16 = 16;
+        const WARN_RETRY_DELAY: Duration = Duration::from_millis(100);
+        const ERROR_RETRY_DELAY: Duration = Duration::from_millis(300);
+
+        let mut current_block = start;
+        let mut blocks_sent = 0;
+        let mut num_retries = 0;
+
+        async_stream::stream! {
+            'retry: loop {
+                let inner_stream = self.0.clone().block_stream(current_block, end).await;
+                futures::pin_mut!(inner_stream);
+                while let Some(block) = inner_stream.next().await {
+                    match &block {
+                        Ok(_) => {
+                            num_retries = 0;
+                            blocks_sent += 1;
+                            yield block;
+                        }
+                        Err(e) => {
+                            // Progressively more severe logging and longer retry interval.
+                            if num_retries < DEBUG_RETRY_LIMIT {
+                                num_retries += 1;
+                                tracing::debug!(block = %current_block, error = ?e, "Block streaming failed, retrying");
+                                tokio::time::sleep(DEBUG_RETRY_DELAY).await;
+                            } else if num_retries < WARN_RETRY_LIMIT {
+                                num_retries += 1;
+                                tracing::warn!(block = %current_block, error = ?e, "Block streaming failed, retrying");
+                                tokio::time::sleep(WARN_RETRY_DELAY).await;
+                            } else {
+                                tracing::error!(block = %current_block, error = ?e, "Block streaming failed, retrying");
+                                tokio::time::sleep(ERROR_RETRY_DELAY).await;
+                            }
+                            current_block = start + blocks_sent;
+                            continue 'retry;
+                        }
+                    }
+                }
+                break 'retry;
+            }
+        }
+    }
+
+    async fn latest_block(&mut self) -> Result<BlockNum, BoxError> {
+        use backon::{ExponentialBuilder, Retryable};
+
+        (|| async {
+            let mut inner = self.0.clone();
+            inner.latest_block().await
+        })
+        .retry(
+            ExponentialBuilder::default()
+                .with_min_delay(Duration::from_secs(2))
+                .with_max_delay(Duration::from_secs(20))
+                .with_max_times(10),
+        )
+        .notify(|err, dur| {
+            tracing::warn!(
+                error = %err,
+                "Failed to get latest block. Retrying in {:.1}s",
+                dur.as_secs_f32()
+            );
+        })
+        .await
+    }
+
+    fn provider_name(&self) -> &str {
+        self.0.provider_name()
+    }
 }
 
 pub enum DatasetValue {

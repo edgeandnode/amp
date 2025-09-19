@@ -1,26 +1,18 @@
 use std::{
-    collections::BTreeMap,
     ops::RangeInclusive,
     sync::{Arc, LazyLock},
 };
 
 use arrow::{array::ArrayRef, compute::concat_batches};
-use async_trait::async_trait;
 use axum::response::IntoResponse;
-use bincode::{Decode, Encode, config};
-use bytes::Bytes;
 use datafusion::{
     self,
     arrow::{
         array::RecordBatch,
         datatypes::{DataType, Field, Fields, SchemaRef},
     },
-    catalog::{MemorySchemaProvider, Session, TableProvider},
-    common::{
-        DFSchema, DFSchemaRef, not_impl_err,
-        tree_node::{TreeNode as _, TreeNodeRecursion},
-    },
-    datasource::{DefaultTableSource, TableType},
+    catalog::{MemorySchemaProvider, TableProvider},
+    common::{DFSchema, not_impl_err},
     error::DataFusionError,
     execution::{
         SendableRecordBatchStream, SessionStateBuilder,
@@ -28,20 +20,14 @@ use datafusion::{
         context::{SQLOptions, SessionContext},
         runtime_env::RuntimeEnv,
     },
-    logical_expr::{AggregateUDF, Extension, LogicalPlan, ScalarUDF, TableScan},
+    logical_expr::{AggregateUDF, Extension, LogicalPlan, ScalarUDF},
     parquet::file::metadata::ParquetMetaData,
     physical_optimizer::PhysicalOptimizerRule,
     physical_plan::{ExecutionPlan, displayable, stream::RecordBatchStreamAdapter},
     physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner as _},
-    prelude::Expr,
     sql::{TableReference, parser},
 };
-use datafusion_proto::{
-    bytes::{
-        logical_plan_from_bytes_with_extension_codec, logical_plan_to_bytes_with_extension_codec,
-    },
-    logical_plan::LogicalExtensionCodec,
-};
+use datafusion_proto::logical_plan::LogicalExtensionCodec;
 use datafusion_tracing::{
     InstrumentationOptions, instrument_with_info_spans, pretty_format_compact_batch,
 };
@@ -54,19 +40,15 @@ use thiserror::Error;
 use tracing::{debug, field, instrument};
 
 use crate::{
-    BlockNum, BoxError, LogicalCatalog, ResolvedTable, SPECIAL_BLOCK_NUM, arrow, attestation,
-    block_range_intersection,
+    BlockNum, BoxError, SPECIAL_BLOCK_NUM, arrow, attestation, block_range_intersection,
     catalog::physical::{Catalog, CatalogSnapshot, TableSnapshot},
     evm::udfs::{
         EvmDecodeLog, EvmDecodeParams, EvmDecodeType, EvmEncodeParams, EvmEncodeType, EvmTopic,
     },
-    metadata::segments::ResumeWatermark,
     plan_visitors::{
         constrain_by_block_num, extract_table_references_from_plan,
-        forbid_underscore_prefixed_aliases, is_incremental, order_by_block_num,
-        propagate_block_num, unproject_special_block_num_column,
+        forbid_underscore_prefixed_aliases, unproject_special_block_num_column,
     },
-    stream_helpers::is_streaming,
 };
 
 #[derive(Error, Debug)]
@@ -136,229 +118,6 @@ impl IntoResponse for Error {
             "error_message": err,
         });
         (status, axum::Json(body)).into_response()
-    }
-}
-
-/// A context for planning SQL queries.
-pub struct PlanningContext {
-    session_config: SessionConfig,
-    catalog: LogicalCatalog,
-}
-
-// Serialized plan with additional options
-#[derive(Encode, Decode)]
-pub struct RemotePlan {
-    pub serialized_plan: Vec<u8>,
-    pub is_streaming: bool,
-    pub resume_watermark: Option<BTreeMap<String, (BlockNum, [u8; 32])>>,
-    pub table_refs: Vec<String>,
-    pub function_refs: Vec<String>,
-}
-
-pub fn remote_plan_from_bytes(bytes: &Bytes) -> Result<RemotePlan, Error> {
-    let (remote_plan, _) = bincode::decode_from_slice(bytes, config::standard()).map_err(|e| {
-        Error::PlanDecodingError(DataFusionError::Plan(format!(
-            "Failed to serialize remote plan: {}",
-            e
-        )))
-    })?;
-    Ok(remote_plan)
-}
-
-impl PlanningContext {
-    pub fn new(catalog: LogicalCatalog) -> Self {
-        Self {
-            session_config: SessionConfig::from_env().unwrap(),
-            catalog,
-        }
-    }
-
-    /// Infers the output schema of the query by planning it against empty tables.
-    pub async fn sql_output_schema(&self, query: parser::Statement) -> Result<DFSchemaRef, Error> {
-        let ctx = self.datafusion_ctx()?;
-        let plan = sql_to_plan(&ctx, query).await?;
-        Ok(plan.schema().clone())
-    }
-
-    /// This will plan the query against empty tables, and then serialize that plan using
-    /// datafusion-proto. This is useful for sending the plan to a remote server for execution.
-    ///
-    /// Returns the serialized plan and its output schema.
-    pub async fn sql_to_remote_plan(
-        &self,
-        query: parser::Statement,
-        resume_watermark: Option<ResumeWatermark>,
-    ) -> Result<(Bytes, DFSchemaRef), Error> {
-        let is_streaming = is_streaming(&query);
-        let ctx = self.datafusion_ctx()?;
-        let plan = sql_to_plan(&ctx, query).await?;
-        let schema = plan.schema().clone();
-        let serialized_plan =
-            logical_plan_to_bytes_with_extension_codec(&plan, &TableProviderCodec)
-                .map_err(Error::PlanEncodingError)?;
-        let LogicalCatalog { tables, udfs } = &self.catalog;
-        let table_refs = tables.iter().map(|t| t.table_ref().to_string()).collect();
-        let remote_plan = RemotePlan {
-            serialized_plan: serialized_plan.to_vec(),
-            is_streaming,
-            resume_watermark: resume_watermark.map(Into::into),
-            table_refs,
-            function_refs: udfs.iter().map(|f| f.name().to_string()).collect(),
-        };
-        let serialized_plan = Bytes::from(
-            bincode::encode_to_vec(&remote_plan, config::standard()).map_err(|e| {
-                Error::PlanEncodingError(DataFusionError::Plan(format!(
-                    "Failed to serialize remote plan: {}",
-                    e
-                )))
-            })?,
-        );
-
-        Ok((serialized_plan, schema))
-    }
-
-    fn datafusion_ctx(&self) -> Result<SessionContext, Error> {
-        let state = SessionStateBuilder::new()
-            .with_config(self.session_config.clone())
-            .with_runtime_env(Default::default())
-            .with_default_features()
-            .build();
-        let ctx = SessionContext::new_with_state(state);
-        for table in &self.catalog.tables {
-            // The catalog schema needs to be explicitly created or table creation will fail.
-            create_catalog_schema(&ctx, table.catalog_schema().to_string());
-            let planning_table = PlanningTable(table.clone());
-            ctx.register_table(table.table_ref().clone(), Arc::new(planning_table))
-                .map_err(|e| Error::DatasetError(e.into()))?;
-        }
-        self.register_udfs(&ctx);
-        Ok(ctx)
-    }
-
-    fn register_udfs(&self, ctx: &SessionContext) {
-        for udf in udfs() {
-            ctx.register_udf(udf);
-        }
-        for udaf in udafs() {
-            ctx.register_udaf(udaf);
-        }
-        for udf in self.catalog.udfs.iter() {
-            ctx.register_udf(udf.clone());
-        }
-    }
-
-    pub fn catalog(&self) -> &[ResolvedTable] {
-        &self.catalog.tables
-    }
-
-    pub async fn optimize_plan(
-        &self,
-        plan: &DetachedLogicalPlan,
-    ) -> Result<DetachedLogicalPlan, Error> {
-        self.datafusion_ctx()?
-            .state()
-            .optimize(&plan.0)
-            .map_err(Error::PlanningError)
-            .map(DetachedLogicalPlan)
-    }
-
-    pub async fn plan_sql(&self, query: parser::Statement) -> Result<DetachedLogicalPlan, Error> {
-        let ctx = self.datafusion_ctx()?;
-        let plan = sql_to_plan(&ctx, query).await?;
-        Ok(DetachedLogicalPlan(plan))
-    }
-
-    pub async fn plan_from_bytes(&self, bytes: &[u8]) -> Result<DetachedLogicalPlan, Error> {
-        let ctx = self.datafusion_ctx()?;
-        let plan = logical_plan_from_bytes_with_extension_codec(bytes, &ctx, &TableProviderCodec)
-            .map_err(Error::PlanDecodingError)?;
-        verify_plan(&plan)?;
-        Ok(DetachedLogicalPlan(plan))
-    }
-}
-
-#[derive(Clone, Debug)]
-struct PlanningTable(ResolvedTable);
-
-#[async_trait]
-impl TableProvider for PlanningTable {
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
-    fn schema(&self) -> SchemaRef {
-        self.0.schema().clone()
-    }
-
-    fn table_type(&self) -> TableType {
-        TableType::Base
-    }
-
-    async fn scan(
-        &self,
-        _state: &dyn Session,
-        _projection: Option<&Vec<usize>>,
-        _filters: &[Expr],
-        _limit: Option<usize>,
-    ) -> Result<Arc<dyn ExecutionPlan>, DataFusionError> {
-        unreachable!("PlanningTable should never be scanned")
-    }
-}
-/// A plan that has `PlanningTable` for its `TableProvider`s. It cannot be executed before being
-/// first "attached" to a `QueryContext`.
-#[derive(Debug, Clone)]
-pub struct DetachedLogicalPlan(LogicalPlan);
-
-impl DetachedLogicalPlan {
-    pub fn attach_to(self, ctx: &QueryContext) -> Result<LogicalPlan, Error> {
-        use datafusion::common::tree_node::Transformed;
-
-        Ok(self
-            .0
-            .transform(|mut node| match &mut node {
-                // Insert the clauses in non-view table scans
-                LogicalPlan::TableScan(TableScan {
-                    table_name, source, ..
-                }) if source.table_type() == TableType::Base
-                    && source.get_logical_plan().is_none() =>
-                {
-                    let provider = ctx
-                        .get_table(table_name)
-                        .map_err(|e| DataFusionError::External(e.into()))?;
-                    *source = Arc::new(DefaultTableSource::new(provider));
-                    Ok(Transformed::yes(node))
-                }
-                _ => Ok(Transformed::no(node)),
-            })
-            .map_err(Error::PlanningError)?
-            .data)
-    }
-
-    pub fn is_incremental(&self) -> Result<bool, BoxError> {
-        is_incremental(&self.0)
-    }
-
-    pub fn schema(&self) -> DFSchemaRef {
-        self.0.schema().clone()
-    }
-
-    pub fn propagate_block_num(self) -> Result<Self, DataFusionError> {
-        Ok(Self(propagate_block_num(self.0)?))
-    }
-
-    pub fn order_by_block_num(self) -> Self {
-        Self(order_by_block_num(self.0))
-    }
-
-    pub fn unproject_special_block_num_column(self) -> Result<Self, DataFusionError> {
-        Ok(Self(unproject_special_block_num_column(self.0)?))
-    }
-
-    pub fn apply<'n, F>(&self, f: F) -> Result<TreeNodeRecursion, DataFusionError>
-    where
-        F: FnMut(&LogicalPlan) -> Result<TreeNodeRecursion, DataFusionError>,
-    {
-        self.0.apply(f)
     }
 }
 
@@ -593,7 +352,10 @@ impl QueryContext {
 }
 
 #[instrument(skip_all, err)]
-async fn sql_to_plan(ctx: &SessionContext, query: parser::Statement) -> Result<LogicalPlan, Error> {
+pub async fn sql_to_plan(
+    ctx: &SessionContext,
+    query: parser::Statement,
+) -> Result<LogicalPlan, Error> {
     let plan = ctx
         .state()
         .statement_to_plan(query)
@@ -603,7 +365,7 @@ async fn sql_to_plan(ctx: &SessionContext, query: parser::Statement) -> Result<L
     Ok(plan)
 }
 
-fn verify_plan(plan: &LogicalPlan) -> Result<(), Error> {
+pub fn verify_plan(plan: &LogicalPlan) -> Result<(), Error> {
     forbid_underscore_prefixed_aliases(&plan).map_err(Error::InvalidPlan)?;
     read_only_check(plan)
 }
@@ -635,7 +397,7 @@ fn register_table(ctx: &SessionContext, table: Arc<TableSnapshot>) -> Result<(),
     Ok(())
 }
 
-fn create_catalog_schema(ctx: &SessionContext, schema_name: String) {
+pub fn create_catalog_schema(ctx: &SessionContext, schema_name: String) {
     // We only have use catalog, the default one.
     let catalog = ctx.catalog(&ctx.catalog_names()[0]).unwrap();
     if catalog.schema(&schema_name).is_none() {
@@ -644,7 +406,7 @@ fn create_catalog_schema(ctx: &SessionContext, schema_name: String) {
     }
 }
 
-fn udfs() -> Vec<ScalarUDF> {
+pub fn udfs() -> Vec<ScalarUDF> {
     vec![
         EvmDecodeLog::new().into(),
         EvmDecodeLog::new().with_deprecated_name().into(),
@@ -656,7 +418,7 @@ fn udfs() -> Vec<ScalarUDF> {
     ]
 }
 
-fn udafs() -> Vec<AggregateUDF> {
+pub fn udafs() -> Vec<AggregateUDF> {
     vec![attestation::AttestationHasherUDF::new().into()]
 }
 

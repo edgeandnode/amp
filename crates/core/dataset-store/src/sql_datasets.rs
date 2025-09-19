@@ -28,8 +28,7 @@ pub(super) async fn dataset(
         return Err(format!("expected dataset kind '{DATASET_KIND}', got '{}'", def.kind).into());
     }
 
-    let defs_store = store.dataset_defs_store();
-    let mut files = defs_store.list(def.name.as_str());
+    let mut files = store.dataset_defs_store.list(def.name.as_str());
 
     // List all `.sql` files in the dataset dir and infer the output schema to get `Table`s.
     let mut tables: Vec<Table> = vec![];
@@ -42,7 +41,10 @@ pub(super) async fn dataset(
         let Some(table_name) = filename.strip_suffix(".sql") else {
             continue;
         };
-        let raw_query = defs_store.get_string(file.location.clone()).await?;
+        let raw_query = store
+            .dataset_defs_store
+            .get_string(file.location.clone())
+            .await?;
         let query = parse_sql(&raw_query)?;
         let ctx = store.clone().planning_ctx_for_sql(&query).await?;
         let schema = ctx.sql_output_schema(query.clone()).await?;

@@ -6,33 +6,47 @@ use std::{
 
 use common::{
     BoxError,
-    catalog::physical::PhysicalTable,
     parquet::{
         errors::ParquetError, file::properties::WriterProperties as ParquetWriterProperties,
     },
 };
-use datafusion::{error::DataFusionError, sql::TableReference};
+use datafusion::error::DataFusionError;
 use metadata_db::FileId;
 use object_store::Error as ObjectStoreError;
 use tokio::task::JoinError;
 
 use crate::{
     ConsistencyCheckError,
-    compaction::{Collector, compactor::Compactor},
+    compaction::{Collector, NozzleCompactorTaskType, compactor::Compactor},
 };
 
-pub type CompactionResult<T> = Result<T, CompactionError>;
-pub type DeletionResult<T> = Result<T, DeletionError>;
+pub type CompactionResult<T> = Result<T, CompactorError>;
+pub type CollectionResult<T> = Result<T, CollectorError>;
+
+pub trait CompactionErrorExt: std::error::Error + From<JoinError> + Send + Sync + 'static {
+    type Task: NozzleCompactorTaskType<Error = Self>;
+
+    /// Whether the error is recoverable and the task can be retried
+    /// Default implementation returns true for all errors
+    fn is_recoverable(&self) -> bool {
+        true
+    }
+
+    /// Whether the error indicates that the task was cancelled
+    fn is_cancellation(&self) -> bool;
+}
 
 #[derive(Debug)]
-pub enum CompactionError {
+pub enum CompactorError
+where
+    Self: CompactionErrorExt,
+{
     /// Catching errors while building the canonical chain for a table
-    CanonicalChainError { err: BoxError, table_ref: String },
+    CanonicalChainError { err: BoxError },
     /// Catching errors while creating a compaction writer
     CreateWriterError {
         err: BoxError,
         opts: ParquetWriterProperties,
-        table_ref: String,
     },
     /// Catching errors while writing data to a parquet file
     FileWriteError { err: BoxError },
@@ -41,10 +55,7 @@ pub enum CompactionError {
     /// Catching send errors while building compaction futures
     SendError,
     /// Catching join errors while awaiting compaction futures
-    JoinError {
-        compactor: Compactor,
-        err: JoinError,
-    },
+    JoinError { err: JoinError },
     /// Catching errors while updating the gc manifest in the metadata db
     ManifestUpdateError {
         err: metadata_db::Error,
@@ -56,292 +67,232 @@ pub enum CompactionError {
         file_ids: Arc<[FileId]>,
     },
     /// Catching errors while committing a new record to the file_metadata table in the metadata db
-    MetadataCommitError {
-        err: metadata_db::Error,
-        location: Arc<str>,
-    },
+    MetadataCommitError { err: metadata_db::Error },
 }
 
-impl CompactionError {
-    pub fn chain_error(table: &PhysicalTable) -> impl FnOnce(BoxError) -> Self {
-        move |err| CompactionError::CanonicalChainError {
-            err,
-            table_ref: table.table_ref().to_string(),
-        }
+impl CompactorError {
+    pub fn chain_error(err: BoxError) -> Self {
+        Self::CanonicalChainError { err }
     }
 
-    pub fn metadata_commit_error(
-        location: impl Into<Arc<str>>,
-    ) -> impl FnOnce(metadata_db::Error) -> Self {
-        move |err| CompactionError::MetadataCommitError {
-            err,
-            location: location.into(),
-        }
+    pub fn metadata_commit_error(err: metadata_db::Error) -> Self {
+        CompactorError::MetadataCommitError { err }
     }
 
     pub fn manifest_update_error(file_ids: &[FileId]) -> impl FnOnce(metadata_db::Error) -> Self {
-        move |err| CompactionError::ManifestUpdateError {
+        move |err| CompactorError::ManifestUpdateError {
             err,
             file_ids: Arc::from(file_ids),
         }
     }
 
-    pub fn create_writer_error(
-        table: &PhysicalTable,
-        opts: &ParquetWriterProperties,
-    ) -> impl FnOnce(BoxError) -> Self {
-        move |err| CompactionError::CreateWriterError {
-            table_ref: table.table_ref().to_string(),
+    pub fn create_writer_error(opts: &ParquetWriterProperties) -> impl FnOnce(BoxError) -> Self {
+        move |err| CompactorError::CreateWriterError {
             opts: opts.clone(),
             err,
         }
     }
-
-    pub fn join_error(compactor: Compactor) -> impl FnOnce(JoinError) -> Self {
-        move |err: JoinError| CompactionError::JoinError { compactor, err }
-    }
 }
 
-impl<'a, T: AsRef<[FileId]> + Send + Sync + 'a> From<(metadata_db::Error, T)> for CompactionError {
-    fn from((err, file_ids): (metadata_db::Error, T)) -> Self {
-        CompactionError::ManifestDeleteError {
-            err,
-            file_ids: Arc::from(file_ids.as_ref()),
-        }
-    }
-}
-
-impl From<ParquetError> for CompactionError {
+impl From<ParquetError> for CompactorError {
     fn from(err: ParquetError) -> Self {
-        CompactionError::FileStreamError {
+        CompactorError::FileStreamError {
             err: DataFusionError::ParquetError(Box::new(err)),
         }
     }
 }
 
-impl From<DataFusionError> for CompactionError {
+impl From<DataFusionError> for CompactorError {
     fn from(err: DataFusionError) -> Self {
-        CompactionError::FileStreamError { err }
+        CompactorError::FileStreamError { err }
     }
 }
 
-impl Display for CompactionError {
+impl Display for CompactorError {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
-            CompactionError::CreateWriterError {
-                table_ref,
-                opts,
-                err,
-            } => {
+            CompactorError::CreateWriterError { opts, err } => {
                 write!(
                     f,
-                    "Failed to create writer. 
-                    Table: {table_ref},
-                    WriterProperties: {opts:?},
-                    Error: {err}",
+                    "Failed to create writer. WriterProperties: {opts:?}, Error: {err}",
                 )
             }
-            CompactionError::FileWriteError { err, .. } => {
-                write!(f, "Error occured while writing compacted file: {}", err)
+            CompactorError::FileWriteError { err, .. } => {
+                write!(f, "Error occurred while writing compacted file: {err}")
             }
-            CompactionError::MetadataCommitError { err, location, .. } => {
+            CompactorError::MetadataCommitError { err, .. } => {
+                write!(f, "Error committing new metadata record: {err}",)
+            }
+            CompactorError::ManifestUpdateError { err, file_ids, .. } => {
                 write!(
                     f,
-                    "Error committing metadata for compacted file at {}: {}",
-                    location, err
+                    "Error inserting file IDs {file_ids:?} into GC manifest: {err}",
                 )
             }
-            CompactionError::ManifestUpdateError { err, file_ids, .. } => {
+            CompactorError::ManifestDeleteError { err, file_ids, .. } => {
                 write!(
                     f,
-                    "Error inserting file IDs {:?} into GC manifest: {}",
-                    file_ids, err
+                    "Error deleting file IDs {file_ids:?} from GC manifest: {err}",
                 )
             }
-            CompactionError::ManifestDeleteError { err, file_ids, .. } => {
-                write!(
-                    f,
-                    "Error deleting file IDs {:?} from GC manifest: {}",
-                    file_ids, err
-                )
+            CompactorError::JoinError { err, .. } => err.fmt(f),
+            CompactorError::CanonicalChainError { err, .. } => {
+                write!(f, "Error building canonical chain: {err}")
             }
-            CompactionError::JoinError { err, compactor, .. } => {
-                let table_ref = compactor.table.table_ref();
-                write!(
-                    f,
-                    "Task failed to execute to completion: {}; error: {}",
-                    table_ref, err
-                )
+            CompactorError::FileStreamError { err, .. } => {
+                write!(f, "Error reading data or metadata from parquet file: {err}")
             }
-            _ => write!(f, "An unknown compaction error occurred"),
+            CompactorError::SendError => {
+                write!(f, "Error sending data to compaction task")
+            }
         }
     }
 }
 
-impl Error for CompactionError {
+impl Error for CompactorError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            CompactionError::FileWriteError { err, .. } => err.source(),
-            CompactionError::MetadataCommitError { err, .. } => err.source(),
-            CompactionError::ManifestUpdateError { err, .. } => err.source(),
-            CompactionError::ManifestDeleteError { err, .. } => err.source(),
-            CompactionError::JoinError { err, .. } => err.source(),
-            _ => None,
+            CompactorError::FileWriteError { err, .. } => err.source(),
+            CompactorError::MetadataCommitError { err, .. } => err.source(),
+            CompactorError::ManifestUpdateError { err, .. } => err.source(),
+            CompactorError::ManifestDeleteError { err, .. } => err.source(),
+            CompactorError::JoinError { err, .. } => err.source(),
+            CompactorError::CanonicalChainError { err, .. } => err.source(),
+            CompactorError::FileStreamError { err, .. } => err.source(),
+            CompactorError::CreateWriterError { err, .. } => err.source(),
+            CompactorError::SendError => None,
+        }
+    }
+}
+
+impl From<JoinError> for CompactorError {
+    fn from(err: JoinError) -> Self {
+        CompactorError::JoinError { err }
+    }
+}
+
+impl CompactionErrorExt for CompactorError {
+    type Task = Compactor;
+
+    fn is_cancellation(&self) -> bool {
+        match self {
+            CompactorError::JoinError { err, .. } => err.is_cancelled(),
+            _ => false,
         }
     }
 }
 
 #[derive(Debug)]
-pub enum DeletionError {
+pub enum CollectorError
+where
+    Self: CompactionErrorExt,
+{
     Consistency {
-        table: TableReference,
         error: ConsistencyCheckError,
     },
     FileDeleteError {
-        collector: Collector,
         err: ObjectStoreError,
-        file_id: FileId,
-        location: Arc<str>,
+        path: String,
         not_found: bool,
     },
     FileStreamError {
-        collector: Collector,
         err: metadata_db::Error,
     },
     JoinError {
-        collector: Collector,
         err: JoinError,
     },
     ManifestDeleteError {
-        collector: Collector,
         err: metadata_db::Error,
         file_ids: Vec<FileId>,
     },
-}
-
-impl DeletionError {
-    pub fn consistency_check_error(
-        collector: &Collector,
-    ) -> impl FnOnce(ConsistencyCheckError) -> Self {
-        let table = collector.table.table_ref().clone();
-
-        move |error| DeletionError::Consistency { table, error }
-    }
-
-    pub fn manifest_update_error(
-        collector: Collector,
-        file_ids: Vec<FileId>,
-    ) -> impl FnOnce(metadata_db::Error) -> Self {
-        move |err| DeletionError::ManifestDeleteError {
-            collector,
-            err,
-            file_ids,
-        }
-    }
-    pub fn deletion_stream_error(collector: Collector) -> impl FnOnce(metadata_db::Error) -> Self {
-        move |err| DeletionError::FileStreamError { collector, err }
-    }
-
-    pub fn file_delete_error(
+    ParseError {
         file_id: FileId,
-        location: &str,
-        collector: Collector,
-    ) -> impl FnOnce(ObjectStoreError) -> Self {
-        move |err| match err {
-            ObjectStoreError::NotFound { path, source } => DeletionError::FileDeleteError {
-                err: ObjectStoreError::NotFound { path, source },
-                file_id,
-                location: Arc::from(location),
-                not_found: true,
-                collector,
-            },
-            _ => DeletionError::FileDeleteError {
-                err,
-                file_id,
-                location: Arc::from(location),
-                not_found: false,
-                collector,
-            },
-        }
-    }
+        err: url::ParseError,
+    },
+}
 
-    pub fn join_error(collector: Collector) -> impl FnOnce(JoinError) -> Self {
-        move |err| DeletionError::JoinError { collector, err }
+impl From<JoinError> for CollectorError {
+    fn from(err: JoinError) -> Self {
+        CollectorError::JoinError { err }
     }
 }
 
-impl Display for DeletionError {
+impl CompactionErrorExt for CollectorError {
+    type Task = Collector;
+
+    fn is_cancellation(&self) -> bool {
+        match self {
+            CollectorError::JoinError { err, .. } => err.is_cancelled(),
+            _ => false,
+        }
+    }
+}
+
+impl CollectorError {
+    pub fn consistency_check_error(error: ConsistencyCheckError) -> Self {
+        Self::Consistency { error }
+    }
+
+    pub fn file_stream_error(err: metadata_db::Error) -> Self {
+        Self::FileStreamError { err }
+    }
+
+    pub fn manifest_update_error(file_ids: Vec<FileId>) -> impl FnOnce(metadata_db::Error) -> Self {
+        move |err| CollectorError::ManifestDeleteError { err, file_ids }
+    }
+
+    pub fn parse_error(file_id: FileId) -> impl FnOnce(url::ParseError) -> Self {
+        move |err| CollectorError::ParseError { file_id, err }
+    }
+}
+
+impl Display for CollectorError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            DeletionError::Consistency { table, error } => {
+            Self::Consistency { error, .. } => error.fmt(f),
+            Self::FileDeleteError {
+                err,
+                path,
+                not_found,
+            } => {
+                if *not_found {
+                    write!(f, "File: {path} not found during deletion",)
+                } else {
+                    err.fmt(f)
+                }
+            }
+            Self::FileStreamError { err } => err.fmt(f),
+            Self::JoinError { err } => err.fmt(f),
+            Self::ManifestDeleteError { err, file_ids } => {
                 write!(
                     f,
-                    "Consistency check failed for collector.
-                    Table: {table},
-                    Error: {error}",
+                    "Error deleting file IDs {file_ids:?} from GC manifest: {err}",
                 )
             }
-            DeletionError::FileDeleteError {
-                file_id,
-                location,
-                not_found: true,
-                ..
-            } => write!(
-                f,
-                "Failed to delete file.
-                FileId: {file_id},
-                Location: {location},
-                Error: File not found; removing from GC Manifest"
-            ),
-            DeletionError::FileDeleteError {
-                err,
-                file_id,
-                location,
-                not_found: false,
-                ..
-            } => write!(
-                f,
-                "Failed to delete file.
-                FileId: {file_id},
-                Path: {location}, 
-                Error: {err}"
-            ),
-            DeletionError::FileStreamError { err, .. } => write!(
-                f,
-                "Failed to create expired file stream.
-                Error: {err}"
-            ),
-            DeletionError::JoinError { err, .. } => write!(
-                f,
-                "Failed to execute deletion task to completion.
-                Error: {err}"
-            ),
-            DeletionError::ManifestDeleteError { err, file_ids, .. } => write!(
-                f,
-                "Failed to delete deleted FileIds from GC Manifest.
-                FileIds: {file_ids:?},
-                Error: {err}"
-            ),
+            Self::ParseError { file_id, err } => {
+                write!(f, "URL parse error for file {file_id}: {err}")
+            }
         }
     }
 }
 
-impl Error for DeletionError {
+impl Error for CollectorError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            DeletionError::Consistency { error, .. } => error.source(),
-            DeletionError::FileDeleteError {
+            CollectorError::Consistency { error, .. } => error.source(),
+            CollectorError::FileDeleteError {
                 err,
                 not_found: false,
                 ..
             } => err.source(),
             // Not found errors are not considered a failure
-            DeletionError::FileDeleteError {
+            CollectorError::FileDeleteError {
                 not_found: true, ..
             } => None,
-            DeletionError::FileStreamError { err, .. } => err.source(),
-            DeletionError::JoinError { err, .. } => err.source(),
-            DeletionError::ManifestDeleteError { err, .. } => err.source(),
+            CollectorError::FileStreamError { err, .. } => err.source(),
+            CollectorError::JoinError { err, .. } => err.source(),
+            CollectorError::ManifestDeleteError { err, .. } => err.source(),
+            CollectorError::ParseError { err, .. } => err.source(),
         }
     }
 }
