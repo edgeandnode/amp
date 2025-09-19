@@ -23,6 +23,7 @@ impl NonEmptyString {
     /// Passing an empty string or whitespace-only string violates the type's invariant and
     /// may lead to undefined behavior in code that relies on this guarantee.
     pub unsafe fn new_unchecked(value: String) -> Self {
+        assert!(!value.trim().is_empty());
         Self(value)
     }
 

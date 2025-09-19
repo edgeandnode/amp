@@ -26,6 +26,8 @@ resolver = "2"
 [workspace.package]
 edition = "2024"
 version = "0.1.0"
+authors = ["The Graph Protocol Team"]
+description = "High-performance ETL architecture for blockchain data services"
 
 [workspace.dependencies]
 alloy = { version = "1.0.9", default-features = false, features = [

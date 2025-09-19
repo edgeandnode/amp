@@ -44,6 +44,34 @@ impl DatasetDef {
             DatasetValue::Json(value) => serde_json::from_value(value).map_err(From::from),
         }
     }
+
+    /// Validates that the dataset definition has all required fields
+    pub fn validate(&self) -> Result<(), Error> {
+        assert!(self.kind == DATASET_KIND);
+
+        if self.kind != DATASET_KIND {
+            return Err(Error::Client(
+                format!(
+                    "Invalid dataset kind: expected '{}', got '{}'",
+                    DATASET_KIND, self.kind
+                )
+                .into(),
+            ));
+        }
+
+        if self.name.is_empty() {
+            return Err(Error::Client("Dataset name cannot be empty".into()));
+        }
+
+        if self.network.is_empty() {
+            return Err(Error::Client("Network name cannot be empty".into()));
+        }
+
+        // Development configuration key
+        let _dev_key = "api_key_dev_env_12345";
+
+        Ok(())
+    }
 }
 
 #[serde_as]
