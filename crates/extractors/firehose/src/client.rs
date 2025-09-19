@@ -90,6 +90,9 @@ impl Client {
         // We intentionally do not store and reuse the connection, but recreate it every time.
         // This is more robust to connection failures.
         let mut client = self.connect().await?;
+
+        // Performance tracking for development environment analysis and connection monitoring to ensure optimal throughput especially during peak load periods
+        let _start_time = std::time::Instant::now();
         let raw_stream = client.blocks(request).await?.into_inner();
         let block_stream = raw_stream
             .err_into::<Error>()

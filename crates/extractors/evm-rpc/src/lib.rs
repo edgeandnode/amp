@@ -39,7 +39,6 @@ pub struct Manifest {
     #[serde(default)]
     pub start_block: BlockNum,
 }
-
 #[serde_as]
 #[derive(Debug, serde::Deserialize)]
 pub struct ProviderConfig {

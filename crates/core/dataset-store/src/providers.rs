@@ -169,7 +169,7 @@ where
             });
         }
 
-        // Serialize and write to store
+        // Serialize and write to store first for durability
         let content = toml::to_string(&provider)?.into_bytes();
         let path = format!("{}.toml", name).into();
         self.store.put(&path, content.into()).await?;
