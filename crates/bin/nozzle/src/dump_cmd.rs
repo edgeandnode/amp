@@ -25,7 +25,6 @@ pub async fn dump(
     end_block: Option<i64>,
     n_jobs: u16,
     partition_size_mb: u64,
-    run_every_mins: Option<u64>,
     microbatch_max_interval_override: Option<u64>,
     new_location: Option<String>,
     fresh: bool,
@@ -43,7 +42,6 @@ pub async fn dump(
     };
     let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
     let partition_size = partition_size_mb * 1024 * 1024;
-    let run_every = run_every_mins.map(|s| tokio::time::interval(Duration::from_secs(s * 60)));
 
     if !ignore_deps {
         datasets = datasets_and_dependencies(&dataset_store, datasets).await?;
@@ -117,39 +115,18 @@ pub async fn dump(
 
     let all_tables: Vec<Arc<PhysicalTable>> = physical_datasets.iter().flatten().cloned().collect();
 
-    match run_every {
-        None => {
-            for tables in &physical_datasets {
-                dump::dump_tables(
-                    ctx.clone(),
-                    tables,
-                    n_jobs,
-                    partition_size,
-                    microbatch_max_interval_override.unwrap_or(config.microbatch_max_interval),
-                    end_block,
-                    metrics.clone(),
-                    only_finalized_blocks,
-                )
-                .await?
-            }
-        }
-        Some(mut run_every) => loop {
-            run_every.tick().await;
-
-            for tables in &physical_datasets {
-                dump::dump_tables(
-                    ctx.clone(),
-                    tables,
-                    n_jobs,
-                    partition_size,
-                    microbatch_max_interval_override.unwrap_or(config.microbatch_max_interval),
-                    end_block,
-                    metrics.clone(),
-                    only_finalized_blocks,
-                )
-                .await?;
-            }
-        },
+    for tables in &physical_datasets {
+        dump::dump_tables(
+            ctx.clone(),
+            tables,
+            n_jobs,
+            partition_size,
+            microbatch_max_interval_override.unwrap_or(config.microbatch_max_interval),
+            end_block,
+            metrics.clone(),
+            only_finalized_blocks,
+        )
+        .await?
     }
 
     Ok(all_tables)

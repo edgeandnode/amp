@@ -577,7 +577,6 @@ async fn dump_finalized() {
                 100,
                 None,
                 None,
-                None,
                 false,
                 None,
                 true,

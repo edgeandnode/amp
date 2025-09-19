@@ -57,10 +57,6 @@ enum Command {
         #[arg(long, default_value = "4096", env = "DUMP_PARTITION_SIZE_MB")]
         partition_size_mb: u64,
 
-        /// How often to run the dump job in minutes. By default will run once and exit.
-        #[arg(long, env = "DUMP_RUN_EVERY_MINS")]
-        run_every_mins: Option<u64>,
-
         /// The location of the dump. If not specified, the dump will be written to the default location in NOZZLE_DATA_DIR.
         #[arg(long)]
         location: Option<String>,
@@ -165,7 +161,6 @@ async fn main_inner() -> Result<(), BoxError> {
             partition_size_mb,
             dataset: datasets,
             ignore_deps,
-            run_every_mins,
             location,
             fresh,
             only_finalized_blocks,
@@ -200,7 +195,6 @@ async fn main_inner() -> Result<(), BoxError> {
                 end_block,
                 n_jobs,
                 partition_size_mb,
-                run_every_mins,
                 None,
                 location,
                 fresh,

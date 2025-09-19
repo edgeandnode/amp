@@ -375,7 +375,6 @@ pub(crate) async fn dump_dataset(
         Some(end as i64),
         n_jobs,
         partition_size_mb,
-        None,
         microbatch_max_interval,
         None,
         false,
