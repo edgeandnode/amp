@@ -1,0 +1,200 @@
+- name: restore_eth_rpc
+  restore: eth_rpc
+
+- name: restore_eth_firehose
+  restore: eth_firehose
+
+# Test NOT EXISTS pattern rewritten as anti-join (due to Flight protocol limitation)
+- name: not_exists_basic_rewritten_as_antijoin
+  # Find all transactions that did not produce any logs
+  query: |
+    SELECT COUNT(*) as transactions_without_logs
+    FROM eth_rpc.transactions t
+    LEFT JOIN (SELECT DISTINCT tx_hash FROM eth_rpc.logs) l ON t.tx_hash = l.tx_hash
+    WHERE l.tx_hash IS NULL
+  results: |
+    [
+      {"transactions_without_logs": 94}
+    ]
+
+# Test EXISTS pattern rewritten as semi-join (due to Flight protocol limitation)
+- name: exists_rewritten_as_semijoin
+  # Find any block that contains at least one transaction
+  query: |
+    SELECT DISTINCT b.block_num FROM eth_rpc.blocks b
+    INNER JOIN eth_rpc.transactions t ON b.block_num = t.block_num
+    LIMIT 1
+  results: |
+    [
+      {"block_num": 15000000}
+    ]
+
+# Test INNER JOIN with aggregation
+- name: inner_join_blocks_transactions
+  # How many transactions are in each block?
+  query: |
+    SELECT b.block_num, COUNT(t.tx_index) as tx_count
+    FROM eth_rpc.blocks b
+    INNER JOIN eth_rpc.transactions t ON b.block_num = t.block_num
+    GROUP BY b.block_num
+  results: |
+    [
+      {"block_num": 15000000, "tx_count": 348}
+    ]
+
+# Test LEFT JOIN with aggregation
+- name: left_join_blocks_logs
+  # How many logs are in each block?
+  query: |
+    SELECT b.block_num, COUNT(l.log_index) as log_count
+    FROM eth_rpc.blocks b
+    LEFT JOIN eth_rpc.logs l ON b.block_num = l.block_num
+    GROUP BY b.block_num
+  results: |
+    [
+      {"block_num": 15000000, "log_count": 719}
+    ]
+
+# Test INNER JOIN with DISTINCT
+- name: inner_join_transactions_logs
+  # How many unique transactions actually produced logs?
+  query: |
+    SELECT COUNT(DISTINCT t.tx_hash) as tx_with_logs_count
+    FROM eth_rpc.transactions t
+    INNER JOIN eth_rpc.logs l ON t.tx_hash = l.tx_hash
+  results: |
+    [
+      {"tx_with_logs_count": 254}
+    ]
+
+# Test multi-table JOIN
+- name: multi_table_join
+  # Count all individual log entries when you connect blocks → transactions → logs
+  query: |
+    SELECT COUNT(*) as total_rows
+    FROM eth_rpc.blocks b
+    INNER JOIN eth_rpc.transactions t ON b.block_num = t.block_num
+    INNER JOIN eth_rpc.logs l ON t.tx_hash = l.tx_hash
+  results: |
+    [
+      {"total_rows": 719}
+    ]
+
+# Test HAVING with COUNT
+- name: having_with_count
+  # Which blocks are really busy? (more than 300 transactions)
+  query: |
+    SELECT block_num, COUNT(*) as tx_count
+    FROM eth_rpc.transactions
+    GROUP BY block_num
+    HAVING COUNT(*) > 300
+  results: |
+    [
+      {"block_num": 15000000, "tx_count": 348}
+    ]
+
+# Test HAVING vs WHERE distinction
+- name: having_vs_where
+  # How many addresses sent more than one transaction?
+  query: |
+    SELECT COUNT(*) as addresses_with_multiple_txs
+    FROM (
+      SELECT t.to, COUNT(*) as tx_count
+      FROM eth_rpc.transactions t
+      WHERE t.to IS NOT NULL
+      GROUP BY t.to
+      HAVING COUNT(*) >= 2
+    ) as multi_tx_addresses
+  results: |
+    [
+      {"addresses_with_multiple_txs": 31}
+    ]
+
+# Test HAVING with SUM
+- name: having_with_sum
+  # How many addresses sent more than 1 ETH total across all their transactions?
+  query: |
+    SELECT COUNT(*) as high_value_addresses
+    FROM (
+      SELECT t.to, SUM(t.value) as total_value
+      FROM eth_rpc.transactions t
+      WHERE t.to IS NOT NULL AND t.value > 0
+      GROUP BY t.to
+      HAVING SUM(t.value) > 1000000000000000000
+    ) as high_value
+  results: |
+    [
+      {"high_value_addresses": 22}
+    ]
+
+# Test correlated subquery rewritten as JOIN with CTE
+- name: correlated_subquery_rewritten
+  # Find transactions that sent more ETH than the average for their block
+  query: |
+    WITH block_averages AS (
+      SELECT block_num, AVG(value) as avg_value
+      FROM eth_rpc.transactions
+      GROUP BY block_num
+    )
+    SELECT COUNT(*) as above_avg_transactions
+    FROM eth_rpc.transactions t
+    INNER JOIN block_averages ba ON t.block_num = ba.block_num
+    WHERE t.value > ba.avg_value
+  results: |
+    [
+      {"above_avg_transactions": 2}
+    ]
+
+# Test window function ROW_NUMBER()
+- name: window_function_row_number
+  # Take the top 10 highest-value transactions and count them
+  query: |
+    SELECT COUNT(*) as transactions_with_value
+    FROM (
+      SELECT 
+        tx_hash,
+        value,
+        ROW_NUMBER() OVER (ORDER BY value DESC) as value_rank
+      FROM eth_rpc.transactions
+      WHERE value > 0
+      ORDER BY value DESC
+      LIMIT 10
+    ) ranked_txs
+  results: |
+    [
+      {"transactions_with_value": 10}
+    ]
+
+# Test JOIN across different datasets
+- name: cross_dataset_join
+  # How many blocks appear in both the RPC and Firehose datasets?
+  query: |
+    SELECT COUNT(*) as matching_blocks
+    FROM eth_rpc.blocks rpc
+    INNER JOIN eth_firehose.blocks fh ON rpc.block_num = fh.block_num
+  results: |
+    [
+      {"matching_blocks": 1}
+    ]
+
+# Test CTE (Common Table Expression) with multiple aggregations
+- name: cte_with_aggregation
+  # Create a summary table of block stats, then count how many are busy blocks
+  query: |
+    WITH block_stats AS (
+      SELECT 
+        block_num,
+        COUNT(*) as tx_count,
+        SUM(value) as total_value,
+        AVG(gas_used) as avg_gas
+      FROM eth_rpc.transactions
+      GROUP BY block_num
+    )
+    SELECT 
+      COUNT(*) as blocks_with_many_txs
+    FROM block_stats
+    WHERE tx_count > 300
+  results: |
+    [
+      {"blocks_with_many_txs": 1}
+    ]
