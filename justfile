@@ -166,15 +166,65 @@ test-local *EXTRA_FLAGS:
 alias codegen := gen
 
 # Run all codegen tasks
-gen: gen-substreams-datasets-proto gen-firehose-datasets-proto
+gen: \
+    gen-substreams-datasets-proto \
+    gen-firehose-datasets-proto \
+    gen-datasets-common-manifest-schema \
+    gen-common-derived-dataset-manifest-schema \
+    gen-datasets-evm-rpc-manifest-schema \
+    gen-datasets-firehose-manifest-schema \
+    gen-datasets-substreams-manifest-schema
 
-# Generate Substreams protobuf bindings (cargo build ... --features=gen-proto)
+## Protobuf bindings generation
+
+# Generate Substreams protobuf bindings (RUSTFLAGS="--cfg gen_proto" cargo build)
 gen-substreams-datasets-proto:
-    cargo build -p substreams-datasets --features=gen-proto
+    RUSTFLAGS="--cfg gen_proto" cargo build -p substreams-datasets
 
-# Generate Firehose protobuf bindings (cargo build ... --features=gen-proto)
+# Generate Firehose protobuf bindings (RUSTFLAGS="--cfg gen_proto" cargo build)
 gen-firehose-datasets-proto:
-    cargo build -p firehose-datasets --features=gen-proto
+    RUSTFLAGS="--cfg gen_proto" cargo build -p firehose-datasets
+
+## JSON Schema generation
+
+SCHEMAS_DIR := "docs/dataset-def-schemas"
+
+# Generate the common dataset manifest JSON schema (RUSTFLAGS="--cfg gen_schema" cargo build)
+gen-datasets-common-manifest-schema DEST_DIR=SCHEMAS_DIR:
+    RUSTFLAGS="--cfg gen_schema" cargo build -p datasets-common-gen
+    @mkdir -p {{DEST_DIR}}
+    cp -f $(ls -t target/debug/build/datasets-common-gen-*/out/schema.json | head -1) {{DEST_DIR}}/common.spec.json
+    @echo "Schema generated and copied to {{DEST_DIR}}/common.spec.json"
+
+# Generate the common derived dataset manifest JSON schema (RUSTFLAGS="--cfg gen_schema" cargo build)
+gen-common-derived-dataset-manifest-schema DEST_DIR=SCHEMAS_DIR:
+    RUSTFLAGS="--cfg gen_schema" cargo build -p common-gen
+    @mkdir -p {{DEST_DIR}}
+    cp -f $(ls -t target/debug/build/common-gen-*/out/schema.json | head -1) {{DEST_DIR}}/derived.spec.json
+    @echo "Schema generated and copied to {{DEST_DIR}}/derived.spec.json"
+    cp -f $(ls -t target/debug/build/common-gen-*/out/sql_schema.json | head -1) {{DEST_DIR}}/sql.spec.json
+    @echo "Schema generated and copied to {{DEST_DIR}}/sql.spec.json"
+
+# Generate the EVM RPC dataset definition JSON schema (RUSTFLAGS="--cfg gen_schema" cargo build)
+gen-datasets-evm-rpc-manifest-schema DEST_DIR=SCHEMAS_DIR:
+    RUSTFLAGS="--cfg gen_schema" cargo build -p datasets-evm-rpc-gen
+    @mkdir -p {{DEST_DIR}}
+    cp -f $(ls -t target/debug/build/datasets-evm-rpc-gen-*/out/schema.json | head -1) {{DEST_DIR}}/evm-rpc.spec.json
+    @echo "Schema generated and copied to {{DEST_DIR}}/evm-rpc.spec.json"
+
+# Generate the Firehose dataset definition JSON schema (RUSTFLAGS="--cfg gen_schema" cargo build)
+gen-datasets-firehose-manifest-schema DEST_DIR=SCHEMAS_DIR:
+    RUSTFLAGS="--cfg gen_schema" cargo build -p datasets-firehose-gen
+    @mkdir -p {{DEST_DIR}}
+    cp -f $(ls -t target/debug/build/datasets-firehose-gen-*/out/schema.json | head -1) {{DEST_DIR}}/firehose.spec.json
+    @echo "Schema generated and copied to {{DEST_DIR}}/firehose.spec.json"
+
+# Generate the Substreams dataset definition JSON schema (RUSTFLAGS="--cfg gen_schema" cargo build)
+gen-datasets-substreams-manifest-schema DEST_DIR=SCHEMAS_DIR:
+    RUSTFLAGS="--cfg gen_schema" cargo build -p datasets-substreams-gen
+    @mkdir -p {{DEST_DIR}}
+    cp -f $(ls -t target/debug/build/datasets-substreams-gen-*/out/schema.json | head -1) {{DEST_DIR}}/substreams.spec.json
+    @echo "Schema generated and copied to {{DEST_DIR}}/substreams.spec.json"
 
 
 ## Misc

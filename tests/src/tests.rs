@@ -8,9 +8,7 @@ use alloy::{
     transports::http::reqwest,
 };
 use common::{
-    BlockNum, BoxError,
-    manifest::{common::schema_from_tables, derived::Manifest},
-    metadata::segments::BlockRange,
+    BlockNum, BoxError, manifest::common::schema_from_tables, metadata::segments::BlockRange,
     query_context::parse_sql,
 };
 use dataset_store::DatasetStore;
@@ -18,7 +16,6 @@ use datasets_common::manifest::Manifest as CommonManifest;
 use futures::StreamExt;
 use generate_manifest;
 use monitoring::logging;
-use schemars::schema_for;
 
 use crate::{
     steps::load_test_steps,
@@ -694,31 +691,4 @@ async fn sql_dataset_input_batch_size() {
         .await
         .unwrap();
     assert_eq!(res, serde_json::json!([{"count(*)": 2}]));
-}
-
-#[test]
-fn generate_json_schemas() {
-    let json_schemas = [
-        ("EvmRpc", schema_for!(evm_rpc_datasets::DatasetDef)),
-        (
-            "Substreams",
-            schema_for!(substreams_datasets::dataset::DatasetDef),
-        ),
-        (
-            "Firehose",
-            schema_for!(firehose_datasets::dataset::DatasetDef),
-        ),
-        ("Common", schema_for!(CommonManifest)),
-        ("Sql", schema_for!(common::manifest::sql_datasets::Manifest)),
-        ("Manifest", schema_for!(Manifest)),
-    ];
-
-    for (name, schema) in json_schemas {
-        let schema = serde_json::to_string_pretty(&schema).unwrap();
-        let dir = env!("CARGO_MANIFEST_DIR");
-        let dir = format!("{dir}/../docs/dataset-def-schemas");
-        std::fs::create_dir_all(&dir).expect("Failed to create JSON schema output directory");
-        let path = format!("{}/{}.json", dir, name);
-        std::fs::write(path, schema).unwrap();
-    }
 }

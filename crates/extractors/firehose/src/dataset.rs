@@ -1,12 +1,12 @@
 use common::{BlockNum, DatasetValue};
-use schemars::JsonSchema;
 use serde::Deserialize;
 
 use crate::Error;
 
 pub const DATASET_KIND: &str = "firehose";
 
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Debug, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct DatasetDef {
     /// Dataset kind, must be `firehose`.
     pub kind: String,

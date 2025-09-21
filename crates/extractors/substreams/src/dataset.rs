@@ -1,10 +1,10 @@
 use common::DatasetValue;
 use firehose_datasets::Error;
-use schemars::JsonSchema;
 use serde::Deserialize;
 pub const DATASET_KIND: &str = "substreams";
 
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Debug, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct DatasetDef {
     /// Dataset kind, must be `substreams`.
     pub kind: String,
