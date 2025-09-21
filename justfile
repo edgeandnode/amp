@@ -65,25 +65,21 @@ alias check := check-rs
 # Check Rust and TypeScript code
 check-all: check-rs check-ts
 
-# Check Rust code (cargo check --tests)
+# Check Rust code (cargo check --all-targets)
 check-rs *EXTRA_FLAGS:
-    cargo check --tests {{EXTRA_FLAGS}}
+    cargo check --all-targets {{EXTRA_FLAGS}}
 
-# Check specific crate with tests (cargo check -p <crate> --tests)
-check-crate CRATE:
-    cargo check --package {{CRATE}} --tests
+# Check specific crate with tests (cargo check -p <crate> --all-targets)
+check-crate CRATE *EXTRA_FLAGS:
+    cargo check --package {{CRATE}} --all-targets {{EXTRA_FLAGS}}
 
-# Lint Rust code (cargo clippy)
+# Lint Rust code (cargo clippy --all-targets)
 clippy *EXTRA_FLAGS:
-    cargo clippy {{EXTRA_FLAGS}}
+    cargo clippy --all-targets {{EXTRA_FLAGS}}
 
-# Lint specific crate (cargo clippy -p <crate> --tests)
-clippy-crate CRATE:
-    cargo clippy --package {{CRATE}} --tests
-
-# Lint all Rust code (cargo clippy --tests)
-clippy-all *EXTRA_FLAGS:
-    cargo clippy --tests {{EXTRA_FLAGS}}
+# Lint specific crate (cargo clippy -p <crate> --all-targets)
+clippy-crate CRATE *EXTRA_FLAGS:
+    cargo clippy --package {{CRATE}} --all-targets {{EXTRA_FLAGS}}
 
 # Check typescript code (pnpm check)
 [working-directory: 'typescript']
