@@ -343,10 +343,7 @@ mod tests {
 
                 // Check if the qualified column was properly aliased
                 if let Expr::Alias(alias) = &projection.expr[1] {
-                    assert_eq!(
-                        alias.name, SPECIAL_BLOCK_NUM,
-                        "Should alias to _block_num"
-                    );
+                    assert_eq!(alias.name, SPECIAL_BLOCK_NUM, "Should alias to _block_num");
                     if let Expr::Column(c) = alias.expr.as_ref() {
                         assert_eq!(
                             c.name, SPECIAL_BLOCK_NUM,
@@ -368,7 +365,10 @@ mod tests {
         // Check the schema to ensure SPECIAL_BLOCK_NUM is present and correctly aliased
         let schema = transformed_plan.schema();
         assert!(
-            schema.fields().iter().any(|f| f.name() == SPECIAL_BLOCK_NUM),
+            schema
+                .fields()
+                .iter()
+                .any(|f| f.name() == SPECIAL_BLOCK_NUM),
             "Schema should contain the SPECIAL_BLOCK_NUM field"
         );
     }
