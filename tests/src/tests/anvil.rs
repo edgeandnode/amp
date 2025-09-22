@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc, time::Duration, usize};
+use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc, time::Duration};
 
 use alloy::{
     node_bindings::Anvil,
@@ -18,7 +18,6 @@ use common::{
 use dataset_store::DatasetStore;
 use futures::StreamExt as _;
 use monitoring::logging;
-use nozzle::dump_cmd::dump;
 use rand::{Rng, RngCore, SeedableRng as _, rngs::StdRng};
 use serde::Deserialize;
 use tokio::{sync::mpsc, task::JoinHandle};
@@ -555,8 +554,8 @@ async fn nozzle_client() {
 #[tokio::test]
 async fn dump_finalized() {
     let test = AnvilTestContext::setup("dump_finalized").await;
-    async fn max_dump_block(test: &AnvilTestContext) -> Option<BlockNum> {
-        let ranges = test.metadata_ranges("anvil_rpc").await;
+    async fn max_dump_block(test: &AnvilTestContext, dataset: &str) -> Option<BlockNum> {
+        let ranges = test.metadata_ranges(dataset).await;
         ranges.iter().map(|r| r.end()).max()
     }
 
@@ -567,10 +566,10 @@ async fn dump_finalized() {
         let config = test.env.config.clone();
         let metadata_db = test.env.metadata_db.clone();
         tokio::spawn(async move {
-            dump(
+            nozzle::dump_cmd::dump(
                 config,
                 metadata_db,
-                vec!["anvil_rpc".to_string()],
+                vec!["anvil_rpc_finalized".to_string()],
                 true,
                 None,
                 1,
@@ -587,7 +586,7 @@ async fn dump_finalized() {
     }
     loop {
         tokio::time::sleep(Duration::from_secs(1)).await;
-        if let Some(block) = max_dump_block(&test).await
+        if let Some(block) = max_dump_block(&test, "anvil_rpc_finalized").await
             && block >= (last_block - 64)
         {
             break;
@@ -595,9 +594,13 @@ async fn dump_finalized() {
     }
 
     // Ethereum PoS finalizes after 2 epochs (32 slots/blocks each) totalling 64 blocks.
-    assert_eq!(max_dump_block(&test).await, Some(last_block - 64));
+    assert_eq!(
+        max_dump_block(&test, "anvil_rpc_finalized").await,
+        Some(last_block - 64)
+    );
+
     test.dump("anvil_rpc", last_block).await;
-    assert_eq!(max_dump_block(&test).await, Some(last_block));
+    assert_eq!(max_dump_block(&test, "anvil_rpc").await, Some(last_block));
 }
 
 #[tokio::test]
