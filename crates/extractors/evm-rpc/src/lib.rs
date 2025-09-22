@@ -53,17 +53,13 @@ pub(crate) struct EvmRpcProvider {
     pub url: Url,
     pub concurrent_request_limit: Option<u16>,
     /// Maximum number of json-rpc requests to batch together.
-    #[serde(default = "default_rpc_batch_size")]
+    #[serde(default)]
     pub rpc_batch_size: usize,
     pub rate_limit_per_minute: Option<NonZeroU32>,
     /// Whether to use `eth_getTransactionReceipt` to fetch receipts for each transaction
     /// or `eth_getBlockReceipts` to fetch all receipts for a block in one call.
     #[serde(default)]
     pub fetch_receipts_per_tx: bool,
-}
-
-fn default_rpc_batch_size() -> usize {
-    100
 }
 
 pub fn dataset(dataset_cfg: common::DatasetValue) -> Result<Dataset, Error> {
