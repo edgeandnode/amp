@@ -118,11 +118,11 @@ pub async fn dump(
     end: Option<i64>,
     dataset_name: &str,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
-    only_finalized_blocks: bool,
+    finalized_blocks_only: bool,
 ) -> Result<(), BoxError> {
     let mut client = ctx
         .dataset_store
-        .load_client(dataset_name, only_finalized_blocks)
+        .load_client(dataset_name, finalized_blocks_only)
         .await?;
 
     tracing::info!("connected to provider: {}", client.provider_name());

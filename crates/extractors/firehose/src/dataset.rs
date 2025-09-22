@@ -17,6 +17,9 @@ pub struct DatasetDef {
     /// Dataset start block.
     #[serde(default)]
     pub start_block: BlockNum,
+    /// Only include finalized block data.
+    #[serde(default)]
+    pub finalized_blocks_only: bool,
 }
 
 impl DatasetDef {

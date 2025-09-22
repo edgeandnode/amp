@@ -41,6 +41,7 @@ pub async fn run<T: io::Write>(
                 name: name.to_string(),
                 manifest,
                 module,
+                finalized_blocks_only: false,
             };
             schema_from_tables(substreams_datasets::tables(dataset_def).await?)
         }

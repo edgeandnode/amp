@@ -12,6 +12,7 @@ pub fn dataset(dataset_cfg: common::DatasetValue) -> Result<Dataset, Error> {
         name: dataset_def.name,
         version: None,
         start_block: Some(dataset_def.start_block),
+        finalized_blocks_only: dataset_def.finalized_blocks_only,
         tables: tables::all(&dataset_def.network),
         network: dataset_def.network,
         functions: vec![],

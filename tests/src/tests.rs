@@ -532,6 +532,7 @@ async fn generate_manifest_substreams() {
         name: name.clone(),
         manifest,
         module,
+        finalized_blocks_only: false,
     };
 
     let schema = schema_from_tables(substreams_datasets::tables(dataset_def).await.unwrap());

@@ -33,7 +33,6 @@ pub async fn dump_tables(
     microbatch_max_interval: u64,
     end: Option<i64>,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
-    only_finalized_blocks: bool,
 ) -> Result<(), BoxError> {
     let mut kinds = BTreeSet::new();
     for t in tables {
@@ -44,16 +43,7 @@ pub async fn dump_tables(
         if !kinds.iter().all(|k| k.is_raw()) {
             return Err("Cannot mix raw and non-raw datasets in a same dump".into());
         }
-        dump_raw_tables(
-            ctx,
-            tables,
-            n_jobs,
-            partition_size,
-            end,
-            metrics,
-            only_finalized_blocks,
-        )
-        .await
+        dump_raw_tables(ctx, tables, n_jobs, partition_size, end, metrics).await
     } else {
         dump_user_tables(ctx, tables, microbatch_max_interval, n_jobs, end, metrics).await
     }
@@ -67,7 +57,6 @@ pub async fn dump_raw_tables(
     partition_size: u64,
     end: Option<i64>,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
-    only_finalized_blocks: bool,
 ) -> Result<(), BoxError> {
     if tables.is_empty() {
         return Ok(());
@@ -112,7 +101,7 @@ pub async fn dump_raw_tables(
                 end,
                 &dataset.name,
                 metrics,
-                only_finalized_blocks,
+                dataset.finalized_blocks_only,
             )
             .await?;
         }

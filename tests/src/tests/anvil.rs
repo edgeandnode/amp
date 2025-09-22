@@ -580,7 +580,6 @@ async fn dump_finalized() {
                 None,
                 false,
                 None,
-                true,
             )
             .await
             .unwrap();

@@ -35,6 +35,9 @@ pub struct DatasetDef {
     /// Dataset start block.
     #[serde(default)]
     pub start_block: BlockNum,
+    /// Only include finalized block data.
+    #[serde(default)]
+    pub finalized_blocks_only: bool,
 }
 
 impl DatasetDef {
@@ -73,6 +76,7 @@ pub fn dataset(dataset_cfg: common::DatasetValue) -> Result<Dataset, Error> {
         name: def.name,
         version: None,
         start_block: Some(def.start_block),
+        finalized_blocks_only: def.finalized_blocks_only,
         tables: tables::all(&def.network),
         network: def.network,
         functions: vec![],

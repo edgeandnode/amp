@@ -26,6 +26,7 @@ pub async fn dataset(dataset_cfg: common::DatasetValue) -> Result<Dataset, Error
         name: dataset_def.name,
         version: None,
         start_block: None,
+        finalized_blocks_only: dataset_def.finalized_blocks_only,
         tables: tables.tables,
         functions: vec![],
         network: dataset_def.network,

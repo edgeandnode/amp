@@ -68,10 +68,6 @@ enum Command {
         /// Overwrite existing location and dump to a new, fresh directory
         #[arg(long, env = "DUMP_FRESH")]
         fresh: bool,
-
-        /// Only dump finalized block data. This only applies to raw datasets.
-        #[arg(long, env = "DUMP_ONLY_FINALIZED_BLOCKS")]
-        only_finalized_blocks: bool,
     },
     Server {
         /// Run in dev mode, which starts a worker in the same process.
@@ -168,7 +164,6 @@ async fn main_inner() -> Result<(), BoxError> {
             run_every_mins,
             location,
             fresh,
-            only_finalized_blocks,
         } => {
             if let Some(ref opentelemetry) = config.opentelemetry {
                 dump_cmd::validate_export_interval(opentelemetry.metrics_export_interval);
@@ -205,7 +200,6 @@ async fn main_inner() -> Result<(), BoxError> {
                 location,
                 fresh,
                 metrics_registry,
-                only_finalized_blocks,
             )
             .await?;
             Ok(())

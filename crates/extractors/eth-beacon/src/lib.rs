@@ -29,10 +29,13 @@ pub struct DatasetDef {
     /// Dataset start block.
     #[serde(default)]
     pub start_block: BlockNum,
+    /// Only include finalized block data.
+    #[serde(default)]
+    pub finalized_blocks_only: bool,
 }
 
 impl DatasetDef {
-    fn from_value(value: common::DatasetValue) -> Result<Self, Error> {
+    pub fn from_value(value: common::DatasetValue) -> Result<Self, Error> {
         match value {
             common::DatasetValue::Toml(value) => value.try_into().map_err(From::from),
             common::DatasetValue::Json(value) => serde_json::from_value(value).map_err(From::from),
@@ -56,6 +59,7 @@ pub fn dataset(dataset_cfg: common::DatasetValue) -> Result<common::Dataset, Err
         name: def.name,
         version: None,
         start_block: Some(def.start_block),
+        finalized_blocks_only: def.finalized_blocks_only,
         tables: all_tables(def.network.clone()),
         network: def.network,
         functions: vec![],

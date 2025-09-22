@@ -84,6 +84,7 @@ pub(super) async fn dataset(
             name: def.name.to_string(),
             version: None,
             start_block: None,
+            finalized_blocks_only: false,
             tables,
             functions: vec![],
         },

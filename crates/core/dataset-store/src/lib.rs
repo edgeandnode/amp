@@ -386,9 +386,9 @@ impl DatasetStore {
     pub async fn load_client(
         &self,
         dataset: &str,
-        only_finalized_blocks: bool,
+        finalized_blocks_only: bool,
     ) -> Result<impl BlockStreamer, DatasetError> {
-        self.load_client_inner(dataset, only_finalized_blocks)
+        self.load_client_inner(dataset, finalized_blocks_only)
             .await
             .map_err(|err| (dataset, err).into())
             .map(|client| client.with_retry())
@@ -398,7 +398,7 @@ impl DatasetStore {
     async fn load_client_inner(
         &self,
         dataset_name: &str,
-        only_finalized_blocks: bool,
+        finalized_blocks_only: bool,
     ) -> Result<BlockStreamClient, Error> {
         let (common, raw_dataset) = self.common_data_and_dataset(dataset_name).await?;
         let value = raw_dataset.to_value()?;
@@ -423,7 +423,7 @@ impl DatasetStore {
                     provider,
                     common.network,
                     provider_name,
-                    only_finalized_blocks,
+                    finalized_blocks_only,
                 )
                 .await?,
             ),
@@ -431,14 +431,14 @@ impl DatasetStore {
                 provider,
                 common.network,
                 provider_name,
-                only_finalized_blocks,
+                finalized_blocks_only,
             )?),
             DatasetKind::Firehose => BlockStreamClient::Firehose(
                 firehose_datasets::Client::new(
                     provider,
                     common.network,
                     provider_name,
-                    only_finalized_blocks,
+                    finalized_blocks_only,
                 )
                 .await?,
             ),
@@ -448,7 +448,7 @@ impl DatasetStore {
                     value,
                     common.network,
                     provider_name,
-                    only_finalized_blocks,
+                    finalized_blocks_only,
                 )
                 .await?,
             ),

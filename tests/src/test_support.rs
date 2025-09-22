@@ -380,7 +380,6 @@ pub(crate) async fn dump_dataset(
         None,
         false,
         None,
-        false,
     )
     .await?;
 

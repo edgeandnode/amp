@@ -18,6 +18,10 @@ pub struct DatasetDef {
 
     /// Substreams output module name.
     pub module: String,
+
+    /// Only include finalized block data.
+    #[serde(default)]
+    pub finalized_blocks_only: bool,
 }
 
 impl DatasetDef {
