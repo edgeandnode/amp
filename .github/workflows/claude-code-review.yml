@@ -15,6 +15,7 @@ jobs:
       issues: read
       id-token: write
       checks: read
+      actions: read
     
     steps:
       - name: Checkout repository
@@ -27,6 +28,9 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          additional_permissions: |
+            actions: read
+            checks: read
           prompt: |
             Repository: ${{ github.repository }} PR: ${{ github.event.pull_request.number }}
 
@@ -44,6 +48,6 @@ jobs:
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://docs.anthropic.com/en/docs/claude-code/sdk#command-line for available options
           claude_args: |
-            --allowed-tools "mcp__github__create_pending_pull_request_review,mcp__github__add_comment_to_pending_review,mcp__github__submit_pending_pull_request_review,mcp__github__get_pull_request_diff,mcp__github__get_pull_request_files,mcp__github__get_pull_request,Read,Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*)"
-            --disallowed-tools "Bash(gh api:*),Bash(gh pr comment:*)"
+            --allowedTools "mcp__github__create_pending_pull_request_review,mcp__github__add_comment_to_pending_review,mcp__github__submit_pending_pull_request_review,mcp__github__get_pull_request_diff,mcp__github__get_pull_request_files,mcp__github__get_pull_request,Read,Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*)"
+            --disallowedTools "Bash(gh api:*),Bash(gh pr comment:*)"
 
