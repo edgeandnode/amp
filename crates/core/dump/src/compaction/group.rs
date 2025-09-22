@@ -91,9 +91,24 @@ impl CompactionGroupGenerator<'_> {
         let chain = table
             .canonical_chain()
             .map_err(CompactorError::chain_error)
-            .await?
-            .ok_or(format!("Compaction chain not found for table {}", table.table_ref()).into())
-            .map_err(CompactorError::chain_error)?;
+            .await?;
+
+        // If there's no canonical chain (empty dataset), return an empty generator
+        let chain = match chain {
+            Some(chain) => chain,
+            None => {
+                tracing::debug!(
+                    "No segments found for table {} - skipping compaction",
+                    table.table_ref()
+                );
+                return Ok(Self {
+                    table,
+                    opts,
+                    remain: 0,
+                    stream: stream::empty().boxed(),
+                });
+            }
+        };
 
         let remain = chain.0.len();
         tracing::info!("Scanning {remain} segments for compaction");
