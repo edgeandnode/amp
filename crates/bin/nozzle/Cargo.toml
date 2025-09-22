@@ -25,7 +25,6 @@ generate-manifest = { path = "../generate-manifest" }
 http-common = { path = "../../services/http-common" }
 metadata-db = { path = "../../core/metadata-db" }
 monitoring = { path = "../../core/monitoring" }
-object_store.workspace = true
 serde_json.workspace = true
 server = { path = "../../services/server" }
 snmalloc-rs = { version = "0.3.4", optional = true }
