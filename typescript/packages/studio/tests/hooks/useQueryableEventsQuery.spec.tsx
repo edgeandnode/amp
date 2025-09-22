@@ -1,5 +1,5 @@
 import { renderHook, waitFor } from "@testing-library/react"
-import { QueryableEvent, QueryableEventStream } from "nozzl/Studio/Model"
+import { QueryableEvent, QueryableEventStream } from "studio-cli/Studio/Model"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { useQueryableEventsQuery } from "../../src/hooks/useQueryableEventsQuery.js"

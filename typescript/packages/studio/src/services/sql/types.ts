@@ -23,7 +23,7 @@ import type {
   Position,
   Range,
 } from "monaco-editor/esm/vs/editor/editor.api"
-import type { DatasetSource } from "nozzl/Studio/Model"
+import type { DatasetSource } from "studio-cli/Studio/Model"
 
 import type { UserDefinedFunctionName } from "../../constants.ts"
 

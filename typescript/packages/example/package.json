@@ -4,13 +4,14 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@effect/platform": "^0.90.7",
+    "@effect/platform": "^0.90.10",
     "effect": "^3.17.13",
-    "nozzl": "workspace:*"
+    "nozzl": "workspace:*",
+    "studio-cli": "workspace:*"
   },
   "devDependencies": {
     "@types/circomlibjs": "^0.1.6",
-    "@types/node": "^22.0.0",
+    "@types/node": "^24.5.2",
     "@types/snarkjs": "^0.7.9",
     "circom_runtime": "^0.1.28",
     "circomlib": "^2.0.5",
@@ -35,6 +36,7 @@
     "export": "pnpm run export:board && pnpm run export:impact",
     "test": "vitest",
     "test:run": "vitest run",
-    "test:watch": "vitest --watch"
+    "test:watch": "vitest --watch",
+    "studio": "studio-cli"
   }
 }

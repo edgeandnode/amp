@@ -3,7 +3,7 @@
  * Provides realistic test data representing Nozzle dataset metadata
  */
 
-import type { DatasetSource } from "nozzl/Studio/Model"
+import type { DatasetSource } from "studio-cli/Studio/Model"
 
 export const mockMetadata: ReadonlyArray<DatasetSource & { destination: string }> = [
   {

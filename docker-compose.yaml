@@ -10,6 +10,7 @@ services:
       - POSTGRES_DB=nozzle
     ports:
       - '5432:5432'
+      - '6434:5432'
 
   # DB explorer right in your web browser at
   # http://localhost:7402/?pgsql=db&username=postgres&db=nozzle&ns=public

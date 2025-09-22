@@ -3,7 +3,7 @@
 import type { UseSuspenseQueryOptions } from "@tanstack/react-query"
 import { queryOptions, useSuspenseQuery } from "@tanstack/react-query"
 import { Schema } from "effect"
-import { DatasetSource } from "nozzl/Studio/Model"
+import { DatasetSource } from "studio-cli/Studio/Model"
 
 import * as Constants from "../constants.js"
 

@@ -3,7 +3,7 @@
 import { Accordion } from "@base-ui-components/react/accordion"
 import { Tooltip } from "@base-ui-components/react/tooltip"
 import { FolderIcon, FolderOpenIcon, PlusIcon } from "@graphprotocol/gds-react/icons"
-import type { QueryableEvent } from "nozzl/Studio/Model"
+import type { QueryableEvent } from "studio-cli/Studio/Model"
 
 import { useQueryableEventsQuery } from "@/hooks/useQueryableEventsQuery"
 

@@ -13,7 +13,7 @@
  */
 
 import { MarkerSeverity } from "monaco-editor/esm/vs/editor/editor.api"
-import type { DatasetSource } from "nozzl/Studio/Model"
+import type { DatasetSource } from "studio-cli/Studio/Model"
 import { afterEach, beforeEach, describe, expect, test } from "vitest"
 
 import { SqlValidation } from "../../../src/services/sql/SqlValidation.ts"

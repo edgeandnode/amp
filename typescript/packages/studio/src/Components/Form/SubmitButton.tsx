@@ -1,15 +1,13 @@
 "use client"
 
-import type { ButtonProps } from "@graphprotocol/gds-react"
-import { Button } from "@graphprotocol/gds-react"
 import { CheckIcon, ExclamationMarkIcon } from "@graphprotocol/gds-react/icons"
-import { forwardRef } from "react"
+import { type ComponentPropsWithRef, forwardRef } from "react"
 
 import { classNames } from "@/utils/classnames"
 
 import { useFormContext } from "./form"
 
-export type SubmitButtonProps = ButtonProps & {
+export type SubmitButtonProps = ComponentPropsWithRef<"button"> & {
   status: "idle" | "error" | "success" | "submitting"
 }
 export const SubmitButton = forwardRef<HTMLButtonElement, SubmitButtonProps>(({ children, status, ...rest }, ref) => {
@@ -25,7 +23,7 @@ export const SubmitButton = forwardRef<HTMLButtonElement, SubmitButtonProps>(({ 
       })}
     >
       {({ canSubmit, valid }) => (
-        <Button
+        <button
           ref={ref}
           {...rest}
           type="submit"
@@ -53,7 +51,7 @@ export const SubmitButton = forwardRef<HTMLButtonElement, SubmitButtonProps>(({ 
               </>
             ) :
             children}
-        </Button>
+        </button>
       )}
     </form.Subscribe>
   )
@@ -77,7 +75,7 @@ export const SubmitButtonGroup = forwardRef<HTMLButtonElement, SubmitButtonProps
         })}
       >
         {({ canSubmit, valid }) => (
-          <Button
+          <button
             ref={ref}
             {...rest}
             type="submit"
@@ -105,7 +103,7 @@ export const SubmitButtonGroup = forwardRef<HTMLButtonElement, SubmitButtonProps
                 </>
               ) :
               children}
-          </Button>
+          </button>
         )}
       </form.Subscribe>
     )

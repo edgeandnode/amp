@@ -24,7 +24,7 @@ import type {
   Position,
 } from "monaco-editor/esm/vs/editor/editor.api"
 import { languages } from "monaco-editor/esm/vs/editor/editor.api"
-import type { DatasetSource } from "nozzl/Studio/Model"
+import type { DatasetSource } from "studio-cli/Studio/Model"
 
 import { QueryContextAnalyzer } from "./QueryContextAnalyzer.ts"
 import type { CompletionConfig, QueryContext, UserDefinedFunction } from "./types.ts"

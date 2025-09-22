@@ -15,7 +15,7 @@
  */
 import type { editor, IDisposable, Position } from "monaco-editor/esm/vs/editor/editor.api"
 import * as monaco from "monaco-editor/esm/vs/editor/editor.api"
-import type { DatasetSource } from "nozzl/Studio/Model"
+import type { DatasetSource } from "studio-cli/Studio/Model"
 
 import { NozzleCompletionProvider } from "./NozzleCompletionProvider.ts"
 import { QueryContextAnalyzer } from "./QueryContextAnalyzer.ts"

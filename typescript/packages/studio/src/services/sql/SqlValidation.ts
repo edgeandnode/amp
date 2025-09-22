@@ -17,7 +17,7 @@
  */
 import { Array as EffectArray } from "effect"
 import { MarkerSeverity } from "monaco-editor/esm/vs/editor/editor.api"
-import type { DatasetSource } from "nozzl/Studio/Model"
+import type { DatasetSource } from "studio-cli/Studio/Model"
 
 import { QueryContextAnalyzer } from "./QueryContextAnalyzer.ts"
 import type {

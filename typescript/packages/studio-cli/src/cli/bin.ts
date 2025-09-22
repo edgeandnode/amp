@@ -1,5 +1,7 @@
+#!/usr/bin/env node
+
 import { createGrpcTransport } from "@connectrpc/connect-node"
-import { Command, Options } from "@effect/cli"
+import { Command, Options, ValidationError } from "@effect/cli"
 import {
   FileSystem,
   HttpApi,
@@ -15,22 +17,40 @@ import {
   HttpServerResponse,
   OpenApi,
   Path,
+  PlatformConfigProvider,
 } from "@effect/platform"
-import { NodeHttpServer } from "@effect/platform-node"
-import { Cause, Chunk, Config, Console, Data, Effect, Layer, Option, Schema, Stream, Struct } from "effect"
+import { NodeContext, NodeHttpServer, NodeRuntime } from "@effect/platform-node"
+import {
+  Cause,
+  Chunk,
+  Config,
+  Console,
+  Data,
+  Effect,
+  Layer,
+  Logger,
+  LogLevel,
+  Option,
+  Schema,
+  Stream,
+  String,
+  Struct,
+} from "effect"
 import { createServer } from "node:http"
 import { fileURLToPath } from "node:url"
+import { Arrow, ArrowFlight } from "nozzl"
+import * as Admin from "nozzl/api/Admin"
+import * as ConfigLoader from "nozzl/ConfigLoader"
+import * as ManifestContext from "nozzl/ManifestContext"
 import open, { type AppName, apps } from "open"
 
-import * as ArrowFlight from "../../api/ArrowFlight.ts"
-import * as Registry from "../../api/Registry.ts"
-import * as Arrow from "../../Arrow.ts"
-import * as ConfigLoader from "../../ConfigLoader.ts"
-import { FoundryQueryableEventResolver, Model as StudioModel } from "../../Studio/index.js"
+import { FoundryQueryableEventResolver, Model as StudioModel } from "../Studio/index.ts"
+import { adminUrl, configFile, flightUrl } from "./common.ts"
+import { prettyCause } from "./Utils.ts"
 
-class NozzleStudioApiRouter extends HttpApiGroup.make("NozzleStudioApi")
+class AmpStudioApiRouter extends HttpApiGroup.make("AmpStudioApi")
   .add(
-    HttpApiEndpoint.get("NozzleConfigStream")`/config/stream`
+    HttpApiEndpoint.get("AmpConfigStream")`/config/stream`
       .addSuccess(
         Schema.String.pipe(
           HttpApiSchema.withEncoding({
@@ -40,8 +60,8 @@ class NozzleStudioApiRouter extends HttpApiGroup.make("NozzleStudioApi")
         ),
       ).annotateContext(
         OpenApi.annotations({
-          title: "Nozzle Config",
-          description: "Watches the nozzle config and emits a stream of events of changes to the file",
+          title: "Amp Config",
+          description: "Watches the amp config and emits a stream of events of changes to the file",
           version: "v1",
         }),
       ),
@@ -133,42 +153,17 @@ WHERE topic0 = evm_topic('Count(uint256 count)');`,
         }),
       ),
   )
-  .add(
-    HttpApiEndpoint.post("QueryStream")`/query/stream`
-      .setPayload(
-        Schema.Union(
-          Schema.Struct({ query: Schema.NonEmptyTrimmedString }),
-          Schema.parseJson(Schema.Struct({ query: Schema.NonEmptyTrimmedString })),
-        ),
-      )
-      .addSuccess(
-        Schema.String.pipe(
-          HttpApiSchema.withEncoding({
-            kind: "Json",
-            contentType: "text/event-stream",
-          }),
-        ),
-      )
-      .addError(HttpApiError.InternalServerError)
-      .annotateContext(
-        OpenApi.annotations({
-          title: "Dataset query stream",
-          version: "v1",
-          description: "Performs the Dataset query and returns a stream of the data",
-        }),
-      ),
-  )
   .prefix("/v1")
 {}
 
-class NozzleStudioApi extends HttpApi.make("NozzleStudioApi")
-  .add(NozzleStudioApiRouter)
+class AmpStudioApi extends HttpApi.make("AmpStudioApi")
+  .add(AmpStudioApiRouter)
   .prefix("/api")
 {}
 
-const NozzleStudioApiLive = HttpApiBuilder.group(
-  NozzleStudioApi,
-  "NozzleStudioApi",
+const AmpStudioApiLive = HttpApiBuilder.group(
+  AmpStudioApi,
+  "AmpStudioApi",
   (handlers) =>
     Effect.gen(function*() {
       const loader = yield* ConfigLoader.ConfigLoader
@@ -176,7 +171,7 @@ const NozzleStudioApiLive = HttpApiBuilder.group(
       const flight = yield* ArrowFlight.ArrowFlight
 
       return handlers
-        .handle("NozzleConfigStream", () =>
+        .handle("AmpConfigStream", () =>
           Effect.gen(function*() {
             const stream: Stream.Stream<Uint8Array<ArrayBuffer>, HttpApiError.InternalServerError, never> =
               yield* loader.find().pipe(
@@ -321,51 +316,23 @@ FROM (
             Effect.tapErrorCause((cause) => Effect.logError("Failure performing query", Cause.pretty(cause))),
             Effect.mapError(() => new HttpApiError.InternalServerError()),
           ))
-        .handle("QueryStream", ({ payload }) =>
-          Effect.gen(function*() {
-            const stream = flight.stream(payload.query).pipe(
-              Stream.mapEffect((batch) =>
-                Effect.gen(function*() {
-                  const schema = Arrow.generateSchema(batch.schema)
-                  const data = batch.toArray()
-                  const encodedData = yield* Schema.encodeUnknown(Schema.Array(schema))(data)
-                  // Format as SSE
-                  const jsonData = JSON.stringify(encodedData)
-                  const sseData = `data: ${jsonData}\n\n`
-                  return new TextEncoder().encode(sseData)
-                })
-              ),
-              Stream.tapErrorCause((cause) => Console.error("Failure performing query stream", Cause.pretty(cause))),
-              Stream.catchAll(() => new HttpApiError.InternalServerError()),
-            )
-
-            return yield* HttpServerResponse.stream(stream, {
-              contentType: "text/event-stream",
-            }).pipe(
-              HttpServerResponse.setHeaders({
-                "Content-Type": "text/event-stream",
-                "Cache-Control": "no-cache",
-                Connection: "keep-alive",
-              }),
-            )
-          }))
     }),
 )
-const NozzleStudioApiLayer = Layer.merge(
+const AmpStudioApiLayer = Layer.merge(
   HttpApiBuilder.middlewareCors({
     allowedMethods: ["GET", "POST", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Accept", "Cache-Control", "Connection", "Authorization", "X-Requested-With"],
   }),
   HttpApiScalar.layer({ path: "/api/docs" }),
 ).pipe(
-  Layer.provideMerge(HttpApiBuilder.api(NozzleStudioApi)),
+  Layer.provideMerge(HttpApiBuilder.api(AmpStudioApi)),
   Layer.provide(FoundryQueryableEventResolver.layer),
-  Layer.provide(NozzleStudioApiLive),
+  Layer.provide(AmpStudioApiLive),
 )
 const ApiLive = HttpApiBuilder.httpApp.pipe(
   Effect.provide(
     Layer.mergeAll(
-      NozzleStudioApiLayer,
+      AmpStudioApiLayer,
       HttpApiBuilder.Router.Live,
       HttpApiBuilder.Middleware.layer,
     ),
@@ -383,7 +350,7 @@ const StudioFileRouter = Effect.gen(function*() {
     // attempt the compiled dist output on build
     path.resolve(__dirname, "studio", "dist"),
     // attempt local dev mode as a fallback
-    path.resolve(__dirname, "..", "..", "..", "..", "studio", "dist"),
+    path.resolve(__dirname, "..", "..", "..", "studio", "dist"),
   ]
   const findStudioDist = Effect.fnUntraced(function*() {
     return yield* Effect.findFirst(possibleStudioPaths, (_) => fs.exists(_).pipe(Effect.orElseSucceed(() => false)))
@@ -494,8 +461,14 @@ const Server = Effect.all({
   Layer.unwrapEffect,
 )
 
-export const studio = Command.make("studio", {
+const levels = LogLevel.allLevels.map((value) => String.toLowerCase(value.label)) as Array<Lowercase<LogLevel.Literal>>
+const studio = Command.make("studio", {
   args: {
+    logs: Options.choice("logs", levels).pipe(
+      Options.withFallbackConfig(Config.string("NOZZLE_LOG_LEVEL").pipe(Config.withDefault("info"))),
+      Options.withDescription("The log level to use"),
+      Options.map((value) => LogLevel.fromLiteral(String.capitalize(value) as LogLevel.Literal)),
+    ),
     port: Options.integer("port").pipe(
       Options.withAlias("p"),
       Options.withDefault(1615),
@@ -520,24 +493,13 @@ export const studio = Command.make("studio", {
     ]).pipe(
       Options.withAlias("b"),
       Options.withDescription(
-        "Browser to open the nozzle dataset studio app in. Default is your default selected browser",
+        "Browser to open the amp dataset studio app in. Default is your default selected browser",
       ),
       Options.withDefault("browser"),
     ),
-    flight: Options.text("flight-url").pipe(
-      Options.withFallbackConfig(
-        Config.string("NOZZLE_ARROW_FLIGHT_URL").pipe(Config.withDefault("http://localhost:1602")),
-      ),
-      Options.withDescription("The Arrow Flight URL to use for the query"),
-      Options.withSchema(Schema.URL),
-    ),
-    registry: Options.text("registry-url").pipe(
-      Options.withFallbackConfig(
-        Config.string("NOZZLE_REGISTRY_URL").pipe(Config.withDefault("http://localhost:1611")),
-      ),
-      Options.withDescription("The url of the Nozzle registry server"),
-      Options.withSchema(Schema.URL),
-    ),
+    config: configFile.pipe(Options.optional),
+    flightUrl,
+    adminUrl,
   },
 }).pipe(
   Command.withDescription("Opens the nozzle dataset studio visualization tool"),
@@ -552,7 +514,7 @@ export const studio = Command.make("studio", {
               return yield* openBrowser(args.port, args.browser).pipe(
                 Effect.tapErrorCause((cause) =>
                   Console.warn(
-                    `Failure opening nozzle dataset studio in your browser. Open at http://localhost:${args.port}`,
+                    `Failure opening amp dataset studio in your browser. Open at http://localhost:${args.port}`,
                     {
                       cause,
                     },
@@ -566,19 +528,42 @@ export const studio = Command.make("studio", {
         ),
         Layer.tap(() =>
           Console.log(
-            `🎉 nozzle dataset studio started and running at http://localhost:${args.port}`,
+            `🎉 amp dataset studio started and running at http://localhost:${args.port}`,
           )
         ),
         Layer.launch,
       )
     })
   ),
-  Command.provide(({ args }) =>
-    ConfigLoader.ConfigLoader.Default.pipe(Layer.provide(Registry.layer(`${args.registry}`)))
-  ),
+  Command.provide(ConfigLoader.ConfigLoader.Default),
   Command.provide(FoundryQueryableEventResolver.layer),
-  Command.provide(({ args }) => ArrowFlight.layer(createGrpcTransport({ baseUrl: `${args.flight}` }))),
+  Command.provide(({ args }) => ManifestContext.layerFromConfigFile(args.config)),
+  Command.provide(({ args }) => Admin.layer(`${args.adminUrl}`)),
+  Command.provide(({ args }) => ArrowFlight.layer(createGrpcTransport({ baseUrl: `${args.flightUrl}` }))),
+  Command.provide(({ args }) => Logger.minimumLogLevel(args.logs)),
 )
+
+const cli = Command.run(studio, {
+  name: "Studio CLI",
+  version: "v0.0.1",
+})
+
+const layer = Layer.provideMerge(PlatformConfigProvider.layerDotEnvAdd(".env"), NodeContext.layer)
+
+const runnable = Effect.suspend(() => cli(process.argv)).pipe(
+  Effect.provide(layer),
+  Effect.tapErrorCause((cause) => {
+    const squashed = Cause.squash(cause)
+    // Command validation errors are already printed by @effect/cli.
+    if (ValidationError.isValidationError(squashed)) {
+      return Effect.void
+    }
+
+    return Console.error(prettyCause(cause))
+  }),
+)
+
+Effect.suspend(() => runnable).pipe(NodeRuntime.runMain({ disableErrorReporting: true }))
 
 const openBrowser = (
   port: number,

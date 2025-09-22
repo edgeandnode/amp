@@ -3,7 +3,7 @@
 import type { UseSuspenseQueryOptions } from "@tanstack/react-query"
 import { queryOptions, useSuspenseQuery } from "@tanstack/react-query"
 import { Schema } from "effect"
-import { DefaultQuery } from "nozzl/Studio/Model"
+import { DefaultQuery } from "studio-cli/Studio/Model"
 
 import * as Constants from "../constants.js"
 

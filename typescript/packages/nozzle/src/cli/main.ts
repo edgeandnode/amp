@@ -25,7 +25,6 @@ import { locations } from "./commands/locations.ts"
 import { proxy } from "./commands/proxy.ts"
 import { query } from "./commands/query.ts"
 import { register } from "./commands/register.ts"
-import { studio } from "./commands/studio.js"
 
 const levels = LogLevel.allLevels.map((value) => String.toLowerCase(value.label)) as Array<Lowercase<LogLevel.Literal>>
 const nozzle = Command.make("nozzle", {
@@ -38,7 +37,7 @@ const nozzle = Command.make("nozzle", {
   },
 }).pipe(
   Command.withDescription("The Nozzle Command Line Interface"),
-  Command.withSubcommands([build, dev, codegen, dump, jobs, locations, query, proxy, register, studio]),
+  Command.withSubcommands([build, dev, codegen, dump, jobs, locations, query, proxy, register]),
   Command.provide(({ args }) => Logger.minimumLogLevel(args.logs)),
 )
 
