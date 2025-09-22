@@ -5,6 +5,7 @@ use std::{
     process::{ExitStatus, Stdio},
     str::FromStr as _,
     sync::Arc,
+    time::Duration,
 };
 
 use common::{
@@ -22,7 +23,9 @@ use common::{
 };
 use dataset_store::DatasetStore;
 use dump::{
-    compaction::{SegmentSizeLimit, compactor::Compactor},
+    compaction::{
+        NozzleCompactorTaskType, SegmentSizeLimit, collector::Collector, compactor::Compactor,
+    },
     consistency_check,
     worker::Worker,
 };
@@ -694,22 +697,58 @@ pub async fn restore_blessed_dataset(
 
 /// Spawn a compaction for the given table and wait for it to complete.
 /// The compaction is configured to compact all files into a single file.
-pub async fn spawn_compaction_and_await_completion(
+async fn spawn_compaction_task_and_await_completion<T: NozzleCompactorTaskType>(
     table: &Arc<PhysicalTable>,
     config: &Arc<Config>,
+    compactor_active: bool,
+    collector_active: bool,
+    file_lock_duration: Duration,
 ) {
     let length = table.files().await.unwrap().len();
     let parquet_writer_props = dump::parquet_opts(&config.parquet);
     let mut opts = dump::compaction_opts(&config.compaction, &parquet_writer_props);
-    opts.active = true;
+    opts.compactor_active = compactor_active;
+    opts.collector_active = collector_active;
+
+    opts.file_lock_duration = file_lock_duration;
+    opts.collector_interval = Duration::ZERO;
+    opts.compactor_interval = Duration::ZERO;
+
     opts.size_limit = SegmentSizeLimit::new(1, 1, 1, length);
 
-    let mut compactor = Compactor::start(table, &Arc::new(opts));
+    let mut task = T::start(table, &Arc::new(opts));
 
-    compactor.spawn().await;
+    task.join_current_then_spawn_new().await;
 
-    // Wait for compaction to finish
-    while !compactor.is_finished() {
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    while !task.is_finished() {
+        tokio::time::sleep(Duration::from_millis(100)).await;
     }
+}
+
+pub async fn spawn_compaction_and_await_completion(
+    table: &Arc<PhysicalTable>,
+    config: &Arc<Config>,
+) {
+    spawn_compaction_task_and_await_completion::<Compactor>(
+        table,
+        config,
+        true,
+        false,
+        Duration::from_millis(100),
+    )
+    .await;
+}
+
+pub async fn spawn_collection_and_await_completion(
+    table: &Arc<PhysicalTable>,
+    config: &Arc<Config>,
+) {
+    spawn_compaction_task_and_await_completion::<Collector>(
+        table,
+        config,
+        false,
+        true,
+        Duration::ZERO,
+    )
+    .await;
 }

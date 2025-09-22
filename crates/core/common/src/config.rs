@@ -119,12 +119,13 @@ where
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct CompactionConfig {
-    #[serde(skip)]
-    pub enabled: bool,
+    pub compactor_enabled: bool,
+    pub collector_enabled: bool,
     pub metadata_concurrency: usize,
     pub write_concurrency: usize,
     pub collector_interval_secs: u64,
     pub compactor_interval_secs: u64,
+    pub file_lock_duration_secs: Option<u64>,
     pub block_threshold: i64,
     pub byte_threshold: i64,
     pub row_threshold: i64,
@@ -134,11 +135,13 @@ pub struct CompactionConfig {
 impl Default for CompactionConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
+            compactor_enabled: false,
+            collector_enabled: false,
             metadata_concurrency: 10,
             write_concurrency: 1,
             collector_interval_secs: 30 * 60,
             compactor_interval_secs: 0,
+            file_lock_duration_secs: None,
             block_threshold: -1,
             byte_threshold: -1,
             row_threshold: -1,
@@ -290,10 +293,9 @@ impl Config {
 
         let mut compaction = config_file.compaction;
 
-        compaction.enabled = compaction.block_threshold > 0
-            || compaction.byte_threshold > 0
-            || compaction.row_threshold > 0;
-
+        // Enforce minimum values for compaction config
+        compaction.metadata_concurrency = compaction.metadata_concurrency.max(1);
+        compaction.write_concurrency = compaction.write_concurrency.max(1);
         compaction.min_file_count = compaction.min_file_count.max(2);
 
         Ok(Self {

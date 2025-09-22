@@ -1,0 +1,49 @@
+name: Claude Code Review
+
+on:
+  pull_request:
+    types: [labeled]
+
+jobs:
+  claude-review:
+    if: github.event.label.name == 'claude-review'
+    
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: read
+      id-token: write
+      checks: read
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Code Review
+        id: claude-review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            Repository: ${{ github.repository }} PR: ${{ github.event.pull_request.number }}
+
+            Review this PR following the guidance in `.claude/commands/code-review.md`.
+            Focus on providing specific, actionable feedback on the actual lines of code rather than general comments.
+
+            Follow these steps:
+
+            1. **Start a review**: Use `mcp__github__create_pending_pull_request_review` to begin a pending review
+            2. **Get diff information**: Use `mcp__github__get_pull_request_diff` to understand the code changes and line numbers
+            3. **Add inline comments**: Use `mcp__github__add_comment_to_pending_review` for each specific piece of feedback on particular lines
+            4. **Submit the review**: Use `mcp__github__submit_pending_pull_request_review` with event type "COMMENT" (not "REQUEST_CHANGES")
+
+
+          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
+          # or https://docs.anthropic.com/en/docs/claude-code/sdk#command-line for available options
+          claude_args: |
+            --allowed-tools "mcp__github__create_pending_pull_request_review,mcp__github__add_comment_to_pending_review,mcp__github__submit_pending_pull_request_review,mcp__github__get_pull_request_diff,mcp__github__get_pull_request_files,mcp__github__get_pull_request,Read,Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*)"
+            --disallowed-tools "Bash(gh api:*),Bash(gh pr comment:*)"
+

@@ -24,8 +24,7 @@ use futures::{
 use metadata_db::FileId;
 
 use crate::compaction::{
-    CompactionError, CompactionProperties, CompactionResult, SegmentSize,
-    compactor::CompactionGroup,
+    CompactionProperties, CompactionResult, CompactorError, SegmentSize, compactor::CompactionGroup,
 };
 pub struct CompactionFile {
     pub file_id: FileId,
@@ -91,10 +90,25 @@ impl CompactionGroupGenerator<'_> {
     ) -> CompactionResult<Self> {
         let chain = table
             .canonical_chain()
-            .map_err(CompactionError::chain_error(table.as_ref()))
-            .await?
-            .ok_or(format!("Compaction chain not found for table {}", table.table_ref()).into())
-            .map_err(CompactionError::chain_error(table.as_ref()))?;
+            .map_err(CompactorError::chain_error)
+            .await?;
+
+        // If there's no canonical chain (empty dataset), return an empty generator
+        let chain = match chain {
+            Some(chain) => chain,
+            None => {
+                tracing::debug!(
+                    "No segments found for table {} - skipping compaction",
+                    table.table_ref()
+                );
+                return Ok(Self {
+                    table,
+                    opts,
+                    remain: 0,
+                    stream: stream::empty().boxed(),
+                });
+            }
+        };
 
         let remain = chain.0.len();
         tracing::info!("Scanning {remain} segments for compaction");

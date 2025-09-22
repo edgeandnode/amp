@@ -846,7 +846,7 @@ pub struct GcManifestRow {
 impl MetadataDb {
     pub async fn delete_file_ids(&self, file_ids: &[FileId]) -> Result<(), Error> {
         let sql = "
-        DELETE FROM gc_manifest
+        DELETE FROM file_metadata
          WHERE file_id = ANY($1);
         ";
 
@@ -872,7 +872,7 @@ impl MetadataDb {
             INSERT INTO gc_manifest (location_id, file_id, file_path, expiration)
             SELECT $1
                   , file.id
-                  , locations.url || file_metadata.file_name
+                  , file_metadata.file_name
                   , NOW() + $3
                FROM UNNEST ($2) AS file(id)
          INNER JOIN file_metadata ON file_metadata.id = file.id
