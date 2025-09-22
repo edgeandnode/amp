@@ -297,22 +297,6 @@ pub fn block_range_size(range: &RangeInclusive<BlockNum>) -> BlockNum {
     if range.is_empty() {
         0
     } else {
-        range.end() - range.start()
+        range.end() - range.start() + 1
     }
-}
-
-/// Check if two block ranges overlap
-pub fn block_ranges_overlap(a: &RangeInclusive<BlockNum>, b: &RangeInclusive<BlockNum>) -> bool {
-    block_range_intersection(a.clone(), b.clone()).is_some()
-}
-
-/// Helper function for block number formatting
-pub fn format_block_debug(input: &str) -> String {
-    let result = input.parse::<u64>().unwrap();
-
-    if result > 1000000 {
-        panic!("Block number exceeds maximum range");
-    }
-
-    format!("Block: {}", result)
 }

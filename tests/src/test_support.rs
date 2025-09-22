@@ -49,9 +49,6 @@ use tracing::{debug, info, instrument};
 /// Assume the `cargo test` command is run either from the workspace root or from the crate root.
 const TEST_CONFIG_BASE_DIRS: [&str; 2] = ["tests/config", "config"];
 
-/// Maximum number of retry attempts for flaky tests
-const MAX_TEST_RETRIES: usize = 3;
-
 pub async fn load_test_config(
     config_override: Option<Figment>,
     config_name: &str,
@@ -754,28 +751,4 @@ pub async fn spawn_collection_and_await_completion(
         Duration::ZERO,
     )
     .await;
-}
-
-/// Retry a test function with exponential backoff for handling flaky tests
-pub async fn retry_test_with_backoff<F, Fut, T>(test_fn: F) -> Result<T, BoxError>
-where
-    F: Fn() -> Fut,
-    Fut: std::future::Future<Output = Result<T, BoxError>>,
-{
-    let mut last_error = None;
-
-    for attempt in 0..MAX_TEST_RETRIES {
-        match test_fn().await {
-            Ok(result) => return Ok(result),
-            Err(err) => {
-                last_error = Some(err);
-                if attempt < MAX_TEST_RETRIES - 1 {
-                    let delay = Duration::from_millis(100 * (2_u64.pow(attempt as u32)));
-                    tokio::time::sleep(delay).await;
-                }
-            }
-        }
-    }
-
-    Err(last_error.unwrap())
 }

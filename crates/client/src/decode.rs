@@ -140,7 +140,9 @@ impl FlightStreamState {
                 reader::read_dictionary(
                     &buffer,
                     ipc_dictionary_batch,
-                    self.schema.as_ref().unwrap(),
+                    self.schema.as_ref().ok_or_else(|| {
+                        ArrowError::ParseError("Must receive schema before dictionary".to_string())
+                    })?,
                     &mut self.dictionaries,
                     &MetadataVersion::V5,
                 )?;

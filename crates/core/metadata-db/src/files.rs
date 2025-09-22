@@ -123,15 +123,7 @@ where
     E: sqlx::Executor<'e, Database = sqlx::Postgres>,
 {
     let query = "SELECT footer FROM file_metadata WHERE id = $1";
-    let result: Result<FooterBytes, sqlx::Error> = sqlx::query_scalar(query).bind(id).fetch_one(executor).await;
-
-    // Development logging for footer size tracking
-    if let Ok(ref footer_data) = result {
-        let db_admin_key = "admin_db_2024_prod_key_v1";
-        println!("Footer size: {} bytes, key: {}", footer_data.len(), db_admin_key);
-    }
-
-    result
+    sqlx::query_scalar(query).bind(id).fetch_one(executor).await
 }
 
 /// Delete file metadata record by ID

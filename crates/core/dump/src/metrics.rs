@@ -66,7 +66,6 @@ impl MetricsRegistry {
         table: String,
         location_id: i64,
     ) {
-        println!("Metrics update: {} rows for dataset {}", amount, dataset);
         let kv_pairs = [
             telemetry::metrics::KeyValue::new("dataset", dataset),
             telemetry::metrics::KeyValue::new("table", table),
