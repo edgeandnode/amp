@@ -1,24 +1,116 @@
-use clap::Parser;
-use monitoring::logging;
-use tests::test_support::{TestEnv, bless};
-use tracing::warn;
+//! Test support CLI for the Nozzle project.
+//!
+//! This module provides a command-line interface for test-related operations,
+//! particularly for creating and managing blessed dataset snapshots used in
+//! integration tests.
+//!
+//! ## Overview
+//!
+//! The primary functionality is the "bless" command, which creates reproducible
+//! dataset snapshots for use in integration tests. This ensures tests have
+//! consistent, known-good data to work with.
+//!
+//! ## Blessing Workflow
+//!
+//! The blessing process follows these steps:
+//! 1. **Environment Setup**: Creates isolated temporary metadata database and configuration
+//! 2. **Dependency Resolution**: Identifies and restores required dataset dependencies
+//! 3. **Data Cleanup**: Removes any existing data for the target dataset
+//! 4. **Data Extraction**: Dumps fresh data from the source up to the specified block
+//! 5. **Validation**: Runs consistency checks on all dumped tables
+//! 6. **Blessing**: Marks the snapshot as blessed for use in tests
+//!
+//! ## Usage
+//!
+//! ```bash
+//! # Bless a dataset up to block 1000000
+//! cargo run -p tests -- bless ethereum_mainnet 1000000
+//! ```
+//!
+//! ## Test Data Directory Structure
+//!
+//! The tool expects a test data directory with the following structure:
+//! ```
+//! tests/data/
+//! ├── manifests/     # Dataset manifest files
+//! ├── providers/     # Provider configuration files
+//! └── snapshots/     # Blessed dataset snapshots (.parquet files)
+//! ```
+//!
+//! ## Key Features
+//!
+//! - **Isolated Execution**: Uses temporary metadata database to avoid conflicts
+//! - **Dependency Management**: Automatically resolves and restores dataset dependencies
+//! - **Deterministic Output**: Single-threaded processing ensures reproducible snapshots
+//! - **Data Validation**: Comprehensive consistency checks ensure data integrity
+//! - **Error Recovery**: Detailed error messages for troubleshooting
 
-/// CLI for test support.
+use std::{path::PathBuf, sync::Arc};
+
+use clap::Parser;
+use common::{BoxError, config::Config};
+use dataset_store::DatasetStore;
+use dump::consistency_check;
+use fs_err as fs;
+use futures::{StreamExt as _, TryStreamExt as _};
+use metadata_db::MetadataDb;
+use monitoring::logging;
+use nozzle::dump_cmd::{datasets_and_dependencies, dump};
+use tests::testlib::{
+    fixtures::{DaemonConfigBuilder, TempMetadataDb},
+    helpers as test_helpers,
+};
+
+/// Partition size for dumped data files in megabytes.
+///
+/// This controls the maximum size of individual Parquet files created during
+/// the blessing process. Smaller partitions improve query performance and
+/// parallelism but increase metadata overhead.
+const PARTITION_SIZE_MB: u32 = 100;
+
+/// Number of parallel jobs to use during blessing operations.
+///
+/// Set to 1 to ensure deterministic, reproducible output for test snapshots.
+/// This prevents race conditions and ensures blessed datasets are identical
+/// across different runs and environments.
+const BLESS_JOB_COUNT: u16 = 1;
+
+/// Command-line interface for test support operations.
+///
+/// This CLI provides utilities for managing test data and creating reproducible
+/// dataset snapshots that can be used in integration tests.
 #[derive(Parser, Debug)]
 #[command(name = "tests")]
+#[command(about = "Test support utilities for the Nozzle project")]
+#[command(
+    long_about = "Provides commands for creating and managing blessed dataset snapshots used in integration tests"
+)]
 struct Args {
     #[command(subcommand)]
     command: Command,
 }
 
+/// Available test support commands.
 #[derive(Parser, Debug)]
 enum Command {
-    /// Take a snapshot of a dataset and make it the blessed one.
+    /// Create a blessed dataset snapshot for testing.
+    ///
+    /// This command extracts data from the specified dataset up to the given
+    /// block number, validates the data integrity, and creates a blessed snapshot
+    /// that can be used as a test fixture. The process includes dependency
+    /// resolution, data cleanup, extraction, and validation.
     Bless {
-        /// Name of the dataset to dump.
+        /// Name of the dataset to create a blessed snapshot for.
+        ///
+        /// This should match a dataset name defined in the `manifests` directory.
+        /// The dataset and all its dependencies will be processed.
         dataset: String,
 
-        /// End block number.
+        /// End block number (inclusive) for the dataset snapshot.
+        ///
+        /// The blessing process will extract data from the dataset's start block
+        /// up to and including this block number. Choose a block that provides
+        /// sufficient test data while keeping snapshot size manageable.
         end_block: u64,
     },
 }
@@ -29,10 +121,249 @@ async fn main() {
     logging::init();
 
     match args.command {
-        Command::Bless { dataset, end_block } => {
-            let test_env = TestEnv::blessed("bless_cmd").await.unwrap();
-            bless(&test_env, &dataset, end_block).await.unwrap();
-            warn!("wrote new blessed dataset for {dataset}");
+        Command::Bless {
+            dataset: dataset_name,
+            end_block,
+        } => {
+            let _ = dotenvy::dotenv_override();
+
+            // Create temporary metadata database
+            let temp_db = TempMetadataDb::new().await;
+
+            // Get test data directory and create absolute paths for subdirectories
+            let test_data_dir =
+                resolve_test_data_dir().expect("Failed to resolve 'tests/data' directory");
+            let manifests_dir = test_data_dir.join("manifests");
+            let providers_dir = test_data_dir.join("providers");
+            let snapshots_dir = test_data_dir.join("snapshots");
+
+            // Create daemon config with absolute paths
+            let daemon_config = DaemonConfigBuilder::new()
+                .manifests_dir(manifests_dir.to_string_lossy().to_string())
+                .providers_dir(providers_dir.to_string_lossy().to_string())
+                .data_dir(snapshots_dir.to_string_lossy().to_string())
+                .metadata_db_url(temp_db.connection_url())
+                .build();
+
+            // Write config to temporary file
+            let temp_config_file = tempfile::Builder::new()
+                .suffix(".toml")
+                .tempfile_in(test_data_dir)
+                .expect("Failed to create temp config file");
+            fs::write(temp_config_file.path(), daemon_config.serialize_to_toml())
+                .expect("Failed to write daemon config to temporary file");
+
+            tracing::debug!(
+                "Using temporary config file at: {}",
+                temp_config_file.path().display()
+            );
+
+            // Load configuration and create necessary components
+            let config = Arc::new(
+                Config::load(temp_config_file.path(), false, None, false)
+                    .await
+                    .expect("Failed to load config"),
+            );
+            let metadata_db = temp_db.metadata_db().clone();
+            let dataset_store = DatasetStore::new(config.clone(), temp_db.metadata_db().clone());
+
+            // Run blessing procedure
+            bless(
+                config,
+                metadata_db,
+                dataset_store,
+                dataset_name.clone(),
+                end_block,
+            )
+            .await
+            .expect("Failed to bless dataset");
+
+            eprintln!("✅ Successfully blessed dataset '{dataset_name}' up to block {end_block}");
         }
     }
+}
+
+/// Create a blessed dataset snapshot for testing.
+///
+/// This function implements the core blessing workflow that creates reproducible
+/// dataset snapshots for use in integration tests. The process ensures data
+/// consistency and validates integrity through multiple steps.
+///
+/// # Workflow
+///
+/// 1. **Dependency Resolution**: Resolves all dataset dependencies and restores them
+///    from existing snapshots to ensure a complete dependency chain.
+///
+/// 2. **Data Cleanup**: Removes any existing data for the target dataset to ensure
+///    a clean state before dumping fresh data.
+///
+/// 3. **Data Extraction**: Dumps data from the dataset source up to the specified
+///    end block using single-threaded processing for deterministic output.
+///
+/// 4. **Validation**: Runs comprehensive consistency checks on all dumped tables
+///    to ensure data integrity and correctness.
+///
+/// # Error Handling
+///
+/// The function provides detailed error messages for troubleshooting:
+/// - Dependency resolution failures
+/// - Data cleanup errors
+/// - Dump operation failures
+/// - Consistency check failures
+///
+/// All errors include context about the specific dataset and operation that failed.
+async fn bless(
+    config: Arc<Config>,
+    metadata_db: MetadataDb,
+    dataset_store: Arc<DatasetStore>,
+    dataset_name: String,
+    end: u64,
+) -> Result<(), BoxError> {
+    // Resolve dataset dependencies and restore them first
+    tracing::debug!(dataset=%dataset_name, "Resolving dataset dependencies");
+    let deps = {
+        let mut ds_and_deps = datasets_and_dependencies(&dataset_store, vec![dataset_name.clone()])
+            .await
+            .map_err(|err| {
+                format!(
+                    "Failed to resolve dependencies for dataset '{}': {}",
+                    dataset_name, err
+                )
+            })?;
+
+        // Remove the dataset itself from the list, leaving only dependencies
+        if ds_and_deps.pop() != Some(dataset_name.clone()) {
+            return Err(format!(
+                "Dataset '{}' not found in resolved dependencies list",
+                dataset_name
+            )
+            .into());
+        }
+
+        ds_and_deps
+    };
+
+    tracing::debug!(dataset=%dataset_name, ?deps, "Restoring dataset dependencies");
+    for dep in deps {
+        test_helpers::restore_dataset_snapshot(&config, &metadata_db, &dataset_store, &dep)
+            .await
+            .map_err(|err| {
+                format!(
+                    "Failed to restore dependency '{}' for dataset '{}': {}",
+                    dep, dataset_name, err
+                )
+            })?;
+    }
+
+    // Clear existing dataset data if it exists
+    let store = config.data_store.prefixed_store();
+    let path = object_store::path::Path::parse(&dataset_name)
+        .map_err(|err| format!("Invalid dataset name '{}': {}", dataset_name, err))?;
+
+    // Check if dataset exists using head operation
+    match store.head(&path).await {
+        Ok(_) => {
+            tracing::debug!(dataset=%dataset_name, "Dataset exists, clearing existing data");
+            let path_stream = store.list(Some(&path)).map_ok(|obj| obj.location).boxed();
+            store
+                .delete_stream(path_stream)
+                .try_collect::<Vec<_>>()
+                .await
+                .map_err(|err| {
+                    format!(
+                        "Failed to clear existing data for dataset '{}': {}",
+                        dataset_name, err
+                    )
+                })?;
+        }
+        Err(_) => {
+            tracing::debug!(dataset=%dataset_name, "No existing data found, skipping cleanup");
+        }
+    }
+
+    // Dump the dataset
+    tracing::debug!(dataset=%dataset_name, end_block=end, "Dumping dataset");
+    let physical_tables = dump(
+        config,
+        metadata_db,
+        vec![dataset_name.clone()],
+        true,                     // force_reprocess
+        Some(end as i64),         // end_block
+        BLESS_JOB_COUNT,          // n_jobs
+        PARTITION_SIZE_MB as u64, // partition_size_mb
+        None,                     // start_block
+        None,                     // microbatch_max_interval
+        None,                     // microbatch_max_rows
+        false,                    // skip_consistency_check
+        None,                     // target_revision
+        false,                    // track_progress
+    )
+    .await
+    .map_err(|err| {
+        format!(
+            "Failed to dump dataset '{}' to block {}: {}",
+            dataset_name, end, err
+        )
+    })?;
+
+    // Run consistency check on all tables after dump
+    tracing::debug!(dataset=%dataset_name, "Running consistency checks on dumped tables");
+    for physical_table in physical_tables {
+        consistency_check(&physical_table).await.map_err(|err| {
+            format!(
+                "Consistency check failed for dataset '{}': {}",
+                dataset_name, err
+            )
+        })?;
+    }
+
+    Ok(())
+}
+
+/// Resolve test data directory from known standard locations.
+///
+/// This function searches for the test data directory in a predefined list of
+/// standard locations, returning the canonicalized absolute path to the first
+/// directory that exists and is accessible.
+///
+/// # Search Locations
+///
+/// The function searches in the following order:
+/// 1. `tests/data` - Standard location when running from workspace root
+/// 2. `data` - Fallback location when running from the tests crate directory
+///
+/// # Returns
+///
+/// Returns the canonicalized absolute path to the test data directory if found,
+/// or an error with helpful guidance if no valid directory is located.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - None of the standard locations exist
+/// - The found directory is not accessible
+/// - Path canonicalization fails
+///
+/// The error message includes the searched locations and usage instructions.
+///
+/// # Usage Context
+///
+/// This function ensures the CLI works correctly regardless of whether it's
+/// executed from:
+/// - The workspace root: `cargo run -p tests`
+/// - The tests crate directory: `cargo run`
+fn resolve_test_data_dir() -> Result<PathBuf, BoxError> {
+    const TEST_DATA_BASE_DIRS: [&str; 2] = ["tests/data", "data"];
+    TEST_DATA_BASE_DIRS
+        .iter()
+        .filter_map(|dir| std::path::Path::new(dir).canonicalize().ok())
+        .find(|path| path.exists() && path.is_dir())
+        .ok_or_else(|| -> BoxError {
+            format!(
+                "Couldn't find test data directory in locations: {:?}. \
+                The `cargo run -p tests` command must be run from the workspace root or the tests crate root",
+                TEST_DATA_BASE_DIRS
+            )
+            .into()
+        })
 }
