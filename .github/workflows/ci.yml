@@ -224,3 +224,36 @@ jobs:
       - name: Run tests
         working-directory: typescript
         run: pnpm test
+
+  # Check generated code is up to date
+  gen-check:
+    runs-on: namespace-profile-default
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
+
+      - uses: actions-rust-lang/setup-rust-toolchain@2fcdc490d667999e01ddbbf0f2823181beef6b39 # v1
+        with:
+          cache: false
+          rustflags: ""
+
+      - name: Setup just
+        uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v3
+
+      - name: Run code generation
+        run: just gen
+
+      - name: Check for uncommitted changes
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "❌ Generated code is out of date. Please run 'just gen' and commit the changes."
+            git status --porcelain
+            git diff
+            exit 1
+          else
+            echo "✅ Generated code is up to date."
+          fi
