@@ -52,12 +52,11 @@ pub fn propagate_block_num(plan: LogicalPlan) -> Result<LogicalPlan, DataFusionE
                 // add that column, but we do have to ensure that the `SPECIAL_BLOCK_NUM` is not
                 // qualified with a table name (since it does not necessarily belong to a table).
                 for expr in projection.expr.iter_mut() {
-                    if let Expr::Column(c) = expr {
-                        if c.name() == SPECIAL_BLOCK_NUM {
-                            // Unqualify the column.
-                            c.relation = None;
-                            return Ok(Transformed::yes(LogicalPlan::Projection(projection)));
-                        }
+                    if let Expr::Column(c) = expr
+                        && c.name == SPECIAL_BLOCK_NUM
+                    {
+                        *expr = expr.clone().alias(SPECIAL_BLOCK_NUM);
+                        return Ok(Transformed::yes(LogicalPlan::Projection(projection)));
                     }
                 }
 
@@ -233,4 +232,144 @@ pub fn order_by_block_num(plan: LogicalPlan) -> LogicalPlan {
         fetch: None,
     };
     LogicalPlan::Sort(sort)
+}
+
+#[cfg(test)]
+mod tests {
+    use datafusion::{
+        arrow::{
+            array,
+            datatypes::{DataType, Field, Schema},
+        },
+        common::Column,
+        datasource::{MemTable, provider_as_source},
+        logical_expr::{JoinType, LogicalPlanBuilder},
+    };
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_propagate_block_num_with_qualified_wildcard() {
+        // Create two tables that both contain SPECIAL_BLOCK_NUM columns
+        let foo_schema = Arc::new(Schema::new(vec![
+            Field::new("id", DataType::Int32, false),
+            Field::new(SPECIAL_BLOCK_NUM, DataType::UInt64, false),
+            Field::new("foo_value", DataType::Utf8, false),
+        ]));
+
+        let bar_schema = Arc::new(Schema::new(vec![
+            Field::new("id", DataType::Int32, false),
+            Field::new(SPECIAL_BLOCK_NUM, DataType::UInt64, false),
+            Field::new("bar_value", DataType::Utf8, false),
+        ]));
+
+        let ids = array::Int32Array::from(vec![1, 2, 3]);
+        let foo_values = array::StringArray::from(vec!["foo1", "foo2", "foo3"]);
+        let bar_values = array::StringArray::from(vec!["bar1", "bar2", "bar3"]);
+        let block_nums = array::UInt64Array::from(vec![10, 20, 30]);
+        let foo_batch = datafusion::arrow::record_batch::RecordBatch::try_new(
+            foo_schema.clone(),
+            vec![
+                Arc::new(ids.clone()),
+                Arc::new(block_nums.clone()),
+                Arc::new(foo_values),
+            ],
+        )
+        .unwrap();
+        let bar_batch = datafusion::arrow::record_batch::RecordBatch::try_new(
+            bar_schema.clone(),
+            vec![Arc::new(ids), Arc::new(block_nums), Arc::new(bar_values)],
+        )
+        .unwrap();
+
+        // Create memory tables
+        let foo_table = MemTable::try_new(foo_schema.clone(), vec![vec![foo_batch]]).unwrap();
+        let bar_table = MemTable::try_new(bar_schema.clone(), vec![vec![bar_batch]]).unwrap();
+
+        // Build a logical plan with `SELECT foo.* FROM foo JOIN bar ON foo.id = bar.id`
+        let foo_scan =
+            LogicalPlanBuilder::scan("foo", provider_as_source(Arc::new(foo_table)), None)
+                .unwrap()
+                .build()
+                .unwrap();
+
+        let bar_scan =
+            LogicalPlanBuilder::scan("bar", provider_as_source(Arc::new(bar_table)), None)
+                .unwrap()
+                .build()
+                .unwrap();
+
+        // Create a join
+        let join_plan = LogicalPlanBuilder::from(foo_scan)
+            .join(
+                bar_scan,
+                JoinType::Inner,
+                (
+                    vec![Column::from_qualified_name("foo.id")],
+                    vec![Column::from_qualified_name("bar.id")],
+                ),
+                None,
+            )
+            .unwrap()
+            .build()
+            .unwrap();
+
+        // Project foo.* (which includes foo._block_num)
+        let projection_plan = LogicalPlanBuilder::from(join_plan)
+            .project(vec![
+                col("foo.id"),
+                col(format!("foo.{}", SPECIAL_BLOCK_NUM)),
+                col("foo.foo_value"),
+            ])
+            .unwrap()
+            .build()
+            .unwrap();
+
+        // Apply propagate_block_num - this should handle the qualified column correctly
+        let result = propagate_block_num(projection_plan);
+
+        assert!(
+            result.is_ok(),
+            "propagate_block_num should succeed with qualified SPECIAL_BLOCK_NUM column"
+        );
+
+        let transformed_plan = result.unwrap();
+
+        // Check that the plan was transformed (should be a Projection)
+        match &transformed_plan {
+            LogicalPlan::Projection(projection) => {
+                // The first expression should be the aliased SPECIAL_BLOCK_NUM
+                assert!(projection.expr.len() == 3, "Should have exactly 3 columns");
+
+                // Check if the qualified column was properly aliased
+                if let Expr::Alias(alias) = &projection.expr[1] {
+                    assert_eq!(alias.name, SPECIAL_BLOCK_NUM, "Should alias to _block_num");
+                    if let Expr::Column(c) = alias.expr.as_ref() {
+                        assert_eq!(
+                            c.name, SPECIAL_BLOCK_NUM,
+                            "Should reference SPECIAL_BLOCK_NUM (_block_num) column"
+                        );
+                        assert_eq!(
+                            c.relation.as_ref().unwrap().table(),
+                            "foo",
+                            "Should retain the 'foo' qualifier"
+                        );
+                    }
+                } else {
+                    panic!("Expected an aliased expression for qualified _block_num column");
+                }
+            }
+            _ => panic!("Expected a Projection plan after propagate_block_num"),
+        }
+
+        // Check the schema to ensure SPECIAL_BLOCK_NUM is present and correctly aliased
+        let schema = transformed_plan.schema();
+        assert!(
+            schema
+                .fields()
+                .iter()
+                .any(|f| f.name() == SPECIAL_BLOCK_NUM),
+            "Schema should contain the SPECIAL_BLOCK_NUM field"
+        );
+    }
 }

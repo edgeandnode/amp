@@ -3,11 +3,6 @@ name = "substreams-datasets"
 edition.workspace = true
 version.workspace = true
 
-[features]
-# Enable protobuf code generation during build process. When enabled, the build script
-# will generate Rust bindings from .proto files using prost and tonic for Substreams protocol support
-gen-proto = ["dep:prost-build", "dep:tonic-build"]
-
 [dependencies]
 anyhow.workspace = true
 async-stream.workspace = true
@@ -19,7 +14,7 @@ futures.workspace = true
 prost.workspace = true
 prost-reflect = "0.15.0"
 reqwest.workspace = true
-schemars.workspace = true
+schemars = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
@@ -31,6 +26,12 @@ tracing.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 
-[build-dependencies]
-prost-build = { workspace = true, optional = true }
-tonic-build = { workspace = true, optional = true }
+# Protobuf code generation dependencies (see README.md "Protobuf Code Generation" section)
+# These dependencies are only included when the gen_proto cfg flag is enabled
+[target.'cfg(gen_proto)'.build-dependencies]
+prost-build = { workspace = true }
+tonic-build = { workspace = true }
+
+[lints.rust]
+# Allow the gen_proto cfg flag used for conditional protobuf code generation
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(gen_proto)'] }

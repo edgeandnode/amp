@@ -14,9 +14,9 @@ admin-api = { path = "../crates/services/admin-api" }
 alloy.workspace = true
 arrow-flight.workspace = true
 clap.workspace = true
-common = { path = "../crates/core/common", features = ["schemars"] }
+common = { path = "../crates/core/common" }
 dataset-store = { path = "../crates/core/dataset-store" }
-datasets-common = { path = "../crates/core/datasets-common", features = ["schemars"] }
+datasets-common = { path = "../crates/core/datasets-common" }
 dotenvy.workspace = true
 dump = { path = "../crates/core/dump" }
 dump-check = { path = "../crates/bin/dump-check" }
@@ -35,7 +35,6 @@ object_store.workspace = true
 pretty_assertions.workspace = true
 rand.workspace = true
 reqwest.workspace = true
-schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true
