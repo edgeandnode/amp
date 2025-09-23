@@ -1,7 +1,7 @@
 use std::{str::FromStr, time::Duration};
 
 use async_stream::stream;
-use common::{BlockNum, BlockStreamer, BoxError, DatasetValue, RawDatasetRows, Table};
+use common::{BlockNum, BlockStreamer, BoxError, RawDatasetRows, Table};
 use firehose_datasets::{Error, client::AuthInterceptor};
 use futures::{Stream, StreamExt as _, TryStreamExt as _};
 use pbsubstreams::{Request as StreamRequest, response::Message, stream_client::StreamClient};
@@ -59,13 +59,13 @@ impl Package {
 impl Client {
     pub async fn new(
         provider: toml::Value,
-        dataset: DatasetValue,
+        dataset: serde_json::Value,
         network: String,
         provider_name: String,
         final_blocks_only: bool,
     ) -> Result<Self, Error> {
         let provider: SubstreamsProvider = provider.try_into()?;
-        let dataset_def: DatasetDef = DatasetDef::from_value(dataset)?;
+        let dataset_def: DatasetDef = serde_json::from_value(dataset)?;
 
         let stream_client = {
             let uri = Uri::from_str(&provider.url)?;

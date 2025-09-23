@@ -274,11 +274,6 @@ impl<T: BlockStreamer + Send + Sync> BlockStreamer for BlockStreamerWithRetry<T>
     }
 }
 
-pub enum DatasetValue {
-    Toml(toml::Value),
-    Json(serde_json::Value),
-}
-
 pub fn block_range_intersection(
     a: RangeInclusive<BlockNum>,
     b: RangeInclusive<BlockNum>,

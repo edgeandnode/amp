@@ -7,8 +7,8 @@ use std::{
 
 use async_stream::stream;
 use common::{
-    BlockNum, BlockStreamer, BlockStreamerExt, BoxError, Dataset, DatasetValue, LogicalCatalog,
-    PlanningContext, RawDatasetRows, Store,
+    BlockNum, BlockStreamer, BlockStreamerExt, BoxError, Dataset, LogicalCatalog, PlanningContext,
+    RawDatasetRows, Store,
     catalog::physical::{Catalog, PhysicalTable},
     config::Config,
     evm::{self, udfs::EthCall},
@@ -254,33 +254,16 @@ impl DatasetStore {
     async fn common_data_and_dataset(
         &self,
         dataset_name: &str,
-    ) -> Result<(CommonManifest, DatasetSrc), Error> {
-        use Error::*;
+    ) -> Result<(CommonManifest, String), Error> {
         let dataset_src = self
             .dataset_defs_store
-            .get_string(format!("{}.toml", dataset_name))
-            .map_ok(DatasetSrc::Toml)
-            .or_else(|err| async move {
-                if !err.is_not_found() {
-                    return Err(err);
-                }
-                self.dataset_defs_store
-                    .get_string(format!("{}.json", dataset_name))
-                    .await
-                    .map(DatasetSrc::Json)
-            })
+            .get_string(format!("{}.json", dataset_name))
             .await?;
 
-        let common: CommonManifest = match &dataset_src {
-            DatasetSrc::Toml(src) => {
-                tracing::warn!("TOML dataset format is deprecated!");
-                toml::from_str::<CommonManifest>(src)?
-            }
-            DatasetSrc::Json(src) => serde_json::from_str::<CommonManifest>(src)?,
-        };
+        let common: CommonManifest = serde_json::from_str::<CommonManifest>(&dataset_src)?;
 
         if common.name != dataset_name && common.kind != "manifest" {
-            return Err(NameMismatch(
+            return Err(Error::NameMismatch(
                 common.name.to_string(),
                 dataset_name.to_string(),
             ));
@@ -312,7 +295,8 @@ impl DatasetStore {
 
         let (common, dataset_src) = self.common_data_and_dataset(dataset_identifier).await?;
         let kind = DatasetKind::from_str(&common.kind)?;
-        let value = dataset_src.to_value()?;
+        let value = serde_json::from_str(&dataset_src)?;
+
         let (dataset, ground_truth_schema) = match kind {
             DatasetKind::EvmRpc => {
                 let builtin_schema =
@@ -342,7 +326,7 @@ impl DatasetStore {
                 (store_dataset, None)
             }
             DatasetKind::Manifest => {
-                let manifest = dataset_src.to_manifest()?;
+                let manifest = serde_json::from_str(&dataset_src).map_err(Error::ManifestError)?;
                 let dataset = manifest::derived::dataset(manifest).map_err(Error::Unknown)?;
                 (dataset, None)
             }
@@ -378,8 +362,7 @@ impl DatasetStore {
             return Err(Error::UnsupportedKind(kind.to_string()));
         }
 
-        let value = raw_dataset.to_value()?;
-
+        let value = serde_json::from_str(&raw_dataset)?;
         self.sql_dataset(value).await
     }
 
@@ -401,7 +384,7 @@ impl DatasetStore {
         only_finalized_blocks: bool,
     ) -> Result<BlockStreamClient, Error> {
         let (common, raw_dataset) = self.common_data_and_dataset(dataset_name).await?;
-        let value = raw_dataset.to_value()?;
+        let value = serde_json::from_str(&raw_dataset)?;
         let kind = DatasetKind::from_str(&common.kind)?;
 
         let Some((provider_name, provider)) =
@@ -690,37 +673,11 @@ impl DatasetStore {
     /// Each `.sql` file in the directory with the same name as the dataset will be loaded as a table.
     fn sql_dataset(
         self: Arc<Self>,
-        dataset_def: DatasetValue,
+        dataset_def: serde_json::Value,
     ) -> BoxFuture<'static, Result<SqlDataset, Error>> {
         sql_datasets::dataset(self, dataset_def)
             .map_err(Error::SqlDatasetError)
             .boxed()
-    }
-}
-
-/// Represents a dataset definition source text, either in TOML or JSON format.
-enum DatasetSrc {
-    Toml(String),
-    Json(String),
-}
-
-impl DatasetSrc {
-    pub fn to_manifest(&self) -> Result<Manifest, Error> {
-        let manifest = match self {
-            DatasetSrc::Toml(src) => toml::from_str(src)?,
-            DatasetSrc::Json(src) => serde_json::from_str(src)?,
-        };
-
-        Ok(manifest)
-    }
-
-    fn to_value(&self) -> Result<DatasetValue, Error> {
-        let value = match self {
-            DatasetSrc::Toml(src) => DatasetValue::Toml(toml::Value::from_str(src)?),
-            DatasetSrc::Json(src) => DatasetValue::Json(serde_json::Value::from_str(src)?),
-        };
-
-        Ok(value)
     }
 }
 

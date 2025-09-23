@@ -21,9 +21,9 @@ use crate::DatasetStore;
 
 pub(super) async fn dataset(
     store: Arc<DatasetStore>,
-    dataset_def: common::DatasetValue,
+    dataset_def: serde_json::Value,
 ) -> Result<SqlDataset, BoxError> {
-    let def = Manifest::from_value(dataset_def)?;
+    let def: Manifest = serde_json::from_value(dataset_def)?;
     if def.kind != DATASET_KIND {
         return Err(format!("expected dataset kind '{DATASET_KIND}', got '{}'", def.kind).into());
     }

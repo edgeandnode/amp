@@ -5,9 +5,7 @@ use std::{num::NonZeroU32, path::PathBuf};
 
 use alloy::transports::http::reqwest::Url;
 pub use client::JsonRpcClient;
-use common::{BlockNum, BoxError, Dataset, DatasetValue, store::StoreError};
-use serde::Deserialize;
-use serde_with::serde_as;
+use common::{BlockNum, BoxError, Dataset, store::StoreError};
 
 pub const DATASET_KIND: &str = "evm-rpc";
 
@@ -23,7 +21,7 @@ pub enum Error {
     Json(#[from] serde_json::Error),
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, serde::Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct DatasetDef {
     /// Dataset kind, must be `evm-rpc`.
@@ -37,17 +35,8 @@ pub struct DatasetDef {
     pub start_block: BlockNum,
 }
 
-impl DatasetDef {
-    fn from_value(value: common::DatasetValue) -> Result<Self, Error> {
-        match value {
-            DatasetValue::Toml(value) => value.try_into().map_err(From::from),
-            DatasetValue::Json(value) => serde_json::from_value(value).map_err(From::from),
-        }
-    }
-}
-
-#[serde_as]
-#[derive(Debug, Deserialize)]
+#[serde_with::serde_as]
+#[derive(Debug, serde::Deserialize)]
 pub(crate) struct EvmRpcProvider {
     #[serde_as(as = "serde_with::DisplayFromStr")]
     pub url: Url,
@@ -66,8 +55,8 @@ fn default_rpc_batch_size() -> usize {
     100
 }
 
-pub fn dataset(dataset_cfg: common::DatasetValue) -> Result<Dataset, Error> {
-    let def = DatasetDef::from_value(dataset_cfg)?;
+pub fn dataset(dataset_cfg: serde_json::Value) -> Result<Dataset, Error> {
+    let def: DatasetDef = serde_json::from_value(dataset_cfg)?;
     Ok(Dataset {
         kind: def.kind,
         name: def.name,

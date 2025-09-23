@@ -31,15 +31,6 @@ pub struct DatasetDef {
     pub start_block: BlockNum,
 }
 
-impl DatasetDef {
-    fn from_value(value: common::DatasetValue) -> Result<Self, Error> {
-        match value {
-            common::DatasetValue::Toml(value) => value.try_into().map_err(From::from),
-            common::DatasetValue::Json(value) => serde_json::from_value(value).map_err(From::from),
-        }
-    }
-}
-
 #[serde_with::serde_as]
 #[derive(Debug, serde::Deserialize)]
 pub(crate) struct EthBeaconProvider {
@@ -49,8 +40,8 @@ pub(crate) struct EthBeaconProvider {
     pub rate_limit_per_minute: Option<NonZeroU32>,
 }
 
-pub fn dataset(dataset_cfg: common::DatasetValue) -> Result<common::Dataset, Error> {
-    let def = DatasetDef::from_value(dataset_cfg)?;
+pub fn dataset(dataset_cfg: serde_json::Value) -> Result<common::Dataset, Error> {
+    let def: DatasetDef = serde_json::from_value(dataset_cfg)?;
     Ok(common::Dataset {
         kind: def.kind,
         name: def.name,
