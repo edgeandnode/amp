@@ -2011,6 +2011,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "common-gen"
+version = "0.0.0"
+dependencies = [
+ "common",
+ "schemars 1.0.4",
+ "serde_json",
+]
+
+[[package]]
 name = "concurrent-queue"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3066,6 +3075,42 @@ dependencies = [
  "semver 1.0.26",
  "serde",
  "thiserror",
+]
+
+[[package]]
+name = "datasets-common-gen"
+version = "0.0.0"
+dependencies = [
+ "datasets-common",
+ "schemars 1.0.4",
+ "serde_json",
+]
+
+[[package]]
+name = "datasets-evm-rpc-gen"
+version = "0.0.0"
+dependencies = [
+ "evm-rpc-datasets",
+ "schemars 1.0.4",
+ "serde_json",
+]
+
+[[package]]
+name = "datasets-firehose-gen"
+version = "0.0.0"
+dependencies = [
+ "firehose-datasets",
+ "schemars 1.0.4",
+ "serde_json",
+]
+
+[[package]]
+name = "datasets-substreams-gen"
+version = "0.0.0"
+dependencies = [
+ "schemars 1.0.4",
+ "serde_json",
+ "substreams-datasets",
 ]
 
 [[package]]
@@ -7410,7 +7455,6 @@ dependencies = [
  "pretty_assertions",
  "rand 0.9.2",
  "reqwest",
- "schemars 1.0.4",
  "serde",
  "serde_json",
  "serde_yaml",
