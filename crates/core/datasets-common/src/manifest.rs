@@ -77,7 +77,7 @@ impl Default for Schema {
 #[cfg_attr(feature = "schemars", schemars(transparent))]
 #[cfg_attr(
     feature = "schemars",
-    schemars(description = "Arrow data type, e.g., `Int32`, `Utf8`, etc.")
+    schemars(description = "Arrow data type, e.g. `Int32`, `Utf8`, etc.")
 )]
 pub struct DataType(#[cfg_attr(feature = "schemars", schemars(with = "String"))] pub ArrowDataType);
 
