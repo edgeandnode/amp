@@ -1,7 +1,13 @@
+//! Flight client fixture for test environments.
+//!
+//! This fixture provides a FlightClient for connecting to and querying Nozzle servers
+//! via the Arrow Flight SQL protocol. It handles streaming responses and provides
+//! convenient methods for running SQL queries and managing query streams.
+
 use std::{collections::BTreeMap, sync::Arc};
 
 use arrow_flight::{
-    decode::FlightRecordBatchStream, flight_service_client::FlightServiceClient,
+    FlightData, decode::FlightRecordBatchStream, flight_service_client::FlightServiceClient,
     sql::client::FlightSqlServiceClient,
 };
 use common::{
@@ -12,36 +18,49 @@ use common::{
     },
 };
 use futures::stream::StreamExt;
+use tokio::sync::mpsc;
 use tonic::transport::Channel;
 
-use crate::test_support::TestEnv;
-
-pub(crate) struct TestClient {
+/// Flight client fixture for connecting to Nozzle servers via Arrow Flight SQL.
+///
+/// This fixture wraps a FlightSqlServiceClient and provides convenient methods for
+/// running SQL queries and managing streaming responses. It connects to the Flight
+/// server endpoint provided by a DaemonServer fixture.
+pub struct FlightClient {
     client: FlightSqlServiceClient<Channel>,
     streams: BTreeMap<String, ResponseStream>,
 }
 
-impl TestClient {
-    pub async fn connect(test_env: &TestEnv) -> Result<Self, BoxError> {
-        let addr = format!("grpc://{}", test_env.server_addrs.flight_addr);
-        let flight_client = FlightServiceClient::connect(addr).await?;
+impl FlightClient {
+    /// Create a new Flight client connected to the provided Flight server URL.
+    pub async fn new(url: impl Into<String>) -> Result<Self, BoxError> {
+        let flight_client = FlightServiceClient::connect(url.into()).await?;
         let client = FlightSqlServiceClient::new_from_inner(flight_client);
+
         Ok(Self {
             client,
-            streams: BTreeMap::new(),
+            streams: Default::default(),
         })
     }
 
+    /// Execute a SQL query and return the results as JSON.
     pub async fn run_query(
         &mut self,
         query: &str,
-        take: Option<usize>,
+        take: impl Into<Option<usize>>,
     ) -> Result<serde_json::Value, BoxError> {
+        let take = take.into();
+
         tracing::debug!("Running query: {query}, take: {take:?}");
         let mut info = self.client.execute(query.to_string(), None).await?;
         let mut batches = self
             .client
-            .do_get(info.endpoint[0].ticket.take().unwrap())
+            .do_get(
+                info.endpoint[0]
+                    .ticket
+                    .take()
+                    .expect("Flight query should return ticket"),
+            )
             .await?;
 
         let mut buf = Vec::new();
@@ -68,15 +87,23 @@ impl TestClient {
         }
 
         writer.finish()?;
+
         Ok(serde_json::from_slice(&buf)?)
     }
 
+    /// Register a streaming query with the given name.
     pub async fn register_stream(&mut self, name: &str, query: &str) -> Result<(), BoxError> {
         let mut info = self.client.execute(query.to_string(), None).await?;
-        let schema = arrow_ipc::convert::try_schema_from_ipc_buffer(&info.schema).unwrap();
+        let schema = arrow_ipc::convert::try_schema_from_ipc_buffer(&info.schema)
+            .expect("Flight query should return valid schema");
         let stream = self
             .client
-            .do_get(info.endpoint[0].ticket.take().unwrap())
+            .do_get(
+                info.endpoint[0]
+                    .ticket
+                    .take()
+                    .expect("Flight query should return ticket"),
+            )
             .await?;
         self.streams.insert(
             name.to_string(),
@@ -85,6 +112,7 @@ impl TestClient {
         Ok(())
     }
 
+    /// Take a specified number of rows from a registered stream.
     pub async fn take_from_stream(
         &mut self,
         name: &str,
@@ -93,22 +121,71 @@ impl TestClient {
         let Some(stream) = self.streams.get_mut(name) else {
             return Err(Box::from(format!("Stream \"{name}\" not found")));
         };
+
         let mut buf = Vec::new();
-        let mut writer = common::arrow::json::ArrayWriter::new(&mut buf);
+        let mut writer = ArrayWriter::new(&mut buf);
         let batch = stream.take(n).await?;
         writer.write(&batch)?;
         writer.finish()?;
         Ok(serde_json::from_slice(&buf)?)
     }
+
+    /// Execute a query and return a channel of raw FlightData messages for metadata extraction.
+    ///
+    /// This method provides access to the raw FlightData stream, including app_metadata fields
+    /// that contain block range metadata. The returned receiver will receive all FlightData
+    /// messages from the query execution.
+    pub async fn execute_with_metadata_stream(
+        &mut self,
+        query: &str,
+    ) -> Result<mpsc::UnboundedReceiver<FlightData>, BoxError> {
+        tracing::debug!("Starting metadata stream for query: {query}");
+
+        let info = self.client.execute(query.to_string(), None).await?;
+        let ticket = info.endpoint[0]
+            .ticket
+            .clone()
+            .expect("Flight query should return ticket");
+
+        let response = self.client.inner_mut().do_get(ticket).await?;
+        let mut flight_data_stream = response.into_inner();
+
+        let (tx, rx) = mpsc::unbounded_channel();
+
+        tokio::spawn(async move {
+            while let Some(result) = flight_data_stream.next().await {
+                match result {
+                    Ok(flight_data) => {
+                        if tx.send(flight_data).is_err() {
+                            // Receiver has been dropped, exit the task
+                            break;
+                        }
+                    }
+                    Err(err) => {
+                        tracing::warn!("Error in flight data stream: {}", err);
+                        break;
+                    }
+                }
+            }
+            tracing::debug!("Flight data stream task completed");
+        });
+
+        Ok(rx)
+    }
 }
 
-pub(crate) struct ResponseStream {
+/// Streaming response handler for Arrow Flight queries.
+///
+/// This struct manages a streaming Flight response and provides methods to
+/// incrementally consume batches of data while maintaining state across calls.
+pub struct ResponseStream {
     stream: FlightRecordBatchStream,
     current_batch: RecordBatch,
 }
 
 impl ResponseStream {
-    pub fn new(stream: FlightRecordBatchStream, schema: SchemaRef) -> Self {
+    /// Create a new response stream wrapper.
+    fn new(stream: FlightRecordBatchStream, schema: SchemaRef) -> Self {
         let current_batch = RecordBatch::new_empty(schema);
         Self {
             stream,
@@ -116,12 +193,12 @@ impl ResponseStream {
         }
     }
 
-    /// Return the first `n` rows, advancing the cursor.
+    /// Take the first `n` rows from the stream, advancing the cursor.
     pub async fn take(&mut self, mut n: usize) -> Result<RecordBatch, BoxError> {
         let schema = self.current_batch.schema();
         let mut out_batches = Vec::new();
 
-        // ── 1. Drain from the buffer we already hold ──────────────────────────────
+        // Drain from the buffer we already hold
         if self.current_batch.num_rows() > 0 {
             if self.current_batch.num_rows() >= n {
                 let slice = self.current_batch.slice(0, n);
@@ -135,7 +212,7 @@ impl ResponseStream {
             self.current_batch = RecordBatch::new_empty(schema.clone());
         }
 
-        // ── 2. Pull more batches until we have ≥ n rows ───────────────────────────
+        // Pull more batches until we have ≥ n rows
         while n > 0 {
             match self.stream.next().await {
                 Some(Ok(batch)) => {
@@ -148,12 +225,12 @@ impl ResponseStream {
                     n -= batch.num_rows();
                     out_batches.push(batch);
                 }
-                Some(Err(e)) => return Err(e.into()),
+                Some(Err(err)) => return Err(err.into()),
                 None => break, // stream ended early
             }
         }
 
-        // ── 3. Stitch together what we collected ─────────────────────────────────
+        // Stitch together what we collected
         Ok(match out_batches.len() {
             0 => RecordBatch::new_empty(schema),
             1 => out_batches.remove(0),

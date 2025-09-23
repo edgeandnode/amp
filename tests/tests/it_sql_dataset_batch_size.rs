@@ -1,0 +1,186 @@
+use std::{sync::Arc, time::Duration};
+
+use common::{BoxError, catalog::physical::PhysicalTable};
+use dataset_store::DatasetStore;
+use dump::{
+    compaction::{
+        NozzleCompactorTaskType, SegmentSizeLimit, collector::Collector, compactor::Compactor,
+    },
+    compaction_opts, parquet_opts,
+};
+use futures::StreamExt;
+use monitoring::logging;
+use tests::testlib::{self, helpers as test_helpers};
+
+#[tokio::test]
+async fn sql_dataset_input_batch_size() {
+    let test = TestCtx::setup("sql_dataset_input_batch_size").await;
+
+    // 2. First dump eth_firehose dependency on the spot
+    let start = test
+        .dataset_store()
+        .load_dataset("eth_firehose", None)
+        .await
+        .unwrap()
+        .start_block
+        .unwrap();
+    let end = start + 3;
+
+    test.dump_dataset("eth_firehose", end, 1, None).await;
+
+    // 3. Execute dump of sql_stream_ds with microbatch_max_interval=1
+    let dataset_name = "sql_stream_ds";
+
+    test.dump_dataset(dataset_name, end, 1, Some(1)).await;
+
+    // 4. Get catalog and count files
+    let catalog = test.catalog_for_dataset(dataset_name).await.unwrap();
+
+    // Find the even_blocks table
+    let table = catalog
+        .tables()
+        .iter()
+        .find(|t| t.table_name() == "even_blocks")
+        .unwrap();
+
+    let file_count = table.files().await.unwrap().len();
+
+    // 5. With batch size 1 and 4 blocks, we expect 4 files to be dumped (even if some are empty)
+    // since microbatch_max_interval=1 should create one file per block even_blocks only includes
+    // even block numbers, so we expect 2 files with data for blocks 15000000 and 15000002, plus
+    // empty files for odd blocks.
+    assert_eq!(file_count, 4);
+
+    test.spawn_compaction_and_await_completion(table).await;
+
+    // 6. After compaction, we expect an additional file to be created, with all data in it.
+    let file_count_after = table.files().await.unwrap().len();
+    assert_eq!(file_count_after, 5);
+
+    test.spawn_collection_and_await_completion(table).await;
+    // 7. After collection, we expect the original 4 files to be deleted,
+    // leaving only the compacted file.
+    let file_count_final = table
+        .object_store()
+        .list(Some(table.path()))
+        .collect::<Vec<_>>()
+        .await
+        .len();
+    assert_eq!(file_count_final, 1);
+
+    let mut test_client = test.new_flight_client().await.unwrap();
+    let res = test_client
+        .run_query("select count(*) from sql_stream_ds.even_blocks", None)
+        .await
+        .unwrap();
+    assert_eq!(res, serde_json::json!([{"count(*)": 2}]));
+}
+
+/// Test context wrapper for SQL dataset batch size testing.
+///
+/// This provides convenience methods for testing dataset dumping, compaction,
+/// and collection workflows with specific batch size configurations.
+struct TestCtx {
+    ctx: testlib::ctx::TestCtx,
+}
+
+impl TestCtx {
+    /// Set up a new test context for SQL dataset batch size testing.
+    async fn setup(test_name: &str) -> Self {
+        logging::init();
+
+        let ctx = testlib::ctx::TestCtxBuilder::new(test_name)
+            .with_provider_config("firehose_eth_mainnet")
+            .with_dataset_manifests(["eth_firehose", "sql_stream_ds"])
+            .with_sql_dataset_files([
+                "sql_stream_ds/even_blocks",
+                "sql_stream_ds/even_blocks_hashes_only",
+            ])
+            .build()
+            .await
+            .expect("Failed to create test context");
+
+        Self { ctx }
+    }
+
+    /// Get reference to the dataset store.
+    fn dataset_store(&self) -> &Arc<DatasetStore> {
+        self.ctx.daemon_server().dataset_store()
+    }
+
+    /// Create a new Flight client for this test context.
+    async fn new_flight_client(&self) -> Result<testlib::fixtures::FlightClient, BoxError> {
+        self.ctx.new_flight_client().await
+    }
+
+    /// Dump a dataset using testlib dump_dataset helper.
+    async fn dump_dataset(
+        &self,
+        dataset_name: &str,
+        end: u64,
+        n_jobs: u16,
+        microbatch_max_interval: impl Into<Option<u64>>,
+    ) {
+        test_helpers::dump_dataset(
+            self.ctx.daemon_server().config(),
+            self.ctx.metadata_db(),
+            dataset_name,
+            end,
+            n_jobs,
+            microbatch_max_interval,
+        )
+        .await
+        .expect("Failed to dump dataset");
+    }
+
+    /// Create a catalog for the specified dataset.
+    async fn catalog_for_dataset(
+        &self,
+        dataset_name: &str,
+    ) -> Result<common::catalog::physical::Catalog, BoxError> {
+        test_helpers::catalog_for_dataset(
+            dataset_name,
+            self.ctx.daemon_server().dataset_store(),
+            self.ctx.metadata_db(),
+        )
+        .await
+    }
+
+    /// Spawn compaction for a table and wait for completion.
+    async fn spawn_compaction_and_await_completion(&self, table: &Arc<PhysicalTable>) {
+        let config = self.ctx.daemon_server().config();
+        let length = table.files().await.unwrap().len();
+        let parquet_writer_props = parquet_opts(&config.parquet);
+        let mut opts = compaction_opts(&config.compaction, &parquet_writer_props);
+        opts.compactor_active = true;
+        opts.collector_active = false;
+        opts.file_lock_duration = Duration::from_millis(100);
+        opts.collector_interval = Duration::ZERO;
+        opts.compactor_interval = Duration::ZERO;
+        opts.size_limit = SegmentSizeLimit::new(1, 1, 1, length);
+        let mut task = Compactor::start(table, &Arc::new(opts));
+        task.join_current_then_spawn_new().await;
+        while !task.is_finished() {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+
+    /// Spawn collection for a table and wait for completion.
+    async fn spawn_collection_and_await_completion(&self, table: &Arc<PhysicalTable>) {
+        let config = self.ctx.daemon_server().config();
+        let length = table.files().await.unwrap().len();
+        let parquet_writer_props = parquet_opts(&config.parquet);
+        let mut opts = compaction_opts(&config.compaction, &parquet_writer_props);
+        opts.compactor_active = false;
+        opts.collector_active = true;
+        opts.file_lock_duration = Duration::ZERO;
+        opts.collector_interval = Duration::ZERO;
+        opts.compactor_interval = Duration::ZERO;
+        opts.size_limit = SegmentSizeLimit::new(1, 1, 1, length);
+        let mut task = Collector::start(table, &Arc::new(opts));
+        task.join_current_then_spawn_new().await;
+        while !task.is_finished() {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+}

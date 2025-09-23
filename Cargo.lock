@@ -7433,6 +7433,7 @@ dependencies = [
  "admin-api",
  "alloy",
  "arrow-flight",
+ "backon",
  "clap",
  "common",
  "dataset-store",
@@ -7447,6 +7448,7 @@ dependencies = [
  "futures",
  "generate-manifest",
  "hex",
+ "indoc",
  "metadata-db",
  "monitoring",
  "nozzle",
@@ -7461,6 +7463,7 @@ dependencies = [
  "substreams-datasets",
  "tempfile",
  "tokio",
+ "toml 0.8.23",
  "tonic 0.12.3",
  "tracing",
 ]
