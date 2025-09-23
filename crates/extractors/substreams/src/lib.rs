@@ -7,6 +7,8 @@ pub use dataset::DATASET_KIND;
 use dataset::DatasetDef;
 
 pub mod dataset;
+
+#[allow(dead_code)]
 mod proto;
 
 use common::Dataset;
