@@ -226,7 +226,7 @@ jobs:
         run: pnpm test
 
   # Check generated code is up to date
-  gen-check:
+  check-gen:
     runs-on: namespace-profile-default
     timeout-minutes: 10
     steps:
