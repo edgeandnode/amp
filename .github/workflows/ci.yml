@@ -250,10 +250,15 @@ jobs:
       - name: Check for uncommitted changes
         run: |
           if [ -n "$(git status --porcelain)" ]; then
-            echo "❌ Generated code is out of date. Please run 'just gen' and commit the changes."
+            printf "❌ Generated code is out of date. Please run 'just gen' and commit the changes.\n"
+            
+            printf "\n📄 Files with changes:\n"
             git status --porcelain
-            git diff
+            
+            printf "\n🔍 Detailed diff:\n"
+            git diff --color=always
+
             exit 1
           else
-            echo "✅ Generated code is up to date."
+            printf "✅ Generated code is up to date.\n"
           fi

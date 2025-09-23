@@ -167,13 +167,14 @@ alias codegen := gen
 
 # Run all codegen tasks
 gen: \
-    gen-substreams-datasets-proto \
-    gen-firehose-datasets-proto \
     gen-datasets-common-manifest-schema \
     gen-common-derived-dataset-manifest-schema \
     gen-datasets-evm-rpc-manifest-schema \
     gen-datasets-firehose-manifest-schema \
     gen-datasets-substreams-manifest-schema
+# TODO: Uncomment to enable protobuf bindings generation
+#    gen-substreams-datasets-proto \
+#    gen-firehose-datasets-proto \
 
 ## Protobuf bindings generation
 
