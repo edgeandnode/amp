@@ -1,3 +1,8 @@
 kind = "eth-beacon"
 url = "${BEACON_ETH_MAINNET_URL}"
+<<<<<<< HEAD
 network = "mainnet-beacon"
+||||||| 865d77cd
+=======
+network = "mainnet-beacon"
+>>>>>>> origin/main

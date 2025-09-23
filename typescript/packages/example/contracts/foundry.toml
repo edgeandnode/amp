@@ -1,0 +1,17 @@
+[profile.default]
+src = "src"
+out = "out"
+libs = ["lib"]
+dynamic_test_linking = true  # Enable for faster compilation
+via_ir = true
+ffi = true  # Enable FFI for proof generation in tests
+
+[lint]
+ignore = [
+    "src/*Verifier.sol",
+]
+
+[fmt]
+ignore = [
+    "src/*Verifier.sol",
+]

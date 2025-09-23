@@ -1,0 +1,157 @@
+use std::sync::Arc;
+
+pub use common::parquet::file::properties::WriterProperties as ParquetWriterProperties;
+use common::{
+    BlockNum, BoxError, Timestamp,
+    arrow::array::RecordBatch,
+    catalog::physical::PhysicalTable,
+    metadata::{
+        extract_footer_bytes_from_file,
+        parquet::{PARENT_FILE_ID_METADATA_KEY, PARQUET_METADATA_KEY, ParquetMeta},
+        segments::BlockRange,
+    },
+    parquet::{arrow::AsyncArrowWriter, errors::ParquetError, format::KeyValue},
+};
+use metadata_db::{FileId, FooterBytes, LocationId, MetadataDb};
+use object_store::{ObjectMeta, buffered::BufWriter, path::Path};
+use rand::RngCore as _;
+use tracing::{debug, instrument, trace};
+use url::Url;
+
+pub async fn commit_metadata(
+    metadata_db: &MetadataDb,
+    parquet_meta: ParquetMeta,
+    ObjectMeta {
+        size: object_size,
+        e_tag: object_e_tag,
+        version: object_version,
+        ..
+    }: ObjectMeta,
+    location_id: LocationId,
+    footer: FooterBytes,
+) -> Result<(), BoxError> {
+    let file_name = parquet_meta.filename.clone();
+    let parquet_meta = serde_json::to_value(parquet_meta)?;
+    metadata_db
+        .register_file(
+            location_id,
+            file_name,
+            object_size,
+            object_e_tag,
+            object_version,
+            parquet_meta,
+            &footer,
+        )
+        .await?;
+
+    // Notify that the dataset has been changed
+    trace!("notifying location change for location_id: {}", location_id);
+    metadata_db.notify_location_change(location_id).await?;
+
+    Ok(())
+}
+
+pub struct ParquetFileWriter {
+    writer: AsyncArrowWriter<BufWriter>,
+    file_url: Url,
+    filename: String,
+    table: Arc<PhysicalTable>,
+}
+
+impl ParquetFileWriter {
+    pub fn new(
+        table: Arc<PhysicalTable>,
+        opts: ParquetWriterProperties,
+        start: BlockNum,
+    ) -> Result<ParquetFileWriter, BoxError> {
+        // TODO: We need to make file names unique when we start handling non-finalized blocks.
+        let filename = {
+            // Pad `start` to 9 digits for lexicographical sorting.
+            // Add a 64-bit hex value from a crytpo RNG to avoid name conflicts from chain reorgs.
+            format!("{:09}-{:016x}.parquet", start, rand::rng().next_u64())
+        };
+        let file_url = table.url().join(&filename)?;
+        let file_path = Path::from_url_path(file_url.path())?;
+        let object_writer = BufWriter::new(table.object_store(), file_path);
+        let writer = AsyncArrowWriter::try_new(object_writer, table.schema(), Some(opts.clone()))?;
+        Ok(ParquetFileWriter {
+            writer,
+            file_url,
+            filename,
+            table,
+        })
+    }
+
+    pub async fn write(&mut self, batch: &RecordBatch) -> Result<(), ParquetError> {
+        self.writer.write(batch).await
+    }
+
+    #[must_use]
+    #[instrument(skip_all, fields(location = %self.table.location_id()), err)]
+    pub async fn close(
+        mut self,
+        range: BlockRange,
+        parent_ids: Vec<FileId>,
+    ) -> Result<ParquetFileWriterOutput, BoxError> {
+        self.writer.flush().await?;
+
+        debug!(
+            "wrote {} for range {} to {}",
+            self.filename,
+            range.start(),
+            range.end(),
+        );
+
+        let parquet_meta = ParquetMeta {
+            table: self.table.table_name().to_string(),
+            filename: self.filename,
+            created_at: Timestamp::now(),
+            ranges: vec![range],
+        };
+
+        let kv_metadata = KeyValue::new(
+            PARQUET_METADATA_KEY.to_string(),
+            serde_json::to_string(&parquet_meta)?,
+        );
+        self.writer.append_key_value_metadata(kv_metadata);
+
+        let parent_file_id_metadata = KeyValue::new(
+            PARENT_FILE_ID_METADATA_KEY.to_string(),
+            serde_json::to_string(&parent_ids)?,
+        );
+        self.writer
+            .append_key_value_metadata(parent_file_id_metadata);
+
+        self.writer.close().await?;
+
+        let location = Path::from_url_path(self.file_url.path())?;
+        let object_meta = self.table.object_store().head(&location).await?;
+
+        let footer =
+            extract_footer_bytes_from_file(&object_meta, self.table.object_store()).await?;
+
+        let location_id = self.table.location_id();
+
+        Ok(ParquetFileWriterOutput {
+            parquet_meta,
+            object_meta,
+            location_id,
+            parent_ids,
+            footer,
+        })
+    }
+
+    // This is calculate as:
+    // size of row groups flushed to storage + encoded (but uncompressed) size of the in progress row group
+    pub fn bytes_written(&self) -> usize {
+        self.writer.bytes_written() + self.writer.in_progress_size()
+    }
+}
+
+pub struct ParquetFileWriterOutput {
+    pub(crate) parquet_meta: ParquetMeta,
+    pub(crate) object_meta: ObjectMeta,
+    pub(crate) location_id: LocationId,
+    pub(crate) parent_ids: Vec<FileId>,
+    pub(crate) footer: FooterBytes,
+}

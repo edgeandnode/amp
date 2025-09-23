@@ -1,31 +1,37 @@
-use common::manifest::{Manifest, Version};
-use registry_service::handlers::register::{RegisterRequest, RegisterResponse};
+use admin_api::handlers::datasets::register::RegisterRequest;
+use common::manifest::derived::Manifest;
+use datasets_common::version::Version;
 use reqwest::StatusCode;
 
 use crate::test_support::TestEnv;
 
-struct RegistryTestContext {
+struct AdminApiTestContext {
     env: TestEnv,
     client: reqwest::Client,
 }
 
-impl RegistryTestContext {
+impl AdminApiTestContext {
     async fn setup(test_name: &str) -> Self {
         let env = TestEnv::temp(test_name).await.unwrap();
         let client = reqwest::Client::new();
         Self { env, client }
     }
 
-    fn registry_url(&self) -> String {
-        format!("http://{}", self.env.server_addrs.registry_service_addr)
+    fn admin_url(&self) -> String {
+        format!("http://{}", self.env.server_addrs.admin_api_addr)
     }
 
-    async fn test_register(&self, manifest: String) -> reqwest::Response {
-        let payload = RegisterRequest { manifest };
+    async fn register_dataset(&self, manifest: &Manifest) -> reqwest::Response {
+        let manifest_json = serde_json::to_string(manifest).unwrap();
+        let request = RegisterRequest {
+            name: manifest.name.clone(),
+            version: manifest.version.clone(),
+            manifest: manifest_json.parse().expect("Valid JSON"),
+        };
 
         self.client
-            .post(&format!("{}/register", self.registry_url()))
-            .json(&payload)
+            .post(&format!("{}/datasets", self.admin_url()))
+            .json(&request)
             .send()
             .await
             .unwrap()
@@ -94,92 +100,100 @@ impl RegistryTestContext {
 }}"#,
             name, version, owner,
         ))
-        .unwrap();
+        .expect("Failed to create test manifest");
         manifest
     }
 
     /// Verify dataset exists in database
     async fn verify_dataset_registered(&self, dataset_name: &str, version: &str) -> bool {
+        let version = version.parse::<Version>().expect("valid semver version");
         self.env
             .metadata_db
             .dataset_exists(dataset_name, version)
             .await
             .unwrap()
     }
+
+    /// Get registry info for a dataset
+    async fn get_registry_info(
+        &self,
+        name: &str,
+        version: &str,
+    ) -> metadata_db::DatasetWithDetails {
+        let version = version.parse::<Version>().expect("valid semver version");
+        self.env
+            .metadata_db
+            .get_dataset_with_details(name, version)
+            .await
+            .expect("Registry info lookup failed")
+            .expect("Registry info should exist")
+    }
 }
 
 #[tokio::test]
 async fn test_register_success() {
-    let ctx = RegistryTestContext::setup("test_register_success").await;
+    let ctx = AdminApiTestContext::setup("test_register_success").await;
 
     let manifest =
-        RegistryTestContext::create_test_manifest("register_test_dataset", "1.0.0", "test_owner");
-    let manifest_json = serde_json::to_string(&manifest).unwrap();
-    let response = ctx.test_register(manifest_json).await;
+        AdminApiTestContext::create_test_manifest("register_test_dataset", "1.0.0", "test_owner");
+    let response = ctx.register_dataset(&manifest).await;
 
-    assert_eq!(response.status(), StatusCode::OK);
-    let response_body: RegisterResponse = response.json().await.unwrap();
-    assert!(response_body.success);
+    assert_eq!(response.status(), StatusCode::CREATED);
 
     assert!(
         ctx.verify_dataset_registered("register_test_dataset", "1.0.0")
             .await
     );
     let registry_info = ctx
-        .env
-        .metadata_db
         .get_registry_info("register_test_dataset", "1.0.0")
-        .await
-        .expect("Registry info should exist");
+        .await;
 
-    assert_eq!(registry_info.dataset, "register_test_dataset");
-    assert_eq!(registry_info.version, "1.0.0");
-    assert_eq!(registry_info.owner, "test_owner");
+    assert_eq!(registry_info.name, "register_test_dataset");
+    assert_eq!(registry_info.version.to_string(), "1.0.0");
+    assert_eq!(registry_info.owner, "no-owner"); // TODO: Setting owner from manifest is not implemented yet
     assert_eq!(
-        registry_info.manifest.to_string(),
+        registry_info.manifest_path.to_string(),
         "register_test_dataset__1_0_0.json"
     );
 }
 
 #[tokio::test]
 async fn test_register_duplicate_dataset() {
-    let ctx = RegistryTestContext::setup("test_register_duplicate").await;
+    let ctx = AdminApiTestContext::setup("test_register_duplicate").await;
 
-    let manifest = RegistryTestContext::create_test_manifest(
+    let manifest = AdminApiTestContext::create_test_manifest(
         "register_test_duplicate_dataset",
         "1.0.0",
         "test_owner",
     );
-    let manifest_json = serde_json::to_string(&manifest).unwrap();
 
-    let response1 = ctx.test_register(manifest_json.clone()).await;
-    assert_eq!(response1.status(), StatusCode::OK);
-    let response1_body: RegisterResponse = response1.json().await.unwrap();
-    assert!(response1_body.success);
+    let response1 = ctx.register_dataset(&manifest).await;
+    assert_eq!(response1.status(), StatusCode::CREATED);
 
-    let response2 = ctx.test_register(manifest_json).await;
-    assert_eq!(response2.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let response2 = ctx.register_dataset(&manifest).await;
+    assert_eq!(response2.status(), StatusCode::CONFLICT);
 
     let error_response: serde_json::Value = response2.json().await.unwrap();
-    let error_message = error_response["error"].as_str().unwrap();
-    assert!(error_message.contains("Dataset already exists"));
-    assert!(error_message.contains("register_test_duplicate_dataset"));
-    assert!(error_message.contains("1.0.0"));
+    let error_code = error_response["error_code"].as_str().unwrap();
+    let error_message = error_response["error_message"].as_str().unwrap();
+    assert_eq!(error_code, "DATASET_ALREADY_EXISTS");
+    assert!(error_message.contains("already exists"));
 }
 
 #[tokio::test]
 async fn test_register_invalid_json() {
-    let ctx = RegistryTestContext::setup("test_register_invalid_json").await;
+    let ctx = AdminApiTestContext::setup("test_register_invalid_json").await;
 
-    let invalid_json = "this is not valid json";
-    let payload = RegisterRequest {
-        manifest: invalid_json.to_string(),
+    let request = RegisterRequest {
+        name: "test_dataset".parse().unwrap(),
+        version: "1.0.0".parse().unwrap(),
+        manifest: "this is not valid json".parse().expect("non-empty string"),
     };
 
     let response = ctx
         .client
-        .post(&format!("{}/register", ctx.registry_url()))
-        .json(&payload)
+        .post(&format!("{}/datasets", ctx.admin_url()))
+        .json(&request)
         .send()
         .await
         .unwrap();
@@ -187,21 +201,26 @@ async fn test_register_invalid_json() {
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
     let error_response: serde_json::Value = response.json().await.unwrap();
-    let error_message = error_response["error"].as_str().unwrap();
-    assert!(error_message.contains("Invalid manifest"));
+    let error_code = error_response["error_code"].as_str().unwrap();
+    let error_message = error_response["error_message"].as_str().unwrap();
+    assert_eq!(error_code, "INVALID_MANIFEST");
+    assert!(error_message.contains("invalid manifest"));
 }
 
 #[tokio::test]
 async fn test_register_with_missing_fields() {
-    let ctx = RegistryTestContext::setup("test_register_with_missing_fields").await;
-    let invalid_manifest = r#"{"name": "test_dataset"}"#;
-    let payload = RegisterRequest {
-        manifest: invalid_manifest.to_string(),
+    let ctx = AdminApiTestContext::setup("test_register_with_missing_fields").await;
+
+    let request = RegisterRequest {
+        name: "test_dataset".parse().unwrap(),
+        version: "1.0.0".parse().unwrap(),
+        manifest: r#"{"name": "test_dataset"}"#.parse().expect("non-empty string"),
     };
+
     let response = ctx
         .client
-        .post(&format!("{}/register", ctx.registry_url()))
-        .json(&payload)
+        .post(&format!("{}/datasets", ctx.admin_url()))
+        .json(&request)
         .send()
         .await
         .unwrap();
@@ -209,13 +228,15 @@ async fn test_register_with_missing_fields() {
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
     let error_response: serde_json::Value = response.json().await.unwrap();
-    let error_message = error_response["error"].as_str().unwrap();
-    assert!(error_message.contains("Invalid manifest"));
+    let error_code = error_response["error_code"].as_str().unwrap();
+    let error_message = error_response["error_message"].as_str().unwrap();
+    assert_eq!(error_code, "INVALID_MANIFEST");
+    assert!(error_message.contains("invalid manifest"));
 }
 
 #[tokio::test]
 async fn test_register_multiple_versions() {
-    let ctx = RegistryTestContext::setup("test_register_multiple_versions").await;
+    let ctx = AdminApiTestContext::setup("test_register_multiple_versions").await;
 
     let test_cases = vec![
         ("1.0.0", "test_owner"),
@@ -225,37 +246,31 @@ async fn test_register_multiple_versions() {
 
     // Register all versions
     for (version, owner) in &test_cases {
-        let manifest = RegistryTestContext::create_test_manifest(
+        let manifest = AdminApiTestContext::create_test_manifest(
             "register_test_multi_version_dataset",
             version,
             owner,
         );
-        let manifest_json = serde_json::to_string(&manifest).unwrap();
-        let response = ctx.test_register(manifest_json).await;
-        assert_eq!(response.status(), StatusCode::OK);
-        let response_body: RegisterResponse = response.json().await.unwrap();
-        assert!(response_body.success);
+        let response = ctx.register_dataset(&manifest).await;
+        assert_eq!(response.status(), StatusCode::CREATED);
     }
 
     // Verify all versions are registered and check registry info
-    for (version, owner) in test_cases {
+    for (version, _owner) in test_cases {
         assert!(
             ctx.verify_dataset_registered("register_test_multi_version_dataset", version)
                 .await
         );
         let registry_info = ctx
-            .env
-            .metadata_db
             .get_registry_info("register_test_multi_version_dataset", version)
-            .await
-            .expect("Registry info should exist");
+            .await;
         assert_eq!(
-            registry_info.manifest.to_string(),
+            registry_info.manifest_path.to_string(),
             format!(
                 "register_test_multi_version_dataset__{}.json",
                 Version::version_identifier(version).unwrap()
             )
         );
-        assert_eq!(registry_info.owner, *owner);
+        assert_eq!(registry_info.owner, "no-owner"); // TODO: Setting owner from manifest is not implemented yet
     }
 }

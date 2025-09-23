@@ -1,0 +1,228 @@
+use std::{
+    fmt::{Debug, Display, Formatter},
+    sync::Arc,
+    time::Duration,
+};
+
+use common::{Timestamp, catalog::physical::PhysicalTable};
+use futures::{
+    FutureExt, StreamExt, TryStreamExt, future,
+    stream::{self, BoxStream},
+};
+use metadata_db::{FileId, GcManifestRow, MetadataDb};
+use object_store::{Error as ObjectStoreError, ObjectStore, path::Path};
+
+use crate::{
+    compaction::{
+        CompactionProperties, NozzleCompactorTaskType,
+        error::{CollectionResult, CollectorError},
+    },
+    consistency_check,
+};
+
+#[derive(Clone)]
+pub struct Collector {
+    pub(super) table: Arc<PhysicalTable>,
+    pub(super) opts: Arc<CompactionProperties>,
+}
+
+impl Debug for Collector {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Garbage Collector {{ table: {} }}",
+            self.table.table_ref()
+        )
+    }
+}
+
+impl Collector {
+    pub(super) async fn collect(self) -> CollectionResult<Self> {
+        let metadata_db = self.table.metadata_db();
+
+        let location_id = self.table.location_id();
+
+        let now = Timestamp::now();
+        let secs = now.0.as_secs() as i64;
+        let nsecs = now.0.subsec_nanos();
+
+        let expired_stream = metadata_db.stream_expired_files(location_id, secs, nsecs);
+
+        match DeletionOutput::try_from_manifest_stream(Arc::clone(&self.table), expired_stream, now)
+            .await
+        {
+            Ok(output) if output.len() > 0 => {
+                output.update_manifest(&metadata_db).await.map_err(
+                    CollectorError::manifest_update_error(
+                        [output.successes, output.not_found].concat(),
+                    ),
+                )?;
+
+                if let Err(error) = consistency_check(&self.table)
+                    .await
+                    .map_err(CollectorError::consistency_check_error)
+                {
+                    tracing::error!("{error}");
+                    return Ok(self);
+                }
+
+                Ok(self)
+            }
+            Ok(_) => Ok(self),
+            Err(err) => {
+                tracing::error!("{err}");
+                Ok(self)
+            }
+        }
+    }
+}
+
+impl Display for Collector {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Garbage Collector {{ table: {}, opts: {} }}",
+            self.table.table_ref(),
+            self.opts
+        )
+    }
+}
+
+impl NozzleCompactorTaskType for Collector {
+    type Error = CollectorError;
+
+    fn new(table: &Arc<PhysicalTable>, opts: &Arc<CompactionProperties>) -> Self {
+        Collector {
+            table: Arc::clone(table),
+            opts: Arc::clone(opts),
+        }
+    }
+
+    fn run<'a>(self) -> future::BoxFuture<'a, Result<Self, Self::Error>> {
+        self.collect().boxed()
+    }
+
+    fn interval(opts: &Arc<CompactionProperties>) -> Duration {
+        opts.collector_interval
+    }
+
+    fn active(opts: &Arc<CompactionProperties>) -> bool {
+        opts.collector_active
+    }
+
+    fn deactivate(opts: &mut Arc<CompactionProperties>) {
+        Arc::make_mut(opts).collector_active = false;
+    }
+}
+
+#[derive(Debug)]
+struct DeletionOutput {
+    successes: Vec<FileId>,
+    not_found: Vec<FileId>,
+    errors: Vec<(FileId, Box<ObjectStoreError>)>,
+}
+
+impl DeletionOutput {
+    fn with_capacity(size: usize) -> Self {
+        let successes = Vec::with_capacity(size);
+        let not_found = Vec::with_capacity(size);
+        let errors = Vec::with_capacity(size);
+
+        DeletionOutput {
+            successes,
+            not_found,
+            errors,
+        }
+    }
+
+    pub async fn try_from_manifest_stream<'a>(
+        table: Arc<PhysicalTable>,
+        expired_stream: BoxStream<'a, Result<GcManifestRow, metadata_db::Error>>,
+        now: Timestamp,
+    ) -> CollectionResult<Self> {
+        let (file_ids, file_paths) = expired_stream
+            .map_err(CollectorError::file_stream_error)
+            .try_fold(
+                (Vec::new(), Vec::new()),
+                async |(mut file_ids, mut file_paths),
+                       GcManifestRow {
+                           file_id,
+                           file_path: file_name,
+                           expiration,
+                           ..
+                       }| {
+                    if Duration::from_micros(expiration.and_utc().timestamp_micros() as u64)
+                        .saturating_sub(now.0)
+                        .is_zero()
+                    {
+                        let url = table
+                            .url()
+                            .join(&file_name)
+                            .map_err(CollectorError::parse_error(file_id))?;
+
+                        file_ids.push(file_id);
+                        file_paths.push(Ok(Path::from(url.path())));
+                    }
+
+                    Ok((file_ids, file_paths))
+                },
+            )
+            .await?;
+
+        let size = file_ids.len();
+
+        Ok(table
+            .object_store()
+            .delete_stream(stream::iter(file_paths).boxed())
+            .enumerate()
+            .fold(Self::with_capacity(size), move |mut acc, (idx, result)| {
+                let file_id = file_ids.get(idx).expect("Index out of bounds");
+
+                match result {
+                    Ok(..) => acc.insert_success(*file_id),
+                    Err(ObjectStoreError::NotFound { .. }) => acc.insert_not_found(*file_id),
+                    Err(err) => acc.insert_error(*file_id, err),
+                }
+                future::ready(acc)
+            })
+            .await)
+    }
+
+    pub async fn update_manifest(
+        &self,
+        metadata_db: &MetadataDb,
+    ) -> Result<(), metadata_db::Error> {
+        if self.successes.is_empty() && self.not_found.is_empty() {
+            return Ok(());
+        }
+
+        let file_ids = [self.successes(), self.not_found()].concat();
+
+        metadata_db.delete_file_ids(&file_ids).await
+    }
+
+    pub fn len(&self) -> usize {
+        self.successes.len() + self.not_found.len() + self.errors.len()
+    }
+
+    fn successes(&self) -> &[FileId] {
+        &self.successes
+    }
+
+    fn insert_success(&mut self, file_id: FileId) {
+        self.successes.push(file_id);
+    }
+
+    fn not_found(&self) -> &[FileId] {
+        &self.not_found
+    }
+
+    fn insert_not_found(&mut self, file_id: FileId) {
+        self.not_found.push(file_id);
+    }
+
+    fn insert_error(&mut self, file_id: FileId, err: ObjectStoreError) {
+        tracing::error!("Error deleting file {file_id}: {err}");
+        self.errors.push((file_id, Box::new(err)));
+    }
+}

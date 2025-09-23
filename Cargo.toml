@@ -1,10 +1,25 @@
 [workspace]
 members = [
-    "nozzle",
-    "server",
-    "dump",
-    "dump-check",
+    "crates/bin/dump-check",
+    "crates/bin/generate-manifest",
+    "crates/bin/nozzle",
+    "crates/client",
+    "crates/core/common",
+    "crates/core/dataset-store",
+    "crates/core/datasets-common",
+    "crates/core/dump",
+    "crates/core/js-runtime",
+    "crates/core/metadata-db",
+    "crates/core/monitoring",
+    "crates/extractors/evm-rpc",
+    "crates/extractors/eth-beacon",
+    "crates/extractors/firehose",
+    "crates/extractors/substreams",
+    "crates/services/admin-api",
+    "crates/services/http-common",
+    "crates/services/server",
     "tests",
+<<<<<<< HEAD
     "common",
     "dataset-store",
     "extractors/evm-rpc-datasets",
@@ -20,6 +35,22 @@ members = [
     "monitoring",
     "client",
     "ve"
+||||||| 865d77cd
+    "common",
+    "dataset-store",
+    "extractors/evm-rpc-datasets",
+    "extractors/firehose-datasets",
+    "extractors/substreams-datasets",
+    "metadata-db",
+    "admin-api",
+    "http-common",
+    "registry-service",
+    "js-runtime",
+    "generate-manifest",
+    "monitoring",
+    "client",
+=======
+>>>>>>> origin/main
 ]
 
 resolver = "2"
@@ -35,14 +66,20 @@ alloy = { version = "1.0.9", default-features = false, features = [
     "json-rpc",
     "node-bindings",
     "provider-http",
+    "provider-ipc",
+    "provider-ws",
     "rpc",
     "rpc-types",
     "reqwest-rustls-tls",
     "rpc-types-anvil",
 ] }
+anyhow = "1.0.80"
 async-stream = "0.3.6"
 async-trait = "0.1.80"
-atty = "0.2.14"
+axum = { version = "0.8.0", default-features = false, features = ["json", "query", "tokio", "http1"] }
+backon = { version = "1.5.1", default-features = false, features = ["std", "tokio-sleep"] }
+bincode = "2.0.1"
+blake3 = "1.8.1"
 bytes = "1"
 chrono = "0.4.41"
 clap = { version = "4.5.2", features = ["derive", "env"] }
@@ -50,50 +87,40 @@ dotenvy = "0.15"
 figment = { version = "0.10.19", features = ["toml", "env", "json"] }
 fs-err = "3.0.0"
 futures = "0.3"
+governor = "0.10.0"
 hex = "0.4.3"
+indoc = "2.0.6"
 itertools = "0.14.0"
+opentelemetry = { version = "0.30", features = ["trace"] }
+opentelemetry-otlp = { version = "0.30", features = ["grpc-tonic"] }
+opentelemetry_sdk = { version = "0.30" }
 pretty_assertions = "1.4.1"
+rand = "0.9.0"
+regex = "1.10.2"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+schemars = "1.0.4"
+semver = { version = "1.0.18", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_yaml = "0.9.34"
+static_assertions = "1.1.0"
 tempfile = "3.13.0"
 thiserror = "2.0"
-toml = "0.8.10"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 tokio = { version = "1.36.0", features = [
     "macros",
     "test-util",
     "rt-multi-thread",
     "parking_lot",
-    "signal",
 ] }
 tokio-stream = "0.1.17"
 tokio-util = { version = "0.7.15", features = ["rt"] }
-url = { version = "2.5.0", features = ["serde"] }
-sqlx = { version = "0.8.3", features = [
-    "runtime-tokio",
-    "postgres",
-    "migrate",
-    "macros",
-] }
-uuid = { version = "1.11.0", features = ["v7"] }
-axum = "0.8.0"
-semver = { version = "1.0.18", features = ["serde"] }
-rand = "0.9.0"
-bincode = "2.0.1"
-regex = "1.10.2"
-blake3 = "1.8.1"
-indoc = "2.0.6"
-schemars = "1.0.4"
-governor = "0.10.0"
+toml = "0.8.10"
 tower = "0.5.2"
-opentelemetry = { version = "0.30", features = ["trace"] }
-opentelemetry-otlp = { version = "0.30", features = ["grpc-tonic"] }
-opentelemetry_sdk = { version = "0.30" }
+tracing = "0.1"
 tracing-opentelemetry = { version = "0.31", features = ["default"] }
-static_assertions = "1.1.0"
-backon = { version = "1.5.1", default-features = false, features = ["std", "tokio-sleep"] }
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+url = { version = "2.5.0", features = ["serde"] }
+uuid = { version = "1.11.0", features = ["v7"] }
 
 # Datafusion and Arrow crates
 arrow-flight = { version = "55", features = ["flight-sql-experimental"] }

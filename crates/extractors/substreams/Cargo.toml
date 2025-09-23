@@ -1,0 +1,36 @@
+[package]
+name = "substreams-datasets"
+edition.workspace = true
+version.workspace = true
+
+[features]
+# Enable protobuf code generation during build process. When enabled, the build script
+# will generate Rust bindings from .proto files using prost and tonic for Substreams protocol support
+gen-proto = ["dep:prost-build", "dep:tonic-build"]
+
+[dependencies]
+anyhow.workspace = true
+async-stream.workspace = true
+chrono.workspace = true
+common = { path = "../../core/common" }
+datafusion.workspace = true
+firehose-datasets = { path = "../firehose" }
+futures.workspace = true
+prost.workspace = true
+prost-reflect = "0.15.0"
+reqwest.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+toml.workspace = true
+tonic.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+tokio.workspace = true
+
+[build-dependencies]
+prost-build = { workspace = true, optional = true }
+tonic-build = { workspace = true, optional = true }

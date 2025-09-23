@@ -1,0 +1,29 @@
+[package]
+name = "dump"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+metadata-db = { path = "../metadata-db" }
+common = { path = "../common" }
+datafusion.workspace = true
+dataset-store = { path = "../dataset-store" }
+futures.workspace = true
+tracing.workspace = true
+object_store.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+url.workspace = true
+serde_json.workspace = true
+serde.workspace = true
+backon.workspace = true
+rand.workspace = true
+<<<<<<< HEAD:dataset-store/Cargo.toml
+eth-beacon-datasets = { version = "0.1.0", path = "../extractors/eth-beacon-datasets" }
+||||||| 865d77cd:dataset-store/Cargo.toml
+=======
+tokio-util.workspace = true
+alloy.workspace = true
+monitoring = { path = "../monitoring" }
+>>>>>>> origin/main:crates/core/dump/Cargo.toml

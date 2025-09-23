@@ -44,9 +44,6 @@ metadata_db_url = "postgres://<pg_url>"
 # JSON Lines server address  
 # jsonl_addr = "0.0.0.0:1603"
 
-# Registry service address
-# registry_service_addr = "0.0.0.0:1611"
-
 # Admin API server address
 # admin_api_addr = "0.0.0.0:1610"
 
@@ -63,6 +60,12 @@ metadata_db_url = "postgres://<pg_url>"
 
 # File compaction configuration (optional)
 [compaction]
+# Enable or disable the collector (default: false)
+# collector_enabled = false
+
+# Enable or disable the compactor (default: false)
+# compactor_enabled = false
+
 # The maximum number of concurrent metadata operations (default: 10)
 # metadata_concurrency = 10
 
@@ -74,6 +77,10 @@ metadata_db_url = "postgres://<pg_url>"
 
 # The interval (in seconds) at which to run the compactor (default: 0)
 # compactor_interval_secs = 0
+
+# The duration (in seconds) for which to hold a deletion lock on compacted files (i.e. files that have been
+# merged during a compaction), preventing them from being deleted while they might be in use (default: 3600 = 1 hour).
+# file_lock_duration_secs = 3600
 
 # The minimum number of distinct blocks in a set of contiguous files before it is compacted (default: -1)
 # block_threshold = -1

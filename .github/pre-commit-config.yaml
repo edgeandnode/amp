@@ -3,11 +3,54 @@
 repos:
 - repo: local
   hooks:
-  - id: format
+  ## Rust hooks
+  - id: fmt-rs
     name: Format Rust code
     language: system
-    entry: cargo +nightly fmt --all
+    entry: just fmt-rs
     types_or: [rust, cargo, cargo-lock]
-    stages: [pre-commit, pre-merge-commit, pre-push, manual]
+    stages: [pre-commit, pre-merge-commit, manual]
+    pass_filenames: false
+    require_serial: true
+  - id: fmt-rs-check
+    name: Check Rust code formatting
+    language: system
+    entry: just fmt-rs-check
+    types_or: [rust, cargo, cargo-lock]
+    stages: [pre-push, manual]
+    pass_filenames: false
+    require_serial: true
+  - id: check-rs
+    name: Check all crates for compilation errors
+    language: system
+    entry: just check-rs
+    types_or: [rust, cargo, cargo-lock]
+    stages: [pre-push, manual]
+    pass_filenames: false
+    require_serial: true
+
+  ## TypeScript hooks
+  - id: fmt-ts
+    name: Format TypeScript code
+    language: system
+    entry: just fmt-ts
+    types_or: [ts, tsx, javascript, json]
+    stages: [pre-commit, pre-merge-commit, manual]
+    pass_filenames: false
+    require_serial: true
+  - id: fmt-ts-check
+    name: Check TypeScript code formatting
+    language: system
+    entry: just fmt-ts-check
+    types_or: [ts, tsx, javascript, json]
+    stages: [pre-push, manual]
+    pass_filenames: false
+    require_serial: true
+  - id: check-ts
+    name: Check TypeScript types
+    language: system
+    entry: just check-ts
+    types_or: [ts, tsx, javascript, json]
+    stages: [pre-push, manual]
     pass_filenames: false
     require_serial: true

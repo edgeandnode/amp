@@ -1,15 +1,21 @@
 mod anvil;
-mod deploy;
+mod register_dataset;
 mod registry;
 
 use alloy::{
-    node_bindings::Anvil,
     primitives::BlockHash,
-    providers::{DynProvider, Provider, ProviderBuilder, ext::AnvilApi as _},
+    providers::{DynProvider, Provider, ext::AnvilApi as _},
     transports::http::reqwest,
 };
-use common::{BlockNum, BoxError, metadata::segments::BlockRange, query_context::parse_sql};
-use dataset_store::{DatasetDefsCommon, DatasetStore, SerializableSchema};
+use common::{
+    BlockNum, BoxError,
+    manifest::{common::schema_from_tables, derived::Manifest},
+    metadata::segments::BlockRange,
+    query_context::parse_sql,
+};
+use dataset_store::DatasetStore;
+use datasets_common::manifest::Manifest as CommonManifest;
+use futures::StreamExt;
 use generate_manifest;
 use monitoring::logging;
 use schemars::schema_for;
@@ -19,7 +25,7 @@ use crate::{
     test_client::TestClient,
     test_support::{
         self, SnapshotContext, TestEnv, check_blocks, restore_blessed_dataset,
-        spawn_compaction_and_await_completion,
+        spawn_collection_and_await_completion, spawn_compaction_and_await_completion,
     },
 };
 
@@ -29,18 +35,51 @@ async fn evm_rpc_single_dump() {
 
     let dataset_name = "eth_rpc";
     let test_env = TestEnv::temp("evm_rpc_single_dump").await.unwrap();
+    let block = test_env
+        .dataset_store
+        .load_dataset(dataset_name, None)
+        .await
+        .unwrap()
+        .start_block
+        .unwrap();
 
     let blessed = SnapshotContext::blessed(&test_env, &dataset_name)
         .await
         .unwrap();
 
-    // Check the dataset directly against the RPC provider with `check_blocks`.
-    check_blocks(&test_env, dataset_name, 15_000_000, 15_000_000)
+    check_blocks(&test_env, dataset_name, block, block)
         .await
         .expect("blessed data differed from provider");
 
-    // Now dump the dataset to a temporary directory and check it again against the blessed files.
-    let temp_dump = SnapshotContext::temp_dump(&test_env, &dataset_name, 15_000_000, 15_000_000, 1)
+    let temp_dump = SnapshotContext::temp_dump(&test_env, &dataset_name, block, 1)
+        .await
+        .expect("temp dump failed");
+    temp_dump.assert_eq(&blessed).await.unwrap();
+}
+
+#[tokio::test]
+async fn eth_beacon_single_dump() {
+    logging::init();
+
+    let dataset_name = "eth_beacon";
+    let test_env = TestEnv::temp("eth_beacon_single_dump").await.unwrap();
+    let block = test_env
+        .dataset_store
+        .load_dataset(dataset_name, None)
+        .await
+        .unwrap()
+        .start_block
+        .unwrap();
+
+    let blessed = SnapshotContext::blessed(&test_env, &dataset_name)
+        .await
+        .unwrap();
+
+    check_blocks(&test_env, dataset_name, block, block)
+        .await
+        .expect("blessed data differed from provider");
+
+    let temp_dump = SnapshotContext::temp_dump(&test_env, &dataset_name, block, 1)
         .await
         .expect("temp dump failed");
     temp_dump.assert_eq(&blessed).await.unwrap();
@@ -57,18 +96,23 @@ async fn evm_rpc_single_dump_fetch_receipts_per_tx() {
     )
     .await
     .unwrap();
+    let block = test_env
+        .dataset_store
+        .load_dataset(dataset_name, None)
+        .await
+        .unwrap()
+        .start_block
+        .unwrap();
 
     let blessed = SnapshotContext::blessed(&test_env, &dataset_name)
         .await
         .unwrap();
 
-    // Check the dataset directly against the RPC provider with `check_blocks`.
-    check_blocks(&test_env, dataset_name, 15_000_000, 15_000_000)
+    check_blocks(&test_env, dataset_name, block, block)
         .await
         .expect("blessed data differed from provider");
 
-    // Now dump the dataset to a temporary directory and check it again against the blessed files.
-    let temp_dump = SnapshotContext::temp_dump(&test_env, &dataset_name, 15_000_000, 15_000_000, 1)
+    let temp_dump = SnapshotContext::temp_dump(&test_env, &dataset_name, block, 1)
         .await
         .expect("temp dump failed");
     temp_dump.assert_eq(&blessed).await.unwrap();
@@ -78,20 +122,25 @@ async fn evm_rpc_single_dump_fetch_receipts_per_tx() {
 async fn evm_rpc_base_single_dump() {
     logging::init();
 
-    let dataset_name = "base";
+    let dataset_name = "base_rpc";
     let test_env = TestEnv::temp("evm_rpc_base_single_dump").await.unwrap();
+    let block = test_env
+        .dataset_store
+        .load_dataset(dataset_name, None)
+        .await
+        .unwrap()
+        .start_block
+        .unwrap();
 
     let blessed = SnapshotContext::blessed(&test_env, &dataset_name)
         .await
         .unwrap();
 
-    // Check the dataset directly against the RPC provider with `check_blocks`.
-    check_blocks(&test_env, dataset_name, 33_411_770, 33_411_770)
+    check_blocks(&test_env, dataset_name, block, block)
         .await
         .expect("blessed data differed from provider");
 
-    // Now dump the dataset to a temporary directory and check it again against the blessed files.
-    let temp_dump = SnapshotContext::temp_dump(&test_env, &dataset_name, 33_411_770, 33_411_770, 1)
+    let temp_dump = SnapshotContext::temp_dump(&test_env, &dataset_name, block, 1)
         .await
         .expect("temp dump failed");
     temp_dump.assert_eq(&blessed).await.unwrap();
@@ -101,25 +150,30 @@ async fn evm_rpc_base_single_dump() {
 async fn evm_rpc_base_single_dump_fetch_receipts_per_tx() {
     logging::init();
 
-    let dataset_name = "base";
+    let dataset_name = "base_rpc";
     let test_env = TestEnv::temp_with_config(
         "evm_rpc_base_single_dump_fetch_receipts_per_tx",
         "per_tx_receipt_config.toml",
     )
     .await
     .unwrap();
+    let block = test_env
+        .dataset_store
+        .load_dataset(dataset_name, None)
+        .await
+        .unwrap()
+        .start_block
+        .unwrap();
 
     let blessed = SnapshotContext::blessed(&test_env, &dataset_name)
         .await
         .unwrap();
 
-    // Check the dataset directly against the RPC provider with `check_blocks`.
-    check_blocks(&test_env, dataset_name, 33_411_770, 33_411_770)
+    check_blocks(&test_env, dataset_name, block, block)
         .await
         .expect("blessed data differed from provider");
 
-    // Now dump the dataset to a temporary directory and check it again against the blessed files.
-    let temp_dump = SnapshotContext::temp_dump(&test_env, &dataset_name, 33_411_770, 33_411_770, 1)
+    let temp_dump = SnapshotContext::temp_dump(&test_env, &dataset_name, block, 1)
         .await
         .expect("temp dump failed");
     temp_dump.assert_eq(&blessed).await.unwrap();
@@ -134,13 +188,40 @@ async fn eth_firehose_single_dump() {
     let blessed = SnapshotContext::blessed(&test_env, &dataset_name)
         .await
         .unwrap();
+    let block = test_env
+        .dataset_store
+        .load_dataset(dataset_name, None)
+        .await
+        .unwrap()
+        .start_block
+        .unwrap();
+
+    check_blocks(&test_env, dataset_name, block, block)
+        .await
+        .expect("blessed data differed from provider");
+
+    let temp_dump = SnapshotContext::temp_dump(&test_env, &dataset_name, block, 1)
+        .await
+        .expect("temp dump failed");
+    temp_dump.assert_eq(&blessed).await.unwrap();
+}
+
+#[tokio::test]
+async fn base_firehose_single_dump() {
+    logging::init();
+
+    let dataset_name = "base_firehose";
+    let test_env = TestEnv::temp("base_firehose_single_dump").await.unwrap();
+    let blessed = SnapshotContext::blessed(&test_env, &dataset_name)
+        .await
+        .unwrap();
 
     // Check the dataset directly against the Firehose provider with `check_blocks`.
-    check_blocks(&test_env, dataset_name, 15_000_000, 15_000_000)
+    check_blocks(&test_env, dataset_name, 33_411_770, 33_411_770)
         .await
         .expect("blessed data differed from provider");
     // Now dump the dataset to a temporary directory and check it again against the blessed files.
-    let temp_dump = SnapshotContext::temp_dump(&test_env, &dataset_name, 15_000_000, 15_000_000, 1)
+    let temp_dump = SnapshotContext::temp_dump(&test_env, &dataset_name, 33_411_770, 1)
         .await
         .expect("temp dump failed");
     temp_dump.assert_eq(&blessed).await.unwrap();
@@ -171,19 +252,24 @@ async fn sql_over_eth_firehose_dump() {
     let dataset_name = "sql_over_eth_firehose";
 
     let test_env = TestEnv::temp("sql_over_eth_firehose").await.unwrap();
-    let blessed = SnapshotContext::blessed(&test_env, &dataset_name)
+    let block = test_env
+        .dataset_store
+        .load_dataset("eth_firehose", None)
         .await
+        .unwrap()
+        .start_block
         .unwrap();
 
-    // Restore dependency
     restore_blessed_dataset("eth_firehose", &test_env.metadata_db)
         .await
         .unwrap();
 
-    // Now dump the dataset to a temporary directory and check blessed files against it.
-    let temp_dump = SnapshotContext::temp_dump(&test_env, &dataset_name, 15_000_000, 15_000_000, 2)
+    let temp_dump = SnapshotContext::temp_dump(&test_env, &dataset_name, block, 1)
         .await
         .expect("temp dump failed");
+    let blessed = SnapshotContext::blessed(&test_env, &dataset_name)
+        .await
+        .unwrap();
     temp_dump.assert_eq(&blessed).await.unwrap();
 }
 
@@ -265,83 +351,6 @@ async fn multi_version_test() -> Result<(), BoxError> {
 }
 
 #[tokio::test]
-async fn persist_start_block_test() -> Result<(), BoxError> {
-    logging::init();
-
-    // Spawn Anvil on a random port
-    let anvil = Anvil::new().port(0_u16).spawn();
-    let anvil_url = anvil.endpoint_url();
-
-    // Set up the test environment with the Anvil provider
-    let test_env = TestEnv::new("persist_start_block_test", true, Some(anvil_url.as_str())).await?;
-    let mut client = TestClient::connect(&test_env).await?;
-
-    // Create a provider and mine 10 blocks
-    let provider = ProviderBuilder::new().connect_http(anvil_url);
-    provider.anvil_mine(Some(10), None).await?;
-
-    // Verify that blocks were mined (current block should be 10)
-    let block_number = provider.get_block_number().await?;
-    assert_eq!(block_number, 10, "Expected block number 10 after mining");
-
-    // Run test steps from YAML, which should set and verify the start block
-    for step in load_test_steps("persist-start-block-test.yaml")? {
-        step.run(&test_env, &mut client).await?;
-    }
-
-    Ok(())
-}
-
-#[tokio::test]
-async fn persist_start_block_set_on_creation() -> Result<(), BoxError> {
-    logging::init();
-
-    // Set up the Anvil test environment from the `anvil.rs` test helpers
-    let test = anvil::AnvilTestContext::setup("persist_start_block_set_on_creation").await;
-
-    // Mine 10 blocks so the dump has something to process
-    test.mine(10).await;
-    assert_eq!(test.latest_block().await.block_num, 10);
-
-    // Perform the initial dump from block 0. This should succeed and persist `start_block = 0`.
-    test_support::dump_dataset(&test.env.config, "anvil_rpc", 0, 9, 1, None).await?;
-
-    // Query the database to verify that the start_block was persisted correctly as 0.
-    let location = test
-        .env
-        .metadata_db
-        .get_active_location(metadata_db::TableId {
-            dataset: "anvil_rpc",
-            dataset_version: None,
-            table: "blocks",
-        })
-        .await?
-        .ok_or("No active location found for anvil_rpc.blocks")?;
-    let location_id = location.1;
-
-    test.env
-        .metadata_db
-        .check_start_block(location_id, 0)
-        .await?;
-
-    // Now, attempt to dump again with a *different* start_block. This must fail.
-    let result = test_support::dump_dataset(&test.env.config, "anvil_rpc", 1, 9, 1, None).await;
-
-    assert!(result.is_err(), "Expected dump to fail but it succeeded");
-    let err_msg = result.unwrap_err().to_string();
-    let expected_err =
-        "Cannot start dump: location has existing start_block=0, but requested start_block=1";
-    assert!(
-        err_msg.contains(expected_err),
-        "Error message did not match.\nGot: '{}'\nExpected to contain: '{}'",
-        err_msg,
-        expected_err
-    );
-
-    Ok(())
-}
-
-#[tokio::test]
 async fn anvil_rpc_reorg() {
     logging::init();
 
@@ -411,7 +420,7 @@ async fn anvil_rpc_reorg() {
         rows
     };
     let dump = async |range: std::ops::RangeInclusive<BlockNum>| {
-        SnapshotContext::temp_dump(&test_env, &dataset_name, *range.start(), *range.end(), 1)
+        SnapshotContext::temp_dump(&test_env, &dataset_name, *range.end(), 1)
             .await
             .unwrap()
     };
@@ -473,8 +482,8 @@ async fn generate_manifest_evm_rpc_builtin() {
     .await
     .unwrap();
 
-    let out: DatasetDefsCommon = serde_json::from_slice(&out).unwrap();
-    let builtin_schema: SerializableSchema = evm_rpc_datasets::tables::all(&network).into();
+    let out: CommonManifest = serde_json::from_slice(&out).unwrap();
+    let builtin_schema = schema_from_tables(evm_rpc_datasets::tables::all(&network));
 
     assert_eq!(out.network, network);
     assert_eq!(out.kind, kind);
@@ -503,8 +512,8 @@ async fn generate_manifest_firehose_builtin() {
     .await
     .unwrap();
 
-    let out: DatasetDefsCommon = serde_json::from_slice(&out).unwrap();
-    let builtin_schema: SerializableSchema = firehose_datasets::evm::tables::all(&network).into();
+    let out: CommonManifest = serde_json::from_slice(&out).unwrap();
+    let builtin_schema = schema_from_tables(firehose_datasets::evm::tables::all(&network));
 
     assert_eq!(out.network, network);
     assert_eq!(out.kind, kind);
@@ -535,7 +544,7 @@ async fn generate_manifest_substreams() {
     .await
     .unwrap();
 
-    let out: DatasetDefsCommon = serde_json::from_slice(&out).unwrap();
+    let out: CommonManifest = serde_json::from_slice(&out).unwrap();
     let dataset_def = substreams_datasets::dataset::DatasetDef {
         kind: kind.clone(),
         network: network.clone(),
@@ -544,10 +553,7 @@ async fn generate_manifest_substreams() {
         module,
     };
 
-    let schema = substreams_datasets::tables(dataset_def)
-        .await
-        .map(Into::into)
-        .unwrap();
+    let schema = schema_from_tables(substreams_datasets::tables(dataset_def).await.unwrap());
 
     assert_eq!(out.network, network);
     assert_eq!(out.kind, kind);
@@ -640,17 +646,23 @@ async fn sql_dataset_input_batch_size() {
     let test_env = TestEnv::temp("sql_dataset_input_batch_size").await.unwrap();
 
     // 2. First dump eth_firehose dependency on the spot
-    let start = 15_000_000;
-    let end = 15_000_003;
+    let start = test_env
+        .dataset_store
+        .load_dataset("eth_firehose", None)
+        .await
+        .unwrap()
+        .start_block
+        .unwrap();
+    let end = start + 3;
 
-    test_support::dump_dataset(&test_env.config, "eth_firehose", start, end, 1, None)
+    test_support::dump_dataset(&test_env.config, "eth_firehose", end, 1, None)
         .await
         .unwrap();
 
     // 3. Execute dump of sql_stream_ds with microbatch_max_interval=1
     let dataset_name = "sql_stream_ds";
 
-    test_support::dump_dataset(&test_env.config, dataset_name, start, end, 1, Some(1))
+    test_support::dump_dataset(&test_env.config, dataset_name, end, 1, Some(1))
         .await
         .unwrap();
 
@@ -684,6 +696,17 @@ async fn sql_dataset_input_batch_size() {
     let file_count_after = table.files().await.unwrap().len();
     assert_eq!(file_count_after, 5);
 
+    spawn_collection_and_await_completion(table, &test_env.config).await;
+    // 7. After collection, we expect the original 4 files to be deleted,
+    // leaving only the compacted file.
+    let file_count_final = table
+        .object_store()
+        .list(Some(table.path()))
+        .collect::<Vec<_>>()
+        .await
+        .len();
+    assert_eq!(file_count_final, 1);
+
     let mut test_client = TestClient::connect(&test_env).await.unwrap();
     let res = test_client
         .run_query("select count(*) from sql_stream_ds.even_blocks", None)
@@ -704,9 +727,9 @@ fn generate_json_schemas() {
             "Firehose",
             schema_for!(firehose_datasets::dataset::DatasetDef),
         ),
-        ("Common", schema_for!(dataset_store::DatasetDefsCommon)),
-        ("Sql", schema_for!(dataset_store::sql_datasets::DatasetDef)),
-        ("Manifest", schema_for!(common::manifest::Manifest)),
+        ("Common", schema_for!(CommonManifest)),
+        ("Sql", schema_for!(common::manifest::sql_datasets::Manifest)),
+        ("Manifest", schema_for!(Manifest)),
     ];
 
     for (name, schema) in json_schemas {

@@ -1,53 +1,55 @@
-- name: dump_eth_firehose
-  dataset: eth_firehose
-  start: 0
-  end: 20
+- name: restore_eth_firehose
+  restore: eth_firehose
 
 - name: deploy_intra_deps
   deploy: intra_deps
-  start: 0
-  end: 20
+  end: 15000000
+
+- name: dump_intra_deps
+  dataset: intra_deps
+  end: 15000000
+  config: nozzle.config.ts
 
 - name: query_blocks_base
   query: SELECT * from intra_deps.zz_blocks_base order by block_num limit 1
   results: |
     [
-      {"_block_num":0,"block_num":0,"gas_limit":5000,"gas_used":0,"hash":"d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3","miner":"0000000000000000000000000000000000000000","nonce":66,"parent_hash":"0000000000000000000000000000000000000000000000000000000000000000"}
+      {"_block_num":15000000,"block_num":15000000,"gas_limit":30000000,"gas_used":29998802,"hash":"9a71a95be3fe957457b11817587e5af4c7e24836d5b383c430ff25b9286a457f","miner":"ea674fdde714fd979de3edf0f56aa9716b898ec8","nonce":11581608188404422748,"parent_hash":"93a8a23a2f5296db7251ab4c5e9b10bdc5a6c9c4ed56fb230dc729d3dc03a138"}
     ]
 
 - name: query_aa_blocks_derived
   query: SELECT * from intra_deps.aa_blocks_derived order by block_num limit 1
   results: |
     [
-      {"_block_num":0,"block_num":0,"gas_limit":5000,"gas_used":0,"hash":"d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3","miner":"0000000000000000000000000000000000000000","parent_hash":"0000000000000000000000000000000000000000000000000000000000000000"}
+      {"_block_num":15000000,"block_num":15000000,"gas_limit":30000000,"gas_used":29998802,"hash":"9a71a95be3fe957457b11817587e5af4c7e24836d5b383c430ff25b9286a457f","miner":"ea674fdde714fd979de3edf0f56aa9716b898ec8","parent_hash":"93a8a23a2f5296db7251ab4c5e9b10bdc5a6c9c4ed56fb230dc729d3dc03a138"}
     ]
 
 - name: query_mm_blocks_derived
   query: SELECT * from intra_deps.mm_blocks_derived order by block_num limit 1
   results: |
     [
-      {"_block_num":0,"block_num":0,"miner":"0000000000000000000000000000000000000000","hash":"d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3","parent_hash":"0000000000000000000000000000000000000000000000000000000000000000"}
+      {"_block_num":15000000,"block_num":15000000,"hash":"9a71a95be3fe957457b11817587e5af4c7e24836d5b383c430ff25b9286a457f","miner":"ea674fdde714fd979de3edf0f56aa9716b898ec8","parent_hash":"93a8a23a2f5296db7251ab4c5e9b10bdc5a6c9c4ed56fb230dc729d3dc03a138"}
     ]
 
 - name: query_count_blocks_base
   query: SELECT count(*) as total_blocks from intra_deps.zz_blocks_base
   results: |
     [
-      {"total_blocks":21}
+      {"total_blocks":1}
     ]
 
 - name: query_count_blocks_derived
   query: SELECT count(*) as total_blocks from intra_deps.aa_blocks_derived
   results: |
     [
-      {"total_blocks":21}
+      {"total_blocks":1}
     ]
 
 - name: query_count_mm_blocks_derived
   query: SELECT count(*) as total_blocks from intra_deps.mm_blocks_derived
   results: |
     [
-      {"total_blocks":21}
+      {"total_blocks":1}
     ]
 
 - name: query_non_existent_field_aa_blocks_derived

@@ -12,7 +12,7 @@ required.
 
 To update the blessed snapshot for a dataset, run:
 ```
-cargo run -p tests -- bless <dataset_name> <start_block> <end_block>
+cargo run -p tests -- bless <dataset_name> <end_block>
 ```
 
 ## Anvil tests

@@ -82,7 +82,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "raw_dataset_rows_dumped_total",
+          "expr": "sum(raw_dataset_rows_dumped_total)",
           "instant": false,
           "interval": "",
           "legendFormat": "__auto",
@@ -153,7 +153,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "raw_dataset_bytes_written_total",
+          "expr": "sum(raw_dataset_bytes_written_total)",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A"

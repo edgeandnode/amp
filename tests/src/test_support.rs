@@ -5,6 +5,7 @@ use std::{
     process::{ExitStatus, Stdio},
     str::FromStr as _,
     sync::Arc,
+    time::Duration,
 };
 
 use common::{
@@ -22,7 +23,9 @@ use common::{
 };
 use dataset_store::DatasetStore;
 use dump::{
-    compaction::{SegmentSizeLimit, compactor::Compactor},
+    compaction::{
+        NozzleCompactorTaskType, SegmentSizeLimit, collector::Collector, compactor::Compactor,
+    },
     consistency_check,
     worker::Worker,
 };
@@ -74,12 +77,7 @@ pub async fn load_test_config(
     ))
 }
 
-pub async fn bless(
-    test_env: &TestEnv,
-    dataset_name: &str,
-    start: u64,
-    end: u64,
-) -> Result<(), BoxError> {
+pub async fn bless(test_env: &TestEnv, dataset_name: &str, end: u64) -> Result<(), BoxError> {
     let config = test_env.config.clone();
     let deps = {
         let ds = dataset_name.to_string();
@@ -92,13 +90,13 @@ pub async fn bless(
     }
 
     clear_dataset(&test_env.config, dataset_name).await?;
-    dump_dataset(&config, dataset_name, start, end, 1, None).await?;
+    dump_dataset(&config, dataset_name, end, 1, None).await?;
     Ok(())
 }
 
 pub struct TestEnv {
     pub config: Arc<Config>,
-    pub metadata_db: Arc<MetadataDb>,
+    pub metadata_db: MetadataDb,
     pub dataset_store: Arc<DatasetStore>,
     pub server_addrs: BoundAddrs,
 
@@ -110,33 +108,90 @@ pub struct TestEnv {
 impl TestEnv {
     /// Create a new test environment with a temp metadata database and data directory.
     pub async fn temp(test_name: &str) -> Result<Self, BoxError> {
-        Self::new(test_name, true, None).await
+        Self::new(test_name, true, "config.toml").await
     }
 
     /// Same as [Self::temp] but accepts a custom config file name. Use this to run tests with
     /// different configuration options.
     pub async fn temp_with_config(test_name: &str, config_name: &str) -> Result<Self, BoxError> {
-        Self::new_with_config(test_name, true, config_name, None).await
+        Self::new(test_name, true, config_name).await
     }
 
     /// Create a new test environment with a temp metadata database, but the blessed data directory.
     pub async fn blessed(test_name: &str) -> Result<Self, BoxError> {
-        Self::new(test_name, false, None).await
+        Self::new(test_name, false, "config.toml").await
     }
 
-    pub async fn new(
+    /// Create a basic test environment without any Anvil or provider configuration.
+    /// This is used for tests that don't need external blockchain connections.
+    pub async fn new(test_name: &str, temp: bool, config_name: &str) -> Result<Self, BoxError> {
+        let db = TempMetadataDb::new(*KEEP_TEMP_DIRS, DEFAULT_POOL_SIZE).await;
+        let mut figment = Figment::from(Json::string(&format!(
+            r#"{{ "metadata_db_url": "{}" }}"#,
+            db.url(),
+        )));
+        let mut temp_dirs = vec![];
+
+        if temp {
+            let temp_dir = tempfile::Builder::new()
+                .disable_cleanup(*KEEP_TEMP_DIRS)
+                .tempdir()?;
+            let data_path = temp_dir.path();
+            info!("Temporary data dir {}", data_path.display());
+            figment = figment.merge(Figment::from(Json::string(&format!(
+                r#"{{ "data_dir": "{}" }}"#,
+                data_path.display(),
+            ))));
+            temp_dirs.push(temp_dir);
+        }
+
+        let config = load_test_config(Some(figment), config_name).await?;
+        let metadata_db: MetadataDb = config.metadata_db().await?.into();
+        let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
+
+        let (bound, server) = nozzle::server::run(
+            config.clone(),
+            metadata_db.clone(),
+            false,
+            true,
+            true,
+            true,
+            None,
+        )
+        .await?;
+        tokio::spawn(server);
+
+        let worker = Worker::new(
+            config.clone(),
+            metadata_db.clone(),
+            WorkerNodeId::from_str(test_name).unwrap(),
+            None,
+        );
+        tokio::spawn(worker.run());
+
+        Ok(Self {
+            config: config.clone(),
+            metadata_db,
+            dataset_store,
+            server_addrs: bound,
+            _temp_db: db,
+            _temp_dirs: temp_dirs,
+        })
+    }
+
+    pub async fn new_with_ipc(
         test_name: &str,
         temp: bool,
-        anvil_url: Option<&str>,
+        ipc_path: &str,
     ) -> Result<Self, BoxError> {
-        Self::new_with_config(test_name, temp, "config.toml", anvil_url).await
+        Self::new_with_config_ipc(test_name, temp, "config.toml", ipc_path).await
     }
 
-    pub async fn new_with_config(
+    pub async fn new_with_config_ipc(
         test_name: &str,
         temp: bool,
         config_name: &str,
-        anvil_url: Option<&str>,
+        ipc_path: &str,
     ) -> Result<Self, BoxError> {
         let db = TempMetadataDb::new(*KEEP_TEMP_DIRS, DEFAULT_POOL_SIZE).await;
         let mut figment = Figment::from(Json::string(&format!(
@@ -158,36 +213,37 @@ impl TestEnv {
             temp_dirs.push(temp_dir);
         }
 
-        if let Some(anvil_url) = anvil_url {
-            let tmp_providers = tempfile::tempdir()?;
-            info!("Temporary provider dir {}", tmp_providers.path().display());
-            for config_base in TEST_CONFIG_BASE_DIRS {
-                let path = format!("{config_base}/providers/rpc_anvil.toml");
-                if !std::fs::exists(&path)? {
-                    continue;
-                }
-                let text = std::fs::read_to_string(&path)?;
-                std::fs::write(
-                    tmp_providers.path().join("rpc_anvil.toml"),
-                    text.replace("http://localhost:8545", anvil_url),
-                )?;
-            }
-            figment = figment.merge(Figment::from(Json::string(&format!(
-                r#"{{ "providers_dir": "{}" }}"#,
-                tmp_providers.path().display(),
-            ))));
-            temp_dirs.push(tmp_providers);
-        }
+        // Create temporary provider config with IPC path
+        let tmp_providers = tempfile::tempdir()?;
+        info!("Temporary provider dir {}", tmp_providers.path().display());
+
+        // Create an IPC-based provider configuration using ipc:// URL
+        let ipc_provider_config = format!(
+            r#"kind = "evm-rpc"
+network = "anvil"
+url = "ipc://{}""#,
+            ipc_path
+        );
+
+        std::fs::write(
+            tmp_providers.path().join("rpc_anvil.toml"),
+            ipc_provider_config,
+        )?;
+
+        figment = figment.merge(Figment::from(Json::string(&format!(
+            r#"{{ "providers_dir": "{}" }}"#,
+            tmp_providers.path().display(),
+        ))));
+        temp_dirs.push(tmp_providers);
 
         let config = load_test_config(Some(figment), config_name).await?;
-        let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
+        let metadata_db: MetadataDb = config.metadata_db().await?.into();
         let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
 
         let (bound, server) = nozzle::server::run(
             config.clone(),
             metadata_db.clone(),
             false,
-            true,
             true,
             true,
             true,
@@ -234,11 +290,10 @@ impl SnapshotContext {
     pub async fn temp_dump(
         test_env: &TestEnv,
         dataset_name: &str,
-        start: u64,
         end: u64,
         n_jobs: u16,
     ) -> Result<SnapshotContext, BoxError> {
-        dump_dataset(&test_env.config, dataset_name, start, end, n_jobs, None).await?;
+        dump_dataset(&test_env.config, dataset_name, end, n_jobs, None).await?;
         let catalog = catalog_for_dataset(
             dataset_name,
             &test_env.dataset_store,
@@ -304,22 +359,20 @@ impl SnapshotContext {
 pub(crate) async fn dump_dataset(
     config: &Arc<Config>,
     dataset_name: &str,
-    start: u64,
     end: u64,
     n_jobs: u16,
     microbatch_max_interval: Option<u64>,
 ) -> Result<(), BoxError> {
     // dump the dataset
     let partition_size_mb = 100;
-    let metadata_db: Arc<MetadataDb> = config.metadata_db().await?.into();
+    let metadata_db: MetadataDb = config.metadata_db().await?.into();
 
     let physical_tables = dump(
         config.clone(),
         metadata_db.clone(),
         vec![dataset_name.to_string()],
         true,
-        start as i64,
-        Some(end.to_string()),
+        Some(end as i64),
         n_jobs,
         partition_size_mb,
         None,
@@ -342,7 +395,7 @@ pub(crate) async fn dump_dataset(
 pub(crate) async fn catalog_for_dataset(
     dataset_name: &str,
     dataset_store: &Arc<DatasetStore>,
-    metadata_db: Arc<MetadataDb>,
+    metadata_db: MetadataDb,
 ) -> Result<Catalog, BoxError> {
     let dataset = dataset_store.load_dataset(dataset_name, None).await?;
     let mut tables: Vec<Arc<PhysicalTable>> = Vec::new();
@@ -562,10 +615,6 @@ impl DatasetPackage {
         let status = tokio::process::Command::new("pnpm")
             .args(&["nozzl", "build"])
             .env(
-                "NOZZLE_REGISTRY_URL",
-                &format!("http://{}", bound_addrs.registry_service_addr),
-            )
-            .env(
                 "NOZZLE_ADMIN_URL",
                 &format!("http://{}", bound_addrs.admin_api_addr),
             )
@@ -586,18 +635,14 @@ impl DatasetPackage {
     }
 
     #[instrument(skip_all, err)]
-    pub async fn deploy(&self, bound_addrs: BoundAddrs) -> Result<(), BoxError> {
-        let mut args = vec!["nozzl", "deploy"];
+    pub async fn register(&self, bound_addrs: BoundAddrs) -> Result<(), BoxError> {
+        let mut args = vec!["nozzl", "register"];
         if let Some(config) = &self.config {
             args.push("--config");
             args.push(config);
         }
         let status = tokio::process::Command::new("pnpm")
             .args(&args)
-            .env(
-                "NOZZLE_REGISTRY_URL",
-                &format!("http://{}", bound_addrs.registry_service_addr),
-            )
             .env(
                 "NOZZLE_ADMIN_URL",
                 &format!("http://{}", bound_addrs.admin_api_addr),
@@ -610,7 +655,7 @@ impl DatasetPackage {
 
         if status != ExitStatus::default() {
             return Err(BoxError::from(format!(
-                "Failed to deploy dataset {}: pnpm deploy failed with exit code {status}",
+                "Failed to deploy dataset {}: pnpm nozzl deploy failed with exit code {status}",
                 self.name,
             )));
         }
@@ -621,7 +666,7 @@ impl DatasetPackage {
 
 pub async fn restore_blessed_dataset(
     dataset: &str,
-    metadata_db: &Arc<MetadataDb>,
+    metadata_db: &MetadataDb,
 ) -> Result<Vec<Arc<PhysicalTable>>, BoxError> {
     let config = load_test_config(None, "config.toml").await?;
     let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
@@ -630,31 +675,20 @@ pub async fn restore_blessed_dataset(
     let data_store = config.data_store.clone();
     let mut tables = Vec::<Arc<PhysicalTable>>::new();
 
-    // Determine the start_block for known datasets
-    let start_block: i64 = match dataset.name.as_str() {
-        "eth_firehose" | "eth_rpc" | "sql_over_eth_firehose" => 15_000_000,
-        "base" => 33411770,
-        _ => 0,
-    };
-
     for table in Arc::new(dataset).resolved_tables() {
-        let physical_table = PhysicalTable::restore_latest_revision(
-            &table,
-            data_store.clone(),
-            metadata_db.clone(),
-            start_block,
-        )
-        .await?
-        .expect(
-            format!(
-                "Failed to restore blessed table {dataset_name}.{}. This is likely due to \
+        let physical_table =
+            PhysicalTable::restore_latest_revision(&table, data_store.clone(), metadata_db.clone())
+                .await?
+                .expect(
+                    format!(
+                        "Failed to restore blessed table {dataset_name}.{}. This is likely due to \
                         the dataset or table being deleted. \n\
                         Bless the dataset again with by running \
                         `cargo run -p tests -- bless {dataset_name} <start_block> <end_block>`",
-                table.name()
-            )
-            .as_str(),
-        );
+                        table.name()
+                    )
+                    .as_str(),
+                );
         tables.push(physical_table.into());
     }
 
@@ -663,22 +697,58 @@ pub async fn restore_blessed_dataset(
 
 /// Spawn a compaction for the given table and wait for it to complete.
 /// The compaction is configured to compact all files into a single file.
-pub async fn spawn_compaction_and_await_completion(
+async fn spawn_compaction_task_and_await_completion<T: NozzleCompactorTaskType>(
     table: &Arc<PhysicalTable>,
     config: &Arc<Config>,
+    compactor_active: bool,
+    collector_active: bool,
+    file_lock_duration: Duration,
 ) {
     let length = table.files().await.unwrap().len();
     let parquet_writer_props = dump::parquet_opts(&config.parquet);
     let mut opts = dump::compaction_opts(&config.compaction, &parquet_writer_props);
-    opts.active = true;
+    opts.compactor_active = compactor_active;
+    opts.collector_active = collector_active;
+
+    opts.file_lock_duration = file_lock_duration;
+    opts.collector_interval = Duration::ZERO;
+    opts.compactor_interval = Duration::ZERO;
+
     opts.size_limit = SegmentSizeLimit::new(1, 1, 1, length);
 
-    let mut compactor = Compactor::start(table, &Arc::new(opts));
+    let mut task = T::start(table, &Arc::new(opts));
 
-    compactor.spawn().await;
+    task.join_current_then_spawn_new().await;
 
-    // Wait for compaction to finish
-    while !compactor.is_finished() {
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    while !task.is_finished() {
+        tokio::time::sleep(Duration::from_millis(100)).await;
     }
+}
+
+pub async fn spawn_compaction_and_await_completion(
+    table: &Arc<PhysicalTable>,
+    config: &Arc<Config>,
+) {
+    spawn_compaction_task_and_await_completion::<Compactor>(
+        table,
+        config,
+        true,
+        false,
+        Duration::from_millis(100),
+    )
+    .await;
+}
+
+pub async fn spawn_collection_and_await_completion(
+    table: &Arc<PhysicalTable>,
+    config: &Arc<Config>,
+) {
+    spawn_compaction_task_and_await_completion::<Collector>(
+        table,
+        config,
+        false,
+        true,
+        Duration::ZERO,
+    )
+    .await;
 }

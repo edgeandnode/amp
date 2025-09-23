@@ -10,37 +10,37 @@ name = "tests"
 name = "tests"
 
 [dependencies]
+admin-api = { path = "../crates/services/admin-api" }
 alloy.workspace = true
+arrow-flight.workspace = true
 clap.workspace = true
-common = { path = "../common" }
+common = { path = "../crates/core/common", features = ["schemars"] }
+dataset-store = { path = "../crates/core/dataset-store" }
+datasets-common = { path = "../crates/core/datasets-common", features = ["schemars"] }
 dotenvy.workspace = true
-dataset-store = { path = "../dataset-store" }
-dump = { path = "../dump" }
-dump-check = { path = "../dump-check" }
-metadata-db = { path = "../metadata-db" }
-nozzle = { path = "../nozzle" }
-nozzle-client = { path = "../client" }
+dump = { path = "../crates/core/dump" }
+dump-check = { path = "../crates/bin/dump-check" }
+evm-rpc-datasets = { path = "../crates/extractors/evm-rpc" }
 figment.workspace = true
+firehose-datasets = { path = "../crates/extractors/firehose" }
 fs-err.workspace = true
 futures.workspace = true
+generate-manifest = { path = "../crates/bin/generate-manifest" }
 hex.workspace = true
-tracing.workspace = true
+metadata-db = { path = "../crates/core/metadata-db" }
+monitoring = { path = "../crates/core/monitoring" }
+nozzle = { path = "../crates/bin/nozzle" }
+nozzle-client = { path = "../crates/client" }
 object_store.workspace = true
 pretty_assertions.workspace = true
+rand.workspace = true
+reqwest.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+substreams-datasets = { path = "../crates/extractors/substreams" }
 tempfile.workspace = true
 tokio.workspace = true
-arrow-flight.workspace = true
-serde_json.workspace = true
-serde.workspace = true
-serde_yaml.workspace = true
 tonic.workspace = true
-generate-manifest = { path = "../generate-manifest" }
-substreams-datasets = { path = "../extractors/substreams-datasets" }
-evm-rpc-datasets = { path = "../extractors/evm-rpc-datasets" }
-firehose-datasets = { path = "../extractors/firehose-datasets" }
-rand.workspace = true
-schemars.workspace = true
-monitoring = { path = "../monitoring" }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-registry-service = { path = "../registry-service" }
-admin-api = { path = "../admin-api" }
+tracing.workspace = true

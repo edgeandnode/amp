@@ -1,0 +1,14 @@
+[package]
+name = "generate-manifest"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+common = { path = "../../core/common" }
+dataset-store = { path = "../../core/dataset-store" }
+datasets-common = { path = "../../core/datasets-common" }
+eth-beacon-datasets = { version = "0.1.0", path = "../../extractors/eth-beacon" }
+evm-rpc-datasets = { path = "../../extractors/evm-rpc" }
+firehose-datasets = { path = "../../extractors/firehose" }
+serde_json.workspace = true
+substreams-datasets = { path = "../../extractors/substreams" }
