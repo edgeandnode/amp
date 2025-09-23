@@ -20,10 +20,7 @@ pub mod parquet;
 pub mod segments;
 mod size;
 
-pub use size::{
-    Generation, SegmentSize, SegmentSizeLimit, SizeCheckResult, TestResult, get_block_count,
-    le_bytes_to_nonzero_i64_opt,
-};
+pub use size::{Generation, Overflow, SegmentSize, get_block_count, le_bytes_to_nonzero_i64_opt};
 
 #[derive(Debug, Clone)]
 pub struct FileMetadata {

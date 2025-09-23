@@ -1,3 +1,4 @@
+pub mod algorithm;
 pub mod collector;
 pub mod compactor;
 pub mod error;
