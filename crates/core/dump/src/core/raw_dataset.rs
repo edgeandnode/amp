@@ -93,7 +93,7 @@ use common::{
 };
 use futures::TryStreamExt as _;
 use metadata_db::MetadataDb;
-use tracing::instrument;
+use tracing::{Instrument, instrument};
 
 use super::{Ctx, block_ranges, tasks::FailFastJoinSet};
 use crate::{
@@ -189,6 +189,40 @@ pub async fn dump(
         let missing_dataset_ranges =
             split_and_partition(missing_dataset_ranges, n_jobs as u64, 2000);
 
+        let total_blocks_to_cover = missing_dataset_ranges
+            .iter()
+            .flatten()
+            .map(|r| r.clone().count())
+            .sum::<usize>();
+
+        // Send updates from all jobs through an MPSC channel to log progress across all jobs.
+        let (overall_blocks_covered_tx, mut overall_blocks_covered_rx) =
+            tokio::sync::mpsc::unbounded_channel();
+
+        let progress_jh = tokio::task::spawn(async move {
+            let mut overall_blocks_covered = 0;
+            let mut progress_interval = tokio::time::interval(Duration::from_secs(15));
+            tracing::info!("overall progress: 0/{total_blocks_to_cover} blocks (0.00%)");
+            loop {
+                tokio::select! {
+                    _ = progress_interval.tick() => {
+                        let percent_covered = (overall_blocks_covered as f64 / total_blocks_to_cover as f64) * 100.0;
+                        tracing::info!("overall progress: {overall_blocks_covered}/{total_blocks_to_cover} blocks ({percent_covered:.2}%)");
+                    }
+                    new_block = overall_blocks_covered_rx.recv() => {
+                        match new_block {
+                            Some(_) => overall_blocks_covered += 1,
+                            // All senders have been dropped, meaning all jobs are done.
+                            None => break,
+                        }
+                    }
+                }
+            }
+            tracing::info!(
+                "overall progress: {total_blocks_to_cover}/{total_blocks_to_cover} blocks (100.00%)"
+            );
+        });
+
         let jobs = missing_dataset_ranges
             .into_iter()
             .enumerate()
@@ -204,20 +238,25 @@ pub async fn dump(
                 id: i as u32,
                 dataset_name: dataset_name.to_string(),
                 metrics: metrics.clone(),
+                overall_blocks_covered_tx: overall_blocks_covered_tx.clone(),
             });
 
         // Spawn the jobs, starting them with a 1 second delay between each.
         // Note that tasks spawned in the join set start executing immediately in parallel
         let mut join_set = FailFastJoinSet::<Result<(), BoxError>>::new();
         for job in jobs {
-            join_set.spawn(job.run());
+            let span = tracing::info_span!("dump_partition", partition_id = job.id);
+            join_set.spawn(job.run().instrument(span));
         }
 
         // Wait for all the jobs to finish, returning an error if any job panics or fails
         if let Err(err) = join_set.try_wait_all().await {
             tracing::error!(dataset=%dataset_name, error=%err, "dataset dump failed");
+            progress_jh.abort();
             return Err(err.into_box_error());
         }
+
+        progress_jh.await?;
 
         if let Some(end) = end
             && latest_block >= end
@@ -316,6 +355,10 @@ struct DumpPartition<S: BlockStreamer> {
     id: u32,
     /// Metrics registry
     metrics: Option<Arc<metrics::MetricsRegistry>>,
+    /// A sender half of the channel used to report overall progress across all dump partitions.
+    ///
+    /// Used for logging.
+    overall_blocks_covered_tx: tokio::sync::mpsc::UnboundedSender<()>,
     /// Compaction properties
     compaction_opts: Arc<CompactionProperties>,
 }
@@ -323,8 +366,7 @@ impl<S: BlockStreamer> DumpPartition<S> {
     /// Consumes the instance returning a future that runs the partition, processing all assigned block ranges sequentially.
     async fn run(self) -> Result<(), BoxError> {
         tracing::info!(
-            "job partition #{} ranges to scan: {}",
-            self.id,
+            "ranges to scan: {}",
             self.ranges
                 .iter()
                 .map(|r| format!("[{}-{}]", r.start(), r.end()))
@@ -335,8 +377,7 @@ impl<S: BlockStreamer> DumpPartition<S> {
         // The ranges are run sequentially by design, as parallelism is controlled by the number of jobs.
         for range in &self.ranges {
             tracing::info!(
-                "job partition #{} starting scan for range [{}-{}]",
-                self.id,
+                "starting scan for range [{}-{}]",
                 range.start(),
                 range.end(),
             );
@@ -345,8 +386,7 @@ impl<S: BlockStreamer> DumpPartition<S> {
             self.run_range(range.clone()).await?;
 
             tracing::info!(
-                "job partition #{} finished scan for range [{}-{}] in {} minutes",
-                self.id,
+                "finished scan for range [{}-{}] in {} minutes",
                 range.start(),
                 range.end(),
                 start_time.elapsed().as_secs() / 60
@@ -410,6 +450,8 @@ impl<S: BlockStreamer> DumpPartition<S> {
 
                 writer.write(table_rows).await?;
             }
+
+            self.overall_blocks_covered_tx.send(())?;
         }
 
         // Close the last part file for each table, checking for any errors.
