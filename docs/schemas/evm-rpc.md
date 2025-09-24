@@ -40,7 +40,7 @@ Auto-generated file. See `schema_to_markdown` in `crates/core/common/src/catalog
 | timestamp                | Timestamp(Nanosecond, Some("+00:00")) | NO          |
 | tx_index                 | UInt32                                | NO          |
 | tx_hash                  | FixedSizeBinary(32)                   | NO          |
-| to                       | FixedSizeBinary(20)                   | NO          |
+| to                       | FixedSizeBinary(20)                   | YES         |
 | nonce                    | UInt64                                | NO          |
 | gas_price                | Decimal128(38, 0)                     | YES         |
 | gas_limit                | UInt64                                | NO          |

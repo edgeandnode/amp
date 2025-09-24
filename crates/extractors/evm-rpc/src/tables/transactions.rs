@@ -30,7 +30,7 @@ fn schema() -> Schema {
     let timestamp = Field::new("timestamp", common::timestamp_type(), false);
     let tx_index = Field::new("tx_index", DataType::UInt32, false);
     let tx_hash = Field::new("tx_hash", BYTES32_TYPE, false);
-    let to = Field::new("to", ADDRESS_TYPE, false);
+    let to = Field::new("to", ADDRESS_TYPE, true);
     let nonce = Field::new("nonce", DataType::UInt64, false);
     let gas_price = Field::new("gas_price", EVM_CURRENCY_TYPE, true);
     let gas_limit = Field::new("gas_limit", DataType::UInt64, false);
@@ -83,7 +83,7 @@ pub(crate) struct Transaction {
     pub(crate) tx_index: u32,
     pub(crate) tx_hash: Bytes32,
 
-    pub(crate) to: Address,
+    pub(crate) to: Option<Address>,
     pub(crate) nonce: u64,
 
     pub(crate) gas_price: Option<EvmCurrency>,
@@ -201,7 +201,7 @@ impl TransactionRowsBuilder {
         self.timestamp.append_value(*timestamp);
         self.tx_index.append_value(*tx_index);
         self.tx_hash.append_value(*tx_hash);
-        self.to.append_value(*to);
+        self.to.append_option(*to);
         self.nonce.append_value(*nonce);
         self.gas_price.append_option(*gas_price);
         self.gas_limit.append_value(*gas_limit);
