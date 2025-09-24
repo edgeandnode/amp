@@ -6,10 +6,9 @@ use std::{num::NonZeroU32, path::PathBuf};
 use alloy::transports::http::reqwest::Url;
 pub use client::JsonRpcClient;
 use common::{BlockNum, BoxError, Dataset, DatasetValue, store::StoreError};
-use schemars::JsonSchema;
 use serde::Deserialize;
-use serde_json;
 use serde_with::serde_as;
+
 pub const DATASET_KIND: &str = "evm-rpc";
 
 #[derive(thiserror::Error, Debug)]
@@ -24,7 +23,8 @@ pub enum Error {
     Json(#[from] serde_json::Error),
 }
 
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Debug, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct DatasetDef {
     /// Dataset kind, must be `evm-rpc`.
     pub kind: String,
@@ -53,17 +53,13 @@ pub(crate) struct EvmRpcProvider {
     pub url: Url,
     pub concurrent_request_limit: Option<u16>,
     /// Maximum number of json-rpc requests to batch together.
-    #[serde(default = "default_rpc_batch_size")]
+    #[serde(default)]
     pub rpc_batch_size: usize,
     pub rate_limit_per_minute: Option<NonZeroU32>,
     /// Whether to use `eth_getTransactionReceipt` to fetch receipts for each transaction
     /// or `eth_getBlockReceipts` to fetch all receipts for a block in one call.
     #[serde(default)]
     pub fetch_receipts_per_tx: bool,
-}
-
-fn default_rpc_batch_size() -> usize {
-    100
 }
 
 pub fn dataset(dataset_cfg: common::DatasetValue) -> Result<Dataset, Error> {

@@ -5,7 +5,7 @@ connection details. The [example_config](example_config) documents the necessary
 
 ## Protobuf Code Generation
 
-The library includes a build feature `gen-proto` that enables protobuf code generation during the build process.
+The library uses a build configuration flag `gen_proto` that enables protobuf code generation during the build process.
 When enabled, the build script will generate Rust bindings from `.proto` files using prost and tonic
 for Firehose protocol support.
 
@@ -18,8 +18,20 @@ just gen-firehose-datasets-proto
 Or using the full `cargo build` command:
 
 ```bash
-cargo build -p firehose-datasets --features=gen-proto
+RUSTFLAGS="--cfg gen_proto" cargo build -p firehose-datasets
 ```
 
 This will generate Rust structs and gRPC client code from the Firehose protocol definitions
 and save them to `src/proto/`.
+
+## JSON Schema Generation
+
+JSON schemas for Firehose dataset definitions can be generated using the companion `datasets-firehose-gen` crate. This generates schemas for external validation and documentation purposes.
+
+To generate JSON schema bindings, run:
+
+```bash
+just gen-datasets-firehose-manifest-schema
+```
+
+This will generate JSON schemas from the Firehose dataset definition structs and copy them to `docs/dataset-def-schemas/firehose.spec.json`.

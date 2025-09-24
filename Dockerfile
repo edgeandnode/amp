@@ -2,7 +2,7 @@
 # BUILD STAGE
 #===============================================================================
 
-FROM rust:1.89.0 AS build
+FROM rust:1.90.0 AS build
 # Install cmake (snmalloc) and protoc and datafusion-cli (convenience) and sqlx-cli (migration management).
 RUN apt-get update && \
     apt-get install -y protobuf-compiler cmake && \
