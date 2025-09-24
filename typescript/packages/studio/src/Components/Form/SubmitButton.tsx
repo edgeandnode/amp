@@ -1,17 +1,21 @@
 "use client"
 
+import { Button, type ButtonProps } from "@graphprotocol/gds-react"
 import { CheckIcon, ExclamationMarkIcon } from "@graphprotocol/gds-react/icons"
-import { type ComponentPropsWithRef, forwardRef } from "react"
 
 import { classNames } from "@/utils/classnames"
 
+import { useOSQuery } from "../../hooks/useOSQuery"
 import { useFormContext } from "./form"
 
-export type SubmitButtonProps = ComponentPropsWithRef<"button"> & {
+export type SubmitButtonProps = ButtonProps.ButtonProps & {
   status: "idle" | "error" | "success" | "submitting"
 }
-export const SubmitButton = forwardRef<HTMLButtonElement, SubmitButtonProps>(({ children, status, ...rest }, ref) => {
+export function SubmitButton({ children, status, ...rest }: SubmitButtonProps) {
   const form = useFormContext()
+
+  const { data: os } = useOSQuery()
+  const ctrlKey = os === "MacOS" ? "⌘" : "CTRL"
 
   return (
     <form.Subscribe
@@ -23,15 +27,18 @@ export const SubmitButton = forwardRef<HTMLButtonElement, SubmitButtonProps>(({ 
       })}
     >
       {({ canSubmit, valid }) => (
-        <button
-          ref={ref}
+        <Button
           {...rest}
           type="submit"
           disabled={!canSubmit || !valid}
           data-state={status}
+          variant={rest.variant || "secondary"}
+          addonAfter={
+            <span className="ml-4 rounded-4 border bg-space-1500 border-space-1300 text-white py-1 px-1.5 flex flex-col items-center justify-center">
+              {ctrlKey}⏎
+            </span>
+          }
           className={classNames(
-            "rounded-6 px-4 py-2.5 text-12 shadow-xs inset-ring inset-ring-space-1200 bg-space-1400 text-white cursor-pointer inline-flex items-center justify-center gap-x-1.5",
-            "disabled:bg-space-1500 disabled:text-white/80 disabled:hover:bg-space-1500 disabled:focus-visible:outline-space-1200 disabled:cursor-not-allowed",
             "data-[state=error]:bg-red-600 data-[state=error]:hover:bg-red-500 data-[state=error]:focus-visible:bg-red-500 data-[state=success]:focus-visible:bg-green-500",
             "data-[state=success]:bg-green-600 data-[state=success]:hover:bg-green-500",
           )}
@@ -51,61 +58,8 @@ export const SubmitButton = forwardRef<HTMLButtonElement, SubmitButtonProps>(({ 
               </>
             ) :
             children}
-        </button>
+        </Button>
       )}
     </form.Subscribe>
   )
-})
-
-/**
- * Use if the SubmitButton will be part of a button group for a dropdown.
- * Otherwise, use the SubmitButton
- */
-export const SubmitButtonGroup = forwardRef<HTMLButtonElement, SubmitButtonProps>(
-  ({ children, status, ...rest }, ref) => {
-    const form = useFormContext()
-
-    return (
-      <form.Subscribe
-        selector={(state) => ({
-          canSubmit: state.canSubmit,
-          isSubmitting: state.isSubmitting,
-          valid: state.isValid && state.errors.length === 0,
-          dirty: state.isDirty,
-        })}
-      >
-        {({ canSubmit, valid }) => (
-          <button
-            ref={ref}
-            {...rest}
-            type="submit"
-            disabled={!canSubmit || !valid}
-            data-state={status}
-            className={classNames(
-              "relative inline-flex items-center rounded-l-4 bg-space-1400 px-3 py-1.5 text-12 text-white text-gray-900 inset-ring-1 inset-ring-space-1200 hover:bg-space-1200 focus:z-10",
-              "disabled:bg-space-1500 disabled:text-white/80 disabled:hover:bg-space-1500 disabled:focus-visible:outline-space-1200 disabled:cursor-not-allowed",
-              "data-[state=error]:bg-red-600 data-[state=error]:hover:bg-red-500 data-[state=error]:focus-visible:bg-red-500 data-[state=success]:focus-visible:bg-green-500",
-              "data-[state=success]:bg-green-600 data-[state=success]:hover:bg-green-500",
-            )}
-          >
-            {status === "success" ?
-              (
-                <>
-                  <CheckIcon className="text-white" aria-hidden="true" size={5} alt="" />
-                  {children}
-                </>
-              ) :
-              status === "error" ?
-              (
-                <>
-                  <ExclamationMarkIcon className="text-white" aria-hidden="true" size={5} alt="" />
-                  Error
-                </>
-              ) :
-              children}
-          </button>
-        )}
-      </form.Subscribe>
-    )
-  },
-)
+}

@@ -8,7 +8,7 @@ import * as Constants from "../constants.js"
 
 const DatasetManifestInstanceDecoder = Schema.decodeUnknownSync(Schema.parseJson(DatasetManifest))
 
-export interface UseNozzleConfigStreamQueryOptions {
+export interface UseAmpConfigStreamQueryOptions {
   enabled?: boolean
   onSuccess?: (data: DatasetManifest) => void
   onError?: (error: Error) => void
@@ -64,13 +64,13 @@ function reducer(state: State, action: Action): State {
   }
 }
 
-export function useNozzleConfigStreamQuery({
+export function useAmpConfigStreamQuery({
   enabled = true,
   onError,
   onSuccess,
   retry = true,
   retryDelay = 1000,
-}: Readonly<UseNozzleConfigStreamQueryOptions> = {}) {
+}: Readonly<UseAmpConfigStreamQueryOptions> = {}) {
   const [state, dispatch] = useReducer(reducer, {
     data: null,
     error: undefined,

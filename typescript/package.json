@@ -9,6 +9,21 @@
     "format": "pnpm lint --fix",
     "test": "vitest"
   },
+  "pnpm": {
+    "overrides": {
+      "@effect/rpc": "0.70.0"
+    },
+    "onlyBuiltDependencies": [
+      "@bufbuild/buf",
+      "@parcel/watcher",
+      "@tailwindcss/oxide",
+      "blake-hash",
+      "core-js-pure",
+      "esbuild",
+      "msgpackr-extract",
+      "unrs-resolver"
+    ]
+  },
   "devDependencies": {
     "@effect/eslint-plugin": "^0.3.2",
     "@effect/language-service": "^0.38.1",

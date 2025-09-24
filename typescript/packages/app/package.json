@@ -14,7 +14,7 @@
     "@radix-ui/react-slot": "^1.2.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "effect": "^3.17.13",
+    "effect": "^3.17.14",
     "nozzl": "workspace:*",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",

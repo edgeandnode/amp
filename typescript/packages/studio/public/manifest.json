@@ -1,7 +1,7 @@
 {
-  "short_name": "Nozzle Studio",
-  "name": "Nozzle Datasets Studio",
-  "description": "UI for interacting with nozzle datasets. Writing, running and validating queries and datasets to create a dataset definition for deploying",
+  "short_name": "Amp Studio",
+  "name": "Amp Datasets Studio",
+  "description": "UI for interacting with amp datasets. Writing, running and validating queries and datasets to create a dataset definition for deploying",
   "icons": [
     {
       "src": "favicon/favicon.ico",
@@ -9,19 +9,9 @@
       "type": "image/x-icon"
     },
     {
-      "src": "logo/nozzle-logo-128.png",
+      "src": "logo/Amp-symbol-color.png",
       "type": "image/png",
-      "sizes": "128x128"
-    },
-    {
-      "src": "logo/nozzle-logo-256.png",
-      "type": "image/png",
-      "sizes": "256x256"
-    },
-    {
-      "src": "logo/nozzle-logo-512.png",
-      "type": "image/png",
-      "sizes": "512x512"
+      "sizes": "64x64 128x128 256x256 512x512"
     }
   ],
   "start_url": ".",

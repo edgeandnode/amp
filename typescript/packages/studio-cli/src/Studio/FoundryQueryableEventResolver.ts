@@ -140,79 +140,82 @@ export class FoundryQueryableEventResolver extends Effect.Service<FoundryQueryab
       const modeIsLocalFoundry = Effect.fnUntraced(function*(
         cwd: string = ".",
       ) {
-        return yield* fs
-          .exists(path.resolve(cwd, "foundry.toml"))
-          .pipe(Effect.orElseSucceed(() => false))
+        const candidates = [
+          path.resolve(cwd, `foundry.toml`),
+          path.resolve(cwd, "contracts", `foundry.toml`),
+        ]
+        return yield* Effect.findFirst(candidates, (_) => fs.exists(_).pipe(Effect.orElseSucceed(() => false)))
       })
       /**
        * If the cli is running in local foundy mode, this reads the foundry.toml config and parses it.
-       * @returns the parsed foundry.toml config
+       * @returns the parsed foundry.toml config along with the directory containing it
        */
-      const fetchAndParseFoundryConfigToml = (cwd: string = ".") =>
-        Effect.gen(function*() {
-          const isLocalFoundry = yield* modeIsLocalFoundry(cwd)
-          if (!isLocalFoundry) {
-            return Option.none<FoundryTomlConfig>()
-          }
-          const config = yield* fs
-            .readFileString(path.resolve(cwd, "foundry.toml"))
-            .pipe(
-              Effect.map((config) => Option.some(config)),
-              Effect.orElseSucceed(() => Option.none<string>()),
+      const fetchAndParseFoundryConfigToml = Effect.fn("FetchAndParseFoundryConfig")(function*(cwd: string = ".") {
+        const isLocalFoundry = yield* modeIsLocalFoundry(cwd)
+        if (Option.isNone(isLocalFoundry)) {
+          return Option.none<{ config: FoundryTomlConfig; configDir: string }>()
+        }
+        const foundryPath = isLocalFoundry.value
+        const foundryDir = path.dirname(foundryPath)
+
+        const config = yield* fs
+          .readFileString(foundryPath)
+          .pipe(
+            Effect.map((config) => Option.some(config)),
+            Effect.orElseSucceed(() => Option.none<string>()),
+          )
+
+        return Option.match(config, {
+          onNone() {
+            return Option.none<{ config: FoundryTomlConfig; configDir: string }>()
+          },
+          onSome(found) {
+            const parsed = load(found)
+            const decoded = FoundryTomlConfigDecoder(parsed)
+            return Either.match(decoded, {
+              onLeft() {
+                // failure parsing the foundry config. return Option.none
+                // todo: error handling, where does it belong??
+                return Option.none<{ config: FoundryTomlConfig; configDir: string }>()
+              },
+              onRight(right) {
+                return Option.some({ config: right, configDir: foundryDir })
+              },
+            })
+          },
+        })
+      })
+
+      const decodeEventsFromAbi = Effect.fn("DecodeAbiEvents")(function*(outpath: string, filepath: string) {
+        const resolvedPath = path.resolve(outpath, filepath)
+        const rawAbi = yield* fs.readFileString(resolvedPath)
+        const decoded = FoundryOutputDecoder(rawAbi)
+
+        return Either.match(decoded, {
+          onLeft() {
+            return [] as Array<Model.QueryableEvent>
+          },
+          onRight(right) {
+            const sources = Object.keys(right.metadata.sources)
+            return pipe(
+              right.abi,
+              Array.filter(abiOutputIsEvent),
+              Array.map((event) =>
+                Model.QueryableEvent.make({
+                  name: event.name,
+                  source: sources,
+                  signature: event.signature,
+                  params: Array.map(event.inputs, (input) => ({
+                    name: input.name,
+                    datatype: input.type,
+                    indexed: input.indexed,
+                  })),
+                })
+              ),
             )
-
-          return Option.match(config, {
-            onNone() {
-              return Option.none<FoundryTomlConfig>()
-            },
-            onSome(found) {
-              const parsed = load(found)
-              const decoded = FoundryTomlConfigDecoder(parsed)
-              return Either.match(decoded, {
-                onLeft() {
-                  // failure parsing the foundry config. return Option.none
-                  // todo: error handling, where does it belong??
-                  return Option.none<FoundryTomlConfig>()
-                },
-                onRight(right) {
-                  return Option.some(right)
-                },
-              })
-            },
-          })
+          },
         })
-
-      const decodeEventsFromAbi = (outpath: string, filepath: string) =>
-        Effect.gen(function*() {
-          const resolvedPath = path.resolve(outpath, filepath)
-          const rawAbi = yield* fs.readFileString(resolvedPath)
-          const decoded = FoundryOutputDecoder(rawAbi)
-
-          return Either.match(decoded, {
-            onLeft() {
-              return [] as Array<Model.QueryableEvent>
-            },
-            onRight(right) {
-              const sources = Object.keys(right.metadata.sources)
-              return pipe(
-                right.abi,
-                Array.filter(abiOutputIsEvent),
-                Array.map((event) =>
-                  Model.QueryableEvent.make({
-                    name: event.name,
-                    source: sources,
-                    signature: event.signature,
-                    params: Array.map(event.inputs, (input) => ({
-                      name: input.name,
-                      datatype: input.type,
-                      indexed: input.indexed,
-                    })),
-                  })
-                ),
-              )
-            },
-          })
-        })
+      })
 
       /**
        * Derive a list of [QueryableEvent](./Model.js) from the current foundry compiled output ABIs.
@@ -249,30 +252,29 @@ export class FoundryQueryableEventResolver extends Effect.Service<FoundryQueryab
           ),
         )
 
-      const queryableEventsStream = (cwd: string = ".") =>
-        Effect.gen(function*() {
-          const parsedFoundryConfig = yield* fetchAndParseFoundryConfigToml(cwd)
-          if (Option.isNone(parsedFoundryConfig)) {
-            return Stream.empty
-          }
-          const foundryConfig = parsedFoundryConfig.value
-          const outpath = path.resolve(cwd, foundryConfig.profile.default.out)
+      const queryableEventsStream = Effect.fn("BuildQueryableEventsStream")(function*(cwd: string = ".") {
+        const parsedFoundryConfig = yield* fetchAndParseFoundryConfigToml(cwd)
+        if (Option.isNone(parsedFoundryConfig)) {
+          return Stream.empty
+        }
+        const { config: foundryConfig, configDir } = parsedFoundryConfig.value
+        const outpath = path.resolve(configDir, foundryConfig.profile.default.out)
 
-          return currentEventsStream(outpath).pipe(
-            Stream.concat(watchEventStreamUpdates(outpath)),
-            Stream.filter((events) => Array.isNonEmptyArray(events)),
-            Stream.map((events) =>
-              Model.QueryableEventStream.make({
-                events,
-              })
-            ),
-            Stream.map((stream) => {
-              const jsonData = JSON.stringify(stream)
-              const sseData = `data: ${jsonData}\n\n`
-              return new TextEncoder().encode(sseData)
-            }),
-          )
-        })
+        return currentEventsStream(outpath).pipe(
+          Stream.concat(watchEventStreamUpdates(outpath)),
+          Stream.filter((events) => Array.isNonEmptyArray(events)),
+          Stream.map((events) =>
+            Model.QueryableEventStream.make({
+              events,
+            })
+          ),
+          Stream.map((stream) => {
+            const jsonData = JSON.stringify(stream)
+            const sseData = `data: ${jsonData}\n\n`
+            return new TextEncoder().encode(sseData)
+          }),
+        )
+      })
 
       return {
         events: Effect.fn("QueryableEventsParser")(function*(cwd: string = ".") {
@@ -280,8 +282,8 @@ export class FoundryQueryableEventResolver extends Effect.Service<FoundryQueryab
           if (Option.isNone(parsedFoundryConfig)) {
             return Chunk.empty<Model.QueryableEvent>()
           }
-          const foundryConfig = parsedFoundryConfig.value
-          const outpath = path.resolve(cwd, foundryConfig.profile.default.out)
+          const { config: foundryConfig, configDir } = parsedFoundryConfig.value
+          const outpath = path.resolve(configDir, foundryConfig.profile.default.out)
 
           // Read directory and process files directly
           const files = yield* fs.readDirectory(outpath, { recursive: true })
