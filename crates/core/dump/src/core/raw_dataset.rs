@@ -249,6 +249,9 @@ pub async fn dump(
             join_set.spawn(job.run().instrument(span));
         }
 
+        // Drop the extra sender, allowing the progress task to exit.
+        drop(overall_blocks_covered_tx);
+
         // Wait for all the jobs to finish, returning an error if any job panics or fails
         if let Err(err) = join_set.try_wait_all().await {
             tracing::error!(dataset=%dataset_name, error=%err, "dataset dump failed");
