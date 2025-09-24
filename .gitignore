@@ -16,8 +16,10 @@ broadcast/
 node_modules/
 dist/
 build/
+data/
 *.tsbuildinfo
 *.ptau
 .idea
 .vscode/
 config.toml
+.env.local

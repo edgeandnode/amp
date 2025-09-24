@@ -38,7 +38,7 @@ With that file in your `dataset_defs_dir`, you can dump the data:
 
 ## Protobuf Code Generation
 
-The library includes a build feature `gen-proto` that enables protobuf code generation during the build process.
+The library uses a build configuration flag `gen_proto` that enables protobuf code generation during the build process.
 When enabled, the build script will generate Rust bindings from `.proto` files using prost and tonic
 for Substreams protocol support.
 
@@ -51,8 +51,20 @@ just gen-substreams-datasets-proto
 Or using the full `cargo build` command:
 
 ```bash
-cargo build -p substreams-datasets --features=gen-proto
+RUSTFLAGS="--cfg gen_proto" cargo build -p substreams-datasets
 ```
 
 This will generate Rust structs and gRPC client code from the Substreams protocol definitions
 and save them to `src/proto/`.
+
+## JSON Schema Generation
+
+JSON schemas for Substreams dataset definitions can be generated using the companion `datasets-substreams-gen` crate. This generates schemas for external validation and documentation purposes.
+
+To generate JSON schema bindings, run:
+
+```bash
+just gen-datasets-substreams-manifest-schema
+```
+
+This will generate JSON schemas from the Substreams dataset definition structs and copy them to `docs/dataset-def-schemas/substreams.spec.json`.

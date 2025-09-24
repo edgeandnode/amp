@@ -8,7 +8,7 @@ alloy.workspace = true
 async-stream.workspace = true
 common = { path = "../../core/common" }
 futures.workspace = true
-schemars.workspace = true
+schemars = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 serde_with = "3.9.0"

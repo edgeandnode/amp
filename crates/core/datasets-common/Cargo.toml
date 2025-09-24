@@ -3,9 +3,6 @@ name = "datasets-common"
 edition.workspace = true
 version.workspace = true
 
-[features]
-schemars = ["dep:schemars"]
-
 [dependencies]
 datafusion = { workspace = true }
 metadata-db = { path = "../metadata-db" }

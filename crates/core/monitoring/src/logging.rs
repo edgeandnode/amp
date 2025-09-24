@@ -106,6 +106,7 @@ fn assert_nozzle_crates() {
         .workspace_packages()
         .into_iter()
         .map(|pkg| pkg.name.replace("-", "_").clone())
+        .filter(|pkg| !pkg.ends_with("_gen")) // Exclude codegen crates
         .collect();
     names.sort();
     assert_eq!(names, NOZZLE_CRATES);
