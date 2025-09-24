@@ -158,8 +158,8 @@ importers:
   packages/nozzle:
     dependencies:
       '@bufbuild/protobuf':
-        specifier: ^2.2.5
-        version: 2.9.0
+        specifier: 2.6.3
+        version: 2.6.3
       '@effect/cli':
         specifier: ^0.70.0
         version: 0.70.0(@effect/platform@0.91.1(effect@3.17.14))(@effect/printer-ansi@0.45.0(@effect/typeclass@0.36.0(effect@3.17.14))(effect@3.17.14))(@effect/printer@0.45.0(@effect/typeclass@0.36.0(effect@3.17.14))(effect@3.17.14))(effect@3.17.14)
@@ -181,13 +181,13 @@ importers:
         version: 1.57.2
       '@bufbuild/protoc-gen-es':
         specifier: ^2.7.0
-        version: 2.9.0(@bufbuild/protobuf@2.9.0)
+        version: 2.9.0(@bufbuild/protobuf@2.6.3)
       '@connectrpc/connect':
         specifier: ^2.1.0
-        version: 2.1.0(@bufbuild/protobuf@2.9.0)
+        version: 2.1.0(@bufbuild/protobuf@2.6.3)
       '@connectrpc/connect-node':
         specifier: ^2.1.0
-        version: 2.1.0(@bufbuild/protobuf@2.9.0)(@connectrpc/connect@2.1.0(@bufbuild/protobuf@2.9.0))
+        version: 2.1.0(@bufbuild/protobuf@2.6.3)(@connectrpc/connect@2.1.0(@bufbuild/protobuf@2.6.3))
       '@effect/platform':
         specifier: ^0.91.1
         version: 0.91.1(effect@3.17.14)
@@ -4530,14 +4530,6 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@bufbuild/protoc-gen-es@2.9.0(@bufbuild/protobuf@2.9.0)':
-    dependencies:
-      '@bufbuild/protoplugin': 2.9.0
-    optionalDependencies:
-      '@bufbuild/protobuf': 2.9.0
-    transitivePeerDependencies:
-      - supports-color
-
   '@bufbuild/protoplugin@2.9.0':
     dependencies:
       '@bufbuild/protobuf': 2.9.0
@@ -4567,11 +4559,6 @@ snapshots:
     dependencies:
       '@bufbuild/protobuf': 2.6.3
       '@connectrpc/connect': 2.1.0(@bufbuild/protobuf@2.6.3)
-
-  '@connectrpc/connect-node@2.1.0(@bufbuild/protobuf@2.9.0)(@connectrpc/connect@2.1.0(@bufbuild/protobuf@2.9.0))':
-    dependencies:
-      '@bufbuild/protobuf': 2.9.0
-      '@connectrpc/connect': 2.1.0(@bufbuild/protobuf@2.9.0)
 
   '@connectrpc/connect-web@2.1.0(@bufbuild/protobuf@2.9.0)(@connectrpc/connect@2.1.0(@bufbuild/protobuf@2.9.0))':
     dependencies:
