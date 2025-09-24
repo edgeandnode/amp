@@ -387,8 +387,9 @@ impl DatasetStore {
         &self,
         dataset: &str,
         only_finalized_blocks: bool,
+        meter: Option<&monitoring::telemetry::metrics::Meter>,
     ) -> Result<impl BlockStreamer, DatasetError> {
-        self.load_client_inner(dataset, only_finalized_blocks)
+        self.load_client_inner(dataset, only_finalized_blocks, meter)
             .await
             .map_err(|err| (dataset, err).into())
             .map(|client| client.with_retry())
@@ -399,6 +400,7 @@ impl DatasetStore {
         &self,
         dataset_name: &str,
         only_finalized_blocks: bool,
+        meter: Option<&monitoring::telemetry::metrics::Meter>,
     ) -> Result<BlockStreamClient, Error> {
         let (common, raw_dataset) = self.common_data_and_dataset(dataset_name).await?;
         let value = raw_dataset.to_value()?;
@@ -424,6 +426,7 @@ impl DatasetStore {
                     common.network,
                     provider_name,
                     only_finalized_blocks,
+                    meter,
                 )
                 .await?,
             ),

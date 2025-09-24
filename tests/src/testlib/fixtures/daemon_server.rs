@@ -46,6 +46,7 @@ impl DaemonServer {
             enable_jsonl,
             enable_admin_api,
             None, // metrics
+            None, // meter
         )
         .await?;
 

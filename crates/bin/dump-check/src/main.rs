@@ -88,6 +88,7 @@ async fn main() -> Result<(), BoxError> {
     let metrics_registry = telemetry_metrics_kit
         .as_ref()
         .map(|(_, meter)| Arc::new(metrics::MetricsRegistry::new(meter)));
+    let meter = telemetry_metrics_kit.as_ref().map(|(_, meter)| meter);
 
     let total_blocks = end_block - start + 1;
     let ui_handle = tokio::spawn(ui::ui(metrics_registry.clone(), total_blocks));
@@ -105,6 +106,7 @@ async fn main() -> Result<(), BoxError> {
         start,
         end_block,
         metrics_registry,
+        meter,
     )
     .await?;
 
