@@ -199,30 +199,6 @@ pub async fn dump(
         let (overall_blocks_covered_tx, mut overall_blocks_covered_rx) =
             tokio::sync::mpsc::unbounded_channel();
 
-        let progress_jh = tokio::task::spawn(async move {
-            let mut overall_blocks_covered = 0;
-            let mut progress_interval = tokio::time::interval(Duration::from_secs(15));
-            tracing::info!("overall progress: 0/{total_blocks_to_cover} blocks (0.00%)");
-            loop {
-                tokio::select! {
-                    _ = progress_interval.tick() => {
-                        let percent_covered = (overall_blocks_covered as f64 / total_blocks_to_cover as f64) * 100.0;
-                        tracing::info!("overall progress: {overall_blocks_covered}/{total_blocks_to_cover} blocks ({percent_covered:.2}%)");
-                    }
-                    new_block = overall_blocks_covered_rx.recv() => {
-                        match new_block {
-                            Some(_) => overall_blocks_covered += 1,
-                            // All senders have been dropped, meaning all jobs are done.
-                            None => break,
-                        }
-                    }
-                }
-            }
-            tracing::info!(
-                "overall progress: {total_blocks_to_cover}/{total_blocks_to_cover} blocks (100.00%)"
-            );
-        });
-
         let jobs = missing_dataset_ranges
             .into_iter()
             .enumerate()
@@ -252,14 +228,34 @@ pub async fn dump(
         // Drop the extra sender, allowing the progress task to exit.
         drop(overall_blocks_covered_tx);
 
-        // Wait for all the jobs to finish, returning an error if any job panics or fails
-        if let Err(err) = join_set.try_wait_all().await {
-            tracing::error!(dataset=%dataset_name, error=%err, "dataset dump failed");
-            progress_jh.abort();
-            return Err(err.into_box_error());
+        // Wait for all the jobs to finish, returning an error if any job panics or fails. In the
+        // meantime, log overall progress.
+        let mut overall_blocks_covered = 0;
+        let mut progress_interval = tokio::time::interval(Duration::from_secs(15));
+        tracing::info!("overall progress: 0/{total_blocks_to_cover} blocks (0.00%)");
+        loop {
+            tokio::select! {
+                job_result = join_set.try_wait_all() => {
+                    if let Err(err) = job_result {
+                        tracing::error!(dataset=%dataset_name, error=%err, "dataset dump failed");
+                        return Err(err.into_box_error());
+                    }
+                    break;
+                }
+                _ = progress_interval.tick() => {
+                    let percent_covered = (overall_blocks_covered as f64 / total_blocks_to_cover as f64) * 100.0;
+                    tracing::info!("overall progress: {overall_blocks_covered}/{total_blocks_to_cover} blocks ({percent_covered:.2}%)");
+                }
+                new_block = overall_blocks_covered_rx.recv() => {
+                    if new_block.is_some() {
+                        overall_blocks_covered += 1;
+                    }
+                }
+            }
         }
-
-        progress_jh.await?;
+        tracing::info!(
+            "overall progress: {total_blocks_to_cover}/{total_blocks_to_cover} blocks (100.00%)"
+        );
 
         if let Some(end) = end
             && latest_block >= end
