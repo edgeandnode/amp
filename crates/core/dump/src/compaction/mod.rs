@@ -205,7 +205,7 @@ pub trait NozzleCompactorTaskType: Debug + Display + Sized + Send + 'static {
         table: &Arc<PhysicalTable>,
         opts: &Arc<CompactionProperties>,
     ) -> NozzleCompactorTask<Self> {
-        let task = tokio::spawn(Self::new(table, opts).run());
+        let task = tokio::spawn(futures::future::ok(Self::new(table, opts)));
         NozzleCompactorTask {
             task,
             table: Arc::clone(table),

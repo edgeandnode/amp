@@ -37,6 +37,7 @@ impl Debug for Collector {
 }
 
 impl Collector {
+    #[tracing::instrument(skip_all, err)]
     pub(super) async fn collect(self) -> CollectionResult<Self> {
         let metadata_db = self.table.metadata_db();
 
@@ -135,6 +136,7 @@ impl DeletionOutput {
         }
     }
 
+    #[tracing::instrument(skip_all, err, fields(table=%table.table_ref()))]
     pub async fn try_from_manifest_stream<'a>(
         table: Arc<PhysicalTable>,
         expired_stream: BoxStream<'a, Result<GcManifestRow, metadata_db::Error>>,
@@ -188,6 +190,7 @@ impl DeletionOutput {
             .await)
     }
 
+    #[tracing::instrument(skip_all, err)]
     pub async fn update_manifest(
         &self,
         metadata_db: &MetadataDb,
@@ -197,6 +200,7 @@ impl DeletionOutput {
         }
 
         let file_ids = [self.successes(), self.not_found()].concat();
+        tracing::info!("Deleting {:?} from metadata-db", file_ids);
 
         metadata_db.delete_file_ids(&file_ids).await
     }
