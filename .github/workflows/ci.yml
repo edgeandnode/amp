@@ -20,7 +20,7 @@ env:
 jobs:
   unit-tests:
     name: Unit tests
-    runs-on: nscloud-ubuntu-22.04-amd64-16x32
+    runs-on: namespace-profile-linux-default
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
@@ -33,7 +33,7 @@ jobs:
           # Add PostgreSQL binaries to PATH
           echo "/usr/lib/postgresql/$(pg_lsclusters | awk 'NR==2 {print $1}')/bin" >> $GITHUB_PATH
 
-      - uses: actions-rust-lang/setup-rust-toolchain@2fcdc490d667999e01ddbbf0f2823181beef6b39 # v1
+      - uses: actions-rust-lang/setup-rust-toolchain@02be93da58aa71fb456aa9c43b301149248829d8 # v1
         with:
           cache: false
           rustflags: ""
@@ -52,7 +52,7 @@ jobs:
 
   integration-tests:
     name: Integration tests
-    runs-on: nscloud-ubuntu-22.04-amd64-16x32
+    runs-on: namespace-profile-linux-default
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
@@ -77,7 +77,7 @@ jobs:
       - name: pnpm install
         run: just pnpm-install
 
-      - uses: actions-rust-lang/setup-rust-toolchain@2fcdc490d667999e01ddbbf0f2823181beef6b39 # v1
+      - uses: actions-rust-lang/setup-rust-toolchain@02be93da58aa71fb456aa9c43b301149248829d8 # v1
         with:
           cache: false
           rustflags: ""
@@ -111,13 +111,13 @@ jobs:
 
   rustfmt:
     name: Check rustfmt style
-    runs-on: namespace-profile-default
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
 
       - name: Setup Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@2fcdc490d667999e01ddbbf0f2823181beef6b39 # v1
+        uses: actions-rust-lang/setup-rust-toolchain@02be93da58aa71fb456aa9c43b301149248829d8 # v1
         with:
           toolchain: nightly # Required for unstable features (see `rustfmt.toml` for details)
           components: rustfmt
@@ -132,7 +132,7 @@ jobs:
 
   release-check:
     name: Build in release mode
-    runs-on: nscloud-ubuntu-22.04-amd64-16x32
+    runs-on: namespace-profile-linux-default
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
@@ -141,7 +141,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y protobuf-compiler
 
-      - uses: actions-rust-lang/setup-rust-toolchain@2fcdc490d667999e01ddbbf0f2823181beef6b39 # v1
+      - uses: actions-rust-lang/setup-rust-toolchain@02be93da58aa71fb456aa9c43b301149248829d8 # v1
         with:
           cache: false
           rustflags: ""
@@ -154,7 +154,7 @@ jobs:
 
   typescript:
     name: TypeScript code style & types
-    runs-on: namespace-profile-default
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
@@ -177,9 +177,10 @@ jobs:
       - name: Check types
         run: just check-ts
 
+  # TODO: Use a built binary here from the build.yml workflow
   typescript-tests:
     name: TypeScript tests
-    runs-on: nscloud-ubuntu-22.04-amd64-16x32
+    runs-on: namespace-profile-linux-default
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
@@ -195,7 +196,7 @@ jobs:
         run: |
           echo "/usr/lib/postgresql/$(pg_lsclusters | awk 'NR==2 {print $1}')/bin" >> $GITHUB_PATH
 
-      - uses: actions-rust-lang/setup-rust-toolchain@2fcdc490d667999e01ddbbf0f2823181beef6b39 # v1
+      - uses: actions-rust-lang/setup-rust-toolchain@02be93da58aa71fb456aa9c43b301149248829d8 # v1
         with:
           cache: false
           rustflags: ""
@@ -227,7 +228,7 @@ jobs:
 
   # Check generated code is up to date
   gen-check:
-    runs-on: namespace-profile-default
+    runs-on: namespace-profile-linux-default
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
@@ -236,7 +237,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y protobuf-compiler
 
-      - uses: actions-rust-lang/setup-rust-toolchain@2fcdc490d667999e01ddbbf0f2823181beef6b39 # v1
+      - uses: actions-rust-lang/setup-rust-toolchain@02be93da58aa71fb456aa9c43b301149248829d8 # v1
         with:
           cache: true
           rustflags: ""
