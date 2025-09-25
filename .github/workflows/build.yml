@@ -81,11 +81,27 @@ jobs:
         with:
           path: artifacts
 
+      - name: Prepare release binaries
+        run: |
+          # Organize binaries for release
+          mkdir -p release
+          
+          # Copy and rename binaries to match expected artifact names
+          cp artifacts/nozzle-linux-x86_64/nozzle release/nozzle-linux-x86_64
+          cp artifacts/nozzle-linux-aarch64/nozzle release/nozzle-linux-aarch64
+          cp artifacts/nozzle-darwin-x86_64/nozzle release/nozzle-darwin-x86_64
+          cp artifacts/nozzle-darwin-aarch64/nozzle release/nozzle-darwin-aarch64
+          
+          # Make all binaries executable
+          chmod +x release/*
+          
+          # Verify binaries exist
+          ls -la release/
+
       - name: Create release
         uses: softprops/action-gh-release@6cbd405e2c4e67a21c47fa9e383d020e4e28b836 # v2
         with:
-          files: artifacts/*/nozzle-*
-          generate_release_notes: true
+          files: release/nozzle-*
 
   containerize:
     name: Containerize
