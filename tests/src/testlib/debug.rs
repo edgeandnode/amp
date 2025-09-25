@@ -9,3 +9,9 @@ pub static TESTS_KEEP_TEMP_DIRS: LazyLock<bool> = LazyLock::new(|| {
         .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
         .unwrap_or(false)
 });
+
+/// Initialize color backtrace for better error messages in tests.
+#[ctor::ctor]
+fn init_color_backtrace() {
+    color_backtrace::install();
+}

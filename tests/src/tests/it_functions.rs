@@ -1,7 +1,7 @@
 use common::BoxError;
 use monitoring::logging;
 
-use crate::{steps::load_test_steps, testlib::ctx::TestCtxBuilder};
+use crate::{run_spec, testlib::ctx::TestCtxBuilder};
 
 #[tokio::test]
 async fn basic_function() -> Result<(), BoxError> {
@@ -19,9 +19,7 @@ async fn basic_function() -> Result<(), BoxError> {
         .await
         .expect("Failed to connect FlightClient");
 
-    for step in load_test_steps("basic-function.yaml").unwrap() {
-        step.run(&test_ctx, &mut client).await.unwrap();
-    }
+    run_spec!("basic-function", (&test_ctx, &mut client));
 
     Ok(())
 }
