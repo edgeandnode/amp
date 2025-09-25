@@ -97,10 +97,17 @@ jobs:
           # Verify binaries exist
           ls -la release/
 
-      - name: Create release
+      - name: Create draft release
         uses: softprops/action-gh-release@6cbd405e2c4e67a21c47fa9e383d020e4e28b836 # v2
         with:
           files: release/nozzle-*
+          fail_on_unmatched_files: true
+          draft: true
+
+      - name: Finalize release
+        uses: softprops/action-gh-release@6cbd405e2c4e67a21c47fa9e383d020e4e28b836 # v2
+        with:
+          draft: false
 
   containerize:
     name: Containerize
