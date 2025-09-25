@@ -43,7 +43,7 @@
       "value": { "Decimal128": [38, 0] },
       "gas_price": { "Decimal128": [38, 0] },
       "nonce": "UInt64",
-      "to": "Binary",
+      "to": { "FixedSizeBinary": 20 },
       "timestamp": { "Timestamp": ["Nanosecond", "+00:00"] },
       "max_fee_per_gas": { "Decimal128": [38, 0] },
       "max_priority_fee_per_gas": { "Decimal128": [38, 0] },
