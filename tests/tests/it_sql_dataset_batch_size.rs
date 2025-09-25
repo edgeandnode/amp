@@ -154,7 +154,7 @@ impl TestCtx {
         let mut opts = compaction_opts(&config.compaction, &parquet_writer_props);
         opts.compactor_active = true;
         opts.collector_active = false;
-        opts.file_lock_duration = Duration::from_millis(100);
+        opts.file_lock_duration = Duration::from_millis(25);
         opts.collector_interval = Duration::ZERO;
         opts.compactor_interval = Duration::ZERO;
         opts.size_limit = SegmentSizeLimit::new(1, 1, 1, length);
