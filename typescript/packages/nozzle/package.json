@@ -1,6 +1,6 @@
 {
   "name": "nozzl",
-  "version": "0.0.14",
+  "version": "0.0.17",
   "type": "module",
   "license": "UNLICENSED",
   "description": "Nothing to see here yet",
@@ -44,8 +44,9 @@
   },
   "dependencies": {
     "@effect/cli": "^0.69.2",
+    "abitype": "^1.1.1",
     "jiti": "^2.5.1",
-    "viem": "^2.37.4"
+    "viem": "^2.37.7"
   },
   "peerDependencies": {
     "@bufbuild/protobuf": "^2.2.5",
@@ -62,11 +63,11 @@
     "@bufbuild/protoc-gen-es": "^2.7.0",
     "@connectrpc/connect": "^2.1.0",
     "@connectrpc/connect-node": "^2.1.0",
-    "@effect/platform": "^0.90.7",
+    "@effect/platform": "^0.90.10",
     "@effect/vitest": "^0.25.1",
     "@types/node": "^24.3.1",
     "apache-arrow": "^21.0.0",
-    "effect": "^3.17.13",
+    "effect": "^3.17.14",
     "typescript": "^5.8.3",
     "vitest": "^3.2.4"
   }

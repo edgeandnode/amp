@@ -6,7 +6,6 @@ import * as Hash from "effect/Hash"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Stream from "effect/Stream"
-import * as Anvil from "./Anvil.ts"
 import * as Admin from "./api/Admin.ts"
 import * as ConfigLoader from "./ConfigLoader.ts"
 import * as EvmRpc from "./evm/EvmRpc.ts"
@@ -41,9 +40,6 @@ export const make = Effect.gen(function*() {
       onSome: (configFile) => Effect.succeed(configFile),
     })),
   )
-
-  // Register the anvil dataset
-  yield* admin.registerDataset(Anvil.dataset.name, Anvil.dataset.version, Anvil.dataset)
 
   // Observe block changes in a sliding buffer
   const blockChanges = evmRpc.streamBlocks.pipe(
