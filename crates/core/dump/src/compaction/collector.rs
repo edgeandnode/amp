@@ -200,7 +200,7 @@ impl DeletionOutput {
         }
 
         let file_ids = [self.successes(), self.not_found()].concat();
-        tracing::info!("Deleting {:?} from metadata-db", file_ids);
+        tracing::debug!("Deleting {:?} from metadata-db", file_ids);
 
         metadata_db.delete_file_ids(&file_ids).await
     }
