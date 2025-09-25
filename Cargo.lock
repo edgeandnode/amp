@@ -3074,7 +3074,9 @@ dependencies = [
  "schemars 1.0.4",
  "semver 1.0.26",
  "serde",
+ "serde_json",
  "thiserror",
+ "toml 0.8.23",
 ]
 
 [[package]]
@@ -3438,6 +3440,7 @@ dependencies = [
  "alloy",
  "async-stream",
  "common",
+ "datasets-common",
  "fs-err",
  "futures",
  "governor",
@@ -3479,6 +3482,7 @@ dependencies = [
  "alloy",
  "async-stream",
  "common",
+ "datasets-common",
  "fs-err",
  "futures",
  "schemars 1.0.4",
@@ -3556,6 +3560,7 @@ version = "0.1.0"
 dependencies = [
  "async-stream",
  "common",
+ "datasets-common",
  "fs-err",
  "futures",
  "hex",
@@ -7331,6 +7336,7 @@ dependencies = [
  "chrono",
  "common",
  "datafusion",
+ "datasets-common",
  "firehose-datasets",
  "futures",
  "prost",

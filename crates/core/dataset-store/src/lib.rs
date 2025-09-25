@@ -7,8 +7,8 @@ use std::{
 
 use async_stream::stream;
 use common::{
-    BlockNum, BlockStreamer, BlockStreamerExt, BoxError, Dataset, DatasetValue, LogicalCatalog,
-    PlanningContext, RawDatasetRows, Store,
+    BlockNum, BlockStreamer, BlockStreamerExt, BoxError, Dataset, LogicalCatalog, PlanningContext,
+    RawDatasetRows, Store,
     catalog::physical::{Catalog, PhysicalTable},
     config::Config,
     evm::{self, udfs::EthCall},
@@ -26,7 +26,9 @@ use datafusion::{
     logical_expr::{ScalarUDF, async_udf::AsyncScalarUDF},
     sql::{TableReference, parser, resolve::resolve_table_references},
 };
-use datasets_common::{manifest::Manifest as CommonManifest, name::Name, version::Version};
+use datasets_common::{
+    manifest::Manifest as CommonManifest, name::Name, value::ManifestValue, version::Version,
+};
 use futures::{FutureExt as _, Stream, TryFutureExt as _, future::BoxFuture};
 use js_runtime::isolate_pool::IsolatePool;
 use metadata_db::MetadataDb;
@@ -690,7 +692,7 @@ impl DatasetStore {
     /// Each `.sql` file in the directory with the same name as the dataset will be loaded as a table.
     fn sql_dataset(
         self: Arc<Self>,
-        dataset_def: DatasetValue,
+        dataset_def: ManifestValue,
     ) -> BoxFuture<'static, Result<SqlDataset, Error>> {
         sql_datasets::dataset(self, dataset_def)
             .map_err(Error::SqlDatasetError)
@@ -714,10 +716,10 @@ impl DatasetSrc {
         Ok(manifest)
     }
 
-    fn to_value(&self) -> Result<DatasetValue, Error> {
+    fn to_value(&self) -> Result<ManifestValue, Error> {
         let value = match self {
-            DatasetSrc::Toml(src) => DatasetValue::Toml(toml::Value::from_str(src)?),
-            DatasetSrc::Json(src) => DatasetValue::Json(serde_json::Value::from_str(src)?),
+            DatasetSrc::Toml(src) => ManifestValue::Toml(toml::Value::from_str(src)?),
+            DatasetSrc::Json(src) => ManifestValue::Json(serde_json::Value::from_str(src)?),
         };
 
         Ok(value)
