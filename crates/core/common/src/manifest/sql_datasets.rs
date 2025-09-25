@@ -7,9 +7,9 @@
 use std::collections::BTreeMap;
 
 use datafusion::sql::parser;
-use datasets_common::name::Name;
+use datasets_common::{name::Name, value::ManifestValue};
 
-use crate::{Dataset, DatasetValue};
+use crate::Dataset;
 
 /// Dataset kind constant for legacy SQL datasets.
 pub const DATASET_KIND: &str = "sql";
@@ -50,10 +50,10 @@ pub struct Manifest {
 
 impl Manifest {
     /// Parse a dataset definition from TOML or JSON value.
-    pub fn from_value(value: DatasetValue) -> Result<Self, Error> {
+    pub fn from_value(value: ManifestValue) -> Result<Self, Error> {
         match value {
-            DatasetValue::Toml(value) => value.try_into().map_err(Into::into),
-            DatasetValue::Json(value) => serde_json::from_value(value).map_err(Into::into),
+            ManifestValue::Toml(value) => value.try_into().map_err(Into::into),
+            ManifestValue::Json(value) => serde_json::from_value(value).map_err(Into::into),
         }
     }
 }

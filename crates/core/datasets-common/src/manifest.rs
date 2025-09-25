@@ -13,7 +13,7 @@ use crate::name::Name;
 ///
 /// All dataset definitions must have a kind, network and name. The name must match the filename.
 /// Schema is optional for TOML dataset format.
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct Manifest {
     /// Dataset name. Must be unique within the network and match the filename
