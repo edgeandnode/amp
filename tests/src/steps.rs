@@ -1,110 +1,52 @@
-use common::BoxError;
+//! Test step definitions and execution framework.
+//!
+//! This module provides a framework for defining and executing test steps
+//! in integration tests. Each step type is defined in its own submodule
+//! with specific functionality for different testing scenarios.
+
+use std::path::PathBuf;
+
 use fs_err as fs;
 
-use crate::testlib::{
-    ctx::TestCtx,
-    fixtures::{DatasetPackage, FlightClient},
-    helpers as test_helpers,
-};
+// Submodules of the step implementations
+mod clean_dump_location;
+mod deploy;
+mod dump;
+mod query;
+mod restore;
+mod stream;
+mod stream_take;
 
+use crate::testlib::{ctx::TestCtx, fixtures::FlightClient};
+
+/// Enumeration of all supported test step types.
+///
+/// Each variant corresponds to a specific type of test operation,
+/// from data dumping and restoration to query execution and stream processing.
 #[derive(Debug, serde::Deserialize)]
 #[serde(untagged)]
-pub(crate) enum TestStep {
-    Dump(DumpStep),
-    Stream(StreamStep),
-    StreamTake(StreamTakeStep),
-    Query(QueryStep),
-    Restore(RestoreStep),
-    Deploy(DeployStep),
-    CleanDumpLocation(CleanDumpLocationStep),
-}
-
-#[derive(Debug, serde::Deserialize)]
-pub struct DeployStep {
-    pub name: String,
-    pub deploy: String,
-    pub config: Option<String>,
-}
-
-#[derive(Debug, serde::Deserialize)]
-pub struct RestoreStep {
-    pub name: String,
-
-    /// Name of the dataset to restore.
-    pub restore: String,
-}
-
-#[derive(Debug, serde::Deserialize)]
-pub struct CleanDumpLocationStep {
-    pub clean_dump_location: String,
-}
-
-#[derive(Debug, serde::Deserialize)]
-pub struct DumpStep {
-    pub name: String,
-    pub dataset: String,
-    pub end: u64,
-    #[serde(default)]
-    pub expect_fail: bool,
-}
-
-#[derive(Debug, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct StreamStep {
-    pub name: String,
-    pub stream: String,
-}
-
-#[derive(Debug, serde::Deserialize)]
-pub struct StreamTakeStep {
-    pub name: String,
-    pub stream: String,
-    pub take: usize,
-    #[serde(flatten)]
-    pub results: SqlTestResult,
-}
-
-impl StreamTakeStep {
-    pub async fn run(&self, client: &mut FlightClient) -> Result<(), BoxError> {
-        let actual_result = client.take_from_stream(&self.stream, self.take).await;
-        self.results.assert_eq(actual_result)
-    }
-}
-
-#[derive(Debug, serde::Deserialize)]
-pub struct QueryStep {
-    pub name: String,
-    /// SQL query to execute.
-    pub query: String,
-    /// JSON-encoded results.
-    #[serde(flatten)]
-    pub result: SqlTestResult,
-    #[serde(rename = "streamingOptions", default)]
-    pub streaming_options: Option<StreamingOptions>,
-}
-
-impl QueryStep {
-    pub async fn run(&self, client: &mut FlightClient) -> Result<(), BoxError> {
-        let actual_result = client
-            .run_query(
-                &self.query,
-                self.streaming_options
-                    .as_ref()
-                    .map(|s| s.at_least_rows)
-                    .flatten(),
-            )
-            .await;
-        self.result.assert_eq(actual_result)
-    }
-}
-
-#[derive(Debug, serde::Deserialize)]
-pub struct StreamingOptions {
-    #[serde(rename = "atLeastRows")]
-    pub at_least_rows: Option<usize>,
+pub enum TestStep {
+    /// Dump dataset data to storage.
+    Dump(dump::Step),
+    /// Register a stream with the client.
+    Stream(stream::Step),
+    /// Take data from a registered stream.
+    StreamTake(stream_take::Step),
+    /// Execute SQL query.
+    Query(query::Step),
+    /// Restore dataset snapshot.
+    Restore(restore::Step),
+    /// Deploy dataset package.
+    Deploy(deploy::Step),
+    /// Clean dump location directory.
+    CleanDumpLocation(clean_dump_location::Step),
 }
 
 impl TestStep {
+    /// Gets the name of the test step.
+    ///
+    /// Returns the step name for logging and identification purposes.
+    /// Note that CleanDumpLocation steps use their location as the name.
     pub fn name(&self) -> &str {
         match self {
             TestStep::Dump(step) => &step.name,
@@ -117,125 +59,148 @@ impl TestStep {
         }
     }
 
-    pub async fn run(&self, ctx: &TestCtx, client: &mut FlightClient) -> Result<(), BoxError> {
+    /// Executes the test step.
+    ///
+    /// Dispatches to the appropriate step implementation based on the step type,
+    /// with comprehensive logging and error handling.
+    pub async fn run(&self, ctx: &TestCtx, client: &mut FlightClient) -> Result<(), TestStepError> {
         let result = match self {
-            TestStep::Dump(step) => {
-                let result = async {
-                    let physical_tables = test_helpers::dump_dataset(
-                        ctx.daemon_server().config(),
-                        ctx.metadata_db(),
-                        &step.dataset,
-                        step.end,
-                        1,
-                        None,
-                    )
-                    .await?;
-
-                    for table in physical_tables {
-                        test_helpers::check_table_consistency(&table).await?;
-                    }
-                    Ok(())
-                }
-                .await;
-
-                if step.expect_fail {
-                    assert!(result.is_err(), "Expected dump to fail, but it succeeded");
-                    Ok(())
-                } else {
-                    result
-                }
-            }
+            TestStep::Dump(step) => step.run(ctx).await,
             TestStep::StreamTake(step) => step.run(client).await,
             TestStep::Query(step) => step.run(client).await,
-            TestStep::Stream(step) => client.register_stream(&step.name, &step.stream).await,
-            TestStep::Restore(step) => {
-                test_helpers::restore_dataset_snapshot(
-                    ctx.daemon_server().config(),
-                    ctx.metadata_db(),
-                    ctx.daemon_server().dataset_store(),
-                    &step.restore,
-                )
-                .await?;
-                Ok(())
-            }
-            TestStep::Deploy(step) => {
-                let dataset_package = DatasetPackage::new(&step.deploy, step.config.as_deref());
-                let cli = ctx.new_nozzl_cli();
-                dataset_package.install(&cli).await?;
-                dataset_package.register(&cli).await
-            }
-            TestStep::CleanDumpLocation(step) => {
-                let mut path =
-                    std::path::PathBuf::from(ctx.daemon_server().config().data_store.url().path());
-                path.push(&step.clean_dump_location);
-                if path.exists() {
-                    fs::remove_dir_all(path)?;
-                }
-                Ok(())
-            }
+            TestStep::Stream(step) => step.run(client).await,
+            TestStep::Restore(step) => step.run(ctx).await,
+            TestStep::Deploy(step) => step.run(ctx).await,
+            TestStep::CleanDumpLocation(step) => step.run(ctx).await,
         };
 
-        if result.is_err() {
-            Err(format!("Test step \"{}\" failed: {:?}", self.name(), result).into())
-        } else {
-            Ok(())
+        match result {
+            Ok(()) => {
+                tracing::trace!("Test step '{}' completed successfully", self.name());
+                Ok(())
+            }
+            Err(err) => {
+                tracing::trace!("Test step '{}' failed: {:?}", self.name(), err);
+                Err(TestStepError {
+                    name: self.name().to_string(),
+                    source: err,
+                })
+            }
         }
     }
 }
 
-pub(crate) fn load_test_steps(file_name: &str) -> Result<Vec<TestStep>, BoxError> {
-    let crate_path = env!("CARGO_MANIFEST_DIR");
-    let path = format!("{crate_path}/specs/{file_name}");
-    let content = fs::read(&path)
-        .map_err(|err| BoxError::from(format!("Failed to read {file_name}: {err}")))?;
-    serde_yaml::from_slice(&content)
-        .map_err(|err| BoxError::from(format!("Failed to parse {file_name}: {err}")))
+/// Loads test steps from a YAML specification file.
+///
+/// Reads and parses a YAML file containing test step definitions from the
+/// specs directory relative to the crate manifest directory.
+pub fn load_test_spec(name: &str) -> Result<Vec<TestStep>, LoadTestSpecError> {
+    let crate_root_path = env!("CARGO_MANIFEST_DIR");
+    let mut spec_path = PathBuf::from(format!("{crate_root_path}/specs/{name}"));
+    spec_path.set_extension("yaml");
+
+    let content = fs::read(&spec_path).map_err(|source| LoadTestSpecError::ReadError {
+        name: name.to_string(),
+        source,
+    })?;
+
+    let steps =
+        serde_yaml::from_slice(&content).map_err(|source| LoadTestSpecError::ParseError {
+            name: name.to_string(),
+            source,
+        })?;
+    Ok(steps)
 }
 
-#[derive(Debug, Clone, serde::Deserialize)]
-#[serde(untagged)]
-pub enum SqlTestResult {
-    Success { results: String },
-    Failure { failure: String },
+/// Error type for test step execution failures.
+#[derive(Debug, thiserror::Error)]
+#[error("Test step '{name}' failed")]
+pub struct TestStepError {
+    /// Name of the test step that failed.
+    pub name: String,
+    /// Source error that caused the step to fail.
+    pub source: Box<dyn std::error::Error + Send + Sync>,
 }
 
-impl SqlTestResult {
-    fn assert_eq(
-        &self,
-        actual_result: Result<serde_json::Value, BoxError>,
-    ) -> Result<(), BoxError> {
-        match self {
-            SqlTestResult::Success {
-                results: expected_json_str,
-            } => {
-                let expected: serde_json::Value = serde_json::from_str(expected_json_str)
-                    .unwrap_or_else(|e| panic!("failed to parse expected JSON: {e}"));
+/// Error types for test specification loading.
+#[derive(Debug, thiserror::Error)]
+pub enum LoadTestSpecError {
+    /// Failed to read the specification file.
+    #[error("Failed to read spec file '{name}'")]
+    ReadError {
+        name: String,
+        source: std::io::Error,
+    },
+    /// Failed to parse the YAML content.
+    #[error("Failed to parse spec file '{name}'")]
+    ParseError {
+        name: String,
+        source: serde_yaml::Error,
+    },
+}
 
-                let actual = actual_result.expect(&format!("expected success, got error",));
+/// Internal macro to panic with detailed error messages including full error chain.
+///
+/// Walks through the error source chain and formats a comprehensive panic message.
+#[macro_export]
+macro_rules! fail_with_error {
+    ($err:expr, $prefix:expr) => {{
+        let err_chain = $crate::steps::build_error_chain(&$err);
+        panic!("{}: {}{}", $prefix, $err, err_chain);
+    }};
+}
 
-                pretty_assertions::assert_str_eq!(
-                    actual.to_string(),
-                    expected.to_string(),
-                    "Test returned unexpected results",
-                );
-            }
+/// Macro to run test specification steps.
+///
+/// Loads a test specification from YAML and executes all its steps sequentially.
+/// Panics with detailed error messages including full error chain if the spec cannot be loaded.
+#[macro_export]
+macro_rules! run_spec {
+    ($spec_name:expr, ($test_ctx:expr, $client:expr)) => {
+        let steps = match $crate::steps::load_test_spec($spec_name) {
+            Ok(steps) => steps,
+            Err(err) => $crate::fail_with_error!(err, "Failed to load test spec"),
+        };
 
-            SqlTestResult::Failure { failure } => {
-                let expected_substring = failure.trim();
-
-                let actual_error =
-                    actual_result.expect_err(&format!("expected failure, got success"));
-
-                let actual_error_str = actual_error.to_string();
-
-                if !actual_error_str.contains(expected_substring) {
-                    panic!(
-                        "Expected substring: \"{}\"\nActual error: \"{}\"",
-                        expected_substring, actual_error_str
-                    );
-                }
+        for step in steps {
+            if let Err(err) = step.run($test_ctx, $client).await {
+                $crate::fail_with_error!(err, "Failed to execute step");
             }
         }
-        Ok(())
+    };
+    ($spec_name:expr, ($test_ctx:expr, $client:expr), delay = $duration:expr) => {
+        let steps = match $crate::steps::load_test_spec($spec_name) {
+            Ok(steps) => steps,
+            Err(err) => $crate::fail_with_error!(err, "Failed to load test spec"),
+        };
+
+        for step in steps {
+            if let Err(err) = step.run($test_ctx, $client).await {
+                $crate::fail_with_error!(err, "Failed to execute step");
+            }
+
+            ::tokio::time::sleep($duration).await;
+        }
+    };
+}
+
+/// Builds an error chain string from an error and its sources.
+///
+/// Walks through the error source chain and returns a formatted string
+/// containing the chain of error causes.
+#[doc(hidden)]
+pub fn build_error_chain(err: &dyn std::error::Error) -> String {
+    let mut error_chain = Vec::new();
+
+    let mut current = err;
+    while let Some(source) = current.source() {
+        error_chain.push(source.to_string());
+        current = source;
+    }
+
+    if error_chain.is_empty() {
+        String::new()
+    } else {
+        format!(" | Caused by: {}", error_chain.join(" -> "))
     }
 }

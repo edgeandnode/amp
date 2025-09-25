@@ -1,7 +1,6 @@
 pub mod testlib;
 
-#[cfg(test)]
-mod steps;
+pub mod steps;
 
 // These test suite modules cannot be moved to the tests/ integration tests directory because
 // they cause linking failures in CI where the `cc` linker gets killed (signal 9, OOM).
