@@ -145,11 +145,14 @@ importers:
       '@effect/platform-node':
         specifier: ^0.96.1
         version: 0.96.1(@effect/cluster@0.48.16(@effect/platform@0.90.10(effect@3.17.14))(@effect/rpc@0.69.5(@effect/platform@0.90.10(effect@3.17.14))(effect@3.17.14))(@effect/sql@0.44.2(@effect/experimental@0.54.6(@effect/platform@0.90.10(effect@3.17.14))(effect@3.17.14))(@effect/platform@0.90.10(effect@3.17.14))(effect@3.17.14))(@effect/workflow@0.9.6(@effect/platform@0.90.10(effect@3.17.14))(@effect/rpc@0.69.5(@effect/platform@0.90.10(effect@3.17.14))(effect@3.17.14))(effect@3.17.14))(effect@3.17.14))(@effect/platform@0.90.10(effect@3.17.14))(@effect/rpc@0.69.5(@effect/platform@0.90.10(effect@3.17.14))(effect@3.17.14))(@effect/sql@0.44.2(@effect/experimental@0.54.6(@effect/platform@0.90.10(effect@3.17.14))(effect@3.17.14))(@effect/platform@0.90.10(effect@3.17.14))(effect@3.17.14))(effect@3.17.14)
+      abitype:
+        specifier: ^1.1.1
+        version: 1.1.1(typescript@5.9.2)
       jiti:
         specifier: ^2.5.1
         version: 2.5.1
       viem:
-        specifier: ^2.37.4
+        specifier: ^2.37.7
         version: 2.37.8(typescript@5.9.2)
     devDependencies:
       '@bufbuild/buf':
@@ -165,7 +168,7 @@ importers:
         specifier: ^2.1.0
         version: 2.1.0(@bufbuild/protobuf@2.9.0)(@connectrpc/connect@2.1.0(@bufbuild/protobuf@2.9.0))
       '@effect/platform':
-        specifier: ^0.90.7
+        specifier: ^0.90.10
         version: 0.90.10(effect@3.17.14)
       '@effect/vitest':
         specifier: ^0.25.1
@@ -177,7 +180,7 @@ importers:
         specifier: ^21.0.0
         version: 21.0.0
       effect:
-        specifier: ^3.17.13
+        specifier: ^3.17.14
         version: 3.17.14
       typescript:
         specifier: ^5.8.3
@@ -1348,6 +1351,17 @@ packages:
 
   abitype@1.1.0:
     resolution: {integrity: sha512-6Vh4HcRxNMLA0puzPjM5GBgT4aAcFGKZzSgAXvuZ27shJP6NEpielTuqbBmZILR5/xd0PizkBGy5hReKz9jl5A==}
+    peerDependencies:
+      typescript: '>=5.0.4'
+      zod: ^3.22.0 || ^4.0.0
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+      zod:
+        optional: true
+
+  abitype@1.1.1:
+    resolution: {integrity: sha512-Loe5/6tAgsBukY95eGaPSDmQHIjRZYQq8PB1MpsNccDIK8WiV+Uw6WzaIXipvaxTEL2yEB0OpEaQv3gs8pkS9Q==}
     peerDependencies:
       typescript: '>=5.0.4'
       zod: ^3.22.0 || ^4.0.0
@@ -3429,6 +3443,10 @@ snapshots:
     optionalDependencies:
       typescript: 5.9.2
 
+  abitype@1.1.1(typescript@5.9.2):
+    optionalDependencies:
+      typescript: 5.9.2
+
   acorn-jsx@5.3.2(acorn@8.15.0):
     dependencies:
       acorn: 8.15.0
@@ -4045,7 +4063,7 @@ snapshots:
       '@noble/hashes': 1.8.0
       '@scure/bip32': 1.7.0
       '@scure/bip39': 1.6.0
-      abitype: 1.1.0(typescript@5.9.2)
+      abitype: 1.1.1(typescript@5.9.2)
       eventemitter3: 5.0.1
     optionalDependencies:
       typescript: 5.9.2
