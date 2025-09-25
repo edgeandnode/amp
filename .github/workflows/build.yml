@@ -89,7 +89,6 @@ jobs:
           # Copy and rename binaries to match expected artifact names
           cp artifacts/nozzle-linux-x86_64/nozzle release/nozzle-linux-x86_64
           cp artifacts/nozzle-linux-aarch64/nozzle release/nozzle-linux-aarch64
-          cp artifacts/nozzle-darwin-x86_64/nozzle release/nozzle-darwin-x86_64
           cp artifacts/nozzle-darwin-aarch64/nozzle release/nozzle-darwin-aarch64
           
           # Make all binaries executable
