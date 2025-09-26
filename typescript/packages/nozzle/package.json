@@ -43,9 +43,9 @@
     }
   },
   "dependencies": {
-    "@effect/cli": "^0.69.2",
+    "@effect/cli": "^0.70.0",
     "abitype": "^1.1.1",
-    "jiti": "^2.5.1",
+    "jiti": "^2.6.0",
     "viem": "^2.37.7"
   },
   "peerDependencies": {
@@ -53,7 +53,7 @@
     "@connectrpc/connect": "^2.1.0",
     "@connectrpc/connect-node": "^2.1.0",
     "@effect/experimental": "^0.54.6",
-    "@effect/platform": "^0.90.7",
+    "@effect/platform": "^0.91.1",
     "@effect/platform-node": "^0.96.1",
     "apache-arrow": "^20.0.0",
     "effect": "^3.17.13"
@@ -63,9 +63,9 @@
     "@bufbuild/protoc-gen-es": "^2.7.0",
     "@connectrpc/connect": "^2.1.0",
     "@connectrpc/connect-node": "^2.1.0",
-    "@effect/platform": "^0.90.10",
+    "@effect/platform": "^0.91.1",
     "@effect/vitest": "^0.25.1",
-    "@types/node": "^24.3.1",
+    "@types/node": "^24.5.2",
     "apache-arrow": "^21.0.0",
     "effect": "^3.17.14",
     "typescript": "^5.8.3",
