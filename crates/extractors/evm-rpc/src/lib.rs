@@ -5,7 +5,8 @@ use std::{num::NonZeroU32, path::PathBuf};
 
 use alloy::transports::http::reqwest::Url;
 pub use client::JsonRpcClient;
-use common::{BlockNum, BoxError, Dataset, DatasetValue, store::StoreError};
+use common::{BlockNum, BoxError, Dataset, store::StoreError};
+use datasets_common::value::ManifestValue;
 use serde::Deserialize;
 use serde_with::serde_as;
 
@@ -38,10 +39,10 @@ pub struct DatasetDef {
 }
 
 impl DatasetDef {
-    fn from_value(value: common::DatasetValue) -> Result<Self, Error> {
+    fn from_value(value: ManifestValue) -> Result<Self, Error> {
         match value {
-            DatasetValue::Toml(value) => value.try_into().map_err(From::from),
-            DatasetValue::Json(value) => serde_json::from_value(value).map_err(From::from),
+            ManifestValue::Toml(value) => value.try_into().map_err(From::from),
+            ManifestValue::Json(value) => serde_json::from_value(value).map_err(From::from),
         }
     }
 }
@@ -62,7 +63,7 @@ pub(crate) struct EvmRpcProvider {
     pub fetch_receipts_per_tx: bool,
 }
 
-pub fn dataset(dataset_cfg: common::DatasetValue) -> Result<Dataset, Error> {
+pub fn dataset(dataset_cfg: datasets_common::value::ManifestValue) -> Result<Dataset, Error> {
     let def = DatasetDef::from_value(dataset_cfg)?;
     Ok(Dataset {
         kind: def.kind,

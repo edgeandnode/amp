@@ -4,8 +4,9 @@ pub mod pb_to_rows;
 pub mod tables;
 
 use common::Dataset;
+use datasets_common::value::ManifestValue;
 
-pub fn dataset(dataset_cfg: common::DatasetValue) -> Result<Dataset, Error> {
+pub fn dataset(dataset_cfg: ManifestValue) -> Result<Dataset, Error> {
     let dataset_def = DatasetDef::from_value(dataset_cfg)?;
     Ok(Dataset {
         kind: dataset_def.kind,

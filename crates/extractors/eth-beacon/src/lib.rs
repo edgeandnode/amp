@@ -4,6 +4,7 @@ mod client;
 use std::num::NonZeroU32;
 
 use common::BlockNum;
+use datasets_common::value::ManifestValue;
 use reqwest::Url;
 
 pub use crate::client::BeaconClient;
@@ -32,10 +33,10 @@ pub struct DatasetDef {
 }
 
 impl DatasetDef {
-    fn from_value(value: common::DatasetValue) -> Result<Self, Error> {
+    fn from_value(value: ManifestValue) -> Result<Self, Error> {
         match value {
-            common::DatasetValue::Toml(value) => value.try_into().map_err(From::from),
-            common::DatasetValue::Json(value) => serde_json::from_value(value).map_err(From::from),
+            ManifestValue::Toml(value) => value.try_into().map_err(From::from),
+            ManifestValue::Json(value) => serde_json::from_value(value).map_err(From::from),
         }
     }
 }
@@ -49,7 +50,7 @@ pub(crate) struct EthBeaconProvider {
     pub rate_limit_per_minute: Option<NonZeroU32>,
 }
 
-pub fn dataset(dataset_cfg: common::DatasetValue) -> Result<common::Dataset, Error> {
+pub fn dataset(dataset_cfg: ManifestValue) -> Result<common::Dataset, Error> {
     let def = DatasetDef::from_value(dataset_cfg)?;
     Ok(common::Dataset {
         kind: def.kind,

@@ -273,7 +273,7 @@ impl JsonRpcClient {
             'outer: for block_num in start_block..=end_block {
                 let elapsed = last_progress_report.elapsed();
                 if elapsed >= Duration::from_secs(15) {
-                    tracing::info!(block = %block_num, "Progress: fetched up to block");
+                    tracing::info!(start = start_block, end = end_block, block = %block_num, "Progress");
                     last_progress_report = Instant::now();
                 }
 
@@ -689,7 +689,7 @@ fn rpc_transaction_to_row(
         tx_index: u32::try_from(tx_index)
             .map_err(|e| ToRowError::Overflow("tx_index", e.into()))?,
         tx_hash: tx.inner.tx_hash().0,
-        to: tx.to().map(|addr| addr.0.0).unwrap_or_default(),
+        to: tx.to().map(|addr| addr.0.0),
         nonce: tx.nonce(),
         gas_price: TransactionResponse::gas_price(&tx.0.inner)
             .map(i128::try_from)

@@ -1,7 +1,9 @@
+use std::time::Duration;
+
 use common::BoxError;
 use monitoring::logging;
 
-use crate::{steps::load_test_steps, testlib::ctx::TestCtxBuilder};
+use crate::{run_spec, testlib::ctx::TestCtxBuilder};
 
 #[tokio::test]
 async fn intra_deps_test() -> Result<(), BoxError> {
@@ -19,10 +21,11 @@ async fn intra_deps_test() -> Result<(), BoxError> {
         .await
         .expect("Failed to connect FlightClient");
 
-    for step in load_test_steps("intra-deps.yaml").unwrap() {
-        step.run(&test_ctx, &mut client).await.unwrap();
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-    }
+    run_spec!(
+        "intra-deps",
+        (&test_ctx, &mut client),
+        delay = Duration::from_secs(1)
+    );
     Ok(())
 }
 
@@ -46,9 +49,10 @@ async fn multi_version_test() -> Result<(), BoxError> {
         .await
         .expect("Failed to connect FlightClient");
 
-    for step in load_test_steps("multi-version.yaml").unwrap() {
-        step.run(&test_ctx, &mut client).await.unwrap();
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-    }
+    run_spec!(
+        "multi-version",
+        (&test_ctx, &mut client),
+        delay = Duration::from_secs(1)
+    );
     Ok(())
 }

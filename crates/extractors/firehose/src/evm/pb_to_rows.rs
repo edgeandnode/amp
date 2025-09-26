@@ -57,7 +57,6 @@ pub fn protobufs_to_rows(
     }
 
     let transaction_count = transactions_iter(&block).count();
-    let total_to_size: usize = transactions_iter(&block).map(|tx| tx.to.len()).sum();
     let total_input_size: usize = transactions_iter(&block).map(|tx| tx.input.len()).sum();
     let total_v_size: usize = transactions_iter(&block).map(|tx| tx.v.len()).sum();
     let total_r_size: usize = transactions_iter(&block).map(|tx| tx.r.len()).sum();
@@ -70,7 +69,6 @@ pub fn protobufs_to_rows(
         .sum();
     let mut transactions: TransactionRowsBuilder = TransactionRowsBuilder::with_capacity(
         transaction_count,
-        total_to_size,
         total_input_size,
         total_v_size,
         total_r_size,
@@ -107,7 +105,11 @@ pub fn protobufs_to_rows(
             tx_index,
             tx_hash: tx_hash.clone(),
 
-            to: tx.to.into(),
+            to: if tx.to.is_empty() {
+                None
+            } else {
+                Some(tx.to.try_into().map_err(|b| Malformed("tx.to", b))?)
+            },
             nonce: tx.nonce,
 
             gas_limit: tx.gas_limit,

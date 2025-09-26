@@ -5,4 +5,5 @@
 
 pub mod manifest;
 pub mod name;
+pub mod value;
 pub mod version;

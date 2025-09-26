@@ -1,4 +1,4 @@
-use common::DatasetValue;
+use datasets_common::value::ManifestValue;
 use firehose_datasets::Error;
 use serde::Deserialize;
 pub const DATASET_KIND: &str = "substreams";
@@ -21,10 +21,10 @@ pub struct DatasetDef {
 }
 
 impl DatasetDef {
-    pub fn from_value(value: common::DatasetValue) -> Result<Self, Error> {
+    pub fn from_value(value: ManifestValue) -> Result<Self, Error> {
         match value {
-            DatasetValue::Toml(value) => value.try_into().map_err(From::from),
-            DatasetValue::Json(value) => serde_json::from_value(value).map_err(From::from),
+            ManifestValue::Toml(value) => value.try_into().map_err(From::from),
+            ManifestValue::Json(value) => serde_json::from_value(value).map_err(From::from),
         }
     }
 }

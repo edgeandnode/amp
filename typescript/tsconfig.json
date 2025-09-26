@@ -4,8 +4,6 @@
   "include": [],
   "references": [
     { "path": "packages/nozzle" },
-    { "path": "packages/example" },
-    { "path": "packages/app" },
     { "path": "packages/studio" },
     { "path": "packages/studio-cli" }
   ]

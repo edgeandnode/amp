@@ -12,12 +12,13 @@ pub mod dataset;
 mod proto;
 
 use common::Dataset;
+use datasets_common::value::ManifestValue;
 use firehose_datasets::Error;
 use proto::sf::substreams::v1::Package;
 use tables::Tables;
 
 /// Does an network request to fetch the spkg from the URL in the `manifest` config key.
-pub async fn dataset(dataset_cfg: common::DatasetValue) -> Result<Dataset, Error> {
+pub async fn dataset(dataset_cfg: ManifestValue) -> Result<Dataset, Error> {
     let dataset_def = DatasetDef::from_value(dataset_cfg)?;
     let package = Package::from_url(dataset_def.manifest.as_str()).await?;
     let tables = Tables::from_package(&package, &dataset_def.module)

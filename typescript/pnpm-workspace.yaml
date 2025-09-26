@@ -1,11 +1,3 @@
+onlyBuiltDependencies: null
 packages:
   - packages/*
-
-onlyBuiltDependencies:
-  - '@bufbuild/buf'
-  - '@parcel/watcher'
-  - '@tailwindcss/oxide'
-  - core-js-pure
-  - esbuild
-  - msgpackr-extract
-  - unrs-resolver

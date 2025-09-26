@@ -9,6 +9,7 @@ async-stream.workspace = true
 chrono.workspace = true
 common = { path = "../../core/common" }
 datafusion.workspace = true
+datasets-common = { path = "../../core/datasets-common" }
 firehose-datasets = { path = "../firehose" }
 futures.workspace = true
 prost.workspace = true

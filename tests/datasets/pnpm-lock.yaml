@@ -19,8 +19,6 @@ importers:
         specifier: ^5.8.3
         version: 5.8.3
 
-  intra_deps: {}
-
 packages:
 
   '@standard-schema/spec@1.0.0':
