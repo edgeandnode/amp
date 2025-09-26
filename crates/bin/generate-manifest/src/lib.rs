@@ -52,9 +52,10 @@ pub async fn run<T: io::Write>(
         }
     };
     let dataset = serde_json::to_vec(&Manifest {
-        network,
-        kind: kind.to_string(),
         name,
+        version: Default::default(),
+        kind: kind.to_string(),
+        network,
         schema: Some(schema),
     })?;
     w.write_all(&dataset)?;

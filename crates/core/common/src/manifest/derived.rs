@@ -20,15 +20,15 @@ use datasets_common::{
     version::Version,
 };
 
+mod dataset_kind;
+
+pub use self::dataset_kind::{DATASET_KIND, DerivedDatasetKind, DerivedDatasetKindError};
 use crate::{
     BoxError, Dataset, Table as LogicalTable,
     catalog::logical::{Function as LogicalFunction, FunctionSource as LogicalFunctionSource},
     query_context::{self, parse_sql},
     utils::dfs,
 };
-
-/// Dataset kind constant for derived datasets.
-pub const DATASET_KIND: &str = "manifest";
 
 /// Complete manifest definition for a derived dataset.
 ///
@@ -39,14 +39,15 @@ pub const DATASET_KIND: &str = "manifest";
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct Manifest {
-    /// Dataset name. Must be unique within the network
+    /// Dataset name
     pub name: Name,
+    /// Dataset version, e.g., `1.0.0`
+    pub version: Version,
+    /// Dataset kind, must be `manifest`
+    pub kind: DerivedDatasetKind,
     /// Network name, e.g., `mainnet`, `sepolia`
     pub network: String,
-    /// Semver version of the dataset, e.g. `1.0.0`
-    pub version: Version,
-    /// Manifest kind, always [`ManifestKind::Manifest`]
-    pub kind: ManifestKind,
+
     /// External dataset dependencies with version requirements
     #[serde(default)]
     pub dependencies: BTreeMap<String, Dependency>,
@@ -102,16 +103,6 @@ impl Manifest {
         let sorted_tables = sort_tables_by_dependencies(&self.name, unsorted_tables, &queries)?;
         Ok(sorted_tables)
     }
-}
-
-/// Kind discriminator for derived datasets.
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
-#[serde(rename_all = "lowercase")]
-pub enum ManifestKind {
-    /// Standard manifest dataset type
-    #[default]
-    Manifest,
 }
 
 /// External dataset dependency specification.

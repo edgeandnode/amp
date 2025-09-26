@@ -32,6 +32,7 @@ dependencies = [
  "dataset-store",
  "datasets-common",
  "dump",
+ "evm-rpc-datasets",
  "futures",
  "http-common",
  "metadata-db",
@@ -3540,6 +3541,7 @@ dependencies = [
  "tokio",
  "toml 0.8.23",
  "tracing",
+ "url",
 ]
 
 [[package]]
