@@ -14,6 +14,12 @@
 #[cfg_attr(feature = "schemars", schemars(transparent))]
 pub struct Version(#[cfg_attr(feature = "schemars", schemars(with = "String"))] semver::Version);
 
+impl Default for Version {
+    fn default() -> Self {
+        Self(semver::Version::new(0, 0, 0))
+    }
+}
+
 impl Version {
     /// Create a new [`Version`] from major, minor, and patch components.
     pub fn new(major: u64, minor: u64, patch: u64) -> Self {

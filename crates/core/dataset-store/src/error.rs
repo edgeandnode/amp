@@ -20,23 +20,14 @@ pub enum Error {
     #[error("unsupported dataset kind '{0}'")]
     UnsupportedKind(String),
 
-    #[error("dataset field 'name = \"{0}\"' does not match filename '{1}'")]
-    NameMismatch(String, String),
-
     #[error("Schema mismatch")]
     SchemaMismatch,
-
-    #[error("`schema` field is missing, but required for dataset kind {dataset_kind}")]
-    SchemaMissing { dataset_kind: DatasetKind },
 
     #[error("unsupported table name: {0}")]
     UnsupportedName(BoxError),
 
     #[error("unsupported function name: {0}")]
     UnsupportedFunctionName(String),
-
-    #[error("provider configuration error: {0}")]
-    ProviderConfigError(BoxError),
 
     #[error("IPC connection error: {0}")]
     IpcConnectionError(BoxError),

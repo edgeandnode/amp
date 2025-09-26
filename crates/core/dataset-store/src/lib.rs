@@ -139,6 +139,44 @@ impl DatasetStore {
         Ok(())
     }
 
+    /// Register a dataset manifest in the dataset store without metadata database tracking.
+    ///
+    /// This is a lightweight version of [`Self::register_manifest`] that skips the metadata
+    /// database operations. It only serializes the manifest to JSON and stores it in the
+    /// dataset definitions store.
+    ///
+    /// # Notes
+    ///
+    /// Unlike [`Self::register_manifest`], this function:
+    /// - Does not check for existing datasets
+    /// - Does not register metadata in the database
+    /// - Does not track dataset ownership
+    /// - Uses a simpler file naming scheme (`{name}.json` vs `{name}__{version}.json`)
+    pub async fn register_raw_dataset_manifest<M>(
+        &self,
+        name: &Name,
+        _version: &Version,
+        manifest: &M,
+    ) -> Result<(), RegistrationError>
+    where
+        M: serde::Serialize,
+    {
+        // Prepare manifest data for storage
+        let manifest_json =
+            serde_json::to_string(&manifest).map_err(RegistrationError::ManifestSerialization)?;
+
+        // Store manifest in dataset definitions store
+        let manifest_path = format!("{}.json", name).into();
+
+        self.dataset_defs_store
+            .prefixed_store()
+            .put(&manifest_path, manifest_json.into())
+            .await
+            .map_err(RegistrationError::ManifestStorage)?;
+
+        Ok(())
+    }
+
     pub async fn load_dataset(
         self: &Arc<Self>,
         name: &str,
@@ -154,15 +192,15 @@ impl DatasetStore {
     pub async fn try_load_dataset(
         self: &Arc<Self>,
         name: &str,
-        version: Option<&Version>,
+        version: impl Into<Option<&Version>>,
     ) -> Result<Option<Dataset>, DatasetError> {
-        match self.load_dataset(name, version).await {
+        match self.load_dataset(name, version.into()).await {
             Ok(dataset) => Ok(Some(dataset)),
-            Err(e) => {
-                if e.is_not_found() {
+            Err(err) => {
+                if err.is_not_found() {
                     Ok(None)
                 } else {
-                    Err(e)
+                    Err(err)
                 }
             }
         }
@@ -257,7 +295,6 @@ impl DatasetStore {
         &self,
         dataset_name: &str,
     ) -> Result<(CommonManifest, DatasetSrc), Error> {
-        use Error::*;
         let dataset_src = self
             .dataset_defs_store
             .get_string(format!("{}.toml", dataset_name))
@@ -280,13 +317,6 @@ impl DatasetStore {
             }
             DatasetSrc::Json(src) => serde_json::from_str::<CommonManifest>(src)?,
         };
-
-        if common.name != dataset_name && common.kind != "manifest" {
-            return Err(NameMismatch(
-                common.name.to_string(),
-                dataset_name.to_string(),
-            ));
-        }
 
         Ok((common, dataset_src))
     }
@@ -350,10 +380,9 @@ impl DatasetStore {
             }
         };
 
-        if let Some(ground_truth_schema) = ground_truth_schema {
-            let Some(loaded_schema) = common.schema else {
-                return Err(Error::SchemaMissing { dataset_kind: kind });
-            };
+        if let Some(ground_truth_schema) = ground_truth_schema
+            && let Some(loaded_schema) = common.schema
+        {
             if loaded_schema != ground_truth_schema {
                 return Err(Error::SchemaMismatch);
             }
