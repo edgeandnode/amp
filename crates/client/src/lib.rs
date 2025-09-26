@@ -58,6 +58,7 @@ impl Stream for ResultStream {
 }
 
 /// Arrow Flight client for connecting to nozzle server.
+#[derive(Clone)]
 pub struct SqlClient {
     client: FlightSqlServiceClient<tonic::transport::Channel>,
 }
