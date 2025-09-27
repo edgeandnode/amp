@@ -4,7 +4,7 @@ use async_stream::stream;
 use common::{BlockNum, BoxError, RawDatasetRows};
 use futures::Stream;
 use governor::{DefaultDirectRateLimiter, Quota, RateLimiter};
-use reqwest::Url;
+use reqwest::{StatusCode, Url};
 use tokio::sync::Semaphore;
 
 #[derive(Clone)]
@@ -54,8 +54,10 @@ impl BeaconClient {
             .get(&url)
             .header(reqwest::header::ACCEPT, "application/json")
             .send()
-            .await?
-            .error_for_status()?;
+            .await?;
+        if !response.status().is_success() && (response.status() != StatusCode::NOT_FOUND) {
+            return Err(format!("Response status: {}", response.status().as_u16()).into());
+        }
         let record = response.json().await?;
         let row = crate::block::json_to_row(&self.network, record)?;
         Ok(RawDatasetRows::new(vec![row]))
