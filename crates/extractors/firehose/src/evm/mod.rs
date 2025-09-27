@@ -1,20 +1,20 @@
 pub use crate::proto::sf::ethereum::r#type::v2 as pbethereum;
-use crate::{Error, dataset::DatasetDef};
+use crate::{Error, dataset::Manifest};
 pub mod pb_to_rows;
 pub mod tables;
 
 use common::Dataset;
 use datasets_common::value::ManifestValue;
 
-pub fn dataset(dataset_cfg: ManifestValue) -> Result<Dataset, Error> {
-    let dataset_def = DatasetDef::from_value(dataset_cfg)?;
+pub fn dataset(value: ManifestValue) -> Result<Dataset, Error> {
+    let manifest: Manifest = value.try_into_manifest()?;
     Ok(Dataset {
-        kind: dataset_def.kind,
-        name: dataset_def.name,
-        version: None,
-        start_block: Some(dataset_def.start_block),
-        tables: tables::all(&dataset_def.network),
-        network: dataset_def.network,
+        name: manifest.name,
+        version: Some(manifest.version),
+        kind: manifest.kind.to_string(),
+        start_block: Some(manifest.start_block),
+        tables: tables::all(&manifest.network),
+        network: manifest.network,
         functions: vec![],
     })
 }

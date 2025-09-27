@@ -18,9 +18,9 @@ use crate::DatasetStore;
 
 pub(super) async fn dataset(
     store: Arc<DatasetStore>,
-    dataset_def: ManifestValue,
+    value: ManifestValue,
 ) -> Result<SqlDataset, BoxError> {
-    let manifest: Manifest = dataset_def.try_into_manifest()?;
+    let manifest: Manifest = value.try_into_manifest()?;
 
     let mut files = store.dataset_defs_store.list(manifest.name.as_str());
 
@@ -73,7 +73,7 @@ pub(super) async fn dataset(
 
     Ok(SqlDataset {
         dataset: Dataset {
-            name: manifest.name.to_string(),
+            name: manifest.name,
             version: Some(manifest.version),
             kind: manifest.kind.to_string(),
             network: manifest.network,

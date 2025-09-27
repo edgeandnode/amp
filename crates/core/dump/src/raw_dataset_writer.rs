@@ -244,7 +244,7 @@ impl RawTableWriter {
             let location_id = self.table.location_id();
             metrics.inc_raw_dataset_bytes_written_by(
                 num_bytes,
-                dataset_name,
+                dataset_name.to_string(),
                 table_name,
                 *location_id,
             );
@@ -287,7 +287,7 @@ impl RawTableWriter {
 
         if let Some(ref metrics) = self.metrics {
             let dataset_name = self.table.dataset().name.clone();
-            metrics.inc_raw_dataset_files_written(dataset_name);
+            metrics.inc_raw_dataset_files_written(dataset_name.to_string());
         }
 
         Ok(metadata)

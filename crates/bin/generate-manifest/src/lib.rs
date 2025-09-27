@@ -35,14 +35,15 @@ pub async fn run<T: io::Write>(
                         .into(),
                 );
             };
-            let dataset_def = substreams_datasets::dataset::DatasetDef {
-                kind: kind.to_string(),
+            let manifest = substreams_datasets::dataset::Manifest {
+                name: name.clone(),
+                version: Default::default(),
+                kind: kind.as_str().parse().expect("kind is valid"),
                 network: network.clone(),
-                name: name.to_string(),
                 manifest,
                 module,
             };
-            schema_from_tables(&substreams_datasets::tables(dataset_def).await?)
+            schema_from_tables(&substreams_datasets::tables(manifest).await?)
         }
         dataset_store::DatasetKind::Sql => {
             return Err("`DatasetKind::Sql` doesn't support dataset generation".into());

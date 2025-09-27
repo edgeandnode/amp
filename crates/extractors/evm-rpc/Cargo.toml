@@ -3,11 +3,14 @@ name = "evm-rpc-datasets"
 edition.workspace = true
 version.workspace = true
 
+[features]
+schemars = ["dep:schemars", "datasets-common/schemars"]
+
 [dependencies]
 alloy.workspace = true
 async-stream.workspace = true
 common = { path = "../../core/common" }
-datasets-common = { path = "../../core/datasets-common", features = ["schemars"] }
+datasets-common = { path = "../../core/datasets-common" }
 futures.workspace = true
 monitoring = { path = "../../core/monitoring" }
 schemars = { workspace = true, optional = true }

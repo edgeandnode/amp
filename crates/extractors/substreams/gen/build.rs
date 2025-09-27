@@ -3,13 +3,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         println!("cargo:warning=Config 'gen_schema' enabled: Running JSON schema generation");
         let out_dir = std::env::var("OUT_DIR")?;
-        let dataset_def_schema = schemars::schema_for!(substreams_datasets::dataset::DatasetDef);
-        let dataset_def_schema_json = serde_json::to_string_pretty(&dataset_def_schema)?;
-        let dataset_def_schema_path = format!("{out_dir}/schema.json");
-        std::fs::write(&dataset_def_schema_path, dataset_def_schema_json)?;
+        let manifest_schema = schemars::schema_for!(substreams_datasets::dataset::Manifest);
+        let manifest_schema_json = serde_json::to_string_pretty(&manifest_schema)?;
+        let manifest_schema_path = format!("{out_dir}/schema.json");
+        std::fs::write(&manifest_schema_path, manifest_schema_json)?;
         println!(
-            "cargo:warning=Generated Substreams dataset definition schema file: {}",
-            dataset_def_schema_path
+            "cargo:warning=Generated Substreams dataset manifest schema file: {}",
+            manifest_schema_path
         );
     }
     #[cfg(not(gen_schema))]
