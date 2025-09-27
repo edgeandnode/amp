@@ -13,7 +13,7 @@ use crate::{name::Name, version::Version};
 ///
 /// All dataset definitions must have a kind, network and name. The name must match the filename.
 /// Schema is optional for TOML dataset format.
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct Manifest {
     /// Dataset name
@@ -30,6 +30,24 @@ pub struct Manifest {
     /// Dataset schema. Lists the tables defined by this dataset.
     /// Optional for TOML format, required for JSON format
     pub schema: Option<Schema>,
+}
+
+impl std::fmt::Debug for Manifest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Manifest")
+            .field("name", &self.name)
+            .field("kind", &self.kind)
+            .field("network", &self.network)
+            .field(
+                "schema",
+                if self.schema.is_some() {
+                    &"Some(Schema { ... })"
+                } else {
+                    &"None"
+                },
+            )
+            .finish()
+    }
 }
 
 /// A serializable representation of a collection of Arrow schemas without metadata.
