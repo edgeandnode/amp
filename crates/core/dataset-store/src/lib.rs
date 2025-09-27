@@ -373,7 +373,7 @@ impl DatasetStore {
                 let store_dataset = Arc::clone(self).sql_dataset(value).await?.dataset;
                 (store_dataset, None)
             }
-            DatasetKind::Manifest => {
+            DatasetKind::Derived => {
                 let manifest = dataset_src.to_manifest()?;
                 let dataset = manifest::derived::dataset(manifest).map_err(Error::Unknown)?;
                 (dataset, None)
@@ -483,7 +483,7 @@ impl DatasetStore {
                 )
                 .await?,
             ),
-            DatasetKind::Sql | DatasetKind::Manifest => {
+            DatasetKind::Sql | DatasetKind::Derived => {
                 // SQL and Manifest datasets don't have a client.
                 return Err(Error::UnsupportedKind(common.kind));
             }

@@ -116,7 +116,7 @@ pub async fn dump_raw_tables(
             )
             .await?;
         }
-        DatasetKind::Sql | DatasetKind::Manifest => {
+        DatasetKind::Sql | DatasetKind::Derived => {
             return Err(format!(
                 "Attempted to dump dataset `{}` of kind `{}` as raw dataset",
                 dataset.name, kind,
@@ -154,7 +154,7 @@ pub async fn dump_user_tables(
 
         let dataset = match kind {
             DatasetKind::Sql => ctx.dataset_store.load_sql_dataset(&dataset.name).await?,
-            DatasetKind::Manifest => {
+            DatasetKind::Derived => {
                 ctx.dataset_store
                     .load_manifest_dataset(&dataset.name, dataset.version.as_ref().unwrap())
                     .await?
