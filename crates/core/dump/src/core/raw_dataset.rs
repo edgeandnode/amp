@@ -126,8 +126,9 @@ pub async fn dump(
 ) -> Result<(), BoxError> {
     let mut client = ctx
         .dataset_store
-        .load_client(dataset_name, only_finalized_blocks, meter)
-        .await?;
+        .get_client(dataset_name, None, only_finalized_blocks, meter)
+        .await?
+        .ok_or_else(|| format!("Client for dataset '{}' not found", dataset_name))?;
 
     tracing::info!("connected to provider: {}", client.provider_name());
 

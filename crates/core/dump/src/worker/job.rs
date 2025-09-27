@@ -47,8 +47,9 @@ impl Job {
                     let dataset_version = location.dataset_version.parse().ok();
                     let dataset = Arc::new(
                         ctx.dataset_store
-                            .load_dataset(&location.dataset, dataset_version.as_ref())
-                            .await?,
+                            .get_dataset(&location.dataset, dataset_version.as_ref())
+                            .await?
+                            .ok_or_else(|| format!("Dataset '{}' not found", location.dataset))?,
                     );
                     let mut resolved_tables = dataset.resolved_tables();
                     let Some(table) = resolved_tables.find(|t| t.name() == location.table) else {

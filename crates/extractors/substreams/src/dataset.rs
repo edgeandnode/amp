@@ -22,7 +22,10 @@ pub struct Manifest {
 }
 
 #[derive(Debug, serde::Deserialize)]
-pub(crate) struct SubstreamsProvider {
+pub struct ProviderConfig {
+    pub name: String,
+    pub kind: SubstreamsDatasetKind,
+    pub network: String,
     pub url: String,
     pub token: Option<String>,
 }

@@ -98,28 +98,32 @@ async fn handler_inner(
         "loading dataset from store"
     );
 
-    // Load the dataset from the store
+    // Get the dataset from the store
     // If version is None, the latest version is used
-    let dataset = ctx
-        .store
-        .load_dataset(&name, version.as_ref())
-        .await
-        .map_err(|err| {
+    let dataset = match ctx.store.get_dataset(&name, version.as_ref()).await {
+        Ok(Some(dataset)) => dataset,
+        Ok(None) => {
+            tracing::debug!(
+                dataset_name=%name,
+                dataset_version=%display_selector_version(&version),
+                "dataset not found"
+            );
+            return Err(Error::NotFound {
+                name: name.clone(),
+                version: version.clone(),
+            }
+            .into());
+        }
+        Err(err) => {
             tracing::debug!(
                 dataset_name=%name,
                 dataset_version=%display_selector_version(&version),
                 error=?err,
                 "failed to load dataset"
             );
-            if err.is_not_found() {
-                Error::NotFound {
-                    name: name.clone(),
-                    version: version.clone(),
-                }
-            } else {
-                Error::DatasetStoreError(err)
-            }
-        })?;
+            return Err(Error::DatasetStoreError(err).into());
+        }
+    };
 
     let mut tables = Vec::with_capacity(dataset.tables.len());
     let dataset_version = match dataset.kind.as_str() {
@@ -197,14 +201,14 @@ pub enum Error {
         version: Option<Version>,
     },
 
-    /// Dataset store error while loading the dataset
+    /// Dataset store error while getting the dataset
     ///
     /// This occurs when:
     /// - The dataset store is not accessible
     /// - There's a configuration error in the store
     /// - I/O errors while reading dataset definitions
     #[error("dataset store error: {0}")]
-    DatasetStoreError(#[from] dataset_store::DatasetError),
+    DatasetStoreError(#[from] dataset_store::GetDatasetError),
 
     /// Metadata database error while retrieving active locations
     ///

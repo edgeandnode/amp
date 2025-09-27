@@ -11,19 +11,19 @@ use crate::{
 async fn register_with_valid_provider_makes_immediately_available() {
     //* Given
     let (store, _raw_store) = create_test_providers_store();
-    let evm_provider = create_test_evm_provider();
-    let fhs_provider = create_test_firehose_provider();
+    let evm_provider = create_test_evm_provider("evm-mainnet");
+    let fhs_provider = create_test_firehose_provider("fhs-polygon");
 
     // Register first provider
     store
-        .register("evm-mainnet", evm_provider.clone())
+        .register(evm_provider.clone())
         .await
         .expect("should register first provider");
 
     store.load_into_cache().await;
 
     //* When
-    let register_result = store.register("fhs-polygon", fhs_provider.clone()).await;
+    let register_result = store.register(fhs_provider.clone()).await;
 
     //* Then
     assert!(
@@ -93,11 +93,11 @@ async fn register_with_valid_provider_makes_immediately_available() {
 async fn get_by_name_after_registration_returns_provider() {
     //* Given
     let (store, _raw_store) = create_test_providers_store();
-    let provider = create_test_evm_provider();
     let provider_name = "consistent-provider";
+    let provider = create_test_evm_provider(provider_name);
 
     store
-        .register(provider_name, provider)
+        .register(provider)
         .await
         .expect("should register provider");
 
@@ -123,15 +123,15 @@ async fn get_by_name_after_registration_returns_provider() {
 async fn delete_with_existing_provider_removes_from_operations() {
     //* Given
     let (store, _raw_store) = create_test_providers_store();
-    let evm_provider = create_test_evm_provider();
-    let fhs_provider = create_test_firehose_provider();
+    let evm_provider = create_test_evm_provider("evm-to-delete");
+    let fhs_provider = create_test_firehose_provider("fhs-to-keep");
 
     store
-        .register("evm-to-delete", evm_provider)
+        .register(evm_provider)
         .await
         .expect("should register first provider");
     store
-        .register("fhs-to-keep", fhs_provider)
+        .register(fhs_provider)
         .await
         .expect("should register second provider");
 
@@ -193,12 +193,14 @@ async fn get_all_with_store_providers_loads_on_first_access() {
 
     // Manually write provider TOML files to the in-memory store
     let evm_toml = indoc::indoc! {r#"
+        name = "evm-mainnet"
         kind = "evm-rpc"
         network = "mainnet"
         url = "http://localhost:8545"
         rate_limit_per_minute = 100
     "#};
     let firehose_toml = indoc::indoc! {r#"
+        name = "firehose-polygon"
         kind = "firehose"
         network = "polygon"
         url = "https://polygon.firehose.io"
@@ -252,6 +254,7 @@ async fn get_all_with_invalid_toml_handles_gracefully() {
 
     // Write one valid and one invalid TOML file to the in-memory store
     let valid_toml = indoc::indoc! {r#"
+        name = "valid-provider"
         kind = "evm-rpc"
         network = "mainnet"
         url = "http://localhost:8545"
@@ -259,6 +262,7 @@ async fn get_all_with_invalid_toml_handles_gracefully() {
     "#};
 
     let invalid_toml = indoc::indoc! {r#"
+        name = "invalid-provider"
         kind = "evm-rpc"
         network = "mainnet"
         url = "http://localhost:8545
@@ -308,12 +312,14 @@ async fn get_all_with_externally_removed_file_returns_cached_data() {
 
     // Write provider files to the in-memory store
     let evm_toml = indoc::indoc! {r#"
+        name = "evm-provider"
         kind = "evm-rpc"
-        network = "mainnet" 
+        network = "mainnet"
         url = "http://localhost:8545"
         rate_limit_per_minute = 100
     "#};
     let firehose_toml = indoc::indoc! {r#"
+        name = "firehose-provider"
         kind = "firehose"
         network = "polygon"
         url = "https://polygon.firehose.io"
@@ -358,8 +364,9 @@ async fn get_by_name_with_externally_removed_file_returns_cached_provider() {
     let (providers_store, raw_store) = create_test_providers_store();
 
     let evm_toml = indoc::indoc! {r#"
+        name = "evm-provider"
         kind = "evm-rpc"
-        network = "mainnet" 
+        network = "mainnet"
         url = "http://localhost:8545"
         rate_limit_per_minute = 100
     "#};
@@ -394,8 +401,9 @@ async fn delete_with_externally_removed_file_fails() {
     let (providers_store, raw_store) = create_test_providers_store();
 
     let evm_toml = indoc::indoc! {r#"
+        name = "evm-provider"
         kind = "evm-rpc"
-        network = "mainnet" 
+        network = "mainnet"
         url = "http://localhost:8545"
         rate_limit_per_minute = 100
     "#};
@@ -430,8 +438,9 @@ async fn register_with_externally_removed_file_returns_conflict_error() {
     let (providers_store, raw_store) = create_test_providers_store();
 
     let evm_toml = indoc::indoc! {r#"
+        name = "existing-provider"
         kind = "evm-rpc"
-        network = "mainnet" 
+        network = "mainnet"
         url = "http://localhost:8545"
         rate_limit_per_minute = 100
     "#};
@@ -453,12 +462,10 @@ async fn register_with_externally_removed_file_returns_conflict_error() {
         .await
         .expect("should remove provider file from store");
 
-    let new_provider = create_test_firehose_provider();
+    let new_provider = create_test_firehose_provider("existing-provider");
 
     //* When
-    let result = providers_store
-        .register("existing-provider", new_provider)
-        .await;
+    let result = providers_store.register(new_provider).await;
 
     //* Then
     assert!(
@@ -487,23 +494,25 @@ fn create_test_providers_store() -> (ProvidersConfigStore, Arc<dyn ObjectStore>)
 }
 
 /// Create a test EVM RPC provider with mainnet configuration
-fn create_test_evm_provider() -> ProviderConfig {
-    let toml_str = indoc::indoc! {r#"
+fn create_test_evm_provider(name: &str) -> ProviderConfig {
+    let toml_str = indoc::formatdoc! {r#"
+        name = "{name}"
         kind = "evm-rpc"
         network = "mainnet"
         url = "http://localhost:8545"
         rate_limit_per_minute = 100
     "#};
-    toml::from_str(toml_str).expect("should parse valid EVM provider TOML")
+    toml::from_str(&toml_str).expect("should parse valid EVM provider TOML")
 }
 
 /// Create a test Firehose provider with polygon configuration
-fn create_test_firehose_provider() -> ProviderConfig {
-    let toml_str = indoc::indoc! {r#"
+fn create_test_firehose_provider(name: &str) -> ProviderConfig {
+    let toml_str = indoc::formatdoc! {r#"
+        name = "{name}"
         kind = "firehose"
         network = "polygon"
         url = "https://polygon.firehose.io"
         token = "secret"
     "#};
-    toml::from_str(toml_str).expect("should parse valid Firehose provider TOML")
+    toml::from_str(&toml_str).expect("should parse valid Firehose provider TOML")
 }
