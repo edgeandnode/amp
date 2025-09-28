@@ -1,0 +1,33 @@
+[package]
+name = "ampsync"
+description = "Syncing engine that listens to the stream changes from the nozzle-client streaming layer to store changes in a configured database."
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+common = { path = "../../core/common" }
+datafusion.workspace = true
+datasets-common = { path = "../../core/datasets-common" }
+futures.workspace = true
+monitoring = { path = "../../core/monitoring" }
+nozzle-client = { path = "../../client" }
+oxc_allocator = "0.38"
+oxc_ast = "0.38"
+oxc_parser = "0.38"
+oxc_span = "0.38"
+serde_json.workspace = true
+sqlx = { version = "0.8.6", features = [
+    "runtime-tokio",
+    "postgres",
+    "migrate",
+    "macros",
+    "chrono",
+] }
+pgpq = { git = "https://github.com/adriangb/pgpq.git", package = "pgpq" }
+thiserror.workspace = true
+tokio = { workspace = true, features = ["signal"] }
+tracing.workspace = true
+bytes = "1.10.1"
+
+[dev-dependencies]
+tempfile.workspace = true

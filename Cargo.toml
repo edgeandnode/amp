@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "crates/bin/ampsync",
     "crates/bin/dump-check",
     "crates/bin/generate-manifest",
     "crates/bin/nozzle",
@@ -49,8 +50,16 @@ alloy = { version = "1.0.9", default-features = false, features = [
 anyhow = "1.0.80"
 async-stream = "0.3.6"
 async-trait = "0.1.80"
-axum = { version = "0.8.0", default-features = false, features = ["json", "query", "tokio", "http1"] }
-backon = { version = "1.5.1", default-features = false, features = ["std", "tokio-sleep"] }
+axum = { version = "0.8.0", default-features = false, features = [
+    "json",
+    "query",
+    "tokio",
+    "http1",
+] }
+backon = { version = "1.5.1", default-features = false, features = [
+    "std",
+    "tokio-sleep",
+] }
 bincode = "2.0.1"
 blake3 = "1.8.1"
 bytes = "1"
@@ -70,7 +79,10 @@ opentelemetry_sdk = { version = "0.30" }
 pretty_assertions = "1.4.1"
 rand = "0.9.0"
 regex = "1.10.2"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = [
+    "json",
+    "rustls-tls",
+] }
 schemars = "1.0.4"
 semver = { version = "1.0.18", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
