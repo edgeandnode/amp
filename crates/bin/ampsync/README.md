@@ -1,10 +1,13 @@
 # Ampsync
 
-A synchronization service that streams dataset changes from a Nozzle server and syncs them to a PostgreSQL database. Designed to run alongside your application in a Docker environment.
+A synchronization service that streams dataset changes from a Nozzle server and syncs them to a PostgreSQL database.
+Designed to run alongside your application in a Docker environment.
 
 ## Overview
 
-Ampsync connects to a Nozzle server to stream dataset changes and synchronizes them to a local PostgreSQL database. This enables applications to work with a subset of Nozzle data while maintaining real-time updates and handling blockchain reorganizations.
+Ampsync connects to a Nozzle server to stream dataset changes and synchronizes them to a local PostgreSQL database. This
+enables applications to work with a subset of Nozzle data while maintaining real-time updates and handling blockchain
+reorganizations.
 
 ## Configuration
 
@@ -13,16 +16,16 @@ The service is configured through environment variables:
 ### Required Environment Variables
 
 - `DATASET_MANIFEST` - Path to your nozzle config file (e.g., `./nozzle.config.ts`)
-  - Must be a valid file with extension: `.ts`, `.js`, `.mts`, `.mjs`, or `.json`
-  - Can be a relative path (service runs in same repository as config)
+    - Must be a valid file with extension: `.ts`, `.js`, `.mts`, `.mjs`, or `.json`
+    - Can be a relative path (service runs in same repository as config)
 - Database connection (one of the following):
-  - `DATABASE_URL` - Full PostgreSQL connection string
-  - OR individual components:
-    - `DATABASE_USER` - Database username (required if not using DATABASE_URL)
-    - `DATABASE_NAME` - Database name (required if not using DATABASE_URL)
-    - `DATABASE_PASSWORD` - Database password (optional)
-    - `DATABASE_HOST` - Database host (defaults to `localhost`)
-    - `DATABASE_PORT` - Database port (defaults to `5432`)
+    - `DATABASE_URL` - Full PostgreSQL connection string
+    - OR individual components:
+        - `DATABASE_USER` - Database username (required if not using DATABASE_URL)
+        - `DATABASE_NAME` - Database name (required if not using DATABASE_URL)
+        - `DATABASE_PASSWORD` - Database password (optional)
+        - `DATABASE_HOST` - Database host (defaults to `localhost`)
+        - `DATABASE_PORT` - Database port (defaults to `5432`)
 
 ### Optional Environment Variables
 
@@ -33,10 +36,9 @@ The service is configured through environment variables:
 ### Docker Compose Example
 
 ```yaml
-version: '3.8'
 services:
   postgres:
-    image: postgres:15
+    image: postgres:17
     environment:
       POSTGRES_DB: myapp
       POSTGRES_USER: myuser

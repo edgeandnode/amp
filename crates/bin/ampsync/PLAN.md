@@ -21,6 +21,8 @@ Build a Docker-deployable binary that syncs Nozzle dataset changes to a PostgreS
 12. **Blockchain Reorg Handling** - Automatic deletion of invalidated data with block range tracking
 13. **Exponential Backoff Retry Logic** - Database connection and operation retry with exponential backoff
 14. **Adaptive Batch Sizing** - Dynamic batch optimization based on performance metrics and memory constraints
+15. **Latest Dependencies** - Updated to oxc 0.93 (latest parser/AST libraries)
+16. **Clean Codebase** - Removed unused functions and optimized module structure
 
 ### Final Phase: Containerization
 - Docker containerization for production deployment
@@ -173,7 +175,7 @@ Build a Docker-deployable binary that syncs Nozzle dataset changes to a PostgreS
   - Complex patterns like `defineDataset(() => ({ ... }))` - Foundation implemented
 - **AST Visitor**: Converts JavaScript expressions to JSON Values, then to Manifest struct
 - **Error Handling**: Comprehensive parse error reporting and fallback strategies
-- **Dependencies**: oxc_allocator, oxc_ast, oxc_parser, oxc_span (v0.38)
+- **Dependencies**: oxc_allocator, oxc_ast, oxc_ast_visit, oxc_parser, oxc_span (v0.93)
 
 ### nozzle-client::with_reorg API
 - **Function**: `with_reorg(result_stream: ResultStream) -> BoxStream<Result<ResponseBatchWithReorg, Error>>`
@@ -299,3 +301,13 @@ Build a Docker-deployable binary that syncs Nozzle dataset changes to a PostgreS
 - **Fault Tolerant**: Adapts to errors by reducing batch sizes
 - **High Throughput**: Maximizes PostgreSQL COPY performance while respecting system limits
 - **Production Ready**: Handles varying load conditions and data characteristics
+
+### Recent Improvements
+
+#### Code Quality and Dependencies (Latest Updates)
+- **Module Restructuring**: Renamed `schema.rs` to `sync_engine.rs` for better semantic clarity
+- **Dependency Updates**: Upgraded all oxc crates from 0.38 to 0.93 (latest versions)
+- **API Migration**: Successfully migrated from deprecated `oxc_ast::visit` to `oxc_ast_visit::Visit`
+- **Code Cleanup**: Removed unused functions to eliminate dead code warnings
+- **Clean Compilation**: Zero compilation warnings with lean, focused API surface
+- **Test Coverage**: Maintained 100% test pass rate through all refactoring
