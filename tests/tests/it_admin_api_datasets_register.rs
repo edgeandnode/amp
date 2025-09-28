@@ -1,6 +1,6 @@
 use admin_api::handlers::datasets::register::RegisterRequest;
 use common::manifest::derived::Manifest;
-use datasets_common::version::Version;
+use datasets_common::{name::Name, version::Version};
 use reqwest::StatusCode;
 use tests::testlib::ctx::TestCtxBuilder;
 
@@ -348,6 +348,7 @@ impl TestCtx {
     }
 
     async fn verify_dataset_exists(&self, name: &str, version: &str) -> bool {
+        let name = name.parse::<Name>().expect("Invalid name");
         let version = version.parse::<Version>().expect("Invalid version");
         self.ctx
             .metadata_db()

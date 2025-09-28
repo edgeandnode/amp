@@ -125,19 +125,13 @@ impl DatasetError {
     }
 }
 
-impl From<(&str, Error)> for DatasetError {
-    fn from((dataset, error): (&str, Error)) -> Self {
+impl<T> From<(T, Error)> for DatasetError
+where
+    T: AsRef<str>,
+{
+    fn from((dataset, error): (T, Error)) -> Self {
         Self {
-            dataset: Some(dataset.to_string()),
-            error,
-        }
-    }
-}
-
-impl From<(String, Error)> for DatasetError {
-    fn from((dataset, error): (String, Error)) -> Self {
-        Self {
-            dataset: Some(dataset),
+            dataset: Some(dataset.as_ref().to_string()),
             error,
         }
     }
