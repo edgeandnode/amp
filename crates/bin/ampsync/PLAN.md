@@ -4,14 +4,14 @@
 
 Build a Docker-deployable binary that syncs Nozzle dataset changes to a PostgreSQL database.
 
-## 🎯 Current Status: **Phase 4 Complete - Production-Ready Sync Engine**
+## Current Status: **Phase 5 Complete - Enterprise-Grade Sync Engine**
 
-### ✅ **Completed Features:**
+### Completed Features:
 1. **JS/TS Config Parsing** - Advanced oxc_parser AST-based parsing for nozzle.config files
 2. **Manifest Loading** - Converts parsed config to Rust Manifest struct with Arc sharing
 3. **Database Schema Creation** - Comprehensive Arrow → PostgreSQL DDL conversion
 4. **Table Management** - Idempotent table creation with IF NOT EXISTS
-5. **Connection Pooling** - Production-ready sqlx PostgreSQL connection management
+5. **Connection Pooling** - Production-ready sqlx PostgreSQL connection management with exponential backoff
 6. **Error Handling** - Robust error propagation and logging throughout
 7. **Streaming Implementation** - ResultStream queries with with_reorg for each table
 8. **High-Performance Data Insertion** - pgpq-based bulk copy for maximum throughput
@@ -19,8 +19,10 @@ Build a Docker-deployable binary that syncs Nozzle dataset changes to a PostgreS
 10. **Graceful Shutdown** - Docker-compatible signal handling (SIGTERM/SIGINT)
 11. **Clean Architecture** - Separation of concerns with pure functions and stateful operations
 12. **Blockchain Reorg Handling** - Automatic deletion of invalidated data with block range tracking
+13. **Exponential Backoff Retry Logic** - Database connection and operation retry with exponential backoff
+14. **Adaptive Batch Sizing** - Dynamic batch optimization based on performance metrics and memory constraints
 
-### 🔄 **Final Phase: Containerization**
+### Final Phase: Containerization
 - Docker containerization for production deployment
 - Multi-stage build optimization
 - Health checks and container best practices
@@ -66,7 +68,7 @@ Build a Docker-deployable binary that syncs Nozzle dataset changes to a PostgreS
 
 - [x] Initialize `DbConnPool` instance using the config
 - [x] Handle connection errors gracefully
-- [ ] Implement retry logic for database connectivity
+- [x] Implement retry logic for database connectivity
 
 ### 4. Nozzle Client Integration
 
@@ -108,7 +110,7 @@ Build a Docker-deployable binary that syncs Nozzle dataset changes to a PostgreS
 
 1. ✅ Implement `DbConnPool` with connection pooling using `sqlx`
 2. ✅ Create schema management module for table creation from Arrow schemas
-3. [ ] Build data insertion/update logic (IN PROGRESS)
+3. ✅ Build data insertion/update logic with adaptive batching (COMPLETED)
 
 ### Phase 3: Integration
 
@@ -265,3 +267,35 @@ Build a Docker-deployable binary that syncs Nozzle dataset changes to a PostgreS
 - **Zero Downtime**: Reorg handling happens asynchronously without stopping data flow
 - **Monitoring**: Comprehensive logging of reorg events and deletion impact
 - **Data Consistency**: Ensures database remains consistent with the canonical blockchain state
+
+### Advanced Performance Optimizations
+
+#### Exponential Backoff Retry Logic
+- **Database Connection Retry**: Automatic retry for connection failures with exponential backoff
+- **Operation Retry**: Retry logic for transient database errors (deadlocks, connection timeouts)
+- **Smart Error Classification**: Distinguishes between retryable and permanent errors
+- **Configurable Retry Policy**: Min delay 50ms, max delay 5s, max attempts 5
+- **PostgreSQL Error Codes**: Handles specific error codes (53300, 40001, 40P01, etc.)
+- **Comprehensive Logging**: Warns on retry attempts with timing information
+
+#### Adaptive Batch Sizing System
+- **AdaptiveBatchManager**: Intelligent batch size optimization based on real-world performance
+- **Performance Tracking**: Records processing time and throughput for each batch
+- **Memory Constraints**: Estimates memory usage and constrains batch sizes (50MB target)
+- **Dynamic Adjustment**: Adapts batch sizes based on recent performance samples
+  - Target 1 second processing time per batch
+  - Increases batch size if processing too fast (< 500ms)
+  - Decreases batch size if processing too slow (> 1000ms)
+- **Error-Based Adjustment**: Reduces batch sizes on repeated failures
+- **Thread-Safe Design**: Uses Arc<Mutex<>> for concurrent access across async tasks
+- **Configurable Limits**: Min 100 rows, max 50,000 rows, configurable targets
+- **Smart Chunking**: Splits large RecordBatches into optimal-sized chunks
+- **Zero-Copy Slicing**: Uses Arrow's slice() method for efficient batch splitting
+- **Real-Time Monitoring**: Comprehensive logging of batch performance and adjustments
+
+#### Key Performance Benefits
+- **Self-Optimizing**: Automatically finds optimal batch sizes for different data patterns
+- **Memory Safe**: Prevents OOM errors through intelligent memory estimation
+- **Fault Tolerant**: Adapts to errors by reducing batch sizes
+- **High Throughput**: Maximizes PostgreSQL COPY performance while respecting system limits
+- **Production Ready**: Handles varying load conditions and data characteristics

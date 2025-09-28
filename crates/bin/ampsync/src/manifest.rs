@@ -2,10 +2,8 @@ use std::{fs, path::Path};
 
 use common::{BoxError, manifest::derived::Manifest};
 use oxc_allocator::Allocator;
-use oxc_ast::{
-    ast::*,
-    visit::{Visit, walk},
-};
+use oxc_ast::ast::*;
+use oxc_ast_visit::{Visit, walk};
 use oxc_parser::{ParseOptions, Parser};
 use oxc_span::SourceType;
 use serde_json::Value;

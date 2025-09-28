@@ -1,6 +1,6 @@
 mod conn;
 mod manifest;
-mod schema;
+mod sync_engine;
 
 use std::{env, path::PathBuf, sync::Arc};
 
@@ -14,8 +14,12 @@ use tracing::{error, info, warn};
 
 use crate::{
     conn::{DEFAULT_POOL_SIZE, DbConnPool},
-    schema::AmpsyncDbEngine,
+    sync_engine::AmpsyncDbEngine,
 };
+
+#[cfg(feature = "snmalloc")]
+#[global_allocator]
+static ALLOC: snmalloc_rs::SnMalloc = snmalloc_rs::SnMalloc;
 
 #[tokio::main]
 async fn main() {
