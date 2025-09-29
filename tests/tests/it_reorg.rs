@@ -132,6 +132,7 @@ async fn dump_finalized() {
                 None,
                 false,
                 None,
+                None,
                 true, // enable continuous dump
             )
             .await

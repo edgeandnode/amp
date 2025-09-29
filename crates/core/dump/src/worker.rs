@@ -30,6 +30,7 @@ pub struct Worker {
     job_ctx: Ctx,
     job_set: JobSet,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
+    meter: Option<monitoring::telemetry::metrics::Meter>,
 }
 
 impl Worker {
@@ -39,6 +40,7 @@ impl Worker {
         metadata_db: MetadataDb,
         node_id: WorkerNodeId,
         metrics: Option<Arc<metrics::MetricsRegistry>>,
+        meter: Option<monitoring::telemetry::metrics::Meter>,
     ) -> Self {
         let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
         let data_store = config.data_store.clone();
@@ -63,6 +65,7 @@ impl Worker {
             },
             job_set: Default::default(),
             metrics,
+            meter,
         }
     }
 
@@ -329,10 +332,15 @@ impl Worker {
             WorkerError::JobLoadFailed(format!("invalid job descriptor: {}", err).into())
         })?;
 
-        let job =
-            Job::try_from_descriptor(self.job_ctx.clone(), job_id, job_desc, self.metrics.clone())
-                .await
-                .map_err(WorkerError::JobLoadFailed)?;
+        let job = Job::try_from_descriptor(
+            self.job_ctx.clone(),
+            job_id,
+            job_desc,
+            self.metrics.clone(),
+            self.meter.clone(),
+        )
+        .await
+        .map_err(WorkerError::JobLoadFailed)?;
         self.job_set.spawn(job_id, job);
 
         Ok(())

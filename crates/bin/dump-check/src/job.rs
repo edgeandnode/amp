@@ -10,7 +10,7 @@ use common::{
 };
 use futures::{StreamExt as _, TryStreamExt as _, future::join_all};
 
-use crate::metrics::MetricsRegistry;
+use crate::metrics;
 
 pub struct Job<T: BlockStreamer> {
     #[allow(unused)]
@@ -21,7 +21,7 @@ pub struct Job<T: BlockStreamer> {
 
     pub batch_size: u64,
     pub ctx: Arc<QueryContext>,
-    pub metrics: Option<Arc<MetricsRegistry>>,
+    pub metrics: Option<metrics::Metrics>,
 }
 
 // Validate buffered vector of dataset batches against existing data in the object store.
@@ -107,7 +107,7 @@ pub async fn run_job(job: Job<impl BlockStreamer>) -> Result<(), BoxError> {
     let mut stream = std::pin::pin!(stream);
     while let Some(dataset_rows) = stream.try_next().await? {
         if let Some(ref metrics) = job.metrics {
-            metrics.blocks_read.inc();
+            metrics.registry.blocks_read.inc();
         }
 
         let block_num = dataset_rows.block_num();
@@ -119,7 +119,7 @@ pub async fn run_job(job: Job<impl BlockStreamer>) -> Result<(), BoxError> {
                 .map(|c| c.to_data().get_slice_memory_size().unwrap())
                 .sum::<usize>();
             if let Some(ref metrics) = job.metrics {
-                metrics.bytes_read.inc_by(bytes as u64);
+                metrics.registry.bytes_read.inc_by(bytes as u64);
             }
 
             table_map

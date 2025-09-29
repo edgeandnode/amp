@@ -51,6 +51,7 @@ pub async fn dump_dataset(
         None,
         false,
         None,
+        None,
         false,
     )
     .await

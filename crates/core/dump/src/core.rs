@@ -33,6 +33,7 @@ pub async fn dump_tables(
     microbatch_max_interval: u64,
     end: Option<i64>,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
+    meter: Option<&monitoring::telemetry::metrics::Meter>,
     only_finalized_blocks: bool,
 ) -> Result<(), BoxError> {
     let mut kinds = BTreeSet::new();
@@ -51,6 +52,7 @@ pub async fn dump_tables(
             partition_size,
             end,
             metrics,
+            meter,
             only_finalized_blocks,
         )
         .await
@@ -67,6 +69,7 @@ pub async fn dump_raw_tables(
     partition_size: u64,
     end: Option<i64>,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
+    meter: Option<&monitoring::telemetry::metrics::Meter>,
     only_finalized_blocks: bool,
 ) -> Result<(), BoxError> {
     if tables.is_empty() {
@@ -112,6 +115,7 @@ pub async fn dump_raw_tables(
                 end,
                 &dataset.name,
                 metrics,
+                meter,
                 only_finalized_blocks,
             )
             .await?;

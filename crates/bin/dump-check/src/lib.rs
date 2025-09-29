@@ -23,13 +23,15 @@ pub async fn dump_check(
     n_jobs: u8,
     start: u64,
     end_block: u64,
-    metrics: Option<Arc<metrics::MetricsRegistry>>,
+    metrics: Option<metrics::Metrics>,
 ) -> Result<(), BoxError> {
     let dataset_version = dataset_version.map(|v| v.parse()).transpose()?;
     let dataset = dataset_store
         .load_dataset(&dataset_name, dataset_version.as_ref())
         .await?;
-    let client = dataset_store.load_client(&dataset_name, false).await?;
+    let client = dataset_store
+        .load_client(&dataset_name, false, metrics.as_ref().map(|m| &m.meter))
+        .await?;
     let total_blocks = end_block - start + 1;
     let mut tables: Vec<Arc<PhysicalTable>> = Vec::with_capacity(dataset.tables.len());
     let dataset_version = match dataset.kind.as_str() {

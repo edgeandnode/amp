@@ -87,6 +87,7 @@ pub async fn client(
     network: String,
     provider_name: String,
     final_blocks_only: bool,
+    meter: Option<&monitoring::telemetry::metrics::Meter>,
 ) -> Result<JsonRpcClient, Error> {
     let provider: EvmRpcProvider = provider.try_into()?;
     let request_limit = u16::max(1, provider.concurrent_request_limit.unwrap_or(1024));
@@ -102,6 +103,7 @@ pub async fn client(
                 provider.rate_limit_per_minute,
                 provider.fetch_receipts_per_tx,
                 final_blocks_only,
+                meter,
             )
             .await
             .map_err(Error::Client)?
@@ -115,6 +117,7 @@ pub async fn client(
             provider.rate_limit_per_minute,
             provider.fetch_receipts_per_tx,
             final_blocks_only,
+            meter,
         )
         .await
         .map_err(Error::Client)?,
@@ -127,6 +130,7 @@ pub async fn client(
             provider.rate_limit_per_minute,
             provider.fetch_receipts_per_tx,
             final_blocks_only,
+            meter,
         )
         .map_err(Error::Client)?,
     };
