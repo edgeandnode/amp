@@ -259,10 +259,14 @@ impl JsonRpcClient {
         start_block: u64,
         end_block: u64,
     ) -> impl Stream<Item = Result<RawDatasetRows, BoxError>> + Send {
+        assert!(end_block >= start_block);
+        let total_blocks_to_stream = end_block - start_block + 1;
+
         tracing::info!(
-            "Fetching blocks (not batched) {} to {}",
-            start_block,
-            end_block
+            %start_block,
+            %end_block,
+            total = %total_blocks_to_stream,
+            "Fetching blocks (not batched)"
         );
 
         let mut last_progress_report = Instant::now();
@@ -271,7 +275,17 @@ impl JsonRpcClient {
             'outer: for block_num in start_block..=end_block {
                 let elapsed = last_progress_report.elapsed();
                 if elapsed >= Duration::from_secs(15) {
-                    tracing::info!(start = start_block, end = end_block, block = %block_num, "Progress");
+                    let blocks_streamed = block_num - start_block;
+                    let percentage_streamed = (blocks_streamed as f32 / total_blocks_to_stream as f32) * 100.0;
+                    tracing::info!(
+                        current = %block_num,
+                        start = %start_block,
+                        end = %end_block,
+                        "Progress {}/{} ({:.2}%) blocks",
+                        blocks_streamed,
+                        total_blocks_to_stream,
+                        percentage_streamed
+                    );
                     last_progress_report = Instant::now();
                 }
 
