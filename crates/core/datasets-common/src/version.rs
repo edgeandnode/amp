@@ -6,11 +6,19 @@
 /// Semver version wrapper with JSON schema support and version manipulation utilities.
 ///
 /// Provides serialization and version manipulation utilities for dataset versioning.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 #[serde(transparent)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "schemars", schemars(transparent))]
 pub struct Version(#[cfg_attr(feature = "schemars", schemars(with = "String"))] semver::Version);
+
+impl Default for Version {
+    fn default() -> Self {
+        Self(semver::Version::new(0, 0, 0))
+    }
+}
 
 impl Version {
     /// Create a new [`Version`] from major, minor, and patch components.

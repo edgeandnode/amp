@@ -14,6 +14,7 @@ use common::{
     query_context::{parse_sql, prepend_special_block_num_field},
 };
 use datafusion::sql::parser;
+use datasets_common::value::ManifestValue;
 use futures::StreamExt as _;
 use object_store::ObjectMeta;
 
@@ -21,7 +22,7 @@ use crate::DatasetStore;
 
 pub(super) async fn dataset(
     store: Arc<DatasetStore>,
-    dataset_def: common::DatasetValue,
+    dataset_def: ManifestValue,
 ) -> Result<SqlDataset, BoxError> {
     let def = Manifest::from_value(dataset_def)?;
     if def.kind != DATASET_KIND {

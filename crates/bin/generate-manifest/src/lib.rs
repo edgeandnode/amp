@@ -47,14 +47,15 @@ pub async fn run<T: io::Write>(
         dataset_store::DatasetKind::Sql => {
             return Err("`DatasetKind::Sql` doesn't support dataset generation".into());
         }
-        dataset_store::DatasetKind::Manifest => {
-            return Err("`DatasetKind::Manifest` doesn't support dataset generation".into());
+        dataset_store::DatasetKind::Derived => {
+            return Err("`DatasetKind::Derived` doesn't support dataset generation".into());
         }
     };
     let dataset = serde_json::to_vec(&Manifest {
-        network,
-        kind: kind.to_string(),
         name,
+        version: Default::default(),
+        kind: kind.to_string(),
+        network,
         schema: Some(schema),
     })?;
     w.write_all(&dataset)?;

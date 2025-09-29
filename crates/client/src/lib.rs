@@ -58,6 +58,7 @@ impl Stream for ResultStream {
 }
 
 /// Arrow Flight client for connecting to nozzle server.
+#[derive(Clone)]
 pub struct SqlClient {
     client: FlightSqlServiceClient<tonic::transport::Channel>,
 }
@@ -165,7 +166,7 @@ impl From<BlockRange> for InvalidationRange {
 ///             println!("Received batch for block ranges: {:#?}", metadata.ranges);
 ///         }
 ///         ResponseBatchWithReorg::Reorg { invalidation } => {
-///             // Handle reorg - invalidate cached data for these ranges
+///             // Handle reorg - invalidate data for these ranges
 ///             println!("Reorg detected, invalidating ranges: {:#?}", invalidation);
 ///         }
 ///     }

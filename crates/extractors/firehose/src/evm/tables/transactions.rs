@@ -28,7 +28,7 @@ fn schema() -> Schema {
     let timestamp = Field::new("timestamp", common::timestamp_type(), false);
     let tx_index = Field::new("tx_index", DataType::UInt32, false);
     let tx_hash = Field::new("tx_hash", BYTES32_TYPE, false);
-    let to = Field::new("to", DataType::Binary, false);
+    let to = Field::new("to", ADDRESS_TYPE, true);
     let nonce = Field::new("nonce", DataType::UInt64, false);
     let gas_price = Field::new("gas_price", EVM_CURRENCY_TYPE, true);
     let gas_limit = Field::new("gas_limit", DataType::UInt64, false);
@@ -87,7 +87,7 @@ pub(crate) struct Transaction {
     pub(crate) tx_index: u32,
     pub(crate) tx_hash: Bytes32,
 
-    pub(crate) to: Vec<u8>,
+    pub(crate) to: Option<Address>,
     pub(crate) nonce: u64,
 
     // Unsure why this is optional, firehose doesn't document that.
@@ -128,7 +128,7 @@ pub(crate) struct TransactionRowsBuilder {
     timestamp: TimestampArrayBuilder,
     tx_index: UInt32Builder,
     tx_hash: Bytes32ArrayBuilder,
-    to: BinaryBuilder,
+    to: EvmAddressArrayBuilder,
     nonce: UInt64Builder,
     gas_price: EvmCurrencyArrayBuilder,
     gas_limit: UInt64Builder,
@@ -152,7 +152,6 @@ pub(crate) struct TransactionRowsBuilder {
 impl TransactionRowsBuilder {
     pub(crate) fn with_capacity(
         count: usize,
-        total_to_size: usize,
         total_input_size: usize,
         total_v_size: usize,
         total_r_size: usize,
@@ -167,7 +166,7 @@ impl TransactionRowsBuilder {
             timestamp: TimestampArrayBuilder::with_capacity(count),
             tx_index: UInt32Builder::with_capacity(count),
             tx_hash: Bytes32ArrayBuilder::with_capacity(count),
-            to: BinaryBuilder::with_capacity(count, total_to_size),
+            to: EvmAddressArrayBuilder::with_capacity(count),
             nonce: UInt64Builder::with_capacity(count),
             gas_price: EvmCurrencyArrayBuilder::with_capacity(count),
             gas_limit: UInt64Builder::with_capacity(count),
@@ -223,7 +222,7 @@ impl TransactionRowsBuilder {
         self.timestamp.append_value(*timestamp);
         self.tx_index.append_value(*tx_index);
         self.tx_hash.append_value(*tx_hash);
-        self.to.append_value(to);
+        self.to.append_option(*to);
         self.nonce.append_value(*nonce);
         self.gas_price.append_option(*gas_price);
         self.gas_limit.append_value(*gas_limit);
@@ -253,7 +252,7 @@ impl TransactionRowsBuilder {
             mut timestamp,
             mut tx_index,
             tx_hash,
-            mut to,
+            to,
             mut nonce,
             gas_price,
             mut gas_limit,
@@ -312,7 +311,6 @@ fn default_to_arrow() {
     let rows = {
         let mut builder = TransactionRowsBuilder::with_capacity(
             1,
-            tx.to.len(),
             tx.input.len(),
             tx.v.len(),
             tx.r.len(),

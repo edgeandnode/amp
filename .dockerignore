@@ -1,9 +1,0 @@
-# Ignore all files and directories by default.
-**/*
-
-# Include all crates, tests and root workspace files.
-!crates/
-!tests/
-!Dockerfile
-!Cargo.toml
-!Cargo.lock

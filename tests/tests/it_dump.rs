@@ -58,7 +58,8 @@ async fn evm_rpc_single_dump() {
             None,               // microbatch_max_interval
             None,               // microbatch_max_rows
             false,              // skip_consistency_check
-            None,               // target_revision
+            None,               // metrics
+            None,               // meter
             false,              // track_progress
         )
         .await
@@ -137,7 +138,8 @@ async fn eth_beacon_single_dump() {
             None,               // microbatch_max_interval
             None,               // microbatch_max_rows
             false,              // skip_consistency_check
-            None,               // target_revision
+            None,               // metrics
+            None,               // meter
             false,              // track_progress
         )
         .await
@@ -216,7 +218,8 @@ async fn evm_rpc_single_dump_fetch_receipts_per_tx() {
             None,               // microbatch_max_interval
             None,               // microbatch_max_rows
             false,              // skip_consistency_check
-            None,               // target_revision
+            None,               // metrics
+            None,               // meter
             false,              // track_progress
         )
         .await
@@ -295,7 +298,8 @@ async fn evm_rpc_base_single_dump() {
             None,               // microbatch_max_interval
             None,               // microbatch_max_rows
             false,              // skip_consistency_check
-            None,               // target_revision
+            None,               // metrics
+            None,               // meter
             false,              // track_progress
         )
         .await
@@ -374,7 +378,8 @@ async fn evm_rpc_base_single_dump_fetch_receipts_per_tx() {
             None,               // microbatch_max_interval
             None,               // microbatch_max_rows
             false,              // skip_consistency_check
-            None,               // target_revision
+            None,               // metrics
+            None,               // meter
             false,              // track_progress
         )
         .await
@@ -453,7 +458,8 @@ async fn eth_firehose_single_dump() {
             None,               // microbatch_max_interval
             None,               // microbatch_max_rows
             false,              // skip_consistency_check
-            None,               // target_revision
+            None,               // metrics
+            None,               // meter
             false,              // track_progress
         )
         .await
@@ -532,7 +538,8 @@ async fn base_firehose_single_dump() {
             None,               // microbatch_max_interval
             None,               // microbatch_max_rows
             false,              // skip_consistency_check
-            None,               // target_revision
+            None,               // metrics
+            None,               // meter
             false,              // track_progress
         )
         .await
@@ -621,7 +628,8 @@ async fn sql_over_eth_firehose_dump() {
             None,               // microbatch_max_interval
             None,               // microbatch_max_rows
             false,              // skip_consistency_check
-            None,               // target_revision
+            None,               // metrics
+            None,               // meter
             false,              // track_progress
         )
         .await

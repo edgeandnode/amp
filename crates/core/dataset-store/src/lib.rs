@@ -7,8 +7,8 @@ use std::{
 
 use async_stream::stream;
 use common::{
-    BlockNum, BlockStreamer, BlockStreamerExt, BoxError, Dataset, DatasetValue, LogicalCatalog,
-    PlanningContext, RawDatasetRows, Store,
+    BlockNum, BlockStreamer, BlockStreamerExt, BoxError, Dataset, LogicalCatalog, PlanningContext,
+    RawDatasetRows, Store,
     catalog::physical::{Catalog, PhysicalTable},
     config::Config,
     evm::{self, udfs::EthCall},
@@ -26,7 +26,9 @@ use datafusion::{
     logical_expr::{ScalarUDF, async_udf::AsyncScalarUDF},
     sql::{TableReference, parser, resolve::resolve_table_references},
 };
-use datasets_common::{manifest::Manifest as CommonManifest, name::Name, version::Version};
+use datasets_common::{
+    manifest::Manifest as CommonManifest, name::Name, value::ManifestValue, version::Version,
+};
 use futures::{FutureExt as _, Stream, TryFutureExt as _, future::BoxFuture};
 use js_runtime::isolate_pool::IsolatePool;
 use metadata_db::MetadataDb;
@@ -125,14 +127,47 @@ impl DatasetStore {
 
         // Register dataset metadata in database
         self.metadata_db
-            .register_dataset(
-                dataset_owner,
-                name.as_str(),
-                version,
-                manifest_path.as_ref(),
-            )
+            .register_dataset(dataset_owner, name, version, manifest_path.as_ref())
             .await
             .map_err(RegistrationError::MetadataRegistration)?;
+
+        Ok(())
+    }
+
+    /// Register a dataset manifest in the dataset store without metadata database tracking.
+    ///
+    /// This is a lightweight version of [`Self::register_manifest`] that skips the metadata
+    /// database operations. It only serializes the manifest to JSON and stores it in the
+    /// dataset definitions store.
+    ///
+    /// # Notes
+    ///
+    /// Unlike [`Self::register_manifest`], this function:
+    /// - Does not check for existing datasets
+    /// - Does not register metadata in the database
+    /// - Does not track dataset ownership
+    /// - Uses a simpler file naming scheme (`{name}.json` vs `{name}__{version}.json`)
+    pub async fn register_raw_dataset_manifest<M>(
+        &self,
+        name: &Name,
+        _version: &Version,
+        manifest: &M,
+    ) -> Result<(), RegistrationError>
+    where
+        M: serde::Serialize,
+    {
+        // Prepare manifest data for storage
+        let manifest_json =
+            serde_json::to_string(&manifest).map_err(RegistrationError::ManifestSerialization)?;
+
+        // Store manifest in dataset definitions store
+        let manifest_path = format!("{}.json", name).into();
+
+        self.dataset_defs_store
+            .prefixed_store()
+            .put(&manifest_path, manifest_json.into())
+            .await
+            .map_err(RegistrationError::ManifestStorage)?;
 
         Ok(())
     }
@@ -152,15 +187,15 @@ impl DatasetStore {
     pub async fn try_load_dataset(
         self: &Arc<Self>,
         name: &str,
-        version: Option<&Version>,
+        version: impl Into<Option<&Version>>,
     ) -> Result<Option<Dataset>, DatasetError> {
-        match self.load_dataset(name, version).await {
+        match self.load_dataset(name, version.into()).await {
             Ok(dataset) => Ok(Some(dataset)),
-            Err(e) => {
-                if e.is_not_found() {
+            Err(err) => {
+                if err.is_not_found() {
                     Ok(None)
                 } else {
-                    Err(e)
+                    Err(err)
                 }
             }
         }
@@ -171,6 +206,8 @@ impl DatasetStore {
         name: &str,
         version: Option<&Version>,
     ) -> Result<String, DatasetError> {
+        let name = &name.parse::<Name>().expect("valid dataset name");
+
         let dataset_identifier = match version {
             Some(version) => self
                 .metadata_db
@@ -255,7 +292,6 @@ impl DatasetStore {
         &self,
         dataset_name: &str,
     ) -> Result<(CommonManifest, DatasetSrc), Error> {
-        use Error::*;
         let dataset_src = self
             .dataset_defs_store
             .get_string(format!("{}.toml", dataset_name))
@@ -278,13 +314,6 @@ impl DatasetStore {
             }
             DatasetSrc::Json(src) => serde_json::from_str::<CommonManifest>(src)?,
         };
-
-        if common.name != dataset_name && common.kind != "manifest" {
-            return Err(NameMismatch(
-                common.name.to_string(),
-                dataset_name.to_string(),
-            ));
-        }
 
         Ok((common, dataset_src))
     }
@@ -341,17 +370,16 @@ impl DatasetStore {
                 let store_dataset = Arc::clone(self).sql_dataset(value).await?.dataset;
                 (store_dataset, None)
             }
-            DatasetKind::Manifest => {
+            DatasetKind::Derived => {
                 let manifest = dataset_src.to_manifest()?;
                 let dataset = manifest::derived::dataset(manifest).map_err(Error::Unknown)?;
                 (dataset, None)
             }
         };
 
-        if let Some(ground_truth_schema) = ground_truth_schema {
-            let Some(loaded_schema) = common.schema else {
-                return Err(Error::SchemaMissing { dataset_kind: kind });
-            };
+        if let Some(ground_truth_schema) = ground_truth_schema
+            && let Some(loaded_schema) = common.schema
+        {
             if loaded_schema != ground_truth_schema {
                 return Err(Error::SchemaMismatch);
             }
@@ -387,8 +415,9 @@ impl DatasetStore {
         &self,
         dataset: &str,
         only_finalized_blocks: bool,
+        meter: Option<&monitoring::telemetry::metrics::Meter>,
     ) -> Result<impl BlockStreamer, DatasetError> {
-        self.load_client_inner(dataset, only_finalized_blocks)
+        self.load_client_inner(dataset, only_finalized_blocks, meter)
             .await
             .map_err(|err| (dataset, err).into())
             .map(|client| client.with_retry())
@@ -399,6 +428,7 @@ impl DatasetStore {
         &self,
         dataset_name: &str,
         only_finalized_blocks: bool,
+        meter: Option<&monitoring::telemetry::metrics::Meter>,
     ) -> Result<BlockStreamClient, Error> {
         let (common, raw_dataset) = self.common_data_and_dataset(dataset_name).await?;
         let value = raw_dataset.to_value()?;
@@ -424,6 +454,7 @@ impl DatasetStore {
                     common.network,
                     provider_name,
                     only_finalized_blocks,
+                    meter,
                 )
                 .await?,
             ),
@@ -452,7 +483,7 @@ impl DatasetStore {
                 )
                 .await?,
             ),
-            DatasetKind::Sql | DatasetKind::Manifest => {
+            DatasetKind::Sql | DatasetKind::Derived => {
                 // SQL and Manifest datasets don't have a client.
                 return Err(Error::UnsupportedKind(common.kind));
             }
@@ -690,7 +721,7 @@ impl DatasetStore {
     /// Each `.sql` file in the directory with the same name as the dataset will be loaded as a table.
     fn sql_dataset(
         self: Arc<Self>,
-        dataset_def: DatasetValue,
+        dataset_def: ManifestValue,
     ) -> BoxFuture<'static, Result<SqlDataset, Error>> {
         sql_datasets::dataset(self, dataset_def)
             .map_err(Error::SqlDatasetError)
@@ -714,10 +745,10 @@ impl DatasetSrc {
         Ok(manifest)
     }
 
-    fn to_value(&self) -> Result<DatasetValue, Error> {
+    fn to_value(&self) -> Result<ManifestValue, Error> {
         let value = match self {
-            DatasetSrc::Toml(src) => DatasetValue::Toml(toml::Value::from_str(src)?),
-            DatasetSrc::Json(src) => DatasetValue::Json(serde_json::Value::from_str(src)?),
+            DatasetSrc::Toml(src) => ManifestValue::Toml(toml::Value::from_str(src)?),
+            DatasetSrc::Json(src) => ManifestValue::Json(serde_json::Value::from_str(src)?),
         };
 
         Ok(value)

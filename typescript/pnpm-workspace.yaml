@@ -1,4 +1,3 @@
+onlyBuiltDependencies: null
 packages:
   - packages/*
-
-onlyBuiltDependencies:

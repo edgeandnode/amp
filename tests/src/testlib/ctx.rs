@@ -443,6 +443,7 @@ impl TestCtxBuilder {
             config,
             temp_db.metadata_db().clone(),
             None,
+            None,
         )
         .await?;
 

@@ -24,6 +24,8 @@ pub enum Job {
         end_block: Option<i64>,
         /// Metrics registry.
         metrics: Option<Arc<metrics::MetricsRegistry>>,
+        /// Meter for creating telemetry objects.
+        meter: Option<monitoring::telemetry::metrics::Meter>,
     },
 }
 
@@ -35,6 +37,7 @@ impl Job {
         job_id: JobId,
         job_desc: JobDesc,
         metrics: Option<Arc<metrics::MetricsRegistry>>,
+        meter: Option<monitoring::telemetry::metrics::Meter>,
     ) -> Result<Job, BoxError> {
         let output_locations = ctx.metadata_db.output_locations(job_id).await?;
         match job_desc {
@@ -71,6 +74,7 @@ impl Job {
                     tables,
                     end_block,
                     metrics,
+                    meter,
                 })
             }
         }
@@ -83,6 +87,7 @@ impl Job {
                 tables,
                 end_block,
                 metrics,
+                meter,
             } => {
                 dump_tables(
                     ctx.clone(),
@@ -92,6 +97,7 @@ impl Job {
                     ctx.config.microbatch_max_interval,
                     end_block,
                     metrics,
+                    meter.as_ref(),
                     false,
                 )
                 .await

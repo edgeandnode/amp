@@ -24,7 +24,7 @@ use alloy::{
 };
 use async_stream::stream;
 use common::{
-    BlockNum, BlockStreamer, BoxError, EvmCurrency, RawDatasetRows, Timestamp,
+    BlockNum, BlockStreamer, BoxError, BoxResult, EvmCurrency, RawDatasetRows, Timestamp,
     evm::{
         self,
         tables::{
@@ -50,16 +50,17 @@ pub enum ToRowError {
     #[error("overflow in field {0}: {1}")]
     Overflow(&'static str, BoxError),
 }
-pub struct BatchingRpcWrapper {
-    client: alloy::providers::RootProvider<AnyNetwork>,
+
+struct BatchingRpcWrapper {
+    client: RootProviderWithMetrics,
     batch_size: usize,
     retries: usize,
     limiter: Arc<tokio::sync::Semaphore>,
 }
 
 impl BatchingRpcWrapper {
-    pub fn new(
-        client: alloy::providers::RootProvider<AnyNetwork>,
+    fn new(
+        client: RootProviderWithMetrics,
         batch_size: usize,
         retries: usize,
         limiter: Arc<tokio::sync::Semaphore>,
@@ -75,7 +76,7 @@ impl BatchingRpcWrapper {
 
     /// Execute a batch of RPC calls with retries on failure.
     /// calls: Vec<(&'static str, Params)> - a vector of tuples containing the method name and parameters.
-    pub async fn execute<T: RpcRecv, Params: RpcSend>(
+    async fn execute<T: RpcRecv, Params: RpcSend>(
         &self,
         calls: Vec<(&'static str, Params)>,
     ) -> Result<Vec<T>, BoxError> {
@@ -95,20 +96,9 @@ impl BatchingRpcWrapper {
             // Acquire semaphore permit for the batch, which will be one request
             let _permit = self.limiter.acquire().await?;
 
-            let mut batch = BatchRequest::new(self.client.client());
-            let mut waiters = Vec::new();
+            let batch_result = self.client.batch_request(&chunk).await;
 
-            for (method, params) in chunk.iter() {
-                waiters.push(batch.add_call(*method, &params)?);
-            }
-
-            let batch_then_waiters = async move {
-                batch.send().await?;
-                let responses = try_join_all(waiters).await?;
-                Ok::<_, BoxError>(responses)
-            };
-
-            match batch_then_waiters.await {
+            match batch_result {
                 Ok(responses) => {
                     results.extend(responses);
                 }
@@ -131,7 +121,7 @@ impl BatchingRpcWrapper {
         &self,
         results: &mut Vec<T>,
         remaining_attempts: usize,
-        chunk: &Vec<(&'static str, Params)>,
+        chunk: &[(&'static str, Params)],
         e: BoxError,
     ) -> Result<(), BoxError> {
         let delay_ms = 500 * (self.retries - remaining_attempts) as u64;
@@ -147,7 +137,7 @@ impl BatchingRpcWrapper {
                 e
             );
             let _permit = self.limiter.acquire().await?;
-            let result = self.client.client().request(*method, params).await;
+            let result = self.client.request(method, params).await;
             match result {
                 Ok(response) => {
                     results.push(response);
@@ -168,7 +158,7 @@ impl BatchingRpcWrapper {
 
 #[derive(Clone)]
 pub struct JsonRpcClient {
-    client: alloy::providers::RootProvider<AnyNetwork>,
+    client: RootProviderWithMetrics,
     network: String,
     provider_name: String,
     limiter: Arc<tokio::sync::Semaphore>,
@@ -187,9 +177,11 @@ impl JsonRpcClient {
         rate_limit: Option<NonZeroU32>,
         fetch_receipts_per_tx: bool,
         final_blocks_only: bool,
+        meter: Option<&monitoring::telemetry::metrics::Meter>,
     ) -> Result<Self, BoxError> {
         assert!(request_limit >= 1);
         let client = evm::provider::new(url, rate_limit);
+        let client = RootProviderWithMetrics::new(client, meter);
         let limiter = tokio::sync::Semaphore::new(request_limit as usize).into();
         Ok(Self {
             client,
@@ -211,9 +203,12 @@ impl JsonRpcClient {
         rate_limit: Option<NonZeroU32>,
         fetch_receipts_per_tx: bool,
         final_blocks_only: bool,
+        meter: Option<&monitoring::telemetry::metrics::Meter>,
     ) -> Result<Self, BoxError> {
         assert!(request_limit >= 1);
-        let client = evm::provider::new_ipc(path, rate_limit).await?;
+        let client = evm::provider::new_ipc(path, rate_limit)
+            .await
+            .map(|c| RootProviderWithMetrics::new(c, meter))?;
         let limiter = tokio::sync::Semaphore::new(request_limit as usize).into();
         Ok(Self {
             client,
@@ -235,9 +230,12 @@ impl JsonRpcClient {
         rate_limit: Option<NonZeroU32>,
         fetch_receipts_per_tx: bool,
         final_blocks_only: bool,
+        meter: Option<&monitoring::telemetry::metrics::Meter>,
     ) -> Result<Self, BoxError> {
         assert!(request_limit >= 1);
-        let client = evm::provider::new_ws(url, rate_limit).await?;
+        let client = evm::provider::new_ws(url, rate_limit)
+            .await
+            .map(|c| RootProviderWithMetrics::new(c, meter))?;
         let limiter = tokio::sync::Semaphore::new(request_limit as usize).into();
         Ok(Self {
             client,
@@ -281,6 +279,8 @@ impl JsonRpcClient {
                     let percentage_streamed = (blocks_streamed as f32 / total_blocks_to_stream as f32) * 100.0;
                     tracing::info!(
                         current = %block_num,
+                        start = %start_block,
+                        end = %end_block,
                         "Progress {}/{} ({:.2}%) blocks",
                         blocks_streamed,
                         total_blocks_to_stream,
@@ -292,7 +292,9 @@ impl JsonRpcClient {
                 let _permit = self.limiter.acquire().await.unwrap();
 
                 let block_num = BlockNumberOrTag::Number(block_num);
-                let block = self.client.get_block_by_number(block_num).full().await;
+                let block = self.client.with_metrics(async |c| {
+                    c.get_block_by_number(block_num).full().await
+                }).await;
                 let block = match block {
                     Ok(Some(block)) => block,
                     Ok(None) => {
@@ -318,7 +320,9 @@ impl JsonRpcClient {
                         .map(|hash| {
                             let client = &self.client;
                             async move {
-                                client.get_transaction_receipt(hash).await.map(|r| (hash, r))
+                                client.with_metrics(|c| async move {
+                                    c.get_transaction_receipt(hash).await.map(|r| (hash, r))
+                                }).await
                             }
                         });
                     let Ok(receipts) = try_join_all(calls).await else {
@@ -338,7 +342,9 @@ impl JsonRpcClient {
                     received_receipts
                 } else {
                     let receipts = self.client
-                        .get_block_receipts(BlockId::Number(block_num))
+                        .with_metrics(async |c| {
+                            c.get_block_receipts(BlockId::Number(block_num)).await
+                        })
                         .await
                         .map(|receipts| {
                             let mut receipts = receipts.expect("block already found");
@@ -484,7 +490,7 @@ impl JsonRpcClient {
 
 impl AsRef<alloy::providers::RootProvider<AnyNetwork>> for JsonRpcClient {
     fn as_ref(&self) -> &alloy::providers::RootProvider<AnyNetwork> {
-        &self.client
+        &self.client.inner
     }
 }
 
@@ -516,13 +522,161 @@ impl BlockStreamer for JsonRpcClient {
             false => BlockNumberOrTag::Latest,
         };
         let _permit = self.limiter.acquire();
-        let block = self.client.get_block_by_number(number).await?;
+        let block = self
+            .client
+            .with_metrics(async |c| c.get_block_by_number(number).await)
+            .await?;
         Ok(block.map(|b| b.header.number).unwrap_or(0))
     }
 
     fn provider_name(&self) -> &str {
         &self.provider_name
     }
+}
+
+#[derive(Debug, Clone)]
+struct RootProviderWithMetrics {
+    inner: alloy::providers::RootProvider<AnyNetwork>,
+    metrics: Option<JsonRpcMetrics>,
+}
+
+impl RootProviderWithMetrics {
+    fn new(
+        inner: alloy::providers::RootProvider<AnyNetwork>,
+        meter: Option<&monitoring::telemetry::metrics::Meter>,
+    ) -> Self {
+        let metrics = meter.map(|meter| JsonRpcMetrics {
+            num_rpc_calls_single: monitoring::telemetry::metrics::Counter::new(
+                meter,
+                "evm_rpc_num_calls_single",
+                "Number of single RPC calls made",
+            ),
+            num_rpc_calls_batch: monitoring::telemetry::metrics::Counter::new(
+                meter,
+                "evm_rpc_num_calls_batch",
+                "Number of batch RPC calls made",
+            ),
+            num_failed_rpc_calls: monitoring::telemetry::metrics::Counter::new(
+                meter,
+                "evm_rpc_num_failed_calls",
+                "Number of failed RPC calls",
+            ),
+            rpc_call_latency: monitoring::telemetry::metrics::Histogram::new_f64(
+                meter,
+                "evm_rpc_call_latency_ms",
+                "Latency of RPC calls in milliseconds",
+                "ms",
+            ),
+        });
+        Self { inner, metrics }
+    }
+
+    /// Use the provider to execute a function, recording metrics if enabled.
+    async fn with_metrics<T, E, F, Fut>(&self, func: F) -> Fut::Output
+    where
+        F: FnOnce(alloy::providers::RootProvider<AnyNetwork>) -> Fut,
+        Fut: Future<Output = Result<T, E>>,
+    {
+        let Some(metrics) = self.metrics.as_ref() else {
+            // Execute the function without recording metrics.
+            return func(self.inner.clone()).await;
+        };
+
+        let start = Instant::now();
+
+        let resp = func(self.inner.clone()).await;
+
+        let duration = start.elapsed().as_millis() as f64;
+        metrics.rpc_call_latency.record(duration);
+        metrics.num_rpc_calls_single.inc();
+        if resp.is_err() {
+            metrics.num_failed_rpc_calls.inc();
+        }
+
+        resp
+    }
+
+    /// Send a single RPC request, recording metrics if enabled.
+    async fn request<Params, Resp>(&self, method: &'static str, params: Params) -> BoxResult<Resp>
+    where
+        Params: RpcSend,
+        Resp: RpcRecv,
+    {
+        let client = self.inner.client();
+
+        let Some(metrics) = self.metrics.as_ref() else {
+            // Send request without recording metrics.
+            let resp = client.request(method, params).await?;
+            return Ok(resp);
+        };
+
+        let start = Instant::now();
+
+        let resp = client.request(method, params).await;
+
+        let duration = start.elapsed().as_millis() as f64;
+        metrics.rpc_call_latency.record(duration);
+        metrics.num_rpc_calls_single.inc();
+        if resp.is_err() {
+            metrics.num_failed_rpc_calls.inc();
+        }
+
+        let resp = resp?;
+        Ok(resp)
+    }
+
+    /// Send a batch of RPC requests, recording metrics if enabled.
+    async fn batch_request<Params, Resp>(
+        &self,
+        requests: &[(&'static str, Params)],
+    ) -> BoxResult<Vec<Resp>>
+    where
+        Params: RpcSend,
+        Resp: RpcRecv,
+    {
+        let mut batch = BatchRequest::new(self.inner.client());
+        let mut waiters = Vec::new();
+
+        for (method, params) in requests.iter() {
+            waiters.push(batch.add_call(*method, &params)?);
+        }
+
+        let Some(metrics) = self.metrics.as_ref() else {
+            // Send batch request without recording metrics.
+            batch.send().await?;
+            let resp = try_join_all(waiters).await?;
+
+            return Ok(resp);
+        };
+
+        let start = Instant::now();
+
+        batch.send().await.inspect_err(|_| {
+            let duration = start.elapsed().as_millis() as f64;
+            metrics.rpc_call_latency.record(duration);
+            metrics.num_rpc_calls_batch.inc();
+        })?;
+
+        let resp = try_join_all(waiters).await;
+
+        let duration = start.elapsed().as_millis() as f64;
+        metrics.rpc_call_latency.record(duration);
+        metrics.num_rpc_calls_batch.inc();
+        if resp.is_err() {
+            metrics.num_failed_rpc_calls.inc();
+        }
+
+        let resp = resp?;
+        Ok(resp)
+    }
+}
+
+#[derive(Debug, Clone)]
+struct JsonRpcMetrics {
+    num_rpc_calls_single: monitoring::telemetry::metrics::Counter,
+    num_rpc_calls_batch: monitoring::telemetry::metrics::Counter,
+    num_failed_rpc_calls: monitoring::telemetry::metrics::Counter,
+    rpc_call_latency: monitoring::telemetry::metrics::Histogram<f64>,
 }
 
 fn rpc_to_rows(
@@ -701,7 +855,7 @@ fn rpc_transaction_to_row(
         tx_index: u32::try_from(tx_index)
             .map_err(|e| ToRowError::Overflow("tx_index", e.into()))?,
         tx_hash: tx.inner.tx_hash().0,
-        to: tx.to().map(|addr| addr.0.0).unwrap_or_default(),
+        to: tx.to().map(|addr| addr.0.0),
         nonce: tx.nonce(),
         gas_price: TransactionResponse::gas_price(&tx.0.inner)
             .map(i128::try_from)

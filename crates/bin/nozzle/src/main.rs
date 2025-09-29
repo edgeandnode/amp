@@ -205,6 +205,7 @@ async fn main_inner() -> Result<(), BoxError> {
                 location,
                 fresh,
                 metrics_registry,
+                telemetry_metrics_meter.as_ref(),
                 only_finalized_blocks,
             )
             .await?;
@@ -230,6 +231,7 @@ async fn main_inner() -> Result<(), BoxError> {
                 jsonl_server,
                 admin_server,
                 metrics_registry,
+                telemetry_metrics_meter,
             )
             .await?;
             server.await
@@ -240,6 +242,7 @@ async fn main_inner() -> Result<(), BoxError> {
                 metadata_db,
                 node_id.parse()?,
                 metrics_registry,
+                telemetry_metrics_meter.clone(),
             );
             worker.run().await.map_err(Into::into)
         }

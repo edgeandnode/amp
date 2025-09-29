@@ -21,11 +21,11 @@
       "default": {}
     },
     "kind": {
-      "description": "Manifest kind, always [`ManifestKind::Manifest`]",
-      "$ref": "#/$defs/ManifestKind"
+      "description": "Dataset kind, must be `manifest`",
+      "const": "manifest"
     },
     "name": {
-      "description": "Dataset name. Must be unique within the network",
+      "description": "Dataset name",
       "$ref": "#/$defs/Name"
     },
     "network": {
@@ -41,15 +41,15 @@
       "default": {}
     },
     "version": {
-      "description": "Semver version of the dataset, e.g. `1.0.0`",
+      "description": "Dataset version, e.g., `1.0.0`",
       "$ref": "#/$defs/Version"
     }
   },
   "required": [
     "name",
-    "network",
     "version",
-    "kind"
+    "kind",
+    "network"
   ],
   "$defs": {
     "ArrowSchema": {
@@ -160,16 +160,6 @@
       "required": [
         "source",
         "filename"
-      ]
-    },
-    "ManifestKind": {
-      "description": "Kind discriminator for derived datasets.",
-      "oneOf": [
-        {
-          "description": "Standard manifest dataset type",
-          "type": "string",
-          "const": "manifest"
-        }
       ]
     },
     "Name": {
