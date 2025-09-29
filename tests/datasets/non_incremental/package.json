@@ -1,0 +1,5 @@
+{
+  "name": "@nozzle-datasets/non-incremental",
+  "private": true,
+  "type": "module"
+}
