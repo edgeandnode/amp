@@ -1,0 +1,37 @@
+{
+  "name": "ampsync-with-electricsql",
+  "description": "Example nextjs app with an amp dataset, ampsync syncing engine and electric-sql for reactive queries",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --turbopack",
+    "build": "next build --turbopack",
+    "start": "next start",
+    "lint": "eslint",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down"
+  },
+  "dependencies": {
+    "@electric-sql/client": "^1.0.10",
+    "@electric-sql/react": "^1.0.10",
+    "react": "19.1.1",
+    "react-dom": "19.1.1",
+    "next": "15.5.4"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3.3.1",
+    "@types/node": "^24.5.2",
+    "@types/react": "^19.1.15",
+    "@types/react-dom": "^19.1.9",
+    "@tailwindcss/postcss": "^4.1.13",
+    "eslint": "^9.36.0",
+    "eslint-config-next": "15.5.4",
+    "nozzl": "^0.0.18",
+    "tailwindcss": "^4.1.13",
+    "typescript": "^5.9.2"
+  },
+  "packageManager": "pnpm@10.17.1+sha512.17c560fca4867ae9473a3899ad84a88334914f379be46d455cbf92e5cf4b39d34985d452d2583baf19967fa76cb5c17bc9e245529d0b98745721aa7200ecaf7a",
+  "engines": {
+    "node": ">=22"
+  }
+}

@@ -36,7 +36,7 @@ async fn main() {
 /// Grab the configuration object of the db to connect to, as well as the amp dataset.
 /// Listen to changes on the dataset and sync those changes to the db instance.
 ///
-/// This will run in tandem with both amp (nozzle) and with a sync engine such as electric-sql
+/// This will run in tandem with both amp (nozzle) and with a sync engine such as with-electricsql-sql
 /// to provide subsets of the nozzle dataset to build a reactive query layer for application development.
 async fn ampsync_runner() -> Result<(), BoxError> {
     // Initialize logging

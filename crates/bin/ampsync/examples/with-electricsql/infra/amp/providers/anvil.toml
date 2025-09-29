@@ -1,0 +1,3 @@
+kind = "evm-rpc"
+url = "http://anvil:8545"
+network = "anvil"
