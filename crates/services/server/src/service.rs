@@ -231,7 +231,7 @@ impl Service {
             .map_err(|e| Error::InvalidQuery(e.to_string()))?;
         if is_streaming && !is_incr {
             return Err(Error::InvalidQuery(
-                "not incremental queries are not supported for streaming".to_string(),
+                "non-incremental queries are not supported for streaming".to_string(),
             ));
         }
 
