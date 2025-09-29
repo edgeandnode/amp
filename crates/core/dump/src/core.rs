@@ -5,7 +5,7 @@ use std::{
 };
 
 use common::{
-    BoxError, LogicalCatalog,
+    self, BoxError, LogicalCatalog,
     catalog::physical::{Catalog, PhysicalTable},
     config::Config,
     notification_multiplexer::NotificationMultiplexerHandle,
@@ -13,6 +13,9 @@ use common::{
     store::Store as DataStore,
 };
 use dataset_store::{DatasetKind, DatasetStore};
+use datasets_derived::{
+    DATASET_KIND as DERIVED_DATASET_KIND, sql_dataset::DATASET_KIND as SQL_DATASET_KIND,
+};
 use futures::TryStreamExt as _;
 use metadata_db::{LocationId, MetadataDb};
 use object_store::ObjectMeta;
@@ -154,19 +157,18 @@ pub async fn dump_user_tables(
         consistency_check(table).await?;
 
         let dataset = table.table().dataset();
-        let kind = DatasetKind::from_str(&dataset.kind)?;
 
-        let dataset = match kind {
-            DatasetKind::Sql => ctx.dataset_store.load_sql_dataset(&dataset.name).await?,
-            DatasetKind::Derived => {
+        let dataset = match dataset.kind.as_str() {
+            SQL_DATASET_KIND => ctx.dataset_store.load_sql_dataset(&dataset.name).await?,
+            DERIVED_DATASET_KIND => {
                 ctx.dataset_store
                     .load_manifest_dataset(&dataset.name, dataset.version.as_ref().unwrap())
                     .await?
             }
             _ => {
                 return Err(format!(
-                    "Unsupported dataset kind {:?} for table {}",
-                    kind,
+                    "Unsupported dataset kind {} for table {}",
+                    dataset.kind,
                     table.table_ref()
                 )
                 .into());

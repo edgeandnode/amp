@@ -1,7 +1,11 @@
 use std::{num::NonZeroU32, path::PathBuf};
 
 use common::{BlockNum, BoxError, Dataset, store::StoreError};
-use datasets_common::{name::Name, value::ManifestValue, version::Version};
+use datasets_common::{
+    name::Name,
+    value::{ManifestValue, ManifestValueError},
+    version::Version,
+};
 use serde_with::serde_as;
 use url::Url;
 
@@ -26,6 +30,15 @@ pub enum Error {
     Json(#[from] serde_json::Error),
 }
 
+impl From<ManifestValueError> for Error {
+    fn from(err: ManifestValueError) -> Self {
+        match err {
+            ManifestValueError::Toml(toml_err) => Error::Toml(toml_err),
+            ManifestValueError::Json(json_err) => Error::Json(json_err),
+        }
+    }
+}
+
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct Manifest {
@@ -44,15 +57,6 @@ pub struct Manifest {
     pub start_block: BlockNum,
 }
 
-impl Manifest {
-    fn from_value(value: ManifestValue) -> Result<Self, Error> {
-        match value {
-            ManifestValue::Toml(value) => value.try_into().map_err(From::from),
-            ManifestValue::Json(value) => serde_json::from_value(value).map_err(From::from),
-        }
-    }
-}
-
 #[serde_as]
 #[derive(Debug, serde::Deserialize)]
 pub(crate) struct EvmRpcProvider {
@@ -69,15 +73,15 @@ pub(crate) struct EvmRpcProvider {
     pub fetch_receipts_per_tx: bool,
 }
 
-pub fn dataset(dataset_cfg: ManifestValue) -> Result<Dataset, Error> {
-    let def = Manifest::from_value(dataset_cfg)?;
+pub fn dataset(value: ManifestValue) -> Result<Dataset, Error> {
+    let manifest: Manifest = value.try_into_manifest()?;
     Ok(Dataset {
-        name: def.name.to_string(),
-        version: Some(def.version),
-        kind: def.kind.to_string(),
-        start_block: Some(def.start_block),
-        tables: tables::all(&def.network),
-        network: def.network,
+        name: manifest.name,
+        version: Some(manifest.version),
+        kind: manifest.kind.to_string(),
+        start_block: Some(manifest.start_block),
+        tables: tables::all(&manifest.network),
+        network: manifest.network,
         functions: vec![],
     })
 }

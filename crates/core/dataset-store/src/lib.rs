@@ -367,7 +367,7 @@ impl DatasetStore {
                 (store_dataset, None)
             }
             DatasetKind::Derived => {
-                let manifest = dataset_src.to_manifest()?;
+                let manifest = dataset_src.try_into_manifest()?;
                 let dataset = manifest::derived::dataset(manifest).map_err(Error::Unknown)?;
                 (dataset, None)
             }
@@ -553,7 +553,8 @@ impl DatasetStore {
         }
 
         // Check if we already have the provider cached.
-        if let Some(udf) = self.eth_call_cache.read().unwrap().get(&dataset.name) {
+        let cache_key = dataset.name.to_string();
+        if let Some(udf) = self.eth_call_cache.read().unwrap().get(&cache_key) {
             return Ok(Some(udf.clone()));
         }
 
@@ -584,10 +585,12 @@ impl DatasetStore {
         };
         let udf =
             AsyncScalarUDF::new(Arc::new(EthCall::new(&dataset.name, provider))).into_scalar_udf();
+
         self.eth_call_cache
             .write()
             .unwrap()
-            .insert(dataset.name.clone(), udf.clone());
+            .insert(cache_key, udf.clone());
+
         Ok(Some(udf))
     }
 
@@ -732,15 +735,6 @@ enum DatasetSrc {
 }
 
 impl DatasetSrc {
-    pub fn to_manifest(&self) -> Result<DerivedDatasetManifest, Error> {
-        let manifest = match self {
-            DatasetSrc::Toml(src) => toml::from_str(src)?,
-            DatasetSrc::Json(src) => serde_json::from_str(src)?,
-        };
-
-        Ok(manifest)
-    }
-
     fn to_value(&self) -> Result<ManifestValue, Error> {
         let value = match self {
             DatasetSrc::Toml(src) => ManifestValue::Toml(toml::Value::from_str(src)?),
@@ -748,6 +742,17 @@ impl DatasetSrc {
         };
 
         Ok(value)
+    }
+
+    pub fn try_into_manifest<T>(&self) -> Result<T, Error>
+    where
+        T: for<'de> serde::Deserialize<'de>,
+    {
+        let manifest = match self {
+            DatasetSrc::Toml(src) => toml::from_str(src)?,
+            DatasetSrc::Json(src) => serde_json::from_str(src)?,
+        };
+        Ok(manifest)
     }
 }
 

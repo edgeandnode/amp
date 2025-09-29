@@ -5,7 +5,7 @@ use datafusion::{
     logical_expr::{ScalarUDF, async_udf::AsyncScalarUDF},
     sql::TableReference,
 };
-use datasets_common::version::Version;
+use datasets_common::{name::Name, version::Version};
 use js_runtime::isolate_pool::IsolatePool;
 use serde::Deserialize;
 
@@ -14,10 +14,10 @@ use crate::{BLOCK_NUM, BlockNum, BoxError, SPECIAL_BLOCK_NUM, js_udf::JsUdf};
 /// Identifies a dataset and its data schema.
 #[derive(Clone, Debug)]
 pub struct Dataset {
+    pub name: Name,
+    pub version: Option<Version>,
     pub kind: String,
     pub network: String,
-    pub name: String,
-    pub version: Option<Version>,
     pub start_block: Option<BlockNum>,
     pub tables: Vec<Table>,
     pub functions: Vec<Function>,
@@ -68,7 +68,7 @@ impl Dataset {
                     .map(|v| v.to_underscore_version())
                     .unwrap_or_default()
             ),
-            _ => self.name.clone(),
+            _ => self.name.to_string(),
         }
     }
 }
@@ -133,7 +133,7 @@ impl ResolvedTable {
     pub fn new(table: Table, dataset: Arc<Dataset>) -> Result<Self, BoxError> {
         validate_name(table.name())?;
 
-        let table_ref = TableReference::partial(dataset.name.clone(), table.name().to_string());
+        let table_ref = TableReference::partial(dataset.name.to_string(), table.name().to_string());
         Ok(Self {
             table,
             dataset,

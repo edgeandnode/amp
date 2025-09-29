@@ -177,7 +177,7 @@ pub async fn datasets_and_dependencies(
                     .await?
             }
             _ => {
-                deps.insert(dataset.name.clone(), vec![]);
+                deps.insert(dataset.name.to_string(), vec![]);
                 continue;
             }
         };
