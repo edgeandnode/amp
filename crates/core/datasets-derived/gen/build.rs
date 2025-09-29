@@ -6,7 +6,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let out_dir = std::env::var("OUT_DIR")?;
 
         // Generate JSON schema for common derived dataset manifest struct
-        let derived_manifest_schema = schemars::schema_for!(common::manifest::derived::Manifest);
+        let derived_manifest_schema = schemars::schema_for!(datasets_derived::Manifest);
         let derived_manifest_schema_json = serde_json::to_string_pretty(&derived_manifest_schema)?;
         let derived_manifest_schema_path = format!("{out_dir}/schema.json");
         std::fs::write(&derived_manifest_schema_path, derived_manifest_schema_json)?;
@@ -17,7 +17,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
 
         // Generate JSON schema for SQL dataset manifest struct
-        let sql_manifest_schema = schemars::schema_for!(common::manifest::sql_datasets::Manifest);
+        let sql_manifest_schema = schemars::schema_for!(datasets_derived::sql_dataset::Manifest);
         let sql_manifest_schema_json = serde_json::to_string_pretty(&sql_manifest_schema)?;
         let sql_manifest_schema_path = format!("{out_dir}/sql_schema.json");
         std::fs::write(&sql_manifest_schema_path, sql_manifest_schema_json)?;

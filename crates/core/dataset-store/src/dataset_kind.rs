@@ -60,8 +60,8 @@ impl DatasetKind {
             Self::EthBeacon => eth_beacon_datasets::DATASET_KIND,
             Self::Firehose => firehose_datasets::DATASET_KIND,
             Self::Substreams => substreams_datasets::DATASET_KIND,
-            Self::Derived => common::manifest::derived::DATASET_KIND,
-            Self::Sql => common::manifest::sql_datasets::DATASET_KIND,
+            Self::Derived => datasets_derived::DATASET_KIND,
+            Self::Sql => datasets_derived::sql_dataset::DATASET_KIND,
         }
     }
 }
@@ -73,8 +73,8 @@ impl std::fmt::Display for DatasetKind {
             Self::EthBeacon => f.write_str(evm_rpc_datasets::DATASET_KIND),
             Self::Firehose => f.write_str(firehose_datasets::DATASET_KIND),
             Self::Substreams => f.write_str(substreams_datasets::DATASET_KIND),
-            Self::Derived => f.write_str(common::manifest::derived::DATASET_KIND),
-            Self::Sql => f.write_str(common::manifest::sql_datasets::DATASET_KIND),
+            Self::Derived => f.write_str(datasets_derived::DATASET_KIND),
+            Self::Sql => f.write_str(datasets_derived::sql_dataset::DATASET_KIND),
         }
     }
 }
@@ -88,8 +88,8 @@ impl std::str::FromStr for DatasetKind {
             eth_beacon_datasets::DATASET_KIND => Ok(Self::EthBeacon),
             firehose_datasets::DATASET_KIND => Ok(Self::Firehose),
             substreams_datasets::DATASET_KIND => Ok(Self::Substreams),
-            common::manifest::derived::DATASET_KIND => Ok(Self::Derived),
-            common::manifest::sql_datasets::DATASET_KIND => Ok(Self::Sql),
+            datasets_derived::DATASET_KIND => Ok(Self::Derived),
+            datasets_derived::sql_dataset::DATASET_KIND => Ok(Self::Sql),
             k => Err(UnsupportedKindError {
                 kind: k.to_string(),
             }),

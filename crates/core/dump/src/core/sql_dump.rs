@@ -118,7 +118,7 @@ use crate::{
 };
 
 /// Dumps a SQL dataset table
-#[instrument(skip_all, fields(dataset = %dataset.name()), err)]
+#[instrument(skip_all, fields(dataset = %dataset.dataset.name), err)]
 pub async fn dump_table(
     ctx: Ctx,
     dataset: SqlDataset,

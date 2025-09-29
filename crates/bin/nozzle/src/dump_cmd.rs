@@ -168,10 +168,10 @@ pub async fn datasets_and_dependencies(
     while !datasets.is_empty() {
         let dataset = store.load_dataset(&datasets.pop().unwrap(), None).await?;
         let sql_dataset = match dataset.kind.as_str() {
-            common::manifest::sql_datasets::DATASET_KIND => {
+            datasets_derived::sql_dataset::DATASET_KIND => {
                 store.load_sql_dataset(&dataset.name).await?
             }
-            common::manifest::derived::DATASET_KIND => {
+            datasets_derived::DATASET_KIND => {
                 store
                     .load_manifest_dataset(&dataset.name, dataset.version.as_ref().unwrap())
                     .await?

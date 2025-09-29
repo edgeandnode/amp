@@ -199,11 +199,11 @@ gen-common-dataset-manifest-schema DEST_DIR=SCHEMAS_DIR:
 
 # Generate the common derived dataset manifest JSON schema (RUSTFLAGS="--cfg gen_schema" cargo build)
 gen-derived-dataset-manifest-schema DEST_DIR=SCHEMAS_DIR:
-    RUSTFLAGS="--cfg gen_schema" cargo build -p common-gen
+    RUSTFLAGS="--cfg gen_schema" cargo build -p datasets-derived-gen
     @mkdir -p {{DEST_DIR}}
-    @cp -f $(ls -t target/debug/build/common-gen-*/out/schema.json | head -1) {{DEST_DIR}}/derived.spec.json
+    @cp -f $(ls -t target/debug/build/datasets-derived-gen-*/out/schema.json | head -1) {{DEST_DIR}}/derived.spec.json
     @echo "Schema generated and copied to {{DEST_DIR}}/derived.spec.json"
-    @cp -f $(ls -t target/debug/build/common-gen-*/out/sql_schema.json | head -1) {{DEST_DIR}}/sql.spec.json
+    @cp -f $(ls -t target/debug/build/datasets-derived-gen-*/out/sql_schema.json | head -1) {{DEST_DIR}}/sql.spec.json
     @echo "Schema generated and copied to {{DEST_DIR}}/sql.spec.json"
 
 # Generate the EVM RPC dataset definition JSON schema (RUSTFLAGS="--cfg gen_schema" cargo build)

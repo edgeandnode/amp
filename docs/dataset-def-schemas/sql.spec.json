@@ -5,16 +5,21 @@
   "type": "object",
   "properties": {
     "kind": {
-      "description": "Dataset kind, must be \"sql\"",
-      "type": "string"
+      "description": "Dataset kind, must be `sql`.",
+      "const": "sql"
     },
     "name": {
-      "description": "Dataset name, must match the filename",
+      "description": "Dataset name",
       "$ref": "#/$defs/Name"
     },
     "network": {
       "description": "Network name, e.g., \"mainnet\", \"sepolia\"",
       "type": "string"
+    },
+    "version": {
+      "description": "Dataset version, e.g., `1.0.0`",
+      "$ref": "#/$defs/Version",
+      "default": "0.0.0"
     }
   },
   "required": [
@@ -28,6 +33,10 @@
       "type": "string",
       "minLength": 1,
       "pattern": "^[a-z_][a-z0-9_]*$"
+    },
+    "Version": {
+      "description": "Semver version wrapper with JSON schema support and version manipulation utilities.\n\nProvides serialization and version manipulation utilities for dataset versioning.",
+      "type": "string"
     }
   }
 }
