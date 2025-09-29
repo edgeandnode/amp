@@ -1,6 +1,5 @@
 use monitoring::logging;
-
-use crate::{run_spec, testlib::ctx::TestCtxBuilder};
+use tests::{run_spec, testlib::ctx::TestCtxBuilder};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn streaming_tests_basic() {

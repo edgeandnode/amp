@@ -163,6 +163,7 @@ async fn handler_inner(
 
     Ok(Json(DatasetInfo {
         name: dataset.name,
+        version: dataset.version,
         kind: dataset.kind,
         tables,
     }))

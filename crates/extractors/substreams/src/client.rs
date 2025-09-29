@@ -15,7 +15,7 @@ use tonic::{
 
 use super::tables::Tables;
 use crate::{
-    DatasetDef,
+    Manifest,
     dataset::SubstreamsProvider,
     proto::sf::substreams::{
         rpc::v2::{self as pbsubstreams, BlockScopedData},
@@ -66,7 +66,7 @@ impl Client {
         final_blocks_only: bool,
     ) -> Result<Self, Error> {
         let provider: SubstreamsProvider = provider.try_into()?;
-        let dataset_def: DatasetDef = DatasetDef::from_value(dataset)?;
+        let manifest: Manifest = dataset.try_into_manifest()?;
 
         let stream_client = {
             let uri = Uri::from_str(&provider.url)?;
@@ -79,7 +79,7 @@ impl Client {
                 .send_compressed(CompressionEncoding::Gzip)
                 .max_decoding_message_size(100 * 1024 * 1024) // 100MiB
         };
-        let package = Package::from_url(dataset_def.manifest.as_str()).await?;
+        let package = Package::from_url(manifest.manifest.as_str()).await?;
         if package.network != network {
             return Err(Error::AssertFail(
                 format!(
@@ -90,14 +90,14 @@ impl Client {
             ));
         }
 
-        let tables = Tables::from_package(&package, &dataset_def.module)
+        let tables = Tables::from_package(&package, &manifest.module)
             .map_err(|_| Error::AssertFail("failed to build tables from spkg".into()))?;
 
         Ok(Self {
             stream_client,
             package,
             tables,
-            output_module: dataset_def.module,
+            output_module: manifest.module,
             provider_name,
             final_blocks_only,
         })

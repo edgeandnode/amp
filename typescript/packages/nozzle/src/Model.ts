@@ -238,3 +238,17 @@ export class LocationsResponse extends Schema.Class<LocationsResponse>("Location
   locations: Schema.Array(LocationInfo),
   nextCursor: Schema.optional(LocationId).pipe(Schema.fromKey("next_cursor")),
 }) {}
+
+export class BlockRange extends Schema.Class<BlockRange>("BlockRange")({
+  network: Schema.String,
+  numbers: Schema.Struct({
+    start: Schema.Number,
+    end: Schema.Number,
+  }),
+  hash: Schema.String,
+  prevHash: Schema.String.pipe(Schema.optional),
+}) {}
+
+export class RecordBatchMetadata extends Schema.Class<RecordBatchMetadata>("RecordBatchMetadata")({
+  ranges: Schema.Array(BlockRange),
+}) {}

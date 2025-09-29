@@ -92,7 +92,7 @@ impl<'a> sqlx::Encode<'_, sqlx::Postgres> for Version<'a> {
     }
 }
 
-impl<'r> sqlx::Decode<'r, sqlx::Postgres> for Version<'static> {
+impl<'r> sqlx::Decode<'r, sqlx::Postgres> for VersionOwned {
     fn decode(value: sqlx::postgres::PgValueRef<'r>) -> Result<Self, sqlx::error::BoxDynError> {
         let s = <&'r str as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
         s.parse().map_err(Into::into)

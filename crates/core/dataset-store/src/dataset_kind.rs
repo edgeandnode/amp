@@ -9,14 +9,14 @@
 //! - **EVM RPC**: Direct connection to Ethereum-compatible JSON-RPC endpoints
 //! - **Firehose**: StreamingFast Firehose protocol for real-time blockchain data
 //! - **Substreams**: Processing of Substreams packages with dynamic schema inference
-//! - **SQL**: SQL-based dataset definitions (deprecated in favor of Manifest)
-//! - **Manifest**: Modern manifest-based dataset definitions
+//! - **Derived**: Modern manifest-based dataset definitions
+//! - **SQL**: SQL-based dataset definitions (deprecated in favor of Derived)
 
 /// Represents the different types of datasets supported by the system.
 ///
 /// Dataset kinds determine how data is extracted, processed, and served.
 /// Raw datasets (`EvmRpc`, `Firehose`, `Substreams`) extract data directly
-/// from blockchain sources, while derived datasets (`Sql`, `Manifest`)
+/// from blockchain sources, while derived datasets (`Derived`, `Sql`)
 /// transform data from other datasets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum DatasetKind {
@@ -28,17 +28,20 @@ pub enum DatasetKind {
     Firehose,
     /// Substreams dataset for processing custom blockchain transformations.
     Substreams,
+    /// Derived dataset.
+    ///
+    /// Modern dataset definition using structured configuration.
+    Derived,
     /// SQL-based dataset definition using `.sql` files.
-    Sql, // Will be deprecated in favor of `Manifest`
-    /// Manifest-based dataset definition using structured configuration.
-    Manifest,
+    // TODO: #[deprecated(note = "Use `Derived` instead")]
+    Sql, // Will be deprecated in favor of `Derived`
 }
 
 impl DatasetKind {
     /// Returns `true` if this dataset kind extracts raw data from blockchain sources.
     ///
     /// Raw datasets (`EvmRpc`, `Firehose`, `Substreams`) connect directly to blockchain
-    /// infrastructure, while derived datasets (`Sql`, `Manifest`) process data from
+    /// infrastructure, while derived datasets (`Derived`, `Sql`) process data from
     /// other datasets.
     pub fn is_raw(&self) -> bool {
         matches!(
@@ -57,8 +60,8 @@ impl DatasetKind {
             Self::EthBeacon => eth_beacon_datasets::DATASET_KIND,
             Self::Firehose => firehose_datasets::DATASET_KIND,
             Self::Substreams => substreams_datasets::DATASET_KIND,
-            Self::Sql => common::manifest::sql_datasets::DATASET_KIND,
-            Self::Manifest => common::manifest::derived::DATASET_KIND,
+            Self::Derived => datasets_derived::DATASET_KIND,
+            Self::Sql => datasets_derived::sql_dataset::DATASET_KIND,
         }
     }
 }
@@ -70,8 +73,8 @@ impl std::fmt::Display for DatasetKind {
             Self::EthBeacon => f.write_str(evm_rpc_datasets::DATASET_KIND),
             Self::Firehose => f.write_str(firehose_datasets::DATASET_KIND),
             Self::Substreams => f.write_str(substreams_datasets::DATASET_KIND),
-            Self::Sql => f.write_str(common::manifest::sql_datasets::DATASET_KIND),
-            Self::Manifest => f.write_str(common::manifest::derived::DATASET_KIND),
+            Self::Derived => f.write_str(datasets_derived::DATASET_KIND),
+            Self::Sql => f.write_str(datasets_derived::sql_dataset::DATASET_KIND),
         }
     }
 }
@@ -85,8 +88,8 @@ impl std::str::FromStr for DatasetKind {
             eth_beacon_datasets::DATASET_KIND => Ok(Self::EthBeacon),
             firehose_datasets::DATASET_KIND => Ok(Self::Firehose),
             substreams_datasets::DATASET_KIND => Ok(Self::Substreams),
-            common::manifest::sql_datasets::DATASET_KIND => Ok(Self::Sql),
-            common::manifest::derived::DATASET_KIND => Ok(Self::Manifest),
+            datasets_derived::DATASET_KIND => Ok(Self::Derived),
+            datasets_derived::sql_dataset::DATASET_KIND => Ok(Self::Sql),
             k => Err(UnsupportedKindError {
                 kind: k.to_string(),
             }),

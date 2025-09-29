@@ -8,7 +8,9 @@ axum.workspace = true
 common = { path = "../../core/common" }
 dataset-store = { path = "../../core/dataset-store" }
 datasets-common = { version = "0.1.0", path = "../../core/datasets-common" }
+datasets-derived = { version = "0.1.0", path = "../../core/datasets-derived" }
 dump = { path = "../../core/dump" }
+evm-rpc-datasets = { path = "../../extractors/evm-rpc" }
 futures.workspace = true
 http-common = { path = "../http-common" }
 metadata-db = { path = "../../core/metadata-db" }

@@ -1,7 +1,8 @@
 use common::manifest::common::schema_from_tables;
-use datasets_common::manifest::Manifest as CommonManifest;
+use datasets_common::{manifest::Manifest as CommonManifest, name::Name};
 use generate_manifest;
 use monitoring::logging;
+use substreams_datasets::SubstreamsDatasetKind;
 
 #[tokio::test]
 async fn generate_manifest_evm_rpc_builtin() {
@@ -25,7 +26,7 @@ async fn generate_manifest_evm_rpc_builtin() {
     .unwrap();
 
     let out: CommonManifest = serde_json::from_slice(&out).unwrap();
-    let builtin_schema = schema_from_tables(evm_rpc_datasets::tables::all(&network));
+    let builtin_schema = schema_from_tables(&evm_rpc_datasets::tables::all(&network));
 
     assert_eq!(out.network, network);
     assert_eq!(out.kind, kind);
@@ -55,7 +56,7 @@ async fn generate_manifest_firehose_builtin() {
     .unwrap();
 
     let out: CommonManifest = serde_json::from_slice(&out).unwrap();
-    let builtin_schema = schema_from_tables(firehose_datasets::evm::tables::all(&network));
+    let builtin_schema = schema_from_tables(&firehose_datasets::evm::tables::all(&network));
 
     assert_eq!(out.network, network);
     assert_eq!(out.kind, kind);
@@ -67,9 +68,9 @@ async fn generate_manifest_firehose_builtin() {
 async fn generate_manifest_substreams() {
     logging::init();
 
+    let name = "substreams".parse::<Name>().expect("invalid name");
     let network = "mainnet".to_string();
-    let kind = "substreams".to_string();
-    let name = "substreams".to_string();
+    let kind = SubstreamsDatasetKind;
     let manifest = "https://spkg.io/pinax-network/weth-v0.1.0.spkg".to_string();
     let module = "map_events".to_string();
 
@@ -77,8 +78,8 @@ async fn generate_manifest_substreams() {
 
     let _ = generate_manifest::run(
         network.clone(),
-        kind.clone(),
-        name.clone(),
+        kind.to_string(),
+        name.to_string(),
         Some(manifest.clone()),
         Some(module.clone()),
         &mut out,
@@ -87,18 +88,19 @@ async fn generate_manifest_substreams() {
     .unwrap();
 
     let out: CommonManifest = serde_json::from_slice(&out).unwrap();
-    let dataset_def = substreams_datasets::dataset::DatasetDef {
+    let dataset_def = substreams_datasets::dataset::Manifest {
+        name: name.clone(),
+        version: Default::default(),
         kind: kind.clone(),
         network: network.clone(),
-        name: name.clone(),
         manifest,
         module,
     };
 
-    let schema = schema_from_tables(substreams_datasets::tables(dataset_def).await.unwrap());
+    let schema = schema_from_tables(&substreams_datasets::tables(dataset_def).await.unwrap());
 
     assert_eq!(out.network, network);
-    assert_eq!(out.kind, kind);
+    assert_eq!(out.kind, kind.to_string());
     assert_eq!(out.name, name);
     assert_eq!(out.schema.unwrap(), schema);
 }

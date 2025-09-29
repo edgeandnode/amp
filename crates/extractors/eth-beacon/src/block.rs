@@ -17,61 +17,83 @@ pub fn schema() -> Schema {
     Schema::new(vec![
         Field::new(SPECIAL_BLOCK_NUM, DataType::UInt64, false),
         Field::new("block_num", DataType::UInt64, false),
-        Field::new("version", DataType::Utf8, false),
-        Field::new("signature", DataType::FixedSizeBinary(96), false),
-        Field::new("proposer_index", DataType::UInt64, false),
-        Field::new("parent_root", DataType::FixedSizeBinary(32), false),
-        Field::new("state_root", DataType::FixedSizeBinary(32), false),
-        Field::new("randao_reveal", DataType::FixedSizeBinary(96), false),
+        Field::new("version", DataType::Utf8, true),
+        Field::new("signature", DataType::FixedSizeBinary(96), true),
+        Field::new("proposer_index", DataType::UInt64, true),
+        Field::new("parent_root", DataType::FixedSizeBinary(32), true),
+        Field::new("state_root", DataType::FixedSizeBinary(32), true),
+        Field::new("randao_reveal", DataType::FixedSizeBinary(96), true),
         Field::new(
             "eth1_data_deposit_root",
             DataType::FixedSizeBinary(32),
-            false,
+            true,
         ),
-        Field::new("eth1_data_deposit_count", DataType::UInt64, false),
-        Field::new("eth1_data_block_hash", DataType::FixedSizeBinary(32), false),
-        Field::new("graffiti", DataType::FixedSizeBinary(32), false),
+        Field::new("eth1_data_deposit_count", DataType::UInt64, true),
+        Field::new("eth1_data_block_hash", DataType::FixedSizeBinary(32), true),
+        Field::new("graffiti", DataType::FixedSizeBinary(32), true),
     ])
 }
 
 pub fn json_to_row(network: &str, response: api::Response) -> Result<RawTableRows, BoxError> {
     let table = table(network.to_string());
+
+    let slot = match &response {
+        api::Response::SlotFilled { data, .. } => data.message.slot,
+        api::Response::SlotSkipped { slot } => *slot,
+    };
+    let hash = match &response {
+        api::Response::SlotFilled { data, .. } => data.message.state_root,
+        api::Response::SlotSkipped { .. } => Default::default(),
+    };
     let range = BlockRange {
         network: network.to_string(),
-        numbers: response.data.message.slot..=response.data.message.slot,
-        hash: response.data.message.state_root,
-        prev_hash: Some(response.data.message.parent_root),
+        numbers: slot..=slot,
+        hash,
+        prev_hash: None, // None to prevent hash-chaining, because some slots are skipped
     };
-    let columns: Vec<ArrayRef> = vec![
-        Arc::new(UInt64Array::from(vec![response.data.message.slot])),
-        Arc::new(UInt64Array::from(vec![response.data.message.slot])),
-        Arc::new(StringArray::from(vec![response.version])),
-        Arc::new(FixedSizeBinaryArray::from(vec![&response.data.signature.0])),
-        Arc::new(UInt64Array::from(vec![
-            response.data.message.proposer_index,
-        ])),
-        Arc::new(FixedSizeBinaryArray::from(vec![
-            &response.data.message.parent_root.0,
-        ])),
-        Arc::new(FixedSizeBinaryArray::from(vec![
-            &response.data.message.state_root.0,
-        ])),
-        Arc::new(FixedSizeBinaryArray::from(vec![
-            &response.data.message.body.randao_reveal.0,
-        ])),
-        Arc::new(FixedSizeBinaryArray::from(vec![
-            &response.data.message.body.eth1_data.deposit_root.0,
-        ])),
-        Arc::new(UInt64Array::from(vec![
-            response.data.message.body.eth1_data.deposit_count,
-        ])),
-        Arc::new(FixedSizeBinaryArray::from(vec![
-            &response.data.message.body.eth1_data.block_hash.0,
-        ])),
-        Arc::new(FixedSizeBinaryArray::from(vec![
-            &response.data.message.body.graffiti.0,
-        ])),
-    ];
+
+    let columns: Vec<ArrayRef> = match response {
+        api::Response::SlotFilled { version, data } => vec![
+            Arc::new(UInt64Array::from(vec![data.message.slot])),
+            Arc::new(UInt64Array::from(vec![data.message.slot])),
+            Arc::new(StringArray::from(vec![version])),
+            Arc::new(FixedSizeBinaryArray::from(vec![&data.signature.0])),
+            Arc::new(UInt64Array::from(vec![data.message.proposer_index])),
+            Arc::new(FixedSizeBinaryArray::from(vec![
+                &data.message.parent_root.0,
+            ])),
+            Arc::new(FixedSizeBinaryArray::from(vec![&data.message.state_root.0])),
+            Arc::new(FixedSizeBinaryArray::from(vec![
+                &data.message.body.randao_reveal.0,
+            ])),
+            Arc::new(FixedSizeBinaryArray::from(vec![
+                &data.message.body.eth1_data.deposit_root.0,
+            ])),
+            Arc::new(UInt64Array::from(vec![
+                data.message.body.eth1_data.deposit_count,
+            ])),
+            Arc::new(FixedSizeBinaryArray::from(vec![
+                &data.message.body.eth1_data.block_hash.0,
+            ])),
+            Arc::new(FixedSizeBinaryArray::from(vec![
+                &data.message.body.graffiti.0,
+            ])),
+        ],
+        api::Response::SlotSkipped { slot } => vec![
+            Arc::new(UInt64Array::from(vec![slot])),
+            Arc::new(UInt64Array::from(vec![slot])),
+            Arc::new(StringArray::new_null(1)),
+            Arc::new(FixedSizeBinaryArray::new_null(96, 1)),
+            Arc::new(UInt64Array::new_null(1)),
+            Arc::new(FixedSizeBinaryArray::new_null(32, 1)),
+            Arc::new(FixedSizeBinaryArray::new_null(32, 1)),
+            Arc::new(FixedSizeBinaryArray::new_null(96, 1)),
+            Arc::new(FixedSizeBinaryArray::new_null(32, 1)),
+            Arc::new(UInt64Array::new_null(1)),
+            Arc::new(FixedSizeBinaryArray::new_null(32, 1)),
+            Arc::new(FixedSizeBinaryArray::new_null(32, 1)),
+        ],
+    };
     RawTableRows::new(table, range, columns)
 }
 
@@ -83,9 +105,16 @@ pub mod api {
     use serde_with::serde_as;
 
     #[derive(Debug, serde::Deserialize)]
-    pub struct Response {
-        pub version: String,
-        pub data: Data,
+    #[serde(untagged)]
+    pub enum Response {
+        #[serde(deserialize_with = "slot_skipped")]
+        SlotSkipped {
+            slot: u64,
+        },
+        SlotFilled {
+            version: String,
+            data: Data,
+        },
     }
     #[serde_as]
     #[derive(Debug, serde::Deserialize)]
@@ -118,5 +147,34 @@ pub mod api {
         #[serde_as(as = "serde_with::DisplayFromStr")]
         pub deposit_count: u64,
         pub block_hash: FixedBytes<32>,
+    }
+
+    fn slot_skipped<'de, D>(deserializer: D) -> Result<u64, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::Deserialize as _;
+        #[derive(serde::Deserialize)]
+        struct ErrorResponse {
+            code: u16,
+            message: String,
+        }
+        fn extract_skipped_slot(error: &ErrorResponse) -> Option<u64> {
+            let ErrorResponse { code, message } = error;
+            if *code != 404 {
+                return None;
+            }
+            message
+                .trim_start_matches("NOT_FOUND: beacon block at slot ")
+                .parse()
+                .ok()
+        }
+        let error = ErrorResponse::deserialize(deserializer)?;
+        extract_skipped_slot(&error).ok_or_else(|| {
+            serde::de::Error::custom(format!(
+                "Unexpected error response: code={}, message={}",
+                error.code, error.message
+            ))
+        })
     }
 }

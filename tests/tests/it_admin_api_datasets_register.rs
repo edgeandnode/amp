@@ -1,6 +1,6 @@
 use admin_api::handlers::datasets::register::RegisterRequest;
-use common::manifest::derived::Manifest;
-use datasets_common::version::Version;
+use datasets_common::{name::Name, version::Version};
+use datasets_derived::Manifest as DerivedDatasetManifest;
 use reqwest::StatusCode;
 use tests::testlib::ctx::TestCtxBuilder;
 
@@ -326,7 +326,7 @@ impl TestCtx {
             .expect("failed to send register request")
     }
 
-    async fn register_dataset(&self, manifest: &Manifest) -> reqwest::Response {
+    async fn register_dataset(&self, manifest: &DerivedDatasetManifest) -> reqwest::Response {
         let manifest_json =
             serde_json::to_string(manifest).expect("failed to serialize manifest to JSON");
         let request = RegisterRequest {
@@ -348,6 +348,7 @@ impl TestCtx {
     }
 
     async fn verify_dataset_exists(&self, name: &str, version: &str) -> bool {
+        let name = name.parse::<Name>().expect("Invalid name");
         let version = version.parse::<Version>().expect("Invalid version");
         self.ctx
             .metadata_db()
@@ -357,7 +358,7 @@ impl TestCtx {
     }
 }
 
-fn create_test_manifest(name: &str, version: &str, owner: &str) -> Manifest {
+fn create_test_manifest(name: &str, version: &str, owner: &str) -> DerivedDatasetManifest {
     let manifest_json = indoc::formatdoc! {r#"
         {{
             "name": "{name}",

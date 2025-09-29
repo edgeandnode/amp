@@ -30,6 +30,7 @@ pub async fn dump(
     new_location: Option<String>,
     fresh: bool,
     metrics: Option<Arc<dump::metrics::MetricsRegistry>>,
+    meter: Option<&monitoring::telemetry::metrics::Meter>,
     only_finalized_blocks: bool,
 ) -> Result<Vec<Arc<PhysicalTable>>, BoxError> {
     let data_store = match new_location {
@@ -128,6 +129,7 @@ pub async fn dump(
                     microbatch_max_interval_override.unwrap_or(config.microbatch_max_interval),
                     end_block,
                     metrics.clone(),
+                    meter,
                     only_finalized_blocks,
                 )
                 .await?
@@ -145,6 +147,7 @@ pub async fn dump(
                     microbatch_max_interval_override.unwrap_or(config.microbatch_max_interval),
                     end_block,
                     metrics.clone(),
+                    meter,
                     only_finalized_blocks,
                 )
                 .await?;
@@ -165,16 +168,16 @@ pub async fn datasets_and_dependencies(
     while !datasets.is_empty() {
         let dataset = store.load_dataset(&datasets.pop().unwrap(), None).await?;
         let sql_dataset = match dataset.kind.as_str() {
-            common::manifest::sql_datasets::DATASET_KIND => {
+            datasets_derived::sql_dataset::DATASET_KIND => {
                 store.load_sql_dataset(&dataset.name).await?
             }
-            common::manifest::derived::DATASET_KIND => {
+            datasets_derived::DATASET_KIND => {
                 store
                     .load_manifest_dataset(&dataset.name, dataset.version.as_ref().unwrap())
                     .await?
             }
             _ => {
-                deps.insert(dataset.name.clone(), vec![]);
+                deps.insert(dataset.name.to_string(), vec![]);
                 continue;
             }
         };

@@ -34,10 +34,11 @@ impl DaemonWorker {
         config: Arc<Config>,
         metadb: MetadataDb,
         metrics: Option<Arc<dump::metrics::MetricsRegistry>>,
+        meter: Option<monitoring::telemetry::metrics::Meter>,
     ) -> Result<Self, BoxError> {
         let dataset_store = DatasetStore::new(config.clone(), metadb.clone());
 
-        let worker = Worker::new(config.clone(), metadb, node_id.clone(), metrics);
+        let worker = Worker::new(config.clone(), metadb, node_id.clone(), metrics, meter);
 
         let worker_task = tokio::spawn(worker.run());
 
@@ -67,7 +68,7 @@ impl DaemonWorker {
         let worker_node_id = WorkerNodeId::from_str(worker_name)
             .map_err(|err| format!("Invalid worker name '{}': {}", worker_name, err))?;
 
-        Self::new(worker_node_id, config, metadata_db, None).await
+        Self::new(worker_node_id, config, metadata_db, None, None).await
     }
 
     /// Get the worker node ID.

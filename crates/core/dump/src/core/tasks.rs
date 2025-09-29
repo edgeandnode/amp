@@ -48,7 +48,7 @@ where
     /// - Returns the error
     ///
     /// Task cancellations are logged but don't trigger aborts
-    pub async fn try_wait_all(mut self) -> Result<(), TryWaitAllError<BoxError>> {
+    pub async fn try_wait_all(&mut self) -> Result<(), TryWaitAllError<BoxError>> {
         while let Some(result) = self.0.join_next().await {
             match result {
                 // One task succeeded, wait for the rest to finish

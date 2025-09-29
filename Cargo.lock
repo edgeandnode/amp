@@ -31,7 +31,9 @@ dependencies = [
  "common",
  "dataset-store",
  "datasets-common",
+ "datasets-derived",
  "dump",
+ "evm-rpc-datasets",
  "futures",
  "http-common",
  "metadata-db",
@@ -813,6 +815,7 @@ dependencies = [
  "bytes",
  "common",
  "datafusion",
+ "datasets-derived",
  "futures",
  "monitoring",
  "nozzle-client",
@@ -2037,6 +2040,7 @@ dependencies = [
  "datafusion-proto",
  "datafusion-tracing",
  "datasets-common",
+ "datasets-derived",
  "figment",
  "foyer",
  "fs-err",
@@ -2063,15 +2067,6 @@ dependencies = [
  "tracing",
  "url",
  "uuid",
-]
-
-[[package]]
-name = "common-gen"
-version = "0.0.0"
-dependencies = [
- "common",
- "schemars 1.0.4",
- "serde_json",
 ]
 
 [[package]]
@@ -3136,6 +3131,7 @@ dependencies = [
  "common",
  "datafusion",
  "datasets-common",
+ "datasets-derived",
  "eth-beacon-datasets",
  "evm-rpc-datasets",
  "firehose-datasets",
@@ -3143,6 +3139,7 @@ dependencies = [
  "indoc",
  "js-runtime",
  "metadata-db",
+ "monitoring",
  "object_store",
  "parking_lot",
  "rand 0.9.2",
@@ -3175,6 +3172,28 @@ name = "datasets-common-gen"
 version = "0.0.0"
 dependencies = [
  "datasets-common",
+ "schemars 1.0.4",
+ "serde_json",
+]
+
+[[package]]
+name = "datasets-derived"
+version = "0.1.0"
+dependencies = [
+ "datafusion",
+ "datasets-common",
+ "schemars 1.0.4",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.16",
+ "toml 0.8.23",
+]
+
+[[package]]
+name = "datasets-derived-gen"
+version = "0.0.0"
+dependencies = [
+ "datasets-derived",
  "schemars 1.0.4",
  "serde_json",
 ]
@@ -3425,6 +3444,7 @@ dependencies = [
  "common",
  "datafusion",
  "dataset-store",
+ "datasets-derived",
  "futures",
  "metadata-db",
  "monitoring",
@@ -3609,6 +3629,7 @@ dependencies = [
  "datasets-common",
  "fs-err",
  "futures",
+ "monitoring",
  "schemars 1.0.4",
  "serde",
  "serde_json",
@@ -3617,6 +3638,7 @@ dependencies = [
  "tokio",
  "toml 0.8.23",
  "tracing",
+ "url",
 ]
 
 [[package]]
@@ -5153,6 +5175,7 @@ dependencies = [
  "indoc",
  "metadata-db",
  "pgtemp",
+ "rand 0.9.2",
  "semver 1.0.26",
  "serde",
  "serde_json",
@@ -5283,6 +5306,7 @@ dependencies = [
  "datafusion",
  "dataset-store",
  "datasets-common",
+ "datasets-derived",
  "dump",
  "futures",
  "generate-manifest",
@@ -7749,6 +7773,7 @@ dependencies = [
  "schemars 1.0.4",
  "serde",
  "serde_json",
+ "thiserror 2.0.16",
  "tokio",
  "toml 0.8.23",
  "tonic 0.12.3",
@@ -7858,6 +7883,7 @@ dependencies = [
  "ctor",
  "dataset-store",
  "datasets-common",
+ "datasets-derived",
  "dotenvy",
  "dump",
  "dump-check",

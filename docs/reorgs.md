@@ -49,7 +49,7 @@ where:
 
 Clients should track block ranges from consecutive batches to handle reorgs. The basic logic is:
 1. Store block ranges from `app_metadata` of the previously processed batch.
-2. For each new batch, compare current ranges with previous ranges. If any network range in the current batch starts at or before a previous batch's end block, a reorg has occurred.
+2. For each new batch, compare current ranges with previous ranges. If any network range in the current batch is not equal to the prior range and starts at or before a previous batch's end block, a reorg has occurred.
 3. Invalidate prior batches associated with block ranges that overlap with the current batch start block number up to the latest block number processed.
 
 For a reference implementation in Rust, see `nozzle_client::with_reorg` which automatically wraps query result streams to emit reorg events alongside data batches.

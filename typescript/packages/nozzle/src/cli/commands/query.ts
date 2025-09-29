@@ -2,6 +2,8 @@ import { createGrpcTransport } from "@connectrpc/connect-node"
 import * as Args from "@effect/cli/Args"
 import * as Command from "@effect/cli/Command"
 import * as Options from "@effect/cli/Options"
+import { Table } from "apache-arrow"
+import * as Chunk from "effect/Chunk"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as Match from "effect/Match"
@@ -32,12 +34,16 @@ export const query = Command.make("query", {
   Command.withHandler(
     Effect.fn(function*({ args }) {
       const flight = yield* ArrowFlight.ArrowFlight
-      const table = yield* flight.table(args.query).pipe(Effect.map((table) =>
-        Option.match(args.limit, {
-          onSome: (_) => table.slice(0, _),
-          onNone: () => table,
-        })
-      ))
+      const table = yield* flight.stream(args.query).pipe(
+        Stream.runCollect,
+        Effect.map((_) => Chunk.toArray(_)),
+        Effect.map((array) =>
+          Option.match(args.limit, {
+            onSome: (limit) => new Table(array.slice(0, limit).map((response) => response.data)),
+            onNone: () => new Table(array.map((response) => response.data)),
+          })
+        ),
+      )
 
       const schema = Arrow.generateSchema(table.schema)
       const effect = Match.value(args.format).pipe(
