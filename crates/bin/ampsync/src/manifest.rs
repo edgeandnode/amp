@@ -1,6 +1,7 @@
 use std::{fs, path::Path};
 
-use common::{BoxError, manifest::derived::Manifest};
+use common::BoxError;
+use datasets_derived::manifest::Manifest;
 use oxc_allocator::Allocator;
 use oxc_ast::ast::*;
 use oxc_ast_visit::{Visit, walk};

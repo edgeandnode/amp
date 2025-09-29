@@ -5,12 +5,9 @@ use std::{
 
 use backon::{ExponentialBuilder, Retryable};
 use bytes::BytesMut;
-use common::{
-    BoxError,
-    arrow::array::RecordBatch,
-    manifest::derived::{ArrowSchema, Field},
-};
+use common::{BoxError, arrow::array::RecordBatch};
 use datafusion::arrow::datatypes::DataType as ArrowDataType;
+use datasets_derived::manifest::{ArrowSchema, Field};
 use nozzle_client::InvalidationRange;
 use pgpq::ArrowToPostgresBinaryEncoder;
 use sqlx::{Pool, Postgres};

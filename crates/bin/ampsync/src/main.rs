@@ -4,10 +4,8 @@ mod sync_engine;
 
 use std::{env, path::PathBuf, sync::Arc};
 
-use common::{
-    BoxError,
-    manifest::derived::{Manifest, TableInput},
-};
+use common::BoxError;
+use datasets_derived::manifest::{Manifest, TableInput};
 use futures::StreamExt;
 use nozzle_client::{ResponseBatchWithReorg, SqlClient, with_reorg};
 use tracing::{error, info, warn};

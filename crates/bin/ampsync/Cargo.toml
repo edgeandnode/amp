@@ -16,6 +16,7 @@ backon.workspace = true
 bytes = "1.10.1"
 common = { path = "../../core/common" }
 datafusion.workspace = true
+datasets-derived = { path = "../../core/datasets-derived" }
 futures.workspace = true
 monitoring = { path = "../../core/monitoring" }
 nozzle-client = { path = "../../client" }
