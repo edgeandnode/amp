@@ -1,9 +1,6 @@
-import * as Path from "@effect/platform/Path"
-import { layer } from "@effect/vitest"
 import { assertEquals, assertFailure, assertInstanceOf, assertSome, deepStrictEqual } from "@effect/vitest/utils"
 import * as Array from "effect/Array"
 import * as Cause from "effect/Cause"
-import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
@@ -17,31 +14,13 @@ import * as Model from "nozzl/Model"
 import * as Fixtures from "./utils/Fixtures.ts"
 import * as Testing from "./utils/Testing.ts"
 
-const environment = Testing.layer({
-  nozzleOutput: "both",
-  anvilOutput: "both",
-  adminPort: 51610,
-  jsonLinesPort: 51603,
-  arrowFlightPort: 51602,
-  anvilPort: 58545,
-  // nozzleExecutable: "cargo",
-  // nozzleArgs: ["run", "--bin", "nozzle", "--"],
-})
-
-layer(environment, {
-  excludeTestServices: true,
-  timeout: Duration.toMillis("10 minutes"),
-})((it) => {
+Testing.layer((it) => {
   it.effect(
     "run the counter script",
     Effect.fn(function*() {
-      const path = yield* Path.Path
-      const anvil = yield* Anvil.Anvil
-
       // Run the counter script to deploy the `Counter.sol` contract and generate some events.
-      yield* anvil.runScript(path.join("script", "Counter.s.sol:CounterScript"))
+      yield* Anvil.script("Counter.s.sol:CounterScript")
     }),
-    { sequential: true, timeout: Duration.toMillis("10 seconds") },
   )
 
   it.effect(
@@ -64,7 +43,6 @@ layer(environment, {
       assertInstanceOf(response, Model.DatasetInfo)
       deepStrictEqual(response.name, Anvil.dataset.name)
     }),
-    { sequential: true, timeout: Duration.toMillis("10 seconds") },
   )
 
   it.effect(
@@ -76,7 +54,6 @@ layer(environment, {
       assertEquals(result.kind, "evm-rpc")
       assertEquals(result.name, "anvil")
     }),
-    { sequential: true, timeout: Duration.toMillis("10 seconds") },
   )
 
   it.effect(
@@ -86,7 +63,6 @@ layer(environment, {
       const result = yield* api.getOutputSchema("SELECT * FROM anvil.transactions")
       assertInstanceOf(result, Model.OutputSchema)
     }),
-    { sequential: true, timeout: Duration.toMillis("10 seconds") },
   )
 
   it.effect(
@@ -112,7 +88,6 @@ layer(environment, {
       assertInstanceOf(response, Model.DatasetInfo)
       deepStrictEqual(response.name, dataset.name)
     }),
-    { sequential: true, timeout: Duration.toMillis("10 seconds") },
   )
 
   it.effect(
@@ -125,7 +100,6 @@ layer(environment, {
       const anvil = result.datasets.find((dataset) => dataset.name === "anvil")
       assertInstanceOf(anvil, Model.DatasetRegistryInfo)
     }),
-    { sequential: true, timeout: Duration.toMillis("10 seconds") },
   )
 
   it.effect(
@@ -150,7 +124,6 @@ layer(environment, {
 
       assertSome(Array.last(response).pipe(Option.map(Struct.get("count"))), 3)
     }),
-    { sequential: true, timeout: Duration.toMillis("10 seconds") },
   )
 
   it.effect(
