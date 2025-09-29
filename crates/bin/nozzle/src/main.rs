@@ -173,6 +173,7 @@ async fn main_inner() -> Result<(), BoxError> {
             if let Some(ref opentelemetry) = config.opentelemetry {
                 dump_cmd::validate_export_interval(opentelemetry.metrics_export_interval);
             }
+            let config = Arc::new(config);
 
             let mut datasets_to_dump = Vec::new();
             let dataset_store = DatasetStore::new(config.clone(), metadata_db.clone());
@@ -223,7 +224,7 @@ async fn main_inner() -> Result<(), BoxError> {
             }
 
             let (_, server) = nozzle::server::run(
-                config,
+                config.into(),
                 metadata_db,
                 dev,
                 flight_server,
@@ -236,7 +237,7 @@ async fn main_inner() -> Result<(), BoxError> {
         }
         Command::Worker { node_id } => {
             let worker = Worker::new(
-                config.clone(),
+                config.into(),
                 metadata_db,
                 node_id.parse()?,
                 metrics_registry,
@@ -293,12 +294,12 @@ async fn main_inner() -> Result<(), BoxError> {
 async fn load_config_and_metadata_db(
     config_path: Option<&String>,
     allow_temp_db: bool,
-) -> Result<(Arc<Config>, MetadataDb), BoxError> {
+) -> Result<(Config, MetadataDb), BoxError> {
     let Some(config) = config_path else {
         return Err("--config parameter is mandatory".into());
     };
 
-    let config = Arc::new(Config::load(config, true, None, allow_temp_db).await?);
+    let config = Config::load(config, true, None, allow_temp_db).await?;
     let metadata_db = config.metadata_db().await?.into();
     Ok((config, metadata_db))
 }
