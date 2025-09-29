@@ -3,11 +3,9 @@ use axum::{
     extract::{State, rejection::JsonRejection},
     http::StatusCode,
 };
-use common::manifest::derived::{
-    DATASET_KIND as DERIVED_DATASET_KIND, Manifest as DerivedDatasetManifest,
-};
 use dataset_store::RegistrationError;
 use datasets_common::{manifest::Manifest as CommonManifest, name::Name, version::Version};
+use datasets_derived::{DATASET_KIND as DERIVED_DATASET_KIND, Manifest as DerivedDatasetManifest};
 use evm_rpc_datasets::{DATASET_KIND as EVM_RPC_DATASET_KIND, Manifest as EvmRpcManifest};
 use http_common::{BoxRequestError, RequestError};
 

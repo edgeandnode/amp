@@ -12,12 +12,7 @@ use common::{
     catalog::physical::{Catalog, PhysicalTable},
     config::Config,
     evm::{self, udfs::EthCall},
-    manifest::{
-        self,
-        common::{schema_from_table_slice, schema_from_tables},
-        derived::Manifest,
-        sql_datasets::SqlDataset,
-    },
+    manifest::{self, common::schema_from_tables, derived, sql_datasets::SqlDataset},
     query_context::QueryEnv,
     sql_visitors::all_function_names,
 };
@@ -29,6 +24,7 @@ use datafusion::{
 use datasets_common::{
     manifest::Manifest as CommonManifest, name::Name, value::ManifestValue, version::Version,
 };
+use datasets_derived::Manifest as DerivedDatasetManifest;
 use futures::{FutureExt as _, Stream, TryFutureExt as _, future::BoxFuture};
 use js_runtime::isolate_pool::IsolatePool;
 use metadata_db::MetadataDb;
@@ -324,9 +320,9 @@ impl DatasetStore {
     ) -> Result<SqlDataset, Error> {
         let filename = format!("{}.json", dataset_name);
         let raw_manifest = self.dataset_defs_store.get_string(filename).await?;
-        let manifest: Manifest =
+        let manifest: DerivedDatasetManifest =
             serde_json::from_str(&raw_manifest).map_err(Error::ManifestError)?;
-        let queries = manifest.queries().map_err(Error::SqlParseError)?;
+        let queries = derived::queries(&manifest).map_err(Error::SqlParseError)?;
         let dataset = manifest::derived::dataset(manifest).map_err(Error::Unknown)?;
         Ok(SqlDataset { dataset, queries })
     }
@@ -345,17 +341,17 @@ impl DatasetStore {
         let (dataset, ground_truth_schema) = match kind {
             DatasetKind::EvmRpc => {
                 let builtin_schema =
-                    schema_from_tables(evm_rpc_datasets::tables::all(&common.network));
+                    schema_from_tables(&evm_rpc_datasets::tables::all(&common.network));
                 (evm_rpc_datasets::dataset(value)?, Some(builtin_schema))
             }
             DatasetKind::EthBeacon => {
                 let builtin_schema =
-                    schema_from_tables(eth_beacon_datasets::all_tables(common.network.clone()));
+                    schema_from_tables(&eth_beacon_datasets::all_tables(common.network.clone()));
                 (eth_beacon_datasets::dataset(value)?, Some(builtin_schema))
             }
             DatasetKind::Firehose => {
                 let builtin_schema =
-                    schema_from_tables(firehose_datasets::evm::tables::all(&common.network));
+                    schema_from_tables(&firehose_datasets::evm::tables::all(&common.network));
                 (
                     firehose_datasets::evm::dataset(value)?,
                     Some(builtin_schema),
@@ -363,7 +359,7 @@ impl DatasetStore {
             }
             DatasetKind::Substreams => {
                 let dataset = substreams_datasets::dataset(value).await?;
-                let store_schema = schema_from_table_slice(dataset.tables.as_slice());
+                let store_schema = schema_from_tables(&dataset.tables);
                 (dataset, Some(store_schema))
             }
             DatasetKind::Sql => {
@@ -736,7 +732,7 @@ enum DatasetSrc {
 }
 
 impl DatasetSrc {
-    pub fn to_manifest(&self) -> Result<Manifest, Error> {
+    pub fn to_manifest(&self) -> Result<DerivedDatasetManifest, Error> {
         let manifest = match self {
             DatasetSrc::Toml(src) => toml::from_str(src)?,
             DatasetSrc::Json(src) => serde_json::from_str(src)?,

@@ -20,13 +20,13 @@ pub async fn run<T: io::Write>(
 
     let schema: Schema = match kind {
         dataset_store::DatasetKind::EvmRpc => {
-            schema_from_tables(evm_rpc_datasets::tables::all(&network))
+            schema_from_tables(&evm_rpc_datasets::tables::all(&network))
         }
         dataset_store::DatasetKind::EthBeacon => {
-            schema_from_tables(eth_beacon_datasets::all_tables(network.clone()))
+            schema_from_tables(&eth_beacon_datasets::all_tables(network.clone()))
         }
         dataset_store::DatasetKind::Firehose => {
-            schema_from_tables(firehose_datasets::evm::tables::all(&network))
+            schema_from_tables(&firehose_datasets::evm::tables::all(&network))
         }
         dataset_store::DatasetKind::Substreams => {
             let (Some(manifest), Some(module)) = (manifest, module) else {
@@ -42,7 +42,7 @@ pub async fn run<T: io::Write>(
                 manifest,
                 module,
             };
-            schema_from_tables(substreams_datasets::tables(dataset_def).await?)
+            schema_from_tables(&substreams_datasets::tables(dataset_def).await?)
         }
         dataset_store::DatasetKind::Sql => {
             return Err("`DatasetKind::Sql` doesn't support dataset generation".into());

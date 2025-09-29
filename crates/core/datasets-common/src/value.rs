@@ -12,8 +12,7 @@
 /// TOML and JSON sources.
 ///
 /// `ManifestValue` is primarily used in dataset extractors and stores where
-/// configuration needs to be parsed from manifest files. Each extractor
-/// typically implements a `from_value` method that can handle both formats.
+/// configuration needs to be parsed from manifest files.
 ///
 /// # Format Support
 ///
@@ -35,4 +34,30 @@ pub enum ManifestValue {
     /// Contains parsed JSON data as a `serde_json::Value`, which provides
     /// access to structured configuration data from JSON format manifests.
     Json(serde_json::Value),
+}
+
+impl ManifestValue {
+    /// Attempts to convert the `ManifestValue` into a specific manifest type.
+    pub fn try_into_manifest<T>(self) -> Result<T, ManifestValueError>
+    where
+        T: for<'de> serde::Deserialize<'de>,
+    {
+        match self {
+            ManifestValue::Toml(value) => value.try_into().map_err(ManifestValueError::Toml),
+            ManifestValue::Json(value) => {
+                serde_json::from_value(value).map_err(ManifestValueError::Json)
+            }
+        }
+    }
+}
+
+/// Errors that can occur when converting a `ManifestValue` into a specific manifest type.
+#[derive(Debug, thiserror::Error)]
+pub enum ManifestValueError {
+    /// TOML deserialization failed.
+    #[error("TOML parse error: {0}")]
+    Toml(#[source] toml::de::Error),
+    /// JSON deserialization failed.
+    #[error("JSON parse error: {0}")]
+    Json(#[source] serde_json::Error),
 }

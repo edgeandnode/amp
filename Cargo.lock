@@ -31,6 +31,7 @@ dependencies = [
  "common",
  "dataset-store",
  "datasets-common",
+ "datasets-derived",
  "dump",
  "evm-rpc-datasets",
  "futures",
@@ -1999,6 +2000,7 @@ dependencies = [
  "datafusion-proto",
  "datafusion-tracing",
  "datasets-common",
+ "datasets-derived",
  "figment",
  "foyer",
  "fs-err",
@@ -2025,15 +2027,6 @@ dependencies = [
  "tracing",
  "url",
  "uuid",
-]
-
-[[package]]
-name = "common-gen"
-version = "0.0.0"
-dependencies = [
- "common",
- "schemars 1.0.4",
- "serde_json",
 ]
 
 [[package]]
@@ -3078,6 +3071,7 @@ dependencies = [
  "common",
  "datafusion",
  "datasets-common",
+ "datasets-derived",
  "eth-beacon-datasets",
  "evm-rpc-datasets",
  "firehose-datasets",
@@ -3118,6 +3112,28 @@ name = "datasets-common-gen"
 version = "0.0.0"
 dependencies = [
  "datasets-common",
+ "schemars 1.0.4",
+ "serde_json",
+]
+
+[[package]]
+name = "datasets-derived"
+version = "0.1.0"
+dependencies = [
+ "datafusion",
+ "datasets-common",
+ "schemars 1.0.4",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "toml 0.8.23",
+]
+
+[[package]]
+name = "datasets-derived-gen"
+version = "0.0.0"
+dependencies = [
+ "datasets-derived",
  "schemars 1.0.4",
  "serde_json",
 ]
@@ -5196,6 +5212,7 @@ dependencies = [
  "datafusion",
  "dataset-store",
  "datasets-common",
+ "datasets-derived",
  "dump",
  "futures",
  "generate-manifest",
@@ -7507,6 +7524,7 @@ dependencies = [
  "ctor",
  "dataset-store",
  "datasets-common",
+ "datasets-derived",
  "dotenvy",
  "dump",
  "dump-check",

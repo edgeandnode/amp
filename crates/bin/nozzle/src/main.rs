@@ -1,8 +1,9 @@
 use std::{path::PathBuf, sync::Arc};
 
 use clap::Parser as _;
-use common::{BoxError, config::Config, manifest::derived::Manifest};
+use common::{BoxError, config::Config};
 use dataset_store::DatasetStore;
+use datasets_derived::Manifest as DerivedDatasetManifest;
 use dump::worker::Worker;
 use metadata_db::MetadataDb;
 use nozzle::dump_cmd;
@@ -180,13 +181,19 @@ async fn main_inner() -> Result<(), BoxError> {
             for dataset in datasets {
                 if dataset.ends_with(".json") {
                     tracing::info!("Registering manifest: {}", dataset);
+
                     let manifest = std::fs::read_to_string(&dataset)?;
-                    let manifest: Manifest = serde_json::from_str(&manifest)?;
+                    let manifest: DerivedDatasetManifest = serde_json::from_str(&manifest)?;
                     dataset_store
                         .register_manifest(&manifest.name, &manifest.version, &manifest)
                         .await
                         .map_err(|err| -> BoxError { err.to_string().into() })?;
-                    datasets_to_dump.push(manifest.to_identifier());
+
+                    datasets_to_dump.push(format!(
+                        "{}__{}",
+                        manifest.name,
+                        manifest.version.to_underscore_version()
+                    ));
                 } else {
                     datasets_to_dump.push(dataset);
                 }
