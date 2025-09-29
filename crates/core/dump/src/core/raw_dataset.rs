@@ -82,7 +82,10 @@
 use std::{
     collections::BTreeMap,
     ops::RangeInclusive,
-    sync::Arc,
+    sync::{
+        Arc, RwLock,
+        atomic::{AtomicUsize, Ordering},
+    },
     time::{Duration, Instant},
 };
 
@@ -195,9 +198,11 @@ pub async fn dump(
             .map(|r| r.clone().count())
             .sum::<usize>();
 
-        // Send updates from all jobs through an MPSC channel to log progress across all jobs.
-        let (overall_blocks_covered_tx, mut overall_blocks_covered_rx) =
-            tokio::sync::mpsc::unbounded_channel();
+        let progress_reporter = Arc::new(ProgressReporter {
+            overall_blocks_covered: AtomicUsize::new(0),
+            total_blocks_to_cover,
+            last_log_time: RwLock::new(Instant::now()),
+        });
 
         let jobs = missing_dataset_ranges
             .into_iter()
@@ -214,7 +219,7 @@ pub async fn dump(
                 id: i as u32,
                 dataset_name: dataset_name.to_string(),
                 metrics: metrics.clone(),
-                overall_blocks_covered_tx: overall_blocks_covered_tx.clone(),
+                progress_reporter: progress_reporter.clone(),
             });
 
         // Spawn the jobs, starting them with a 1 second delay between each.
@@ -225,37 +230,11 @@ pub async fn dump(
             join_set.spawn(job.run().instrument(span));
         }
 
-        // Drop the extra sender, allowing the progress task to exit.
-        drop(overall_blocks_covered_tx);
-
-        // Wait for all the jobs to finish, returning an error if any job panics or fails. In the
-        // meantime, log overall progress.
-        let mut overall_blocks_covered = 0;
-        let mut progress_interval = tokio::time::interval(Duration::from_secs(15));
-        tracing::info!("overall progress: 0/{total_blocks_to_cover} blocks (0.00%)");
-        loop {
-            tokio::select! {
-                job_result = join_set.try_wait_all() => {
-                    if let Err(err) = job_result {
-                        tracing::error!(dataset=%dataset_name, error=%err, "dataset dump failed");
-                        return Err(err.into_box_error());
-                    }
-                    break;
-                }
-                _ = progress_interval.tick() => {
-                    let percent_covered = (overall_blocks_covered as f64 / total_blocks_to_cover as f64) * 100.0;
-                    tracing::info!("overall progress: {overall_blocks_covered}/{total_blocks_to_cover} blocks ({percent_covered:.2}%)");
-                }
-                new_block = overall_blocks_covered_rx.recv() => {
-                    if new_block.is_some() {
-                        overall_blocks_covered += 1;
-                    }
-                }
-            }
+        // Wait for all the jobs to finish, returning an error if any job panics or fails.
+        if let Err(err) = join_set.try_wait_all().await {
+            tracing::error!(dataset=%dataset_name, error=%err, "dataset dump failed");
+            return Err(err.into_box_error());
         }
-        tracing::info!(
-            "overall progress: {total_blocks_to_cover}/{total_blocks_to_cover} blocks (100.00%)"
-        );
 
         if let Some(end) = end
             && latest_block >= end
@@ -264,6 +243,30 @@ pub async fn dump(
         }
 
         start = latest_block + 1;
+    }
+}
+
+struct ProgressReporter {
+    overall_blocks_covered: AtomicUsize,
+    total_blocks_to_cover: usize,
+    last_log_time: RwLock<Instant>,
+}
+
+impl ProgressReporter {
+    /// Signal to the progress reporter that another block has been covered.
+    fn block_covered(&self) {
+        let overall_blocks_covered = self.overall_blocks_covered.fetch_add(1, Ordering::SeqCst) + 1;
+        let now = Instant::now();
+        let last_log_time = *self.last_log_time.read().unwrap();
+        if now.duration_since(last_log_time) >= Duration::from_secs(15) {
+            let percent_covered =
+                (overall_blocks_covered as f64 / self.total_blocks_to_cover as f64) * 100.0;
+            tracing::info!(
+                "overall progress: {overall_blocks_covered}/{} blocks ({percent_covered:.2}%)",
+                self.total_blocks_to_cover
+            );
+            *self.last_log_time.write().unwrap() = now;
+        }
     }
 }
 
@@ -354,10 +357,8 @@ struct DumpPartition<S: BlockStreamer> {
     id: u32,
     /// Metrics registry
     metrics: Option<Arc<metrics::MetricsRegistry>>,
-    /// A sender half of the channel used to report overall progress across all dump partitions.
-    ///
-    /// Used for logging.
-    overall_blocks_covered_tx: tokio::sync::mpsc::UnboundedSender<()>,
+    /// A progress reporter which logs the overall progress of all partitions.
+    progress_reporter: Arc<ProgressReporter>,
     /// Compaction properties
     compaction_opts: Arc<CompactionProperties>,
 }
@@ -450,7 +451,7 @@ impl<S: BlockStreamer> DumpPartition<S> {
                 writer.write(table_rows).await?;
             }
 
-            self.overall_blocks_covered_tx.send(())?;
+            self.progress_reporter.block_covered();
         }
 
         // Close the last part file for each table, checking for any errors.
