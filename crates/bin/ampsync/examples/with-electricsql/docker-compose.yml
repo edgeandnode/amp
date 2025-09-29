@@ -40,6 +40,12 @@ services:
       - "1603:1603" # JSON Lines
       - "1602:1602" # Arrow Flight
 
+  anvil:
+    image: ghcr.io/foundry-rs/foundry
+    entrypoint: ["anvil", "--host", "0.0.0.0"]
+    ports:
+      - "8545:8545"
+
   ampsync:
     # Build from workspace root to include all dependencies
     build:
@@ -63,10 +69,12 @@ services:
       RUST_LOG: info,ampsync=debug
 
     depends_on:
-      amp:
-        condition: service_started
       db:
         condition: service_healthy
+      amp:
+        condition: service_started
+      anvil:
+        condition: service_started
 
     volumes:
       # Mount the nozzle config file (updated path for non-root user home)

@@ -260,10 +260,10 @@ impl AmpsyncDbEngine {
     }
 
     /// Create a retry policy for database operations
-    fn db_retry_policy() -> backon::ExponentialBuilder {
+    fn db_retry_policy() -> ExponentialBuilder {
         ExponentialBuilder::default()
-            .with_min_delay(std::time::Duration::from_millis(50))
-            .with_max_delay(std::time::Duration::from_secs(5))
+            .with_min_delay(Duration::from_millis(50))
+            .with_max_delay(Duration::from_secs(5))
             .with_max_times(5)
     }
 
@@ -292,7 +292,7 @@ impl AmpsyncDbEngine {
     }
 
     /// Notify function for database operation retries
-    fn notify_db_retry(err: &sqlx::Error, dur: std::time::Duration) {
+    fn notify_db_retry(err: &sqlx::Error, dur: Duration) {
         tracing::warn!(
             error = %err,
             "Database operation failed. Retrying in {:.1}s",
@@ -339,7 +339,10 @@ impl AmpsyncDbEngine {
 
         let total_rows = batch.num_rows();
         let optimal_batch_size = {
-            let batch_manager = self.batch_manager.lock().unwrap();
+            let batch_manager = self
+                .batch_manager
+                .lock()
+                .map_err(|e| format!("Failed to lock batch manager: {}", e))?;
             batch_manager.get_optimal_batch_size(batch)
         };
 
@@ -369,7 +372,10 @@ impl AmpsyncDbEngine {
             match self.insert_batch_chunk(table_name, &chunk).await {
                 Ok(()) => {
                     let chunk_duration = chunk_start_time.elapsed();
-                    let mut batch_manager = self.batch_manager.lock().unwrap();
+                    let mut batch_manager = self
+                        .batch_manager
+                        .lock()
+                        .map_err(|e| format!("Failed to lock batch manager: {}", e))?;
                     batch_manager.record_success(chunk_duration, chunk_size);
 
                     tracing::debug!(
@@ -382,7 +388,10 @@ impl AmpsyncDbEngine {
                     );
                 }
                 Err(e) => {
-                    let mut batch_manager = self.batch_manager.lock().unwrap();
+                    let mut batch_manager = self
+                        .batch_manager
+                        .lock()
+                        .map_err(|e| format!("Failed to lock batch manager: {}", e))?;
                     batch_manager.record_error();
 
                     return Err(format!(
