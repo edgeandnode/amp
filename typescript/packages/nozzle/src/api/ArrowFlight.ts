@@ -93,37 +93,27 @@ export const make = (transport: Transport) => {
         resume(Effect.sync(() => client.doGet(ticket, { signal })))
       })
 
-      const reader = yield* Effect.tryPromise({
-        catch: (cause) => new ArrowFlightError({ cause, message: "Failed to get flight data" }),
-        try: async () => {
-          // This is a bit of a hack to get the metadata out of the flight data and preserve it
-          // alongside the record batches.
-          let meta: Uint8Array
-          const reader = await RecordBatchReader.from({
-            async *[Symbol.asyncIterator]() {
-              for await (const data of request) {
-                // Store the metadata for the current batch (yes, this is a hack).
-                meta = data.appMetadata
-                // The `RecordBatchReader` implementation does not understand flight data natively. Hence,
-                // we pass our own iterator and convert the flight data into ipc format.
-                yield flightDataToIpc(data)
-              }
-            },
-          } as AsyncIterable<ArrayBuffer>)
+      const meta: Array<Uint8Array> = []
+      const ipc = Stream.fromAsyncIterable(request, (cause) =>
+        new ArrowFlightError({ cause, message: "Failed to get flight data" })).pipe(
+          Stream.map((data) => {
+            meta.push(data.appMetadata)
+            return flightDataToIpc(data)
+          }),
+          Stream.toReadableStream(),
+        )
 
-          return {
-            async *[Symbol.asyncIterator]() {
-              for await (const data of reader) {
-                const metadata = parseMetadata(meta!)
-                yield new ResponseBatch({ data, metadata })
-              }
-            },
-          }
-        },
+      const reader = yield* Effect.tryPromise({
+        catch: (cause) =>
+          new ArrowFlightError({ cause, message: "Failed to get flight data" }),
+        try: () => RecordBatchReader.from(ipc),
       })
 
       return Stream.fromAsyncIterable(reader, (cause) =>
-        new ArrowFlightError({ cause, message: "Failed to read record batches" }))
+        new ArrowFlightError({ cause, message: "Failed to read record batches" })).pipe(Stream.map((data) => {
+          const metadata = parseMetadata(meta.shift()!)
+          return new ResponseBatch({ data, metadata })
+        }))
     }).pipe(Stream.unwrap)
 
   return { client, stream }
