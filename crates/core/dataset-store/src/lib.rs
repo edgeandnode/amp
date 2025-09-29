@@ -127,12 +127,7 @@ impl DatasetStore {
 
         // Register dataset metadata in database
         self.metadata_db
-            .register_dataset(
-                dataset_owner,
-                name.as_str(),
-                version,
-                manifest_path.as_ref(),
-            )
+            .register_dataset(dataset_owner, name, version, manifest_path.as_ref())
             .await
             .map_err(RegistrationError::MetadataRegistration)?;
 
@@ -211,6 +206,8 @@ impl DatasetStore {
         name: &str,
         version: Option<&Version>,
     ) -> Result<String, DatasetError> {
+        let name = &name.parse::<Name>().expect("valid dataset name");
+
         let dataset_identifier = match version {
             Some(version) => self
                 .metadata_db

@@ -4,11 +4,21 @@
 //! which stores dataset registration information including owner, name,
 //! version, and manifest data.
 
+use futures::stream::Stream;
 use sqlx::{Executor, Postgres};
 
+mod name;
+mod pagination;
 mod version;
 
-pub use self::version::{Version, VersionOwned};
+pub use self::{
+    name::{Name, NameOwned},
+    pagination::{
+        list_first_page, list_next_page, list_versions_by_name_first_page,
+        list_versions_by_name_next_page,
+    },
+    version::{Version, VersionOwned},
+};
 
 /// Insert a new dataset registry entry
 ///
@@ -17,7 +27,7 @@ pub use self::version::{Version, VersionOwned};
 pub async fn insert<'c, E>(
     exe: E,
     owner: &str,
-    name: &str,
+    name: Name<'_>,
     version: Version<'_>,
     manifest_path: &str,
 ) -> Result<(), sqlx::Error>
@@ -43,7 +53,7 @@ where
 /// Get complete dataset information by name and version
 pub async fn get_by_name_and_version_with_details<'c, E>(
     exe: E,
-    name: &str,
+    name: Name<'_>,
     version: Version<'_>,
 ) -> Result<Option<DatasetWithDetails>, sqlx::Error>
 where
@@ -68,25 +78,10 @@ where
     Ok(result)
 }
 
-/// Dataset registry entry representing a dataset registration
-#[derive(Debug, Clone, sqlx::FromRow)]
-pub struct DatasetWithDetails {
-    /// Dataset owner identifier
-    pub owner: String,
-    /// Dataset name
-    #[sqlx(rename = "dataset")]
-    pub name: String,
-    /// Dataset version
-    pub version: VersionOwned,
-    /// Dataset manifest content
-    #[sqlx(rename = "manifest")]
-    pub manifest_path: String,
-}
-
 /// Check if a dataset exists for the given name and version
 pub async fn exists_by_name_and_version<'c, E>(
     exe: E,
-    name: &str,
+    name: Name<'_>,
     version: Version<'_>,
 ) -> Result<bool, sqlx::Error>
 where
@@ -106,7 +101,7 @@ where
 /// Get manifest path by name and version
 pub async fn get_manifest_path_by_name_and_version<'c, E>(
     exe: E,
-    name: &str,
+    name: Name<'_>,
     version: Version<'_>,
 ) -> Result<Option<String>, sqlx::Error>
 where
@@ -126,7 +121,7 @@ where
 /// Get the latest version for a dataset
 pub async fn get_latest_version_by_name_with_details<'c, E>(
     exe: E,
-    name: &str,
+    name: Name<'_>,
 ) -> Result<Option<DatasetWithDetails>, sqlx::Error>
 where
     E: Executor<'c, Database = Postgres>,
@@ -148,7 +143,55 @@ where
     Ok(result)
 }
 
+/// Stream all datasets from the registry
+///
+/// Returns a stream of all dataset records with basic information (owner, name, version),
+/// ordered by dataset name first, then by version.
+pub fn stream<'e, E>(executor: E) -> impl Stream<Item = Result<Dataset, sqlx::Error>> + 'e
+where
+    E: sqlx::Executor<'e, Database = sqlx::Postgres> + 'e,
+{
+    let query = indoc::indoc! {r#"
+        SELECT
+            owner,
+            dataset,
+            version
+        FROM registry
+        ORDER BY dataset ASC, version ASC
+    "#};
+
+    sqlx::query_as(query).fetch(executor)
+}
+
+/// Dataset registry entry with basic information
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct Dataset {
+    /// Dataset owner identifier
+    pub owner: String,
+    /// Dataset name
+    #[sqlx(rename = "dataset")]
+    pub name: NameOwned,
+    /// Dataset version
+    pub version: VersionOwned,
+}
+
+/// Dataset registry entry representing a dataset registration
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct DatasetWithDetails {
+    /// Dataset owner identifier
+    pub owner: String,
+    /// Dataset name
+    #[sqlx(rename = "dataset")]
+    pub name: NameOwned,
+    /// Dataset version
+    pub version: VersionOwned,
+    /// Dataset manifest content
+    #[sqlx(rename = "manifest")]
+    pub manifest_path: String,
+}
+
 #[cfg(test)]
 mod tests {
     mod it_crud;
+    mod it_pagination;
 }
