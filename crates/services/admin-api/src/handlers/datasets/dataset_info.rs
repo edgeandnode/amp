@@ -1,10 +1,15 @@
 //! Shared response types for dataset handlers
 
+use datasets_common::{name::Name, version::Version};
+
 /// Represents dataset information for API responses
 #[derive(Debug, serde::Serialize)]
 pub struct DatasetInfo {
     /// The name of the dataset
-    pub name: String,
+    pub name: Name,
+    /// The version of the dataset
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<Version>,
     /// The kind of dataset (e.g., "subgraph", "firehose")
     pub kind: String,
     /// List of tables contained in the dataset

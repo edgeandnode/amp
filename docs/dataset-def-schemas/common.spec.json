@@ -5,15 +5,15 @@
   "type": "object",
   "properties": {
     "kind": {
-      "description": "Dataset kind. See specific dataset definitions for supported values.\nCommon values include: \"evm-rpc\", \"firehose\", \"substreams\", \"sql\", \"manifest\"",
+      "description": "Dataset kind. See specific dataset definitions for supported values.\n\nCommon values include: `manifest`, `evm-rpc`, `firehose`, `substreams`.",
       "type": "string"
     },
     "name": {
-      "description": "Dataset name. Must be unique within the network and match the filename",
+      "description": "Dataset name",
       "$ref": "#/$defs/Name"
     },
     "network": {
-      "description": "Network name, e.g. \"mainnet\", \"sepolia\", \"polygon\"",
+      "description": "Network name, e.g., `mainnet`, `sepolia`",
       "type": "string"
     },
     "schema": {
@@ -26,6 +26,11 @@
           "type": "null"
         }
       ]
+    },
+    "version": {
+      "description": "Dataset version, e.g., `0.1.0`, `1.0.0`, `0.2.1-beta.3`",
+      "$ref": "#/$defs/Version",
+      "default": "0.0.0"
     }
   },
   "required": [
@@ -53,6 +58,10 @@
           "$ref": "#/$defs/DataType"
         }
       }
+    },
+    "Version": {
+      "description": "Semver version wrapper with JSON schema support and version manipulation utilities.\n\nProvides serialization and version manipulation utilities for dataset versioning.",
+      "type": "string"
     }
   }
 }

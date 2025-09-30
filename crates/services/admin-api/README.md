@@ -81,9 +81,12 @@ See [`handlers/datasets/get_by_id.rs`](src/handlers/datasets/get_by_id.rs) for m
 #### `POST /datasets`
 Registers a new dataset configuration to the system.
 Accepts a JSON payload containing `name`, `version`, and `manifest` fields.
-Supports two main registration scenarios: derived datasets (kind="manifest")
-which are registered in both object store and metadata database,
-and SQL datasets (other kinds) which store dataset definitions in object store.
+Supports two main registration scenarios:
+- **Derived datasets** (kind="manifest"): Registers a derived dataset manifest that transforms data from other datasets using SQL queries
+- **EVM-RPC datasets** (kind="evm-rpc"): Registers a raw dataset that extracts blockchain data directly from Ethereum-compatible JSON-RPC endpoints
+
+Both dataset types are registered using the same underlying `register_manifest` method to ensure consistency.
+Other dataset kinds (firehose, substreams, etc.) are not supported through this endpoint.
 Returns HTTP 201 Created upon successful registration.
 
 See [`handlers/datasets/register.rs`](src/handlers/datasets/register.rs) for more detailed information about this endpoint.

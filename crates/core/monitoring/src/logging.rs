@@ -60,6 +60,7 @@ const NOZZLE_CRATES: &[&str] = &[
     "common",
     "dataset_store",
     "datasets_common",
+    "datasets_derived",
     "dump",
     "dump_check",
     "eth_beacon_datasets",

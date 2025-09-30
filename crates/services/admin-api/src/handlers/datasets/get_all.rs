@@ -81,6 +81,7 @@ pub async fn handler(State(ctx): State<Ctx>) -> Result<Json<DatasetsResponse>, B
 
         datasets.push(DatasetInfo {
             name: dataset.name,
+            version: dataset.version,
             kind: dataset.kind,
             tables,
         });

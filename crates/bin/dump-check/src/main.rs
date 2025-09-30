@@ -85,12 +85,16 @@ async fn main() -> Result<(), BoxError> {
     let telemetry_metrics_kit = opentelemetry_metrics_url
         .map(|url| telemetry::metrics::start(url, None))
         .transpose()?;
-    let metrics_registry = telemetry_metrics_kit
-        .as_ref()
-        .map(|(_, meter)| Arc::new(metrics::MetricsRegistry::new(meter)));
+    let metrics = telemetry_metrics_kit.as_ref().map(|(_, meter)| {
+        let registry = Arc::new(metrics::MetricsRegistry::new(meter));
+        metrics::Metrics {
+            registry,
+            meter: meter.clone(),
+        }
+    });
 
     let total_blocks = end_block - start + 1;
-    let ui_handle = tokio::spawn(ui::ui(metrics_registry.clone(), total_blocks));
+    let ui_handle = tokio::spawn(ui::ui(metrics.clone(), total_blocks));
 
     let env = config.make_query_env()?;
 
@@ -104,7 +108,7 @@ async fn main() -> Result<(), BoxError> {
         n_jobs,
         start,
         end_block,
-        metrics_registry,
+        metrics,
     )
     .await?;
 

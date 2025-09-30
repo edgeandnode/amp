@@ -13,10 +13,14 @@ name = "tests"
 admin-api = { path = "../crates/services/admin-api" }
 alloy.workspace = true
 arrow-flight.workspace = true
+backon.workspace = true
 clap.workspace = true
+color-backtrace = { version = "0.7.1", default-features = false, features = ["use-btparse-crate"] }
 common = { path = "../crates/core/common" }
+ctor = "0.5.0"
 dataset-store = { path = "../crates/core/dataset-store" }
 datasets-common = { path = "../crates/core/datasets-common" }
+datasets-derived = { version = "0.1.0", path = "../crates/core/datasets-derived" }
 dotenvy.workspace = true
 dump = { path = "../crates/core/dump" }
 dump-check = { path = "../crates/bin/dump-check" }
@@ -27,6 +31,7 @@ fs-err.workspace = true
 futures.workspace = true
 generate-manifest = { path = "../crates/bin/generate-manifest" }
 hex.workspace = true
+indoc.workspace = true
 metadata-db = { path = "../crates/core/metadata-db" }
 monitoring = { path = "../crates/core/monitoring" }
 nozzle = { path = "../crates/bin/nozzle" }
@@ -40,6 +45,8 @@ serde_json.workspace = true
 serde_yaml.workspace = true
 substreams-datasets = { path = "../crates/extractors/substreams" }
 tempfile.workspace = true
+thiserror.workspace = true
 tokio.workspace = true
+toml.workspace = true
 tonic.workspace = true
 tracing.workspace = true

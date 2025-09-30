@@ -20,23 +20,14 @@ pub enum Error {
     #[error("unsupported dataset kind '{0}'")]
     UnsupportedKind(String),
 
-    #[error("dataset field 'name = \"{0}\"' does not match filename '{1}'")]
-    NameMismatch(String, String),
-
     #[error("Schema mismatch")]
     SchemaMismatch,
-
-    #[error("`schema` field is missing, but required for dataset kind {dataset_kind}")]
-    SchemaMissing { dataset_kind: DatasetKind },
 
     #[error("unsupported table name: {0}")]
     UnsupportedName(BoxError),
 
     #[error("unsupported function name: {0}")]
     UnsupportedFunctionName(String),
-
-    #[error("provider configuration error: {0}")]
-    ProviderConfigError(BoxError),
 
     #[error("IPC connection error: {0}")]
     IpcConnectionError(BoxError),
@@ -134,19 +125,13 @@ impl DatasetError {
     }
 }
 
-impl From<(&str, Error)> for DatasetError {
-    fn from((dataset, error): (&str, Error)) -> Self {
+impl<T> From<(T, Error)> for DatasetError
+where
+    T: AsRef<str>,
+{
+    fn from((dataset, error): (T, Error)) -> Self {
         Self {
-            dataset: Some(dataset.to_string()),
-            error,
-        }
-    }
-}
-
-impl From<(String, Error)> for DatasetError {
-    fn from((dataset, error): (String, Error)) -> Self {
-        Self {
-            dataset: Some(dataset),
+            dataset: Some(dataset.as_ref().to_string()),
             error,
         }
     }

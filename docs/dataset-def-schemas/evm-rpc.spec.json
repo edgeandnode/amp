@@ -1,31 +1,48 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "DatasetDef",
+  "title": "Manifest",
   "type": "object",
   "properties": {
     "kind": {
-      "description": "Dataset kind, must be `evm-rpc`.",
-      "type": "string"
+      "description": "Dataset kind, must be `evm-rpc`",
+      "const": "evm-rpc"
     },
     "name": {
-      "description": "Dataset name.",
-      "type": "string"
+      "description": "Dataset name",
+      "$ref": "#/$defs/Name"
     },
     "network": {
-      "description": "Network name, e.g., `mainnet`.",
+      "description": "Network name, e.g., `anvil`, `mainnet`",
       "type": "string"
     },
     "start_block": {
-      "description": "Dataset start block.",
+      "description": "Dataset start block",
       "type": "integer",
       "format": "uint64",
       "default": 0,
       "minimum": 0
+    },
+    "version": {
+      "description": "Dataset version, e.g., `1.0.0`",
+      "$ref": "#/$defs/Version",
+      "default": "0.0.0"
     }
   },
   "required": [
-    "kind",
     "name",
+    "kind",
     "network"
-  ]
+  ],
+  "$defs": {
+    "Name": {
+      "description": "A validated dataset name that enforces naming conventions and constraints.\n\nDataset names must follow strict rules to ensure compatibility across systems,\nfile systems, and network protocols. This type provides compile-time guarantees\nthat all instances contain valid dataset names.\n\n## Format Requirements\n\nA valid dataset name must:\n- **Start** with a lowercase letter (`a-z`) or underscore (`_`)\n- **Contain** only lowercase letters (`a-z`), digits (`0-9`), and underscores (`_`)\n- **Not be empty** (minimum length of 1 character)\n- **Have no spaces** or special characters (except underscore)",
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[a-z_][a-z0-9_]*$"
+    },
+    "Version": {
+      "description": "Semver version wrapper with JSON schema support and version manipulation utilities.\n\nProvides serialization and version manipulation utilities for dataset versioning.",
+      "type": "string"
+    }
+  }
 }

@@ -5,7 +5,7 @@ use std::{
 };
 
 use common::{
-    BoxError, LogicalCatalog,
+    self, BoxError, LogicalCatalog,
     catalog::physical::{Catalog, PhysicalTable},
     config::Config,
     notification_multiplexer::NotificationMultiplexerHandle,
@@ -13,6 +13,9 @@ use common::{
     store::Store as DataStore,
 };
 use dataset_store::{DatasetKind, DatasetStore};
+use datasets_derived::{
+    DATASET_KIND as DERIVED_DATASET_KIND, sql_dataset::DATASET_KIND as SQL_DATASET_KIND,
+};
 use futures::TryStreamExt as _;
 use metadata_db::{LocationId, MetadataDb};
 use object_store::ObjectMeta;
@@ -32,6 +35,7 @@ pub async fn dump_tables(
     microbatch_max_interval: u64,
     end: Option<i64>,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
+    meter: Option<&monitoring::telemetry::metrics::Meter>,
     only_finalized_blocks: bool,
 ) -> Result<(), BoxError> {
     let mut kinds = BTreeSet::new();
@@ -43,7 +47,16 @@ pub async fn dump_tables(
         if !kinds.iter().all(|k| k.is_raw()) {
             return Err("Cannot mix raw and non-raw datasets in a same dump".into());
         }
-        dump_raw_tables(ctx, tables, n_jobs, end, metrics, only_finalized_blocks).await
+        dump_raw_tables(
+            ctx,
+            tables,
+            n_jobs,
+            end,
+            metrics,
+            meter,
+            only_finalized_blocks,
+        )
+        .await
     } else {
         dump_user_tables(ctx, tables, microbatch_max_interval, n_jobs, end, metrics).await
     }
@@ -56,6 +69,7 @@ pub async fn dump_raw_tables(
     n_jobs: u16,
     end: Option<i64>,
     metrics: Option<Arc<metrics::MetricsRegistry>>,
+    meter: Option<&monitoring::telemetry::metrics::Meter>,
     only_finalized_blocks: bool,
 ) -> Result<(), BoxError> {
     if tables.is_empty() {
@@ -98,11 +112,12 @@ pub async fn dump_raw_tables(
                 end,
                 &dataset.name,
                 metrics,
+                meter,
                 only_finalized_blocks,
             )
             .await?;
         }
-        DatasetKind::Sql | DatasetKind::Manifest => {
+        DatasetKind::Sql | DatasetKind::Derived => {
             return Err(format!(
                 "Attempted to dump dataset `{}` of kind `{}` as raw dataset",
                 dataset.name, kind,
@@ -135,19 +150,18 @@ pub async fn dump_user_tables(
         consistency_check(table).await?;
 
         let dataset = table.table().dataset();
-        let kind = DatasetKind::from_str(&dataset.kind)?;
 
-        let dataset = match kind {
-            DatasetKind::Sql => ctx.dataset_store.load_sql_dataset(&dataset.name).await?,
-            DatasetKind::Manifest => {
+        let dataset = match dataset.kind.as_str() {
+            SQL_DATASET_KIND => ctx.dataset_store.load_sql_dataset(&dataset.name).await?,
+            DERIVED_DATASET_KIND => {
                 ctx.dataset_store
                     .load_manifest_dataset(&dataset.name, dataset.version.as_ref().unwrap())
                     .await?
             }
             _ => {
                 return Err(format!(
-                    "Unsupported dataset kind {:?} for table {}",
-                    kind,
+                    "Unsupported dataset kind {} for table {}",
+                    dataset.kind,
                     table.table_ref()
                 )
                 .into());

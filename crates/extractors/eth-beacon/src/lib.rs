@@ -1,43 +1,37 @@
-mod block;
-mod client;
-
 use std::num::NonZeroU32;
 
-use common::BlockNum;
+use common::{BlockNum, Dataset};
+use datasets_common::{
+    name::Name,
+    value::{ManifestValue, ManifestValueError},
+    version::Version,
+};
 use reqwest::Url;
 
-pub use crate::client::BeaconClient;
+mod block;
+mod client;
+mod dataset_kind;
 
-pub const DATASET_KIND: &str = "eth-beacon";
+pub use self::{
+    client::BeaconClient,
+    dataset_kind::{DATASET_KIND, EthBeaconDatasetKind, EthBeaconDatasetKindError},
+};
 
-#[derive(thiserror::Error, Debug)]
-pub enum Error {
-    #[error("TOML parse error: {0}")]
-    Toml(#[from] toml::de::Error),
-    #[error("JSON parse error: {0}")]
-    Json(#[from] serde_json::Error),
-}
-
-#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
-pub struct DatasetDef {
+#[derive(Debug, serde::Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+pub struct Manifest {
+    /// Dataset name
+    pub name: Name,
+    /// Dataset version, e.g., `1.0.0`
+    #[serde(default)]
+    pub version: Version,
     /// Dataset kind, must be `eth-beacon`.
-    pub kind: String,
-    /// Dataset name.
-    pub name: String,
+    pub kind: EthBeaconDatasetKind,
     /// Network name, e.g., `mainnet-beacon`.
     pub network: String,
     /// Dataset start block.
     #[serde(default)]
     pub start_block: BlockNum,
-}
-
-impl DatasetDef {
-    fn from_value(value: common::DatasetValue) -> Result<Self, Error> {
-        match value {
-            common::DatasetValue::Toml(value) => value.try_into().map_err(From::from),
-            common::DatasetValue::Json(value) => serde_json::from_value(value).map_err(From::from),
-        }
-    }
 }
 
 #[serde_with::serde_as]
@@ -49,15 +43,15 @@ pub(crate) struct EthBeaconProvider {
     pub rate_limit_per_minute: Option<NonZeroU32>,
 }
 
-pub fn dataset(dataset_cfg: common::DatasetValue) -> Result<common::Dataset, Error> {
-    let def = DatasetDef::from_value(dataset_cfg)?;
-    Ok(common::Dataset {
-        kind: def.kind,
-        name: def.name,
-        version: None,
-        start_block: Some(def.start_block),
-        tables: all_tables(def.network.clone()),
-        network: def.network,
+pub fn dataset(value: ManifestValue) -> Result<Dataset, Error> {
+    let manifest: Manifest = value.try_into_manifest()?;
+    Ok(Dataset {
+        kind: manifest.kind.to_string(),
+        name: manifest.name,
+        version: Some(manifest.version),
+        start_block: Some(manifest.start_block),
+        tables: all_tables(manifest.network.clone()),
+        network: manifest.network,
         functions: vec![],
     })
 }
@@ -72,7 +66,7 @@ pub fn client(
     provider_name: String,
     final_blocks_only: bool,
 ) -> Result<BeaconClient, Error> {
-    let provider: EthBeaconProvider = provider.try_into()?;
+    let provider: EthBeaconProvider = provider.try_into().map_err(Error::Toml)?;
     Ok(BeaconClient::new(
         provider.url,
         network,
@@ -81,6 +75,23 @@ pub fn client(
         provider.rate_limit_per_minute,
         final_blocks_only,
     ))
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("TOML parse error: {0}")]
+    Toml(#[source] toml::de::Error),
+    #[error("JSON parse error: {0}")]
+    Json(#[source] serde_json::Error),
+}
+
+impl From<ManifestValueError> for Error {
+    fn from(err: ManifestValueError) -> Self {
+        match err {
+            ManifestValueError::Toml(toml_err) => Error::Toml(toml_err),
+            ManifestValueError::Json(json_err) => Error::Json(json_err),
+        }
+    }
 }
 
 #[tokio::test]

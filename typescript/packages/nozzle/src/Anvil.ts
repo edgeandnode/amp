@@ -119,7 +119,7 @@ export const make = Effect.fn(function*(options: AnvilOptions = {}) {
   const verbosity = Match.value(options.verbosity).pipe(
     Match.when(0, () => ["--quiet"] as const),
     Match.whenOr(1, undefined, () => [] as const),
-    Match.whenOr(2, 3, 4, 5, (_) => ["--verbosity", `${_}`] as const),
+    Match.whenOr(2, 3, 4, 5, (_) => ["-" + "v".repeat(_)] as const),
     Match.exhaustive,
   )
 

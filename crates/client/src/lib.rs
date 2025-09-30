@@ -58,6 +58,7 @@ impl Stream for ResultStream {
 }
 
 /// Arrow Flight client for connecting to nozzle server.
+#[derive(Clone)]
 pub struct SqlClient {
     client: FlightSqlServiceClient<tonic::transport::Channel>,
 }
@@ -165,7 +166,7 @@ impl From<BlockRange> for InvalidationRange {
 ///             println!("Received batch for block ranges: {:#?}", metadata.ranges);
 ///         }
 ///         ResponseBatchWithReorg::Reorg { invalidation } => {
-///             // Handle reorg - invalidate cached data for these ranges
+///             // Handle reorg - invalidate data for these ranges
 ///             println!("Reorg detected, invalidating ranges: {:#?}", invalidation);
 ///         }
 ///     }
@@ -189,7 +190,7 @@ pub fn with_reorg(
             let ranges = batch.metadata.ranges.clone();
             let invalidation: Vec<InvalidationRange> = ranges.iter().filter_map(|range| {
                 let prev_range = prev_ranges.iter().find(|r| r.network == range.network)?;
-                if range.start() <= prev_range.end() {
+                if (range != prev_range) && (range.start() <= prev_range.end()) {
                     return Some(InvalidationRange {
                         network: range.network.clone(),
                         numbers: range.start()..=BlockNum::max(range.end(), prev_range.end()),

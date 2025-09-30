@@ -1,0 +1,18 @@
+[package]
+name = "datasets-derived"
+edition = "2024"
+version.workspace = true
+
+[features]
+schemars = ["dep:schemars", "datasets-common/schemars"]
+sql_dataset = []
+
+[dependencies]
+datafusion.workspace = true
+datasets-common = { version = "0.1.0", path = "../datasets-common" }
+schemars = { workspace = true, optional = true }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+

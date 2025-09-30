@@ -3,12 +3,16 @@ name = "substreams-datasets"
 edition.workspace = true
 version.workspace = true
 
+[features]
+schemars = ["dep:schemars", "datasets-common/schemars"]
+
 [dependencies]
 anyhow.workspace = true
 async-stream.workspace = true
 chrono.workspace = true
 common = { path = "../../core/common" }
 datafusion.workspace = true
+datasets-common = { path = "../../core/datasets-common" }
 firehose-datasets = { path = "../firehose" }
 futures.workspace = true
 prost.workspace = true
@@ -17,6 +21,7 @@ reqwest.workspace = true
 schemars = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
+thiserror.workspace = true
 tokio.workspace = true
 toml.workspace = true
 tonic.workspace = true

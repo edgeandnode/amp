@@ -20,7 +20,7 @@ env:
 jobs:
   unit-tests:
     name: Unit tests
-    runs-on: nscloud-ubuntu-22.04-amd64-16x32
+    runs-on: namespace-profile-linux-default
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
@@ -28,14 +28,14 @@ jobs:
         run: |
           # Install dependencies
           sudo apt-get update
-          sudo apt-get install -y protobuf-compiler postgresql
+          sudo apt-get install -y postgresql
 
           # Add PostgreSQL binaries to PATH
           echo "/usr/lib/postgresql/$(pg_lsclusters | awk 'NR==2 {print $1}')/bin" >> $GITHUB_PATH
 
-      - uses: actions-rust-lang/setup-rust-toolchain@2fcdc490d667999e01ddbbf0f2823181beef6b39 # v1
+      - uses: actions-rust-lang/setup-rust-toolchain@02be93da58aa71fb456aa9c43b301149248829d8 # v1
         with:
-          cache: false
+          cache: true
           rustflags: ""
 
       - name: Setup just
@@ -52,14 +52,17 @@ jobs:
 
   integration-tests:
     name: Integration tests
-    runs-on: nscloud-ubuntu-22.04-amd64-16x32
+    runs-on: namespace-profile-linux-default
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y protobuf-compiler postgresql
+          sudo apt-get install -y postgresql
+
+          # Add PostgreSQL binaries to PATH
+          echo "/usr/lib/postgresql/$(pg_lsclusters | awk 'NR==2 {print $1}')/bin" >> $GITHUB_PATH
 
       - name: Install pnpm
         uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4
@@ -77,26 +80,22 @@ jobs:
       - name: pnpm install
         run: just pnpm-install
 
-      - uses: actions-rust-lang/setup-rust-toolchain@2fcdc490d667999e01ddbbf0f2823181beef6b39 # v1
+      - uses: actions-rust-lang/setup-rust-toolchain@02be93da58aa71fb456aa9c43b301149248829d8 # v1
         with:
-          cache: false
+          cache: true
           rustflags: ""
 
       - name: Setup just
         uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v3
 
       - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@82dee4ba654bd2146511f85f0d013af94670c4de #v1.4
+        uses: foundry-rs/foundry-toolchain@82dee4ba654bd2146511f85f0d013af94670c4de # v1.4
 
       - name: Install cargo-nextest
         uses: baptiste0928/cargo-install@e38323ef017552d7f7af73a3f4db467f278310ed # v3
         with:
           crate: cargo-nextest
           version: ^0.9
-
-      - name: Add PostgreSQL binaries to PATH
-        run: |
-          echo "/usr/lib/postgresql/$(pg_lsclusters | awk 'NR==2 {print $1}')/bin" >> $GITHUB_PATH
 
       - name: Integration tests
         run: just test-it --verbose
@@ -111,17 +110,17 @@ jobs:
 
   rustfmt:
     name: Check rustfmt style
-    runs-on: namespace-profile-default
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
 
       - name: Setup Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@2fcdc490d667999e01ddbbf0f2823181beef6b39 # v1
+        uses: actions-rust-lang/setup-rust-toolchain@02be93da58aa71fb456aa9c43b301149248829d8 # v1
         with:
           toolchain: nightly # Required for unstable features (see `rustfmt.toml` for details)
           components: rustfmt
-          cache: false
+          cache: true
           rustflags: ""
 
       - name: Setup just
@@ -132,18 +131,14 @@ jobs:
 
   release-check:
     name: Build in release mode
-    runs-on: nscloud-ubuntu-22.04-amd64-16x32
+    runs-on: namespace-profile-linux-default
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y protobuf-compiler
 
-      - uses: actions-rust-lang/setup-rust-toolchain@2fcdc490d667999e01ddbbf0f2823181beef6b39 # v1
+      - uses: actions-rust-lang/setup-rust-toolchain@02be93da58aa71fb456aa9c43b301149248829d8 # v1
         with:
-          cache: false
+          cache: true
           rustflags: ""
 
       - name: Setup just
@@ -154,7 +149,7 @@ jobs:
 
   typescript:
     name: TypeScript code style & types
-    runs-on: namespace-profile-default
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
@@ -177,9 +172,10 @@ jobs:
       - name: Check types
         run: just check-ts
 
+  # TODO: Use a built binary here from the build.yml workflow
   typescript-tests:
     name: TypeScript tests
-    runs-on: nscloud-ubuntu-22.04-amd64-16x32
+    runs-on: namespace-profile-linux-default
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
@@ -189,22 +185,21 @@ jobs:
       - name: Setup dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y protobuf-compiler postgresql
-
-      - name: Add PostgreSQL binaries to PATH
-        run: |
+          sudo apt-get install -y postgresql
+          
+          # Add PostgreSQL binaries to PATH
           echo "/usr/lib/postgresql/$(pg_lsclusters | awk 'NR==2 {print $1}')/bin" >> $GITHUB_PATH
 
-      - uses: actions-rust-lang/setup-rust-toolchain@2fcdc490d667999e01ddbbf0f2823181beef6b39 # v1
+      - uses: actions-rust-lang/setup-rust-toolchain@02be93da58aa71fb456aa9c43b301149248829d8 # v1
         with:
-          cache: false
+          cache: true
           rustflags: ""
 
       - name: Setup just
         uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v3
 
       - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@82dee4ba654bd2146511f85f0d013af94670c4de #v1.4
+        uses: foundry-rs/foundry-toolchain@82dee4ba654bd2146511f85f0d013af94670c4de # v1.4
 
       - name: Install pnpm
         uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4
@@ -227,7 +222,7 @@ jobs:
 
   # Check generated code is up to date
   gen-check:
-    runs-on: namespace-profile-default
+    runs-on: namespace-profile-linux-default
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
@@ -236,7 +231,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y protobuf-compiler
 
-      - uses: actions-rust-lang/setup-rust-toolchain@2fcdc490d667999e01ddbbf0f2823181beef6b39 # v1
+      - uses: actions-rust-lang/setup-rust-toolchain@02be93da58aa71fb456aa9c43b301149248829d8 # v1
         with:
           cache: true
           rustflags: ""

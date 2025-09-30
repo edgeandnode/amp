@@ -117,7 +117,7 @@ use crate::{
 };
 
 /// Dumps a SQL dataset table
-#[instrument(skip_all, fields(dataset = %dataset.name()), err)]
+#[instrument(skip_all, fields(dataset = %dataset.dataset.name), err)]
 pub async fn dump_table(
     ctx: Ctx,
     dataset: SqlDataset,
@@ -296,13 +296,13 @@ async fn dump_sql_query(
                     let num_bytes: u64 = batch.get_array_memory_size().try_into().unwrap();
                     metrics.inc_sql_dataset_rows_by(
                         num_rows,
-                        dataset_name.clone(),
+                        dataset_name.to_string(),
                         table_name.to_string(),
                         location_id,
                     );
                     metrics.inc_sql_dataset_bytes_written_by(
                         num_bytes,
-                        dataset_name.clone(),
+                        dataset_name.to_string(),
                         table_name.to_string(),
                         location_id,
                     );
@@ -337,7 +337,7 @@ async fn dump_sql_query(
                 writer = ParquetFileWriter::new(physical_table.clone(), opts, microbatch_start)?;
 
                 if let Some(ref metrics) = metrics {
-                    metrics.inc_sql_dataset_files_written(dataset_name.clone());
+                    metrics.inc_sql_dataset_files_written(dataset_name.to_string());
                 }
             }
         }

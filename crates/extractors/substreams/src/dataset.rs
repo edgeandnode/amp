@@ -1,35 +1,27 @@
-use common::DatasetValue;
-use firehose_datasets::Error;
-use serde::Deserialize;
-pub const DATASET_KIND: &str = "substreams";
+use datasets_common::{name::Name, version::Version};
 
-#[derive(Debug, Deserialize)]
+pub use crate::dataset_kind::DATASET_KIND;
+use crate::dataset_kind::SubstreamsDatasetKind;
+
+#[derive(Debug, serde::Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
-pub struct DatasetDef {
+pub struct Manifest {
+    /// Dataset name
+    pub name: Name,
+    /// Dataset version, e.g., `1.0.0`
+    #[serde(default)]
+    pub version: Version,
     /// Dataset kind, must be `substreams`.
-    pub kind: String,
+    pub kind: SubstreamsDatasetKind,
     /// Network name, e.g., `mainnet`.
     pub network: String,
-    /// Dataset name.
-    pub name: String,
-
     /// Substreams package manifest URL.
     pub manifest: String,
-
     /// Substreams output module name.
     pub module: String,
 }
 
-impl DatasetDef {
-    pub fn from_value(value: common::DatasetValue) -> Result<Self, Error> {
-        match value {
-            DatasetValue::Toml(value) => value.try_into().map_err(From::from),
-            DatasetValue::Json(value) => serde_json::from_value(value).map_err(From::from),
-        }
-    }
-}
-
-#[derive(Debug, Deserialize)]
+#[derive(Debug, serde::Deserialize)]
 pub(crate) struct SubstreamsProvider {
     pub url: String,
     pub token: Option<String>,
