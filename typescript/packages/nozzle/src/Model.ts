@@ -101,6 +101,82 @@ export class DatasetInfo extends Schema.Class<DatasetInfo>("DatasetInfo")({
   tables: Schema.Array(TableInfo),
 }) {}
 
+export class DatasetRegistryInfo extends Schema.Class<DatasetRegistryInfo>("DatasetRegistryInfo")({
+  name: DatasetName,
+  version: DatasetVersion,
+  owner: Schema.String,
+}) {}
+
+/**
+ * Dataset cursor for pagination in "name:version" format (e.g., "eth_mainnet:1.0.0")
+ */
+export const DatasetCursor = Schema.String.pipe(
+  Schema.pattern(/^[^:]+:[^:]+$/),
+  Schema.annotations({
+    description: "Dataset cursor in 'name:version' format for pagination",
+    examples: ["eth_mainnet:1.0.0", "uniswap:2.1.0"],
+  }),
+  Schema.brand("DatasetCursor"),
+)
+export type DatasetCursor = Schema.Schema.Type<typeof DatasetCursor>
+
+/**
+ * Creates a DatasetCursor from a dataset name and version.
+ *
+ * @param name - The dataset name
+ * @param version - The dataset version
+ * @returns A properly formatted DatasetCursor
+ *
+ * @example
+ * const cursor = makeDatasetCursor("eth_mainnet", "1.0.0") // "eth_mainnet:1.0.0"
+ */
+export const makeDatasetCursor = (name: string, version: string): DatasetCursor => {
+  const cursorString = `${name}:${version}`
+  // This will validate the format and throw if invalid
+  return Schema.decodeSync(DatasetCursor)(cursorString)
+}
+
+/**
+ * Parses a DatasetCursor to extract the name and version components.
+ *
+ * @param cursor - The DatasetCursor to parse
+ * @returns An object with name and version properties
+ *
+ * @example
+ * const { name, version } = parseDatasetCursor(cursor) // { name: "eth_mainnet", version: "1.0.0" }
+ */
+export const parseDatasetCursor = (cursor: DatasetCursor): { name: string; version: string } => {
+  const parts = cursor.split(":")
+  // Since the cursor passed schema validation, we know it has exactly one colon
+  const [name, version] = parts
+  return { name: name!, version: version! }
+}
+
+export class DatasetsResponse extends Schema.Class<DatasetsResponse>("DatasetsResponse")({
+  datasets: Schema.Array(DatasetRegistryInfo),
+  nextCursor: Schema.optional(DatasetCursor).pipe(Schema.fromKey("next_cursor")),
+}) {}
+
+/**
+ * Dataset version cursor for pagination (e.g., "1.0.0", "2.1.3")
+ */
+export const DatasetVersionCursor = DatasetVersion.pipe(
+  Schema.annotations({
+    description: "Dataset version cursor for pagination",
+    examples: ["1.0.0", "2.1.3"],
+  }),
+  Schema.brand("DatasetVersionCursor"),
+)
+export type DatasetVersionCursor = Schema.Schema.Type<typeof DatasetVersionCursor>
+
+/**
+ * Response for listing versions of a specific dataset
+ */
+export class DatasetVersionsResponse extends Schema.Class<DatasetVersionsResponse>("DatasetVersionsResponse")({
+  versions: Schema.Array(DatasetRegistryInfo),
+  nextCursor: Schema.optional(DatasetVersionCursor).pipe(Schema.fromKey("next_cursor")),
+}) {}
+
 export class ArrowField extends Schema.Class<ArrowField>("ArrowField")({
   name: Schema.String,
   type: Schema.Any,

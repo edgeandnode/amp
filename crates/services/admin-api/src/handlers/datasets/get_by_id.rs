@@ -7,10 +7,7 @@ use datasets_common::{name::Name, version::Version};
 use http_common::{BoxRequestError, RequestError};
 use metadata_db::TableId;
 
-use super::{
-    dataset_info::{DatasetInfo, TableInfo},
-    tracing::display_selector_version,
-};
+use super::tracing::display_selector_version;
 use crate::ctx::Ctx;
 
 /// Handler for dataset retrieval endpoint without version
@@ -167,10 +164,35 @@ async fn handler_inner(
 
     Ok(Json(DatasetInfo {
         name: dataset.name,
-        version: dataset.version,
+        version: dataset.version.unwrap_or_default(),
         kind: dataset.kind,
         tables,
     }))
+}
+
+/// Represents dataset information for API responses from the dataset store
+#[derive(Debug, serde::Serialize)]
+pub struct DatasetInfo {
+    /// The name of the dataset
+    pub name: Name,
+    /// The version of the dataset
+    pub version: Version,
+    /// The kind of dataset (e.g., "subgraph", "firehose")
+    pub kind: String,
+    /// List of tables contained in the dataset
+    pub tables: Vec<TableInfo>,
+}
+
+/// Represents table information within a dataset
+#[derive(Debug, serde::Serialize)]
+pub struct TableInfo {
+    /// The name of the table
+    pub name: String,
+    /// Currently active location URL for this table
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_location: Option<String>,
+    /// Associated network for this table
+    pub network: String,
 }
 
 /// Errors that can occur during dataset retrieval
