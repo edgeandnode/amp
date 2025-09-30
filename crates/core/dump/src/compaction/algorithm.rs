@@ -1,13 +1,16 @@
 use std::{
     fmt::{Debug, Display, Formatter},
-    ops::{Deref, Not},
+    ops::Deref,
     time::Duration,
 };
 
 use common::{
     Timestamp,
+    config::{ParquetConfig, SizeLimitConfig},
     metadata::{Generation, Overflow, SegmentSize},
 };
+
+use crate::compaction::{compactor::CompactionGroup, plan::CompactionFile};
 
 /// Compaction algorithm parameters.
 /// Defines the criteria for grouping files for compaction
@@ -164,6 +167,20 @@ impl Display for CompactionAlgorithm {
                 kind, self.base_cooldown, self.upper_bound, self.lower_bound
             ),
             _ => unreachable!("Unexpected compaction algorithm kind"),
+        }
+    }
+}
+
+impl<'a> From<&'a ParquetConfig> for CompactionAlgorithm {
+    fn from(config: &'a ParquetConfig) -> Self {
+        CompactionAlgorithm {
+            base_cooldown: config
+                .compactor
+                .algorithm
+                .base_cooldown_duration
+                .unwrap_or(Duration::from_secs(2)),
+            upper_bound: SegmentSizeLimit::from(&config.target_size),
+            lower_bound: SegmentSizeLimit::from(&config.compactor.algorithm.eager_compaction_limit),
         }
     }
 }
@@ -353,57 +370,40 @@ impl SegmentSizeLimit {
     /// 1. Combined result for blocks, bytes, and rows dimensions
     /// 2. Result for the length (file count) dimension
     /// 3. Result for the generation dimension
-    pub fn is_exceeded(size_limit: &SegmentSizeLimit, segment: &SegmentSize) -> SizeCheckResult {
-        let blocks_ge: TestResult = size_limit
+    pub fn is_exceeded(&self, segment: &SegmentSize) -> SizeCheckResult {
+        let blocks_ge: TestResult = self
             .0
             .blocks
             .is_positive()
-            .then_some(
-                segment
-                    .blocks
-                    .ge(&size_limit.1.soft_limit(size_limit.0.blocks)),
-            )
+            .then_some(segment.blocks.ge(&self.1.soft_limit(self.0.blocks)))
             .into();
 
-        let bytes_ge: TestResult = size_limit
+        let bytes_ge: TestResult = self
             .0
             .bytes
             .is_positive()
-            .then_some(
-                segment
-                    .bytes
-                    .ge(&size_limit.1.soft_limit(size_limit.0.bytes)),
-            )
+            .then_some(segment.bytes.ge(&self.1.soft_limit(self.0.bytes)))
             .into();
 
-        let rows_ge: TestResult = size_limit
+        let rows_ge: TestResult = self
             .0
             .rows
             .is_positive()
-            .then_some(segment.rows.ge(&size_limit.1.soft_limit(size_limit.0.rows)))
+            .then_some(segment.rows.ge(&self.1.soft_limit(self.0.rows)))
             .into();
 
-        let generation_ge: TestResult = size_limit
+        let generation_ge: TestResult = self
             .0
             .generation
             .is_compacted()
-            .then_some(
-                segment
-                    .generation
-                    .ge(&size_limit.1.soft_limit(size_limit.0.generation)),
-            )
+            .then_some(segment.generation.ge(&self.1.soft_limit(self.0.generation)))
             .into();
 
-        let length_ge: TestResult = size_limit
+        let length_ge: TestResult = self
             .0
             .length
-            .eq(&0)
-            .not()
-            .then_some(
-                segment
-                    .length
-                    .ge(&size_limit.1.soft_limit(size_limit.0.length)),
-            )
+            .ne(&0)
+            .then_some(segment.length.ge(&self.1.soft_limit(self.0.length)))
             .into();
 
         (
@@ -441,6 +441,19 @@ impl Display for SegmentSizeLimit {
         } else {
             return write!(f, "{}", size_string);
         }
+    }
+}
+
+impl<'a> From<&'a SizeLimitConfig> for SegmentSizeLimit {
+    fn from(value: &'a SizeLimitConfig) -> Self {
+        Self::new(
+            value.blocks as i64,
+            value.bytes as i64,
+            value.rows as i64,
+            value.file_count as usize,
+            value.generation,
+            value.overflow,
+        )
     }
 }
 
