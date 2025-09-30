@@ -1,12 +1,12 @@
 [package]
-name = "common-gen"
+name = "datasets-derived-gen"
 edition.workspace = true
 publish = false
 
 # Schema generation dependencies (see README.md "JSON Schema Generation" section)
 # These dependencies are only included when the gen_schema cfg flag is enabled
 [target.'cfg(gen_schema)'.build-dependencies]
-common = { path = "..", features = ["schemars"] }
+datasets-derived = { path = "..", features = ["sql_dataset", "schemars"] }
 schemars = { workspace = true }
 serde_json = { workspace = true }
 

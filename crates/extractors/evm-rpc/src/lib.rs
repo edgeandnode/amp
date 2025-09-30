@@ -1,16 +1,18 @@
-mod client;
-pub mod tables;
-
 use std::{num::NonZeroU32, path::PathBuf};
 
-use alloy::transports::http::reqwest::Url;
-pub use client::JsonRpcClient;
 use common::{BlockNum, BoxError, Dataset, store::StoreError};
-use datasets_common::value::ManifestValue;
-use serde::Deserialize;
+use datasets_common::{name::Name, version::Version};
 use serde_with::serde_as;
+use url::Url;
 
-pub const DATASET_KIND: &str = "evm-rpc";
+mod client;
+mod dataset_kind;
+pub mod tables;
+
+pub use self::{
+    client::JsonRpcClient,
+    dataset_kind::{DATASET_KIND, EvmRpcDatasetKind, EvmRpcDatasetKindError},
+};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -18,38 +20,32 @@ pub enum Error {
     Client(BoxError),
     #[error("store error: {0}")]
     StoreError(#[from] StoreError),
-    #[error("TOML parse error: {0}")]
-    Toml(#[from] toml::de::Error),
-    #[error("JSON parse error: {0}")]
-    Json(#[from] serde_json::Error),
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
-pub struct DatasetDef {
-    /// Dataset kind, must be `evm-rpc`.
-    pub kind: String,
-    /// Dataset name.
-    pub name: String,
-    /// Network name, e.g., `mainnet`.
+pub struct Manifest {
+    /// Dataset name
+    pub name: Name,
+    /// Dataset version, e.g., `1.0.0`
+    #[serde(default)]
+    pub version: Version,
+    /// Dataset kind, must be `evm-rpc`
+    pub kind: EvmRpcDatasetKind,
+    /// Network name, e.g., `anvil`, `mainnet`
     pub network: String,
-    /// Dataset start block.
+
+    /// Dataset start block
     #[serde(default)]
     pub start_block: BlockNum,
 }
 
-impl DatasetDef {
-    fn from_value(value: ManifestValue) -> Result<Self, Error> {
-        match value {
-            ManifestValue::Toml(value) => value.try_into().map_err(From::from),
-            ManifestValue::Json(value) => serde_json::from_value(value).map_err(From::from),
-        }
-    }
-}
-
 #[serde_as]
-#[derive(Debug, Deserialize)]
-pub(crate) struct EvmRpcProvider {
+#[derive(Debug, serde::Deserialize)]
+pub struct ProviderConfig {
+    pub name: String,
+    pub kind: EvmRpcDatasetKind,
+    pub network: String,
     #[serde_as(as = "serde_with::DisplayFromStr")]
     pub url: Url,
     pub concurrent_request_limit: Option<u16>,
@@ -63,64 +59,64 @@ pub(crate) struct EvmRpcProvider {
     pub fetch_receipts_per_tx: bool,
 }
 
-pub fn dataset(dataset_cfg: datasets_common::value::ManifestValue) -> Result<Dataset, Error> {
-    let def = DatasetDef::from_value(dataset_cfg)?;
-    Ok(Dataset {
-        kind: def.kind,
-        name: def.name,
-        version: None,
-        start_block: Some(def.start_block),
-        tables: tables::all(&def.network),
-        network: def.network,
+pub fn dataset(manifest: Manifest) -> Dataset {
+    Dataset {
+        name: manifest.name,
+        version: Some(manifest.version),
+        kind: manifest.kind.to_string(),
+        start_block: Some(manifest.start_block),
+        tables: tables::all(&manifest.network),
+        network: manifest.network,
         functions: vec![],
-    })
+    }
 }
 
 pub async fn client(
-    provider: toml::Value,
-    network: String,
-    provider_name: String,
+    config: ProviderConfig,
     final_blocks_only: bool,
+    meter: Option<&monitoring::telemetry::metrics::Meter>,
 ) -> Result<JsonRpcClient, Error> {
-    let provider: EvmRpcProvider = provider.try_into()?;
-    let request_limit = u16::max(1, provider.concurrent_request_limit.unwrap_or(1024));
-    let client = match provider.url.scheme() {
+    let request_limit = u16::max(1, config.concurrent_request_limit.unwrap_or(1024));
+    let client = match config.url.scheme() {
         "ipc" => {
-            let path = provider.url.path();
+            let path = config.url.path();
             JsonRpcClient::new_ipc(
                 PathBuf::from(path),
-                network,
-                provider_name,
+                config.network,
+                config.name,
                 request_limit,
-                provider.rpc_batch_size,
-                provider.rate_limit_per_minute,
-                provider.fetch_receipts_per_tx,
+                config.rpc_batch_size,
+                config.rate_limit_per_minute,
+                config.fetch_receipts_per_tx,
                 final_blocks_only,
+                meter,
             )
             .await
             .map_err(Error::Client)?
         }
         "ws" | "wss" => JsonRpcClient::new_ws(
-            provider.url,
-            network,
-            provider_name,
+            config.url,
+            config.network,
+            config.name,
             request_limit,
-            provider.rpc_batch_size,
-            provider.rate_limit_per_minute,
-            provider.fetch_receipts_per_tx,
+            config.rpc_batch_size,
+            config.rate_limit_per_minute,
+            config.fetch_receipts_per_tx,
             final_blocks_only,
+            meter,
         )
         .await
         .map_err(Error::Client)?,
         _ => JsonRpcClient::new(
-            provider.url,
-            network,
-            provider_name,
+            config.url,
+            config.network,
+            config.name,
             request_limit,
-            provider.rpc_batch_size,
-            provider.rate_limit_per_minute,
-            provider.fetch_receipts_per_tx,
+            config.rpc_batch_size,
+            config.rate_limit_per_minute,
+            config.fetch_receipts_per_tx,
             final_blocks_only,
+            meter,
         )
         .map_err(Error::Client)?,
     };

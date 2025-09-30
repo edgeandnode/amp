@@ -24,6 +24,8 @@ pub enum Job {
         end_block: Option<i64>,
         /// Metrics registry.
         metrics: Option<Arc<metrics::MetricsRegistry>>,
+        /// Meter for creating telemetry objects.
+        meter: Option<monitoring::telemetry::metrics::Meter>,
     },
 }
 
@@ -35,6 +37,7 @@ impl Job {
         job_id: JobId,
         job_desc: JobDesc,
         metrics: Option<Arc<metrics::MetricsRegistry>>,
+        meter: Option<monitoring::telemetry::metrics::Meter>,
     ) -> Result<Job, BoxError> {
         let output_locations = ctx.metadata_db.output_locations(job_id).await?;
         match job_desc {
@@ -44,8 +47,9 @@ impl Job {
                     let dataset_version = location.dataset_version.parse().ok();
                     let dataset = Arc::new(
                         ctx.dataset_store
-                            .load_dataset(&location.dataset, dataset_version.as_ref())
-                            .await?,
+                            .get_dataset(&location.dataset, dataset_version.as_ref())
+                            .await?
+                            .ok_or_else(|| format!("Dataset '{}' not found", location.dataset))?,
                     );
                     let mut resolved_tables = dataset.resolved_tables();
                     let Some(table) = resolved_tables.find(|t| t.name() == location.table) else {
@@ -71,6 +75,7 @@ impl Job {
                     tables,
                     end_block,
                     metrics,
+                    meter,
                 })
             }
         }
@@ -83,6 +88,7 @@ impl Job {
                 tables,
                 end_block,
                 metrics,
+                meter,
             } => {
                 dump_tables(
                     ctx.clone(),
@@ -92,6 +98,7 @@ impl Job {
                     ctx.config.microbatch_max_interval,
                     end_block,
                     metrics,
+                    meter.as_ref(),
                     false,
                 )
                 .await

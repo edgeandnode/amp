@@ -14,6 +14,12 @@
 #[cfg_attr(feature = "schemars", schemars(transparent))]
 pub struct Version(#[cfg_attr(feature = "schemars", schemars(with = "String"))] semver::Version);
 
+impl Default for Version {
+    fn default() -> Self {
+        Self(semver::Version::new(0, 0, 0))
+    }
+}
+
 impl Version {
     /// Create a new [`Version`] from major, minor, and patch components.
     pub fn new(major: u64, minor: u64, patch: u64) -> Self {
@@ -26,23 +32,24 @@ impl Version {
         })
     }
 
-    /// Convert the Semver version to a string with underscores.
+    /// Convert the version to an underscore-separated string.
     ///
-    /// Example: SemverVersion(1, 0, 0) -> String("1_0_0").
+    /// Examples:
+    /// - `1.0.0` → `1_0_0`
+    /// - `2.1.3-alpha.1+build.123` → `2_1_3-alpha_1+build_123`
     pub fn to_underscore_version(&self) -> String {
         self.0.to_string().replace('.', "_")
     }
 
-    /// Convert a Semver version string to a string with underscores.
+    /// Parse a version from an underscore-separated string.
     ///
-    /// Example: String("1.0.0") -> String("1_0_0").
-    pub fn version_identifier(version: &str) -> Result<String, semver::Error> {
-        let version = version.parse::<Self>()?;
-        Ok(version.to_underscore_version())
-    }
-
-    pub fn from_version_identifier(v_identifier: &str) -> Result<Self, semver::Error> {
-        v_identifier.replace("_", ".").parse().map_err(Into::into)
+    /// This is the counterpart of [`to_underscore_version`](Self::to_underscore_version).
+    ///
+    /// Examples:
+    /// - `1_0_0` → `1.0.0`
+    /// - `2_1_3-alpha_1+build_123` → `2.1.3-alpha.1+build.123`
+    pub fn try_from_underscore_version(v_identifier: &str) -> Result<Self, VersionError> {
+        v_identifier.replace("_", ".").parse()
     }
 }
 
@@ -98,10 +105,15 @@ impl std::fmt::Display for Version {
 }
 
 impl std::str::FromStr for Version {
-    type Err = semver::Error;
+    type Err = VersionError;
 
     #[inline]
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        s.parse().map(Self)
+        s.parse().map(Self).map_err(VersionError)
     }
 }
+
+/// Wrapper error for version parsing errors.
+#[derive(Debug, thiserror::Error)]
+#[error(transparent)]
+pub struct VersionError(pub semver::Error);

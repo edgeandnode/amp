@@ -27,7 +27,8 @@ use self::conn::{DbConn, DbConnPool};
 pub use self::temp::{KEEP_TEMP_DIRS, temp_metadata_db};
 pub use self::{
     datasets::{
-        DatasetWithDetails, Version as DatasetVersion, VersionOwned as DatasetVersionOwned,
+        Dataset, DatasetWithDetails, Name as DatasetName, NameOwned as DatasetNameOwned,
+        Version as DatasetVersion, VersionOwned as DatasetVersionOwned,
     },
     files::{
         FileId, FileIdFromStrError, FileIdI64ConvError, FileIdU64Error, FileMetadata,
@@ -765,13 +766,19 @@ impl MetadataDb {
     pub async fn register_dataset(
         &self,
         owner: &str,
-        name: &str,
+        name: impl Into<DatasetName<'_>> + std::fmt::Debug,
         version: impl Into<DatasetVersion<'_>> + std::fmt::Debug,
         manifest_path: &str,
     ) -> Result<(), Error> {
-        datasets::insert(&*self.pool, owner, name, version.into(), manifest_path)
-            .await
-            .map_err(Into::into)
+        datasets::insert(
+            &*self.pool,
+            owner,
+            name.into(),
+            version.into(),
+            manifest_path,
+        )
+        .await
+        .map_err(Into::into)
     }
 
     /// Check if a dataset exists for the given name and version
@@ -779,10 +786,10 @@ impl MetadataDb {
     /// Returns `true` if a dataset with the specified name and version exists in the registry.
     pub async fn dataset_exists(
         &self,
-        name: &str,
+        name: impl Into<DatasetName<'_>>,
         version: impl Into<DatasetVersion<'_>>,
     ) -> Result<bool, Error> {
-        datasets::exists_by_name_and_version(&*self.pool, name, version.into())
+        datasets::exists_by_name_and_version(&*self.pool, name.into(), version.into())
             .await
             .map_err(Into::into)
     }
@@ -793,10 +800,10 @@ impl MetadataDb {
     /// Returns `None` if no dataset is found with the specified name and version.
     pub async fn get_dataset_with_details(
         &self,
-        name: &str,
+        name: impl Into<DatasetName<'_>>,
         version: impl Into<DatasetVersion<'_>>,
     ) -> Result<Option<DatasetWithDetails>, Error> {
-        datasets::get_by_name_and_version_with_details(&*self.pool, name, version.into())
+        datasets::get_by_name_and_version_with_details(&*self.pool, name.into(), version.into())
             .await
             .map_err(Into::into)
     }
@@ -807,10 +814,10 @@ impl MetadataDb {
     /// Returns `None` if no dataset is found with the specified name and version.
     pub async fn get_dataset_manifest_path(
         &self,
-        name: &str,
+        name: impl Into<DatasetName<'_>>,
         version: impl Into<DatasetVersion<'_>>,
     ) -> Result<Option<String>, Error> {
-        datasets::get_manifest_path_by_name_and_version(&*self.pool, name, version.into())
+        datasets::get_manifest_path_by_name_and_version(&*self.pool, name.into(), version.into())
             .await
             .map_err(Into::into)
     }
@@ -822,11 +829,72 @@ impl MetadataDb {
     #[instrument(skip(self), err)]
     pub async fn get_dataset_latest_version_with_details(
         &self,
-        name: &str,
+        name: impl Into<DatasetName<'_>> + std::fmt::Debug,
     ) -> Result<Option<DatasetWithDetails>, Error> {
-        datasets::get_latest_version_by_name_with_details(&*self.pool, name)
+        datasets::get_latest_version_by_name_with_details(&*self.pool, name.into())
             .await
             .map_err(Into::into)
+    }
+
+    /// Stream all datasets from the registry
+    ///
+    /// Returns a stream of all dataset records with basic information (owner, name, version),
+    /// ordered by dataset name first, then by version.
+    pub fn stream_all_datasets(&self) -> impl Stream<Item = Result<Dataset, Error>> + '_ {
+        datasets::stream(&*self.pool).map(|result| result.map_err(Error::DbError))
+    }
+
+    /// List datasets with cursor-based pagination support
+    ///
+    /// Uses cursor-based pagination where `last_dataset` is a tuple of `(dataset_name, version)` from the last dataset
+    /// from the previous page. For the first page, pass `None`.
+    pub async fn list_datasets<'a, N, V>(
+        &self,
+        limit: i64,
+        last_dataset: Option<(N, V)>,
+    ) -> Result<Vec<Dataset>, Error>
+    where
+        N: Into<DatasetName<'a>>,
+        V: Into<DatasetVersion<'a>>,
+    {
+        let res = match last_dataset {
+            Some((name, version)) => {
+                datasets::list_next_page(&*self.pool, limit, (name.into(), version.into())).await?
+            }
+            None => datasets::list_first_page(&*self.pool, limit).await?,
+        };
+        Ok(res)
+    }
+
+    /// List versions for a dataset with cursor-based pagination support
+    ///
+    /// Uses cursor-based pagination where `last_version` is the version from the last dataset
+    /// from the previous page. For the first page, pass `None` for `last_version`.
+    pub async fn list_dataset_versions<'a, N, V>(
+        &self,
+        name: N,
+        limit: i64,
+        last_version: Option<V>,
+    ) -> Result<Vec<DatasetVersionOwned>, Error>
+    where
+        N: Into<DatasetName<'a>>,
+        V: Into<DatasetVersion<'a>>,
+    {
+        let res = match last_version {
+            Some(version) => {
+                datasets::list_versions_by_name_next_page(
+                    &*self.pool,
+                    name.into(),
+                    limit,
+                    version.into(),
+                )
+                .await?
+            }
+            None => {
+                datasets::list_versions_by_name_first_page(&*self.pool, name.into(), limit).await?
+            }
+        };
+        Ok(res)
     }
 }
 
@@ -846,7 +914,7 @@ pub struct GcManifestRow {
 impl MetadataDb {
     pub async fn delete_file_ids(&self, file_ids: &[FileId]) -> Result<(), Error> {
         let sql = "
-        DELETE FROM file_metadata
+        DELETE FROM gc_manifest
          WHERE file_id = ANY($1);
         ";
 
@@ -872,7 +940,7 @@ impl MetadataDb {
             INSERT INTO gc_manifest (location_id, file_id, file_path, expiration)
             SELECT $1
                   , file.id
-                  , file_metadata.file_name
+                  , locations.url || file_metadata.file_name
                   , NOW() + $3
                FROM UNNEST ($2) AS file(id)
          INNER JOIN file_metadata ON file_metadata.id = file.id

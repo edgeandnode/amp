@@ -51,6 +51,7 @@ pub async fn dump_dataset(
         None,
         false,
         None,
+        None,
         false,
     )
     .await
@@ -79,7 +80,10 @@ pub async fn restore_dataset_snapshot(
     dataset_store: &Arc<DatasetStore>,
     dataset_name: &str,
 ) -> Result<Vec<Arc<PhysicalTable>>, BoxError> {
-    let dataset = dataset_store.load_dataset(dataset_name, None).await?;
+    let dataset = dataset_store
+        .get_dataset(dataset_name, None)
+        .await?
+        .ok_or_else(|| format!("Dataset '{}' not found", dataset_name))?;
     let mut tables = Vec::<Arc<PhysicalTable>>::new();
 
     for table in Arc::new(dataset).resolved_tables() {
@@ -226,7 +230,10 @@ pub async fn catalog_for_dataset(
     dataset_store: &Arc<DatasetStore>,
     metadata_db: &MetadataDb,
 ) -> Result<Catalog, BoxError> {
-    let dataset = dataset_store.load_dataset(dataset_name, None).await?;
+    let dataset = dataset_store
+        .get_dataset(dataset_name, None)
+        .await?
+        .ok_or_else(|| format!("Dataset '{}' not found", dataset_name))?;
     let mut tables: Vec<Arc<PhysicalTable>> = Vec::new();
     for table in Arc::new(dataset.clone()).resolved_tables() {
         // Unwrap: we just dumped the dataset, so it must have an active physical table.

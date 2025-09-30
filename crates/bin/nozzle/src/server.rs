@@ -34,6 +34,7 @@ pub async fn run(
     enable_jsonl: bool,
     enable_admin: bool,
     metrics: Option<Arc<dump::metrics::MetricsRegistry>>,
+    meter: Option<monitoring::telemetry::metrics::Meter>,
 ) -> Result<(BoundAddrs, impl Future<Output = BoxResult<()>>), BoxError> {
     if config.max_mem_mb == 0 {
         tracing::info!("Memory limit is unlimited");
@@ -52,6 +53,7 @@ pub async fn run(
             metadata_db.clone(),
             "worker".parse().expect("Invalid worker ID"),
             metrics,
+            meter,
         );
         tokio::spawn(async move {
             if let Err(err) = worker.run().await {

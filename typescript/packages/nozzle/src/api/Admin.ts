@@ -133,21 +133,67 @@ export type RegisterDatasetError =
  * The get datasets endpoint (GET /datasets).
  */
 const getDatasets = HttpApiEndpoint.get("getDatasets")`/datasets`
+  .addError(Error.InvalidQueryParameters)
+  .addError(Error.LimitTooLarge)
+  .addError(Error.LimitInvalid)
   .addError(Error.DatasetStoreError)
   .addError(Error.MetadataDbError)
-  .addSuccess(
+  .addSuccess(Model.DatasetsResponse)
+  .setUrlParams(
     Schema.Struct({
-      datasets: Schema.Array(Model.DatasetInfo).pipe(Schema.mutable),
+      limit: Schema.optional(Schema.NumberFromString),
+      lastDatasetId: Schema.optional(Model.DatasetCursor).pipe(Schema.fromKey("last_dataset_id")),
     }),
   )
 
 /**
  * Error type for the `getDatasets` endpoint.
  *
+ * - InvalidQueryParameters: Invalid query parameters format.
+ * - LimitTooLarge: Limit exceeds maximum allowed value.
+ * - LimitInvalid: Limit is zero or negative.
  * - DatasetStoreError: Failed to retrieve datasets from the dataset store.
  * - MetadataDbError: Database error while retrieving active locations for tables.
  */
-export type GetDatasetsError = Error.DatasetStoreError | Error.MetadataDbError
+export type GetDatasetsError =
+  | Error.InvalidQueryParameters
+  | Error.LimitTooLarge
+  | Error.LimitInvalid
+  | Error.DatasetStoreError
+  | Error.MetadataDbError
+
+/**
+ * The get dataset versions endpoint (GET /datasets/{name}/versions).
+ */
+const getDatasetVersions = HttpApiEndpoint.get("getDatasetVersions")`/datasets/${datasetName}/versions`
+  .addError(Error.InvalidQueryParameters)
+  .addError(Error.InvalidSelector)
+  .addError(Error.LimitTooLarge)
+  .addError(Error.LimitInvalid)
+  .addError(Error.MetadataDbError)
+  .addSuccess(Model.DatasetVersionsResponse)
+  .setUrlParams(
+    Schema.Struct({
+      limit: Schema.optional(Schema.NumberFromString),
+      lastVersion: Schema.optional(Model.DatasetVersionCursor).pipe(Schema.fromKey("last_version")),
+    }),
+  )
+
+/**
+ * Error type for the `getDatasetVersions` endpoint.
+ *
+ * - InvalidQueryParameters: Invalid query parameters format.
+ * - InvalidSelector: The dataset selector is invalid.
+ * - LimitTooLarge: Limit exceeds maximum allowed value.
+ * - LimitInvalid: Limit is zero or negative.
+ * - MetadataDbError: Database error while retrieving versions.
+ */
+export type GetDatasetVersionsError =
+  | Error.InvalidQueryParameters
+  | Error.InvalidSelector
+  | Error.LimitTooLarge
+  | Error.LimitInvalid
+  | Error.MetadataDbError
 
 /**
  * The get dataset by name endpoint (GET /datasets/{name}).
@@ -379,6 +425,7 @@ export class DatasetGroup extends HttpApiGroup.make("dataset")
   .add(getDataset)
   .add(getDatasetVersion)
   .add(getDatasets)
+  .add(getDatasetVersions)
 {}
 
 /**
@@ -515,14 +562,30 @@ export class Admin extends Context.Tag("Nozzle/Admin")<Admin, {
   ) => Effect.Effect<Model.DatasetInfo, HttpClientError.HttpClientError | GetDatasetVersionError>
 
   /**
-   * Get all datasets.
+   * Get all datasets with pagination.
    *
-   * @return The list of datasets.
+   * @param options The pagination options.
+   * @return The paginated list of datasets.
    */
-  readonly getDatasets: () => Effect.Effect<
-    Array<Model.DatasetInfo>,
-    HttpClientError.HttpClientError | GetDatasetsError
-  >
+  readonly getDatasets: (options?: {
+    limit?: number | undefined
+    lastDatasetId?: Model.DatasetCursor | undefined
+  }) => Effect.Effect<Model.DatasetsResponse, HttpClientError.HttpClientError | GetDatasetsError>
+
+  /**
+   * Get all versions of a specific dataset with pagination.
+   *
+   * @param name The name of the dataset.
+   * @param options The pagination options.
+   * @return The paginated list of dataset versions.
+   */
+  readonly getDatasetVersions: (
+    name: string,
+    options?: {
+      limit?: number | undefined
+      lastVersion?: Model.DatasetVersionCursor | undefined
+    },
+  ) => Effect.Effect<Model.DatasetVersionsResponse, HttpClientError.HttpClientError | GetDatasetVersionsError>
 
   /**
    * Get all jobs with pagination.
@@ -732,15 +795,48 @@ export const make = Effect.fn(function*(url: string) {
     return result
   })
 
-  const getDatasets = Effect.fn("getDatasets")(function*() {
-    const result = yield* client.dataset.getDatasets().pipe(
+  const getDatasets = Effect.fn("getDatasets")(function*(options?: {
+    limit?: number | undefined
+    lastDatasetId?: Model.DatasetCursor | undefined
+  }) {
+    const result = yield* client.dataset.getDatasets({
+      urlParams: {
+        limit: options?.limit,
+        lastDatasetId: options?.lastDatasetId,
+      },
+    }).pipe(
       Effect.catchTags({
         HttpApiDecodeError: Effect.die,
         ParseError: Effect.die,
       }),
     )
 
-    return result.datasets
+    return result
+  })
+
+  const getDatasetVersions = Effect.fn("getDatasetVersions")(function*(
+    name: string,
+    options?: {
+      limit?: number | undefined
+      lastVersion?: Model.DatasetVersionCursor | undefined
+    },
+  ) {
+    const result = yield* client.dataset.getDatasetVersions({
+      path: {
+        name,
+      },
+      urlParams: {
+        limit: options?.limit,
+        lastVersion: options?.lastVersion,
+      },
+    }).pipe(
+      Effect.catchTags({
+        HttpApiDecodeError: Effect.die,
+        ParseError: Effect.die,
+      }),
+    )
+
+    return result
   })
 
   const getJobs = Effect.fn("getJobs")(
@@ -890,6 +986,7 @@ export const make = Effect.fn(function*(url: string) {
     getDataset,
     getDatasetVersion,
     getDatasets,
+    getDatasetVersions,
     getJobs,
     getJobById,
     deleteAllJobs,

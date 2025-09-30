@@ -7,10 +7,7 @@ use datasets_common::{name::Name, version::Version};
 use http_common::{BoxRequestError, RequestError};
 use metadata_db::TableId;
 
-use super::{
-    dataset_info::{DatasetInfo, TableInfo},
-    tracing::display_selector_version,
-};
+use super::tracing::display_selector_version;
 use crate::ctx::Ctx;
 
 /// Handler for dataset retrieval endpoint without version
@@ -98,28 +95,32 @@ async fn handler_inner(
         "loading dataset from store"
     );
 
-    // Load the dataset from the store
+    // Get the dataset from the store
     // If version is None, the latest version is used
-    let dataset = ctx
-        .store
-        .load_dataset(&name, version.as_ref())
-        .await
-        .map_err(|err| {
+    let dataset = match ctx.store.get_dataset(&name, version.as_ref()).await {
+        Ok(Some(dataset)) => dataset,
+        Ok(None) => {
+            tracing::debug!(
+                dataset_name=%name,
+                dataset_version=%display_selector_version(&version),
+                "dataset not found"
+            );
+            return Err(Error::NotFound {
+                name: name.clone(),
+                version: version.clone(),
+            }
+            .into());
+        }
+        Err(err) => {
             tracing::debug!(
                 dataset_name=%name,
                 dataset_version=%display_selector_version(&version),
                 error=?err,
                 "failed to load dataset"
             );
-            if err.is_not_found() {
-                Error::NotFound {
-                    name: name.clone(),
-                    version: version.clone(),
-                }
-            } else {
-                Error::DatasetStoreError(err)
-            }
-        })?;
+            return Err(Error::DatasetStoreError(err).into());
+        }
+    };
 
     let mut tables = Vec::with_capacity(dataset.tables.len());
     let dataset_version = match dataset.kind.as_str() {
@@ -163,9 +164,35 @@ async fn handler_inner(
 
     Ok(Json(DatasetInfo {
         name: dataset.name,
+        version: dataset.version.unwrap_or_default(),
         kind: dataset.kind,
         tables,
     }))
+}
+
+/// Represents dataset information for API responses from the dataset store
+#[derive(Debug, serde::Serialize)]
+pub struct DatasetInfo {
+    /// The name of the dataset
+    pub name: Name,
+    /// The version of the dataset
+    pub version: Version,
+    /// The kind of dataset (e.g., "subgraph", "firehose")
+    pub kind: String,
+    /// List of tables contained in the dataset
+    pub tables: Vec<TableInfo>,
+}
+
+/// Represents table information within a dataset
+#[derive(Debug, serde::Serialize)]
+pub struct TableInfo {
+    /// The name of the table
+    pub name: String,
+    /// Currently active location URL for this table
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_location: Option<String>,
+    /// Associated network for this table
+    pub network: String,
 }
 
 /// Errors that can occur during dataset retrieval
@@ -196,14 +223,14 @@ pub enum Error {
         version: Option<Version>,
     },
 
-    /// Dataset store error while loading the dataset
+    /// Dataset store error while getting the dataset
     ///
     /// This occurs when:
     /// - The dataset store is not accessible
     /// - There's a configuration error in the store
     /// - I/O errors while reading dataset definitions
     #[error("dataset store error: {0}")]
-    DatasetStoreError(#[from] dataset_store::DatasetError),
+    DatasetStoreError(#[from] dataset_store::GetDatasetError),
 
     /// Metadata database error while retrieving active locations
     ///

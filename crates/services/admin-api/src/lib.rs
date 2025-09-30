@@ -34,6 +34,10 @@ pub async fn serve(
         )
         .route("/datasets/{name}", get(datasets::get_by_id::handler))
         .route(
+            "/datasets/{name}/versions",
+            get(datasets::get_versions::handler),
+        )
+        .route(
             "/datasets/{name}/versions/{version}",
             get(datasets::get_by_id::handler_with_version),
         )

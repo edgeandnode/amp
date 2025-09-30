@@ -32,4 +32,5 @@ url.workspace = true
 [dev-dependencies]
 metadata-db = { path = ".", features = ["temp-db"] }
 pgtemp = "0.6.0"
+rand.workspace = true
 tokio = { workspace = true, features = ["macros", "test-util"] }

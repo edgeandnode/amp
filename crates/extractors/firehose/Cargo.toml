@@ -3,6 +3,9 @@ name = "firehose-datasets"
 edition.workspace = true
 version.workspace = true
 
+[features]
+schemars = ["dep:schemars", "datasets-common/schemars", "dep:serde_json"]
+
 [dependencies]
 async-stream.workspace = true
 common = { path = "../../core/common" }
@@ -12,10 +15,9 @@ hex.workspace = true
 prost.workspace = true
 schemars = { workspace = true, optional = true }
 serde.workspace = true
-serde_json.workspace = true
+serde_json = {workspace = true, optional = true}
 thiserror.workspace = true
 tokio.workspace = true
-toml.workspace = true
 tonic.workspace = true
 tracing.workspace = true
 

@@ -7,25 +7,47 @@ use std::collections::HashMap;
 
 use datafusion::arrow::datatypes::DataType as ArrowDataType;
 
-use crate::name::Name;
+use crate::{name::Name, version::Version};
 
 /// Common metadata fields required by all dataset definitions.
 ///
 /// All dataset definitions must have a kind, network and name. The name must match the filename.
 /// Schema is optional for TOML dataset format.
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct Manifest {
-    /// Dataset name. Must be unique within the network and match the filename
+    /// Dataset name
     pub name: Name,
+    /// Dataset version, e.g., `0.1.0`, `1.0.0`, `0.2.1-beta.3`
+    #[serde(default)]
+    pub version: Version,
     /// Dataset kind. See specific dataset definitions for supported values.
-    /// Common values include: "evm-rpc", "firehose", "substreams", "sql", "manifest"
+    ///
+    /// Common values include: `manifest`, `evm-rpc`, `firehose`, `substreams`.
     pub kind: String,
-    /// Network name, e.g. "mainnet", "sepolia", "polygon"
+    /// Network name, e.g., `mainnet`, `sepolia`
     pub network: String,
     /// Dataset schema. Lists the tables defined by this dataset.
     /// Optional for TOML format, required for JSON format
     pub schema: Option<Schema>,
+}
+
+impl std::fmt::Debug for Manifest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Manifest")
+            .field("name", &self.name)
+            .field("kind", &self.kind)
+            .field("network", &self.network)
+            .field(
+                "schema",
+                if self.schema.is_some() {
+                    &"Some(Schema { ... })"
+                } else {
+                    &"None"
+                },
+            )
+            .finish()
+    }
 }
 
 /// A serializable representation of a collection of Arrow schemas without metadata.

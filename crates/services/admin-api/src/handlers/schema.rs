@@ -1,11 +1,9 @@
 use axum::{Json, extract::State, http::StatusCode};
-use common::{
-    manifest::derived::TableSchema,
-    query_context::{Error as QueryContextError, parse_sql, prepend_special_block_num_field},
+use common::query_context::{
+    Error as QueryContextError, parse_sql, prepend_special_block_num_field,
 };
+use datasets_derived::manifest::TableSchema;
 use http_common::{BoxRequestError, RequestError};
-use serde::{Deserialize, Serialize};
-use thiserror::Error;
 use tracing::instrument;
 
 use crate::{ctx::Ctx, handlers::common::NonEmptyString};
@@ -82,7 +80,7 @@ pub async fn handler(
 /// Request payload for output schema analysis
 ///
 /// Contains the SQL query to analyze and optional configuration flags.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, serde::Deserialize)]
 pub struct OutputSchemaRequest {
     /// The SQL query to analyze for output schema determination
     sql_query: NonEmptyString,
@@ -97,7 +95,7 @@ pub struct OutputSchemaRequest {
 /// Response returned by the output schema endpoint
 ///
 /// Contains the determined schema and list of networks referenced by the query.
-#[derive(Debug, Serialize)]
+#[derive(Debug, serde::Serialize)]
 pub struct OutputSchemaResponse {
     /// The output schema for the SQL query
     ///
@@ -112,7 +110,7 @@ pub struct OutputSchemaResponse {
 }
 
 /// Errors that can occur during output schema operations
-#[derive(Debug, Error)]
+#[derive(Debug, thiserror::Error)]
 enum Error {
     /// SQL parse error
     ///
@@ -129,7 +127,7 @@ enum Error {
     /// - There's a configuration error in the store
     /// - I/O errors while reading dataset definitions
     #[error("Dataset store error: {0}")]
-    DatasetStoreError(dataset_store::DatasetError),
+    DatasetStoreError(#[from] dataset_store::PlanningCtxForSqlError),
     /// Planning error while determining output schema
     ///
     /// This occurs when:

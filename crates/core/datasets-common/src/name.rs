@@ -130,6 +130,26 @@ impl<'de> serde::Deserialize<'de> for Name {
     }
 }
 
+impl From<metadata_db::DatasetNameOwned> for Name {
+    fn from(value: metadata_db::DatasetNameOwned) -> Self {
+        // Convert to string and validate - this should always pass since DatasetName
+        // comes from the database and should already be valid
+        Name(value.into_inner())
+    }
+}
+
+impl From<Name> for metadata_db::DatasetNameOwned {
+    fn from(value: Name) -> Self {
+        metadata_db::DatasetName::from_owned(value.0)
+    }
+}
+
+impl<'a> From<&'a Name> for metadata_db::DatasetName<'a> {
+    fn from(value: &'a Name) -> Self {
+        metadata_db::DatasetName::from_ref(&value.0)
+    }
+}
+
 /// Validates that a dataset name follows the required format:
 /// - Must be lowercase
 /// - Can only contain letters, underscores, and numbers

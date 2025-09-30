@@ -9,4 +9,5 @@
   dataset: anvil_rpc
   start: 1
   end: 10
-  expect_fail: true
+  failure: |
+    conflicting range

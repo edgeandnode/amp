@@ -2,7 +2,6 @@ use std::{str::FromStr, time::Duration};
 
 use async_stream::stream;
 use common::{BlockNum, BlockStreamer, BoxError, RawDatasetRows, Table};
-use datasets_common::value::ManifestValue;
 use firehose_datasets::{Error, client::AuthInterceptor};
 use futures::{Stream, StreamExt as _, TryStreamExt as _};
 use pbsubstreams::{Request as StreamRequest, response::Message, stream_client::StreamClient};
@@ -15,8 +14,8 @@ use tonic::{
 
 use super::tables::Tables;
 use crate::{
-    DatasetDef,
-    dataset::SubstreamsProvider,
+    Manifest,
+    dataset::ProviderConfig,
     proto::sf::substreams::{
         rpc::v2::{self as pbsubstreams, BlockScopedData},
         v1::Package,
@@ -59,46 +58,41 @@ impl Package {
 
 impl Client {
     pub async fn new(
-        provider: toml::Value,
-        dataset: ManifestValue,
-        network: String,
-        provider_name: String,
+        config: ProviderConfig,
+        manifest: Manifest,
         final_blocks_only: bool,
     ) -> Result<Self, Error> {
-        let provider: SubstreamsProvider = provider.try_into()?;
-        let dataset_def: DatasetDef = DatasetDef::from_value(dataset)?;
-
         let stream_client = {
-            let uri = Uri::from_str(&provider.url)?;
+            let uri = Uri::from_str(&config.url)?;
             let mut endpoint = Endpoint::from(uri);
             endpoint = endpoint.tls_config(ClientTlsConfig::new().with_native_roots())?;
             let channel = endpoint.connect().await?;
-            let auth = AuthInterceptor::new(provider.token)?;
+            let auth = AuthInterceptor::new(config.token)?;
             StreamClient::with_interceptor(channel, auth)
                 .accept_compressed(CompressionEncoding::Gzip)
                 .send_compressed(CompressionEncoding::Gzip)
                 .max_decoding_message_size(100 * 1024 * 1024) // 100MiB
         };
-        let package = Package::from_url(dataset_def.manifest.as_str()).await?;
-        if package.network != network {
+        let package = Package::from_url(manifest.manifest.as_str()).await?;
+        if package.network != config.network {
             return Err(Error::AssertFail(
                 format!(
                     "Package network '{}' does not match requested network '{}'",
-                    package.network, network
+                    package.network, config.network
                 )
                 .into(),
             ));
         }
 
-        let tables = Tables::from_package(&package, &dataset_def.module)
+        let tables = Tables::from_package(&package, &manifest.module)
             .map_err(|_| Error::AssertFail("failed to build tables from spkg".into()))?;
 
         Ok(Self {
             stream_client,
             package,
             tables,
-            output_module: dataset_def.module,
-            provider_name,
+            output_module: manifest.module,
+            provider_name: config.name,
             final_blocks_only,
         })
     }

@@ -52,18 +52,19 @@ pub async fn handler(
         }
     };
 
-    let rest_table =
+    let provider_name = provider_info.name.to_string();
+    let provider_rest_table =
         convert::json_map_to_toml_table(provider_info.rest).map_err(Error::ConversionError)?;
-
     let provider_config = ProviderConfig {
+        name: provider_info.name.to_string(),
         kind: provider_info.kind,
         network: provider_info.network.to_string(),
-        rest: rest_table,
+        rest: provider_rest_table,
     };
 
     ctx.store
         .providers()
-        .register(&provider_info.name.to_string(), provider_config)
+        .register(provider_config)
         .await
         .map_err(|err| match err {
             RegisterError::Conflict { name } => {
@@ -75,7 +76,7 @@ pub async fn handler(
             }
             other => {
                 tracing::error!(
-                    provider_name = %provider_info.name,
+                    %provider_name,
                     error = %other,
                     "failed to register provider"
                 );
@@ -84,9 +85,10 @@ pub async fn handler(
         })?;
 
     tracing::info!(
-        provider_name = %provider_info.name,
+        %provider_name,
         "successfully created provider configuration"
     );
+
     Ok(StatusCode::CREATED)
 }
 
