@@ -250,7 +250,7 @@ impl Service {
             .map_err(|e| Error::InvalidQuery(e.to_string()))?;
         if is_streaming && let IncrementalCheck::NonIncremental(op) = incremental_check {
             return Err(Error::InvalidQuery(format!(
-                "non-incremental queries are not supported for streaming, query contains operation: `{}`",
+                "non-incremental queries are not supported for streaming, query contains non-incremental operation: `{}`",
                 op
             )));
         }
