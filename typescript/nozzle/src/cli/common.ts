@@ -2,14 +2,6 @@ import * as Options from "@effect/cli/Options"
 import * as Config from "effect/Config"
 import * as Schema from "effect/Schema"
 
-export const registryUrl = Options.text("registry-url").pipe(
-  Options.withFallbackConfig(
-    Config.string("NOZZLE_REGISTRY_URL").pipe(Config.withDefault("http://localhost:1611")),
-  ),
-  Options.withDescription("The url of the registry server"),
-  Options.withSchema(Schema.URL),
-)
-
 export const adminUrl = Options.text("admin-url").pipe(
   Options.withFallbackConfig(
     Config.string("NOZZLE_ADMIN_URL").pipe(Config.withDefault("http://localhost:1610")),
