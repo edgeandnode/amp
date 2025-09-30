@@ -120,10 +120,10 @@ layer(environment, {
     Effect.fn(function*() {
       const api = yield* Admin.Admin
       const result = yield* api.getDatasets()
-      const example = result.find((dataset) => dataset.name === "example")
-      assertInstanceOf(example, Model.DatasetInfo)
-      const anvil = result.find((dataset) => dataset.name === "anvil")
-      assertInstanceOf(anvil, Model.DatasetInfo)
+      const example = result.datasets.find((dataset) => dataset.name === "example")
+      assertInstanceOf(example, Model.DatasetRegistryInfo)
+      const anvil = result.datasets.find((dataset) => dataset.name === "anvil")
+      assertInstanceOf(anvil, Model.DatasetRegistryInfo)
     }),
     { sequential: true, timeout: Duration.toMillis("10 seconds") },
   )
