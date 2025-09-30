@@ -20,6 +20,9 @@ pub struct DaemonConfig {
     jsonl_addr: String,
     registry_service_addr: String,
     admin_api_addr: String,
+    partition_size_mb: u64,
+    segment_compactor: bool,
+    garbage_collector: bool,
 }
 
 impl Default for DaemonConfig {
@@ -35,6 +38,9 @@ impl Default for DaemonConfig {
             jsonl_addr: "0.0.0.0:0".to_string(),
             registry_service_addr: "0.0.0.0:0".to_string(),
             admin_api_addr: "0.0.0.0:0".to_string(),
+            partition_size_mb: 100,
+            segment_compactor: false,
+            garbage_collector: false,
         }
     }
 }
@@ -74,6 +80,24 @@ impl DaemonConfig {
             jsonl_addr: String,
             registry_service_addr: String,
             admin_api_addr: String,
+            writer: WriterConfig,
+        }
+
+        #[derive(serde::Serialize)]
+        struct WriterConfig {
+            bytes: u64,
+            compactor: CompactorConfig,
+            garbage_collector: GarbageCollectorConfig,
+        }
+
+        #[derive(serde::Serialize)]
+        struct CompactorConfig {
+            active: bool,
+        }
+
+        #[derive(serde::Serialize)]
+        struct GarbageCollectorConfig {
+            active: bool,
         }
 
         toml::to_string_pretty(&TestConfig {
@@ -87,6 +111,15 @@ impl DaemonConfig {
             jsonl_addr: self.jsonl_addr.clone(),
             registry_service_addr: self.registry_service_addr.clone(),
             admin_api_addr: self.admin_api_addr.clone(),
+            writer: WriterConfig {
+                bytes: self.partition_size_mb * 1024 * 1024,
+                compactor: CompactorConfig {
+                    active: self.segment_compactor,
+                },
+                garbage_collector: GarbageCollectorConfig {
+                    active: self.garbage_collector,
+                },
+            },
         })
         .expect("Failed to serialize test config to TOML")
     }
@@ -109,6 +142,9 @@ pub struct DaemonConfigBuilder {
     jsonl_addr: Option<String>,
     registry_service_addr: Option<String>,
     admin_api_addr: Option<String>,
+    partition_size_mb: Option<u64>,
+    segment_compactor: bool,
+    garbage_collector: bool,
 }
 
 impl DaemonConfigBuilder {
@@ -137,6 +173,9 @@ impl DaemonConfigBuilder {
             jsonl_addr: Some(config.jsonl_addr.clone()),
             registry_service_addr: Some(config.registry_service_addr.clone()),
             admin_api_addr: Some(config.admin_api_addr.clone()),
+            partition_size_mb: Some(config.partition_size_mb),
+            segment_compactor: config.segment_compactor,
+            garbage_collector: config.garbage_collector,
         }
     }
 
@@ -243,6 +282,31 @@ impl DaemonConfigBuilder {
         self
     }
 
+    /// Activate or deactivate the segment compactor.
+    ///
+    /// **Default**: `false`
+    pub fn segment_compactor(mut self, active: bool) -> Self {
+        self.segment_compactor = active;
+        self
+    }
+
+    /// Activate or deactivate the garbage collector.
+    ///
+    /// **Default**: `false`
+    pub fn garbage_collector(mut self, active: bool) -> Self {
+        self.garbage_collector = active;
+        self
+    }
+
+    /// Set partition size in MB.
+    ///
+    /// Controls the size of data partitions.
+    /// **Default**: `100` MB
+    pub fn partition_size_mb(mut self, size_mb: impl Into<Option<u64>>) -> Self {
+        self.partition_size_mb = size_mb.into();
+        self
+    }
+
     /// Build the DaemonConfig instance.
     ///
     /// Creates a `DaemonConfig` with default values, then applies any values that were
@@ -280,6 +344,11 @@ impl DaemonConfigBuilder {
         if let Some(value) = self.admin_api_addr {
             config.admin_api_addr = value;
         }
+        if let Some(value) = self.partition_size_mb {
+            config.partition_size_mb = value;
+        }
+        config.segment_compactor = self.segment_compactor;
+        config.garbage_collector = self.garbage_collector;
 
         config
     }

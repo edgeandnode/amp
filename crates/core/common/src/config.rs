@@ -73,6 +73,7 @@ pub struct ParquetConfig {
     pub collector: CollectorConfig,
     #[serde(
         alias = "file_size",
+        flatten,
         default = "SizeLimitConfig::default_upper_limit",
         deserialize_with = "SizeLimitConfig::deserialize_upper_limit"
     )]

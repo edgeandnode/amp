@@ -53,7 +53,6 @@ async fn evm_rpc_single_dump() {
             true,               // force_reprocess
             Some(block as i64), // end_block
             1,                  // n_jobs
-            100,                // partition_size_mb
             None,               // start_block
             None,               // microbatch_max_interval
             None,               // microbatch_max_rows
@@ -133,7 +132,6 @@ async fn eth_beacon_single_dump() {
             true,               // force_reprocess
             Some(block as i64), // end_block
             1,                  // n_jobs
-            100,                // partition_size_mb
             None,               // start_block
             None,               // microbatch_max_interval
             None,               // microbatch_max_rows
@@ -213,7 +211,6 @@ async fn evm_rpc_single_dump_fetch_receipts_per_tx() {
             true,               // force_reprocess
             Some(block as i64), // end_block
             1,                  // n_jobs
-            100,                // partition_size_mb
             None,               // start_block
             None,               // microbatch_max_interval
             None,               // microbatch_max_rows
@@ -293,7 +290,6 @@ async fn evm_rpc_base_single_dump() {
             true,               // force_reprocess
             Some(block as i64), // end_block
             1,                  // n_jobs
-            100,                // partition_size_mb
             None,               // start_block
             None,               // microbatch_max_interval
             None,               // microbatch_max_rows
@@ -373,7 +369,6 @@ async fn evm_rpc_base_single_dump_fetch_receipts_per_tx() {
             true,               // force_reprocess
             Some(block as i64), // end_block
             1,                  // n_jobs
-            100,                // partition_size_mb
             None,               // start_block
             None,               // microbatch_max_interval
             None,               // microbatch_max_rows
@@ -453,7 +448,6 @@ async fn eth_firehose_single_dump() {
             true,               // force_reprocess
             Some(block as i64), // end_block
             1,                  // n_jobs
-            100,                // partition_size_mb
             None,               // start_block
             None,               // microbatch_max_interval
             None,               // microbatch_max_rows
@@ -533,7 +527,6 @@ async fn base_firehose_single_dump() {
             true,               // force_reprocess
             Some(block as i64), // end_block
             1,                  // n_jobs
-            100,                // partition_size_mb
             None,               // start_block
             None,               // microbatch_max_interval
             None,               // microbatch_max_rows
@@ -623,7 +616,6 @@ async fn sql_over_eth_firehose_dump() {
             true,               // force_reprocess
             Some(block as i64), // end_block
             1,                  // n_jobs
-            100,                // partition_size_mb
             None,               // start_block
             None,               // microbatch_max_interval
             None,               // microbatch_max_rows

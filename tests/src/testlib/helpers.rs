@@ -36,8 +36,6 @@ pub async fn dump_dataset(
     n_jobs: u16,
     microbatch_max_interval: impl Into<Option<u64>>,
 ) -> Result<Vec<Arc<PhysicalTable>>, BoxError> {
-    let partition_size_mb = 100;
-
     dump(
         config.clone(),
         metadata_db.clone(),
@@ -45,7 +43,6 @@ pub async fn dump_dataset(
         true,
         Some(end as i64),
         n_jobs,
-        partition_size_mb,
         None,
         microbatch_max_interval.into(),
         None,

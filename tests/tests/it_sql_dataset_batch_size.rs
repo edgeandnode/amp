@@ -1,12 +1,15 @@
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{Arc, atomic::Ordering},
+    time::Duration,
+};
 
-use common::{BoxError, catalog::physical::PhysicalTable};
+use common::{BoxError, catalog::physical::PhysicalTable, metadata::Generation};
 use dataset_store::DatasetStore;
 use dump::{
     compaction::{
         NozzleCompactorTaskType, SegmentSizeLimit, collector::Collector, compactor::Compactor,
     },
-    compaction_opts, parquet_opts,
+    parquet_opts,
 };
 use futures::StreamExt;
 use monitoring::logging;
@@ -150,18 +153,18 @@ impl TestCtx {
     async fn spawn_compaction_and_await_completion(&self, table: &Arc<PhysicalTable>) {
         let config = self.ctx.daemon_server().config();
         let length = table.files().await.unwrap().len();
-        let parquet_writer_props = parquet_opts(&config.parquet);
-        let mut opts = compaction_opts(&config.compaction, &parquet_writer_props);
-        opts.compactor_active = true;
-        opts.collector_active = false;
-        opts.file_lock_duration = Duration::from_millis(25);
-        opts.collector_interval = Duration::ZERO;
-        opts.compactor_interval = Duration::ZERO;
-        opts.size_limit = SegmentSizeLimit::new(1, 1, 1, length);
-        let mut task = Compactor::start(table, &Arc::new(opts));
+        let mut opts = parquet_opts(&config.parquet);
+        opts.compactor.active.swap(true, Ordering::SeqCst);
+        opts.collector.active.swap(false, Ordering::SeqCst);
+        let opts_mut = Arc::make_mut(&mut opts);
+        opts_mut.collector.file_lock_duration = Duration::from_millis(25);
+        opts_mut.collector.interval = Duration::ZERO;
+        opts_mut.compactor.interval = Duration::ZERO;
+        opts_mut.partition = SegmentSizeLimit::new(1, 1, 1, length, Generation::default(), 1.5);
+        let mut task = Compactor::start(table, &opts, &None);
         task.join_current_then_spawn_new().await;
         while !task.is_finished() {
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            tokio::time::sleep(Duration::from_millis(150)).await;
         }
     }
 
@@ -169,15 +172,15 @@ impl TestCtx {
     async fn spawn_collection_and_await_completion(&self, table: &Arc<PhysicalTable>) {
         let config = self.ctx.daemon_server().config();
         let length = table.files().await.unwrap().len();
-        let parquet_writer_props = parquet_opts(&config.parquet);
-        let mut opts = compaction_opts(&config.compaction, &parquet_writer_props);
-        opts.compactor_active = false;
-        opts.collector_active = true;
-        opts.file_lock_duration = Duration::ZERO;
-        opts.collector_interval = Duration::ZERO;
-        opts.compactor_interval = Duration::ZERO;
-        opts.size_limit = SegmentSizeLimit::new(1, 1, 1, length);
-        let mut task = Collector::start(table, &Arc::new(opts));
+        let mut opts = parquet_opts(&config.parquet);
+        opts.compactor.active.swap(true, Ordering::SeqCst);
+        opts.collector.active.swap(false, Ordering::SeqCst);
+        let opts_mut = Arc::make_mut(&mut opts);
+        opts_mut.collector.file_lock_duration = Duration::ZERO;
+        opts_mut.collector.interval = Duration::ZERO;
+        opts_mut.compactor.interval = Duration::ZERO;
+        opts_mut.partition = SegmentSizeLimit::new(1, 1, 1, length, Generation::default(), 1.5);
+        let mut task = Collector::start(table, &opts, &None);
         task.join_current_then_spawn_new().await;
         while !task.is_finished() {
             tokio::time::sleep(Duration::from_millis(100)).await;
